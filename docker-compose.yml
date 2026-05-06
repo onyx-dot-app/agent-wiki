@@ -1,0 +1,47 @@
+services:
+  backend:
+    build: ./backend
+    env_file: .env
+    environment:
+      - APP_DB_PATH=/data/app.sqlite
+      - QUEUE_DB_PATH=/data/queue.sqlite
+      - WIKI_DIR=/wiki
+    volumes:
+      - app-data:/data
+      - wiki-data:/wiki
+    expose:
+      - "8080"
+
+  worker:
+    build: ./backend
+    command: ["python", "-m", "app.tasks.run_worker"]
+    env_file: .env
+    environment:
+      - APP_DB_PATH=/data/app.sqlite
+      - QUEUE_DB_PATH=/data/queue.sqlite
+      - WIKI_DIR=/wiki
+    volumes:
+      - app-data:/data
+      - wiki-data:/wiki
+    depends_on:
+      - backend
+
+  frontend:
+    build: ./frontend
+    env_file: .env
+    expose:
+      - "3000"
+    depends_on:
+      - backend
+
+  nginx:
+    build: ./nginx
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+      - frontend
+
+volumes:
+  app-data:
+  wiki-data:
