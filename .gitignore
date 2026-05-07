@@ -26,12 +26,15 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# data volumes (do not commit local sqlite or wiki content)
+# data volumes (do not commit local sqlite content)
 data/
 *.sqlite
 *.sqlite-journal
 *.sqlite-wal
 *.sqlite-shm
+
+# runtime-only state inside local_data/ (wiki content itself is tracked)
+local_data/wiki/.git/
 
 # editor / OS
 .DS_Store

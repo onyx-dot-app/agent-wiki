@@ -1,12 +1,19 @@
-"""HTTP Basic Auth. v0 stub — bcrypt-hashed passwords stored on the users row."""
+"""Email + password verification."""
 from __future__ import annotations
 
-from flask import Request
+from app.auth import User, users as users_repo
+from app.auth.passwords import verify_password
 
-from app.auth import User
 
-
-def authenticate_basic(request: Request) -> User | None:
-    # TODO: parse Authorization: Basic header, look up by email,
-    # verify with passlib.bcrypt, return User.
-    raise NotImplementedError
+def authenticate(email: str, password: str) -> User | None:
+    row = users_repo.get_by_email(email)
+    if row is None or not row["password_hash"]:
+        return None
+    if not verify_password(password, row["password_hash"]):
+        return None
+    return User(
+        id=row["id"],
+        email=row["email"],
+        name=row["name"],
+        is_admin=bool(row["is_admin"]),
+    )

@@ -23,13 +23,22 @@ def _run(args: list[str], cwd: str | None = None, check: bool = True) -> subproc
 
 
 def ensure_wiki_repo() -> None:
-    """Initialize the wiki git repo if it doesn't already exist."""
+    """Initialize the wiki git repo if it doesn't already exist.
+
+    If the working tree already has files (e.g. seeded content from
+    ``local_data/wiki`` in local dev), commit them as the initial revision
+    so ``read_file``/``list_paths``/``history`` see them.
+    """
     p = Path(CONFIG.wiki_dir)
     p.mkdir(parents=True, exist_ok=True)
-    if not (p / ".git").exists():
-        _run(["init", "-b", "main"], cwd=str(p))
-        _run(["config", "user.email", "agent-workspace@local"], cwd=str(p))
-        _run(["config", "user.name", "agent-workspace"], cwd=str(p))
+    if (p / ".git").exists():
+        return
+    _run(["init", "-b", "main"], cwd=str(p))
+    _run(["config", "user.email", "agent-workspace@local"], cwd=str(p))
+    _run(["config", "user.name", "agent-workspace"], cwd=str(p))
+    _run(["add", "-A"], cwd=str(p))
+    if _run(["diff", "--cached", "--quiet"], cwd=str(p), check=False).returncode != 0:
+        _run(["commit", "-m", "Seed wiki from working tree"], cwd=str(p))
 
 
 def commit_file(rel_path: str, body: str, message: str, author: str | None = None) -> str:
@@ -38,6 +47,16 @@ def commit_file(rel_path: str, body: str, message: str, author: str | None = Non
     full.parent.mkdir(parents=True, exist_ok=True)
     full.write_text(body)
     _run(["add", rel_path])
+    if _run(["diff", "--cached", "--quiet"], check=False).returncode == 0:
+        return _run(["rev-parse", "HEAD"]).stdout.strip()
+    env_args = ["--author", author] if author else []
+    _run(["commit", "-m", message, *env_args])
+    return _run(["rev-parse", "HEAD"]).stdout.strip()
+
+
+def delete_path(rel_path: str, message: str, author: str | None = None) -> str:
+    """Remove a tracked file or directory (recursively) and commit. Returns SHA."""
+    _run(["rm", "-r", "--", rel_path])
     env_args = ["--author", author] if author else []
     _run(["commit", "-m", message, *env_args])
     return _run(["rev-parse", "HEAD"]).stdout.strip()

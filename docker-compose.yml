@@ -5,10 +5,9 @@ services:
     environment:
       - APP_DB_PATH=/data/app.sqlite
       - QUEUE_DB_PATH=/data/queue.sqlite
-      - WIKI_DIR=/wiki
+      - WIKI_DIR=/data/wiki
     volumes:
-      - app-data:/data
-      - wiki-data:/wiki
+      - ./local_data:/data
     expose:
       - "8080"
 
@@ -19,10 +18,9 @@ services:
     environment:
       - APP_DB_PATH=/data/app.sqlite
       - QUEUE_DB_PATH=/data/queue.sqlite
-      - WIKI_DIR=/wiki
+      - WIKI_DIR=/data/wiki
     volumes:
-      - app-data:/data
-      - wiki-data:/wiki
+      - ./local_data:/data
     depends_on:
       - backend
 
@@ -41,7 +39,3 @@ services:
     depends_on:
       - backend
       - frontend
-
-volumes:
-  app-data:
-  wiki-data:

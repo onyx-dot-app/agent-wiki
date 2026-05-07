@@ -3,6 +3,15 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+# Load the repo-root .env so non-Docker launchers (python -m app.main, pytest,
+# huey worker) get the same env as `flask run` and docker compose. Search
+# upward from this file rather than relying on CWD.
+_repo_root = Path(__file__).resolve().parents[2]
+load_dotenv(_repo_root / ".env")
 
 
 @dataclass(frozen=True)
@@ -18,11 +27,6 @@ class Config:
     oidc_client_secret: str
     oidc_redirect_uri: str
 
-    llm_provider: str  # "anthropic" | "openai"
-    llm_model: str
-    anthropic_api_key: str
-    openai_api_key: str
-
 
 def load_config() -> Config:
     return Config(
@@ -35,10 +39,6 @@ def load_config() -> Config:
         oidc_client_id=os.environ.get("OIDC_CLIENT_ID", ""),
         oidc_client_secret=os.environ.get("OIDC_CLIENT_SECRET", ""),
         oidc_redirect_uri=os.environ.get("OIDC_REDIRECT_URI", ""),
-        llm_provider=os.environ.get("LLM_PROVIDER", "anthropic"),
-        llm_model=os.environ.get("LLM_MODEL", "claude-opus-4-7"),
-        anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY", ""),
-        openai_api_key=os.environ.get("OPENAI_API_KEY", ""),
     )
 
 

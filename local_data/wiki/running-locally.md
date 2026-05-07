@@ -1,0 +1,235 @@
+# Running locally — agent guide
+
+Quick reference for an agent (or human) running and debugging
+agent-workspace on the host **without Docker**. The compose path in the
+README is canonical; this is the fast-iteration alternative we actually use
+day-to-day. See `architecture_and_progress.md` §3 "Local dev" for the
+architectural context; this doc is the concrete runbook.
+
+---
+
+## Prereqs (already set up on this machine)
+
+- Repo at `/Users/yuhongsun/Projects/agent-workspace`.
+- Backend venv at `backend/.venv` (Python 3.11). Deps installed via
+  `pip install -e .` from `backend/pyproject.toml`.
+- `node_modules/` present in `frontend/`.
+- `.env` at the repo root. Data paths point at `local_data/`:
+  - `WIKI_DIR=…/local_data/wiki`
+  - `APP_DB_PATH=…/local_data/app.sqlite`
+  - `QUEUE_DB_PATH=…/local_data/queue.sqlite`
+  - `BACKEND_URL=http://localhost:8080` — used by the Next dev-server
+    rewrite to proxy `/api/*` to Flask.
+- The wiki dir is a git repo; for files to show up in the UI they must be
+  **tracked** (`/api/documents` is built from `git ls-files`).
+
+If you're starting from a fresh clone, see the bootstrap notes at the
+bottom of this doc.
+
+---
+
+## How to run — three processes
+
+All three are long-lived, so an agent should background them.
+
+### 1. Backend (Flask, :8080)
+
+```
+cd backend
+./.venv/bin/python -m app.main
+```
+
+`app/config.py` calls `dotenv.load_dotenv()` against the repo-root `.env`,
+so no `source .env` is needed.
+
+### 2. Worker (Huey)
+
+```
+cd backend
+./.venv/bin/python -m app.tasks.run_worker
+```
+
+Same venv. Same dotenv auto-load.
+
+### 3. Frontend (Next.js dev, :3000)
+
+```
+cd frontend
+set -a && source ../.env && set +a && npm run dev
+```
+
+The `set -a / source` dance is required here because Next only auto-loads
+`.env` from the frontend dir, not the repo root. Without it,
+`BACKEND_URL` is undefined and the rewrite falls back to
+`http://backend:8080` (a docker hostname that won't resolve on the host).
+
+### Open at
+
+http://localhost:3000 — **not** :8080. There is no nginx in this setup;
+the Next dev server proxies `/api/*` to Flask via the rewrite in
+`frontend/next.config.js`.
+
+### Readiness check
+
+```
+curl -sf http://localhost:8080/api/health   # → {"status":"ok"}
+curl -sf http://localhost:3000              # → 200 OK
+```
+
+### Stopping
+
+```
+lsof -ti:3000,8080 | xargs -r kill -9
+```
+
+---
+
+## Where the logs live
+
+### When a human runs the processes in their own terminals
+
+Each process logs to stdout/stderr in the terminal where it was started.
+Flask logs through `werkzeug` at INFO; Huey logs to stdout. Nothing is
+written to a file by default.
+
+### When an agent runs the processes via the Claude Code task harness
+
+Each backgrounded `Bash(run_in_background: true)` invocation gets a
+`task_id` (e.g. `bnz2gdll6`) and writes its merged stdout+stderr to:
+
+```
+/private/tmp/claude-501/-Users-yuhongsun-Projects-agent-workspace/<session-id>/tasks/<task-id>.output
+```
+
+The exact `<session-id>` is per-harness-session (a UUID) and is reported in
+the bash task output when the task starts. `tail -f` or `tail -N` on that
+file is the way to inspect what the process has emitted. The harness also
+emits a notification when the task exits (with the exit code).
+
+There is **no rotated log file** outside this. If you want persistent logs
+across runs, redirect manually, e.g.:
+
+```
+./.venv/bin/python -m app.main > /tmp/agent-workspace-backend.log 2>&1
+```
+
+### SQLite databases (useful for poking at state)
+
+- `local_data/app.sqlite` — users, documents, triggers cache, events,
+  FTS5, llm_settings, _migrations.
+- `local_data/queue.sqlite` — Huey task queue.
+
+Open with `sqlite3 local_data/app.sqlite` for ad-hoc inspection.
+
+### Wiki git history
+
+The wiki working tree lives at `local_data/wiki/`. It is a real git repo;
+`git -C local_data/wiki log --oneline` shows the commit history written by
+the app's `commit_file` calls.
+
+---
+
+## Debugging recipes
+
+### Backend won't start / port already in use
+
+```
+lsof -nP -iTCP:8080 -sTCP:LISTEN
+lsof -ti:8080 | xargs -r kill -9
+```
+
+Same for `:3000`.
+
+### "Loading…" stuck on a wiki/chat page, 404s on `/_next/static/chunks/*`
+
+The Next dev cache is corrupted (this happens after some kinds of restart).
+Stop the dev server, blow away the cache, restart:
+
+```
+rm -rf frontend/.next
+```
+
+### Wiki page shows no files even though `local_data/wiki/` has markdown in it
+
+The listing comes from `git ls-files`, so untracked files are invisible.
+Either edit them through the app (which auto-commits via
+`app/wiki/git.py:commit_file`), or do a one-time bootstrap commit:
+
+```
+cd local_data/wiki
+git config user.email agent-workspace@local
+git config user.name agent-workspace
+git add -A
+git commit -m "Seed wiki from working tree"
+```
+
+`ensure_wiki_repo` only seeds when `.git` is absent — if the repo was init'd
+without ever committing, it won't re-seed on its own.
+
+### Worker spamming `NotImplementedError` from `evaluate_scheduled_triggers`
+
+Known stub in `app/tasks/periodic.py:16`. Fires on a periodic schedule.
+Not blocking anything in the request path — ignore until that task is
+implemented.
+
+### `/api/documents` returns `{"error":"unauthorized"}`
+
+You're hitting it without a session cookie. Sign in via the UI; from
+`curl`, you'd need to log in to `/api/auth/login` first and pass the
+cookie.
+
+### Backend changes aren't picked up
+
+The Flask dev server here runs without `debug=True`, so it does **not**
+auto-reload. Restart the backend after editing Python code.
+
+### Frontend changes aren't picked up
+
+Next dev does hot-reload. If a change is mysteriously not reflecting,
+check the dev-server log for compile errors, then `rm -rf frontend/.next`
+as a last resort.
+
+### Database schema looks stale
+
+Migrations run on startup via `app/db/sqlite.py:init_db()`. If you added a
+new file under `app/db/migrations/`, restart the backend. To re-bootstrap
+from scratch: stop the app, `rm local_data/app.sqlite*` (and re-create the
+admin user via the signup flow). Don't edit applied migrations — add a
+new one.
+
+---
+
+## Bootstrap from a fresh clone
+
+1. `cp .env.example .env`; set `SECRET_KEY` and adjust the local data
+   paths to point under `local_data/` (or wherever you want them).
+2. Backend venv:
+   ```
+   cd backend
+   python3.11 -m venv .venv
+   ./.venv/bin/pip install -e .
+   ```
+3. Frontend deps: `cd frontend && npm install`.
+4. Start the three processes per the section above. The first hit to the
+   backend will create `local_data/app.sqlite`, run migrations, and
+   `ensure_wiki_repo()` will init `local_data/wiki/` as a git repo.
+5. Sign up at http://localhost:3000/signup — the first account is
+   auto-promoted to admin.
+6. In Admin → LLM, set provider/model/API key (env-var keys are only the
+   pre-row fallback).
+
+---
+
+## Pointers into the codebase
+
+- `backend/app/main.py` — Flask app factory; lists registered blueprints.
+- `backend/app/config.py` — env loading.
+- `backend/app/wiki/git.py` — only place that shells out to git.
+- `backend/app/api/documents.py` — wiki listing/read endpoints.
+- `backend/app/tasks/run_worker.py` — Huey worker entry.
+- `frontend/next.config.js` — `/api/*` rewrite.
+- `frontend/src/lib/api.ts` — `apiFetch` (the only allowed network call).
+- `frontend/src/lib/auth.tsx` — auth context.
+
+For deeper detail on any area, follow the per-area links in
+`architecture_and_progress.md`.

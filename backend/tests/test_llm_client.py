@@ -1,0 +1,730 @@
+"""Tests for app/llm/client.py.
+
+The client owns two responsibilities:
+
+* a *normalized* event stream (``stream()``) — text deltas, completed tool
+  calls, end-of-turn — so callers don't branch on provider, and
+* a drain helper (``complete()``) that returns the historical
+  ``{text, tool_calls, stop_reason, usage}`` dict for one-shot callers.
+
+These tests verify both, plus per-provider translation:
+
+* dispatch by configured provider (and unconfigured / unknown / missing-key),
+* Anthropic message + tool translation into ``messages.stream(...)`` kwargs,
+* OpenAI translation into the **Responses API** (``responses.create(...)``),
+* response normalization across both providers (including tool calls and
+  partial-JSON arg accumulation).
+
+The seam under test is the SDK boundary itself, so we substitute fake clients
+for ``_anthropic_client`` / ``_openai_client`` and capture the kwargs passed
+to ``messages.stream`` / ``responses.create``. We do not import the real
+provider SDKs.
+"""
+from __future__ import annotations
+
+import json
+from types import SimpleNamespace
+
+import pytest
+
+from app.llm import client as llm_client
+from app.llm import settings as llm_settings
+
+
+# --------------------------------------------------------------------------- #
+# Anthropic fakes
+# --------------------------------------------------------------------------- #
+
+
+class _FakeAnthropicStreamCtx:
+    """Stand-in for the context manager Anthropic's ``messages.stream`` returns."""
+
+    def __init__(self, events, final):
+        self._events = events
+        self._final = final
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+    def __iter__(self):
+        return iter(self._events)
+
+    def get_final_message(self):
+        return self._final
+
+
+class _FakeAnthropic:
+    def __init__(self, events, final):
+        self._events = events
+        self._final = final
+        self.calls: list[dict] = []
+        self.messages = SimpleNamespace(stream=self._stream)
+
+    def _stream(self, **kwargs):
+        self.calls.append(kwargs)
+        return _FakeAnthropicStreamCtx(self._events, self._final)
+
+
+def _a_text_block_events(text_chunks, *, index=0):
+    """Build the event sequence for a single text content block."""
+    events = [
+        SimpleNamespace(
+            type="content_block_start",
+            index=index,
+            content_block=SimpleNamespace(type="text"),
+        ),
+    ]
+    for chunk in text_chunks:
+        events.append(
+            SimpleNamespace(
+                type="content_block_delta",
+                index=index,
+                delta=SimpleNamespace(type="text_delta", text=chunk),
+            )
+        )
+    events.append(SimpleNamespace(type="content_block_stop", index=index))
+    return events
+
+
+def _a_tool_use_events(*, index, id, name, arg_chunks):
+    events = [
+        SimpleNamespace(
+            type="content_block_start",
+            index=index,
+            content_block=SimpleNamespace(type="tool_use", id=id, name=name),
+        ),
+    ]
+    for chunk in arg_chunks:
+        events.append(
+            SimpleNamespace(
+                type="content_block_delta",
+                index=index,
+                delta=SimpleNamespace(type="input_json_delta", partial_json=chunk),
+            )
+        )
+    events.append(SimpleNamespace(type="content_block_stop", index=index))
+    return events
+
+
+def _a_final(*, stop_reason="end_turn", input_tokens=10, output_tokens=20):
+    return SimpleNamespace(
+        stop_reason=stop_reason,
+        usage=SimpleNamespace(input_tokens=input_tokens, output_tokens=output_tokens),
+    )
+
+
+# --------------------------------------------------------------------------- #
+# OpenAI (Responses API) fakes
+# --------------------------------------------------------------------------- #
+
+
+class _FakeOpenAI:
+    def __init__(self, events):
+        self._events = events
+        self.calls: list[dict] = []
+        self.responses = SimpleNamespace(create=self._create)
+
+    def _create(self, **kwargs):
+        self.calls.append(kwargs)
+        return iter(self._events)
+
+
+def _o_text_delta(text):
+    return SimpleNamespace(type="response.output_text.delta", delta=text)
+
+
+def _o_completed(*, status="completed", input_tokens=10, output_tokens=20):
+    return SimpleNamespace(
+        type="response.completed",
+        response=SimpleNamespace(
+            status=status,
+            usage=SimpleNamespace(input_tokens=input_tokens, output_tokens=output_tokens),
+        ),
+    )
+
+
+def _o_tool_call_events(*, item_id, call_id, name, arg_chunks):
+    events = [
+        SimpleNamespace(
+            type="response.output_item.added",
+            item=SimpleNamespace(
+                type="function_call", id=item_id, call_id=call_id, name=name, arguments=""
+            ),
+        ),
+    ]
+    for chunk in arg_chunks:
+        events.append(
+            SimpleNamespace(
+                type="response.function_call_arguments.delta",
+                item_id=item_id,
+                delta=chunk,
+            )
+        )
+    events.append(
+        SimpleNamespace(
+            type="response.function_call_arguments.done",
+            item_id=item_id,
+            arguments="".join(arg_chunks),
+        )
+    )
+    return events
+
+
+# --------------------------------------------------------------------------- #
+# Fixtures
+# --------------------------------------------------------------------------- #
+
+
+@pytest.fixture
+def configure_anthropic(tmp_db):
+    llm_settings.upsert(
+        provider="anthropic",
+        model="claude-opus-4-7",
+        anthropic_api_key="sk-ant-test",
+        openai_api_key="",
+    )
+
+
+@pytest.fixture
+def configure_openai(tmp_db):
+    llm_settings.upsert(
+        provider="openai",
+        model="gpt-4o",
+        anthropic_api_key="",
+        openai_api_key="sk-openai-test",
+    )
+
+
+@pytest.fixture
+def fake_anthropic(monkeypatch):
+    """Install a fake Anthropic client. ``install(events, final)`` returns the fake."""
+
+    def install(events, final):
+        fake = _FakeAnthropic(events, final)
+        monkeypatch.setattr(llm_client, "_anthropic_client", lambda api_key: fake)
+        return fake
+
+    return install
+
+
+@pytest.fixture
+def fake_openai(monkeypatch):
+    def install(events):
+        fake = _FakeOpenAI(events)
+        monkeypatch.setattr(llm_client, "_openai_client", lambda api_key: fake)
+        return fake
+
+    return install
+
+
+# --------------------------------------------------------------------------- #
+# Configuration / dispatch errors
+# --------------------------------------------------------------------------- #
+
+
+def test_complete_raises_when_provider_unconfigured(tmp_db):
+    with pytest.raises(llm_client.LLMError) as excinfo:
+        llm_client.complete([{"role": "user", "content": "hi"}])
+    assert excinfo.value.code == "not_configured"
+    assert "LLM is not configured" in excinfo.value.message
+
+
+def test_complete_raises_on_unknown_provider(tmp_db):
+    llm_settings.upsert(
+        provider="cohere", model="x", anthropic_api_key="", openai_api_key=""
+    )
+    with pytest.raises(llm_client.LLMError) as excinfo:
+        llm_client.complete([{"role": "user", "content": "hi"}])
+    assert excinfo.value.code == "not_configured"
+    assert "Unknown LLM provider" in excinfo.value.message
+
+
+def test_complete_raises_when_model_unset(tmp_db):
+    llm_settings.upsert(
+        provider="anthropic", model="", anthropic_api_key="sk-ant", openai_api_key=""
+    )
+    with pytest.raises(llm_client.LLMError) as excinfo:
+        llm_client.complete([{"role": "user", "content": "hi"}])
+    assert excinfo.value.code == "not_configured"
+    assert "No model selected" in excinfo.value.message
+
+
+def test_complete_raises_when_anthropic_key_unset(tmp_db):
+    llm_settings.upsert(
+        provider="anthropic",
+        model="claude-opus-4-7",
+        anthropic_api_key="",
+        openai_api_key="",
+    )
+    with pytest.raises(llm_client.LLMError) as excinfo:
+        llm_client.complete([{"role": "user", "content": "hi"}])
+    assert excinfo.value.code == "not_configured"
+    assert "Anthropic API key" in excinfo.value.message
+
+
+def test_complete_raises_when_openai_key_unset(tmp_db):
+    llm_settings.upsert(
+        provider="openai", model="gpt-4o", anthropic_api_key="", openai_api_key=""
+    )
+    with pytest.raises(llm_client.LLMError) as excinfo:
+        llm_client.complete([{"role": "user", "content": "hi"}])
+    assert excinfo.value.code == "not_configured"
+    assert "OpenAI API key" in excinfo.value.message
+
+
+def test_complete_uses_settings_model_by_default(configure_anthropic, fake_anthropic):
+    fake = fake_anthropic(_a_text_block_events(["ok"]), _a_final())
+    llm_client.complete([{"role": "user", "content": "hi"}])
+    assert fake.calls[0]["model"] == "claude-opus-4-7"
+
+
+def test_complete_model_override_takes_precedence(configure_anthropic, fake_anthropic):
+    fake = fake_anthropic(_a_text_block_events(["ok"]), _a_final())
+    llm_client.complete([{"role": "user", "content": "hi"}], model="claude-haiku-4-5")
+    assert fake.calls[0]["model"] == "claude-haiku-4-5"
+
+
+# --------------------------------------------------------------------------- #
+# Anthropic translation (request shape)
+# --------------------------------------------------------------------------- #
+
+
+def test_anthropic_extracts_system_prompt_with_cache_control(
+    configure_anthropic, fake_anthropic
+):
+    fake = fake_anthropic(_a_text_block_events(["hi"]), _a_final())
+
+    llm_client.complete(
+        [
+            {"role": "system", "content": "be terse"},
+            {"role": "user", "content": "hi"},
+        ]
+    )
+
+    kwargs = fake.calls[0]
+    assert kwargs["system"] == [
+        {"type": "text", "text": "be terse", "cache_control": {"type": "ephemeral"}}
+    ]
+    assert kwargs["messages"] == [{"role": "user", "content": "hi"}]
+
+
+def test_anthropic_concatenates_multiple_system_messages(
+    configure_anthropic, fake_anthropic
+):
+    fake = fake_anthropic(_a_text_block_events(["ok"]), _a_final())
+
+    llm_client.complete(
+        [
+            {"role": "system", "content": "rule one"},
+            {"role": "system", "content": "rule two"},
+            {"role": "user", "content": "hi"},
+        ]
+    )
+
+    assert fake.calls[0]["system"][0]["text"] == "rule one\n\nrule two"
+
+
+def test_anthropic_no_system_key_when_no_system_message(
+    configure_anthropic, fake_anthropic
+):
+    fake = fake_anthropic(_a_text_block_events(["ok"]), _a_final())
+    llm_client.complete([{"role": "user", "content": "hi"}])
+    assert "system" not in fake.calls[0]
+
+
+def test_anthropic_translates_tool_result_message(configure_anthropic, fake_anthropic):
+    fake = fake_anthropic(_a_text_block_events(["done"]), _a_final())
+
+    llm_client.complete(
+        [
+            {"role": "user", "content": "search wiki"},
+            {
+                "role": "assistant",
+                "content": "calling search",
+                "tool_calls": [
+                    {"id": "tu_1", "name": "search", "arguments": {"q": "foo"}}
+                ],
+            },
+            {"role": "tool", "tool_call_id": "tu_1", "content": "result text"},
+        ]
+    )
+
+    msgs = fake.calls[0]["messages"]
+    assert msgs[1] == {
+        "role": "assistant",
+        "content": [
+            {"type": "text", "text": "calling search"},
+            {
+                "type": "tool_use",
+                "id": "tu_1",
+                "name": "search",
+                "input": {"q": "foo"},
+            },
+        ],
+    }
+    assert msgs[2] == {
+        "role": "user",
+        "content": [
+            {"type": "tool_result", "tool_use_id": "tu_1", "content": "result text"}
+        ],
+    }
+
+
+def test_anthropic_tool_result_serializes_non_string_content(
+    configure_anthropic, fake_anthropic
+):
+    fake = fake_anthropic(_a_text_block_events(["done"]), _a_final())
+
+    llm_client.complete(
+        [
+            {"role": "user", "content": "go"},
+            {"role": "tool", "tool_call_id": "tu_1", "content": {"hits": [1, 2, 3]}},
+        ]
+    )
+
+    tool_result = fake.calls[0]["messages"][1]["content"][0]
+    assert tool_result["content"] == json.dumps({"hits": [1, 2, 3]})
+
+
+def test_anthropic_translates_tools_argument(configure_anthropic, fake_anthropic):
+    fake = fake_anthropic(_a_text_block_events(["ok"]), _a_final())
+
+    llm_client.complete(
+        [{"role": "user", "content": "hi"}],
+        tools=[
+            {
+                "name": "search",
+                "description": "search the wiki",
+                "input_schema": {"type": "object", "properties": {"q": {"type": "string"}}},
+            }
+        ],
+    )
+
+    assert fake.calls[0]["tools"] == [
+        {
+            "name": "search",
+            "description": "search the wiki",
+            "input_schema": {"type": "object", "properties": {"q": {"type": "string"}}},
+        }
+    ]
+
+
+def test_anthropic_passes_max_tokens(configure_anthropic, fake_anthropic):
+    fake = fake_anthropic(_a_text_block_events(["ok"]), _a_final())
+    llm_client.complete([{"role": "user", "content": "hi"}], max_tokens=512)
+    assert fake.calls[0]["max_tokens"] == 512
+
+
+# --------------------------------------------------------------------------- #
+# Anthropic streaming + normalization
+# --------------------------------------------------------------------------- #
+
+
+def test_anthropic_stream_yields_text_deltas_then_done(
+    configure_anthropic, fake_anthropic
+):
+    fake_anthropic(
+        _a_text_block_events(["here ", "you ", "go"]),
+        _a_final(input_tokens=12, output_tokens=34),
+    )
+
+    events = list(llm_client.stream([{"role": "user", "content": "hi"}]))
+
+    assert events[:3] == [
+        {"type": "text_delta", "text": "here "},
+        {"type": "text_delta", "text": "you "},
+        {"type": "text_delta", "text": "go"},
+    ]
+    assert events[-1] == {
+        "type": "done",
+        "stop_reason": "end_turn",
+        "usage": {"input_tokens": 12, "output_tokens": 34},
+    }
+
+
+def test_anthropic_stream_yields_tool_call_after_arg_chunks(
+    configure_anthropic, fake_anthropic
+):
+    events = (
+        _a_text_block_events(["calling…"], index=0)
+        + _a_tool_use_events(
+            index=1, id="tu_1", name="search", arg_chunks=['{"q":', ' "foo"}']
+        )
+    )
+    fake_anthropic(events, _a_final(stop_reason="tool_use"))
+
+    out = list(llm_client.stream([{"role": "user", "content": "hi"}]))
+
+    assert {"type": "text_delta", "text": "calling…"} in out
+    tool_events = [e for e in out if e["type"] == "tool_call"]
+    assert tool_events == [
+        {
+            "type": "tool_call",
+            "id": "tu_1",
+            "name": "search",
+            "arguments": {"q": "foo"},
+        }
+    ]
+    assert out[-1]["type"] == "done"
+    assert out[-1]["stop_reason"] == "tool_use"
+
+
+def test_anthropic_complete_drains_stream_into_dict(
+    configure_anthropic, fake_anthropic
+):
+    events = (
+        _a_text_block_events(["here ", "you go"], index=0)
+        + _a_tool_use_events(
+            index=1, id="tu_1", name="search", arg_chunks=['{"q": "foo"}']
+        )
+    )
+    fake_anthropic(
+        events, _a_final(stop_reason="tool_use", input_tokens=12, output_tokens=34)
+    )
+
+    out = llm_client.complete([{"role": "user", "content": "hi"}])
+
+    assert out == {
+        "text": "here you go",
+        "tool_calls": [
+            {"id": "tu_1", "name": "search", "arguments": {"q": "foo"}}
+        ],
+        "stop_reason": "tool_use",
+        "usage": {"input_tokens": 12, "output_tokens": 34},
+    }
+
+
+# --------------------------------------------------------------------------- #
+# OpenAI (Responses API) translation
+# --------------------------------------------------------------------------- #
+
+
+def test_openai_lifts_system_to_instructions(configure_openai, fake_openai):
+    fake = fake_openai([_o_text_delta("hi"), _o_completed()])
+
+    llm_client.complete(
+        [
+            {"role": "system", "content": "be terse"},
+            {"role": "user", "content": "hi"},
+        ]
+    )
+
+    kwargs = fake.calls[0]
+    assert kwargs["instructions"] == "be terse"
+    # System message must NOT appear in the input list — Responses API takes
+    # it as a separate ``instructions`` arg.
+    assert kwargs["input"] == [{"role": "user", "content": "hi"}]
+
+
+def test_openai_no_instructions_key_when_no_system(configure_openai, fake_openai):
+    fake = fake_openai([_o_text_delta("hi"), _o_completed()])
+    llm_client.complete([{"role": "user", "content": "hi"}])
+    assert "instructions" not in fake.calls[0]
+
+
+def test_openai_translates_assistant_with_tool_calls(configure_openai, fake_openai):
+    fake = fake_openai([_o_text_delta("ok"), _o_completed()])
+
+    llm_client.complete(
+        [
+            {"role": "user", "content": "search"},
+            {
+                "role": "assistant",
+                "content": "calling",
+                "tool_calls": [
+                    {"id": "call_1", "name": "search", "arguments": {"q": "foo"}}
+                ],
+            },
+            {"role": "tool", "tool_call_id": "call_1", "content": "result text"},
+        ]
+    )
+
+    items = fake.calls[0]["input"]
+    # user message
+    assert items[0] == {"role": "user", "content": "search"}
+    # assistant text → role-style item
+    assert items[1] == {"role": "assistant", "content": "calling"}
+    # function_call item — Responses API top-level item, not nested
+    assert items[2] == {
+        "type": "function_call",
+        "call_id": "call_1",
+        "name": "search",
+        "arguments": json.dumps({"q": "foo"}),
+    }
+    # tool result → function_call_output item
+    assert items[3] == {
+        "type": "function_call_output",
+        "call_id": "call_1",
+        "output": "result text",
+    }
+
+
+def test_openai_assistant_with_only_tool_calls_emits_no_text_item(
+    configure_openai, fake_openai
+):
+    """If the assistant turn had no text, only function_call items should be emitted —
+    an empty assistant text item would be wasted (and rejected by some providers)."""
+    fake = fake_openai([_o_text_delta("ok"), _o_completed()])
+
+    llm_client.complete(
+        [
+            {"role": "user", "content": "go"},
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {"id": "call_1", "name": "search", "arguments": {"q": "x"}}
+                ],
+            },
+            {"role": "tool", "tool_call_id": "call_1", "content": "r"},
+        ]
+    )
+
+    items = fake.calls[0]["input"]
+    types = [it.get("type") or it.get("role") for it in items]
+    assert types == ["user", "function_call", "function_call_output"]
+
+
+def test_openai_tool_result_serializes_non_string_content(
+    configure_openai, fake_openai
+):
+    fake = fake_openai([_o_text_delta("ok"), _o_completed()])
+
+    llm_client.complete(
+        [
+            {"role": "user", "content": "go"},
+            {"role": "tool", "tool_call_id": "call_1", "content": {"hits": [1, 2]}},
+        ]
+    )
+
+    fco = fake.calls[0]["input"][1]
+    assert fco["type"] == "function_call_output"
+    assert fco["output"] == json.dumps({"hits": [1, 2]})
+
+
+def test_openai_uses_flat_function_tool_envelope(configure_openai, fake_openai):
+    """Responses API tools are flat ``{type: function, name, description, parameters}``,
+    NOT chat.completions' nested ``{type: function, function: {...}}``."""
+    fake = fake_openai([_o_text_delta("ok"), _o_completed()])
+
+    llm_client.complete(
+        [{"role": "user", "content": "hi"}],
+        tools=[
+            {
+                "name": "search",
+                "description": "search the wiki",
+                "input_schema": {"type": "object"},
+            }
+        ],
+    )
+
+    assert fake.calls[0]["tools"] == [
+        {
+            "type": "function",
+            "name": "search",
+            "description": "search the wiki",
+            "parameters": {"type": "object"},
+        }
+    ]
+
+
+def test_openai_passes_max_output_tokens_and_stream_flag(
+    configure_openai, fake_openai
+):
+    fake = fake_openai([_o_text_delta("ok"), _o_completed()])
+    llm_client.complete([{"role": "user", "content": "hi"}], max_tokens=512)
+    assert fake.calls[0]["max_output_tokens"] == 512
+    assert fake.calls[0]["stream"] is True
+
+
+# --------------------------------------------------------------------------- #
+# OpenAI streaming + normalization
+# --------------------------------------------------------------------------- #
+
+
+def test_openai_stream_yields_text_deltas(configure_openai, fake_openai):
+    fake_openai(
+        [
+            _o_text_delta("here "),
+            _o_text_delta("you "),
+            _o_text_delta("go"),
+            _o_completed(input_tokens=7, output_tokens=11),
+        ]
+    )
+
+    events = list(llm_client.stream([{"role": "user", "content": "hi"}]))
+
+    assert events == [
+        {"type": "text_delta", "text": "here "},
+        {"type": "text_delta", "text": "you "},
+        {"type": "text_delta", "text": "go"},
+        {
+            "type": "done",
+            "stop_reason": "completed",
+            "usage": {"input_tokens": 7, "output_tokens": 11},
+        },
+    ]
+
+
+def test_openai_stream_emits_tool_call_with_call_id_not_item_id(
+    configure_openai, fake_openai
+):
+    """The id we surface in ``tool_call`` events must be the ``call_id``
+    (used to echo back ``function_call_output``), not the internal ``item_id``."""
+    fake_openai(
+        _o_tool_call_events(
+            item_id="fc_internal",
+            call_id="call_1",
+            name="search",
+            arg_chunks=['{"q":', ' "foo"}'],
+        )
+        + [_o_completed()]
+    )
+
+    events = list(llm_client.stream([{"role": "user", "content": "hi"}]))
+
+    tool_events = [e for e in events if e["type"] == "tool_call"]
+    assert tool_events == [
+        {
+            "type": "tool_call",
+            "id": "call_1",
+            "name": "search",
+            "arguments": {"q": "foo"},
+        }
+    ]
+
+
+def test_openai_unparseable_tool_arguments_fall_back_to_raw(
+    configure_openai, fake_openai
+):
+    fake_openai(
+        _o_tool_call_events(
+            item_id="fc_1",
+            call_id="call_1",
+            name="search",
+            arg_chunks=["not-json{"],
+        )
+        + [_o_completed()]
+    )
+
+    out = llm_client.complete([{"role": "user", "content": "hi"}])
+
+    assert out["tool_calls"] == [
+        {"id": "call_1", "name": "search", "arguments": {"_raw": "not-json{"}}
+    ]
+
+
+def test_openai_complete_handles_missing_usage(configure_openai, fake_openai):
+    completed = SimpleNamespace(
+        type="response.completed",
+        response=SimpleNamespace(status="completed", usage=None),
+    )
+    fake_openai([_o_text_delta("ok"), completed])
+
+    out = llm_client.complete([{"role": "user", "content": "hi"}])
+
+    assert out["usage"] == {"input_tokens": 0, "output_tokens": 0}
+    assert out["text"] == "ok"

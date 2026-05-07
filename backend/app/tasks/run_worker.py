@@ -5,7 +5,7 @@ Run with: ``python -m app.tasks.run_worker``
 from __future__ import annotations
 
 # Importing modules registers tasks on the Huey instance.
-from app.tasks import document_update, periodic, reindex  # noqa: F401
+from app.tasks import document_update, periodic, reindex, triggers  # noqa: F401
 from app.tasks.huey_app import huey
 
 

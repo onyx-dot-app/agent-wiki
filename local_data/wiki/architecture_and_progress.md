@@ -1,0 +1,413 @@
+# Architecture & Progress
+
+> Working notebook for agent-workspace. Lives at
+> `local_data/wiki/architecture_and_progress.md` — checked into the repo, and
+> also a real file inside the dev wiki working tree so the running app
+> renders it. Update it whenever a product, architecture, or progress
+> decision is made — Claude reads this on every session.
+
+_Last updated: 2026-05-06_
+
+### Per-area docs (each owns its own design + progress)
+- [Running locally — agent runbook](running-locally.md)
+- [Flask + basic APIs](flask-and-apis/flask-and-apis.md)
+- [Agent harness — document updater](agents/document-updater.md)
+- [Agent harness — chat agent](agents/chat-agent.md)
+- [Natural-language triggers](natural-language-triggers/natural-language-triggers.md)
+- [Frontend (ChatUI + Wiki UI + Events + Admin)](frontend/frontend.md)
+- [Onyx-side push integration](onyx-push/onyx-push.md)
+- [Background tasks (Huey)](background-tasks/background-tasks.md)
+- [Exploration work](exploration/exploration.md)
+- [Infra](infra/infra.md)
+
+This file is the cross-area map: product spec, V0 brief, cross-cutting
+architecture and decisions, and a one-line-per-area status snapshot. When
+working in a single area, prefer that area's doc — it carries the
+file-by-file detail, the area-specific design, and the work breakdown.
+
+---
+
+## 1. Product / UX
+
+### North star
+A self-updating, agent-first wiki. Humans and agents collaborate on living
+docs; natural-language triggers fire on changes so people stay aware of what
+matters and downstream agents/services can react.
+
+### Persona priority for v0 dogfooding
+_Note only — does not affect implementation. Build for both eng and GTM use._
+
+### App shell — left sidebar with four primary views
+1. **Wiki** _(default)_ — file-system view; the entry page when you log in.
+2. **Chat** — multi-turn LLM chat over the wiki, with a search tool.
+3. **Triggers** — list/create/edit/delete triggers owned by the current user.
+4. **Events** — history of trigger fires.
+
+Plus: settings/admin (basic CRUD for users etc.) accessible from the chrome.
+
+### Wiki view
+
+Renders the wiki repo as a **file tree** of directories and `.md` files,
+arbitrarily named.
+
+- **Click a directory** → opens a directory page that lists its children
+  (subdirs + `.md` files). The directory page also exposes the directory's
+  triggers (see below).
+- **Click an `.md` file** → opens a **reader** page that renders the markdown.
+- **Reader → editor toggle**: from the reader, switch to an **editor** that
+  shows the raw markdown (not rendered). Editor has **Save** and **Cancel**
+  buttons. Save commits to git; Cancel discards.
+- **Back to file-system view** from any page.
+- **`agents.md` / `agent.md` — TBD, do not implement yet.** The intent is
+  that this file (when present in a directory) acts as authoring/context
+  guidance for how docs in that directory should be updated, with special
+  highlighting in the tree. **Agents working on this codebase should ignore
+  this feature for now and not start any work on it** — design questions
+  (canonical filename, recursive vs. dir-only scope, multiple-files allowed)
+  are unresolved.
+
+### Triggers UX
+
+Triggers are surfaced **on the md-doc page** (file-scoped) and **on the
+directory page** (directory-scoped, including "new file added").
+
+- Add / edit / delete a trigger inline from those pages.
+- A trigger has a **natural-language description** of what it should fire on
+  (e.g. "when this project's status changes from green to yellow").
+- **Fire conditions:**
+  - File-scoped trigger: the file's content changes.
+  - Directory-scoped trigger: any file in the directory changes **or** a new
+    file is added.
+- **What firing does (v0 only):** evaluate the NL description against the
+  change with an LLM; if it matches, **record an event**.
+- The **Events** sidebar view is the audit log of trigger fires.
+- **Trigger extensions — TBD, do not implement yet.** Anything beyond
+  "evaluate + record event" (outbound webhooks, HTTP calls, agent-message
+  dispatch, ambient UI surfacing like badges/toasts, etc.) is out of scope
+  for v0. **Agents working on this codebase should not implement anything
+  past what is described in this section.**
+
+### Chat view
+
+Chat panel that runs an LLM loop (multi-iteration tool use). Tools available
+to the chat agent in v0:
+
+- **Search** — bm25 over the FTS5 index of wiki docs.
+- _(Future: read_doc, propose_doc_edit, list/upsert/delete my triggers — see
+  [agents/chat-agent.md](agents/chat-agent.md).)_
+
+LLM chat interface is done!
+
+### Events view
+
+Reverse-chronological list of trigger fires. Each entry shows:
+- which trigger fired,
+- what change triggered it,
+- the LLM's match verdict + brief reason,
+- timestamp.
+
+### Settings / admin (basic CRUD)
+- Users (admin only): list, promote/demote, delete.
+- LLM provider/keys (admin only).
+- Self-serve: signup (gated by `ALLOWED_EMAILS` whitelist if set), sign-out,
+  password change _(future)_.
+
+### Open UX questions
+- Conflict handling when two users edit the same doc? _(probably out of v0)_
+- Editor: do we want any minimal UX assists — auto-save draft on the client,
+  unsaved-changes warning on navigate-away? _(yes, navigate-away warning is cheap)_
+- Chat: persistent conversations across sessions, or session-only? _(default:
+  persistent; multiple convos.)_
+
+_(`agents.md` scoping/filename and trigger ambient-surfacing questions are
+deferred — see the marked TBD callouts above. Don't pull them back in
+without an explicit decision.)_
+
+---
+
+## 2. V0 specification (original brief)
+
+Reproduced verbatim from the original product brief. **This section is the
+durable reference for what V0 is meant to be**; later sections describe what's
+actually built and what's left to do.
+
+### Architecture
+
+- **Backend container**
+  - Flask web framework
+  - SQLite + FTS5 (bm25)
+  - 2 volumes — 1 for SQLite, 1 for the wiki file system
+  - Flask shells out to git via subprocess
+- **Queue**
+  - Huey (works well with SQLite, no Redis/Celery)
+  - `queue.sqlite` for Huey, `app.sqlite` for the app
+  - Runs the document updates
+- **Frontend container**
+  - TypeScript, same stack as Onyx — can reuse a lot of the components, but
+    can copy them over for now for simplicity
+- **Nginx container**
+
+### Features
+
+- **Auth** — Basic Auth / OIDC only, no groups, no RBAC
+- **APIs**
+  - Auth / users
+  - Managing MCP connections
+  - Way of ingesting the triggers
+  - Audit log of events with time-based filters, pagination, etc.
+  - Webhooks for events
+  - Send a call to external service
+  - APIs for taking document updates:
+    - take a document id for agents updating it
+    - take generic updates from connector updates
+    - queue reindexing work for updated docs
+  - APIs for getting document / trigger history
+  - Triggers also git-backed
+  - Sync LLM APIs for helping users draft plans and docs
+- **Background**
+  - Take document update tasks and reindex them
+  - Time-based checks
+- **LLM items**
+  - Agent harness logic for updating docs based on the APIs — this is
+    probably the trickiest part
+  - V0 can just be an LLM comparison on every doc; worry about scaling later
+  - Watch the cost
+  - Don't bloat the documents over time or throw out important stuff on
+    updates
+  - On saves, save the docs to git history
+  - Natural-language triggers on document deltas and time-based checks on docs
+  - Run checks on the directories above the file that changed
+  - Chat functionality that can reference / update the docs — what tool
+    interfaces should exist for this?
+  - Send descriptive, actionable items to potential downstream agents (Craft)
+- **ChatUI**
+  - Interact with the wiki and triggers
+  - Answer questions about the wiki with a search
+  - Fetch / modify triggers owned by the user
+  - Prefer a loop that can run multiple iterations
+- **Exploration work**
+  - How to get agents (coding agents for now) to reliably update the docs
+    instead of too often or never. Is this just an MCP description? Should
+    it be a skill?
+  - Onyx-side changes to push all document changes to this system; only
+    public connectors for now
+- **Infra**
+  - Deployment
+  - Git-backed file system volume
+
+---
+
+## 3. Architecture (high-level)
+
+### Process / container shape
+
+```
+[browser]
+   |
+   v
+[nginx :80]  --/api/*-->  [backend :8080]    Flask, sessions
+                                |
+                                v
+                         [SQLite app.sqlite]   users / docs metadata / triggers cache /
+                                              events / FTS5 / llm_settings
+                         [SQLite queue.sqlite] Huey (separate file)
+                                |
+                                v
+                         [worker container]   python -m app.tasks.run_worker
+                                |
+                                v
+                         [git wiki working tree]  ←--volume mount: wiki-data
+   |
+   ^
+   '--/-->  [frontend :3000]   Next.js 14 App Router, "use client" pages
+```
+
+### Local dev — running on the host (no Docker)
+
+The compose path is canonical, but day-to-day iteration runs the three
+processes directly on the host so we skip image rebuilds. `.env` at the repo
+root already points the data paths at `local_data/` and sets
+`BACKEND_URL=http://localhost:8080` for the Next dev-server proxy.
+
+- **Backend** — `cd backend && ./.venv/bin/python -m app.main` (Flask on
+  `:8080`). Python 3.11 venv at `backend/.venv`, deps installed via
+  `pip install -e .`.
+- **Worker** — `cd backend && ./.venv/bin/python -m app.tasks.run_worker`
+  (same venv).
+- **Frontend** — `cd frontend && set -a && source ../.env && set +a && npm run dev`
+  (Next on `:3000`). The `next.config.js` rewrite proxies `/api/*` to
+  `BACKEND_URL`, so there's no CORS / nginx in this setup. The `set -a / source`
+  dance is needed because Next only auto-loads `.env` from the frontend dir,
+  not the repo root.
+- **Env loading** — `app/config.py` calls `dotenv.load_dotenv()` against the
+  repo-root `.env`, so the backend and worker can be launched directly
+  (`python -m app.main`, pytest, huey worker) without sourcing the env first.
+- **Open at** http://localhost:3000 (not `:8080` — no nginx).
+- **Readiness** — `curl -sf http://localhost:8080/api/health` and
+  `curl -sf http://localhost:3000`.
+- **Frontend cache wedge** — if pages stick on "Loading…" with 404s on
+  `/_next/static/chunks/*`, the dev cache is corrupted: stop the dev server,
+  `rm -rf frontend/.next`, restart.
+
+### Cross-area design rules
+The interfaces and seams that hold across areas. CLAUDE.md is the canonical
+rulebook; per-area docs reference these and add their own area-specific rules.
+
+- **Single LLM seam.** `app/llm/client.py:complete()` is the only path to a
+  provider. See [agents/chat-agent.md](agents/chat-agent.md) and
+  [agents/document-updater.md](agents/document-updater.md).
+- **No ORM.** Direct sqlite + small repo modules; schema changes are
+  numbered SQL migrations. See [flask-and-apis](flask-and-apis/flask-and-apis.md).
+- **Wiki is git-backed.** `app/wiki/git.py` is the only entry point that
+  shells out to git.
+- **Triggers live in SQLite only.** YAML/git-backed storage was originally
+  planned but dropped for v0 — see decision log entry 2026-05-06. Source of
+  truth is the `triggers` table; CRUD goes through `app/triggers/repo.py`.
+- **Chat agent loop is pure** (messages-in / messages-out). The HTTP layer
+  owns persistence. See [agents/chat-agent.md](agents/chat-agent.md).
+- **Tasks via Huey.** Anything taking >100ms goes to the worker. See
+  [background-tasks](background-tasks/background-tasks.md).
+- **Frontend network/auth via `lib/api.ts` + `lib/auth.tsx`.** No raw
+  `fetch`, no raw session reads. See [frontend](frontend/frontend.md).
+
+### Data model (applied schema)
+
+| Table | Purpose | Owned by |
+|---|---|---|
+| `users`           | id, email, name, password_hash, is_admin, created_at | flask-and-apis |
+| `mcp_connections` | per-user MCP server entries | flask-and-apis |
+| `documents`       | metadata only — body lives in git | flask-and-apis |
+| `triggers`        | cache of YAML in `<wiki>/.triggers/` | natural-language-triggers |
+| `events`          | append-only audit log | flask-and-apis (write surface), frontend (events view) |
+| `documents_fts`   | FTS5 virtual table (porter+unicode61, bm25) | flask-and-apis (search), background-tasks (reindex) |
+| `llm_settings`    | single-row provider/model/keys | flask-and-apis (admin) |
+| `_migrations`     | applied filenames | flask-and-apis |
+
+### Key cross-area design decisions
+
+| Date | Decision | Why |
+|------|----------|-----|
+| 2026-05-06 | LLM keys move to DB, not env | Admin UI ergonomics; env was tedious for non-eng dogfooders |
+| 2026-05-06 | First user auto-admin | Removes pre-seeded admin password footgun |
+| 2026-05-06 | Default entry = file tree (Wiki tab) | Mental model is "open the wiki" |
+| 2026-05-06 | Triggers v0 = record-event only, no webhook dispatch | Ship the loop; integrations come after we trust the eval |
+| 2026-05-06 | 3 sidebar tabs: Wiki / Chat / Events | Matches the three primary verbs |
+| 2026-05-06 | Direct sqlite + small repo modules, no ORM | Tight surface, easy to test |
+| 2026-05-06 | Single LLM seam (`app/llm/client.py:complete`) | Provider-swappable; one place to mock in tests |
+| 2026-05-06 | Mock LLM SDKs at `_anthropic_client` / `_openai_client`, not at `complete` | Lets tests exercise the real translation layer |
+| 2026-05-06 | Chat agent loop is pure (messages-in / messages-out) | Persistence wired separately at the HTTP edge |
+
+### Open cross-area questions
+- **LLM cost** — every doc commit fans out to a doc-updater pass + N trigger
+  evaluations. Need batching / debounce. Acceptable for v0 dogfooding scale?
+- **Doc bloat / loss** — the doc-updater agent must avoid both. No eval
+  data yet. (See [agents/document-updater.md](agents/document-updater.md).)
+- **Agent hand-off discipline** — exploration work; tracked in
+  [exploration](exploration/exploration.md).
+- **Concurrency on the wiki repo** — git operations are serialized in one
+  worker today. Multi-worker needs a per-repo lock. (See
+  [background-tasks](background-tasks/background-tasks.md).)
+- **Onyx → agent-workspace push contract** — see
+  [onyx-push](onyx-push/onyx-push.md).
+- **Triggers schema vs. UX** — `triggers.action_json` exists in schema but
+  is unused in v0. (See [natural-language-triggers](natural-language-triggers/natural-language-triggers.md).)
+
+For file-by-file detail, area-local design, status, and the work breakdown,
+follow the per-area links above.
+
+---
+
+## 4. Status snapshot
+
+One line per area; the per-area doc has the real picture.
+
+| Area | Status | Detail |
+|---|---|---|
+| Flask + APIs | Auth + admin live; documents read-only; triggers/events/webhooks/MCP/users stubs | [flask-and-apis](flask-and-apis/flask-and-apis.md) |
+| Document-updater agent | Stub; system+user prompts written | [agents/document-updater.md](agents/document-updater.md) |
+| Chat agent | Loop primitive + stateless HTTP wired; tools off; persistence stub | [agents/chat-agent.md](agents/chat-agent.md) |
+| NL triggers | CRUD API + repo + Triggers tab + create modal live (SQLite-only); fire-path on human edits live; time-based stubs | [natural-language-triggers](natural-language-triggers/natural-language-triggers.md) |
+| Frontend | Auth/admin/wiki-read/chat live; nav needs reshuffle; no editor / triggers UI / events view yet | [frontend](frontend/frontend.md) |
+| Onyx push | Not started; ingest endpoint stub | [onyx-push](onyx-push/onyx-push.md) |
+| Background tasks | Reindex live; doc-update + periodic stubs; trigger fan-out task TBD | [background-tasks](background-tasks/background-tasks.md) |
+| Exploration | Not started; parking lot for MCP-vs-skill question | [exploration](exploration/exploration.md) |
+| Infra | Compose + volumes wired; prod story TBD | [infra](infra/infra.md) |
+
+---
+
+## 5. Decision log (chronological, terse)
+
+Cross-cutting decisions only — area-specific design choices live in the
+area docs.
+
+- **2026-05-06** — Repo scaffolded; backend (Flask + Huey + SQLite) and
+  frontend (Next.js) skeletons in place; basic auth + signup with optional
+  email whitelist; admin UI for user/LLM management; wiki page renders
+  markdown from a list+file endpoint.
+- **2026-05-06** — Product/UX direction locked: 3-tab sidebar (Wiki / Chat /
+  Events), Wiki is default, file-tree → directory page → reader → editor
+  (Save/Cancel), triggers on doc and directory pages. v0 trigger action is
+  record-event-only.
+- **2026-05-06** — `agents.md` feature **deferred**; do not implement.
+- **2026-05-06** — Trigger extensions (outbound dispatch, ambient surfacing)
+  **deferred**; do not implement past "evaluate + record event".
+- **2026-05-06** — Persona priority is informational only; build for both
+  eng and GTM use.
+- **2026-05-06** — Chat loop primitive landed (`run_chat_loop`) — pure
+  message-list-in / message-list-out, tools off by default.
+- **2026-05-06** — Backend pytest harness landed; convention: mock SDKs at
+  the `_anthropic_client` / `_openai_client` seam; never import the real
+  provider SDKs from tests; use real tmp SQLite via `tmp_db` fixture.
+- **2026-05-06** — V0 brief preserved verbatim under §2 as the durable
+  reference.
+- **2026-05-06** — Admin UI split from a single tabbed page into three
+  routes (`/admin`, `/admin/users`, `/admin/llm`).
+- **2026-05-06** — Manual FTS reindex path wired:
+  `POST /api/documents/reindex` enqueues `tasks.reindex.reindex_path`;
+  wiki file-viewer has a "Reindex" button. Auto-reindex on commit deferred.
+- **2026-05-06** — Split per-area design/progress docs into sibling
+  directories under `local_data/wiki/`. The master doc is the cross-area
+  map; per-area docs own deeper detail.
+- **2026-05-06** — Master doc compressed: file-by-file detail, area-local
+  status, and the A–M work breakdown moved to per-area docs. Master keeps
+  product spec, V0 brief, cross-cutting architecture, status snapshot,
+  decision log.
+- **2026-05-06** — Trigger fire-path landed: human edits via `PUT /api/documents/file`
+  now enqueue `tasks.triggers.fan_out_trigger_eval` after `commit_file`,
+  which runs the SQL match + NL evaluator and writes a `trigger.fire`
+  events row on match. v0 stays record-only — no outbound dispatch.
+  Trigger CRUD/storage/UI still stubs; rows must be seeded via SQL to
+  exercise the path.
+- **2026-05-06** — Trigger CRUD + UI landed. Backend: `app/triggers/repo.py`
+  (SQLite repo) and full `/api/triggers` CRUD (owner-scoped, kind=delta only).
+  Frontend: new "Triggers" sidebar item between Chat and Events
+  (`/triggers`); reusable `<TriggerModal>` opens both from the Triggers tab
+  and a new "+ Trigger" button on the wiki doc reader (with `scope_path`
+  pinned to the current doc).
+- **2026-05-06** — **YAML/git-backed trigger storage dropped.** Original
+  design called for `<wiki>/.triggers/<id>.yaml` as source of truth with
+  SQLite as cache; v0 keeps everything in SQLite to ship faster.
+  `triggers.action_json` continues to be stored as `'{}'` (no v0 dispatch).
+  `app/triggers/storage.py` is now dead and can be deleted on a future
+  cleanup pass.
+
+- **2026-05-06** — Documented host-run dev workflow (no Docker) under §3
+  "Local dev — running on the host". Compose stays the canonical path;
+  host run is for fast iteration. `.env` already points data paths at
+  `local_data/` and sets `BACKEND_URL` so the Next rewrite proxies `/api/*`
+  to Flask without nginx.
+
+- **2026-05-06** — LLM client refactored to streaming. `stream()` is the new
+  primitive (yields `text_delta` / `tool_call` / `done` events); `complete()`
+  is a thin drainer kept for trigger evaluator + doc-updater. **OpenAI moved
+  to the Responses API** (`responses.create(stream=True)`, with `instructions`
+  for system, flat function-tool envelope, `function_call` /
+  `function_call_output` items, `max_output_tokens`). Anthropic uses
+  `messages.stream`. Chat agent gained `run_chat_loop_stream` that yields
+  events while preserving in-place message mutation. `POST /api/chat/messages`
+  is now SSE (`text/event-stream`, `data: {...}\n\n` frames, terminal `done`
+  or `error` event). Frontend chat reads the stream via a new
+  `apiStream` helper in `src/lib/api.ts` and renders text deltas live.
+  Required `openai>=1.50` for the Responses API.
+
+_(Append new entries with a date prefix. Cross-cutting only.)_
