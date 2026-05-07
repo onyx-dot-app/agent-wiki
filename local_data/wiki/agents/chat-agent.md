@@ -73,6 +73,12 @@ Validation:
   `role ∈ {user, assistant}` and string content.
 - Last message must be from `user`.
 
+**Location context** (added when the chat panel lands). The body grows an
+optional `location: { path: string }` field carrying the user's current
+spot in the wiki (a doc path or directory path). The HTTP layer splices
+it into the system prompt — the agent uses it to answer "what's here?"
+and to scope `propose_doc_edit` / `propose_create_trigger` calls.
+
 `LLMError.code` → HTTP status:
 
 | code | status |
@@ -100,25 +106,51 @@ message visible on failure with a Retry affordance.
 ### Tools (v0 plan)
 
 When tools land, the dispatch table is owned by the HTTP layer (it has the
-`current_user`). Initial set:
+`current_user`).
+
+**Read-only tools (no acknowledgement needed):**
 
 | Tool | Input | Output | Notes |
 |---|---|---|---|
 | `search_wiki` | `{query: str, limit?: int}` | bm25 hits | Wraps `app/wiki/search.py` |
 | `read_doc`    | `{path: str}`              | `{path, body}` | Validates path |
-| `propose_doc_edit` | `{path, body, message?}` | draft id | UI surfaces a diff for the user to accept |
-| `list_my_triggers` | `{}` | list | Filtered to `current_user.id` |
-| `upsert_trigger` | `{id?, scope_path, kind, nl_description, ...}` | trigger | Owner-scoped |
-| `delete_trigger` | `{id}` | `{ok}` | Owner-scoped |
+| `list_dir`    | `{path: str}`              | `{path, children: [{path, kind: "file"|"dir"}]}` | Walks the wiki tree |
+| `list_my_triggers` | `{}`                  | list | Filtered to `current_user.id` |
 
-`propose_doc_edit` is a draft, not a direct write — user has to accept in
-the UI. Keeps the agent honest while we don't have eval data.
+**Write / propose tools (require user acknowledgement — propose-and-apply):**
 
-### Why tool-less in v0
-The brief says "answer questions about the wiki with a search." That's
-table stakes. Everything else (`read_doc`, edits, trigger CRUD) is
-incremental and rides on the same dispatch plumbing once we're confident
-in the loop.
+The agent **never writes directly**. These tools emit a draft into the
+chat thread; the panel renders it as a card with **Apply** / **Reject**
+buttons. The HTTP layer takes the user's choice, performs the real call
+(or not), and reports the outcome back as a tool-result on the next turn.
+
+| Tool | Input | On Apply | On Reject |
+|---|---|---|---|
+| `propose_doc_edit` | `{path, body, message?}` | `PUT /api/documents/file` | tool-result `{applied: false}` |
+| `propose_create_trigger` | `{scope_path, kind, nl_description}` | `POST /api/triggers` (owner = current user) | tool-result `{applied: false}` |
+| `propose_update_trigger` | `{id, ...}` | `PUT /api/triggers/<id>` (owner-scoped) | tool-result `{applied: false}` |
+| `propose_delete_trigger` | `{id}` | `DELETE /api/triggers/<id>` (owner-scoped) | tool-result `{applied: false}` |
+
+Acknowledgement is the contract — keeps the agent honest and gives users
+durable control over what lands while we lack eval data. (`upsert_trigger`
+/ `delete_trigger` from the earlier plan are folded into the
+`propose_*_trigger` family — no direct-write trigger CRUD from the agent.)
+
+### Wiki traversal capability — required
+
+The agent must be able to **traverse the wiki and update associated
+pages**, not just answer the current page. The minimum tool set above
+(`search_wiki` + `read_doc` + `list_dir` + the propose-write family)
+covers this. **Open question:** whether to additionally expose a
+**filesystem-style "bash" tool** (e.g. `wiki_shell({command})` running
+read-only commands like `ls`, `grep`, `cat`, `find` against the wiki
+working tree) so the agent can do richer multi-step exploration than
+bm25 surfaces. Pros: matches how coding agents already work, lower
+prompt overhead than chaining `list_dir` + `read_doc`. Cons: another
+attack surface, requires careful sandboxing (no writes, no escapes from
+the wiki root), output truncation. **Decision deferred** — start with
+the structured tools; add the bash tool only if structured calls feel
+too clunky in dogfooding.
 
 ### Cost
 Each turn pays for the system prompt + full prior conversation. Anthropic
@@ -155,24 +187,42 @@ we'll need turn pruning, but not in v0.
 
 ## Work breakdown (Next up)
 
-### F. Chat HTTP + persistence
+### F. Chat HTTP + persistence + tools
 
 1. **Confirm `prompts/chat.system.md` exists** (or create it). Keep terse:
    "You're an assistant for an org wiki. Be concise. Cite docs by path."
-2. **Search tool** — wrap `wiki.search.search` with the input schema
-   above. Pass to `run_chat_loop` from the HTTP layer.
-3. **Persistence migration** — `chat_conversations` + `chat_messages`.
-4. **`run_chat_turn`** — load prior turns, append new user message, call
+2. **Location context** — accept `location: { path }` on
+   `POST /api/chat/messages`; splice into the system prompt for the turn.
+3. **Read-only tool set** — wire `search_wiki`, `read_doc`, `list_dir`,
+   `list_my_triggers` (last one filtered to `current_user.id`). Pass to
+   `run_chat_loop` from the HTTP layer.
+4. **Wiki traversal** — make sure the read-only tool set actually
+   supports traversing the wiki and reasoning across multiple pages. If
+   the structured tools feel clunky in dogfooding, evaluate adding
+   `wiki_shell({command})` (sandboxed read-only `ls`/`grep`/`cat`/`find`
+   against the wiki working tree). Track in the open questions below.
+5. **Propose-and-apply tools** — `propose_doc_edit`,
+   `propose_create_trigger`, `propose_update_trigger`,
+   `propose_delete_trigger`. Each emits a draft tool-call into the
+   thread; the panel renders the Apply / Reject card; on Apply the HTTP
+   layer performs the real API call (owner = current user for trigger
+   ones); the outcome is replayed as a tool-result on the next turn.
+6. **Persistence migration** — `chat_conversations` + `chat_messages`.
+7. **`run_chat_turn`** — load prior turns, append new user message, call
    `run_chat_loop`, persist new turns, return payload.
-5. **HTTP layer** — switch to optionally accept `conversation_id`; persist.
-6. **Frontend** — list past convos in a left sub-pane; URL keeps
-   `conversation_id`. See [frontend](../frontend/frontend.md).
-7. Add `read_doc` and `list/upsert/delete` trigger tools once the
-   triggers domain lands (see
-   [natural-language-triggers](../natural-language-triggers/natural-language-triggers.md)).
+8. **HTTP layer** — switch to optionally accept `conversation_id`; persist.
+9. **Frontend** — `<ChatPanel>` rendering, propose-and-apply card UX,
+   conversation sub-pane. See [frontend](../frontend/frontend.md).
 
 ### Open questions
-- Streaming responses? Not required for v0; would force us to change the
-  HTTP shape and the loop function. Defer until UX demands it.
-- Tool-result truncation? Search hits can be large. v0: cap snippets +
-  result count in the tool itself, not in the loop.
+- **Wiki traversal: structured tools vs. a sandboxed bash tool?** The
+  structured set (`list_dir` + `read_doc` + `search_wiki`) is enough in
+  principle; a `wiki_shell` would be more ergonomic for multi-step
+  exploration but is another attack surface. Start structured; revisit
+  if dogfooding shows the agent floundering on cross-page edits.
+- Streaming responses? Already wired (SSE) — chat panel reads via
+  `apiStream`. Tool calls + propose-and-apply still need to fit cleanly
+  into the SSE event shape.
+- Tool-result truncation? Search hits and `read_doc` bodies can be
+  large. v0: cap snippets + body slice in the tool itself, not in the
+  loop.

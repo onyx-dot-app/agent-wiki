@@ -37,11 +37,21 @@ matters and downstream agents/services can react.
 ### Persona priority for v0 dogfooding
 _Note only — does not affect implementation. Build for both eng and GTM use._
 
-### App shell — left sidebar with four primary views
+### App shell — three primary views + a chat side panel
+
+Left-sidebar **tabs** (top-level views):
 1. **Wiki** _(default)_ — file-system view; the entry page when you log in.
-2. **Chat** — multi-turn LLM chat over the wiki, with a search tool.
-3. **Triggers** — list/create/edit/delete triggers owned by the current user.
-4. **Events** — history of trigger fires.
+2. **Triggers** — the current user's triggers (owner-only — see Triggers UX).
+3. **Events** — history of trigger fires the current user owns.
+
+**Chat side panel.** Not a tab. A collapsible panel available on every page —
+toggle open/closed from the chrome, state persists across navigation. The
+panel **knows the current location** in the wiki (the doc path or directory
+the user is viewing) and forwards it with each message so the agent can
+answer "what's here?" and scope its proposals correctly. The panel can
+**modify the page or create triggers, gated on user acknowledgement** —
+edits and trigger creates show up in-thread as a diff / preview that the
+user has to **Apply** (or Reject) before it lands.
 
 Plus: settings/admin (basic CRUD for users etc.) accessible from the chrome.
 
@@ -68,35 +78,72 @@ arbitrarily named.
 
 ### Triggers UX
 
-Triggers are surfaced **on the md-doc page** (file-scoped) and **on the
-directory page** (directory-scoped, including "new file added").
+Triggers are **per-user** in v0. Every trigger has an owner; only the
+owner sees it, edits it, and receives the events from its fires. Two
+users with the same NL description on the same path are independent
+triggers, each producing their own events. **Sharing/collaboration is
+backlog** (see
+[natural-language-triggers](natural-language-triggers/natural-language-triggers.md)).
 
-- Add / edit / delete a trigger inline from those pages.
-- A trigger has a **natural-language description** of what it should fire on
-  (e.g. "when this project's status changes from green to yellow").
-- **Fire conditions:**
-  - File-scoped trigger: the file's content changes.
-  - Directory-scoped trigger: any file in the directory changes **or** a new
-    file is added.
-- **What firing does (v0 only):** evaluate the NL description against the
-  change with an LLM; if it matches, **record an event**.
-- The **Events** sidebar view is the audit log of trigger fires.
-- **Trigger extensions — TBD, do not implement yet.** Anything beyond
-  "evaluate + record event" (outbound webhooks, HTTP calls, agent-message
-  dispatch, ambient UI surfacing like badges/toasts, etc.) is out of scope
-  for v0. **Agents working on this codebase should not implement anything
-  past what is described in this section.**
+Two surfaces for managing your own triggers:
+- **Top-level Triggers tab** — every trigger you own, across the whole
+  wiki. Full CRUD here; this is the "all my triggers" view.
+- **Inline on doc and directory pages** — a panel that shows **your**
+  triggers scoped to this path (file-scoped on the doc page;
+  directory-scoped on the dir page). Add / edit / delete inline.
 
-### Chat view
+A trigger has:
+- **scope** — a doc path or a directory path.
+- **natural-language description** — when it should fire (e.g. "when this
+  project's status changes from green to yellow").
 
-Chat panel that runs an LLM loop (multi-iteration tool use). Tools available
-to the chat agent in v0:
+**Fire conditions:**
+- File-scoped trigger: the file's content changes.
+- Directory-scoped trigger: any file in the directory changes **or** a new
+  file is added.
 
-- **Search** — bm25 over the FTS5 index of wiki docs.
-- _(Future: read_doc, propose_doc_edit, list/upsert/delete my triggers — see
-  [agents/chat-agent.md](agents/chat-agent.md).)_
+The trigger fires when the scoped path changes regardless of **who** made
+the edit. Visibility and the resulting event are gated on ownership: only
+the trigger's owner sees the event in their Events tab.
 
-LLM chat interface is done!
+**What firing does (v0 only):** evaluate the NL description against the
+change with an LLM; if it matches, **record an event** owned by the
+trigger's user.
+
+**Trigger extensions — TBD, do not implement yet.** Anything beyond
+"evaluate + record event" (outbound webhooks, HTTP calls, agent-message
+dispatch, ambient UI surfacing like badges/toasts, etc.) is out of scope
+for v0. **Agents working on this codebase should not implement anything
+past what is described in this section.**
+
+### Chat side panel
+
+The chat experience is a **collapsible side panel** on every page — not a
+top-level tab.
+
+- **Toggle from the chrome.** Open/closed state persists across navigation.
+- **Location-aware.** The panel knows the user's current location in the
+  wiki (the doc path or directory path being viewed) and includes it with
+  each message to the backend. The agent uses it to answer "what's here?"
+  and to scope edits / new triggers.
+- **Multi-turn LLM loop with tools.** v0 tool surface:
+  - `search_wiki(query)` — bm25 over the FTS5 index. _(read-only; no ack
+    needed)_
+  - `propose_doc_edit(path, body, message?)` — emits a draft diff into the
+    chat thread. **Does not write.** The user clicks **Apply** to commit
+    or **Reject** to discard. The agent sees the result on the next turn.
+  - `propose_create_trigger(scope_path, kind, nl_description)` — emits a
+    trigger preview into the chat thread. **Does not create.** On
+    **Apply**, a trigger is created **owned by the current user**.
+  - _(Owner-scoped reads — `list_my_triggers`, `read_doc` — don't need
+    acknowledgement.)_
+- **Acknowledgement is the contract.** Anything that writes to the wiki or
+  creates a trigger goes through the propose-and-confirm flow. No silent
+  writes from the chat agent.
+
+The stateless `POST /api/chat/messages` endpoint is wired today; the
+location field, the propose-and-apply tools, and persistence are
+follow-ups (see [agents/chat-agent.md](agents/chat-agent.md)).
 
 ### Events view
 
@@ -291,7 +338,9 @@ rulebook; per-area docs reference these and add their own area-specific rules.
 | 2026-05-06 | First user auto-admin | Removes pre-seeded admin password footgun |
 | 2026-05-06 | Default entry = file tree (Wiki tab) | Mental model is "open the wiki" |
 | 2026-05-06 | Triggers v0 = record-event only, no webhook dispatch | Ship the loop; integrations come after we trust the eval |
-| 2026-05-06 | 3 sidebar tabs: Wiki / Chat / Events | Matches the three primary verbs |
+| 2026-05-06 | Sidebar = Wiki / Triggers / Events; chat is a side panel | Chat needs to follow the user across pages and stay context-aware |
+| 2026-05-06 | Triggers per-user (owner-only visibility) in v0 | Simplest model that ships; sharing is backlog |
+| 2026-05-06 | Chat propose-and-apply for writes | No silent edits while we lack eval data |
 | 2026-05-06 | Direct sqlite + small repo modules, no ORM | Tight surface, easy to test |
 | 2026-05-06 | Single LLM seam (`app/llm/client.py:complete`) | Provider-swappable; one place to mock in tests |
 | 2026-05-06 | Mock LLM SDKs at `_anthropic_client` / `_openai_client`, not at `complete` | Lets tests exercise the real translation layer |
@@ -325,9 +374,9 @@ One line per area; the per-area doc has the real picture.
 |---|---|---|
 | Flask + APIs | Auth + admin live; documents read-only; triggers/events/webhooks/MCP/users stubs | [flask-and-apis](flask-and-apis/flask-and-apis.md) |
 | Document-updater agent | Stub; system+user prompts written | [agents/document-updater.md](agents/document-updater.md) |
-| Chat agent | Loop primitive + stateless HTTP wired; tools off; persistence stub | [agents/chat-agent.md](agents/chat-agent.md) |
+| Chat agent | Loop primitive + stateless HTTP wired (SSE streaming); tools off; persistence stub. Next: location context, propose-and-apply tools, wiki traversal | [agents/chat-agent.md](agents/chat-agent.md) |
 | NL triggers | CRUD API + repo + Triggers tab + create modal live (SQLite-only); fire-path on human edits live; time-based stubs | [natural-language-triggers](natural-language-triggers/natural-language-triggers.md) |
-| Frontend | Auth/admin/wiki-read/chat live; nav needs reshuffle; no editor / triggers UI / events view yet | [frontend](frontend/frontend.md) |
+| Frontend | Auth/admin/wiki-read/chat live; chat needs to move from `/chat` page to a side panel; sidebar needs to become Wiki/Triggers/Events; no editor, no inline-triggers panel, no events view yet | [frontend](frontend/frontend.md) |
 | Onyx push | Not started; ingest endpoint stub | [onyx-push](onyx-push/onyx-push.md) |
 | Background tasks | Reindex live; doc-update + periodic stubs; trigger fan-out task TBD | [background-tasks](background-tasks/background-tasks.md) |
 | Exploration | Not started; parking lot for MCP-vs-skill question | [exploration](exploration/exploration.md) |
@@ -409,5 +458,29 @@ area docs.
   or `error` event). Frontend chat reads the stream via a new
   `apiStream` helper in `src/lib/api.ts` and renders text deltas live.
   Required `openai>=1.50` for the Responses API.
+
+- **2026-05-06** — **Chat is a collapsible side panel, not a top-level tab.**
+  Always available; carries the user's current wiki location with each
+  message. Two new tool primitives — `propose_doc_edit` and
+  `propose_create_trigger` — implement the **propose-and-apply contract**:
+  the agent emits a draft into the chat thread, the user clicks Apply to
+  commit. No silent writes from the chat agent. Sidebar tabs become
+  Wiki / Triggers / Events.
+- **2026-05-06** — **Triggers are per-user in v0.** Every trigger has an
+  owner; only the owner sees, edits, and receives events from their
+  triggers. The trigger fires when the scoped path changes regardless of
+  who edited; visibility and the resulting event are gated on ownership.
+  Sharing/collaboration is backlog (tracked under
+  [natural-language-triggers](natural-language-triggers/natural-language-triggers.md)).
+- **2026-05-06** — Triggers are visible in two places: a top-level
+  Triggers tab (the user's full list) and inline panels on doc/directory
+  pages (the user's triggers scoped to that path).
+- **2026-05-06** — **Chat agent must be able to traverse the wiki and
+  update associated pages**, not only answer about the current page. v0
+  tool minimum: `search_wiki` (bm25) + `read_doc` + `list_dir` + the
+  propose-and-apply write family. **Open question:** add a sandboxed
+  read-only `wiki_shell` tool (ls/grep/cat/find against the wiki working
+  tree) for richer multi-step exploration — decision deferred; revisit
+  if the structured tools feel clunky in dogfooding.
 
 _(Append new entries with a date prefix. Cross-cutting only.)_

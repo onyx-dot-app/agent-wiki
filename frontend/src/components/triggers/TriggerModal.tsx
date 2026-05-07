@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 
 import {
   createTrigger,
@@ -18,21 +18,62 @@ interface Props {
   lockScope?: boolean;
 }
 
+const DESTINATIONS = [{ id: "event_log", label: "Event log only" }];
+
+const EXAMPLE_SCOPE = "projects/release-v3.md";
+const EXAMPLE_IF = "the document is updated with a release version";
+const EXAMPLE_SEND =
+  "a message saying that the version has been finalized or updated to the specific version number.";
+
+// nl_description storage format. Two labelled lines so the LLM evaluator can
+// still read it as plain prose, while the modal can round-trip it on edit.
+function formatDescription(ifText: string, sendText: string): string {
+  return `If: ${ifText.trim()}\nSend: ${sendText.trim()}`;
+}
+
+function parseDescription(raw: string): { ifText: string; sendText: string } {
+  let ifText = "";
+  let sendText = "";
+  let mode: "if" | "send" | null = null;
+  for (const line of raw.split("\n")) {
+    if (line.startsWith("If: ")) {
+      ifText = line.slice(4);
+      mode = "if";
+    } else if (line.startsWith("Send: ")) {
+      sendText = line.slice(6);
+      mode = "send";
+    } else if (mode === "if") {
+      ifText += (ifText ? "\n" : "") + line;
+    } else if (mode === "send") {
+      sendText += (sendText ? "\n" : "") + line;
+    } else {
+      // Legacy / freeform description — dump it into the "if" field.
+      ifText += (ifText ? "\n" : "") + line;
+    }
+  }
+  return { ifText: ifText.trim(), sendText: sendText.trim() };
+}
+
 export function TriggerModal({ open, initial, onClose, onSaved, lockScope }: Props) {
   const isEdit = Boolean(initial?.id);
-  const [scopePath, setScopePath] = useState(initial?.scope_path ?? "");
-  const [description, setDescription] = useState(initial?.nl_description ?? "");
-  const [enabled, setEnabled] = useState(initial?.enabled ?? true);
+  const [scopePath, setScopePath] = useState("");
+  const [ifText, setIfText] = useState("");
+  const [sendText, setSendText] = useState("");
+  const [destination, setDestination] = useState(DESTINATIONS[0].id);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) return;
     setScopePath(initial?.scope_path ?? "");
-    setDescription(initial?.nl_description ?? "");
-    setEnabled(initial?.enabled ?? true);
+    const parsed = initial?.nl_description
+      ? parseDescription(initial.nl_description)
+      : { ifText: "", sendText: "" };
+    setIfText(parsed.ifText);
+    setSendText(parsed.sendText);
+    setDestination(DESTINATIONS[0].id);
     setError(null);
-  }, [open, initial?.id, initial?.scope_path, initial?.nl_description, initial?.enabled]);
+  }, [open, initial?.id, initial?.scope_path, initial?.nl_description]);
 
   if (!open) return null;
 
@@ -41,18 +82,17 @@ export function TriggerModal({ open, initial, onClose, onSaved, lockScope }: Pro
     setBusy(true);
     setError(null);
     try {
+      const nl = formatDescription(ifText, sendText);
       let saved: Trigger;
       if (isEdit && initial?.id) {
         saved = await updateTrigger(initial.id, {
           scope_path: scopePath.trim(),
-          nl_description: description.trim(),
-          enabled,
+          nl_description: nl,
         });
       } else {
         const input: TriggerCreateInput = {
           scope_path: scopePath.trim(),
-          nl_description: description.trim(),
-          enabled,
+          nl_description: nl,
         };
         saved = await createTrigger(input);
       }
@@ -64,6 +104,9 @@ export function TriggerModal({ open, initial, onClose, onSaved, lockScope }: Pro
       setBusy(false);
     }
   }
+
+  const canSave = scopePath.trim() && ifText.trim() && sendText.trim();
+  const destLabel = DESTINATIONS.find((d) => d.id === destination)?.label ?? "";
 
   return (
     <div
@@ -80,25 +123,59 @@ export function TriggerModal({ open, initial, onClose, onSaved, lockScope }: Pro
         zIndex: 100,
       }}
     >
+      {/* Blurred filled-in example, peeking out from behind the form. */}
+      <div
+        aria-hidden
+        style={{
+          position: "absolute",
+          top: "50%",
+          left: "50%",
+          transform: "translate(-50%, -50%) translate(40px, 44px) rotate(-1.5deg)",
+          width: "min(560px, 92vw)",
+          filter: "blur(3.5px)",
+          opacity: 0.85,
+          pointerEvents: "none",
+          zIndex: 0,
+        }}
+      >
+        <PreviewCard
+          scope={EXAMPLE_SCOPE}
+          ifText={EXAMPLE_IF}
+          sendText={EXAMPLE_SEND}
+          destLabel="Event log only"
+        />
+      </div>
+
       <form
         onSubmit={onSubmit}
         style={{
+          position: "relative",
           background: "white",
-          borderRadius: 12,
+          borderRadius: 14,
           width: "min(560px, 92vw)",
+          maxHeight: "92vh",
+          overflowY: "auto",
           padding: 24,
-          boxShadow: "0 24px 60px rgba(0,0,0,0.18)",
+          boxShadow: "0 32px 80px rgba(0,0,0,0.28)",
           display: "flex",
           flexDirection: "column",
-          gap: 14,
+          gap: 16,
+          zIndex: 1,
         }}
       >
-        <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>
-          {isEdit ? "Edit trigger" : "New trigger"}
-        </h2>
+        <div>
+          <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700 }}>
+            {isEdit ? "Edit trigger" : "Create a trigger"}
+          </h2>
+          <p style={{ margin: "8px 0 0", fontSize: 13, color: "#4b5563", lineHeight: 1.55 }}>
+            A trigger keeps an eye on a doc (or folder) and reacts when something
+            you care about changes. Tell us what to look for, what to say when it
+            happens, and where to send the message. We'll watch the edits for you.
+          </p>
+        </div>
 
-        <label style={labelStyle}>
-          <span>Scope path</span>
+        <label style={fieldStyle}>
+          <span style={fieldLabelStyle}>Watching</span>
           <input
             value={scopePath}
             onChange={(e) => setScopePath(e.target.value)}
@@ -106,32 +183,49 @@ export function TriggerModal({ open, initial, onClose, onSaved, lockScope }: Pro
             placeholder="projects/foo.md or projects"
             style={inputStyle}
           />
-          <span style={hintStyle}>
-            File path = file-scoped. Directory = matches every doc inside it.
-          </span>
         </label>
 
-        <label style={labelStyle}>
-          <span>Fire when…</span>
+        <SentenceRow label="If" tone="if">
           <textarea
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
+            value={ifText}
+            onChange={(e) => setIfText(e.target.value)}
             disabled={busy}
-            rows={4}
-            placeholder="e.g. status flips from green to yellow"
+            placeholder={EXAMPLE_IF}
+            rows={2}
             style={{ ...inputStyle, fontFamily: "inherit", resize: "vertical" }}
           />
-        </label>
+        </SentenceRow>
 
-        <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
-          <input
-            type="checkbox"
-            checked={enabled}
-            onChange={(e) => setEnabled(e.target.checked)}
+        <SentenceRow label="then send" tone="send">
+          <textarea
+            value={sendText}
+            onChange={(e) => setSendText(e.target.value)}
             disabled={busy}
+            placeholder={EXAMPLE_SEND}
+            rows={2}
+            style={{ ...inputStyle, fontFamily: "inherit", resize: "vertical" }}
           />
-          Enabled
-        </label>
+        </SentenceRow>
+
+        <SentenceRow label="to" tone="to">
+          <select
+            value={destination}
+            onChange={(e) => setDestination(e.target.value)}
+            disabled={busy}
+            style={{ ...inputStyle, cursor: "pointer", appearance: "auto" }}
+          >
+            {DESTINATIONS.map((d) => (
+              <option key={d.id} value={d.id}>
+                {d.label}
+              </option>
+            ))}
+          </select>
+        </SentenceRow>
+
+        <p style={{ margin: 0, fontSize: 12, color: "#6b7280", lineHeight: 1.5 }}>
+          For now, &quot;{destLabel}&quot; just records the event on the Events tab so
+          you can review it. More destinations (Slack, email, agents) are coming.
+        </p>
 
         {error && (
           <div
@@ -153,11 +247,8 @@ export function TriggerModal({ open, initial, onClose, onSaved, lockScope }: Pro
           </button>
           <button
             type="submit"
-            disabled={busy || !scopePath.trim() || !description.trim()}
-            style={{
-              ...primaryBtn,
-              opacity: busy || !scopePath.trim() || !description.trim() ? 0.6 : 1,
-            }}
+            disabled={busy || !canSave}
+            style={{ ...primaryBtn, opacity: busy || !canSave ? 0.6 : 1 }}
           >
             {busy ? "Saving…" : isEdit ? "Save" : "Create"}
           </button>
@@ -167,22 +258,110 @@ export function TriggerModal({ open, initial, onClose, onSaved, lockScope }: Pro
   );
 }
 
-const labelStyle: React.CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  gap: 6,
-  fontSize: 13,
-  color: "#374151",
+function SentenceRow({
+  label,
+  tone,
+  children,
+}: {
+  label: string;
+  tone: "if" | "send" | "to";
+  children: ReactNode;
+}) {
+  const colors = {
+    if: { bg: "#fffbeb", fg: "#92400e", border: "#fde68a" },
+    send: { bg: "#ecfdf5", fg: "#047857", border: "#a7f3d0" },
+    to: { bg: "#eef2ff", fg: "#4338ca", border: "#c7d2fe" },
+  }[tone];
+  return (
+    <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+      <span
+        style={{
+          flexShrink: 0,
+          marginTop: 6,
+          padding: "3px 10px",
+          background: colors.bg,
+          color: colors.fg,
+          border: `1px solid ${colors.border}`,
+          borderRadius: 999,
+          fontSize: 11,
+          fontWeight: 700,
+          letterSpacing: "0.04em",
+          textTransform: "uppercase",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {label}
+      </span>
+      <div style={{ flex: 1, minWidth: 0 }}>{children}</div>
+    </div>
+  );
+}
+
+function PreviewCard({
+  scope,
+  ifText,
+  sendText,
+  destLabel,
+}: {
+  scope: string;
+  ifText: string;
+  sendText: string;
+  destLabel: string;
+}) {
+  return (
+    <div
+      style={{
+        background: "white",
+        borderRadius: 14,
+        padding: 24,
+        boxShadow: "0 12px 40px rgba(0,0,0,0.18)",
+        display: "flex",
+        flexDirection: "column",
+        gap: 16,
+      }}
+    >
+      <div>
+        <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700 }}>Create a trigger</h2>
+        <p style={{ margin: "8px 0 0", fontSize: 13, color: "#4b5563" }}>
+          A trigger keeps an eye on a doc and reacts when something changes.
+        </p>
+      </div>
+      <div style={fieldStyle}>
+        <span style={fieldLabelStyle}>Watching</span>
+        <div style={{ ...inputStyle, color: "#111" }}>{scope}</div>
+      </div>
+      <SentenceRow label="If" tone="if">
+        <div style={{ ...inputStyle, color: "#111", whiteSpace: "pre-wrap" }}>{ifText}</div>
+      </SentenceRow>
+      <SentenceRow label="then send" tone="send">
+        <div style={{ ...inputStyle, color: "#111", whiteSpace: "pre-wrap" }}>{sendText}</div>
+      </SentenceRow>
+      <SentenceRow label="to" tone="to">
+        <div style={{ ...inputStyle, color: "#111" }}>{destLabel}</div>
+      </SentenceRow>
+    </div>
+  );
+}
+
+const fieldStyle: React.CSSProperties = { display: "flex", flexDirection: "column", gap: 6 };
+
+const fieldLabelStyle: React.CSSProperties = {
+  fontSize: 11,
+  fontWeight: 700,
+  color: "#6b7280",
+  textTransform: "uppercase",
+  letterSpacing: "0.06em",
 };
 
-const hintStyle: React.CSSProperties = { fontSize: 11, color: "#6b7280" };
-
 const inputStyle: React.CSSProperties = {
-  padding: 10,
+  padding: "9px 11px",
   border: "1px solid #d1d5db",
   borderRadius: 6,
   fontSize: 14,
   outline: "none",
+  width: "100%",
+  boxSizing: "border-box",
+  background: "white",
 };
 
 const primaryBtn: React.CSSProperties = {

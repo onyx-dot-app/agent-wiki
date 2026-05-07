@@ -21,10 +21,103 @@ architectural context; this doc is the concrete runbook.
   - `BACKEND_URL=http://localhost:8080` — used by the Next dev-server
     rewrite to proxy `/api/*` to Flask.
 - The wiki dir is a git repo; for files to show up in the UI they must be
-  **tracked** (`/api/documents` is built from `git ls-files`).
+  **tracked** (`/api/documents` is built from `git ls-files`). See the
+  next section for setup details and recovery.
 
 If you're starting from a fresh clone, see the bootstrap notes at the
 bottom of this doc.
+
+---
+
+## Wiki dir — git requirements and setup
+
+The wiki working tree (`WIKI_DIR`, default `local_data/wiki`) is **not** a
+plain folder of markdown — the backend treats it as a real git repository
+and shells out to `git` for every read/write. This shapes a few things you
+need to get right.
+
+### Why it has to be a git repo
+
+- `app/wiki/git.py:list_paths` builds the directory listing from
+  `git ls-files`. **Untracked files are invisible to the API**, even if they
+  exist in the working tree.
+- `app/wiki/git.py:read_file` reads via `git show <ref>:<path>`. Reading the
+  current version requires that the file is committed at `HEAD`.
+- `app/wiki/git.py:commit_file` is the only sanctioned write path. Every
+  user/agent edit that goes through the UI does `git add` + `git commit`
+  inside the wiki dir.
+- `app/wiki/git.py:history` and the file-history view rely on `git log`
+  for that path.
+
+So the invariant is: *if it isn't tracked at HEAD, it doesn't exist as far
+as the app is concerned*.
+
+### What `ensure_wiki_repo()` does (and doesn't) on startup
+
+Called from `create_app()` in `app/main.py`. Logic:
+
+1. Ensure `WIKI_DIR` exists (mkdir -p).
+2. If `.git/` already exists in `WIKI_DIR`, **return immediately** — no
+   further setup happens.
+3. Otherwise: `git init -b main`, set local `user.email` /
+   `user.name`, then `git add -A` everything in the working tree and (only
+   if there's something staged) `git commit -m "Seed wiki from working tree"`.
+
+The seed step is gated on the absence of `.git/`. Concrete consequences:
+
+- **Fresh dir, no `.git/`** → `ensure_wiki_repo()` inits and commits
+  whatever was in the directory. Files show up immediately. ✅
+- **Existing `.git/` with commits** → repo is valid; nothing to do. ✅
+- **Existing `.git/` but *zero* commits** (e.g. someone init'd the repo on
+  a previous run when the working tree was empty, then later dropped
+  markdown files into the dir) → `ensure_wiki_repo()` short-circuits at
+  step 2, the files stay untracked, the API returns an empty listing, and
+  the UI looks empty. ⚠️ This is the failure mode we hit; see "First-run
+  setup / recovery" below.
+
+### First-run setup / recovery — make existing files appear in the UI
+
+If you have markdown in `WIKI_DIR` that isn't showing up, do a one-time
+bootstrap commit using the same identity the app uses:
+
+```
+cd "$WIKI_DIR"     # default: local_data/wiki
+git init -b main 2>/dev/null || true     # no-op if already init'd
+git config user.email agent-workspace@local
+git config user.name agent-workspace
+git add -A
+git commit -m "Seed wiki from working tree"
+```
+
+After this, restart the backend (or just refresh the page; reads don't
+cache the file list). Subsequent edits via the UI auto-commit through
+`commit_file`.
+
+### Seed content for a brand-new install
+
+For a clean dev environment we have sample content under `wiki/seed/` in
+the repo. To use it as the starting tree, copy it into `WIKI_DIR` *before*
+the first backend start:
+
+```
+mkdir -p local_data/wiki
+cp -R wiki/seed/. local_data/wiki/
+```
+
+Then start the backend; `ensure_wiki_repo()` will init the git repo and
+commit the seed as the initial revision.
+
+### Things to avoid
+
+- Don't shell out to `git` against `WIKI_DIR` from anywhere in the backend
+  *other than* `app/wiki/git.py`. (See CLAUDE.md.)
+- Don't `git rm` files manually then forget to commit — the working tree
+  diverges from `HEAD` and the API still won't show the change because
+  `list_paths` reads the index, not the FS.
+- Don't ignore wiki paths via `.gitignore` inside `WIKI_DIR` — anything
+  ignored is, by construction, invisible to the app.
+- Don't force-push or hard-reset the wiki repo. Wiki history is the
+  authoritative trail of edits; only additive commits.
 
 ---
 
@@ -151,20 +244,9 @@ rm -rf frontend/.next
 
 ### Wiki page shows no files even though `local_data/wiki/` has markdown in it
 
-The listing comes from `git ls-files`, so untracked files are invisible.
-Either edit them through the app (which auto-commits via
-`app/wiki/git.py:commit_file`), or do a one-time bootstrap commit:
-
-```
-cd local_data/wiki
-git config user.email agent-workspace@local
-git config user.name agent-workspace
-git add -A
-git commit -m "Seed wiki from working tree"
-```
-
-`ensure_wiki_repo` only seeds when `.git` is absent — if the repo was init'd
-without ever committing, it won't re-seed on its own.
+Untracked files are invisible to the API (`/api/documents` is built from
+`git ls-files`). See "Wiki dir — git requirements and setup" above for
+the full picture and the one-time bootstrap commit recipe.
 
 ### Worker spamming `NotImplementedError` from `evaluate_scheduled_triggers`
 
@@ -210,12 +292,13 @@ new one.
    ./.venv/bin/pip install -e .
    ```
 3. Frontend deps: `cd frontend && npm install`.
-4. Start the three processes per the section above. The first hit to the
+4. (Optional) Seed the wiki: `mkdir -p local_data/wiki && cp -R wiki/seed/. local_data/wiki/`. Do this **before** the first backend start so `ensure_wiki_repo()` commits the seed as the initial revision. See "Wiki dir — git requirements and setup" above for why this matters and what to do if you've already started the backend with an empty wiki dir.
+5. Start the three processes per the section above. The first hit to the
    backend will create `local_data/app.sqlite`, run migrations, and
    `ensure_wiki_repo()` will init `local_data/wiki/` as a git repo.
-5. Sign up at http://localhost:3000/signup — the first account is
+6. Sign up at http://localhost:3000/signup — the first account is
    auto-promoted to admin.
-6. In Admin → LLM, set provider/model/API key (env-var keys are only the
+7. In Admin → LLM, set provider/model/API key (env-var keys are only the
    pre-row fallback).
 
 ---

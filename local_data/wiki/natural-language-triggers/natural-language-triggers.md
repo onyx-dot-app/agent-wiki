@@ -15,6 +15,26 @@ _Last updated: 2026-05-06_
 
 ## Design
 
+### Ownership and visibility — per-user (v0)
+
+Every trigger has an **owner** (`owner_user_id`). Visibility, edit rights,
+and event delivery are **all gated on ownership**:
+
+- The trigger's owner is the only one who can **see** it (in the
+  Triggers tab, in the inline panels on doc/dir pages, anywhere).
+- The trigger's owner is the only one who can **edit / disable / delete** it.
+- A trigger fires when its scoped path changes **regardless of which user
+  edited the doc** — but the resulting `events` row is owned by the
+  trigger's user, and the Events tab is owner-scoped.
+- Two users with the same NL description on the same path are
+  **independent** triggers — each evaluates and emits its own event.
+
+This means every read in `app/api/triggers.py` is filtered by
+`owner_user_id = current_user.id`; every write stamps the current user.
+
+**Sharing / collaboration** (multi-user triggers, group ownership, "see
+team triggers") is **backlog** — see below. Don't implement in v0.
+
 ### Two trigger kinds (schema already supports both)
 
 | `kind` | Fires when… | v0? |
@@ -229,3 +249,19 @@ This is the only thing v0 does on a fire. **Do not add outbound dispatch.**
   memory.
 - What happens when a trigger fires repeatedly on a chatty doc? v0:
   nothing. Later: per-trigger per-window debounce.
+
+### Backlog
+- **Shareable triggers.** Today every trigger is private to its owner.
+  Future: let users opt a trigger into being visible to a group / the
+  whole org, with one event row per recipient or shared event rows.
+  Open design questions when this is picked up: ownership semantics on
+  edit/delete (owner-only or any viewer?), how shared triggers interact
+  with the per-user Events tab, and whether sharing is per-trigger or
+  per-scope.
+- Outbound dispatch (webhooks / HTTP / agent messages) — the
+  long-deferred trigger-extensions item; see the master TBD callout.
+- Per-trigger debounce / dedup window for chatty docs.
+- Better UI for cross-cutting trigger scopes (e.g. "all docs under
+  `projects/`").
+- YAML/git-backed trigger source-of-truth — a re-litigation of the v0
+  decision once we want trigger history beyond what SQLite gives us.

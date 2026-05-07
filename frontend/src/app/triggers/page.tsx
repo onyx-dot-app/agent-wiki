@@ -83,9 +83,10 @@ export default function TriggersPage() {
           </button>
         </header>
 
-        <p style={{ color: "#6b7280", fontSize: 13, marginTop: 0, marginBottom: 16 }}>
-          Triggers fire when a doc within their scope changes. On a match, an
-          event is recorded in the Events tab. v0 has no outbound dispatch.
+        <p style={{ color: "#6b7280", fontSize: 13, marginTop: 0, marginBottom: 16, lineHeight: 1.55 }}>
+          Triggers watch a doc (or folder) and notice when something specific
+          changes. When that happens, the message you wrote shows up on the
+          Events tab so you can review it.
         </p>
 
         {listError && (

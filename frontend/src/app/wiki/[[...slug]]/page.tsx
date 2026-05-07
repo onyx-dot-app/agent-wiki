@@ -8,6 +8,7 @@ import remarkGfm from "remark-gfm";
 
 import { AppShell } from "@/components/common/AppShell";
 import { TriggerModal } from "@/components/triggers/TriggerModal";
+import { RunAgentModal } from "@/components/wiki/RunAgentModal";
 import { apiFetch } from "@/lib/api";
 import { useRequireAuth } from "@/lib/auth";
 
@@ -435,6 +436,7 @@ function FileViewer({ path }: { path: string }) {
   const [reindexStatus, setReindexStatus] = useState<string | null>(null);
   const [triggerModalOpen, setTriggerModalOpen] = useState(false);
   const [triggerStatus, setTriggerStatus] = useState<string | null>(null);
+  const [runAgentOpen, setRunAgentOpen] = useState(false);
 
   useEffect(() => {
     setLoading(true);
@@ -498,6 +500,7 @@ function FileViewer({ path }: { path: string }) {
       style={{
         padding: "24px 32px",
         height: "100vh",
+        boxSizing: "border-box",
         display: "flex",
         flexDirection: "column",
         minHeight: 0,
@@ -535,6 +538,12 @@ function FileViewer({ path }: { path: string }) {
         <div style={{ flex: 1 }} />
         {!editing && !loading && !error && (
           <>
+            <button
+              onClick={() => setRunAgentOpen(true)}
+              style={secondaryBtn}
+            >
+              Run Agent
+            </button>
             <button
               onClick={() => setTriggerModalOpen(true)}
               style={secondaryBtn}
@@ -585,6 +594,8 @@ function FileViewer({ path }: { path: string }) {
         onSaved={(t) => setTriggerStatus(`Created trigger for ${t.scope_path}`)}
       />
 
+      <RunAgentModal open={runAgentOpen} onClose={() => setRunAgentOpen(false)} />
+
       {error && (
         <div
           style={{
@@ -611,7 +622,7 @@ function FileViewer({ path }: { path: string }) {
             flex: 1,
             minHeight: 0,
             width: "100%",
-            maxWidth: 820,
+            boxSizing: "border-box",
             padding: 16,
             border: "1px solid #ddd",
             borderRadius: 8,
