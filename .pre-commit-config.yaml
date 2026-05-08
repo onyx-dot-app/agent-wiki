@@ -1,0 +1,32 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: check-yaml
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+
+  - repo: https://github.com/sirwart/ripsecrets
+    rev: v0.1.11
+    hooks:
+      - id: ripsecrets
+        args:
+          - --additional-pattern
+          - ^sk-[A-Za-z0-9_\-]{20,}$
+
+  - repo: https://github.com/antonbabenko/pre-commit-terraform
+    rev: v1.103.0
+    hooks:
+      - id: terraform_fmt
+        files: \.tf$
+      - id: terraform_validate
+        files: \.tf$
+
+  - repo: local
+    hooks:
+      - id: helm-lint
+        name: helm lint
+        entry: bash -c 'set -euo pipefail; for d in deploy/helm/*/; do [ -f "$d/Chart.yaml" ] && helm lint "$d" --set secretKey=ci-placeholder; done'
+        language: system
+        files: ^deploy/helm/
+        pass_filenames: false

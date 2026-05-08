@@ -33,6 +33,12 @@ App at http://localhost:8080. First account created is auto-promoted to admin
 configured at runtime in the admin UI — env vars are only the fallback before
 any row exists in `llm_settings`.
 
+## Pre-commit hooks
+
+Lint config lives in `.pre-commit-config.yaml`; CI runs the same hooks on PRs.
+Run `pre-commit install` once, then `pre-commit run --all-files` ad-hoc.
+Add new checks as hooks here, not as one-off CI steps.
+
 ## Layout
 
 ```
