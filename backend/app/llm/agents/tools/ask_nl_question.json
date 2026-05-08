@@ -1,0 +1,14 @@
+{
+  "name": "ask_nl_question",
+  "description": "Ask a natural-language question about anything in the wiki. Spawns a one-shot Q&A sub-agent with read-only access (`search_wiki` + `read_page`). Returns `{answer, sources: [{path}, ...]}`. Use this when you want a synthesized answer rather than raw doc bodies — e.g. 'how do triggers work?', 'what's the status of the chat agent?'. The sub-agent will not write or propose edits. Sync: blocks until the answer is ready (typically 5-30 seconds).",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "query": {
+        "type": "string",
+        "description": "The question to answer. Plain English; no special syntax."
+      }
+    },
+    "required": ["query"]
+  }
+}

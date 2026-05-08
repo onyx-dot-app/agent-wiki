@@ -15,13 +15,13 @@ def handle(args: dict[str, Any]) -> Any:
         rel = h.validate_doc_path(args.get("path"))
         old_string = args.get("old_string")
         new_string = args.get("new_string")
-        message = args.get("message")
+        commit_message = args.get("commit_message")
         if not isinstance(old_string, str) or old_string == "":
             raise h.ToolError("old_string is required and must be non-empty")
         if not isinstance(new_string, str):
             raise h.ToolError("new_string is required (string)")
-        if not isinstance(message, str) or not message.strip():
-            raise h.ToolError("message is required")
+        if not isinstance(commit_message, str) or not commit_message.strip():
+            raise h.ToolError("commit_message is required")
         replace_all = bool(args.get("replace_all", False))
 
         if not h.file_exists(rel):
@@ -34,7 +34,7 @@ def handle(args: dict[str, Any]) -> Any:
         except wiki_edit.ReplaceError as exc:
             raise h.ToolError(str(exc))
 
-        sha = h.commit_and_fan_out(rel, new_body, message.strip(), change_kind="edit")
+        sha = h.commit_and_fan_out(rel, new_body, commit_message.strip(), change_kind="edit")
 
         return {
             "path": rel,

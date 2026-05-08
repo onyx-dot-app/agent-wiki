@@ -1,0 +1,26 @@
+{
+  "name": "apply_patch",
+  "description": "Apply a unified-diff patch (one or more `@@ -L,N +L,M @@` hunks) to a wiki document. Atomic: if any hunk fails to apply, nothing is committed. Each hunk is matched line-anchored first; if line drift makes that fail, falls back to the same fuzzy chain `edit_doc` uses (the context + `-` lines must match somewhere uniquely in the file). Use this when you have a line-numbered diff in hand. For find-and-replace edits without line numbers, prefer `edit_doc` or `multi_edit`. The file must have been read this session via `read_page`/`read_doc` (HEAD).",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "path": {
+        "type": "string",
+        "description": "Wiki-relative path to the markdown file. Must end in `.md` and already exist."
+      },
+      "patch": {
+        "type": "string",
+        "description": "Unified-diff body. One or more `@@ -L,N +L,M @@` hunks. Lines start with ` ` (context), `-` (remove), or `+` (add). File-header lines (`--- a/x`, `+++ b/x`) are tolerated but optional. Pure-insertion hunks (no context, only `+`) require a valid line anchor — they have no fallback."
+      },
+      "commit_message": {
+        "type": "string",
+        "description": "Short commit message summarizing the change."
+      },
+      "base_sha": {
+        "type": "string",
+        "description": "Optional SHA the patch was authored against. If set and HEAD has moved, returns `stale_base` with the current sha and the diff since `base_sha` so you can rebase. Omit only if you've just read HEAD."
+      }
+    },
+    "required": ["path", "patch", "commit_message"]
+  }
+}

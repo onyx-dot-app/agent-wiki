@@ -18,9 +18,15 @@ _Last updated: 2026-05-07_
 ```
 nginx :80                 reverse proxy: /api/* → backend, else → frontend
   ├── backend :8080       Flask app
-  ├── worker              Huey consumer (same image, different command)
+  ├── worker-documents    Huey consumer for documents_huey
+  ├── worker-triggers     Huey consumer for triggers_huey
+  ├── worker-wiki-bm25    Huey consumer for wiki_bm25_huey
   └── frontend :3000      Next.js standalone
 ```
+
+All three workers are the same image; the queue name is a positional
+arg. Queue rationale + status live in
+[background-tasks](../background-tasks/background-tasks.md).
 
 All four services are defined in `docker-compose.yml` at the repo root.
 Compose is the canonical local path. A k8s/EKS deploy story also lives in

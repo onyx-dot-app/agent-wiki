@@ -1,0 +1,22 @@
+{
+  "name": "update_doc_nl",
+  "description": "Update a wiki document from a natural-language instruction. Dispatches to the document-updater sub-agent which loads the current body, applies your instruction, and either commits the new body or reports `NO_CHANGE` if nothing should change. Use this for high-level updates like 'mark the TODO under section X as done' or 'add a sentence noting that we shipped Y'. For surgical edits where you already know the exact strings, prefer `edit_doc` / `multi_edit` / `apply_patch` (cheaper, no extra LLM call). The file must have been read this session via `read_page`/`read_doc` (HEAD).",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "path": {
+        "type": "string",
+        "description": "Wiki-relative path to the markdown file. Must end in `.md` and already exist."
+      },
+      "instruction": {
+        "type": "string",
+        "description": "Natural-language description of the desired change. Specific is better — name the section, the value to update, what 'done' means."
+      },
+      "base_sha": {
+        "type": "string",
+        "description": "Optional SHA the instruction was authored against. If set and HEAD has moved, returns `stale_base` so you can re-read and re-issue."
+      }
+    },
+    "required": ["path", "instruction"]
+  }
+}

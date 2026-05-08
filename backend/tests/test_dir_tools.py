@@ -45,7 +45,7 @@ def repo(tmp_repo, tmp_config):
 def test_create_directory_creates_gitkeep(repo):
     from app.llm.agents.tools.create_directory import handle
 
-    out = handle({"path": "ops", "message": "add ops folder"})
+    out = handle({"path": "ops", "commit_message": "add ops folder"})
     assert "error" not in out, out
     assert out["path"] == "ops"
     assert out["created"] is True
@@ -55,7 +55,7 @@ def test_create_directory_creates_gitkeep(repo):
 def test_create_directory_rejects_md(repo):
     from app.llm.agents.tools.create_directory import handle
 
-    out = handle({"path": "ops.md", "message": "x"})
+    out = handle({"path": "ops.md", "commit_message": "x"})
     assert "error" in out
     assert ".md" in out["error"]
 
@@ -63,7 +63,7 @@ def test_create_directory_rejects_md(repo):
 def test_create_directory_rejects_existing(repo):
     from app.llm.agents.tools.create_directory import handle
 
-    out = handle({"path": "auth", "message": "x"})
+    out = handle({"path": "auth", "commit_message": "x"})
     assert "error" in out
     assert "exists" in out["error"]
 
@@ -71,16 +71,16 @@ def test_create_directory_rejects_existing(repo):
 def test_create_directory_rejects_traversal(repo):
     from app.llm.agents.tools.create_directory import handle
 
-    out = handle({"path": "../escape", "message": "x"})
+    out = handle({"path": "../escape", "commit_message": "x"})
     assert "error" in out
 
 
 def test_create_directory_requires_message(repo):
     from app.llm.agents.tools.create_directory import handle
 
-    out = handle({"path": "ops", "message": ""})
+    out = handle({"path": "ops", "commit_message": ""})
     assert "error" in out
-    assert "message" in out["error"]
+    assert "commit_message" in out["error"]
 
 
 # --------------------------------------------------------------------------- #
@@ -95,7 +95,7 @@ def test_move_path_renames_file(repo):
         {
             "old_path": "guide.md",
             "new_path": "intro.md",
-            "message": "rename guide -> intro",
+            "commit_message": "rename guide -> intro",
         }
     )
     assert "error" not in out, out
@@ -113,7 +113,7 @@ def test_move_path_moves_directory_recursively(repo):
         {
             "old_path": "auth",
             "new_path": "identity",
-            "message": "rename auth -> identity",
+            "commit_message": "rename auth -> identity",
         }
     )
     assert "error" not in out, out
@@ -131,7 +131,7 @@ def test_move_path_rejects_missing_source(repo):
     from app.llm.agents.tools.move_path import handle
 
     out = handle(
-        {"old_path": "nope.md", "new_path": "yep.md", "message": "x"}
+        {"old_path": "nope.md", "new_path": "yep.md", "commit_message": "x"}
     )
     assert "error" in out
     assert "not found" in out["error"]
@@ -144,7 +144,7 @@ def test_move_path_rejects_existing_target(repo):
         {
             "old_path": "guide.md",
             "new_path": "auth/passwords.md",
-            "message": "x",
+            "commit_message": "x",
         }
     )
     assert "error" in out
@@ -154,7 +154,7 @@ def test_move_path_rejects_existing_target(repo):
 def test_move_path_rejects_identical_paths(repo):
     from app.llm.agents.tools.move_path import handle
 
-    out = handle({"old_path": "guide.md", "new_path": "guide.md", "message": "x"})
+    out = handle({"old_path": "guide.md", "new_path": "guide.md", "commit_message": "x"})
     assert "error" in out
     assert "identical" in out["error"]
 
@@ -163,7 +163,7 @@ def test_move_path_rejects_md_to_non_md(repo):
     from app.llm.agents.tools.move_path import handle
 
     out = handle(
-        {"old_path": "guide.md", "new_path": "guide", "message": "x"}
+        {"old_path": "guide.md", "new_path": "guide", "commit_message": "x"}
     )
     assert "error" in out
     assert ".md" in out["error"]
@@ -173,7 +173,7 @@ def test_move_path_rejects_dir_to_md(repo):
     from app.llm.agents.tools.move_path import handle
 
     out = handle(
-        {"old_path": "auth", "new_path": "auth.md", "message": "x"}
+        {"old_path": "auth", "new_path": "auth.md", "commit_message": "x"}
     )
     assert "error" in out
     assert ".md" in out["error"]
@@ -183,6 +183,6 @@ def test_move_path_rejects_traversal(repo):
     from app.llm.agents.tools.move_path import handle
 
     out = handle(
-        {"old_path": "../oops", "new_path": "intro.md", "message": "x"}
+        {"old_path": "../oops", "new_path": "intro.md", "commit_message": "x"}
     )
     assert "error" in out

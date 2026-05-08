@@ -20,11 +20,11 @@
         "type": "boolean",
         "description": "If true, replace every occurrence of `old_string`. Defaults to false (exactly-one match required)."
       },
-      "message": {
+      "commit_message": {
         "type": "string",
         "description": "Short commit message summarizing the change."
       }
     },
-    "required": ["path", "old_string", "new_string", "message"]
+    "required": ["path", "old_string", "new_string", "commit_message"]
   }
 }

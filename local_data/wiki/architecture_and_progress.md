@@ -13,6 +13,7 @@ _Last updated: 2026-05-07_
 - [Flask + basic APIs](flask-and-apis/flask-and-apis.md)
 - [Agent harness — document updater](agents/document-updater.md)
 - [Agent harness — chat agent](agents/chat-agent.md)
+- [Agent tools (every tool, sync/async, side effects)](agent-tools/agent-tools.md)
 - [Natural-language triggers](natural-language-triggers/natural-language-triggers.md)
 - [Frontend (ChatUI + Wiki UI + Events + Admin)](frontend/frontend.md)
 - [Onyx-side push integration](onyx-push/onyx-push.md)

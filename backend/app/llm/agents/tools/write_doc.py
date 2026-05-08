@@ -14,11 +14,11 @@ def handle(args: dict[str, Any]) -> Any:
     try:
         rel = h.validate_doc_path(args.get("path"))
         body = args.get("body")
-        message = args.get("message")
+        commit_message = args.get("commit_message")
         if not isinstance(body, str):
             raise h.ToolError("body is required (string)")
-        if not isinstance(message, str) or not message.strip():
-            raise h.ToolError("message is required")
+        if not isinstance(commit_message, str) or not commit_message.strip():
+            raise h.ToolError("commit_message is required")
 
         existed = h.file_exists(rel)
         if existed:
@@ -28,7 +28,7 @@ def handle(args: dict[str, Any]) -> Any:
             old = ""
 
         change_kind = "edit" if existed else "create"
-        sha = h.commit_and_fan_out(rel, body, message.strip(), change_kind=change_kind)
+        sha = h.commit_and_fan_out(rel, body, commit_message.strip(), change_kind=change_kind)
 
         return {
             "path": rel,

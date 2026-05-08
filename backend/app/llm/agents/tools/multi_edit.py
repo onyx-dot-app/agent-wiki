@@ -15,11 +15,11 @@ def handle(args: dict[str, Any]) -> Any:
     try:
         rel = h.validate_doc_path(args.get("path"))
         edits = args.get("edits")
-        message = args.get("message")
+        commit_message = args.get("commit_message")
         if not isinstance(edits, list) or not edits:
             raise h.ToolError("edits must be a non-empty array")
-        if not isinstance(message, str) or not message.strip():
-            raise h.ToolError("message is required")
+        if not isinstance(commit_message, str) or not commit_message.strip():
+            raise h.ToolError("commit_message is required")
 
         if not h.file_exists(rel):
             raise h.ToolError(f"file not found: {rel}")
@@ -45,7 +45,7 @@ def handle(args: dict[str, Any]) -> Any:
         if body == old_body:
             raise h.ToolError("edits produced no change")
 
-        sha = h.commit_and_fan_out(rel, body, message.strip(), change_kind="edit")
+        sha = h.commit_and_fan_out(rel, body, commit_message.strip(), change_kind="edit")
 
         return {
             "path": rel,

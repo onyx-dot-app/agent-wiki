@@ -8,11 +8,11 @@
         "type": "string",
         "description": "Wiki-relative directory path (e.g. `auth/admin`). No leading slash, no `..`, no `.md` extension. Parent directories are created as needed."
       },
-      "message": {
+      "commit_message": {
         "type": "string",
         "description": "Short commit message summarizing the new directory (e.g. \"add admin folder\")."
       }
     },
-    "required": ["path", "message"]
+    "required": ["path", "commit_message"]
   }
 }

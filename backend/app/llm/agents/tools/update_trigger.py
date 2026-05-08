@@ -45,16 +45,16 @@ def handle(args: dict[str, Any]) -> Any:
                 return {"error": f"invalid scope_path: {exc}"}
         kwargs["scope_path"] = scope
 
-    if "nl_description" in args:
-        nl = args["nl_description"]
+    if "trigger_nl_condition" in args:
+        nl = args["trigger_nl_condition"]
         if not isinstance(nl, str) or not nl.strip():
-            return {"error": "nl_description cannot be empty"}
+            return {"error": "trigger_nl_condition cannot be empty"}
         kwargs["nl_description"] = nl.strip()
 
-    if "message" in args:
-        msg = args["message"]
+    if "trigger_fire_message" in args:
+        msg = args["trigger_fire_message"]
         if not isinstance(msg, str) or not msg.strip():
-            return {"error": "message cannot be empty"}
+            return {"error": "trigger_fire_message cannot be empty"}
         kwargs["message"] = msg.strip()
 
     destination = args.get("destination", _UNSET)

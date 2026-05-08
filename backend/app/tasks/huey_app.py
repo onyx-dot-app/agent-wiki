@@ -20,7 +20,7 @@ Queues:
   we keep them off the indexer/triggers paths so a slow Anthropic call
   can't backpressure FTS reindex or trigger fan-out.
   Today: connector ingest (``update_document_from_payload``), direct agent
-  edits (``update_document_direct``), and the periodic stale-doc review
+  edits (``agent_update_document_nl``), and the periodic stale-doc review
   (``stale_doc_review``).
 
 * ``triggers_huey`` — **natural-language trigger evaluation (delta +

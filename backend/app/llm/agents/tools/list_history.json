@@ -1,0 +1,20 @@
+{
+  "name": "list_history",
+  "description": "List the git commit history for a wiki document. Returns commits newest-first as `[{sha, author, ts, message}, ...]`. Useful for finding a historical sha to pass to `read_doc`, or for understanding what's changed recently before proposing an edit. The list follows renames (`git log --follow`).",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "path": {
+        "type": "string",
+        "description": "Wiki-relative path to the markdown file. Must end in `.md`."
+      },
+      "limit": {
+        "type": "integer",
+        "description": "Max commits to return (default 20, max 100).",
+        "minimum": 1,
+        "maximum": 100
+      }
+    },
+    "required": ["path"]
+  }
+}
