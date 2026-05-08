@@ -147,9 +147,235 @@ the `connect()` implementation to `psycopg`; migrate the SQL idioms
 (`?` → `%s`, `INSERT OR IGNORE` → `INSERT … ON CONFLICT`,
 `AUTOINCREMENT` → `BIGSERIAL`). The repo pattern is preserved.
 
-FTS5 → Postgres `tsvector` + GIN index. The bm25 wrapper in
-`app/wiki/search.py` becomes a `ts_rank_cd` query. Same callers, same
-return shape.
+### Replacing the SQLite FTS5 search index
+
+Search today is a SQLite FTS5 virtual table (`documents_fts`)
+maintained by a Huey reindex task that fires after every commit (see
+[architecture_diagram.md](../architecture_diagram.md) — `wiki_bm25_huey`
+queue + `tasks/reindex.py`). Tokenizer is `porter unicode61`; ranking
+is `bm25(documents_fts)`; snippets come from `snippet(documents_fts,
+…)`.
+
+This replaces with **Postgres native full-text search**: a generated
+`tsvector` column on the `documents` table backed by a GIN index.
+Queries use `websearch_to_tsquery` + `ts_rank_cd`; snippets use
+`ts_headline`.
+
+The migration is a net simplification — the Postgres design removes a
+Huey queue, a reindex task, a virtual table, and a startup bootstrap
+hook. None of those ceremonies exist in the new design because
+Postgres maintains the index inline in the `UPDATE` that lands the
+new body.
+
+#### Schema
+
+```sql
+ALTER TABLE documents
+  ADD COLUMN content_fts tsvector
+  GENERATED ALWAYS AS (
+    setweight(to_tsvector('english', coalesce(title, '')), 'A') ||
+    setweight(to_tsvector('english', coalesce(body,  '')), 'B')
+  ) STORED;
+
+CREATE INDEX idx_documents_content_fts
+  ON documents USING GIN (content_fts);
+```
+
+`GENERATED ALWAYS AS … STORED` means Postgres recomputes `content_fts`
+inside the same transaction as any UPDATE to `title` or `body`. The
+index entry updates atomically with the row. There is no separate
+"apply this write" / "now reindex it" two-step the way SQLite FTS5
+required.
+
+`setweight A/B` lets us rank title hits above body hits in `ts_rank_cd`
+output. Today's FTS5 setup ranks title and body uniformly; this is a
+small quality bump that comes free with the migration.
+
+#### Operator and function mapping
+
+| Concern          | SQLite FTS5                                      | Postgres                                                                                      |
+| ---------------- | ------------------------------------------------ | --------------------------------------------------------------------------------------------- |
+| Index unit       | virtual table `documents_fts`                    | column `documents.content_fts` + GIN                                                          |
+| Tokenizer        | `porter unicode61`                               | `english` config (Snowball/porter + unicode-aware lower)                                      |
+| Match            | `documents_fts MATCH ?`                          | `content_fts @@ websearch_to_tsquery('english', ?)`                                           |
+| Rank             | `bm25(documents_fts)`                            | `ts_rank_cd(content_fts, query, 32)` — cover-density                                          |
+| Snippet          | `snippet(documents_fts, 1, '**', '**', '…', 32)` | `ts_headline('english', body, query, 'StartSel=**, StopSel=**, MaxFragments=2, MaxWords=20')` |
+| Phrase           | `"foo bar"`                                      | `"foo bar"` (parsed by `websearch_to_tsquery`)                                                |
+| Negation         | `-term`                                          | `-term` (parsed by `websearch_to_tsquery`)                                                    |
+| Boolean          | implicit AND, `OR`, `NEAR`                       | implicit AND, `OR`. `NEAR` has no direct equivalent — see "Differences" below                 |
+| Reindex on write | `tasks.reindex.reindex_path` (Huey)              | None — `STORED` column updates inline                                                         |
+| Index bootstrap  | `bootstrap_index_if_empty()` at process start    | None — column populated when row is inserted                                                  |
+
+`websearch_to_tsquery` is the parser to use for any user-typed query.
+It accepts the same shape Google does (quoted phrases, `-` negation,
+`OR`) without operator-escape gymnastics. `to_tsquery` exists too but
+expects pre-formatted operator syntax (`foo & !bar`); it's brittle
+fed raw user input.
+
+#### Caller surface
+
+`app/wiki/search.py` is the only seam. Internals change; the public
+function signature is unchanged.
+
+Before (SQLite):
+
+```python
+def search(query: str, limit: int = 10) -> list[Hit]:
+    rows = db.execute("""
+        SELECT path, title,
+               snippet(documents_fts, 1, '**', '**', '…', 32) AS snippet,
+               bm25(documents_fts) AS rank
+        FROM documents_fts
+        WHERE documents_fts MATCH ?
+        ORDER BY rank
+        LIMIT ?
+    """, (query, limit)).fetchall()
+    return [Hit(**r) for r in rows]
+```
+
+After (Postgres):
+
+```python
+def search(query: str, limit: int = 10) -> list[Hit]:
+    rows = db.execute("""
+        SELECT d.path, d.title,
+               ts_headline('english', d.body, q,
+                           'StartSel=**, StopSel=**, MaxFragments=2, MaxWords=20')
+                 AS snippet,
+               ts_rank_cd(d.content_fts, q, 32) AS rank
+        FROM documents d, websearch_to_tsquery('english', %s) q
+        WHERE d.content_fts @@ q
+        ORDER BY rank DESC
+        LIMIT %s
+    """, (query, limit)).fetchall()
+    return [Hit(**r) for r in rows]
+```
+
+Same `Hit` dataclass, same `{path, title, snippet, rank}` fields.
+Every caller — `/api/documents/search`, the chat agent's
+`search_wiki` tool, the MCP server's `search_wiki` tool, any future
+caller — is unchanged.
+
+The `Hit.rank` field flips sign convention (`bm25` returns lower =
+better; `ts_rank_cd` returns higher = better), so the ORDER BY flips
+from `ASC` to `DESC` and any external caller comparing rank values
+needs to know. In practice no caller does — they consume an already-
+sorted list.
+
+#### What goes away
+
+This is the part that makes the migration a net simplification, not
+an addition:
+
+| Removed                                                                                     | Why                                                         |
+| ------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| `documents_fts` virtual-table migration                                                     | Replaced by the generated `tsvector` column on `documents`. |
+| `wiki_bm25_huey` queue                                                                      | No async reindex needed.                                    |
+| `tasks/reindex.py` (`reindex_path`, `reindex_document`)                                     | Generated column updates inside the UPDATE; no second step. |
+| `tasks/run_worker.py --queue wiki_bm25_huey` invocation                                     | One fewer worker process / fewer worker threads.            |
+| `bootstrap_index_if_empty` call in `app/main.py:create_app` and in `mcp_server/__main__.py` | Generated column populates on insert; nothing to bootstrap. |
+| Manual reindex button in the admin UI                                                       | Removed — there is no separate index to refresh.            |
+| The "schedule a reindex after a doc commits" line in `commit_writer`                        | One less fan-out task to enqueue.                           |
+
+Net delta versus today: **fewer moving parts**, not more. This is
+worth saying explicitly because the broader Postgres+Redis migration
+adds infrastructure (two new datastores, one new sidecar) — the
+search-path migration alone subtracts.
+
+#### Why generated column rather than a write-side trigger
+
+Two PG-native options exist: a `STORED` generated column (compiler
+maintains it on every UPDATE) or a trigger (`BEFORE INSERT OR UPDATE`
+that sets the column manually). Both produce the same data. The
+generated column is preferred because:
+
+- Less code (one column declaration vs a trigger function).
+- Trigger functions are runtime-evaluated and have more failure modes
+  (PL/pgSQL errors, search_path issues). The generator is part of the
+  CREATE TABLE / ALTER TABLE definition.
+- The generator participates in `pg_catalog`, so tools like
+  `pg_dump` and migration validators see it as schema, not as
+  imperative behavior.
+- Performance is identical (PG actually compiles generated-column
+  expressions inline).
+
+Pick generated column. Don't add a trigger.
+
+#### Differences in ranking quality (and the escape hatch)
+
+`ts_rank_cd` is cover-density ranking — closer term proximity ranks
+higher, term frequency adds, document length normalizes. `bm25` is
+the same family but weights term rarity (IDF) more aggressively. For
+a wiki of hundreds to low-thousands of documents, the practical
+difference in result ordering for typical queries is small.
+
+If ranking quality regresses on real queries, the escape hatch is the
+[ParadeDB `pg_search`](https://www.paradedb.com/) extension which
+adds a true bm25 ranker on top of Postgres tsvector indexes. It's a
+drop-in (extension + one index type change), no application-code
+churn. Out of scope for v0; flagged as available.
+
+#### Phrase / proximity / fuzzy
+
+| Need                             | Today (FTS5) | New (PG)                               | Notes                                                                                        |
+| -------------------------------- | ------------ | -------------------------------------- | -------------------------------------------------------------------------------------------- |
+| Exact phrase                     | `"foo bar"`  | `"foo bar"` via `websearch_to_tsquery` | Identical.                                                                                   |
+| `NEAR` operator (within N words) | supported    | not directly                           | Use `phraseto_tsquery` for adjacency, or skip — agent-wiki has no caller using `NEAR` today. |
+| Fuzzy / typo tolerance           | not in FTS5  | `pg_trgm` extension + `%` operator     | Out of scope; available if user reports type-tolerance need.                                 |
+| Stemming                         | porter       | `english` config = porter family       | Identical for ~all real queries.                                                             |
+
+#### Update cost (write-path)
+
+| Phase                               | SQLite FTS5                                                                                       | Postgres                                                            |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| Write business row                  | `INSERT INTO documents …` (~100µs)                                                                | `INSERT INTO documents …` (~200µs incl. tsvector compute + GIN)     |
+| Reindex                             | `enqueue reindex_path` (~50µs to enqueue) + worker pickup + virtual-table rebuild (~ms in worker) | (none — done inline in the INSERT)                                  |
+| User-visible latency on next search | depends on worker drain time (typically 10s–100s of ms)                                           | immediate — search reads see new content as soon as the txn commits |
+
+Net: write costs ~100µs more synchronously; eliminates ~5-10ms of
+async work and the lag window where a search wouldn't find a
+just-committed doc. Lower write amplification (one place writes
+instead of two), tighter consistency between write and search.
+
+#### Index size
+
+GIN on a tsvector typically lands at ~30-50% of the source text size,
+roughly the same as SQLite FTS5's index size. No concern at the
+agent-wiki corpus scale (hundreds to thousands of docs).
+
+#### Migration mechanics
+
+For an existing-data cutover (when we move off SQLite):
+
+1. Dump SQLite `documents` rows.
+2. Migration creates the new Postgres `documents` table including the
+   `content_fts` STORED generated column.
+3. Bulk INSERT loads the rows; PG computes the tsvector inline.
+4. `CREATE INDEX … CONCURRENTLY ON documents USING GIN (content_fts)`
+   builds the index without locking writes.
+5. Cutover: switch the application's DSN from SQLite to Postgres.
+
+There is no "warm the index" step — the generated column populated
+during the bulk INSERT, and the GIN index was built CONCURRENTLY.
+First search after cutover hits a fully-populated index.
+
+#### Open questions on the search migration
+
+- **`english` config vs `simple`.** `english` does stemming
+  (`updated`/`updates`/`updating` collapse to one token), which is
+  usually right. Code-symbol searches (`run_chat_loop_stream`) get
+  tokenized weirdly under `english`; under `simple` they survive
+  intact. If we see code-symbol queries in real usage, we may need a
+  separate code-aware index column (`to_tsvector('simple', body)`).
+  Not a v0 concern.
+- **Title weighting factor.** `setweight A/B` is the categorical
+  knob. Numeric weights for `ts_rank_cd` (the `{0.1, 0.2, 0.4, 1.0}`
+  array on the function) is the fine-grained knob. Default tuple is
+  fine for v0; tune if title hits feel under-ranked.
+- **Multi-language wiki content.** All current content is English.
+  If a future wiki lands docs in other languages, we'd need a
+  `language` column on `documents` and a generator that picks the
+  right TS config. Out of scope until we see non-English content.
 
 Huey switches from SQLite-backed to Redis-backed. Same Redis
 everywhere — local dev runs it natively (`brew install redis && brew
