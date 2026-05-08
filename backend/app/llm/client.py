@@ -29,7 +29,9 @@ Stream event shapes:
     {"type": "text_delta",  "text": str}
     {"type": "tool_call",   "id": str, "name": str, "arguments": dict}
     {"type": "done",        "stop_reason": str,
-                             "usage": {"input_tokens": int, "output_tokens": int}}
+                             "usage": {"input_tokens": int,
+                                       "output_tokens": int,
+                                       "reasoning_tokens": int}}
 """
 from __future__ import annotations
 
@@ -70,7 +72,13 @@ def stream(
     tools: list[dict[str, Any]] | None = None,
     max_tokens: int = DEFAULT_MAX_TOKENS,
 ) -> Iterator[StreamEvent]:
-    """Stream a single LLM completion. Yields normalized event dicts."""
+    """Stream a single LLM completion. Yields normalized event dicts.
+
+    Logs the full request (messages + tools) and the full response (text +
+    tool calls + usage including reasoning tokens) at DEBUG, once per call.
+    Provider modules don't dump payloads themselves — this is the single
+    spot the whole exchange is captured.
+    """
     _debug_dump("llm request messages", messages)
     if tools:
         _debug_dump("llm request tools", tools)
@@ -90,12 +98,36 @@ def stream(
         )
     provider.check_configured(settings)
     chosen_model = model or settings.model
-    yield from provider.stream(
+    text_parts: list[str] = []
+    tool_calls: list[dict[str, Any]] = []
+    stop_reason = ""
+    usage: dict[str, int] = {"input_tokens": 0, "output_tokens": 0, "reasoning_tokens": 0}
+    for ev in provider.stream(
         messages,
         model=chosen_model,
         tools=tools,
         max_tokens=max_tokens,
         settings=settings,
+    ):
+        t = ev.get("type")
+        if t == "text_delta":
+            text_parts.append(ev["text"])
+        elif t == "tool_call":
+            tool_calls.append(
+                {"id": ev["id"], "name": ev["name"], "arguments": ev["arguments"]}
+            )
+        elif t == "done":
+            stop_reason = ev.get("stop_reason", "") or ""
+            usage = ev.get("usage") or usage
+        yield ev
+    _debug_dump(
+        "llm response",
+        {
+            "text": "".join(text_parts),
+            "tool_calls": tool_calls,
+            "stop_reason": stop_reason,
+            "usage": usage,
+        },
     )
 
 
@@ -106,11 +138,15 @@ def complete(
     tools: list[dict[str, Any]] | None = None,
     max_tokens: int = DEFAULT_MAX_TOKENS,
 ) -> dict[str, Any]:
-    """Drain ``stream()`` into the historical dict for non-streaming callers."""
+    """Drain ``stream()`` into the historical dict for non-streaming callers.
+
+    Request/response DEBUG logging happens inside ``stream()`` — don't
+    re-log here.
+    """
     text_parts: list[str] = []
     tool_calls: list[dict[str, Any]] = []
     stop_reason = ""
-    usage = {"input_tokens": 0, "output_tokens": 0}
+    usage = {"input_tokens": 0, "output_tokens": 0, "reasoning_tokens": 0}
     for ev in stream(messages, model=model, tools=tools, max_tokens=max_tokens):
         t = ev["type"]
         if t == "text_delta":
@@ -122,14 +158,12 @@ def complete(
         elif t == "done":
             stop_reason = ev["stop_reason"]
             usage = ev["usage"]
-    result = {
+    return {
         "text": "".join(text_parts),
         "tool_calls": tool_calls,
         "stop_reason": stop_reason,
         "usage": usage,
     }
-    _debug_dump("llm response", result)
-    return result
 
 
 __all__ = ["DEFAULT_MAX_TOKENS", "StreamEvent", "stream", "complete"]

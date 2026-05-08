@@ -8,10 +8,7 @@ proper home.
 from __future__ import annotations
 
 import json
-import logging
 from typing import Any
-
-log = logging.getLogger("app.llm.providers")
 
 
 def safe_json_loads(s: str) -> dict[str, Any]:
@@ -81,18 +78,3 @@ def stringify_tool_result(content: Any) -> str:
         return json.dumps(content)
     except (TypeError, ValueError):
         return str(content)
-
-
-def debug_dump(label: str, obj: Any) -> None:
-    """Pretty-print ``obj`` to the provider log at DEBUG, untruncated.
-
-    Skips serialization entirely when DEBUG isn't enabled — no cost on the
-    hot path. Use for full LLM payloads (request kwargs, raw chunks).
-    """
-    if not log.isEnabledFor(logging.DEBUG):
-        return
-    try:
-        rendered = json.dumps(obj, indent=2, ensure_ascii=False, default=str)
-    except (TypeError, ValueError):
-        rendered = repr(obj)
-    log.debug("%s\n%s", label, rendered)

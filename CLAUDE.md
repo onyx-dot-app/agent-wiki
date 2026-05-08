@@ -12,6 +12,9 @@
 Guidance for Claude (and other agents) working on **agent-wiki** — a
 self-updating wiki for AI agents. Read this before changing code.
 
+CRITICAL: When starting new work, make sure to check the wiki for relevant documentation and update accordingly.
+As you make progress, make sure to periodically update the wiki.
+
 ## Stack at a glance
 
 - **Backend** — Flask + SQLite (FTS5) + Huey on SQLite. Git is shelled out to.
@@ -129,9 +132,17 @@ working dir, identity, and commit-on-write. Path validation goes through
 ### Background work — Huey, not threads
 
 If something might take more than ~100ms, queue it. Tasks live under
-`app/tasks/` and import `huey` from `app.tasks.huey_app`. The `worker`
-container runs `python -m app.tasks.run_worker` — make sure new task modules
-are imported there (or transitively) so they register on boot.
+`app/tasks/` and bind to one of three Huey instances in
+`app/tasks/huey_app.py` — `documents_huey` (LLM doc-reconciliation),
+`triggers_huey` (NL trigger eval, delta + scheduled), or
+`wiki_doc_index_huey` (FTS5 / BM25). Each queue has its own worker
+process (`python -m app.tasks.run_worker <queue>`); make sure new task
+modules are imported by `run_worker.py` so they register on boot.
+
+**For all the detail — queue rationale, routing rules, run commands,
+docker / launch.json wiring, what breaks if a worker isn't running —
+see `local_data/wiki/background-tasks/background-tasks.md`.** Don't
+duplicate that doc; update it.
 
 ### Logging — `app.utils.logging.setup_logging` once per process
 

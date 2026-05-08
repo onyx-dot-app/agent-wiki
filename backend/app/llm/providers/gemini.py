@@ -17,7 +17,6 @@ from typing import Any, Iterator
 
 from app.llm.errors import LLMError
 from app.llm.providers._common import (
-    debug_dump,
     split_system,
     stringify_tool_result,
     tool_call_id_to_name,
@@ -80,7 +79,6 @@ class GeminiProvider:
                 }
             ]
 
-        debug_dump("gemini request", {"model": model, "contents": contents, "config": config})
         log.info(
             "llm request provider=gemini model=%s tools=%d max_tokens=%d msgs=%d",
             model, len(tools or []), max_tokens, len(convo),
@@ -124,6 +122,7 @@ class GeminiProvider:
                     usage = {
                         "input_tokens": getattr(meta, "prompt_token_count", 0) or 0,
                         "output_tokens": getattr(meta, "candidates_token_count", 0) or 0,
+                        "reasoning_tokens": getattr(meta, "thoughts_token_count", 0) or 0,
                     }
             log.info(
                 "llm done provider=gemini model=%s stop=%s tokens=%d/%d",

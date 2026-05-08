@@ -62,3 +62,19 @@ def test_find_matching_triggers_empty_when_nothing_seeded(tmp_db):
     from app.triggers.engine import find_matching_triggers
 
     assert find_matching_triggers("any/path.md") == []
+
+
+def test_find_matching_triggers_includes_root_scope(tmp_db):
+    """A trigger with scope_path='' (root) should fire on any doc update,
+    including docs in nested directories and docs at the wiki root."""
+    from app.triggers.engine import find_matching_triggers
+
+    conn = connect()
+    try:
+        _seed_user(conn)
+        _seed_trigger(conn, scope_path="", tid="t_root")
+    finally:
+        conn.close()
+
+    assert {r["id"] for r in find_matching_triggers("a/b/c.md")} == {"t_root"}
+    assert {r["id"] for r in find_matching_triggers("foo.md")} == {"t_root"}

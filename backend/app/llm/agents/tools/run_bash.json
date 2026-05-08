@@ -1,0 +1,14 @@
+{
+  "name": "run_bash",
+  "description": "Read-only Unix command runner against the wiki working tree. **This is a BACKUP tool** for wiki-related questions that the other tools can't answer cleanly and that need more flexibility — for example, counting markdown files in a directory, listing the directory tree, finding a literal string across the whole wiki with line numbers, or scanning many docs in one pass. Reach for it only when `search_wiki`, `read_page`, `web_search`, etc. don't fit the question. Do **not** use it for ordinary content lookups (use `search_wiki`), full-doc reads (`read_page`), edits (`edit_doc` / `multi_edit` / `write_doc`), renames (`move_path`), or directory creation (`create_directory`).\n\n**Allowed commands (whitelist, checked upfront when the command is parsed): `cat, find, grep, ls, head, tail, wc`.** The first token of every segment in the chain must be one of these. Pipes (`|`), boolean (`&&`, `||`), and sequencing (`;`) are supported. Anything outside the whitelist — `rm`, `mv`, `cp`, `git`, `sh`, `bash`, `python`, redirects (`>`, `>>`), shell expansion (`$(...)`) — is rejected before execution.\n\nReturns `{output, exit_code, elapsed_ms, truncated}`. `output` is plain text; output >2000 lines or >50 KB is truncated, and chains ending in `grep` or `find` are capped at 100 lines. Working directory is fixed at the wiki root, so use relative paths. Per-segment timeout is 30 seconds.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "command": {
+        "type": "string",
+        "description": "Shell command to run, e.g. `find . -name '*.md' | wc -l`, `ls -la`, `grep -rn 'TODO' .`, `cat README.md | head -20`."
+      }
+    },
+    "required": ["command"]
+  }
+}

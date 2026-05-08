@@ -20,7 +20,7 @@ from functools import lru_cache
 from typing import Any, Iterator
 
 from app.llm.errors import LLMError
-from app.llm.providers._common import debug_dump, stringify_tool_result
+from app.llm.providers._common import stringify_tool_result
 from app.llm.settings import LLMSettings
 
 log = logging.getLogger(__name__)
@@ -77,7 +77,6 @@ class OllamaProvider:
                 for t in tools
             ]
 
-        debug_dump("ollama request kwargs", kwargs)
         log.info(
             "llm request provider=ollama model=%s tools=%d max_tokens=%d msgs=%d",
             model, len(tools or []), max_tokens, len(ollama_messages),
@@ -116,7 +115,11 @@ class OllamaProvider:
                     stop_reason = getattr(chunk, "done_reason", "") or ""
                     in_tok = getattr(chunk, "prompt_eval_count", 0) or 0
                     out_tok = getattr(chunk, "eval_count", 0) or 0
-                    usage = {"input_tokens": in_tok, "output_tokens": out_tok}
+                    usage = {
+                        "input_tokens": in_tok,
+                        "output_tokens": out_tok,
+                        "reasoning_tokens": 0,
+                    }
             log.info(
                 "llm done provider=ollama model=%s stop=%s tokens=%d/%d",
                 model, stop_reason, usage["input_tokens"], usage["output_tokens"],

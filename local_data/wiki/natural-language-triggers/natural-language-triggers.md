@@ -103,7 +103,7 @@ can match descriptions like "when a new doc lands in this dir."
 SELECT * FROM triggers
 WHERE kind = 'delta'
   AND enabled = 1
-  AND scope_path IN (?, ?, ...)   -- doc_path + parent_dirs
+  AND scope_path IN (?, ?, ...)   -- doc_path + parent_dirs (incl. ""=root)
 ```
 
 ### NL evaluation — two phases

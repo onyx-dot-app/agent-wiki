@@ -23,9 +23,14 @@ def absolute(rel_path: str) -> Path:
 
 
 def parent_dirs(rel_path: str) -> list[str]:
-    """All directories above ``rel_path`` (closest first), used for trigger evaluation."""
+    """All directories above ``rel_path`` (closest first), used for trigger evaluation.
+
+    The root of the wiki is represented as ``""`` to match the scope_path
+    convention used by root-scoped triggers (see ``app/triggers/storage.py``).
+    """
     parts = Path(safe_rel_path(rel_path)).parts[:-1]
     out = []
     for i in range(len(parts), 0, -1):
         out.append(str(Path(*parts[:i])))
+    out.append("")
     return out

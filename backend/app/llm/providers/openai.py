@@ -7,7 +7,7 @@ from functools import lru_cache
 from typing import Any, Iterator
 
 from app.llm.errors import LLMError
-from app.llm.providers._common import debug_dump, safe_json_loads, split_system
+from app.llm.providers._common import safe_json_loads, split_system
 from app.llm.settings import LLMSettings
 
 log = logging.getLogger(__name__)
@@ -69,7 +69,6 @@ class OpenAIProvider:
                 for t in tools
             ]
 
-        debug_dump("openai request kwargs", kwargs)
         log.info(
             "llm request provider=openai model=%s tools=%d max_tokens=%d items=%d",
             model, len(tools or []), max_tokens, len(input_items),
@@ -112,6 +111,8 @@ class OpenAIProvider:
                     usage = getattr(resp, "usage", None)
                     in_tok = getattr(usage, "input_tokens", 0) if usage else 0
                     out_tok = getattr(usage, "output_tokens", 0) if usage else 0
+                    details = getattr(usage, "output_tokens_details", None) if usage else None
+                    reason_tok = getattr(details, "reasoning_tokens", 0) if details else 0
                     status = getattr(resp, "status", "") or ""
                     log.info(
                         "llm done provider=openai model=%s status=%s tokens=%d/%d",
@@ -123,7 +124,11 @@ class OpenAIProvider:
                         # "completed" / "incomplete". Map to the same string key
                         # so callers don't branch on provider.
                         "stop_reason": status,
-                        "usage": {"input_tokens": in_tok, "output_tokens": out_tok},
+                        "usage": {
+                            "input_tokens": in_tok,
+                            "output_tokens": out_tok,
+                            "reasoning_tokens": reason_tok or 0,
+                        },
                     }
         except LLMError:
             raise

@@ -279,8 +279,13 @@ root already points the data paths at `local_data/` and sets
 - **Backend** — `cd backend && ./.venv/bin/python -m app.main` (Flask on
   `:8080`). Python 3.11 venv at `backend/.venv`, deps installed via
   `pip install -e .`.
-- **Worker** — `cd backend && ./.venv/bin/python -m app.tasks.run_worker`
-  (same venv).
+- **Workers** — three queues, three processes. Each drains one queue:
+  `./.venv/bin/python -m app.tasks.run_worker documents`,
+  `./.venv/bin/python -m app.tasks.run_worker triggers`,
+  `./.venv/bin/python -m app.tasks.run_worker wiki_doc_index`
+  (same venv). See
+  [running-locally.md](running-locally.md#how-to-run--five-processes)
+  and [background-tasks](background-tasks/background-tasks.md).
 - **Frontend** — `cd frontend && set -a && source ../.env && set +a && npm run dev`
   (Next on `:3000`). The `next.config.js` rewrite proxies `/api/*` to
   `BACKEND_URL`, so there's no CORS / nginx in this setup. The `set -a / source`
@@ -511,5 +516,43 @@ area docs.
   frontend directly. Image registry assumed to be a public GHCR/Docker Hub
   repo (no ECR provisioning). Two-step flow: `terraform apply` once per
   env, then `helm upgrade --install` per app deploy. See `deploy/README.md`.
+
+- **2026-05-08** — **LLM observability consolidated to the seam.** The
+  full request + full response are now DEBUG-dumped exactly once per
+  call, inside `app/llm/client.py:stream()`. Provider modules
+  (`anthropic`, `openai`, `gemini`, `ollama`) no longer pretty-print
+  their request kwargs — that was duplicating the seam's "llm request
+  messages" / "llm request tools" output. `stream()` also accumulates
+  the response (text + tool_calls + stop_reason + usage) and emits a
+  single "llm response" entry on done, so streaming callers (chat) get
+  the same dump that `complete()` callers (triggers, doc-updater) used
+  to. The unused `debug_dump` helper in `app/llm/providers/_common.py`
+  was removed.
+
+  Normalized `usage` dict gained an optional `reasoning_tokens` field
+  alongside `input_tokens` / `output_tokens`. OpenAI surfaces it from
+  `usage.output_tokens_details.reasoning_tokens`; Gemini from
+  `usage_metadata.thoughts_token_count`; Anthropic and Ollama emit `0`.
+
+- **2026-05-08** — **Background work split into three queues.** One
+  `SqliteHuey` instance per queue, all sharing `queue.sqlite` via
+  `name=` namespacing: `documents_huey` (LLM doc-reconciliation —
+  `update_document_*`, `stale_doc_review`), `triggers_huey` (NL trigger
+  eval, both `fan_out_trigger_eval` and the cron
+  `evaluate_scheduled_triggers`), `wiki_doc_index_huey` (FTS5/BM25
+  reindex). Three worker containers in `docker-compose.yml`
+  (`worker-documents`, `worker-triggers`, `worker-wiki-doc-index`),
+  each launched via `python -m app.tasks.run_worker <queue>`. Goal:
+  isolate slow LLM work from the cheap indexer and from trigger fires
+  so each queue's backlog only delays its own consumers. See
+  [background-tasks](background-tasks/background-tasks.md).
+
+- **2026-05-08** — **Root-scoped trigger fan-out fix.** `find_matching_triggers`
+  was building its `IN (...)` candidate set from `[doc_path,
+  *parent_dirs(doc_path)]`, but `parent_dirs` never returned `""` — so a
+  trigger with `scope_path = ''` (the wiki root convention from
+  `app/triggers/storage.py:compute_path`) never matched any doc.
+  `app/wiki/filesystem.py:parent_dirs` now appends `""` to its output;
+  regression test in `tests/test_triggers_engine.py`.
 
 _(Append new entries with a date prefix. Cross-cutting only.)_

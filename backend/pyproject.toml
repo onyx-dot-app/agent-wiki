@@ -16,6 +16,7 @@ dependencies = [
     "google-genai>=1.0", # Gemini provider
     "ollama>=0.4",       # Local-model provider (uses Ollama HTTP API)
     "pyyaml>=6.0",       # trigger files on disk
+    "gunicorn>=21",      # dev/prod WSGI; --reload + --graceful-timeout for in-flight-safe reloads
 ]
 
 [project.optional-dependencies]

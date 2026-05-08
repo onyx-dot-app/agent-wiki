@@ -97,13 +97,13 @@ wiki/
   filesystem.py      safe_rel_path, traversal guard
   search.py          FTS5 query wrapper
 
-tasks/             ── Huey on SQLite (queue.sqlite)
-  huey_app.py        the huey instance
-  run_worker.py      worker entrypoint; imports task modules to register
-  reindex.py         reindex_path / reindex_document  (live)
-  triggers.py        fan_out_trigger_eval            (live)
-  document_update.py doc-updater task                (stub)
-  periodic.py        time-based checks               (stub)
+tasks/             ── 3 Huey queues on queue.sqlite — see background-tasks/
+  huey_app.py        documents_huey / triggers_huey / wiki_doc_index_huey
+  run_worker.py      worker entrypoint; takes <queue> arg
+  reindex.py         reindex_path / reindex_document  → wiki_doc_index
+  triggers.py        fan_out_trigger_eval             → triggers
+  document_update.py doc-updater tasks                → documents
+  periodic.py        crons split across triggers + documents queues
 
 models/            ── pydantic request/response shapes (HTTP only, not DB)
 utils/

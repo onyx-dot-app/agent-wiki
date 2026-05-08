@@ -12,6 +12,7 @@
 - Number of days:
 - Who's going:
 - Main priorities:
+- Loves vanilla ice cream
 
 ## Areas to Consider
 - Union Square

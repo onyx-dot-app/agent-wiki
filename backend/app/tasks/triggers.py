@@ -1,9 +1,17 @@
 """Post-commit trigger fan-out.
 
-After a successful ``commit_file`` on a wiki doc, the API enqueues
-``fan_out_trigger_eval`` here. It loads BEFORE/AFTER from git, finds the
-``delta`` triggers attached to the doc and its parent dirs, and routes
-each one through the appropriate evaluation flow:
+Tasks in this module run on the ``triggers_huey`` queue — the queue
+dedicated to natural-language trigger evaluation, both event-driven (this
+file) and time-based (``app/tasks/periodic.py:evaluate_scheduled_triggers``).
+Trigger eval is read-only (no commits), so it sits on its own queue
+between the LLM-heavy ``documents_huey`` and the cheap
+``wiki_doc_index_huey``: a flood of trigger fires can't delay an FTS
+reindex, and a backlogged doc-updater can't delay an event-log entry.
+
+After a successful ``commit_file`` on a wiki doc, the API (or an agent
+tool) enqueues ``fan_out_trigger_eval`` here. It loads BEFORE/AFTER from
+git, finds the ``delta`` triggers attached to the doc and its parent
+dirs, and routes each one through the appropriate evaluation flow:
 
 * **Standard** (doc-scoped triggers, or directory-scoped on edits) — two
   LLM calls. ``evaluate_delta`` checks if the trigger's NL "if" is
@@ -17,6 +25,8 @@ each one through the appropriate evaluation flow:
 
 Each fire becomes one ``trigger.fire`` row in the events table. V0 has
 no outbound dispatch (see ``local_data/wiki/natural-language-triggers``).
+
+See ``app/tasks/huey_app.py`` for the queue rationale.
 """
 from __future__ import annotations
 
@@ -25,7 +35,7 @@ import logging
 import subprocess
 
 from app.db.sqlite import connect
-from app.tasks.huey_app import huey
+from app.tasks.huey_app import triggers_huey
 from app.triggers import diff as diff_helper
 from app.triggers.engine import (
     evaluate_delta,
@@ -38,7 +48,7 @@ from app.wiki import git as wiki_git
 log = logging.getLogger(__name__)
 
 
-@huey.task()
+@triggers_huey.task()
 def fan_out_trigger_eval(
     doc_path: str,
     sha: str,

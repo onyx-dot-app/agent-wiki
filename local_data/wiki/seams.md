@@ -39,6 +39,7 @@ through one entry point. Two reasons we declare seams:
 | Wiki path safety | `backend/app/wiki/filesystem.py` (`safe_rel_path`) | All user/agent-supplied wiki paths flow through this. |
 | Wiki edit primitive | `backend/app/wiki/edit.py` (`replace`) | Pure fuzzy find-and-replace (9-strategy chain). All doc-edit tools call this — no other places do find-and-replace on wiki bodies. |
 | Wiki link checker | `backend/app/wiki/links.py` (`find_broken_links`) | Markdown LSP analogue. Tools call after a write to surface broken links to the model. |
+| Bash execution | `backend/app/llm/agents/tools/_bash.py` (`run`, `execute_chain`, `parse_chain`) | The only place `subprocess.run` runs LLM-emitted shell. Allowlist gate + per-segment re-validation + cwd pinned to `CONFIG.wiki_dir` + per-command timeout + truncation. Don't shell out to model-supplied strings anywhere else. |
 | Web search | `backend/app/web/__init__.py` (`search`, `search_provider`) | Serper-only today; callers don't import `app.web.serper` directly. Tests patch `app.web.search_provider`. |
 | Web crawl | `backend/app/web/__init__.py` (`fetch`, `crawl_provider`) | Firecrawl-only today; same rule. |
 | Web provider config | `backend/app/web/settings.py` (`get()`) | Don't read provider keys from `os.environ` or `CONFIG`; admin UI is the only way. |

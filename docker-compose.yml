@@ -11,9 +11,37 @@ services:
     expose:
       - "8080"
 
-  worker:
+  # Three workers, one per queue (see backend/app/tasks/huey_app.py).
+  # All three share queue.sqlite — Huey namespaces tables by queue name.
+  worker-documents:
     build: ./backend
-    command: ["python", "-m", "app.tasks.run_worker"]
+    command: ["python", "-m", "app.tasks.run_worker", "documents"]
+    env_file: .env
+    environment:
+      - APP_DB_PATH=/data/app.sqlite
+      - QUEUE_DB_PATH=/data/queue.sqlite
+      - WIKI_DIR=/data/wiki
+    volumes:
+      - ./local_data:/data
+    depends_on:
+      - backend
+
+  worker-triggers:
+    build: ./backend
+    command: ["python", "-m", "app.tasks.run_worker", "triggers"]
+    env_file: .env
+    environment:
+      - APP_DB_PATH=/data/app.sqlite
+      - QUEUE_DB_PATH=/data/queue.sqlite
+      - WIKI_DIR=/data/wiki
+    volumes:
+      - ./local_data:/data
+    depends_on:
+      - backend
+
+  worker-wiki-doc-index:
+    build: ./backend
+    command: ["python", "-m", "app.tasks.run_worker", "wiki_doc_index"]
     env_file: .env
     environment:
       - APP_DB_PATH=/data/app.sqlite

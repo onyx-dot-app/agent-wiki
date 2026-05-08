@@ -317,6 +317,59 @@ own). The repo's `update` uses an `_UNSET` sentinel internally so we can
 tell "destination omitted" apart from "destination explicitly set to
 null."
 
+## Bash tool (`run_bash`)
+
+Ported from `EnterpriseRAG-Bench/src/scripts/answer_generation/agent_retrieval.py`
+with our adaptations. Lives in `backend/app/llm/agents/tools/_bash.py`
+(pure logic) + `tools/run_bash.{json,py}` (spec + thin handler).
+
+Two-layer architecture (matches the upstream):
+
+- **Execution layer** — `parse_chain` tokenizes the command string respecting
+  quotes, then `execute_chain` runs each segment via `subprocess.run` with
+  `shell=True`. Stdout pipes into the next segment's stdin. `&&` / `||` /
+  `;` semantics are honored by inspecting return codes between segments.
+  Per-segment timeout is 30s; binary output on the final segment aborts
+  with `[error] binary file detected`.
+- **Presentation layer** — `format_output` applies a 100-line cap when the
+  chain ends in `grep`/`rg`/`find`, then a generic 2 000 lines / 50 KB cap.
+  Truncation is signalled via `truncated: true` in the result.
+
+Adaptations from the upstream port:
+
+- **cwd is pinned to `CONFIG.wiki_dir`.** The model explores the wiki
+  working tree, not the Flask source. Looked up at call time so test
+  fixtures that monkeypatch `app.config.CONFIG` flow through.
+- **Allowlist is `{cat, find, grep, ls, head, tail, wc}`.** Read-only
+  only — no `rm`, `mv`, `cp`, `git`, `sh`/`bash`/`python`, no shell
+  redirection. Writes go through `edit_doc` / `write_doc` / `multi_edit`
+  / `move_path` / `create_directory` so they're committed and audited.
+- **Whitelist is checked upfront.** `validate_chain` runs against every
+  parsed segment immediately after `parse_chain`, before any subprocess
+  fires (the upstream only checks the first segment, which lets
+  `ls | xargs rm`-style smuggling through). One gate, one place.
+- **`||` short-circuit preserves the lhs output** — the upstream port
+  drops it when the lhs succeeds; we keep it because that's what the
+  user usually wants.
+- **Skipped:** per-session repeat-detection, zero-result subdirectory
+  hints, semaphore-based concurrency gate, deadline crediting. All
+  designed for the upstream's batch-eval loop and unnecessary here.
+
+The result shape is `{output, exit_code, elapsed_ms, truncated}`. Plain
+text output (`output`) is what the LLM actually reads — no JSON envelope
+in the body. Errors from the allowlist gate, timeouts, or stderr come
+through with `exit_code != 0` and a leading `[error]` / `[stderr]` tag
+in `output`.
+
+System-prompt framing: `run_bash` is the **backup** tool. Reach for it
+only when the user is asking a wiki-related question and the other
+tools (`search_wiki`, `read_page`, etc.) don't give the model enough
+flexibility — e.g. counting markdown files in a directory, listing the
+tree, finding a literal string across the whole wiki with line numbers,
+scanning many docs in one pass. Normal content lookups still go through
+`search_wiki` + `read_page`; doc mutations still go through the doc-edit
+tools.
+
 ## Open questions
 
 - **Should `edit_doc` accept a hint about which match the model wants

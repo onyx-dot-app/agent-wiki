@@ -121,28 +121,81 @@ commit the seed as the initial revision.
 
 ---
 
-## How to run — three processes
+## How to run — five processes
 
-All three are long-lived, so an agent should background them.
+Background work is split into three Huey queues, each with its own worker
+process (see
+[background-tasks](background-tasks/background-tasks.md#three-queues--one-huey-instance-each-sharing-queuesqlite)).
+So a full local stack is **backend + three workers + frontend**. All five
+are long-lived, so an agent should background them.
 
 ### 1. Backend (Flask, :8080)
 
+We run the backend under **gunicorn** with `--reload` and a
+`--graceful-timeout` so file saves don't kill in-flight requests (the chat
+agent's multi-turn LLM calls hold a request for several seconds; a naive
+reload mid-call would error out the response).
+
 ```
 cd backend
-./.venv/bin/python -m app.main
+./.venv/bin/gunicorn 'app.main:create_app()' \
+  --bind 127.0.0.1:8080 \
+  --workers 1 \
+  --reload \
+  --graceful-timeout 30 \
+  --timeout 60
 ```
+
+- `app.main:create_app()` — gunicorn calls the factory; no app-level glue
+  needed.
+- `--workers 1` — single worker keeps SQLite happy (the app doesn't use a
+  multi-writer locking strategy).
+- `--reload` — gunicorn's master watches `backend/app/**` and signals the
+  worker on change.
+- `--graceful-timeout 30` — on reload, the master gives the old worker up
+  to 30 s to finish in-flight requests before killing it. New requests
+  queue at the listener until the new worker comes up; nothing gets
+  dropped.
+- `--timeout 60` — bound on individual request duration (raise if you have
+  longer-running endpoints; LLM tool-call rounds in chat usually finish in
+  a few seconds).
 
 `app/config.py` calls `dotenv.load_dotenv()` against the repo-root `.env`,
 so no `source .env` is needed.
 
-### 2. Worker (Huey)
+Cold-start to first HTTP 200 is ~250 ms on a recent Mac. Reload latency on
+a file save ≈ longest in-flight request + ~250 ms.
+
+If you want the simpler dev server (no graceful reload — kills in-flight
+requests on save), `./.venv/bin/python -m app.main` still works.
+
+### 2. Workers (Huey) — three processes, one per queue
+
+Each worker takes the queue name as a positional arg. Run all three (one
+per shell, or background them) — the app fully functions only when all
+three are alive:
 
 ```
 cd backend
-./.venv/bin/python -m app.tasks.run_worker
+./.venv/bin/python -m app.tasks.run_worker documents       # LLM doc-updater
+./.venv/bin/python -m app.tasks.run_worker triggers        # NL trigger eval (delta + scheduled)
+./.venv/bin/python -m app.tasks.run_worker wiki_doc_index  # FTS5 / BM25 reindex
 ```
 
-Same venv. Same dotenv auto-load.
+Same venv. Same dotenv auto-load. All three share `local_data/queue.sqlite`
+(Huey namespaces tables by queue name), so there's no separate setup.
+
+If you only need a subset (e.g. iterating on the chat agent without
+exercising trigger eval), you can launch fewer workers — but doc edits
+will pile up in the corresponding queue until the right worker is started.
+
+**Skip-able for narrow iteration:**
+- No `wiki_doc_index` worker → search results stay stale; everything else
+  works.
+- No `triggers` worker → trigger fires don't get evaluated; cron stub
+  errors disappear from your logs (they live on this queue).
+- No `documents` worker → connector ingest queues but nothing reconciles;
+  human edits via the UI still work (they don't go through this queue).
 
 ### 3. Frontend (Next.js dev, :3000)
 
@@ -174,6 +227,81 @@ curl -sf http://localhost:3000              # → 200 OK
 ```
 lsof -ti:3000,8080 | xargs -r kill -9
 ```
+
+---
+
+## Running from VS Code / Cursor
+
+A `.vscode/launch.json` is checked in with five launch configs (backend,
+three Huey workers, frontend) plus a compound that starts all of them
+together. The configs use the same Python venv (`backend/.venv`) and the
+repo-root `.env` that the CLI path uses, so behavior matches.
+
+### Prereqs
+
+- **Python extension** (Microsoft `ms-python.python` / `ms-python.debugpy`).
+  In Cursor, the bundled Python extension works the same.
+- **JavaScript Debugger** is built into VS Code / Cursor — no install needed
+  for the Next.js launch.
+- (Optional) **Chrome debugger** if you want to step through frontend code
+  in an attached browser. The `Browser (Chrome attach)` config is included
+  for that.
+
+Both editors auto-pick the venv when you open the repo. If they don't, run
+the "Python: Select Interpreter" command and point it at
+`backend/.venv/bin/python`.
+
+### Launch configs
+
+| Config | What it does | Notes |
+|---|---|---|
+| `Backend (Flask via gunicorn)` | `python -m gunicorn app.main:create_app() --bind 127.0.0.1:8080 --workers 1 --reload --graceful-timeout 30 --timeout 60`, cwd `backend/`. | Reloads on Python save with **graceful drain** of in-flight requests. `subProcess: true` so debugpy follows the worker fork (and re-attaches to the new worker after `--reload`). `justMyCode: false` lets you step into Flask/gunicorn/etc. |
+| `Worker — documents (LLM doc-updater)` | `python -m app.tasks.run_worker documents`. | Drains `documents_huey`: connector ingest, direct agent edits, stale-doc cron. |
+| `Worker — triggers (NL trigger eval)` | `python -m app.tasks.run_worker triggers`. | Drains `triggers_huey`: post-commit `fan_out_trigger_eval` + 5-min scheduled-trigger cron. |
+| `Worker — wiki_doc_index (FTS5 / BM25)` | `python -m app.tasks.run_worker wiki_doc_index`. | Drains `wiki_doc_index_huey`: `reindex_path` / `reindex_document`. |
+| `Frontend (Next dev)` | `npm run dev` in `frontend/`, env loaded from repo-root `.env`. | This is the `set -a / source ../.env` dance, but done by VS Code. |
+| `Browser (Chrome attach)` | Launches Chrome at `http://localhost:3000`. | Optional — only if you want frontend breakpoints. |
+| `App: backend + 3 workers + frontend` (compound) | Runs the five above in parallel. `stopAll` so killing one stops the others. | The single click that boots the whole stack. |
+
+### How to use it
+
+1. Open the Run & Debug panel (⇧⌘D / Ctrl+Shift+D).
+2. Pick **App: backend + 3 workers + frontend** from the dropdown and hit ▶.
+3. Five integrated-terminal panes open, one per process. Logs stream
+   there.
+4. Open http://localhost:3000.
+
+To debug just one queue's worker, pick its individual config — the other
+queues will sit idle (so trigger fires won't evaluate, the indexer won't
+catch up, etc.).
+
+To debug just one process, pick its individual config instead. Set
+breakpoints in `backend/app/**` or `frontend/src/**` — the Python configs
+hit immediately; the frontend hits when you also launch
+`Browser (Chrome attach)` (or attach VS Code's JS debugger to a running
+Chrome via the auto-attach feature).
+
+### Why this works without the `set -a / source ../.env` dance
+
+VS Code's `envFile` directive on each config loads the repo-root `.env`
+into the launched process's environment **before** the program starts. So
+`BACKEND_URL` reaches the Next.js dev server (which reads `process.env`
+inside `next.config.js`'s `rewrites()`), and `LOG_LEVEL` reaches the Python
+processes (read by `app/utils/logging.py:setup_logging`). Same outcome as
+the shell `source ../.env`, just driven by the editor.
+
+### Caveats
+
+- The frontend launch runs through `npm`, so killing the debug session
+  sends SIGTERM to the npm wrapper. If a stray Next dev server keeps
+  holding `:3000`, fall back to `lsof -ti:3000 | xargs -r kill -9`.
+- Hot reload works for both ends:
+  - Frontend: Next.js HMR — saves under `frontend/src/**` propagate to the
+    browser within ~1 s; component state is preserved where possible.
+  - Backend: gunicorn `--reload` watches `backend/app/**`; saves trigger a
+    graceful worker swap. Each reload, debugpy's `subProcess: true`
+    re-attaches to the new worker. If you've set breakpoints, they survive
+    the swap.
 
 ---
 
@@ -250,9 +378,11 @@ the full picture and the one-time bootstrap commit recipe.
 
 ### Worker spamming `NotImplementedError` from `evaluate_scheduled_triggers`
 
-Known stub in `app/tasks/periodic.py:16`. Fires on a periodic schedule.
-Not blocking anything in the request path — ignore until that task is
-implemented.
+Known stub in `app/tasks/periodic.py`. Fires every 5 minutes on the
+**`triggers`** worker (cron tasks live on the queue that owns the work
+they generate). Not blocking anything in the request path — ignore until
+that task is implemented. The 6-hour `stale_doc_review` stub is the
+analogous noise on the `documents` worker.
 
 ### `/api/documents` returns `{"error":"unauthorized"}`
 

@@ -84,10 +84,16 @@ declared and emits at INFO/WARNING/EXCEPTION):
   iteration-limit hit (warning).
 
 **DEBUG-level full-dump path (LLM observability).** Set `LOG_LEVEL=DEBUG`
-to get untruncated, pretty-printed JSON of every LLM payload:
+to get untruncated, pretty-printed JSON of every LLM payload. The full
+exchange is dumped exactly once per call, at the LLM seam — provider
+modules (`anthropic.py`, `openai.py`, `gemini.py`, `ollama.py`) do **not**
+re-dump the request kwargs:
 
 - `client.stream` entry → "llm request messages" + "llm request tools"
-- `client.complete` exit → "llm response" (text + tool_calls + usage)
+- `client.stream` exit → "llm response" (text + tool_calls + stop_reason
+  + usage incl. `reasoning_tokens`). This fires for both streaming
+  callers and `complete()` (which drains `stream()`), so there's one
+  response dump per LLM call regardless of caller shape.
 - `agents/chat._drive_loop` → "chat assistant turn" (text + tool_calls
   per iteration), "chat tool call" (per call, before dispatch), "chat
   tool result name=… id=…" (after dispatch, full content string).

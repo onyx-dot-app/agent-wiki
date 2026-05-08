@@ -43,9 +43,9 @@ def _patch_io(monkeypatch, before: str, after: str) -> None:
 
 
 def _enable_immediate(monkeypatch) -> None:
-    from app.tasks.huey_app import huey
+    from app.tasks.huey_app import triggers_huey
 
-    monkeypatch.setattr(huey, "immediate", True)
+    monkeypatch.setattr(triggers_huey, "immediate", True)
 
 
 def test_fan_out_records_event_on_match_with_rendered_message(tmp_db, monkeypatch):

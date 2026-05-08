@@ -7,7 +7,7 @@ from functools import lru_cache
 from typing import Any, Iterator
 
 from app.llm.errors import LLMError
-from app.llm.providers._common import debug_dump, safe_json_loads, split_system
+from app.llm.providers._common import safe_json_loads, split_system
 from app.llm.settings import LLMSettings
 
 log = logging.getLogger(__name__)
@@ -65,7 +65,6 @@ class AnthropicProvider:
                 for t in tools
             ]
 
-        debug_dump("anthropic request kwargs", kwargs)
         log.info(
             "llm request provider=anthropic model=%s tools=%d max_tokens=%d msgs=%d",
             model, len(tools or []), max_tokens, len(convo),
@@ -111,7 +110,11 @@ class AnthropicProvider:
             yield {
                 "type": "done",
                 "stop_reason": getattr(final, "stop_reason", "") or "",
-                "usage": {"input_tokens": in_tok, "output_tokens": out_tok},
+                "usage": {
+                    "input_tokens": in_tok,
+                    "output_tokens": out_tok,
+                    "reasoning_tokens": 0,
+                },
             }
         except LLMError:
             raise
