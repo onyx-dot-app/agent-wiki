@@ -34,6 +34,7 @@ def tmp_config(tmp_path, monkeypatch):
         oidc_client_id="",
         oidc_client_secret="",
         oidc_redirect_uri="",
+        secure_cookies=False,
     )
     monkeypatch.setattr("app.config.CONFIG", cfg)
     monkeypatch.setattr("app.db.sqlite.CONFIG", cfg)

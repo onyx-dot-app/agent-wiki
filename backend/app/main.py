@@ -6,6 +6,7 @@ from datetime import timedelta
 from flask import Flask
 
 from app.api import admin, auth, chat, documents, events, mcp, triggers, users, webhooks
+from app.auth.oidc import init_oauth
 from app.config import CONFIG
 from app.db.sqlite import init_db
 from app.utils.logging import setup_logging
@@ -20,13 +21,14 @@ def create_app() -> Flask:
         SECRET_KEY=CONFIG.secret_key,
         SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE="Lax",
-        SESSION_COOKIE_SECURE=False,  # set True behind HTTPS in prod
+        SESSION_COOKIE_SECURE=CONFIG.secure_cookies,
         PERMANENT_SESSION_LIFETIME=timedelta(days=30),
     )
 
     init_db()
     ensure_wiki_repo()
     bootstrap_index_if_empty()
+    init_oauth(app)
 
     app.register_blueprint(auth.bp, url_prefix="/api/auth")
     app.register_blueprint(admin.bp, url_prefix="/api/admin")

@@ -69,7 +69,7 @@ stay in lockstep.
       name: {{ include "agent-workspace.fullname" . }}-secrets
       key: oidc-client-secret
 - name: OIDC_REDIRECT_URI
-  value: {{ .Values.auth.oidc.redirectUri | quote }}
+  value: {{ default (printf "https://%s/api/auth/oidc/callback" .Values.ingress.host) .Values.auth.oidc.redirectUri | quote }}
 {{- end }}
 {{- end -}}
 

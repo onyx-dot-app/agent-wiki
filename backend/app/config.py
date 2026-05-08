@@ -27,6 +27,9 @@ class Config:
     oidc_client_secret: str
     oidc_redirect_uri: str
 
+    # `True` when the app is served over HTTPS — toggles SESSION_COOKIE_SECURE.
+    secure_cookies: bool
+
 
 def load_config() -> Config:
     return Config(
@@ -39,6 +42,7 @@ def load_config() -> Config:
         oidc_client_id=os.environ.get("OIDC_CLIENT_ID", ""),
         oidc_client_secret=os.environ.get("OIDC_CLIENT_SECRET", ""),
         oidc_redirect_uri=os.environ.get("OIDC_REDIRECT_URI", ""),
+        secure_cookies=os.environ.get("SECURE_COOKIES", "false").lower() in {"1", "true", "yes"},
     )
 
 
