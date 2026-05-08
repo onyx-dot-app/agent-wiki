@@ -63,7 +63,16 @@ backend:
     periodSeconds: 10
 
 worker:
+  # One Deployment is created per queue; replicaCount applies per queue.
+  # Keep at 1 — backend + worker pods share RWO PVCs and must co-schedule.
   replicaCount: 1
+  # Three Huey queues, one consumer process each. Match
+  # `backend/app/tasks/huey_app.py:QUEUES`. Don't add a fourth without
+  # corresponding code.
+  queues:
+    - documents
+    - triggers
+    - wiki_doc_index
   resources:
     requests:
       cpu: 100m

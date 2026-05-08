@@ -24,8 +24,8 @@ variable "cluster_version" {
 
 variable "node_instance_types" {
   type        = list(string)
-  description = "EC2 instance types for the managed node group. t3.medium is a sensible default for a single-tenant lightweight workload."
-  default     = ["t3.medium"]
+  description = "EC2 instance types for the managed node group. t3.large supports 35 pods/node — t3.medium's 17-pod cap couldn't fit cluster services + the chart's backend + worker + frontend with headroom."
+  default     = ["t3.large"]
 }
 
 variable "node_min_size" {
