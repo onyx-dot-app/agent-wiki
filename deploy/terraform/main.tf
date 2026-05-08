@@ -96,7 +96,11 @@ module "eks" {
       min_size       = var.node_min_size
       max_size       = var.node_max_size
       desired_size   = var.node_desired_size
-      subnet_ids     = module.vpc.private_subnets
+      # Pin to a single AZ. EBS volumes are AZ-bound; if a node replacement
+      # lands in a different AZ than the original PVCs, the chart's RWO PVCs
+      # can't follow and the backend pod gets stuck Pending with
+      # "node(s) didn't match PersistentVolume's node affinity".
+      subnet_ids = slice(module.vpc.private_subnets, 0, 1)
     }
   }
 }
@@ -193,10 +197,25 @@ resource "helm_release" "ingress_nginx" {
     value = "LoadBalancer"
   }
 
-  # NLB is cheaper, terminates faster, and proxies arbitrary TCP — good default for an HTTP ingress.
+  # Use the AWS Load Balancer Controller (NOT the legacy in-tree NLB).
+  # `type=external` + `nlb-target-type=ip` makes the LBC manage the LB,
+  # target pods directly (bypassing NodePort), and open the necessary
+  # security-group ingress. The in-tree NLB defaults to scheme=internal AND
+  # doesn't open NodePort to the public, so the external LB ends up
+  # unreachable from the internet and cert-manager's HTTP-01 challenge fails.
   set {
     name  = "controller.service.annotations.service\\.beta\\.kubernetes\\.io/aws-load-balancer-type"
-    value = "nlb"
+    value = "external"
+  }
+
+  set {
+    name  = "controller.service.annotations.service\\.beta\\.kubernetes\\.io/aws-load-balancer-nlb-target-type"
+    value = "ip"
+  }
+
+  set {
+    name  = "controller.service.annotations.service\\.beta\\.kubernetes\\.io/aws-load-balancer-scheme"
+    value = "internet-facing"
   }
 
   depends_on = [module.eks, kubernetes_storage_class_v1.gp3]
