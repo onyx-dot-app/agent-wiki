@@ -16,7 +16,7 @@ output "kubeconfig_command" {
 }
 
 output "ingress_lb_hostname" {
-  description = "Public NLB hostname for the ingress-nginx LoadBalancer Service. Create a CNAME pointing your app's host (e.g. dev-wiki.onyx.app) at this. Empty string on a fresh apply if AWS hasn't finished provisioning yet — re-run `terraform refresh` or use the kubectl fallback below."
+  description = "Public NLB hostname for the ingress-nginx LoadBalancer Service. Create a CNAME pointing your app's host at this value. Empty string on a fresh apply if AWS hasn't finished provisioning yet — re-run `terraform refresh` or use the kubectl fallback below."
   value       = try(data.kubernetes_service.ingress_nginx.status[0].load_balancer[0].ingress[0].hostname, "")
 }
 

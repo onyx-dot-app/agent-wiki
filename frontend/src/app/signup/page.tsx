@@ -1,15 +1,23 @@
 "use client";
 
 import Link from "next/link";
-import { Suspense, useState, type FormEvent } from "react";
+import { Suspense, useEffect, useState, type FormEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import { useAuth } from "@/lib/auth";
 
 function SignupForm() {
-  const { signup } = useAuth();
+  const { signup, config } = useAuth();
   const router = useRouter();
   const params = useSearchParams();
+
+  // OIDC mode has no password; bounce to /login where the SSO button lives.
+  useEffect(() => {
+    if (config?.mode === "oidc") {
+      const next = params.get("next");
+      router.replace(next ? `/login?next=${encodeURIComponent(next)}` : "/login");
+    }
+  }, [config?.mode, params, router]);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");

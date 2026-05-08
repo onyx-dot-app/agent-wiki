@@ -32,9 +32,14 @@ auth:
   # basic | oidc
   mode: basic
   oidc:
+    # Use https://accounts.google.com for Google. The /.well-known/openid-configuration
+    # path is appended automatically.
     issuer: ""
     clientId: ""
     clientSecret: ""
+    # Must match exactly what's registered with the IdP (e.g. Google Cloud Console
+    # OAuth client → Authorized redirect URIs). Defaults to
+    # `https://<ingress.host>/api/auth/oidc/callback` when left empty.
     redirectUri: ""
 
 # Set true behind HTTPS. The Ingress section below issues a cert via cert-manager.

@@ -6,6 +6,14 @@ import { useRouter, useSearchParams } from "next/navigation";
 
 import { useAuth } from "@/lib/auth";
 
+const OIDC_ERROR_MESSAGES: Record<string, string> = {
+  oidc_exchange_failed: "Couldn't complete sign-in. Try again.",
+  oidc_userinfo_failed: "Couldn't fetch your profile from the identity provider.",
+  oidc_no_email: "The identity provider didn't return an email address.",
+  oidc_email_unverified: "Your email isn't verified with the identity provider.",
+  oidc_email_not_allowed: "Your email isn't on the allow list for this workspace.",
+};
+
 function LoginForm() {
   const { login, config } = useAuth();
   const router = useRouter();
@@ -32,46 +40,71 @@ function LoginForm() {
 
   const next = params.get("next");
   const signupHref = next ? `/signup?next=${encodeURIComponent(next)}` : "/signup";
+  const oidcError = params.get("error");
+  const oidcErrorMessage = oidcError ? OIDC_ERROR_MESSAGES[oidcError] ?? oidcError : null;
+  const isOidc = config?.mode === "oidc";
 
   return (
     <main style={{ maxWidth: 360, margin: "10vh auto", padding: 24 }}>
       <h1 style={{ marginBottom: 24 }}>Sign in</h1>
-      <form onSubmit={onSubmit} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        <label>
-          <div style={{ marginBottom: 4 }}>Email</div>
-          <input
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-            autoFocus
-            style={{ width: "100%", padding: 8, boxSizing: "border-box" }}
-          />
-        </label>
-        <label>
-          <div style={{ marginBottom: 4 }}>Password</div>
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-            style={{ width: "100%", padding: 8, boxSizing: "border-box" }}
-          />
-        </label>
-        {error && <div style={{ color: "crimson" }}>{error}</div>}
-        <button type="submit" disabled={submitting} style={{ padding: "10px 16px", marginTop: 8 }}>
-          {submitting ? "Signing in…" : "Sign in"}
-        </button>
-      </form>
-      <p style={{ marginTop: 16, fontSize: 14, color: "#666" }}>
-        {config?.signup_open === false
-          ? "Signup is restricted — contact an admin."
-          : (
-            <>
-              Don&apos;t have an account? <Link href={signupHref}>Sign up</Link>
-            </>
-          )}
-      </p>
+      {oidcErrorMessage && (
+        <div style={{ color: "crimson", marginBottom: 16 }}>{oidcErrorMessage}</div>
+      )}
+      {isOidc ? (
+        <a
+          href="/api/auth/oidc/login"
+          style={{
+            display: "block",
+            padding: "10px 16px",
+            textAlign: "center",
+            background: "#1a73e8",
+            color: "white",
+            borderRadius: 4,
+            textDecoration: "none",
+          }}
+        >
+          Sign in with Google
+        </a>
+      ) : (
+        <>
+          <form onSubmit={onSubmit} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <label>
+              <div style={{ marginBottom: 4 }}>Email</div>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+                autoFocus
+                style={{ width: "100%", padding: 8, boxSizing: "border-box" }}
+              />
+            </label>
+            <label>
+              <div style={{ marginBottom: 4 }}>Password</div>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                style={{ width: "100%", padding: 8, boxSizing: "border-box" }}
+              />
+            </label>
+            {error && <div style={{ color: "crimson" }}>{error}</div>}
+            <button type="submit" disabled={submitting} style={{ padding: "10px 16px", marginTop: 8 }}>
+              {submitting ? "Signing in…" : "Sign in"}
+            </button>
+          </form>
+          <p style={{ marginTop: 16, fontSize: 14, color: "#666" }}>
+            {config?.signup_open === false ? (
+              "Signup is restricted — contact an admin."
+            ) : (
+              <>
+                Don&apos;t have an account? <Link href={signupHref}>Sign up</Link>
+              </>
+            )}
+          </p>
+        </>
+      )}
     </main>
   );
 }
