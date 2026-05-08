@@ -39,39 +39,41 @@ runs one LLM doc-updater pass per doc on a periodic schedule.
 were actually indexed (new or updated) — unchanged docs are already
 filtered out by `get_doc_ids_to_update` and never reach this point.
 
-**Public connectors only:** Filter on `cc_pair.is_public` before
-enqueueing. Look up via `get_connector_credential_pair_from_id` using
-`IndexAttemptMetadata.connector_id` + `credential_id`. Skip the push if
-`is_public` is false.
+**Public connectors only:** Filter on `cc_pair.access_type == AccessType.PUBLIC`
+before enqueueing. Look up via `get_connector_credential_pair` using the
+`connector_id` and `credential_id` from the indexing adapter. Skip the push if
+the pair is not public.
 
-**Async via existing light queue:** No new worker or queue. Enqueue a
-`@shared_task` on the existing `light` Celery queue so the indexing path
-is never blocked by a slow or unavailable agent-wiki. The task:
-- `push_to_agent_wiki(doc_id, source, title, sections, metadata, doc_updated_at, tenant_id)`
+**Async via a new `agent_wiki_push` Celery queue:** A dedicated queue named
+`agent_wiki_push` is added to the existing `light` worker's `-Q` list — no new
+worker process is needed. Routing via a `@shared_task` with
+`queue=OnyxCeleryQueues.AGENT_WIKI_PUSH` keeps the indexing path non-blocking
+if agent-wiki is slow or unavailable. The task:
+- `push_to_agent_wiki(doc_id, source, title, content, url, doc_updated_at)`
 - Makes an HTTPS POST to `AGENT_WIKI_BASE_URL/api/documents/ingest`.
 - Authenticates with `AGENT_WIKI_API_KEY` as a bearer token.
-- Retries with exponential backoff on failure.
+- Retries with exponential backoff on failure (up to 3 times).
 
 **Payload shape:** Onyx already normalizes all connectors into a `Document`
 with `sections`. We concatenate the text sections and send as `content`.
 
 ```json
 {
-  "source": "slack",
-  "external_id": "<onyx-doc-id>",
-  "occurred_at": "2026-05-08T14:00:00Z",
-  "target_path": null,
-  "payload": {
-    "title": "...",
-    "url": "...",
-    "content": "...",
-    "updated_at": "..."
-  }
+  "content": "...",
+  "title": "...",
+  "source_type": "slack",
+  "metadata": {
+    "external_id": "<onyx-doc-id>",
+    "url": "..."
+  },
+  "updated_at": "..."
 }
 ```
 
-`target_path` is null for now — routing (which wiki doc to update) is
-TBD and will be resolved on the agent-wiki side.
+`metadata` is opaque JSON passed through to the doc-updater agent.
+Routing (which wiki page to update) is resolved on the agent-wiki side.
+A 413 response means the payload exceeds agent-wiki's size cap — the
+task logs a warning and does not retry.
 
 ### Surface in agent-wiki
 
@@ -98,26 +100,24 @@ Auth: shared signing secret (HMAC), same approach as
 ## Progress
 
 ### Working
-- Nothing yet on either side.
+- **Onyx side (shipped on `bo/agent_wiki_push`):**
+  - `AGENT_WIKI_ENABLED` / `AGENT_WIKI_BASE_URL` / `AGENT_WIKI_API_KEY` env vars in `app_configs.py`.
+  - `OnyxCeleryQueues.AGENT_WIKI_PUSH` + `OnyxCeleryTask.PUSH_TO_AGENT_WIKI` constants.
+  - `backend/onyx/background/celery/tasks/agent_wiki/tasks.py` — `push_to_agent_wiki` Celery task.
+  - `_maybe_enqueue_agent_wiki_push` helper in `indexing_pipeline.py` — enqueues after `primary_doc_idx_insertion_records` for public connectors only.
+  - `agent_wiki_push` queue added to light worker in `supervisord.conf`.
 
 ### Stubbed
 - `POST /api/documents/ingest` in agent-wiki raises `NotImplementedError`.
 
 ### Next up
 
-**Onyx side (Bo):**
-1. Add `AGENT_WIKI_BASE_URL` + `AGENT_WIKI_API_KEY` to `app_configs.py`.
-2. Create `backend/onyx/background/celery/tasks/agent_wiki/tasks.py` with
-   `push_to_agent_wiki` task (`@shared_task` on existing light queue,
-   exponential backoff retry, bearer token auth).
-3. Enqueue from `index_doc_batch`: after `primary_doc_idx_insertion_records`
-   is known, for each successfully indexed doc, check `AGENT_WIKI_ENABLED`
-   and `cc_pair.is_public`, then enqueue.
-
 **Agent-wiki side (deferred):**
-1. Implement `POST /api/documents/ingest`: validate HMAC → insert into
+
+**Agent-wiki side (next):**
+1. Implement `POST /api/documents/ingest`: validate bearer token → insert into
    `pending_doc_updates` → return `{id}`.
-2. Migration `0007` adding `pending_doc_updates` and `api_tokens` tables.
+2. Migration adding `pending_doc_updates` and `api_tokens` tables.
 3. Periodic drain task in `tasks.periodic`.
 
 ---
