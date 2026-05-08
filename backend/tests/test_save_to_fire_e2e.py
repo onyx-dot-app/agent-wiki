@@ -300,7 +300,7 @@ def test_chat_agent_edit_fires_through_same_seam(signed_in, monkeypatch):
                 "path": "agent_doc.md",
                 "old_string": "before",
                 "new_string": "after",
-                "message": "tighten",
+                "commit_message": "tighten",
             }
         )
     finally:

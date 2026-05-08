@@ -50,10 +50,10 @@ def test_create_trigger_requires_message(as_user):
     from app.llm.agents.tools.create_trigger import handle
 
     out = handle(
-        {"scope_path": "guide.md", "nl_description": "fire on rewrite"}
+        {"scope_path": "guide.md", "trigger_nl_condition": "fire on rewrite"}
     )
     assert "error" in out
-    assert "message" in out["error"]
+    assert "trigger_fire_message" in out["error"]
 
 
 def test_create_trigger_default_destination_is_null(as_user):
@@ -62,8 +62,8 @@ def test_create_trigger_default_destination_is_null(as_user):
     out = handle(
         {
             "scope_path": "guide.md",
-            "nl_description": "fire on rewrite",
-            "message": "Guide rewritten",
+            "trigger_nl_condition": "fire on rewrite",
+            "trigger_fire_message": "Guide rewritten",
         }
     )
     assert "error" not in out, out
@@ -78,8 +78,8 @@ def test_create_trigger_rejects_non_null_destination(as_user):
     out = handle(
         {
             "scope_path": "guide.md",
-            "nl_description": "fire on rewrite",
-            "message": "x",
+            "trigger_nl_condition": "fire on rewrite",
+            "trigger_fire_message": "x",
             "destination": "https://example.com/hook",
         }
     )
@@ -110,12 +110,12 @@ def test_update_trigger_changes_individual_fields(as_user):
 
     tid = _seed_trigger(as_user)
 
-    out = handle({"trigger_id": tid, "message": "new msg"})
+    out = handle({"trigger_id": tid, "trigger_fire_message": "new msg"})
     assert "error" not in out, out
     assert out["trigger"]["message"] == "new msg"
     assert out["trigger"]["nl_description"] == "orig"
 
-    out = handle({"trigger_id": tid, "nl_description": "new cond"})
+    out = handle({"trigger_id": tid, "trigger_nl_condition": "new cond"})
     assert out["trigger"]["nl_description"] == "new cond"
     assert out["trigger"]["message"] == "new msg"
 
@@ -149,7 +149,7 @@ def test_update_trigger_rejects_other_users_trigger(as_user, monkeypatch):
     other_id = _seed_user(uid="usr_2", email="b@x.com")
     other_trigger = _seed_trigger(other_id)
 
-    out = handle({"trigger_id": other_trigger, "message": "hijack"})
+    out = handle({"trigger_id": other_trigger, "trigger_fire_message": "hijack"})
     assert "error" in out
     assert "do not own" in out["error"]
 

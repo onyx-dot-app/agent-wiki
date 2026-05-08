@@ -15,11 +15,11 @@ from app.wiki import filesystem, git as wiki_git
 def handle(args: dict[str, Any]) -> Any:
     try:
         raw = args.get("path")
-        message = args.get("message")
+        commit_message = args.get("commit_message")
         if not isinstance(raw, str) or not raw.strip():
             raise h.ToolError("path is required")
-        if not isinstance(message, str) or not message.strip():
-            raise h.ToolError("message is required")
+        if not isinstance(commit_message, str) or not commit_message.strip():
+            raise h.ToolError("commit_message is required")
 
         cleaned = raw.strip().strip("/")
         if not cleaned:
@@ -38,7 +38,7 @@ def handle(args: dict[str, Any]) -> Any:
             raise h.ToolError(f"directory already exists: {rel}")
 
         sha = wiki_git.commit_file(
-            f"{rel}/.gitkeep", "", message.strip(), author=h.author_string()
+            f"{rel}/.gitkeep", "", commit_message.strip(), author=h.author_string()
         )
         return {"path": rel, "sha": sha, "created": True}
     except h.ToolError as exc:

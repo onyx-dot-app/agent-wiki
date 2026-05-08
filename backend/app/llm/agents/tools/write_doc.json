@@ -12,11 +12,11 @@
         "type": "string",
         "description": "Complete new markdown body. Overwrites whatever is currently there."
       },
-      "message": {
+      "commit_message": {
         "type": "string",
         "description": "Short commit message summarizing the change (e.g. \"clarify session timeout policy\")."
       }
     },
-    "required": ["path", "body", "message"]
+    "required": ["path", "body", "commit_message"]
   }
 }

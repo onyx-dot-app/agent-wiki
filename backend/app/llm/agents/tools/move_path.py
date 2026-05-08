@@ -15,13 +15,13 @@ def handle(args: dict[str, Any]) -> Any:
     try:
         old_raw = args.get("old_path")
         new_raw = args.get("new_path")
-        message = args.get("message")
+        commit_message = args.get("commit_message")
         if not isinstance(old_raw, str) or not old_raw.strip():
             raise h.ToolError("old_path is required")
         if not isinstance(new_raw, str) or not new_raw.strip():
             raise h.ToolError("new_path is required")
-        if not isinstance(message, str) or not message.strip():
-            raise h.ToolError("message is required")
+        if not isinstance(commit_message, str) or not commit_message.strip():
+            raise h.ToolError("commit_message is required")
 
         try:
             old_rel = filesystem.safe_rel_path(old_raw.strip().strip("/"))
@@ -46,7 +46,7 @@ def handle(args: dict[str, Any]) -> Any:
 
         author = h.author_string()
         sha, moves = wiki_git.move_path(
-            old_rel, new_rel, message.strip(), author=author
+            old_rel, new_rel, commit_message.strip(), author=author
         )
         wiki_notify.after_path_move(moves, sha, author)
 

@@ -14,14 +14,14 @@ def handle(args: dict[str, Any]) -> Any:
         return {"error": "no authenticated user"}
 
     raw_scope = args.get("scope_path", "")
-    nl = args.get("nl_description")
-    message = args.get("message")
+    nl = args.get("trigger_nl_condition")
+    message = args.get("trigger_fire_message")
     destination = args.get("destination", None)
 
     if not isinstance(nl, str) or not nl.strip():
-        return {"error": "nl_description is required"}
+        return {"error": "trigger_nl_condition is required"}
     if not isinstance(message, str) or not message.strip():
-        return {"error": "message is required"}
+        return {"error": "trigger_fire_message is required"}
     if destination not in triggers_repo.SUPPORTED_DESTINATIONS:
         return {
             "error": (

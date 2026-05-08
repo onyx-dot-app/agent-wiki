@@ -12,11 +12,11 @@
         "type": "string",
         "description": "Wiki-relative destination path. For a `.md` file this should also end in `.md`; for a directory it must not. Parent directories are created as needed."
       },
-      "message": {
+      "commit_message": {
         "type": "string",
         "description": "Short commit message summarizing the move (e.g. \"rename auth/ to identity/\")."
       }
     },
-    "required": ["old_path", "new_path", "message"]
+    "required": ["old_path", "new_path", "commit_message"]
   }
 }

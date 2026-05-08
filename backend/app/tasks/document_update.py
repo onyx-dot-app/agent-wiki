@@ -38,7 +38,7 @@ def update_document_from_payload(doc_id: str, source: str, payload: dict) -> Non
 
 
 @documents_huey.task()
-def update_document_direct(doc_id: str, new_body: str, message: str, author: str) -> None:
+def agent_update_document_nl(doc_id: str, new_body: str, message: str, author: str) -> None:
     # Used when an agent edits a doc through the API rather than from a payload.
-    log.info("update_document_direct doc_id=%s author=%s", doc_id, author)
+    log.info("agent_update_document_nl doc_id=%s author=%s", doc_id, author)
     raise NotImplementedError

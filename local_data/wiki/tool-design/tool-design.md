@@ -130,7 +130,7 @@ with `<name>.json`.
 
 ## Tool set
 
-### `write_doc(path, body, message)`
+### `write_doc(path, body, commit_message)`
 
 Full-body overwrite or create. Use only for new docs or wholesale
 restructures (>50% of lines changing).
@@ -143,7 +143,7 @@ restructures (>50% of lines changing).
   `fan_out_trigger_eval`.
 - Returns `{path, sha, created, diff, broken_links?}`.
 
-### `edit_doc(path, old_string, new_string, replace_all?, message)`
+### `edit_doc(path, old_string, new_string, replace_all?, commit_message)`
 
 Find-and-replace one occurrence (or all) using the fuzzy replacer chain.
 
@@ -156,7 +156,7 @@ Find-and-replace one occurrence (or all) using the fuzzy replacer chain.
   `{"error": "old_string matched multiple times — provide more context or pass replace_all=true"}`.
 - Returns `{path, sha, diff, broken_links?}`.
 
-### `multi_edit(path, edits, message)`
+### `multi_edit(path, edits, commit_message)`
 
 Atomic batch of `edit_doc`-shaped operations on one file.
 
@@ -168,7 +168,7 @@ Atomic batch of `edit_doc`-shaped operations on one file.
 - Single commit, single reindex, single fan-out.
 - Returns `{path, sha, diff, applied_count, broken_links?}`.
 
-### `create_directory(path, message)`
+### `create_directory(path, commit_message)`
 
 Make an empty wiki folder. Git doesn't track empty dirs, so the tool
 commits a `.gitkeep` marker inside (mirrors the `POST /api/documents/folder`
@@ -180,7 +180,7 @@ endpoint humans use from the explorer).
   explicitly asks for the folder or confirms when proposed.
 - Returns `{path, sha, created}`.
 
-### `move_path(old_path, new_path, message)`
+### `move_path(old_path, new_path, commit_message)`
 
 Pure rename of a file or directory in one commit. Wraps `git mv`, so a
 folder rename moves every tracked file inside it and history follows
@@ -279,10 +279,11 @@ agent later).
 `create_trigger` and `update_trigger` work the same three-part trigger
 shape:
 
-- **`nl_description`** — the **if** condition (NL string evaluated by an
-  LLM against each diff).
-- **`message`** — what notification body to deliver when the trigger
-  fires.
+- **`trigger_nl_condition`** — the **if** condition (NL string evaluated
+  by an LLM against each diff). Stored on the trigger row as
+  `nl_description`.
+- **`trigger_fire_message`** — what notification body to deliver when the
+  trigger fires. Stored on the trigger row as `message`.
 - **`destination`** — where to deliver. **v0 only supports `null`**,
   which routes the fire to the **Event Log**: a `trigger.fire` row is
   inserted into the `events` table with the `message` carried in the
@@ -311,8 +312,8 @@ Fan-out (`app/tasks/triggers.py:_deliver_fire`):
   branch off here.
 
 `update_trigger` accepts partial updates: pass the `trigger_id` plus any
-subset of `scope_path`, `nl_description`, `message`, `destination`, or
-`enabled`. Ownership is enforced (a user may only update triggers they
+subset of `scope_path`, `trigger_nl_condition`, `trigger_fire_message`,
+`destination`, or `enabled`. Ownership is enforced (a user may only update triggers they
 own). The repo's `update` uses an `_UNSET` sentinel internally so we can
 tell "destination omitted" apart from "destination explicitly set to
 null."

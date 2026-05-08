@@ -31,11 +31,11 @@
           "required": ["old_string", "new_string"]
         }
       },
-      "message": {
+      "commit_message": {
         "type": "string",
         "description": "Short commit message summarizing the overall change."
       }
     },
-    "required": ["path", "edits", "message"]
+    "required": ["path", "edits", "commit_message"]
   }
 }

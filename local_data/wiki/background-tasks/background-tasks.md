@@ -30,7 +30,7 @@ one queue doesn't backpressure the others.
 
 | Queue (`name=`) | Instance | What it runs | Why it's its own queue |
 |---|---|---|---|
-| `documents`      | `documents_huey`      | LLM doc-reconciliation: `update_document_from_payload`, `update_document_direct`, `stale_doc_review` (cron) | Slow + LLM-bound. Keeps provider latency off the indexer / triggers paths. |
+| `documents`      | `documents_huey`      | LLM doc-reconciliation: `update_document_from_payload`, `agent_update_document_nl`, `stale_doc_review` (cron) | Slow + LLM-bound. Keeps provider latency off the indexer / triggers paths. |
 | `triggers`       | `triggers_huey`       | Trigger evaluation, both event-driven (`fan_out_trigger_eval`) and time-based (`evaluate_scheduled_triggers`, cron) | Read-only (no commits). Trigger backlog can't delay event-log entries. |
 | `wiki_bm25` | `wiki_bm25_huey` | FTS5 / BM25 indexer: `reindex_path`, `reindex_document` | Cheap, no LLM. Search staleness bounded by indexer throughput alone. |
 
@@ -112,23 +112,33 @@ evaluate, the indexer won't catch up, etc.). Editor-wide caveats
 
 ### End-to-end fan-out on a wiki write
 
-When a doc is saved (human edit, agent edit, doc-updater commit, etc.):
+Every successful wiki `.md` mutation flows through the **post-write
+seam** at `app/wiki/notify.py` — the single place that owns reindex +
+trigger fan-out. Three entry points:
 
-1. The caller commits via `app/wiki/git.py:commit_file`.
-2. It enqueues `reindex_path(rel)` on `wiki_bm25_huey`.
-3. It enqueues `fan_out_trigger_eval(rel, sha, change_kind, actor)` on
-   `triggers_huey`. That task runs `find_matching_triggers(doc_path)`,
-   which already returns triggers attached to the doc itself **and to
-   every ancestor directory** (incl. the wiki root, `""`) via
-   `app/wiki/filesystem.py:parent_dirs`. Each match runs phase-1
-   `evaluate_delta` (or `evaluate_new_file_in_dir` for `change_kind ==
-   "create"` on dir-scoped triggers) → on match, phase-2
-   `render_delta_message` → write a `trigger.fire` event row.
-4. Connector ingest goes through `update_document_from_payload` on
-   `documents_huey` instead. When that task commits a new body, it
-   re-enqueues `reindex_path` (wiki_bm25) and
-   `fan_out_trigger_eval` (triggers), so the side effects fan out
-   exactly like a human edit.
+| Function | Used by | Effect |
+|---|---|---|
+| `after_doc_write(rel, sha, change_kind, actor)` | UI save (`PUT /api/documents/file`), agent `edit_doc` / `multi_edit` / `write_doc` | enqueue `reindex_path(rel)` on `wiki_bm25_huey` + `fan_out_trigger_eval(rel, sha, change_kind, actor)` on `triggers_huey` |
+| `after_doc_delete(rel, sha, actor)` | UI delete (`DELETE /api/documents/file`) | inline `fts.delete_document(rel)` + fan out with `change_kind="delete"` |
+| `after_path_move(moves, sha, actor)` | UI move (`POST /api/documents/move`), agent `move_path` | for each `(old, new)` pair: drop old FTS row + reindex new + fan out a `delete` on old and a `create` on new |
+
+`fan_out_trigger_eval` runs `find_matching_triggers(doc_path)`, which
+returns triggers attached to the doc itself **and every ancestor
+directory** (incl. the wiki root `""`) via
+`app/wiki/filesystem.py:parent_dirs`. Each match runs phase-1
+`evaluate_delta` (or `evaluate_new_file_in_dir` for `change_kind=="create"`
+on dir-scoped triggers) → on match, phase-2 `render_delta_message` →
+write a `trigger.fire` event row.
+
+Connector ingest is the exception: it goes through
+`update_document_from_payload` on `documents_huey`. When that task
+eventually commits a new body, it should call `after_doc_write` so the
+side effects fan out exactly like a human edit. (Stub today — see
+[Status](#status).)
+
+Trigger YAMLs (`.trigger_*.yaml`) deliberately bypass the seam — they're
+trigger config, not docs. `app/triggers/storage.py` calls `commit_file`
+directly and never `wiki/notify.py`.
 
 ### Architectural rules (also in CLAUDE.md)
 - **Anything that might take >100ms goes in a task.** Web requests should
@@ -146,19 +156,13 @@ When a doc is saved (human edit, agent edit, doc-updater commit, etc.):
 
 | Task | Queue | Status | Trigger |
 |---|---|---|---|
-| `tasks.reindex.reindex_document(doc_id, path, title)` | `wiki_bm25` | working | (legacy form; called by document_update once it's wired) |
-| `tasks.reindex.reindex_path(path)`                    | `wiki_bm25` | working | preferred form — derives title from `# heading`; used by the wiki write path |
-| `tasks.triggers.fan_out_trigger_eval`                 | `triggers`       | working | post-commit fan-out from the wiki write path / agent edit tools |
-| `tasks.document_update.update_document_from_payload`  | `documents`      | stub    | inbound ingest from Onyx/webhooks |
-| `tasks.document_update.update_document_direct`        | `documents`      | stub    | agent PUTs a doc directly through the API |
-| `tasks.periodic.evaluate_scheduled_triggers`          | `triggers`       | stub    | every 5 min |
-| `tasks.periodic.stale_doc_review`                     | `documents`      | stub    | every 6 hours |
-
-### Tasks to add
-
-| Task | Queue | Notes |
-|---|---|---|
-| `tasks.events.record(...)` | (TBD) | Convenience shim if we want to enqueue audit-log writes (probably not needed; sync write is fine) |
+| `tasks.reindex.reindex_path(path)`                    | `wiki_bm25` | ✅ working | enqueued by `wiki/notify.py:after_doc_write` and `after_path_move`; also by `POST /api/documents/reindex` |
+| `tasks.reindex.reindex_document(doc_id, path, title)` | `wiki_bm25` | ✅ working | legacy form; kept for the doc-updater path once it lands |
+| `tasks.triggers.fan_out_trigger_eval`                 | `triggers`  | ✅ working | enqueued by `wiki/notify.py` for write / delete / move; runs delta + new-file-in-dir flows |
+| `tasks.document_update.update_document_from_payload`  | `documents` | 🛑 stub   | inbound ingest from Onyx / webhooks |
+| `tasks.document_update.agent_update_document_nl`        | `documents` | 🛑 stub   | agent PUTs a doc directly through the API (not via the chat-tool path) |
+| `tasks.periodic.evaluate_scheduled_triggers`          | `triggers`  | 🛑 stub   | every 5 min — depends on `triggers/time_based.py:due_triggers` |
+| `tasks.periodic.stale_doc_review`                     | `documents` | 🛑 stub   | every 6 hours |
 
 ### Concurrency on the wiki repo
 - Git writes (commits, moves) happen on the `documents` worker (LLM
@@ -187,37 +191,64 @@ remain stubs.
 
 ---
 
-## Progress
+## Status
 
-### Working
-- Three Huey queues configured (`documents_huey`, `triggers_huey`,
-  `wiki_bm25_huey`), all `SqliteHuey` instances sharing
-  `queue.sqlite` via `name=` namespacing.
-- Worker entry point (`run_worker.py <queue>`); per-queue worker counts
-  in `_WORKERS`.
-- `docker-compose.yml` runs three worker services
-  (`worker-documents`, `worker-triggers`, `worker-wiki-bm25`).
-- `reindex_document` and `reindex_path` are real and produce FTS rows.
-- `fan_out_trigger_eval` is real (see `natural-language-triggers/`).
+### ✅ Done
 
-### Stubbed
-- All `document_update` tasks (`update_document_from_payload`,
-  `update_document_direct`).
-- All `periodic` tasks (`evaluate_scheduled_triggers`, `stale_doc_review`).
+- **Three queues + three workers wired up.**
+  - `documents_huey`, `triggers_huey`, `wiki_bm25_huey` all configured
+    in `app/tasks/huey_app.py` as `SqliteHuey` instances sharing
+    `queue.sqlite` via `name=` namespacing.
+  - `app/tasks/run_worker.py <queue>` is the entry point; per-queue
+    thread counts in `_WORKERS` (`documents=2`, `triggers=4`, `wiki_bm25=4`).
+  - `docker-compose.yml` runs `worker-documents`, `worker-triggers`,
+    `worker-wiki-bm25` from the same image with different commands.
+- **BM25 indexer end-to-end.** `reindex_path` / `reindex_document`
+  populate `documents_fts`; `search_wiki` returns hits.
+  Lock-in tests in `tests/test_bm25_indexer_e2e.py`.
+- **Trigger fan-out end-to-end.** `fan_out_trigger_eval` runs the SQL
+  match (incl. parent dirs + root scope), routes to delta or new-file
+  flow, writes `trigger.fire` rows to `events`.
+  Tests in `tests/test_triggers_fanout.py` + `tests/test_save_to_fire_e2e.py`.
+- **Single post-write seam.** `app/wiki/notify.py` owns reindex +
+  fan-out; both API handlers and chat-agent tools route through it. See
+  [seams.md](../seams.md) (`Post-write notify`).
+- **Save-button → event row** flow is live and covered end-to-end:
+  - UI save (`PUT /api/documents/file`) → `wiki/notify.py:after_doc_write`
+  - UI delete (`DELETE /api/documents/file`) → `after_doc_delete`
+  - UI move / drag-and-drop (`POST /api/documents/move`) → `after_path_move`
+  - Chat-agent edits (`edit_doc`, `multi_edit`, `write_doc`, `move_path`) → same seam
+- **Manual reindex.** `POST /api/documents/reindex` enqueues
+  `reindex_path` for ops use.
 
-### Next up
-1. **`tasks.document_update.update_document_from_payload`** — see
-   `agents/document-updater.md` next-up list. After commit, re-enqueue
-   `reindex_path` (wiki_bm25) and `fan_out_trigger_eval` (triggers).
-2. **Periodic stubs** — implement `evaluate_scheduled_triggers` once
-   `triggers/time_based.py:due_triggers` is real.
-3. **Test pattern** — set `<queue>_huey.immediate = True` in fixtures
-   (e.g. `triggers_huey.immediate = True` for fan-out tests) and call
-   tasks synchronously to assert side effects (FTS row, events row).
+### 🛑 TODO — stubs to implement
 
-### Open questions
-- Per-doc lock to prevent two ingest tasks racing on the same path?
-  Cheap: `(SELECT … FOR UPDATE)` style guard via a `doc_locks` table, or
-  a fixed-key `flock`. Defer until we see contention.
-- Multi-worker scaling — when we add more workers, see "Concurrency on
-  the wiki repo" above.
+1. **`tasks.document_update.update_document_from_payload`** (queue:
+   `documents`). Connector ingest from Onyx / webhooks. After the
+   doc-updater agent produces a new body, call `wiki/notify.py:after_doc_write`
+   so reindex + fan-out happen automatically. Design lives in
+   [agents/document-updater.md](../agents/document-updater.md).
+2. **`tasks.document_update.agent_update_document_nl`** (queue:
+   `documents`). The "agent PUTs a doc directly via API" path. Same
+   side-effect pattern as above.
+3. **`tasks.periodic.evaluate_scheduled_triggers`** (queue: `triggers`,
+   cron: every 5 min). Depends on `app/triggers/time_based.py:due_triggers`
+   being real (today: also stub). Implement that first.
+4. **`tasks.periodic.stale_doc_review`** (queue: `documents`, cron: every
+   6 hours). Surface docs that haven't been touched in N days for
+   doc-updater review.
+
+### 🟡 Open questions / deferred
+
+- **Per-doc lock to prevent two ingest tasks racing on the same path.**
+  Cheap options: `(SELECT … FOR UPDATE)`-style guard via a `doc_locks`
+  table, or fixed-key `flock` on a sentinel file. Defer until contention
+  shows up — today the only writer queue is `documents`, capped at 2
+  threads, and the post-write seam doesn't race itself.
+- **Multi-worker scaling.** When we add a second `documents` worker (or
+  commit from elsewhere), need a per-repo write lock; see "Concurrency
+  on the wiki repo" above.
+- **Test pattern (in use, worth documenting).** Set `<queue>_huey.immediate
+  = True` in fixtures and call tasks synchronously to assert side
+  effects (FTS row, events row). See `tests/test_save_to_fire_e2e.py`
+  and `tests/test_bm25_indexer_e2e.py` for the canonical pattern.

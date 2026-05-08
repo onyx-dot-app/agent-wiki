@@ -1,6 +1,6 @@
 {
   "name": "update_trigger",
-  "description": "Update an existing trigger owned by the current user. Pass only the fields you want to change; omitted fields are left alone. The same three-part shape applies: `nl_description` is the **if** condition, `message` is what to deliver, `destination` is where (only `null` = Event Log is supported in v0). Use `enabled` to disable/re-enable a trigger without deleting it. Only call after the user has explicitly asked for the update.",
+  "description": "Update an existing trigger owned by the current user. Pass only the fields you want to change; omitted fields are left alone. The same three-part shape applies: `trigger_nl_condition` is the **if** condition, `trigger_fire_message` is what to deliver, `destination` is where (only `null` = Event Log is supported in v0). Use `enabled` to disable/re-enable a trigger without deleting it. Only call after the user has explicitly asked for the update.",
   "input_schema": {
     "type": "object",
     "properties": {
@@ -12,13 +12,13 @@
         "type": "string",
         "description": "New scope (wiki-relative file or directory). If the scope changes, the YAML moves to match. Omit to keep current."
       },
-      "nl_description": {
+      "trigger_nl_condition": {
         "type": "string",
         "description": "New **if condition**. Omit to keep current."
       },
-      "message": {
+      "trigger_fire_message": {
         "type": "string",
-        "description": "New **message** body delivered on fire. Omit to keep current."
+        "description": "New **fire message** body delivered on fire. Omit to keep current."
       },
       "destination": {
         "type": ["null"],

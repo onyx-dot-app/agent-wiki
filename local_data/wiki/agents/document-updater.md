@@ -98,7 +98,7 @@ for the known no-row bug.
 - `app/llm/agents/document_updater.py:run` — currently raises
   `NotImplementedError`.
 - `tasks.document_update.update_document_from_payload` — stub.
-- `tasks.document_update.update_document_direct` — stub (used when an agent
+- `tasks.document_update.agent_update_document_nl` — stub (used when an agent
   PUTs a doc directly through the API rather than from a payload).
 - `POST /api/documents/ingest` and `POST /api/documents/<doc_id>` — stubs.
 

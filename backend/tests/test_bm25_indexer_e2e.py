@@ -187,7 +187,7 @@ def test_chat_agent_edit_reindexes(signed_in):
                 "path": "agent.md",
                 "old_string": "beforetoken",
                 "new_string": "aftertoken",
-                "message": "tweak",
+                "commit_message": "tweak",
             }
         )
     finally:

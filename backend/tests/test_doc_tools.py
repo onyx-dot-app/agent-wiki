@@ -58,7 +58,7 @@ def seen():
 def test_write_doc_creates_new_file_without_seen_check(repo_with_doc, seen):
     from app.llm.agents.tools.write_doc import handle
 
-    out = handle({"path": "new.md", "body": "# New\n", "message": "create"})
+    out = handle({"path": "new.md", "body": "# New\n", "commit_message": "create"})
     assert "error" not in out, out
     assert out["created"] is True
     assert Path(repo_with_doc.wiki_dir, "new.md").read_text() == "# New\n"
@@ -68,7 +68,7 @@ def test_write_doc_blocks_overwrite_of_unseen_existing(repo_with_doc, seen):
     from app.llm.agents.tools.write_doc import handle
 
     out = handle(
-        {"path": "guide.md", "body": "# Replaced\n", "message": "rewrite"}
+        {"path": "guide.md", "body": "# Replaced\n", "commit_message": "rewrite"}
     )
     assert "error" in out
     assert "read_page" in out["error"]
@@ -79,7 +79,7 @@ def test_write_doc_overwrites_when_seen(repo_with_doc, seen):
 
     seen.add("guide.md")
     out = handle(
-        {"path": "guide.md", "body": "# Replaced\n", "message": "rewrite"}
+        {"path": "guide.md", "body": "# Replaced\n", "commit_message": "rewrite"}
     )
     assert "error" not in out, out
     assert out["created"] is False
@@ -89,7 +89,7 @@ def test_write_doc_overwrites_when_seen(repo_with_doc, seen):
 def test_write_doc_rejects_non_md(repo_with_doc, seen):
     from app.llm.agents.tools.write_doc import handle
 
-    out = handle({"path": "file.txt", "body": "hi", "message": "x"})
+    out = handle({"path": "file.txt", "body": "hi", "commit_message": "x"})
     assert "error" in out
     assert ".md" in out["error"]
 
@@ -98,7 +98,7 @@ def test_write_doc_returns_broken_links(repo_with_doc, seen):
     from app.llm.agents.tools.write_doc import handle
 
     body = "See [missing](nope.md) and [also](still-nope.md).\n"
-    out = handle({"path": "intro.md", "body": body, "message": "intro"})
+    out = handle({"path": "intro.md", "body": body, "commit_message": "intro"})
     assert "error" not in out, out
     targets = sorted(b["target"] for b in out["broken_links"])
     assert targets == ["nope.md", "still-nope.md"]
@@ -118,7 +118,7 @@ def test_edit_doc_simple_replace(repo_with_doc, seen):
             "path": "guide.md",
             "old_string": "Alpha section.",
             "new_string": "Alpha section (updated).",
-            "message": "tweak",
+            "commit_message": "tweak",
         }
     )
     assert "error" not in out, out
@@ -136,7 +136,7 @@ def test_edit_doc_blocks_unseen(repo_with_doc, seen):
             "path": "guide.md",
             "old_string": "Alpha",
             "new_string": "A",
-            "message": "x",
+            "commit_message": "x",
         }
     )
     assert "error" in out
@@ -152,7 +152,7 @@ def test_edit_doc_no_match_returns_error(repo_with_doc, seen):
             "path": "guide.md",
             "old_string": "nonexistent text",
             "new_string": "X",
-            "message": "x",
+            "commit_message": "x",
         }
     )
     assert "error" in out
@@ -171,7 +171,7 @@ def test_edit_doc_ambiguous_returns_error(repo_with_doc, seen):
             "path": "dup.md",
             "old_string": "foo",
             "new_string": "bar",
-            "message": "x",
+            "commit_message": "x",
         }
     )
     assert "error" in out
@@ -191,7 +191,7 @@ def test_edit_doc_replace_all_works_on_dup(repo_with_doc, seen):
             "old_string": "foo",
             "new_string": "bar",
             "replace_all": True,
-            "message": "x",
+            "commit_message": "x",
         }
     )
     assert "error" not in out, out
@@ -206,7 +206,7 @@ def test_edit_doc_rejects_missing_file(repo_with_doc, seen):
             "path": "missing.md",
             "old_string": "x",
             "new_string": "y",
-            "message": "x",
+            "commit_message": "x",
         }
     )
     assert "error" in out
@@ -229,7 +229,7 @@ def test_multi_edit_applies_all_atomically(repo_with_doc, seen):
                 {"old_string": "Alpha", "new_string": "First"},
                 {"old_string": "Beta", "new_string": "Second"},
             ],
-            "message": "rename",
+            "commit_message": "rename",
         }
     )
     assert "error" not in out, out
@@ -255,7 +255,7 @@ def test_multi_edit_aborts_on_any_failure(repo_with_doc, seen):
                 {"old_string": "Alpha", "new_string": "First"},
                 {"old_string": "DOES_NOT_EXIST", "new_string": "X"},
             ],
-            "message": "x",
+            "commit_message": "x",
         }
     )
     assert "error" in out
@@ -277,7 +277,7 @@ def test_multi_edit_chains_through_running_body(repo_with_doc, seen):
                 {"old_string": "Alpha", "new_string": "MID"},
                 {"old_string": "MID", "new_string": "Final"},
             ],
-            "message": "chain",
+            "commit_message": "chain",
         }
     )
     assert "error" not in out, out
@@ -296,7 +296,7 @@ def test_multi_edit_rejects_no_op(repo_with_doc, seen):
         {
             "path": "guide.md",
             "edits": [{"old_string": "Alpha", "new_string": "Alpha"}],
-            "message": "x",
+            "commit_message": "x",
         }
     )
     assert "error" in out

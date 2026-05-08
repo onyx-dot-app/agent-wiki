@@ -202,7 +202,7 @@ Flow:
    key; if found, return its `job_id` (no new enqueue).
 3. Insert `mcp_jobs` row with `status='pending'`, `kind='update_doc_nl'`,
    `payload_json={path, instruction, base_sha}`.
-4. Enqueue `tasks.document_update.update_document_direct(job_id)` on
+4. Enqueue `tasks.document_update.agent_update_document_nl(job_id)` on
    `documents_huey` (see [background-tasks](../background-tasks/background-tasks.md)).
 5. Return `{job_id, status_uri: "job://<job_id>"}`. The agent can
    `resources/subscribe` to the URI to be pushed completion.
@@ -594,7 +594,7 @@ doc; client B edits it; client A receives the push within 200ms.
 1. Migration `0008_mcp_jobs.sql`.
 2. `app/mcp_server/jobs.py` repo.
 3. `app/mcp_server/tools/update_doc_nl.py`.
-4. `tasks/document_update.py:update_document_direct(job_id)` — wire
+4. `tasks/document_update.py:agent_update_document_nl(job_id)` — wire
    the document-updater agent as documented in
    [agents/document-updater.md](../agents/document-updater.md).
 5. Worker publishes job updates via `mcp_pubsub.publish_job_update`.
