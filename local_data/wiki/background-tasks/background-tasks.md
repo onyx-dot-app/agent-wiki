@@ -152,6 +152,32 @@ directly and never `wiki/notify.py`.
 - **Catch and surface errors.** A task that swallows an `LLMError` is
   worse than one that records it as an event of kind `<thing>.failed`.
 
+### Bounded backlog — `MAX_QUEUE_SIZE`
+
+Each `BoundedSqliteHuey` instance (subclass in `app/tasks/huey_app.py`)
+checks `storage.queue_size()` before every enqueue and raises
+`QueueFullError` if the backlog is at the cap. The cap is shared across
+all three queues and configured via the `MAX_QUEUE_SIZE` env var
+(default **1000**, must be a positive integer).
+
+The Flask app registers a global error handler for `QueueFullError` that
+returns a 503 with `{error, queue, size, limit}`, so any route that
+enqueues (e.g. `POST /api/documents/ingest`, `POST /api/documents/reindex`,
+the wiki write paths via `wiki/notify.py`) gets a clear failure message
+without per-route try/except.
+
+The check is best-effort, not transactional — under heavy concurrent
+producers the backlog can briefly exceed the cap. That's intentional;
+the cap is a coarse safeguard against runaway producers, not a fairness
+mechanism.
+
+### Healthcheck — `GET /api/health`
+
+Reports overall liveness plus per-queue `{name, size, limit, ok}` so
+the frontend `/health` page (and any external probe) can read backlog
+without shelling into `queue.sqlite`. The size read is a single
+`SELECT COUNT(*)` against the queue table, cheap on every poll.
+
 ### Tasks today
 
 | Task | Queue | Status | Trigger |

@@ -77,17 +77,59 @@ task logs a warning and does not retry.
 
 ### Surface in agent-wiki
 
-`POST /api/documents/ingest` (stub today). Backend behavior:
-validate token → insert row into `pending_doc_updates` → return `{id}`
-immediately. A periodic drain task in `tasks.periodic` processes all
-pending rows per doc in one LLM pass.
+`POST /api/documents/ingest` — receives a single document push from any
+external system (Onyx today; other connectors in the future). The API
+layer is intentionally dumb: it validates the payload, enforces the
+admin-configured size cap, enqueues a task on `documents_huey`, and acks
+**202** immediately. All routing (which wiki page to update) and
+reconciliation happens in the background task via the doc-updater agent.
 
-**Dedup / idempotency:** `pending_doc_updates.id` is an idempotency key
-(`sha256(source + external_id + occurred_at)`). Duplicate POSTs from
-Onyx retries return the existing row without re-inserting.
+**Request body** (JSON, `application/json`):
 
-Auth: shared signing secret (HMAC), same approach as
-`POST /api/webhooks/<source>`.
+| Field         | Type   | Required | Notes                                              |
+| ------------- | ------ | -------- | -------------------------------------------------- |
+| `content`     | string | yes      | Full document text. Must be non-empty.             |
+| `title`       | string | no       | Display title from the source.                     |
+| `source_type` | string | no       | Connector identifier — `slack`, `drive`, …         |
+| `metadata`    | object | no       | Opaque JSON; passed through to the agent.          |
+| `updated_at`  | string | no       | Source-side last-modified timestamp.               |
+| `diff`        | string | no       | Diff vs. last pushed version, if known.            |
+
+**Size cap:** `len(content) + len(diff)` must not exceed
+`ingest_settings.max_doc_chars` (default 100,000; see admin config below).
+Bounded jointly because both fields are LLM input on the consumer side.
+
+**Responses:**
+- `202 Accepted` — `{"queued": true, "task_id": "<huey-id>"}`. The push
+  has been put on `documents_huey`. The HTTP request never waits for the
+  agent.
+- `400 Bad Request` — malformed JSON, missing/empty `content`, or any
+  field with a wrong type. Body: `{"error": "<message>"}`.
+- `413 Payload Too Large` — content + diff exceeds the cap. Body
+  includes `limit` and `received` so callers can see the diagnosed size.
+- `503 Service Unavailable` — failed to enqueue the background task
+  (queue DB unreachable, etc.). The pusher should retry with backoff.
+
+Auth: not yet implemented. Today the endpoint is open and matches the
+`POST /api/webhooks/<source>` pattern (private network / auth proxy
+front-end). Shared bearer token / HMAC validation lands when the
+`api_tokens` table does — tracked in **Next up** below.
+
+**Background task:** `app.tasks.document_update.process_pushed_document`
+on `documents_huey`. Stub today (`raise NotImplementedError`) — picking
+target page(s) and running the doc-updater agent is the next chunk of
+work. The API contract is fixed.
+
+### Admin config: max document size
+
+`POST /api/admin/ingest` (admin-gated, separate from `/admin/llm` and
+`/admin/web`). Single setting:
+
+- `max_doc_chars` — integer. Default **100,000**. Bounds enforced
+  server-side: 1,000 ≤ value ≤ 5,000,000. Persisted in the `ingest_settings`
+  single-row table (migration `0007_ingest_settings.sql`).
+
+Schema in code: `app/ingest/settings.py:IngestSettings`.
 
 ### What we're explicitly **not** doing in v0
 - Two-way sync (agent-wiki pushing back to Onyx).
@@ -100,18 +142,30 @@ Auth: shared signing secret (HMAC), same approach as
 ## Progress
 
 ### Working
+<<<<<<< Updated upstream
 - **Onyx side (shipped on `bo/agent_wiki_push`):**
   - `AGENT_WIKI_ENABLED` / `AGENT_WIKI_BASE_URL` / `AGENT_WIKI_API_KEY` env vars in `app_configs.py`.
   - `OnyxCeleryQueues.AGENT_WIKI_PUSH` + `OnyxCeleryTask.PUSH_TO_AGENT_WIKI` constants.
   - `backend/onyx/background/celery/tasks/agent_wiki/tasks.py` — `push_to_agent_wiki` Celery task.
   - `_maybe_enqueue_agent_wiki_push` helper in `indexing_pipeline.py` — enqueues after `primary_doc_idx_insertion_records` for public connectors only.
   - `agent_wiki_push` queue added to light worker in `supervisord.conf`.
+=======
+- `POST /api/documents/ingest` validates the payload, enforces the
+  admin-configured size cap, enqueues `process_pushed_document` on
+  `documents_huey`, and acks 202.
+- `GET/PUT /api/admin/ingest` for the `max_doc_chars` setting (default
+  100,000). Persisted in `ingest_settings`.
+- Migration `0007_ingest_settings.sql`.
+>>>>>>> Stashed changes
 
 ### Stubbed
-- `POST /api/documents/ingest` in agent-wiki raises `NotImplementedError`.
+- `app.tasks.document_update.process_pushed_document` runs on the right
+  queue but raises `NotImplementedError`. Routing + agent invocation is
+  the next implementation step.
 
 ### Next up
 
+<<<<<<< Updated upstream
 **Agent-wiki side (deferred):**
 
 **Agent-wiki side (next):**
@@ -119,6 +173,29 @@ Auth: shared signing secret (HMAC), same approach as
    `pending_doc_updates` → return `{id}`.
 2. Migration adding `pending_doc_updates` and `api_tokens` tables.
 3. Periodic drain task in `tasks.periodic`.
+=======
+**Onyx side (Bo):**
+1. Add `AGENT_WIKI_BASE_URL` + `AGENT_WIKI_API_KEY` to `app_configs.py`.
+2. Create `backend/onyx/background/celery/tasks/agent_wiki/tasks.py` with
+   `push_to_agent_wiki` task (`@shared_task` on existing light queue,
+   exponential backoff retry, bearer token auth).
+3. Update the push body to the agent-wiki contract above
+   (`content` required, `title` / `source_type` / `metadata` /
+   `updated_at` / `diff` optional). Onyx's normalized `Document.sections`
+   gets joined into `content`.
+4. Enqueue from `index_doc_batch`: after `primary_doc_idx_insertion_records`
+   is known, for each successfully indexed doc, check `AGENT_WIKI_ENABLED`
+   and `cc_pair.is_public`, then enqueue.
+
+**Agent-wiki side:**
+1. Implement `process_pushed_document`: pick target wiki page(s), run the
+   doc-updater agent, commit + reindex + trigger fan-out on body change.
+2. Add bearer-token / HMAC auth to `/api/documents/ingest`. Likely an
+   `api_tokens` table with admin-managed tokens.
+3. Idempotency: optionally accept a client-supplied dedup key
+   (`source_type` + external id) to drop duplicate pushes from retries
+   without enqueuing twice.
+>>>>>>> Stashed changes
 
 ---
 

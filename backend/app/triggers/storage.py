@@ -23,6 +23,25 @@ def kind_of_scope(scope_path: str) -> str:
     return "doc" if scope_path.endswith(".md") else "dir"
 
 
+def normalize_scope_path(raw: str) -> str:
+    """Validate a trigger scope path. Treats ``/`` and ``""`` as the wiki root.
+
+    Triggers accept a leading slash for "the whole wiki" — the rest of the
+    wiki tooling represents that as the empty string, so we collapse to
+    ``""`` here before handing off to ``filesystem.safe_rel_path``.
+    """
+    if not isinstance(raw, str):
+        raise ValueError("scope_path must be a string")
+    stripped = raw.strip()
+    if stripped in ("", "/"):
+        return ""
+    if stripped.startswith("/"):
+        stripped = stripped.lstrip("/")
+        if stripped == "":
+            return ""
+    return filesystem.safe_rel_path(stripped)
+
+
 def compute_path(*, scope_path: str, trigger_id: str) -> str:
     """Return the wiki-relative path where this trigger's YAML should live."""
     rel = filesystem.safe_rel_path(scope_path)

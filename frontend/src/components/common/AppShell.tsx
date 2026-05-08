@@ -16,6 +16,7 @@ const NAV: NavItem[] = [
   { href: "/wiki", label: "Wiki", icon: <BookIcon /> },
   { href: "/triggers", label: "Triggers", icon: <BoltIcon /> },
   { href: "/events", label: "Events", icon: <EventsIcon /> },
+  { href: "/health", label: "Health", icon: <HealthIcon /> },
 ];
 
 export function AppShell({ children }: { children: ReactNode }) {
@@ -206,6 +207,13 @@ function EventsIcon() {
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <circle cx="12" cy="12" r="9" />
       <path d="M12 7v5l3 2" />
+    </svg>
+  );
+}
+function HealthIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M3 12h4l2-6 4 12 2-6h6" />
     </svg>
   );
 }

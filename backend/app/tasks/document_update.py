@@ -42,3 +42,24 @@ def agent_update_document_nl(doc_id: str, new_body: str, message: str, author: s
     # Used when an agent edits a doc through the API rather than from a payload.
     log.info("agent_update_document_nl doc_id=%s author=%s", doc_id, author)
     raise NotImplementedError
+
+
+@documents_huey.task()
+def process_pushed_document(push: dict) -> None:
+    """Reconcile a document pushed from an external system into the wiki.
+
+    ``push`` is the validated payload from POST /api/documents/ingest. Shape:
+    ``{content, title?, source_type?, metadata?, updated_at?, diff?}``. The
+    document-updater agent decides which wiki page(s) to update based on
+    these fields; the API layer does no routing.
+    """
+    log.info(
+        "process_pushed_document source_type=%s title=%s len=%d",
+        push.get("source_type"), push.get("title"), len(push.get("content") or ""),
+    )
+    # TODO:
+    #   1. Resolve target wiki page(s) (LLM-routed via document-updater agent).
+    #   2. Run document-updater against the resolved page with the push.
+    #   3. On a body change, commit + reindex + trigger fan-out (mirrors the
+    #      update_document_from_payload pipeline above).
+    raise NotImplementedError

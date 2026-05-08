@@ -6,7 +6,7 @@
     "properties": {
       "scope_path": {
         "type": "string",
-        "description": "Wiki-relative path of the file or directory to watch. Use a `.md` path (e.g. `auth/passwords.md`) to watch one doc, or a directory path (e.g. `auth`) to watch every doc beneath it. Use an empty string for the wiki root."
+        "description": "Wiki-relative path of the file or directory to watch. Use a `.md` path (e.g. `auth/passwords.md`) to watch one doc, or a directory path (e.g. `auth`) to watch every doc beneath it. Use `/` (or an empty string) to watch the whole wiki."
       },
       "trigger_nl_condition": {
         "type": "string",

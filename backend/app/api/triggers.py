@@ -17,7 +17,7 @@ from flask import Blueprint, jsonify, request
 from app.auth import current_user, login_required
 from app.triggers import repo as triggers_repo
 from app.triggers import storage as triggers_storage
-from app.wiki import filesystem, git as wiki_git
+from app.wiki import git as wiki_git
 
 bp = Blueprint("triggers", __name__)
 log = logging.getLogger(__name__)
@@ -36,7 +36,7 @@ def _validate_scope_path(raw: str) -> tuple[str | None, str | None]:
     if not isinstance(raw, str) or not raw.strip():
         return None, "scope_path is required"
     try:
-        rel = filesystem.safe_rel_path(raw.strip())
+        rel = triggers_storage.normalize_scope_path(raw)
     except ValueError as e:
         return None, str(e)
     return rel, None
@@ -82,16 +82,19 @@ def create_trigger():
     if not isinstance(enabled, bool):
         return jsonify(error="enabled must be a boolean"), 400
 
-    trigger = triggers_repo.create(
-        owner_user_id=user.id,
-        scope_path=scope_path,
-        nl_description=nl,
-        message=message,
-        destination=destination,
-        kind=kind,
-        enabled=enabled,
-        actor=_git_author(),
-    )
+    try:
+        trigger = triggers_repo.create(
+            owner_user_id=user.id,
+            scope_path=scope_path,
+            nl_description=nl,
+            message=message,
+            destination=destination,
+            kind=kind,
+            enabled=enabled,
+            actor=_git_author(),
+        )
+    except ValueError as exc:
+        return jsonify(error=str(exc)), 400
     log.info(
         "trigger created id=%s owner=%s scope=%s kind=%s enabled=%s",
         trigger.get("id"), user.id, scope_path, kind, enabled,
@@ -144,7 +147,10 @@ def update_trigger(trigger_id: str):
             return jsonify(error="enabled must be a boolean"), 400
         kwargs["enabled"] = enabled
 
-    updated = triggers_repo.update(trigger_id, actor=_git_author(), **kwargs)
+    try:
+        updated = triggers_repo.update(trigger_id, actor=_git_author(), **kwargs)
+    except ValueError as exc:
+        return jsonify(error=str(exc)), 400
     log.info(
         "trigger updated id=%s owner=%s fields=%s",
         trigger_id, user.id, sorted(kwargs.keys()),

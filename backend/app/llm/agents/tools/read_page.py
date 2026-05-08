@@ -27,6 +27,14 @@ def handle(args: dict[str, Any]) -> Any:
     except Exception as exc:
         return {"error": f"could not read {rel}: {exc}"}
 
+    h.mark_doc_read(rel)
+    # The frontmatter just got re-rendered — re-read so the model sees what
+    # the file now contains on disk.
+    try:
+        body = wiki_git.read_file(rel)
+    except Exception:  # pragma: no cover — already read once above
+        pass
+
     return {
         "path": rel,
         "title": _derive_title(rel, body),

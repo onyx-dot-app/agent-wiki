@@ -1,6 +1,6 @@
 {
   "name": "explain_functionality",
-  "description": "Return a canonical description of what agent-wiki is and how to use it. Use ONLY when the user asks meta questions about the app itself — \"how does this work\", \"what can you do\", \"how do I use the chat\", \"what's the wiki for\", \"how do triggers work\", and similar. Do NOT call for ordinary content questions about their wiki docs (use `search_wiki` + `read_page`) or for general \"how do I do X in language Y\" coding help. Takes no arguments. The result is reference text — read it, then answer the user's specific question in your own words.",
+  "description": "Describes what agent-wiki is and how to use it. Call only for meta questions about the app itself, not for wiki content or general help questions. Takes no arguments.",
   "input_schema": {
     "type": "object",
     "properties": {},

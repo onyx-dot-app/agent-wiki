@@ -83,8 +83,15 @@ def create(
 ) -> dict:
     if kind not in ALLOWED_KINDS:
         raise ValueError(f"unsupported kind: {kind!r}")
+    if not isinstance(nl_description, str) or not nl_description.strip():
+        raise ValueError(
+            "nl_description (the firing condition) is required and must be a "
+            "non-empty string"
+        )
     if not isinstance(message, str) or not message.strip():
-        raise ValueError("message is required and must be a non-empty string")
+        raise ValueError(
+            "message (the fire message) is required and must be a non-empty string"
+        )
     if destination not in SUPPORTED_DESTINATIONS:
         raise ValueError(
             f"destination {destination!r} not supported in v0 — only null (Event Log)"
@@ -175,7 +182,9 @@ def update(
     if scope_path is not None:
         new["scope_path"] = scope_path
     if nl_description is not None:
-        new["nl_description"] = nl_description
+        if not isinstance(nl_description, str) or not nl_description.strip():
+            raise ValueError("nl_description must be a non-empty string")
+        new["nl_description"] = nl_description.strip()
     if message is not None:
         if not isinstance(message, str) or not message.strip():
             raise ValueError("message must be a non-empty string")
@@ -188,6 +197,19 @@ def update(
         new["destination"] = destination
     if enabled is not None:
         new["enabled"] = enabled
+
+    # Invariant: a saved trigger must always have both a firing condition
+    # and a fire message. Catches the case where an existing legacy row had
+    # one of them blank and the update doesn't touch the offending field.
+    if not (isinstance(new.get("nl_description"), str) and new["nl_description"].strip()):
+        raise ValueError(
+            "nl_description (the firing condition) is required and must be a "
+            "non-empty string"
+        )
+    if not (isinstance(new.get("message"), str) and new["message"].strip()):
+        raise ValueError(
+            "message (the fire message) is required and must be a non-empty string"
+        )
 
     if (
         new["scope_path"] == existing["scope_path"]
@@ -249,6 +271,50 @@ def delete(trigger_id: str, *, actor: str | None = None) -> bool:
         conn.close()
 
 
+def _is_nonempty_string(value: object) -> bool:
+    return isinstance(value, str) and bool(value.strip())
+
+
+def purge_invalid_triggers(*, actor: str | None = None) -> int:
+    """Delete trigger YAML files that violate the both-fields-required invariant.
+
+    A saved trigger must carry both a non-empty firing condition
+    (``nl_description``) and a non-empty fire message (``message``). Files
+    that pre-date this rule (or otherwise drift) are removed from the wiki
+    repo here so the cache rebuild that follows starts from a clean slate.
+    Returns the number of files deleted.
+    """
+    deleted = 0
+    for file_path in storage.list_all_files():
+        try:
+            data = storage.read_trigger(file_path)
+        except Exception:
+            log.warning(
+                "purge_invalid_triggers: skip unreadable %s", file_path, exc_info=True
+            )
+            continue
+        if _is_nonempty_string(data.get("nl_description")) and _is_nonempty_string(
+            data.get("message")
+        ):
+            continue
+        trigger_id = data.get("id") or "?"
+        try:
+            storage.delete_trigger(file_path, trigger_id, actor=actor)
+            deleted += 1
+            log.info(
+                "purge_invalid_triggers: removed %s id=%s (missing required field)",
+                file_path,
+                trigger_id,
+            )
+        except Exception:
+            log.exception(
+                "purge_invalid_triggers: failed to delete %s id=%s",
+                file_path,
+                trigger_id,
+            )
+    return deleted
+
+
 def rebuild_from_filesystem() -> int:
     """Repopulate the SQLite cache from on-disk trigger files.
 
@@ -262,6 +328,16 @@ def rebuild_from_filesystem() -> int:
             data = storage.read_trigger(file_path)
         except Exception:
             log.warning("rebuild_from_filesystem: skip unreadable %s", file_path, exc_info=True)
+            skipped += 1
+            continue
+        if not (
+            _is_nonempty_string(data.get("nl_description"))
+            and _is_nonempty_string(data.get("message"))
+        ):
+            log.warning(
+                "rebuild_from_filesystem: skip %s (missing required field)",
+                file_path,
+            )
             skipped += 1
             continue
         parsed.append((file_path, data))

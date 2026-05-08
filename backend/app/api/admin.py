@@ -6,6 +6,7 @@ import logging
 from flask import Blueprint, jsonify, request
 
 from app.auth import admin_required, current_user, users as users_repo
+from app.ingest import settings as ingest_settings
 from app.llm import settings as llm_settings
 from app.web import settings as web_settings
 
@@ -216,3 +217,47 @@ def put_web():
         actor.id if actor else "?", bool(serper_key), bool(firecrawl_key),
     )
     return jsonify(_web_view(web_settings.get()))
+
+
+# --------------------------------------------------------------------------- #
+# Ingest settings (inbound document push from external systems)
+# --------------------------------------------------------------------------- #
+
+
+# Floor at 1k chars (smaller than this and meaningful docs get rejected) and
+# cap at 5M (single LLM context budget; anything larger is almost certainly a
+# misconfiguration on the pushing side).
+_MIN_DOC_CHARS = 1_000
+_MAX_DOC_CHARS = 5_000_000
+
+
+def _ingest_view(s) -> dict:
+    return {"max_doc_chars": s.max_doc_chars}
+
+
+@bp.get("/ingest")
+@admin_required
+def get_ingest():
+    return jsonify(_ingest_view(ingest_settings.get()))
+
+
+@bp.put("/ingest")
+@admin_required
+def put_ingest():
+    body = request.get_json(silent=True) or {}
+    raw = body.get("max_doc_chars")
+    if raw is None:
+        return jsonify(error="max_doc_chars is required"), 400
+    if isinstance(raw, bool) or not isinstance(raw, int):
+        return jsonify(error="max_doc_chars must be an integer"), 400
+    if raw < _MIN_DOC_CHARS or raw > _MAX_DOC_CHARS:
+        return jsonify(
+            error=f"max_doc_chars must be between {_MIN_DOC_CHARS} and {_MAX_DOC_CHARS}"
+        ), 400
+    ingest_settings.upsert(max_doc_chars=raw)
+    actor = current_user()
+    log.info(
+        "admin: %s updated ingest settings max_doc_chars=%d",
+        actor.id if actor else "?", raw,
+    )
+    return jsonify(_ingest_view(ingest_settings.get()))

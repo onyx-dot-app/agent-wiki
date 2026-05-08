@@ -1,6 +1,6 @@
 {{- /*
 One Deployment per Huey queue. The backend's `app.tasks.run_worker`
-requires a queue argument (`documents`, `triggers`, or `wiki_doc_index`),
+requires a queue argument (`documents`, `triggers`, or `wiki_bm25`),
 and each queue gets its own consumer process to keep slow LLM doc
 work from backpressuring fast paths like FTS reindex.
 */ -}}
