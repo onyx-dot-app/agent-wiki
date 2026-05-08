@@ -381,7 +381,7 @@ One line per area; the per-area doc has the real picture.
 | Onyx push | Not started; ingest endpoint stub | [onyx-push](onyx-push/onyx-push.md) |
 | Background tasks | Reindex live; doc-update + periodic stubs; trigger fan-out task TBD | [background-tasks](background-tasks/background-tasks.md) |
 | Exploration | Not started; parking lot for MCP-vs-skill question | [exploration](exploration/exploration.md) |
-| Infra | Compose + volumes wired; prod story TBD | [infra](infra/infra.md) |
+| Infra | Compose + volumes wired; EKS Terraform + Helm chart in `deploy/` (validated, not yet end-to-end applied) | [infra](infra/infra.md) |
 
 ---
 
@@ -496,5 +496,20 @@ area docs.
   credentials (Anthropic key, OpenAI key, Gemini key, Ollama base URL).
   Required `google-genai>=1.0` and `ollama>=0.4`; migration 0006 added
   `gemini_api_key` and `ollama_base_url` columns.
+- **2026-05-07** — **EKS + Helm deploy scaffolding landed under `deploy/`.**
+  Terraform (`deploy/terraform/`) provisions VPC + EKS via the community
+  `terraform-aws-modules/{vpc,eks}/aws` modules, wires the EBS CSI add-on
+  with IRSA, sets a `gp3` default StorageClass, and helm-installs
+  ingress-nginx (NLB) + cert-manager (with an optional `letsencrypt-prod`
+  ClusterIssuer). State is local + gitignored. Helm chart
+  (`deploy/helm/agent-workspace/`) deploys backend + worker + frontend with
+  two PVCs (`app-data` 5Gi, `wiki-data` 10Gi, both RWO `gp3`); backend and
+  worker are pinned to one replica with `Recreate` strategy and
+  `podAffinity` co-scheduling because SQLite is single-writer and the wiki
+  working tree has no concurrent-write story. The in-cluster nginx pod from
+  compose is **dropped** — the Ingress handles `/api/*` → backend, `/` →
+  frontend directly. Image registry assumed to be a public GHCR/Docker Hub
+  repo (no ECR provisioning). Two-step flow: `terraform apply` once per
+  env, then `helm upgrade --install` per app deploy. See `deploy/README.md`.
 
 _(Append new entries with a date prefix. Cross-cutting only.)_

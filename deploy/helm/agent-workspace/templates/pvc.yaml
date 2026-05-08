@@ -1,0 +1,31 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "agent-workspace.fullname" . }}-app-data
+  labels:
+    {{- include "agent-workspace.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    - {{ .Values.persistence.appData.accessMode }}
+  resources:
+    requests:
+      storage: {{ .Values.persistence.appData.size }}
+  {{- with .Values.persistence.appData.storageClass }}
+  storageClassName: {{ . }}
+  {{- end }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "agent-workspace.fullname" . }}-wiki-data
+  labels:
+    {{- include "agent-workspace.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    - {{ .Values.persistence.wikiData.accessMode }}
+  resources:
+    requests:
+      storage: {{ .Values.persistence.wikiData.size }}
+  {{- with .Values.persistence.wikiData.storageClass }}
+  storageClassName: {{ . }}
+  {{- end }}
