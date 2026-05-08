@@ -15,9 +15,8 @@ import subprocess
 from flask import Blueprint, jsonify, request
 
 from app.auth import current_user, login_required
-from app.db import fts
 from app.tasks.reindex import reindex_path
-from app.tasks.triggers import fan_out_trigger_eval
+from app.wiki import notify as wiki_notify
 from app.triggers import repo as triggers_repo
 from app.wiki import filesystem, git as wiki_git
 
@@ -92,8 +91,7 @@ def put_document_by_path():
     if deprecated:
         msg = f"{msg}\n\nDeprecates: {' '.join(deprecated)}"
     sha = wiki_git.commit_file(rel, body, msg, author=author)
-    reindex_path(rel)
-    fan_out_trigger_eval(rel, sha, change_kind, author)
+    wiki_notify.after_doc_write(rel, sha, change_kind, author)
     log.info("doc %s %s by %s sha=%s", change_kind, rel, author or "?", sha[:8])
     return jsonify(path=rel, sha=sha, created=not existed, deprecated=deprecated)
 
@@ -169,11 +167,7 @@ def move_document_or_folder():
         log.warning("move_path git error %s -> %s: %s", old_rel, new_rel, exc.stderr)
         return jsonify(error="git move failed"), 500
 
-    for old_p, new_p in moves:
-        if old_p.endswith(".md"):
-            fts.delete_document(old_p)
-        if new_p.endswith(".md"):
-            reindex_path(new_p)
+    wiki_notify.after_path_move(moves, sha, author)
 
     # Trigger YAML files may have moved with their containing folder. The
     # SQLite cache stores their absolute file_path, so reconverge it from
@@ -208,6 +202,7 @@ def delete_document_by_path():
     user = current_user()
     author = f"{user.name or user.email} <{user.email}>" if user else None
     sha = wiki_git.delete_path(rel, f"delete {rel}", author=author)
+    wiki_notify.after_doc_delete(rel, sha, author)
     log.info("doc deleted %s by %s sha=%s", rel, author or "?", sha[:8])
     return jsonify(sha=sha)
 

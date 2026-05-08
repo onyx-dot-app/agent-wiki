@@ -39,6 +39,7 @@ through one entry point. Two reasons we declare seams:
 | Wiki path safety | `backend/app/wiki/filesystem.py` (`safe_rel_path`) | All user/agent-supplied wiki paths flow through this. |
 | Wiki edit primitive | `backend/app/wiki/edit.py` (`replace`) | Pure fuzzy find-and-replace (9-strategy chain). All doc-edit tools call this — no other places do find-and-replace on wiki bodies. |
 | Wiki link checker | `backend/app/wiki/links.py` (`find_broken_links`) | Markdown LSP analogue. Tools call after a write to surface broken links to the model. |
+| Post-write notify | `backend/app/wiki/notify.py` (`after_doc_write`, `after_doc_delete`, `after_path_move`) | The single seam every successful wiki `.md` mutation goes through. Runs FTS reindex + `fan_out_trigger_eval`. **Both API handlers (`api/documents.py`) and chat-agent tools (`tools/_doc_helpers.py`, `tools/move_path.py`) call it.** Trigger YAMLs (`storage.py`) deliberately bypass — they're config, not docs. |
 | Bash execution | `backend/app/llm/agents/tools/_bash.py` (`run`, `execute_chain`, `parse_chain`) | The only place `subprocess.run` runs LLM-emitted shell. Allowlist gate + per-segment re-validation + cwd pinned to `CONFIG.wiki_dir` + per-command timeout + truncation. Don't shell out to model-supplied strings anywhere else. |
 | Web search | `backend/app/web/__init__.py` (`search`, `search_provider`) | Serper-only today; callers don't import `app.web.serper` directly. Tests patch `app.web.search_provider`. |
 | Web crawl | `backend/app/web/__init__.py` (`fetch`, `crawl_provider`) | Firecrawl-only today; same rule. |
@@ -87,7 +88,9 @@ shape *before* the second implementation lands so it doesn't fork.
 | Prompt loader | `backend/app/llm/prompts/__init__.py:load_prompt` | Already exists implicitly. Make it the only way prompts are read so admin-editable prompts (likely soon) plug in here. |
 | Search backend | `backend/app/wiki/search.py:search` | Pin the return shape (`{path, title, score}`) in a model so the chat tool and any future surface don't bind to `sqlite3.Row`. FTS today, vector later. |
 | Event sink | `backend/app/events/repo.py:record(kind, actor, payload)` | Trigger fires, doc updates, agent runs all want to write events. One repo function so audit/metrics later isn't a refactor. |
-| MCP tool surface | `backend/app/api/mcp.py` | Decide MCP tools share the **same registry** as agent tools, then this blueprint just wraps the agent-tools registry. |
+| MCP server (inbound) tool surface | `backend/app/mcp_server/__init__.py` | Mounts `/api/mcp` (Streamable HTTP). Tool registry merges the agent-tool registry with mcp-only tools (`update_doc_nl`, `apply_patch`, `ask_nl_question`, `read_doc(sha)`, `list_history`). See [mcp-server](mcp-server/mcp-server.md). |
+| MCP client (outbound) connections | `backend/app/api/mcp_connections.py` | User-managed list of external MCP servers our agent harness consumes. Currently lives in `app/api/mcp.py`; rename when the inbound surface lands. |
+| Wiki commit pub-sub | `commit_and_fan_out` in `backend/app/llm/agents/tools/_doc_helpers.py` | Single seam every wiki write goes through. Already fans out to reindex + trigger eval; the MCP server adds a third subscriber for `notifications/resources/updated`. |
 | Frontend streaming | `frontend/src/lib/stream.ts` | Chat streams now; trigger-evaluation progress likely will. Keep `apiFetch` for request/response, put SSE behind its own typed function. |
 
 ## How to add a new seam

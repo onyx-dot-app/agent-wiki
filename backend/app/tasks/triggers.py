@@ -5,7 +5,7 @@ dedicated to natural-language trigger evaluation, both event-driven (this
 file) and time-based (``app/tasks/periodic.py:evaluate_scheduled_triggers``).
 Trigger eval is read-only (no commits), so it sits on its own queue
 between the LLM-heavy ``documents_huey`` and the cheap
-``wiki_doc_index_huey``: a flood of trigger fires can't delay an FTS
+``wiki_bm25_huey``: a flood of trigger fires can't delay an FTS
 reindex, and a backlogged doc-updater can't delay an event-log entry.
 
 After a successful ``commit_file`` on a wiki doc, the API (or an agent

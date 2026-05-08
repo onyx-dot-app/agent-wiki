@@ -6,7 +6,14 @@
 - Need a basic chat loop, don't use any custom frameworks, very easy to build internally, no branching, no edits, nothing fancy.
 
 ## MCP for agents
-What it needs to provide:
+**→ Designed in [mcp-server/mcp-server.md](mcp-server/mcp-server.md).** Phased
+implementation plan, transport (Streamable HTTP), per-user tokens, tool
+inventory (`read_doc(sha?)`, `apply_patch`, `update_doc_nl`,
+`ask_nl_question`, …), `wiki://` and `job://` resource subscriptions, and
+the `base_sha` + push-notification staleness model are all spelled out
+there. Update that doc, not this section, going forward.
+
+Original brief retained for traceability:
 - Fetch the relevant wikis for a project (bm25 based, LLM filtering/selection). Gives back the full MDs and provides it as a resource
 - Pass updates via the resource design: https://modelcontextprotocol.info/docs/concepts/resources/
 - Write an update to the wiki using a natural language description: "I have now completed the TODO under section X which is blah blah blah"

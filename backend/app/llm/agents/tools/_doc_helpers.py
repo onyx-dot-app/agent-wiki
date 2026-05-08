@@ -13,9 +13,7 @@ from typing import Any
 
 from app.auth import current_user
 from app.llm.agents._session import seen_doc_paths
-from app.tasks.reindex import reindex_path
-from app.tasks.triggers import fan_out_trigger_eval
-from app.wiki import filesystem, git as wiki_git, links
+from app.wiki import filesystem, git as wiki_git, links, notify as wiki_notify
 
 
 class ToolError(Exception):
@@ -110,8 +108,7 @@ def commit_and_fan_out(
     """
     author = author_string()
     sha = wiki_git.commit_file(rel, body, message, author=author)
-    reindex_path(rel)
-    fan_out_trigger_eval(rel, sha, change_kind, author)
+    wiki_notify.after_doc_write(rel, sha, change_kind, author)
     return sha
 
 

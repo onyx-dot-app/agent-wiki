@@ -7,10 +7,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.db import fts
 from app.llm.agents.tools import _doc_helpers as h
-from app.tasks.reindex import reindex_path
-from app.wiki import filesystem, git as wiki_git
+from app.wiki import filesystem, git as wiki_git, notify as wiki_notify
 
 
 def handle(args: dict[str, Any]) -> Any:
@@ -46,15 +44,11 @@ def handle(args: dict[str, Any]) -> Any:
         if old_abs.is_dir() and new_rel.endswith(".md"):
             raise h.ToolError("renaming a directory requires new_path to not end in .md")
 
+        author = h.author_string()
         sha, moves = wiki_git.move_path(
-            old_rel, new_rel, message.strip(), author=h.author_string()
+            old_rel, new_rel, message.strip(), author=author
         )
-
-        for old_p, new_p in moves:
-            if old_p.endswith(".md"):
-                fts.delete_document(old_p)
-            if new_p.endswith(".md"):
-                reindex_path(new_p)
+        wiki_notify.after_path_move(moves, sha, author)
 
         return {
             "old_path": old_rel,

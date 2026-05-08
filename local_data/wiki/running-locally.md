@@ -179,7 +179,7 @@ three are alive:
 cd backend
 ./.venv/bin/python -m app.tasks.run_worker documents       # LLM doc-updater
 ./.venv/bin/python -m app.tasks.run_worker triggers        # NL trigger eval (delta + scheduled)
-./.venv/bin/python -m app.tasks.run_worker wiki_doc_index  # FTS5 / BM25 reindex
+./.venv/bin/python -m app.tasks.run_worker wiki_bm25  # FTS5 / BM25 reindex
 ```
 
 Same venv. Same dotenv auto-load. All three share `local_data/queue.sqlite`
@@ -190,7 +190,7 @@ exercising trigger eval), you can launch fewer workers — but doc edits
 will pile up in the corresponding queue until the right worker is started.
 
 **Skip-able for narrow iteration:**
-- No `wiki_doc_index` worker → search results stay stale; everything else
+- No `wiki_bm25` worker → search results stay stale; everything else
   works.
 - No `triggers` worker → trigger fires don't get evaluated; cron stub
   errors disappear from your logs (they live on this queue).
@@ -258,7 +258,7 @@ the "Python: Select Interpreter" command and point it at
 | `Backend (Flask via gunicorn)` | `python -m gunicorn app.main:create_app() --bind 127.0.0.1:8080 --workers 1 --reload --graceful-timeout 30 --timeout 60`, cwd `backend/`. | Reloads on Python save with **graceful drain** of in-flight requests. `subProcess: true` so debugpy follows the worker fork (and re-attaches to the new worker after `--reload`). `justMyCode: false` lets you step into Flask/gunicorn/etc. |
 | `Worker — documents (LLM doc-updater)` | `python -m app.tasks.run_worker documents`. | Drains `documents_huey`: connector ingest, direct agent edits, stale-doc cron. |
 | `Worker — triggers (NL trigger eval)` | `python -m app.tasks.run_worker triggers`. | Drains `triggers_huey`: post-commit `fan_out_trigger_eval` + 5-min scheduled-trigger cron. |
-| `Worker — wiki_doc_index (FTS5 / BM25)` | `python -m app.tasks.run_worker wiki_doc_index`. | Drains `wiki_doc_index_huey`: `reindex_path` / `reindex_document`. |
+| `Worker — wiki_bm25 (FTS5 / BM25)` | `python -m app.tasks.run_worker wiki_bm25`. | Drains `wiki_bm25_huey`: `reindex_path` / `reindex_document`. |
 | `Frontend (Next dev)` | `npm run dev` in `frontend/`, env loaded from repo-root `.env`. | This is the `set -a / source ../.env` dance, but done by VS Code. |
 | `Browser (Chrome attach)` | Launches Chrome at `http://localhost:3000`. | Optional — only if you want frontend breakpoints. |
 | `App: backend + 3 workers + frontend` (compound) | Runs the five above in parallel. `stopAll` so killing one stops the others. | The single click that boots the whole stack. |

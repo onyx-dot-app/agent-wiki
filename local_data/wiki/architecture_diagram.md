@@ -98,9 +98,9 @@ wiki/
   search.py          FTS5 query wrapper
 
 tasks/             ── 3 Huey queues on queue.sqlite — see background-tasks/
-  huey_app.py        documents_huey / triggers_huey / wiki_doc_index_huey
+  huey_app.py        documents_huey / triggers_huey / wiki_bm25_huey
   run_worker.py      worker entrypoint; takes <queue> arg
-  reindex.py         reindex_path / reindex_document  → wiki_doc_index
+  reindex.py         reindex_path / reindex_document  → wiki_bm25
   triggers.py        fan_out_trigger_eval             → triggers
   document_update.py doc-updater tasks                → documents
   periodic.py        crons split across triggers + documents queues

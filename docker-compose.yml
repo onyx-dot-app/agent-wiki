@@ -39,9 +39,9 @@ services:
     depends_on:
       - backend
 
-  worker-wiki-doc-index:
+  worker-wiki-bm25:
     build: ./backend
-    command: ["python", "-m", "app.tasks.run_worker", "wiki_doc_index"]
+    command: ["python", "-m", "app.tasks.run_worker", "wiki_bm25"]
     env_file: .env
     environment:
       - APP_DB_PATH=/data/app.sqlite

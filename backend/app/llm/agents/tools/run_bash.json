@@ -6,7 +6,7 @@
     "properties": {
       "command": {
         "type": "string",
-        "description": "Shell command to run, e.g. `find . -name '*.md' | wc -l`, `ls -la`, `grep -rn 'TODO' .`, `cat README.md | head -20`."
+        "description": "Shell command to run, e.g. `find . -name '*.md' | wc -l`, `ls -la`, `grep -rn 'TODO' .`"
       }
     },
     "required": ["command"]

@@ -7,7 +7,7 @@ we keep this work off the indexer / trigger queues to prevent provider
 slowness from cascading into search staleness or delayed trigger fires.
 
 After a successful commit, these tasks re-enqueue ``reindex_path`` (on
-``wiki_doc_index_huey``) and ``fan_out_trigger_eval`` (on
+``wiki_bm25_huey``) and ``fan_out_trigger_eval`` (on
 ``triggers_huey``) so the side effects fan out exactly like a human edit.
 
 v0 hands the agent a single doc and the new payload; later versions can
@@ -32,7 +32,7 @@ def update_document_from_payload(doc_id: str, source: str, payload: dict) -> Non
     #   1. Load current doc body from git (app.wiki.git.read_file).
     #   2. Call app.llm.agents.document_updater.run(doc_id, body, payload, source).
     #   3. If the agent produced a new body, commit it (app.wiki.git.commit_file).
-    #   4. Enqueue reindex_path on wiki_doc_index_huey.
+    #   4. Enqueue reindex_path on wiki_bm25_huey.
     #   5. Enqueue fan_out_trigger_eval on triggers_huey for doc + parent dirs.
     raise NotImplementedError
 

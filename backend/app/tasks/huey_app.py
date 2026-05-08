@@ -33,7 +33,7 @@ Queues:
   because trigger eval is read-only (no commits) and we want one queue's
   backlog to be the only thing that delays an event-log entry.
 
-* ``wiki_doc_index_huey`` — **FTS5 / BM25 indexer.** Cheap, frequent, no
+* ``wiki_bm25_huey`` — **FTS5 / BM25 indexer.** Cheap, frequent, no
   LLM. Re-indexes a single wiki path into the ``documents_fts`` table from
   the current git working tree. Runs after every successful ``commit_file``
   (whether human edit, agent edit, move, or doc-updater commit) and on
@@ -43,7 +43,7 @@ Queues:
 
 Each consumer runs as a separate worker container — see
 ``docker-compose.yml`` (``worker-documents``, ``worker-triggers``,
-``worker-wiki-doc-index``) and ``app/tasks/run_worker.py``.
+``worker-wiki-bm25``) and ``app/tasks/run_worker.py``.
 """
 from __future__ import annotations
 
@@ -53,12 +53,12 @@ from app.config import CONFIG
 
 documents_huey = SqliteHuey(name="documents", filename=CONFIG.queue_db_path)
 triggers_huey = SqliteHuey(name="triggers", filename=CONFIG.queue_db_path)
-wiki_doc_index_huey = SqliteHuey(name="wiki_doc_index", filename=CONFIG.queue_db_path)
+wiki_bm25_huey = SqliteHuey(name="wiki_bm25", filename=CONFIG.queue_db_path)
 
 # Map queue-name → instance, used by run_worker.py to launch the right
 # consumer per worker container.
 QUEUES = {
     "documents": documents_huey,
     "triggers": triggers_huey,
-    "wiki_doc_index": wiki_doc_index_huey,
+    "wiki_bm25": wiki_bm25_huey,
 }

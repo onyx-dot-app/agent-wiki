@@ -1,7 +1,7 @@
 """Entry point for a Huey consumer container.
 
 Run with: ``python -m app.tasks.run_worker <queue>`` where ``<queue>`` is one
-of ``documents``, ``triggers``, ``wiki_doc_index``. Each queue gets its own
+of ``documents``, ``triggers``, ``wiki_bm25``. Each queue gets its own
 worker process — see ``app/tasks/huey_app.py`` for the queue rationale.
 
 We import every task module up front (regardless of which queue we're
@@ -26,7 +26,7 @@ from app.utils.logging import setup_logging
 _WORKERS = {
     "documents": 2,
     "triggers": 4,
-    "wiki_doc_index": 4,
+    "wiki_bm25": 4,
 }
 
 

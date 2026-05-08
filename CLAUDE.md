@@ -135,7 +135,7 @@ If something might take more than ~100ms, queue it. Tasks live under
 `app/tasks/` and bind to one of three Huey instances in
 `app/tasks/huey_app.py` — `documents_huey` (LLM doc-reconciliation),
 `triggers_huey` (NL trigger eval, delta + scheduled), or
-`wiki_doc_index_huey` (FTS5 / BM25). Each queue has its own worker
+`wiki_bm25_huey` (FTS5 / BM25). Each queue has its own worker
 process (`python -m app.tasks.run_worker <queue>`); make sure new task
 modules are imported by `run_worker.py` so they register on boot.
 

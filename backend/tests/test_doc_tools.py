@@ -26,13 +26,13 @@ def repo_with_doc(tmp_repo, tmp_config):
 def _stub_side_effects(monkeypatch):
     """Skip Huey + trigger fan-out for these tests.
 
-    Other test files cover those paths; here we focus on the tool layer.
+    The post-write seam is ``app.wiki.notify.after_doc_write`` — patching
+    it short-circuits both the FTS reindex and the trigger fan-out task
+    enqueue. Coverage of the side effects themselves lives in
+    ``test_save_to_fire_e2e.py`` and ``test_triggers_fanout.py``.
     """
     monkeypatch.setattr(
-        "app.llm.agents.tools._doc_helpers.reindex_path", lambda *a, **kw: None
-    )
-    monkeypatch.setattr(
-        "app.llm.agents.tools._doc_helpers.fan_out_trigger_eval",
+        "app.llm.agents.tools._doc_helpers.wiki_notify.after_doc_write",
         lambda *a, **kw: None,
     )
 

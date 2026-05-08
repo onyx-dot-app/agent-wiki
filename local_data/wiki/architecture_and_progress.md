@@ -18,6 +18,7 @@ _Last updated: 2026-05-07_
 - [Onyx-side push integration](onyx-push/onyx-push.md)
 - [Background tasks (Huey)](background-tasks/background-tasks.md)
 - [Exploration work](exploration/exploration.md)
+- [MCP server (inbound)](mcp-server/mcp-server.md)
 - [Infra](infra/infra.md)
 
 This file is the cross-area map: product spec, V0 brief, cross-cutting
@@ -282,7 +283,7 @@ root already points the data paths at `local_data/` and sets
 - **Workers** — three queues, three processes. Each drains one queue:
   `./.venv/bin/python -m app.tasks.run_worker documents`,
   `./.venv/bin/python -m app.tasks.run_worker triggers`,
-  `./.venv/bin/python -m app.tasks.run_worker wiki_doc_index`
+  `./.venv/bin/python -m app.tasks.run_worker wiki_bm25`
   (same venv). See
   [running-locally.md](running-locally.md#how-to-run--five-processes)
   and [background-tasks](background-tasks/background-tasks.md).
@@ -385,6 +386,7 @@ One line per area; the per-area doc has the real picture.
 | Frontend | Auth/admin/wiki-read/chat live; chat needs to move from `/chat` page to a side panel; sidebar needs to become Wiki/Triggers/Events; no editor, no inline-triggers panel, no events view yet | [frontend](frontend/frontend.md) |
 | Onyx push | Not started; ingest endpoint stub | [onyx-push](onyx-push/onyx-push.md) |
 | Background tasks | Reindex live; doc-update + periodic stubs; trigger fan-out task TBD | [background-tasks](background-tasks/background-tasks.md) |
+| MCP server (inbound) | Designed, not started. Streamable HTTP + per-user tokens + shared agent-tool registry + `wiki://` resource subscriptions; phased plan | [mcp-server](mcp-server/mcp-server.md) |
 | Exploration | Not started; parking lot for MCP-vs-skill question | [exploration](exploration/exploration.md) |
 | Infra | Compose + volumes wired; EKS Terraform + Helm chart in `deploy/` (validated, not yet end-to-end applied) | [infra](infra/infra.md) |
 
@@ -539,9 +541,9 @@ area docs.
   `name=` namespacing: `documents_huey` (LLM doc-reconciliation —
   `update_document_*`, `stale_doc_review`), `triggers_huey` (NL trigger
   eval, both `fan_out_trigger_eval` and the cron
-  `evaluate_scheduled_triggers`), `wiki_doc_index_huey` (FTS5/BM25
+  `evaluate_scheduled_triggers`), `wiki_bm25_huey` (FTS5/BM25
   reindex). Three worker containers in `docker-compose.yml`
-  (`worker-documents`, `worker-triggers`, `worker-wiki-doc-index`),
+  (`worker-documents`, `worker-triggers`, `worker-wiki-bm25`),
   each launched via `python -m app.tasks.run_worker <queue>`. Goal:
   isolate slow LLM work from the cheap indexer and from trigger fires
   so each queue's backlog only delays its own consumers. See

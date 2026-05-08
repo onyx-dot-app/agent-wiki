@@ -32,7 +32,7 @@ one queue doesn't backpressure the others.
 |---|---|---|---|
 | `documents`      | `documents_huey`      | LLM doc-reconciliation: `update_document_from_payload`, `update_document_direct`, `stale_doc_review` (cron) | Slow + LLM-bound. Keeps provider latency off the indexer / triggers paths. |
 | `triggers`       | `triggers_huey`       | Trigger evaluation, both event-driven (`fan_out_trigger_eval`) and time-based (`evaluate_scheduled_triggers`, cron) | Read-only (no commits). Trigger backlog can't delay event-log entries. |
-| `wiki_doc_index` | `wiki_doc_index_huey` | FTS5 / BM25 indexer: `reindex_path`, `reindex_document` | Cheap, no LLM. Search staleness bounded by indexer throughput alone. |
+| `wiki_bm25` | `wiki_bm25_huey` | FTS5 / BM25 indexer: `reindex_path`, `reindex_document` | Cheap, no LLM. Search staleness bounded by indexer throughput alone. |
 
 Cron tasks live on the queue that owns the work they generate:
 `evaluate_scheduled_triggers` is on `triggers_huey` (same evaluator as
@@ -48,7 +48,7 @@ venv / entry point; the queue name is a positional arg.
 fully populated, then launches a `Consumer` against the named queue.
 Tasks bound to the other two queues are inert in this process. Per-queue
 thread counts live in `_WORKERS` in `app/tasks/run_worker.py` (defaults
-today: `documents=2`, `triggers=4`, `wiki_doc_index=4`).
+today: `documents=2`, `triggers=4`, `wiki_bm25=4`).
 
 #### Docker (canonical)
 
@@ -58,7 +58,7 @@ today: `documents=2`, `triggers=4`, `wiki_doc_index=4`).
 |---|---|
 | `worker-documents`      | `python -m app.tasks.run_worker documents` |
 | `worker-triggers`       | `python -m app.tasks.run_worker triggers` |
-| `worker-wiki-doc-index` | `python -m app.tasks.run_worker wiki_doc_index` |
+| `worker-wiki-bm25` | `python -m app.tasks.run_worker wiki_bm25` |
 
 `docker compose up --build` brings up backend + nginx + frontend + all
 three workers.
@@ -74,7 +74,7 @@ For the backend / frontend commands and the rest of the dev story see
 cd backend
 ./.venv/bin/python -m app.tasks.run_worker documents       # LLM doc-updater
 ./.venv/bin/python -m app.tasks.run_worker triggers        # NL trigger eval (delta + scheduled)
-./.venv/bin/python -m app.tasks.run_worker wiki_doc_index  # FTS5 / BM25 reindex
+./.venv/bin/python -m app.tasks.run_worker wiki_bm25  # FTS5 / BM25 reindex
 ```
 
 Same venv as the backend. All three share `local_data/queue.sqlite`
@@ -87,7 +87,7 @@ Useful for narrow iteration; not safe for a real run.
 
 | Skipped worker | What stops working | What still works |
 |---|---|---|
-| `wiki_doc_index` | `documents_fts` falls behind; search results stale until you restart the worker (queued `reindex_path` calls drain on resume). | All wiki reads/writes; trigger eval. |
+| `wiki_bm25` | `documents_fts` falls behind; search results stale until you restart the worker (queued `reindex_path` calls drain on resume). | All wiki reads/writes; trigger eval. |
 | `triggers`       | Trigger fires don't get evaluated; `trigger.fire` rows stop appearing in the events log; the 5-min `evaluate_scheduled_triggers` cron stops noisy stub-error logs. | All wiki reads/writes; FTS reindex. |
 | `documents`      | `POST /api/documents/ingest` enqueues but nothing reconciles; the 6-hour `stale_doc_review` cron stops noisy stub-error logs. | Human edits via the UI (they don't go through this queue); FTS reindex; trigger eval. |
 
@@ -101,7 +101,7 @@ all five with one click. Worker configs:
 |---|---|---|
 | `Worker — documents (LLM doc-updater)`   | `app.tasks.run_worker documents`      | `documents_huey` — connector ingest, direct agent edits, `stale_doc_review` cron |
 | `Worker — triggers (NL trigger eval)`    | `app.tasks.run_worker triggers`       | `triggers_huey` — `fan_out_trigger_eval` + 5-min `evaluate_scheduled_triggers` cron |
-| `Worker — wiki_doc_index (FTS5 / BM25)`  | `app.tasks.run_worker wiki_doc_index` | `wiki_doc_index_huey` — `reindex_path`, `reindex_document` |
+| `Worker — wiki_bm25 (FTS5 / BM25)`  | `app.tasks.run_worker wiki_bm25` | `wiki_bm25_huey` — `reindex_path`, `reindex_document` |
 
 Pick the compound from the Run & Debug panel and hit ▶; five
 integrated-terminal panes open. To debug just one worker, run its
@@ -115,7 +115,7 @@ evaluate, the indexer won't catch up, etc.). Editor-wide caveats
 When a doc is saved (human edit, agent edit, doc-updater commit, etc.):
 
 1. The caller commits via `app/wiki/git.py:commit_file`.
-2. It enqueues `reindex_path(rel)` on `wiki_doc_index_huey`.
+2. It enqueues `reindex_path(rel)` on `wiki_bm25_huey`.
 3. It enqueues `fan_out_trigger_eval(rel, sha, change_kind, actor)` on
    `triggers_huey`. That task runs `find_matching_triggers(doc_path)`,
    which already returns triggers attached to the doc itself **and to
@@ -126,7 +126,7 @@ When a doc is saved (human edit, agent edit, doc-updater commit, etc.):
    `render_delta_message` → write a `trigger.fire` event row.
 4. Connector ingest goes through `update_document_from_payload` on
    `documents_huey` instead. When that task commits a new body, it
-   re-enqueues `reindex_path` (wiki_doc_index) and
+   re-enqueues `reindex_path` (wiki_bm25) and
    `fan_out_trigger_eval` (triggers), so the side effects fan out
    exactly like a human edit.
 
@@ -146,8 +146,8 @@ When a doc is saved (human edit, agent edit, doc-updater commit, etc.):
 
 | Task | Queue | Status | Trigger |
 |---|---|---|---|
-| `tasks.reindex.reindex_document(doc_id, path, title)` | `wiki_doc_index` | working | (legacy form; called by document_update once it's wired) |
-| `tasks.reindex.reindex_path(path)`                    | `wiki_doc_index` | working | preferred form — derives title from `# heading`; used by the wiki write path |
+| `tasks.reindex.reindex_document(doc_id, path, title)` | `wiki_bm25` | working | (legacy form; called by document_update once it's wired) |
+| `tasks.reindex.reindex_path(path)`                    | `wiki_bm25` | working | preferred form — derives title from `# heading`; used by the wiki write path |
 | `tasks.triggers.fan_out_trigger_eval`                 | `triggers`       | working | post-commit fan-out from the wiki write path / agent edit tools |
 | `tasks.document_update.update_document_from_payload`  | `documents`      | stub    | inbound ingest from Onyx/webhooks |
 | `tasks.document_update.update_document_direct`        | `documents`      | stub    | agent PUTs a doc directly through the API |
@@ -163,7 +163,7 @@ When a doc is saved (human edit, agent edit, doc-updater commit, etc.):
 ### Concurrency on the wiki repo
 - Git writes (commits, moves) happen on the `documents` worker (LLM
   doc-updater commits) and from web-tier request handlers (human edits,
-  agent tool edits). The `triggers` and `wiki_doc_index` workers are
+  agent tool edits). The `triggers` and `wiki_bm25` workers are
   read-only against git, so they don't contend on writes — but they
   *do* read while another process may be writing.
 - If we add a second `documents` worker (or commit from elsewhere), we
@@ -191,12 +191,12 @@ remain stubs.
 
 ### Working
 - Three Huey queues configured (`documents_huey`, `triggers_huey`,
-  `wiki_doc_index_huey`), all `SqliteHuey` instances sharing
+  `wiki_bm25_huey`), all `SqliteHuey` instances sharing
   `queue.sqlite` via `name=` namespacing.
 - Worker entry point (`run_worker.py <queue>`); per-queue worker counts
   in `_WORKERS`.
 - `docker-compose.yml` runs three worker services
-  (`worker-documents`, `worker-triggers`, `worker-wiki-doc-index`).
+  (`worker-documents`, `worker-triggers`, `worker-wiki-bm25`).
 - `reindex_document` and `reindex_path` are real and produce FTS rows.
 - `fan_out_trigger_eval` is real (see `natural-language-triggers/`).
 
@@ -208,7 +208,7 @@ remain stubs.
 ### Next up
 1. **`tasks.document_update.update_document_from_payload`** — see
    `agents/document-updater.md` next-up list. After commit, re-enqueue
-   `reindex_path` (wiki_doc_index) and `fan_out_trigger_eval` (triggers).
+   `reindex_path` (wiki_bm25) and `fan_out_trigger_eval` (triggers).
 2. **Periodic stubs** — implement `evaluate_scheduled_triggers` once
    `triggers/time_based.py:due_triggers` is real.
 3. **Test pattern** — set `<queue>_huey.immediate = True` in fixtures

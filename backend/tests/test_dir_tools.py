@@ -13,8 +13,15 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def _stub_side_effects(monkeypatch):
+    """Stub the post-write seam so tests don't queue Huey tasks.
+
+    ``move_path.py`` calls ``wiki_notify.after_path_move``; patching it
+    short-circuits both FTS updates and trigger fan-outs. Coverage of
+    those lives in ``test_save_to_fire_e2e.py`` and ``test_triggers_fanout.py``.
+    """
     monkeypatch.setattr(
-        "app.llm.agents.tools.move_path.reindex_path", lambda *a, **kw: None
+        "app.llm.agents.tools.move_path.wiki_notify.after_path_move",
+        lambda *a, **kw: None,
     )
 
 
