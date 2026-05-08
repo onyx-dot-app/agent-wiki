@@ -7,7 +7,7 @@
 > agent-wiki. Code-level architecture lives in the other per-area
 > docs (e.g. [flask-and-apis](../flask-and-apis/flask-and-apis.md)).
 
-_Last updated: 2026-05-07_
+_Last updated: 2026-05-08_
 
 ---
 
@@ -102,22 +102,52 @@ Not implemented. When this matters:
   in-cluster nginx pod that compose uses).
 
 Constraints baked into the chart:
-- **Backend + worker pinned to 1 replica** with `strategy: Recreate` and a
-  `podAffinity` rule that co-schedules them on one node — RWO PVCs +
-  single-writer SQLite + single git working tree leave no room for HA at
-  this layer.
+- **Backend pinned to 1 replica** + **one Deployment per Huey queue** (one
+  worker process for each of `documents`, `triggers`, `wiki_bm25`), all
+  using `strategy: Recreate` and a `podAffinity` rule that co-schedules
+  them on the backend's node — RWO PVCs + single-writer SQLite + single
+  git working tree leave no room for HA at this layer.
 - **Frontend** is stateless and free to scale.
 - **No nginx pod** — ingress-nginx replaces it. Path routing lives in the
   Ingress resource; `proxy-body-size` matches the 25m the compose nginx had.
+- **Single-AZ node group.** EBS volumes are AZ-bound; pinning the main node
+  group to a single subnet (`slice(module.vpc.private_subnets, 0, 1)`)
+  prevents cross-AZ node replacements from stranding the chart's RWO PVCs.
+- **`t3.large` node default.** `t3.medium` maxes at 17 pods/node; cluster
+  services + the chart's pods exhaust the budget and the worker can't
+  schedule. `t3.large` supports 35.
+- **Ingress-nginx via the AWS Load Balancer Controller** (not the legacy
+  in-tree NLB), with `aws-load-balancer-type=external` +
+  `nlb-target-type=ip` + `scheme=internet-facing`. The in-tree NLB doesn't
+  open NodePort to `0.0.0.0/0` on the node SG and defaults to internal
+  scheme — both make the LB unreachable from the public internet.
+
+The chart is published as a Helm repo from `gh-pages` of this repo by
+`.github/workflows/helm-release.yml`; consumers add it via
+`helm repo add agent-wiki <gh-pages url>` and pin to a Chart.yaml version.
+
+### Auth flows
+
+Two `AUTH_MODE`s are wired end-to-end:
+- **`basic`** — email + password signup/login, bcrypt-hashed in the `users`
+  table. First account is auto-promoted to admin.
+- **`oidc`** — Google (or any OIDC issuer) via authlib. `/api/auth/oidc/login`
+  redirects to the IdP; `/api/auth/oidc/callback` exchanges the code,
+  validates `email_verified` + the `ALLOWED_EMAILS` allow list, and upserts
+  the user. First OIDC user is auto-admin same as basic. Frontend swaps the
+  email/password form for a "Sign in with Google" button when
+  `auth_config.mode == "oidc"`.
+
+The team's own dogfood deploy runs in `oidc` mode locked to the org's email
+domain via `allowedEmails`.
 
 See `deploy/README.md` for the apply/install flow.
 
 ### Production deltas (still to do)
-- `SESSION_COOKIE_SECURE = True` behind HTTPS — chart wires `SECURE_COOKIES`
-  env from `values.yaml` (default `true`); backend code still needs to read
-  it (`main.py` currently hard-codes `False`).
-- Real `SECRET_KEY` from a secret store (External Secrets / AWS Secrets
-  Manager) — chart currently takes it via `--set secretKey=...`.
+- Real `SECRET_KEY` + `OIDC_CLIENT_SECRET` from a secret store (External
+  Secrets / AWS Secrets Manager). Chart currently takes them via `--set`.
+- Automated CI/CD: image build + helm upgrade on push (today: tag-driven
+  build, manual `helm upgrade`).
 - A health check that exercises `init_db()` and an LLM ping (optional).
 - Backup automation (cron `git push --mirror` for the wiki PVC, `VACUUM INTO`
   for SQLite). Not wired.
@@ -132,9 +162,15 @@ See `deploy/README.md` for the apply/install flow.
 - Migrations run on boot; FTS5 active.
 - Wiki repo auto-initializes.
 - Worker registers tasks on import.
-- `deploy/terraform/` validates (`terraform validate` clean); `deploy/helm/`
-  lints clean and templates against representative values. Not yet
-  end-to-end applied against a real AWS account.
+- **End-to-end production deploy.** `deploy/terraform/` (template) +
+  `deploy/helm/agent-workspace/` (published to gh-pages by chart-releaser)
+  brought up a live EKS cluster with TLS via Let's Encrypt and Google OIDC
+  sign-in. Backend + frontend + three queue workers all green.
+- **`SECURE_COOKIES`** env wires `SESSION_COOKIE_SECURE` correctly behind
+  HTTPS (no longer hard-coded `False`).
+- **Image build/push** to Docker Hub (`onyxdotapp/agent-wiki-{backend,frontend}`)
+  on `v*` tag in `agent-wiki:main` via `.github/workflows/docker-build-push.yml`.
+  Multi-arch (`linux/amd64,linux/arm64`).
 
 ### Stubbed / partial
 - `nginx.conf` is minimal — fine for local, may need tuning for prod
@@ -144,18 +180,26 @@ See `deploy/README.md` for the apply/install flow.
   output — works but unverified at production load.
 
 ### Not started
-- TLS / production hosting story.
+- **Automated CI/CD.** Today: cut a tag → image builds → `helm upgrade`
+  is manual. Want: on push to `agent-wiki:main`, build images and roll
+  out via a workflow in the private cluster repo. See "Next up".
+- Secrets in a real secret store. Today `secretKey` + `auth.oidc.clientSecret`
+  are passed via `helm --set` from 1Password.
 - Backup automation.
 - Metrics / tracing.
 - Healthcheck endpoint that exercises more than a static `{status: ok}`.
 - Per-deploy migration safety (rollback path if a migration breaks).
 
 ### Next up (concrete work units)
-1. **`/api/health` improvement** — verify DB reachable, queue path
-   writable, optionally pull an LLM-settings row count. Keep it cheap.
-2. **`SESSION_COOKIE_SECURE` toggle** via env (`SECURE_COOKIES=true`).
-3. **TLS docs** — even just a sample compose + `caddy` sidecar in
-   `deploy/` so people don't roll their own.
+1. **Automated deploy workflow.** Mirror the org's existing deploy
+   workflow pattern: on push to `agent-wiki:main`, fire image build,
+   then `repository_dispatch` to the cluster repo, which runs
+   `helm upgrade` against the live cluster.
+2. **Secrets to AWS Secrets Manager.** Move `secretKey` +
+   `auth.oidc.clientSecret` out of 1Password / `--set` into Secrets
+   Manager so the deploy workflow can pull them via OIDC.
+3. **`/api/health` improvement** — verify DB reachable, queue path
+   writable, optionally pull an LLM-settings row count.
 4. **Backup recipe** — short doc covering: cron `git push --mirror` for
    the wiki, `VACUUM INTO` for SQLite.
 
@@ -164,8 +208,4 @@ See `deploy/README.md` for the apply/install flow.
   in `background-tasks/background-tasks.md`. Becomes a real question if
   a single worker can't keep up; until then the helm chart pins worker
   replicas to 1 and co-schedules with the backend.
-- First dogfood deploy: are we using the bundled `deploy/terraform` (own
-  cluster) or installing the chart into the existing Onyx EKS? The chart
-  works for either; Terraform is only needed for the former.
-- Image registry — chart defaults assume a public GHCR/Docker Hub repo
-  (no ECR provisioning). Revisit if private images become a requirement.
+- Image registry — currently Docker Hub. Revisit if we want private images.

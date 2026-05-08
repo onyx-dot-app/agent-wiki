@@ -6,7 +6,7 @@
 > renders it. Update it whenever a product, architecture, or progress
 > decision is made — Claude reads this on every session.
 
-_Last updated: 2026-05-07_
+_Last updated: 2026-05-08_
 
 ### Per-area docs (each owns its own design + progress)
 - [Running locally — agent runbook](running-locally.md)
@@ -557,5 +557,30 @@ area docs.
   `app/triggers/storage.py:compute_path`) never matched any doc.
   `app/wiki/filesystem.py:parent_dirs` now appends `""` to its output;
   regression test in `tests/test_triggers_engine.py`.
+
+- **2026-05-08** — **Helm chart published as a Helm repo from `gh-pages`**
+  via `.github/workflows/helm-release.yml` (chart-releaser-action). Chart
+  shape evolved from the initial scaffold: one `Deployment` per Huey
+  queue (`documents`, `triggers`, `wiki_bm25`); single-AZ node group;
+  AWS LB Controller for ingress (`type=external`, `nlb-target-type=ip`,
+  `scheme=internet-facing`) instead of the legacy in-tree NLB. The
+  in-tree NLB doesn't open NodePort to `0.0.0.0/0` and defaults to
+  `internal` scheme, both of which leave the LB unreachable from the
+  public internet. See [infra/infra.md](infra/infra.md) for the live
+  shape.
+
+- **2026-05-08** — **OIDC auth wired end-to-end (Google).** The
+  `app/auth/oidc.py` stub was replaced with a real authorization-code
+  flow via authlib's Flask integration. New routes:
+  `GET /api/auth/oidc/login` (redirect to IdP) and
+  `GET /api/auth/oidc/callback` (exchange code → validate
+  `email_verified` + `ALLOWED_EMAILS` → upsert user → start session).
+  First OIDC user is auto-admin, same convention as basic. Frontend
+  swaps the email/password form for a "Sign in with Google" button when
+  `auth_config.mode == "oidc"`; `/signup` redirects to `/login` in OIDC
+  mode. Chart's `_helpers.tpl` derives `OIDC_REDIRECT_URI` from
+  `ingress.host` automatically. `SECURE_COOKIES` env now wires
+  `SESSION_COOKIE_SECURE` (was hard-coded `False`). 14 unit tests in
+  `tests/test_auth_oidc.py` cover upsert + every callback branch.
 
 _(Append new entries with a date prefix. Cross-cutting only.)_
