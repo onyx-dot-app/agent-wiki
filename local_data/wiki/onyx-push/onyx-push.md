@@ -10,7 +10,7 @@
 > doc-updater agent that processes the payload lives in
 > [agents/document-updater.md](../agents/document-updater.md).
 
-_Last updated: 2026-05-06_
+_Last updated: 2026-05-08_
 
 ---
 
@@ -22,40 +22,70 @@ _Last updated: 2026-05-06_
 
 The wiki should react to org-wide activity surfaced through Onyx
 connectors (Slack threads, Drive docs, GitHub PRs, …). Whenever Onyx
-indexes a document change from a public connector, it forwards a small
-event to agent-wiki, which queues a doc-updater pass.
+indexes a new or updated document from a public connector, it enqueues
+an async push to agent-wiki. Agent-wiki accumulates these records and
+runs one LLM doc-updater pass per doc on a periodic schedule.
 
-### Surface in agent-wiki
+### Onyx-side architecture (decided 2026-05-08)
 
-`POST /api/documents/ingest` — already specced (stub today). Body:
+**Feature control:** Three env vars in `app_configs.py`:
+- `AGENT_WIKI_ENABLED` — explicit boolean flag; feature is off unless this is `true`.
+- `AGENT_WIKI_BASE_URL` — required when enabled.
+- `AGENT_WIKI_API_KEY` — passed as a bearer token on every push request.
+
+**Where to hook in:** At the end of `index_doc_batch` in
+`backend/onyx/indexing/indexing_pipeline.py`, after
+`primary_doc_idx_insertion_records` is known. Only enqueue for docs that
+were actually indexed (new or updated) — unchanged docs are already
+filtered out by `get_doc_ids_to_update` and never reach this point.
+
+**Public connectors only:** Filter on `cc_pair.is_public` before
+enqueueing. Look up via `get_connector_credential_pair_from_id` using
+`IndexAttemptMetadata.connector_id` + `credential_id`. Skip the push if
+`is_public` is false.
+
+**Async via existing light queue:** No new worker or queue. Enqueue a
+`@shared_task` on the existing `light` Celery queue so the indexing path
+is never blocked by a slow or unavailable agent-wiki. The task:
+- `push_to_agent_wiki(doc_id, source, title, sections, metadata, doc_updated_at, tenant_id)`
+- Makes an HTTPS POST to `AGENT_WIKI_BASE_URL/api/documents/ingest`.
+- Authenticates with `AGENT_WIKI_API_KEY` as a bearer token.
+- Retries with exponential backoff on failure.
+
+**Payload shape:** Onyx already normalizes all connectors into a `Document`
+with `sections`. We concatenate the text sections and send as `content`.
 
 ```json
 {
-  "source": "onyx.slack",                 // <connector>.<source-id>
-  "external_id": "<source-side id>",      // optional, for dedup later
-  "occurred_at": "2026-05-06T14:00:00Z",
-  "target_path": "projects/foo.md",       // optional hint; if omitted,
-                                          // agent or routing logic decides
-  "payload": { "...": "free-form" }
+  "source": "slack",
+  "external_id": "<onyx-doc-id>",
+  "occurred_at": "2026-05-08T14:00:00Z",
+  "target_path": null,
+  "payload": {
+    "title": "...",
+    "url": "...",
+    "content": "...",
+    "updated_at": "..."
+  }
 }
 ```
 
-Auth: a per-source signed token (same approach as `POST /api/webhooks/<source>`).
+`target_path` is null for now — routing (which wiki doc to update) is
+TBD and will be resolved on the agent-wiki side.
 
-Backend behavior: validate signature → write `events` row of kind
-`webhook.in` → enqueue `tasks.document_update.update_document_from_payload`
-(if `target_path` provided) or `route_payload_to_doc` (TBD; out of scope
-for v0 unless we need it).
+### Surface in agent-wiki
 
-### What changes in Onyx
+`POST /api/documents/ingest` (stub today). Backend behavior:
+validate token → insert row into `pending_doc_updates` → return `{id}`
+immediately. A periodic drain task in `tasks.periodic` processes all
+pending rows per doc in one LLM pass.
 
-- A connector callback that fires after each indexed-document update.
-- Filter: only **public** connectors and public docs (per the brief).
-- Outbound HTTP to agent-wiki's ingest endpoint with the payload
-  shape above. Reuse Onyx's existing webhook/queue infra; do not block
-  the indexing path on this call.
-- Configuration: agent-wiki base URL + per-source signing secret,
-  managed in Onyx admin.
+**Dedup / idempotency:** `pending_doc_updates.id` is an idempotency key
+(`sha256(source + external_id + occurred_at)`). Duplicate POSTs from
+Onyx retries return the existing row without re-inserting.
+
+Auth: shared signing secret (HMAC), same approach as
+`POST /api/webhooks/<source>`.
 
 ### What we're explicitly **not** doing in v0
 - Two-way sync (agent-wiki pushing back to Onyx).
@@ -63,52 +93,37 @@ for v0 unless we need it).
 - Private-connector data — public only, by spec.
 - Backfill of historical Onyx data — only forward deltas.
 
-### Open contract questions (resolve before Onyx-side work starts)
-- **Payload shape per connector.** Slack thread vs. GitHub PR vs. Drive
-  doc — they're shaped differently. Two options:
-  1. Onyx normalizes to a common shape (URL, title, source, snippet,
-     change type, timestamp).
-  2. Pass through the connector-native payload and let the document-updater
-     prompt handle variance.
-  Lean toward (1) for v0 — simpler doc-updater prompt; we can specialize
-  later.
-- **Dedup / idempotency.** Onyx may retry; we should de-dup on
-  `(source, external_id)` for a window. Cheap to add: an extra index on
-  `events.payload_json` is awkward in SQLite, so consider a small
-  `ingest_seen(source, external_id, ts)` table.
-- **Routing — who picks `target_path`?** v0: Onyx picks. Later: an
-  agent step on our side decides which doc(s) to update.
-
 ---
 
 ## Progress
 
 ### Working
-- Nothing yet on the Onyx side.
-- `POST /api/webhooks/<source>` and `POST /api/documents/ingest` exist as
-  stubs in agent-wiki.
+- Nothing yet on either side.
 
 ### Stubbed
-- Both endpoints raise `NotImplementedError`.
+- `POST /api/documents/ingest` in agent-wiki raises `NotImplementedError`.
 
 ### Next up
-1. Lock the payload shape (option 1 vs. 2 above; recommend 1).
-2. Implement `POST /api/documents/ingest` with signature verify + event
-   record + enqueue.
-3. Add `ingest_seen` dedup table + check.
-4. Onyx-side: connector hook + outbound HTTP client + config storage.
-5. Test contract end-to-end in a dev pair.
 
-### Open questions
-- Auth: shared signing secret per source (HMAC) or token-per-source? HMAC
-  is fine and matches webhook conventions.
-- Where does `target_path` come from on the Onyx side? Probably a
-  per-connector mapping (e.g. "all Slack #project-foo updates →
-  `projects/foo.md`") configured in Onyx.
+**Onyx side (Bo):**
+1. Add `AGENT_WIKI_BASE_URL` + `AGENT_WIKI_API_KEY` to `app_configs.py`.
+2. Create `backend/onyx/background/celery/tasks/agent_wiki/tasks.py` with
+   `push_to_agent_wiki` task (`@shared_task` on existing light queue,
+   exponential backoff retry, bearer token auth).
+3. Enqueue from `index_doc_batch`: after `primary_doc_idx_insertion_records`
+   is known, for each successfully indexed doc, check `AGENT_WIKI_ENABLED`
+   and `cc_pair.is_public`, then enqueue.
+
+**Agent-wiki side (deferred):**
+1. Implement `POST /api/documents/ingest`: validate HMAC → insert into
+   `pending_doc_updates` → return `{id}`.
+2. Migration `0007` adding `pending_doc_updates` and `api_tokens` tables.
+3. Periodic drain task in `tasks.periodic`.
 
 ---
 
 ## Cross-link
 - Doc-updater agent contract: `agents/document-updater.md`
+- `pending_doc_updates` table design and drain task: `background-tasks/background-tasks.md`
 - Trigger fan-out runs after each ingest-driven commit:
   `natural-language-triggers/natural-language-triggers.md`
