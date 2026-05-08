@@ -1,0 +1,14 @@
+apiVersion: v1
+entries:
+  agent-workspace:
+  - apiVersion: v2
+    appVersion: 0.1.0
+    created: "2026-05-08T17:29:52.945535246Z"
+    description: Self-updating wiki for AI agents (Flask + SQLite + Huey + Next.js).
+    digest: d8666eabfc68680dceba3a6f985019f05ffba5300f46f1461663acc8a461e3b8
+    name: agent-workspace
+    type: application
+    urls:
+    - https://github.com/onyx-dot-app/agent-wiki/releases/download/agent-workspace-0.1.0/agent-workspace-0.1.0.tgz
+    version: 0.1.0
+generated: "2026-05-08T17:29:52.945540556Z"
