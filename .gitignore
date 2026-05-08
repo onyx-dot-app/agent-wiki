@@ -42,11 +42,12 @@ local_data/wiki/.git/
 .vscode/
 *.swp
 
-# terraform (deploy/terraform/) — lock file is committed (matches cloud-deployment-yamls)
+# terraform (deploy/terraform/ is a template; lock file is intentionally not tracked here)
 *.tfstate
 *.tfstate.*
 *.tfstate.backup
 .terraform/
+.terraform.lock.hcl
 crash.log
 crash.*.log
 override.tf

@@ -1,3 +1,6 @@
+# Template Terraform — see README.md in this directory. Copy into your own
+# private repo and customize before running.
+
 locals {
   full_name    = "${var.name}-${var.environment}"
   vpc_name     = "${local.full_name}-vpc"
@@ -197,6 +200,23 @@ resource "helm_release" "ingress_nginx" {
   }
 
   depends_on = [module.eks, kubernetes_storage_class_v1.gp3]
+}
+
+# AWS provisions the NLB asynchronously after the Service is created. Sleep
+# briefly so the data source below has a hostname to read; first-apply edge
+# cases are handled by the try() in outputs.tf.
+resource "time_sleep" "wait_for_ingress_lb" {
+  depends_on      = [helm_release.ingress_nginx]
+  create_duration = "60s"
+}
+
+data "kubernetes_service" "ingress_nginx" {
+  metadata {
+    name      = "ingress-nginx-controller"
+    namespace = "ingress-nginx"
+  }
+
+  depends_on = [time_sleep.wait_for_ingress_lb]
 }
 
 resource "helm_release" "cert_manager" {

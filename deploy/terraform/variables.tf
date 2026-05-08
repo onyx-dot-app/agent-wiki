@@ -1,7 +1,7 @@
 variable "name" {
   type        = string
-  description = "Base name used to derive cluster, VPC, and other resource names."
-  default     = "agent-workspace"
+  description = "Base name used to derive cluster, VPC, and other resource names. Override per-deploy."
+  default     = "agent-wiki"
 }
 
 variable "region" {
