@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  helm-lint:
+    name: Helm lint
+    runs-on: ubuntu-latest
+    if: ${{ hashFiles('deploy/helm/**') != '' }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.13.3
+
+      - name: helm lint
+        run: |
+          set -euo pipefail
+          for chart_dir in deploy/helm/*/; do
+            if [ -f "$chart_dir/Chart.yaml" ]; then
+              echo "Linting $chart_dir"
+              helm lint "$chart_dir" --set secretKey=ci-placeholder
+            fi
+          done
+
+  terraform-checks:
+    name: Terraform fmt + validate
+    runs-on: ubuntu-latest
+    if: ${{ hashFiles('deploy/terraform/**') != '' }}
+
+    defaults:
+      run:
+        working-directory: ./deploy/terraform
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.8
+
+      - name: terraform fmt
+        run: terraform fmt -check -recursive
+
+      - name: terraform init
+        run: terraform init -backend=false -input=false
+
+      - name: terraform validate
+        run: terraform validate
