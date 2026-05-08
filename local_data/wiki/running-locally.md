@@ -1,7 +1,7 @@
 # Running locally — agent guide
 
 Quick reference for an agent (or human) running and debugging
-agent-workspace on the host **without Docker**. The compose path in the
+agent-wiki on the host **without Docker**. The compose path in the
 README is canonical; this is the fast-iteration alternative we actually use
 day-to-day. See `architecture_and_progress.md` §3 "Local dev" for the
 architectural context; this doc is the concrete runbook.
@@ -83,8 +83,8 @@ bootstrap commit using the same identity the app uses:
 ```
 cd "$WIKI_DIR"     # default: local_data/wiki
 git init -b main 2>/dev/null || true     # no-op if already init'd
-git config user.email agent-workspace@local
-git config user.name agent-workspace
+git config user.email agent-wiki@local
+git config user.name agent-wiki
 git add -A
 git commit -m "Seed wiki from working tree"
 ```
@@ -203,7 +203,7 @@ There is **no rotated log file** outside this. If you want persistent logs
 across runs, redirect manually, e.g.:
 
 ```
-./.venv/bin/python -m app.main > /tmp/agent-workspace-backend.log 2>&1
+./.venv/bin/python -m app.main > /tmp/agent-wiki-backend.log 2>&1
 ```
 
 ### SQLite databases (useful for poking at state)

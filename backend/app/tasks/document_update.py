@@ -7,11 +7,16 @@ expensive.
 """
 from __future__ import annotations
 
+import logging
+
 from app.tasks.huey_app import huey
+
+log = logging.getLogger(__name__)
 
 
 @huey.task()
 def update_document_from_payload(doc_id: str, source: str, payload: dict) -> None:
+    log.info("update_document_from_payload doc_id=%s source=%s", doc_id, source)
     # TODO:
     #   1. Load current doc body from git (app.wiki.git.read_file).
     #   2. Call app.llm.agents.document_updater.run(doc_id, body, payload, source).
@@ -24,4 +29,5 @@ def update_document_from_payload(doc_id: str, source: str, payload: dict) -> Non
 @huey.task()
 def update_document_direct(doc_id: str, new_body: str, message: str, author: str) -> None:
     # Used when an agent edits a doc through the API rather than from a payload.
+    log.info("update_document_direct doc_id=%s author=%s", doc_id, author)
     raise NotImplementedError

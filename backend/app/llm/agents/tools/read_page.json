@@ -1,0 +1,14 @@
+{
+  "name": "read_page",
+  "description": "Read the full markdown body of a single wiki document. Use this AFTER `search_wiki` identifies a relevant page — snippets from search are not enough to answer detailed questions or to plan an edit. Returns `{path, title, body}`. Errors if the path doesn't exist or isn't a `.md` file. Calling `read_page` on a path is the only way to satisfy the read-before-write requirement enforced by `edit_doc` / `multi_edit` / `write_doc` for existing files.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "path": {
+        "type": "string",
+        "description": "Wiki-relative path to the markdown file (e.g. `auth/passwords.md`). Must end in `.md`."
+      }
+    },
+    "required": ["path"]
+  }
+}

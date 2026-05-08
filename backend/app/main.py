@@ -1,7 +1,6 @@
 """Flask app entry. Wires up blueprints, then serves on 8080."""
 from __future__ import annotations
 
-import logging
 from datetime import timedelta
 
 from flask import Flask
@@ -9,12 +8,13 @@ from flask import Flask
 from app.api import admin, auth, chat, documents, events, mcp, triggers, users, webhooks
 from app.config import CONFIG
 from app.db.sqlite import init_db
+from app.utils.logging import setup_logging
 from app.wiki.git import ensure_wiki_repo
 from app.wiki.search import bootstrap_index_if_empty
 
 
 def create_app() -> Flask:
-    logging.basicConfig(level=logging.INFO)
+    setup_logging()
     app = Flask(__name__)
     app.config.update(
         SECRET_KEY=CONFIG.secret_key,

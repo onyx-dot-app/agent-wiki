@@ -7,9 +7,11 @@ from __future__ import annotations
 # Importing modules registers tasks on the Huey instance.
 from app.tasks import document_update, periodic, reindex, triggers  # noqa: F401
 from app.tasks.huey_app import huey
+from app.utils.logging import setup_logging
 
 
 def main() -> None:
+    setup_logging()
     from huey.consumer import Consumer
     Consumer(huey, workers=2, worker_type="thread").run()
 

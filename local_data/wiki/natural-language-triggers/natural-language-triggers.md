@@ -1,6 +1,6 @@
 # Natural-Language Triggers
 
-> **Part of agent-workspace v0.** See the master doc
+> **Part of agent-wiki v0.** See the master doc
 > [`../architecture_and_progress.md`](../architecture_and_progress.md) for
 > the cross-area map. This doc owns trigger storage (git-backed YAML +
 > SQLite cache), CRUD API, matching engine, NL evaluation, and the
@@ -9,7 +9,7 @@
 > (webhooks / external services / agent messages) is **deferred** — see
 > the TBD callout in `../architecture_and_progress.md` §1.
 
-_Last updated: 2026-05-06_
+_Last updated: 2026-05-07_
 
 ---
 
@@ -42,33 +42,47 @@ team triggers") is **backlog** — see below. Don't implement in v0.
 | `delta`    | A doc within `scope_path` changes (or new file added in a directory scope) | **yes** |
 | `schedule` | Cron matches | wire up in `time_based.py`; v0 still record-only |
 
-### Storage: SQLite-only (v0)
+### Storage: file-system as source of truth, SQLite as cache (2026-05-07)
 
-The original design called for git-backed YAML at
-`<wiki>/.triggers/<id>.yaml` as the source of truth with SQLite as a cache.
-**That was dropped in v0** (decision: 2026-05-06) — triggers live only in
-the `triggers` table, mutated through `app/triggers/repo.py`. We trade
-trigger history/auditability via git for a simpler write path; can revisit
-if/when the design is needed.
+A trigger's YAML file in the wiki repo is canonical. SQLite mirrors it for
+fast fan-out lookup and id→path resolution. This re-litigates the
+2026-05-06 SQLite-only call so trigger config has git history.
 
-`app/triggers/storage.py` is the dead leftover — it can go on a future
-cleanup pass. The reference YAML shape (kept here for when YAML is
-revisited):
+**Layout** (per `../difficult_separable_work.md`): the file sits inside
+the directory it acts on — no centralized `.triggers/` dir.
+
+| scope        | filename                                | example                              |
+|---           |---                                      |---                                   |
+| doc          | `.trigger_<id>_<docbase>.yaml`          | `projects/.trigger_trg_ab12_foo.yaml` |
+| folder       | `.trigger_<id>.yaml`                    | `projects/.trigger_trg_cd34.yaml`     |
+
+The doc-suffix (`_<docbase>`) is a human hint; the canonical id lives in
+the YAML. `kind_of_scope` is heuristic on the scope path: `*.md` → doc,
+otherwise dir.
+
+**File contents:**
 
 ```yaml
-id: trg_<uuid>
+id: trg_ab12cd34
 owner_user_id: usr_…
-scope_path: projects/foo.md       # or a directory: projects/
-kind: delta                       # or schedule
+scope_path: projects/foo.md       # or a directory: projects
+kind: delta                       # schedule still deferred
 nl_description: |
   Fire when this project's status changes from green to yellow.
-action:                           # v0: ignored; required by schema only when used later
-  kind: agent_message             # or webhook | http
-  config: {}
-schedule_cron: null               # only for kind=schedule
 enabled: true
-created_at: 2026-05-06T...
+created_at: 2026-05-07T...
 ```
+
+**Mutation order** (`app/triggers/repo.py`): write/delete the file
+first, then upsert the SQLite row. If the row write fails after the file
+commit, `repo.rebuild_from_filesystem()` re-converges the cache by
+walking `git ls-files` for `.trigger_*.yaml`.
+
+**Scope changes** rename the file (delete old path, write new) so the
+filename stays a useful hint.
+
+`migrations/0003_triggers_file_path.sql` adds the `file_path` column on
+the `triggers` cache row.
 
 ### Scope resolution
 
@@ -92,72 +106,161 @@ WHERE kind = 'delta'
   AND scope_path IN (?, ?, ...)   -- doc_path + parent_dirs
 ```
 
-### NL evaluation
+### NL evaluation — two phases
 
-`app/triggers/natural_language.py:matches(nl_description, before, after,
-*, change_kind)` runs a single `client.complete()` call (via the LLM seam
-described in [agents/chat-agent.md](../agents/chat-agent.md)) with a
-tool / JSON-schema-shaped output:
+A trigger has two natural-language fields: an **if** (`nl_description` —
+when to fire) and a **message** (what to deliver). Each gets its own
+LLM call. Both calls share the same context payload built by
+`app/triggers/diff.py:build_payload`:
+
+1. The whole wiki at its latest version (`=== WIKI (latest version) ===`,
+   each `.md` file with its current body, bounded by per-doc and total
+   character budgets).
+2. The change view (`=== CHANGE ===`), which is a unified `+/-` diff
+   for edits, the full body for new files, or both bodies side-by-side
+   for high-density rewrites.
+
+**Phase 1** — `app/triggers/natural_language.py:matches(nl_description,
+payload)` runs one `client.complete()` call with a `report` tool that
+returns:
 
 ```json
 { "matches": true, "reason": "Status table flipped from green to yellow." }
 ```
 
 Hard rules (in the prompt):
+- **Diff-first.** Triggers should typically be evaluated against the
+  diff. Only evaluate against overall current state when the description
+  is clearly about state ("when status is yellow") rather than an update
+  ("when status flips to yellow"). When in doubt, evaluate the diff.
 - **Conservative.** False positives are louder than false negatives in v0.
 - **Cite the change.** The `reason` should quote or paraphrase what changed.
-- **No outside knowledge.** Only what's in `before`/`after`.
+- **No outside knowledge.** Only what's in the payload.
 
-### Trigger evaluation flow (designed; implementation is stub)
+**Phase 2** — `render_message(message_instruction, payload, *, reason)`
+runs only on a phase-1 match. It uses a `render` tool to compose the
+final notification text from the owner's instruction, grounded in the
+same payload plus the phase-1 reason. Plain text or markdown out, no
+meta-commentary. On LLM error or missing tool call, we fall back to the
+raw instruction so the Event Log still receives something the owner
+authored.
+
+#### New-file-in-dir variant (single combined call)
+
+When a directory-scoped trigger fires on a `change_kind = "create"` —
+i.e. a brand-new file appears under the scoped directory — the standard
+diff payload is misleading: every line of the new file would be a `+`
+line, with nothing on the BEFORE side. Showing it as a diff just makes
+the model re-read the same body twice.
+
+For this case we use a different payload and a single LLM call:
+
+* **Payload** — `app/triggers/diff.py:build_new_file_payload` returns
+  the wiki snapshot followed by a `=== NEW FILE ===` block with the
+  path and the file's full body. No diff section.
+* **Call** — `app/triggers/natural_language.py:evaluate_new_file_in_dir`
+  combines the firing-condition check and the message render into one
+  `client.complete()` call. The model is asked to emit a single JSON
+  object as its entire response:
+
+  ```json
+  {"triggered": true, "trigger_message": "..."}
+  ```
+
+  We strip optional markdown fences and tolerate stray prose around the
+  object, but require valid JSON. On parse failure or LLM error we drop
+  the fire (`(False, "")`) — better than sending a confused message. If
+  the model says `triggered=true` with a blank message, we fall back to
+  the owner's raw instruction.
+
+  Routing logic lives in `tasks/triggers.py:fan_out_trigger_eval`:
+  `change_kind == "create"` AND `trigger.scope_path != doc_path` →
+  new-file-in-dir path; everything else → standard two-phase path.
+
+### Trigger evaluation flow
 1. A doc commit lands (via API or the editor's Save).
 2. Worker enqueues reindex + trigger evaluation.
 3. For the changed file path **and each parent directory**, load enabled
    triggers from cache.
-4. For each, run a small LLM call: "given this change and this NL
-   description, did it match?" → yes/no + one-line reason.
-5. On match, write an `events` row of kind `trigger.fire`.
-6. **No external dispatch in v0.** Surface in the Events tab.
+4. Build the wiki snapshot **once** per fan-out (same context for every
+   trigger on a given commit) and combine it with the change view into
+   a single payload.
+5. For each trigger, run phase 1 (`matches`); on match, run phase 2
+   (`render_message`) to produce the delivered text.
+6. Write a `trigger.fire` event with the rendered message and the raw
+   instruction (kept for audit / re-render later).
+7. **No external dispatch in v0.** Surface in the Events tab.
 
 ### Fan-out (post-commit)
 
-A new Huey task — likely `tasks/triggers.py:fan_out(doc_path, before, after,
-change_kind)` — runs **after** every successful `commit_file` (see
+`tasks/triggers.py:fan_out_trigger_eval(doc_path, sha, change_kind, actor)`
+runs **after** every successful `commit_file` (see
 [background-tasks](../background-tasks/background-tasks.md)):
 
-1. `find_matching_triggers(doc_path)`.
-2. For each, call `matches(...)`.
-3. If `matches=true`, write `events` row of kind `trigger.fire` with
-   `payload_json = {trigger_id, doc_path, change_kind, reason, verdict}`.
-
-This is the only thing v0 does on a fire. **Do not add outbound dispatch.**
+1. `find_matching_triggers(doc_path)` (SQL over the cache, includes parent dirs).
+2. Read BEFORE/AFTER from git at `{sha}^`/`{sha}`.
+3. `diff.build_wiki_snapshot()` once, then `diff.build_payload(...)` and
+   (when `change_kind == "create"`) `diff.build_new_file_payload(...)`.
+4. For each trigger, route by case:
+   * Directory-scoped + create →
+     `engine.evaluate_new_file_in_dir(trigger, instruction, new_file_payload)`
+     (single JSON-output call returning `(triggered, trigger_message)`).
+   * Otherwise → `engine.evaluate_delta(trigger, payload)` and, on match,
+     `engine.render_delta_message(instruction, payload, reason=...)`.
+5. Insert one `trigger.fire` row carrying
+   `{trigger_id, doc_path, sha, change_kind, reason, message,
+   message_instruction, destination}`.
 
 ### Cost (watch this)
-- Every doc commit × every matching trigger = an LLM call.
+- Every doc commit × every matching trigger = **two** LLM calls on a
+  match (phase 1 always; phase 2 only when matched).
 - Mitigate with: tight prompts, small models (`claude-haiku-*` is fine for
-  yes/no), short `before`/`after` slices (truncate or diff-only).
+  both phases), and the per-doc / total-wiki budgets in `diff.py` to keep
+  the payload bounded.
 - Track per-fire input/output tokens in the event payload so we can
   compute spend later.
 
 ### File-by-file (current state)
 
-- `app/triggers/storage.py` — paths only (`<wiki>/.triggers/<id>.yaml`);
-  `ensure_triggers_dir`. Real read/write/delete TODO.
+- `app/triggers/storage.py` — `compute_path` (inline-next-to-scope layout),
+  `serialize`/`parse` (PyYAML), `write_trigger`/`delete_trigger`/
+  `read_trigger` (via `wiki.git`), `list_all_files` (walks tracked
+  paths for `.trigger_*.yaml`).
+- `app/triggers/repo.py` — file-first mutation: `create`/`update`/`delete`
+  write/delete the YAML, then upsert/delete the SQLite row.
+  `rebuild_from_filesystem` for crash recovery / boot reconciliation.
 - `app/triggers/engine.py` — `find_matching_triggers` (SQL over `triggers`
-  cache, includes parent dirs) and `evaluate_delta` (thin wrapper over
-  `natural_language.matches`) live. `dispatch` left stubbed (deferred).
-- `app/triggers/natural_language.py:matches` — live; single `complete()`
-  call with a `report` tool returning `{matches, reason}`. LLM errors
-  surface as `(False, "llm_error:<code>")`.
-- `app/triggers/diff.py` — builds the BEFORE/AFTER snippets: unified diff
-  for edits, full body for creates, full-body fallback when diff covers
-  >50% of the file. Truncates each side at 8KB.
+  cache, includes parent dirs), plus thin wrappers `evaluate_delta`
+  (phase 1, calls `natural_language.matches`), `render_delta_message`
+  (phase 2, calls `natural_language.render_message`), and
+  `evaluate_new_file_in_dir` (single combined call for the new-file-in-dir
+  case). `dispatch` left stubbed (deferred).
+- `app/triggers/natural_language.py` — three entry points.
+  Standard path: `matches(nl_description, payload)` →
+  `(matched, reason)` via the `report` tool, and
+  `render_message(instruction, payload, *, reason)` → delivered text via
+  the `render` tool (falls back to the raw instruction on LLM error or
+  missing tool call). New-file-in-dir path:
+  `evaluate_new_file_in_dir(nl_description, instruction, payload)` →
+  `(triggered, trigger_message)` parsed from a JSON object emitted as
+  the assistant's text content (no tool call). System prompts include
+  diff-first guidance and explicit JSON-only rules.
+- `app/triggers/diff.py` — `build_wiki_snapshot()` concatenates every
+  tracked `.md` doc (per-doc cap 16KB, total cap 200KB).
+  `build_change_view(...)` produces the `=== CHANGE ===` block: unified
+  diff for edits, full body for creates, both bodies side-by-side for
+  high-density rewrites. `build_new_file_view(...)` /
+  `build_new_file_payload(...)` produce the `=== NEW FILE ===` variant
+  for the directory-scoped-on-create case (path + body, no diff).
+  `build_payload(...)` glues snapshot + change view into one string.
 - `app/tasks/triggers.py:fan_out_trigger_eval` — Huey task wired into the
   human-edit path (`api/documents.py:put_document_by_path` after
   `commit_file`). Reads BEFORE from `sha^`, AFTER from `sha`, writes
   `trigger.fire` events on match. Registered in `run_worker.py`.
 - `app/triggers/time_based.py:due_triggers` — stub.
-- `app/api/triggers.py` — all CRUD endpoints still raise. To exercise the
-  fire-path today, seed a row directly in the `triggers` SQLite table.
+- `app/api/triggers.py` — `GET /` (owner-scoped list), `POST /`, `PUT /<id>`,
+  `DELETE /<id>`, `GET /<id>/history` (git log on the YAML file). Threads
+  the current user as the git author.
 
 ### Out of scope (do not build)
 - Outbound webhooks / HTTP calls / agent messages on fire.
@@ -169,67 +272,40 @@ This is the only thing v0 does on a fire. **Do not add outbound dispatch.**
 ## Progress
 
 ### Working
-- Schema in place (migration `0001_init.sql`): `triggers` table with all
-  needed columns; `events` table for fires.
+- Schema in place (migrations `0001_init.sql`, `0003_triggers_file_path.sql`):
+  `triggers` table with all needed columns including `file_path`; `events`
+  table for fires.
 - `wiki.filesystem.parent_dirs` — used for ancestor lookup.
-- `wiki.git.commit_file` / `delete_path` — needed for YAML mutations.
+- `wiki.git.commit_file` / `delete_path` / `history` — used for YAML
+  mutations and trigger config history.
 - LLM client + `LLMError` taxonomy — usable from `matches`.
 - **Fire-path on human edits** (post-commit fan-out): `engine.find_matching_triggers`,
   `engine.evaluate_delta`, `natural_language.matches`, `diff.build_payload`,
   and `tasks.triggers.fan_out_trigger_eval` are all live and tested
   (`backend/tests/test_triggers_*`). Triggered from
   `api/documents.py:put_document_by_path` after `commit_file`.
+- **Trigger CRUD on git-backed YAML** — `storage.write_trigger` / `read_trigger`
+  / `delete_trigger` / `list_all_files`; `repo.create` / `update` / `delete`
+  / `rebuild_from_filesystem`; `api/triggers.py` endpoints including
+  `GET /<id>/history`.
 
 ### Stubbed, not wired
-- `app/triggers/storage.py` real read/write/delete (only path helpers exist).
 - `app/triggers/time_based.py:due_triggers`.
-- `app/api/triggers.py` — all CRUD endpoints raise (so triggers must be
-  seeded via SQL until the API is wired).
 - `engine.dispatch` — deferred per v0 scope (no outbound action).
+- `repo.rebuild_from_filesystem` — implemented but not yet called on boot;
+  hook into app startup if/when crash recovery becomes a concern.
 
 ---
 
 ## Work breakdown (Next up)
 
-### D. Triggers (CRUD + storage + engine + fan-out)
-
-1. **Storage (real)**
-   - `write_yaml(trigger)` → write file + commit.
-   - `read_yaml(trigger_id)` → parse file.
-   - `delete_yaml(trigger_id)` → `wiki.git.delete_path` + commit.
-   - `list_yaml()` → walk `<wiki>/.triggers/`.
-
-2. **Repo (SQLite cache)**
-   - `upsert(trigger)`, `delete(trigger_id)`, `list_for_paths(paths)`,
-     `list_for_owner(user_id)`. Pattern: `app/auth/users.py`.
-   - `rebuild_from_yaml()` for crash recovery.
-
-3. **CRUD API** (`app/api/triggers.py`)
-   - `GET /` (owner-scoped), `POST /`, `PUT /<id>`, `DELETE /<id>`,
-     `GET /<id>/history` (git log on the YAML path).
-   - v0 only honors `kind=delta`. Reject other kinds with 400 until
-     time-based is wired.
-
-4. **Matching engine**
-   - `find_matching_triggers(doc_path)` per the SQL above.
-   - `evaluate_delta(trigger, before, after, change_kind)` → returns
-     `(matched: bool, reason: str)`.
-
-5. **NL evaluator**
-   - `matches(...)` with the JSON-schema tool output.
-   - Use the configured cheap model unless overridden — these run hot.
-
-6. **Fan-out task**
-   - New `app/tasks/triggers.py:fan_out_trigger_eval(doc_path, before,
-     after, change_kind)`.
-   - Wire into the wiki write path (after `commit_file` succeeds; see
-     [flask-and-apis B](../flask-and-apis/flask-and-apis.md#b-wiki-write-path)
-     and [background-tasks](../background-tasks/background-tasks.md)).
-   - Records `trigger.fire` events.
-
-7. **Triggers UI** — owned by [frontend](../frontend/frontend.md);
-   inline on the doc and directory pages. Lists, add (NL description input),
-   edit, delete, enable/disable.
+### D. Triggers — remaining
+- **Boot-time cache reconciliation.** Call `repo.rebuild_from_filesystem`
+  during app startup (or via an admin endpoint) so cache drift after a
+  crash heals automatically.
+- **Triggers UI** — owned by [frontend](../frontend/frontend.md); inline
+  on the doc and directory pages. Surfaces `GET /<id>/history` for
+  per-trigger config history.
 
 ### L. Time-based checks (V0 brief)
 - Implement `due_triggers(now_iso)` matching enabled `kind=schedule`
@@ -263,5 +339,6 @@ This is the only thing v0 does on a fire. **Do not add outbound dispatch.**
 - Per-trigger debounce / dedup window for chatty docs.
 - Better UI for cross-cutting trigger scopes (e.g. "all docs under
   `projects/`").
-- YAML/git-backed trigger source-of-truth — a re-litigation of the v0
-  decision once we want trigger history beyond what SQLite gives us.
+- ~~YAML/git-backed trigger source-of-truth — a re-litigation of the v0
+  decision once we want trigger history beyond what SQLite gives us.~~
+  **Done 2026-05-07** (see Storage section).

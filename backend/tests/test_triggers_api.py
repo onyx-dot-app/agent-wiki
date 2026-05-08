@@ -13,7 +13,7 @@ from app.db.sqlite import connect
 
 
 @pytest.fixture
-def app(tmp_db):
+def app(tmp_repo):
     app = Flask(__name__)
     app.config.update(SECRET_KEY="test-secret", TESTING=True)
     app.register_blueprint(triggers_api.bp, url_prefix="/api/triggers")
@@ -53,12 +53,14 @@ def test_create_then_list(client):
 
     res = client.post(
         "/api/triggers",
-        json={"scope_path": "projects/foo.md", "nl_description": "fire on status flip"},
+        json={"scope_path": "projects/foo.md", "nl_description": "fire on status flip", "message": "status flipped"},
     )
     assert res.status_code == 201, res.get_json()
     body = res.get_json()
     assert body["id"].startswith("trg_")
     assert body["enabled"] is True
+    assert body["message"] == "status flipped"
+    assert body["destination"] is None
 
     res = client.get("/api/triggers")
     assert res.status_code == 200
@@ -72,24 +74,36 @@ def test_create_validation_errors(client):
     _login(client, uid)
 
     # missing scope_path
-    res = client.post("/api/triggers", json={"nl_description": "x"})
+    res = client.post("/api/triggers", json={"nl_description": "x", "message": "m"})
     assert res.status_code == 400
 
     # missing nl_description
-    res = client.post("/api/triggers", json={"scope_path": "a.md"})
+    res = client.post("/api/triggers", json={"scope_path": "a.md", "message": "m"})
+    assert res.status_code == 400
+
+    # missing message
+    res = client.post("/api/triggers", json={"scope_path": "a.md", "nl_description": "x"})
     assert res.status_code == 400
 
     # path traversal
     res = client.post(
         "/api/triggers",
-        json={"scope_path": "../escape", "nl_description": "x"},
+        json={"scope_path": "../escape", "nl_description": "x", "message": "m"},
     )
     assert res.status_code == 400
 
     # unsupported kind
     res = client.post(
         "/api/triggers",
-        json={"scope_path": "a.md", "nl_description": "x", "kind": "schedule"},
+        json={"scope_path": "a.md", "nl_description": "x", "message": "m", "kind": "schedule"},
+    )
+    assert res.status_code == 400
+
+    # unsupported destination
+    res = client.post(
+        "/api/triggers",
+        json={"scope_path": "a.md", "nl_description": "x", "message": "m",
+              "destination": "https://example.com/hook"},
     )
     assert res.status_code == 400
 
@@ -99,10 +113,10 @@ def test_owner_isolation_on_list(client):
     b = _seed_user("usr_b", "b@x.com")
 
     _login(client, a)
-    client.post("/api/triggers", json={"scope_path": "a.md", "nl_description": "x"})
+    client.post("/api/triggers", json={"scope_path": "a.md", "nl_description": "x", "message": "m"})
 
     _login(client, b)
-    client.post("/api/triggers", json={"scope_path": "b.md", "nl_description": "y"})
+    client.post("/api/triggers", json={"scope_path": "b.md", "nl_description": "y", "message": "m"})
     rows = client.get("/api/triggers").get_json()["triggers"]
     assert {r["scope_path"] for r in rows} == {"b.md"}
 
@@ -112,17 +126,29 @@ def test_update_disable_then_re_enable(client):
     _login(client, uid)
     tid = client.post(
         "/api/triggers",
-        json={"scope_path": "a.md", "nl_description": "orig"},
+        json={"scope_path": "a.md", "nl_description": "orig", "message": "m"},
     ).get_json()["id"]
 
     res = client.put(f"/api/triggers/{tid}", json={"enabled": False})
     assert res.status_code == 200
     assert res.get_json()["enabled"] is False
 
-    res = client.put(f"/api/triggers/{tid}", json={"enabled": True, "nl_description": "new"})
+    res = client.put(
+        f"/api/triggers/{tid}",
+        json={"enabled": True, "nl_description": "new", "message": "m2"},
+    )
     body = res.get_json()
     assert body["enabled"] is True
     assert body["nl_description"] == "new"
+    assert body["message"] == "m2"
+
+    # destination updates: null is ok, anything else rejected.
+    res = client.put(f"/api/triggers/{tid}", json={"destination": None})
+    assert res.status_code == 200
+    res = client.put(
+        f"/api/triggers/{tid}", json={"destination": "https://example.com/hook"}
+    )
+    assert res.status_code == 400
 
 
 def test_cannot_modify_anothers_trigger(client):
@@ -131,7 +157,7 @@ def test_cannot_modify_anothers_trigger(client):
 
     _login(client, a)
     tid = client.post(
-        "/api/triggers", json={"scope_path": "a.md", "nl_description": "x"}
+        "/api/triggers", json={"scope_path": "a.md", "nl_description": "x", "message": "m"}
     ).get_json()["id"]
 
     _login(client, b)
@@ -143,7 +169,7 @@ def test_delete_then_404(client):
     uid = _seed_user()
     _login(client, uid)
     tid = client.post(
-        "/api/triggers", json={"scope_path": "a.md", "nl_description": "x"}
+        "/api/triggers", json={"scope_path": "a.md", "nl_description": "x", "message": "m"}
     ).get_json()["id"]
 
     assert client.delete(f"/api/triggers/{tid}").status_code == 204

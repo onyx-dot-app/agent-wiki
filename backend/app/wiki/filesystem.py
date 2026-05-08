@@ -1,15 +1,19 @@
 """Path utilities scoped to the wiki working tree."""
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 
 from app.config import CONFIG
 
+log = logging.getLogger(__name__)
+
 
 def safe_rel_path(rel_path: str) -> str:
     """Reject path traversal. Returns a normalized path or raises ValueError."""
     if rel_path.startswith("/") or ".." in Path(rel_path).parts:
+        log.warning("rejected unsafe wiki path: %r", rel_path)
         raise ValueError(f"unsafe path: {rel_path!r}")
     return os.path.normpath(rel_path)
 

@@ -3,14 +3,33 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { AppShell } from "@/components/common/AppShell";
+import { TriggerHistoryModal } from "@/components/triggers/TriggerHistoryModal";
 import { TriggerModal } from "@/components/triggers/TriggerModal";
 import { useRequireAuth } from "@/lib/auth";
 import {
   deleteTrigger,
+  formatScopePath,
+  getTriggerVersion,
   listTriggers,
   updateTrigger,
   type Trigger,
 } from "@/lib/triggers";
+
+function formatRelative(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return "";
+  const diffMs = Date.now() - t;
+  const sec = Math.round(diffMs / 1000);
+  if (sec < 60) return "just now";
+  const min = Math.round(sec / 60);
+  if (min < 60) return `${min} min ago`;
+  const hr = Math.round(min / 60);
+  if (hr < 24) return `${hr} hr ago`;
+  const day = Math.round(hr / 24);
+  if (day < 30) return `${day} day${day === 1 ? "" : "s"} ago`;
+  return new Date(iso).toLocaleDateString();
+}
 
 export default function TriggersPage() {
   const { user, loading } = useRequireAuth();
@@ -19,6 +38,7 @@ export default function TriggersPage() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<Trigger | null>(null);
+  const [historyFor, setHistoryFor] = useState<Trigger | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -138,9 +158,20 @@ export default function TriggersPage() {
                       fontSize: 12,
                       color: "#6b7280",
                       marginBottom: 4,
+                      display: "flex",
+                      gap: 10,
+                      alignItems: "baseline",
                     }}
                   >
-                    {t.scope_path}
+                    <span title={t.scope_path}>{formatScopePath(t.scope_path)}</span>
+                    {t.last_edited_at && (
+                      <span
+                        title={new Date(t.last_edited_at).toLocaleString()}
+                        style={{ fontFamily: "inherit", fontSize: 11, color: "#9ca3af" }}
+                      >
+                        edited {formatRelative(t.last_edited_at)}
+                      </span>
+                    )}
                   </div>
                   <div style={{ fontSize: 14, color: "#111", whiteSpace: "pre-wrap" }}>
                     {t.nl_description}
@@ -177,6 +208,13 @@ export default function TriggersPage() {
                     Edit
                   </button>
                   <button
+                    onClick={() => setHistoryFor(t)}
+                    disabled={busyId === t.id}
+                    style={iconBtn}
+                  >
+                    History
+                  </button>
+                  <button
                     onClick={() => onDelete(t)}
                     disabled={busyId === t.id}
                     style={{ ...iconBtn, color: "#dc2626", borderColor: "#fecaca" }}
@@ -204,6 +242,27 @@ export default function TriggersPage() {
               next[i] = saved;
               return next;
             });
+          }}
+        />
+
+        <TriggerHistoryModal
+          trigger={historyFor}
+          onClose={() => setHistoryFor(null)}
+          onSelectVersion={async (sha) => {
+            if (!historyFor) return;
+            try {
+              const version = await getTriggerVersion(historyFor.id, sha);
+              setEditing({
+                ...historyFor,
+                scope_path: version.scope_path,
+                nl_description: version.nl_description,
+                enabled: version.enabled,
+              });
+              setHistoryFor(null);
+              setModalOpen(true);
+            } catch (e) {
+              setListError(e instanceof Error ? e.message : "failed to load version");
+            }
           }}
         />
       </main>

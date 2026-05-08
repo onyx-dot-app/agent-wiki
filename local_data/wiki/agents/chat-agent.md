@@ -1,6 +1,6 @@
 # Agent harness — Chat Agent
 
-> **Part of agent-workspace v0.** See the master doc
+> **Part of agent-wiki v0.** See the master doc
 > [`../architecture_and_progress.md`](../architecture_and_progress.md) for
 > the cross-area map. Sister doc:
 > [agents/document-updater.md](document-updater.md). Frontend rendering

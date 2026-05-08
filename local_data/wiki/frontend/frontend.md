@@ -1,6 +1,6 @@
 # Frontend (ChatUI + Wiki UI + Events + Admin)
 
-> **Part of agent-workspace v0.** See the master doc
+> **Part of agent-wiki v0.** See the master doc
 > [`../architecture_and_progress.md`](../architecture_and_progress.md) for
 > the cross-area map. Backend-side chat lives in
 > [agents/chat-agent.md](../agents/chat-agent.md); trigger semantics in
@@ -9,7 +9,7 @@
 > the auth/api libs, the AppShell chrome, and the three primary views
 > (Wiki / Chat / Events).
 
-_Last updated: 2026-05-06_
+_Last updated: 2026-05-07_
 
 ---
 
@@ -41,29 +41,21 @@ _Last updated: 2026-05-06_
 | Triggers | `/triggers`                           | Owner's triggers (full CRUD) |
 | Events   | `/events`                             | Owner's trigger-fire history |
 
-**Chat is not a tab.** It's a collapsible side panel — see "Chat side
-panel" below.
-
-**Current AppShell has Home + Wiki + Chat + Triggers — needs swap to
-Wiki + Triggers + Events, and Chat needs to move from `/chat` page to a
-side panel.**
+**Chat is not a tab.** It's a global widget — see "Chat widget" below.
 
 Avatar menu (top of sidebar) keeps Admin + Sign out.
 
 ### File-by-file (current state)
 
 #### `src/app/`
-- `layout.tsx` — wraps everything in `<AuthProvider>`.
+- `layout.tsx` — wraps everything in `<AuthProvider>` and renders the
+  global `<ChatWidget>`.
 - `page.tsx` — gated home, wrapped in `<AppShell>`.
 - `login/page.tsx`, `signup/page.tsx` — **real**, fully working.
 - `wiki/page.tsx` — **partial**: flat list of `.md` paths in a sidebar +
   rendered markdown on the right via `react-markdown` + `remark-gfm`.
   Has a "Reindex" button calling `POST /api/documents/reindex`.
   **No directory navigation, no editor, no triggers UI.**
-- `chat/page.tsx` — **transitional**: bubbles + textarea + send. Will be
-  refactored into a `<ChatPanel>` component owned by `<AppShell>` so
-  it's available on every page (collapsible). The current page is fine
-  as a placeholder until that lands.
 - `triggers/page.tsx` — owner-scoped Triggers tab; full CRUD over the
   current user's triggers. **Kept as a top-level view.** Inline panels
   on doc/dir pages mirror this for path-scoped management.
@@ -79,8 +71,13 @@ Avatar menu (top of sidebar) keeps Admin + Sign out.
   excludes `/login` and `/signup`); `login`, `signup`, `logout`.
 
 #### `src/components/common/AppShell.tsx`
-Vertical icon nav (Home, Wiki, Chat, Triggers) + avatar menu (admin link,
+Vertical icon nav (Wiki, Triggers, Events) + avatar menu (admin link,
 sign out).
+
+#### `src/components/chat/ChatWidget.tsx`
+Global chat widget mounted from `app/layout.tsx`. Renders only when a
+user is logged in. Three modes (`closed` | `widget` | `expanded`)
+persisted in `localStorage` along with the expanded width.
 
 ### Wiki view — design
 
@@ -101,13 +98,21 @@ sign out).
 - **My-triggers panel** (directory-scoped): the current user's triggers
   scoped to this directory — list, add, edit, delete. Per-user only;
   other users' triggers are not visible.
+- **Drag-and-drop reorganize.** Each row is `draggable`. Folders are drop
+  targets; breadcrumb crumbs (including "Wiki" for the root) are drop
+  targets too — drop on a crumb to move out of the current folder. Move
+  goes through `POST /api/documents/move`; a name conflict at the
+  destination returns 409 and is surfaced as an inline error.
+- **Rename inline.** A pencil icon on each row opens an in-place rename
+  input; submits via the same `/documents/move` endpoint.
 
 #### Reader page
 - `react-markdown` + `remark-gfm` rendering of the file body fetched via
   `GET /api/documents/file?path=`.
 - **My-triggers panel** (file-scoped): the current user's triggers
   scoped to this file. Per-user only.
-- "Edit" button toggles to editor.
+- "Edit" button toggles to editor. "Rename" button prompts for a new
+  filename and calls `/documents/move`, then routes to the new path.
 
 #### Editor
 - Plain `<textarea>` with the raw markdown — **not WYSIWYG**, per spec.
@@ -119,32 +124,37 @@ sign out).
 #### Special files (deferred — see `agents.md` TBD in master)
 Not implementing yet.
 
-### Chat side panel
+### Chat widget
 
-A collapsible right-edge panel rendered by `<AppShell>` so it's available
-on **every** page (Wiki / Triggers / Events / Admin). Not a top-level tab,
-not a route.
+`<ChatWidget>` is mounted globally from `app/layout.tsx` so the agent is
+reachable on **every** page (Wiki / Triggers / Events / Admin). Not a
+top-level tab, not a route.
 
-- **Toggle from the chrome.** Open/closed state persists in `localStorage`.
-- **Width** persists (resizable by drag) so users can tune for their
-  screen.
-- **Location-aware.** The panel reads the current route (typically the
-  wiki path being viewed) and includes it with each message:
-  `POST /api/chat/messages` body grows a `location: { path }` field.
-- **Streaming.** Reads the SSE stream from `apiStream` (already wired);
-  renders text deltas live and surfaces `error` events with Retry.
-- **Propose-and-apply UX.** When the agent emits a `propose_doc_edit`
-  or `propose_create_trigger` tool call, the panel renders a draft card
-  inline in the thread with **Apply** and **Reject** buttons. Apply
-  triggers the corresponding API call (`PUT /api/documents/file` or
-  `POST /api/triggers`); the result is reported back as a tool-result
-  in the next user/assistant turn. Reject is also a tool-result so the
-  agent knows.
-- **Persistent conversations** (when backend lands): list past convos in
-  a sub-pane within the panel; URL fragment carries `conversation_id`.
+- **Three modes:**
+  - `closed` — floating circular FAB in the bottom-right corner.
+  - `widget` — small floating panel anchored bottom-right (~380×560).
+  - `expanded` — full-height panel anchored to the **right** edge of the
+    screen, resizable by dragging its left edge. While expanded, the
+    page content is pushed left (body gets `padding-right`) rather than
+    being overlaid.
+- **Persistence.** Mode and expanded-width persist in `localStorage`
+  (`chat-widget:mode`, `chat-widget:expanded-width`). Conversation
+  history lives in component state for now and resets on page refresh.
+- **Streaming.** Reads the SSE stream from `apiStream`; renders text
+  deltas live and surfaces `error` events with Retry.
+- **New-chat button** clears the in-memory thread.
 
-Until the panel lands, `chat/page.tsx` keeps the current full-page
-fallback so the agent is reachable.
+Not yet built (still planned):
+
+- **Location-awareness.** Sending the current route as
+  `location: { path }` on `POST /api/chat/messages`.
+- **Propose-and-apply UX.** Inline draft cards for `propose_doc_edit` /
+  `propose_create_trigger` tool calls with Apply / Reject buttons that
+  call the corresponding API and report the outcome back as a
+  tool-result.
+- **Persistent conversations** (when the backend persistence lands):
+  list past convos in a sub-pane within the widget; URL fragment carries
+  `conversation_id`.
 
 ### Events view
 
@@ -183,18 +193,21 @@ Will need a third route for **MCP connections** when we wire that.
 - `<AppShell>` (icon nav + avatar menu w/ admin link + sign out).
 - Wiki page: flat list of `.md` paths in a sidebar; right panel renders
   the selected file via `react-markdown`; Reindex button.
-- Chat page: full thread UI, stateless, error-aware.
+- Chat: global `<ChatWidget>` (FAB → bottom-right widget → resizable
+  right-side expanded panel that pushes the page left), error-aware,
+  streaming.
 - Admin pages (landing + Users + LLM).
 
 ### Stubbed
 - Triggers page — kept; needs CRUD UI wired to per-user API.
 - No directory navigation, no editor in the wiki view.
 - No `<EventsView>`.
-- Chat is a full page (`/chat`); needs to move into a side panel.
+- Chat widget is stateless across reloads and not yet location-aware /
+  propose-and-apply.
 
 ### Not started
 - Inline (per-user) triggers panel on doc/dir pages.
-- Chat side panel (collapsible, location-aware, propose-and-apply UX).
+- Chat widget: location-aware messages + propose-and-apply UX.
 - MCP admin route.
 
 ---
@@ -202,17 +215,16 @@ Will need a third route for **MCP connections** when we wire that.
 ## Work breakdown (Next up)
 
 ### G. AppShell + routing cleanup
-1. Swap nav: **Wiki / Triggers / Events**, drop Home and the standalone
-   Chat tab.
+1. ~~Swap nav: **Wiki / Triggers / Events**, drop Home and the standalone
+   Chat tab.~~ **Done** (Chat tab removed; nav is Wiki / Triggers / Events).
 2. Make `/` redirect to `/wiki`.
-3. Render the `<ChatPanel>` in `<AppShell>` so it's available on every
-   page (see G.4 below).
-4. **`<ChatPanel>`** — collapsible right-edge panel; persists open/closed
-   state and width in `localStorage`; reads current route as
-   `location.path`; sends it on every `POST /api/chat/messages`. Inline
-   draft cards for `propose_doc_edit` and `propose_create_trigger` with
-   Apply / Reject buttons that call the corresponding API and report the
-   outcome back as a tool-result.
+3. ~~Mount the chat surface globally so it's available on every page.~~
+   **Done** as `<ChatWidget>` mounted in `app/layout.tsx`.
+4. **Chat widget enhancements** — read current route as `location.path`
+   and send it on every `POST /api/chat/messages`. Inline draft cards
+   for `propose_doc_edit` and `propose_create_trigger` with Apply /
+   Reject buttons that call the corresponding API and report the outcome
+   back as a tool-result.
 
 ### C. Wiki UI: tree, directory, reader, editor
 1. **Tree component** — call `GET /api/documents?prefix=` and group paths
@@ -246,7 +258,7 @@ Will need a third route for **MCP connections** when we wire that.
   [flask-and-apis E.1](../flask-and-apis/flask-and-apis.md#e1-events-api-ui-in-frontend).
 
 ### F.6 Chat persistence UI (after backend persistence lands)
-- Sub-pane inside `<ChatPanel>` listing past conversations.
+- Sub-pane inside `<ChatWidget>` listing past conversations.
 - URL fragment carries `conversation_id` so deep-linking + reload work.
 
 ### K.2 MCP admin route

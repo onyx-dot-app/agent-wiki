@@ -1,0 +1,20 @@
+{
+  "name": "search_wiki",
+  "description": "Discover wiki documents whose contents match a bm25 query. Returns the top-ranked matches with `path`, `title`, and a short `snippet` (~60 tokens around the densest match, with matched terms wrapped in `**bold**`). Snippets are for triage only — they are NOT enough context to answer detailed questions or to edit a doc. After identifying the right document(s), call `read_page(path)` to get the full body. Use plain words separated by spaces, or quoted phrases for exact matches. Avoid punctuation like `?` and `:` that the FTS5 parser may reject.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "query": {
+        "type": "string",
+        "description": "Search query. Plain words are AND'd together. Use \"double quotes\" for exact phrases."
+      },
+      "limit": {
+        "type": "integer",
+        "description": "Max results (default 10, max 20).",
+        "minimum": 1,
+        "maximum": 20
+      }
+    },
+    "required": ["query"]
+  }
+}

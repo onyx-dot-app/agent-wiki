@@ -1,0 +1,84 @@
+"""Handler for the `update_trigger` tool. Spec lives in `update_trigger.json`.
+
+Partial updates: only the fields the model passes are changed. Ownership
+is enforced — a user can only update triggers they own.
+"""
+from __future__ import annotations
+
+from typing import Any
+
+from app.auth import current_user
+from app.triggers import repo as triggers_repo
+from app.wiki import filesystem
+
+# Sentinel mirroring the one in triggers.repo so we can distinguish
+# "destination omitted" from "destination explicitly set to null".
+_UNSET = object()
+
+
+def handle(args: dict[str, Any]) -> Any:
+    user = current_user()
+    if user is None:
+        return {"error": "no authenticated user"}
+
+    trigger_id = args.get("trigger_id")
+    if not isinstance(trigger_id, str) or not trigger_id.strip():
+        return {"error": "trigger_id is required"}
+
+    existing = triggers_repo.get(trigger_id)
+    if existing is None:
+        return {"error": f"trigger not found: {trigger_id}"}
+    if existing["owner_user_id"] != user.id:
+        return {"error": "you do not own this trigger"}
+
+    kwargs: dict[str, Any] = {}
+
+    if "scope_path" in args:
+        raw = args["scope_path"]
+        if not isinstance(raw, str):
+            return {"error": "scope_path must be a string"}
+        scope = raw.strip()
+        if scope:
+            try:
+                scope = filesystem.safe_rel_path(scope)
+            except ValueError as exc:
+                return {"error": f"invalid scope_path: {exc}"}
+        kwargs["scope_path"] = scope
+
+    if "nl_description" in args:
+        nl = args["nl_description"]
+        if not isinstance(nl, str) or not nl.strip():
+            return {"error": "nl_description cannot be empty"}
+        kwargs["nl_description"] = nl.strip()
+
+    if "message" in args:
+        msg = args["message"]
+        if not isinstance(msg, str) or not msg.strip():
+            return {"error": "message cannot be empty"}
+        kwargs["message"] = msg.strip()
+
+    destination = args.get("destination", _UNSET)
+    if destination is not _UNSET:
+        if destination not in triggers_repo.SUPPORTED_DESTINATIONS:
+            return {
+                "error": (
+                    f"destination {destination!r} not supported in v0 — only null "
+                    "(Event Log)"
+                )
+            }
+        kwargs["destination"] = destination
+
+    if "enabled" in args:
+        enabled = args["enabled"]
+        if not isinstance(enabled, bool):
+            return {"error": "enabled must be a boolean"}
+        kwargs["enabled"] = enabled
+
+    if not kwargs:
+        return {"trigger": existing, "note": "no fields to update"}
+
+    try:
+        updated = triggers_repo.update(trigger_id, **kwargs)
+    except ValueError as exc:
+        return {"error": str(exc)}
+    return {"trigger": updated}

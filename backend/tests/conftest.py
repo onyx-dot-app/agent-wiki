@@ -47,3 +47,15 @@ def tmp_db(tmp_config):
 
     init_db()
     return tmp_config
+
+
+@pytest.fixture
+def tmp_repo(tmp_db, tmp_config, monkeypatch):
+    """Tmp DB + an initialized wiki git repo for tests that touch the filesystem."""
+    monkeypatch.setattr("app.wiki.git.CONFIG", tmp_config)
+    monkeypatch.setattr("app.wiki.filesystem.CONFIG", tmp_config)
+
+    from app.wiki.git import ensure_wiki_repo
+
+    ensure_wiki_repo()
+    return tmp_db

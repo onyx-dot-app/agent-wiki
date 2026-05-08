@@ -1,11 +1,14 @@
 """Reindex a single doc into the FTS index from the git working tree."""
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from app.db import fts
 from app.tasks.huey_app import huey
 from app.wiki import git
+
+log = logging.getLogger(__name__)
 
 
 def _derive_title(path: str, body: str) -> str:
@@ -23,12 +26,14 @@ def reindex_path_inline(path: str) -> None:
     worker being available. Online write paths should call the `reindex_path`
     task wrapper instead so they don't block the request.
     """
+    log.debug("reindex %s", path)
     body = git.read_file(path)
     fts.upsert_document(doc_id=path, path=path, title=_derive_title(path, body), body=body)
 
 
 @huey.task()
 def reindex_document(doc_id: str, path: str, title: str) -> None:
+    log.debug("reindex_document doc_id=%s path=%s", doc_id, path)
     body = git.read_file(path)
     fts.upsert_document(doc_id=doc_id, path=path, title=title, body=body)
 

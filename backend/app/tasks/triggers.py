@@ -2,22 +2,40 @@
 
 After a successful ``commit_file`` on a wiki doc, the API enqueues
 ``fan_out_trigger_eval`` here. It loads BEFORE/AFTER from git, finds the
-``delta`` triggers attached to the doc and its parent dirs, runs each
-through the NL evaluator, and writes one ``trigger.fire`` event per match.
+``delta`` triggers attached to the doc and its parent dirs, and routes
+each one through the appropriate evaluation flow:
 
-V0 records events only — no outbound dispatch (see
-``local_data/wiki/natural-language-triggers``).
+* **Standard** (doc-scoped triggers, or directory-scoped on edits) — two
+  LLM calls. ``evaluate_delta`` checks if the trigger's NL "if" is
+  satisfied; on match, ``render_delta_message`` writes the owner's
+  message. Payload: whole-wiki snapshot + +/- diff view.
+* **New-file-in-dir** (directory-scoped trigger, ``change_kind ==
+  "create"``) — one LLM call. ``evaluate_new_file_in_dir`` returns
+  ``(triggered, trigger_message)`` from a single JSON-output prompt. The
+  diff view would be noise (every line is a ``+``), so the payload is
+  the wiki snapshot + the new file's full body, no diff section.
+
+Each fire becomes one ``trigger.fire`` row in the events table. V0 has
+no outbound dispatch (see ``local_data/wiki/natural-language-triggers``).
 """
 from __future__ import annotations
 
 import json
+import logging
 import subprocess
 
 from app.db.sqlite import connect
 from app.tasks.huey_app import huey
 from app.triggers import diff as diff_helper
-from app.triggers.engine import evaluate_delta, find_matching_triggers
+from app.triggers.engine import (
+    evaluate_delta,
+    evaluate_new_file_in_dir,
+    find_matching_triggers,
+    render_delta_message,
+)
 from app.wiki import git as wiki_git
+
+log = logging.getLogger(__name__)
 
 
 @huey.task()
@@ -29,29 +47,79 @@ def fan_out_trigger_eval(
 ) -> None:
     triggers = find_matching_triggers(doc_path)
     if not triggers:
+        log.debug("fan_out_trigger_eval %s: no matching triggers", doc_path)
         return
+
+    log.info(
+        "fan_out_trigger_eval %s sha=%s kind=%s candidates=%d",
+        doc_path, sha[:8], change_kind, len(triggers),
+    )
 
     after = _read_at(sha, doc_path)
     before = _read_at(f"{sha}^", doc_path)
 
-    before_snippet, after_snippet = diff_helper.build_payload(
-        before, after, change_kind=change_kind
+    # Build the wiki snapshot once and reuse it for every trigger on this
+    # commit. Each trigger pays its own per-call eval (and render-on-match).
+    wiki_snapshot = diff_helper.build_wiki_snapshot()
+    delta_payload = diff_helper.build_payload(
+        doc_path=doc_path,
+        change_kind=change_kind,
+        before=before,
+        after=after,
+        wiki_snapshot=wiki_snapshot,
     )
-
-    for trigger in triggers:
-        matched, reason = evaluate_delta(
-            trigger, before_snippet, after_snippet, change_kind=change_kind
+    new_file_payload: str | None = None
+    if change_kind == "create":
+        new_file_payload = diff_helper.build_new_file_payload(
+            doc_path=doc_path, body=after, wiki_snapshot=wiki_snapshot
         )
-        if not matched:
-            continue
+
+    fired = 0
+    for trigger in triggers:
+        from app.triggers.repo import _parse_action  # local import avoids cycle
+        action = _parse_action(trigger["action_json"])
+        instruction = action.get("message") or ""
+        destination = action.get("destination")
+
+        if change_kind == "create" and trigger["scope_path"] != doc_path:
+            assert new_file_payload is not None
+            triggered, rendered = evaluate_new_file_in_dir(
+                trigger, instruction, new_file_payload
+            )
+            if not triggered:
+                continue
+            reason = "new file under directory scope"
+            log.info(
+                "trigger fired (new-file-in-dir) id=%s doc=%s",
+                trigger["id"], doc_path,
+            )
+        else:
+            matched, reason = evaluate_delta(trigger, delta_payload)
+            if not matched:
+                continue
+            rendered = (
+                render_delta_message(instruction, delta_payload, reason=reason)
+                if instruction
+                else ""
+            )
+            log.info(
+                "trigger fired id=%s doc=%s reason=%s",
+                trigger["id"], doc_path, reason,
+            )
+
+        fired += 1
         _record_fire(
-            trigger_id=trigger["id"],
+            trigger=trigger,
             doc_path=doc_path,
             sha=sha,
             change_kind=change_kind,
             reason=reason,
+            instruction=instruction,
+            rendered_message=rendered,
+            destination=destination,
             actor=actor,
         )
+    log.info("fan_out_trigger_eval %s: %d/%d fired", doc_path, fired, len(triggers))
 
 
 def _read_at(ref: str, rel_path: str) -> str:
@@ -59,32 +127,53 @@ def _read_at(ref: str, rel_path: str) -> str:
     try:
         return wiki_git.read_file(rel_path, ref=ref)
     except subprocess.CalledProcessError:
+        log.debug("read_at miss ref=%s path=%s", ref, rel_path)
         return ""
 
 
 def _record_fire(
     *,
-    trigger_id: str,
+    trigger: dict,
     doc_path: str,
     sha: str,
     change_kind: str,
     reason: str,
+    instruction: str,
+    rendered_message: str,
+    destination: object,
     actor: str | None,
 ) -> None:
-    payload = json.dumps(
+    """Write a single ``trigger.fire`` row to the events table.
+
+    v0 only supports ``destination = None`` (Event Log delivery); a
+    non-null value logs a warning and still records to the Event Log so
+    no fire is lost. Outbound dispatch (webhook, agent message, etc.) is
+    not implemented yet.
+    """
+    if destination is not None:
+        log.warning(
+            "trigger %s has destination=%r but only null (Event Log) is "
+            "supported in v0; recording to events anyway",
+            trigger["id"], destination,
+        )
+
+    event_payload = json.dumps(
         {
-            "trigger_id": trigger_id,
+            "trigger_id": trigger["id"],
             "doc_path": doc_path,
             "sha": sha,
             "change_kind": change_kind,
             "reason": reason,
+            "message": rendered_message,
+            "message_instruction": instruction,
+            "destination": destination,
         }
     )
     conn = connect()
     try:
         conn.execute(
             "INSERT INTO events(kind, actor, target, payload_json) VALUES (?, ?, ?, ?)",
-            ("trigger.fire", actor, trigger_id, payload),
+            ("trigger.fire", actor, trigger["id"], event_payload),
         )
     finally:
         conn.close()

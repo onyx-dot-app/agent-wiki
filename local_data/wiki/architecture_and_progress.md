@@ -1,12 +1,12 @@
 # Architecture & Progress
 
-> Working notebook for agent-workspace. Lives at
+> Working notebook for agent-wiki. Lives at
 > `local_data/wiki/architecture_and_progress.md` — checked into the repo, and
 > also a real file inside the dev wiki working tree so the running app
 > renders it. Update it whenever a product, architecture, or progress
 > decision is made — Claude reads this on every session.
 
-_Last updated: 2026-05-06_
+_Last updated: 2026-05-07_
 
 ### Per-area docs (each owns its own design + progress)
 - [Running locally — agent runbook](running-locally.md)
@@ -343,8 +343,9 @@ rulebook; per-area docs reference these and add their own area-specific rules.
 | 2026-05-06 | Chat propose-and-apply for writes | No silent edits while we lack eval data |
 | 2026-05-06 | Direct sqlite + small repo modules, no ORM | Tight surface, easy to test |
 | 2026-05-06 | Single LLM seam (`app/llm/client.py:complete`) | Provider-swappable; one place to mock in tests |
-| 2026-05-06 | Mock LLM SDKs at `_anthropic_client` / `_openai_client`, not at `complete` | Lets tests exercise the real translation layer |
+| 2026-05-06 | Mock LLM SDKs at the per-provider `_client`, not at `complete` | Lets tests exercise the real translation layer |
 | 2026-05-06 | Chat agent loop is pure (messages-in / messages-out) | Persistence wired separately at the HTTP edge |
+| 2026-05-07 | LLM providers are a plural seam at `app/llm/providers/` (Anthropic, OpenAI Responses, Gemini, Ollama) | Adding a backend = drop a module + register, no `client.py` if/elif growth |
 
 ### Open cross-area questions
 - **LLM cost** — every doc commit fans out to a doc-updater pass + N trigger
@@ -356,7 +357,7 @@ rulebook; per-area docs reference these and add their own area-specific rules.
 - **Concurrency on the wiki repo** — git operations are serialized in one
   worker today. Multi-worker needs a per-repo lock. (See
   [background-tasks](background-tasks/background-tasks.md).)
-- **Onyx → agent-workspace push contract** — see
+- **Onyx → agent-wiki push contract** — see
   [onyx-push](onyx-push/onyx-push.md).
 - **Triggers schema vs. UX** — `triggers.action_json` exists in schema but
   is unused in v0. (See [natural-language-triggers](natural-language-triggers/natural-language-triggers.md).)
@@ -405,8 +406,8 @@ area docs.
 - **2026-05-06** — Chat loop primitive landed (`run_chat_loop`) — pure
   message-list-in / message-list-out, tools off by default.
 - **2026-05-06** — Backend pytest harness landed; convention: mock SDKs at
-  the `_anthropic_client` / `_openai_client` seam; never import the real
-  provider SDKs from tests; use real tmp SQLite via `tmp_db` fixture.
+  the per-provider `_client` seam; never import the real provider SDKs
+  from tests; use real tmp SQLite via `tmp_db` fixture.
 - **2026-05-06** — V0 brief preserved verbatim under §2 as the durable
   reference.
 - **2026-05-06** — Admin UI split from a single tabbed page into three
@@ -482,5 +483,18 @@ area docs.
   read-only `wiki_shell` tool (ls/grep/cat/find against the wiki working
   tree) for richer multi-step exploration — decision deferred; revisit
   if the structured tools feel clunky in dogfooding.
+
+- **2026-05-07** — **LLM seam refactored into a plural seam at
+  `app/llm/providers/`.** `client.py` keeps `stream` / `complete` as the
+  public surface; one module per backend (`anthropic`, `openai`,
+  `gemini`, `ollama`) implements the `Provider` protocol
+  (`name`, `check_configured(settings)`,
+  `stream(messages, *, model, tools, max_tokens, settings)`). Adding a
+  backend = drop a module + register; no if/elif edits in `client.py`.
+  `LLMError` moved to `app/llm/errors.py` (no client.py back-compat
+  re-export). The admin UI now exposes provider/model + per-provider
+  credentials (Anthropic key, OpenAI key, Gemini key, Ollama base URL).
+  Required `google-genai>=1.0` and `ollama>=0.4`; migration 0006 added
+  `gemini_api_key` and `ollama_base_url` columns.
 
 _(Append new entries with a date prefix. Cross-cutting only.)_

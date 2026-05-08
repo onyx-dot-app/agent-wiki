@@ -1,0 +1,190 @@
+"""Anthropic provider — Messages API streaming."""
+from __future__ import annotations
+
+import json
+import logging
+from functools import lru_cache
+from typing import Any, Iterator
+
+from app.llm.errors import LLMError
+from app.llm.providers._common import debug_dump, safe_json_loads, split_system
+from app.llm.settings import LLMSettings
+
+log = logging.getLogger(__name__)
+
+StreamEvent = dict[str, Any]
+
+
+@lru_cache(maxsize=4)
+def _client(api_key: str):
+    """Cached Anthropic client. Cache size is small but >1 because tests
+    swap keys between cases; production uses a single key."""
+    from anthropic import Anthropic
+
+    return Anthropic(api_key=api_key)
+
+
+class AnthropicProvider:
+    name = "anthropic"
+
+    def check_configured(self, settings: LLMSettings) -> None:
+        if not settings.anthropic_api_key:
+            raise LLMError(
+                "not_configured",
+                "Anthropic API key is not set. An admin needs to add it on the admin page.",
+            )
+
+    def stream(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        model: str,
+        tools: list[dict[str, Any]] | None,
+        max_tokens: int,
+        settings: LLMSettings,
+    ) -> Iterator[StreamEvent]:
+        system, convo = split_system(messages)
+        kwargs: dict[str, Any] = {
+            "model": model,
+            "max_tokens": max_tokens,
+            "messages": [_message(m) for m in convo],
+        }
+        if system is not None:
+            # Cache the (usually large, stable) system prompt so multi-turn
+            # loops don't repay for it on every call.
+            kwargs["system"] = [
+                {"type": "text", "text": system, "cache_control": {"type": "ephemeral"}},
+            ]
+        if tools:
+            kwargs["tools"] = [
+                {
+                    "name": t["name"],
+                    "description": t.get("description", ""),
+                    "input_schema": t["input_schema"],
+                }
+                for t in tools
+            ]
+
+        debug_dump("anthropic request kwargs", kwargs)
+        log.info(
+            "llm request provider=anthropic model=%s tools=%d max_tokens=%d msgs=%d",
+            model, len(tools or []), max_tokens, len(convo),
+        )
+        client = _client(settings.anthropic_api_key)
+        try:
+            with client.messages.stream(**kwargs) as s:
+                # Per content-block index, accumulate tool-use args (streamed
+                # as input_json_delta chunks). Text blocks are emitted as we go.
+                tool_blocks: dict[int, dict[str, Any]] = {}
+                for event in s:
+                    etype = getattr(event, "type", None)
+                    if etype == "content_block_start":
+                        block = event.content_block
+                        if getattr(block, "type", None) == "tool_use":
+                            tool_blocks[event.index] = {
+                                "id": block.id,
+                                "name": block.name,
+                                "buf": "",
+                            }
+                    elif etype == "content_block_delta":
+                        delta = event.delta
+                        dtype = getattr(delta, "type", None)
+                        if dtype == "text_delta":
+                            yield {"type": "text_delta", "text": delta.text}
+                        elif dtype == "input_json_delta" and event.index in tool_blocks:
+                            tool_blocks[event.index]["buf"] += delta.partial_json
+                    elif etype == "content_block_stop" and event.index in tool_blocks:
+                        tb = tool_blocks.pop(event.index)
+                        yield {
+                            "type": "tool_call",
+                            "id": tb["id"],
+                            "name": tb["name"],
+                            "arguments": safe_json_loads(tb["buf"]),
+                        }
+                final = s.get_final_message()
+            in_tok = getattr(final.usage, "input_tokens", 0)
+            out_tok = getattr(final.usage, "output_tokens", 0)
+            log.info(
+                "llm done provider=anthropic model=%s stop=%s tokens=%d/%d",
+                model, getattr(final, "stop_reason", "") or "", in_tok, out_tok,
+            )
+            yield {
+                "type": "done",
+                "stop_reason": getattr(final, "stop_reason", "") or "",
+                "usage": {"input_tokens": in_tok, "output_tokens": out_tok},
+            }
+        except LLMError:
+            raise
+        except Exception as exc:
+            log.exception("llm provider error provider=anthropic model=%s", model)
+            raise _translate_error(exc) from exc
+
+
+def _message(m: dict[str, Any]) -> dict[str, Any]:
+    """Translate one normalized message into Anthropic's content-block shape."""
+    role = m["role"]
+    if role == "tool":
+        # Normalized tool result -> Anthropic tool_result block on a user turn.
+        return {
+            "role": "user",
+            "content": [
+                {
+                    "type": "tool_result",
+                    "tool_use_id": m["tool_call_id"],
+                    "content": m["content"]
+                    if isinstance(m["content"], str)
+                    else json.dumps(m["content"]),
+                }
+            ],
+        }
+    if role == "assistant" and m.get("tool_calls"):
+        blocks: list[dict[str, Any]] = []
+        if m.get("content"):
+            blocks.append({"type": "text", "text": m["content"]})
+        for tc in m["tool_calls"]:
+            blocks.append(
+                {
+                    "type": "tool_use",
+                    "id": tc["id"],
+                    "name": tc["name"],
+                    "input": tc["arguments"],
+                }
+            )
+        return {"role": "assistant", "content": blocks}
+
+    return {"role": role, "content": m["content"]}
+
+
+def _translate_error(exc: Exception) -> LLMError:
+    """Map an Anthropic SDK exception to an LLMError. Imports the SDK locally
+    so the failure path is the only place we touch the SDK error types."""
+    import anthropic
+
+    if isinstance(exc, anthropic.AuthenticationError):
+        return LLMError(
+            "auth", "Anthropic rejected the API key. An admin needs to update it on the admin page."
+        )
+    if isinstance(exc, anthropic.PermissionDeniedError):
+        return LLMError("auth", "Anthropic denied access for the configured API key.")
+    if isinstance(exc, anthropic.RateLimitError):
+        return LLMError("rate_limit", "Anthropic rate limit hit. Please retry in a moment.")
+    if isinstance(exc, anthropic.APIConnectionError):
+        return LLMError("network", "Could not reach Anthropic. Check the backend's network access.")
+    if isinstance(exc, anthropic.NotFoundError):
+        return LLMError(
+            "config",
+            "Anthropic returned 'not found' — usually a bad model name. Check the configured model.",
+        )
+    if isinstance(exc, anthropic.BadRequestError):
+        return LLMError("bad_request", f"Anthropic rejected the request: {exc}")
+    if isinstance(exc, anthropic.APIStatusError):
+        return LLMError("provider", f"Anthropic error: {exc}")
+    return LLMError("unknown", "Unexpected error talking to Anthropic.")
+
+
+PROVIDER = AnthropicProvider()
+
+
+from app.llm.providers import register  # noqa: E402
+
+register(PROVIDER)

@@ -1,19 +1,76 @@
-"""LLM-backed evaluator: 'does this doc delta satisfy this NL trigger?'.
+"""LLM-backed trigger evaluator and message renderer.
 
-Tight, single-shot tool call returning ``{matches: bool, reason: str}``. Runs
-hot — every commit fans out to one of these per matching trigger — so keep
-the prompt small and use the configured cheap model.
+Two paths, picked by the fan-out task:
+
+**Standard path** — for doc-scoped triggers, and directory-scoped triggers
+on edits. Two phases:
+
+* ``matches(nl_description, payload)`` — phase 1, a single tool call that
+  returns ``{matches: bool, reason: str}``. Decides whether the change
+  satisfies the trigger's firing condition.
+* ``render_message(message_instruction, payload, *, reason)`` — phase 2,
+  only run when phase 1 matched. A second tool call that returns the
+  final notification text the user (or downstream system) sees.
+
+The shared ``payload`` (built by ``app.triggers.diff.build_payload``) is
+the whole wiki at the latest version followed by a ``+/-`` view of the
+changed doc. The eval prompt tells the model to focus on the diff unless
+the description is clearly about overall state.
+
+**New-file-in-dir path** — for directory-scoped triggers when a brand-new
+file appears under the scope. The diff would just be the body with ``+``
+on every line, so we skip it entirely:
+
+* ``evaluate_new_file_in_dir(nl_description, message_instruction, payload)``
+  — single ``complete()`` call that emits a JSON object
+  ``{"triggered": bool, "trigger_message": str}`` directly in the
+  assistant text. Combines firing-condition check and message render
+  into one round-trip.
+
+The new-file payload (``app.triggers.diff.build_new_file_payload``) is
+the wiki snapshot followed by the new file's path and full body — no
+diff section.
 """
 from __future__ import annotations
 
-from app.llm.client import LLMError, complete
+import json
+import logging
+import re
 
-_SYSTEM_PROMPT = """\
+from app.llm.client import complete
+from app.llm.errors import LLMError
+
+log = logging.getLogger(__name__)
+
+# --------------------------------------------------------------------------- #
+# Phase 1: does the change satisfy the trigger?                               #
+# --------------------------------------------------------------------------- #
+
+_EVAL_SYSTEM_PROMPT = """\
 You evaluate whether a wiki document change satisfies a natural-language \
-trigger description. Be conservative: false positives are louder than false \
-negatives. Only use information present in the BEFORE and AFTER snippets. Do \
-not bring in outside knowledge or speculate. The reason must quote or \
-paraphrase the specific change you observed.
+trigger description.
+
+The user message gives you, in order:
+  1. The trigger description ("if …").
+  2. A snapshot of the whole wiki at its latest version (for context on \
+how the changed doc relates to its siblings).
+  3. A CHANGE block with the path, change kind, and the +/- diff (or full \
+body, for new files / wholesale rewrites).
+
+How to evaluate:
+  * Triggers should typically be evaluated against the **diff** — what \
+was added, removed, or rewritten in this change. The wiki snapshot is \
+context, not the primary signal.
+  * Only evaluate against the overall current state of the document(s) \
+when the trigger description is clearly about state rather than an \
+update — for example, "when status is yellow" (state) vs. "when status \
+flips to yellow" (update). When in doubt, evaluate the diff.
+  * Be conservative: false positives are louder than false negatives. \
+If the change doesn't clearly satisfy the description, say no.
+  * Use only what is in the payload below. Do not bring in outside \
+knowledge or speculate.
+  * The reason must quote or paraphrase the specific change (or specific \
+state) that satisfies the trigger.
 
 Always respond by calling the `report` tool exactly once.\
 """
@@ -41,36 +98,24 @@ _REPORT_TOOL = {
 }
 
 
-def matches(
-    nl_description: str,
-    before_body: str,
-    after_body: str,
-    *,
-    change_kind: str,
-) -> tuple[bool, str]:
-    """Run a single LLM call. Returns ``(matched, reason)``.
+def matches(nl_description: str, payload: str) -> tuple[bool, str]:
+    """Phase 1. Returns ``(matched, reason)``.
 
-    ``change_kind`` is "create", "edit", or "new_file_in_dir" — the model
-    uses it to decide how to interpret the BEFORE side (empty / prior body /
-    sibling docs).
+    ``payload`` is the combined wiki-snapshot + change view from
+    ``app.triggers.diff.build_payload``.
     """
-    user_msg = (
-        f"Trigger description:\n{nl_description}\n\n"
-        f"Change kind: {change_kind}\n\n"
-        f"BEFORE:\n{before_body or '(empty — file did not exist)'}\n\n"
-        f"AFTER:\n{after_body or '(empty)'}"
-    )
-
+    user_msg = f"Trigger description (if):\n{nl_description}\n\n{payload}"
     try:
         resp = complete(
             [
-                {"role": "system", "content": _SYSTEM_PROMPT},
+                {"role": "system", "content": _EVAL_SYSTEM_PROMPT},
                 {"role": "user", "content": user_msg},
             ],
             tools=[_REPORT_TOOL],
             max_tokens=512,
         )
     except LLMError as e:
+        log.warning("trigger eval llm_error code=%s msg=%s", e.code, e.message)
         return False, f"llm_error: {e.code}"
 
     for call in resp.get("tool_calls") or []:
@@ -78,3 +123,196 @@ def matches(
             args = call.get("arguments") or {}
             return bool(args.get("matches")), str(args.get("reason") or "")
     return False, "no_tool_call"
+
+
+# --------------------------------------------------------------------------- #
+# Phase 2: render the delivered message                                       #
+# --------------------------------------------------------------------------- #
+
+_RENDER_SYSTEM_PROMPT = """\
+You compose the notification message that a wiki trigger delivers when \
+it fires. The trigger's owner has already written a short instruction \
+describing what they want the message to say; your job is to produce \
+the final text a human (or downstream system) will see.
+
+The user message gives you, in order:
+  1. The owner's message instruction ("send …").
+  2. A one-line "match reason" produced by the firing-condition check.
+  3. A snapshot of the whole wiki at its latest version (context).
+  4. A CHANGE block with the path, change kind, and the +/- diff.
+
+Guidance:
+  * Follow the owner's instruction. Keep the message concise and \
+specific — quote concrete values from the change where useful.
+  * Ground the message in the diff first; treat the wiki snapshot as \
+context. If the instruction is clearly about overall state, you can \
+reference the latest version directly.
+  * Do not include meta-commentary ("the trigger fired because…"), \
+internal IDs, or explanations of your reasoning. Output only the \
+delivered message text.
+  * Plain text or markdown is fine. No greetings, no signoff.
+
+Always respond by calling the `render` tool exactly once.\
+"""
+
+_RENDER_TOOL = {
+    "name": "render",
+    "description": "Return the final notification message text.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "message": {
+                "type": "string",
+                "description": "The final notification text to deliver.",
+            },
+        },
+        "required": ["message"],
+    },
+}
+
+
+def render_message(
+    message_instruction: str, payload: str, *, reason: str
+) -> str:
+    """Phase 2. Returns the rendered message text.
+
+    On any failure we fall back to ``message_instruction`` itself so the
+    Event Log still receives something the owner authored — better to
+    surface the raw template than drop the fire.
+    """
+    user_msg = (
+        f"Owner's message instruction:\n{message_instruction}\n\n"
+        f"Match reason:\n{reason}\n\n"
+        f"{payload}"
+    )
+    try:
+        resp = complete(
+            [
+                {"role": "system", "content": _RENDER_SYSTEM_PROMPT},
+                {"role": "user", "content": user_msg},
+            ],
+            tools=[_RENDER_TOOL],
+            max_tokens=1024,
+        )
+    except LLMError as e:
+        log.warning("trigger render llm_error code=%s msg=%s", e.code, e.message)
+        return message_instruction
+
+    for call in resp.get("tool_calls") or []:
+        if call.get("name") == "render":
+            args = call.get("arguments") or {}
+            rendered = str(args.get("message") or "").strip()
+            if rendered:
+                return rendered
+    log.warning("trigger render: no tool call, falling back to instruction")
+    return message_instruction
+
+
+# --------------------------------------------------------------------------- #
+# New-file-in-dir path                                                        #
+# --------------------------------------------------------------------------- #
+
+_NEW_FILE_SYSTEM_PROMPT = """\
+You evaluate a directory-scoped wiki trigger when a brand-new document \
+has just been created under the scope, and — if it fires — write the \
+notification message the owner asked for. This is a single combined \
+check: there is no diff to inspect, because the file did not exist \
+before.
+
+The user message gives you, in order:
+  1. The trigger description ("if …").
+  2. The owner's message instruction ("send …").
+  3. A snapshot of the whole wiki at its latest version (context).
+  4. A NEW FILE block with the path and full body of the just-created \
+document.
+
+How to evaluate:
+  * Decide ``triggered`` by reading the new file. Use the wiki snapshot \
+only as context — the primary signal is the new file's content.
+  * Be conservative: if the file does not clearly satisfy the trigger \
+description, set ``triggered`` to false.
+  * Use only what is in the payload. Do not bring in outside knowledge.
+
+If triggered, write ``trigger_message`` following the owner's \
+instruction, grounded in the new file. Concise and specific. No \
+greetings, signoff, meta-commentary, or reasoning. If not triggered, \
+set ``trigger_message`` to "".
+
+Respond with a single JSON object as your entire response, exactly in \
+this shape:
+
+  {"triggered": true, "trigger_message": "..."}
+
+Hard rules:
+  * Output JSON only. No prose, no markdown fences, no commentary \
+before or after the object.
+  * ``triggered`` must be a JSON boolean (true / false).
+  * ``trigger_message`` must be a JSON string.\
+"""
+
+# Pulls the first balanced JSON object out of a response. Tolerates a
+# small amount of stray text or markdown code fences before/after — model
+# output can drift even with strict instructions.
+_FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE)
+
+
+def _extract_json_object(text: str) -> dict | None:
+    if not text:
+        return None
+    cleaned = _FENCE_RE.sub("", text.strip())
+    start = cleaned.find("{")
+    end = cleaned.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        return None
+    candidate = cleaned[start : end + 1]
+    try:
+        data = json.loads(candidate)
+    except json.JSONDecodeError:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def evaluate_new_file_in_dir(
+    nl_description: str, message_instruction: str, payload: str
+) -> tuple[bool, str]:
+    """Single-call combined evaluate + render for the new-file-in-dir case.
+
+    ``payload`` is the wiki snapshot + NEW FILE block from
+    ``app.triggers.diff.build_new_file_payload``.
+
+    Returns ``(triggered, trigger_message)``. On LLM error or unparseable
+    output, returns ``(False, "")`` — better to drop a fire than to send
+    a confusing message.
+    """
+    user_msg = (
+        f"Trigger description (if):\n{nl_description}\n\n"
+        f"Message instruction (send):\n{message_instruction}\n\n"
+        f"{payload}"
+    )
+    try:
+        resp = complete(
+            [
+                {"role": "system", "content": _NEW_FILE_SYSTEM_PROMPT},
+                {"role": "user", "content": user_msg},
+            ],
+            max_tokens=1024,
+        )
+    except LLMError as e:
+        log.warning(
+            "trigger new-file-in-dir llm_error code=%s msg=%s", e.code, e.message
+        )
+        return False, ""
+
+    text = (resp.get("text") or "").strip()
+    data = _extract_json_object(text)
+    if data is None:
+        log.warning("trigger new-file-in-dir: unparseable response: %r", text[:200])
+        return False, ""
+
+    triggered = bool(data.get("triggered"))
+    trigger_message = str(data.get("trigger_message") or "").strip()
+    if triggered and not trigger_message:
+        # Owner's instruction is the safe fallback so the Event Log isn't
+        # blank when the model says yes but forgets the message.
+        trigger_message = message_instruction
+    return triggered, trigger_message

@@ -1,6 +1,7 @@
 """Auth endpoints — signup / login / logout / me / OIDC callback."""
 from __future__ import annotations
 
+import logging
 import sqlite3
 
 from flask import Blueprint, jsonify, request, session
@@ -11,6 +12,7 @@ from app.auth.whitelist import is_allowed, is_open
 from app.config import CONFIG
 
 bp = Blueprint("auth", __name__)
+log = logging.getLogger(__name__)
 
 
 def _start_session(user: User) -> None:
@@ -42,11 +44,13 @@ def signup():
     try:
         user_id = users_repo.create(email=email, password=password, name=name)
     except sqlite3.IntegrityError:
+        log.warning("signup race: account already exists for %s", email, exc_info=True)
         return jsonify(error="account already exists"), 409
     row = users_repo.get_by_id(user_id)
     assert row is not None
     user = User(id=row["id"], email=row["email"], name=row["name"], is_admin=bool(row["is_admin"]))
     _start_session(user)
+    log.info("signup: user %s (%s) is_admin=%s", user.id, user.email, user.is_admin)
     return jsonify(_user_payload(user)), 201
 
 
@@ -61,8 +65,10 @@ def login():
         return jsonify(error="email and password required"), 400
     user = authenticate(email, password)
     if user is None:
+        log.warning("login failed for %s", email)
         return jsonify(error="invalid credentials"), 401
     _start_session(user)
+    log.info("login: user %s (%s)", user.id, user.email)
     return jsonify(_user_payload(user))
 
 

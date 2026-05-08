@@ -1,0 +1,26 @@
+{
+  "name": "create_trigger",
+  "description": "Create a natural-language trigger owned by the current user. A trigger has three parts: an **if** condition (`nl_description` — when to fire), a **message** (what to deliver when it fires), and a **destination** (where to deliver). In v0 the only supported destination is `null`, which records the fire in the Event Log; outbound dispatch (webhook, agent message, etc.) isn't wired yet. Only call this after the user has explicitly asked to create a trigger — do not create speculatively.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "scope_path": {
+        "type": "string",
+        "description": "Wiki-relative path of the file or directory to watch. Use a `.md` path (e.g. `auth/passwords.md`) to watch one doc, or a directory path (e.g. `auth`) to watch every doc beneath it. Use an empty string for the wiki root."
+      },
+      "nl_description": {
+        "type": "string",
+        "description": "**If condition.** Plain-language description of when the trigger should fire (e.g. \"when the auth flow's session-timeout policy changes\"). Evaluated by an LLM against the diff, so be specific about what kind of change matters."
+      },
+      "message": {
+        "type": "string",
+        "description": "**What message to send.** The notification body delivered when the trigger fires (e.g. \"Auth: session timeout policy changed — please review\"). Will appear in the Event Log entry."
+      },
+      "destination": {
+        "type": ["null"],
+        "description": "**Where to send it.** Must be `null` in v0 — fires are recorded in the Event Log. Other destinations (webhook URLs, etc.) will be added later."
+      }
+    },
+    "required": ["scope_path", "nl_description", "message"]
+  }
+}

@@ -7,6 +7,7 @@ cheap to extend when needed.
 from __future__ import annotations
 
 import json
+import logging
 
 from flask import Blueprint, jsonify, request
 
@@ -14,12 +15,14 @@ from app.auth import login_required
 from app.db.sqlite import connect
 
 bp = Blueprint("events", __name__)
+log = logging.getLogger(__name__)
 
 
 def _parse_payload(raw: str) -> dict:
     try:
         return json.loads(raw) if raw else {}
     except json.JSONDecodeError:
+        log.warning("malformed event payload_json: %r", raw[:200])
         return {}
 
 

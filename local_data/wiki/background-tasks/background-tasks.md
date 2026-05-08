@@ -1,6 +1,6 @@
 # Background tasks (Huey)
 
-> **Part of agent-workspace v0.** See the master doc
+> **Part of agent-wiki v0.** See the master doc
 > [`../architecture_and_progress.md`](../architecture_and_progress.md) for
 > the cross-area map. This doc owns the worker container, the Huey queue,
 > and every async unit of work that runs off the request path. Specific

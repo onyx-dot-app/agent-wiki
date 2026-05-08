@@ -1,6 +1,6 @@
 # Exploration work
 
-> **Part of agent-workspace v0.** See the master doc
+> **Part of agent-wiki v0.** See the master doc
 > [`../architecture_and_progress.md`](../architecture_and_progress.md) for
 > the cross-area map. This doc owns the open-ended R&D the V0 brief
 > explicitly calls out as "exploration." These items don't have a clean
@@ -30,7 +30,7 @@ project plans + status pages. Two failure modes:
 
 | Approach | What it looks like | Pros | Cons |
 |---|---|---|---|
-| MCP tool description only | Agent-workspace exposes an MCP server (`update_doc`, `read_doc`, `list_triggers`); the description tells agents when to use it | Lowest friction for any agent; standard MCP UX | Tool descriptions are easy to ignore; no agent-side rules engine |
+| MCP tool description only | Agent-wiki exposes an MCP server (`update_doc`, `read_doc`, `list_triggers`); the description tells agents when to use it | Lowest friction for any agent; standard MCP UX | Tool descriptions are easy to ignore; no agent-side rules engine |
 | Skill / agent-instruction file | Per-org or per-repo skill that says "before opening a PR, check for project plans matching the changed area and update if scope shifts" | Concrete trigger conditions; reusable across agents | Requires per-environment install; risks bit-rot |
 | Webhook-driven (no agent action) | Agent does nothing; Onyx pushes the PR/commit info via the ingest API and our doc-updater agent does the editing | No coding-agent change at all; centralizes the editing logic | Doesn't capture intent — only outcome — so the doc lags one step |
 | Hybrid | Coding agent emits a structured "context update" (plan changes, decisions made) into a known doc convention; our doc-updater enriches | Captures both intent and outcome | Most moving parts |
@@ -53,7 +53,7 @@ back to `architecture_and_progress.md` as a decision row.
   reconciliation**? V0 architecture assumes the latter (agent rewrites
   the page from a stream of events).
 - How do we evaluate quality? "Did a human edit it later?" is a useful
-  signal we already have — every commit by a non-`agent-workspace@local`
+  signal we already have — every commit by a non-`agent-wiki@local`
   identity is a correction.
 
 ---

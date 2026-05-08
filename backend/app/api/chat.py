@@ -28,7 +28,7 @@ from flask import Blueprint, Response, jsonify, request, stream_with_context
 
 from app.auth import login_required
 from app.llm.agents.chat import run_chat_stream
-from app.llm.client import LLMError
+from app.llm.errors import LLMError
 
 bp = Blueprint("chat", __name__)
 log = logging.getLogger(__name__)

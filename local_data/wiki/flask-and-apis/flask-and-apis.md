@@ -1,6 +1,6 @@
 # Flask + Basic APIs
 
-> **Part of agent-workspace v0.** See the master doc
+> **Part of agent-wiki v0.** See the master doc
 > [`../architecture_and_progress.md`](../architecture_and_progress.md) for
 > the cross-area map (product spec, V0 brief, cross-cutting decisions).
 > This doc owns the file-by-file design and progress for the HTTP surface,
@@ -9,7 +9,7 @@
 > evaluation, chat agent logic, document-updater agent, or the frontend —
 > those have their own per-area docs.
 
-_Last updated: 2026-05-06_
+_Last updated: 2026-05-07_
 
 ---
 
@@ -49,11 +49,58 @@ explicit public endpoints (signup, login, `/auth/config`, inbound webhooks).
 ### File-by-file (current state)
 
 #### `app/main.py`
-Flask app factory. Configures session cookie (httponly, samesite=Lax,
-30-day permanent lifetime). On boot: `init_db()` (run migrations) +
-`ensure_wiki_repo()` (init git in `WIKI_DIR` if absent). Registers
-blueprints under `/api/{auth,admin,users,mcp,documents,triggers,events,
-webhooks,chat}` and a `/api/health`.
+Flask app factory. Calls `app.utils.logging.setup_logging()` first so every
+subsequent boot step logs through the shared formatter. Configures session
+cookie (httponly, samesite=Lax, 30-day permanent lifetime). On boot:
+`init_db()` (run migrations) + `ensure_wiki_repo()` (init git in `WIKI_DIR`
+if absent). Registers blueprints under `/api/{auth,admin,users,mcp,
+documents,triggers,events,webhooks,chat}` and a `/api/health`.
+
+#### `app/utils/logging.py`
+`setup_logging(level=None)` — idempotent root logger config. Format:
+`<ts> [<level>] <logger> (<file>:<line>): <msg>`. Level comes from the
+`LOG_LEVEL` env var (default `INFO`). Called once each from
+`app/main.py:create_app` and `app/tasks/run_worker.py:main`. Module code
+uses the standard `log = logging.getLogger(__name__)` pattern; no module
+should call `logging.basicConfig` or `print()` for diagnostics.
+
+**Audit-event coverage** (where `log = logging.getLogger(__name__)` is now
+declared and emits at INFO/WARNING/EXCEPTION):
+
+- `app/api/`: `auth` (signup, login success/fail, signup race), `admin`
+  (set_admin, delete user, llm settings update), `documents` (write,
+  delete, folder create), `triggers` (create, update, delete), `events`
+  (malformed payload warn), `webhooks` (placeholder).
+- `app/auth/users.py` — user creation. `app/auth/passwords.py` — bcrypt
+  rejects malformed hash.
+- `app/db/sqlite.py` — each migration applied.
+- `app/wiki/git.py` — repo init + seed; commit/delete at DEBUG.
+  `app/wiki/filesystem.py` — path-traversal rejection (warning).
+- `app/llm/client.py` — request (provider, model, tool count, msg count)
+  and done (stop reason, token usage) at INFO; provider exceptions
+  `log.exception`'d before being translated to `LLMError`.
+  `app/llm/settings.py` — upsert.
+  `app/llm/agents/chat.py` — tool dispatch failure (`log.exception`),
+  iteration-limit hit (warning).
+
+**DEBUG-level full-dump path (LLM observability).** Set `LOG_LEVEL=DEBUG`
+to get untruncated, pretty-printed JSON of every LLM payload:
+
+- `client.stream` entry → "llm request messages" + "llm request tools"
+- `client.complete` exit → "llm response" (text + tool_calls + usage)
+- `agents/chat._drive_loop` → "chat assistant turn" (text + tool_calls
+  per iteration), "chat tool call" (per call, before dispatch), "chat
+  tool result name=… id=…" (after dispatch, full content string).
+
+Both `client.py` and `agents/chat.py` define a private `_debug_dump(label,
+obj)` helper that gates serialization behind `log.isEnabledFor(DEBUG)`,
+so this is free at INFO. Format is `json.dumps(obj, indent=2,
+ensure_ascii=False, default=str)` — unicode preserved, no length cap.
+- `app/tasks/`: `document_update`, `reindex`, `triggers`
+  (fan-out summary + per-fire info), `periodic` (tick markers).
+- `app/triggers/repo.py` — rebuild summary, skipped unreadable files.
+  `app/triggers/natural_language.py` — `LLMError` warning before falling
+  back to `matches=False`.
 
 #### `app/config.py`
 **Trimmed.** Now exposes only `secret_key`, `wiki_dir`, `app_db_path`,
@@ -111,7 +158,7 @@ removed** — provider/model/keys are DB-only via `app/llm/settings.py`.
 #### `app/wiki/` (real)
 - `git.py` — `ensure_wiki_repo`, `commit_file`, `delete_path`,
   `read_file`, `history`, `list_paths`, `diff_for_commit`. All shell out
-  to `git` via subprocess. Identity hardcoded `agent-workspace@local`.
+  to `git` via subprocess. Identity hardcoded `agent-wiki@local`.
 - `filesystem.py` — `safe_rel_path`, `absolute`, `parent_dirs` (used for
   trigger fan-out to ancestor directories).
 - `search.py` — wraps `db.fts.search` and exposes

@@ -25,10 +25,17 @@ def delete_document(doc_id: str) -> None:
 
 
 def search(query: str, limit: int = 20) -> list[dict]:
-    """Run a bm25 ranked search. ``query`` follows FTS5 query syntax."""
+    """Run a bm25 ranked search. ``query`` follows FTS5 query syntax.
+
+    The ``snippet`` column is FTS5's match-aware extraction: it picks the
+    densest cluster of matching terms in ``body`` and returns ~64 tokens of
+    surrounding context, with each match wrapped in ``**...**`` so the
+    LLM consumer sees standard markdown bold.
+    """
     with cursor() as cur:
         rows = cur.execute(
-            "SELECT doc_id, path, title, snippet(documents_fts, 3, '<b>', '</b>', '…', 16) AS snippet, "
+            "SELECT doc_id, path, title, "
+            "       snippet(documents_fts, 3, '**', '**', '…', 64) AS snippet, "
             "       bm25(documents_fts) AS score "
             "FROM documents_fts WHERE documents_fts MATCH ? "
             "ORDER BY score LIMIT ?",

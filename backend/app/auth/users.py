@@ -1,11 +1,14 @@
 """User repo — direct SQLite. Small enough that an ORM would be overkill."""
 from __future__ import annotations
 
+import logging
 import sqlite3
 import uuid
 
 from app.auth.passwords import hash_password
 from app.db.sqlite import connect
+
+log = logging.getLogger(__name__)
 
 
 def get_by_email(email: str) -> sqlite3.Row | None:
@@ -60,6 +63,7 @@ def create(email: str, password: str, name: str | None = None) -> str:
         )
     finally:
         conn.close()
+    log.info("user created id=%s email=%s is_admin=%s", user_id, email.lower(), bool(is_admin))
     return user_id
 
 

@@ -1,0 +1,22 @@
+{
+  "name": "write_doc",
+  "description": "Overwrite a wiki markdown document with a new full body, OR create a new file if `path` doesn't exist. Use ONLY for new documents or wholesale restructures (more than ~half the file changing). For surgical changes prefer `edit_doc`. Always pass the COMPLETE new body, not a patch. Existing files must have been seen via `search_wiki` earlier in the conversation. Only call after the user has explicitly approved the change. Returns the commit SHA, the unified diff, and any broken markdown links the new body introduces.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "path": {
+        "type": "string",
+        "description": "Wiki-relative path to the markdown file (e.g. `auth/passwords.md`). Must end in `.md`."
+      },
+      "body": {
+        "type": "string",
+        "description": "Complete new markdown body. Overwrites whatever is currently there."
+      },
+      "message": {
+        "type": "string",
+        "description": "Short commit message summarizing the change (e.g. \"clarify session timeout policy\")."
+      }
+    },
+    "required": ["path", "body", "message"]
+  }
+}

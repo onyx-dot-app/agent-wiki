@@ -1,9 +1,9 @@
 # Onyx-side push integration
 
-> **Part of agent-workspace v0.** See the master doc
+> **Part of agent-wiki v0.** See the master doc
 > [`../architecture_and_progress.md`](../architecture_and_progress.md) for
 > the cross-area map. This doc owns the contract by which Onyx pushes
-> deltas (document changes from public connectors) into agent-workspace
+> deltas (document changes from public connectors) into agent-wiki
 > so doc-updater agents can keep wiki pages current. The actual code on
 > the Onyx side ships from a different repo; the receiving endpoint lives
 > in [flask-and-apis](../flask-and-apis/flask-and-apis.md). The
@@ -23,9 +23,9 @@ _Last updated: 2026-05-06_
 The wiki should react to org-wide activity surfaced through Onyx
 connectors (Slack threads, Drive docs, GitHub PRs, …). Whenever Onyx
 indexes a document change from a public connector, it forwards a small
-event to agent-workspace, which queues a doc-updater pass.
+event to agent-wiki, which queues a doc-updater pass.
 
-### Surface in agent-workspace
+### Surface in agent-wiki
 
 `POST /api/documents/ingest` — already specced (stub today). Body:
 
@@ -51,14 +51,14 @@ for v0 unless we need it).
 
 - A connector callback that fires after each indexed-document update.
 - Filter: only **public** connectors and public docs (per the brief).
-- Outbound HTTP to agent-workspace's ingest endpoint with the payload
+- Outbound HTTP to agent-wiki's ingest endpoint with the payload
   shape above. Reuse Onyx's existing webhook/queue infra; do not block
   the indexing path on this call.
-- Configuration: agent-workspace base URL + per-source signing secret,
+- Configuration: agent-wiki base URL + per-source signing secret,
   managed in Onyx admin.
 
 ### What we're explicitly **not** doing in v0
-- Two-way sync (agent-workspace pushing back to Onyx).
+- Two-way sync (agent-wiki pushing back to Onyx).
 - Routing payloads to multiple wiki docs from one Onyx event.
 - Private-connector data — public only, by spec.
 - Backfill of historical Onyx data — only forward deltas.
@@ -86,7 +86,7 @@ for v0 unless we need it).
 ### Working
 - Nothing yet on the Onyx side.
 - `POST /api/webhooks/<source>` and `POST /api/documents/ingest` exist as
-  stubs in agent-workspace.
+  stubs in agent-wiki.
 
 ### Stubbed
 - Both endpoints raise `NotImplementedError`.

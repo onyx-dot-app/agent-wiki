@@ -1,10 +1,10 @@
 # Infra
 
-> **Part of agent-workspace v0.** See the master doc
+> **Part of agent-wiki v0.** See the master doc
 > [`../architecture_and_progress.md`](../architecture_and_progress.md) for
 > the cross-area map. This doc owns deployment, container layout,
 > volumes, env, observability, and the operational concerns of running
-> agent-workspace. Code-level architecture lives in the other per-area
+> agent-wiki. Code-level architecture lives in the other per-area
 > docs (e.g. [flask-and-apis](../flask-and-apis/flask-and-apis.md)).
 
 _Last updated: 2026-05-06_
@@ -65,7 +65,7 @@ the DB and are configured at runtime via the admin UI.
 ### Boot order considerations
 - `init_db()` runs migrations on every backend boot; idempotent.
 - `ensure_wiki_repo()` initializes the git repo if missing; sets the
-  hardcoded identity `agent-workspace@local`.
+  hardcoded identity `agent-wiki@local`.
 - The worker container shares both volumes and runs migrations
   implicitly via `app.tasks.huey_app` import (not strictly necessary
   today, but cheap).

@@ -16,8 +16,8 @@ These tests verify both, plus per-provider translation:
   partial-JSON arg accumulation).
 
 The seam under test is the SDK boundary itself, so we substitute fake clients
-for ``_anthropic_client`` / ``_openai_client`` and capture the kwargs passed
-to ``messages.stream`` / ``responses.create``. We do not import the real
+for ``_client`` in each provider module and capture the kwargs passed to
+``messages.stream`` / ``responses.create``. We do not import the real
 provider SDKs.
 """
 from __future__ import annotations
@@ -29,6 +29,23 @@ import pytest
 
 from app.llm import client as llm_client
 from app.llm import settings as llm_settings
+from app.llm.errors import LLMError
+from app.llm.providers import anthropic as anthropic_provider
+from app.llm.providers import openai as openai_provider
+
+
+def _upsert(**overrides) -> None:
+    """upsert() with empty defaults so tests only set fields they care about."""
+    base = {
+        "provider": "",
+        "model": "",
+        "anthropic_api_key": "",
+        "openai_api_key": "",
+        "gemini_api_key": "",
+        "ollama_base_url": "",
+    }
+    base.update(overrides)
+    llm_settings.upsert(**base)
 
 
 # --------------------------------------------------------------------------- #
@@ -180,31 +197,33 @@ def _o_tool_call_events(*, item_id, call_id, name, arg_chunks):
 
 @pytest.fixture
 def configure_anthropic(tmp_db):
-    llm_settings.upsert(
+    _upsert(
         provider="anthropic",
         model="claude-opus-4-7",
         anthropic_api_key="sk-ant-test",
-        openai_api_key="",
     )
 
 
 @pytest.fixture
 def configure_openai(tmp_db):
-    llm_settings.upsert(
+    _upsert(
         provider="openai",
         model="gpt-4o",
-        anthropic_api_key="",
         openai_api_key="sk-openai-test",
     )
 
 
 @pytest.fixture
 def fake_anthropic(monkeypatch):
-    """Install a fake Anthropic client. ``install(events, final)`` returns the fake."""
+    """Install a fake Anthropic client at the provider's SDK seam.
+
+    ``install(events, final)`` returns the fake so the test can read
+    ``fake.calls`` to verify request kwargs.
+    """
 
     def install(events, final):
         fake = _FakeAnthropic(events, final)
-        monkeypatch.setattr(llm_client, "_anthropic_client", lambda api_key: fake)
+        monkeypatch.setattr(anthropic_provider, "_client", lambda api_key: fake)
         return fake
 
     return install
@@ -214,7 +233,7 @@ def fake_anthropic(monkeypatch):
 def fake_openai(monkeypatch):
     def install(events):
         fake = _FakeOpenAI(events)
-        monkeypatch.setattr(llm_client, "_openai_client", lambda api_key: fake)
+        monkeypatch.setattr(openai_provider, "_client", lambda api_key: fake)
         return fake
 
     return install
@@ -226,53 +245,50 @@ def fake_openai(monkeypatch):
 
 
 def test_complete_raises_when_provider_unconfigured(tmp_db):
-    with pytest.raises(llm_client.LLMError) as excinfo:
+    with pytest.raises(LLMError) as excinfo:
         llm_client.complete([{"role": "user", "content": "hi"}])
     assert excinfo.value.code == "not_configured"
     assert "LLM is not configured" in excinfo.value.message
 
 
 def test_complete_raises_on_unknown_provider(tmp_db):
-    llm_settings.upsert(
-        provider="cohere", model="x", anthropic_api_key="", openai_api_key=""
-    )
-    with pytest.raises(llm_client.LLMError) as excinfo:
+    _upsert(provider="cohere", model="x")
+    with pytest.raises(LLMError) as excinfo:
         llm_client.complete([{"role": "user", "content": "hi"}])
     assert excinfo.value.code == "not_configured"
     assert "Unknown LLM provider" in excinfo.value.message
 
 
 def test_complete_raises_when_model_unset(tmp_db):
-    llm_settings.upsert(
-        provider="anthropic", model="", anthropic_api_key="sk-ant", openai_api_key=""
-    )
-    with pytest.raises(llm_client.LLMError) as excinfo:
+    _upsert(provider="anthropic", model="", anthropic_api_key="sk-ant")
+    with pytest.raises(LLMError) as excinfo:
         llm_client.complete([{"role": "user", "content": "hi"}])
     assert excinfo.value.code == "not_configured"
     assert "No model selected" in excinfo.value.message
 
 
 def test_complete_raises_when_anthropic_key_unset(tmp_db):
-    llm_settings.upsert(
-        provider="anthropic",
-        model="claude-opus-4-7",
-        anthropic_api_key="",
-        openai_api_key="",
-    )
-    with pytest.raises(llm_client.LLMError) as excinfo:
+    _upsert(provider="anthropic", model="claude-opus-4-7")
+    with pytest.raises(LLMError) as excinfo:
         llm_client.complete([{"role": "user", "content": "hi"}])
     assert excinfo.value.code == "not_configured"
     assert "Anthropic API key" in excinfo.value.message
 
 
 def test_complete_raises_when_openai_key_unset(tmp_db):
-    llm_settings.upsert(
-        provider="openai", model="gpt-4o", anthropic_api_key="", openai_api_key=""
-    )
-    with pytest.raises(llm_client.LLMError) as excinfo:
+    _upsert(provider="openai", model="gpt-4o")
+    with pytest.raises(LLMError) as excinfo:
         llm_client.complete([{"role": "user", "content": "hi"}])
     assert excinfo.value.code == "not_configured"
     assert "OpenAI API key" in excinfo.value.message
+
+
+def test_complete_raises_when_gemini_key_unset(tmp_db):
+    _upsert(provider="gemini", model="gemini-2.5-pro")
+    with pytest.raises(LLMError) as excinfo:
+        llm_client.complete([{"role": "user", "content": "hi"}])
+    assert excinfo.value.code == "not_configured"
+    assert "Gemini API key" in excinfo.value.message
 
 
 def test_complete_uses_settings_model_by_default(configure_anthropic, fake_anthropic):

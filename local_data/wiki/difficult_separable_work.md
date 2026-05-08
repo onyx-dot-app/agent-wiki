@@ -45,6 +45,7 @@ What it needs to provide:
 - All document/trigger versions are saved. Triggers for example can be saved in the system as .trigger_1_document_name.md or .trigger_1 for folder level, and it can sit in those folders.
 - Documents on agent write or user edit + save, creates a commit with something like revision_x monotonically increasing
 - If a user rolls back to a previous version, we can just mark in later commits with some special prefix pattern to the commit message like IS_A_DEPRECATED_DOC_VERSION or something and not display any of those in the history view of the page
+  - **Built (rollback flow):** the wiki page now has a "History" panel that lists per-file commits and lets you view any prior version. Editing from an older version sends `base_sha` to `PUT /api/documents/file`; the new commit body gets a `Deprecates: <sha>...` trailer listing every commit between `base_sha` and the head that touched the file. `GET /api/documents/file/history` walks all commits and hides any sha that appears in any later commit's `Deprecates:` trailer, so rolled-back-over revisions disappear without rewriting git history. See `backend/app/wiki/git.py` (`head_sha_for_path`, `commits_between`, body-aware `history`), `backend/app/api/documents.py` (`file_history`, `base_sha` on PUT, `?ref=` on GET), and `frontend/src/app/wiki/[[...slug]]/page.tsx` (`HistoryPanel`).
 
 ## MCP personal token
 - Need a page to create a personal token for this

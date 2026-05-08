@@ -1,0 +1,34 @@
+{
+  "name": "update_trigger",
+  "description": "Update an existing trigger owned by the current user. Pass only the fields you want to change; omitted fields are left alone. The same three-part shape applies: `nl_description` is the **if** condition, `message` is what to deliver, `destination` is where (only `null` = Event Log is supported in v0). Use `enabled` to disable/re-enable a trigger without deleting it. Only call after the user has explicitly asked for the update.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "trigger_id": {
+        "type": "string",
+        "description": "ID of the trigger to update (e.g. `trg_abc123...`). The trigger must be owned by the current user."
+      },
+      "scope_path": {
+        "type": "string",
+        "description": "New scope (wiki-relative file or directory). If the scope changes, the YAML moves to match. Omit to keep current."
+      },
+      "nl_description": {
+        "type": "string",
+        "description": "New **if condition**. Omit to keep current."
+      },
+      "message": {
+        "type": "string",
+        "description": "New **message** body delivered on fire. Omit to keep current."
+      },
+      "destination": {
+        "type": ["null"],
+        "description": "New **destination**. Must be `null` in v0. Omit to keep current."
+      },
+      "enabled": {
+        "type": "boolean",
+        "description": "Disable or re-enable the trigger. Omit to keep current."
+      }
+    },
+    "required": ["trigger_id"]
+  }
+}

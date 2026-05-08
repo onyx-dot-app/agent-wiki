@@ -5,6 +5,7 @@ App state lives in ``app.sqlite``. The Huey queue lives in a separate
 """
 from __future__ import annotations
 
+import logging
 import os
 import sqlite3
 from contextlib import contextmanager
@@ -14,6 +15,8 @@ from typing import Iterator
 from app.config import CONFIG
 
 _MIGRATIONS_DIR = Path(__file__).parent / "migrations"
+
+log = logging.getLogger(__name__)
 
 
 def connect() -> sqlite3.Connection:
@@ -49,5 +52,6 @@ def init_db() -> None:
         for path in sorted(_MIGRATIONS_DIR.glob("*.sql")):
             if path.name in applied:
                 continue
+            log.info("applying migration %s", path.name)
             cur.executescript(path.read_text())
             cur.execute("INSERT INTO _migrations(name) VALUES (?)", (path.name,))

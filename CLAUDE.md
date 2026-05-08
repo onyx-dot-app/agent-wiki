@@ -1,14 +1,15 @@
 # CLAUDE.md
 
-> **Always read `local_data/wiki/architecture_and_progress.md` at the start of every
-> session and reference it throughout your work.** That file is the running
-> source of truth for product/UX intent, architectural decisions, and what's
-> actually built vs. planned. **Update it** whenever a decision is made, a
-> piece of work is finished, or an assumption changes — append to the decision
-> log and edit the relevant section. CLAUDE.md is the durable rulebook;
-> `architecture_and_progress.md` is the living state.
+> **The `local_data/wiki/` directory is the source of truth** for product/UX
+> intent, architectural decisions, work ownership, and what's actually built
+> vs. planned. Browse it at the start of every session and reference the
+> relevant pages throughout your work. **Keep it up to date** for every
+> change, update, or decision — when you finish a piece of work, make a
+> decision, or invalidate an assumption, edit the appropriate page (or add
+> a new one) so the wiki reflects current reality. CLAUDE.md is the durable
+> rulebook; `local_data/wiki/` is the living state.
 
-Guidance for Claude (and other agents) working on **agent-workspace** — a
+Guidance for Claude (and other agents) working on **agent-wiki** — a
 self-updating wiki for AI agents. Read this before changing code.
 
 ## Stack at a glance
@@ -58,19 +59,31 @@ docs/             architecture + API reference
 
 These exist so the system stays testable and swappable. Honor them.
 
-### LLM calls — always through `app/llm/client.py:complete`
+### LLM calls — always through `app/llm/client.py`
 
-`complete(messages, *, model=None, tools=None, max_tokens=...)` is the **only**
-allowed entry point for talking to a model. It returns a normalized dict
-(`text`, `tool_calls`, `stop_reason`, `usage`, `raw`) so callers don't branch
-on provider.
+`stream(messages, ...)` and `complete(messages, ...)` (a drainer) in
+`app/llm/client.py` are the **only** allowed entry points for talking to a
+model. They yield/return a normalized shape (`text_delta`/`tool_call`/`done`
+events; `{text, tool_calls, stop_reason, usage}` dicts) so callers don't
+branch on provider.
 
-- Do **not** `import anthropic` or `import openai` outside `app/llm/client.py`.
-- Provider, model, and API keys come from `app/llm/settings.py:get()` (DB-backed,
-  with env fallback). Don't read `CONFIG.anthropic_api_key` from anywhere else.
-- Add a new provider by adding a `_<provider>_complete` branch and message
-  translator inside `client.py`. Keep the normalized return shape stable.
-- In tests, patch `app.llm.client.complete` — never patch the SDK objects.
+Provider implementations live as a plural seam under `app/llm/providers/`:
+one module per backend (`anthropic.py`, `openai.py`, `gemini.py`, `ollama.py`),
+each exposing a module-level `PROVIDER` satisfying the `Provider` protocol
+(`name`, `check_configured(settings)`, `stream(messages, *, model, tools,
+max_tokens, settings)`).
+
+- Do **not** `import anthropic`, `import openai`, `from google import genai`,
+  or `import ollama` outside the matching `app/llm/providers/<name>.py` module.
+- Provider, model, and credentials come from `app/llm/settings.py:get()`
+  (DB-backed, configured via the admin page). Don't read provider keys from
+  `CONFIG` or `os.environ` anywhere else.
+- Add a new provider by dropping `app/llm/providers/<name>.py` with a
+  `PROVIDER` instance and importing+registering it from
+  `app/llm/providers/__init__.py`. Don't add if/elif branches in `client.py`.
+- In tests, patch `app.llm.client.stream`/`complete` for caller-level tests,
+  or the per-provider `_client` for SDK-shape tests. Never import the real
+  provider SDKs in tests.
 
 ### Auth — decorators, not raw session reads
 
@@ -114,12 +127,35 @@ If something might take more than ~100ms, queue it. Tasks live under
 container runs `python -m app.tasks.run_worker` — make sure new task modules
 are imported there (or transitively) so they register on boot.
 
+### Logging — `app.utils.logging.setup_logging` once per process
+
+Module code uses standard `log = logging.getLogger(__name__)` and emits at
+`debug/info/warning/error/exception` levels. Process entry points
+(`app/main.py:create_app`, `app/tasks/run_worker.py:main`) call
+`setup_logging()` exactly once to install the formatter on the root logger.
+
+- Format: `<ts> [<level>] <logger> (<file>:<line>): <msg>` — level is
+  controlled by the `LOG_LEVEL` env var (default `INFO`).
+- Don't `print()` from app code; don't call `logging.basicConfig` anywhere
+  outside `setup_logging`.
+- Use `log.exception(...)` inside `except` blocks to capture the traceback.
+- Set `LOG_LEVEL=DEBUG` to dump full LLM message history, tool definitions,
+  tool calls, and tool results untruncated. Hot-path serialization is gated
+  behind `log.isEnabledFor(DEBUG)`, so leaving it at INFO has no cost.
+
 ### Triggers — git-backed, SQLite is a cache
 
-The source of truth for a trigger is its YAML file under `<wiki>/.triggers/`.
-The `triggers` SQLite row is a denormalized cache for fast lookup during doc
-update fan-out. When mutating triggers, write the file first, then upsert the
-row, in the same task.
+The source of truth for a trigger is its YAML file in the wiki repo, sitting
+inline next to the scope it acts on:
+
+- doc-scoped: `<dir>/.trigger_<id>_<docbase>.yaml` next to the doc
+- folder-scoped: `<dir>/.trigger_<id>.yaml` inside the folder
+
+The `triggers` SQLite row (including `file_path`) is a denormalized cache
+for fast fan-out lookup and id→path resolution. When mutating triggers,
+write/delete the file first via `app/triggers/storage.py`, then upsert/delete
+the row, in the same task. `app/triggers/repo.py:rebuild_from_filesystem`
+re-converges the cache by walking tracked `.trigger_*.yaml` paths.
 
 ### HTTP API — blueprints stay thin
 
@@ -202,7 +238,8 @@ so they're trivially testable.
 
 ## What not to do
 
-- Don't import `anthropic` or `openai` outside `app/llm/client.py`.
+- Don't import `anthropic`, `openai`, `google.genai`, or `ollama` outside the
+  matching `app/llm/providers/<name>.py` module.
 - Don't read `flask.session` outside `app/auth/`.
 - Don't shell out to `git` outside `app/wiki/git.py`.
 - Don't put business logic inside a Flask blueprint — push it to a domain module.

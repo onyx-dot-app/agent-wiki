@@ -16,6 +16,7 @@ import pytest
 
 from app.llm import client as llm_client
 from app.llm.agents import chat as chat_agent
+from app.llm.errors import LLMError
 
 
 @pytest.fixture
@@ -135,6 +136,73 @@ def test_loop_stream_tool_dispatch_errors_are_surfaced_to_model(stub_stream):
     assert json.loads(tool_msg["content"]) == {"error": "nope"}
 
 
+def test_loop_populates_seen_paths_from_read_page_results(stub_stream):
+    """``read_page`` feeds the target ``path`` into ``seen_doc_paths``;
+    ``search_wiki`` snippets do NOT count as a read."""
+    from app.llm.agents._session import seen_doc_paths
+
+    # Iter 1: search_wiki (snippets only — must NOT count as read).
+    # Iter 2: read_page on guide.md (counts).
+    # Iter 3: peek captures seen-set contents.
+    # Iter 4: text + done.
+    stub_stream(
+        [
+            [
+                {"type": "tool_call", "id": "c1", "name": "search_wiki",
+                 "arguments": {"query": "x"}},
+                _done(),
+            ],
+            [
+                {"type": "tool_call", "id": "c2", "name": "read_page",
+                 "arguments": {"path": "guide.md"}},
+                _done(),
+            ],
+            [
+                {"type": "tool_call", "id": "c3", "name": "peek", "arguments": {}},
+                _done(),
+            ],
+            [{"type": "text_delta", "text": "ok"}, _done()],
+        ]
+    )
+
+    captured: dict = {}
+
+    def dispatch(name, args):
+        if name == "search_wiki":
+            return {
+                "results": [
+                    {"path": "auth/passwords.md", "title": "pw", "snippet": "..."},
+                    {"path": "guide.md", "title": "Guide", "snippet": "..."},
+                ]
+            }
+        if name == "read_page":
+            return {"path": args["path"], "title": "Guide", "body": "# Guide\n"}
+        if name == "peek":
+            captured["seen"] = set(seen_doc_paths.get() or [])
+            return {}
+        return {}
+
+    list(
+        chat_agent.run_chat_loop_stream(
+            [{"role": "user", "content": "go"}],
+            tools=[
+                {"name": "search_wiki", "description": "",
+                 "input_schema": {"type": "object"}},
+                {"name": "read_page", "description": "",
+                 "input_schema": {"type": "object"}},
+                {"name": "peek", "description": "",
+                 "input_schema": {"type": "object"}},
+            ],
+            tool_dispatch=dispatch,
+        )
+    )
+
+    # Only read_page's path is in seen — search_wiki paths are NOT.
+    assert captured["seen"] == {"guide.md"}
+    # Outside the loop the ContextVar resets to default (None).
+    assert seen_doc_paths.get() is None
+
+
 def test_loop_stream_max_iterations_raises(stub_stream):
     """If the model keeps emitting tool calls, the loop should hard-stop."""
     # Schedule far more iterations than max.
@@ -229,7 +297,7 @@ def test_sse_endpoint_emits_error_event_on_llm_error(signed_in_client, monkeypat
         # Yield one delta to prove a partial stream still terminates with an
         # error event (the frontend uses that to drop the empty placeholder).
         yield {"type": "text_delta", "text": "partial"}
-        raise llm_client.LLMError("rate_limit", "Anthropic rate limit hit. Please retry in a moment.")
+        raise LLMError("rate_limit", "Anthropic rate limit hit. Please retry in a moment.")
 
     monkeypatch.setattr("app.api.chat.run_chat_stream", fake_stream)
 

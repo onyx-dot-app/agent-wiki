@@ -14,7 +14,6 @@ interface NavItem {
 
 const NAV: NavItem[] = [
   { href: "/wiki", label: "Wiki", icon: <BookIcon /> },
-  { href: "/chat", label: "Chat", icon: <ChatIcon /> },
   { href: "/triggers", label: "Triggers", icon: <BoltIcon /> },
   { href: "/events", label: "Events", icon: <EventsIcon /> },
 ];
@@ -192,13 +191,6 @@ function BookIcon() {
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <path d="M4 4h12a3 3 0 0 1 3 3v13H7a3 3 0 0 0-3 3z" />
       <path d="M4 4v16" />
-    </svg>
-  );
-}
-function ChatIcon() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="M21 12a8 8 0 0 1-11.5 7.2L4 21l1.8-5.5A8 8 0 1 1 21 12z" />
     </svg>
   );
 }

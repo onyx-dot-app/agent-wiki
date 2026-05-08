@@ -1,0 +1,30 @@
+{
+  "name": "edit_doc",
+  "description": "Surgical find-and-replace on an existing wiki markdown document. Replaces `old_string` with `new_string` exactly once (or every occurrence with `replace_all`). The match is fuzzy: minor whitespace and indentation drift in `old_string` is tolerated, but the surrounding context must still be unique to avoid ambiguity. The file must have been seen via `search_wiki` earlier in the conversation. Only call after the user has explicitly approved the change. Returns the commit SHA, the unified diff, and any broken markdown links the edit introduces. Errors with \"old_string not found\" or \"matched multiple times\" — in those cases provide more surrounding context or set `replace_all`.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "path": {
+        "type": "string",
+        "description": "Wiki-relative path to the markdown file. Must end in `.md` and the file must already exist."
+      },
+      "old_string": {
+        "type": "string",
+        "description": "The text to replace. Include enough surrounding context to make the match unique. Must be different from `new_string`."
+      },
+      "new_string": {
+        "type": "string",
+        "description": "The replacement text. Whitespace/indentation in this string is preserved verbatim — choose it to match the surrounding document."
+      },
+      "replace_all": {
+        "type": "boolean",
+        "description": "If true, replace every occurrence of `old_string`. Defaults to false (exactly-one match required)."
+      },
+      "message": {
+        "type": "string",
+        "description": "Short commit message summarizing the change."
+      }
+    },
+    "required": ["path", "old_string", "new_string", "message"]
+  }
+}

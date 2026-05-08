@@ -1,0 +1,41 @@
+{
+  "name": "multi_edit",
+  "description": "Apply multiple find-and-replace operations to one wiki document atomically. Each edit operates on the result of the previous edit. If ANY edit fails (no match, multi-match without `replace_all`, or empty `old_string`), nothing is written and the whole batch is reported as failed. One commit covers all edits. Prefer this over multiple `edit_doc` calls when changing several parts of the same document — saves round-trips and gives all-or-nothing semantics. The file must have been seen via `search_wiki` earlier in the conversation, and must already exist (use `write_doc` for new files). Only call after the user has explicitly approved the change. Returns the commit SHA, the unified diff, and any broken markdown links the result introduces.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "path": {
+        "type": "string",
+        "description": "Wiki-relative path to the markdown file. Must end in `.md` and already exist."
+      },
+      "edits": {
+        "type": "array",
+        "description": "Edits applied sequentially against the running body. Plan them so earlier edits don't remove text that later edits look for.",
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "properties": {
+            "old_string": {
+              "type": "string",
+              "description": "Text to replace at this step. Must be unique within the running body unless `replace_all` is true."
+            },
+            "new_string": {
+              "type": "string",
+              "description": "Replacement text. Whitespace preserved verbatim."
+            },
+            "replace_all": {
+              "type": "boolean",
+              "description": "Replace every occurrence at this step. Defaults to false."
+            }
+          },
+          "required": ["old_string", "new_string"]
+        }
+      },
+      "message": {
+        "type": "string",
+        "description": "Short commit message summarizing the overall change."
+      }
+    },
+    "required": ["path", "edits", "message"]
+  }
+}

@@ -6,10 +6,13 @@ history is always consistent with the working tree.
 """
 from __future__ import annotations
 
+import logging
 import subprocess
 from pathlib import Path
 
 from app.config import CONFIG
+
+log = logging.getLogger(__name__)
 
 
 def _run(args: list[str], cwd: str | None = None, check: bool = True) -> subprocess.CompletedProcess:
@@ -33,12 +36,14 @@ def ensure_wiki_repo() -> None:
     p.mkdir(parents=True, exist_ok=True)
     if (p / ".git").exists():
         return
+    log.info("initializing wiki git repo at %s", p)
     _run(["init", "-b", "main"], cwd=str(p))
-    _run(["config", "user.email", "agent-workspace@local"], cwd=str(p))
-    _run(["config", "user.name", "agent-workspace"], cwd=str(p))
+    _run(["config", "user.email", "agent-wiki@local"], cwd=str(p))
+    _run(["config", "user.name", "agent-wiki"], cwd=str(p))
     _run(["add", "-A"], cwd=str(p))
     if _run(["diff", "--cached", "--quiet"], cwd=str(p), check=False).returncode != 0:
         _run(["commit", "-m", "Seed wiki from working tree"], cwd=str(p))
+        log.info("seeded wiki repo with initial commit")
 
 
 def commit_file(rel_path: str, body: str, message: str, author: str | None = None) -> str:
@@ -48,10 +53,74 @@ def commit_file(rel_path: str, body: str, message: str, author: str | None = Non
     full.write_text(body)
     _run(["add", rel_path])
     if _run(["diff", "--cached", "--quiet"], check=False).returncode == 0:
-        return _run(["rev-parse", "HEAD"]).stdout.strip()
+        sha = _run(["rev-parse", "HEAD"]).stdout.strip()
+        log.debug("commit_file no-op (no diff) %s sha=%s", rel_path, sha[:8])
+        return sha
     env_args = ["--author", author] if author else []
     _run(["commit", "-m", message, *env_args])
-    return _run(["rev-parse", "HEAD"]).stdout.strip()
+    sha = _run(["rev-parse", "HEAD"]).stdout.strip()
+    log.debug("commit_file %s sha=%s author=%s", rel_path, sha[:8], author or "default")
+    return sha
+
+
+def move_and_commit(
+    old_rel_path: str,
+    new_rel_path: str,
+    body: str,
+    message: str,
+    author: str | None = None,
+) -> str:
+    """Rename a tracked file (delete old + write new) in one commit.
+
+    Single-commit moves let ``git log --follow`` trace history across renames.
+    """
+    full_new = Path(CONFIG.wiki_dir) / new_rel_path
+    full_new.parent.mkdir(parents=True, exist_ok=True)
+    full_new.write_text(body)
+    _run(["add", new_rel_path])
+    _run(["rm", "--", old_rel_path])
+    env_args = ["--author", author] if author else []
+    _run(["commit", "-m", message, *env_args])
+    sha = _run(["rev-parse", "HEAD"]).stdout.strip()
+    log.debug("move_and_commit %s -> %s sha=%s", old_rel_path, new_rel_path, sha[:8])
+    return sha
+
+
+def move_path(
+    old_rel_path: str,
+    new_rel_path: str,
+    message: str,
+    author: str | None = None,
+) -> tuple[str, list[tuple[str, str]]]:
+    """Rename a tracked file or directory via ``git mv``, single commit.
+
+    Returns ``(sha, [(old, new), ...])`` where each tuple is one tracked
+    file that was actually moved. For a directory rename this lists every
+    nested file. Used by tools that move things without rewriting content.
+    """
+    listed = _run(["ls-files", "--", old_rel_path]).stdout.splitlines()
+    tracked = [p for p in listed if p]
+    moves: list[tuple[str, str]] = []
+    for old_p in tracked:
+        if old_p == old_rel_path:
+            moves.append((old_p, new_rel_path))
+        else:
+            rest = old_p[len(old_rel_path):].lstrip("/")
+            moves.append((old_p, f"{new_rel_path}/{rest}"))
+    full_new = Path(CONFIG.wiki_dir) / new_rel_path
+    full_new.parent.mkdir(parents=True, exist_ok=True)
+    _run(["mv", old_rel_path, new_rel_path])
+    env_args = ["--author", author] if author else []
+    _run(["commit", "-m", message, *env_args])
+    sha = _run(["rev-parse", "HEAD"]).stdout.strip()
+    log.debug(
+        "move_path %s -> %s sha=%s files=%d",
+        old_rel_path,
+        new_rel_path,
+        sha[:8],
+        len(moves),
+    )
+    return sha, moves
 
 
 def delete_path(rel_path: str, message: str, author: str | None = None) -> str:
@@ -59,7 +128,9 @@ def delete_path(rel_path: str, message: str, author: str | None = None) -> str:
     _run(["rm", "-r", "--", rel_path])
     env_args = ["--author", author] if author else []
     _run(["commit", "-m", message, *env_args])
-    return _run(["rev-parse", "HEAD"]).stdout.strip()
+    sha = _run(["rev-parse", "HEAD"]).stdout.strip()
+    log.debug("delete_path %s sha=%s author=%s", rel_path, sha[:8], author or "default")
+    return sha
 
 
 def read_file(rel_path: str, ref: str = "HEAD") -> str:
@@ -67,21 +138,68 @@ def read_file(rel_path: str, ref: str = "HEAD") -> str:
     return _run(["show", f"{ref}:{rel_path}"]).stdout
 
 
-def history(rel_path: str, limit: int = 50) -> list[dict]:
-    """Return commit metadata for a path."""
+def history(rel_path: str, limit: int = 100) -> list[dict]:
+    """Return commit metadata (incl. body) for a path, newest first."""
+    sep_field = "\x1f"
+    sep_record = "\x1e"
+    fmt = f"%H{sep_field}%an{sep_field}%aI{sep_field}%s{sep_field}%b{sep_record}"
     out = _run(
-        ["log", f"-n{limit}", "--pretty=format:%H%x09%an%x09%aI%x09%s", "--", rel_path]
+        ["log", f"-n{limit}", "--follow", f"--pretty=format:{fmt}", "--", rel_path]
     ).stdout
-    rows = []
-    for line in out.splitlines():
-        sha, author, iso, subject = line.split("\t", 3)
-        rows.append({"sha": sha, "author": author, "ts": iso, "message": subject})
+    rows: list[dict] = []
+    for record in out.split(sep_record):
+        record = record.strip("\n")
+        if not record:
+            continue
+        parts = record.split(sep_field, 4)
+        if len(parts) < 5:
+            continue
+        sha, author, iso, subject, body = parts
+        rows.append({
+            "sha": sha,
+            "author": author,
+            "ts": iso,
+            "message": subject,
+            "body": body,
+        })
     return rows
+
+
+def head_sha_for_path(rel_path: str) -> str | None:
+    """SHA of the most recent commit that touched ``rel_path``, or None."""
+    out = _run(
+        ["log", "-n1", "--pretty=format:%H", "--", rel_path], check=False
+    ).stdout.strip()
+    return out or None
+
+
+def commits_between(base_sha: str, head_sha: str, rel_path: str) -> list[str]:
+    """SHAs reachable from head_sha but not base_sha that touched rel_path,
+    newest first. Excludes base_sha itself."""
+    out = _run(
+        ["log", "--pretty=format:%H", f"{base_sha}..{head_sha}", "--", rel_path],
+        check=False,
+    ).stdout
+    return [s for s in out.splitlines() if s]
 
 
 def list_paths(prefix: str = "") -> list[str]:
     """List tracked files under a path prefix."""
     out = _run(["ls-files", prefix or "."]).stdout
+    return [line for line in out.splitlines() if line]
+
+
+def paths_changed_in(sha: str) -> list[str]:
+    """File paths touched by a single commit. Empty list if sha is unknown."""
+    out = _run(
+        ["diff-tree", "--no-commit-id", "--name-only", "-r", sha], check=False
+    ).stdout
+    return [line for line in out.splitlines() if line]
+
+
+def tree_paths_at(sha: str) -> list[str]:
+    """All tracked file paths in the tree at ``sha``."""
+    out = _run(["ls-tree", "-r", "--name-only", sha], check=False).stdout
     return [line for line in out.splitlines() if line]
 
 
