@@ -3,6 +3,9 @@ repos:
     rev: v4.6.0
     hooks:
       - id: check-yaml
+        # Helm chart templates contain Go templating that isn't valid YAML
+        # pre-render; `helm lint` (below) covers those.
+        exclude: ^deploy/helm/[^/]+/templates/
       - id: end-of-file-fixer
       - id: trailing-whitespace
 
