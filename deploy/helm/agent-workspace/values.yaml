@@ -77,7 +77,7 @@ worker:
   queues:
     - documents
     - triggers
-    - wiki_doc_index
+    - wiki_bm25
   resources:
     requests:
       cpu: 100m
