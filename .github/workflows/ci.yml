@@ -1,59 +1,32 @@
-name: CI
+name: Quality Checks PR
+
+concurrency:
+  group: Quality-Checks-PR-${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
 
 on:
-  push:
-    branches: [main]
   pull_request:
-    branches: [main]
+  workflow_dispatch:
 
 jobs:
-  helm-lint:
-    name: Helm lint
+  pre-commit:
     runs-on: ubuntu-latest
-    if: ${{ hashFiles('deploy/helm/**') != '' }}
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Install Helm
-        uses: azure/setup-helm@v4
+      - uses: actions/checkout@v4
         with:
-          version: v3.13.3
-
-      - name: helm lint
-        run: |
-          set -euo pipefail
-          for chart_dir in deploy/helm/*/; do
-            if [ -f "$chart_dir/Chart.yaml" ]; then
-              echo "Linting $chart_dir"
-              helm lint "$chart_dir" --set secretKey=ci-placeholder
-            fi
-          done
-
-  terraform-checks:
-    name: Terraform fmt + validate
-    runs-on: ubuntu-latest
-    if: ${{ hashFiles('deploy/terraform/**') != '' }}
-
-    defaults:
-      run:
-        working-directory: ./deploy/terraform
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+          fetch-depth: 0
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: 1.9.8
 
-      - name: terraform fmt
-        run: terraform fmt -check -recursive
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.13.3
 
-      - name: terraform init
-        run: terraform init -backend=false -input=false
-
-      - name: terraform validate
-        run: terraform validate
+      - name: Run pre-commit
+        uses: j178/prek-action@v2.0.2
+        with:
+          extra_args: ${{ github.event_name == 'pull_request' && format('--from-ref {0} --to-ref {1}', github.event.pull_request.base.sha, github.event.pull_request.head.sha) || '' }}
