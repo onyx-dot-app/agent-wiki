@@ -89,23 +89,40 @@ it.
 
 ## Storage — Postgres
 
-Move off SQLite for any non-developer-laptop deployment. SQLite stays
-supported for local dev (one developer, no replicas, no LISTEN/NOTIFY)
-behind a config flag, but the canonical and tested deployment uses
-Postgres.
+Move off SQLite. Postgres is the only primary store, in every
+environment — local development, CI, staging, production. SQLite is
+removed; there is no dev-mode fallback, no config flag, no compatibility
+shim. Local dev runs Postgres natively (`brew install postgresql@16 &&
+brew services start postgresql@16`).
+
+Reasons to unify on Postgres rather than keep SQLite as a dev option:
+
+- A two-store architecture splits the bug surface in two. Migration
+  bugs, transaction-isolation differences, FTS-syntax drift, and
+  datetime serialization all behave differently between SQLite and
+  Postgres. Catching them only in CI or staging is exactly the failure
+  mode unified stacks prevent.
+- Subscriptions, audit log behavior, and the commit lock all rely on
+  Postgres-specific features (`LISTEN/NOTIFY`, advisory locks). Any
+  dev-mode SQLite path would either fake these or skip them, which
+  means the SQLite path runs different code than prod and is therefore
+  not testing prod.
+- Operating two stores costs runbook and review attention forever. The
+  one-time cost of installing Postgres locally is paid once per
+  developer machine.
 
 Why now, not later:
 
-- **`LISTEN/NOTIFY` is in Postgres natively, free, real-time.** SQLite
-  has no equivalent; the polling alternative pays CPU continuously and
-  caps notification latency at the poll interval.
-- **Multiple replicas need a single shared writer view.** SQLite assumes
-  one process; WAL extends to multi-reader but not to anything we'd
-  trust under concurrent writes from N processes.
+- **`LISTEN/NOTIFY` is in Postgres natively, free, real-time.** The
+  subscription system depends on it. Polling-on-SQLite caps
+  notification latency at the poll interval and pays CPU continuously.
+- **Multiple replicas need a single shared writer view.** SQLite
+  assumes one process; WAL extends to multi-reader but not to
+  concurrent writes from N processes. Postgres is built for it.
 - **Schema migrations stay simple now, get harder later.** Migrating
   from SQLite to Postgres after live tables exist is real work
   (column-type drift, datetime serialization, autoincrement vs
-  sequences). Doing it before the surface area grows is a one-time
+  sequences). Cutting over before the surface grows is a one-time
   cost.
 - **Backups, point-in-time recovery, replication, observability** —
   every one of these has a paved path in Postgres and a hand-rolled
@@ -122,13 +139,12 @@ FTS5 → Postgres `tsvector` + GIN index. The bm25 wrapper in
 return shape.
 
 Huey switches from SQLite-backed to Redis-backed (Huey supports both
-out of the box). Or to a Postgres queue (`pgmq`-style, table-backed).
-Picking Redis keeps Huey idiomatic; picking Postgres avoids running a
-second datastore until traffic justifies it.
+out of the box). Same Redis everywhere — local dev runs it natively
+(`brew install redis && brew services start redis`).
 
-Default recommendation: **Postgres for primary, Redis for the queue**.
-Two services already (Flask, MCP); two more (Postgres, Redis) is the
-standard production stack and the operating burden is well-understood.
+The full stack is **Postgres + Redis**, identical in dev and prod. No
+fallbacks, no flags. Two more services to install on a fresh laptop;
+both are one `brew` line and run forever after.
 
 ## Pubsub — Postgres LISTEN/NOTIFY
 
@@ -148,7 +164,7 @@ the NOTIFY happens inside Flask anyway, so this is implicit).
 Job-status updates use a separate channel (`mcp_job_updated`) with the
 same shape.
 
-This replaces the SQLite-backed `mcp_subscriptions` + `mcp_notifications`
+This replaces the table-backed `mcp_subscriptions` + `mcp_notifications`
 tables in the [mcp-server.md](./mcp-server.md) plan. There is no
 notifications table; there is no polling; there is no `delivered_at`
 bookkeeping. Subscriptions live only in MCP-server-process memory and
@@ -465,7 +481,7 @@ backend/
 │   ├── audit/
 │   │   └── log.py                  NEW — write helper called from each write endpoint
 │   ├── db/
-│   │   └── postgres.py             NEW (or modified sqlite.py) — connect + idiom adapter
+│   │   └── postgres.py             NEW — replaces sqlite.py; psycopg connect + repo idioms
 │   ├── tasks/
 │   │   └── document_update.py      worker — calls Flask HTTP, never git directly
 │   ├── llm/agents/
@@ -529,21 +545,21 @@ data, so the cost is trivial.
 
 ## Divergences from current state
 
-| Area                                     | Today                                             | This proposal                                                                | Why                                                                                 |
-| ---------------------------------------- | ------------------------------------------------- | ---------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| Primary store                            | SQLite (`app.sqlite`)                             | Postgres                                                                     | LISTEN/NOTIFY, multi-replica, audit-friendly. SQLite kept for solo-laptop dev only. |
-| Queue store                              | SQLite (`queue.sqlite`, Huey)                     | Redis (Huey)                                                                 | Idiomatic Huey at scale; avoids two roles for SQLite.                               |
-| Search index                             | SQLite FTS5                                       | Postgres `tsvector` + GIN                                                    | Co-located with primary store; same ACID transaction as the commit.                 |
-| Inbound MCP                              | none (only an outbound stub at `app/api/mcp.py`)  | Streamable HTTP, FastAPI sidecar                                             | Real protocol surface; ASGI-native for SSE; separate scaling shape.                 |
-| Outbound MCP                             | `app/api/mcp.py` blueprint (stubs)                | Renamed `app/api/mcp_connections.py`                                         | Clarifies direction in the namespace.                                               |
-| Wiki commit ownership                    | Flask AND worker both call `wiki_git.commit_file` | Only Flask calls `commit_file`; worker POSTs to Flask                        | Eliminates cross-process race on the git working tree.                              |
-| Auth for tools                           | none                                              | per-user PAT (`mcp_<32hex>`), sha256-hashed, expiring, revocable             | Real auth + audit per agent.                                                        |
-| Token hashing                            | n/a                                               | sha256 of high-entropy random                                                | bcrypt is for low-entropy passwords; sha256 is correct here.                        |
-| Audit                                    | events table fires on triggers only               | dedicated `audit_log` written by every Flask write endpoint                  | Foundational requirement once external agents can mutate state.                     |
-| Subscriptions                            | none                                              | MCP `resources/subscribe`; PG `LISTEN/NOTIFY` fan-out; in-memory per-replica | Real-time multi-agent collab.                                                       |
-| Pubsub mechanism                         | n/a                                               | Postgres LISTEN/NOTIFY                                                       | Native, real-time, no polling.                                                      |
-| Web framework for long-lived connections | Flask (sync, WSGI)                                | FastAPI/Uvicorn (async, ASGI) for the MCP service                            | SSE without fighting the framework.                                                 |
-| Deployment shape                         | one Flask container, one worker container         | Flask + worker + MCP sidecar + Postgres + Redis                              | Each service scales independently.                                                  |
+| Area                                     | Today                                             | This proposal                                                                | Why                                                                                               |
+| ---------------------------------------- | ------------------------------------------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| Primary store                            | SQLite (`app.sqlite`)                             | Postgres (everywhere — dev, CI, prod)                                        | LISTEN/NOTIFY, multi-replica, audit-friendly, advisory locks. SQLite is removed; no dev fallback. |
+| Queue store                              | SQLite (`queue.sqlite`, Huey)                     | Redis (everywhere)                                                           | Idiomatic Huey; one queue store across all environments.                                          |
+| Search index                             | SQLite FTS5                                       | Postgres `tsvector` + GIN                                                    | Co-located with primary store; same ACID transaction as the commit.                               |
+| Inbound MCP                              | none (only an outbound stub at `app/api/mcp.py`)  | Streamable HTTP, FastAPI sidecar                                             | Real protocol surface; ASGI-native for SSE; separate scaling shape.                               |
+| Outbound MCP                             | `app/api/mcp.py` blueprint (stubs)                | Renamed `app/api/mcp_connections.py`                                         | Clarifies direction in the namespace.                                                             |
+| Wiki commit ownership                    | Flask AND worker both call `wiki_git.commit_file` | Only Flask calls `commit_file`; worker POSTs to Flask                        | Eliminates cross-process race on the git working tree.                                            |
+| Auth for tools                           | none                                              | per-user PAT (`mcp_<32hex>`), sha256-hashed, expiring, revocable             | Real auth + audit per agent.                                                                      |
+| Token hashing                            | n/a                                               | sha256 of high-entropy random                                                | bcrypt is for low-entropy passwords; sha256 is correct here.                                      |
+| Audit                                    | events table fires on triggers only               | dedicated `audit_log` written by every Flask write endpoint                  | Foundational requirement once external agents can mutate state.                                   |
+| Subscriptions                            | none                                              | MCP `resources/subscribe`; PG `LISTEN/NOTIFY` fan-out; in-memory per-replica | Real-time multi-agent collab.                                                                     |
+| Pubsub mechanism                         | n/a                                               | Postgres LISTEN/NOTIFY                                                       | Native, real-time, no polling.                                                                    |
+| Web framework for long-lived connections | Flask (sync, WSGI)                                | FastAPI/Uvicorn (async, ASGI) for the MCP service                            | SSE without fighting the framework.                                                               |
+| Deployment shape                         | one Flask container, one worker container         | Flask + worker + MCP sidecar + Postgres + Redis                              | Each service scales independently.                                                                |
 
 Each of these changes has a defensible "do it later" framing. The
 recommendation is to do them now, before the surface area grows. The
