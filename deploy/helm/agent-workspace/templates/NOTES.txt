@@ -1,0 +1,17 @@
+agent-workspace has been deployed.
+
+1. Find the public hostname of the ingress controller's NLB:
+   kubectl -n ingress-nginx get svc ingress-nginx-controller \
+     -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
+
+2. Point a DNS record for {{ .Values.ingress.host }} at that hostname (CNAME).
+
+{{- if .Values.ingress.clusterIssuer }}
+3. cert-manager will issue a TLS cert via the "{{ .Values.ingress.clusterIssuer }}" ClusterIssuer
+   once DNS resolves to the ingress.
+{{- else }}
+3. TLS is not enabled — set .Values.ingress.clusterIssuer to a configured ClusterIssuer
+   (e.g. "letsencrypt-prod") and .Values.ingress.tls.enabled=true to add HTTPS.
+{{- end }}
+
+4. Open https://{{ .Values.ingress.host }} — the first account you sign up is auto-promoted to admin.

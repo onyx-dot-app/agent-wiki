@@ -7,7 +7,7 @@
 > agent-wiki. Code-level architecture lives in the other per-area
 > docs (e.g. [flask-and-apis](../flask-and-apis/flask-and-apis.md)).
 
-_Last updated: 2026-05-06_
+_Last updated: 2026-05-07_
 
 ---
 
@@ -23,7 +23,8 @@ nginx :80                 reverse proxy: /api/* → backend, else → frontend
 ```
 
 All four services are defined in `docker-compose.yml` at the repo root.
-Compose is the only wiring today — no Helm chart, no k8s manifests yet.
+Compose is the canonical local path. A k8s/EKS deploy story also lives in
+`deploy/` — see "Production deploy (EKS + Helm)" below.
 
 ### Volumes
 
@@ -79,13 +80,41 @@ Not implemented. When this matters:
 - `wiki-data` — push a mirror to a remote git remote on a cron. The wiki
   *is* a git repo; this is the cleanest backup story.
 
-### Production deltas (not done yet)
-- `SESSION_COOKIE_SECURE = True` behind HTTPS (currently False; the
-  comment in `main.py` flags this).
-- Real `SECRET_KEY` from a secret store, not env.
-- Nginx terminating TLS (or a load balancer in front).
-- A health check that exercises `init_db()` having run and a sample LLM
-  ping (optional).
+### Production deploy (EKS + Helm)
+
+`deploy/` holds the production wiring. Two layers:
+
+- **`deploy/terraform/`** — provisions VPC + EKS (using
+  `terraform-aws-modules/{vpc,eks}/aws`) with the EBS CSI add-on, a `gp3`
+  default StorageClass, ingress-nginx (NLB-backed), cert-manager, and an
+  optional `letsencrypt-prod` ClusterIssuer (gated on `cert_manager_email`).
+  State is local and gitignored.
+- **`deploy/helm/agent-workspace/`** — chart with backend/worker/frontend
+  Deployments, two PVCs (`app-data` 5Gi, `wiki-data` 10Gi, both `gp3`/RWO),
+  a Secret for `SECRET_KEY` (+ optional OIDC client secret), and an Ingress
+  that routes `/api/*` → backend and `/` → frontend (replacing the
+  in-cluster nginx pod that compose uses).
+
+Constraints baked into the chart:
+- **Backend + worker pinned to 1 replica** with `strategy: Recreate` and a
+  `podAffinity` rule that co-schedules them on one node — RWO PVCs +
+  single-writer SQLite + single git working tree leave no room for HA at
+  this layer.
+- **Frontend** is stateless and free to scale.
+- **No nginx pod** — ingress-nginx replaces it. Path routing lives in the
+  Ingress resource; `proxy-body-size` matches the 25m the compose nginx had.
+
+See `deploy/README.md` for the apply/install flow.
+
+### Production deltas (still to do)
+- `SESSION_COOKIE_SECURE = True` behind HTTPS — chart wires `SECURE_COOKIES`
+  env from `values.yaml` (default `true`); backend code still needs to read
+  it (`main.py` currently hard-codes `False`).
+- Real `SECRET_KEY` from a secret store (External Secrets / AWS Secrets
+  Manager) — chart currently takes it via `--set secretKey=...`.
+- A health check that exercises `init_db()` and an LLM ping (optional).
+- Backup automation (cron `git push --mirror` for the wiki PVC, `VACUUM INTO`
+  for SQLite). Not wired.
 
 ---
 
@@ -97,6 +126,9 @@ Not implemented. When this matters:
 - Migrations run on boot; FTS5 active.
 - Wiki repo auto-initializes.
 - Worker registers tasks on import.
+- `deploy/terraform/` validates (`terraform validate` clean); `deploy/helm/`
+  lints clean and templates against representative values. Not yet
+  end-to-end applied against a real AWS account.
 
 ### Stubbed / partial
 - `nginx.conf` is minimal — fine for local, may need tuning for prod
@@ -122,10 +154,12 @@ Not implemented. When this matters:
    the wiki, `VACUUM INTO` for SQLite.
 
 ### Open questions
-- Where will this actually run for the first dogfood — a single VM, a
-  managed-container product (Fly/Render), or k8s? Affects how much we
-  invest in compose vs. moving to Helm/Kustomize. V0 brief just says
-  "deployment"; pick after the first real install.
 - Multi-worker concurrency on the wiki repo (lock strategy) — flagged
   in `background-tasks/background-tasks.md`. Becomes a real question if
-  a single worker can't keep up.
+  a single worker can't keep up; until then the helm chart pins worker
+  replicas to 1 and co-schedules with the backend.
+- First dogfood deploy: are we using the bundled `deploy/terraform` (own
+  cluster) or installing the chart into the existing Onyx EKS? The chart
+  works for either; Terraform is only needed for the former.
+- Image registry — chart defaults assume a public GHCR/Docker Hub repo
+  (no ECR provisioning). Revisit if private images become a requirement.
