@@ -16,35 +16,54 @@ choreography. Companion to [seams.md](../seams.md) and
    the database and the wiki working tree; the MCP server keeps only
    per-replica session metadata (subscriptions, seen paths) that is
    cheap to rebuild on reconnect.
-2. **One writer to the wiki and to the database.** Concurrent writes to
-   `git` working trees corrupt index state, partial commits, and HEAD
-   pointers — `git` provides no native cross-process write coordination.
-   The MCP server, the Huey worker, and the Flask handler must all
-   funnel commits through a single in-process writer (Flask).
+2. **Single git writer via a transactional outbox.** Concurrent writes
+   to `git` working trees corrupt index state, partial commits, and
+   HEAD pointers — `git` provides no native cross-process write
+   coordination. Every caller (Flask handler, Huey worker,
+   document-updater agent, future cron) writes a row into
+   `commit_outbox` in the same DB transaction as the business write; a
+   dedicated single-concurrency Huey consumer (`commit_writer`) is the
+   only process that calls `wiki_git.commit_file`.
 3. **Stateless, horizontally scalable MCP replicas.** Sessions are
    sticky to a replica via load-balancer hashing on session id; nothing
    about a replica is durable beyond an open connection.
-4. **The MCP server is deletable.** If Anthropic deprecates MCP or we
-   adopt a different agent protocol, we replace the MCP package without
-   touching wiki business logic.
+4. **The MCP server is deletable.** If MCP is replaced or another
+   agent protocol joins, the MCP package goes away without touching
+   wiki business logic.
 
-## Core principle — Flask is the only writer
+## Core principle — transactional outbox
 
-| Process               | Reads wiki + DB?          | Writes wiki + DB?                   |
-| --------------------- | ------------------------- | ----------------------------------- |
-| Flask app             | yes                       | **yes**                             |
-| MCP server            | no — calls Flask HTTP API | no — calls Flask HTTP API           |
-| Huey worker           | reads job rows            | calls Flask HTTP API for any commit |
-| Cron / future workers | as needed                 | calls Flask HTTP API                |
+The git working tree is non-transactional state alongside Postgres,
+which is transactional. The classic solution is the **transactional
+outbox**: every intent-to-mutate-git is recorded as a row in Postgres
+inside the same transaction as the business write. A single dedicated
+consumer drains the outbox and performs the git operation. This buys:
 
-Worker processes never call `wiki_git.commit_file` directly. They POST to
-`/api/documents/<path>/edit` (or whichever endpoint matches the change
-shape). Flask serializes commits behind a process-local lock and is the
-sole holder of git working-tree state.
+- ACID atomicity across the business write and the commit intent. A
+  process crash between "I decided to commit X" and "git wrote X" is
+  impossible — either both land or neither does.
+- Single git writer for free. The drain process is the one and only
+  caller of `wiki_git.commit_file`. No advisory locks, no `flock`
+  ceremony, no race.
+- Retryability. A failed git op leaves the outbox row in `pending` (or
+  `failed` with backoff); the next drain picks it up.
+- Audit by construction. The outbox row carries `user_id`,
+  `token_id`, `action`, `path`, `payload`, `result_sha`, `error`. It
+  IS the audit log; a separate `audit_log` table is unnecessary.
+- No HTTP loopback. Workers don't call back into Flask just to commit.
+  They write the same outbox row Flask does.
 
-This is the single architectural decision that eliminates the
-cross-process commit race. Every other piece of the design follows from
-it.
+| Process                  | Reads wiki + DB? | Writes outbox? | Writes git? |
+| ------------------------ | ---------------- | -------------- | ----------- |
+| Flask app                | yes              | yes            | no          |
+| MCP server               | calls Flask HTTP | no             | no          |
+| Huey worker (general)    | yes              | yes            | no          |
+| `commit_writer` consumer | yes              | drains/marks   | **yes**     |
+
+`wiki_git.commit_file` is private to `commit_writer`; `app/wiki/git.py`
+makes that explicit (the read helpers stay public; `commit_file` and
+`move_and_commit` move behind a "writer-only" import path or a runtime
+assertion that the caller is the writer process).
 
 ## Topology
 
@@ -55,134 +74,293 @@ it.
               │ POST /mcp  (JSON-RPC)              │ GET /mcp  (SSE)
               ▼                                    ▼
        ┌───────────────────────────────────────────────────────────┐
-       │  MCP server  (FastAPI / ASGI, single replica for v0)      │
-       │  ─────────────────────────────────────────────────────    │
+       │  MCP server  (FastAPI / ASGI, N stateless replicas)       │
        │  - bearer-token auth → user                               │
        │  - tool dispatch → httpx call to Flask                    │
        │  - per-session subscription set (in-process)              │
-       │  - SSE writer fed by mcp_notifications poll (100 ms)      │
+       │  - SSE writer fed by Postgres LISTEN                      │
        └─────────────┬──────────────────────────────────┬──────────┘
-                     │ HTTP (intra-host)                 │ poll mcp_notifications
+                     │ HTTP (intra-cluster, mTLS)        │ LISTEN wiki_doc_updated
                      ▼                                    ▼
            ┌──────────────────────────────────────────────────────┐
-           │  Flask app  (existing — only writer)                  │
+           │  Flask app  (existing — owns API + outbox enqueue)    │
            │  /api/documents, /api/triggers, /api/jobs, /api/auth  │
-           │  - acquires threading.Lock                            │
-           │  - wiki_git.commit_file                               │
-           │  - reindex + trigger fan-out                          │
-           │  - INSERT mcp_notifications row (cross-process)       │
-           │  - in-process asyncio.Queue push (same-process)       │
-           │  - audit_log INSERT                                   │
-           └────────────┬─────────────────────────────────┬────────┘
-                        │ enqueue                          │
-                        ▼                                  ▼
-              ┌─────────────────┐               ┌──────────────────┐
-              │  Huey worker    │──HTTP──▶─────│  SQLite          │
-              │  (calls Flask   │               │  app.sqlite:     │
-              │   API for       │               │   documents      │
-              │   commits)      │               │   triggers       │
-              └─────────────────┘               │   events         │
-                                                │   mcp_tokens     │
-                                                │   mcp_jobs       │
-                                                │   mcp_notifs     │
-                                                │   audit_log      │
-                                                │  queue.sqlite:   │
-                                                │   Huey           │
-                                                └──────────────────┘
+           │  INSERT commit_outbox + business rows in one txn      │
+           │  LISTEN commit_done for sync-response handlers        │
+           └──┬─────────────────────────────────────┬──────────────┘
+              │ enqueue                              │
+              ▼                                      │
+       ┌─────────────────┐                           │
+       │  Huey worker    │── INSERT commit_outbox ──┤
+       │  (doc-updater   │                           │
+       │   agent, etc.)  │                           │
+       └─────────────────┘                           │
+                                                     ▼
+                              ┌────────────────────────────────────────┐
+                              │  Postgres                              │
+                              │  documents / triggers / events /       │
+                              │  mcp_tokens / mcp_jobs / commit_outbox │
+                              │  + LISTEN/NOTIFY channels              │
+                              └────────────────────┬───────────────────┘
+                                                   │ pg_notify('commit_pending', id)
+                                                   ▼
+                              ┌────────────────────────────────────────┐
+                              │  commit_writer  (Huey, concurrency=1)  │
+                              │  - SELECT FOR UPDATE SKIP LOCKED       │
+                              │  - check base_sha vs head_sha_for_path │
+                              │  - wiki_git.commit_file                │
+                              │  - update outbox.status, result_sha    │
+                              │  - enqueue reindex + trigger fan-out   │
+                              │  - pg_notify('wiki_doc_updated', …)    │
+                              │  - pg_notify('commit_done', outbox_id) │
+                              └────────────────────────────────────────┘
 ```
 
-Single-host deployment for v0. Postgres + Redis become a future
-migration when scaling needs cross that line — see [Future migration to
-Postgres + Redis](#future-migration-to-postgres--redis).
+## Storage — Postgres + Redis
 
-## Storage — SQLite (v0)
+Postgres is the primary store across all environments — local
+development, CI, staging, production. SQLite is removed; there is no
+dev-mode fallback, no config flag, no compatibility shim. Local dev
+runs Postgres natively (`brew install postgresql@16 && brew services
+start postgresql@16`).
 
-The current store stays. `app.sqlite` continues to hold all primary
-state (`users`, `documents`, `triggers`, `events`, `llm_settings`,
-`mcp_connections`, plus the new tables this proposal adds). FTS5
-remains the search index. Huey continues to run on `queue.sqlite`. The
-existing `app/db/sqlite.py` connect helper and the free-function repo
-modules in `app/auth/`, `app/triggers/`, etc. are unchanged.
+Reasons:
 
-This proposal does not introduce Postgres or Redis as v0 dependencies.
-Adding them was the single biggest weight in earlier drafts, and the
-production-quality wins this doc lands do not depend on the storage
-swap. See [Future migration to Postgres + Redis](#future-migration-to-postgres--redis)
-for when and why we'd cut over.
+- The outbox pattern relies on `SELECT FOR UPDATE SKIP LOCKED`,
+  partial indexes on status, and `LISTEN/NOTIFY` for low-latency
+  drain. None of these are SQLite-equivalent in semantics.
+- Subscriptions and the commit-writer wake-up depend on
+  `LISTEN/NOTIFY` for sub-millisecond push — polling is the only
+  SQLite alternative and pays CPU continuously.
+- Multiple replicas need a single shared writer view. SQLite assumes
+  one process; Postgres handles N processes correctly.
+- Schema migrations stay simple now, get harder later. Migrating from
+  SQLite to Postgres after live tables exist is real work
+  (column-type drift, datetime serialization, autoincrement vs
+  sequences).
+- Backups, point-in-time recovery, replication, observability — paved
+  paths in Postgres, hand-rolled in SQLite.
 
-New tables (all SQLite, applied through the existing numbered-migration
-mechanism in `app/db/migrations/`):
+The repo modules in `app/auth/users.py`, `app/triggers/repo.py`, etc.
+are already free-function repos using `app.db.sqlite.connect()`. Swap
+the `connect()` implementation to `psycopg`; migrate the SQL idioms
+(`?` → `%s`, `INSERT OR IGNORE` → `INSERT … ON CONFLICT`,
+`AUTOINCREMENT` → `BIGSERIAL`). The repo pattern is preserved.
 
-- `mcp_tokens` — per-user PATs.
-- `mcp_jobs` — async LLM jobs (state, idempotency, payload, result).
-- `mcp_notifications` — cross-process pubsub queue (see [Pubsub](#pubsub--polled-mcp_notifications-table)).
-- `audit_log` — append-only write trail.
+FTS5 → Postgres `tsvector` + GIN index. The bm25 wrapper in
+`app/wiki/search.py` becomes a `ts_rank_cd` query. Same callers, same
+return shape.
 
-Schemas use SQLite idioms (`INTEGER PRIMARY KEY AUTOINCREMENT`, `TEXT`
-for ISO-8601 datetimes, `TEXT` for JSON blobs). Stated explicitly per
-table below.
+Huey switches from SQLite-backed to Redis-backed. Same Redis
+everywhere — local dev runs it natively (`brew install redis && brew
+services start redis`).
 
-## Pubsub — polled `mcp_notifications` table
+Three Huey queues:
 
-Wiki commits and job updates fan out through two parallel paths:
+- `documents_huey` — heavy LLM tasks (document-updater agent runs).
+- `wiki_bm25_huey` — reindexing.
+- `commits_huey` — single-concurrency commit writer (NEW).
 
-1. **In-process (same-replica) — direct.** When Flask commits a doc,
-   it pushes a `Notification` object into an in-process registry
-   keyed by path. The MCP-server-side queue drains the registry and
-   ships SSE messages without touching SQLite. Latency: sub-ms.
-   Applies only to commits originating in the Flask process the MCP
-   replica is co-located with.
-2. **Cross-process — `mcp_notifications` table.** When the Huey
-   worker (separate process) commits via the Flask API, Flask still
-   does the in-process push (above) and ALSO inserts a row into
-   `mcp_notifications`. Each MCP replica polls
-   `mcp_notifications WHERE delivered=0 ORDER BY id` every 100 ms,
-   matches against subscribed sessions, ships the SSE messages, and
-   stamps `delivered=1`. A small janitor task drops delivered rows
-   older than an hour.
+`triggers_huey` from the existing layout stays as the trigger-eval
+queue.
 
-The two paths look the same to subscribers — the in-process path is a
-latency optimization for the common case (worker-not-involved commits),
-the table is the correctness floor for cross-process events.
+The full stack is **Postgres + Redis**, identical in dev and prod. No
+fallbacks, no flags. Two services to install on a fresh laptop;
+both are one `brew` line and run forever after.
 
-`mcp_notifications`:
+## Outbox — schema and protocol
 
-| column     | type                                    | notes                                                     |
-| ---------- | --------------------------------------- | --------------------------------------------------------- |
-| id         | INTEGER PRIMARY KEY AUTOINCREMENT       |                                                           |
-| uri        | TEXT NOT NULL                           | `wiki:///<path>` or `job://<id>`                          |
-| payload    | TEXT NOT NULL                           | JSON blob: `{sha, kind}` for docs, `{status, …}` for jobs |
-| delivered  | INTEGER NOT NULL DEFAULT 0              | 0 / 1 boolean                                             |
-| created_at | TEXT NOT NULL DEFAULT (datetime('now')) |                                                           |
+```sql
+-- migration: commit_outbox
+CREATE TABLE commit_outbox (
+  id              BIGSERIAL PRIMARY KEY,
+  user_id         BIGINT NOT NULL REFERENCES users(id),
+  token_id        BIGINT REFERENCES mcp_tokens(id),
+  action          TEXT NOT NULL,             -- 'doc.edit'/'doc.write'/'doc.move'/'doc.create_dir'/'doc.patch'
+  path            TEXT NOT NULL,
+  payload         JSONB NOT NULL,            -- shape varies by action: {body, edits, message, trace, ...}
+  base_sha        TEXT,                      -- optional optimistic-concurrency anchor
+  idempotency_key TEXT,                      -- client-supplied UUID v4 for retry-safe writes
+  status          TEXT NOT NULL DEFAULT 'pending',
+                                             -- pending | running | committed | stale_base | failed
+  result_sha      TEXT,                      -- set when status='committed'
+  error           TEXT,                      -- non-null when status in ('stale_base','failed')
+  attempts        INTEGER NOT NULL DEFAULT 0,
+  enqueued_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  started_at      TIMESTAMPTZ,
+  finished_at     TIMESTAMPTZ
+);
+CREATE INDEX idx_commit_outbox_pending
+  ON commit_outbox(id) WHERE status='pending';
+CREATE INDEX idx_commit_outbox_user_created
+  ON commit_outbox(user_id, enqueued_at DESC);
+CREATE UNIQUE INDEX idx_commit_outbox_idempotency
+  ON commit_outbox(user_id, idempotency_key) WHERE idempotency_key IS NOT NULL;
+```
 
-Indexed on `(delivered, id)` for the polling query.
+### Enqueue protocol
 
-Subscriptions themselves live only in MCP-server-process memory — no
-table. Clients re-subscribe on reconnect. With single-replica MCP for
-v0, that is sufficient; multi-replica futures get a subscription table
-or a real pubsub broker (see Future migration).
+Every Flask write endpoint and every Huey-task that needs to commit
+follows the same pattern:
+
+```python
+with db.transaction() as txn:
+    # 1. business-state write (e.g. mcp_jobs.status='succeeded')
+    repo.update(...)
+    # 2. intent-to-commit
+    outbox_id = commit_outbox.insert(
+        user_id=ctx.user_id,
+        token_id=ctx.token_id,
+        action="doc.edit",
+        path=rel,
+        payload={"edits": edits, "message": message},
+        base_sha=base_sha,
+    )
+    txn.commit()
+
+# 3. wake the writer
+db.notify("commit_pending", outbox_id)
+```
+
+The notify is opportunistic — the writer also polls every N seconds as
+a backstop for missed wake-ups (NOTIFY isn't durable across listener
+disconnects).
+
+### Drain protocol — `commit_writer`
+
+```python
+# pseudo, runs forever as a Huey task on commits_huey (concurrency=1)
+def drain_commit_outbox():
+    while True:
+        wait_for_notify_or_timeout("commit_pending", timeout=5)
+        with db.transaction() as txn:
+            row = txn.execute("""
+                SELECT * FROM commit_outbox
+                WHERE status='pending'
+                ORDER BY id
+                FOR UPDATE SKIP LOCKED
+                LIMIT 1
+            """).first()
+            if not row:
+                continue
+            txn.execute("UPDATE commit_outbox SET status='running', "
+                        "started_at=now(), attempts=attempts+1 WHERE id=%s",
+                        (row.id,))
+            txn.commit()
+
+        try:
+            if row.base_sha and head_sha_for_path(row.path) != row.base_sha:
+                mark(row.id, status="stale_base",
+                     error=f"current={head_sha_for_path(row.path)}")
+                pg_notify("commit_done", row.id)
+                continue
+            sha = perform_commit(row)            # the only call to wiki_git.commit_file
+            mark(row.id, status="committed", result_sha=sha)
+            enqueue_reindex(row.path)
+            enqueue_trigger_fan_out(row.path, sha)
+            pg_notify("wiki_doc_updated", json({"path": row.path, "sha": sha}))
+            pg_notify("commit_done", row.id)
+        except Exception as exc:
+            mark(row.id, status="failed", error=repr(exc))
+            pg_notify("commit_done", row.id)
+```
+
+`commit_writer` is the only process that imports `wiki_git.commit_file`
+or `move_and_commit`. Other modules import the read helpers (`read_file`,
+`history`, `head_sha_for_path`, etc.) freely.
+
+### Synchronous-feel for UI handlers
+
+Flask handlers that need to return the new sha to the caller (in-app
+editor saves, MCP `edit_doc`/`write_doc` tool calls):
+
+```python
+def edit_doc():
+    with db.transaction():
+        outbox_id = enqueue_outbox(...)
+    db.notify("commit_pending", outbox_id)
+
+    deadline = time.monotonic() + 5  # 5s synchronous budget
+    with db.listen("commit_done") as sub:
+        for notif in sub.iter(timeout_until=deadline):
+            if int(notif.payload) != outbox_id:
+                continue
+            row = commit_outbox.get(outbox_id)
+            if row.status == "committed":
+                return {"sha": row.result_sha, ...}
+            if row.status == "stale_base":
+                return 409, {"error": "stale_base", ...}
+            return 500, {"error": row.error}
+    # past 5s — return 202 + outbox_id; client polls or subscribes
+    return 202, {"outbox_id": outbox_id}
+```
+
+Typical drain latency: a single git op + INSERT + NOTIFY ≈ 10–30 ms
+on co-located Postgres. The synchronous response feels indistinguishable
+from a direct call. The 5-second budget is for the rare slow case (very
+large doc, GC pause); past it, we surface a job id and let the client
+follow up.
+
+Async callers (Huey workers, the document-updater agent) do not LISTEN
+— they enqueue and return. The fan-out tasks the writer enqueues handle
+the user-visible side effects.
+
+### Why not `audit_log` as a separate table
+
+The outbox row already carries every field an audit log needs:
+who (`user_id`, `token_id`), what (`action`, `path`, `payload`), when
+(`enqueued_at`/`finished_at`), result (`result_sha`/`status`/`error`),
+diff is reconstructable from `result_sha` against `head_sha_for_path`
+at enqueue time.
+
+Adding a parallel `audit_log` table duplicates the data and creates
+the question of "what if outbox and audit_log disagree." Outbox IS the
+audit log; queries that the audit story would want (`WHERE
+user_id=? AND status='committed' ORDER BY finished_at DESC`) hit the
+same indexes the writer uses.
+
+For non-mutating reads (logins, search, list-tokens) we may want a
+parallel `read_audit` later; out of scope for v0.
+
+## Pubsub — Postgres LISTEN/NOTIFY
+
+Two channels:
+
+- `wiki_doc_updated` — fired by `commit_writer` after every successful
+  commit. Payload: `{path, sha, kind}`.
+- `commit_done` — fired by `commit_writer` after every outbox row
+  reaches a terminal state. Payload: outbox `id`.
+- `mcp_job_updated` — fired by Flask when an `mcp_jobs` row changes.
+  Payload: `job_id`.
+
+Each MCP server replica holds one Postgres connection in `LISTEN
+wiki_doc_updated` mode. When NOTIFY arrives, the replica looks up
+sessions subscribed to the affected path and pushes
+`notifications/resources/updated` over each subscriber's open SSE
+stream.
+
+`commit_done` is a per-handler concern (synchronous Flask write
+handlers LISTEN it during their own request lifecycle). The MCP server
+does not LISTEN this channel.
 
 ## Transport — Streamable HTTP via FastAPI sidecar
 
 The MCP server is its own Python process running FastAPI on Uvicorn. It
 is **not** mounted on the Flask app via an ASGI bridge.
 
-Why a sidecar instead of mounting:
-
 - **SSE on Flask is fighting the framework.** Werkzeug's WSGI model is
   thread-per-connection; long-lived SSE connections starve the worker
   pool unless we add a second WSGI server tuned for it. Native ASGI
   with Uvicorn handles this in the loop.
-- **Different scaling shape.** Wiki UI traffic is request/response,
-  bursty per active user. MCP is a small number of long-lived
-  connections per agent. Replica counts move independently — a busy
-  agent fleet doesn't force the UI tier to scale, and UI traffic
-  doesn't compete with SSE I/O.
+- **Different scaling shape.** Wiki UI traffic is request/response;
+  MCP is a small number of long-lived connections per agent. Replica
+  counts move independently — a busy agent fleet doesn't force the UI
+  tier to scale, and UI traffic doesn't compete with SSE I/O.
 - **Different blast radius.** A bug in the MCP tool dispatcher should
   not take down the wiki UI, and vice versa. Separate processes give
   separate restart domains.
 - **Deployment hygiene.** The MCP server has a different dependency
-  surface (`mcp` SDK, `httpx`) than Flask. A separate image keeps each
+  surface (`mcp` SDK, `httpx`) than Flask. Separate images stay
   smaller and faster to rebuild.
 
 Endpoints on the MCP service:
@@ -192,7 +370,7 @@ Endpoints on the MCP service:
 | `/mcp`     | POST   | JSON-RPC 2.0 request. Response is a single reply, OR an `text/event-stream` upgrade for streamed multi-step output. |
 | `/mcp`     | GET    | Long-lived SSE stream of server-initiated messages (resource updates, job status, list-changed).                    |
 | `/healthz` | GET    | Liveness — does the process answer.                                                                                 |
-| `/readyz`  | GET    | Readiness — Flask reachable AND `mcp_notifications` poll loop healthy.                                              |
+| `/readyz`  | GET    | Readiness — Flask reachable AND Postgres LISTEN connection healthy.                                                 |
 
 Session id is established on `initialize` and carried in
 `Mcp-Session-Id` on every subsequent request. The load balancer hashes
@@ -206,23 +384,23 @@ inbound now lives in the sidecar).
 
 ### Token format
 
-`mcp_<32 hex chars>` = 128 bits of randomness, prefix scopes greppability
-in logs.
+`mcp_<32 hex chars>` = 128 bits of randomness. Prefix scopes
+greppability in logs.
 
 ### Storage
 
 `mcp_tokens` table:
 
-| column       | type                                                    | notes                                                         |
-| ------------ | ------------------------------------------------------- | ------------------------------------------------------------- |
-| id           | INTEGER PRIMARY KEY AUTOINCREMENT                       |                                                               |
-| user_id      | INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE |                                                               |
-| name         | TEXT NOT NULL                                           | human label e.g. "claude-code laptop"                         |
-| token_hash   | TEXT NOT NULL UNIQUE                                    | sha256(token) hex; salt unnecessary for 128-bit random tokens |
-| created_at   | TEXT NOT NULL DEFAULT (datetime('now'))                 | ISO-8601                                                      |
-| expires_at   | TEXT NOT NULL                                           | ISO-8601; default 1 year from `created_at`                    |
-| last_used_at | TEXT                                                    | bumped per request, debounced                                 |
-| revoked_at   | TEXT                                                    | non-null = revoked, kept for audit                            |
+| column       | type                                                   | notes                                                         |
+| ------------ | ------------------------------------------------------ | ------------------------------------------------------------- |
+| id           | BIGSERIAL PRIMARY KEY                                  |                                                               |
+| user_id      | BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE |                                                               |
+| name         | TEXT NOT NULL                                          | human label e.g. "claude-code laptop"                         |
+| token_hash   | TEXT NOT NULL UNIQUE                                   | sha256(token) hex; salt unnecessary for 128-bit random tokens |
+| created_at   | TIMESTAMPTZ NOT NULL DEFAULT now()                     |                                                               |
+| expires_at   | TIMESTAMPTZ NOT NULL                                   | default `now() + interval '1 year'`                           |
+| last_used_at | TIMESTAMPTZ                                            | bumped per request, debounced                                 |
+| revoked_at   | TIMESTAMPTZ                                            | non-null = revoked, kept for audit                            |
 
 Hashing: **sha256 of the raw token**, not bcrypt. Bcrypt's slow-by-design
 property protects low-entropy passwords against brute force; high-entropy
@@ -237,13 +415,13 @@ Constant-time comparison on the hash is mandatory.
 1. MCP server reads `Authorization: Bearer mcp_…`.
 2. SHA-256 the raw token, query `mcp_tokens` by `token_hash` (indexed,
    one row).
-3. Check `revoked_at IS NULL AND expires_at > datetime('now')`.
+3. Check `revoked_at IS NULL AND expires_at > now()`.
 4. Resolve `user_id` → user record cached for the request.
-5. Update `last_used_at` (debounced — once per minute per token to avoid
-   write churn).
-6. Inject `X-Internal-User-Id: <id>` and `X-Internal-Token-Id: <id>` on
-   every Flask call. mTLS or a shared secret authenticates the call as
-   coming from the MCP service itself.
+5. Update `last_used_at` (debounced — once per minute per token to
+   avoid write churn).
+6. Inject `X-Internal-User-Id: <id>` and `X-Internal-Token-Id: <id>`
+   on every Flask call. mTLS or a shared secret authenticates the
+   call as coming from the MCP service itself.
 
 ### Token management surface
 
@@ -258,29 +436,6 @@ Constant-time comparison on the hash is mandatory.
 
 Frontend page `frontend/src/app/settings/mcp-tokens/page.tsx` reuses
 `apiFetch` and `useRequireAuth`.
-
-### Audit log
-
-Every Flask write endpoint inserts into `audit_log`:
-
-| column     | type                                    | notes                                                                           |
-| ---------- | --------------------------------------- | ------------------------------------------------------------------------------- |
-| id         | INTEGER PRIMARY KEY AUTOINCREMENT       |                                                                                 |
-| user_id    | INTEGER NOT NULL REFERENCES users(id)   |                                                                                 |
-| token_id   | INTEGER REFERENCES mcp_tokens(id)       | NULL when the action came from a session cookie                                 |
-| action     | TEXT NOT NULL                           | `doc.edit`, `doc.write`, `doc.move`, `doc.create`, `trigger.create`, etc.       |
-| target     | TEXT NOT NULL                           | wiki path, trigger id, etc.                                                     |
-| sha_before | TEXT                                    | git SHA before the change, NULL on create                                       |
-| sha_after  | TEXT                                    | git SHA after the change                                                        |
-| metadata   | TEXT                                    | JSON blob: tool name, arguments shape (NOT raw arguments — PII), result summary |
-| created_at | TEXT NOT NULL DEFAULT (datetime('now')) | ISO-8601                                                                        |
-
-The audit log is append-only. Indexed on `(user_id, created_at)` and
-`(target, created_at)`. Retention policy lives in ops, not the schema.
-
-This is a deliberate addition not in [mcp-server.md](./mcp-server.md).
-For any system that lets external agents mutate shared state, an audit
-trail is foundational, not a v2 nice-to-have.
 
 ## Sessions
 
@@ -302,33 +457,33 @@ Sessions die on client disconnect or after 24h of inactivity (janitor
 task). Subscriptions die with the session — clients re-subscribe on
 reconnect. There is no persistent subscription table.
 
-For v0, MCP runs as a single replica. Session state is in-memory; the
-process is the session boundary. Multi-replica scaling becomes a
-concern alongside the Postgres migration — both fall in the same
-future-work bucket because both want a real pubsub broker.
+Scaling: load balancer hashes `Mcp-Session-Id` to a replica. Sticky
+sessions make in-memory state correct without distributed state. If a
+replica dies, all its sessions die; clients reconnect and re-establish
+on a new replica. Standard stateful-stickiness pattern.
 
 ## Concurrency
 
-| Layer                                  | Mechanism                                                                                                    | Guarantee                                                                      |
-| -------------------------------------- | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------ |
-| 1. Single writer                       | Only Flask calls `wiki_git.commit_file`; everyone else POSTs to Flask.                                       | Eliminates cross-process race on the working tree entirely.                    |
-| 2. base_sha optimistic concurrency     | Every write tool accepts `base_sha`; Flask returns 409 `stale_base` if HEAD-for-path differs.                | Hard guarantee against blind overwrites.                                       |
-| 3. In-process commit lock              | Flask wraps `wiki_git.commit_file` in a `threading.Lock`. Single-replica Flask makes this sufficient for v0. | Serializes concurrent writes to the same path within Flask.                    |
-| 4. Push notifications                  | In-process push for same-replica commits; `mcp_notifications` poll for cross-process commits (Huey worker).  | Sub-ms in the common case; ~100 ms cross-process. Well-behaved agents re-read. |
-| 5. `stale_paths` field on tool results | Every tool result includes a list of subscribed paths that drifted since the last call.                      | Belt-and-suspenders for agents that ignore notifications.                      |
-| 6. Edit fuzziness                      | Existing `wiki_edit.replace` chain in `_doc_helpers`.                                                        | Final safety net for context drift in `old_string`.                            |
+| Layer                                  | Mechanism                                                                                                                                | Guarantee                                                                                                                |
+| -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| 1. Single git writer                   | All commits flow through `commit_outbox`; `commit_writer` (Huey, concurrency=1) is the only process that calls `wiki_git.commit_file`.   | Eliminates cross-process race on the working tree by construction.                                                       |
+| 2. base_sha optimistic concurrency     | `commit_writer` checks `base_sha == head_sha_for_path(path)` at drain time; mismatch returns `stale_base` to the enqueuer.               | Hard guarantee against blind overwrites — checked at the latest possible moment, so fast followers don't false-negative. |
+| 3. Atomic enqueue                      | Outbox INSERT is in the same DB transaction as the business-state write (e.g. `mcp_jobs.status='running'`). Either both land or neither. | No "I committed the DB write but git didn't happen" gap.                                                                 |
+| 4. Push notifications                  | `pg_notify('wiki_doc_updated', …)` from `commit_writer` → MCP `LISTEN` → SSE within ~1ms.                                                | Low-latency feedback so well-behaved agents re-read before next edit.                                                    |
+| 5. `stale_paths` field on tool results | Every tool result includes a list of subscribed paths that drifted since the last call.                                                  | Belt-and-suspenders for agents that ignore notifications.                                                                |
+| 6. Edit fuzziness                      | Existing `wiki_edit.replace` chain in `_doc_helpers`.                                                                                    | Final safety net for context drift in `old_string`.                                                                      |
 
 `base_sha` semantics per tool:
 
-| Tool            | base_sha behavior                                                                                                                  |
-| --------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `edit_doc`      | Optional. If set, must match HEAD-for-path.                                                                                        |
-| `apply_patch`   | Optional. Same as edit_doc.                                                                                                        |
-| `write_doc`     | **Required when overwriting an existing file.** New-file creates skip.                                                             |
-| `update_doc_nl` | Optional. Recorded on the job row; checked at task-execution time inside the worker (HEAD may have moved between enqueue and run). |
-| `move_doc`      | N/A — content unchanged.                                                                                                           |
+| Tool            | base_sha behavior                                                                                                             |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `edit_doc`      | Optional. If set, must match HEAD-for-path at drain time.                                                                     |
+| `apply_patch`   | Optional. Same as edit_doc.                                                                                                   |
+| `write_doc`     | **Required when overwriting an existing file.** New-file creates skip.                                                        |
+| `update_doc_nl` | Optional. Recorded on the job row; checked by the writer when the worker's outbox row drains (HEAD may have moved meanwhile). |
+| `move_doc`      | N/A — content unchanged.                                                                                                      |
 
-`read_doc` returns `sha`, so the canonical agent flow is `read_doc →
+`read_doc` returns `sha`; canonical agent flow is `read_doc →
 edit_doc(base_sha=<that sha>)`.
 
 ## Subscriptions
@@ -354,62 +509,63 @@ session.
 reads (with `sha`) do not, because subscribing to a frozen sha is
 meaningless.
 
-Server-side delivery: the in-process push (for same-replica commits)
-or the `mcp_notifications` poll loop (for cross-process commits) walks
-the local sessions, matches subscriptions against the notified URI,
-and pushes `notifications/resources/updated` into each affected
-session's outbound queue. The SSE writer drains the queue.
+Server-side delivery: when `pg_notify` arrives on the MCP replica, the
+LISTEN handler walks the local sessions, matches subscriptions against
+the notified path, and pushes `notifications/resources/updated` into
+each affected session's outbound queue. The SSE writer drains the queue.
 
-If a session's outbound queue grows past a high-water mark (e.g. the
-client stopped reading), the writer drops the connection rather than
-buffer indefinitely. The client reconnects and re-subscribes.
+If a session's outbound queue grows past a high-water mark (client
+stopped reading), the writer drops the connection rather than buffer
+indefinitely. The client reconnects and re-subscribes.
 
 ## Async jobs
 
-For tools that take longer than ~1s — primarily `update_doc_nl` (LLM
+For tools that take longer than ~1 s — primarily `update_doc_nl` (LLM
 call) — the MCP tool returns a `job_id` immediately and the work runs
 in the Huey worker.
 
 `mcp_jobs` table:
 
-| column          | type                                    | notes                                                              |
-| --------------- | --------------------------------------- | ------------------------------------------------------------------ |
-| id              | TEXT PRIMARY KEY                        | ULID                                                               |
-| user_id         | INTEGER NOT NULL REFERENCES users(id)   |                                                                    |
-| token_id        | INTEGER REFERENCES mcp_tokens(id)       | for audit                                                          |
-| kind            | TEXT NOT NULL                           | `update_doc_nl` for now                                            |
-| status          | TEXT NOT NULL                           | `pending`/`running`/`succeeded`/`failed`                           |
-| idempotency_key | TEXT                                    | `sha256(user_id‖kind‖canonical_payload)` if not provided by client |
-| payload         | TEXT NOT NULL                           | JSON blob: `{path, instruction, base_sha}`                         |
-| result          | TEXT                                    | JSON blob: `{committed, sha, reason}`                              |
-| error           | TEXT                                    | error code on `failed`                                             |
-| created_at      | TEXT NOT NULL DEFAULT (datetime('now')) | ISO-8601                                                           |
-| started_at      | TEXT                                    | ISO-8601                                                           |
-| finished_at     | TEXT                                    | ISO-8601                                                           |
+| column          | type                                 | notes                                                              |
+| --------------- | ------------------------------------ | ------------------------------------------------------------------ |
+| id              | TEXT PRIMARY KEY                     | ULID                                                               |
+| user_id         | BIGINT NOT NULL REFERENCES users(id) |                                                                    |
+| token_id        | BIGINT REFERENCES mcp_tokens(id)     |                                                                    |
+| kind            | TEXT NOT NULL                        | `update_doc_nl` for now                                            |
+| status          | TEXT NOT NULL                        | `pending`/`running`/`succeeded`/`failed`                           |
+| idempotency_key | TEXT                                 | `sha256(user_id‖kind‖canonical_payload)` if not provided by client |
+| payload         | JSONB NOT NULL                       | `{path, instruction, base_sha}`                                    |
+| result          | JSONB                                | `{committed, sha, reason}`                                         |
+| outbox_id       | BIGINT REFERENCES commit_outbox(id)  | set when the job's commit has been enqueued                        |
+| error           | TEXT                                 | error code on `failed`                                             |
+| created_at      | TIMESTAMPTZ NOT NULL DEFAULT now()   |                                                                    |
+| started_at      | TIMESTAMPTZ                          |                                                                    |
+| finished_at     | TIMESTAMPTZ                          |                                                                    |
 
 Unique partial index on `(user_id, idempotency_key) WHERE
 idempotency_key IS NOT NULL` collapses retries.
 
 Flow:
 
-1. MCP server `update_doc_nl` tool → POST `/api/jobs/doc-update` on
-   Flask.
-2. Flask validates, looks up idempotency_key (returns existing
+1. MCP `update_doc_nl` tool → POST `/api/jobs/doc-update` on Flask.
+2. Flask validates, looks up `idempotency_key` (returns existing
    pending/succeeded job if a match), inserts `mcp_jobs` row, enqueues
-   Huey task, returns `{job_id}`.
+   Huey task on `documents_huey`, returns `{job_id}`.
 3. MCP tool returns `{job_id, status_uri: "job://<job_id>"}` to the
    client.
-4. Huey worker: load job, validate `base_sha` against current HEAD,
-   call `app.llm.agents.document_updater.run(...)`. On result, POST to
-   Flask write endpoint (NOT direct git call) → Flask commits → Flask
-   updates `mcp_jobs.status` → Flask INSERTs an `mcp_notifications`
-   row keyed on `job://<job_id>`.
-5. MCP replicas with subscribers to `job://<job_id>` push the update
+4. Huey worker on `documents_huey`: load job, call
+   `app.llm.agents.document_updater.run(...)`. Atomic txn: update
+   `mcp_jobs.status='running'`, INSERT `commit_outbox` row,
+   `mcp_jobs.outbox_id = <new>`, `pg_notify('commit_pending', id)`.
+5. `commit_writer` drains the outbox row, commits, fires
+   `pg_notify('mcp_job_updated', job_id)` after also stamping
+   `mcp_jobs.status='succeeded'/'failed'/'stale_base'`.
+6. MCP replicas with subscribers to `job://<job_id>` push the update
    over SSE.
 
-A debounce window (`MCP_NL_DEBOUNCE_SECONDS`, default 30s) inside the
-worker checks for a recent succeeded job on the same `(user_id, path)`
-and skips the LLM call if found, marking the new job
+A debounce window (`MCP_NL_DEBOUNCE_SECONDS`, default 30 s) inside the
+worker checks for a recent `succeeded` job on the same `(user_id,
+path)` and skips the LLM call if found, marking the new job
 `succeeded committed=false reason=debounced`.
 
 ## Tool surface
@@ -445,7 +601,7 @@ Inventory:
 | `search_wiki`                                                   | `GET /api/documents/search`                      | bm25 / tsvector hits with snippets.                                                                                                                           |
 | `read_doc(path, sha?, subscribe=true)`                          | `GET /api/documents/<path>?sha=<sha>`            | `sha` defaults to HEAD. Returns `{path, body, sha, is_head}`. Auto-subscribes when `is_head` and `subscribe=true`. Populates `seen_paths` only on HEAD reads. |
 | `list_history(path, limit=20)`                                  | `GET /api/documents/<path>/history`              | `[{sha, author, ts, message}, …]`                                                                                                                             |
-| `edit_doc(path, edits[], message, base_sha?)`                   | `POST /api/documents/<path>/edit`                | Atomic batch of `{old_string, new_string, replace_all?}`.                                                                                                     |
+| `edit_doc(path, edits[], message, base_sha?)`                   | `POST /api/documents/<path>/edit`                | Atomic batch of `{old_string, new_string, replace_all?}`. Synchronous via outbox + LISTEN.                                                                    |
 | `apply_patch(path, patch, message, base_sha?)`                  | `POST /api/documents/<path>/patch`               | Unified diff with line-anchored hunks; fuzzy fallback if line offsets drift. Atomic across hunks.                                                             |
 | `write_doc(path, body, message, base_sha?)`                     | `POST /api/documents/<path>`                     | Full overwrite or new file. `base_sha` required for overwrite.                                                                                                |
 | `move_doc(old_path, new_path, message)`                         | `POST /api/documents/<old_path>/move`            | Rename.                                                                                                                                                       |
@@ -463,7 +619,7 @@ non-destructively.
 
 ```
 backend/
-├── app/                            (existing Flask — unchanged shape)
+├── app/                            (existing Flask)
 │   ├── api/
 │   │   ├── documents.py            +write/edit/patch/move/edit-fuzzy/history endpoints
 │   │   ├── jobs.py                 NEW — async job CRUD
@@ -472,26 +628,28 @@ backend/
 │   │   └── wiki_ask.py             NEW — POST /api/wiki/ask (sync RAG)
 │   ├── auth/
 │   │   └── mcp_tokens.py           NEW — sha256 verify, constant-time compare
-│   ├── audit/
-│   │   └── log.py                  NEW — write helper called from each write endpoint
+│   ├── outbox/
+│   │   ├── repo.py                 NEW — commit_outbox CRUD: insert, mark, fetch
+│   │   └── enqueue.py              NEW — single function callers use to enqueue
 │   ├── db/
-│   │   └── sqlite.py               unchanged; +helper for mcp_notifications insert
+│   │   └── postgres.py             NEW — replaces sqlite.py; psycopg connect + repo idioms
 │   ├── tasks/
-│   │   └── document_update.py      worker — calls Flask HTTP, never git directly
+│   │   ├── document_update.py      worker — INSERTs commit_outbox; never calls git directly
+│   │   └── commit_writer.py        NEW — single-concurrency Huey consumer that drains outbox
 │   ├── llm/agents/
 │   │   └── wiki_qa.py              NEW — one-shot RAG harness
 │   └── wiki/
-│       ├── git.py                  +read_file_at_ref(rel, sha), +head_sha_for_path(rel)
+│       ├── git.py                  +read_file_at_ref(rel, sha), +head_sha_for_path(rel); commit_file becomes "writer-only"
 │       └── patch.py                NEW — parse + apply unified-diff hunks
 │
 ├── mcp_server/                     NEW package, sibling of app/
 │   ├── __init__.py
 │   ├── main.py                     FastAPI ASGI entry (uvicorn)
-│   ├── config.py                   env-loaded; Flask base URL, internal secret, sqlite path
+│   ├── config.py                   env-loaded; Flask base URL, internal secret, PG DSN
 │   ├── auth.py                     bearer middleware → user
 │   ├── session.py                  Session class, in-memory registry, janitor
 │   ├── flask_client.py             httpx.AsyncClient wrapper, internal-header injection
-│   ├── pubsub.py                   in-process push registry + 100ms mcp_notifications poll loop
+│   ├── pubsub.py                   asyncio Postgres LISTEN; routes notifies to sessions
 │   ├── transport.py                SSE writer per session (drains the outbound queue)
 │   ├── resources.py                wiki:///, job://, list/read/subscribe handlers
 │   └── tools/
@@ -516,137 +674,314 @@ backend/
 └── deploy/
     ├── flask.Dockerfile
     ├── mcp.Dockerfile               NEW — slim ASGI image
-    ├── worker.Dockerfile            existing
-    └── docker-compose.yml           +mcp service
+    ├── worker.Dockerfile            existing — also runs commit_writer queue
+    └── docker-compose.yml           +mcp service, +postgres, +redis
 ```
 
 ## Deployment
 
-Three long-running processes in production for v0:
+Five long-running services in production:
 
-| Service     | Image            | Replicas | Notes                                                                                                                 |
-| ----------- | ---------------- | -------- | --------------------------------------------------------------------------------------------------------------------- |
-| Flask app   | flask.Dockerfile | 1        | The only writer. `threading.Lock` around `commit_file` is sufficient because there is one process.                    |
-| MCP server  | mcp.Dockerfile   | 1        | Sessions and subscriptions live in-process. `/healthz` + `/readyz` for orchestrator probes.                           |
-| Huey worker | (Flask image)    | 1+       | Background work; talks to Flask over HTTP for any commit. Multiple worker replicas are safe because Flask serializes. |
+| Service       | Image                               | Replicas                     | Notes                                                                                                      |
+| ------------- | ----------------------------------- | ---------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| Postgres      | upstream                            | 1 primary (+ replicas later) | Owns all durable state.                                                                                    |
+| Redis         | upstream                            | 1                            | Huey backing store.                                                                                        |
+| Flask app     | flask.Dockerfile                    | 1+                           | API surface; INSERTs into `commit_outbox` for any write. Behind a load balancer.                           |
+| MCP server    | mcp.Dockerfile                      | 1+                           | Stateless; sticky-by-session at the LB; `/healthz` + `/readyz` for orchestrator probes.                    |
+| Huey worker   | worker.Dockerfile                   | 1+                           | Runs `documents_huey`, `triggers_huey`, `wiki_bm25_huey` queues. Calls Flask API; INSERTs `commit_outbox`. |
+| commit_writer | worker.Dockerfile (different queue) | **exactly 1**                | Drains `commits_huey` with concurrency=1. The only caller of `wiki_git.commit_file`.                       |
 
-State (SQLite) lives on a shared volume mounted into Flask, MCP, and
-Huey worker. The wiki working tree is a sibling volume only Flask
-writes to. No external databases or brokers in v0.
+`commit_writer` runs the same image as the Huey worker but is launched
+with `python -m app.tasks.run_worker --queue commits_huey
+--workers 1`. The constraint "exactly 1" is enforced operationally
+(orchestrator deploys this service with replica=1, no HPA). If two
+were to run simultaneously, `SELECT FOR UPDATE SKIP LOCKED` keeps them
+from grabbing the same row, but both could touch the working tree —
+defeating the single-writer goal. Operationally pin to one.
 
-Multi-replica Flask is the trigger for the [Future migration to
-Postgres + Redis](#future-migration-to-postgres--redis) — the
-`threading.Lock` stops working once N>1 Flask processes share the
-working tree, and that's where Postgres advisory locks become useful.
+Flask is otherwise scalable (multi-replica). The outbox indirection
+removes the working-tree race that would otherwise force single-replica.
 
 ## Divergences from current state
 
-| Area                                     | Today                                             | This proposal                                                            | Why                                                                                                        |
-| ---------------------------------------- | ------------------------------------------------- | ------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------- |
-| Primary store                            | SQLite (`app.sqlite`)                             | SQLite (`app.sqlite`) — unchanged                                        | v0 stays on the existing store; Postgres is a future migration.                                            |
-| Queue store                              | SQLite (`queue.sqlite`, Huey)                     | SQLite (`queue.sqlite`, Huey) — unchanged                                | v0 stays; Redis is a future migration.                                                                     |
-| Search index                             | SQLite FTS5                                       | SQLite FTS5 — unchanged                                                  | v0 stays; `tsvector`/GIN follows the Postgres migration.                                                   |
-| Inbound MCP                              | none (only an outbound stub at `app/api/mcp.py`)  | Streamable HTTP, FastAPI sidecar                                         | Real protocol surface; ASGI-native for SSE; separate scaling shape.                                        |
-| Outbound MCP                             | `app/api/mcp.py` blueprint (stubs)                | Renamed `app/api/mcp_connections.py`                                     | Clarifies direction in the namespace.                                                                      |
-| Wiki commit ownership                    | Flask AND worker both call `wiki_git.commit_file` | Only Flask calls `commit_file`; worker POSTs to Flask                    | Eliminates cross-process race on the git working tree. Independent of DB choice.                           |
-| Auth for tools                           | none                                              | per-user PAT (`mcp_<32hex>`), sha256-hashed, expiring, revocable         | Real auth + audit per agent.                                                                               |
-| Token hashing                            | n/a                                               | sha256 of high-entropy random                                            | bcrypt is for low-entropy passwords; sha256 is correct here.                                               |
-| Audit                                    | events table fires on triggers only               | dedicated `audit_log` written by every Flask write endpoint              | Foundational requirement once external agents can mutate state.                                            |
-| Subscriptions                            | none                                              | MCP `resources/subscribe`; in-process push + `mcp_notifications` polling | Multi-agent collab; latency floor is the 100 ms poll for cross-process events.                             |
-| Pubsub mechanism                         | n/a                                               | in-process registry + polled SQLite table                                | Sub-ms in the common case (same-replica commits); ~100 ms cross-process. LISTEN/NOTIFY is the future move. |
-| Web framework for long-lived connections | Flask (sync, WSGI)                                | FastAPI/Uvicorn (async, ASGI) for the MCP service                        | SSE without fighting the framework.                                                                        |
-| Deployment shape                         | one Flask container, one worker container         | Flask + worker + MCP sidecar (no new datastores)                         | Adds one process; reuses the existing SQLite + git volumes.                                                |
+| Area                                     | Today                                             | This proposal                                                                | Why                                                                                                          |
+| ---------------------------------------- | ------------------------------------------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| Primary store                            | SQLite (`app.sqlite`)                             | Postgres (everywhere — dev, CI, prod)                                        | LISTEN/NOTIFY, multi-replica, audit-friendly, advisory locks. SQLite is removed; no dev fallback.            |
+| Queue store                              | SQLite (`queue.sqlite`, Huey)                     | Redis (everywhere)                                                           | Idiomatic Huey at scale; one queue store across all environments.                                            |
+| Search index                             | SQLite FTS5                                       | Postgres `tsvector` + GIN                                                    | Co-located with primary store; same ACID transaction as the commit-outbox INSERT.                            |
+| Inbound MCP                              | none (only an outbound stub at `app/api/mcp.py`)  | Streamable HTTP, FastAPI sidecar                                             | Real protocol surface; ASGI-native for SSE; separate scaling shape.                                          |
+| Outbound MCP                             | `app/api/mcp.py` blueprint (stubs)                | Renamed `app/api/mcp_connections.py`                                         | Clarifies direction in the namespace.                                                                        |
+| Wiki commit ownership                    | Flask AND worker both call `wiki_git.commit_file` | All callers INSERT `commit_outbox`; `commit_writer` is the only git writer   | Eliminates cross-process race by construction; ACID across business write + commit intent; audit comes free. |
+| Auth for tools                           | none                                              | per-user PAT (`mcp_<32hex>`), sha256-hashed, expiring, revocable             | Real auth + audit per agent.                                                                                 |
+| Token hashing                            | n/a                                               | sha256 of high-entropy random                                                | bcrypt is for low-entropy passwords; sha256 is correct here.                                                 |
+| Audit                                    | events table fires on triggers only               | `commit_outbox` is the audit log; every write lives there forever            | Foundational requirement once external agents can mutate state. No separate `audit_log` table needed.        |
+| Subscriptions                            | none                                              | MCP `resources/subscribe`; PG `LISTEN/NOTIFY` fan-out; in-memory per-replica | Real-time multi-agent collab.                                                                                |
+| Pubsub mechanism                         | n/a                                               | Postgres `LISTEN/NOTIFY`                                                     | Native, real-time, no polling.                                                                               |
+| Web framework for long-lived connections | Flask (sync, WSGI)                                | FastAPI/Uvicorn (async, ASGI) for the MCP service                            | SSE without fighting the framework.                                                                          |
+| Deployment shape                         | one Flask container, one worker container         | Flask + Huey worker + commit_writer + MCP sidecar + Postgres + Redis         | Each service scales independently; commit_writer pinned to exactly one replica.                              |
 
-The architectural fixes (single-writer, MCP-as-thin-client, ASGI for
-SSE, base_sha, audit log) all land at v0 and are independent of the
-storage choice. The Postgres + Redis migration is its own
-self-contained future change.
+## Operational concerns
+
+The architecture above is correct in steady state; this section covers
+what makes it production-operable.
+
+### Observability
+
+Every service emits:
+
+- **Structured logs** (JSON, single line per event) to stderr. Mandatory
+  fields on every line: `ts`, `level`, `service`, `request_id`,
+  `user_id` (when in a user context), `outbox_id` (when applicable).
+  Aggregator-agnostic — pick at deploy time.
+- **Prometheus metrics** at `/metrics` (Flask, MCP server,
+  `commit_writer`). Required series:
+  - `commit_outbox_pending` (gauge, labeled by action) — depth of
+    work waiting on `commit_writer`
+  - `commit_outbox_drain_seconds` (histogram) — time from `pending`
+    to terminal state
+  - `commit_outbox_failed_total` (counter, labeled by error code)
+  - `mcp_session_count` (gauge) — active sessions per replica
+  - `mcp_subscription_count` (gauge) — active subs per replica
+  - `mcp_tool_call_seconds` (histogram, labeled by tool name +
+    outcome)
+  - `flask_outbox_enqueue_seconds` (histogram) — write-endpoint
+    latency budget
+- **OpenTelemetry traces** with W3C Trace Context propagated across
+  the MCP → Flask → `commit_writer` → reindex/trigger fan-out chain.
+  `commit_writer` continues the parent span found in the outbox row's
+  payload (carry the traceparent header in the outbox row's
+  `payload.trace`).
+- **Error tracking** (Sentry or equivalent). Capture: every `failed`
+  outbox row, every 5xx from Flask write endpoints, every
+  unhandled exception in `commit_writer`.
+
+### Health and readiness
+
+| Service         | `/healthz` (liveness) | `/readyz` (readiness)                                                   |
+| --------------- | --------------------- | ----------------------------------------------------------------------- |
+| Flask app       | process answers       | Postgres reachable, Redis reachable                                     |
+| MCP server      | process answers       | Flask reachable, Postgres `LISTEN` connection healthy                   |
+| Huey worker     | process answers       | Postgres reachable, Redis reachable, last-heartbeat within 10s          |
+| `commit_writer` | process answers       | Postgres reachable, last successful drain within 30s OR no pending rows |
+
+Orchestrator pulls liveness probes constantly; rolling deploys gate on
+readiness. Failed `readyz` does not bounce the process — it stops the
+LB from routing.
+
+### `commit_writer` failover and stuck-row recovery
+
+`commit_writer` is pinned to one replica, but a process can crash
+mid-drain and leave a row in `running` indefinitely. The next replica
+(or the same one after restart) must reclaim it.
+
+A janitor task on the `commits_huey` queue runs every 30 s and resets
+rows stuck in `running` with `started_at < now() - interval '60
+seconds'` back to `pending`, incrementing `attempts`. After 5
+attempts, the row goes to `failed` with `error='exceeded_attempts'`
+and a paging alert fires.
+
+The 60 s threshold is bigger than the longest legitimate commit
+(large files, slow disk) but small enough that a crashed writer
+unblocks within a minute.
+
+### Backpressure
+
+When `commit_outbox_pending` grows faster than `commit_writer` drains,
+the system has three escalating responses:
+
+1. **Warning at 100 pending rows.** Metric crosses threshold; alert
+   fires; no behavior change.
+2. **Soft shed at 1000 pending rows.** Flask write endpoints return
+   `503 Retry-After: 5` for non-MCP traffic (UI editor saves) and
+   reject new outbox INSERTs from `documents_huey` with a transient
+   error so the worker retries with backoff. MCP tool calls still
+   accept but get a longer synchronous-budget timeout that surfaces
+   as `202` more often.
+3. **Hard shed at 10000 pending rows.** All write endpoints return
+   `503` until the queue drains below soft shed. Reads remain
+   available.
+
+Thresholds are config; numbers above are starting points.
+
+### Idempotency on writes
+
+Every Flask write endpoint accepts `Idempotency-Key` (UUID v4 from
+the client). Flask stores it on the outbox row in a new column
+`idempotency_key TEXT` with a unique partial index on
+`(user_id, idempotency_key) WHERE idempotency_key IS NOT NULL`.
+
+Re-submission of the same key (e.g. agent retries after a network
+hiccup) returns the existing outbox row instead of enqueueing a
+duplicate. This applies to ALL writes, not just `update_doc_nl`.
+
+### Encryption
+
+- **At rest:** Postgres data directory on encrypted volumes (KMS-managed
+  keys at the cloud-provider layer is sufficient; PG TDE not required).
+  Wiki working tree on the same encrypted volume.
+- **In transit:** TLS on every external boundary (load balancer →
+  client). Intra-cluster MCP → Flask uses mTLS (or a private-network
+  shared secret if the cluster has private networking guarantees).
+- **Postgres connections:** TLS required, including from local dev
+  (`sslmode=require` in DSN).
+- **Token storage:** sha256 hashes only; raw tokens never persisted.
+
+### Backup and recovery
+
+Two state stores need backup policy:
+
+- **Postgres** — point-in-time recovery via WAL archiving. Standard
+  cloud-provider managed PG handles this. RPO target: 5 minutes; RTO
+  target: 30 minutes for restore from snapshot.
+- **Wiki working tree** — git repo on disk. Push to a remote on every
+  commit OR snapshot the volume on the same cadence as the PG WAL
+  archive. The git remote is the simpler path; `commit_writer` runs
+  `git push origin main` after every successful commit (or batches
+  every N seconds).
+
+The two stores can briefly disagree (PG ahead of git remote, or vice
+versa). The outbox row reconciles: rows with `status='committed'` and
+`result_sha` not present in the working tree on restore = need
+replay against a clean clone.
+
+### Schema migrations
+
+Postgres migrations land via the existing numbered-`.sql`-files
+mechanism in `app/db/migrations/` (already wired). Online-safe rules:
+
+- Never drop or rename a column in a single migration if the column is
+  read by deployed code. Deploy in two phases (add new column → ship
+  code → drop old column).
+- Add columns with defaults using `DEFAULT … NOT VALID` then
+  `VALIDATE CONSTRAINT` to avoid full-table rewrites.
+- Add indexes `CONCURRENTLY` for tables with active writes.
+
+Migration test runs against a Postgres instance in CI; not a SQLite
+shim.
+
+### Graceful shutdown
+
+Each service handles `SIGTERM`:
+
+- **Flask:** stop accepting new requests, drain in-flight (cap 30 s),
+  exit. Long-poll-on-`commit_done` handlers exit early with `202`
+  pointing the client at the outbox id.
+- **MCP server:** stop accepting new sessions, send
+  `notifications/cancelled` to active sessions, drain SSE writes
+  (cap 5 s), close LISTEN connections, exit.
+- **Huey workers and `commit_writer`:** finish current task, refuse
+  new work, exit. `SELECT FOR UPDATE` row is released on transaction
+  rollback if the task hadn't completed; janitor recovers.
+
+### Operational runbooks (hooks)
+
+The doc proper doesn't carry runbooks; this section enumerates the
+named alarms and where the runbook lives:
+
+| Alarm                                 | Where to look                                                                                         |
+| ------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `commit_outbox_pending` > soft shed   | `commit_writer` logs; PG `pg_stat_activity` for the writer's session; check for stuck `running` rows. |
+| `commit_writer` `readyz` failing      | `commit_writer` logs; check Postgres reachability; check working-tree disk fullness.                  |
+| Outbox row in `failed` with retry max | Logs scoped to that outbox id; the original enqueuer's logs by `request_id`.                          |
+| Flask 5xx rate spike                  | Flask logs; commonly a downstream Postgres/Redis issue; check `/readyz`.                              |
+| MCP `mcp_session_count` collapse      | Replica restarted or LB drain; clients reconnect automatically; investigate restart cause.            |
+
+Concrete runbook content lives in `docs/ops/` once the system ships.
+
+## Forward-compatibility hooks
+
+The architecture leaves named extension points for capabilities that
+are out of scope today but predictable enough that the schema should
+not preclude them.
+
+### Multi-tenancy / org isolation
+
+Every table that the [Auth](#auth), [Async jobs](#async-jobs), and
+[Outbox](#outbox--schema-and-protocol) sections introduce gets a future
+`org_id BIGINT REFERENCES orgs(id)` column. v0 ships with the column
+absent; the migration that introduces orgs adds it with `DEFAULT NULL`
+and backfills based on `users.org_id` once the `orgs` table exists.
+Tokens become org-scoped; the token resolution step adds `org_id` to
+the request context the MCP service injects on Flask calls.
+
+Indexes on `(org_id, …)` replace today's `(user_id, …)` indexes via the
+two-phase migration pattern.
+
+### RBAC / scoped tokens
+
+Token table gets `scopes JSONB NOT NULL DEFAULT '["*"]'`. Bearer
+middleware checks the scope before dispatch. v0 leaves the column
+absent and treats every token as `["*"]`; introducing the column is a
+single migration with no code change required to existing tokens
+(default applies).
+
+### Rate limiting
+
+Per-token Redis token bucket. Middleware in the MCP service checks
+`rate:token:<id>` before dispatch; Flask middleware checks
+`rate:user:<id>` for non-MCP traffic. Buckets size by token tier (set
+on the token at creation). v0 ships with limits unenforced (a single
+config flag toggles the middleware); add tiers and enforcement once
+the first abuse signal lands.
+
+### API versioning
+
+The MCP transport endpoint mounts at `/api/v1/mcp` from day one
+even though there's only one version. New transport revisions go to
+`/api/v2/mcp` with the v1 endpoint kept for the protocol-supported
+deprecation window (typically 12 months). Same for Flask `/api/v1/...`
+on every endpoint that ships.
+
+### Per-doc permissions
+
+A `doc_permissions` table that the write endpoints consult before
+inserting into `commit_outbox`. v0 has no such table; the check is a
+no-op. Adding it is one migration plus one helper call inside each
+write handler.
+
+### Distributed tracing
+
+W3C `traceparent` propagates already (from the MCP service into the
+Flask call, from Flask into the outbox row's payload). The
+`commit_writer` continues that span. No further hooks needed; this is
+purely an operational rollout.
 
 ## Out of scope
 
-| Concern                                         | Out of scope here, where it lands                                              |
-| ----------------------------------------------- | ------------------------------------------------------------------------------ |
-| Outbound MCP dispatch from triggers             | Trigger destination work, separate doc.                                        |
-| Persistent subscriptions across reconnects      | Clients re-subscribe; if proven flaky in practice, revisit.                    |
-| Per-org / multi-tenant isolation                | Org concept doesn't exist yet; tokens are user-scoped.                         |
-| Streaming partial results from `update_doc_nl`  | Job is `pending`/`succeeded`/`failed`; agents don't need token-level progress. |
-| Resource templates (`resources/templates/list`) | Flat `resources/list` is fine until the wiki has thousands of docs.            |
-| Token scopes beyond all-or-nothing              | Add `scopes` column when first scoped use case appears.                        |
-| HTTP+SSE legacy MCP transport                   | Streamable HTTP only. Bridge if a real client breaks.                          |
-| Rate limiting                                   | Add per-token throttling once abuse is observed.                               |
-
-## Future migration to Postgres + Redis
-
-When v0 is dogfooded and one of the trigger conditions below is hit,
-the storage stack moves to Postgres + Redis. The architectural
-decisions in this doc are designed so the migration is a swap of the
-storage layer rather than a redesign.
-
-Trigger conditions (any one):
-
-- Subscription latency on cross-process commits is felt by users (the
-  100 ms poll is too slow for the agent experience).
-- Need for >1 Flask replica appears (HA, blue-green deploy, or
-  throughput).
-- Audit log volume or query patterns outgrow SQLite's single-writer
-  ceiling.
-- A second service (telemetry, search, eval store) wants the same
-  store, and standing up shared Postgres becomes cheaper than another
-  SQLite footprint.
-
-What changes when we cut over:
-
-| Layer             | v0 (SQLite)                                | After migration (Postgres + Redis)                                              |
-| ----------------- | ------------------------------------------ | ------------------------------------------------------------------------------- |
-| Primary store     | `app.sqlite`                               | Postgres                                                                        |
-| Search index      | FTS5 (`documents_fts`)                     | `tsvector` + GIN, same callers via `app/wiki/search.py`                         |
-| Pubsub            | in-process push + `mcp_notifications` poll | `LISTEN/NOTIFY` (`pg_notify`) inside Flask; `LISTEN` connection per MCP replica |
-| Queue             | Huey on `queue.sqlite`                     | Huey on Redis                                                                   |
-| Commit lock       | `threading.Lock` (single Flask process)    | Postgres advisory lock keyed on path (multi-replica safe)                       |
-| MCP replicas      | 1                                          | N, sticky-by-session at the load balancer                                       |
-| Datetime columns  | `TEXT` ISO-8601                            | `TIMESTAMPTZ`                                                                   |
-| Autoincrement ids | `INTEGER PRIMARY KEY AUTOINCREMENT`        | `BIGSERIAL`                                                                     |
-| JSON blobs        | `TEXT` parsed by callers                   | `JSONB` with operators                                                          |
-| SQL idioms        | `?` placeholders, `INSERT OR IGNORE`       | `%s` placeholders, `INSERT … ON CONFLICT`                                       |
-
-What does NOT change:
-
-- The MCP server stays a stateless thin client over Flask.
-- Flask stays the only writer.
-- `base_sha` optimistic concurrency, audit log, token model, tool
-  surface, transport, SSE shape — all identical.
-- Free-function repo modules in `app/auth/`, `app/triggers/`, etc.
-  keep their shapes; the `connect()` helper changes.
-
-This is the contract we want from "deletable storage layer." The
-investment in unified-stack-everywhere is deferred until the
-deferred-cost story above breaks.
+| Concern                                         | Out of scope here, where it lands                                                                 |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| Outbound MCP dispatch from triggers             | Trigger destination work, separate doc.                                                           |
+| Persistent subscriptions across reconnects      | Clients re-subscribe; if proven flaky in practice, revisit.                                       |
+| Streaming partial results from `update_doc_nl`  | Job is `pending`/`succeeded`/`failed`; agents don't need token-level progress.                    |
+| Resource templates (`resources/templates/list`) | Flat `resources/list` is fine until the wiki has thousands of docs.                               |
+| HTTP+SSE legacy MCP transport                   | Streamable HTTP only. Bridge if a real client breaks.                                             |
+| Multiple `commit_writer` replicas               | One is correct for the working-tree contract. Sharding by path range is a future scaling concern. |
 
 ## Open questions
 
 - **Streamable HTTP vs HTTP+SSE.** Some agent runtimes only speak the
   older transport. Streamable HTTP first; bridge if needed.
-- **Worker → Flask HTTP cost.** Every async commit becomes a
-  loopback HTTP call. Latency impact is in the single-digit ms range
-  on localhost; needs verification under load.
-- **MCP service co-location.** Is the MCP service deployed in the same
-  cluster as Flask, or run behind a public-facing edge with its own
-  TLS? Affects the auth model between MCP and Flask (mTLS in-cluster
-  is cheap; over the public internet needs more thought).
+- **Synchronous-response budget for write tools.** 5 s is a guess.
+  Real distribution lives in observability — tighten or loosen once
+  measured.
+- **Outbox retention.** `committed`/`stale_base`/`failed` rows live
+  forever as audit. Volume is a write per agent edit; manageable for
+  years. Move cold rows to a partition or archive table when query
+  performance degrades — not a v0 problem.
+- **MCP service co-location.** Same cluster as Flask, or behind a
+  public-facing edge with its own TLS? Affects the auth model
+  between MCP and Flask (mTLS in-cluster is cheap; over public
+  internet needs more thought).
 - **Internal-header trust.** The MCP service injects
-  `X-Internal-User-Id` on Flask calls. This requires either mTLS or a
-  shared secret enforced at the Flask boundary. Either is fine; pick
-  one and document.
-- **Tool description sharing.** If the chat-agent and MCP surfaces both
-  expose `search_wiki`, do their descriptions diverge or stay aligned?
-  Default: each owns its description; cross-pollinate through review.
-- **`stale_paths` payload size.** A heavily subscribed agent could
+  `X-Internal-User-Id` on Flask calls. Requires either mTLS or a
+  shared secret enforced at the Flask boundary. Pick one and document.
+- **Tool description sharing.** If the chat-agent and MCP surfaces
+  both expose `search_wiki`, do their descriptions diverge or stay
+  aligned? Default: each owns its description; cross-pollinate
+  through review.
+- **`stale_paths` payload size.** Heavily-subscribed agents could
   accumulate many notifications between tool calls. Cap and surface
   truncation explicitly on the result.
-- **When does the Postgres migration trigger?** The conditions in
-  [Future migration](#future-migration-to-postgres--redis) are
-  qualitative. Worth tightening once we have observability on
-  subscription latency and SQLite write throughput.
 
 ## Relationship to other docs
 
@@ -654,11 +989,14 @@ deferred-cost story above breaks.
   doc is paired with. Same product surface; different state ownership,
   storage, transport, and deployment.
 - [seams.md](../seams.md) — needs an updated row pointing inbound MCP
-  at this sidecar, outbound at `app/api/mcp_connections.py`.
+  at this sidecar, outbound at `app/api/mcp_connections.py`, and
+  flagging `wiki_git.commit_file` as writer-only (callable only from
+  `commit_writer`).
 - [architecture_diagram.md](../architecture_diagram.md) — the "as
   built" snapshot; this doc describes the next shape.
 - [agents/document-updater.md](../agents/document-updater.md) — the
-  agent invoked by `update_doc_nl`.
+  agent invoked by `update_doc_nl`; in this design it INSERTs an
+  outbox row and stops calling `commit_file` directly.
 - [tool-design](../tool-design/tool-design.md) — the in-process
   chat-agent tool primitives this proposal stops sharing the registry
   with.
