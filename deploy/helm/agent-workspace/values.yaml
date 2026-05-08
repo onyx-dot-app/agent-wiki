@@ -9,13 +9,14 @@ nameOverride: ""
 fullnameOverride: ""
 
 image:
-  # Public registry (GHCR / Docker Hub). Override per-deploy.
+  # Published by .github/workflows/docker-build-push.yml on `v*` tags.
+  # Override `tag` per-deploy to pin a specific release.
   backend:
-    repository: ghcr.io/CHANGE-ME/agent-workspace-backend
+    repository: onyxdotapp/agent-wiki-backend
     tag: latest
     pullPolicy: IfNotPresent
   frontend:
-    repository: ghcr.io/CHANGE-ME/agent-workspace-frontend
+    repository: onyxdotapp/agent-wiki-frontend
     tag: latest
     pullPolicy: IfNotPresent
 

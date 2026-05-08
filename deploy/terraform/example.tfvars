@@ -1,5 +1,5 @@
 # Copy to terraform.tfvars (which is gitignored) and edit.
-name        = "agent-workspace"
+name        = "agent-wiki"
 environment = "dev"
 region      = "us-west-2"
 

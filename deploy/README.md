@@ -1,24 +1,27 @@
 # deploy/
 
-Two-step deploy for agent-workspace:
+Two pieces:
 
-1. **`terraform/`** — provisions a small EKS cluster (VPC, EKS, EBS CSI add-on,
-   gp3 default StorageClass, ingress-nginx, cert-manager, optional
-   `letsencrypt-prod` ClusterIssuer).
-2. **`helm/agent-workspace/`** — installs the app (backend, worker, frontend,
-   two PVCs, Ingress) onto the cluster from step 1.
+1. **`helm/agent-workspace/`** — the chart. Installs the app (backend, worker,
+   frontend, two PVCs, Ingress) onto **any existing Kubernetes cluster**.
+   Published as a Helm repo from the `gh-pages` branch — this is the primary
+   way to run agent-wiki.
+2. **`terraform/`** — a **starting template** for provisioning a small EKS
+   cluster (VPC, EKS, EBS CSI add-on, gp3 default StorageClass, ingress-nginx,
+   cert-manager). Generic; not the source of truth for the agent-wiki team's
+   own deploys. See [`terraform/README.md`](terraform/README.md).
 
-Terraform is run once per environment; Helm is the loop you run on every app
-deploy. State is local (`terraform.tfstate` is gitignored) — fine for a single
-operator. Move it to S3 when more than one person operates the cluster.
+If you already have a cluster, skip to step 2. Otherwise, the terraform
+template gets you one in ~15 minutes — copy it into your own private repo
+first and customize.
 
 ## Prereqs
 
-- AWS credentials with permission to create VPC + EKS + IAM roles.
-- `terraform >= 1.5`, `kubectl`, `helm >= 3.13`, `aws` CLI.
+- `kubectl`, `helm >= 3.13`. For the terraform template: `terraform >= 1.5`,
+  `aws` CLI, AWS credentials with permission to create VPC + EKS + IAM roles.
 - A DNS zone where you can point a record at the ingress NLB.
 
-## 1. Provision the cluster
+## 1. Provision the cluster (optional — skip if you have one)
 
 ```bash
 cd deploy/terraform
@@ -36,51 +39,53 @@ $(terraform output -raw kubeconfig_command)   # writes ~/.kube/config entry
 kubectl get nodes
 ```
 
-## 2. Build & push images
+## 2. Publish images
 
-The chart pulls from a public registry — defaults are `ghcr.io/CHANGE-ME/...`.
-Build and push:
-
-```bash
-# from repo root
-docker build -t ghcr.io/<you>/agent-workspace-backend:<tag>  ./backend
-docker build -t ghcr.io/<you>/agent-workspace-frontend:<tag> ./frontend
-docker push ghcr.io/<you>/agent-workspace-backend:<tag>
-docker push ghcr.io/<you>/agent-workspace-frontend:<tag>
-```
-
-If the repo is private, create an `imagePullSecret` and pass it via
-`--set imagePullSecrets[0].name=<secret>`.
-
-## 3. Install the chart
+Images are built and pushed to Docker Hub
+(`onyxdotapp/agent-wiki-{backend,frontend}`) by
+`.github/workflows/docker-build-push.yml`. Cut a tag to release:
 
 ```bash
-cd deploy/helm
-
-helm upgrade --install agent-workspace ./agent-workspace \
-  --namespace agent-workspace --create-namespace \
-  --set secretKey="$(openssl rand -hex 32)" \
-  --set image.backend.repository=ghcr.io/<you>/agent-workspace-backend \
-  --set image.backend.tag=<tag> \
-  --set image.frontend.repository=ghcr.io/<you>/agent-workspace-frontend \
-  --set image.frontend.tag=<tag> \
-  --set ingress.host=agent-workspace.example.com \
-  --set ingress.clusterIssuer=letsencrypt-prod \
-  --set ingress.tls.enabled=true
+git tag v0.0.1
+git push --tags
 ```
 
-Or write a `values.yaml` per environment and use `-f`.
+The workflow publishes multi-arch images for `linux/amd64` + `linux/arm64`.
+Verify with `docker pull onyxdotapp/agent-wiki-backend:v0.0.1`.
 
-## 4. Wire DNS
+## 3. Wire DNS
 
 Get the ingress NLB hostname:
 
 ```bash
-$(cd deploy/terraform && terraform output -raw ingress_hostname_command)
+# If you used the terraform template:
+cd deploy/terraform && terraform output -raw ingress_lb_hostname
+# Otherwise, ask your cluster directly:
+kubectl -n ingress-nginx get svc ingress-nginx-controller \
+  -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
 ```
 
-Create a CNAME from `ingress.host` to that hostname. cert-manager will issue a
-Let's Encrypt cert once DNS resolves (give it a minute).
+Create a CNAME in your DNS provider pointing the host you want
+(`<your-host>`) at the NLB hostname. Wait for DNS to propagate.
+cert-manager issues a Let's Encrypt cert via HTTP-01 once DNS resolves
+and the chart is installed.
+
+## 4. Install the chart
+
+```bash
+helm upgrade --install agent-wiki ./deploy/helm/agent-workspace \
+  --namespace agent-wiki --create-namespace \
+  --set secretKey="$(openssl rand -hex 32)" \
+  --set image.backend.tag=v0.0.1 \
+  --set image.frontend.tag=v0.0.1 \
+  --set ingress.host=<your-host> \
+  --set ingress.clusterIssuer=letsencrypt-prod \
+  --set ingress.tls.enabled=true
+```
+
+The image repos default to `onyxdotapp/agent-wiki-{backend,frontend}` in
+`values.yaml`, so you only need to override `tag`. Or write a `values.yaml`
+per environment and use `-f`.
 
 ## 5. Sign in
 
@@ -90,14 +95,14 @@ to admin (see `app/auth/users.py`). Configure the LLM provider/keys from
 
 ## Day-2
 
-- **App update** — push new images, then `helm upgrade` with the new tag.
+- **App update** — cut a new `v*` tag, then `helm upgrade --set image.*.tag=<new>`.
 - **Cluster update** — `terraform apply` after bumping `cluster_version` or
   module versions.
 - **Backups** — not wired in this scaffold. The `wiki-data` PVC is a real git
   repo; cron a `git push --mirror` to a remote for the durable content. The
   `app-data` PVC holds SQLite + the Huey queue; `VACUUM INTO` snapshots are
   cheap.
-- **Tear down** — `helm uninstall agent-workspace -n agent-workspace`, then
+- **Tear down** — `helm uninstall agent-wiki -n agent-wiki`, then
   `terraform destroy`. PVCs use `Retain` reclaim policy, so EBS volumes
   survive `helm uninstall` and need to be deleted manually if you want them
   gone.
