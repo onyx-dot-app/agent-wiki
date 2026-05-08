@@ -49,6 +49,14 @@ def handle(args: dict[str, Any]) -> Any:
     is_head = sha is None or sha == head_sha
     if is_head:
         _mark_seen(rel)
+        h.mark_doc_read(rel)
+        # Frontmatter may have just been re-rendered; re-read so the model
+        # sees the current body. Historical reads (sha != HEAD) don't
+        # re-register and are returned as-was.
+        try:
+            body = wiki_git.read_file(rel, ref="HEAD")
+        except Exception:  # pragma: no cover
+            pass
 
     return {
         "path": rel,

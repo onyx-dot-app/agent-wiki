@@ -15,6 +15,9 @@ import subprocess
 from flask import Blueprint, jsonify, request
 
 from app.auth import current_user, login_required
+from app.ingest import settings as ingest_settings
+from app.tasks.document_update import process_pushed_document
+from app.tasks.huey_app import QueueFullError
 from app.tasks.reindex import reindex_path
 from app.wiki import notify as wiki_notify
 from app.triggers import repo as triggers_repo
@@ -248,13 +251,90 @@ def update_document(doc_id: str):
 
 
 @bp.post("/ingest")
-@login_required
 def ingest_update():
-    # Generic connector update — passed to the LLM agent harness, which
-    # decides which doc(s) to update.
-    # body: {source, payload}
-    # TODO: write event, enqueue document_update task.
-    raise NotImplementedError
+    """Receive a document push from an external system (e.g. Onyx connectors).
+
+    Validates the payload, enforces the admin-configured size cap, enqueues
+    a ``process_pushed_document`` task on ``documents_huey``, and acks 202
+    immediately. The doc-updater agent picks the target wiki page(s); this
+    layer does no routing.
+
+    Auth: not yet implemented. Matches the ``webhooks`` pattern — the
+    receiving cluster is expected to be private network or fronted by an
+    auth proxy until the bearer-token / HMAC layer lands.
+
+    Body fields:
+      * ``content`` (required, str, non-empty) — full document text.
+      * ``title`` (optional, str)
+      * ``source_type`` (optional, str) — connector/source identifier.
+      * ``metadata`` (optional, object) — opaque, passed through to the agent.
+      * ``updated_at`` (optional, str) — source-side timestamp.
+      * ``diff`` (optional, str) — diff vs. last pushed version, if known.
+    """
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify(error="request body must be a JSON object"), 400
+
+    content = data.get("content")
+    if not isinstance(content, str) or not content.strip():
+        return jsonify(error="content is required and must be a non-empty string"), 400
+
+    title = data.get("title")
+    if title is not None and not isinstance(title, str):
+        return jsonify(error="title must be a string"), 400
+
+    source_type = data.get("source_type")
+    if source_type is not None and not isinstance(source_type, str):
+        return jsonify(error="source_type must be a string"), 400
+
+    metadata = data.get("metadata")
+    if metadata is not None and not isinstance(metadata, dict):
+        return jsonify(error="metadata must be an object"), 400
+
+    updated_at = data.get("updated_at")
+    if updated_at is not None and not isinstance(updated_at, str):
+        return jsonify(error="updated_at must be a string"), 400
+
+    diff = data.get("diff")
+    if diff is not None and not isinstance(diff, str):
+        return jsonify(error="diff must be a string"), 400
+
+    max_chars = ingest_settings.get().max_doc_chars
+    # Bound content + diff together — both are LLM-bound input on the consumer.
+    total_chars = len(content) + (len(diff) if diff else 0)
+    if total_chars > max_chars:
+        return jsonify(
+            error=(
+                f"document too large: {total_chars} chars exceeds the configured "
+                f"max of {max_chars} (set on /admin/ingest)"
+            ),
+            limit=max_chars,
+            received=total_chars,
+        ), 413
+
+    push = {
+        "content": content,
+        "title": title,
+        "source_type": source_type,
+        "metadata": metadata,
+        "updated_at": updated_at,
+        "diff": diff,
+    }
+    try:
+        result = process_pushed_document(push)
+    except QueueFullError:
+        # Let the app-level errorhandler translate this — it has the queue
+        # name + numbers and produces a clearer 503 than this generic catch.
+        raise
+    except Exception:
+        log.exception("failed to enqueue process_pushed_document source_type=%s", source_type)
+        return jsonify(error="failed to enqueue background task"), 503
+    task_id = getattr(result, "id", None)
+    log.info(
+        "ingest enqueued source_type=%s title=%s len=%d task_id=%s",
+        source_type, title, total_chars, task_id,
+    )
+    return jsonify(queued=True, task_id=task_id), 202
 
 
 @bp.get("/file/history")

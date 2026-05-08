@@ -10,7 +10,7 @@
       },
       "scope_path": {
         "type": "string",
-        "description": "New scope (wiki-relative file or directory). If the scope changes, the YAML moves to match. Omit to keep current."
+        "description": "New scope (wiki-relative file or directory; use `/` or an empty string for the whole wiki). If the scope changes, the YAML moves to match. Omit to keep current."
       },
       "trigger_nl_condition": {
         "type": "string",

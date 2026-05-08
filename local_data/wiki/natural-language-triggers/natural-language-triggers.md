@@ -9,7 +9,7 @@
 > (webhooks / external services / agent messages) is **deferred** — see
 > the TBD callout in `../architecture_and_progress.md` §1.
 
-_Last updated: 2026-05-07_
+_Last updated: 2026-05-08_
 
 ---
 
@@ -35,6 +35,23 @@ This means every read in `app/api/triggers.py` is filtered by
 **Sharing / collaboration** (multi-user triggers, group ownership, "see
 team triggers") is **backlog** — see below. Don't implement in v0.
 
+### Required fields — both `nl_description` and `message` (2026-05-08)
+
+Every saved trigger must carry **both** a non-empty firing condition
+(`nl_description`, the **if**) and a non-empty fire message (`message`,
+the **what**). Half-configured triggers are not persisted.
+
+The invariant is enforced at the repo layer (`app/triggers/repo.py:create`
+and `update` raise `ValueError`). The HTTP API and both LLM agent tools
+(`create_trigger`, `update_trigger`) translate that into a 400 / `{error}`
+response, so a partially-filled call gets a clear rejection instead of a
+silently-saved zombie row.
+
+`repo.purge_invalid_triggers()` runs once on app startup (in
+`main.create_app`, before `rebuild_from_filesystem`) and removes any YAML
+files in the wiki repo that pre-date this rule. The deletion is a normal
+git commit, so the history is preserved.
+
 ### Two trigger kinds (schema already supports both)
 
 | `kind` | Fires when… | v0? |
@@ -59,6 +76,12 @@ the directory it acts on — no centralized `.triggers/` dir.
 The doc-suffix (`_<docbase>`) is a human hint; the canonical id lives in
 the YAML. `kind_of_scope` is heuristic on the scope path: `*.md` → doc,
 otherwise dir.
+
+The trigger boundary accepts a leading `/` (or a bare `/`) as a synonym
+for the wiki root and collapses it to `""` before storage —
+`storage.normalize_scope_path` is the entry point for the API and both
+agent tools, so the rest of the wiki path utilities never see an
+absolute path.
 
 **File contents:**
 
@@ -292,17 +315,18 @@ runs **after** every successful `commit_file` (see
 ### Stubbed, not wired
 - `app/triggers/time_based.py:due_triggers`.
 - `engine.dispatch` — deferred per v0 scope (no outbound action).
-- `repo.rebuild_from_filesystem` — implemented but not yet called on boot;
-  hook into app startup if/when crash recovery becomes a concern.
+
+### Boot-time housekeeping (2026-05-08)
+- `app/main.py:create_app` calls `repo.purge_invalid_triggers()` (drops
+  YAML files missing a non-empty firing condition or fire message), then
+  `repo.rebuild_from_filesystem()` to re-converge the SQLite cache from
+  the surviving files.
 
 ---
 
 ## Work breakdown (Next up)
 
 ### D. Triggers — remaining
-- **Boot-time cache reconciliation.** Call `repo.rebuild_from_filesystem`
-  during app startup (or via an admin endpoint) so cache drift after a
-  crash heals automatically.
 - **Triggers UI** — owned by [frontend](../frontend/frontend.md); inline
   on the doc and directory pages. Surfaces `GET /<id>/history` for
   per-trigger config history.

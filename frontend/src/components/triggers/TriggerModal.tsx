@@ -183,6 +183,10 @@ export function TriggerModal({ open, initial, onClose, onSaved, lockScope }: Pro
             placeholder="projects/foo.md or projects"
             style={inputStyle}
           />
+          <span style={fieldHintStyle}>
+            e.g. <code>projects/foo.md</code> for one doc, <code>projects</code>{" "}
+            for a folder, or <code>/</code> to watch the whole wiki.
+          </span>
         </label>
 
         <SentenceRow label="If" tone="if">
@@ -351,6 +355,12 @@ const fieldLabelStyle: React.CSSProperties = {
   color: "#6b7280",
   textTransform: "uppercase",
   letterSpacing: "0.06em",
+};
+
+const fieldHintStyle: React.CSSProperties = {
+  fontSize: 12,
+  color: "#6b7280",
+  lineHeight: 1.4,
 };
 
 const inputStyle: React.CSSProperties = {

@@ -5,7 +5,7 @@ from typing import Any
 
 from app.auth import current_user
 from app.triggers import repo as triggers_repo
-from app.wiki import filesystem
+from app.triggers import storage as triggers_storage
 
 
 def handle(args: dict[str, Any]) -> Any:
@@ -32,12 +32,10 @@ def handle(args: dict[str, Any]) -> Any:
 
     if not isinstance(raw_scope, str):
         return {"error": "scope_path must be a string"}
-    scope = raw_scope.strip()
-    if scope:
-        try:
-            scope = filesystem.safe_rel_path(scope)
-        except ValueError as exc:
-            return {"error": f"invalid scope_path: {exc}"}
+    try:
+        scope = triggers_storage.normalize_scope_path(raw_scope)
+    except ValueError as exc:
+        return {"error": f"invalid scope_path: {exc}"}
 
     try:
         trigger = triggers_repo.create(

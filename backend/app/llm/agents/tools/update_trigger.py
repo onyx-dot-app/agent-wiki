@@ -9,7 +9,7 @@ from typing import Any
 
 from app.auth import current_user
 from app.triggers import repo as triggers_repo
-from app.wiki import filesystem
+from app.triggers import storage as triggers_storage
 
 # Sentinel mirroring the one in triggers.repo so we can distinguish
 # "destination omitted" from "destination explicitly set to null".
@@ -37,12 +37,10 @@ def handle(args: dict[str, Any]) -> Any:
         raw = args["scope_path"]
         if not isinstance(raw, str):
             return {"error": "scope_path must be a string"}
-        scope = raw.strip()
-        if scope:
-            try:
-                scope = filesystem.safe_rel_path(scope)
-            except ValueError as exc:
-                return {"error": f"invalid scope_path: {exc}"}
+        try:
+            scope = triggers_storage.normalize_scope_path(raw)
+        except ValueError as exc:
+            return {"error": f"invalid scope_path: {exc}"}
         kwargs["scope_path"] = scope
 
     if "trigger_nl_condition" in args:

@@ -51,9 +51,64 @@ from huey import SqliteHuey
 
 from app.config import CONFIG
 
-documents_huey = SqliteHuey(name="documents", filename=CONFIG.queue_db_path)
-triggers_huey = SqliteHuey(name="triggers", filename=CONFIG.queue_db_path)
-wiki_bm25_huey = SqliteHuey(name="wiki_bm25", filename=CONFIG.queue_db_path)
+
+class QueueFullError(RuntimeError):
+    """Raised when a producer tries to enqueue past the configured cap.
+
+    Each queue has a hard size limit (``MAX_QUEUE_SIZE``, default 1000) so
+    a runaway producer can't fill the SQLite queue file or starve the
+    consumer with a backlog it will never catch up on. Callers (mostly API
+    routes that enqueue) translate this to a 503 with a clear message.
+    """
+
+    def __init__(self, queue_name: str, size: int, limit: int) -> None:
+        super().__init__(
+            f"queue '{queue_name}' is full: {size} pending tasks at the configured "
+            f"limit of {limit} (MAX_QUEUE_SIZE). Try again after the worker drains."
+        )
+        self.queue_name = queue_name
+        self.size = size
+        self.limit = limit
+
+
+class BoundedSqliteHuey(SqliteHuey):
+    """SqliteHuey that rejects enqueue when the backlog is at the limit.
+
+    Huey itself has no built-in bound; we check ``storage.queue_size()``
+    just before handing the message to storage. The check is racy under
+    concurrent producers (no transactional guard), but the cap is a
+    coarse safeguard against runaway producers, not a fairness mechanism.
+    """
+
+    def __init__(self, *args, max_size: int, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._max_queue_size = max_size
+
+    @property
+    def max_queue_size(self) -> int:
+        return self._max_queue_size
+
+    def enqueue(self, task):
+        # ``immediate`` mode (used in tests) doesn't touch storage — skip the
+        # cap so test fixtures don't need to worry about queue size.
+        if not self._immediate:
+            size = self.storage.queue_size()
+            if size >= self._max_queue_size:
+                raise QueueFullError(self.name, size, self._max_queue_size)
+        return super().enqueue(task)
+
+
+def _make(name: str) -> BoundedSqliteHuey:
+    return BoundedSqliteHuey(
+        name=name,
+        filename=CONFIG.queue_db_path,
+        max_size=CONFIG.max_queue_size,
+    )
+
+
+documents_huey = _make("documents")
+triggers_huey = _make("triggers")
+wiki_bm25_huey = _make("wiki_bm25")
 
 # Map queue-name → instance, used by run_worker.py to launch the right
 # consumer per worker container.

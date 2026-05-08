@@ -15,7 +15,7 @@ import argparse
 import sys
 
 # Importing modules registers tasks on their respective Huey instances.
-from app.tasks import document_update, periodic, reindex, triggers  # noqa: F401
+from app.tasks import agent_activity, document_update, periodic, reindex, triggers  # noqa: F401
 from app.tasks.huey_app import QUEUES
 from app.utils.logging import setup_logging
 

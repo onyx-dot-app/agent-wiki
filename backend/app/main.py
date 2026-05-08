@@ -3,12 +3,15 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-from flask import Flask
+from flask import Flask, jsonify
 
-from app.api import admin, auth, chat, documents, events, mcp, triggers, users, webhooks
+from app.api import admin, auth, chat, documents, events, health, mcp, triggers, users, webhooks
 from app.auth.oidc import init_oauth
 from app.config import CONFIG
 from app.db.sqlite import init_db
+from app.tasks.agent_activity import schedule_all_pending_cleanups
+from app.tasks.huey_app import QueueFullError
+from app.triggers import repo as triggers_repo
 from app.utils.logging import setup_logging
 from app.wiki.git import ensure_wiki_repo
 from app.wiki.search import bootstrap_index_if_empty
@@ -28,6 +31,9 @@ def create_app() -> Flask:
     init_db()
     ensure_wiki_repo()
     bootstrap_index_if_empty()
+    triggers_repo.purge_invalid_triggers(actor="system <system@agent-wiki>")
+    triggers_repo.rebuild_from_filesystem()
+    schedule_all_pending_cleanups()
     init_oauth(app)
 
     app.register_blueprint(auth.bp, url_prefix="/api/auth")
@@ -39,10 +45,16 @@ def create_app() -> Flask:
     app.register_blueprint(events.bp, url_prefix="/api/events")
     app.register_blueprint(webhooks.bp, url_prefix="/api/webhooks")
     app.register_blueprint(chat.bp, url_prefix="/api/chat")
+    app.register_blueprint(health.bp, url_prefix="/api/health")
 
-    @app.get("/api/health")
-    def health() -> dict[str, str]:
-        return {"status": "ok"}
+    @app.errorhandler(QueueFullError)
+    def _queue_full(err: QueueFullError):  # type: ignore[unused-ignore]
+        return jsonify(
+            error=str(err),
+            queue=err.queue_name,
+            size=err.size,
+            limit=err.limit,
+        ), 503
 
     return app
 
