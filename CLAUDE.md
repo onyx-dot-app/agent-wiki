@@ -35,25 +35,9 @@ any row exists in `llm_settings`.
 
 ## Pre-commit hooks
 
-Quality checks run via `pre-commit` (or `prek`, the Rust-port drop-in) against
-`.pre-commit-config.yaml` at the repo root. CI runs the same hooks on PRs via
-`.github/workflows/ci.yml`, so what passes locally also passes in CI.
-
-```bash
-pip install pre-commit       # or: brew install prek
-pre-commit install           # one-time: install the git hook
-pre-commit run --all-files   # run every hook against the whole tree
-```
-
-Configured hooks: `check-yaml`, `end-of-file-fixer`, `trailing-whitespace`,
-`ripsecrets` (block accidental API key commits), `terraform_fmt` +
-`terraform_validate` (gated to `*.tf` under `deploy/terraform/`), and a local
-`helm-lint` hook that runs `helm lint` against every chart in `deploy/helm/`.
-
-When adding a new tool/check, prefer adding a hook in `.pre-commit-config.yaml`
-over a one-off CI step — keeping the source of truth in one place avoids the
-"works locally but fails in CI" trap. Mirror what `onyx-dot-app/internal-tools`
-does if a precedent exists there.
+Lint config lives in `.pre-commit-config.yaml`; CI runs the same hooks on PRs.
+Run `pre-commit install` once, then `pre-commit run --all-files` ad-hoc.
+Add new checks as hooks here, not as one-off CI steps.
 
 ## Layout
 
