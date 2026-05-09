@@ -20,9 +20,8 @@ Queues:
   page goes here. Tasks make full LLM calls and may produce a new commit;
   we keep them off the indexer/triggers paths so a slow Anthropic call
   can't backpressure BM25 reindex or trigger fan-out.
-  Today: connector ingest (``update_document_from_payload``), direct agent
-  edits (``agent_update_document_nl``), and the periodic stale-doc review
-  (``stale_doc_review``).
+  Today: connector ingest (``update_document_from_payload``) and direct
+  agent edits (``agent_update_document_nl``).
 
 * ``triggers_queue`` — **natural-language trigger evaluation (delta +
   scheduled).** All trigger evaluation, both event-driven and time-based.

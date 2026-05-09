@@ -1,6 +1,6 @@
 {
   "name": "update_trigger",
-  "description": "Update an existing trigger owned by the current user. Pass only the fields you want to change; omitted fields are left alone. The same three-part shape applies: `trigger_nl_condition` is the **if** condition, `trigger_fire_message` is what to deliver, `destination` is where (only `null` = Event Log is supported in v0). Use `enabled` to disable/re-enable a trigger without deleting it. Only call after the user has explicitly asked for the update.",
+  "description": "Update an existing trigger owned by the current user. Pass only the fields you want to change; omitted fields are left alone. The same three-part shape applies: `trigger_nl_condition` is the **if** condition, `trigger_fire_message` is what to deliver, `destination` is where (a destination id from `get_trigger_destinations`). Use `enabled` to disable/re-enable a trigger without deleting it. Only call after the user has explicitly asked for the update.",
   "input_schema": {
     "type": "object",
     "properties": {
@@ -21,8 +21,8 @@
         "description": "New **fire message** body delivered on fire. Omit to keep current."
       },
       "destination": {
-        "type": ["null"],
-        "description": "New **destination**. Must be `null` in v0. Omit to keep current."
+        "type": "string",
+        "description": "New **destination** id from `get_trigger_destinations` (e.g. `event_log`). Omit to keep current."
       },
       "enabled": {
         "type": "boolean",

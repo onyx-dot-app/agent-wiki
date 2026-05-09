@@ -4,9 +4,11 @@ import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 
 import {
   createTrigger,
+  getTriggerDestinations,
   updateTrigger,
   type Trigger,
   type TriggerCreateInput,
+  type TriggerDestination,
 } from "@/lib/triggers";
 
 interface Props {
@@ -18,7 +20,12 @@ interface Props {
   lockScope?: boolean;
 }
 
-const DESTINATIONS = [{ id: "event_log", label: "Event log only" }];
+// Fallback used while the catalog is loading or if the fetch fails — keeps
+// the form usable on a transient network blip. Live values come from
+// GET /api/triggers/destinations.
+const FALLBACK_DESTINATIONS: TriggerDestination[] = [
+  { id: "event_log", name: "Event Log", description: "Tracked in the event log only." },
+];
 
 const EXAMPLE_SCOPE = "projects/release-v3.md";
 const EXAMPLE_IF = "the document is updated with a release version";
@@ -30,7 +37,10 @@ export function TriggerModal({ open, initial, onClose, onSaved, lockScope }: Pro
   const [scopePath, setScopePath] = useState("");
   const [ifText, setIfText] = useState("");
   const [sendText, setSendText] = useState("");
-  const [destination, setDestination] = useState(DESTINATIONS[0].id);
+  const [destinations, setDestinations] = useState<TriggerDestination[]>(
+    FALLBACK_DESTINATIONS,
+  );
+  const [destination, setDestination] = useState(FALLBACK_DESTINATIONS[0].id);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -39,9 +49,34 @@ export function TriggerModal({ open, initial, onClose, onSaved, lockScope }: Pro
     setScopePath(initial?.scope_path ?? "");
     setIfText(initial?.nl_description ?? "");
     setSendText(initial?.message ?? "");
-    setDestination(DESTINATIONS[0].id);
+    setDestination(initial?.destination ?? FALLBACK_DESTINATIONS[0].id);
     setError(null);
-  }, [open, initial?.id, initial?.scope_path, initial?.nl_description, initial?.message]);
+  }, [
+    open,
+    initial?.id,
+    initial?.scope_path,
+    initial?.nl_description,
+    initial?.message,
+    initial?.destination,
+  ]);
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    getTriggerDestinations()
+      .then((rows) => {
+        if (cancelled || rows.length === 0) return;
+        setDestinations(rows);
+        // If the current selection isn't in the catalog, fall back to the first row.
+        setDestination((cur) => (rows.some((r) => r.id === cur) ? cur : rows[0].id));
+      })
+      .catch(() => {
+        // Keep the fallback list silently — the form stays usable.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
 
   if (!open) return null;
 
@@ -58,12 +93,14 @@ export function TriggerModal({ open, initial, onClose, onSaved, lockScope }: Pro
           scope_path: scopePath.trim(),
           nl_description: nl,
           message: msg,
+          destination,
         });
       } else {
         const input: TriggerCreateInput = {
           scope_path: scopePath.trim(),
           nl_description: nl,
           message: msg,
+          destination,
         };
         saved = await createTrigger(input);
       }
@@ -77,7 +114,9 @@ export function TriggerModal({ open, initial, onClose, onSaved, lockScope }: Pro
   }
 
   const canSave = scopePath.trim() && ifText.trim() && sendText.trim();
-  const destLabel = DESTINATIONS.find((d) => d.id === destination)?.label ?? "";
+  const selectedDest = destinations.find((d) => d.id === destination);
+  const destLabel = selectedDest?.name ?? destination;
+  const destDescription = selectedDest?.description ?? "";
 
   return (
     <div
@@ -189,18 +228,19 @@ export function TriggerModal({ open, initial, onClose, onSaved, lockScope }: Pro
             disabled={busy}
             style={{ ...inputStyle, cursor: "pointer", appearance: "auto" }}
           >
-            {DESTINATIONS.map((d) => (
+            {destinations.map((d) => (
               <option key={d.id} value={d.id}>
-                {d.label}
+                {d.name}
               </option>
             ))}
           </select>
         </SentenceRow>
 
-        <p style={{ margin: 0, fontSize: 12, color: "#6b7280", lineHeight: 1.5 }}>
-          For now, &quot;{destLabel}&quot; just records the event on the Events tab so
-          you can review it. More destinations (Slack, email, agents) are coming.
-        </p>
+        {destDescription && (
+          <p style={{ margin: 0, fontSize: 12, color: "#6b7280", lineHeight: 1.5 }}>
+            {destDescription}
+          </p>
+        )}
 
         {error && (
           <div

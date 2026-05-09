@@ -39,7 +39,7 @@ class TriggerRecord(BaseModel):
     kind: str
     nl_description: str
     message: str | None
-    destination: str | None
+    destination: str
     enabled: bool
     file_path: str | None
     created_at: str | None
@@ -55,7 +55,7 @@ def _to_record(t: Trigger) -> TriggerRecord:
         kind=t.kind,
         nl_description=t.nl_description,
         message=action.get("message"),
-        destination=action.get("destination"),
+        destination=action["destination"],
         enabled=t.enabled,
         file_path=t.file_path,
         created_at=t.created_at,

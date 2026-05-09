@@ -15,17 +15,20 @@ from typing import Any
 
 from flask import Blueprint, jsonify, request
 
-from app.auth import current_user, login_required
+from app.auth import current_user, login_required, require_can
 from app.models._helpers import error, parse_body
 from app.models.trigger import (
     CreateTriggerRequest,
     TriggerCommit,
+    TriggerDestinationsResponse,
+    TriggerDestinationView,
     TriggerHistoryResponse,
     TriggerListResponse,
     TriggerVersionResponse,
     TriggerView,
     UpdateTriggerRequest,
 )
+from app.triggers import destinations as destinations_repo
 from app.triggers import repo as triggers_repo
 from app.triggers import storage as triggers_storage
 from app.wiki import git as wiki_git
@@ -66,6 +69,24 @@ def list_triggers():
     ).model_dump())
 
 
+@bp.get("/destinations")
+@login_required
+def list_destinations():
+    """Catalog of where a trigger fire can be delivered. Global, login-only —
+    no per-user filter (the catalog itself contains no user data; whether a
+    user can *use* a destination is enforced at trigger-creation time).
+    """
+    rows = destinations_repo.list_all()
+    return jsonify(TriggerDestinationsResponse(
+        destinations=[
+            TriggerDestinationView(
+                id=r["id"], name=r["name"], description=r["description"]
+            )
+            for r in rows
+        ],
+    ).model_dump())
+
+
 @bp.post("")
 @login_required
 def create_trigger():
@@ -78,8 +99,9 @@ def create_trigger():
     except ValueError as exc:
         return error(str(exc), 400)
 
-    if req.destination not in triggers_repo.SUPPORTED_DESTINATIONS:
-        return error(f"destination {req.destination!r} not supported in v0 — only null (Event Log)", 400)
+    # A trigger reads the scope at fire-time to render its message; require
+    # the same up-front so users can't watch paths they can't see.
+    require_can("read", scope_path)
 
     if req.kind not in triggers_repo.ALLOWED_KINDS:
         return error(f"kind {req.kind!r} not supported in v0", 400)
@@ -125,6 +147,12 @@ def update_trigger(trigger_id: str):
         except ValueError as exc:
             return error(str(exc), 400)
 
+    # Require read access against whichever scope ends up sticking — the new
+    # one if rebinding, otherwise the existing one (in case ACLs were
+    # revoked after the trigger was created).
+    final_scope = kwargs.get("scope_path", existing["scope_path"])
+    require_can("read", final_scope)
+
     if "nl_description" in raw:
         nl = (req.nl_description or "").strip()
         if not nl:
@@ -138,8 +166,6 @@ def update_trigger(trigger_id: str):
         kwargs["message"] = msg
 
     if "destination" in raw:
-        if req.destination not in triggers_repo.SUPPORTED_DESTINATIONS:
-            return error(f"destination {req.destination!r} not supported in v0 — only null (Event Log)", 400)
         kwargs["destination"] = req.destination
 
     if "enabled" in raw:

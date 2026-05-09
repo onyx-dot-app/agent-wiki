@@ -25,3 +25,17 @@ export interface Event {
   target: string | null;
   payload: Record<string, unknown>;
 }
+
+export interface DocumentActivity {
+  owner_display: string;
+  agent_name: string | null;
+  activity: "read" | "wrote";
+  description: string | null;
+  registered_at: string;
+  expires_at: string;
+}
+
+export interface DocumentActivityResponse {
+  path: string;
+  agents: DocumentActivity[];
+}

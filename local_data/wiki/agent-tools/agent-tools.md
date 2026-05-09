@@ -101,15 +101,16 @@ Postgres `triggers` table as a denormalized cache for fan-out lookup. See
 
 | Tool | Inputs | Returns | Latency | Writes | Notes |
 | --- | --- | --- | --- | --- | --- |
-| `create_trigger` | `scope_path`, `trigger_nl_condition`, `trigger_fire_message`, `destination` (must be `null` in v0) | `{trigger_id, scope_path, ...}` | fast | git+db | Owned by the current user. v0 only supports `destination: null` (Event Log). |
-| `update_trigger` | `trigger_id`, optional `scope_path` / `trigger_nl_condition` / `trigger_fire_message` / `destination` / `enabled` | `{trigger_id, ...}` | fast | git+db | Partial update — omitted fields preserved. Ownership enforced. |
+| `create_trigger` | `scope_path`, `trigger_nl_condition`, `trigger_fire_message`, `destination?` (slug from `get_trigger_destinations`; defaults to `event_log`) | `{trigger_id, scope_path, ...}` | fast | git+db | Owned by the current user. Requires `read` ACL on `scope_path` — returns `{"error": "...read access..."}` otherwise. Destination validated against the `trigger_destinations` table. |
+| `update_trigger` | `trigger_id`, optional `scope_path` / `trigger_nl_condition` / `trigger_fire_message` / `destination` / `enabled` | `{trigger_id, ...}` | fast | git+db | Partial update — omitted fields preserved. Ownership enforced. Re-checks `read` ACL on the final scope (new one if rebinding, otherwise existing) so revoked access blocks further mutation. |
+| `get_trigger_destinations` | _none_ | `{destinations: [{id, name, description}]}` | fast | none | Catalog of where a trigger fire can be delivered. v0 ships only `event_log` (record to events table, no outbound dispatch); future destinations land via migration as their dispatchers come online. Call before `create_trigger` / `update_trigger` if the user wants to pick a destination. |
 
 ### Web
 
 | Tool | Inputs | Returns | Latency | Writes | Notes |
 | --- | --- | --- | --- | --- | --- |
-| `web_search` | `query: str`, `num_results?: int` (≤10) | `[{title, link, snippet, published_date?}]` | slow (network) | none | Serper-backed. Use for things the wiki probably doesn't contain (current events, library docs). Prefer `search_wiki` first when relevant. |
-| `open_url` | `url: str` | `{title, link, full_content, published_date?, scrape_successful}` | slow (network) | none | Firecrawl-backed page fetch → markdown. If `scrape_successful` is false, `full_content` may be empty — caller should not fabricate. |
+| `web_search` | `query: str`, `num_results?: int` (≤20) | `[{title, link, snippet, published_date?}]` | slow (network) | none | Serper-backed. Use for things the wiki probably doesn't contain (current events, library docs). Prefer `search_wiki` first when relevant. |
+| `open_urls` | `urls: list[str]` (1–10) | `{results: [{title, link, full_content, published_date?, scrape_successful}, ...]}` | slow (network) | none | Firecrawl-backed page fetch → markdown. Pass every URL to read in a single call (fetched concurrently server-side); don't issue parallel `open_urls` calls. If `scrape_successful` is false on a row, `full_content` may be empty — caller should not fabricate. |
 
 ## Cross-cutting contracts
 

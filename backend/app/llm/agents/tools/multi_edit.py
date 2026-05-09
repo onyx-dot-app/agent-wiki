@@ -16,15 +16,22 @@ def handle(args: dict[str, Any]) -> Any:
         rel = h.validate_doc_path(args.get("path"))
         edits_raw = args.get("edits")
         commit_message = args.get("commit_message")
+        base_sha = args.get("base_sha")
         if not isinstance(edits_raw, list) or not edits_raw:
             raise h.ToolError("edits must be a non-empty array")
         if not isinstance(commit_message, str) or not commit_message.strip():
             raise h.ToolError("commit_message is required")
+        if base_sha is not None and not isinstance(base_sha, str):
+            raise h.ToolError("base_sha must be a string when provided")
         edits = cast(list[Any], edits_raw)
 
         if not h.file_exists(rel):
             raise h.ToolError(f"file not found: {rel}")
         h.assert_read_before_write(rel)
+
+        stale = h.assert_base_sha(rel, base_sha)
+        if stale is not None:
+            return stale
 
         old_body = h.read_existing(rel)
         body = old_body

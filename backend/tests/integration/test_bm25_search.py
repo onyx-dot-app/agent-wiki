@@ -13,7 +13,7 @@ import pytest
 
 from app.db import fts
 from app.tasks.reindex import reindex_path
-from app.wiki import git
+from app.wiki import acl, git
 from tests._seed import list_fts_rows
 
 
@@ -168,6 +168,10 @@ def seeded_corpus(tmp_repo, immediate_queues):
     """
     for path, body in _CORPUS:
         git.commit_file(path, body, message=f"seed {path}")
+        # Mirror production's ``after_doc_write`` create path so the
+        # BM25 search visibility filter doesn't drop these pages —
+        # bypassing the API skips the lifecycle hook otherwise.
+        acl.on_page_created(path, owner_user_id=None)
         reindex_path(path)
     return _CORPUS
 
@@ -209,3 +213,30 @@ def test_snippet_bolds_query_terms(seeded_corpus):
     assert hits, "expected at least one hit"
     snippet = hits[0].snippet.lower()
     assert "**nginx**" in snippet or "**gzip**" in snippet, hits[0].snippet
+
+
+def test_quoted_phrase_is_not_real_phrase_search(seeded_corpus):
+    """pg_textsearch's ``to_bm25query`` does NOT honor quote syntax as
+    Tantivy-style phrase queries — quotes are effectively stripped and
+    the inner tokens are matched individually.
+
+    'cooperative rebalance protocol' appears verbatim only in
+    streams/kafka-rebalance.md. With real phrase semantics, the reversed
+    wording 'protocol rebalance cooperative' should miss every doc. We
+    observe instead that both queries return the same hit with the same
+    score — proving quotes are ignored. This test pins that behaviour so
+    future changes (e.g. swapping the parser or pre-processing the query)
+    surface as a deliberate diff.
+    """
+    in_order = fts.search('"cooperative rebalance protocol"', limit=5)
+    reversed_phrase = fts.search('"protocol rebalance cooperative"', limit=5)
+
+    assert in_order, "quoted phrase query returned no hits"
+    assert in_order[0].path == "streams/kafka-rebalance.md"
+    assert reversed_phrase, "reversed quoted phrase unexpectedly returned no hits"
+    assert reversed_phrase[0].path == "streams/kafka-rebalance.md"
+    # Same hit, same score — quotes had no effect on ranking.
+    assert reversed_phrase[0].score == in_order[0].score, (
+        f"scores differ: in_order={in_order[0].score} "
+        f"reversed={reversed_phrase[0].score}"
+    )

@@ -29,7 +29,7 @@ def _seed_user_and_trigger(
     scope_path: str,
     tid: str = "trg_1",
     message: str = "tell me when status changes",
-    destination: object | None = None,
+    destination: str = "event_log",
 ) -> None:
     seed_user(uid="usr_1", email="u@x.com", is_admin=True)
     seed_trigger(
@@ -93,7 +93,7 @@ def test_fan_out_records_event_on_match_with_rendered_message(tmp_db, monkeypatc
     # is preserved alongside it for audit / re-render later.
     assert payload["message"] == "projects/foo.md flipped from green to yellow."
     assert payload["message_instruction"] == "tell me when status flips"
-    assert payload["destination"] is None
+    assert payload["destination"] == "event_log"
 
     # Render saw the same payload + reason the matcher produced.
     assert captured["instruction"] == "tell me when status flips"
@@ -214,6 +214,80 @@ def test_fan_out_directory_scope_edit_uses_two_phase_flow(tmp_db, monkeypatch):
     payload = rows[0]["payload"]
     assert payload["message"] == "rendered text"
     assert payload["reason"] == "green→yellow"
+
+
+def test_fan_out_fires_when_non_admin_owner_has_explicit_read_grant(tmp_db, monkeypatch):
+    """Positive regression: a non-admin owner with an explicit `read`
+    grant on a managed scope still fires through the fan-out gate. Pairs
+    with the owner-revoked test below."""
+    from app.tasks import triggers as trig_task
+    from app.triggers import engine
+    from app.wiki import acl
+
+    seed_user(uid="usr_1", email="u@x.com", is_admin=False)
+    other = seed_user(uid="usr_other", email="o@x.com")
+    acl.set_owner("projects/foo.md", other)
+    acl.grant(
+        resource_kind="page",
+        resource_path="projects/foo.md",
+        principal_kind="user",
+        principal_id="usr_1",
+        permission="read",
+        granted_by_user_id=other,
+    )
+
+    seed_trigger(
+        tid="trg_grant",
+        owner_user_id="usr_1",
+        scope_path="projects/foo.md",
+        message="msg",
+    )
+
+    _patch_io(monkeypatch, before="x", after="y")
+    monkeypatch.setattr(
+        engine, "nl_matches", lambda *a, **kw: MatchResult(matched=True, reason="x→y")
+    )
+    monkeypatch.setattr(engine, "nl_render_message", lambda *a, **kw: "rendered")
+
+    trig_task.fan_out_trigger_eval("projects/foo.md", "deadbeef", "edit", None)
+
+    rows = list_events(kind="trigger.fire")
+    assert len(rows) == 1
+    assert rows[0]["target"] == "trg_grant"
+
+
+def test_fan_out_skips_event_when_owner_lacks_read_access(tmp_db, monkeypatch):
+    """Owner-revocation safety: a trigger whose owner can no longer read
+    the changed doc should NOT produce a fire row, even if the NL match
+    would otherwise succeed."""
+    from app.tasks import triggers as trig_task
+    from app.triggers import engine
+    from app.wiki import acl
+
+    # Non-admin owner, then a private ACL on the doc that excludes them.
+    seed_user(uid="usr_1", email="u@x.com", is_admin=False)
+    other = seed_user(uid="usr_other", email="o@x.com")
+    acl.set_owner("projects/foo.md", other)  # owned by someone else → usr_1 has no read
+
+    seed_trigger(
+        tid="trg_revoked",
+        owner_user_id="usr_1",
+        scope_path="projects/foo.md",
+        message="msg",
+    )
+
+    _patch_io(monkeypatch, before="x", after="y")
+
+    def boom_match(*a, **kw):
+        raise AssertionError("match should not run when owner lacks read")
+
+    monkeypatch.setattr(engine, "nl_matches", boom_match)
+    monkeypatch.setattr(engine, "nl_render_message", boom_match)
+
+    trig_task.fan_out_trigger_eval("projects/foo.md", "deadbeef", "edit", None)
+
+    rows = list_events(kind="trigger.fire")
+    assert rows == []
 
 
 def test_fan_out_doc_scope_create_uses_two_phase_flow(tmp_db, monkeypatch):

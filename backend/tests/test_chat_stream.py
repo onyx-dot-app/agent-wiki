@@ -269,6 +269,12 @@ def _parse_sse(body: str) -> list[dict]:
     return out
 
 
+def _create_session(client) -> str:
+    resp = client.post("/api/chat/sessions")
+    assert resp.status_code == 201, resp.get_data(as_text=True)
+    return resp.get_json()["id"]
+
+
 def test_sse_endpoint_streams_text_then_done(signed_in_client, monkeypatch):
     def fake_stream(messages, *, model=None):
         yield {"type": "text_delta", "text": "hi "}
@@ -277,9 +283,10 @@ def test_sse_endpoint_streams_text_then_done(signed_in_client, monkeypatch):
 
     monkeypatch.setattr("app.api.chat.run_chat_stream", fake_stream)
 
+    sid = _create_session(signed_in_client)
     resp = signed_in_client.post(
         "/api/chat/messages",
-        json={"messages": [{"role": "user", "content": "hello"}]},
+        json={"session_id": sid, "content": "hello"},
     )
 
     assert resp.status_code == 200
@@ -301,9 +308,10 @@ def test_sse_endpoint_emits_error_event_on_llm_error(signed_in_client, monkeypat
 
     monkeypatch.setattr("app.api.chat.run_chat_stream", fake_stream)
 
+    sid = _create_session(signed_in_client)
     resp = signed_in_client.post(
         "/api/chat/messages",
-        json={"messages": [{"role": "user", "content": "hello"}]},
+        json={"session_id": sid, "content": "hello"},
     )
 
     assert resp.status_code == 200
@@ -317,22 +325,17 @@ def test_sse_endpoint_emits_error_event_on_llm_error(signed_in_client, monkeypat
 
 
 def test_sse_endpoint_validates_request_body(signed_in_client):
-    # No messages → 400 with JSON envelope (NOT an SSE error event).
-    resp = signed_in_client.post("/api/chat/messages", json={"messages": []})
+    # Missing session_id → 400 with JSON envelope (NOT an SSE error event).
+    resp = signed_in_client.post("/api/chat/messages", json={"content": "hi"})
     assert resp.status_code == 400
     assert resp.is_json
     assert "error" in resp.get_json()
 
 
-def test_sse_endpoint_rejects_when_last_message_not_user(signed_in_client):
+def test_sse_endpoint_rejects_unknown_session(signed_in_client):
     resp = signed_in_client.post(
         "/api/chat/messages",
-        json={
-            "messages": [
-                {"role": "user", "content": "hi"},
-                {"role": "assistant", "content": "hello"},
-            ]
-        },
+        json={"session_id": "no-such-session", "content": "hi"},
     )
-    assert resp.status_code == 400
-    assert "last message" in resp.get_json()["error"]
+    assert resp.status_code == 404
+    assert "error" in resp.get_json()

@@ -1,11 +1,16 @@
-"""Manage MCP server connections used by the agent harness."""
+"""Manage outbound MCP server connections — the user-managed list of
+external MCP servers our in-process agent harness consumes as a
+*client*. The inbound surface (where this app exposes itself *as* an
+MCP server to external coding agents) lives separately under
+``app/mcp_server/`` and ``app/api/mcp_tokens.py``.
+"""
 from __future__ import annotations
 
 from flask import Blueprint
 
 from app.auth import login_required
 
-bp = Blueprint("mcp", __name__)
+bp = Blueprint("mcp_connections", __name__)
 
 
 @bp.get("")

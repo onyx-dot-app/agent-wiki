@@ -34,6 +34,10 @@
       "commit_message": {
         "type": "string",
         "description": "Short commit message summarizing the overall change."
+      },
+      "base_sha": {
+        "type": "string",
+        "description": "Optional. The sha you last read for `path`. When set, the batch aborts with `stale_base` if HEAD has moved since."
       }
     },
     "required": ["path", "edits", "commit_message"]

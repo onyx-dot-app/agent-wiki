@@ -27,6 +27,13 @@ def handle(args: dict[str, Any]) -> Any:
         limit = DEFAULT_LIMIT
     limit = max(1, min(limit, MAX_LIMIT))
 
+    from app.auth import PermissionDenied, require_can
+
+    try:
+        require_can("read", rel)
+    except PermissionDenied as exc:
+        return {"error": str(exc)}
+
     rows = wiki_git.history(rel, limit=limit)
     if not rows:
         return {"path": rel, "history": [], "note": "no history"}

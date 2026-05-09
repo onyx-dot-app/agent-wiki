@@ -5,8 +5,9 @@ v0 supports two AUTH_MODEs:
   * ``oidc``  — TODO
 
 In both modes the active session is identified by a Flask server-side session
-cookie keyed by user id. Permissioning is intentionally minimal — anything
-authenticated can read or write, except for endpoints behind ``admin_required``.
+cookie keyed by user id. Per-resource permissioning for wiki pages goes
+through ``require_can`` (below), which delegates to ``app.wiki.acl``;
+``admin_required`` still gates the admin-only endpoints.
 """
 from __future__ import annotations
 
@@ -28,11 +29,31 @@ class User(BaseModel):
     is_admin: bool = False
 
 
+class PermissionDenied(Exception):
+    """Raised when a wiki path access check fails. The Flask error
+    handler (``app.main``) translates this into a 403."""
+
+    def __init__(self, message: str = "forbidden") -> None:
+        super().__init__(message)
+        self.message = message
+
+
 def current_user() -> User | None:
-    cached = cast("User | None", getattr(g, "user", None))
+    # ``g``/``session`` raise ``RuntimeError`` outside an app/request
+    # context. Treat that as "no current user" — agent tools dispatched
+    # from a test or background-task harness (no Flask request) get the
+    # anonymous principal, and the resolver applies the same rules
+    # (``everyone`` grants only) it would for a logged-out caller.
+    try:
+        cached = cast("User | None", getattr(g, "user", None))
+    except RuntimeError:
+        return None
     if cached is not None:
         return cached
-    user_id = session.get("user_id")
+    try:
+        user_id = session.get("user_id")
+    except RuntimeError:
+        return None
     if not user_id:
         return None
     row = users_repo.get_by_id(user_id)
@@ -67,3 +88,21 @@ def admin_required(fn: F) -> F:
             return jsonify(error="forbidden"), 403
         return fn(*args, **kwargs)
     return cast(F, wrapper)
+
+
+def require_can(action: str, path: str) -> None:
+    """Raise ``PermissionDenied`` if the current user lacks ``action`` on
+    ``path``. ``action`` is ``"read"`` or ``"write"``.
+
+    Callers are expected to be ``@login_required`` already — the helper
+    treats an unauthenticated caller the same as any other principal
+    without grants. Admins always pass. Imported lazily so
+    ``app.wiki.acl`` can depend on ``app.auth`` without a cycle.
+    """
+    from app.wiki import acl as _acl
+
+    user = current_user()
+    user_id = user.id if user is not None else None
+    is_admin = bool(user is not None and user.is_admin)
+    if not _acl.can(user_id, is_admin, action, path):
+        raise PermissionDenied(f"forbidden: {action} on {path}")

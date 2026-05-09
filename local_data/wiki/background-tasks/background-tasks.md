@@ -8,7 +8,7 @@
 > eval lives in
 > [natural-language-triggers](../natural-language-triggers/natural-language-triggers.md).
 
-_Last updated: 2026-05-08_
+_Last updated: 2026-05-09_
 
 ---
 
@@ -34,14 +34,13 @@ others.
 
 | Queue | TaskQueue | What it runs | Why it's its own queue |
 |---|---|---|---|
-| `documents`      | `documents_queue`      | LLM doc-reconciliation: `update_document_from_payload`, `agent_update_document_nl`, `stale_doc_review` (cron) | Slow + LLM-bound. Keeps provider latency off the indexer / triggers paths. |
+| `documents`      | `documents_queue`      | LLM-bound work: `update_document_from_payload`, `agent_update_document_nl`, `generate_chat_title` | Slow + LLM-bound. Keeps provider latency off the indexer / triggers paths. |
 | `triggers`       | `triggers_queue`       | Trigger evaluation, both event-driven (`fan_out_trigger_eval`) and time-based (`evaluate_scheduled_triggers`, cron) | Read-only (no commits). Trigger backlog can't delay event-log entries. |
 | `wiki_bm25` | `wiki_bm25_queue` | BM25 indexer: `reindex_path`, `reindex_document` | Cheap, no LLM. Search staleness bounded by indexer throughput alone. |
 
 Cron tasks live on the queue that owns the work they generate:
 `evaluate_scheduled_triggers` is on `triggers_queue` (same evaluator as
-delta triggers, just clock-ignited); `stale_doc_review` is on
-`documents_queue` (it's a doc-updater pass, same cost profile as ingest).
+delta triggers, just clock-ignited).
 
 ### Worker processes — how to run them
 
@@ -105,7 +104,7 @@ Useful for narrow iteration; not safe for a real run.
 |---|---|---|
 | `wiki_bm25` | `documents_fts` falls behind; search results stale until you restart the worker (queued `reindex_path` calls drain on resume). | All wiki reads/writes; trigger eval. |
 | `triggers`       | Trigger fires don't get evaluated; `trigger.fire` rows stop appearing in the events log; the 5-min `evaluate_scheduled_triggers` cron stops noisy stub-error logs. | All wiki reads/writes; FTS reindex. |
-| `documents`      | `POST /api/documents/ingest` enqueues but nothing reconciles; the 6-hour `stale_doc_review` cron stops noisy stub-error logs. | Human edits via the UI (they don't go through this queue); FTS reindex; trigger eval. |
+| `documents`      | `POST /api/documents/ingest` enqueues but nothing reconciles. | Human edits via the UI (they don't go through this queue); FTS reindex; trigger eval. |
 
 #### VS Code / Cursor (`.vscode/launch.json`)
 
@@ -115,7 +114,7 @@ all five with one click. Worker configs:
 
 | Config | Module + args | Drains |
 |---|---|---|
-| `Worker — documents (LLM doc-updater)`   | `app.tasks.run_worker documents`      | `documents_queue` — connector ingest, direct agent edits, `stale_doc_review` cron |
+| `Worker — documents (LLM doc-updater)`   | `app.tasks.run_worker documents`      | `documents_queue` — connector ingest, direct agent edits |
 | `Worker — triggers (NL trigger eval)`    | `app.tasks.run_worker triggers`       | `triggers_queue` — `fan_out_trigger_eval` + 5-min `evaluate_scheduled_triggers` cron |
 | `Worker — wiki_bm25 (BM25)`  | `app.tasks.run_worker wiki_bm25` | `wiki_bm25_queue` — `reindex_path`, `reindex_document` |
 
@@ -246,7 +245,6 @@ producers are outpacing consumers.
 | `tasks.document_update.update_document_from_payload`  | `documents` | 🛑 stub   | inbound ingest from Onyx / webhooks |
 | `tasks.document_update.agent_update_document_nl`        | `documents` | 🛑 stub   | agent PUTs a doc directly through the API (not via the chat-tool path) |
 | `tasks.periodic.evaluate_scheduled_triggers`          | `triggers`  | 🛑 stub   | every 5 min — depends on `triggers/time_based.py:due_triggers` |
-| `tasks.periodic.stale_doc_review`                     | `documents` | 🛑 stub   | every 6 hours |
 
 ### Concurrency on the wiki repo
 - Git writes (commits, moves) happen on the `documents` worker (LLM
@@ -327,9 +325,6 @@ the implementation hooks (`due_triggers`,
 3. **`tasks.periodic.evaluate_scheduled_triggers`** (queue: `triggers`,
    cron: every 5 min). Depends on `app/triggers/time_based.py:due_triggers`
    being real (today: also stub). Implement that first.
-4. **`tasks.periodic.stale_doc_review`** (queue: `documents`, cron: every
-   6 hours). Surface docs that haven't been touched in N days for
-   doc-updater review.
 
 ### 🟡 Open questions / deferred
 

@@ -1,21 +1,20 @@
 """Cleanup tasks for the agent-activity registry.
 
-Each row in the ``agent_activity`` table carries an ``expires_at``. When
-that moment passes, the row should be deleted and the doc's frontmatter
-re-rendered to reflect it. We don't want to poll — instead, every time a
-row is upserted we schedule a delayed task at exactly ``expires_at``,
-and on server restart we re-schedule the same for every active row.
+Each row in the ``agent_activity`` table carries an ``expires_at``.
+When that moment passes, the row should be deleted. We don't want to
+poll — instead, every time a row is upserted we schedule a delayed
+task at exactly ``expires_at``, and on server restart we re-schedule
+the same for every active row.
 
-Why ``triggers_queue``: cleanup is a small, time-driven side effect — same
-shape as a scheduled trigger fire. Each cleanup may commit a tiny
-frontmatter-only diff and queue a BM25 reindex; the work is bounded
-and non-LLM. Keeping it off ``documents_queue`` avoids ever sitting
-behind a slow LLM call.
+Why ``triggers_queue``: cleanup is a small, time-driven side effect —
+same shape as a scheduled trigger fire. Activity is DB-only (the doc
+body is never touched), so the work is just a single ``DELETE``.
 
-A cleanup is "stale" when the row has already been re-registered with a
-later ``expires_at``: the new registration scheduled its own cleanup, so
-the old fire is a no-op. We detect this by stamping the scheduled task
-with the ``expires_at`` it was supposed to enforce and comparing on fire.
+A cleanup is "stale" when the row has already been re-registered with
+a later ``expires_at``: the new registration scheduled its own
+cleanup, so the old fire is a no-op. We detect this by stamping the
+scheduled task with the ``expires_at`` it was supposed to enforce and
+comparing on fire.
 """
 from __future__ import annotations
 
@@ -65,12 +64,6 @@ def cleanup_expired_activity(
         agent_name=agent_name,
         doc_path=doc_path,
         activity=activity,
-    )
-    # Local import: ``_doc_helpers`` lives in the agent-tools package and
-    # is unsafe to import at module load (tools register at app startup).
-    from app.llm.agents.tools._doc_helpers import refresh_doc_frontmatter
-    refresh_doc_frontmatter(
-        doc_path, message=f"agent-activity: expire {doc_path}"
     )
 
 

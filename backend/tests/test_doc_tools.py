@@ -76,14 +76,50 @@ def test_write_doc_blocks_overwrite_of_unseen_existing(repo_with_doc, seen):
 
 def test_write_doc_overwrites_when_seen(repo_with_doc, seen):
     from app.llm.agents.tools.write_doc import handle
+    from app.wiki import git as wiki_git
+
+    seen.add("guide.md")
+    base = wiki_git.head_sha_for_path("guide.md")
+    out = handle(
+        {
+            "path": "guide.md",
+            "body": "# Replaced\n",
+            "commit_message": "rewrite",
+            "base_sha": base,
+        }
+    )
+    assert "error" not in out, out
+    assert out["created"] is False
+    assert Path(repo_with_doc.wiki_dir, "guide.md").read_text() == "# Replaced\n"
+
+
+def test_write_doc_overwrite_without_base_sha_is_rejected(repo_with_doc, seen):
+    """Phase 4 contract: full-body overwrite has no fuzzy fallback, so
+    every overwrite must opt in via ``base_sha``."""
+    from app.llm.agents.tools.write_doc import handle
 
     seen.add("guide.md")
     out = handle(
         {"path": "guide.md", "body": "# Replaced\n", "commit_message": "rewrite"}
     )
-    assert "error" not in out, out
-    assert out["created"] is False
-    assert Path(repo_with_doc.wiki_dir, "guide.md").read_text() == "# Replaced\n"
+    assert out["error"] == "base_sha_required_for_overwrite"
+
+
+def test_write_doc_overwrite_with_stale_base_sha_returns_stale_base(repo_with_doc, seen):
+    from app.llm.agents.tools.write_doc import handle
+
+    seen.add("guide.md")
+    out = handle(
+        {
+            "path": "guide.md",
+            "body": "# Replaced\n",
+            "commit_message": "rewrite",
+            "base_sha": "deadbeef",
+        }
+    )
+    assert out["error"] == "stale_base"
+    assert out["base_sha"] == "deadbeef"
+    assert out["current_sha"]
 
 
 def test_write_doc_rejects_non_md(repo_with_doc, seen):

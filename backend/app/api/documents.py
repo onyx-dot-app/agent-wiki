@@ -14,14 +14,16 @@ import subprocess
 
 from flask import Blueprint, jsonify, request
 
-from app.auth import current_user, login_required
+from app.auth import current_user, login_required, require_can
 from app.ingest import settings as ingest_settings
 from app.models._helpers import RequestError, error, parse_body
 from app.models.document import (
+    ActivityRowView,
     CommitView,
     CreateFolderRequest,
     CreateFolderResponse,
     DeleteDocumentResponse,
+    DocumentActivityResponse,
     FileHistoryResponse,
     GetDocumentResponse,
     IngestRequest,
@@ -35,13 +37,20 @@ from app.models.document import (
     PutDocumentResponse,
     ReindexRequest,
     ReindexResponse,
+    SearchHitView,
+    SearchResponse,
 )
 from app.tasks.document_update import process_pushed_document
 from app.tasks.queues import QueueFullError
 from app.tasks.reindex import reindex_path
-from app.wiki import notify as wiki_notify
+from app.wiki import (
+    agent_activity,
+    filesystem,
+    git as wiki_git,
+    notify as wiki_notify,
+    search as wiki_search,
+)
 from app.triggers import repo as triggers_repo
-from app.wiki import filesystem, git as wiki_git
 
 bp = Blueprint("documents", __name__)
 log = logging.getLogger(__name__)
@@ -58,6 +67,14 @@ _DEPRECATES_RE = re.compile(r"^Deprecates:\s*(.+)$", re.MULTILINE)
 def list_documents():
     prefix = request.args.get("prefix", "")
     paths = wiki_git.list_paths(prefix)
+    user = current_user()
+    md_paths = [p for p in paths if p.endswith(".md")]
+    if user is not None and not user.is_admin:
+        from app.wiki import acl as _acl
+        visible = set(_acl.filter_paths_in_python(user.id, False, md_paths))
+        # Keep non-md paths (folders, .gitkeep) so the explorer can render
+        # the tree; permission checks happen on actual page access.
+        paths = [p for p in paths if not p.endswith(".md") or p in visible]
     return jsonify(ListDocumentsResponse(paths=paths).model_dump())
 
 
@@ -72,6 +89,7 @@ def get_document_by_path():
         rel = filesystem.safe_rel_path(path)
     except ValueError as e:
         return error(str(e), 400)
+    require_can("read", rel)
     head_sha = wiki_git.head_sha_for_path(rel)
     if ref:
         try:
@@ -101,6 +119,11 @@ def put_document_by_path():
         return error("only .md files are supported", 400)
     abs_path = filesystem.absolute(rel)
     existed = abs_path.is_file()
+    if existed:
+        # Editing an existing page requires write access to *that* page.
+        # Creating a new page is always allowed for an authenticated user;
+        # the creator becomes the owner and gets full rights.
+        require_can("write", rel)
     user = current_user()
     author = f"{user.name or user.email} <{user.email}>" if user else None
     change_kind = "edit" if existed else "create"
@@ -113,7 +136,10 @@ def put_document_by_path():
     if deprecated:
         msg = f"{msg}\n\nDeprecates: {' '.join(deprecated)}"
     sha = wiki_git.commit_file(rel, req.body, msg, author=author)
-    wiki_notify.after_doc_write(rel, sha, change_kind, author)
+    wiki_notify.after_doc_write(
+        rel, sha, change_kind, author,
+        owner_user_id=user.id if (user and change_kind == "create") else None,
+    )
     log.info("doc %s %s by %s sha=%s", change_kind, rel, author or "?", sha[:8])
     return jsonify(PutDocumentResponse(
         path=rel, sha=sha, created=not existed, deprecated=deprecated,
@@ -182,6 +208,16 @@ def move_document_or_folder():
     if old_abs.is_dir() and new_rel.endswith(".md"):
         return error("folder name must not end in .md", 400)
 
+    # Moving a page requires write on it. Moving a folder requires
+    # write on every page underneath it (we expand the check at write
+    # time so the whole move is atomic — refuse if any page is denied).
+    if old_abs.is_file() and old_rel.endswith(".md"):
+        require_can("write", old_rel)
+    elif old_abs.is_dir():
+        for p in wiki_git.list_paths(old_rel):
+            if p.endswith(".md"):
+                require_can("write", p)
+
     user = current_user()
     author = f"{user.name or user.email} <{user.email}>" if user else None
     msg = f"move {old_rel} -> {new_rel}"
@@ -223,6 +259,12 @@ def delete_document_by_path():
     abs_path = filesystem.absolute(rel)
     if not abs_path.exists():
         return error("not found", 404)
+    if abs_path.is_file() and rel.endswith(".md"):
+        require_can("write", rel)
+    elif abs_path.is_dir():
+        for p in wiki_git.list_paths(rel):
+            if p.endswith(".md"):
+                require_can("write", p)
     user = current_user()
     author = f"{user.name or user.email} <{user.email}>" if user else None
     sha = wiki_git.delete_path(rel, f"delete {rel}", author=author)
@@ -242,6 +284,7 @@ def reindex_document_by_path():
     abs_path = filesystem.absolute(rel)
     if not abs_path.is_file():
         return error("not found", 404)
+    require_can("read", rel)
     reindex_path(rel)
     return jsonify(ReindexResponse(path=rel, queued=True).model_dump())
 
@@ -249,8 +292,34 @@ def reindex_document_by_path():
 @bp.get("/search")
 @login_required
 def search_documents():
-    # TODO: BM25 query → ranked results (uses app.db.fts.search)
-    raise NotImplementedError
+    query = (request.args.get("q") or "").strip()
+    if not query:
+        return jsonify(SearchResponse(query="", hits=[]).model_dump())
+    try:
+        limit = int(request.args.get("limit") or 10)
+    except ValueError:
+        return error("limit must be an integer", 400)
+    limit = max(1, min(limit, 50))
+    user = current_user()
+    hits = wiki_search.search(
+        query,
+        limit=limit,
+        user_id=user.id if user else None,
+        is_admin=bool(user and user.is_admin),
+    )
+    return jsonify(SearchResponse(
+        query=query,
+        hits=[
+            SearchHitView(
+                doc_id=h.doc_id,
+                path=h.path,
+                title=h.title,
+                snippet=h.snippet,
+                score=h.score,
+            )
+            for h in hits
+        ],
+    ).model_dump())
 
 
 @bp.get("/<doc_id>")
@@ -326,6 +395,7 @@ def file_history():
         rel = filesystem.safe_rel_path(path)
     except ValueError as e:
         return error(str(e), 400)
+    require_can("read", rel)
     rows = wiki_git.history(rel)
     deprecated: set[str] = set()
     for r in rows:
@@ -340,6 +410,40 @@ def file_history():
     ]
     return jsonify(FileHistoryResponse(
         path=rel, head_sha=head_sha, commits=visible,
+    ).model_dump())
+
+
+@bp.get("/file/activity")
+@login_required
+def file_activity():
+    """Active agent-activity rows for a doc.
+
+    Drives the wiki page header's "Active agents" panel. Read-gated by
+    the same per-page ACL the body endpoint uses; rows are derived
+    from the ``agent_activity`` Postgres table, never from disk.
+    """
+    path = request.args.get("path", "")
+    if not path:
+        return error("path required", 400)
+    try:
+        rel = filesystem.safe_rel_path(path)
+    except ValueError as e:
+        return error(str(e), 400)
+    require_can("read", rel)
+    rows = agent_activity.list_for_doc(rel)
+    return jsonify(DocumentActivityResponse(
+        path=rel,
+        agents=[
+            ActivityRowView(
+                owner_display=r.owner_display,
+                agent_name=r.agent_name,
+                activity=r.activity,
+                description=r.description,
+                registered_at=r.registered_at,
+                expires_at=r.expires_at,
+            )
+            for r in rows
+        ],
     ).model_dump())
 
 

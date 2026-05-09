@@ -284,32 +284,37 @@ shape:
   `nl_description`.
 - **`trigger_fire_message`** — what notification body to deliver when the
   trigger fires. Stored on the trigger row as `message`.
-- **`destination`** — where to deliver. **v0 only supports `null`**,
+- **`destination`** — slug of a row in the `trigger_destinations`
+  catalog table. Defaults to `"event_log"` (the only seeded row in v0),
   which routes the fire to the **Event Log**: a `trigger.fire` row is
   inserted into the `events` table with the `message` carried in the
-  payload. Outbound dispatch (webhooks, agent messages, etc.) is not
-  implemented yet — non-null destinations are rejected at the API,
-  repo, and tool boundary so we don't silently drop them.
+  payload. Validation goes through `app/triggers/destinations.py:exists`,
+  shared by the API, repo, and the LLM agent tools — adding a new
+  destination is a one-line migration plus a dispatcher branch in
+  `_record_fire`. The catalog itself is exposed to the chat agent via
+  the `get_trigger_destinations` tool.
 
 Storage:
 
 - The two new fields live in the existing `triggers.action_json` column
-  as a JSON blob `{"message": "...", "destination": null}`. No schema
-  migration was needed.
+  as a JSON blob `{"message": "...", "destination": "event_log"}`. No
+  schema migration of the `triggers` table was needed.
 - The YAML on disk gets two new top-level keys (`message`, `destination`).
 - `storage.parse` is tolerant of pre-existing YAML files that lack these
   keys (they default to `None`); `_parse_action` in the repo does the
-  same for old Postgres rows.
+  same for old Postgres rows. Both then run through
+  `repo._normalize_destination` which maps legacy `None` → `"event_log"`
+  so callers see one shape across the migration boundary.
 
-Fan-out (`app/tasks/triggers.py:_deliver_fire`):
+Fan-out (`app/tasks/triggers.py:_record_fire`):
 
 - Pulls `message` + `destination` out of the trigger's `action_json`.
-- For `destination is None`, writes the standard `trigger.fire` event,
-  now including `message` and `destination` in `payload_json` so the
+- For `destination == "event_log"`, writes the standard `trigger.fire`
+  event, including `message` and `destination` in `payload_json` so the
   Events UI can render the message.
-- For any non-null destination, logs a warning and falls through to the
+- For any other destination id, logs a warning and falls through to the
   Event Log so no fire is lost. Once outbound dispatchers ship they will
-  branch off here.
+  branch off here, keyed on the destination id.
 
 `update_trigger` accepts partial updates: pass the `trigger_id` plus any
 subset of `scope_path`, `trigger_nl_condition`, `trigger_fire_message`,
@@ -381,7 +386,12 @@ tools.
   That's where trigger YAML lives — agents shouldn't write there directly.
   TODO: have `safe_rel_path` (or a new check) reject `.triggers/` from
   the doc tools.
-- **Trigger destination registry.** When the second destination type
-  arrives (webhook/Slack/agent message), wire it through
-  `app/triggers/actions/` per the planned-seams entry in `seams.md`.
-  Today's null-only behavior is the placeholder.
+- **Trigger destination registry.** The catalog now lives in the
+  `trigger_destinations` table (`id, name, description, created_at`) and
+  is surfaced to agents via `get_trigger_destinations`. v0 ships only
+  `event_log`. When the second destination type arrives (webhook /
+  Slack / agent message), drop a migration insert into
+  `trigger_destinations` and add the dispatcher branch in
+  `tasks/triggers.py:_record_fire`. The creation surface (`create_trigger`,
+  `update_trigger`, REST API) doesn't need to change — validation is
+  catalog-driven.

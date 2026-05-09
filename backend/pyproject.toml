@@ -26,6 +26,7 @@ dependencies = [
 dev = [
     "pytest>=8.0",
     "pytest-cov>=5.0",
+    "pytest-xdist>=3.5",
     "ruff>=0.4",
     "basedpyright>=1.18",
 ]
@@ -40,7 +41,13 @@ target-version = "py312"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q"
+# ``-n auto`` runs tests across one process per CPU core via pytest-xdist.
+# Tests are parallel-safe: each gets a unique Postgres schema (see
+# ``tests/conftest.py``) and a unique ``tmp_path``; module-level state is
+# patched per-test and lives in a worker-local process. ``--dist=loadfile``
+# keeps tests in the same file on the same worker so module-scoped fixtures
+# (if any are added later) don't get rebuilt across workers.
+addopts = "-q -n auto --dist=loadfile"
 
 [tool.basedpyright]
 include = ["app", "tests"]

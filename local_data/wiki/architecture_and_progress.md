@@ -21,6 +21,7 @@ _Last updated: 2026-05-08_
 - [Exploration work](exploration/exploration.md)
 - [MCP server (inbound)](mcp-server/mcp-server.md)
 - [Infra](infra/infra.md)
+- [Permissions (proposal)](permissions/permissions.md)
 
 This file is the cross-area map: product spec, V0 brief, cross-cutting
 architecture and decisions, and a one-line-per-area status snapshot. When
@@ -340,6 +341,9 @@ rulebook; per-area docs reference these and add their own area-specific rules.
 | `triggers`        | Postgres cache of inline `<dir>/.trigger_*.yaml` files | natural-language-triggers |
 | `events`          | append-only audit log | flask-and-apis (write surface), frontend (events view) |
 | `documents_fts`   | BM25 virtual table (porter+unicode61, bm25) | flask-and-apis (search), background-tasks (reindex) |
+| `groups`, `group_members` | user groups for permission grants | permissions |
+| `wiki_owners`     | per-page owner (path → user_id) | permissions |
+| `acl_entries`     | grants of read/write to user/group/everyone on a page or folder | permissions |
 | `llm_settings`    | single-row provider/model/keys | flask-and-apis (admin) |
 | *(removed — schema is driven by `app/db/models.py`)*
 
@@ -393,7 +397,7 @@ One line per area; the per-area doc has the real picture.
 | Frontend | Auth/admin/wiki-read/chat live; chat needs to move from `/chat` page to a side panel; sidebar needs to become Wiki/Triggers/Events; no editor, no inline-triggers panel, no events view yet | [frontend](frontend/frontend.md) |
 | Onyx push | Not started; ingest endpoint stub | [onyx-push](onyx-push/onyx-push.md) |
 | Background tasks | Reindex live; doc-update + periodic stubs; trigger fan-out task TBD | [background-tasks](background-tasks/background-tasks.md) |
-| MCP server (inbound) | Designed, not started. Streamable HTTP + per-user tokens + shared agent-tool registry + `wiki://` resource subscriptions; phased plan | [mcp-server](mcp-server/mcp-server.md) |
+| MCP server (inbound) | **Full surface shipped (Phases 1–7).** Phase 1: tokens + Agents sidebar page (mint / reveal-once / revoke). Phase 2: bearer-authed JSON-RPC dispatcher at `POST /api/mcp` (`g.user` seam so `require_can`/ACL Just Work). Phase 3: read tool surface (`read_doc`, `search_wiki`, `list_history`, `ask_nl_question`) with allow-list. Phase 4: write tool surface (`edit_doc`, `multi_edit`, `write_doc`, `apply_patch`, `move_path`, `create_directory`) — `base_sha` optimistic concurrency, `base_sha_required_for_overwrite` for `write_doc`, `stale_paths` field on every result. Phase 5: `resources/{list,read,subscribe,unsubscribe}` over `wiki:///<path>`; long-lived SSE side channel on `GET /api/mcp`; in-memory subscription registry + per-session queue + Postgres `LISTEN/NOTIFY` bridge for cross-process commits; `read_doc` auto-subscribes at HEAD; per-subscriber ACL recheck before delivery. Phase 6: async `update_doc_nl` (`mcp_jobs` table, `agent_update_document_nl(job_id)` worker on `documents_queue`); idempotency key dedupes retries; 30s same-(user,path) debounce; worker reconstitutes `g.user` via `worker_context.as_user`; `job://<id>` resource read + subscribe with cross-user isolation; `publish_job_update` pushes status changes over SSE. Phase 7: operator-facing setup guide at `docs/mcp-server.md` (Claude Code / Cursor / Codex / Python-SDK examples + troubleshooting); `update_doc_nl` and `edit_doc` tool descriptions tuned with explicit batching guidance. Open questions in the design doc track follow-on work (rate limits, per-token scoping, tree templates) | [mcp-server](mcp-server/mcp-server.md) |
 | Exploration | Not started; parking lot for MCP-vs-skill question | [exploration](exploration/exploration.md) |
 | Infra | Compose + volumes wired; EKS Terraform + Helm chart in `deploy/` (validated, not yet end-to-end applied) | [infra](infra/infra.md) |
 
@@ -546,7 +550,7 @@ area docs.
   `TaskQueue` instance per queue, each backed by its own pgmq queue in
   the app's Postgres (`pgmq.q_documents`, `pgmq.q_triggers`,
   `pgmq.q_wiki_bm25`): `documents_queue` (LLM doc-reconciliation —
-  `update_document_*`, `stale_doc_review`), `triggers_queue` (NL trigger
+  `update_document_*`), `triggers_queue` (NL trigger
   eval, both `fan_out_trigger_eval` and the cron
   `evaluate_scheduled_triggers`), `wiki_bm25_queue` (BM25
   reindex). Three worker containers in `docker-compose.yml`

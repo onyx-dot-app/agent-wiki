@@ -1,7 +1,7 @@
 """HTTP shapes for /api/chat."""
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -12,4 +12,33 @@ class ChatMessage(BaseModel):
 
 
 class SendChatRequest(BaseModel):
-    messages: list[ChatMessage] = Field(min_length=1)
+    """Body for ``POST /api/chat/messages``.
+
+    The session must already exist (the frontend creates it via
+    ``POST /api/chat/sessions`` on first send). The backend loads the
+    full prior message history from the DB and runs the agent loop —
+    only the latest user content travels over the wire.
+    """
+
+    session_id: str
+    content: str = Field(min_length=1)
+
+
+class ChatSessionOut(BaseModel):
+    id: str
+    title: str | None
+    created_at: str
+    updated_at: str
+
+
+class ChatMessageOut(BaseModel):
+    id: str
+    role: Literal["user", "assistant"]
+    content: str
+    events: list[dict[str, Any]] | None
+    created_at: str
+
+
+class ChatSessionDetail(BaseModel):
+    session: ChatSessionOut
+    messages: list[ChatMessageOut]

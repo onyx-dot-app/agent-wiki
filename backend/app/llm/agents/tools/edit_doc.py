@@ -16,17 +16,24 @@ def handle(args: dict[str, Any]) -> Any:
         old_string = args.get("old_string")
         new_string = args.get("new_string")
         commit_message = args.get("commit_message")
+        base_sha = args.get("base_sha")
         if not isinstance(old_string, str) or old_string == "":
             raise h.ToolError("old_string is required and must be non-empty")
         if not isinstance(new_string, str):
             raise h.ToolError("new_string is required (string)")
         if not isinstance(commit_message, str) or not commit_message.strip():
             raise h.ToolError("commit_message is required")
+        if base_sha is not None and not isinstance(base_sha, str):
+            raise h.ToolError("base_sha must be a string when provided")
         replace_all = bool(args.get("replace_all", False))
 
         if not h.file_exists(rel):
             raise h.ToolError(f"file not found: {rel}")
         h.assert_read_before_write(rel)
+
+        stale = h.assert_base_sha(rel, base_sha)
+        if stale is not None:
+            return stale
 
         old_body = h.read_existing(rel)
         try:

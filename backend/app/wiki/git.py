@@ -30,13 +30,23 @@ class CommitInfo(BaseModel):
 def _run(
     args: list[str], cwd: str | None = None, check: bool = True
 ) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        ["git", *args],
-        cwd=cwd or CONFIG.wiki_dir,
-        check=check,
-        capture_output=True,
-        text=True,
-    )
+    try:
+        return subprocess.run(
+            ["git", *args],
+            cwd=cwd or CONFIG.wiki_dir,
+            check=check,
+            capture_output=True,
+            text=True,
+        )
+    except subprocess.CalledProcessError as e:
+        log.error(
+            "git %s failed (exit %d): stderr=%r stdout=%r",
+            " ".join(args),
+            e.returncode,
+            (e.stderr or "").strip(),
+            (e.stdout or "").strip(),
+        )
+        raise
 
 
 def ensure_wiki_repo() -> None:
@@ -138,8 +148,13 @@ def move_path(
 
 
 def delete_path(rel_path: str, message: str, author: str | None = None) -> str:
-    """Remove a tracked file or directory (recursively) and commit. Returns SHA."""
-    _run(["rm", "-r", "--", rel_path])
+    """Remove a tracked file or directory (recursively) and commit. Returns SHA.
+
+    Uses ``-f`` so a working-tree copy that has drifted from HEAD (uncommitted
+    local modifications) doesn't block the delete — the user asked to remove
+    the path, and the prior contents remain reachable in history.
+    """
+    _run(["rm", "-rf", "--", rel_path])
     env_args = ["--author", author] if author else []
     _run(["commit", "-m", message, *env_args])
     sha = _run(["rev-parse", "HEAD"]).stdout.strip()

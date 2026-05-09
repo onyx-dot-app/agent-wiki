@@ -16,7 +16,7 @@ from __future__ import annotations
 import argparse
 
 # Importing modules registers tasks on their respective queues.
-from app.tasks import agent_activity, document_update, periodic, reindex, triggers  # noqa: F401  # pyright: ignore[reportUnusedImport]
+from app.tasks import agent_activity, chat_title, document_update, periodic, reindex, triggers  # noqa: F401  # pyright: ignore[reportUnusedImport]
 from app.tasks.queues import QUEUES
 from app.tasks.queue import run_consumer
 from app.utils.logging import setup_logging

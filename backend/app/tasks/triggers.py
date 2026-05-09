@@ -34,9 +34,12 @@ import json
 import logging
 import subprocess
 
-from app.db.models import Event
+from sqlalchemy import select
+
+from app.db.models import Event, User
 from app.db.session import session
 from app.tasks.queues import triggers_queue
+from app.triggers import destinations as destinations_repo
 from app.triggers import diff as diff_helper
 from app.triggers.engine import (
     TriggerRecord,
@@ -45,6 +48,7 @@ from app.triggers.engine import (
     find_matching_triggers,
     render_delta_message,
 )
+from app.wiki import acl as wiki_acl
 from app.wiki import git as wiki_git
 
 log = logging.getLogger(__name__)
@@ -86,10 +90,45 @@ def fan_out_trigger_eval(
             doc_path=doc_path, body=after, wiki_snapshot=wiki_snapshot
         )
 
+    # Cache owner ACL flags by user id — most fan-outs touch a handful of
+    # owners and the same owner often shows up across triggers.
+    owner_can_read: dict[str, bool] = {}
+
+    def _owner_can_read(owner_user_id: str) -> bool:
+        cached = owner_can_read.get(owner_user_id)
+        if cached is not None:
+            return cached
+        with session() as s:
+            row = s.scalars(
+                select(User).where(User.id == owner_user_id)
+            ).one_or_none()
+        if row is None:
+            # Orphan trigger (shouldn't normally happen — rebuild
+            # disables these). Skip rather than render against a
+            # missing principal.
+            owner_can_read[owner_user_id] = False
+            return False
+        allowed = wiki_acl.can(row.id, row.is_admin, "read", doc_path)
+        owner_can_read[owner_user_id] = allowed
+        return allowed
+
     fired = 0
+    skipped_acl = 0
     for trigger in triggers:
         instruction = trigger.message or ""
         destination = trigger.destination
+
+        # Re-check the owner's read access at fire-time. The trigger may have
+        # been created when the owner had access and then revoked; we don't
+        # want a rendered message (which embeds doc body excerpts) landing in
+        # an event the owner shouldn't have visibility into.
+        if not _owner_can_read(trigger.owner_user_id):
+            skipped_acl += 1
+            log.info(
+                "trigger %s skipped: owner %s lacks read on %s",
+                trigger.id, trigger.owner_user_id, doc_path,
+            )
+            continue
 
         if change_kind == "create" and trigger.scope_path != doc_path:
             assert new_file_payload is not None
@@ -131,7 +170,10 @@ def fan_out_trigger_eval(
             destination=destination,
             actor=actor,
         )
-    log.info("fan_out_trigger_eval %s: %d/%d fired", doc_path, fired, len(triggers))
+    log.info(
+        "fan_out_trigger_eval %s: %d/%d fired (%d skipped on owner ACL)",
+        doc_path, fired, len(triggers), skipped_acl,
+    )
 
 
 def _read_at(ref: str, rel_path: str) -> str:
@@ -157,15 +199,15 @@ def _record_fire(
 ) -> None:
     """Write a single ``trigger.fire`` row to the events table.
 
-    v0 only supports ``destination = None`` (Event Log delivery); a
-    non-null value logs a warning and still records to the Event Log so
-    no fire is lost. Outbound dispatch (webhook, agent message, etc.) is
-    not implemented yet.
+    v0 only delivers to the ``event_log`` destination (a row in the
+    ``trigger.fire`` events table). A trigger pointed at a destination
+    without a wired-up dispatcher logs a warning and still records to the
+    events table so no fire is lost.
     """
-    if destination is not None:
+    if destination != destinations_repo.EVENT_LOG_ID:
         log.warning(
-            "trigger %s has destination=%r but only null (Event Log) is "
-            "supported in v0; recording to events anyway",
+            "trigger %s has destination=%r but no outbound dispatcher is "
+            "wired up; recording to events anyway",
             trigger.id, destination,
         )
 

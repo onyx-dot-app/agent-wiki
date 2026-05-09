@@ -14,7 +14,7 @@ from typing import Any
 
 from app.llm.agents._session import seen_doc_paths
 from app.llm.agents.tools import _doc_helpers as h
-from app.wiki import git as wiki_git
+from app.wiki import agent_activity, git as wiki_git
 
 
 def handle(args: dict[str, Any]) -> Any:
@@ -32,6 +32,13 @@ def handle(args: dict[str, Any]) -> Any:
     if sha is None and not h.file_exists(rel):
         return {"error": f"file not found: {rel}"}
 
+    from app.auth import PermissionDenied, require_can
+
+    try:
+        require_can("read", rel)
+    except PermissionDenied as exc:
+        return {"error": str(exc)}
+
     ref = sha or "HEAD"
     try:
         body = wiki_git.read_file(rel, ref=ref)
@@ -47,22 +54,18 @@ def handle(args: dict[str, Any]) -> Any:
         return {"error": f"could not read {rel}@{ref}: {exc}"}
 
     is_head = sha is None or sha == head_sha
+    agents: list[dict[str, Any]] = []
     if is_head:
         _mark_seen(rel)
         h.mark_doc_read(rel)
-        # Frontmatter may have just been re-rendered; re-read so the model
-        # sees the current body. Historical reads (sha != HEAD) don't
-        # re-register and are returned as-was.
-        try:
-            body = wiki_git.read_file(rel, ref="HEAD")
-        except Exception:  # pragma: no cover
-            pass
+        agents = [r.model_dump() for r in agent_activity.list_for_doc(rel)]
 
     return {
         "path": rel,
         "body": body,
         "sha": sha or head_sha,
         "is_head": is_head,
+        "agents": agents,
     }
 
 

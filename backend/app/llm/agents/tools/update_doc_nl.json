@@ -1,6 +1,6 @@
 {
   "name": "update_doc_nl",
-  "description": "Update a wiki document from a natural-language instruction. Dispatches to the document-updater sub-agent which loads the current body, applies your instruction, and either commits the new body or reports `NO_CHANGE` if nothing should change. Use this for high-level updates like 'mark the TODO under section X as done' or 'add a sentence noting that we shipped Y'. For surgical edits where you already know the exact strings, prefer `edit_doc` / `multi_edit` / `apply_patch` (cheaper, no extra LLM call). The file must have been read this session via `read_page`/`read_doc` (HEAD).",
+  "description": "Update a wiki document from a natural-language instruction. Dispatches to the document-updater sub-agent which loads the current body, applies your instruction, and either commits the new body or reports `NO_CHANGE` if nothing should change. Use this for high-level updates like 'mark the TODO under section X as done' or 'add a sentence noting that we shipped Y'. For surgical edits where you already know the exact strings, prefer `edit_doc` / `multi_edit` / `apply_patch` (cheaper, no extra LLM call). The file must have been read this session via `read_page`/`read_doc` (HEAD). USAGE GUIDANCE: this is the most expensive tool in the surface — every call invokes a full LLM pass against the doc body. Batch related context into ONE instruction per logical change (\"mark the TODO done and update the status header\") rather than firing the tool after every commit or for every individual edit. The server enforces a 30s same-doc debounce; back-to-back calls within that window will return `committed=false reason=debounced`.",
   "input_schema": {
     "type": "object",
     "properties": {
@@ -15,6 +15,10 @@
       "base_sha": {
         "type": "string",
         "description": "Optional SHA the instruction was authored against. If set and HEAD has moved, returns `stale_base` so you can re-read and re-issue."
+      },
+      "idempotency_key": {
+        "type": "string",
+        "description": "Optional. Over MCP this collapses retries of the same instruction onto the same `job_id` (the second call returns the existing job, `deduplicated=true`). When omitted, the server defaults to `sha256(user_id|path|instruction)` so an agent that doesn't mint its own key still gets dedupe semantics. Ignored on the in-process chat surface (which is sync)."
       }
     },
     "required": ["path", "instruction"]

@@ -131,3 +131,43 @@ class FileHistoryResponse(BaseModel):
     path: str
     head_sha: str | None
     commits: list[CommitView]
+
+
+class SearchHitView(BaseModel):
+    doc_id: str
+    path: str
+    title: str | None
+    snippet: str
+    score: float
+
+
+class SearchResponse(BaseModel):
+    query: str
+    hits: list[SearchHitView]
+
+
+# --------------------------------------------------------------------------- #
+# Agent activity                                                              #
+# --------------------------------------------------------------------------- #
+
+
+class ActivityRowView(BaseModel):
+    """One active registration on a doc — what the UI / agents see.
+
+    Mirror of ``app.wiki.agent_activity.ActivityRow`` minus the internal
+    ``id`` and ``user_id``. ``owner_display`` is the user's display
+    name (falling back to email); ``agent_name`` is ``None`` when the
+    agent didn't identify itself.
+    """
+
+    owner_display: str
+    agent_name: str | None
+    activity: str           # "read" | "wrote"
+    description: str | None
+    registered_at: str
+    expires_at: str
+
+
+class DocumentActivityResponse(BaseModel):
+    path: str
+    agents: list[ActivityRowView]

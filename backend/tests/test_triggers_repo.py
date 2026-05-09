@@ -33,7 +33,7 @@ def test_create_and_get(tmp_repo):
     assert t["enabled"] is True
     assert t["kind"] == "delta"
     assert t["message"] == "status changed"
-    assert t["destination"] is None
+    assert t["destination"] == "event_log"
 
     fetched = repo.get(t["id"])
     assert fetched == t
@@ -130,7 +130,7 @@ def test_create_rejects_missing_message(tmp_repo):
         )
 
 
-def test_create_rejects_unsupported_destination(tmp_repo):
+def test_create_rejects_unknown_destination(tmp_repo):
     from app.triggers import repo
 
     uid = seed_user(email="a@b.com")
@@ -140,7 +140,7 @@ def test_create_rejects_unsupported_destination(tmp_repo):
             scope_path="a.md",
             nl_description="x",
             message="m",
-            destination="https://example.com/hook",
+            destination="no_such_destination",
         )
 
 

@@ -9,7 +9,7 @@
 > the auth/api libs, the AppShell chrome, and the three primary views
 > (Wiki / Chat / Events).
 
-_Last updated: 2026-05-07_
+_Last updated: 2026-05-09_
 
 ---
 
@@ -59,9 +59,12 @@ Avatar menu (top of sidebar) keeps Admin + Sign out.
 - `triggers/page.tsx` — owner-scoped Triggers tab; full CRUD over the
   current user's triggers. **Kept as a top-level view.** Inline panels
   on doc/dir pages mirror this for path-scoped management.
-- `admin/page.tsx`, `admin/users/page.tsx`, `admin/llm/page.tsx` — admin
-  surface, all working. Each owns its own admin gate via
-  `useRequireAuth` + `is_admin` redirect.
+- `admin/page.tsx`, `admin/users/page.tsx`, `admin/llm/page.tsx`,
+  `admin/web/page.tsx`, `admin/groups/page.tsx`, `admin/health/page.tsx`
+  — admin surface, all working. Each owns its own admin gate via
+  `useRequireAuth` + `is_admin` redirect. The Health page (backend
+  liveness + queue depths, polling `/api/health` every 5s) lives here
+  rather than in the main sidebar.
 
 #### `src/lib/`
 - `api.ts` — `apiFetch<T>` (credentials include, JSON content type, parses
@@ -87,12 +90,24 @@ Avatar menu (top of sidebar) keeps Admin + Sign out.
 
 #### `src/components/common/AppShell.tsx`
 Vertical icon nav (Wiki, Triggers, Events) + avatar menu (admin link,
-sign out). Also renders the **LLM setup banner** at the top of the
-content column: polls `GET /api/llm/status` once when a user is loaded,
-and if `configured=false` shows a dismissible amber alert. Admins see a
-deep link to `/admin/llm`; non-admins are told to ask an admin.
-Dismissal is per-tab (`sessionStorage["llm-banner-dismissed"]`) so it
-re-appears in a fresh tab until the system is actually configured.
+sign out). Also renders a unified **status banner** at the top of the
+content column via the `StatusBanner` component, which shows at most
+one of:
+
+1. **Backend health banner** (red) — driven by `useHealth` polling
+   `GET /api/health` every 15s. Fires when the request fails (backend
+   unreachable) or `status === "degraded"`. Non-dismissible — clears
+   automatically when the backend recovers. Admins get a deep link to
+   `/admin/health`; non-admins are told to ask an admin.
+2. **LLM setup banner** (amber) — driven by `useLLMStatus`
+   (`GET /api/llm/status`). Fires when `configured === false`.
+   Dismissible per-tab (`sessionStorage["llm-banner-dismissed"]`) so
+   it re-appears in a fresh tab until the system is configured.
+   Admins get a deep link to `/admin/llm`; non-admins are told to ask
+   an admin.
+
+Backend health takes precedence over LLM setup — if both signals fire,
+only the health banner renders. Both banners skip rendering pre-auth.
 
 #### `src/components/chat/ChatWidget.tsx`
 Global chat widget mounted from `app/layout.tsx`. Renders only when a
@@ -106,6 +121,14 @@ persisted in `localStorage` along with the expanded width.
   `.md` files as leaves. Sourced from `GET /api/documents?prefix=` and
   grouped client-side.
 - **Right panel** is one of: directory page, reader, editor.
+- **Search bar** (`components/wiki/WikiSearch.tsx`) at the top of every
+  wiki page (rendered by `WikiRoute`, above both Explorer and FileViewer).
+  Debounced typeahead against `GET /api/documents/search?q=…&limit=8`
+  (BM25 via pg_textsearch). Dropdown shows title, path, and a snippet
+  with `**match**` markers rendered as bold spans; ↑/↓/Enter selects;
+  Esc / outside-click closes; picking a hit routes to `/wiki/<path>`.
+  Stale-response guard via a request-sequence counter so a slower reply
+  can't overwrite a fresher one.
 
 #### Routing
 `/wiki/[...path]` resolves at runtime:

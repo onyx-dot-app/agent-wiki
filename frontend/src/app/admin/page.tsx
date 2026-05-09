@@ -51,6 +51,18 @@ export default function AdminPage() {
             description="Configure web search to help with drafting documents"
             icon={<GlobeIcon />}
           />
+          <AdminCard
+            href="/admin/groups"
+            title="Groups"
+            description="Create user groups to share wiki pages with."
+            icon={<UsersIcon />}
+          />
+          <AdminCard
+            href="/admin/health"
+            title="Health"
+            description="Backend liveness and background queue depth."
+            icon={<HealthIcon />}
+          />
         </div>
       </main>
     </AppShell>
@@ -127,6 +139,14 @@ function GlobeIcon() {
       <circle cx="12" cy="12" r="10" />
       <path d="M2 12h20" />
       <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+    </svg>
+  );
+}
+
+function HealthIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M3 12h4l2-6 4 12 2-6h6" />
     </svg>
   );
 }

@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { useAuth } from "@/lib/auth";
+import { useHealth } from "@/lib/health";
 import { useLLMStatus } from "@/lib/llm";
 
 interface NavItem {
@@ -17,8 +18,10 @@ const NAV: NavItem[] = [
   { href: "/wiki", label: "Wiki", icon: <BookIcon /> },
   { href: "/triggers", label: "Triggers", icon: <BoltIcon /> },
   { href: "/events", label: "Events", icon: <EventsIcon /> },
-  { href: "/health", label: "Health", icon: <HealthIcon /> },
+  { href: "/agents", label: "Agents", icon: <AgentsIcon /> },
 ];
+
+const BANNER_HEALTH_POLL_MS = 15000;
 
 export function AppShell({ children }: { children: ReactNode }) {
   const { user, logout } = useAuth();
@@ -161,30 +164,54 @@ export function AppShell({ children }: { children: ReactNode }) {
         })}
       </nav>
       <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
-        <LLMSetupBanner />
+        <StatusBanner />
         <div style={{ flex: 1, minWidth: 0 }}>{children}</div>
       </div>
     </div>
   );
 }
 
-function LLMSetupBanner() {
+// Renders at most one banner at a time. Backend health takes precedence
+// over the LLM setup banner — if both signals fire, the user sees the
+// health banner only.
+function StatusBanner() {
   const { user, loading } = useAuth();
-  // Skip the fetch until we have a logged-in user — `/llm/status` is
-  // login-gated, so calling it pre-auth just produces 401s.
-  const { status } = useLLMStatus({ skip: loading || !user });
-  const [dismissed, setDismissed] = useState(false);
+  const skip = loading || !user;
+  const { health, error: healthError } = useHealth({
+    refreshIntervalMs: skip ? undefined : BANNER_HEALTH_POLL_MS,
+  });
+  const { status: llmStatus } = useLLMStatus({ skip });
 
-  useEffect(() => {
-    if (typeof window !== "undefined" && sessionStorage.getItem("llm-banner-dismissed") === "1") {
-      setDismissed(true);
-    }
-  }, []);
+  const backendUnreachable = !skip && !!healthError;
+  const backendDegraded = !skip && health?.status === "degraded";
 
-  if (!user || status?.configured !== false || dismissed) return null;
+  if (skip) return null;
+  if (backendUnreachable || backendDegraded) {
+    return (
+      <BackendHealthBanner
+        unreachable={backendUnreachable}
+        isAdmin={!!user?.is_admin}
+        message={healthError?.message ?? null}
+      />
+    );
+  }
+  if (llmStatus?.configured === false) {
+    return <LLMSetupBanner isAdmin={!!user?.is_admin} />;
+  }
+  return null;
+}
 
-  const isAdmin = !!user.is_admin;
-
+function BannerShell({
+  tone,
+  children,
+}: {
+  tone: "warning" | "error";
+  children: ReactNode;
+}) {
+  const palette =
+    tone === "error"
+      ? { background: "#fee2e2", border: "#fca5a5", color: "#7f1d1d" }
+      : { background: "#fef3c7", border: "#fcd34d", color: "#78350f" };
   return (
     <div
       role="alert"
@@ -193,56 +220,110 @@ function LLMSetupBanner() {
         alignItems: "center",
         gap: 12,
         padding: "10px 16px",
-        background: "#fef3c7",
-        borderBottom: "1px solid #fcd34d",
-        color: "#78350f",
+        background: palette.background,
+        borderBottom: `1px solid ${palette.border}`,
+        color: palette.color,
         fontSize: 14,
       }}
     >
       <span aria-hidden style={{ fontSize: 16, lineHeight: 1 }}>⚠️</span>
-      <span style={{ flex: 1 }}>
-        <strong>No language model is configured.</strong>{" "}
-        {isAdmin ? (
-          <>
-            AI features (chat, document updates, trigger evaluation) are disabled until you add a
-            provider and API key on the{" "}
-            <Link
-              href="/admin/llm"
-              style={{ color: "#78350f", textDecoration: "underline", fontWeight: 600 }}
-            >
-              LLM settings page
-            </Link>
-            .
-          </>
-        ) : (
-          <>
-            AI features (chat, document updates, trigger evaluation) are disabled. Please ask a
-            workspace admin to finish setup.
-          </>
-        )}
-      </span>
-      <button
-        onClick={() => {
-          if (typeof window !== "undefined") {
-            sessionStorage.setItem("llm-banner-dismissed", "1");
-          }
-          setDismissed(true);
-        }}
-        aria-label="Dismiss"
-        style={{
-          background: "transparent",
-          border: "none",
-          color: "#78350f",
-          cursor: "pointer",
-          fontSize: 18,
-          lineHeight: 1,
-          padding: "2px 6px",
-          borderRadius: 4,
-        }}
-      >
-        ×
-      </button>
+      <span style={{ flex: 1 }}>{children}</span>
     </div>
+  );
+}
+
+function BackendHealthBanner({
+  unreachable,
+  isAdmin,
+  message,
+}: {
+  unreachable: boolean;
+  isAdmin: boolean;
+  message: string | null;
+}) {
+  // Not dismissible — the banner is driven by live polling and will
+  // disappear automatically once the backend recovers.
+  return (
+    <BannerShell tone="error">
+      <strong>{unreachable ? "Backend unreachable." : "Backend degraded."}</strong>{" "}
+      {unreachable
+        ? "The frontend can't reach the backend. Some features will not work until it recovers."
+        : "One or more background queues are reporting errors."}{" "}
+      {isAdmin ? (
+        <Link
+          href="/admin/health"
+          style={{ color: "inherit", textDecoration: "underline", fontWeight: 600 }}
+        >
+          View health details
+        </Link>
+      ) : (
+        <span>Please ask a workspace admin to investigate.</span>
+      )}
+      {message && isAdmin && (
+        <span style={{ marginLeft: 8, fontSize: 12, opacity: 0.8 }}>({message})</span>
+      )}
+    </BannerShell>
+  );
+}
+
+function LLMSetupBanner({ isAdmin }: { isAdmin: boolean }) {
+  const [dismissed, setDismissed] = useState(false);
+
+  useEffect(() => {
+    if (typeof window !== "undefined" && sessionStorage.getItem("llm-banner-dismissed") === "1") {
+      setDismissed(true);
+    }
+  }, []);
+
+  if (dismissed) return null;
+
+  return (
+    <BannerShell tone="warning">
+      <span style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <span style={{ flex: 1 }}>
+          <strong>No language model is configured.</strong>{" "}
+          {isAdmin ? (
+            <>
+              AI features (chat, document updates, trigger evaluation) are disabled until you add a
+              provider and API key on the{" "}
+              <Link
+                href="/admin/llm"
+                style={{ color: "#78350f", textDecoration: "underline", fontWeight: 600 }}
+              >
+                LLM settings page
+              </Link>
+              .
+            </>
+          ) : (
+            <>
+              AI features (chat, document updates, trigger evaluation) are disabled. Please ask a
+              workspace admin to finish setup.
+            </>
+          )}
+        </span>
+        <button
+          onClick={() => {
+            if (typeof window !== "undefined") {
+              sessionStorage.setItem("llm-banner-dismissed", "1");
+            }
+            setDismissed(true);
+          }}
+          aria-label="Dismiss"
+          style={{
+            background: "transparent",
+            border: "none",
+            color: "#78350f",
+            cursor: "pointer",
+            fontSize: 18,
+            lineHeight: 1,
+            padding: "2px 6px",
+            borderRadius: 4,
+          }}
+        >
+          ×
+        </button>
+      </span>
+    </BannerShell>
   );
 }
 
@@ -292,10 +373,14 @@ function EventsIcon() {
     </svg>
   );
 }
-function HealthIcon() {
+function AgentsIcon() {
   return (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="M3 12h4l2-6 4 12 2-6h6" />
+      <rect x="4" y="7" width="16" height="12" rx="2" />
+      <path d="M12 3v4" />
+      <circle cx="9" cy="13" r="1" />
+      <circle cx="15" cy="13" r="1" />
+      <path d="M9 17h6" />
     </svg>
   );
 }

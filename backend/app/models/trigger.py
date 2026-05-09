@@ -22,9 +22,10 @@ class TriggerAction(BaseModel):
 
 
 class CreateTriggerRequest(BaseModel):
-    """v0 only honors ``kind=delta`` and ``destination=null``; the values are
-    still validated in the route against the repo's allow-lists for clearer
-    error messages."""
+    """v0 only honors ``kind=delta``; ``destination`` is a slug from the
+    ``trigger_destinations`` table (default ``"event_log"``). Validation
+    against the destinations catalog happens in the repo for a single
+    source of truth."""
 
     scope_path: str = Field(min_length=1)
     nl_description: str = Field(min_length=1)
@@ -59,7 +60,7 @@ class TriggerView(BaseModel):
     kind: str
     nl_description: str
     message: str | None
-    destination: str | None
+    destination: str
     enabled: bool
     created_at: str | None
     last_edited_at: str | None
@@ -80,6 +81,18 @@ class TriggerCommit(BaseModel):
 
 class TriggerHistoryResponse(BaseModel):
     commits: list[TriggerCommit]
+
+
+class TriggerDestinationView(BaseModel):
+    """One row in the ``trigger_destinations`` catalog."""
+
+    id: str
+    name: str
+    description: str
+
+
+class TriggerDestinationsResponse(BaseModel):
+    destinations: list[TriggerDestinationView]
 
 
 class TriggerVersionResponse(BaseModel):

@@ -9,13 +9,16 @@ nothing behind because the row write is the second step.
 Format (every trigger has these three fields plus the standard scope/kind/enabled):
   * **if** — ``nl_description``: natural-language firing condition.
   * **message** — the notification body to deliver when the trigger fires.
-  * **destination** — where to deliver. ``None`` (the only supported value in v0)
-    means the Event Log: the fire is recorded as a ``trigger.fire`` event with
-    the message in its payload, and nothing is dispatched outbound.
+  * **destination** — slug of a row in ``trigger_destinations``. Defaults to
+    ``"event_log"`` (record the fire to the events table; no outbound
+    dispatch). New destinations are added by migration as their dispatchers
+    come online — see ``app/triggers/destinations.py``.
 
 ``message`` and ``destination`` are stored together in the ``action_json``
 column (and the ``action`` block in the YAML file). The repo layer exposes
-them as flat dict keys for callers.
+them as flat dict keys for callers. Legacy rows where ``destination`` is
+``None`` (predating the destinations catalog) are read as ``"event_log"``
+so callers don't need to special-case the migration boundary.
 """
 from __future__ import annotations
 
@@ -29,30 +32,45 @@ from sqlalchemy import delete as sa_delete, select
 
 from app.db.models import Trigger
 from app.db.session import session
+from app.triggers import destinations as destinations_repo
 from app.triggers import storage
 
 log = logging.getLogger(__name__)
 
 ALLOWED_KINDS = {"delta"}              # schedule support comes later
-SUPPORTED_DESTINATIONS = {None}        # v0: Event Log only
+
+# Default destination for new triggers — fires go to the events table.
+DEFAULT_DESTINATION = destinations_repo.EVENT_LOG_ID
+
+
+def _validate_destination(destination: object) -> str:
+    """Coerce + validate a destination value into a known slug.
+
+    Returns the canonical slug. Raises ``ValueError`` if the value isn't a
+    string or doesn't match a row in ``trigger_destinations``.
+    """
+    if destination is None:
+        return destinations_repo.EVENT_LOG_ID
+    if not isinstance(destination, str) or not destination.strip():
+        raise ValueError(
+            f"destination must be a destination id string; got {destination!r}"
+        )
+    slug = destination.strip()
+    if not destinations_repo.exists(slug):
+        raise ValueError(
+            f"destination {slug!r} not found — call get_trigger_destinations "
+            "to list available ids"
+        )
+    return slug
 
 
 def _action_payload(*, message: str, destination: object) -> str:
     return json.dumps({"message": message, "destination": destination})
 
 
-def _parse_action(raw: str | None) -> dict[str, Any]:
-    """Safely parse the ``action_json`` column. Returns ``{}`` on legacy rows."""
-    if not raw:
-        return {}
-    try:
-        data: object = json.loads(raw)
-    except (TypeError, ValueError):
-        log.warning("trigger action_json invalid: %r", raw)
-        return {}
-    if isinstance(data, dict):
-        return cast(dict[str, Any], data)
-    return {}
+def _parse_action(raw: str) -> dict[str, Any]:
+    """Parse the ``action_json`` column."""
+    return cast(dict[str, Any], json.loads(raw))
 
 
 def _to_dict(t: Trigger) -> dict[str, Any]:
@@ -64,7 +82,7 @@ def _to_dict(t: Trigger) -> dict[str, Any]:
         "kind": t.kind,
         "nl_description": t.nl_description,
         "message": action.get("message"),
-        "destination": action.get("destination"),
+        "destination": action["destination"],
         "enabled": t.enabled,
         "created_at": t.created_at,
         "last_edited_at": t.last_edited_at,
@@ -98,10 +116,7 @@ def create(
         raise ValueError(
             "message (the fire message) is required and must be a non-empty string"
         )
-    if destination not in SUPPORTED_DESTINATIONS:
-        raise ValueError(
-            f"destination {destination!r} not supported in v0 — only null (Event Log)"
-        )
+    destination_id = _validate_destination(destination)
 
     trigger_id = "trg_" + uuid.uuid4().hex[:12]
     created_at = _now_iso()
@@ -113,7 +128,7 @@ def create(
         "kind": kind,
         "nl_description": nl_description,
         "message": message.strip(),
-        "destination": destination,
+        "destination": destination_id,
         "enabled": enabled,
         "created_at": created_at,
     }
@@ -128,7 +143,7 @@ def create(
                 kind=kind,
                 nl_description=nl_description,
                 action_json=_action_payload(
-                    message=message.strip(), destination=destination
+                    message=message.strip(), destination=destination_id
                 ),
                 enabled=enabled,
                 file_path=file_path,
@@ -189,11 +204,7 @@ def update(
             raise ValueError("message must be a non-empty string")
         new["message"] = message.strip()
     if destination is not _UNSET:
-        if destination not in SUPPORTED_DESTINATIONS:
-            raise ValueError(
-                f"destination {destination!r} not supported in v0 — only null (Event Log)"
-            )
-        new["destination"] = destination
+        new["destination"] = _validate_destination(destination)
     if enabled is not None:
         new["enabled"] = enabled
 
@@ -364,7 +375,7 @@ def rebuild_from_filesystem() -> int:
 
             action_payload = _action_payload(
                 message=data.get("message") or "",
-                destination=data.get("destination"),
+                destination=_validate_destination(data.get("destination")),
             )
             created_at = data.get("created_at") or fallback_now
             last_edited = data.get("last_edited_at") or created_at

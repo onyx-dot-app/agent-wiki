@@ -9,6 +9,10 @@ pg_textsearch's ``<@>`` operator and ``to_bm25query()`` function don't map
 cleanly onto SQLAlchemy expressions, so the search query goes through
 ``text()``. Snippets are synthesized in Python because pg_textsearch has no
 ``snippet()`` analogue.
+
+Visibility: when a caller is provided, results are filtered through
+``app.wiki.acl.visible_paths_filter`` so users only see hits on paths
+they can read. Admin / no-caller paths bypass the filter.
 """
 from __future__ import annotations
 
@@ -66,7 +70,14 @@ _SEARCH_SQL = text(
 )
 
 
-def search(query: str, limit: int = 20) -> list[SearchHit]:
+def search(
+    query: str,
+    limit: int = 20,
+    *,
+    user_id: str | None = None,
+    is_admin: bool = False,
+    apply_visibility: bool = True,
+) -> list[SearchHit]:
     """Run a BM25 ranked search.
 
     Ranking is from pg_textsearch (``<@> to_bm25query(...)`` returns a
@@ -75,9 +86,32 @@ def search(query: str, limit: int = 20) -> list[SearchHit]:
     return ~``_SNIPPET_RADIUS`` tokens of surrounding context, with each
     match wrapped in ``**...**`` so the LLM consumer sees standard
     markdown bold.
+
+    When ``apply_visibility`` is true (default), results are filtered
+    via ``app.wiki.acl.visible_paths_filter`` so users only see hits on
+    paths they can read. We over-fetch (``limit * 4``, capped) and then
+    truncate to ``limit`` post-filter — gives reasonable behaviour even
+    when many top hits are private. ``apply_visibility=False`` is for
+    internal callers (BM25 index inspection in tests) that want raw
+    ranking.
     """
+    raw_limit = max(limit * 4, limit) if apply_visibility else limit
+
     with session() as s:
-        rows = s.execute(_SEARCH_SQL, {"q": query, "lim": limit}).mappings().all()
+        rows = s.execute(_SEARCH_SQL, {"q": query, "lim": raw_limit}).mappings().all()
+
+        if apply_visibility:
+            # Imported lazily — fts.py is imported very early; acl pulls
+            # in groups_repo which depends on the user model that's only
+            # ready once init_db has run.
+            from app.wiki import acl
+
+            allowed_paths = set(
+                acl.filter_paths_in_python(
+                    user_id, is_admin, [r["path"] for r in rows]
+                )
+            )
+            rows = [r for r in rows if r["path"] in allowed_paths][:limit]
 
     terms = _query_terms(query)
     out: list[SearchHit] = []

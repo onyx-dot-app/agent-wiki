@@ -2,12 +2,10 @@
 
 These exercise rules the codebase relies on but that are hard to spot
 via unit tests alone — they need a real DB, a real wiki repo, and the
-agent-activity registry wired up:
+chat-loop ``seen_doc_paths`` machinery wired up:
 
-* The ``agents:`` frontmatter block is registry-managed; an agent
-  body that mutates it must be rejected before commit.
-* Doc-edit tools must refuse to overwrite a doc the model hasn't
-  read this turn (the read-before-write guard).
+* Doc-edit tools must refuse to overwrite a doc the model hasn't read
+  this turn (the read-before-write guard).
 """
 from __future__ import annotations
 
@@ -19,69 +17,6 @@ def _enter_request_with_user(flask_app, uid: str):
     from flask import session as flask_session
     flask_session["user_id"] = uid
     return ctx
-
-
-def test_write_doc_rejects_agents_block_mutation(
-    integration, flask_app, monkeypatch
-):
-    """An agent that submits a body editing the registry-managed
-    ``agents:`` block gets a ToolError back, the doc on disk is
-    untouched, and no extra commit lands.
-    """
-    # Skip the cleanup task so the registry row stays put for the read,
-    # giving us a real `agents:` block on disk to try to tamper with.
-    monkeypatch.setattr(
-        "app.tasks.agent_activity.schedule_cleanup_for_natural_key",
-        lambda **kw: None,
-    )
-
-    uid = integration.signup_and_signin(email="agent-user@x.com")
-    integration.put_doc("guide.md", "# Guide\n\noriginal body\n")
-
-    from app.llm.agents.tools import read_page, write_doc
-    from app.llm.agents import _session
-    from app.wiki import agent_activity, git as wiki_git
-
-    token = agent_activity.agent_name_var.set("status-watcher")
-    seen_token = _session.seen_doc_paths.set({"guide.md"})
-    ctx = _enter_request_with_user(flask_app, uid)
-    try:
-        # First read — stamps the frontmatter on disk.
-        read_page.handle({"path": "guide.md"})
-        before = wiki_git.read_file("guide.md")
-        assert before.startswith("---\n"), before
-
-        sha_before = wiki_git.head_sha_for_path("guide.md")
-
-        # Tamper: rewrite the body with a fake `agents:` entry.
-        tampered = (
-            "---\n"
-            "agents:\n"
-            "  - owner: attacker\n"
-            "    agent: malicious\n"
-            "    activity: read\n"
-            "    description: spoofed\n"
-            "    expires_at: '2099-01-01T00:00:00+00:00'\n"
-            "---\n"
-            "# Guide\n\nspoofed body\n"
-        )
-        result = write_doc.handle({
-            "path": "guide.md",
-            "body": tampered,
-            "commit_message": "spoof",
-        })
-
-        assert "error" in result, result
-        assert "agents" in result["error"].lower()
-
-        # Disk is unchanged — no spoofed body, no new commit.
-        after = wiki_git.read_file("guide.md")
-        assert after == before
-        assert wiki_git.head_sha_for_path("guide.md") == sha_before
-    finally:
-        ctx.pop()
-        _session.seen_doc_paths.reset(seen_token)
-        agent_activity.agent_name_var.reset(token)
 
 
 def test_write_doc_rejects_when_path_not_read(
@@ -147,10 +82,12 @@ def test_write_doc_allowed_when_path_was_read(
     seen_token = _session.seen_doc_paths.set({"guide.md"})
     ctx = _enter_request_with_user(flask_app, uid)
     try:
+        sha_before = wiki_git.head_sha_for_path("guide.md")
         result = write_doc.handle({
             "path": "guide.md",
             "body": "# Guide\n\nwholesale rewrite\n",
             "commit_message": "informed overwrite",
+            "base_sha": sha_before,
         })
         assert "error" not in result, result
         assert "wholesale rewrite" in wiki_git.read_file("guide.md")
