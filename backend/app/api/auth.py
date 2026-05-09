@@ -2,15 +2,24 @@
 from __future__ import annotations
 
 import logging
-import sqlite3
+from typing import Any
 
 from flask import Blueprint, current_app, jsonify, redirect, request, session, url_for
+from sqlalchemy.exc import IntegrityError
 
 from app.auth import User, current_user, login_required, users as users_repo
 from app.auth.basic import authenticate
 from app.auth.oidc import CLIENT_NAME as OIDC_CLIENT_NAME, upsert_oidc_user
 from app.auth.whitelist import is_allowed, is_open
 from app.config import CONFIG
+from app.models._helpers import error, parse_body
+from app.models.auth import (
+    AuthConfig,
+    AuthSession,
+    LoginRequest,
+    OkResponse,
+    SignupRequest,
+)
 
 bp = Blueprint("auth", __name__)
 log = logging.getLogger(__name__)
@@ -22,61 +31,59 @@ def _start_session(user: User) -> None:
     session.permanent = True
 
 
-def _user_payload(user: User) -> dict:
-    return {"id": user.id, "email": user.email, "name": user.name, "is_admin": user.is_admin}
+def _session_payload(user: User) -> dict[str, Any]:
+    return AuthSession(
+        id=user.id, email=user.email, name=user.name, is_admin=user.is_admin
+    ).model_dump()
 
 
 @bp.post("/signup")
 def signup():
     if CONFIG.auth_mode != "basic":
-        return jsonify(error="signup disabled"), 400
-    body = request.get_json(silent=True) or {}
-    email = (body.get("email") or "").strip().lower()
-    password = body.get("password") or ""
-    name = (body.get("name") or "").strip() or None
-    if not email or not password:
-        return jsonify(error="email and password required"), 400
-    if len(password) < 8:
-        return jsonify(error="password must be at least 8 characters"), 400
+        return error("signup disabled", 400)
+    req = parse_body(SignupRequest, request.get_json(silent=True))
+    email = req.email.strip().lower()
+    name = (req.name or "").strip() or None
+    if not email:
+        return error("email is required", 400)
     if not is_allowed(email):
-        return jsonify(error="email not allowed"), 403
+        return error("email not allowed", 403)
     if users_repo.get_by_email(email) is not None:
-        return jsonify(error="account already exists"), 409
+        return error("account already exists", 409)
     try:
-        user_id = users_repo.create(email=email, password=password, name=name)
-    except sqlite3.IntegrityError:
+        user_id = users_repo.create(email=email, password=req.password, name=name)
+    except IntegrityError:
         log.warning("signup race: account already exists for %s", email, exc_info=True)
-        return jsonify(error="account already exists"), 409
+        return error("account already exists", 409)
     row = users_repo.get_by_id(user_id)
     assert row is not None
-    user = User(id=row["id"], email=row["email"], name=row["name"], is_admin=bool(row["is_admin"]))
+    user = User(id=row["id"], email=row["email"], name=row["name"], is_admin=row["is_admin"])
     _start_session(user)
     log.info("signup: user %s (%s) is_admin=%s", user.id, user.email, user.is_admin)
-    return jsonify(_user_payload(user)), 201
+    return jsonify(_session_payload(user)), 201
 
 
 @bp.post("/login")
 def login():
     if CONFIG.auth_mode != "basic":
-        return jsonify(error="basic auth disabled"), 400
-    body = request.get_json(silent=True) or {}
-    email = (body.get("email") or "").strip()
-    password = body.get("password") or ""
-    if not email or not password:
-        return jsonify(error="email and password required"), 400
-    user = authenticate(email, password)
+        return error("basic auth disabled", 400)
+    req = parse_body(LoginRequest, request.get_json(silent=True))
+    email = req.email.strip()
+    if not email:
+        return error("email is required", 400)
+    user = authenticate(email, req.password)
     if user is None:
         log.warning("login failed for %s", email)
-        return jsonify(error="invalid credentials"), 401
+        return error("invalid credentials", 401)
     _start_session(user)
     log.info("login: user %s (%s)", user.id, user.email)
-    return jsonify(_user_payload(user))
+    return jsonify(_session_payload(user))
 
 
 @bp.post("/logout")
 def logout():
     session.clear()
-    return jsonify(ok=True)
+    return jsonify(OkResponse().model_dump())
 
 
 def _oidc_client():
@@ -91,10 +98,10 @@ def _oidc_client():
 def oidc_login():
     """Kick off the OIDC authorization-code flow."""
     if CONFIG.auth_mode != "oidc":
-        return jsonify(error="oidc disabled"), 400
+        return error("oidc disabled", 400)
     client = _oidc_client()
     if client is None:
-        return jsonify(error="oidc not configured"), 503
+        return error("oidc not configured", 503)
     # Use the explicit redirect URI when set (matches what's registered with
     # the IdP); otherwise reconstruct from the request so dev/local also works.
     redirect_uri = CONFIG.oidc_redirect_uri or url_for("auth.oidc_callback", _external=True)
@@ -105,10 +112,10 @@ def oidc_login():
 def oidc_callback():
     """OIDC redirect handler — exchanges code for token, upserts user, starts session."""
     if CONFIG.auth_mode != "oidc":
-        return jsonify(error="oidc disabled"), 400
+        return error("oidc disabled", 400)
     client = _oidc_client()
     if client is None:
-        return jsonify(error="oidc not configured"), 503
+        return error("oidc not configured", 503)
     try:
         token = client.authorize_access_token()
     except Exception:
@@ -138,7 +145,7 @@ def oidc_callback():
     user_id = upsert_oidc_user(email=email, name=name)
     row = users_repo.get_by_id(user_id)
     assert row is not None
-    user = User(id=row["id"], email=row["email"], name=row["name"], is_admin=bool(row["is_admin"]))
+    user = User(id=row["id"], email=row["email"], name=row["name"], is_admin=row["is_admin"])
     _start_session(user)
     log.info("oidc login: user %s (%s)", user.id, user.email)
     return redirect("/")
@@ -149,10 +156,10 @@ def oidc_callback():
 def me():
     user = current_user()
     assert user is not None  # login_required guarantees this
-    return jsonify(_user_payload(user))
+    return jsonify(_session_payload(user))
 
 
 @bp.get("/config")
 def auth_config():
     """Public — frontend uses this to know whether to show the signup form."""
-    return jsonify(mode=CONFIG.auth_mode, signup_open=is_open())
+    return jsonify(AuthConfig(mode=CONFIG.auth_mode, signup_open=is_open()).model_dump())

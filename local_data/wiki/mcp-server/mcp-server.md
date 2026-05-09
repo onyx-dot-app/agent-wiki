@@ -73,7 +73,7 @@ match what `app/auth/users.py` uses for passwords) and resolves to a
 `user_id`. Every commit made through this session uses that user's git
 identity (`name <email>`).
 
-New table (migration 0007):
+New table (see `app/db/models.py`):
 
 ```sql
 CREATE TABLE mcp_tokens (
@@ -203,7 +203,7 @@ Flow:
 3. Insert `mcp_jobs` row with `status='pending'`, `kind='update_doc_nl'`,
    `payload_json={path, instruction, base_sha}`.
 4. Enqueue `tasks.document_update.agent_update_document_nl(job_id)` on
-   `documents_huey` (see [background-tasks](../background-tasks/background-tasks.md)).
+   `documents_queue` (see [background-tasks](../background-tasks/background-tasks.md)).
 5. Return `{job_id, status_uri: "job://<job_id>"}`. The agent can
    `resources/subscribe` to the URI to be pushed completion.
 
@@ -219,7 +219,7 @@ Worker side (`tasks/document_update.py`):
    `committed=true, sha=<new>`. Publish.
 6. On exception: mark job `failed` with `error=<code>` from `LLMError`.
 
-New table (migration 0008):
+New table (see `app/db/models.py`):
 
 ```sql
 CREATE TABLE mcp_jobs (
@@ -341,50 +341,39 @@ PUBSUB = PubSub()
 asyncio for the SDK). The transport layer's SSE writer awaits the queue
 and serializes each notification as a JSON-RPC message.
 
-Cross-process complication: Huey workers run in a different process than
+Cross-process complication: task workers run in a different process than
 the Flask/MCP server. The doc-updater agent commits from the worker. The
 worker's `commit_and_fan_out` therefore needs to reach into the
-**server-process** subscription registry. Two options:
+**server-process** subscription registry.
 
-- **(v0) SQLite-backed pub-sub.** `mcp_subscriptions` table for active
-  subscriptions; `mcp_notifications` table as a queue. Worker INSERTs a
-  notification row tagged with the session ids. Server polls (every
-  100ms) or listens via SQLite's `update_hook` C-API (cleaner but
-  pythonic-bindings-shaky). Polling is fine for v0 — wiki commits are
-  not high-frequency.
-- **(later) Redis pub-sub or NATS.** Defer until SQLite polling is a
-  bottleneck. Note this in seams.md.
+**Approach: Postgres `LISTEN/NOTIFY`.** App state already lives in
+Postgres; using its native pub-sub means no extra infrastructure and
+sub-millisecond fan-out across processes. The MCP server holds one
+long-lived connection per replica that `LISTEN`s on a `wiki_commit`
+channel; every commit (web or worker) calls `NOTIFY wiki_commit, '<json
+payload>'` in the same transaction as the business write. The server
+matches incoming payloads against in-memory `mcp_subscriptions` (rebuilt
+per-replica from a small `mcp_subscriptions` table on session
+reconnect — sessions are sticky to a replica).
 
-Default to **SQLite-backed pub-sub** for v0:
+Subscription state is the only thing that lives in Postgres for this
+feature:
 
-```sql
--- migration 0009
-CREATE TABLE mcp_subscriptions (
-  session_id  TEXT NOT NULL,
-  uri         TEXT NOT NULL,             -- 'wiki:///foo.md' or 'job://abc'
-  user_id     INTEGER NOT NULL REFERENCES users(id),
-  created_at  TEXT NOT NULL DEFAULT (datetime('now')),
-  PRIMARY KEY (session_id, uri)
-);
-CREATE INDEX idx_mcp_subs_uri ON mcp_subscriptions(uri);
-
-CREATE TABLE mcp_notifications (
-  id          INTEGER PRIMARY KEY,
-  session_id  TEXT NOT NULL,
-  uri         TEXT NOT NULL,
-  payload_json TEXT NOT NULL,            -- {sha, kind} or {status, ...}
-  created_at  TEXT NOT NULL DEFAULT (datetime('now')),
-  delivered_at TEXT
-);
-CREATE INDEX idx_mcp_notifs_undelivered
-  ON mcp_notifications(session_id) WHERE delivered_at IS NULL;
+```python
+# additions to `app/db/models.py`
+class McpSubscription(Base):
+    __tablename__ = "mcp_subscriptions"
+    session_id: Mapped[str] = mapped_column(primary_key=True)
+    uri: Mapped[str] = mapped_column(primary_key=True)  # 'wiki:///foo.md' or 'job://abc'
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(default=func.now())
 ```
 
-Server-side: a per-session task `tail_notifications(session_id)` polls
-`mcp_notifications WHERE session_id=? AND delivered_at IS NULL ORDER BY
-id` every 100ms, ships matches over the SSE stream, and stamps
-`delivered_at`. Sessions clean up their rows on disconnect (or a 24h
-janitor task).
+Notifications themselves are not persisted — `LISTEN/NOTIFY` is
+fire-and-forget. If a session disconnects mid-flight it re-syncs by
+re-reading the resource on next `read_doc` (the `sha` round-trip already
+covers that staleness window). Sessions clean up their subscription rows
+on disconnect (or a 24h janitor).
 
 ## Concurrency — the staleness contract
 
@@ -425,8 +414,8 @@ edit_doc(base_sha=<that sha>)`.
 Every `read_doc` auto-subscribes the session to `wiki:///<path>`. On any
 commit to that path (from anyone), the server fires
 `notifications/resources/updated` over the session's SSE stream within
-~100ms (limited by the SQLite poll interval; sub-millisecond once we
-move to in-process pub-sub for same-process commits).
+a few ms (Postgres `LISTEN/NOTIFY` latency; sub-millisecond once we
+short-circuit same-process commits via an in-memory bus).
 
 Well-behaved agents process the notification by re-reading before their
 next edit. The notification carries the new `sha` so the agent knows
@@ -475,7 +464,7 @@ backend/app/mcp_server/
     list_history.py
     move_doc.py      # thin wrapper of move_path
   resources.py       # list/read/subscribe handlers for wiki:// + job://
-  pubsub.py          # SQLite-backed subscription registry + notification queue
+  pubsub.py          # Postgres LISTEN/NOTIFY bridge + per-replica subscription registry
   transport.py       # SSE writer per session (or SDK adapter)
   jobs.py            # mcp_jobs repo
 
@@ -505,7 +494,7 @@ backend/app/llm/agents/
 
 ### Phase 1 — auth and token surface (foundation)
 
-1. Migration `0007_mcp_tokens.sql`.
+1. The MCP tokens model.
 2. `app/auth/mcp_tokens.py` repo (`create`, `verify`, `list`, `revoke`).
 3. `app/api/mcp_tokens.py` blueprint + register in `app/main.py`.
 4. Frontend `settings/mcp-tokens` page.
@@ -570,11 +559,11 @@ read → someone else commits → edit fails with `stale_base`.
 
 ### Phase 5 — resources and subscriptions
 
-1. Migration `0009_mcp_subscriptions.sql`.
-2. `app/mcp_server/pubsub.py` — SQLite-backed registry + queue.
+1. The MCP subscriptions model.
+2. `app/mcp_server/pubsub.py` — Postgres LISTEN/NOTIFY bridge + registry.
 3. Hook `mcp_pubsub.publish_doc_update` into
    `commit_and_fan_out` (single line — every commit path flows through
-   here, including the Huey worker process).
+   here, including the task worker process).
 4. `app/mcp_server/resources.py` — `list`, `read`, `subscribe`,
    `unsubscribe` handlers.
 5. Auto-subscribe in `read_doc` when `subscribe=true && is_head`.
@@ -584,14 +573,14 @@ read → someone else commits → edit fails with `stale_base`.
 7. Janitor: drop subscriptions and notifications older than 24h.
 8. Tests: subscribe → another connection commits → SSE delivers the
    notification within 200ms; unsubscribe stops delivery; cross-process
-   commit (Huey worker) reaches the server.
+   commit (task worker) reaches the server.
 
 Exit criteria: two MCP clients connected; client A subscribes to a
 doc; client B edits it; client A receives the push within 200ms.
 
 ### Phase 6 — async NL update
 
-1. Migration `0008_mcp_jobs.sql`.
+1. The MCP jobs model.
 2. `app/mcp_server/jobs.py` repo.
 3. `app/mcp_server/tools/update_doc_nl.py`.
 4. `tasks/document_update.py:agent_update_document_nl(job_id)` — wire
@@ -636,7 +625,7 @@ body.
 - `tests/test_mcp_read_write.py` — `initialize` → `read_doc` →
   `edit_doc(base_sha)` → success; concurrent commit → stale rejection.
 - `tests/test_mcp_subscriptions.py` — subscribe; commit from another
-  session (and from a Huey worker with `huey.immediate=True`); assert
+  session (and from a task worker with `queue.immediate=True`); assert
   notification fan-out via the SSE writer's outbound queue.
 - `tests/test_mcp_nl_update.py` — patch `app.llm.client.complete` to
   return a synthetic body; round-trip job lifecycle; idempotency
@@ -645,7 +634,8 @@ body.
   citations and that no write tools were callable.
 
 Mocks: same rules as elsewhere — patch `app.llm.client.complete`, never
-the SDK; tmp git repo for `wiki_git.*`; tmp SQLite for everything DB.
+the SDK; tmp git repo for `wiki_git.*`; per-test Postgres schema (the
+shared `tmp_db` fixture) for everything DB.
 
 ## Out of scope (do not pull forward)
 
@@ -683,3 +673,5 @@ the SDK; tmp git repo for `wiki_git.*`; tmp SQLite for everything DB.
 - **`apply_patch` vs `edit_doc` — which do agents reach for?** Worth
   measuring once the surface is live; might inform whether we keep both
   long-term.
+
+Yuhong sidenote, ignore this

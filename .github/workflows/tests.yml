@@ -1,0 +1,81 @@
+name: Backend tests
+
+# Non-blocking on PRs: this workflow reports real pass/fail, but the
+# check is intentionally NOT in branch-protection's required list. Read
+# the run logs to see results; do not gate merges on this job.
+
+concurrency:
+  group: backend-tests-${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    env:
+      TEST_DATABASE_URL: postgresql://agent:agent@localhost:5432/agent_wiki_test
+      SECRET_KEY: ci-test-secret
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Postgres has to be built locally because the image bakes in
+      # pg_textsearch (loaded via shared_preload_libraries) and pgmq.
+      # No upstream image bundles both — see deploy/postgres/Dockerfile.
+      - name: Build Postgres image
+        run: docker build -t agent-wiki-postgres:ci ./deploy/postgres
+
+      - name: Start Postgres
+        run: |
+          docker run -d --name agent-wiki-pg \
+            -e POSTGRES_USER=agent \
+            -e POSTGRES_PASSWORD=agent \
+            -e POSTGRES_DB=agent_wiki \
+            -p 127.0.0.1:5432:5432 \
+            agent-wiki-postgres:ci \
+            postgres -c shared_preload_libraries=pg_textsearch
+
+      - name: Wait for Postgres
+        run: |
+          for i in $(seq 1 60); do
+            if docker exec agent-wiki-pg pg_isready -U agent -d agent_wiki >/dev/null 2>&1; then
+              echo "Postgres ready"; exit 0
+            fi
+            sleep 1
+          done
+          echo "Postgres did not become ready"; docker logs agent-wiki-pg; exit 1
+
+      - name: Create test database with extensions
+        run: |
+          docker exec -u postgres agent-wiki-pg createdb -O agent agent_wiki_test
+          docker exec agent-wiki-pg psql -U agent -d agent_wiki_test \
+            -c 'CREATE EXTENSION pg_textsearch;' \
+            -c 'CREATE EXTENSION pgmq;'
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Install backend deps
+        working-directory: backend
+        run: uv sync --extra dev
+
+      - name: Unit tests
+        working-directory: backend
+        run: uv run pytest tests --ignore=tests/integration -v
+
+      - name: Integration tests
+        working-directory: backend
+        run: uv run pytest tests/integration -v
+
+      - name: Postgres logs on failure
+        if: failure()
+        run: docker logs agent-wiki-pg

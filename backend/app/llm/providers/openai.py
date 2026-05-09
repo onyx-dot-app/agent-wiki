@@ -4,7 +4,9 @@ from __future__ import annotations
 import json
 import logging
 from functools import lru_cache
-from typing import Any, Iterator
+from typing import Any, Iterator, cast
+
+from openai import OpenAI
 
 from app.llm.errors import LLMError
 from app.llm.providers._common import safe_json_loads, split_system
@@ -16,10 +18,8 @@ StreamEvent = dict[str, Any]
 
 
 @lru_cache(maxsize=4)
-def _client(api_key: str):
+def _client(api_key: str) -> OpenAI:
     """Cached OpenAI client. See _client docstring in anthropic.py."""
-    from openai import OpenAI
-
     return OpenAI(api_key=api_key)
 
 
@@ -75,7 +75,7 @@ class OpenAIProvider:
         )
         client = _client(settings.openai_api_key)
         try:
-            events = client.responses.create(**kwargs)
+            events = cast(Any, client.responses.create(**kwargs))
             # item_id (an internal id) -> {call_id, name, args_buf}.
             # Note: item_id (used in delta events) is distinct from call_id (the
             # tool_call_id we emit and that callers must echo back as
@@ -202,4 +202,4 @@ PROVIDER = OpenAIProvider()
 
 from app.llm.providers import register  # noqa: E402
 
-register(PROVIDER)
+register(PROVIDER)  # pyright: ignore[reportUnknownMemberType]

@@ -31,7 +31,7 @@ Original brief retained for traceability:
 - The harness likely needs things like a update_doc tool which looks similar to how Claude Code or Opencode does it.
 - Needs an API to receive these types of updates
 - 2 Endpoints on the server side.
-  - POST /api/mcp/update — validate, insert jobs row (pending), enqueue Huey task, return {job_id}. Returns in ms; no DB session or worker
+  - POST /api/mcp/update — validate, insert jobs row (pending), enqueue task, return {job_id}. Returns in ms; no DB session or worker
   held.
   - GET /api/jobs/<id>?wait=<sec> — long-poll: check jobs row, if pending wait on an Event (or short sleep loop) up to wait, return current
    status. Brief DB session per call.

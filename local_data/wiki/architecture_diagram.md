@@ -4,7 +4,7 @@ Snapshot of what exists in the repo today. Companion to
 `architecture_and_progress.md` — that file owns intent and decisions; this one
 just shows the wiring.
 
-_Last updated: 2026-05-07_
+_Last updated: 2026-05-08_
 
 ---
 
@@ -27,30 +27,37 @@ _Last updated: 2026-05-07_
                  │ Flask        │  │ Next.js 14 App Router│
                  │ (sessions)   │  │ "use client" pages   │
                  └──┬───────────┘  └──────────────────────┘
-                    │ enqueue
+                    │ pgmq.send
                     ▼
-       ┌─────────────────────────┐
-       │ queue.sqlite  (Huey)    │◀──────┐
-       └─────────────────────────┘       │ pulls jobs
-                    ▲                    │
-                    │ writes             │
-       ┌────────────┴────────────┐   ┌───┴────────────────┐
-       │ app.sqlite              │   │ worker container   │
-       │ users / documents /     │◀──│ python -m          │
-       │ triggers / events /     │   │ app.tasks.run_     │
-       │ documents_fts (FTS5) /  │   │ worker             │
-       │ llm_settings /          │   └───┬────────────────┘
-       │ mcp_connections /       │       │ git ops + reindex
-       │ _migrations             │       ▼
-       └─────────────────────────┘   ┌───────────────────────┐
-                    ▲                │ wiki working tree     │
-                    │ shared volume  │ (git-backed,          │
-                    └────────────────│  volume: wiki-data)   │
-                                     └───────────────────────┘
+       ┌─────────────────────────────────────────────────┐
+       │ Postgres 17 (DATABASE_URL)                      │
+       │   + pg_textsearch  (BM25 search)                │   pgmq.read
+       │   + pgmq           (task queues)                │◀────────┐
+       │ users / documents / triggers / events /         │         │
+       │ documents_fts (BM25) / llm_settings /           │         │
+       │ mcp_connections /                 │         │
+       │ pgmq.q_documents / pgmq.q_triggers /            │   ┌─────┴──────────┐
+       │ pgmq.q_wiki_bm25                                │   │ worker (one    │
+       └─────────────────────────────────────────────────┘   │ per queue)     │
+                                                             │ python -m      │
+                                                             │ app.tasks.run_ │
+                                                             │ worker         │
+                                                             └─────┬──────────┘
+                                                                   │ git ops
+                                                                   ▼
+                                                       ┌───────────────────────┐
+                                                       │ wiki working tree     │
+                                                       │ (git-backed,          │
+                                                       │  volume: wiki-data)   │
+                                                       └───────────────────────┘
 ```
 
-Two SQLite files (`app.sqlite`, `queue.sqlite`) on volume `app-data`; the
-wiki working tree on volume `wiki-data`. The backend and worker share both.
+App state and the three task queues both live in Postgres 17 (the
+`postgres` service in compose ships `pg_textsearch` for BM25 ranking
+and `pgmq` for queues; pg_textsearch is loaded via
+`shared_preload_libraries`, see `deploy/postgres/Dockerfile`). Wiki
+working tree on volume `wiki-data`, shared between backend and worker
+containers.
 
 ---
 
@@ -72,9 +79,10 @@ auth/            ── @login_required, @admin_required, current_user()
                     bcrypt + flask session; first user auto-admin
 
 db/
-  sqlite.py          connect()
-  fts.py             FTS5 helpers (porter+unicode61, bm25)
-  migrations/        numbered .sql, applied once via _migrations table
+  models.py          ORM models — source of truth for schema
+  session.py         engine + session() + init_db() (runs `alembic upgrade head`)
+  fts.py             BM25 helpers (pg_textsearch)
+  migrations/        Alembic env.py + versions/0001_initial.py + …
 
 llm/
   client.py          ★ single seam: complete() + stream()
@@ -85,7 +93,7 @@ llm/
   prompts/           system+user prompt strings
 
 triggers/
-  repo.py            SQLite repo (source of truth in v0)
+  repo.py            Postgres cache (file YAML is source of truth)
   engine.py          SQL match + NL eval orchestration
   natural_language.py LLM-backed match verdict
   diff.py            change-payload shaping
@@ -95,10 +103,10 @@ triggers/
 wiki/
   git.py             ★ only place that shells out to git
   filesystem.py      safe_rel_path, traversal guard
-  search.py          FTS5 query wrapper
+  search.py          BM25 query wrapper
 
-tasks/             ── 3 Huey queues on queue.sqlite — see background-tasks/
-  huey_app.py        documents_huey / triggers_huey / wiki_bm25_huey
+tasks/             ── 3 pgmq queues in the app Postgres — see background-tasks/
+  queues.py        documents_queue / triggers_queue / wiki_bm25_queue
   run_worker.py      worker entrypoint; takes <queue> arg
   reindex.py         reindex_path / reindex_document  → wiki_bm25
   triggers.py        fan_out_trigger_eval             → triggers
@@ -192,7 +200,7 @@ browser ── POST /api/chat/messages (JSON) ──▶ api/chat.py
 ### Trigger CRUD
 ```
 browser ── /api/triggers (GET/POST/PATCH/DELETE) ──▶ api/triggers.py
-                                                     └─ triggers/repo.py (SQLite only)
+                                                     └─ triggers/repo.py (Postgres cache)
 ```
 
 ---
@@ -210,7 +218,7 @@ browser ── /api/triggers (GET/POST/PATCH/DELETE) ──▶ api/triggers.py
 | Chat: stateless SSE endpoint + loop  | live; tools off; no persistence |
 | Chat: global widget (FAB / bottom-right / resizable right panel that pushes page) | live |
 | Chat: location ctx + propose-and-apply UX | not built |
-| Triggers: CRUD API + repo            | live (SQLite-only)     |
+| Triggers: CRUD API + repo            | live (Postgres cache + git YAML) |
 | Triggers: Triggers tab + create modal| live     |
 | Triggers: fire-path on human edits   | live     |
 | Triggers: fire-path on agent edits   | not wired |
@@ -232,10 +240,10 @@ browser ── /api/triggers (GET/POST/PATCH/DELETE) ──▶ api/triggers.py
 | `users`           | id, email, name, password_hash, is_admin, created_at |
 | `mcp_connections` | per-user MCP server entries (stub feature)         |
 | `documents`       | metadata only — body lives in git                  |
-| `documents_fts`   | FTS5 virtual table (porter+unicode61, bm25)        |
-| `triggers`        | per-user; SQLite is the source of truth in v0      |
+| `documents_fts`   | BM25 virtual table (porter+unicode61, bm25)        |
+| `triggers`        | per-user; Postgres cache (git YAML is canonical)   |
 | `events`          | append-only audit log (trigger fires today)        |
 | `llm_settings`    | single-row provider/model/keys                     |
-| `_migrations`     | applied filenames                                  |
+| *(removed — schema is driven by `app/db/models.py`)*
 
 `triggers.action_json` is reserved but always `'{}'` — no v0 dispatch.

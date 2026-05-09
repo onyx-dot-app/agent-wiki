@@ -76,6 +76,7 @@ and the chart is installed.
 helm upgrade --install agent-wiki ./deploy/helm/agent-workspace \
   --namespace agent-wiki --create-namespace \
   --set secretKey="$(openssl rand -hex 32)" \
+  --set databaseUrl="postgresql://USER:PASSWORD@HOST:5432/DBNAME" \
   --set image.backend.tag=v0.0.1 \
   --set image.frontend.tag=v0.0.1 \
   --set ingress.host=<your-host> \
@@ -99,9 +100,9 @@ to admin (see `app/auth/users.py`). Configure the LLM provider/keys from
 - **Cluster update** — `terraform apply` after bumping `cluster_version` or
   module versions.
 - **Backups** — not wired in this scaffold. The `wiki-data` PVC is a real git
-  repo; cron a `git push --mirror` to a remote for the durable content. The
-  `app-data` PVC holds SQLite + the Huey queue; `VACUUM INTO` snapshots are
-  cheap.
+  repo; cron a `git push --mirror` to a remote for the durable content. App
+  state and the pgmq task queues live in Postgres — back that up with whatever
+  your managed Postgres provides (point-in-time recovery, daily snapshots).
 - **Tear down** — `helm uninstall agent-wiki -n agent-wiki`, then
   `terraform destroy`. PVCs use `Retain` reclaim policy, so EBS volumes
   survive `helm uninstall` and need to be deleted manually if you want them
@@ -109,10 +110,17 @@ to admin (see `app/auth/users.py`). Configure the LLM provider/keys from
 
 ## What's deliberately not here
 
-- **No RDS / Redis / S3.** The app is SQLite-on-PVC by design — see
+- **No managed Postgres / Redis / S3 provisioning.** The chart assumes a
+  Postgres 17 with the `pg_textsearch` and `pgmq` extensions is reachable
+  via `DATABASE_URL` (set on the backend + worker env). Provision it
+  however you want — RDS, Cloud SQL, a self-managed instance, etc. — see
   `local_data/wiki/infra/infra.md` and `CLAUDE.md`.
-- **No multi-replica backend/worker.** SQLite is single-writer; replicas would
-  fight over the wiki working tree. The chart pins both to one replica with a
-  `Recreate` strategy and a `podAffinity` rule that co-schedules them.
+- **No multi-replica backend/worker.** Two reasons, both still binding
+  after the Postgres migration: (a) the `wiki-data` PVC is RWO and the
+  pods share it, so replicas would fight over the git working tree; and
+  (b) the per-queue periodic-task scheduler runs in-process — multiple
+  replicas would double-fire crons. The chart pins both to one replica
+  with a `Recreate` strategy and a `podAffinity` rule that co-schedules
+  them.
 - **No remote Terraform state.** Local for now (gitignored). Add an S3 backend
   when this graduates beyond a single-operator deploy.

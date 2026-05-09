@@ -23,7 +23,8 @@ untouched.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+
+from pydantic import BaseModel
 
 from app.wiki import edit as wiki_edit
 
@@ -32,8 +33,7 @@ class PatchError(Exception):
     """Patch could not be applied (parse failure or hunk mismatch)."""
 
 
-@dataclass
-class Hunk:
+class Hunk(BaseModel):
     original_start: int  # 1-indexed line where the hunk applies in the original
     original_count: int  # number of original lines covered (context + removals)
     new_start: int

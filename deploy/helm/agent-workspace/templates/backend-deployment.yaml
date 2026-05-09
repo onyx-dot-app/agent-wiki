@@ -7,7 +7,7 @@ metadata:
     app.kubernetes.io/component: backend
 spec:
   replicas: {{ .Values.backend.replicaCount }}
-  # SQLite is single-writer; Recreate so the old pod releases the PVC before the new one mounts it.
+  # The wiki-data PVC is RWO; Recreate so the old pod releases it before the new one mounts.
   strategy:
     type: Recreate
   selector:

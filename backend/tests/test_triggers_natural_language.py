@@ -6,15 +6,17 @@ shape, so the seam-level patch is the right level.
 """
 from __future__ import annotations
 
+from app.llm.client import CompletionResult, ToolCall, Usage
+
 
 def _stub_complete(tool_calls):
-    return lambda *args, **kwargs: {
-        "text": "",
-        "tool_calls": tool_calls,
-        "stop_reason": "tool_use",
-        "usage": {"input_tokens": 1, "output_tokens": 1},
-        "raw": None,
-    }
+    calls = [ToolCall(**c) for c in tool_calls]
+    return lambda *args, **kwargs: CompletionResult(
+        text="",
+        tool_calls=calls,
+        stop_reason="tool_use",
+        usage=Usage(input_tokens=1, output_tokens=1),
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -30,19 +32,14 @@ def test_matches_returns_verdict_from_tool_call(monkeypatch):
     def fake_complete(messages, *, tools=None, max_tokens=512, model=None):
         captured["messages"] = messages
         captured["tools"] = tools
-        return {
-            "text": "",
-            "tool_calls": [
-                {
-                    "id": "1",
-                    "name": "report",
-                    "arguments": {"matches": True, "reason": "Status flipped to yellow"},
-                }
+        return CompletionResult(
+            text="",
+            tool_calls=[
+                ToolCall(id="1", name="report", arguments={"matches": True, "reason": "Status flipped to yellow"})
             ],
-            "stop_reason": "tool_use",
-            "usage": {"input_tokens": 1, "output_tokens": 1},
-            "raw": None,
-        }
+            stop_reason="tool_use",
+            usage=Usage(input_tokens=1, output_tokens=1),
+        )
 
     monkeypatch.setattr(natural_language, "complete", fake_complete)
 
@@ -52,7 +49,8 @@ def test_matches_returns_verdict_from_tool_call(monkeypatch):
         "=== CHANGE ===\nPath: projects/foo.md\nKind: edit\n\n"
         "<unified diff>\n-status: green\n+status: yellow\n</unified diff>\n"
     )
-    matched, reason = natural_language.matches("fire when status flips", payload)
+    res = natural_language.matches("fire when status flips", payload)
+    matched, reason = res.matched, res.reason
     assert matched is True
     assert "yellow" in reason
 
@@ -70,19 +68,14 @@ def test_matches_system_prompt_mentions_diff_focus(monkeypatch):
 
     def fake_complete(messages, *, tools=None, max_tokens=512, model=None):
         captured["system"] = messages[0]["content"]
-        return {
-            "text": "",
-            "tool_calls": [
-                {
-                    "id": "1",
-                    "name": "report",
-                    "arguments": {"matches": False, "reason": "no signal"},
-                }
+        return CompletionResult(
+            text="",
+            tool_calls=[
+                ToolCall(id="1", name="report", arguments={"matches": False, "reason": "no signal"})
             ],
-            "stop_reason": "tool_use",
-            "usage": {"input_tokens": 1, "output_tokens": 1},
-            "raw": None,
-        }
+            stop_reason="tool_use",
+            usage=Usage(input_tokens=1, output_tokens=1),
+        )
 
     monkeypatch.setattr(natural_language, "complete", fake_complete)
     natural_language.matches("x", "payload")
@@ -95,7 +88,8 @@ def test_matches_false_when_no_tool_call(monkeypatch):
     from app.triggers import natural_language
 
     monkeypatch.setattr(natural_language, "complete", _stub_complete([]))
-    matched, reason = natural_language.matches("x", "payload")
+    res = natural_language.matches("x", "payload")
+    matched, reason = res.matched, res.reason
     assert matched is False
     assert reason == "no_tool_call"
 
@@ -108,7 +102,8 @@ def test_matches_returns_false_on_llm_error(monkeypatch):
         raise LLMError("not_configured", "no provider")
 
     monkeypatch.setattr(natural_language, "complete", boom)
-    matched, reason = natural_language.matches("x", "payload")
+    res = natural_language.matches("x", "payload")
+    matched, reason = res.matched, res.reason
     assert matched is False
     assert reason.startswith("llm_error:")
 
@@ -126,21 +121,16 @@ def test_render_message_returns_text_from_tool_call(monkeypatch):
     def fake_complete(messages, *, tools=None, max_tokens=1024, model=None):
         captured["messages"] = messages
         captured["tools"] = tools
-        return {
-            "text": "",
-            "tool_calls": [
-                {
-                    "id": "1",
-                    "name": "render",
-                    "arguments": {
+        return CompletionResult(
+            text="",
+            tool_calls=[
+                ToolCall(id="1", name="render", arguments={
                         "message": "projects/foo.md flipped from green to yellow."
-                    },
-                }
+                    })
             ],
-            "stop_reason": "tool_use",
-            "usage": {"input_tokens": 1, "output_tokens": 1},
-            "raw": None,
-        }
+            stop_reason="tool_use",
+            usage=Usage(input_tokens=1, output_tokens=1),
+        )
 
     monkeypatch.setattr(natural_language, "complete", fake_complete)
     out = natural_language.render_message(
@@ -203,13 +193,12 @@ def test_render_message_strips_whitespace(monkeypatch):
 
 def _stub_text(text: str):
     """Stub that returns ``text`` as the assistant's text content."""
-    return lambda *a, **kw: {
-        "text": text,
-        "tool_calls": [],
-        "stop_reason": "end_turn",
-        "usage": {"input_tokens": 1, "output_tokens": 1},
-        "raw": None,
-    }
+    return lambda *a, **kw: CompletionResult(
+        text=text,
+        tool_calls=[],
+        stop_reason="end_turn",
+        usage=Usage(input_tokens=1, output_tokens=1),
+    )
 
 
 def test_new_file_in_dir_parses_json_object(monkeypatch):
@@ -220,21 +209,21 @@ def test_new_file_in_dir_parses_json_object(monkeypatch):
     def fake_complete(messages, *, tools=None, max_tokens=1024, model=None):
         captured["messages"] = messages
         captured["tools"] = tools
-        return {
-            "text": '{"triggered": true, "trigger_message": "New project Foo added."}',
-            "tool_calls": [],
-            "stop_reason": "end_turn",
-            "usage": {"input_tokens": 1, "output_tokens": 1},
-            "raw": None,
-        }
+        return CompletionResult(
+            text='{"triggered": true, "trigger_message": "New project Foo added."}',
+            tool_calls=[],
+            stop_reason="end_turn",
+            usage=Usage(input_tokens=1, output_tokens=1),
+        )
 
     monkeypatch.setattr(natural_language, "complete", fake_complete)
 
-    triggered, msg = natural_language.evaluate_new_file_in_dir(
+    res = natural_language.evaluate_new_file_in_dir(
         "fire when a new project doc lands",
         "tell me about new projects",
         "=== WIKI (latest version) ===\n\n=== NEW FILE ===\nPath: p/foo.md\n\n# Foo\n",
     )
+    triggered, msg = res.triggered, res.message
     assert triggered is True
     assert msg == "New project Foo added."
 
@@ -256,7 +245,8 @@ def test_new_file_in_dir_strips_markdown_fence(monkeypatch):
             '```json\n{"triggered": false, "trigger_message": ""}\n```'
         ),
     )
-    triggered, msg = natural_language.evaluate_new_file_in_dir("x", "y", "p")
+    res = natural_language.evaluate_new_file_in_dir("x", "y", "p")
+    triggered, msg = res.triggered, res.message
     assert triggered is False
     assert msg == ""
 
@@ -274,7 +264,8 @@ def test_new_file_in_dir_tolerates_surrounding_text(monkeypatch):
             'Let me know if you need anything else.'
         ),
     )
-    triggered, msg = natural_language.evaluate_new_file_in_dir("x", "y", "p")
+    res = natural_language.evaluate_new_file_in_dir("x", "y", "p")
+    triggered, msg = res.triggered, res.message
     assert triggered is True
     assert msg == "ok"
 
@@ -283,7 +274,8 @@ def test_new_file_in_dir_falls_back_when_unparseable(monkeypatch):
     from app.triggers import natural_language
 
     monkeypatch.setattr(natural_language, "complete", _stub_text("not json at all"))
-    triggered, msg = natural_language.evaluate_new_file_in_dir("x", "y", "p")
+    res = natural_language.evaluate_new_file_in_dir("x", "y", "p")
+    triggered, msg = res.triggered, res.message
     assert triggered is False
     assert msg == ""
 
@@ -296,7 +288,8 @@ def test_new_file_in_dir_falls_back_on_llm_error(monkeypatch):
         raise LLMError("not_configured", "no provider")
 
     monkeypatch.setattr(natural_language, "complete", boom)
-    triggered, msg = natural_language.evaluate_new_file_in_dir("x", "y", "p")
+    res = natural_language.evaluate_new_file_in_dir("x", "y", "p")
+    triggered, msg = res.triggered, res.message
     assert triggered is False
     assert msg == ""
 
@@ -311,8 +304,9 @@ def test_new_file_in_dir_uses_instruction_when_message_empty(monkeypatch):
         "complete",
         _stub_text('{"triggered": true, "trigger_message": ""}'),
     )
-    triggered, msg = natural_language.evaluate_new_file_in_dir(
+    res = natural_language.evaluate_new_file_in_dir(
         "if-clause", "raw instruction", "p"
     )
+    triggered, msg = res.triggered, res.message
     assert triggered is True
     assert msg == "raw instruction"

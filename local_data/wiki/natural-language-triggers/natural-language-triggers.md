@@ -3,7 +3,7 @@
 > **Part of agent-wiki v0.** See the master doc
 > [`../architecture_and_progress.md`](../architecture_and_progress.md) for
 > the cross-area map. This doc owns trigger storage (git-backed YAML +
-> SQLite cache), CRUD API, matching engine, NL evaluation, and the
+> Postgres cache), CRUD API, matching engine, NL evaluation, and the
 > post-commit fan-out that fires them. Trigger UI lives in
 > [frontend/frontend.md](../frontend/frontend.md). Outbound dispatch
 > (webhooks / external services / agent messages) is **deferred** — see
@@ -59,11 +59,12 @@ git commit, so the history is preserved.
 | `delta`    | A doc within `scope_path` changes (or new file added in a directory scope) | **yes** |
 | `schedule` | Cron matches | wire up in `time_based.py`; v0 still record-only |
 
-### Storage: file-system as source of truth, SQLite as cache (2026-05-07)
+### Storage: file-system as source of truth, Postgres as cache (2026-05-07)
 
-A trigger's YAML file in the wiki repo is canonical. SQLite mirrors it for
-fast fan-out lookup and id→path resolution. This re-litigates the
-2026-05-06 SQLite-only call so trigger config has git history.
+A trigger's YAML file in the wiki repo is canonical. Postgres mirrors it
+for fast fan-out lookup and id→path resolution. The file-first invariant
+gives trigger config full git history; the row is just a denormalized
+cache for fan-out.
 
 **Layout** (per `../difficult_separable_work.md`): the file sits inside
 the directory it acts on — no centralized `.triggers/` dir.
@@ -97,14 +98,14 @@ created_at: 2026-05-07T...
 ```
 
 **Mutation order** (`app/triggers/repo.py`): write/delete the file
-first, then upsert the SQLite row. If the row write fails after the file
+first, then upsert the Postgres row. If the row write fails after the file
 commit, `repo.rebuild_from_filesystem()` re-converges the cache by
 walking `git ls-files` for `.trigger_*.yaml`.
 
 **Scope changes** rename the file (delete old path, write new) so the
 filename stays a useful hint.
 
-`migrations/0003_triggers_file_path.sql` adds the `file_path` column on
+`app/db/models.py` adds the `file_path` column on
 the `triggers` cache row.
 
 ### Scope resolution
@@ -250,7 +251,7 @@ runs **after** every successful `commit_file` (see
   `read_trigger` (via `wiki.git`), `list_all_files` (walks tracked
   paths for `.trigger_*.yaml`).
 - `app/triggers/repo.py` — file-first mutation: `create`/`update`/`delete`
-  write/delete the YAML, then upsert/delete the SQLite row.
+  write/delete the YAML, then upsert/delete the Postgres row.
   `rebuild_from_filesystem` for crash recovery / boot reconciliation.
 - `app/triggers/engine.py` — `find_matching_triggers` (SQL over `triggers`
   cache, includes parent dirs), plus thin wrappers `evaluate_delta`
@@ -276,7 +277,7 @@ runs **after** every successful `commit_file` (see
   `build_new_file_payload(...)` produce the `=== NEW FILE ===` variant
   for the directory-scoped-on-create case (path + body, no diff).
   `build_payload(...)` glues snapshot + change view into one string.
-- `app/tasks/triggers.py:fan_out_trigger_eval` — Huey task wired into the
+- `app/tasks/triggers.py:fan_out_trigger_eval` — task wired into the
   human-edit path (`api/documents.py:put_document_by_path` after
   `commit_file`). Reads BEFORE from `sha^`, AFTER from `sha`, writes
   `trigger.fire` events on match. Registered in `run_worker.py`.
@@ -295,9 +296,10 @@ runs **after** every successful `commit_file` (see
 ## Progress
 
 ### Working
-- Schema in place (migrations `0001_init.sql`, `0003_triggers_file_path.sql`):
-  `triggers` table with all needed columns including `file_path`; `events`
-  table for fires.
+- Schema in place (`Trigger` + `Event` ORM models in `app/db/models.py`,
+  bootstrapped by Alembic migration `0001_initial`): `triggers` table
+  with all needed columns including `file_path`; `events` table for
+  fires.
 - `wiki.filesystem.parent_dirs` — used for ancestor lookup.
 - `wiki.git.commit_file` / `delete_path` / `history` — used for YAML
   mutations and trigger config history.
@@ -319,7 +321,7 @@ runs **after** every successful `commit_file` (see
 ### Boot-time housekeeping (2026-05-08)
 - `app/main.py:create_app` calls `repo.purge_invalid_triggers()` (drops
   YAML files missing a non-empty firing condition or fire message), then
-  `repo.rebuild_from_filesystem()` to re-converge the SQLite cache from
+  `repo.rebuild_from_filesystem()` to re-converge the Postgres cache from
   the surviving files.
 
 ---
@@ -363,6 +365,6 @@ runs **after** every successful `commit_file` (see
 - Per-trigger debounce / dedup window for chatty docs.
 - Better UI for cross-cutting trigger scopes (e.g. "all docs under
   `projects/`").
-- ~~YAML/git-backed trigger source-of-truth — a re-litigation of the v0
-  decision once we want trigger history beyond what SQLite gives us.~~
-  **Done 2026-05-07** (see Storage section).
+- ~~YAML/git-backed trigger source-of-truth — re-litigated so trigger
+  config has full git history.~~ **Done 2026-05-07** (see Storage
+  section).

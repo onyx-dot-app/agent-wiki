@@ -1,7 +1,7 @@
 """Users CRUD. v0 stubs."""
 from __future__ import annotations
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint
 
 from app.auth import login_required
 

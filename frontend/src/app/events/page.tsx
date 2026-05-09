@@ -1,32 +1,16 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-
 import { AppShell } from "@/components/common/AppShell";
 import { useRequireAuth } from "@/lib/auth";
-import { listEvents, type AppEvent } from "@/lib/events";
+import { useEvents } from "@/lib/events";
 
 export default function EventsPage() {
   const { user, loading } = useRequireAuth();
-  const [events, setEvents] = useState<AppEvent[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  const refresh = useCallback(async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      setEvents(await listEvents({ kind: "trigger.fire", limit: 200 }));
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "failed to load events");
-    } finally {
-      setBusy(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (user) void refresh();
-  }, [user, refresh]);
+  const { events, error, isValidating, refresh } = useEvents({
+    kind: "trigger.fire",
+    limit: 200,
+  });
+  const errorMessage = error?.message ?? null;
 
   if (loading || !user) return <main style={{ padding: 32 }}>Loading…</main>;
 
@@ -47,12 +31,12 @@ export default function EventsPage() {
               Trigger fires, newest first.
             </p>
           </div>
-          <button onClick={refresh} disabled={busy} style={secondaryBtn}>
-            {busy ? "Loading…" : "Refresh"}
+          <button onClick={() => void refresh()} disabled={isValidating} style={secondaryBtn}>
+            {isValidating ? "Loading…" : "Refresh"}
           </button>
         </header>
 
-        {error && (
+        {errorMessage && (
           <div
             style={{
               padding: 10,
@@ -63,11 +47,11 @@ export default function EventsPage() {
               marginBottom: 12,
             }}
           >
-            {error}
+            {errorMessage}
           </div>
         )}
 
-        {events.length === 0 && !error && !busy && (
+        {events.length === 0 && !errorMessage && !isValidating && (
           <p style={{ color: "#888", fontSize: 14 }}>No trigger fires yet.</p>
         )}
 

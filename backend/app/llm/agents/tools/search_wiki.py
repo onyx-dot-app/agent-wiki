@@ -1,14 +1,16 @@
 """Handler for the `search_wiki` tool. Spec lives in `search_wiki.json`.
 
-Discovery layer over the FTS5 index. Returns ``{path, title, snippet,
-score}`` per hit. The ``snippet`` is FTS5's match-aware extraction
-(~64 tokens of context around the densest cluster of matched terms,
-with matches wrapped in ``**...**``). Full bodies come from ``read_page``.
+Discovery layer over the BM25 index (pg_textsearch). Returns
+``{path, title, snippet, score}`` per hit. The ``snippet`` is a
+match-aware extraction (~64 tokens of context around the densest cluster
+of matched terms, with matches wrapped in ``**...**``). Full bodies
+come from ``read_page``.
 """
 from __future__ import annotations
 
-import sqlite3
 from typing import Any
+
+from sqlalchemy.exc import OperationalError
 
 from app.wiki import search as wiki_search
 
@@ -31,11 +33,11 @@ def handle(args: dict[str, Any]) -> Any:
 
     try:
         rows = wiki_search.search(query, limit=limit)
-    except sqlite3.OperationalError as exc:
+    except OperationalError as exc:
         return {
             "error": (
-                f"FTS5 rejected the query: {exc}. Try plain words separated by "
-                "spaces, or quoted phrases."
+                f"Search backend rejected the query: {exc}. Try plain words "
+                "separated by spaces, or quoted phrases."
             ),
         }
 
@@ -43,12 +45,7 @@ def handle(args: dict[str, Any]) -> Any:
         return {"results": [], "note": "no matches"}
 
     results = [
-        {
-            "path": r["path"],
-            "title": r["title"],
-            "snippet": r["snippet"],
-            "score": r["score"],
-        }
+        {"path": r.path, "title": r.title, "snippet": r.snippet, "score": r.score}
         for r in rows
     ]
     return {"results": results}

@@ -1,3 +1,5 @@
+import useSWR from "swr";
+
 import { apiFetch } from "@/lib/api";
 
 /** Display form of a trigger scope path.
@@ -33,6 +35,8 @@ export interface Trigger {
   scope_path: string;
   kind: "delta";
   nl_description: string;
+  message: string | null;
+  destination: string | null;
   enabled: boolean;
   created_at: string;
   last_edited_at: string;
@@ -50,18 +54,27 @@ export interface TriggerCommit {
 export interface TriggerCreateInput {
   scope_path: string;
   nl_description: string;
+  message: string;
+  destination?: string | null;
   enabled?: boolean;
 }
 
 export interface TriggerUpdateInput {
   scope_path?: string;
   nl_description?: string;
+  message?: string;
+  destination?: string | null;
   enabled?: boolean;
 }
 
-export async function listTriggers(): Promise<Trigger[]> {
-  const r = await apiFetch<{ triggers: Trigger[] }>("/triggers");
-  return r.triggers;
+export function useTriggers() {
+  const { data, error, isLoading, mutate } = useSWR<{ triggers: Trigger[] }>("/triggers");
+  return {
+    triggers: data?.triggers ?? [],
+    error: error as Error | undefined,
+    isLoading,
+    refresh: mutate,
+  };
 }
 
 export function createTrigger(input: TriggerCreateInput): Promise<Trigger> {
@@ -90,6 +103,8 @@ export async function getTriggerHistory(id: string): Promise<TriggerCommit[]> {
 export interface TriggerVersion {
   scope_path: string;
   nl_description: string;
+  message: string | null;
+  destination: string | null;
   enabled: boolean;
   sha: string;
   path: string;

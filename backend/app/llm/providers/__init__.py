@@ -91,7 +91,7 @@ def names() -> list[str]:
 # Eager registration so unknown-provider checks in client.py reflect what's
 # actually compiled in. Keep imports at the bottom — each module references
 # `register` from this module.
-from app.llm.providers import anthropic as _anthropic  # noqa: E402,F401
-from app.llm.providers import gemini as _gemini  # noqa: E402,F401
-from app.llm.providers import ollama as _ollama  # noqa: E402,F401
-from app.llm.providers import openai as _openai  # noqa: E402,F401
+from app.llm.providers import anthropic as _anthropic  # noqa: E402,F401  # pyright: ignore[reportUnusedImport]
+from app.llm.providers import gemini as _gemini  # noqa: E402,F401  # pyright: ignore[reportUnusedImport]
+from app.llm.providers import ollama as _ollama  # noqa: E402,F401  # pyright: ignore[reportUnusedImport]
+from app.llm.providers import openai as _openai  # noqa: E402,F401  # pyright: ignore[reportUnusedImport]

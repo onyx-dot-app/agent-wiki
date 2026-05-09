@@ -16,8 +16,11 @@ that lives in a private repo and is intentionally not linked from here.
 - `ingress-nginx` (NLB-backed) and `cert-manager` as `helm_release`s
 - Optional `letsencrypt-prod` `ClusterIssuer` if `cert_manager_email` is set
 
-No RDS, Redis, S3, or external state — agent-wiki uses SQLite on a PVC by
-design (see `local_data/wiki/infra/infra.md`).
+No RDS, Redis, or S3 — this template only provisions the cluster + ingress.
+agent-wiki itself needs a Postgres 17 (with `pg_textsearch` and `pgmq`) for
+app state and task queues, plus an RWO PVC for the wiki git working tree.
+Provision Postgres separately (RDS, Cloud SQL, or self-managed) and wire
+it via `DATABASE_URL` on the chart. See `local_data/wiki/infra/infra.md`.
 
 ## Use it
 

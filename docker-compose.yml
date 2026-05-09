@@ -1,56 +1,93 @@
 services:
+  postgres:
+    # Postgres 17 with pg_textsearch (BM25 search) and pgmq (task queue).
+    # pg_textsearch must be loaded via `shared_preload_libraries`; pgmq is
+    # a regular extension. There's no upstream image bundling both, so this
+    # builds locally — see `deploy/postgres/Dockerfile`.
+    build: ./deploy/postgres
+    image: agent-wiki-postgres:local
+    environment:
+      - POSTGRES_USER=agent
+      - POSTGRES_PASSWORD=agent
+      - POSTGRES_DB=agent_wiki
+    command:
+      - "postgres"
+      - "-c"
+      - "shared_preload_libraries=pg_textsearch"
+    volumes:
+      - ./local_data/pgdata:/var/lib/postgresql/data
+    expose:
+      - "5432"
+    ports:
+      # Publish to the host for local psql / smoke tests / running tests
+      # against the compose Postgres without compose `exec`.
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agent -d agent_wiki"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
   backend:
     build: ./backend
     env_file: .env
     environment:
-      - APP_DB_PATH=/data/app.sqlite
-      - QUEUE_DB_PATH=/data/queue.sqlite
+      - DATABASE_URL=postgresql://agent:agent@postgres:5432/agent_wiki
       - WIKI_DIR=/data/wiki
     volumes:
       - ./local_data:/data
     expose:
       - "8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
 
-  # Three workers, one per queue (see backend/app/tasks/huey_app.py).
-  # All three share queue.sqlite — Huey namespaces tables by queue name.
+  # Three workers, one per queue (see backend/app/tasks/queues.py).
+  # Each worker reads from `pgmq.q_<queue>` in the shared Postgres.
   worker-documents:
     build: ./backend
     command: ["python", "-m", "app.tasks.run_worker", "documents"]
     env_file: .env
     environment:
-      - APP_DB_PATH=/data/app.sqlite
-      - QUEUE_DB_PATH=/data/queue.sqlite
+      - DATABASE_URL=postgresql://agent:agent@postgres:5432/agent_wiki
       - WIKI_DIR=/data/wiki
     volumes:
       - ./local_data:/data
     depends_on:
-      - backend
+      backend:
+        condition: service_started
+      postgres:
+        condition: service_healthy
 
   worker-triggers:
     build: ./backend
     command: ["python", "-m", "app.tasks.run_worker", "triggers"]
     env_file: .env
     environment:
-      - APP_DB_PATH=/data/app.sqlite
-      - QUEUE_DB_PATH=/data/queue.sqlite
+      - DATABASE_URL=postgresql://agent:agent@postgres:5432/agent_wiki
       - WIKI_DIR=/data/wiki
     volumes:
       - ./local_data:/data
     depends_on:
-      - backend
+      backend:
+        condition: service_started
+      postgres:
+        condition: service_healthy
 
   worker-wiki-bm25:
     build: ./backend
     command: ["python", "-m", "app.tasks.run_worker", "wiki_bm25"]
     env_file: .env
     environment:
-      - APP_DB_PATH=/data/app.sqlite
-      - QUEUE_DB_PATH=/data/queue.sqlite
+      - DATABASE_URL=postgresql://agent:agent@postgres:5432/agent_wiki
       - WIKI_DIR=/data/wiki
     volumes:
       - ./local_data:/data
     depends_on:
-      - backend
+      backend:
+        condition: service_started
+      postgres:
+        condition: service_healthy
 
   frontend:
     build: ./frontend

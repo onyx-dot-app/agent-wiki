@@ -1,6 +1,6 @@
 apiVersion: v2
 name: agent-workspace
-description: Self-updating wiki for AI agents (Flask + SQLite + Huey + Next.js).
+description: Self-updating wiki for AI agents (Flask + Postgres 17 with pg_textsearch and pgmq + Next.js).
 type: application
-version: 0.2.2
+version: 0.3.1
 appVersion: "0.1.0"

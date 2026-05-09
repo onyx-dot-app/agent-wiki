@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
+from typing import Any
 
 import requests
 
@@ -52,8 +53,8 @@ class SerperClient(SearchProvider):
                 f"serper returned status {response.status_code}: {response.text[:200]}"
             )
 
-        body = response.json()
-        organic = body.get("organic") or []
+        body: dict[str, Any] = response.json()
+        organic: list[dict[str, Any]] = body.get("organic") or []
 
         results: list[WebSearchResult] = []
         for item in organic:

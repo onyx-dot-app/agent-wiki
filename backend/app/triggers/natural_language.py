@@ -36,11 +36,30 @@ from __future__ import annotations
 import json
 import logging
 import re
+from typing import Any, cast
+
+from pydantic import BaseModel
 
 from app.llm.client import complete
 from app.llm.errors import LLMError
 
 log = logging.getLogger(__name__)
+
+
+class MatchResult(BaseModel):
+    """Result of a phase-1 trigger evaluation: did the change satisfy the
+    NL "if"? ``reason`` is a one-liner suitable for the events log."""
+
+    matched: bool
+    reason: str
+
+
+class NewFileEvalResult(BaseModel):
+    """Result of the combined evaluate+render call for new files under a
+    directory scope. ``message`` is the already-rendered notification."""
+
+    triggered: bool
+    message: str
 
 # --------------------------------------------------------------------------- #
 # Phase 1: does the change satisfy the trigger?                               #
@@ -98,8 +117,8 @@ _REPORT_TOOL = {
 }
 
 
-def matches(nl_description: str, payload: str) -> tuple[bool, str]:
-    """Phase 1. Returns ``(matched, reason)``.
+def matches(nl_description: str, payload: str) -> MatchResult:
+    """Phase 1: did the change satisfy the trigger's NL description?
 
     ``payload`` is the combined wiki-snapshot + change view from
     ``app.triggers.diff.build_payload``.
@@ -116,13 +135,15 @@ def matches(nl_description: str, payload: str) -> tuple[bool, str]:
         )
     except LLMError as e:
         log.warning("trigger eval llm_error code=%s msg=%s", e.code, e.message)
-        return False, f"llm_error: {e.code}"
+        return MatchResult(matched=False, reason=f"llm_error: {e.code}")
 
-    for call in resp.get("tool_calls") or []:
-        if call.get("name") == "report":
-            args = call.get("arguments") or {}
-            return bool(args.get("matches")), str(args.get("reason") or "")
-    return False, "no_tool_call"
+    for call in resp.tool_calls:
+        if call.name == "report":
+            return MatchResult(
+                matched=bool(call.arguments.get("matches")),
+                reason=str(call.arguments.get("reason") or ""),
+            )
+    return MatchResult(matched=False, reason="no_tool_call")
 
 
 # --------------------------------------------------------------------------- #
@@ -198,10 +219,9 @@ def render_message(
         log.warning("trigger render llm_error code=%s msg=%s", e.code, e.message)
         return message_instruction
 
-    for call in resp.get("tool_calls") or []:
-        if call.get("name") == "render":
-            args = call.get("arguments") or {}
-            rendered = str(args.get("message") or "").strip()
+    for call in resp.tool_calls:
+        if call.name == "render":
+            rendered = str(call.arguments.get("message") or "").strip()
             if rendered:
                 return rendered
     log.warning("trigger render: no tool call, falling back to instruction")
@@ -256,7 +276,7 @@ before or after the object.
 _FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE)
 
 
-def _extract_json_object(text: str) -> dict | None:
+def _extract_json_object(text: str) -> dict[str, Any] | None:
     if not text:
         return None
     cleaned = _FENCE_RE.sub("", text.strip())
@@ -266,23 +286,22 @@ def _extract_json_object(text: str) -> dict | None:
         return None
     candidate = cleaned[start : end + 1]
     try:
-        data = json.loads(candidate)
+        data: Any = json.loads(candidate)
     except json.JSONDecodeError:
         return None
-    return data if isinstance(data, dict) else None
+    return cast(dict[str, Any], data) if isinstance(data, dict) else None
 
 
 def evaluate_new_file_in_dir(
     nl_description: str, message_instruction: str, payload: str
-) -> tuple[bool, str]:
+) -> NewFileEvalResult:
     """Single-call combined evaluate + render for the new-file-in-dir case.
 
     ``payload`` is the wiki snapshot + NEW FILE block from
     ``app.triggers.diff.build_new_file_payload``.
 
-    Returns ``(triggered, trigger_message)``. On LLM error or unparseable
-    output, returns ``(False, "")`` — better to drop a fire than to send
-    a confusing message.
+    On LLM error or unparseable output, returns ``triggered=False`` with an
+    empty message — better to drop a fire than to send a confusing one.
     """
     user_msg = (
         f"Trigger description (if):\n{nl_description}\n\n"
@@ -301,13 +320,13 @@ def evaluate_new_file_in_dir(
         log.warning(
             "trigger new-file-in-dir llm_error code=%s msg=%s", e.code, e.message
         )
-        return False, ""
+        return NewFileEvalResult(triggered=False, message="")
 
-    text = (resp.get("text") or "").strip()
+    text = resp.text.strip()
     data = _extract_json_object(text)
     if data is None:
         log.warning("trigger new-file-in-dir: unparseable response: %r", text[:200])
-        return False, ""
+        return NewFileEvalResult(triggered=False, message="")
 
     triggered = bool(data.get("triggered"))
     trigger_message = str(data.get("trigger_message") or "").strip()
@@ -315,4 +334,4 @@ def evaluate_new_file_in_dir(
         # Owner's instruction is the safe fallback so the Event Log isn't
         # blank when the model says yes but forgets the message.
         trigger_message = message_instruction
-    return triggered, trigger_message
+    return NewFileEvalResult(triggered=triggered, message=trigger_message)

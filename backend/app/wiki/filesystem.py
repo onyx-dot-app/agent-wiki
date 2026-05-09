@@ -29,7 +29,7 @@ def parent_dirs(rel_path: str) -> list[str]:
     convention used by root-scoped triggers (see ``app/triggers/storage.py``).
     """
     parts = Path(safe_rel_path(rel_path)).parts[:-1]
-    out = []
+    out: list[str] = []
     for i in range(len(parts), 0, -1):
         out.append(str(Path(*parts[:i])))
     out.append("")

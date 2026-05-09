@@ -3,13 +3,13 @@
 Each row in the ``agent_activity`` table carries an ``expires_at``. When
 that moment passes, the row should be deleted and the doc's frontmatter
 re-rendered to reflect it. We don't want to poll — instead, every time a
-row is upserted we schedule a delayed Huey task at exactly ``expires_at``,
+row is upserted we schedule a delayed task at exactly ``expires_at``,
 and on server restart we re-schedule the same for every active row.
 
-Why ``triggers_huey``: cleanup is a small, time-driven side effect — same
+Why ``triggers_queue``: cleanup is a small, time-driven side effect — same
 shape as a scheduled trigger fire. Each cleanup may commit a tiny
-frontmatter-only diff and queue an FTS reindex; the work is bounded
-and non-LLM. Keeping it off ``documents_huey`` avoids ever sitting
+frontmatter-only diff and queue a BM25 reindex; the work is bounded
+and non-LLM. Keeping it off ``documents_queue`` avoids ever sitting
 behind a slow LLM call.
 
 A cleanup is "stale" when the row has already been re-registered with a
@@ -22,14 +22,17 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 
-from app.db.sqlite import connect
-from app.tasks.huey_app import triggers_huey
+from sqlalchemy import select
+
+from app.db.models import AgentActivity
+from app.db.session import session
+from app.tasks.queues import triggers_queue
 from app.wiki import agent_activity
 
 log = logging.getLogger(__name__)
 
 
-@triggers_huey.task()
+@triggers_queue.task()
 def cleanup_expired_activity(
     user_id: str,
     agent_name: str | None,
@@ -49,12 +52,12 @@ def cleanup_expired_activity(
             user_id, agent_name, doc_path, activity,
         )
         return
-    if row["expires_at"] != expected_expires_at:
+    if row.expires_at != expected_expires_at:
         # Re-registered with a new expiry; its own scheduled cleanup is
         # what should fire. This one is stale.
         log.debug(
             "agent_activity cleanup: stale fire (renewed); expected=%s current=%s",
-            expected_expires_at, row["expires_at"],
+            expected_expires_at, row.expires_at,
         )
         return
     agent_activity.delete_by_natural_key(
@@ -94,28 +97,22 @@ def schedule_all_pending_cleanups() -> None:
     Called once at server startup so a restart never leaves rows orphaned.
     """
     now = datetime.now(timezone.utc)
-    conn = connect()
-    try:
-        rows = conn.execute(
-            "SELECT user_id, agent_name, doc_path, activity, expires_at"
-            "  FROM agent_activity"
-        ).fetchall()
-    finally:
-        conn.close()
+    with session() as s:
+        rows = s.scalars(select(AgentActivity)).all()
     if not rows:
         log.debug("agent_activity startup scan: no rows to schedule")
         return
     n_immediate = 0
     n_future = 0
     for r in rows:
-        eta = _parse_eta(r["expires_at"])
+        eta = _parse_eta(r.expires_at)
         if eta < now:
             eta = now
             n_immediate += 1
         else:
             n_future += 1
         cleanup_expired_activity.schedule(
-            args=(r["user_id"], r["agent_name"], r["doc_path"], r["activity"], r["expires_at"]),
+            args=(r.user_id, r.agent_name, r.doc_path, r.activity, r.expires_at),
             eta=eta,
         )
     log.info(
@@ -125,9 +122,10 @@ def schedule_all_pending_cleanups() -> None:
 
 
 def _parse_eta(expires_at: str) -> datetime:
-    """Parse the stored ISO timestamp into an aware datetime.
+    """Parse the stored ISO timestamp into a UTC-aware datetime.
 
-    Huey's SQLite scheduler compares ETAs in the consumer's local timezone
-    if they're naive; ours are UTC-aware so it does the right thing.
+    The queue's enqueue path converts an ``eta`` (timezone-aware datetime)
+    into a pgmq delay in seconds; passing aware UTC keeps the math right
+    regardless of where the worker process happens to run.
     """
     return datetime.fromisoformat(expires_at)

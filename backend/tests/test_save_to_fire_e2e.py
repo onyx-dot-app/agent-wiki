@@ -7,7 +7,7 @@ trigger matching, and event insert all line up.
 
 We patch only the LLM evaluators (``nl_matches`` /
 ``nl_evaluate_new_file_in_dir`` / ``nl_render_message``) — everything
-else (git commit, FTS reindex, Huey queues, find_matching_triggers) runs
+else (git commit, FTS reindex, task queues, find_matching_triggers) runs
 for real against a tmp wiki repo.
 """
 from __future__ import annotations
@@ -16,7 +16,9 @@ import json
 
 import pytest
 
-from app.db.sqlite import connect
+from app.triggers.natural_language import MatchResult, NewFileEvalResult
+
+from tests._seed import list_events
 
 
 # --------------------------------------------------------------------------- #
@@ -48,14 +50,18 @@ def signed_in(app, tmp_repo):
 
 
 @pytest.fixture(autouse=True)
-def _huey_immediate(monkeypatch):
-    """Run Huey tasks synchronously so the test sees the event row before
+def _immediate_queues():
+    """Run tasks synchronously so the test sees the event row before
     its assertions. Both queues touched by the save path go immediate.
     """
-    from app.tasks.huey_app import triggers_huey, wiki_bm25_huey
+    from contextlib import ExitStack
 
-    monkeypatch.setattr(triggers_huey, "immediate", True)
-    monkeypatch.setattr(wiki_bm25_huey, "immediate", True)
+    from app.tasks.queues import triggers_queue, wiki_bm25_queue
+
+    with ExitStack() as stack:
+        stack.enter_context(triggers_queue.immediate_mode())
+        stack.enter_context(wiki_bm25_queue.immediate_mode())
+        yield
 
 
 def _seed_trigger(*, owner_user_id, scope_path, nl="fire when status changes"):
@@ -70,14 +76,8 @@ def _seed_trigger(*, owner_user_id, scope_path, nl="fire when status changes"):
 
 
 def _list_fires():
-    conn = connect()
-    try:
-        rows = conn.execute(
-            "SELECT * FROM events WHERE kind='trigger.fire' ORDER BY id"
-        ).fetchall()
-    finally:
-        conn.close()
-    return rows
+    """Return ``trigger.fire`` events oldest-first."""
+    return list(reversed(list_events(kind="trigger.fire")))
 
 
 def _put_doc(client, *, path, body):
@@ -103,7 +103,7 @@ def test_save_fires_doc_scoped_trigger_to_event_log(signed_in, monkeypatch):
     from app.triggers import engine
 
     monkeypatch.setattr(
-        engine, "nl_matches", lambda nl, payload: (True, "status flipped")
+        engine, "nl_matches", lambda nl, payload: MatchResult(matched=True, reason="status flipped")
     )
     monkeypatch.setattr(
         engine,
@@ -113,7 +113,7 @@ def test_save_fires_doc_scoped_trigger_to_event_log(signed_in, monkeypatch):
     monkeypatch.setattr(
         engine,
         "nl_evaluate_new_file_in_dir",
-        lambda nl, instr, payload: (False, ""),
+        lambda nl, instr, payload: NewFileEvalResult(triggered=False, message=""),
     )
 
     # First save: create the file. Trigger doesn't fire here because the
@@ -165,7 +165,7 @@ def test_save_fires_parent_dir_scoped_trigger(signed_in, monkeypatch):
 
     from app.triggers import engine
 
-    monkeypatch.setattr(engine, "nl_matches", lambda nl, payload: (True, "matched"))
+    monkeypatch.setattr(engine, "nl_matches", lambda nl, payload: MatchResult(matched=True, reason="matched"))
     monkeypatch.setattr(
         engine, "nl_render_message", lambda instr, payload, *, reason: "rendered"
     )
@@ -176,7 +176,7 @@ def test_save_fires_parent_dir_scoped_trigger(signed_in, monkeypatch):
     monkeypatch.setattr(
         engine,
         "nl_evaluate_new_file_in_dir",
-        lambda nl, instr, payload: (False, ""),
+        lambda nl, instr, payload: NewFileEvalResult(triggered=False, message=""),
     )
 
     # Create then edit. The CREATE goes through evaluate_new_file_in_dir
@@ -206,12 +206,12 @@ def test_save_fires_root_scoped_trigger(signed_in, monkeypatch):
 
     from app.triggers import engine
 
-    monkeypatch.setattr(engine, "nl_matches", lambda nl, payload: (True, "root match"))
+    monkeypatch.setattr(engine, "nl_matches", lambda nl, payload: MatchResult(matched=True, reason="root match"))
     monkeypatch.setattr(engine, "nl_render_message", lambda i, p, *, reason: "msg")
     monkeypatch.setattr(
         engine,
         "nl_evaluate_new_file_in_dir",
-        lambda nl, instr, payload: (False, ""),
+        lambda nl, instr, payload: NewFileEvalResult(triggered=False, message=""),
     )
 
     # Two unrelated docs in different parts of the tree.
@@ -244,7 +244,7 @@ def test_save_does_not_fire_when_eval_returns_no_match(signed_in, monkeypatch):
     from app.triggers import engine
 
     monkeypatch.setattr(
-        engine, "nl_matches", lambda nl, payload: (False, "irrelevant")
+        engine, "nl_matches", lambda nl, payload: MatchResult(matched=False, reason="irrelevant")
     )
 
     resp = _put_doc(client, path="projects/foo.md", body="status: green\n")
@@ -273,13 +273,13 @@ def test_chat_agent_edit_fires_through_same_seam(signed_in, monkeypatch):
     """Chat-agent edits go through ``_doc_helpers.commit_and_fan_out``,
     which now routes through ``wiki.notify.after_doc_write`` — so the
     same trigger fan-out should fire when the agent edits a doc."""
-    client, uid = signed_in
+    _, uid = signed_in
 
     trigger = _seed_trigger(owner_user_id=uid, scope_path="agent_doc.md")
 
     from app.triggers import engine
 
-    monkeypatch.setattr(engine, "nl_matches", lambda nl, payload: (True, "agent edit"))
+    monkeypatch.setattr(engine, "nl_matches", lambda nl, payload: MatchResult(matched=True, reason="agent edit"))
     monkeypatch.setattr(
         engine, "nl_render_message", lambda i, p, *, reason: f"[agent] {reason}"
     )
@@ -328,7 +328,7 @@ def test_move_fires_delete_on_old_and_create_on_new(signed_in, monkeypatch):
     from app.triggers import engine
 
     monkeypatch.setattr(
-        engine, "nl_matches", lambda nl, payload: (True, "directory delta")
+        engine, "nl_matches", lambda nl, payload: MatchResult(matched=True, reason="directory delta")
     )
     monkeypatch.setattr(
         engine, "nl_render_message", lambda i, p, *, reason: "moved"
@@ -337,19 +337,15 @@ def test_move_fires_delete_on_old_and_create_on_new(signed_in, monkeypatch):
     monkeypatch.setattr(
         engine,
         "nl_evaluate_new_file_in_dir",
-        lambda nl, instr, payload: (True, "moved-in"),
+        lambda nl, instr, payload: NewFileEvalResult(triggered=True, message="moved-in"),
     )
 
     # Seed a file under src/.
     from app.wiki import git as wiki_git
     wiki_git.commit_file("src/foo.md", "body\n", "seed", author=None)
     # Clear any fires generated by the seed commit (root scope etc. — none here).
-    from app.db.sqlite import connect
-    conn = connect()
-    try:
-        conn.execute("DELETE FROM events")
-    finally:
-        conn.close()
+    from tests._seed import clear_events
+    clear_events()
 
     resp = client.post(
         "/api/documents/move",
@@ -384,18 +380,14 @@ def test_delete_fires_with_change_kind_delete(signed_in, monkeypatch):
 
     from app.triggers import engine
 
-    monkeypatch.setattr(engine, "nl_matches", lambda nl, payload: (True, "gone"))
+    monkeypatch.setattr(engine, "nl_matches", lambda nl, payload: MatchResult(matched=True, reason="gone"))
     monkeypatch.setattr(engine, "nl_render_message", lambda i, p, *, reason: "deleted")
 
     from app.wiki import git as wiki_git
     wiki_git.commit_file("docs/old.md", "text\n", "seed", author=None)
     # Wipe any seed-time fires.
-    from app.db.sqlite import connect
-    conn = connect()
-    try:
-        conn.execute("DELETE FROM events")
-    finally:
-        conn.close()
+    from tests._seed import clear_events
+    clear_events()
 
     resp = client.delete("/api/documents/file?path=docs/old.md")
     assert resp.status_code == 200, resp.get_data(as_text=True)
@@ -415,7 +407,7 @@ def test_fire_records_actor_from_save_author(signed_in, monkeypatch):
 
     from app.triggers import engine
 
-    monkeypatch.setattr(engine, "nl_matches", lambda nl, payload: (True, "ok"))
+    monkeypatch.setattr(engine, "nl_matches", lambda nl, payload: MatchResult(matched=True, reason="ok"))
     monkeypatch.setattr(
         engine, "nl_render_message", lambda i, p, *, reason: "rendered"
     )

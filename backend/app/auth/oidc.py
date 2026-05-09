@@ -39,7 +39,7 @@ def init_oauth(app: Flask) -> OAuth:
         return oauth
 
     issuer = CONFIG.oidc_issuer.rstrip("/")
-    oauth.register(
+    oauth.register(  # pyright: ignore[reportUnknownMemberType]
         name=CLIENT_NAME,
         server_metadata_url=f"{issuer}/.well-known/openid-configuration",
         client_id=CONFIG.oidc_client_id,

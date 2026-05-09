@@ -69,10 +69,30 @@ Avatar menu (top of sidebar) keeps Admin + Sign out.
 - `auth.tsx` — `<AuthProvider>` fetches `/auth/me` + `/auth/config` on
   mount; `useAuth()`, `useRequireAuth()` (redirects to `/login?next=...`,
   excludes `/login` and `/signup`); `login`, `signup`, `logout`.
+- `swr.tsx` — `<SWRProvider>` mounted in `app/layout.tsx`. Default
+  fetcher is `apiFetch` keyed by API path, so `useSWR("/events?...")`
+  Just Works. Defaults: `revalidateOnFocus`, `revalidateOnReconnect`,
+  `keepPreviousData` (no flash on key change), `dedupingInterval: 2s`,
+  `errorRetryCount: 3`. **Per-resource hooks live next to the resource**
+  (`useEvents` in `events.ts`, `useTriggers` in `triggers.ts`,
+  `useHealth` in `health.ts`, `useLLMStatus` in `llm.ts`) so pages
+  call a typed hook, not raw SWR. After a write, mutate the cache —
+  optimistic update + revalidate, e.g.
+  `refresh((cur) => ({...}), { revalidate: true })`.
+
+  Why SWR over a hand-rolled `useEffect` + `useState`: cache survives
+  cross-route navigation, so revisiting a page shows the previous data
+  instantly while a background revalidation runs. The old pattern blanked
+  to `[]`/`null` on remount.
 
 #### `src/components/common/AppShell.tsx`
 Vertical icon nav (Wiki, Triggers, Events) + avatar menu (admin link,
-sign out).
+sign out). Also renders the **LLM setup banner** at the top of the
+content column: polls `GET /api/llm/status` once when a user is loaded,
+and if `configured=false` shows a dismissible amber alert. Admins see a
+deep link to `/admin/llm`; non-admins are told to ask an admin.
+Dismissal is per-tab (`sessionStorage["llm-banner-dismissed"]`) so it
+re-appears in a fresh tab until the system is actually configured.
 
 #### `src/components/chat/ChatWidget.tsx`
 Global chat widget mounted from `app/layout.tsx`. Renders only when a

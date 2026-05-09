@@ -17,7 +17,9 @@ from __future__ import annotations
 
 import logging
 from functools import lru_cache
-from typing import Any, Iterator
+from typing import Any, Iterator, cast
+
+from ollama import Client
 
 from app.llm.errors import LLMError
 from app.llm.providers._common import stringify_tool_result
@@ -29,10 +31,8 @@ StreamEvent = dict[str, Any]
 
 
 @lru_cache(maxsize=4)
-def _client(host: str):
+def _client(host: str) -> Client:
     """Cached Ollama client. Empty host means "SDK default" (localhost)."""
-    from ollama import Client
-
     return Client(host=host) if host else Client()
 
 
@@ -84,9 +84,11 @@ class OllamaProvider:
         client = _client(settings.ollama_base_url)
         try:
             stop_reason = ""
-            usage = {"input_tokens": 0, "output_tokens": 0}
+            usage: dict[str, int] = {"input_tokens": 0, "output_tokens": 0}
             tool_call_idx = 0
-            for chunk in client.chat(**kwargs):
+            chat_call = cast(Any, client.chat)
+            for raw_chunk in chat_call(**kwargs):
+                chunk: Any = raw_chunk
                 # ChatResponse is a pydantic model with .message.content,
                 # .message.tool_calls, .done, .done_reason, .prompt_eval_count,
                 # .eval_count.
@@ -101,9 +103,12 @@ class OllamaProvider:
                         if fn is None:
                             continue
                         name = getattr(fn, "name", "")
-                        args = getattr(fn, "arguments", None) or {}
-                        if not isinstance(args, dict):
-                            args = {"_raw": str(args)}
+                        raw_args: Any = getattr(fn, "arguments", None) or {}
+                        args: dict[str, Any]
+                        if isinstance(raw_args, dict):
+                            args = cast(dict[str, Any], raw_args)
+                        else:
+                            args = {"_raw": str(raw_args)}
                         yield {
                             "type": "tool_call",
                             "id": f"ollama_tc_{tool_call_idx}",
@@ -182,4 +187,4 @@ PROVIDER = OllamaProvider()
 
 from app.llm.providers import register  # noqa: E402
 
-register(PROVIDER)
+register(PROVIDER)  # pyright: ignore[reportUnknownMemberType]

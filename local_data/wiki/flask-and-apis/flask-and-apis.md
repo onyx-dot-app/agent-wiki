@@ -31,6 +31,8 @@ explicit public endpoints (signup, login, `/auth/config`, inbound webhooks).
 | `events`    | `/api/events`    | stub |
 | `webhooks`  | `/api/webhooks`  | stub |
 | `chat`      | `/api/chat`      | real (stateless) — see [agents/chat-agent.md](../agents/chat-agent.md) |
+| `health`    | `/api/health`    | real — liveness + per-queue backlog |
+| `llm`       | `/api/llm`       | real — `GET /status` (login-gated): `{configured, provider}` for the setup banner; no keys exposed |
 
 ### Architectural rules (also in CLAUDE.md)
 
@@ -38,11 +40,14 @@ explicit public endpoints (signup, login, `/auth/config`, inbound webhooks).
   multi-step workflows in route handlers.
 - **No raw `flask.session` reads** outside `app/auth/`. Use `@login_required`,
   `@admin_required`, `current_user()`.
-- **No ORM.** Direct sqlite + small repo modules (pattern: `app/auth/users.py`).
-  Repos return `sqlite3.Row` for reads, primitive ids for writes.
-- **All schema changes** are new numbered files under `app/db/migrations/`.
-  Never edit an applied migration. SQLite's ALTER is limited; rebuild the
-  table when you need to drop/rename.
+- **SQLAlchemy 2.0 ORM, small repo modules.** Pattern: `app/auth/users.py`.
+  Repos go through `with session() as s:` (from `app/db/session.py`) and
+  return plain dicts, not ORM rows, so the rest of the app doesn't depend
+  on SQLAlchemy.
+- **All schema changes** start as edits to `app/db/models.py`, then an
+  Alembic autogenerate (`cd backend && alembic revision --autogenerate
+  -m "..."`) reviewed before commit. `init_db()` runs `alembic upgrade
+  head` on every boot.
 - **Errors** are `{"error": "<msg>"}` with the right status code. The
   frontend's `ApiError` parses this shape.
 
@@ -54,7 +59,7 @@ subsequent boot step logs through the shared formatter. Configures session
 cookie (httponly, samesite=Lax, 30-day permanent lifetime). On boot:
 `init_db()` (run migrations) + `ensure_wiki_repo()` (init git in `WIKI_DIR`
 if absent). Registers blueprints under `/api/{auth,admin,users,mcp,
-documents,triggers,events,webhooks,chat}` and a `/api/health`.
+documents,triggers,events,webhooks,chat,llm}` and a `/api/health`.
 
 #### `app/utils/logging.py`
 `setup_logging(level=None)` — idempotent root logger config. Format:
@@ -73,7 +78,7 @@ declared and emits at INFO/WARNING/EXCEPTION):
   (malformed payload warn), `webhooks` (placeholder).
 - `app/auth/users.py` — user creation. `app/auth/passwords.py` — bcrypt
   rejects malformed hash.
-- `app/db/sqlite.py` — each migration applied.
+- `app/db/session.py` — each migration applied.
 - `app/wiki/git.py` — repo init + seed; commit/delete at DEBUG.
   `app/wiki/filesystem.py` — path-traversal rejection (warning).
 - `app/llm/client.py` — request (provider, model, tool count, msg count)
@@ -109,8 +114,8 @@ ensure_ascii=False, default=str)` — unicode preserved, no length cap.
   back to `matches=False`.
 
 #### `app/config.py`
-**Trimmed.** Now exposes only `secret_key`, `wiki_dir`, `app_db_path`,
-`queue_db_path`, `auth_mode`, and OIDC fields. **LLM env keys were
+**Trimmed.** Now exposes only `secret_key`, `wiki_dir`, `database_url`,
+`max_queue_size`, `auth_mode`, and OIDC fields. **LLM env keys were
 removed** — provider/model/keys are DB-only via `app/llm/settings.py`.
 
 > **Known bug:** `app/llm/settings.py:get()` still references
@@ -119,17 +124,19 @@ removed** — provider/model/keys are DB-only via `app/llm/settings.py`.
 > work-unit "Stabilize the LLM seam" below.
 
 #### `app/db/`
-- `sqlite.py` — `connect()` returns an autocommit connection (WAL,
-  foreign_keys=ON). `cursor()` context manager. `init_db()` is idempotent;
-  applies any new `.sql` file under `migrations/` and records in
-  `_migrations`.
-- `fts.py` — `upsert_document`, `delete_document`, `search` over
-  `documents_fts` (FTS5, porter+unicode61, bm25, snippet helper).
-- `migrations/0001_init.sql` — `users`, `mcp_connections`, `documents`,
-  `triggers`, `events` (+ indexes on `events.ts` and `events.kind+ts`),
-  and `documents_fts` virtual table.
-- `migrations/0002_admin_and_llm_settings.sql` — adds `users.is_admin`
-  column; creates single-row `llm_settings` table.
+- `session.py` — SQLAlchemy 2.0 engine + sessionmaker against
+  `CONFIG.database_url` (psycopg3). `session()` is the per-call context
+  manager (commit on clean exit, rollback on exception). `init_db()`
+  runs `alembic upgrade head` and is idempotent.
+- `models.py` — declarative ORM models: `users`, `mcp_connections`,
+  `documents`, `triggers`, `events`, `llm_settings`, `web_settings`,
+  `ingest_settings`, `cron_state`, etc. Plus the BM25 / `pg_textsearch`
+  surface for search.
+- `fts.py` — `upsert_document`, `delete_document`, `search` over the
+  `pg_textsearch` BM25 columns (snippet helper included).
+- `migrations/` — Alembic env + versions. `0001_initial` materializes
+  every table, the `pg_textsearch` + `pgmq` extensions, and the three
+  pgmq queues; later revisions ALTER on top.
 
 #### `app/auth/` (real, end-to-end)
 - `__init__.py` — `User` dataclass (with `is_admin`), `current_user()`
@@ -176,9 +183,11 @@ Pydantic schemas: `Document`, `DocumentUpdate`, `IngestPayload`, `Trigger`,
 `TriggerAction`, `User`, `Event`. HTTP shapes — not the DB layer.
 
 #### `tests/`
-Backend pytest harness. `conftest.py` provides per-test tmp DBs (`tmp_db`
-fixture patches `CONFIG` in both `app.config` and `app.db.sqlite`, runs
-migrations). Current coverage: LLM interface
+Backend pytest harness. `conftest.py` provisions a per-test schema in
+the test Postgres (`TEST_DATABASE_URL`), points `CONFIG.database_url`
+at it via libpq's `options=-csearch_path=…`, and runs `init_db()` so
+migrations apply against the fresh schema; teardown drops it. Current
+coverage: LLM interface
 (`test_llm_settings.py`, `test_llm_client.py`); SDKs are mocked at the
 `_anthropic_client` / `_openai_client` seam — never import real provider
 SDKs from tests.
@@ -199,7 +208,7 @@ SDKs from tests.
 See the cross-area data-model table in
 [the master doc](../architecture_and_progress.md#data-model-applied-schema).
 This area owns: `users`, `mcp_connections`, `documents`, `events`,
-`documents_fts`, `llm_settings`, `_migrations`. The `triggers` table is
+`documents_fts`, `llm_settings`, schema state. The `triggers` table is
 maintained by [natural-language-triggers](../natural-language-triggers/natural-language-triggers.md).
 
 ### Open issues
@@ -213,8 +222,8 @@ maintained by [natural-language-triggers](../natural-language-triggers/natural-l
 
 ### Working
 - App factory + session config (`app/main.py`).
-- Migrations runner (`app/db/sqlite.py:init_db`) — idempotent via
-  `_migrations` table.
+- Migrations runner (`app/db/session.py:init_db`) — idempotent via
+  schema state.
 - Auth blueprint: signup, login, logout, me, `/auth/config`.
 - Admin blueprint: list/promote/demote/delete users; get/put LLM settings
   with key-redaction in responses.
@@ -291,7 +300,7 @@ letters appear in other per-area docs when the unit cuts across.
 
 ### M. Test harness expansion
 1. **End-to-end tests:** auth (signup/login/me), wiki read+write commits,
-   FTS reindex (set `huey.immediate = True`).
+   FTS reindex (set `queue.immediate = True`).
 2. **LLM seam tests** — patch `app.llm.client.complete` to return canned
    responses for trigger eval, chat, document-updater tests.
 3. **Trigger eval test pattern** — patch with canned `{matches, reason}`

@@ -7,7 +7,7 @@
 > agent-wiki. Code-level architecture lives in the other per-area
 > docs (e.g. [flask-and-apis](../flask-and-apis/flask-and-apis.md)).
 
-_Last updated: 2026-05-08_
+_Last updated: 2026-05-09_
 
 ---
 
@@ -18,37 +18,42 @@ _Last updated: 2026-05-08_
 ```
 nginx :80                 reverse proxy: /api/* → backend, else → frontend
   ├── backend :8080       Flask app
-  ├── worker-documents    Huey consumer for documents_huey
-  ├── worker-triggers     Huey consumer for triggers_huey
-  ├── worker-wiki-bm25    Huey consumer for wiki_bm25_huey
-  └── frontend :3000      Next.js standalone
+  ├── worker-documents    task worker for documents_queue
+  ├── worker-triggers     task worker for triggers_queue
+  ├── worker-wiki-bm25    task worker for wiki_bm25_queue
+  ├── frontend :3000      Next.js standalone
+  └── postgres :5432      Postgres 17 + pg_textsearch + pgmq (custom image)
 ```
 
-All three workers are the same image; the queue name is a positional
-arg. Queue rationale + status live in
-[background-tasks](../background-tasks/background-tasks.md).
+All three workers are the same image as the backend; the queue name is a
+positional arg to `python -m app.tasks.run_worker`. Queue rationale +
+status live in [background-tasks](../background-tasks/background-tasks.md).
 
-All four services are defined in `docker-compose.yml` at the repo root.
+All six services are defined in `docker-compose.yml` at the repo root.
 Compose is the canonical local path. A k8s/EKS deploy story also lives in
 `deploy/` — see "Production deploy (EKS + Helm)" below.
+
+Postgres is built locally from `deploy/postgres/Dockerfile` because no
+upstream image bundles both `pg_textsearch` (must load via
+`shared_preload_libraries`, hence the `command:` override in compose) and
+`pgmq`. Production deploys reuse the same Dockerfile or provision an
+external Postgres with both extensions available.
 
 ### Volumes
 
 | Volume | Mount | Purpose |
 |---|---|---|
-| `app-data`  | `/data`  | `app.sqlite` + `queue.sqlite` |
 | `wiki-data` | `/wiki`  | git-backed wiki working tree (per V0 brief) |
 
-**Two separate volumes by design:** the SQLite store can be backed by
-fast block storage; the wiki repo can live on a slower (or
-network-mounted, replicated, snapshotted) volume since it's the durable
-content store.
+App state and the pgmq task queues live in Postgres (`DATABASE_URL`);
+the workload itself only needs the wiki repo on disk. In compose,
+`local_data/pgdata/` is the data dir for the local `postgres` service.
 
 ### Env model
 
 Runtime config split:
 - **Static / boot-time** — env vars (`SECRET_KEY`, `WIKI_DIR`,
-  `*_DB_PATH`, `AUTH_MODE`, `ALLOWED_EMAILS`, OIDC settings).
+  `DATABASE_URL`, `AUTH_MODE`, `ALLOWED_EMAILS`, OIDC settings).
 - **Mutable / admin-managed** — DB rows (LLM provider/model/keys via
   `llm_settings`).
 
@@ -64,7 +69,9 @@ the DB and are configured at runtime via the admin UI.
   values only sent in PUT bodies.
 
 ### Observability (minimal today)
-- Python logging at INFO via `logging.basicConfig` in `app/main.py`.
+- Python logging via `app.utils.logging.setup_logging`, called once per
+  process (backend `create_app`, each worker's `main`). Format includes
+  `<file>:<line>`; level controlled by `LOG_LEVEL` (default `INFO`).
 - Audit log of system events lives in the `events` table (kind +
   payload). This is the durable audit trail, not just logs.
 - No metrics / tracing yet.
@@ -73,16 +80,15 @@ the DB and are configured at runtime via the admin UI.
 - `init_db()` runs migrations on every backend boot; idempotent.
 - `ensure_wiki_repo()` initializes the git repo if missing; sets the
   hardcoded identity `agent-wiki@local`.
-- The worker container shares both volumes and runs migrations
-  implicitly via `app.tasks.huey_app` import (not strictly necessary
-  today, but cheap).
+- The worker container mounts the wiki-data PVC and connects to the
+  same Postgres as the backend; it picks up the schema lazily on first
+  ORM session use rather than running `init_db()` itself.
 
 ### Backups
 Not implemented. When this matters:
-- `app.sqlite` — periodic `VACUUM INTO` snapshot to the wiki volume or
-  external storage. WAL mode is on; mid-write copies are fine.
-- `queue.sqlite` — recoverable; tasks can be re-driven from the events
-  log.
+- **Postgres** (app state + pgmq queues) — use whatever your managed
+  Postgres provides (PITR, daily snapshots). The pgmq archive tables
+  (`pgmq.a_<name>`) are useful as a forensic trail for failed tasks.
 - `wiki-data` — push a mirror to a remote git remote on a cron. The wiki
   *is* a git repo; this is the cleanest backup story.
 
@@ -96,23 +102,28 @@ Not implemented. When this matters:
   optional `letsencrypt-prod` ClusterIssuer (gated on `cert_manager_email`).
   State is local and gitignored.
 - **`deploy/helm/agent-workspace/`** — chart with backend/worker/frontend
-  Deployments, two PVCs (`app-data` 5Gi, `wiki-data` 10Gi, both `gp3`/RWO),
-  a Secret for `SECRET_KEY` (+ optional OIDC client secret), and an Ingress
-  that routes `/api/*` → backend and `/` → frontend (replacing the
-  in-cluster nginx pod that compose uses).
+  Deployments, a `wiki-data` 10Gi `gp3`/RWO PVC, a Secret for
+  `SECRET_KEY` + `DATABASE_URL` (+ optional OIDC client secret), and an
+  Ingress that routes `/api/*` → backend and `/` → frontend (replacing
+  the in-cluster nginx pod that compose uses). The chart does **not**
+  provision Postgres — provision it externally (managed RDS / a Postgres
+  17 chart with `pg_textsearch` and `pgmq` available) and inject the
+  connection string via the secret.
 
 Constraints baked into the chart:
-- **Backend pinned to 1 replica** + **one Deployment per Huey queue** (one
+- **Backend pinned to 1 replica** + **one Deployment per pgmq queue** (one
   worker process for each of `documents`, `triggers`, `wiki_bm25`), all
   using `strategy: Recreate` and a `podAffinity` rule that co-schedules
-  them on the backend's node — RWO PVCs + single-writer SQLite + single
-  git working tree leave no room for HA at this layer.
+  them on the backend's node — RWO `wiki-data` PVC plus a single git
+  working tree leaves no room for HA at this layer. Each worker also
+  runs the in-process periodic-task scheduler, so a second replica per
+  queue would double-fire the cron tasks.
 - **Frontend** is stateless and free to scale.
 - **No nginx pod** — ingress-nginx replaces it. Path routing lives in the
   Ingress resource; `proxy-body-size` matches the 25m the compose nginx had.
 - **Single-AZ node group.** EBS volumes are AZ-bound; pinning the main node
   group to a single subnet (`slice(module.vpc.private_subnets, 0, 1)`)
-  prevents cross-AZ node replacements from stranding the chart's RWO PVCs.
+  prevents cross-AZ node replacements from stranding the `wiki-data` PVC.
 - **`t3.large` node default.** `t3.medium` maxes at 17 pods/node; cluster
   services + the chart's pods exhaust the budget and the worker can't
   schedule. `t3.large` supports 35.
@@ -177,8 +188,8 @@ back to a prior day.
 
 ### Production deltas (still to do)
 - A health check that exercises `init_db()` and an LLM ping (optional).
-- Backup automation (cron `git push --mirror` for the wiki PVC, `VACUUM INTO`
-  for SQLite). Not wired.
+- Backup automation: cron `git push --mirror` for the wiki PVC, plus
+  Postgres PITR / snapshots driven by the managed-DB layer. Not wired.
 
 ---
 
@@ -187,7 +198,7 @@ back to a prior day.
 ### Working
 - `docker-compose.yml` boots all four containers locally.
 - Volumes wired correctly; data persists across restarts.
-- Migrations run on boot; FTS5 active.
+- Migrations run on boot via `init_db()` → `alembic upgrade head` (bootstrap migration `0001_initial` creates extensions, tables, and pgmq queues; subsequent migrations are explicit `op.alter_table` diffs); pg_textsearch BM25 index built.
 - Wiki repo auto-initializes.
 - Worker registers tasks on import.
 - **End-to-end production deploy.** `deploy/terraform/` (template) +
@@ -224,7 +235,8 @@ back to a prior day.
 1. **`/api/health` improvement** — verify DB reachable, queue path
    writable, optionally pull an LLM-settings row count.
 2. **Backup recipe** — short doc covering: cron `git push --mirror` for
-   the wiki, `VACUUM INTO` for SQLite.
+   the wiki, plus whatever PITR/snapshot story your managed Postgres
+   provides for app state and the pgmq queues.
 
 ### Open questions
 - Multi-worker concurrency on the wiki repo (lock strategy) — flagged

@@ -1,46 +1,46 @@
-"""Entry point for a Huey consumer container.
+"""Entry point for a worker container.
 
-Run with: ``python -m app.tasks.run_worker <queue>`` where ``<queue>`` is one
-of ``documents``, ``triggers``, ``wiki_bm25``. Each queue gets its own
-worker process — see ``app/tasks/huey_app.py`` for the queue rationale.
+Run with: ``python -m app.tasks.run_worker <queue>`` where ``<queue>`` is
+one of ``documents``, ``triggers``, ``wiki_bm25``. Each queue gets its
+own worker process — see ``app/tasks/queues.py`` for the queue
+rationale.
 
 We import every task module up front (regardless of which queue we're
-serving) so all ``@<huey>.task()`` decorators run and Huey's task registry
-is populated. The consumer then only pulls from the queue it was launched
-with; tasks bound to other queues are inert in this process.
+serving) so all ``@<queue>.task()`` decorators run and the per-queue
+handler registry is populated. The consumer then only pulls from the
+queue it was launched with; tasks bound to other queues are inert in
+this process.
 """
 from __future__ import annotations
 
 import argparse
-import sys
 
-# Importing modules registers tasks on their respective Huey instances.
-from app.tasks import agent_activity, document_update, periodic, reindex, triggers  # noqa: F401
-from app.tasks.huey_app import QUEUES
+# Importing modules registers tasks on their respective queues.
+from app.tasks import agent_activity, document_update, periodic, reindex, triggers  # noqa: F401  # pyright: ignore[reportUnusedImport]
+from app.tasks.queues import QUEUES
+from app.tasks.queue import run_consumer
 from app.utils.logging import setup_logging
 
-
-# Per-queue worker counts. Indexer is cheap so we give it more headroom;
-# documents is LLM-bound and we don't want to fan out concurrent provider
-# calls from a single host. Tune as we get real load data.
-_WORKERS = {
-    "documents": 2,
+# Per-queue handler concurrency (= number of worker threads in this process).
+# ``documents`` is LLM-bound; we don't want concurrent provider calls from a
+# single host so it stays at 1. The cheap queues run wider.
+_CONCURRENCY = {
+    "documents": 1,
     "triggers": 4,
     "wiki_bm25": 4,
 }
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run a Huey consumer for one queue.")
+    parser = argparse.ArgumentParser(description="Run a task-queue consumer for one queue.")
     parser.add_argument("queue", choices=sorted(QUEUES.keys()))
     args = parser.parse_args()
 
     setup_logging()
-    huey = QUEUES[args.queue]
-    workers = _WORKERS[args.queue]
+    queue = QUEUES[args.queue]
+    concurrency = _CONCURRENCY[args.queue]
 
-    from huey.consumer import Consumer
-    Consumer(huey, workers=workers, worker_type="thread").run()
+    run_consumer(queue, concurrency=concurrency)
 
 
 if __name__ == "__main__":

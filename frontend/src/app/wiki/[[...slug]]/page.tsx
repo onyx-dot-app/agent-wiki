@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import useSWR from "swr";
 
 import { AppShell } from "@/components/common/AppShell";
 import { TriggerModal } from "@/components/triggers/TriggerModal";
@@ -63,8 +64,16 @@ export default function WikiRoute() {
 
 function Explorer({ dir }: { dir: string }) {
   const router = useRouter();
-  const [paths, setPaths] = useState<string[]>([]);
-  const [error, setError] = useState<string | null>(null);
+  const { data, error: listError, mutate: mutatePaths } = useSWR<ListResponse>("/documents");
+  const paths = data?.paths ?? [];
+  const [mutationError, setMutationError] = useState<string | null>(null);
+  const error = mutationError ?? (listError instanceof Error ? listError.message : null);
+  const setError = setMutationError;
+  // Force the cache to revalidate from the server. Used after writes
+  // (create / delete / move) to pull in the new tree.
+  const refresh = useCallback(() => {
+    void mutatePaths();
+  }, [mutatePaths]);
   const [busyPath, setBusyPath] = useState<string | null>(null);
   const [creating, setCreating] = useState<"doc" | "folder" | null>(null);
   const [newName, setNewName] = useState("");
@@ -74,16 +83,6 @@ function Explorer({ dir }: { dir: string }) {
   const [renaming, setRenaming] = useState<string | null>(null);
   const [dragSource, setDragSource] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
-
-  const refresh = useCallback(() => {
-    apiFetch<ListResponse>("/documents")
-      .then((r) => setPaths(r.paths))
-      .catch((e) => setError(e instanceof Error ? e.message : "failed to list"));
-  }, []);
-
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
 
   const { subdirs, files } = useMemo(() => {
     const prefix = dir ? dir + "/" : "";

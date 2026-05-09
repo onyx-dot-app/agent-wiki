@@ -14,10 +14,12 @@ architectural context; this doc is the concrete runbook.
 - Backend venv at `backend/.venv` (Python 3.11). Deps installed via
   `pip install -e .` from `backend/pyproject.toml`.
 - `node_modules/` present in `frontend/`.
-- `.env` at the repo root. Data paths point at `local_data/`:
+- `.env` at the repo root:
   - `WIKI_DIR=…/local_data/wiki`
-  - `APP_DB_PATH=…/local_data/app.sqlite`
-  - `QUEUE_DB_PATH=…/local_data/queue.sqlite`
+  - `DATABASE_URL=postgresql://agent:agent@localhost:5432/agent_wiki` — app
+    state and pgmq queues both live here. The host needs Postgres 17 with
+    the `pg_textsearch` and `pgmq` extensions installed (or run
+    `docker compose up postgres` and connect to the compose service).
   - `BACKEND_URL=http://localhost:8080` — used by the Next dev-server
     rewrite to proxy `/api/*` to Flask.
 - The wiki dir is a git repo; for files to show up in the UI they must be
@@ -123,9 +125,9 @@ commit the seed as the initial revision.
 
 ## How to run — five processes
 
-Background work is split into three Huey queues, each with its own worker
+Background work is split into three pgmq queues, each with its own worker
 process (see
-[background-tasks](background-tasks/background-tasks.md#three-queues--one-huey-instance-each-sharing-queuesqlite)).
+[background-tasks](background-tasks/background-tasks.md#three-queues--one-pgmq-queue-per-logical-lane)).
 So a full local stack is **backend + three workers + frontend**. All five
 are long-lived, so an agent should background them.
 
@@ -148,8 +150,9 @@ cd backend
 
 - `app.main:create_app()` — gunicorn calls the factory; no app-level glue
   needed.
-- `--workers 1` — single worker keeps SQLite happy (the app doesn't use a
-  multi-writer locking strategy).
+- `--workers 1` — single worker matches the production deployment (the
+  per-queue cron scheduler runs in-process and doesn't tolerate replicas
+  fighting over leadership; Postgres itself handles concurrency fine).
 - `--reload` — gunicorn's master watches `backend/app/**` and signals the
   worker on change.
 - `--graceful-timeout 30` — on reload, the master gives the old worker up
@@ -169,7 +172,7 @@ a file save ≈ longest in-flight request + ~250 ms.
 If you want the simpler dev server (no graceful reload — kills in-flight
 requests on save), `./.venv/bin/python -m app.main` still works.
 
-### 2. Workers (Huey) — three processes, one per queue
+### 2. Workers (pgmq) — three processes, one per queue
 
 Each worker takes the queue name as a positional arg. Run all three (one
 per shell, or background them) — the app fully functions only when all
@@ -179,11 +182,12 @@ three are alive:
 cd backend
 ./.venv/bin/python -m app.tasks.run_worker documents   # LLM doc-updater
 ./.venv/bin/python -m app.tasks.run_worker triggers    # NL trigger eval (delta + scheduled)
-./.venv/bin/python -m app.tasks.run_worker wiki_bm25   # FTS5 / BM25 reindex
+./.venv/bin/python -m app.tasks.run_worker wiki_bm25   # BM25 reindex
 ```
 
-Same venv. Same dotenv auto-load. All three share `local_data/queue.sqlite`
-(Huey namespaces tables by queue name), so there's no separate setup.
+Same venv. Same dotenv auto-load. All three pull from `pgmq.q_<name>`
+in the configured Postgres (`DATABASE_URL`); the `pgmq.create()` calls in `init_db`
+creates the queues on first `init_db()`, so there's no separate setup.
 
 What each queue owns, what breaks if you skip its worker, and the full
 design rationale live in
@@ -230,7 +234,7 @@ lsof -ti:3000,8080 | xargs -r kill -9
 ## Running from VS Code / Cursor
 
 A `.vscode/launch.json` is checked in with five launch configs (backend,
-three Huey workers, frontend) plus a compound that starts all of them
+three task workers, frontend) plus a compound that starts all of them
 together. The configs use the same Python venv (`backend/.venv`) and the
 repo-root `.env` that the CLI path uses, so behavior matches.
 
@@ -253,9 +257,9 @@ the "Python: Select Interpreter" command and point it at
 | Config | What it does | Notes |
 |---|---|---|
 | `Backend (Flask via gunicorn)` | `python -m gunicorn app.main:create_app() --bind 127.0.0.1:8080 --workers 1 --reload --graceful-timeout 30 --timeout 60`, cwd `backend/`. | Reloads on Python save with **graceful drain** of in-flight requests. `subProcess: true` so debugpy follows the worker fork (and re-attaches to the new worker after `--reload`). `justMyCode: false` lets you step into Flask/gunicorn/etc. |
-| `Worker — documents (LLM doc-updater)` | `python -m app.tasks.run_worker documents`. | Drains `documents_huey` — see [background-tasks](background-tasks/background-tasks.md). |
-| `Worker — triggers (NL trigger eval)` | `python -m app.tasks.run_worker triggers`. | Drains `triggers_huey` — see [background-tasks](background-tasks/background-tasks.md). |
-| `Worker — wiki_bm25 (FTS5 / BM25)` | `python -m app.tasks.run_worker wiki_bm25`. | Drains `wiki_bm25_huey` — see [background-tasks](background-tasks/background-tasks.md). |
+| `Worker — documents (LLM doc-updater)` | `python -m app.tasks.run_worker documents`. | Drains `documents_queue` — see [background-tasks](background-tasks/background-tasks.md). |
+| `Worker — triggers (NL trigger eval)` | `python -m app.tasks.run_worker triggers`. | Drains `triggers_queue` — see [background-tasks](background-tasks/background-tasks.md). |
+| `Worker — wiki_bm25 (BM25)` | `python -m app.tasks.run_worker wiki_bm25`. | Drains `wiki_bm25_queue` — see [background-tasks](background-tasks/background-tasks.md). |
 | `Frontend (Next dev)` | `npm run dev` in `frontend/`, env loaded from repo-root `.env`. | This is the `set -a / source ../.env` dance, but done by VS Code. |
 | `Browser (Chrome attach)` | Launches Chrome at `http://localhost:3000`. | Optional — only if you want frontend breakpoints. |
 | `App: backend + 3 workers + frontend` (compound) | Runs the five above in parallel. `stopAll` so killing one stops the others. | The single click that boots the whole stack. |
@@ -307,7 +311,7 @@ the shell `source ../.env`, just driven by the editor.
 ### When a human runs the processes in their own terminals
 
 Each process logs to stdout/stderr in the terminal where it was started.
-Flask logs through `werkzeug` at INFO; Huey logs to stdout. Nothing is
+Flask logs through `werkzeug` at INFO; pgmq logs to stdout. Nothing is
 written to a file by default.
 
 ### When an agent runs the processes via the Claude Code task harness
@@ -331,13 +335,19 @@ across runs, redirect manually, e.g.:
 ./.venv/bin/python -m app.main > /tmp/agent-wiki-backend.log 2>&1
 ```
 
-### SQLite databases (useful for poking at state)
+### Postgres (useful for poking at state)
 
-- `local_data/app.sqlite` — users, documents, triggers cache, events,
-  FTS5, llm_settings, _migrations.
-- `local_data/queue.sqlite` — Huey task queue.
+App state (users, documents, triggers cache, events, BM25-indexed
+`documents_fts`, `llm_settings`, schema state) and the three pgmq
+queues (`pgmq.q_documents`, `pgmq.q_triggers`, `pgmq.q_wiki_bm25`)
+all live in the database pointed at by `DATABASE_URL`.
 
-Open with `sqlite3 local_data/app.sqlite` for ad-hoc inspection.
+```
+psql "$DATABASE_URL"
+\dt                     # app state tables
+\dt pgmq.*              # queue tables
+SELECT count(*) FROM pgmq.q_wiki_bm25;
+```
 
 ### Wiki git history
 
@@ -400,11 +410,25 @@ as a last resort.
 
 ### Database schema looks stale
 
-Migrations run on startup via `app/db/sqlite.py:init_db()`. If you added a
-new file under `app/db/migrations/`, restart the backend. To re-bootstrap
-from scratch: stop the app, `rm local_data/app.sqlite*` (and re-create the
-admin user via the signup flow). Don't edit applied migrations — add a
-new one.
+Migrations run on startup via `app/db/session.py:init_db()`, which calls
+`alembic upgrade head` against `DATABASE_URL`.
+
+To author a new migration after editing `app/db/models.py`:
+
+```
+cd backend
+./.venv/bin/alembic revision --autogenerate -m "<short-slug>"
+```
+
+The new file lands under `app/db/migrations/versions/`. Review it
+(autogenerate misses some kinds of change — column rename, check
+constraint tweaks) and commit. Restart the backend and the migration
+applies automatically.
+
+To re-bootstrap from scratch: stop the app, `DROP DATABASE
+agent_wiki; CREATE DATABASE agent_wiki;` (and re-create the admin user
+via the signup flow). Don't edit a migration that's already shipped —
+add a new one.
 
 ---
 
@@ -421,7 +445,7 @@ new one.
 3. Frontend deps: `cd frontend && npm install`.
 4. (Optional) Seed the wiki: `mkdir -p local_data/wiki && cp -R wiki/seed/. local_data/wiki/`. Do this **before** the first backend start so `ensure_wiki_repo()` commits the seed as the initial revision. See "Wiki dir — git requirements and setup" above for why this matters and what to do if you've already started the backend with an empty wiki dir.
 5. Start the three processes per the section above. The first hit to the
-   backend will create `local_data/app.sqlite`, run migrations, and
+   backend will run `init_db()` against `DATABASE_URL`, run migrations, and
    `ensure_wiki_repo()` will init `local_data/wiki/` as a git repo.
 6. Sign up at http://localhost:3000/signup — the first account is
    auto-promoted to admin.
@@ -436,7 +460,7 @@ new one.
 - `backend/app/config.py` — env loading.
 - `backend/app/wiki/git.py` — only place that shells out to git.
 - `backend/app/api/documents.py` — wiki listing/read endpoints.
-- `backend/app/tasks/run_worker.py` — Huey worker entry.
+- `backend/app/tasks/run_worker.py` — task worker entry.
 - `frontend/next.config.js` — `/api/*` rewrite.
 - `frontend/src/lib/api.ts` — `apiFetch` (the only allowed network call).
 - `frontend/src/lib/auth.tsx` — auth context.

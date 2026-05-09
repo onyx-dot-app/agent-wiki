@@ -10,8 +10,9 @@ Only relative `.md` links are checked. Absolute URLs (``http(s)://``,
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
 from pathlib import Path
+
+from pydantic import BaseModel, ConfigDict
 
 from app.wiki import filesystem
 
@@ -22,8 +23,9 @@ from app.wiki import filesystem
 _LINK_RE = re.compile(r"(?<!\!)\[([^\]]+)\]\(([^)\s]+)\)")
 
 
-@dataclass(frozen=True)
-class BrokenLink:
+class BrokenLink(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     text: str       # link text inside the brackets
     target: str     # raw href as it appeared in the markdown
     resolved: str   # wiki-relative path we tried to resolve to
@@ -39,7 +41,7 @@ def find_broken_links(body: str, doc_path: str) -> list[BrokenLink]:
     base_dir = Path(doc_path).parent  # may be Path('.')
 
     broken: list[BrokenLink] = []
-    seen: set[str] = set()
+    seen: set[tuple[str, str, str]] = set()
 
     for match in _LINK_RE.finditer(body):
         text, raw_target = match.group(1), match.group(2)

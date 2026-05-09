@@ -21,7 +21,7 @@ except the inbound webhook endpoints (which use per-source signing secrets).
 | Method | Path | Notes |
 |---|---|---|
 | GET    | `/api/documents`                | list, optional `?prefix=` |
-| GET    | `/api/documents/search`         | bm25 over FTS5 |
+| GET    | `/api/documents/search`         | BM25 over `pg_textsearch` |
 | GET    | `/api/documents/:id`            | read latest body |
 | PUT    | `/api/documents/:id`            | agent direct edit → commits + reindex |
 | POST   | `/api/documents/ingest`         | generic update payload → LLM agent reconciles |

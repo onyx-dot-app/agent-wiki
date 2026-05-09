@@ -39,6 +39,8 @@ import json
 import logging
 from typing import Any, Iterator
 
+from pydantic import BaseModel, Field
+
 from app.llm import providers
 from app.llm.errors import LLMError
 from app.llm.settings import get as get_llm_settings
@@ -48,6 +50,31 @@ log = logging.getLogger(__name__)
 DEFAULT_MAX_TOKENS = 4096
 
 StreamEvent = dict[str, Any]
+
+
+class ToolCall(BaseModel):
+    """Normalized tool-call shape emitted by every provider."""
+
+    id: str
+    name: str
+    arguments: dict[str, Any]
+
+
+class Usage(BaseModel):
+    """Token counts reported by the provider for a single completion."""
+
+    input_tokens: int = 0
+    output_tokens: int = 0
+    reasoning_tokens: int = 0
+
+
+class CompletionResult(BaseModel):
+    """Drained result of a single LLM completion. Provider-agnostic."""
+
+    text: str = ""
+    tool_calls: list[ToolCall] = Field(default_factory=list)
+    stop_reason: str = ""
+    usage: Usage = Field(default_factory=Usage)
 
 
 def _debug_dump(label: str, obj: Any) -> None:
@@ -137,33 +164,41 @@ def complete(
     model: str | None = None,
     tools: list[dict[str, Any]] | None = None,
     max_tokens: int = DEFAULT_MAX_TOKENS,
-) -> dict[str, Any]:
-    """Drain ``stream()`` into the historical dict for non-streaming callers.
+) -> CompletionResult:
+    """Drain ``stream()`` into a ``CompletionResult`` for non-streaming callers.
 
     Request/response DEBUG logging happens inside ``stream()`` — don't
     re-log here.
     """
     text_parts: list[str] = []
-    tool_calls: list[dict[str, Any]] = []
+    tool_calls: list[ToolCall] = []
     stop_reason = ""
-    usage = {"input_tokens": 0, "output_tokens": 0, "reasoning_tokens": 0}
+    usage = Usage()
     for ev in stream(messages, model=model, tools=tools, max_tokens=max_tokens):
         t = ev["type"]
         if t == "text_delta":
             text_parts.append(ev["text"])
         elif t == "tool_call":
             tool_calls.append(
-                {"id": ev["id"], "name": ev["name"], "arguments": ev["arguments"]}
+                ToolCall(id=ev["id"], name=ev["name"], arguments=ev["arguments"])
             )
         elif t == "done":
             stop_reason = ev["stop_reason"]
-            usage = ev["usage"]
-    return {
-        "text": "".join(text_parts),
-        "tool_calls": tool_calls,
-        "stop_reason": stop_reason,
-        "usage": usage,
-    }
+            usage = Usage(**ev["usage"])
+    return CompletionResult(
+        text="".join(text_parts),
+        tool_calls=tool_calls,
+        stop_reason=stop_reason,
+        usage=usage,
+    )
 
 
-__all__ = ["DEFAULT_MAX_TOKENS", "StreamEvent", "stream", "complete"]
+__all__ = [
+    "DEFAULT_MAX_TOKENS",
+    "CompletionResult",
+    "StreamEvent",
+    "ToolCall",
+    "Usage",
+    "complete",
+    "stream",
+]

@@ -8,7 +8,7 @@ proper home.
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, cast
 
 
 def safe_json_loads(s: str) -> dict[str, Any]:
@@ -21,12 +21,12 @@ def safe_json_loads(s: str) -> dict[str, Any]:
     if not s:
         return {}
     try:
-        parsed = json.loads(s)
+        parsed: object = json.loads(s)
     except json.JSONDecodeError:
         return {"_raw": s}
     if not isinstance(parsed, dict):
         return {"_raw": s}
-    return parsed
+    return cast(dict[str, Any], parsed)
 
 
 def split_system(messages: list[dict[str, Any]]) -> tuple[str | None, list[dict[str, Any]]]:
@@ -61,7 +61,8 @@ def tool_call_id_to_name(messages: list[dict[str, Any]]) -> dict[str, str]:
     for m in messages:
         if m.get("role") != "assistant":
             continue
-        for tc in m.get("tool_calls") or []:
+        tool_calls: list[dict[str, Any]] = m.get("tool_calls") or []
+        for tc in tool_calls:
             tc_id = tc.get("id")
             tc_name = tc.get("name")
             if isinstance(tc_id, str) and isinstance(tc_name, str):

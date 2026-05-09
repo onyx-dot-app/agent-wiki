@@ -2,24 +2,24 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
 from pathlib import Path
 
 from dotenv import load_dotenv
+from pydantic import BaseModel, ConfigDict
 
 # Load the repo-root .env so non-Docker launchers (python -m app.main, pytest,
-# huey worker) get the same env as `flask run` and docker compose. Search
+# task workers) get the same env as `flask run` and docker compose. Search
 # upward from this file rather than relying on CWD.
 _repo_root = Path(__file__).resolve().parents[2]
 load_dotenv(_repo_root / ".env")
 
 
-@dataclass(frozen=True)
-class Config:
+class Config(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     secret_key: str
     wiki_dir: str
-    app_db_path: str
-    queue_db_path: str
+    database_url: str          # Postgres connection string for app state + pgmq queues
     max_queue_size: int
 
     auth_mode: str  # "basic" | "oidc"
@@ -49,8 +49,10 @@ def load_config() -> Config:
     return Config(
         secret_key=os.environ.get("SECRET_KEY", "dev-secret"),
         wiki_dir=os.environ.get("WIKI_DIR", "/wiki"),
-        app_db_path=os.environ.get("APP_DB_PATH", "/data/app.sqlite"),
-        queue_db_path=os.environ.get("QUEUE_DB_PATH", "/data/queue.sqlite"),
+        database_url=os.environ.get(
+            "DATABASE_URL",
+            "postgresql://agent:agent@postgres:5432/agent_wiki",
+        ),
         max_queue_size=_positive_int("MAX_QUEUE_SIZE", 1000),
         auth_mode=os.environ.get("AUTH_MODE", "basic"),
         oidc_issuer=os.environ.get("OIDC_ISSUER", ""),

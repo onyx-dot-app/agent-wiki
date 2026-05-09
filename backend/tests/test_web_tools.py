@@ -7,7 +7,6 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-import pytest
 
 from app import web as web_pkg
 from app.web.models import WebContent, WebSearchResult

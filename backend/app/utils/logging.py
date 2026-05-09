@@ -1,9 +1,9 @@
 """Centralized logging configuration.
 
 Call ``setup_logging()`` once per process at startup (Flask app factory,
-Huey worker entry point, scripts). Module code uses the standard
-``logging.getLogger(__name__)`` pattern; the root configuration set here
-gives every logger consistent formatting and level handling.
+``app.tasks.run_worker`` entry point, scripts). Module code uses the
+standard ``logging.getLogger(__name__)`` pattern; the root configuration
+set here gives every logger consistent formatting and level handling.
 
 Format: ``<ts> [<level>] <logger> (<file>:<line>): <message>``
 
@@ -44,7 +44,7 @@ def setup_logging(level: str | int | None = None) -> None:
 
     # Tame noisy third-party loggers; flip to DEBUG via env if needed.
     logging.getLogger("werkzeug").setLevel(logging.INFO)
-    logging.getLogger("huey").setLevel(logging.INFO)
+    logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
 
     _configured = True
 

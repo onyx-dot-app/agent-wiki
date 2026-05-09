@@ -227,7 +227,9 @@ def _record_seen_paths(tool_name: str, result: Any) -> None:
     seen = seen_doc_paths.get()
     if seen is None or not isinstance(result, dict):
         return
-    path = result.get("path")
+    from typing import cast
+    result_dict = cast(dict[str, Any], result)
+    path = result_dict.get("path")
     if isinstance(path, str) and path:
         seen.add(path)
 
@@ -239,7 +241,7 @@ def _stringify(value: Any) -> str:
         return str(value)
 
 
-def run_chat_turn(user_id: str, conversation_id: str, message: str) -> dict:
+def run_chat_turn(user_id: str, conversation_id: str, message: str) -> dict[str, Any]:
     """Persistence-aware wrapper used by the HTTP layer.
 
     Loads prior turns for `conversation_id`, appends the new user `message`,

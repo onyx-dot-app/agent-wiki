@@ -1,9 +1,11 @@
 # Defaults for agent-workspace.
 #
-# Backend + worker share two PVCs (app-data, wiki-data) and run as a single
-# replica each — SQLite is single-writer and the wiki repo has no concurrent-
-# write story (see CLAUDE.md / background-tasks doc). The frontend is
-# stateless and can scale.
+# Backend + worker share one RWO PVC (wiki-data) and run as a single
+# replica each — the wiki git working tree has no concurrent-write story,
+# and the per-queue periodic-task scheduler runs in-process (multiple
+# replicas would double-fire crons). App state + task queues live in
+# Postgres, reached via DATABASE_URL. See CLAUDE.md / background-tasks doc.
+# The frontend is stateless and can scale.
 
 nameOverride: ""
 fullnameOverride: ""
@@ -24,6 +26,12 @@ imagePullSecrets: []
 
 # Flask SECRET_KEY. Generate with `openssl rand -hex 32`. Required.
 secretKey: ""
+
+# Postgres connection string for app state + pgmq task queues. Required.
+# Postgres 17 with `pg_textsearch` (BM25 search) and `pgmq` (task queue)
+# extensions installed — the chart does not provision Postgres. Form:
+# postgresql://USER:PASSWORD@HOST:5432/DBNAME
+databaseUrl: ""
 
 # Comma-separated email whitelist for signup. Empty = anyone.
 allowedEmails: ""
@@ -69,10 +77,12 @@ backend:
 
 worker:
   # One Deployment is created per queue; replicaCount applies per queue.
-  # Keep at 1 — backend + worker pods share RWO PVCs and must co-schedule.
+  # Keep at 1 — backend + worker pods share an RWO wiki-data PVC and must
+  # co-schedule, AND the per-queue periodic-task scheduler runs in-process
+  # (running multiple replicas would double-fire the cron tasks).
   replicaCount: 1
-  # Three Huey queues, one consumer process each. Match
-  # `backend/app/tasks/huey_app.py:QUEUES`. Don't add a fourth without
+  # Three pgmq queues, one consumer process each. Match
+  # `backend/app/tasks/queues.py:QUEUES`. Don't add a fourth without
   # corresponding code.
   queues:
     - documents
@@ -96,11 +106,10 @@ frontend:
       memory: 512Mi
 
 persistence:
-  appData:
-    # SQLite app.sqlite + queue.sqlite live here. Mounted at /data on backend + worker.
-    size: 5Gi
-    storageClass: gp3
-    accessMode: ReadWriteOnce
+  # App state and task queues both live in Postgres (not modeled by this
+  # chart yet — provision a managed Postgres 17 with `pg_textsearch` and
+  # `pgmq` extensions, then set DATABASE_URL on the backend + worker pods).
+  # The only volume the workload still needs is the wiki working tree.
   wikiData:
     # Git working tree. Mounted at /wiki on backend + worker.
     size: 10Gi
