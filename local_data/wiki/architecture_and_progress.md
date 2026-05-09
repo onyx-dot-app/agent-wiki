@@ -583,4 +583,25 @@ area docs.
   `SESSION_COOKIE_SECURE` (was hard-coded `False`). 14 unit tests in
   `tests/test_auth_oidc.py` cover upsert + every callback branch.
 
+- **2026-05-08** — **Automated dogfood deploy live.** Image build and
+  cluster rollout are now cron-driven across two repos. Build side:
+  `agent-wiki:.github/workflows/nightly-build.yml` (10 UTC daily +
+  `workflow_dispatch`) matrix-builds backend + frontend multi-arch and
+  pushes `onyxdotapp/agent-wiki-{backend,frontend}:nightly-latest-YYYYMMDD`
+  to Docker Hub. Deploy side: a corresponding workflow in the private
+  cluster repo runs an hour later (11 UTC + dispatch with `version_tag`
+  input), probes Docker Hub for both images at the requested tag,
+  assumes an IAM role via GitHub OIDC, pulls `SECRET_KEY` + the OIDC
+  client secret from AWS Secrets Manager, and runs `helm upgrade
+  --install` with `--set image.{backend,frontend}.tag` + the secrets.
+  Slack notifications fire on kickoff/result for ad-hoc runs and on
+  failure for scheduled. `ods deploy wiki` (shipped in the
+  `onyx-devtools` PyPI package) wraps the chain end-to-end so an ad-hoc
+  deploy is a single command. The pre-existing `v*` tag-driven build
+  (`docker-build-push.yml`) is retained for cutting named releases; the
+  automated path uses the date-rolled `nightly-latest-*` tag instead so
+  the deploy side doesn't have to chase a moving "latest". Secrets in
+  AWS Secrets Manager replaces the prior `helm --set` from 1Password.
+  See [infra/infra.md](infra/infra.md) for the full shape.
+
 _(Append new entries with a date prefix. Cross-cutting only.)_
