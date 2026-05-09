@@ -14,7 +14,7 @@ from app import web
 log = logging.getLogger(__name__)
 
 DEFAULT_NUM = 10
-MAX_NUM = 10
+MAX_NUM = 20
 
 
 def handle(args: dict[str, Any]) -> Any:

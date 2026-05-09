@@ -2,8 +2,15 @@
 
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 
-import { ApiError, apiStream } from "@/lib/api";
+import { ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import {
+  createSession,
+  getSession,
+  streamMessage,
+  type ChatSession,
+} from "@/lib/chat";
+import { ChatHistoryPanel } from "@/components/chat/ChatHistoryPanel";
 
 interface ChatMessage {
   role: "user" | "assistant";
@@ -22,6 +29,7 @@ type Mode = "closed" | "widget" | "expanded";
 
 const STORAGE_KEY_MODE = "chat-widget:mode";
 const STORAGE_KEY_WIDTH = "chat-widget:expanded-width";
+const STORAGE_KEY_SESSION = "chat-widget:session-id";
 const DEFAULT_EXPANDED_WIDTH = 480;
 const MIN_EXPANDED_WIDTH = 280;
 
@@ -30,12 +38,16 @@ export function ChatWidget() {
   const [mode, setMode] = useState<Mode>("closed");
   const [expandedWidth, setExpandedWidth] = useState<number>(DEFAULT_EXPANDED_WIDTH);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [toolHint, setToolHint] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const resizingRef = useRef(false);
+  const hydratedSessionRef = useRef(false);
 
   // Hydrate persisted UI state on mount.
   useEffect(() => {
@@ -47,6 +59,8 @@ export function ChatWidget() {
         const n = parseInt(w, 10);
         if (!Number.isNaN(n)) setExpandedWidth(clampWidth(n));
       }
+      const sid = window.localStorage.getItem(STORAGE_KEY_SESSION);
+      if (sid) setSessionId(sid);
     } catch {
       // ignore
     }
@@ -67,6 +81,44 @@ export function ChatWidget() {
       // ignore
     }
   }, [expandedWidth]);
+
+  useEffect(() => {
+    try {
+      if (sessionId) window.localStorage.setItem(STORAGE_KEY_SESSION, sessionId);
+      else window.localStorage.removeItem(STORAGE_KEY_SESSION);
+    } catch {
+      // ignore
+    }
+  }, [sessionId]);
+
+  // Hydrate the active session's messages when the widget first opens with
+  // a stored session id. Runs once per page load — switching sessions via
+  // the history panel does its own load.
+  useEffect(() => {
+    if (mode === "closed") return;
+    if (hydratedSessionRef.current) return;
+    if (!sessionId) {
+      hydratedSessionRef.current = true;
+      return;
+    }
+    hydratedSessionRef.current = true;
+    void (async () => {
+      try {
+        const detail = await getSession(sessionId);
+        setMessages(
+          detail.messages.map((m) => ({ role: m.role, content: m.content })),
+        );
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 404) {
+          // Session was deleted on another device — start fresh.
+          setSessionId(null);
+          setMessages([]);
+        } else {
+          setError(formatError(e));
+        }
+      }
+    })();
+  }, [mode, sessionId]);
 
   useEffect(() => {
     if (mode === "closed") return;
@@ -109,17 +161,40 @@ export function ChatWidget() {
     };
   }, [mode, expandedWidth]);
 
-  const sendHistory = useCallback(async (history: ChatMessage[]) => {
-    setError(null);
-    setSending(true);
-    setToolHint(null);
-    setMessages((prev) => [...prev, { role: "assistant", content: "" }]);
-    let streamFailed = false;
-    try {
-      await apiStream(
-        "/chat/messages",
-        { method: "POST", body: JSON.stringify({ messages: history }) },
-        (raw) => {
+  const sendUserMessage = useCallback(
+    async (text: string) => {
+      setError(null);
+      setSending(true);
+      setToolHint(null);
+
+      // Optimistically place the user + empty-assistant pair.
+      setMessages((prev) => [
+        ...prev,
+        { role: "user", content: text },
+        { role: "assistant", content: "" },
+      ]);
+
+      // Lazily create a server-side session on first send so empty
+      // sessions don't pile up if the user opens and closes the widget.
+      let activeId = sessionId;
+      let createdSession: ChatSession | null = null;
+      if (!activeId) {
+        try {
+          createdSession = await createSession();
+          activeId = createdSession.id;
+          setSessionId(activeId);
+        } catch (e) {
+          setError(formatError(e));
+          setSending(false);
+          // Roll back optimistic insert.
+          setMessages((prev) => prev.slice(0, -2));
+          return;
+        }
+      }
+
+      let streamFailed = false;
+      try {
+        await streamMessage(activeId, text, (raw) => {
           const ev = raw as StreamEvent;
           switch (ev.type) {
             case "text_delta":
@@ -144,48 +219,79 @@ export function ChatWidget() {
               setError(ev.message);
               break;
           }
-        },
-      );
-    } catch (err) {
-      streamFailed = true;
-      setError(formatError(err));
-    } finally {
-      setSending(false);
-      setToolHint(null);
-      if (streamFailed) {
-        setMessages((prev) => {
-          const last = prev[prev.length - 1];
-          if (last && last.role === "assistant" && last.content === "") return prev.slice(0, -1);
-          return prev;
         });
+      } catch (err) {
+        streamFailed = true;
+        setError(formatError(err));
+      } finally {
+        setSending(false);
+        setToolHint(null);
+        if (streamFailed) {
+          setMessages((prev) => {
+            const last = prev[prev.length - 1];
+            if (last && last.role === "assistant" && last.content === "") return prev.slice(0, -1);
+            return prev;
+          });
+        } else {
+          // Stream finished cleanly — refresh history so a freshly-
+          // generated title can show up in the panel.
+          setHistoryRefreshKey((k) => k + 1);
+        }
       }
-    }
-  }, []);
+    },
+    [sessionId],
+  );
 
   const onSend = useCallback(
     async (e: FormEvent) => {
       e.preventDefault();
       const text = input.trim();
       if (!text || sending) return;
-      const next: ChatMessage[] = [...messages, { role: "user", content: text }];
-      setMessages(next);
       setInput("");
-      await sendHistory(next);
+      await sendUserMessage(text);
     },
-    [input, sending, messages, sendHistory],
+    [input, sending, sendUserMessage],
   );
 
   const onRetry = useCallback(async () => {
     if (sending || messages.length === 0) return;
-    if (messages[messages.length - 1].role !== "user") return;
-    await sendHistory(messages);
-  }, [sending, messages, sendHistory]);
+    const last = messages[messages.length - 1];
+    if (last.role !== "user") return;
+    // Drop the prior user message and re-send it. The backend already
+    // persisted it on the first attempt, so resending would double it;
+    // instead we just kick off a retry against the same content with
+    // the existing history intact: pop the user msg, then send.
+    setMessages((prev) => prev.slice(0, -1));
+    await sendUserMessage(last.content);
+  }, [sending, messages, sendUserMessage]);
 
   const startResize = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     resizingRef.current = true;
     document.body.style.userSelect = "none";
     document.body.style.cursor = "col-resize";
+  }, []);
+
+  const onSelectSession = useCallback(async (id: string) => {
+    setHistoryOpen(false);
+    setError(null);
+    if (id === sessionId) return;
+    try {
+      const detail = await getSession(id);
+      setSessionId(id);
+      setMessages(
+        detail.messages.map((m) => ({ role: m.role, content: m.content })),
+      );
+    } catch (e) {
+      setError(formatError(e));
+    }
+  }, [sessionId]);
+
+  const onNewChat = useCallback(() => {
+    setHistoryOpen(false);
+    setError(null);
+    setSessionId(null);
+    setMessages([]);
   }, []);
 
   if (!user) return null;
@@ -266,6 +372,19 @@ export function ChatWidget() {
       >
         <div style={{ fontWeight: 600, fontSize: 14, flex: 1 }}>Chat</div>
         <IconButton
+          title="New chat"
+          onClick={onNewChat}
+          disabled={sending || (sessionId === null && messages.length === 0)}
+        >
+          <NewChatIcon />
+        </IconButton>
+        <IconButton
+          title="History"
+          onClick={() => setHistoryOpen((v) => !v)}
+        >
+          <HistoryIcon />
+        </IconButton>
+        <IconButton
           title={isExpanded ? "Collapse" : "Expand"}
           onClick={() => setMode(isExpanded ? "widget" : "expanded")}
         >
@@ -276,128 +395,139 @@ export function ChatWidget() {
         </IconButton>
       </header>
 
-      <div
-        ref={scrollRef}
-        style={{
-          flex: 1,
-          overflowY: "auto",
-          padding: 12,
-          display: "flex",
-          flexDirection: "column",
-          gap: 10,
-        }}
-      >
-        {messages.length === 0 && (
-          <p style={{ color: "#888", fontSize: 13, margin: 0 }}>
-            Hi, I can help create pages, make changes, explain things, help
-            you create triggers, or explain how this wiki works. Ask me
-            anything!
-          </p>
-        )}
-        {messages.map((m, i) => (
-          <Bubble key={i} role={m.role} content={m.content} />
-        ))}
-        {sending && toolHint && (
-          <div style={{ paddingLeft: 4, color: "#6b7280", fontStyle: "italic", fontSize: 13 }}>
-            {toolHint}
-          </div>
-        )}
-        {sending && !toolHint && messages[messages.length - 1]?.content === "" && (
-          <Bubble role="assistant" content="…" muted />
-        )}
-      </div>
-
-      {error && (
+      <div style={{ position: "relative", flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
         <div
-          role="alert"
-          style={{
-            display: "flex",
-            alignItems: "flex-start",
-            gap: 8,
-            margin: "0 12px 8px",
-            padding: "8px 10px",
-            background: "#fef2f2",
-            border: "1px solid #fecaca",
-            color: "#991b1b",
-            borderRadius: 6,
-            fontSize: 12,
-          }}
-        >
-          <div style={{ flex: 1, whiteSpace: "pre-wrap" }}>{error}</div>
-          {messages.length > 0 && messages[messages.length - 1].role === "user" && (
-            <button
-              onClick={onRetry}
-              disabled={sending}
-              style={{
-                padding: "3px 8px",
-                background: "white",
-                border: "1px solid #fecaca",
-                borderRadius: 4,
-                color: "#991b1b",
-                cursor: sending ? "not-allowed" : "pointer",
-                fontSize: 11,
-                fontWeight: 600,
-                flexShrink: 0,
-              }}
-            >
-              Retry
-            </button>
-          )}
-        </div>
-      )}
-
-      <form
-        onSubmit={onSend}
-        style={{
-          display: "flex",
-          gap: 6,
-          padding: 10,
-          borderTop: "1px solid #eee",
-          flexShrink: 0,
-        }}
-      >
-        <textarea
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              void onSend(e as unknown as FormEvent);
-            }
-          }}
-          placeholder="Send a message…"
-          rows={2}
-          disabled={sending}
+          ref={scrollRef}
           style={{
             flex: 1,
-            minWidth: 0,
-            boxSizing: "border-box",
-            resize: "none",
-            padding: 8,
-            border: "1px solid #ddd",
-            borderRadius: 6,
-            fontFamily: "inherit",
-            fontSize: 13,
-          }}
-        />
-        <button
-          type="submit"
-          disabled={sending || !input.trim()}
-          style={{
-            padding: "0 14px",
-            background: "#6366f1",
-            color: "white",
-            border: "none",
-            borderRadius: 6,
-            cursor: sending || !input.trim() ? "not-allowed" : "pointer",
-            opacity: sending || !input.trim() ? 0.5 : 1,
-            fontWeight: 600,
-            fontSize: 13,
+            overflowY: "auto",
+            padding: 12,
+            display: "flex",
+            flexDirection: "column",
+            gap: 10,
           }}
         >
-          Send
-        </button>
-      </form>
+          {messages.length === 0 && (
+            <p style={{ color: "#888", fontSize: 13, margin: 0 }}>
+              Hi, I can help create pages, make changes, explain things, help
+              you create triggers, or explain how this wiki works. Ask me
+              anything!
+            </p>
+          )}
+          {messages.map((m, i) => (
+            <Bubble key={i} role={m.role} content={m.content} />
+          ))}
+          {sending && toolHint && (
+            <div style={{ paddingLeft: 4, color: "#6b7280", fontStyle: "italic", fontSize: 13 }}>
+              {toolHint}
+            </div>
+          )}
+          {sending && !toolHint && messages[messages.length - 1]?.content === "" && (
+            <Bubble role="assistant" content="…" muted />
+          )}
+        </div>
+
+        {error && (
+          <div
+            role="alert"
+            style={{
+              display: "flex",
+              alignItems: "flex-start",
+              gap: 8,
+              margin: "0 12px 8px",
+              padding: "8px 10px",
+              background: "#fef2f2",
+              border: "1px solid #fecaca",
+              color: "#991b1b",
+              borderRadius: 6,
+              fontSize: 12,
+            }}
+          >
+            <div style={{ flex: 1, whiteSpace: "pre-wrap" }}>{error}</div>
+            {messages.length > 0 && messages[messages.length - 1].role === "user" && (
+              <button
+                onClick={onRetry}
+                disabled={sending}
+                style={{
+                  padding: "3px 8px",
+                  background: "white",
+                  border: "1px solid #fecaca",
+                  borderRadius: 4,
+                  color: "#991b1b",
+                  cursor: sending ? "not-allowed" : "pointer",
+                  fontSize: 11,
+                  fontWeight: 600,
+                  flexShrink: 0,
+                }}
+              >
+                Retry
+              </button>
+            )}
+          </div>
+        )}
+
+        <form
+          onSubmit={onSend}
+          style={{
+            display: "flex",
+            gap: 6,
+            padding: 10,
+            borderTop: "1px solid #eee",
+            flexShrink: 0,
+          }}
+        >
+          <textarea
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                void onSend(e as unknown as FormEvent);
+              }
+            }}
+            placeholder="Send a message…"
+            rows={2}
+            disabled={sending}
+            style={{
+              flex: 1,
+              minWidth: 0,
+              boxSizing: "border-box",
+              resize: "none",
+              padding: 8,
+              border: "1px solid #ddd",
+              borderRadius: 6,
+              fontFamily: "inherit",
+              fontSize: 13,
+            }}
+          />
+          <button
+            type="submit"
+            disabled={sending || !input.trim()}
+            style={{
+              padding: "0 14px",
+              background: "#6366f1",
+              color: "white",
+              border: "none",
+              borderRadius: 6,
+              cursor: sending || !input.trim() ? "not-allowed" : "pointer",
+              opacity: sending || !input.trim() ? 0.5 : 1,
+              fontWeight: 600,
+              fontSize: 13,
+            }}
+          >
+            Send
+          </button>
+        </form>
+
+        <ChatHistoryPanel
+          open={historyOpen}
+          activeSessionId={sessionId}
+          onSelect={(id) => void onSelectSession(id)}
+          onNewChat={onNewChat}
+          onClose={() => setHistoryOpen(false)}
+          refreshKey={historyRefreshKey}
+        />
+      </div>
 
       {isExpanded && (
         <div
@@ -523,6 +653,23 @@ function ChatBubbleIcon() {
   return (
     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <path d="M21 12a8 8 0 0 1-11.5 7.2L4 21l1.8-5.5A8 8 0 1 1 21 12z" />
+    </svg>
+  );
+}
+function NewChatIcon() {
+  // Pencil-on-paper compose glyph — universally read as "new message".
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 20h9" />
+      <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
+    </svg>
+  );
+}
+function HistoryIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 7v5l3 2" />
     </svg>
   );
 }

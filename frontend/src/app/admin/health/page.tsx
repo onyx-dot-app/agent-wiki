@@ -1,6 +1,8 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 
 import { AppShell } from "@/components/common/AppShell";
 import { useRequireAuth } from "@/lib/auth";
@@ -14,12 +16,17 @@ const QUEUE_LABELS: Record<string, string> = {
   wiki_bm25: "Wiki page indexing",
 };
 
-export default function HealthPage() {
+export default function AdminHealthPage() {
   const { user, loading } = useRequireAuth();
+  const router = useRouter();
   const { health: data, error: healthError, isValidating: healthValidating } = useHealth({
     refreshIntervalMs: POLL_MS,
   });
   const error = healthError?.message ?? null;
+
+  useEffect(() => {
+    if (!loading && user && !user.is_admin) router.replace("/");
+  }, [loading, user, router]);
 
   // Track when we last got a *successful* response so the user sees a
   // freshness signal even though SWR doesn't expose `dataUpdatedAt`.
@@ -31,6 +38,7 @@ export default function HealthPage() {
   }, [data, error, healthValidating]);
 
   if (loading || !user) return <main style={{ padding: 32 }}>Loading…</main>;
+  if (!user.is_admin) return null;
 
   const backendUp = !error;
   const statusColor = backendUp && data?.status === "ok" ? "#16a34a" : "#dc2626";
@@ -43,7 +51,13 @@ export default function HealthPage() {
   return (
     <AppShell>
       <main style={{ padding: "24px 32px", height: "100vh", overflowY: "auto" }}>
-        <header style={{ marginBottom: 20 }}>
+        <Link
+          href="/admin"
+          style={{ fontSize: 13, color: "#4f46e5", textDecoration: "none" }}
+        >
+          ← Admin
+        </Link>
+        <header style={{ margin: "12px 0 20px" }}>
           <h1 style={{ margin: 0, fontSize: 22, fontWeight: 600 }}>Health</h1>
           <p style={{ color: "#666", margin: "4px 0 0", fontSize: 13 }}>
             Backend liveness and queue depth. Polls every {POLL_MS / 1000}s.

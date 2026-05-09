@@ -57,6 +57,39 @@ def validate_doc_path(raw_path: Any) -> str:
 # --------------------------------------------------------------------------- #
 
 
+def assert_base_sha(rel: str, base_sha: str | None) -> dict[str, str] | None:
+    """Optimistic-concurrency check shared by every write tool.
+
+    Returns ``None`` when the check passes or is opted out of (no
+    ``base_sha`` provided). Returns the ``stale_base`` error dict — the
+    same shape every write tool returns — when ``base_sha`` no longer
+    matches HEAD for ``rel``.
+
+    Used by the MCP write surface (Phase 4 in
+    ``local_data/wiki/mcp-server/mcp-server.md``) so external agents
+    can rebase against drift instead of clobbering. The chat agent
+    holds direct loop state and rarely passes ``base_sha``; that's
+    fine — both flows go through the same handler, the check is a
+    no-op when ``base_sha`` is None.
+    """
+    if base_sha is None:
+        return None
+    from app.wiki import git as wiki_git
+
+    head_sha = wiki_git.head_sha_for_path(rel)
+    if base_sha == head_sha:
+        return None
+    return {
+        "error": "stale_base",
+        "base_sha": base_sha,
+        "current_sha": head_sha or "",
+        "message": (
+            "the file has changed since base_sha; re-read with "
+            "read_doc, re-derive the edit, and retry"
+        ),
+    }
+
+
 def assert_read_before_write(rel: str) -> None:
     """Refuse to edit an existing doc the model has not seen this turn.
 
@@ -112,21 +145,23 @@ def commit_and_fan_out(
 
     Returns the commit SHA. ``change_kind`` is ``"create"`` or ``"edit"``.
 
-    Side effects (in order):
-      1. Reject the write if the agent's body altered the registry-managed
-         ``agents:`` frontmatter block.
-      2. Register a ``wrote`` activity for the current user (if any).
-      3. Strip and re-render the ``agents:`` frontmatter from current DB
-         state so the committed body reflects the new registration.
-      4. Commit, then run the standard reindex + trigger fan-out.
+    Side effects:
+      1. Permission gate (write on existing pages).
+      2. Register a ``wrote`` activity row for the current user.
+      3. Commit, then run the standard reindex + trigger fan-out.
+
+    Activity is DB-only — the doc body is committed verbatim.
     """
-    current_disk_body = read_existing(rel) if file_exists(rel) else ""
-    try:
-        agent_activity.assert_frontmatter_unchanged(
-            incoming_body=body, current_disk_body=current_disk_body
-        )
-    except agent_activity.FrontmatterTamperedError as exc:
-        raise ToolError(str(exc))
+    # Permission gate: editing requires write on the existing page.
+    # Creating a new page is always allowed for the calling user — they
+    # become the owner via the seeding hook in ``after_doc_write``.
+    if change_kind == "edit":
+        from app.auth import PermissionDenied, require_can
+
+        try:
+            require_can("write", rel)
+        except PermissionDenied as exc:
+            raise ToolError(str(exc))
 
     user = _current_user_or_none()
     if user is not None:
@@ -148,21 +183,20 @@ def commit_and_fan_out(
             expires_at=expires_at,
         )
 
-    body = agent_activity.replace_frontmatter(body, rel)
-
     author = author_string()
     sha = wiki_git.commit_file(rel, body, message, author=author)
-    wiki_notify.after_doc_write(rel, sha, change_kind, author)
+    wiki_notify.after_doc_write(
+        rel, sha, change_kind, author,
+        owner_user_id=user.id if (user is not None and change_kind == "create") else None,
+    )
     return sha
 
 
 def mark_doc_read(rel: str) -> None:
-    """Register a ``read`` activity for the current user and refresh the
-    doc's frontmatter to reflect it.
+    """Register a ``read`` activity row for the current user.
 
-    No-op outside a request context (no current user). The frontmatter
-    refresh commits via the registry's frontmatter-only path, which
-    bypasses trigger fan-out (the content didn't change).
+    No-op outside a request context (no current user). DB-only — the
+    doc body is not touched.
     """
     user = _current_user_or_none()
     if user is None:
@@ -183,30 +217,6 @@ def mark_doc_read(rel: str) -> None:
         activity="read",
         expires_at=expires_at,
     )
-    refresh_doc_frontmatter(rel, message=f"agent-activity: refresh {rel}")
-
-
-def refresh_doc_frontmatter(rel: str, *, message: str) -> str | None:
-    """Re-render and commit the ``agents:`` frontmatter for ``rel``.
-
-    Skipped (returns None) if the file isn't tracked yet — the registry
-    only attaches metadata to existing docs. Bypasses trigger fan-out
-    because nothing in the content changed; the FTS reindex still runs
-    so search hits stay consistent.
-    """
-    if not file_exists(rel):
-        return None
-    old_body = read_existing(rel)
-    new_body = agent_activity.replace_frontmatter(old_body, rel)
-    if new_body == old_body:
-        return None
-    author = author_string()
-    sha = wiki_git.commit_file(rel, new_body, message, author=author)
-    # Reindex only — this is a frontmatter-only commit and shouldn't fire
-    # any natural-language triggers attached to the doc.
-    from app.tasks.reindex import reindex_path  # local import: avoids cycle
-    reindex_path(rel)
-    return sha
 
 
 def _current_user_or_none():

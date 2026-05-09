@@ -1,18 +1,18 @@
 {
   "name": "web_search",
-  "description": "Search the public web (Serper-backed) when the user asks about something that the wiki probably doesn't contain — current events, library docs, third-party services, news. Returns up to 10 results: each is `{title, link, snippet, published_date?}`. Snippets are short — call `open_url(link)` on the most promising result(s) to read the full page. Prefer `search_wiki` first when the question could plausibly be answered by the user's own wiki content.",
+  "description": "Search the public web when the user asks about something that requires up to date information from the internet — current events, library docs, third-party services, news, etc. Returns up to 20 results: each is `{title, link, snippet, published_date?}`. Snippets are short — call `open_urls([link, ...])` on the most promising result(s) to read the full page(s) in a single call.",
   "input_schema": {
     "type": "object",
     "properties": {
       "query": {
         "type": "string",
-        "description": "Search query in plain English. Be specific — e.g. \"flask 3.0 streaming response keep-alive\" beats \"flask streaming\"."
+        "description": "Search query. Be specific — e.g. \"flask 3.0 streaming response keep-alive\" is preferable to \"flask streaming\"."
       },
       "num_results": {
         "type": "integer",
-        "description": "Max results (default 10, min 1, max 10).",
+        "description": "Max results (default 10, min 1, max 20).",
         "minimum": 1,
-        "maximum": 10
+        "maximum": 20
       }
     },
     "required": ["query"]

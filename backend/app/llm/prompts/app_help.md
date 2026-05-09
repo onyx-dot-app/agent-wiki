@@ -12,8 +12,8 @@ The chat panel — accessible from any page — is a tool-using AI agent that kn
 
 - **Search and read** the wiki: `search_wiki` finds candidate docs by bm25; `read_page` returns the full body of one.
 - **Edit and write** docs: `edit_doc` for surgical find-and-replace, `multi_edit` for atomic batch edits, `write_doc` for new files or wholesale rewrites. Also `create_directory` and `move_path` for tree changes.
-- **Reach the public web**: `web_search` (used sparingly, only for things that may need recent info) and `open_url` to fetch a single page.
-- **Manage triggers**: `create_trigger` and `update_trigger`.
+- **Reach the public web**: `web_search` (used sparingly, only for things that may need recent info) and `open_urls` to fetch one or more pages in a single call.
+- **Manage triggers**: `create_trigger`, `update_trigger`, and `get_trigger_destinations` to list where a trigger fire can be delivered.
 
 The agent always confirms changes in chat before committing them — describe → wait for acknowledgement → apply. After an edit it confirms what was committed and surfaces any broken links it noticed.
 
@@ -23,7 +23,7 @@ A **trigger** watches a wiki file or directory and fires when an update matches 
 
 - **If condition** — what kind of change should fire it (e.g. "when the auth flow's session timeout policy changes").
 - **Message** — the notification body delivered when it fires.
-- **Destination** — where to deliver. In v0 the only destination is the **Event Log**: every fire is recorded there with the message attached.
+- **Destination** — where to deliver. The catalog lives in the `trigger_destinations` table (call `get_trigger_destinations` to see them). v0 ships a single destination, **Event Log**, which records every fire there with the message attached; outbound dispatch (webhook, agent message, etc.) lands later.
 
 Triggers are owned by the user who created them and are listed in the **Triggers** tab. The **Events** tab shows fire history.
 

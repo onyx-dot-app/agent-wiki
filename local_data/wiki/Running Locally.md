@@ -121,6 +121,36 @@ commit the seed as the initial revision.
 - Don't force-push or hard-reset the wiki repo. Wiki history is the
   authoritative trail of edits; only additive commits.
 
+### Permissions don't travel with the wiki repo or the volume
+
+> **Operational warning.** Wiki page permissions (ACLs, group
+> definitions, group memberships, page ownership) live entirely in
+> Postgres — see `permissions/permissions.md`. They are **not**
+> committed to the wiki git repo, **not** stored in the `wiki-data`
+> Docker volume, and **not** exported by:
+>
+> - `git clone` / `git push` against the wiki repo,
+> - copying the `wiki-data` volume to a new host,
+> - any filesystem-level backup of `WIKI_DIR`.
+>
+> A wiki cloned or restored from the repo or volume **alone** comes
+> back as if every page had no permissions configured (the resolver
+> treats unconfigured paths as implicit-public). If you need to
+> round-trip permissions, dump the relevant Postgres tables alongside
+> the wiki repo:
+>
+> ```bash
+> pg_dump -U agent agent_wiki \
+>   --data-only \
+>   --table=groups --table=group_members \
+>   --table=wiki_owners --table=acl_entries \
+>   > permissions.sql
+> ```
+>
+> This is by design — Postgres-only storage gives us fast filtering
+> for list/search queries. See `permissions/permissions.md` for the
+> tradeoff and the open `.acl.yaml`-in-git option.
+
 ---
 
 ## How to run — five processes
@@ -388,8 +418,7 @@ the full picture and the one-time bootstrap commit recipe.
 Known stub in `app/tasks/periodic.py`. Fires every 5 minutes on the
 **`triggers`** worker (cron tasks live on the queue that owns the work
 they generate). Not blocking anything in the request path — ignore until
-that task is implemented. The 6-hour `stale_doc_review` stub is the
-analogous noise on the `documents` worker.
+that task is implemented.
 
 ### `/api/documents` returns `{"error":"unauthorized"}`
 

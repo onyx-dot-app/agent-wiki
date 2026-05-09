@@ -3,6 +3,14 @@
 V0 scope: list newest-first with a simple limit. Time filters / pagination
 come later; the table has indices on ``ts`` and ``(kind, ts)`` so this is
 cheap to extend when needed.
+
+Owner-scoping (2026-05-09): ``trigger.fire`` rows reference the trigger's
+id in ``target``, and triggers carry an ``owner_user_id``. Both endpoints
+filter to events the caller owns by joining through that subquery —
+non-fire events without a trigger id are excluded by design until we add
+an explicit user attribution column for them. ``get_event`` returns
+``404`` rather than ``403`` on cross-owner reads so we don't leak
+existence.
 """
 from __future__ import annotations
 
@@ -13,8 +21,8 @@ from typing import Any, cast
 from flask import Blueprint, jsonify, request
 from sqlalchemy import select
 
-from app.auth import login_required
-from app.db.models import Event as EventRow
+from app.auth import current_user, login_required
+from app.db.models import Event as EventRow, Trigger
 from app.db.session import session
 from app.models.event import Event, EventListResponse
 from app.models._helpers import error
@@ -46,6 +54,8 @@ def _to_view(e: EventRow) -> Event:
 @bp.get("")
 @login_required
 def list_events():
+    user = current_user()
+    assert user is not None
     try:
         limit = int(request.args.get("limit", 100))
     except ValueError:
@@ -53,7 +63,13 @@ def list_events():
     limit = max(1, min(limit, 500))
     kind = request.args.get("kind")
 
-    stmt = select(EventRow).order_by(EventRow.id.desc()).limit(limit)
+    owned_trigger_ids = select(Trigger.id).where(Trigger.owner_user_id == user.id)
+    stmt = (
+        select(EventRow)
+        .where(EventRow.target.in_(owned_trigger_ids))
+        .order_by(EventRow.id.desc())
+        .limit(limit)
+    )
     if kind:
         stmt = stmt.where(EventRow.kind == kind)
 
@@ -66,8 +82,18 @@ def list_events():
 @bp.get("/<int:event_id>")
 @login_required
 def get_event(event_id: int):
+    user = current_user()
+    assert user is not None
     with session() as s:
         e = s.get(EventRow, event_id)
-    if e is None:
-        return error("not found", 404)
-    return jsonify(_to_view(e).model_dump())
+        if e is None:
+            return error("not found", 404)
+        # Hide cross-owner rows behind a 404 so we don't leak existence.
+        if e.target is None:
+            return error("not found", 404)
+        owner = s.scalar(
+            select(Trigger.owner_user_id).where(Trigger.id == e.target)
+        )
+        if owner != user.id:
+            return error("not found", 404)
+        return jsonify(_to_view(e).model_dump())

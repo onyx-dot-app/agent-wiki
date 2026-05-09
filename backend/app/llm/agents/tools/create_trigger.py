@@ -6,6 +6,7 @@ from typing import Any
 from app.auth import current_user
 from app.triggers import repo as triggers_repo
 from app.triggers import storage as triggers_storage
+from app.wiki import acl as wiki_acl
 
 
 def handle(args: dict[str, Any]) -> Any:
@@ -16,19 +17,12 @@ def handle(args: dict[str, Any]) -> Any:
     raw_scope = args.get("scope_path", "")
     nl = args.get("trigger_nl_condition")
     message = args.get("trigger_fire_message")
-    destination = args.get("destination", None)
+    destination = args.get("destination", triggers_repo.DEFAULT_DESTINATION)
 
     if not isinstance(nl, str) or not nl.strip():
         return {"error": "trigger_nl_condition is required"}
     if not isinstance(message, str) or not message.strip():
         return {"error": "trigger_fire_message is required"}
-    if destination not in triggers_repo.SUPPORTED_DESTINATIONS:
-        return {
-            "error": (
-                f"destination {destination!r} not supported in v0 — only null "
-                "(Event Log)"
-            )
-        }
 
     if not isinstance(raw_scope, str):
         return {"error": "scope_path must be a string"}
@@ -36,6 +30,9 @@ def handle(args: dict[str, Any]) -> Any:
         scope = triggers_storage.normalize_scope_path(raw_scope)
     except ValueError as exc:
         return {"error": f"invalid scope_path: {exc}"}
+
+    if not wiki_acl.can(user.id, user.is_admin, "read", scope):
+        return {"error": f"you do not have read access to scope_path {scope!r}"}
 
     try:
         trigger = triggers_repo.create(

@@ -12,6 +12,7 @@ from typing import Any
 
 from sqlalchemy.exc import OperationalError
 
+from app.auth import current_user
 from app.wiki import search as wiki_search
 
 DEFAULT_LIMIT = 10
@@ -31,8 +32,17 @@ def handle(args: dict[str, Any]) -> Any:
         limit = DEFAULT_LIMIT
     limit = max(1, min(limit, MAX_LIMIT))
 
+    # Agent inherits the calling user's visibility — chat tools run inside
+    # an authenticated request, so ``current_user()`` returns the same
+    # principal the request was authenticated as.
+    user = current_user()
     try:
-        rows = wiki_search.search(query, limit=limit)
+        rows = wiki_search.search(
+            query,
+            limit=limit,
+            user_id=user.id if user else None,
+            is_admin=bool(user and user.is_admin),
+        )
     except OperationalError as exc:
         return {
             "error": (

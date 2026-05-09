@@ -1,6 +1,6 @@
 {
   "name": "edit_doc",
-  "description": "Surgical find-and-replace on an existing wiki markdown document. Replaces `old_string` with `new_string` exactly once (or every occurrence with `replace_all`). The match is fuzzy: minor whitespace and indentation drift in `old_string` is tolerated, but the surrounding context must still be unique to avoid ambiguity. The file must have been seen via `search_wiki` earlier in the conversation. Only call after the user has explicitly approved the change. Returns the commit SHA, the unified diff, and any broken markdown links the edit introduces. Errors with \"old_string not found\" or \"matched multiple times\" — in those cases provide more surrounding context or set `replace_all`.",
+  "description": "Surgical find-and-replace on an existing wiki markdown document. Replaces `old_string` with `new_string` exactly once (or every occurrence with `replace_all`). The match is fuzzy: minor whitespace and indentation drift in `old_string` is tolerated, but the surrounding context must still be unique to avoid ambiguity. The file must have been seen via `search_wiki` earlier in the conversation. Only call after the user has explicitly approved the change. Returns the commit SHA, the unified diff, and any broken markdown links the edit introduces. Errors with \"old_string not found\" or \"matched multiple times\" — in those cases provide more surrounding context or set `replace_all`. USAGE GUIDANCE: prefer one `edit_doc` per logical change. When you have multiple related edits to the same doc, use `multi_edit` instead of firing several `edit_doc` calls — it's atomic and produces one commit, which keeps the doc's history readable and avoids fan-out to triggers / subscribers per individual edit.",
   "input_schema": {
     "type": "object",
     "properties": {
@@ -23,6 +23,10 @@
       "commit_message": {
         "type": "string",
         "description": "Short commit message summarizing the change."
+      },
+      "base_sha": {
+        "type": "string",
+        "description": "Optional. The sha you last read for `path` (returned by `read_doc`). When set, the edit aborts with `stale_base` if HEAD has moved since — re-read with `read_doc` and retry. Strongly recommended over MCP; the chat agent can omit it (the loop has direct state)."
       }
     },
     "required": ["path", "old_string", "new_string", "commit_message"]

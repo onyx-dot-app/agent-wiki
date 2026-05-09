@@ -1,0 +1,9 @@
+{
+  "name": "get_trigger_destinations",
+  "description": "List the available trigger destinations — the targets a trigger fire can be delivered to. Each destination has an `id` (the slug to pass as `destination` to `create_trigger` / `update_trigger`), a human-readable `name`, and a short `description` of how delivery works. Call this before creating or updating a trigger if you need to pick a destination, or any time the user asks where a trigger can send to.",
+  "input_schema": {
+    "type": "object",
+    "properties": {},
+    "additionalProperties": false
+  }
+}

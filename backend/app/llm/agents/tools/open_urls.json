@@ -1,0 +1,19 @@
+{
+  "name": "open_urls",
+  "description": "Fetch one or more web pages in a single call and return their full contents. Use after `web_search` to read the most promising results, or when the user gives you URL(s) directly. Pass multiple URLs in one call rather than issuing parallel `open_urls` calls — they are fetched concurrently server-side. Returns `{results: [{title, link, full_content, published_date?, scrape_successful}, ...]}` in the same order as the input.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "urls": {
+        "type": "array",
+        "description": "Absolute http(s) URLs to fetch (min 1, max 10). Pass every URL you want to read in one call — they are fetched concurrently.",
+        "items": {
+          "type": "string"
+        },
+        "minItems": 1,
+        "maxItems": 10
+      }
+    },
+    "required": ["urls"]
+  }
+}

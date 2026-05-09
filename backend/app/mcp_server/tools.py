@@ -1,0 +1,347 @@
+"""Tool surface exposed by the inbound MCP server.
+
+The handlers themselves live in ``app/llm/agents/tools/`` — the same
+registry the in-process chat agent uses. This module is the MCP-facing
+adapter:
+
+  * ``MCP_ALLOWED_TOOLS`` — explicit allow-list of tool names. Walking
+    the chat-agent registry blindly would expose tools that don't make
+    sense over MCP yet (write tools land in Phase 4; bash / web tools
+    are out of scope for v0). A new tool only becomes MCP-callable
+    after its name is added here.
+
+  * ``list_for_mcp()`` — translates the chat-agent JSON specs into
+    MCP's ``tools/list`` shape (``input_schema`` → ``inputSchema``).
+
+  * ``call_for_mcp()`` — dispatches into the chat-agent registry,
+    binding the MCP session's ``seen_paths`` to the
+    ``seen_doc_paths`` ContextVar so the existing read-before-write
+    enforcement works the same way it does inside a chat loop.
+    Translates the handler's return shape into MCP's
+    ``{content, isError}`` envelope.
+
+Design: ``local_data/wiki/mcp-server/mcp-server.md`` (Phase 3+).
+"""
+from __future__ import annotations
+
+import json
+import logging
+from typing import Any, cast
+
+from app.llm.agents._session import seen_doc_paths
+from app.llm.agents.tools import TOOL_SPECS, dispatch as registry_dispatch
+from app.mcp_server.session import McpSession
+
+log = logging.getLogger(__name__)
+
+# Phases 3 + 4 — sync tools dispatched directly into the chat-agent
+# registry. Phase 6 adds the async ``update_doc_nl`` (handled below in
+# ``_call_async_nl_update``); listed here so it shows up in
+# ``tools/list`` but routed away from the sync dispatch path. Bash /
+# web tools stay off-list (out of scope for v0).
+MCP_ALLOWED_TOOLS: frozenset[str] = frozenset(
+    {
+        # Read
+        "read_doc",
+        "search_wiki",
+        "list_history",
+        "ask_nl_question",
+        # Write — sync
+        "edit_doc",
+        "multi_edit",
+        "write_doc",
+        "apply_patch",
+        "move_path",
+        "create_directory",
+        # Write — async
+        "update_doc_nl",
+    }
+)
+
+# Tools that need the MCP-side async wrapper instead of the sync
+# chat-agent handler. ``tools/call`` routes these through
+# ``_call_async_nl_update`` and family.
+MCP_ASYNC_TOOLS: frozenset[str] = frozenset({"update_doc_nl"})
+
+
+def list_for_mcp() -> list[dict[str, Any]]:
+    """Return the MCP-shape tool list — only tools in ``MCP_ALLOWED_TOOLS``,
+    with ``input_schema`` renamed to ``inputSchema`` per MCP spec.
+    """
+    out: list[dict[str, Any]] = []
+    for spec in TOOL_SPECS:
+        name = spec.get("name")
+        if name not in MCP_ALLOWED_TOOLS:
+            continue
+        out.append(
+            {
+                "name": name,
+                "description": spec.get("description", ""),
+                "inputSchema": spec.get("input_schema", {"type": "object"}),
+            }
+        )
+    return out
+
+
+def _maybe_auto_subscribe(
+    sess: McpSession,
+    name: str,
+    arguments: dict[str, Any],
+    payload: dict[str, Any],
+    is_error: bool,
+) -> None:
+    """``read_doc`` with ``subscribe=true`` (the default) auto-registers
+    the session for ``wiki:///<path>`` so future commits push
+    notifications. HEAD-only — historical reads are explicitly excluded
+    because subscribing to a sha is meaningless.
+    """
+    if name != "read_doc" or is_error:
+        return
+    subscribe = arguments.get("subscribe", True)
+    if subscribe is False:
+        return
+    if not payload.get("is_head"):
+        return
+    rel = payload.get("path")
+    if not isinstance(rel, str) or not rel:
+        return
+    # Local import — pubsub depends on this module transitively.
+    from app.mcp_server import pubsub as mcp_pubsub
+
+    mcp_pubsub.subscribe_doc(sess.id, rel)
+
+
+def call_for_mcp(
+    sess: McpSession, name: str, arguments: dict[str, Any]
+) -> tuple[dict[str, Any], bool]:
+    """Dispatch a tool call on behalf of an MCP session.
+
+    Returns ``(payload_dict, is_error)``. The transport layer wraps this
+    into MCP's ``{content: [{type, text}], isError}`` shape.
+
+    Application-level errors (file not found, permission denied,
+    invalid path, ``stale_base``) come back as ``({"error": "..."},
+    True)`` — same shape the chat agent already produces, so the MCP
+    wrapper doesn't need a custom translation table.
+
+    The session's ``seen_paths`` set is bound to the
+    ``seen_doc_paths`` ContextVar for the duration of the dispatch so
+    that ``read_doc`` registers HEAD reads against the *MCP* session,
+    and the write tools (``edit_doc``, ``multi_edit``, ``write_doc``,
+    ``apply_patch``) refuse edits to paths the session hasn't read at
+    HEAD.
+
+    Every successful payload also carries a ``stale_paths`` array —
+    paths the session has subscribed to that have changed since the
+    last tool call. Phase 4 always returns ``[]`` here because
+    subscriptions don't exist yet; the field becomes meaningful in
+    Phase 5 when ``resources/subscribe`` lands. We add it now so the
+    contract is stable from day one and clients don't have to special-
+    case its later appearance.
+    """
+    if name not in MCP_ALLOWED_TOOLS:
+        return {"error": f"unknown tool: {name}", "stale_paths": []}, True
+
+    if name in MCP_ASYNC_TOOLS:
+        return _call_async_nl_update(sess, arguments)
+
+    token = seen_doc_paths.set(sess.seen_paths)
+    try:
+        result = registry_dispatch(name, arguments)
+    except Exception as exc:
+        log.exception("mcp tool dispatch raised name=%s", name)
+        return {"error": f"internal error: {exc}", "stale_paths": []}, True
+    finally:
+        seen_doc_paths.reset(token)
+
+    is_error = isinstance(result, dict) and "error" in result
+    payload: dict[str, Any] = (
+        cast("dict[str, Any]", result) if isinstance(result, dict) else {"result": result}
+    )
+    _maybe_auto_subscribe(sess, name, arguments, payload, is_error)
+    payload.setdefault("stale_paths", _compute_stale_paths(sess))
+    return payload, is_error
+
+
+def _call_async_nl_update(
+    sess: McpSession, arguments: dict[str, Any]
+) -> tuple[dict[str, Any], bool]:
+    """MCP-side wrapper for ``update_doc_nl``.
+
+    Validates inputs, enforces ACL + read-before-write at *enqueue*
+    time (the worker can't re-check ``seen_paths`` — the ContextVar
+    only exists in this process), dedupes via the idempotency key,
+    inserts the ``mcp_jobs`` row, enqueues the worker task, and
+    auto-subscribes the calling session to ``job://<id>`` so the SSE
+    stream pushes status changes without a separate
+    ``resources/subscribe`` call.
+
+    Returns ``({job_id, status_uri, status, ...}, False)`` on enqueue,
+    ``({error, ...}, True)`` on validation / ACL failure.
+    """
+    # Local imports — these modules pull in the queue + worker which
+    # we don't want loaded at module-import time for tools.py callers
+    # that just want list_for_mcp.
+    import hashlib
+
+    from app.auth import PermissionDenied, require_can
+    from app.llm.agents.tools import _doc_helpers as h
+    from app.mcp_server import jobs as mcp_jobs
+    from app.mcp_server import pubsub as mcp_pubsub
+    from app.tasks.document_update import agent_update_document_nl
+    from app.wiki import git as wiki_git
+
+    # ---- Validate ----
+    raw_path = arguments.get("path")
+    instruction = arguments.get("instruction")
+    base_sha = arguments.get("base_sha")
+    idempotency_key = arguments.get("idempotency_key")
+
+    try:
+        rel = h.validate_doc_path(raw_path)
+    except h.ToolError as exc:
+        return {"error": str(exc), "stale_paths": _compute_stale_paths(sess)}, True
+    if not isinstance(instruction, str) or not instruction.strip():
+        return (
+            {"error": "instruction is required (non-empty string)",
+             "stale_paths": _compute_stale_paths(sess)},
+            True,
+        )
+    if base_sha is not None and not isinstance(base_sha, str):
+        return (
+            {"error": "base_sha must be a string when provided",
+             "stale_paths": _compute_stale_paths(sess)},
+            True,
+        )
+    if idempotency_key is not None and not isinstance(idempotency_key, str):
+        return (
+            {"error": "idempotency_key must be a string when provided",
+             "stale_paths": _compute_stale_paths(sess)},
+            True,
+        )
+
+    if not h.file_exists(rel):
+        return (
+            {"error": f"file not found: {rel}",
+             "stale_paths": _compute_stale_paths(sess)},
+            True,
+        )
+
+    # ---- ACL + seen_paths gate at enqueue (worker can't re-check) ----
+    seen_token = seen_doc_paths.set(sess.seen_paths)
+    try:
+        try:
+            h.assert_read_before_write(rel)
+        except h.ToolError as exc:
+            return {"error": str(exc), "stale_paths": _compute_stale_paths(sess)}, True
+    finally:
+        seen_doc_paths.reset(seen_token)
+
+    try:
+        require_can("write", rel)
+    except PermissionDenied as exc:
+        return {"error": str(exc), "stale_paths": _compute_stale_paths(sess)}, True
+
+    # ---- Idempotency dedupe ----
+    if not idempotency_key:
+        # Default: hash of (user_id + path + instruction). Lets retries
+        # of the same instruction collapse without the agent having to
+        # mint its own key. Truncated to 32 hex chars — enough for
+        # collision avoidance at human scale.
+        idempotency_key = hashlib.sha256(
+            f"{sess.user_id}|{rel}|{instruction.strip()}".encode("utf-8")
+        ).hexdigest()[:32]
+
+    existing = mcp_jobs.find_by_idempotency_key(sess.user_id, idempotency_key)
+    if existing is not None:
+        # Auto-subscribe so the agent's SSE stream still gets future
+        # status pushes for this in-flight job, even though we didn't
+        # mint a new row.
+        mcp_pubsub.subscribe_job(sess.id, existing["id"])
+        return (
+            _job_response(sess, existing, deduplicated=True),
+            False,
+        )
+
+    # ---- Insert + enqueue ----
+    head_sha = wiki_git.head_sha_for_path(rel)
+    payload: dict[str, Any] = {
+        "path": rel,
+        "instruction": instruction.strip(),
+        "base_sha": base_sha,
+        "head_at_enqueue": head_sha,
+    }
+    job = mcp_jobs.create(
+        user_id=sess.user_id,
+        kind=mcp_jobs.KIND_UPDATE_DOC_NL,
+        payload=payload,
+        idempotency_key=idempotency_key,
+    )
+    mcp_pubsub.subscribe_job(sess.id, job["id"])
+    agent_update_document_nl(job["id"])
+
+    return _job_response(sess, job, deduplicated=False), False
+
+
+def _job_response(
+    sess: McpSession, job: dict[str, Any], *, deduplicated: bool
+) -> dict[str, Any]:
+    out: dict[str, Any] = {
+        "job_id": job["id"],
+        "status_uri": f"job://{job['id']}",
+        "status": job["status"],
+        "deduplicated": deduplicated,
+        "stale_paths": _compute_stale_paths(sess),
+    }
+    if job.get("result") is not None:
+        out["result"] = job["result"]
+    if job.get("error") is not None:
+        out["error_detail"] = job["error"]
+    return out
+
+
+def _compute_stale_paths(sess: McpSession) -> list[str]:
+    """Paths the session is subscribed to that have a pending push.
+
+    Implemented as a non-destructive peek at the session's pub-sub
+    queue: read every queued notification, collect the URIs that map
+    to ``wiki:///<path>``, and (importantly) put the notifications
+    back so the SSE writer still ships them. Empty when no SSE stream
+    is open or no commits have arrived since the last tool call —
+    which is the steady state for an attentive client.
+    """
+    from app.mcp_server import pubsub as mcp_pubsub
+
+    q = mcp_pubsub.queue_for(sess.id)
+    drained: list[Any] = []
+    paths: list[str] = []
+    try:
+        while True:
+            notif = q.get_nowait()
+            drained.append(notif)
+            params = notif.params or {}
+            uri = params.get("uri")
+            if isinstance(uri, str) and uri.startswith("wiki:///"):
+                rel = uri[len("wiki:///"):]
+                if rel and rel not in paths:
+                    paths.append(rel)
+    except Exception:
+        # ``queue.Empty`` is the expected exit; any other exception we
+        # treat the same — preserve whatever we drained, return what
+        # we found.
+        pass
+    finally:
+        for notif in drained:
+            q.put(notif)
+    return paths
+
+
+def to_mcp_content(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    """Wrap a handler payload in MCP's ``content`` array.
+
+    Default representation is a single ``text`` block carrying the
+    JSON-stringified payload. Tools that produce binary data (none yet)
+    would extend this to ``image`` / ``resource`` blocks per the MCP
+    spec.
+    """
+    return [{"type": "text", "text": json.dumps(payload)}]

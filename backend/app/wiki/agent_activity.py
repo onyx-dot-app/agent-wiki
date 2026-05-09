@@ -1,35 +1,35 @@
-"""Agent activity registry — per-doc frontmatter visibility for active agents.
+"""Agent activity registry — per-doc visibility for active agents.
 
-The DB (`agent_activity` table) is the source of truth. Each wiki `.md`
-file carries an `agents:` YAML frontmatter block rendered from that table:
-which user (and optionally which named agent) read or wrote the doc, what
-they're doing, and when their registration expires. The block is managed
-by the system — direct edits by agents are rejected.
+The DB (`agent_activity` table) is the source of truth. Each row says
+which user (and optionally which named agent) is currently reading or
+writing a wiki doc, with a 24h TTL. The state is exposed through:
+
+* The ``read_page`` / ``read_doc`` tool responses (an ``agents`` field
+  on every HEAD read), so co-occupant agents can see each other.
+* ``GET /api/documents/file/activity?path=...`` for the UI panel.
+
+The doc body itself is *not* touched — there is no on-disk
+representation. This avoids the read→commit churn that broke
+``base_sha`` optimistic concurrency when activity was rendered as
+frontmatter on each ``.md``.
 
 Lifecycle:
-* `read` is registered when an agent successfully reads a wiki doc through
-  `read_page` / `read_doc`.
-* `wrote` is registered when an agent successfully writes to a wiki doc
-  through any of the doc-edit tools.
-* Both share the same TTL (`DEFAULT_TTL`). Re-registration overwrites the
-  prior row's `expires_at` (natural-key UPSERT).
-* On `expires_at`, a cleanup task removes the row and re-renders the
-  doc's frontmatter. On server restart, every active row gets a fresh
-  cleanup scheduled (see `app/tasks/agent_activity.py`).
-
-This module owns:
-* The DB repo functions.
-* Frontmatter parse / render / replace.
-* The write-time guard that detects direct frontmatter tampering.
+* ``read`` registers on successful HEAD reads via ``read_page`` /
+  ``read_doc``.
+* ``wrote`` registers on successful writes through the doc-edit
+  tools.
+* Both share ``DEFAULT_TTL``; re-registration slides ``expires_at``
+  via a natural-key UPSERT.
+* At ``expires_at`` the cleanup task in ``app/tasks/agent_activity.py``
+  deletes the row. Server restart re-schedules cleanups for every
+  active row.
 """
 from __future__ import annotations
 
 import logging
 from contextvars import ContextVar
 from datetime import datetime, timedelta, timezone
-from typing import Any, cast
 
-import yaml
 from pydantic import BaseModel
 from sqlalchemy import and_, func, select
 
@@ -41,15 +41,11 @@ log = logging.getLogger(__name__)
 
 DEFAULT_TTL = timedelta(hours=24)
 
-FRONTMATTER_NOTE_LINES = (
-    "# DO NOT EDIT — managed by the agent activity registry.",
-    "# Direct edits to the `agents:` block will be rejected on write.",
-)
-
 
 # Optional per-request agent identity. Set by an agent entrypoint when a
-# name is meaningful. Default `None` renders as `N/A` in the frontmatter
-# and the natural-key index treats it as "anonymous for this user".
+# name is meaningful. Default ``None`` renders as ``N/A`` to API
+# consumers and the natural-key index treats it as "anonymous for this
+# user".
 agent_name_var: ContextVar[str | None] = ContextVar("agent_name", default=None)
 
 
@@ -246,150 +242,3 @@ def rename_doc(old_path: str, new_path: str) -> None:
         ).all()
         for r in rows:
             r.doc_path = new_path
-
-
-# --------------------------------------------------------------------------- #
-# Frontmatter parse / render                                                  #
-# --------------------------------------------------------------------------- #
-
-
-class FrontmatterTamperedError(Exception):
-    """Agent attempted to modify the registry-managed `agents:` block."""
-
-
-def split_frontmatter(body: str) -> tuple[str | None, str]:
-    """Split a body into ``(frontmatter_inner_text or None, rest)``.
-
-    Recognized frontmatter starts at byte 0 with ``---\\n`` and ends at the
-    next ``\\n---\\n`` or trailing ``\\n---``. The leading/trailing fences
-    are stripped from the returned inner text.
-    """
-    if not body.startswith("---\n"):
-        return None, body
-    end = body.find("\n---\n", 4)
-    if end != -1:
-        return body[4:end], body[end + 5:]
-    if body.endswith("\n---"):
-        return body[4:-4], ""
-    return None, body
-
-
-def _parse_frontmatter_data(fm_text: str | None) -> dict[str, Any]:
-    if fm_text is None:
-        return {}
-    try:
-        data: Any = yaml.safe_load(fm_text)
-    except yaml.YAMLError as exc:
-        raise FrontmatterTamperedError(f"frontmatter is not valid YAML: {exc}") from exc
-    if data is None:
-        return {}
-    if not isinstance(data, dict):
-        raise FrontmatterTamperedError("frontmatter must be a YAML mapping")
-    return cast(dict[str, Any], data)
-
-
-def _agents_field(fm: dict[str, Any]) -> list[dict[str, Any]] | None:
-    raw = fm.get("agents")
-    if raw is None:
-        return None
-    if not isinstance(raw, list):
-        raise FrontmatterTamperedError("`agents` field must be a YAML list")
-    return cast(list[dict[str, Any]], raw)
-
-
-def _yaml_str(s: str) -> str:
-    """Render `s` as a YAML scalar — quote if it contains anything tricky."""
-    s = str(s)
-    needs_quote = (
-        not s
-        or any(c in s for c in ':#\n"\'\\')
-        or s.startswith(("-", "?", "&", "*", "!", "|", ">", "%", "@", "`", "[", "{"))
-        or s.strip() != s
-        or s.lower() in ("true", "false", "null", "yes", "no", "~")
-    )
-    if not needs_quote:
-        return s
-    escaped = s.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
-    return f'"{escaped}"'
-
-
-def _render_agents_lines(activities: list[ActivityRow]) -> list[str]:
-    """Just the `agents:` key + items. No fences, no note."""
-    if not activities:
-        return []
-    lines = ["agents:"]
-    for a in activities:
-        lines.append(f"  - owner: {_yaml_str(a.owner_display)}")
-        lines.append(f"    agent: {_yaml_str(a.agent_name or 'N/A')}")
-        lines.append(f"    activity: {a.activity}")
-        lines.append(f"    description: {_yaml_str(a.description or 'N/A')}")
-        lines.append(f"    expires_at: {a.expires_at}")
-    return lines
-
-
-# --------------------------------------------------------------------------- #
-# Tamper guard + body rewriting                                               #
-# --------------------------------------------------------------------------- #
-
-
-def _normalize_agents_for_compare(
-    agents: list[dict[str, Any]] | None,
-) -> list[dict[str, Any]] | None:
-    """Strip ordering/structural noise so semantic equality can be compared."""
-    if agents is None:
-        return None
-    out: list[dict[str, Any]] = []
-    for entry in agents:
-        out.append({k: entry.get(k) for k in sorted(entry)})
-    return out
-
-
-def assert_frontmatter_unchanged(*, incoming_body: str, current_disk_body: str) -> None:
-    """Raise if the incoming body's `agents:` block differs from disk's."""
-    incoming_fm_text, _ = split_frontmatter(incoming_body)
-    current_fm_text, _ = split_frontmatter(current_disk_body)
-    incoming_fm = _parse_frontmatter_data(incoming_fm_text)
-    current_fm = _parse_frontmatter_data(current_fm_text)
-    incoming_agents = _normalize_agents_for_compare(_agents_field(incoming_fm))
-    current_agents = _normalize_agents_for_compare(_agents_field(current_fm))
-    if incoming_agents != current_agents:
-        raise FrontmatterTamperedError(
-            "the `agents:` frontmatter block is managed by the system and "
-            "cannot be edited directly. Leave it as you read it; the registry "
-            "will re-render it after your write."
-        )
-
-
-def replace_frontmatter(body: str, doc_path: str) -> str:
-    """Strip any `agents:` block from ``body`` and re-render from current DB state."""
-    fm_text, rest = split_frontmatter(body)
-    fm = _parse_frontmatter_data(fm_text) if fm_text is not None else {}
-    fm.pop("agents", None)
-
-    activities = list_for_doc(doc_path)
-    return _assemble(fm_extras=fm, activities=activities, rest=rest)
-
-
-def _assemble(
-    *,
-    fm_extras: dict[str, Any],
-    activities: list[ActivityRow],
-    rest: str,
-) -> str:
-    has_agents = bool(activities)
-    has_extras = bool(fm_extras)
-    if not has_agents and not has_extras:
-        return rest
-
-    lines: list[str] = ["---"]
-    if has_agents:
-        lines.extend(FRONTMATTER_NOTE_LINES)
-        lines.extend(_render_agents_lines(activities))
-    if has_extras:
-        extras_yaml = yaml.safe_dump(
-            fm_extras, sort_keys=False, default_flow_style=False
-        ).rstrip("\n")
-        lines.extend(extras_yaml.splitlines())
-    lines.append("---")
-    lines.append("")
-    return "\n".join(lines) + rest

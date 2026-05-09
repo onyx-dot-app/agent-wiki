@@ -58,14 +58,11 @@ def seed_trigger(
     scope_path: str,
     nl_description: str = "fire when status changes",
     message: str | None = None,
-    destination: object | None = None,
+    destination: str = "event_log",
     enabled: bool = True,
     kind: str = "delta",
 ) -> str:
-    if message is None:
-        action_json = "{}"
-    else:
-        action_json = json.dumps({"message": message, "destination": destination})
+    action_json = json.dumps({"message": message, "destination": destination})
     with session() as s:
         s.add(
             Trigger(

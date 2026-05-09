@@ -10,8 +10,11 @@ import useSWR from "swr";
 import { AppShell } from "@/components/common/AppShell";
 import { TriggerModal } from "@/components/triggers/TriggerModal";
 import { RunAgentModal } from "@/components/wiki/RunAgentModal";
+import { ShareDialog } from "@/components/wiki/ShareDialog";
+import { WikiSearch } from "@/components/wiki/WikiSearch";
 import { apiFetch } from "@/lib/api";
 import { useRequireAuth } from "@/lib/auth";
+import type { DocumentActivity, DocumentActivityResponse } from "@/types";
 
 interface ListResponse {
   paths: string[];
@@ -57,6 +60,16 @@ export default function WikiRoute() {
 
   return (
     <AppShell>
+      <div
+        style={{
+          padding: "16px 32px 0",
+          display: "flex",
+          alignItems: "center",
+          gap: 16,
+        }}
+      >
+        <WikiSearch />
+      </div>
       {isFile ? <FileViewer path={slugPath} /> : <Explorer dir={slugPath} />}
     </AppShell>
   );
@@ -835,6 +848,7 @@ function FileViewer({ path }: { path: string }) {
   const [triggerModalOpen, setTriggerModalOpen] = useState(false);
   const [triggerStatus, setTriggerStatus] = useState<string | null>(null);
   const [runAgentOpen, setRunAgentOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
   // History state. `viewingSha` is null when looking at the working-tree
   // (latest) version; otherwise it's the sha being viewed and is what we
   // pass back as `base_sha` on save so the server records a rollback.
@@ -843,6 +857,12 @@ function FileViewer({ path }: { path: string }) {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [commits, setCommits] = useState<CommitInfo[] | null>(null);
   const [historyError, setHistoryError] = useState<string | null>(null);
+  // Active-agents panel (collapsible chip near the top of the doc).
+  // We always know the count (so the chip can label "Active agents (N)"),
+  // but the entry list only renders when the user expands it.
+  const [agentsOpen, setAgentsOpen] = useState(false);
+  const [agents, setAgents] = useState<DocumentActivity[]>([]);
+  const [agentsError, setAgentsError] = useState<string | null>(null);
 
   const loadLatest = useCallback(() => {
     setLoading(true);
@@ -864,6 +884,29 @@ function FileViewer({ path }: { path: string }) {
     setHistoryOpen(false);
     setCommits(null);
   }, [loadLatest]);
+
+  const refreshAgents = useCallback(() => {
+    setAgentsError(null);
+    apiFetch<DocumentActivityResponse>(
+      `/documents/file/activity?path=${encodeURIComponent(path)}`,
+    )
+      .then((r) => setAgents(r.agents))
+      .catch((e) =>
+        setAgentsError(e instanceof Error ? e.message : "failed to load activity"),
+      );
+  }, [path]);
+
+  useEffect(() => {
+    refreshAgents();
+    setAgentsOpen(false);
+    // Refresh on window focus so the chip count tracks reality after
+    // the user comes back from another tab. The endpoint is cheap.
+    function onFocus() {
+      refreshAgents();
+    }
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [refreshAgents]);
 
   const refreshHistory = useCallback(() => {
     setHistoryError(null);
@@ -1037,6 +1080,9 @@ function FileViewer({ path }: { path: string }) {
             >
               + Trigger
             </button>
+            <button onClick={() => setShareOpen(true)} style={secondaryBtn}>
+              Share
+            </button>
             <button onClick={onRename} style={secondaryBtn}>
               Rename
             </button>
@@ -1080,6 +1126,15 @@ function FileViewer({ path }: { path: string }) {
         )}
       </header>
 
+      {!editing && (
+        <ActiveAgentsBar
+          agents={agents}
+          error={agentsError}
+          open={agentsOpen}
+          onToggle={() => setAgentsOpen((v) => !v)}
+        />
+      )}
+
       {!editing && reindexStatus && (
         <div style={{ fontSize: 12, color: "#4b5563", marginBottom: 12 }}>{reindexStatus}</div>
       )}
@@ -1094,6 +1149,12 @@ function FileViewer({ path }: { path: string }) {
         lockScope
         onClose={() => setTriggerModalOpen(false)}
         onSaved={(t) => setTriggerStatus(`Created trigger for ${t.scope_path}`)}
+      />
+
+      <ShareDialog
+        path={path}
+        open={shareOpen}
+        onClose={() => setShareOpen(false)}
       />
 
       <RunAgentModal open={runAgentOpen} onClose={() => setRunAgentOpen(false)} />
@@ -1336,6 +1397,173 @@ function formatTs(iso: string): string {
   const d = new Date(iso);
   if (isNaN(d.getTime())) return iso;
   return d.toLocaleString();
+}
+
+function formatRelative(iso: string): string {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return iso;
+  const diffMs = d.getTime() - Date.now();
+  const past = diffMs <= 0;
+  const abs = Math.abs(diffMs);
+  const sec = Math.round(abs / 1000);
+  let value: string;
+  if (sec < 45) value = "just now";
+  else if (sec < 90) value = "1m";
+  else if (sec < 3600) value = `${Math.round(sec / 60)}m`;
+  else if (sec < 86400) value = `${Math.round(sec / 3600)}h`;
+  else value = `${Math.round(sec / 86400)}d`;
+  if (value === "just now") return value;
+  return past ? `${value} ago` : `in ${value}`;
+}
+
+function ActiveAgentsBar({
+  agents,
+  error,
+  open,
+  onToggle,
+}: {
+  agents: DocumentActivity[];
+  error: string | null;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  const count = agents.length;
+  const summary = count === 0 ? "No agents active" : `Active agents (${count})`;
+  return (
+    <div
+      style={{
+        marginBottom: 12,
+        border: "1px solid #e5e5e5",
+        borderRadius: 8,
+        background: count > 0 ? "#f0f9ff" : "#fafafa",
+        overflow: "hidden",
+      }}
+    >
+      <button
+        onClick={onToggle}
+        aria-expanded={open}
+        style={{
+          width: "100%",
+          textAlign: "left",
+          padding: "8px 12px",
+          background: "transparent",
+          border: "none",
+          cursor: "pointer",
+          fontSize: 13,
+          fontWeight: 600,
+          color: count > 0 ? "#0c4a6e" : "#6b7280",
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+        }}
+      >
+        <span style={{ display: "inline-block", width: 8 }}>{open ? "▾" : "▸"}</span>
+        <span>{summary}</span>
+        {error && <span style={{ color: "#991b1b", fontWeight: 500 }}> — {error}</span>}
+      </button>
+      {open && count > 0 && (
+        <ul
+          style={{
+            listStyle: "none",
+            padding: 0,
+            margin: 0,
+            borderTop: "1px solid #e0f2fe",
+            background: "white",
+          }}
+        >
+          {agents.map((a, i) => (
+            <ActiveAgentRow
+              key={`${a.owner_display}-${a.agent_name ?? ""}-${a.activity}-${i}`}
+              a={a}
+              isLast={i === agents.length - 1}
+            />
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function ActiveAgentRow({
+  a,
+  isLast,
+}: {
+  a: DocumentActivity;
+  isLast: boolean;
+}) {
+  const wrote = a.activity === "wrote";
+  const pillStyle: React.CSSProperties = {
+    flexShrink: 0,
+    fontSize: 11,
+    fontWeight: 600,
+    padding: "2px 8px",
+    borderRadius: 999,
+    textTransform: "uppercase",
+    letterSpacing: 0.3,
+    background: wrote ? "#fef3c7" : "#dbeafe",
+    color: wrote ? "#92400e" : "#1e40af",
+  };
+  return (
+    <li
+      style={{
+        padding: "8px 12px",
+        borderBottom: isLast ? "none" : "1px solid #f1f5f9",
+        fontSize: 13,
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        whiteSpace: "nowrap",
+        overflow: "hidden",
+      }}
+    >
+      <span style={pillStyle}>{a.activity}</span>
+
+      <span style={{ fontWeight: 600, color: "#0f172a", flexShrink: 0 }}>
+        {a.owner_display}
+      </span>
+      {a.agent_name ? (
+        <span style={{ color: "#64748b", flexShrink: 0 }}>· {a.agent_name}</span>
+      ) : null}
+
+      {a.description ? (
+        <span
+          style={{
+            color: "#475569",
+            fontStyle: "italic",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            minWidth: 0,
+            flex: "1 1 auto",
+          }}
+          title={a.description}
+        >
+          “{a.description}”
+        </span>
+      ) : (
+        <span style={{ flex: 1 }} />
+      )}
+
+      <span
+        style={{ fontSize: 12, color: "#475569", flexShrink: 0 }}
+        title={`Started ${formatTs(a.registered_at)}`}
+      >
+        {formatRelative(a.registered_at)}
+      </span>
+      <span
+        style={{
+          fontSize: 11,
+          color: "#94a3b8",
+          flexShrink: 0,
+          paddingLeft: 4,
+          borderLeft: "1px solid #e2e8f0",
+          marginLeft: 4,
+        }}
+        title={`Expires ${formatTs(a.expires_at)}`}
+      >
+        expires {formatRelative(a.expires_at)}
+      </span>
+    </li>
+  );
 }
 
 const primaryBtn: React.CSSProperties = {

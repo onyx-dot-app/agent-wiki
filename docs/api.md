@@ -14,8 +14,26 @@ except the inbound webhook endpoints (which use per-source signing secrets).
 ## Users
 `GET /api/users`, `POST /api/users`, `GET /api/users/:id`
 
-## MCP connections
-`GET /api/mcp`, `POST /api/mcp`, `DELETE /api/mcp/:id`
+## MCP — inbound server (external coding agents → wiki)
+
+Streamable HTTP transport, bearer auth. See `docs/mcp-server.md` for
+the user-facing setup guide and
+`local_data/wiki/mcp-server/mcp-server.md` for the design.
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| POST   | `/api/mcp`                | Bearer | JSON-RPC 2.0 request/response (initialize, tools/list, tools/call, resources/*, ping). |
+| GET    | `/api/mcp`                | Bearer | Long-lived SSE stream — server-initiated `notifications/resources/updated` and `…/list_changed` frames. |
+| GET    | `/api/mcp/tokens`         | Cookie | Current user's personal API tokens (no hashes). |
+| POST   | `/api/mcp/tokens`         | Cookie | Mint a new token; raw value returned exactly once. |
+| DELETE | `/api/mcp/tokens/:id`     | Cookie | Revoke. |
+
+## MCP — outbound connections (wiki harness → external MCP servers)
+
+`GET /api/mcp/connections`, `POST /api/mcp/connections`,
+`DELETE /api/mcp/connections/:id` — manages the in-process agent
+harness's *use* of *other* MCP servers. Distinct from the inbound
+surface above.
 
 ## Documents
 | Method | Path | Notes |

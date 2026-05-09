@@ -1,4 +1,4 @@
-"""Tests for the web_search and open_url tools.
+"""Tests for the web_search and open_urls tools.
 
 We patch the seams (``app.web.search`` / ``app.web.fetch``) — never the
 underlying Serper/Firecrawl SDK clients.
@@ -94,21 +94,29 @@ def test_web_search_surfaces_unexpected_errors(monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
-# open_url                                                                    #
+# open_urls                                                                   #
 # --------------------------------------------------------------------------- #
 
 
-def test_open_url_validation_requires_http_url():
-    from app.llm.agents.tools.open_url import handle
+def test_open_urls_validation_requires_url_list():
+    from app.llm.agents.tools.open_urls import handle
 
-    assert handle({})["error"] == "url is required"
-    assert handle({"url": ""})["error"] == "url is required"
-    assert "http" in handle({"url": "not-a-url"})["error"]
-    assert "http" in handle({"url": "ftp://x.example.com"})["error"]
+    assert "urls is required" in handle({})["error"]
+    assert "urls is required" in handle({"urls": []})["error"]
+    assert "non-empty string" in handle({"urls": [""]})["error"]
+    assert "http" in handle({"urls": ["not-a-url"]})["error"]
+    assert "http" in handle({"urls": ["ftp://x.example.com"]})["error"]
 
 
-def test_open_url_returns_normalized_content(monkeypatch):
-    from app.llm.agents.tools import open_url as ou
+def test_open_urls_rejects_too_many():
+    from app.llm.agents.tools import open_urls as ou
+
+    out = ou.handle({"urls": [f"https://example.com/{i}" for i in range(ou.MAX_URLS + 1)]})
+    assert "too many urls" in out["error"]
+
+
+def test_open_urls_returns_normalized_content(monkeypatch):
+    from app.llm.agents.tools import open_urls as ou
 
     seen = {}
 
@@ -121,33 +129,46 @@ def test_open_url_returns_normalized_content(monkeypatch):
                 full_content="# Hello\n\nbody",
                 published_date=None,
                 scrape_successful=True,
-            )
+            ),
+            WebContent(
+                title="World",
+                link="https://example.org/",
+                full_content="body 2",
+                published_date=datetime(2024, 1, 1, tzinfo=timezone.utc),
+                scrape_successful=True,
+            ),
         ]
 
     monkeypatch.setattr(ou.web, "fetch", fake_fetch)
-    out = ou.handle({"url": "  https://example.com/  "})
-    assert seen["urls"] == ["https://example.com/"]
-    assert out["title"] == "Hello"
-    assert out["full_content"].startswith("# Hello")
-    assert out["scrape_successful"] is True
-    assert out["published_date"] is None
+    out = ou.handle(
+        {"urls": ["  https://example.com/  ", "https://example.org/"]}
+    )
+    assert seen["urls"] == ["https://example.com/", "https://example.org/"]
+    assert "error" not in out
+    assert len(out["results"]) == 2
+    first = out["results"][0]
+    assert first["title"] == "Hello"
+    assert first["full_content"].startswith("# Hello")
+    assert first["scrape_successful"] is True
+    assert first["published_date"] is None
+    assert out["results"][1]["published_date"] == "2024-01-01T00:00:00+00:00"
 
 
-def test_open_url_handles_provider_not_configured(monkeypatch):
-    from app.llm.agents.tools import open_url as ou
+def test_open_urls_handles_provider_not_configured(monkeypatch):
+    from app.llm.agents.tools import open_urls as ou
 
     def boom(urls):
         raise web_pkg.WebProviderNotConfigured("Firecrawl API key is not configured")
 
     monkeypatch.setattr(ou.web, "fetch", boom)
-    out = ou.handle({"url": "https://example.com/"})
+    out = ou.handle({"urls": ["https://example.com/"]})
     assert "error" in out
     assert "Firecrawl" in out["error"]
 
 
-def test_open_url_handles_empty_response(monkeypatch):
-    from app.llm.agents.tools import open_url as ou
+def test_open_urls_handles_empty_response(monkeypatch):
+    from app.llm.agents.tools import open_urls as ou
 
     monkeypatch.setattr(ou.web, "fetch", lambda urls: [])
-    out = ou.handle({"url": "https://example.com/"})
-    assert out["error"] == "fetch returned no content"
+    out = ou.handle({"urls": ["https://example.com/"]})
+    assert out["results"] == []

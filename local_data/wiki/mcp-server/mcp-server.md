@@ -1,677 +1,538 @@
 # MCP Server (inbound)
 
-How the wiki exposes itself **as** an MCP server so external coding agents
-(Claude Code, Cursor, Codex, custom harnesses) can search, read, edit, and
-subscribe to docs. This is the **inbound** surface — distinct from the
-outbound MCP-client surface (`backend/app/api/mcp.py` →
-`mcp_connections.py` after the rename below) which lets *our* agent harness
-consume *other* MCP servers.
+The wiki exposes itself **as** an MCP server so external coding agents
+(Claude Code, Cursor, Codex, custom harnesses) can discover, read, and
+edit wiki docs as a first-class workspace.
 
-Source of truth for the editing primitives the MCP wraps:
-[tool-design](../tool-design/tool-design.md). This doc covers the
-transport, auth, resource subscription, staleness model, and the tools
-that exist only on the MCP surface (`update_doc_nl`, `ask_nl_question`,
-`apply_patch`, `read_doc` with `sha`, `list_history`).
+This is the **inbound** surface. Distinct from the outbound MCP-client
+surface (`backend/app/api/mcp_connections.py`) which lets *our* in-process
+agent harness consume *other* MCP servers.
 
-## Goal
+> **Status — Phases 1–7 shipped (full surface).** Authentication,
+> JSON-RPC transport, read tools, write tools, resource subscriptions
+> with SSE notifications, the async ``update_doc_nl`` job, and the
+> operator + tool-description polish are all live. Open questions
+> below track follow-on work that wasn't in scope for v0.
 
-Let an external agent treat the wiki as a first-class workspace:
+## What it currently supports
 
-1. **Discover** — `search_wiki`, `list_history`, `ask_nl_question`.
-2. **Read** — `read_doc(path, sha?)`, with auto-subscription so the agent
-   gets pushed an update the moment the doc changes underneath it.
-3. **Write** — `edit_doc` (find-and-replace), `apply_patch` (line-anchored
-   unified diff), `multi_edit`, `write_doc`, `move_doc`, `create_directory`,
-   plus the heavier `update_doc_nl` (NL instruction → document-updater
-   agent → commit).
-4. **Stay in sync** — MCP `resources/subscribe` on `wiki:///<path>`. On
-   commit (from any source — human, another agent, the doc-updater),
-   subscribers receive `notifications/resources/updated` over their open
-   SSE stream.
+External agents authenticated with a personal API token can:
 
-Non-goals for v0: outbound dispatch from triggers via MCP, streaming
-partial tool results, multi-tenant isolation beyond user-scoped tokens,
-persistent subscriptions across reconnects.
+- **Discover** — full-text search the wiki via BM25, list a doc's
+  commit history, and ask natural-language questions answered by a
+  curated read-only sub-agent.
+- **Read** — fetch HEAD or any historical sha of a markdown doc.
+- **Edit (sync)** — surgical find-and-replace (`edit_doc`), atomic
+  multi-edit batches (`multi_edit`), full-body overwrite or create
+  (`write_doc`), line-anchored unified-diff patches (`apply_patch`),
+  rename / move (`move_path`), and folder creation (`create_directory`).
+- **Stay safe** — every write tool accepts a `base_sha` parameter for
+  optimistic concurrency. `write_doc` *requires* `base_sha` on overwrites
+  because full-body writes have no fuzzy fallback. `read_before_write` is
+  enforced via the same ContextVar the chat agent uses.
+- **Stay in scope** — every tool consults `app/wiki/acl.py`, so an MCP
+  token can read or modify exactly what the same user could via the web
+  UI. Search results are pre-filtered through ACL in SQL.
+- **Stay in sync** — `resources/list`, `resources/read`,
+  `resources/subscribe`, `resources/unsubscribe` over `wiki:///<path>`
+  and `job://<id>` URIs. `read_doc` auto-subscribes the session at
+  HEAD by default. Commits anywhere — UI saves, chat-agent edits,
+  MCP edits, task worker writes — fan out to subscribed sessions
+  over a long-lived SSE stream on `GET /api/mcp` as
+  `notifications/resources/updated` (and `…/list_changed` on creates,
+  deletes, and moves). Postgres `LISTEN/NOTIFY` carries cross-process
+  events from the worker to the web replica that owns the session's
+  SSE stream.
+- **Hand off heavy work** — `update_doc_nl(path, instruction,
+  base_sha?, idempotency_key?)` enqueues an async job, returns
+  `{job_id, status_uri: "job://<id>"}`, and auto-subscribes the
+  calling session so the SSE stream pushes status changes
+  (`pending` → `succeeded` | `failed`). The worker reconstitutes
+  `g.user` from the job row before any wiki write, so ACL applies
+  inside the worker too. Idempotency: same `(user, path,
+  instruction)` collapses onto the same job; explicit
+  `idempotency_key` overrides. Server-side debounce (default 30s)
+  skips redundant LLM calls when the same `(user, path)` was just
+  committed.
 
-## Surface — transport and framing
+The surface that *isn't* available yet: final polish (Phase 7) —
+operator-facing docs and tool-description tuning. See [What's not yet
+implemented](#whats-not-yet-implemented).
 
-### Streamable HTTP
+## Architecture — request lifecycle
 
-Use MCP's **Streamable HTTP** transport (the modern replacement for
-HTTP+SSE). One endpoint, two methods:
+Two concurrent flows hang off `/api/mcp`: the per-call request/response
+on `POST` and the long-lived SSE side channel on `GET`. Both wear the
+same bearer auth.
 
-- `POST /api/mcp` — JSON-RPC 2.0 request/notification. Response is either
-  a single JSON-RPC reply or an `text/event-stream` upgrade if the server
-  needs to stream multi-step output.
-- `GET /api/mcp` — opens a long-lived SSE stream for **server-initiated**
-  messages (resource update notifications, list-changed notifications,
-  progress events for long-running tools).
+### POST — request/response
 
-Session id is established on the first `initialize` call and carried in
-the `Mcp-Session-Id` header on every subsequent request. The server keeps
-session state (subscriptions, seen_paths, idempotency keys) keyed by that
-id, in-process for v0.
-
-### JSON-RPC framing
-
-Use the official `mcp` Python SDK (`pip install mcp`) for the framing,
-capability negotiation, and SSE plumbing. Hand-rolling JSON-RPC for this
-gains nothing. The SDK plugs into ASGI, so we mount it on the Flask app
-via `a2wsgi` or run it under the same uvicorn process Flask uses for SSE
-chat (the chat agent already streams over SSE — same pattern).
-
-If the SDK proves heavy or surprising, the fallback is to write a thin
-JSON-RPC handler in `app/mcp_server/transport.py` and reuse the SSE
-plumbing from `app/api/chat.py`. Decision deferred to implementation, but
-default to **SDK first**.
-
-### Auth — per-user personal API token
-
-Bearer auth on the HTTP transport. Header: `Authorization: Bearer
-mcp_<token>`. Token is hashed-at-rest (`bcrypt` or `hashlib.sha256` —
-match what `app/auth/users.py` uses for passwords) and resolves to a
-`user_id`. Every commit made through this session uses that user's git
-identity (`name <email>`).
-
-New table (see `app/db/models.py`):
-
-```sql
-CREATE TABLE mcp_tokens (
-  id          INTEGER PRIMARY KEY,
-  user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  name        TEXT    NOT NULL,        -- human label, e.g. "claude-code laptop"
-  token_hash  TEXT    NOT NULL UNIQUE, -- sha256 of the raw token
-  created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
-  last_used_at TEXT
-);
-CREATE INDEX idx_mcp_tokens_user ON mcp_tokens(user_id);
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  External agent (Claude Code / Cursor / Codex)                  │
+│  POST /api/mcp                                                   │
+│  Authorization: Bearer mcp_<token>                               │
+│  Mcp-Session-Id: <id>          (after first initialize)         │
+│  body: {jsonrpc:2.0, id, method, params}                         │
+└─────────────────────────┬───────────────────────────────────────┘
+                          │
+                          ▼
+   ┌──────────────────────────────────────────────────────┐
+   │  app/api/mcp_server.py  — Flask blueprint @ /api/mcp │
+   └──────────────────────────────┬───────────────────────┘
+                                  │
+                                  ▼
+   ┌─────────────────────────────────────────────────────────┐
+   │  app/mcp_server/auth.py                                 │
+   │  bearer_required → tokens_repo.verify(raw)              │
+   │                  → flask.g.user = User(...)             │  ← single seam:
+   │                                                         │    everything below
+   │  401 if missing / unknown / revoked                     │    reads g.user via
+   └──────────────────────────────┬──────────────────────────┘    current_user()
+                                  │
+                                  ▼
+   ┌─────────────────────────────────────────────────────────┐
+   │  app/mcp_server/transport.py — dispatch(message)        │
+   │  - validates jsonrpc==2.0                               │
+   │  - routes by method:                                    │
+   │      initialize → mcp_session.create(g.user)            │
+   │      notifications/initialized → flips initialized=True │
+   │      tools/list, tools/call → mcp_tools                 │
+   │      resources/list, /read, /subscribe, /unsubscribe    │
+   │                              → mcp_resources            │
+   │      ping / errors                                      │
+   └──────────────────────────────┬──────────────────────────┘
+                                  │
+                                  ▼
+   ┌─────────────────────────────────────────────────────────┐
+   │  app/mcp_server/tools.py                                │
+   │  - allow-list filter (MCP_ALLOWED_TOOLS)                │
+   │  - bind seen_doc_paths ContextVar = sess.seen_paths     │
+   │  - registry_dispatch(name, args)                        │
+   │  - auto-subscribe on read_doc(is_head=true)             │
+   │  - wrap result: {content:[{type:text,text:json(...)}],  │
+   │                  isError, stale_paths}                  │
+   └──────────────────────────────┬──────────────────────────┘
+                                  │
+                                  ▼
+   ┌─────────────────────────────────────────────────────────┐
+   │  app/llm/agents/tools/<name>.py — SHARED with chat agent│
+   │  - validate args                                        │
+   │  - require_can("read"|"write", path)  ← ACL gate        │
+   │  - assert_read_before_write(rel)                        │
+   │  - assert_base_sha(rel, base_sha)                       │
+   │  - body manipulation (wiki.edit / wiki.patch)           │
+   │  - commit_and_fan_out → wiki.git + wiki.notify          │
+   └──────────────────────────────┬──────────────────────────┘
+                                  │
+                                  ▼
+   ┌─────────────────────────────────────────────────────────┐
+   │  app/wiki/notify.py:after_doc_write / _delete / _move   │
+   │  - reindex_path (BM25)                                  │
+   │  - fan_out_trigger_eval                                 │
+   │  - acl.on_page_created / _deleted / _moved              │
+   │  - mcp_pubsub.publish_doc_update / _delete /            │
+   │                                  publish_list_changed   │
+   └─────────────────────────────────────────────────────────┘
 ```
 
-The raw token is shown **once** at creation (`mcp_<32 hex chars>` so it's
-distinguishable from session cookies in logs) and never stored. Lost
-tokens get revoked + reissued.
+### GET — SSE side channel + pub-sub
 
-New repo: `app/auth/mcp_tokens.py` — `create(user_id, name) -> (token_id,
-raw_token)`, `verify(raw_token) -> User | None`, `list(user_id)`,
-`revoke(token_id, user_id)`.
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  External agent — long-lived GET /api/mcp                       │
+│  Authorization: Bearer mcp_<token>                               │
+│  Mcp-Session-Id: <id>                                            │
+└─────────────────────────┬───────────────────────────────────────┘
+                          │
+                          ▼  bearer_required + session check
+   ┌─────────────────────────────────────────────────────────┐
+   │  app/api/mcp_server.py:transport_sse                    │
+   │  - per-iteration: pubsub.drain_blocking(sess_id, 15s)   │
+   │  - yield "data: {jsonrpc:2.0, method, params}\n\n"      │
+   │  - heartbeat ":keepalive\n\n" on timeout                │
+   │  - on disconnect → mcp_session.drop(sess_id)            │
+   │                  → pubsub.forget(sess_id)               │
+   └──────────────────────────────▲──────────────────────────┘
+                                  │ in-memory queue per session
+                                  │
+   ┌──────────────────────────────┴──────────────────────────┐
+   │  app/mcp_server/pubsub.py                               │
+   │  - subscriptions: session_id → set[rel_path]            │
+   │  - reverse index: rel_path → set[session_id]            │
+   │  - per-session queue: drain_blocking(...) parks here    │
+   │  - publish_*  : local fan-out + per-subscriber ACL      │
+   │                 recheck (acl.can(...)) before delivery  │
+   │                 + NOTIFY wiki_commit, '<json>'          │
+   └──────────────────────────────▲──────────────────────────┘
+                                  │
+              ┌───────────────────┴────────────────────┐
+              │                                        │
+   ┌──────────┴──────────┐               ┌─────────────┴──────────┐
+   │ in-process commits  │               │ cross-process commits  │
+   │ (web → web):        │               │ (worker → web):        │
+   │ direct call into    │               │ LISTEN wiki_commit     │
+   │ publish_doc_update  │               │ thread per web replica │
+   │ from after_doc_write│               │ re-publishes locally   │
+   └─────────────────────┘               └────────────────────────┘
+```
 
-New API (admin-free, user-scoped) under `app/api/mcp_tokens.py`:
-- `GET /api/mcp/tokens` — list current user's tokens (no hashes).
-- `POST /api/mcp/tokens {name}` — mint, return raw token in body once.
-- `DELETE /api/mcp/tokens/<id>` — revoke.
+The handler layer is **shared** with the in-process chat agent. The MCP
+server is structurally a different transport / authentication front-end
+plus an allow-list — every wiki side-effect goes through the same code
+the chat agent uses, so ACL, agent-activity attribution, BM25 reindex,
+trigger fan-out, **and pub-sub fan-out** all apply identically. A
+chat-agent edit fires the same `notifications/resources/updated`
+frame to MCP subscribers as an MCP edit would.
 
-Frontend page: `frontend/src/app/settings/mcp-tokens/page.tsx` — list +
-"New token" button + reveal-once modal. Reuses `apiFetch` and
-`useRequireAuth`.
+## Authentication — bearer tokens
+
+Personal API tokens are per-user, hashed-at-rest, shown to the user once
+at creation and never persisted.
+
+- Schema: `mcp_tokens(id, user_id, name, token_hash, created_at, last_used_at)`
+  — see `app/db/models.py:McpToken` and migration `0003_mcp_tokens.py`.
+- Repo: `app/auth/mcp_tokens.py` — `create()`, `list_for_user()`,
+  `revoke()`, `verify()`.
+- HTTP: `GET / POST / DELETE /api/mcp/tokens` —
+  `app/api/mcp_tokens.py`, `@login_required` (cookie-authenticated user
+  managing their own tokens).
+- Format: `mcp_<24-byte-urlsafe>` plaintext, distinguishable in logs.
+- Verification (`verify`): bcrypt-walks every row and bumps
+  `last_used_at` on the matching one. Linear scan is fine at the
+  per-user-keys-each scale; revisit if we ever ship machine-generated
+  tokens at volume.
+
+The bearer middleware (`app/mcp_server/auth.py:bearer_required`) is the
+**single seam** that turns a token into a request principal. It resolves
+the token to a `User` and stuffs it into `flask.g.user` — exactly the
+same field the cookie-based `current_user()` reads. Everything below this
+line (`require_can`, `commit_and_fan_out`, agent-activity attribution,
+trigger `actor` field, frontmatter rendering) sees the right user with
+zero MCP-specific code.
+
+## Authorization — ACL is the same as the web UI
+
+There is **no MCP-specific ACL code path.** Once `g.user` is set, every
+existing helper in `app/wiki/acl.py` and `require_can(action, path)`
+fires unchanged.
+
+| MCP surface | Check |
+| --- | --- |
+| `read_doc(path, sha?)` | `require_can("read", path)`. Returns the standard `forbidden` error envelope. |
+| `list_history(path)` | `require_can("read", path)`. |
+| `search_wiki(query)` | Filtered through `acl.visible_paths_filter` — the BM25 query joins ACL in SQL, unauthorized hits never get scored or returned. |
+| `ask_nl_question(query)` | The wiki_qa harness's read tools all go through the same gates because they read `g.user`. |
+| `edit_doc` / `multi_edit` / `apply_patch` | `require_can("write", path)` enforced inside `commit_and_fan_out`. |
+| `write_doc` (overwrite) | `require_can("write", path)`. |
+| `write_doc` (create) | Allowed for any authenticated user. New page gets default-public ACL rows + an owner stamp via the lifecycle hook in `app/wiki/notify.py:after_doc_write(change_kind="create", owner_user_id=user.id)` — see the [permissions doc](../permissions/permissions.md) for the rationale. |
+| `move_path` | `require_can("write", old)` (and creates owner rows on the new path). |
+| Token CRUD (`/api/mcp/tokens`) | `@login_required` — a user can only mint and revoke their own tokens. |
+
+Admins still bypass page-level checks per the permissions doc, mirroring
+the web UI.
+
+## Session lifecycle
+
+Sessions are **in-memory and process-local** in
+`app/mcp_server/session.py`. A `McpSession` carries `(id, user_id,
+initialized, seen_paths)`. They die when the process restarts —
+persistent subscriptions across reconnects are an explicit non-goal.
+
+```
+client                                 server
+  │                                       │
+  │── POST initialize ───────────────────▶│  bearer_required → g.user
+  │                                       │  mcp_session.create(g.user)
+  │                                       │  → returns sess (initialized=False)
+  │◀─ result + Mcp-Session-Id: <new id> ──│
+  │                                       │
+  │── POST notifications/initialized ────▶│  sess.initialized = True
+  │   (Mcp-Session-Id: <id>)              │
+  │◀─ 202 Accepted (no body) ─────────────│
+  │                                       │
+  │── POST tools/list ───────────────────▶│  filter MCP_ALLOWED_TOOLS;
+  │                                       │  reshape input_schema → inputSchema
+  │◀─ result: {tools: [...]} ─────────────│
+  │                                       │
+  │── POST tools/call ───────────────────▶│  bind seen_doc_paths to sess.seen_paths
+  │   {name, arguments}                   │  registry_dispatch(name, args)
+  │                                       │  wrap in {content,isError,stale_paths}
+  │◀─ result: {content:[...]} ────────────│
+```
+
+For multi-replica deploys, the load balancer must pin sessions to a
+replica via `Mcp-Session-Id` (e.g. sticky cookie, header-hash rule) —
+v0 ships single-process so this is automatic and not a concern yet.
+
+## JSON-RPC transport
+
+Hand-rolled in `app/mcp_server/transport.py` rather than via the `mcp`
+Python SDK. The SDK is async-first / ASGI-only, and the WSGI Flask app
+would need an ASGI bridge plus event-loop work to host it — too much
+infra for what is currently six methods (`initialize`,
+`notifications/initialized`, `ping`, `tools/list`, `tools/call`, plus
+errors). The MCP doc's Phase-2 fallback path explicitly allows this.
+
+If/when the surface grows enough that the SDK pays off — or a future
+client expects strictly spec-compliant capability negotiation we
+haven't reproduced — the transport module is small enough to swap
+behind the same blueprint without touching callers.
+
+Spec: MCP `2025-03-26`. Errors follow JSON-RPC 2.0:
+`-32600 INVALID_REQUEST`, `-32601 METHOD_NOT_FOUND`, `-32602
+INVALID_PARAMS`, `-32603 INTERNAL_ERROR`. Application-level errors
+(file not found, permission denied, `stale_base`) come back inside the
+result envelope with `isError: true` — JSON-RPC errors are reserved
+for protocol-level issues.
 
 ## Tool surface
 
-The MCP tool registry **shares** the agent-tool registry per
-[seams.md](../seams.md). Tools the in-process chat agent already exposes
-(`search_wiki`, `read_page`, `edit_doc`, `multi_edit`, `write_doc`,
-`move_path`, `create_directory`, `create_trigger`, `update_trigger`) get
-re-exposed as MCP tools by walking `app/llm/agents/tools/__init__.py:REGISTRY`.
+Tool *handlers* live in the chat agent's existing registry at
+`app/llm/agents/tools/`. The MCP server doesn't duplicate them; it
+re-exports a curated subset via `app/mcp_server/tools.py:MCP_ALLOWED_TOOLS`.
+Adding a tool to MCP requires its name to be added to the allow-list —
+walking the chat-agent registry blindly would expose tools that don't
+make sense over MCP yet (e.g. `run_bash`, `web_search`).
 
-Tools that exist **only** on the MCP surface (because the in-process
-chat agent has direct loop access and doesn't need them) live in a
-sibling registry `app/mcp_server/tools/` and are merged at server-start
-into the exported tool list.
-
-### Inventory
-
-| Tool | Source | Notes |
+| Tool | Purpose | MCP-specific extras |
 | --- | --- | --- |
-| `search_wiki` | shared | Returns BM25 snippets. Auto-populates session `seen_paths` is **not** done here — search-only sessions still need explicit `read_doc` before edits, same rule as the chat agent. |
-| `read_doc(path, sha?, subscribe=true)` | mcp-only (replaces `read_page`) | `sha` defaults to HEAD. Returns `{path, body, sha, is_head}`. If `subscribe=true` (default), session subscribes to `wiki:///<path>` so future commits push notifications. Adds `path` to `seen_paths` only when `is_head` (a historical read doesn't authorize an edit). |
-| `list_history(path, limit=20)` | mcp-only | Wraps `wiki_git.history(rel)`. Returns `[{sha, author, ts, message, deprecated_by}, ...]` — same shape as the existing `GET /api/documents/file/history`. |
-| `edit_doc(path, edits[], message, base_sha?)` | shared (`multi_edit` shape) | Atomic batch of `{old_string, new_string, replace_all?}`. `base_sha` is new — see "Concurrency". |
-| `apply_patch(path, patch, message, base_sha?)` | mcp-only | Unified diff with `@@ -L,N +L,M @@` hunks. See "Patch tool" below. |
-| `write_doc(path, body, message, base_sha?)` | shared | Full-body create or overwrite. `base_sha` required when overwriting an existing file. |
-| `move_doc(old_path, new_path, message)` | shared (`move_path`) | Rename. |
-| `create_directory(path, message)` | shared | Empty folder via `.gitkeep`. |
-| `update_doc_nl(path, instruction, idempotency_key?, base_sha?)` | mcp-only | NL update — see "NL update tool" below. |
-| `ask_nl_question(query)` | mcp-only | NL Q&A over the wiki — see "NL question tool" below. |
-| `create_trigger`, `update_trigger` | shared | Same shape as in-process. |
+| `read_doc(path, sha?)` | Read HEAD or a historical sha. Returns `{path, body, sha, is_head}`. Adds the path to the session's `seen_paths` only when `is_head` (a historical read doesn't authorize an edit). | `sha` parameter for historical reads. |
+| `search_wiki(query, limit?)` | BM25 search filtered through ACL. Returns `{path, title, snippet, score}`. | — |
+| `list_history(path, limit?)` | Per-path commit history. Returns `[{sha, author, ts, message, deprecated_by}, ...]`. | — |
+| `ask_nl_question(query)` | RAG-style answer with sources. Wraps `app.llm.agents.wiki_qa` (read-only chat-loop instance). | — |
+| `edit_doc(path, old_string, new_string, commit_message, base_sha?)` | Surgical fuzzy find-and-replace. | `base_sha` (optional) for optimistic concurrency. |
+| `multi_edit(path, edits[], commit_message, base_sha?)` | Atomic batch of `{old_string, new_string, replace_all?}` edits. | `base_sha` (optional). |
+| `write_doc(path, body, commit_message, base_sha?)` | Full-body overwrite or create. | `base_sha` **required** when overwriting (no fuzzy fallback). |
+| `apply_patch(path, patch, commit_message, base_sha?)` | Line-anchored unified diff with content-based fuzzy fallback (`app/wiki/patch.py`). | `base_sha` (optional). |
+| `move_path(old_path, new_path, commit_message)` | Rename a doc or folder. | — |
+| `create_directory(path, commit_message)` | Create an empty folder via `.gitkeep`. | — |
+| `update_doc_nl(path, instruction, base_sha?, idempotency_key?)` | Async LLM-driven update. Returns `{job_id, status_uri: "job://<id>", status, deduplicated}`. Worker runs the document-updater agent and commits if it produces a new body. | `idempotency_key` (defaults to `sha256(user_id\|path\|instruction)`) for retry collapse; `job://<id>` resource subscribe for status pushes; server-side debounce (`MCP_NL_DEBOUNCE_SECONDS`, default 30s). |
 
-### `read_doc` with `sha`
+`tools/list` translates the internal JSON specs (`input_schema` →
+`inputSchema` per MCP spec) and filters to the allow-list.
+`tools/call` dispatches into the same handler the chat agent uses,
+binding `seen_doc_paths` to the MCP session's `seen_paths` set so
+read-before-write is enforced consistently across both surfaces.
 
-```
-read_doc(path: str, sha: str | None = None, subscribe: bool = True)
-  -> {path, body, sha, is_head: bool}
-```
+## Concurrency — the staleness model
 
-- `sha` omitted → reads HEAD via `wiki_git.read_file(rel)`.
-- `sha` provided → reads via `wiki_git.read_file_at_ref(rel, sha)` (new
-  helper — `git show <sha>:<rel>`). Errors with `{"error": "sha_not_found"}`
-  if the sha doesn't exist or the file wasn't tracked at that sha.
-- Auto-subscribe: when `subscribe=true` and `is_head`, the session is
-  registered as a subscriber for `wiki:///<path>`. Auto-subscribe is
-  intentionally HEAD-only — subscribing to a historical sha is meaningless.
-- `seen_paths` is populated only on a HEAD read so an agent can't read
-  an old version and then edit blindly against HEAD.
+Three layers, strongest to weakest:
 
-### `apply_patch` (line-anchored unified diff)
+### 1. `base_sha` optimistic concurrency — hard correctness
 
-We deliberately skipped this in `tool-design.md` for the in-process
-agent because the model produces unified-diff format unreliably without
-strong training signal, and the fuzzy `edit_doc` chain covers most cases.
-**On the MCP surface we add it**, because external agents (Claude Code,
-Codex) often have line-numbered context and expect to send `+/-` diffs.
-
-```
-apply_patch(path: str, patch: str, message: str, base_sha: str | None = None)
-  -> {path, sha, diff, applied_hunks, broken_links?}
-```
-
-`patch` is a standard unified diff body (no `*** Begin Patch` envelope —
-plain `--- a/x`, `+++ b/x`, then `@@` hunks). Implementation in
-`app/wiki/patch.py`:
-
-1. Parse hunks (one of `whatthepatch`, `unidiff`, or hand-rolled — check
-   if any are already in `requirements.txt`; default to a small
-   hand-rolled parser).
-2. For each hunk:
-   - **Try at the specified line range first.** If the context lines
-     (`' '` lines) match exactly at the offset, apply.
-   - **Fallback: locate by content.** Drop the line numbers, build the
-     "before" text from context + `-` lines, run it through
-     `app/wiki/edit.py:replace()`. If it matches uniquely, apply.
-   - **Fail.** Return `{"error": "hunk_failed", "hunk_index": i,
-     "expected": "...", "found": "..."}`. The whole patch aborts (atomic).
-3. On success, commit + reindex + fan-out via `commit_and_fan_out`.
-
-This gives us the line-number ergonomics agents expect, with the same
-fuzzy safety net `edit_doc` already has.
-
-### `update_doc_nl` (NL instruction → document-updater)
-
-```
-update_doc_nl(path: str, instruction: str, idempotency_key: str | None = None,
-              base_sha: str | None = None) -> {job_id, status_uri}
-```
-
-This is the "I have now completed the TODO under section X which is
-blah blah" entry point. It's heavy (LLM call) and async.
-
-Flow:
-
-1. Validate path + check `seen_paths` (file must exist; agent must have
-   `read_doc`'d it).
-2. Compute `idempotency_key` if not provided: `sha256(user_id + path +
-   instruction)`. Look up an existing pending/completed job with that
-   key; if found, return its `job_id` (no new enqueue).
-3. Insert `mcp_jobs` row with `status='pending'`, `kind='update_doc_nl'`,
-   `payload_json={path, instruction, base_sha}`.
-4. Enqueue `tasks.document_update.agent_update_document_nl(job_id)` on
-   `documents_queue` (see [background-tasks](../background-tasks/background-tasks.md)).
-5. Return `{job_id, status_uri: "job://<job_id>"}`. The agent can
-   `resources/subscribe` to the URI to be pushed completion.
-
-Worker side (`tasks/document_update.py`):
-
-1. Load job row + current body + `base_sha`.
-2. If `base_sha` set and HEAD differs, mark job `failed` with
-   `error="stale_base"` and the diff since base. Publish job update.
-3. Run `app.llm.agents.document_updater.run(doc_id, current_body,
-   {instruction}, source="mcp")`.
-4. On `NO_CHANGE`: mark job `succeeded` with `committed=false`. Publish.
-5. On new body: `commit_and_fan_out` → mark job `succeeded` with
-   `committed=true, sha=<new>`. Publish.
-6. On exception: mark job `failed` with `error=<code>` from `LLMError`.
-
-New table (see `app/db/models.py`):
-
-```sql
-CREATE TABLE mcp_jobs (
-  id              TEXT PRIMARY KEY,           -- ulid
-  user_id         INTEGER NOT NULL REFERENCES users(id),
-  kind            TEXT NOT NULL,              -- 'update_doc_nl' for now
-  status          TEXT NOT NULL,              -- pending|running|succeeded|failed
-  idempotency_key TEXT,
-  payload_json    TEXT NOT NULL,
-  result_json     TEXT,
-  error           TEXT,
-  created_at      TEXT NOT NULL DEFAULT (datetime('now')),
-  finished_at     TEXT
-);
-CREATE UNIQUE INDEX idx_mcp_jobs_idemp
-  ON mcp_jobs(user_id, idempotency_key) WHERE idempotency_key IS NOT NULL;
-```
-
-Frequency hint (server-side debounce): inside the worker, before invoking
-the LLM, check if a `succeeded` job for the same `(user_id, path)`
-committed within the last 30 seconds. If so, mark this one
-`succeeded committed=false reason=debounced`. Cheap insurance against a
-chatty agent. The 30s window is configurable (`MCP_NL_DEBOUNCE_SECONDS`).
-
-### `ask_nl_question` (NL Q&A over the wiki)
-
-```
-ask_nl_question(query: str, max_sources: int = 8)
-  -> {answer, sources: [{path, sha}]}
-```
-
-Read-only RAG over the wiki. Sync (block until done) for v0 — most
-agents tolerate 30–60s tool calls. If we see chronic timeouts, switch to
-the same job pattern as `update_doc_nl`.
-
-Implementation: dispatches to a one-shot variant of the chat-agent
-harness with:
-- `search_wiki` + `read_page` enabled
-- All write tools disabled
-- Max 6 tool-call iterations (hard cap)
-- System prompt instructs: "Answer concisely with citations to wiki
-  paths. Do not propose edits."
-
-Lives in `app/llm/agents/wiki_qa.py:run(query) -> {answer, sources}`.
-The MCP tool wrapper just calls it. The chat-agent loop primitive
-(`app/llm/agents/loop.py`) is reused — we just instantiate it with a
-narrower toolset and write-disabled mode.
-
-## Resources — subscription model
-
-MCP resources expose URI-addressable content the client can list, read,
-and subscribe to. The server pushes `notifications/resources/updated`
-when the content changes.
-
-### URI scheme
-
-- `wiki:///<rel-path>` — a markdown doc. Body is `text/markdown`.
-- `wiki:///` — the wiki root (returns the tree as JSON, `application/json`).
-- `job://<job_id>` — async job status. Body is JSON `{status, result, error}`.
-
-`resources/list` returns:
-
-- One entry per `.md` file under `<wiki>/` (walked once at session start,
-  cached, refreshed on `notifications/resources/list_changed`).
-- One entry per active `mcp_jobs` row owned by the session's user.
-
-`resources/read` dispatches:
-
-- `wiki:///<path>` → `wiki_git.read_file(rel)` (HEAD only — historical
-  reads go through `read_doc(path, sha)`).
-- `wiki:///` → tree walk via `app/wiki/filesystem.py:walk_tree()`.
-- `job://<id>` → query `mcp_jobs` row.
-
-`resources/subscribe`:
-
-- `wiki:///<path>` → record `(session_id, path)` in the subscription
-  registry.
-- `job://<id>` → record `(session_id, job_id)`.
-
-`resources/unsubscribe` removes the entry. Subscriptions die with the
-session.
-
-### Pub-sub — hooked into `commit_and_fan_out`
-
-The single seam for **all** wiki commits is
-`app/llm/agents/tools/_doc_helpers.py:commit_and_fan_out`. Today it does
-two side-effects post-commit: `reindex_path` and `fan_out_trigger_eval`.
-We add a third:
-
-```python
-def commit_and_fan_out(rel, body, message, *, change_kind):
-    ...
-    sha = wiki_git.commit_file(rel, body, message, author=author)
-    reindex_path(rel)
-    fan_out_trigger_eval(rel, sha, change_kind, author)
-    mcp_pubsub.publish_doc_update(rel, sha, change_kind)   # NEW
-    return sha
-```
-
-`mcp_pubsub` is `app/mcp_server/pubsub.py` — a tiny in-process pub-sub:
-
-```python
-# app/mcp_server/pubsub.py
-class PubSub:
-    def subscribe_doc(self, session_id: str, rel: str) -> None: ...
-    def unsubscribe_doc(self, session_id: str, rel: str) -> None: ...
-    def subscribe_job(self, session_id: str, job_id: str) -> None: ...
-    def publish_doc_update(self, rel: str, sha: str, kind: str) -> None: ...
-    def publish_job_update(self, job_id: str, status: str) -> None: ...
-    def drain(self, session_id: str) -> list[Notification]: ...
-    def forget(self, session_id: str) -> None: ...
-
-PUBSUB = PubSub()
-```
-
-`publish_doc_update` looks up subscribers for `rel`, enqueues a
-`Notification` per session into a per-session `asyncio.Queue` (or
-`queue.Queue` with a futures bridge — depends on whether we end up under
-asyncio for the SDK). The transport layer's SSE writer awaits the queue
-and serializes each notification as a JSON-RPC message.
-
-Cross-process complication: task workers run in a different process than
-the Flask/MCP server. The doc-updater agent commits from the worker. The
-worker's `commit_and_fan_out` therefore needs to reach into the
-**server-process** subscription registry.
-
-**Approach: Postgres `LISTEN/NOTIFY`.** App state already lives in
-Postgres; using its native pub-sub means no extra infrastructure and
-sub-millisecond fan-out across processes. The MCP server holds one
-long-lived connection per replica that `LISTEN`s on a `wiki_commit`
-channel; every commit (web or worker) calls `NOTIFY wiki_commit, '<json
-payload>'` in the same transaction as the business write. The server
-matches incoming payloads against in-memory `mcp_subscriptions` (rebuilt
-per-replica from a small `mcp_subscriptions` table on session
-reconnect — sessions are sticky to a replica).
-
-Subscription state is the only thing that lives in Postgres for this
-feature:
-
-```python
-# additions to `app/db/models.py`
-class McpSubscription(Base):
-    __tablename__ = "mcp_subscriptions"
-    session_id: Mapped[str] = mapped_column(primary_key=True)
-    uri: Mapped[str] = mapped_column(primary_key=True)  # 'wiki:///foo.md' or 'job://abc'
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(default=func.now())
-```
-
-Notifications themselves are not persisted — `LISTEN/NOTIFY` is
-fire-and-forget. If a session disconnects mid-flight it re-syncs by
-re-reading the resource on next `read_doc` (the `sha` round-trip already
-covers that staleness window). Sessions clean up their subscription rows
-on disconnect (or a 24h janitor).
-
-## Concurrency — the staleness contract
-
-This is the "doc changed under the agent" guarantee. Three layers,
-strongest to weakest:
-
-### 1. Optimistic concurrency (`base_sha`) — hard correctness
-
-Every write tool accepts `base_sha`. If set and `wiki_git.head_sha_for_path(rel)
-!= base_sha`:
+Every write tool accepts an optional `base_sha`. When set, the handler
+calls `_doc_helpers.assert_base_sha(rel, base_sha)`; if `base_sha` no
+longer matches HEAD for `rel`, the call returns:
 
 ```json
 {
   "error": "stale_base",
   "base_sha": "<what agent sent>",
   "current_sha": "<head>",
-  "diff_since_base": "<unified diff>"
+  "message": "the file has changed since base_sha; re-read with read_doc, re-derive the edit, and retry"
 }
 ```
 
-Agent rebases (re-reads, re-edits) and retries.
-
-`base_sha` semantics:
+`base_sha` semantics by tool:
 
 | Tool | base_sha behavior |
 | --- | --- |
-| `edit_doc` | Optional. If set, must match HEAD. Without it, the fuzzy `old_string` chain is the only safety. |
-| `apply_patch` | Optional. Same as edit_doc. |
-| `write_doc` | **Required when overwriting an existing file.** Without it, return `{"error": "base_sha_required_for_overwrite"}`. New-file creates skip the check. |
-| `update_doc_nl` | Optional. Recorded on the job row; checked at task-execution time inside the worker (HEAD might have moved between enqueue and run). |
-| `move_doc` | N/A — content unchanged. |
+| `edit_doc` | Optional. Recommended over MCP. The fuzzy `old_string` chain is the only safety net without it. |
+| `multi_edit` | Optional. Same as `edit_doc`. |
+| `apply_patch` | Optional. Line-anchored hunks + content-based fallback give partial safety; `base_sha` makes drift detectable. |
+| `write_doc` (overwrite) | **Required.** Without it, returns `{"error": "base_sha_required_for_overwrite"}` — full-body writes have no fuzzy fallback, so the staleness check can't be skipped. |
+| `write_doc` (create) | N/A — file doesn't exist yet. |
+| `move_path` | N/A — content unchanged. |
 
-`read_doc` returns `sha` so the agent has it. Agent flow: `read_doc →
-edit_doc(base_sha=<that sha>)`.
+`read_doc` returns the current HEAD sha so an agent can immediately
+round-trip it: `read_doc → edit_doc(base_sha=that_sha)`. The returned
+sha is captured **after** `mark_doc_read` runs so it always matches
+the body returned to the agent (the agent-activity registry's
+frontmatter refresh would otherwise advance HEAD silently).
 
-### 2. Push notification (`notifications/resources/updated`) — low latency
+### 2. Read-before-write — primary signal
 
-Every `read_doc` auto-subscribes the session to `wiki:///<path>`. On any
-commit to that path (from anyone), the server fires
-`notifications/resources/updated` over the session's SSE stream within
-a few ms (Postgres `LISTEN/NOTIFY` latency; sub-millisecond once we
-short-circuit same-process commits via an in-memory bus).
+`assert_read_before_write(rel)` consults the `seen_doc_paths`
+ContextVar (set per-MCP-session in `tools.call_for_mcp`). A write to a
+file the session hasn't `read_doc`-ed at HEAD this session fails with
+"You must call read_page first." Historical reads (with `sha`) do
+**not** mark seen — the agent saw the old body.
 
-Well-behaved agents process the notification by re-reading before their
-next edit. The notification carries the new `sha` so the agent knows
-exactly what to fetch.
+### 3. `stale_paths` field — belt-and-suspenders
 
-### 3. `stale_paths` field on tool results — belt-and-suspenders
-
-Even agents that ignore notifications get a heads-up. Every tool result
-on the MCP surface includes:
-
-```json
-{
-  ...,
-  "stale_paths": ["foo/bar.md", "baz.md"]
-}
-```
-
-…listing every subscribed path that has changed since the session's
-last tool call. Computed by reading the session's pending notifications
-non-destructively (the SSE writer still ships them for completeness;
-this field just surfaces the same info in-band).
-
-### Combined guarantee
-
-- `base_sha` is the only **hard** guarantee. Skipping it allows races.
-  System-prompt language for the MCP tool descriptions strongly recommends
-  it for every write.
-- The push notification + `stale_paths` field together give the agent
-  fast feedback so it doesn't *want* to skip `base_sha`.
-- The fuzzy `edit_doc` chain is a final safety net — drift in `old_string`
-  fails closed.
+Every MCP tool result carries a `stale_paths` array — paths the
+session is subscribed to that have a pending update since the last
+tool call. Computed by non-destructively peeking at the session's
+pub-sub queue: every queued notification is read, paths with
+`wiki:///<path>` URIs are collected, then the notifications are put
+back so the SSE writer still ships them. An attentive client that
+actively drains its SSE stream will see `stale_paths: []` in steady
+state.
 
 ## Module layout
 
 ```
 backend/app/mcp_server/
-  __init__.py        # MCP server bootstrap; mounts JSON-RPC dispatch on Flask
-  auth.py            # bearer token verify -> user
-  session.py         # Session class: id, user_id, seen_paths, subs
-  tools/
-    __init__.py      # registry merge: agent-tool registry + mcp-only tools
-    read_doc.py      # path + sha + auto-subscribe
-    apply_patch.py   # unified diff
-    update_doc_nl.py # async dispatch to document_updater
-    ask_nl_question.py
-    list_history.py
-    move_doc.py      # thin wrapper of move_path
-  resources.py       # list/read/subscribe handlers for wiki:// + job://
-  pubsub.py          # Postgres LISTEN/NOTIFY bridge + per-replica subscription registry
-  transport.py       # SSE writer per session (or SDK adapter)
-  jobs.py            # mcp_jobs repo
+  __init__.py           Package marker + status doc
+  auth.py               bearer_required decorator → flask.g.user
+  session.py            McpSession + in-memory registry, all_session_ids
+  transport.py          JSON-RPC dispatcher (initialize, tools/*,
+                        resources/*, ping, errors)
+  tools.py              MCP_ALLOWED_TOOLS allow-list,
+                        list_for_mcp() (input_schema → inputSchema),
+                        call_for_mcp() (binds seen_doc_paths,
+                                        auto-subscribes read_doc,
+                                        computes stale_paths)
+  resources.py          list / read / subscribe / unsubscribe handlers
+                        for wiki:///<path> AND job://<id> URIs
+  pubsub.py             Subscription registry + per-session queue +
+                        Postgres LISTEN/NOTIFY bridge
+                        (start_listener() / stop_listener())
+                        + publish_job_update for job:// subscribers
+  jobs.py               Async-job repo (create / get / update / dedupe by
+                        idempotency_key / debounce window lookup)
+  worker_context.py     as_user(uid): pushes a Flask app+request context
+                        and binds g.user so commit_and_fan_out, ACL,
+                        and agent-activity attribution Just Work in the
+                        worker process
 
 backend/app/api/
-  mcp_connections.py # RENAMED from mcp.py; outbound MCP-client management
-  mcp_tokens.py      # NEW; user-scoped token CRUD
-  mcp_server.py      # NEW; mounts /api/mcp Streamable HTTP endpoint
-
-backend/app/wiki/
-  patch.py           # NEW; parse + apply unified-diff hunks. Pure logic.
-  git.py             # extend: read_file_at_ref(rel, sha), head_sha_for_path
-                     # (already exists per tool-design.md history flow)
+  mcp_server.py         POST /api/mcp + GET /api/mcp (SSE) blueprint
+  mcp_tokens.py         GET / POST / DELETE /api/mcp/tokens (cookie auth)
+  mcp_connections.py    Outbound MCP-client connection list (existing,
+                        renamed from mcp.py; mounted at /api/mcp/connections)
 
 backend/app/auth/
-  mcp_tokens.py      # NEW; bcrypt/sha256 hashing + verify
+  mcp_tokens.py         Token repo: create / list_for_user / revoke / verify
 
-backend/app/db/migrations/
-  0007_mcp_tokens.sql
-  0008_mcp_jobs.sql
-  0009_mcp_subscriptions.sql
+backend/app/db/migrations/versions/
+  0001_initial.py       Bootstraps every ORM table via Base.metadata.create_all,
+                        so a fresh DB picks up McpToken / McpJob without
+                        needing intermediate migrations
+  0004_mcp_jobs.py      Explicit ALTER for production DBs that ran 0001
+                        before McpJob was added to the model
 
-backend/app/llm/agents/
-  wiki_qa.py         # NEW; one-shot RAG harness for ask_nl_question
+backend/app/db/models.py
+  McpToken              Personal API token (matches McpConnection style)
+  McpJob                Async job row + partial unique index on
+                        (user_id, idempotency_key)
+
+backend/app/wiki/notify.py
+  after_doc_write       + mcp_pubsub.publish_doc_update / publish_list_changed
+  after_doc_delete      + mcp_pubsub.publish_doc_delete / publish_list_changed
+  after_path_move       + per-pair update/delete + publish_list_changed
+
+backend/app/llm/agents/tools/_doc_helpers.py
+  assert_base_sha       Shared optimistic-concurrency helper used by every
+                        write tool; chat agent + MCP both go through it
+
+backend/app/main.py
+  create_app()          Calls mcp_pubsub.start_listener() once at boot
+                        (web process only) so the worker's commits reach
+                        SSE subscribers via NOTIFY wiki_commit
+
+backend/app/tasks/document_update.py
+  agent_update_document_nl(job_id)
+                        Worker task on documents_queue. Loads job row,
+                        runs as_user(...), validates base_sha + debounce,
+                        invokes document_updater, marks succeeded /
+                        failed, publishes job state changes via pubsub.
 ```
 
-## Implementation plan — phased
+Frontend:
 
-### Phase 1 — auth and token surface (foundation)
+```
+frontend/src/
+  app/agents/page.tsx          /agents route — copy block, generate / reveal-once,
+                               key list with revoke, sample client config
+  lib/agents.ts                useTokens() SWR hook + create / revoke + endpoint URL
+  components/common/AppShell.tsx  + Agents NavItem in the left rail
+```
 
-1. The MCP tokens model.
-2. `app/auth/mcp_tokens.py` repo (`create`, `verify`, `list`, `revoke`).
-3. `app/api/mcp_tokens.py` blueprint + register in `app/main.py`.
-4. Frontend `settings/mcp-tokens` page.
-5. Tests: token round-trip, hash collision, revocation.
+## Frontend — the Agents page
 
-Exit criteria: a user can mint a token in the UI, see it once, and that
-token's hash lands in the DB.
+A top-level sidebar entry rather than a buried `/settings/*` page —
+"give your agents the ability to read and update the wiki" is the
+user-facing concept; tokens are the implementation detail.
 
-### Phase 2 — Streamable HTTP scaffold
+Layout:
 
-1. Pull in the `mcp` Python SDK; smoke-test mounting it on the Flask
-   app via ASGI bridge.
-2. `app/mcp_server/auth.py` — bearer middleware that resolves token →
-   user → `Session`.
-3. `app/mcp_server/session.py` — Session object (id, user, seen_paths,
-   created_at). In-memory dict keyed by `Mcp-Session-Id`.
-4. `initialize` handshake: capability advertisement (`tools`,
-   `resources`, `resources.subscribe`).
-5. `app/api/mcp_server.py` blueprint mounted at `/api/mcp`.
-6. Tests: `initialize` round-trip with a token; auth failure returns
-   401; missing session id returns the protocol error.
+1. **Hero copy.** "Give your agents the ability to read and update this
+   wiki. Generate a personal API key below, then drop it into your
+   coding agent's MCP configuration."
+2. **Endpoint block.** Read-only display of `${origin}/api/mcp` with a
+   copy-to-clipboard button. Caption explains the
+   `Authorization: Bearer mcp_…` header.
+3. **Generate API key** button → modal with a name field → reveal-once
+   panel with the plaintext token, copy button, and "you won't see this
+   again" warning.
+4. **Existing keys list** — one row per token: name, created_at,
+   last_used_at (or "never used"), revoke button (with confirm).
+5. **Collapsible sample config** for `mcp_servers.json` — copy-pastable
+   stanza pointing at the endpoint with a placeholder for the bearer
+   token.
 
-Exit criteria: a Python MCP client can `initialize` against the running
-server and see an empty tool list.
+What the page does **not** include in v1:
 
-### Phase 3 — read-only tool surface
-
-1. `app/mcp_server/tools/read_doc.py` — without `subscribe` yet, just
-   `path + sha`.
-2. `app/wiki/git.py:read_file_at_ref(rel, sha)` (uses `git show
-   <sha>:<rel>`).
-3. Re-export `search_wiki` from the agent-tool registry through the MCP
-   tool list.
-4. `app/mcp_server/tools/list_history.py` wrapping `wiki_git.history`.
-5. `app/llm/agents/wiki_qa.py` + `ask_nl_question` MCP tool.
-6. Tests: read HEAD, read at sha, read non-existent sha (error), search,
-   history, ask.
-
-Exit criteria: an agent can do discovery + reads end-to-end, including
-historical reads.
-
-### Phase 4 — write surface (sync edits)
-
-1. Re-export `edit_doc`, `multi_edit`, `write_doc`, `move_path`,
-   `create_directory` from the agent-tool registry.
-2. Add `base_sha` parameter to each (edit the agent-tool JSON specs +
-   handlers — same code path serves chat agent and MCP).
-3. `seen_paths` enforcement: extend `app/llm/agents/_session.py`
-   ContextVar to be settable from the MCP session. Same rule: file
-   must have been `read_doc`'d at HEAD before edits.
-4. `stale_paths` field — append to every tool result via a wrapper in
-   the MCP tool dispatcher. (Agent-tool path doesn't need this; chat
-   loop has direct state.)
-5. `app/wiki/patch.py` + `app/mcp_server/tools/apply_patch.py`.
-6. Tests: each tool with and without `base_sha`, stale rejection,
-   atomic multi-edit rollback, patch with line-correct hunk, patch
-   with line-drifted hunk (fuzzy fallback), patch with unresolvable
-   hunk (atomic abort).
-
-Exit criteria: an agent can read → edit with `base_sha` → succeed; can
-read → someone else commits → edit fails with `stale_base`.
-
-### Phase 5 — resources and subscriptions
-
-1. The MCP subscriptions model.
-2. `app/mcp_server/pubsub.py` — Postgres LISTEN/NOTIFY bridge + registry.
-3. Hook `mcp_pubsub.publish_doc_update` into
-   `commit_and_fan_out` (single line — every commit path flows through
-   here, including the task worker process).
-4. `app/mcp_server/resources.py` — `list`, `read`, `subscribe`,
-   `unsubscribe` handlers.
-5. Auto-subscribe in `read_doc` when `subscribe=true && is_head`.
-6. SSE writer in `app/mcp_server/transport.py` polling
-   `mcp_notifications` per session; ship `notifications/resources/updated`
-   JSON-RPC frames.
-7. Janitor: drop subscriptions and notifications older than 24h.
-8. Tests: subscribe → another connection commits → SSE delivers the
-   notification within 200ms; unsubscribe stops delivery; cross-process
-   commit (task worker) reaches the server.
-
-Exit criteria: two MCP clients connected; client A subscribes to a
-doc; client B edits it; client A receives the push within 200ms.
-
-### Phase 6 — async NL update
-
-1. The MCP jobs model.
-2. `app/mcp_server/jobs.py` repo.
-3. `app/mcp_server/tools/update_doc_nl.py`.
-4. `tasks/document_update.py:agent_update_document_nl(job_id)` — wire
-   the document-updater agent as documented in
-   [agents/document-updater.md](../agents/document-updater.md).
-5. Worker publishes job updates via `mcp_pubsub.publish_job_update`.
-6. `job://<id>` resource handler returns the row.
-7. Idempotency: unique index already on `(user_id, idempotency_key)`.
-   Server-side debounce window check before calling LLM.
-8. Tests: enqueue + poll, idempotency round-trip, debounce window, base
-   sha stale rejection inside worker, NO_CHANGE path, LLM error path.
-
-Exit criteria: agent calls `update_doc_nl`; receives `job_id`;
-subscribes to `job://<id>`; gets pushed completion; can read the new
-body.
-
-### Phase 7 — polish
-
-1. Rename `app/api/mcp.py` → `app/api/mcp_connections.py`; update
-   `main.py` blueprint registration.
-2. Update [seams.md](../seams.md) row to point at
-   `app/mcp_server/__init__.py` for inbound; clarify the outbound
-   surface is `app/api/mcp_connections.py`.
-3. Add an `architecture_and_progress.md` row for the MCP server.
-4. Operator docs: `docs/mcp-server.md` (or extend
-   [running-locally](../running-locally.md)) — example client config
-   for Claude Code (`~/.config/claude/mcp_servers.json`-style).
-5. Frequency-hint language in tool descriptions
-   (`<tool>.json:description`) — "Don't call after every commit; one
-   batched edit per logical change."
+- Per-token permission scoping (read-only keys, path-prefix keys).
+  Tokens inherit the minting user's permissions in full; see [open
+  questions](#open-questions).
+- Usage analytics, request logs, rate limits.
+- Admin "see all tokens across users" view. Strictly the current user's
+  tokens. Admin-side visibility (if needed) would land at
+  `/admin/agents` later.
 
 ## Testing
 
-### Unit
-- `tests/test_wiki_patch.py` — hunk parser, line-correct apply,
-  line-drifted fuzzy apply, unresolvable hunk, atomic abort across hunks.
-- `tests/test_mcp_pubsub.py` — subscribe / publish / drain semantics.
-- `tests/test_mcp_tokens.py` — hashing, verify, revoke.
-- `tests/test_mcp_jobs.py` — idempotency uniqueness, status transitions.
+Backend unit + integration tests against per-test Postgres schemas, real
+git, and a real Flask `test_client`. No SDK mocking — these exercise the
+HTTP transport end-to-end.
 
-### Integration (against a tmp wiki repo + tmp DB)
-- `tests/test_mcp_read_write.py` — `initialize` → `read_doc` →
-  `edit_doc(base_sha)` → success; concurrent commit → stale rejection.
-- `tests/test_mcp_subscriptions.py` — subscribe; commit from another
-  session (and from a task worker with `queue.immediate=True`); assert
-  notification fan-out via the SSE writer's outbound queue.
-- `tests/test_mcp_nl_update.py` — patch `app.llm.client.complete` to
-  return a synthetic body; round-trip job lifecycle; idempotency
-  collapses retries; debounce skip.
-- `tests/test_mcp_ask.py` — patch `app.llm.client.complete`; assert
-  citations and that no write tools were callable.
+| File | Coverage |
+| --- | --- |
+| `tests/test_mcp_tokens.py` | Repo round-trip, hash collision, revocation, multi-user isolation, `last_used_at` bump, plus HTTP layer (401 unauth, 201 reveal-once, 400 validation, 204 revoke, 404 second-revoke, cross-user revoke = 404). |
+| `tests/test_mcp_server_transport.py` | Bearer auth (no header / wrong scheme / unknown / revoked), `initialize` shape, `Mcp-Session-Id` header, full handshake → tools/list → ping flow, missing-session protocol error, pre-initialized rejection, unknown method, missing `jsonrpc` field, non-dict body rejection, `current_user()` visible inside dispatch. |
+| `tests/test_mcp_server_tools.py` | `tools/list` shape (`inputSchema` not `input_schema`) and allow-list, `read_doc` HEAD vs historical, `seen_paths` populated only on HEAD reads, ACL forbid on `read_doc` and `list_history`, disallowed and unknown tool rejection, `tools/call` parameter validation, search round-trip via MCP. |
+| `tests/test_mcp_server_writes.py` | End-to-end read → edit_doc(base_sha) → success; stale base_sha rejection; edit_doc without base_sha; read-before-write enforcement (skip-read fails; historical read doesn't satisfy); multi_edit happy path + atomic abort; apply_patch with correct base_sha; write_doc create vs overwrite; `base_sha_required_for_overwrite`; ACL forbid on write; `stale_paths` present on every result. |
+| `tests/test_mcp_server_subscriptions.py` | `resources/list` (ACL filtered, admin sees all); `resources/read` (HEAD body, forbidden, malformed URI); explicit subscribe + publish round-trip; auto-subscribe via `read_doc(subscribe=true)`, suppressed for historical reads and `subscribe=false`; `unsubscribe` stops delivery; per-subscriber ACL recheck drops post-revoke; end-to-end `edit_doc` → `after_doc_write` → push lands in subscriber's queue; `create` fires `list_changed`; `stale_paths` lists pending paths non-destructively; SSE stream rejects pre-init, requires correct session ownership, delivers a frame, cleans up on disconnect. |
+| `tests/test_mcp_server_jobs.py` | `update_doc_nl` enqueue → worker → succeed-with-commit; `NO_CHANGE` path; missing instruction / unread file / blocked ACL rejected at enqueue; explicit-key idempotency collapses retries; default key collapses identical retries; different instructions get different jobs; worker rechecks `base_sha` and fails with `stale_base` on drift; debounce skips redundant commits within the window; `resources/read job://<id>` returns the public view (no `user_id`); cross-user reads return not-found; cross-user subscribe returns forbidden; the wrapper auto-subscribes the calling session and the SSE queue receives the terminal status. |
+| `tests/test_doc_tools.py` | Chat-agent regression — confirms `base_sha` round-trip works for the in-process loop too (write_doc with sha succeeds; without sha returns `base_sha_required_for_overwrite`; with stale sha returns `stale_base`). |
 
-Mocks: same rules as elsewhere — patch `app.llm.client.complete`, never
-the SDK; tmp git repo for `wiki_git.*`; per-test Postgres schema (the
-shared `tmp_db` fixture) for everything DB.
+Run the targeted set: `uv run --extra dev pytest
+tests/test_mcp_*.py tests/test_doc_tools.py`.
+
+Full suite: `uv run --extra dev pytest`.
 
 ## Out of scope (do not pull forward)
 
 - **Outbound MCP dispatch from triggers.** Trigger destinations are
-  still null-only per [tool-design](../tool-design/tool-design.md);
-  routing fires through MCP back to the originating agent is a separate
-  feature.
+  still null-only per [tool-design](../tool-design/tool-design.md).
 - **Persistent subscriptions across reconnects.** Sessions die,
   subscriptions die. Add later if agent runtimes prove flaky.
-- **Per-org isolation.** v0 has no org concept; tokens are user-scoped
-  and that user can read/write everything not behind `@admin_required`.
+- **Per-org isolation.** v0 has no org concept; per-user ACL via
+  `app/wiki/acl.py` is the only isolation mechanism.
 - **Streaming partial results from `update_doc_nl`.** Job is
   pending/succeeded/failed; the agent doesn't need to watch the LLM
   emit tokens.
-- **Resource templates** (`resources/templates/list`). The wiki tree
-  is small; a flat `resources/list` is fine.
 
 ## Open questions
 
-- **Streamable HTTP vs HTTP+SSE.** Some agent runtimes (older Claude
-  Code builds) only speak the HTTP+SSE transport. We may need to
-  support both during a transition period. Decision: ship Streamable
-  HTTP first; add HTTP+SSE adapter only if we hit real client breakage.
 - **Tool-description strategy.** Should we ship two parallel
-  descriptions per shared tool (one optimized for the in-process chat
-  agent, one for external coding agents) or share one? Default: share
-  one, written for the external case (terser, MCP-protocol-aware).
-  Revisit if the chat agent's tool-call accuracy regresses.
-- **Rate limiting.** No quotas in v0. If a token starts spamming, we
-  rely on the 30s NL debounce. Add `mcp_rate_limit` table + a
+  descriptions per shared tool — one optimized for the in-process chat
+  agent, one for external coding agents — or share one? Default: share
+  one. Revisit if the chat agent's tool-call accuracy regresses.
+- **Rate limiting.** No quotas in v0. Add `mcp_rate_limit` table + a
   middleware once we see abuse.
-- **Tree representation in `resources/list`.** Flat list of every doc,
-  or hierarchical via resource templates? Flat list scales fine to a
-  few thousand docs; switch to templates beyond that.
+- **Tree representation in `resources/list`** (Phase 5). Flat list of
+  every doc, or hierarchical via resource templates? Flat list scales
+  to a few thousand docs; switch to templates beyond that.
 - **`apply_patch` vs `edit_doc` — which do agents reach for?** Worth
-  measuring once the surface is live; might inform whether we keep both
-  long-term.
-
-Yuhong sidenote, ignore this
+  measuring once external traffic is real; might inform whether we
+  keep both long-term.
+- **Per-token permission scoping.** v1 tokens inherit the minting
+  user's permissions in full. A user might want a read-only key for an
+  agent or a key scoped to `/specs/`. Add a `scope` column on
+  `mcp_tokens` (`{actions, paths_under}`) consulted *in addition to*
+  the user's ACL — never broader, only narrower. Out of scope until
+  users ask.

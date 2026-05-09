@@ -9,7 +9,7 @@
 > (webhooks / external services / agent messages) is **deferred** — see
 > the TBD callout in `../architecture_and_progress.md` §1.
 
-_Last updated: 2026-05-08_
+_Last updated: 2026-05-09_
 
 ---
 
@@ -34,6 +34,35 @@ This means every read in `app/api/triggers.py` is filtered by
 
 **Sharing / collaboration** (multi-user triggers, group ownership, "see
 team triggers") is **backlog** — see below. Don't implement in v0.
+
+### Wiki ACLs apply at every boundary (2026-05-09)
+
+Triggers honor wiki page ACLs (see
+[permissions](../permissions/permissions.md)) at three boundaries —
+neither the trigger's owner nor any other user gets a way to read content
+they couldn't read directly:
+
+1. **Create-time scope check.** `app/api/triggers.py` and the
+   `create_trigger` / `update_trigger` agent tools reject any
+   `scope_path` the caller can't read. The HTTP route uses
+   `app.auth.require_can("read", scope_path)` (→ 403 via the
+   `PermissionDenied` handler); the tools call `app.wiki.acl.can(...)`
+   and return `{"error": ...}`. This applies to creation **and** any
+   update that rebinds (or even leaves alone) the scope, so a user
+   whose access was revoked after creation can't still mutate the
+   trigger.
+2. **Fire-time owner re-check.** `app/tasks/triggers.py:fan_out_trigger_eval`
+   looks up the owner's user row once per trigger (cached across the
+   loop) and calls `acl.can(owner.id, owner.is_admin, "read", doc_path)`
+   before any LLM eval or message render. Failed checks log a single
+   `INFO` line and `continue` — no fire row is recorded. This protects
+   against the "owner had access at creation, lost it later" leak.
+3. **Events list is owner-scoped.** `/api/events` (list + detail)
+   filters to `trigger.fire` rows whose `target` trigger is owned by
+   the current user. The detail endpoint returns `404` (not `403`) on
+   a cross-owner read so we don't leak existence. Non-fire events
+   without a trigger id are excluded by design until we add an explicit
+   user-attribution column for them.
 
 ### Required fields — both `nl_description` and `message` (2026-05-08)
 
@@ -107,6 +136,30 @@ filename stays a useful hint.
 
 `app/db/models.py` adds the `file_path` column on
 the `triggers` cache row.
+
+### Destinations — catalog table, slug references (2026-05-09)
+
+Each trigger's `action_json.destination` is a slug pointing at a row in
+the `trigger_destinations` table (`id, name, description, created_at`).
+v0 ships one seeded destination:
+
+| `id`        | `name`    | description |
+|---          |---        |---          |
+| `event_log` | Event Log | Tracked in the event log; not sent externally anywhere. |
+
+Validation lives in `app/triggers/destinations.py:exists`, called from
+`app/triggers/repo.py:_validate_destination`. The HTTP API, the LLM agent
+tools (`create_trigger`, `update_trigger`), and any other caller share
+that single check — there's no per-call allow-list to drift. Legacy
+rows where `destination` is `None` (predating the catalog) are read as
+`"event_log"` via `_normalize_destination`, so callers see one shape.
+
+The `get_trigger_destinations` agent tool surfaces this catalog
+verbatim — the chat agent calls it before creating/updating a trigger
+when the user wants to pick a destination explicitly. Adding a new
+destination is a one-line migration insert plus a dispatcher branch in
+`tasks/triggers.py:_record_fire`; the creation surface picks it up
+automatically.
 
 ### Scope resolution
 
@@ -213,7 +266,13 @@ For this case we use a different payload and a single LLM call:
    (`render_message`) to produce the delivered text.
 6. Write a `trigger.fire` event with the rendered message and the raw
    instruction (kept for audit / re-render later).
-7. **No external dispatch in v0.** Surface in the Events tab.
+7. **No external dispatch in v0.** Every trigger ships with
+   `destination = "event_log"` (the only seeded row in
+   `trigger_destinations`); the fan-out records the fire in the events
+   table and that's it. Adding a new destination is a one-line migration
+   plus a dispatcher in `tasks/triggers.py:_record_fire` — the
+   creation/update path doesn't need to change because validation goes
+   through the catalog (see "Destinations" below).
 
 ### Fan-out (post-commit)
 

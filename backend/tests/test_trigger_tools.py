@@ -19,6 +19,7 @@ def as_user(tmp_repo, monkeypatch):
         id = uid
         email = "u@x.com"
         name = "U"
+        is_admin = False
 
     monkeypatch.setattr(
         "app.llm.agents.tools.create_trigger.current_user", lambda: FakeUser()
@@ -44,7 +45,7 @@ def test_create_trigger_requires_message(as_user):
     assert "trigger_fire_message" in out["error"]
 
 
-def test_create_trigger_default_destination_is_null(as_user):
+def test_create_trigger_default_destination_is_event_log(as_user):
     from app.llm.agents.tools.create_trigger import handle
 
     out = handle(
@@ -57,10 +58,10 @@ def test_create_trigger_default_destination_is_null(as_user):
     assert "error" not in out, out
     t = out["trigger"]
     assert t["message"] == "Guide rewritten"
-    assert t["destination"] is None
+    assert t["destination"] == "event_log"
 
 
-def test_create_trigger_rejects_non_null_destination(as_user):
+def test_create_trigger_rejects_unknown_destination(as_user):
     from app.llm.agents.tools.create_trigger import handle
 
     out = handle(
@@ -68,7 +69,7 @@ def test_create_trigger_rejects_non_null_destination(as_user):
             "scope_path": "guide.md",
             "trigger_nl_condition": "fire on rewrite",
             "trigger_fire_message": "x",
-            "destination": "https://example.com/hook",
+            "destination": "no_such_destination",
         }
     )
     assert "error" in out
@@ -112,22 +113,23 @@ def test_update_trigger_changes_individual_fields(as_user):
     assert out["trigger"]["enabled"] is False
 
 
-def test_update_trigger_rejects_non_null_destination(as_user):
+def test_update_trigger_rejects_unknown_destination(as_user):
     from app.llm.agents.tools.update_trigger import handle
 
     tid = _seed_trigger(as_user)
-    out = handle({"trigger_id": tid, "destination": "slack://channel"})
+    out = handle({"trigger_id": tid, "destination": "no_such_destination"})
     assert "error" in out
     assert "destination" in out["error"]
 
 
 def test_update_trigger_accepts_explicit_null_destination(as_user):
+    """``null`` is a legacy alias for ``event_log`` — it normalizes, doesn't error."""
     from app.llm.agents.tools.update_trigger import handle
 
     tid = _seed_trigger(as_user)
     out = handle({"trigger_id": tid, "destination": None})
     assert "error" not in out, out
-    assert out["trigger"]["destination"] is None
+    assert out["trigger"]["destination"] == "event_log"
 
 
 def test_update_trigger_rejects_other_users_trigger(as_user, monkeypatch):
@@ -159,3 +161,93 @@ def test_update_trigger_no_fields_returns_current(as_user):
     assert "error" not in out, out
     assert out["trigger"]["id"] == tid
     assert out.get("note") == "no fields to update"
+
+
+# --------------------------------------------------------------------------- #
+# scope_path ACL gating                                                        #
+# --------------------------------------------------------------------------- #
+
+
+def test_create_trigger_blocks_unreadable_scope(as_user):
+    from app.llm.agents.tools.create_trigger import handle
+    from app.wiki import acl
+
+    other_owner = seed_user(uid="usr_owner", email="o@x.com")
+    acl.set_owner("private/secret.md", other_owner)
+
+    out = handle(
+        {
+            "scope_path": "private/secret.md",
+            "trigger_nl_condition": "fire",
+            "trigger_fire_message": "msg",
+        }
+    )
+    assert "error" in out
+    assert "read access" in out["error"]
+
+
+def test_update_trigger_blocks_rebinding_to_unreadable_scope(as_user):
+    from app.llm.agents.tools.update_trigger import handle
+    from app.wiki import acl
+
+    tid = _seed_trigger(as_user)
+    other_owner = seed_user(uid="usr_owner", email="o@x.com")
+    acl.set_owner("private/secret.md", other_owner)
+
+    out = handle({"trigger_id": tid, "scope_path": "private/secret.md"})
+    assert "error" in out
+    assert "read access" in out["error"]
+
+
+def test_create_trigger_allowed_with_explicit_grant(as_user):
+    """Positive regression: a managed-path scope works when the user has
+    an explicit `read` grant. Pairs with the unreadable-scope test above to
+    pin both directions of the gate."""
+    from app.llm.agents.tools.create_trigger import handle
+    from app.wiki import acl
+
+    other_owner = seed_user(uid="usr_owner", email="o@x.com")
+    acl.set_owner("private/secret.md", other_owner)
+    acl.grant(
+        resource_kind="page",
+        resource_path="private/secret.md",
+        principal_kind="user",
+        principal_id=as_user,
+        permission="read",
+        granted_by_user_id=other_owner,
+    )
+
+    out = handle(
+        {
+            "scope_path": "private/secret.md",
+            "trigger_nl_condition": "fire",
+            "trigger_fire_message": "msg",
+        }
+    )
+    assert "error" not in out, out
+    assert out["trigger"]["scope_path"] == "private/secret.md"
+
+
+def test_update_trigger_blocks_when_existing_scope_unreadable(as_user):
+    """Negative regression: a user who owns a trigger but lost read access
+    to its *existing* scope can't even toggle ``enabled``."""
+    from app.llm.agents.tools.update_trigger import handle
+    from app.wiki import acl
+
+    other_owner = seed_user(uid="usr_owner", email="o@x.com")
+    acl.set_owner("private/secret.md", other_owner)
+    grant_id = acl.grant(
+        resource_kind="page",
+        resource_path="private/secret.md",
+        principal_kind="user",
+        principal_id=as_user,
+        permission="read",
+        granted_by_user_id=other_owner,
+    )
+
+    tid = _seed_trigger(as_user, scope_path="private/secret.md")
+    acl.revoke(grant_id)
+
+    out = handle({"trigger_id": tid, "enabled": False})
+    assert "error" in out
+    assert "read access" in out["error"]

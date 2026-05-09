@@ -113,3 +113,16 @@ export interface TriggerVersion {
 export function getTriggerVersion(id: string, sha: string): Promise<TriggerVersion> {
   return apiFetch<TriggerVersion>(`/triggers/${id}/version/${sha}`);
 }
+
+export interface TriggerDestination {
+  id: string;
+  name: string;
+  description: string;
+}
+
+export async function getTriggerDestinations(): Promise<TriggerDestination[]> {
+  const r = await apiFetch<{ destinations: TriggerDestination[] }>(
+    "/triggers/destinations",
+  );
+  return r.destinations;
+}

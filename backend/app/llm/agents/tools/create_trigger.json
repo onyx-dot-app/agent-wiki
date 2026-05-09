@@ -1,6 +1,6 @@
 {
   "name": "create_trigger",
-  "description": "Create a natural-language trigger owned by the current user. A trigger has three parts: an **if** condition (`trigger_nl_condition` — when to fire), a **fire message** (`trigger_fire_message` — what to deliver when it fires), and a **destination** (where to deliver). In v0 the only supported destination is `null`, which records the fire in the Event Log; outbound dispatch (webhook, agent message, etc.) isn't wired yet. Only call this after the user has explicitly asked to create a trigger — do not create speculatively.",
+  "description": "Create a natural-language trigger for the current user. A trigger has three parts: an **if** condition (`trigger_nl_condition` — when to fire), a **fire message** (`trigger_fire_message` — what to deliver when it fires), and a **destination** (where to deliver — a destination id from `get_trigger_destinations`, defaulting to `event_log`). Only call this after the user has explicitly asked to create a trigger — do not create speculatively. If the user wants to send the fire somewhere specific, call `get_trigger_destinations` first to see the available ids.",
   "input_schema": {
     "type": "object",
     "properties": {
@@ -14,11 +14,11 @@
       },
       "trigger_fire_message": {
         "type": "string",
-        "description": "**What message to send.** The notification body delivered when the trigger fires (e.g. \"Auth: session timeout policy changed — please review\"). Will appear in the Event Log entry."
+        "description": "**What message to send.** The notification body delivered when the trigger fires (e.g. \"Auth: session timeout policy changed — please review\"). Will appear in the destination."
       },
       "destination": {
-        "type": ["null"],
-        "description": "**Where to send it.** Must be `null` in v0 — fires are recorded in the Event Log. Other destinations (webhook URLs, etc.) will be added later."
+        "type": "string",
+        "description": "**Where to send it.** A destination id from `get_trigger_destinations` (e.g. `event_log`). Optional — defaults to `event_log`, which records the fire in the events table without sending it externally."
       }
     },
     "required": ["scope_path", "trigger_nl_condition", "trigger_fire_message"]

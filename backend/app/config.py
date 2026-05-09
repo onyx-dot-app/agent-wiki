@@ -45,10 +45,21 @@ def _positive_int(name: str, default: int) -> int:
     return value
 
 
+def _resolve_wiki_dir() -> str:
+    # Anchor relative paths against the repo root so the resolved location
+    # doesn't depend on which directory the process was launched from
+    # (`backend/`, repo root, pytest, etc.). Absolute paths pass through.
+    raw = os.environ.get("WIKI_DIR", "/wiki")
+    p = Path(raw)
+    if not p.is_absolute():
+        p = (_repo_root / p).resolve()
+    return str(p)
+
+
 def load_config() -> Config:
     return Config(
         secret_key=os.environ.get("SECRET_KEY", "dev-secret"),
-        wiki_dir=os.environ.get("WIKI_DIR", "/wiki"),
+        wiki_dir=_resolve_wiki_dir(),
         database_url=os.environ.get(
             "DATABASE_URL",
             "postgresql://agent:agent@postgres:5432/agent_wiki",

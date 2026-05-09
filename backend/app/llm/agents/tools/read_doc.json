@@ -1,6 +1,6 @@
 {
   "name": "read_doc",
-  "description": "Read the full markdown body of a single wiki document at HEAD or at a specific commit SHA. Returns `{path, body, sha, is_head}`. Use this when you need a historical version (e.g. after a `stale_base` error, when comparing against the version you last read). For ordinary HEAD reads, `read_page` is the simpler tool. Calling `read_doc` with no `sha` (or with the current HEAD sha) satisfies the read-before-write requirement enforced by `edit_doc` / `multi_edit` / `write_doc` / `apply_patch`. A historical read does NOT — an agent that only saw the old body cannot safely edit HEAD.",
+  "description": "Read the full markdown body of a single wiki document at HEAD or at a specific commit SHA. Returns `{path, body, sha, is_head, agents}`. On HEAD reads `agents` lists other users / named agents currently reading or writing the same doc; on historical reads it is empty (we don't preserve activity history). Use this when you need a historical version (e.g. after a `stale_base` error, when comparing against the version you last read). For ordinary HEAD reads, `read_page` is the simpler tool. Calling `read_doc` with no `sha` (or with the current HEAD sha) satisfies the read-before-write requirement enforced by `edit_doc` / `multi_edit` / `write_doc` / `apply_patch`. A historical read does NOT — an agent that only saw the old body cannot safely edit HEAD.",
   "input_schema": {
     "type": "object",
     "properties": {

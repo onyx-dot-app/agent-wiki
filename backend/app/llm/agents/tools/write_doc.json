@@ -15,6 +15,10 @@
       "commit_message": {
         "type": "string",
         "description": "Short commit message summarizing the change (e.g. \"clarify session timeout policy\")."
+      },
+      "base_sha": {
+        "type": "string",
+        "description": "REQUIRED when overwriting an existing file (the sha you last read). Optional for new-file creates. Without it on an overwrite, returns `base_sha_required_for_overwrite` — full-body overwrite has no fuzzy fallback so the staleness check can't be skipped."
       }
     },
     "required": ["path", "body", "commit_message"]

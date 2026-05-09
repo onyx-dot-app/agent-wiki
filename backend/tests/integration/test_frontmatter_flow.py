@@ -1,31 +1,27 @@
-"""Flow 5 — agent read stamps the doc's `agents:` frontmatter.
+"""Flow 5 — agent reads register in the registry and surface as the
+``agents`` field on the read tool / via ``GET /file/activity``.
 
-The agent-activity registry is the source of truth; every wiki ``.md``
-carries a managed ``agents:`` YAML block rendered from it. When an
-agent calls ``read_page`` on a doc, ``mark_doc_read`` upserts a
-``read`` row and re-commits the doc with the new frontmatter.
+The agent-activity registry is DB-only: a ``read_page`` call upserts a
+``read`` row but does NOT touch the doc body. The body the model sees
+is the raw markdown the page was written with. Co-occupancy
+information rides on a separate channel — the ``agents`` list on the
+tool response, and the ``/api/documents/file/activity`` endpoint that
+backs the wiki UI panel.
 
 This test drives the real ``read_page`` handler inside a Flask request
 context so ``current_user()`` resolves; the rest of the path (DB
-upsert, frontmatter render, commit, reindex) runs for real. We assert
-the doc on disk now carries an ``agents:`` block with the user's
-display name, the agent name set on ``agent_name_var``, ``activity:
-read``, and an ``expires_at`` ~24h in the future.
+upsert, response assembly) runs for real.
 
 Caveat: under ``immediate_queues`` every scheduled task runs
 synchronously, ``eta`` and all. ``mark_doc_read`` schedules a 24h-out
-cleanup that would otherwise delete the row before the frontmatter
-gets rendered, so the test stubs ``schedule_cleanup_for_natural_key``
-to a no-op. In production the eta keeps the cleanup pending.
+cleanup that would otherwise delete the row before we observe it, so
+the test stubs ``schedule_cleanup_for_natural_key`` to a no-op. In
+production the eta keeps the cleanup pending.
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
 
-import yaml
-
-
-def test_agent_read_stamps_frontmatter(integration, flask_app, monkeypatch):
+def test_agent_read_surfaces_via_tool_response_and_api(integration, flask_app, monkeypatch):
     monkeypatch.setattr(
         "app.tasks.agent_activity.schedule_cleanup_for_natural_key",
         lambda **kw: None,
@@ -33,61 +29,203 @@ def test_agent_read_stamps_frontmatter(integration, flask_app, monkeypatch):
 
     uid = integration.signup_and_signin(email="agent-user@x.com")
 
-    # Seed a doc with no frontmatter — pure body.
-    integration.put_doc("guide.md", "# Guide\n\noriginal body\n")
+    raw_body = "# Guide\n\noriginal body\n"
+    integration.put_doc("guide.md", raw_body)
 
     from app.llm.agents.tools import read_page
     from app.wiki import agent_activity, git as wiki_git
 
-    before = wiki_git.read_file("guide.md")
-    assert not before.startswith("---\n"), "doc starts with no frontmatter"
+    # The on-disk body is exactly what was PUT — no managed block.
+    on_disk_before = wiki_git.read_file("guide.md")
+    assert on_disk_before == raw_body
 
-    # Drive the tool the way the chat loop does: a Flask request context
-    # carrying the signed-in user's session, plus the per-turn agent name.
     token = agent_activity.agent_name_var.set("status-watcher")
     try:
         with flask_app.test_request_context():
             from flask import session as flask_session
             flask_session["user_id"] = uid
 
-            t0 = datetime.now(timezone.utc)
             result = read_page.handle({"path": "guide.md"})
-            t1 = datetime.now(timezone.utc)
     finally:
         agent_activity.agent_name_var.reset(token)
 
     assert "error" not in result, result
-    assert "original body" in result["body"]
+    assert result["body"] == raw_body, "read_page must return the raw body unchanged"
 
-    after = wiki_git.read_file("guide.md")
-    fm_text, rest = agent_activity.split_frontmatter(after)
-    assert fm_text is not None, f"expected frontmatter, got: {after!r}"
-    assert "original body" in rest, "body must survive the rewrite"
-
-    fm = yaml.safe_load(fm_text)
-    agents = fm["agents"]
+    # The tool response carries the freshly registered activity row.
+    agents = result["agents"]
     assert len(agents) == 1, agents
     entry = agents[0]
-    # Harness signup sets name="U"; owner_display = coalesce(name, email).
-    assert entry["owner"] == "U"
-    assert entry["agent"] == "status-watcher"
+    assert entry["owner_display"] == "U"  # signup default
+    assert entry["agent_name"] == "status-watcher"
     assert entry["activity"] == "read"
-    assert entry["description"] in (None, "N/A")
 
-    # PyYAML auto-converts ISO timestamps to ``datetime`` (UTC-aware here
-    # because the rendered value carries ``+00:00``).
-    expires = entry["expires_at"]
-    assert isinstance(expires, datetime), expires
-    # Default TTL is 24h; allow a generous window around the test interval.
-    expected_min = t0 + timedelta(hours=24) - timedelta(seconds=5)
-    expected_max = t1 + timedelta(hours=24) + timedelta(seconds=5)
-    assert expected_min <= expires <= expected_max, (
-        f"expires_at {expires} outside window [{expected_min}, {expected_max}]"
+    # The on-disk body did NOT change — read is no longer a write.
+    on_disk_after = wiki_git.read_file("guide.md")
+    assert on_disk_after == on_disk_before
+
+    # GET /api/documents/file/activity reflects the same row.
+    resp = integration.client.get("/api/documents/file/activity?path=guide.md")
+    assert resp.status_code == 200, resp.get_data(as_text=True)
+    payload = resp.get_json()
+    assert payload["path"] == "guide.md"
+    assert len(payload["agents"]) == 1
+    api_entry = payload["agents"][0]
+    assert api_entry["owner_display"] == "U"
+    assert api_entry["agent_name"] == "status-watcher"
+    assert api_entry["activity"] == "read"
+
+
+def test_agent_read_does_not_mint_commits(integration, flask_app, monkeypatch):
+    """Regression: the whole point of moving activity to the DB. A
+    HEAD read must not advance the doc's HEAD — otherwise any
+    ``base_sha`` an agent is holding goes stale on every read.
+    """
+    monkeypatch.setattr(
+        "app.tasks.agent_activity.schedule_cleanup_for_natural_key",
+        lambda **kw: None,
+    )
+
+    uid = integration.signup_and_signin(email="agent-user@x.com")
+    integration.put_doc("guide.md", "# Guide\n\noriginal body\n")
+
+    from app.llm.agents.tools import read_page
+    from app.wiki import git as wiki_git
+
+    sha_before = wiki_git.head_sha_for_path("guide.md")
+
+    with flask_app.test_request_context():
+        from flask import session as flask_session
+        flask_session["user_id"] = uid
+        # Multiple reads in quick succession — pre-migration, each one
+        # would have upserted, slid expires_at, re-rendered the
+        # frontmatter, and committed.
+        for _ in range(3):
+            read_page.handle({"path": "guide.md"})
+
+    sha_after = wiki_git.head_sha_for_path("guide.md")
+    assert sha_after == sha_before, (
+        "reads must not advance HEAD; otherwise base_sha goes stale"
     )
 
 
+def test_agent_write_registers_wrote_activity(integration, flask_app, monkeypatch):
+    """``commit_and_fan_out`` upserts a ``wrote`` row alongside the
+    commit so the registry reflects authorship. Complement to the
+    read-side coverage in ``test_agent_read_surfaces_via_tool_response_and_api``.
+    """
+    monkeypatch.setattr(
+        "app.tasks.agent_activity.schedule_cleanup_for_natural_key",
+        lambda **kw: None,
+    )
+
+    uid = integration.signup_and_signin(email="writer@x.com")
+    integration.put_doc("guide.md", "# Guide\n\noriginal body\n")
+
+    from app.llm.agents.tools import read_page, write_doc
+    from app.llm.agents import _session
+    from app.wiki import agent_activity, git as wiki_git
+
+    seen_token = _session.seen_doc_paths.set({"guide.md"})
+    try:
+        with flask_app.test_request_context():
+            from flask import session as flask_session
+            flask_session["user_id"] = uid
+
+            # Read first to satisfy read-before-write, then write.
+            read_page.handle({"path": "guide.md"})
+            sha = wiki_git.head_sha_for_path("guide.md")
+            result = write_doc.handle({
+                "path": "guide.md",
+                "body": "# Guide\n\nrewritten\n",
+                "commit_message": "tweak heading",
+                "base_sha": sha,
+            })
+            assert "error" not in result, result
+    finally:
+        _session.seen_doc_paths.reset(seen_token)
+
+    rows = agent_activity.list_for_doc("guide.md")
+    activities = sorted(r.activity for r in rows)
+    assert activities == ["read", "wrote"]
+    wrote = next(r for r in rows if r.activity == "wrote")
+    assert wrote.description == "tweak heading"
+
+
+def test_read_doc_agents_field_only_on_head_reads(integration, flask_app, monkeypatch):
+    """``read_doc`` returns the live ``agents`` list on HEAD reads
+    and an empty list on historical reads (we don't preserve activity
+    history alongside content)."""
+    monkeypatch.setattr(
+        "app.tasks.agent_activity.schedule_cleanup_for_natural_key",
+        lambda **kw: None,
+    )
+
+    uid = integration.signup_and_signin(email="historian@x.com")
+    integration.put_doc("guide.md", "# Guide\n\nv1\n")
+    from app.wiki import git as wiki_git
+    v1_sha = wiki_git.head_sha_for_path("guide.md")
+    integration.put_doc("guide.md", "# Guide\n\nv2\n")
+
+    from app.llm.agents.tools import read_doc
+
+    with flask_app.test_request_context():
+        from flask import session as flask_session
+        flask_session["user_id"] = uid
+
+        head_result = read_doc.handle({"path": "guide.md"})
+        assert head_result["is_head"] is True
+        assert len(head_result["agents"]) == 1, head_result["agents"]
+        assert head_result["agents"][0]["activity"] == "read"
+
+        historical = read_doc.handle({"path": "guide.md", "sha": v1_sha})
+        assert historical["is_head"] is False
+        assert historical["body"] == "# Guide\n\nv1\n"
+        assert historical["agents"] == [], (
+            "historical reads must not surface current activity rows"
+        )
+
+
+def test_doc_body_starting_with_yaml_fence_round_trips(integration, flask_app, monkeypatch):
+    """A doc whose body legitimately begins with ``---\\n…`` (e.g. the
+    user is documenting YAML or a frontmatter format) must survive
+    read+write unchanged. Pre-migration the frontmatter parser would
+    have eaten or rewritten this; now there's no parser at all on the
+    commit path."""
+    monkeypatch.setattr(
+        "app.tasks.agent_activity.schedule_cleanup_for_natural_key",
+        lambda **kw: None,
+    )
+
+    uid = integration.signup_and_signin(email="yaml-fan@x.com")
+    yaml_body = (
+        "---\n"
+        "title: Example Frontmatter Doc\n"
+        "tags: [foo, bar]\n"
+        "---\n"
+        "\n"
+        "# YAML Example\n"
+        "\n"
+        "Body that documents what frontmatter can look like.\n"
+    )
+    integration.put_doc("yaml-doc.md", yaml_body)
+
+    from app.llm.agents.tools import read_page
+    from app.wiki import git as wiki_git
+
+    assert wiki_git.read_file("yaml-doc.md") == yaml_body
+
+    with flask_app.test_request_context():
+        from flask import session as flask_session
+        flask_session["user_id"] = uid
+        result = read_page.handle({"path": "yaml-doc.md"})
+
+    assert result["body"] == yaml_body
+    assert wiki_git.read_file("yaml-doc.md") == yaml_body
+
+
 def test_agent_read_anonymous_renders_na(integration, flask_app, monkeypatch):
-    """No ``agent_name_var`` set → entry shows ``agent: N/A``."""
+    """No ``agent_name_var`` set → entry comes back with agent_name=None."""
     monkeypatch.setattr(
         "app.tasks.agent_activity.schedule_cleanup_for_natural_key",
         lambda **kw: None,
@@ -97,16 +235,14 @@ def test_agent_read_anonymous_renders_na(integration, flask_app, monkeypatch):
     integration.put_doc("notes.md", "# Notes\n\nbody\n")
 
     from app.llm.agents.tools import read_page
-    from app.wiki import agent_activity, git as wiki_git
 
     with flask_app.test_request_context():
         from flask import session as flask_session
         flask_session["user_id"] = uid
-        read_page.handle({"path": "notes.md"})
+        result = read_page.handle({"path": "notes.md"})
 
-    body = wiki_git.read_file("notes.md")
-    fm_text, _ = agent_activity.split_frontmatter(body)
-    assert fm_text is not None
-    fm = yaml.safe_load(fm_text)
-    assert fm["agents"][0]["agent"] == "N/A"
-    assert fm["agents"][0]["owner"] == "U"
+    assert "error" not in result, result
+    agents = result["agents"]
+    assert len(agents) == 1
+    assert agents[0]["agent_name"] is None
+    assert agents[0]["owner_display"] == "U"

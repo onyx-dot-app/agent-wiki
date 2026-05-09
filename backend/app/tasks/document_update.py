@@ -19,11 +19,30 @@ See ``app/tasks/queues.py`` for the queue rationale.
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any
 
+from app.config import CONFIG
+from app.llm.agents import document_updater
+from app.llm.agents.tools import _doc_helpers as h
+from app.llm.errors import LLMError
+from app.mcp_server import jobs as mcp_jobs
+from app.mcp_server import pubsub as mcp_pubsub
+from app.mcp_server.worker_context import UserMissingError, as_user
 from app.tasks.queues import documents_queue
+from app.wiki import git as wiki_git
 
 log = logging.getLogger(__name__)
+
+# Server-side debounce: skip the LLM call when the same (user, path) was
+# successfully committed within this many seconds. Cheap insurance
+# against a chatty agent. Read once at module load — workers restart on
+# config changes today.
+_DEBOUNCE_SECONDS = int(os.environ.get("MCP_NL_DEBOUNCE_SECONDS", "30"))
+
+# Hard cap on the commit-message length we record on disk; the
+# instruction may be long, but we only want a quick handle.
+_COMMIT_MESSAGE_MAX = 80
 
 
 @documents_queue.task()
@@ -39,10 +58,152 @@ def update_document_from_payload(doc_id: str, source: str, payload: dict[str, An
 
 
 @documents_queue.task()
-def agent_update_document_nl(doc_id: str, new_body: str, message: str, author: str) -> None:
-    # Used when an agent edits a doc through the API rather than from a payload.
-    log.info("agent_update_document_nl doc_id=%s author=%s", doc_id, author)
-    raise NotImplementedError
+def agent_update_document_nl(job_id: str) -> None:
+    """Worker side of the inbound MCP ``update_doc_nl`` async tool.
+
+    Phases:
+
+      1. Load the job row.
+      2. Reconstitute ``g.user`` from ``mcp_jobs.user_id`` so every
+         downstream helper sees the right principal — same seam the
+         POST handler uses.
+      3. ``base_sha`` recheck — HEAD might have moved between enqueue
+         and run. Fail with ``stale_base`` if so.
+      4. Server-side debounce — if a same-(user, path) job committed
+         within ``MCP_NL_DEBOUNCE_SECONDS``, succeed with
+         ``committed=false reason=debounced``.
+      5. Run the document-updater agent.
+      6. ``NO_CHANGE`` → succeed with ``committed=false``.
+         New body → ``commit_and_fan_out`` → succeed with the sha.
+         Exception → fail with the error code.
+      7. Publish the terminal status to ``job://<id>`` subscribers.
+    """
+    job = mcp_jobs.get(job_id)
+    if job is None:
+        log.warning("agent_update_document_nl: job %s not found, dropping", job_id)
+        return
+
+    payload = job["payload"]
+    rel = payload.get("path")
+    instruction = payload.get("instruction") or ""
+    base_sha = payload.get("base_sha")
+
+    try:
+        with as_user(job["user_id"]):
+            mcp_jobs.mark_running(job_id)
+            _run_inner(job_id, rel, instruction, base_sha)
+    except UserMissingError as exc:
+        log.warning("agent_update_document_nl: user %s missing for job %s", exc.user_id, job_id)
+        mcp_jobs.mark_failed(job_id, error="user_missing")
+        mcp_pubsub.publish_job_update(job_id, "failed")
+    except Exception:
+        log.exception("agent_update_document_nl crashed job=%s", job_id)
+        mcp_jobs.mark_failed(job_id, error="internal_error")
+        mcp_pubsub.publish_job_update(job_id, "failed")
+
+
+def _run_inner(job_id: str, rel: str, instruction: str, base_sha: str | None) -> None:
+    """Inside the worker's user context. Splits out so the outer
+    function can wrap exceptions uniformly."""
+    if not rel:
+        mcp_jobs.mark_failed(job_id, error="invalid_path")
+        mcp_pubsub.publish_job_update(job_id, "failed")
+        return
+
+    if not h.file_exists(rel):
+        mcp_jobs.mark_failed(job_id, error=f"file not found: {rel}")
+        mcp_pubsub.publish_job_update(job_id, "failed")
+        return
+
+    head_sha = wiki_git.head_sha_for_path(rel)
+    if base_sha and base_sha != head_sha:
+        mcp_jobs.mark_failed(
+            job_id,
+            error="stale_base",
+            result={
+                "base_sha": base_sha,
+                "current_sha": head_sha or "",
+            },
+        )
+        mcp_pubsub.publish_job_update(job_id, "failed")
+        return
+
+    debounced = mcp_jobs.find_recent_succeeded_for_user_path(
+        user_id=_current_user_id(), path=rel, within_seconds=_DEBOUNCE_SECONDS
+    )
+    if debounced is not None:
+        mcp_jobs.mark_succeeded(
+            job_id,
+            result={
+                "committed": False,
+                "reason": "debounced",
+                "debounce_window_seconds": _DEBOUNCE_SECONDS,
+                "previous_job_id": debounced["id"],
+                "sha": head_sha,
+            },
+        )
+        mcp_pubsub.publish_job_update(job_id, "succeeded")
+        return
+
+    old_body = h.read_existing(rel)
+    try:
+        new_body = document_updater.run(
+            doc_id=rel,
+            current_body=old_body,
+            payload={"instruction": instruction},
+            source="update_doc_nl",
+        )
+    except LLMError as exc:
+        mcp_jobs.mark_failed(job_id, error=f"llm_error: {exc}")
+        mcp_pubsub.publish_job_update(job_id, "failed")
+        return
+
+    if new_body is None or new_body == old_body:
+        mcp_jobs.mark_succeeded(
+            job_id,
+            result={"committed": False, "reason": "no_change", "sha": head_sha},
+        )
+        mcp_pubsub.publish_job_update(job_id, "succeeded")
+        return
+
+    try:
+        sha = h.commit_and_fan_out(
+            rel,
+            new_body,
+            f"Doc update: {instruction[:_COMMIT_MESSAGE_MAX]}",
+            change_kind="edit",
+        )
+    except h.ToolError as exc:
+        mcp_jobs.mark_failed(job_id, error=str(exc))
+        mcp_pubsub.publish_job_update(job_id, "failed")
+        return
+
+    mcp_jobs.mark_succeeded(
+        job_id,
+        result={
+            "committed": True,
+            "sha": sha,
+            "diff": h.unified_diff(old_body, new_body, rel),
+            "broken_links": h.broken_links(rel, new_body),
+        },
+    )
+    mcp_pubsub.publish_job_update(job_id, "succeeded")
+
+
+def _current_user_id() -> str:
+    """Read the user id off ``g.user`` — set by ``as_user``. Asserts
+    rather than degrades because every caller is inside the context
+    manager."""
+    from flask import g
+
+    user = getattr(g, "user", None)
+    assert user is not None, "_run_inner must execute inside as_user(...)"
+    return user.id
+
+
+# Quiet unused-import warning when Phase 7 wires this elsewhere — keeps
+# the symbol on hand for future callers.
+_ = CONFIG
 
 
 @documents_queue.task()

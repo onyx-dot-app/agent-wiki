@@ -72,6 +72,79 @@ class McpConnection(Base):
     created_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
 
 
+class McpToken(Base):
+    """Personal API token an MCP client (Claude Code, Cursor, …) uses to
+    authenticate against the inbound MCP server. Hashed-at-rest with
+    bcrypt; raw value is shown to the user once at creation and never
+    persisted.
+
+    The token's user identity is what the server pretends is logged in
+    for every request — see ``app/mcp_server/auth.py`` (when it lands)
+    and the design at ``local_data/wiki/mcp-server/mcp-server.md``.
+    """
+
+    __tablename__ = "mcp_tokens"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    user_id: Mapped[str] = mapped_column(
+        Text, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    token_hash: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
+    created_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
+    last_used_at: Mapped[str | None] = mapped_column(Text)
+
+    __table_args__ = (Index("idx_mcp_tokens_user", "user_id"),)
+
+
+class McpJob(Base):
+    """Async job row backing ``update_doc_nl`` over the inbound MCP
+    server. Each call to the tool inserts one row; the worker
+    (``app.tasks.document_update.agent_update_document_nl``) updates
+    ``status`` / ``result_json`` / ``error`` / ``finished_at`` as it
+    runs.
+
+    Idempotency key (when provided or computed) lets a chatty agent
+    retry the same instruction without enqueueing duplicate LLM
+    passes — the second call returns the existing job. The unique
+    index is partial so unkeyed jobs don't collide.
+
+    See ``local_data/wiki/mcp-server/mcp-server.md`` (Phase 6).
+    """
+
+    __tablename__ = "mcp_jobs"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    user_id: Mapped[str] = mapped_column(
+        Text, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    kind: Mapped[str] = mapped_column(Text, nullable=False)        # "update_doc_nl"
+    status: Mapped[str] = mapped_column(Text, nullable=False)      # pending|running|succeeded|failed
+    idempotency_key: Mapped[str | None] = mapped_column(Text)
+    payload_json: Mapped[str] = mapped_column(Text, nullable=False)
+    result_json: Mapped[str | None] = mapped_column(Text)
+    error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
+    )
+    finished_at: Mapped[str | None] = mapped_column(Text)
+
+    __table_args__ = (
+        Index(
+            "idx_mcp_jobs_idemp",
+            "user_id", "idempotency_key",
+            unique=True,
+            postgresql_where=text("idempotency_key IS NOT NULL"),
+        ),
+        Index("idx_mcp_jobs_user", "user_id"),
+        # Used by the debounce check: most-recent succeeded job for a
+        # (user, path) pair within the last N seconds. Path lives in
+        # payload_json so we can't index it cheaply; the user-scope
+        # index is enough — the worker only walks rows within the
+        # debounce window.
+    )
+
+
 # --------------------------------------------------------------------------- #
 # Documents (metadata) — canonical content lives in git                       #
 # --------------------------------------------------------------------------- #
@@ -107,6 +180,83 @@ class Trigger(Base):
     file_path: Mapped[str | None] = mapped_column(Text)
     last_edited_at: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
+
+
+class TriggerDestination(Base):
+    """Catalog of where a trigger fire can be delivered.
+
+    The ``id`` is a stable slug (e.g. ``"event_log"``) referenced from each
+    trigger's ``action_json.destination``. ``name`` and ``description`` are
+    surfaced to the user — including via the ``get_trigger_destinations``
+    agent tool. Seeded by migration ``0004``; new destinations are added by
+    follow-up migrations as outbound dispatchers come online.
+    """
+
+    __tablename__ = "trigger_destinations"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
+    created_at: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Chat sessions — persisted conversations with the in-app ChatUI              #
+# --------------------------------------------------------------------------- #
+
+
+class ChatSession(Base):
+    __tablename__ = "chat_sessions"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    user_id: Mapped[str] = mapped_column(
+        Text, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    # NULL until the title-generation task fills it in after the first turn.
+    title: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
+    )
+    updated_at: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
+    )
+
+    __table_args__ = (Index("idx_chat_sessions_user_updated", "user_id", "updated_at"),)
+
+
+class ChatMessage(Base):
+    """One turn in a chat session.
+
+    For ``role='user'`` the body is just ``content`` (the raw user text);
+    ``events_json`` is NULL. For ``role='assistant'`` ``content`` is the
+    final rendered text shown in the bubble, and ``events_json`` is the
+    full list of stream events for the turn (text deltas, tool calls,
+    tool results, iteration markers) serialized as JSON, so the session
+    can be re-rendered with the original tool-call detail.
+    """
+
+    __tablename__ = "chat_messages"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    session_id: Mapped[str] = mapped_column(
+        Text, ForeignKey("chat_sessions.id", ondelete="CASCADE"), nullable=False
+    )
+    ordering: Mapped[int] = mapped_column(Integer, nullable=False)
+    role: Mapped[str] = mapped_column(Text, nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
+    events_json: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "role IN ('user', 'assistant')", name="chat_messages_role_check"
+        ),
+        Index("idx_chat_messages_session_order", "session_id", "ordering"),
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -261,3 +411,123 @@ class CronState(Base):
     queue_name: Mapped[str] = mapped_column(Text, primary_key=True)
     task_name: Mapped[str] = mapped_column(Text, primary_key=True)
     last_fired_at: Mapped[str | None] = mapped_column(Text)
+
+
+# --------------------------------------------------------------------------- #
+# Permissions — groups, ACLs, page ownership                                  #
+# --------------------------------------------------------------------------- #
+#
+# Wiki page permission state lives entirely in Postgres. The git repo and
+# the wiki-data volume do not carry it; clones / volume copies / filesystem
+# backups lose all of these tables. See local_data/wiki/permissions/.
+
+
+class Group(Base):
+    __tablename__ = "groups"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    name: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    created_by_user_id: Mapped[str | None] = mapped_column(
+        Text, ForeignKey("users.id", ondelete="SET NULL")
+    )
+    created_at: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
+    )
+
+
+class GroupMember(Base):
+    __tablename__ = "group_members"
+
+    group_id: Mapped[str] = mapped_column(
+        Text, ForeignKey("groups.id", ondelete="CASCADE"), primary_key=True
+    )
+    user_id: Mapped[str] = mapped_column(
+        Text, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    added_at: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
+    )
+
+
+class WikiOwner(Base):
+    """Per-page ownership.
+
+    Keyed by canonicalized path (``app.wiki.filesystem.safe_rel_path`` —
+    no leading slash). The owner has unconditional read/write/share/
+    transfer/delete on the page; ACL entries grant *additional* access.
+    ``owner_user_id`` is nullable so account deletion can ``SET NULL``
+    without dropping the page row — admin re-assigns via the transfer
+    endpoint. A page may exist on disk without a row here (e.g. seeded
+    content committed via raw git outside the lifecycle hook) — the
+    resolver treats "no owner row" as "no owner shortcut" and falls
+    back to ACLs.
+    """
+
+    __tablename__ = "wiki_owners"
+
+    path: Mapped[str] = mapped_column(Text, primary_key=True)
+    owner_user_id: Mapped[str | None] = mapped_column(
+        Text, ForeignKey("users.id", ondelete="SET NULL")
+    )
+
+
+class AclEntry(Base):
+    """One grant of ``read`` or ``write`` on a wiki page or folder.
+
+    ``resource_path`` is canonical (no leading or trailing slash); ``""``
+    is the wiki root (folder grants only). For ``principal_kind='everyone'``
+    the row matches every authenticated user and ``principal_id`` is NULL;
+    for ``user``/``group`` the id references ``users.id`` or ``groups.id``
+    but is *not* a real foreign key (one column can't FK to two tables).
+    Existence is enforced at the repo layer.
+
+    Grants are additive only — no explicit deny. ``write`` does not
+    auto-imply ``read`` in storage; the resolver unions matching rows
+    and treats ``write`` as also granting ``read``.
+    """
+
+    __tablename__ = "acl_entries"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    resource_kind: Mapped[str] = mapped_column(Text, nullable=False)
+    resource_path: Mapped[str] = mapped_column(Text, nullable=False)
+    principal_kind: Mapped[str] = mapped_column(Text, nullable=False)
+    principal_id: Mapped[str | None] = mapped_column(Text)
+    permission: Mapped[str] = mapped_column(Text, nullable=False)
+    granted_by_user_id: Mapped[str | None] = mapped_column(
+        Text, ForeignKey("users.id", ondelete="SET NULL")
+    )
+    created_at: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "resource_kind IN ('page', 'folder')",
+            name="acl_entries_kind_check",
+        ),
+        CheckConstraint(
+            "principal_kind IN ('user', 'group', 'everyone')",
+            name="acl_entries_principal_kind_check",
+        ),
+        CheckConstraint(
+            "permission IN ('read', 'write')",
+            name="acl_entries_permission_check",
+        ),
+        CheckConstraint(
+            "(principal_kind = 'everyone') = (principal_id IS NULL)",
+            name="acl_entries_principal_id_alignment",
+        ),
+        UniqueConstraint(
+            "resource_kind",
+            "resource_path",
+            "principal_kind",
+            "principal_id",
+            "permission",
+            name="acl_entries_unique_grant",
+            postgresql_nulls_not_distinct=True,
+        ),
+        Index("idx_acl_resource", "resource_kind", "resource_path"),
+        Index("idx_acl_principal", "principal_kind", "principal_id"),
+    )

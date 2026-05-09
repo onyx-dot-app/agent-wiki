@@ -21,8 +21,14 @@ from app.llm import client
 from app.llm.agents import tools as tool_registry
 from app.llm.agents._session import seen_doc_paths
 from app.llm.prompts import load_prompt
+from app.wiki import agent_activity
 
 log = logging.getLogger(__name__)
+
+
+# Surfaced to other users via the agent-activity registry / "Active
+# agents" panel when this agent reads or writes a doc.
+CHAT_AGENT_NAME = "Wiki AI Assistant"
 
 
 def _debug_dump(label: str, obj: Any) -> None:
@@ -189,24 +195,32 @@ def run_chat_stream(
     messages: list[Message], *, model: str | None = None
 ) -> Iterator[StreamEvent]:
     """Streaming chat agent with the standard wiki tool set + chat.system prompt."""
-    yield from run_chat_loop_stream(
-        messages,
-        system_prompt=load_prompt("chat.system"),
-        tools=tool_registry.TOOL_SPECS,
-        tool_dispatch=tool_registry.dispatch,
-        model=model,
-    )
+    token = agent_activity.agent_name_var.set(CHAT_AGENT_NAME)
+    try:
+        yield from run_chat_loop_stream(
+            messages,
+            system_prompt=load_prompt("chat.system"),
+            tools=tool_registry.TOOL_SPECS,
+            tool_dispatch=tool_registry.dispatch,
+            model=model,
+        )
+    finally:
+        agent_activity.agent_name_var.reset(token)
 
 
 def run_chat(messages: list[Message], *, model: str | None = None) -> list[Message]:
     """Non-streaming wrapper. Mutates and returns ``messages``."""
-    return run_chat_loop(
-        messages,
-        system_prompt=load_prompt("chat.system"),
-        tools=tool_registry.TOOL_SPECS,
-        tool_dispatch=tool_registry.dispatch,
-        model=model,
-    )
+    token = agent_activity.agent_name_var.set(CHAT_AGENT_NAME)
+    try:
+        return run_chat_loop(
+            messages,
+            system_prompt=load_prompt("chat.system"),
+            tools=tool_registry.TOOL_SPECS,
+            tool_dispatch=tool_registry.dispatch,
+            model=model,
+        )
+    finally:
+        agent_activity.agent_name_var.reset(token)
 
 
 def _ensure_system_prompt(messages: list[Message], system_prompt: str) -> None:
@@ -239,15 +253,3 @@ def _stringify(value: Any) -> str:
         return json.dumps(value)
     except (TypeError, ValueError):
         return str(value)
-
-
-def run_chat_turn(user_id: str, conversation_id: str, message: str) -> dict[str, Any]:
-    """Persistence-aware wrapper used by the HTTP layer.
-
-    Loads prior turns for `conversation_id`, appends the new user `message`,
-    runs `run_chat_loop`, persists the new turns, and returns a payload for
-    the frontend.
-
-    Not yet implemented — the DB schema for conversations isn't in place.
-    """
-    raise NotImplementedError

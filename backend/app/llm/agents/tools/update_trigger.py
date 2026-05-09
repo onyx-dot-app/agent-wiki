@@ -10,6 +10,7 @@ from typing import Any
 from app.auth import current_user
 from app.triggers import repo as triggers_repo
 from app.triggers import storage as triggers_storage
+from app.wiki import acl as wiki_acl
 
 # Sentinel mirroring the one in triggers.repo so we can distinguish
 # "destination omitted" from "destination explicitly set to null".
@@ -57,13 +58,6 @@ def handle(args: dict[str, Any]) -> Any:
 
     destination = args.get("destination", _UNSET)
     if destination is not _UNSET:
-        if destination not in triggers_repo.SUPPORTED_DESTINATIONS:
-            return {
-                "error": (
-                    f"destination {destination!r} not supported in v0 — only null "
-                    "(Event Log)"
-                )
-            }
         kwargs["destination"] = destination
 
     if "enabled" in args:
@@ -74,6 +68,15 @@ def handle(args: dict[str, Any]) -> Any:
 
     if not kwargs:
         return {"trigger": existing, "note": "no fields to update"}
+
+    # Require read access against whichever scope ends up sticking — the new
+    # one if rebinding, otherwise the existing one (in case ACLs were
+    # revoked after the trigger was created).
+    final_scope = kwargs.get("scope_path", existing["scope_path"])
+    if not wiki_acl.can(user.id, user.is_admin, "read", final_scope):
+        return {
+            "error": f"you do not have read access to scope_path {final_scope!r}"
+        }
 
     try:
         updated = triggers_repo.update(trigger_id, **kwargs)

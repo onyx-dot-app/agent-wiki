@@ -121,6 +121,27 @@ In API code, gate routes with `@login_required` or `@admin_required` from
   `count() == 0`). Admin can't be left at zero (see `app/api/admin.py` —
   demote/delete guard against `admin_count() <= 1`).
 
+### Wiki page authorization — `require_can` + `app/wiki/acl.py`
+
+Per-page permissions live in Postgres (`acl_entries`, `wiki_owners`,
+`groups`, `group_members`). Routes that read or mutate a wiki page must
+gate via `app.auth.require_can("read"|"write", path)` after the
+`@login_required` / `@admin_required` decorator. Search and listing
+endpoints filter through `app.wiki.acl.visible_paths_filter` (SQL
+predicate) or `acl.filter_paths_in_python` (in-memory).
+
+- New pages get default-public ACL rows + an owner stamp via the
+  lifecycle hook in `app.wiki.notify.after_doc_write` — call that helper
+  with `change_kind="create"` and pass `owner_user_id`.
+- Don't read/write `acl_entries` or `wiki_owners` directly from blueprints
+  or agent tools — go through `app.wiki.acl` (`grant`, `revoke`,
+  `set_owner`, `effective`, `visible_paths_filter`).
+- Group membership goes through `app.auth.groups` (CRUD + lookup).
+- Permission rows are **Postgres-only** — they are not committed to the
+  wiki repo or stored on the `wiki-data` volume. See
+  `local_data/wiki/permissions/permissions.md` and the export warning in
+  `local_data/wiki/running-locally.md`.
+
 ### Database — SQLAlchemy 2.0 ORM, small repo modules
 
 Schema lives in `app/db/models.py` as `DeclarativeBase` subclasses with
@@ -145,8 +166,10 @@ session.
   every kind of change) and commit. `init_db()` runs `alembic upgrade
   head` on every boot so deploys apply pending migrations
   automatically. The bootstrap migration `0001_initial` materializes
-  the entire current schema via `Base.metadata.create_all`; everything
-  after it is an explicit `op.alter_table` / `op.add_column` diff.
+  the entire current schema via `Base.metadata.create_all` and seeds
+  the catalog rows the app expects (e.g. `trigger_destinations`).
+  Everything after it should be an explicit `op.alter_table` /
+  `op.add_column` diff.
 - **Raw SQL is allowed only for things the ORM can't express** — today
   that means pg_textsearch's `<@>` operator + `to_bm25query()` (in
   `app/db/fts.py`) and pgmq's `pgmq.send/read/delete/archive` (in
@@ -346,5 +369,10 @@ so they're trivially testable.
 - **Doc bloat / loss** — the `document_updater` system prompt forbids both,
   but we'll need eval data. If you change the prompt, save the old version
   in git history (it already does — don't squash).
-- **Permissioning** — out of scope for v0. Anything authenticated reads/writes
-  everything not behind `@admin_required`.
+- **Permissioning** — implemented. Per-page read/write ACLs with users,
+  groups, and an `everyone` principal; folder grants cascade; admins
+  bypass; pages with no owner row and no ACL row are implicit-public
+  until managed (covers test setups and seed scripts that bypass the
+  lifecycle hook).
+  Open follow-ups (deny rows, `.acl.yaml`-in-git mirror, group
+  self-service) are tracked in `local_data/wiki/permissions/permissions.md`.
