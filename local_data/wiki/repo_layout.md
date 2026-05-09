@@ -9,13 +9,13 @@ intent) and `CLAUDE.md` (durable rules). This file is the
 
 ```
 agent-workspace/
-├── backend/         Flask API + Huey workers (Python)
+├── backend/         Flask API + task workers (Python)
 ├── frontend/        Next.js 14 App Router UI (TypeScript)
 ├── nginx/           Reverse proxy: /api/* → backend, else → frontend
 ├── deploy/          Deployment glue (currently empty placeholder)
 ├── docs/            Architecture + API reference (developer-facing)
 ├── wiki/seed/       Sample content copied into a fresh wiki working tree
-├── local_data/      Dev-only state: live wiki working tree + sqlite dbs
+├── local_data/      Dev-only state: live wiki working tree + Postgres data dir (`pgdata/`)
 ├── docker-compose.yml
 ├── .env.example     SECRET_KEY, ALLOWED_EMAILS, etc.
 ├── CLAUDE.md        Durable rulebook for agents working on this repo
@@ -23,9 +23,11 @@ agent-workspace/
 └── README.md
 ```
 
-The big idea: three runtime services (backend, frontend, nginx) plus two
-data volumes (`app-data` for sqlite, `wiki-data` for the git-backed wiki
-tree). Everything else is source, docs, or dev scaffolding.
+The big idea: a Postgres service plus three runtime services (backend,
+frontend, nginx); the only data volume the workload needs is
+`wiki-data` for the git-backed wiki tree. App state and the pgmq task
+queues live in Postgres. Everything else is source, docs, or dev
+scaffolding.
 
 ## Backend — `backend/app/`
 
@@ -52,13 +54,13 @@ backend/app/
 │   ├── basic.py           @login_required / @admin_required, current_user()
 │   ├── oidc.py            OIDC flow (optional)
 │   ├── passwords.py       bcrypt hashing
-│   ├── users.py           users repo (sqlite)
+│   ├── users.py           users repo (SQLAlchemy ORM)
 │   └── whitelist.py       ALLOWED_EMAILS gate
 │
-├── db/              SQLite + FTS5 + numbered migrations
-│   ├── sqlite.py          connect(), init_db(), migration runner
-│   ├── fts.py             FTS5 helpers
-│   └── migrations/        0001_init.sql, 0002_*.sql, …  (lex-sorted, applied once)
+├── db/              Postgres + SQLAlchemy ORM + pg_textsearch BM25
+│   ├── models.py          ORM models — schema source of truth
+│   ├── session.py         engine, session() context manager, init_db()
+│   └── fts.py             pg_textsearch BM25 helpers + Python-side snippets
 │
 ├── llm/             The ONLY place we talk to model providers
 │   ├── client.py          complete() — provider-agnostic entry point
@@ -72,20 +74,21 @@ backend/app/
 ├── wiki/            Git-backed wiki working tree
 │   ├── git.py             ONLY module allowed to shell out to git
 │   ├── filesystem.py      safe_rel_path() — traversal guard
-│   └── search.py          FTS-backed search over docs
+│   └── search.py          BM25-backed search over docs
 │
-├── triggers/        Natural-language triggers (YAML in git + sqlite cache)
+├── triggers/        Natural-language triggers (YAML in git + DB cache)
 │   ├── storage.py         YAML <-> .triggers/*.yaml on disk
-│   ├── repo.py            sqlite cache repo
+│   ├── repo.py            ORM-backed cache repo
 │   ├── engine.py          evaluation pipeline
 │   ├── diff.py            doc-diff extraction for prompts
 │   ├── natural_language.py NL-condition matcher (LLM-backed)
 │   └── time_based.py      cron-like trigger scheduling
 │
-├── tasks/           Huey background work (separate worker container)
-│   ├── huey_app.py        Huey instance (sqlite broker)
+├── tasks/           pgmq background work (separate worker container per queue)
+│   ├── queue.py           TaskQueue class + run_consumer + periodic scheduler
+│   ├── queues.py          documents_queue / triggers_queue / wiki_bm25_queue + QUEUES
 │   ├── run_worker.py      worker entry point — must import all task modules
-│   ├── reindex.py         FTS reindex after a wiki commit
+│   ├── reindex.py         BM25 reindex after a wiki commit
 │   ├── document_update.py LLM-driven doc rewrites
 │   ├── triggers.py        trigger fan-out + evaluation
 │   └── periodic.py        scheduled jobs (time-based triggers)
@@ -98,8 +101,10 @@ backend/app/
 │
 └── utils/           (currently empty — for genuinely cross-cutting helpers)
 
-backend/tests/       pytest — uses tmp sqlite + tmp wiki repo, patches
-                     app.llm.client.complete at the seam
+backend/tests/       pytest — uses per-test Postgres schema + tmp wiki repo,
+                     patches app.llm.client.complete at the seam.
+                     tests/integration/ holds full-stack flow tests
+                     (see local_data/wiki/integration-tests.md).
 backend/scripts/     One-off ops scripts
 backend/Dockerfile
 backend/pyproject.toml
@@ -108,15 +113,16 @@ backend/pyproject.toml
 ### Why this shape
 - **`api/` is thin.** Blueprints parse + serialize. Multi-step workflows
   live in the matching domain module (`auth/`, `wiki/`, `triggers/`, `llm/agents/`).
-- **One repo module per aggregate.** Free functions, raw SQL, sqlite.Row
-  back. No ORM. Pattern: `backend/app/auth/users.py`.
+- **One repo module per aggregate.** Free functions over the ORM session;
+  repos return dicts so the rest of the app doesn't depend on SQLAlchemy.
+  Pattern: `backend/app/auth/users.py`.
 - **Single seams for risky I/O.** `llm/client.py` for models, `wiki/git.py`
   for git, `auth/basic.py` for sessions. Tests patch these — never the SDK.
-- **Heavy work goes through Huey.** Anything that hits an LLM, touches FTS,
-  or might exceed ~100ms enqueues a task in `tasks/`. The web request
-  returns fast.
-- **Triggers are git-first.** YAML on disk is source of truth; the sqlite
-  row is a cache for fan-out lookup.
+- **Heavy work goes through pgmq.** Anything that hits an LLM, touches the
+  search index, or might exceed ~100ms enqueues a task in `tasks/`. The
+  web request returns fast.
+- **Triggers are git-first.** YAML on disk is source of truth; the DB row
+  is a cache for fan-out lookup.
 
 ## Frontend — `frontend/src/`
 
@@ -185,17 +191,18 @@ Two trees, easy to confuse:
 
 ## Local data — `local_data/`
 
-Dev-only. Holds `app.sqlite`, `queue.sqlite`, and the live wiki tree. Not
-committed (gitignored). Wiped by deleting the directory.
+Dev-only. Holds `pgdata/` (the compose Postgres service's data dir)
+and the live wiki tree. Not committed (gitignored). Wiped by deleting
+the directory.
 
 ## Where to add a new feature
 
 Mirrors the checklist in `CLAUDE.md`:
 
-1. Schema change → new file in `backend/app/db/migrations/`.
+1. Schema change → new model in `backend/app/db/models.py`.
 2. Storage helpers → `backend/app/<area>/<thing>.py` (repo module).
 3. Domain logic → next to the repo, NOT inside the route.
 4. HTTP surface → blueprint in `backend/app/api/<thing>.py`, gated.
-5. Slow / LLM work → Huey task in `backend/app/tasks/`.
+5. Slow / LLM work → task in `backend/app/tasks/`.
 6. Wire shapes → `backend/app/models/<thing>.py` (pydantic).
 7. UI → typed call in `frontend/src/lib/<thing>.ts`, page/component on top.

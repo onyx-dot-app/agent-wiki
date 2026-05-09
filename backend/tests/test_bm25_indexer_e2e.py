@@ -2,10 +2,10 @@
 
 The other e2e file (``test_save_to_fire_e2e.py``) asserts trigger fan-out
 goes through. This file asserts the **other** half of the post-write
-seam — the ``wiki_bm25_huey``-routed ``reindex_path`` task — actually
+seam — the ``wiki_bm25_queue``-routed ``reindex_path`` task — actually
 executes and populates ``documents_fts``.
 
-We run with ``huey.immediate=True`` on ``wiki_bm25_huey`` so the worker
+We run with ``wiki_bm25_queue.immediate = True`` so the worker
 loop is replaced by inline execution. That proves the wiring (decorator
 registration, queue routing, fts.upsert_document call) without needing
 a real consumer process. Production parity check is in
@@ -16,7 +16,8 @@ from __future__ import annotations
 import pytest
 
 from app.db import fts
-from app.db.sqlite import connect
+
+from tests._seed import list_fts_rows
 
 
 @pytest.fixture
@@ -42,26 +43,24 @@ def signed_in(app, tmp_repo):
 
 
 @pytest.fixture(autouse=True)
-def _huey_immediate(monkeypatch):
+def _immediate_queues():
     """Run the bm25 + triggers queues inline.
 
     We don't care about trigger fires here, but the save path enqueues
     on both queues and we want neither to block.
     """
-    from app.tasks.huey_app import triggers_huey, wiki_bm25_huey
+    from contextlib import ExitStack
 
-    monkeypatch.setattr(wiki_bm25_huey, "immediate", True)
-    monkeypatch.setattr(triggers_huey, "immediate", True)
+    from app.tasks.queues import triggers_queue, wiki_bm25_queue
+
+    with ExitStack() as stack:
+        stack.enter_context(wiki_bm25_queue.immediate_mode())
+        stack.enter_context(triggers_queue.immediate_mode())
+        yield
 
 
 def _fts_rows():
-    conn = connect()
-    try:
-        return conn.execute(
-            "SELECT path, title, body FROM documents_fts ORDER BY path"
-        ).fetchall()
-    finally:
-        conn.close()
+    return list_fts_rows()
 
 
 def _put_doc(client, *, path, body):
@@ -93,10 +92,10 @@ def test_save_makes_doc_searchable_via_bm25(signed_in):
     )
 
     hits = fts.search("bcrypt")
-    assert any(h["path"] == "auth/passwords.md" for h in hits)
-    found = next(h for h in hits if h["path"] == "auth/passwords.md")
-    assert found["title"] == "Passwords"
-    assert "bcrypt" in found["snippet"].lower()
+    assert any(h.path == "auth/passwords.md" for h in hits)
+    found = next(h for h in hits if h.path == "auth/passwords.md")
+    assert found.title == "Passwords"
+    assert "bcrypt" in found.snippet.lower()
 
 
 def test_edit_replaces_indexed_body(signed_in):
@@ -129,7 +128,7 @@ def test_move_drops_old_path_and_indexes_new_path(signed_in):
     assert "dst/foo.md" in paths, "new path should be indexed"
 
     hits = fts.search("findmehere")
-    assert hits and hits[0]["path"] == "dst/foo.md"
+    assert hits and hits[0].path == "dst/foo.md"
 
 
 def test_delete_removes_doc_from_fts(signed_in):
@@ -149,7 +148,7 @@ def test_delete_removes_doc_from_fts(signed_in):
 
 
 def test_manual_reindex_endpoint_routes_through_same_queue(signed_in):
-    """``POST /api/documents/reindex`` enqueues a task on wiki_bm25_huey too,
+    """``POST /api/documents/reindex`` enqueues a task on wiki_bm25_queue too,
     so the same immediate-mode patch covers it."""
     from app.wiki import git as wiki_git
 
@@ -161,7 +160,7 @@ def test_manual_reindex_endpoint_routes_through_same_queue(signed_in):
     assert resp.status_code == 200, resp.get_data(as_text=True)
 
     hits = fts.search("indexable")
-    assert any(h["path"] == "manual.md" for h in hits)
+    assert any(h.path == "manual.md" for h in hits)
 
 
 # --------------------------------------------------------------------------- #
@@ -195,6 +194,6 @@ def test_chat_agent_edit_reindexes(signed_in):
     assert "error" not in out, out
 
     hits = fts.search("aftertoken")
-    assert any(h["path"] == "agent.md" for h in hits)
+    assert any(h.path == "agent.md" for h in hits)
     # And the old content is gone from the index (replaced, not appended).
     assert not fts.search("beforetoken")

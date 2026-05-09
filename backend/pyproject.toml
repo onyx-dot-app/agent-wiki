@@ -4,9 +4,12 @@ version = "0.0.1"
 description = "Backend for agent-wiki: a self-updating wiki for AI agents"
 requires-python = ">=3.11"
 dependencies = [
+    "croniter>=2.0",      # cron-spec parsing for periodic background tasks
     "flask>=3.0",
-    "huey>=2.5",
+    "psycopg[binary]>=3.1",
     "pydantic>=2.6",
+    "sqlalchemy>=2.0",
+    "alembic>=1.13",      # schema migrations applied on init_db()
     "python-dotenv>=1.0",
     "requests>=2.31",
     "authlib>=1.3",          # OIDC
@@ -24,7 +27,7 @@ dev = [
     "pytest>=8.0",
     "pytest-cov>=5.0",
     "ruff>=0.4",
-    "mypy>=1.10",
+    "basedpyright>=1.18",
 ]
 
 [tool.setuptools.packages.find]
@@ -38,3 +41,45 @@ target-version = "py312"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+
+[tool.basedpyright]
+include = ["app", "tests"]
+exclude = [
+    "**/__pycache__",
+    "**/.venv",
+    "app/db/migrations/versions",
+]
+extraPaths = ["."]
+pythonVersion = "3.11"
+venvPath = "."
+venv = ".venv"
+
+typeCheckingMode = "strict"
+
+reportMissingTypeStubs = "none"
+
+reportImplicitOverride = "none"
+reportImplicitStringConcatenation = "none"
+reportUnannotatedClassAttribute = "none"
+reportUnusedCallResult = "none"
+
+reportUnknownParameterType = "error"
+reportUnknownArgumentType = "error"
+reportUnknownVariableType = "error"
+reportUnknownMemberType = "error"
+reportMissingParameterType = "error"
+reportUntypedFunctionDecorator = "error"
+reportUntypedClassDecorator = "error"
+
+[[tool.basedpyright.executionEnvironments]]
+root = "tests"
+reportUnknownParameterType = "none"
+reportUnknownArgumentType = "none"
+reportUnknownVariableType = "none"
+reportUnknownMemberType = "none"
+reportUnknownLambdaType = "none"
+reportMissingParameterType = "none"
+reportMissingTypeArgument = "none"
+reportUntypedFunctionDecorator = "none"
+reportPrivateUsage = "none"
+reportUnusedFunction = "none"

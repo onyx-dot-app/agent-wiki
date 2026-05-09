@@ -2,7 +2,7 @@
 
 `create_directory` drops a `.gitkeep` and commits; `move_path` renames a
 file or directory via `git mv`. Both run against a tmp wiki git repo and
-stub Huey side effects.
+stub task-queue side effects.
 """
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def _stub_side_effects(monkeypatch):
-    """Stub the post-write seam so tests don't queue Huey tasks.
+    """Stub the post-write seam so tests don't queue tasks.
 
     ``move_path.py`` calls ``wiki_notify.after_path_move``; patching it
     short-circuits both FTS updates and trigger fan-outs. Coverage of

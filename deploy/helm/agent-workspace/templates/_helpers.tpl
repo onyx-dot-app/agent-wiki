@@ -37,14 +37,15 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 {{- end -}}
 
 {{/*
-Shared backend env. Used by both backend and worker so the SQLite + wiki paths
-stay in lockstep.
+Shared backend env. Used by both backend and worker so the Postgres URL
+and wiki path stay in lockstep.
 */}}
 {{- define "agent-workspace.backendEnv" -}}
-- name: APP_DB_PATH
-  value: /data/app.sqlite
-- name: QUEUE_DB_PATH
-  value: /data/queue.sqlite
+- name: DATABASE_URL
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "agent-workspace.fullname" . }}-secrets
+      key: database-url
 - name: WIKI_DIR
   value: /wiki
 - name: SECRET_KEY
@@ -74,16 +75,11 @@ stay in lockstep.
 {{- end -}}
 
 {{- define "agent-workspace.backendVolumeMounts" -}}
-- name: app-data
-  mountPath: /data
 - name: wiki-data
   mountPath: /wiki
 {{- end -}}
 
 {{- define "agent-workspace.backendVolumes" -}}
-- name: app-data
-  persistentVolumeClaim:
-    claimName: {{ include "agent-workspace.fullname" . }}-app-data
 - name: wiki-data
   persistentVolumeClaim:
     claimName: {{ include "agent-workspace.fullname" . }}-wiki-data

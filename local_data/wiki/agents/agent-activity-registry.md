@@ -35,7 +35,7 @@ Per-entry fields:
 | `agent`       | The named agent acting for the user; `N/A` if the agent didn't identify itself.     |
 | `activity`    | Either `read` or `wrote`. Both expire on the same TTL.                              |
 | `description` | The commit message for `wrote`; `N/A` for `read`.                                   |
-| `expires_at`  | UTC ISO 8601. After this, a Huey cleanup deletes the row and re-renders the block.  |
+| `expires_at`  | UTC ISO 8601. After this, a pgmq cleanup deletes the row and re-renders the block.  |
 
 ## How rows are created
 
@@ -54,7 +54,7 @@ forward and overwrites `description` — it does not create a duplicate row.
 ## TTL and cleanup
 
 `DEFAULT_TTL = 24h` in `app/wiki/agent_activity.py`. On every UPSERT the
-caller schedules a Huey delayed task on `triggers_huey` (see
+caller schedules a delayed task on `triggers_queue` (see
 `app/tasks/agent_activity.py:cleanup_expired_activity`). The task fires
 at `expires_at`, deletes the row if it's still the same one (renewals
 look like a new `expires_at`, so the old fire detects the mismatch and
@@ -100,7 +100,7 @@ content changes (writes through the doc-edit tools).
 * **MCP / external agents** — the activity registration runs from inside
   the chat agent's tool handlers under a Flask request context, so an
   authenticated `current_user()` is available. Tasks that don't have a
-  request user (Huey background work, the document-updater agent) skip
+  request user (pgmq background work, the document-updater agent) skip
   registration silently.
 * **Agent self-naming** — the chat and wiki-qa agents don't yet set
   `agent_activity.agent_name_var`, so `agent` renders as `N/A`. Wiring
@@ -109,9 +109,9 @@ content changes (writes through the doc-edit tools).
 
 ## Files
 
-* `backend/app/db/migrations/0008_agent_activity.sql` — schema.
+* `backend/app/db/models.py` — schema.
 * `backend/app/wiki/agent_activity.py` — repo, parser, renderer, guard.
-* `backend/app/tasks/agent_activity.py` — Huey cleanup + restart scan.
+* `backend/app/tasks/agent_activity.py` — pgmq cleanup + restart scan.
 * `backend/app/llm/agents/tools/_doc_helpers.py` — wires read/write tools
   into the registry.
 * `backend/app/main.py:create_app` — calls the restart scan.

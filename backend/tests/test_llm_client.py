@@ -503,13 +503,15 @@ def test_anthropic_complete_drains_stream_into_dict(
 
     out = llm_client.complete([{"role": "user", "content": "hi"}])
 
-    assert out == {
-        "text": "here you go",
-        "tool_calls": [
-            {"id": "tu_1", "name": "search", "arguments": {"q": "foo"}}
-        ],
-        "stop_reason": "tool_use",
-        "usage": {"input_tokens": 12, "output_tokens": 34, "reasoning_tokens": 0},
+    assert out.text == "here you go"
+    assert [tc.model_dump() for tc in out.tool_calls] == [
+        {"id": "tu_1", "name": "search", "arguments": {"q": "foo"}}
+    ]
+    assert out.stop_reason == "tool_use"
+    assert out.usage.model_dump() == {
+        "input_tokens": 12,
+        "output_tokens": 34,
+        "reasoning_tokens": 0,
     }
 
 
@@ -728,7 +730,7 @@ def test_openai_unparseable_tool_arguments_fall_back_to_raw(
 
     out = llm_client.complete([{"role": "user", "content": "hi"}])
 
-    assert out["tool_calls"] == [
+    assert [tc.model_dump() for tc in out.tool_calls] == [
         {"id": "call_1", "name": "search", "arguments": {"_raw": "not-json{"}}
     ]
 
@@ -742,5 +744,5 @@ def test_openai_complete_handles_missing_usage(configure_openai, fake_openai):
 
     out = llm_client.complete([{"role": "user", "content": "hi"}])
 
-    assert out["usage"] == {"input_tokens": 0, "output_tokens": 0, "reasoning_tokens": 0}
-    assert out["text"] == "ok"
+    assert out.usage.model_dump() == {"input_tokens": 0, "output_tokens": 0, "reasoning_tokens": 0}
+    assert out.text == "ok"

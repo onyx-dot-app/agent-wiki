@@ -84,7 +84,7 @@ class FirecrawlClient(CrawlProvider):
                 f"firecrawl returned status {response.status_code}"
             )
 
-        body = response.json()
+        body: dict[str, Any] = response.json()
         text, title = _extract(body)
         return WebContent(
             title=title,
@@ -96,14 +96,14 @@ class FirecrawlClient(CrawlProvider):
 
 
 def _extract(body: dict[str, Any]) -> tuple[str, str]:
-    data = body.get("data") or {}
-    metadata = data.get("metadata") or body.get("metadata") or {}
-    text = (
+    data: dict[str, Any] = body.get("data") or {}
+    metadata: dict[str, Any] = data.get("metadata") or body.get("metadata") or {}
+    text: str = (
         data.get("markdown")
         or data.get("content")
         or body.get("markdown")
         or body.get("content")
         or ""
     )
-    title = metadata.get("title") or body.get("title") or ""
+    title: str = metadata.get("title") or body.get("title") or ""
     return text, title

@@ -25,35 +25,6 @@ const EXAMPLE_IF = "the document is updated with a release version";
 const EXAMPLE_SEND =
   "a message saying that the version has been finalized or updated to the specific version number.";
 
-// nl_description storage format. Two labelled lines so the LLM evaluator can
-// still read it as plain prose, while the modal can round-trip it on edit.
-function formatDescription(ifText: string, sendText: string): string {
-  return `If: ${ifText.trim()}\nSend: ${sendText.trim()}`;
-}
-
-function parseDescription(raw: string): { ifText: string; sendText: string } {
-  let ifText = "";
-  let sendText = "";
-  let mode: "if" | "send" | null = null;
-  for (const line of raw.split("\n")) {
-    if (line.startsWith("If: ")) {
-      ifText = line.slice(4);
-      mode = "if";
-    } else if (line.startsWith("Send: ")) {
-      sendText = line.slice(6);
-      mode = "send";
-    } else if (mode === "if") {
-      ifText += (ifText ? "\n" : "") + line;
-    } else if (mode === "send") {
-      sendText += (sendText ? "\n" : "") + line;
-    } else {
-      // Legacy / freeform description — dump it into the "if" field.
-      ifText += (ifText ? "\n" : "") + line;
-    }
-  }
-  return { ifText: ifText.trim(), sendText: sendText.trim() };
-}
-
 export function TriggerModal({ open, initial, onClose, onSaved, lockScope }: Props) {
   const isEdit = Boolean(initial?.id);
   const [scopePath, setScopePath] = useState("");
@@ -66,14 +37,11 @@ export function TriggerModal({ open, initial, onClose, onSaved, lockScope }: Pro
   useEffect(() => {
     if (!open) return;
     setScopePath(initial?.scope_path ?? "");
-    const parsed = initial?.nl_description
-      ? parseDescription(initial.nl_description)
-      : { ifText: "", sendText: "" };
-    setIfText(parsed.ifText);
-    setSendText(parsed.sendText);
+    setIfText(initial?.nl_description ?? "");
+    setSendText(initial?.message ?? "");
     setDestination(DESTINATIONS[0].id);
     setError(null);
-  }, [open, initial?.id, initial?.scope_path, initial?.nl_description]);
+  }, [open, initial?.id, initial?.scope_path, initial?.nl_description, initial?.message]);
 
   if (!open) return null;
 
@@ -82,17 +50,20 @@ export function TriggerModal({ open, initial, onClose, onSaved, lockScope }: Pro
     setBusy(true);
     setError(null);
     try {
-      const nl = formatDescription(ifText, sendText);
+      const nl = ifText.trim();
+      const msg = sendText.trim();
       let saved: Trigger;
       if (isEdit && initial?.id) {
         saved = await updateTrigger(initial.id, {
           scope_path: scopePath.trim(),
           nl_description: nl,
+          message: msg,
         });
       } else {
         const input: TriggerCreateInput = {
           scope_path: scopePath.trim(),
           nl_description: nl,
+          message: msg,
         };
         saved = await createTrigger(input);
       }

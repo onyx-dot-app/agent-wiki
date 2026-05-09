@@ -4,7 +4,9 @@ from __future__ import annotations
 import json
 import logging
 from functools import lru_cache
-from typing import Any, Iterator
+from typing import Any, Iterator, cast
+
+from anthropic import Anthropic
 
 from app.llm.errors import LLMError
 from app.llm.providers._common import safe_json_loads, split_system
@@ -16,11 +18,9 @@ StreamEvent = dict[str, Any]
 
 
 @lru_cache(maxsize=4)
-def _client(api_key: str):
+def _client(api_key: str) -> Anthropic:
     """Cached Anthropic client. Cache size is small but >1 because tests
     swap keys between cases; production uses a single key."""
-    from anthropic import Anthropic
-
     return Anthropic(api_key=api_key)
 
 
@@ -75,7 +75,11 @@ class AnthropicProvider:
                 # Per content-block index, accumulate tool-use args (streamed
                 # as input_json_delta chunks). Text blocks are emitted as we go.
                 tool_blocks: dict[int, dict[str, Any]] = {}
-                for event in s:
+                for raw_event in s:
+                    # The SDK's stream is a union of ~14 event types narrowed
+                    # by a runtime `.type` string. Pyright can't follow that
+                    # discriminator pattern, so we drop into Any for the loop.
+                    event = cast(Any, raw_event)
                     etype = getattr(event, "type", None)
                     if etype == "content_block_start":
                         block = event.content_block
@@ -100,9 +104,9 @@ class AnthropicProvider:
                             "name": tb["name"],
                             "arguments": safe_json_loads(tb["buf"]),
                         }
-                final = s.get_final_message()
-            in_tok = getattr(final.usage, "input_tokens", 0)
-            out_tok = getattr(final.usage, "output_tokens", 0)
+                final = cast(Any, s.get_final_message())
+            in_tok = cast(int, getattr(final.usage, "input_tokens", 0))
+            out_tok = cast(int, getattr(final.usage, "output_tokens", 0))
             log.info(
                 "llm done provider=anthropic model=%s stop=%s tokens=%d/%d",
                 model, getattr(final, "stop_reason", "") or "", in_tok, out_tok,
@@ -190,4 +194,4 @@ PROVIDER = AnthropicProvider()
 
 from app.llm.providers import register  # noqa: E402
 
-register(PROVIDER)
+register(PROVIDER)  # pyright: ignore[reportUnknownMemberType]

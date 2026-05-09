@@ -14,6 +14,7 @@ Open questions tracked in
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from app.llm import client
 from app.llm.prompts import load_prompt
@@ -23,10 +24,10 @@ log = logging.getLogger(__name__)
 NO_CHANGE_SENTINEL = "NO_CHANGE"
 
 
-def run(doc_id: str, current_body: str, payload: dict, source: str) -> str | None:
+def run(doc_id: str, current_body: str, payload: dict[str, Any], source: str) -> str | None:
     """Return a new doc body, or ``None`` if no update is warranted.
 
-    Caller (a Huey task or the ``update_doc_nl`` tool) is responsible for
+    Caller (a background task or the ``update_doc_nl`` tool) is responsible for
     committing the new body. This function does no I/O beyond the LLM
     call.
     """
@@ -43,7 +44,7 @@ def run(doc_id: str, current_body: str, payload: dict, source: str) -> str | Non
             {"role": "user", "content": user},
         ],
     )
-    text = (result.get("text") or "").strip()
+    text = result.text.strip()
     if not text:
         log.warning("document_updater returned empty text for %s", doc_id)
         return None

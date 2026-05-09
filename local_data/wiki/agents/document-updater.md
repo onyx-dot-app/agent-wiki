@@ -35,7 +35,7 @@ def run(doc_id: str, current_body: str, payload: dict, source: str) -> str | Non
     """Return new body, or None if NO_CHANGE."""
 ```
 
-Driven by the Huey task `tasks.document_update.update_document_from_payload`
+Driven by the task `tasks.document_update.update_document_from_payload`
 (see [background-tasks](../background-tasks/background-tasks.md)), which:
 1. Loads `current_body` via `wiki.git.read_file`.
 2. Calls `run(...)`.

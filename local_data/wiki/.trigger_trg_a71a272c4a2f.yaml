@@ -1,0 +1,9 @@
+id: trg_a71a272c4a2f
+owner_user_id: b19ca287-e4ca-430b-9046-4d3c7db401ac
+scope_path: ''
+kind: delta
+nl_description: A document has a new mention of Yuhong
+message: Tell me what document it is and in what context I was mentioned
+destination: null
+enabled: true
+created_at: '2026-05-09T08:01:16+00:00'

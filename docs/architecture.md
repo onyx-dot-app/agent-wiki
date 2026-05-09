@@ -4,8 +4,9 @@
 
 | Container | Role |
 |---|---|
+| `postgres` | Postgres 17 with `pg_textsearch` (BM25 search) and `pgmq` (task queue). pg_textsearch is loaded via `shared_preload_libraries`. Local image — see `deploy/postgres/Dockerfile`. |
 | `backend`  | Flask app on :8080. Hosts the API. |
-| `worker`   | Same image as backend, runs Huey consumer. |
+| `worker-*` | Same image as backend, runs one `app.tasks.run_worker <queue>` per pgmq queue (`documents`, `triggers`, `wiki_bm25`). |
 | `frontend` | Next.js + TS UI on :3000. |
 | `nginx`    | Reverse proxy on :80 — `/api/*` → backend, everything else → frontend. |
 
@@ -13,29 +14,33 @@
 
 | Volume | Mount | Purpose |
 |---|---|---|
-| `app-data`  | `/data`  | `app.sqlite` (state) and `queue.sqlite` (Huey). |
-| `wiki-data` | `/wiki`  | Git-backed wiki working tree. The backend shells out to `git`. |
+| `wiki-data` | `/wiki`  | Git-backed wiki working tree. The backend shells out to `git`. Backend + workers share an RWO mount, so they must co-schedule. |
+
+App state (users, MCP connections, document metadata, trigger cache,
+events, the BM25 search index) and the three pgmq queues all live in
+Postgres — no on-disk DB files outside the `postgres` service's own
+data dir.
 
 ## Storage
 
-- **Wiki content & triggers** — files in the `wiki-data` volume, committed to git on every write. Triggers live under `.triggers/<id>.yaml`.
-- **App state** — SQLite (`app.sqlite`): users, MCP connections, document metadata, trigger cache, events.
-- **Search** — FTS5 virtual table (`documents_fts`) with bm25 ranking. Rebuilt by `tasks.reindex` after every doc commit.
-- **Queue** — Huey on its own SQLite file (`queue.sqlite`).
+- **Wiki content & triggers** — files in the `wiki-data` volume, committed to git on every write. Triggers live as YAML beside their scope (`.trigger_<id>_<doc>.yaml` or `.trigger_<id>.yaml`).
+- **App state** — Postgres (`DATABASE_URL`): users, MCP connections, document metadata, trigger cache, events, plus the BM25-indexed `documents_fts` table. Schema lives in `backend/app/db/models.py` (SQLAlchemy 2.0 ORM) and is applied by Alembic on every boot — `init_db()` runs `alembic upgrade head` against the configured URL. Migration files live in `backend/app/db/migrations/versions/`.
+- **Search** — `documents_fts(doc_id, path, title, body)` with a `pg_textsearch` BM25 index on `(coalesce(title,'') || ' ' || coalesce(body,''))`. Rebuilt by `tasks.reindex` after every doc commit. Snippets are synthesized in Python (`app/db/fts.py`) since pg_textsearch has no `snippet()` function.
+- **Queue** — pgmq queues `pgmq.q_documents`, `pgmq.q_triggers`, `pgmq.q_wiki_bm25` in the same Postgres. Failed messages are archived to `pgmq.a_<queue>` after `MAX_RETRIES` redeliveries.
 
 ## Data flow: doc gets updated as work happens
 
 1. Connector or webhook posts to `/api/documents/ingest` (or `/api/webhooks/<source>`).
-2. Backend records an `events` row and enqueues `update_document_from_payload`.
+2. Backend records an `events` row and enqueues `update_document_from_payload` on `pgmq.q_documents`.
 3. Worker pulls the task, calls the **document-updater agent** (`app/llm/agents/document_updater.py`).
 4. If the agent returns a new body, the worker commits it via `app.wiki.git.commit_file`.
-5. Worker enqueues `reindex_document` to refresh FTS.
-6. Worker evaluates **delta triggers** scoped to the doc and to each parent directory; matched triggers dispatch (webhook / external service / agent message).
+5. Worker enqueues `reindex_document` on `pgmq.q_wiki_bm25` to refresh the BM25 index.
+6. Worker enqueues `fan_out_trigger_eval` on `pgmq.q_triggers`. That task evaluates **delta triggers** scoped to the doc and to each parent directory; matched triggers record `trigger.fire` events (v0 has no outbound dispatch yet).
 
 ## Data flow: scheduled trigger
 
-1. `tasks.periodic.evaluate_scheduled_triggers` (every 5 min) loads enabled `kind=schedule` triggers due now.
-2. For each, the engine runs the configured action and records `trigger.fire`.
+1. The in-process periodic scheduler on the `triggers` worker fires `evaluate_scheduled_triggers` every 5 minutes (cron-driven via `croniter`). The scheduler runs inside the consumer process — running >1 replica per queue would double-fire it.
+2. The handler loads enabled `kind=schedule` triggers due now, runs the configured action, and records `trigger.fire`.
 
 ## Open questions
 
@@ -43,3 +48,4 @@
 - **Doc bloat / loss** — the agent must avoid both growing docs unboundedly and dropping important context. The system prompt forbids both, but we'll need eval data to keep it honest.
 - **Agent hand-off discipline** — coding agents are supposed to update high-level project plans here without spamming. Open: is this best done via MCP tool description, or as a skill the agent loads?
 - **Permissioning** — out of scope for v0. Anything authenticated can read/write everything.
+- **Migrations** — Alembic on top of SQLAlchemy 2.0. Bootstrap migration `0001_initial` materializes the entire current schema via `Base.metadata.create_all`; subsequent changes are explicit autogenerated diffs (`cd backend && alembic revision --autogenerate -m "<slug>"`). `init_db()` runs `alembic upgrade head` on every boot, so deploys apply pending migrations automatically.

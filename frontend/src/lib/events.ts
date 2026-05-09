@@ -1,4 +1,4 @@
-import { apiFetch } from "@/lib/api";
+import useSWR from "swr";
 
 export interface AppEvent {
   id: number;
@@ -9,11 +9,24 @@ export interface AppEvent {
   payload: Record<string, unknown>;
 }
 
-export async function listEvents(opts: { kind?: string; limit?: number } = {}): Promise<AppEvent[]> {
+function eventsPath(opts: { kind?: string; limit?: number }): string {
   const qs = new URLSearchParams();
   if (opts.kind) qs.set("kind", opts.kind);
   if (opts.limit) qs.set("limit", String(opts.limit));
-  const path = `/events${qs.toString() ? `?${qs}` : ""}`;
-  const r = await apiFetch<{ events: AppEvent[] }>(path);
-  return r.events;
+  return `/events${qs.toString() ? `?${qs}` : ""}`;
+}
+
+export function useEvents(opts: { kind?: string; limit?: number } = {}) {
+  const { data, error, isLoading, isValidating, mutate } = useSWR<{ events: AppEvent[] }>(
+    eventsPath(opts),
+  );
+  return {
+    events: data?.events ?? [],
+    error: error as Error | undefined,
+    // True only on the very first load (no cached data yet). Background
+    // revalidations show as `isValidating` but don't blank the list.
+    isLoading,
+    isValidating,
+    refresh: mutate,
+  };
 }

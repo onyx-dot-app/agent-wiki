@@ -1,47 +1,34 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { AppShell } from "@/components/common/AppShell";
 import { useRequireAuth } from "@/lib/auth";
-import { fetchHealth, type HealthResponse } from "@/lib/health";
+import { useHealth } from "@/lib/health";
 
 const POLL_MS = 5000;
 
+const QUEUE_LABELS: Record<string, string> = {
+  documents: "Document update processing",
+  triggers: "Trigger evaluations",
+  wiki_bm25: "Wiki page indexing",
+};
+
 export default function HealthPage() {
   const { user, loading } = useRequireAuth();
-  const [data, setData] = useState<HealthResponse | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const { health: data, error: healthError, isValidating: healthValidating } = useHealth({
+    refreshIntervalMs: POLL_MS,
+  });
+  const error = healthError?.message ?? null;
 
-  const refresh = useCallback(async () => {
-    try {
-      const res = await fetchHealth();
-      setData(res);
-      setError(null);
-      setLastUpdated(new Date());
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "failed to reach backend");
-      setData(null);
+  // Track when we last got a *successful* response so the user sees a
+  // freshness signal even though SWR doesn't expose `dataUpdatedAt`.
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  useEffect(() => {
+    if (!healthValidating && (data || error)) {
       setLastUpdated(new Date());
     }
-  }, []);
-
-  useEffect(() => {
-    if (!user) return;
-    void refresh();
-    const tick = () => {
-      timer.current = setTimeout(async () => {
-        await refresh();
-        tick();
-      }, POLL_MS);
-    };
-    tick();
-    return () => {
-      if (timer.current) clearTimeout(timer.current);
-    };
-  }, [user, refresh]);
+  }, [data, error, healthValidating]);
 
   if (loading || !user) return <main style={{ padding: 32 }}>Loading…</main>;
 
@@ -127,9 +114,7 @@ export default function HealthPage() {
                       marginBottom: 8,
                     }}
                   >
-                    <div style={{ fontFamily: "ui-monospace, Menlo, monospace", fontSize: 14 }}>
-                      {q.name}
-                    </div>
+                    <div style={{ fontSize: 14 }}>{QUEUE_LABELS[q.name] ?? q.name}</div>
                     <div style={{ fontSize: 12, color: "#374151" }}>
                       {q.ok && q.size != null ? (
                         <>

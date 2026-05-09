@@ -5,7 +5,6 @@ tmp wiki working tree — no mocking of subprocess.
 """
 from __future__ import annotations
 
-import pytest
 
 from app.llm.agents.tools import _bash
 from app.llm.agents.tools.run_bash import handle

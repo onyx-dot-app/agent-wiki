@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
 
 import { AppShell } from "@/components/common/AppShell";
 import { TriggerHistoryModal } from "@/components/triggers/TriggerHistoryModal";
@@ -10,8 +10,8 @@ import {
   deleteTrigger,
   formatScopePath,
   getTriggerVersion,
-  listTriggers,
   updateTrigger,
+  useTriggers,
   type Trigger,
 } from "@/lib/triggers";
 
@@ -33,35 +33,31 @@ function formatRelative(iso: string | null | undefined): string {
 
 export default function TriggersPage() {
   const { user, loading } = useRequireAuth();
-  const [triggers, setTriggers] = useState<Trigger[]>([]);
-  const [listError, setListError] = useState<string | null>(null);
+  const { triggers, error: listSwrError, refresh } = useTriggers();
+  const [mutationError, setMutationError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<Trigger | null>(null);
   const [historyFor, setHistoryFor] = useState<Trigger | null>(null);
 
-  const refresh = useCallback(async () => {
-    try {
-      setTriggers(await listTriggers());
-      setListError(null);
-    } catch (e) {
-      setListError(e instanceof Error ? e.message : "failed to load triggers");
-    }
-  }, []);
-
-  useEffect(() => {
-    if (user) void refresh();
-  }, [user, refresh]);
+  const listError = mutationError ?? listSwrError?.message ?? null;
 
   if (loading || !user) return <main style={{ padding: 32 }}>Loading…</main>;
 
   async function onToggle(t: Trigger) {
     setBusyId(t.id);
+    setMutationError(null);
     try {
       const updated = await updateTrigger(t.id, { enabled: !t.enabled });
-      setTriggers((prev) => prev.map((x) => (x.id === t.id ? updated : x)));
+      // Optimistic update: patch the cached list, then revalidate.
+      await refresh(
+        (cur) => ({
+          triggers: (cur?.triggers ?? []).map((x) => (x.id === t.id ? updated : x)),
+        }),
+        { revalidate: true },
+      );
     } catch (e) {
-      setListError(e instanceof Error ? e.message : "toggle failed");
+      setMutationError(e instanceof Error ? e.message : "toggle failed");
     } finally {
       setBusyId(null);
     }
@@ -70,11 +66,17 @@ export default function TriggersPage() {
   async function onDelete(t: Trigger) {
     if (!confirm(`Delete this trigger?\n\n"${t.nl_description}"`)) return;
     setBusyId(t.id);
+    setMutationError(null);
     try {
       await deleteTrigger(t.id);
-      setTriggers((prev) => prev.filter((x) => x.id !== t.id));
+      await refresh(
+        (cur) => ({
+          triggers: (cur?.triggers ?? []).filter((x) => x.id !== t.id),
+        }),
+        { revalidate: true },
+      );
     } catch (e) {
-      setListError(e instanceof Error ? e.message : "delete failed");
+      setMutationError(e instanceof Error ? e.message : "delete failed");
     } finally {
       setBusyId(null);
     }
@@ -174,7 +176,14 @@ export default function TriggersPage() {
                     )}
                   </div>
                   <div style={{ fontSize: 14, color: "#111", whiteSpace: "pre-wrap" }}>
-                    {t.nl_description}
+                    <span style={{ color: "#92400e", fontWeight: 600 }}>If</span> {t.nl_description}
+                    {t.message && (
+                      <>
+                        {"\n"}
+                        <span style={{ color: "#047857", fontWeight: 600 }}>then send</span>{" "}
+                        {t.message}
+                      </>
+                    )}
                   </div>
                 </div>
                 <div style={{ display: "flex", gap: 6, alignItems: "center", flexShrink: 0 }}>
@@ -235,13 +244,17 @@ export default function TriggersPage() {
             setEditing(null);
           }}
           onSaved={(saved) => {
-            setTriggers((prev) => {
-              const i = prev.findIndex((t) => t.id === saved.id);
-              if (i === -1) return [saved, ...prev];
-              const next = prev.slice();
-              next[i] = saved;
-              return next;
-            });
+            void refresh(
+              (cur) => {
+                const prev = cur?.triggers ?? [];
+                const i = prev.findIndex((t) => t.id === saved.id);
+                if (i === -1) return { triggers: [saved, ...prev] };
+                const next = prev.slice();
+                next[i] = saved;
+                return { triggers: next };
+              },
+              { revalidate: true },
+            );
           }}
         />
 
@@ -256,12 +269,14 @@ export default function TriggersPage() {
                 ...historyFor,
                 scope_path: version.scope_path,
                 nl_description: version.nl_description,
+                message: version.message,
+                destination: version.destination,
                 enabled: version.enabled,
               });
               setHistoryFor(null);
               setModalOpen(true);
             } catch (e) {
-              setListError(e instanceof Error ? e.message : "failed to load version");
+              setMutationError(e instanceof Error ? e.message : "failed to load version");
             }
           }}
         />

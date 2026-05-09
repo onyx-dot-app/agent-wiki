@@ -6,10 +6,12 @@ doesn't need a real wiki dir.
 from __future__ import annotations
 
 import pytest
-from flask import Flask
+from flask import Flask, jsonify
 
 from app.api import triggers as triggers_api
-from app.db.sqlite import connect
+from app.models._helpers import RequestError
+
+from tests._seed import seed_user
 
 
 @pytest.fixture
@@ -17,24 +19,17 @@ def app(tmp_repo):
     app = Flask(__name__)
     app.config.update(SECRET_KEY="test-secret", TESTING=True)
     app.register_blueprint(triggers_api.bp, url_prefix="/api/triggers")
+
+    @app.errorhandler(RequestError)
+    def _on_request_error(err: RequestError):
+        return jsonify(error=err.message), err.status
+
     return app
 
 
 @pytest.fixture
 def client(app):
     return app.test_client()
-
-
-def _seed_user(uid: str = "usr_1", email: str = "a@b.com") -> str:
-    conn = connect()
-    try:
-        conn.execute(
-            "INSERT INTO users(id, email, password_hash, is_admin) VALUES (?, ?, ?, 0)",
-            (uid, email, "x"),
-        )
-    finally:
-        conn.close()
-    return uid
 
 
 def _login(client, user_id: str) -> None:
@@ -48,7 +43,7 @@ def test_unauthenticated_list_is_401(client):
 
 
 def test_create_then_list(client):
-    uid = _seed_user()
+    uid = seed_user(email="a@b.com")
     _login(client, uid)
 
     res = client.post(
@@ -70,7 +65,7 @@ def test_create_then_list(client):
 
 
 def test_create_validation_errors(client):
-    uid = _seed_user()
+    uid = seed_user(email="a@b.com")
     _login(client, uid)
 
     # missing scope_path
@@ -109,8 +104,8 @@ def test_create_validation_errors(client):
 
 
 def test_owner_isolation_on_list(client):
-    a = _seed_user("usr_a", "a@x.com")
-    b = _seed_user("usr_b", "b@x.com")
+    a = seed_user("usr_a", "a@x.com")
+    b = seed_user("usr_b", "b@x.com")
 
     _login(client, a)
     client.post("/api/triggers", json={"scope_path": "a.md", "nl_description": "x", "message": "m"})
@@ -122,7 +117,7 @@ def test_owner_isolation_on_list(client):
 
 
 def test_update_disable_then_re_enable(client):
-    uid = _seed_user()
+    uid = seed_user(email="a@b.com")
     _login(client, uid)
     tid = client.post(
         "/api/triggers",
@@ -152,8 +147,8 @@ def test_update_disable_then_re_enable(client):
 
 
 def test_cannot_modify_anothers_trigger(client):
-    a = _seed_user("usr_a", "a@x.com")
-    b = _seed_user("usr_b", "b@x.com")
+    a = seed_user("usr_a", "a@x.com")
+    b = seed_user("usr_b", "b@x.com")
 
     _login(client, a)
     tid = client.post(
@@ -166,7 +161,7 @@ def test_cannot_modify_anothers_trigger(client):
 
 
 def test_delete_then_404(client):
-    uid = _seed_user()
+    uid = seed_user(email="a@b.com")
     _login(client, uid)
     tid = client.post(
         "/api/triggers", json={"scope_path": "a.md", "nl_description": "x", "message": "m"}

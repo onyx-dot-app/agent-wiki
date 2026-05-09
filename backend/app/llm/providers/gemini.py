@@ -13,7 +13,9 @@ from __future__ import annotations
 
 import logging
 from functools import lru_cache
-from typing import Any, Iterator
+from typing import Any, Iterator, cast
+
+from google import genai
 
 from app.llm.errors import LLMError
 from app.llm.providers._common import (
@@ -29,10 +31,8 @@ StreamEvent = dict[str, Any]
 
 
 @lru_cache(maxsize=4)
-def _client(api_key: str):
+def _client(api_key: str) -> genai.Client:
     """Cached Gemini client. See _client docstring in anthropic.py."""
-    from google import genai
-
     return genai.Client(api_key=api_key)
 
 
@@ -85,21 +85,22 @@ class GeminiProvider:
         )
         client = _client(settings.gemini_api_key)
         try:
-            stream = client.models.generate_content_stream(
-                model=model, contents=contents, config=config
+            stream = client.models.generate_content_stream(  # pyright: ignore[reportUnknownMemberType]
+                model=model, contents=cast(Any, contents), config=cast(Any, config)
             )
             stop_reason = ""
-            usage = {"input_tokens": 0, "output_tokens": 0}
+            usage: dict[str, int] = {"input_tokens": 0, "output_tokens": 0}
             tool_call_idx = 0
-            for chunk in stream:
-                cands = getattr(chunk, "candidates", None) or []
+            for raw_chunk in stream:
+                chunk = cast(Any, raw_chunk)
+                cands: list[Any] = list(getattr(chunk, "candidates", None) or [])
                 for cand in cands:
                     finish = getattr(cand, "finish_reason", None)
                     if finish:
                         # Gemini's enum string ("STOP", "MAX_TOKENS", "TOOL_CALLS"...).
                         stop_reason = str(finish).split(".")[-1].lower()
                     content = getattr(cand, "content", None)
-                    parts = getattr(content, "parts", None) or []
+                    parts: list[Any] = list(getattr(content, "parts", None) or [])
                     for part in parts:
                         text = getattr(part, "text", None)
                         if text:
@@ -146,7 +147,7 @@ def _content_for(m: dict[str, Any], id_to_name: dict[str, str]) -> dict[str, Any
         content = m.get("content")
         response_obj: dict[str, Any]
         if isinstance(content, dict):
-            response_obj = content
+            response_obj = cast(dict[str, Any], content)
         else:
             response_obj = {"result": stringify_tool_result(content)}
         return {
@@ -177,17 +178,16 @@ def _sanitize_schema(schema: dict[str, Any]) -> dict[str, Any]:
     properties (``type``, ``description``, ``enum``, ``properties``,
     ``items``, ``required``) flow through cleanly.
     """
-    if not isinstance(schema, dict):
-        return schema
     drop = {"additionalProperties", "$schema", "$id", "$ref", "definitions"}
     out: dict[str, Any] = {}
     for k, v in schema.items():
         if k in drop:
             continue
         if k == "properties" and isinstance(v, dict):
-            out[k] = {pk: _sanitize_schema(pv) for pk, pv in v.items()}
+            v_dict: dict[str, Any] = cast(dict[str, Any], v)
+            out[k] = {pk: _sanitize_schema(pv) for pk, pv in v_dict.items()}
         elif k == "items":
-            out[k] = _sanitize_schema(v) if isinstance(v, dict) else v
+            out[k] = _sanitize_schema(cast(dict[str, Any], v)) if isinstance(v, dict) else v
         else:
             out[k] = v
     return out
@@ -221,4 +221,4 @@ PROVIDER = GeminiProvider()
 
 from app.llm.providers import register  # noqa: E402
 
-register(PROVIDER)
+register(PROVIDER)  # pyright: ignore[reportUnknownMemberType]

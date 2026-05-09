@@ -1,7 +1,10 @@
 """Tests for app/llm/settings.py — DB-backed LLM configuration."""
 from __future__ import annotations
 
+from app.db.models import LLMSettings as LLMSettingsRow
 from app.llm import settings as llm_settings
+
+from tests._seed import count_rows
 
 
 def _upsert(**overrides) -> None:
@@ -72,15 +75,7 @@ def test_upsert_round_trips_gemini_and_ollama(tmp_db):
 
 
 def test_settings_row_is_singleton(tmp_db):
-    """The migration constrains id=1; upsert must keep exactly one row."""
+    """The schema constrains id=1; upsert must keep exactly one row."""
     _upsert(provider="anthropic", model="m1", anthropic_api_key="a")
     _upsert(provider="openai", model="m2", openai_api_key="b")
-
-    from app.db.sqlite import connect
-
-    conn = connect()
-    try:
-        count = conn.execute("SELECT COUNT(*) AS c FROM llm_settings").fetchone()["c"]
-    finally:
-        conn.close()
-    assert count == 1
+    assert count_rows(LLMSettingsRow) == 1

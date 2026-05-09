@@ -80,7 +80,7 @@ task logs a warning and does not retry.
 `POST /api/documents/ingest` — receives a single document push from any
 external system (Onyx today; other connectors in the future). The API
 layer is intentionally dumb: it validates the payload, enforces the
-admin-configured size cap, enqueues a task on `documents_huey`, and acks
+admin-configured size cap, enqueues a task on `documents_queue`, and acks
 **202** immediately. All routing (which wiki page to update) and
 reconciliation happens in the background task via the doc-updater agent.
 
@@ -100,8 +100,8 @@ reconciliation happens in the background task via the doc-updater agent.
 Bounded jointly because both fields are LLM input on the consumer side.
 
 **Responses:**
-- `202 Accepted` — `{"queued": true, "task_id": "<huey-id>"}`. The push
-  has been put on `documents_huey`. The HTTP request never waits for the
+- `202 Accepted` — `{"queued": true, "task_id": "<pgmq-msg-id>"}`. The push
+  has been put on `documents_queue`. The HTTP request never waits for the
   agent.
 - `400 Bad Request` — malformed JSON, missing/empty `content`, or any
   field with a wrong type. Body: `{"error": "<message>"}`.
@@ -116,7 +116,7 @@ front-end). Shared bearer token / HMAC validation lands when the
 `api_tokens` table does — tracked in **Next up** below.
 
 **Background task:** `app.tasks.document_update.process_pushed_document`
-on `documents_huey`. Stub today (`raise NotImplementedError`) — picking
+on `documents_queue`. Stub today (`raise NotImplementedError`) — picking
 target page(s) and running the doc-updater agent is the next chunk of
 work. The API contract is fixed.
 
@@ -127,7 +127,7 @@ work. The API contract is fixed.
 
 - `max_doc_chars` — integer. Default **100,000**. Bounds enforced
   server-side: 1,000 ≤ value ≤ 5,000,000. Persisted in the `ingest_settings`
-  single-row table (migration `0007_ingest_settings.sql`).
+  single-row table (the `IngestSettings` model).
 
 Schema in code: `app/ingest/settings.py:IngestSettings`.
 
@@ -152,10 +152,10 @@ Schema in code: `app/ingest/settings.py:IngestSettings`.
 =======
 - `POST /api/documents/ingest` validates the payload, enforces the
   admin-configured size cap, enqueues `process_pushed_document` on
-  `documents_huey`, and acks 202.
+  `documents_queue`, and acks 202.
 - `GET/PUT /api/admin/ingest` for the `max_doc_chars` setting (default
   100,000). Persisted in `ingest_settings`.
-- Migration `0007_ingest_settings.sql`.
+- The `IngestSettings` model.
 >>>>>>> Stashed changes
 
 ### Stubbed

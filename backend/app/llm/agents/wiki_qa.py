@@ -12,7 +12,7 @@ agent. Tests patch ``app.llm.client.complete`` (transitively via
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, cast
 
 from app.llm.prompts import load_prompt
 
@@ -60,10 +60,11 @@ def _final_assistant_text(messages: list[dict[str, Any]]) -> str:
         if isinstance(content, str):
             return content
         if isinstance(content, list):
-            parts = [
-                blk.get("text", "")
-                for blk in content
-                if isinstance(blk, dict) and blk.get("type") == "text"
+            blocks = cast(list[Any], content)
+            parts: list[str] = [
+                cast(dict[str, Any], blk).get("text", "")
+                for blk in blocks
+                if isinstance(blk, dict) and cast(dict[str, Any], blk).get("type") == "text"
             ]
             joined = "".join(parts).strip()
             if joined:
@@ -84,9 +85,11 @@ def _collect_sources(messages: list[dict[str, Any]]) -> list[dict[str, str]]:
     for msg in messages:
         role = msg.get("role")
         if role == "assistant":
-            for call in msg.get("tool_calls") or []:
+            tool_calls: list[Any] = msg.get("tool_calls") or []
+            for call in tool_calls:
                 if isinstance(call, dict):
-                    pending_calls[call.get("id", "")] = call.get("name", "")
+                    call_dict = cast(dict[str, Any], call)
+                    pending_calls[call_dict.get("id", "")] = call_dict.get("name", "")
             continue
         if role != "tool":
             continue
@@ -108,11 +111,12 @@ def _extract_path(content: Any) -> str | None:
     # Cheap path extraction — avoids loading json for the common shape.
     import json
     try:
-        parsed = json.loads(content)
+        parsed: Any = json.loads(content)
     except (TypeError, ValueError):
         return None
     if isinstance(parsed, dict):
-        path = parsed.get("path")
+        parsed_dict = cast(dict[str, Any], parsed)
+        path = parsed_dict.get("path")
         if isinstance(path, str) and path:
             return path
     return None

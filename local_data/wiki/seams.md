@@ -45,9 +45,10 @@ through one entry point. Two reasons we declare seams:
 | Web crawl | `backend/app/web/__init__.py` (`fetch`, `crawl_provider`) | Firecrawl-only today; same rule. |
 | Web provider config | `backend/app/web/settings.py` (`get()`) | Don't read provider keys from `os.environ` or `CONFIG`; admin UI is the only way. |
 | Chat-loop session state | `backend/app/llm/agents/_session.py` (`seen_doc_paths` ContextVar) | The chat loop populates from `read_page` results (NOT `search_wiki` — its snippets are too short to count as a read); doc-edit tools read it for read-before-write. Tools must tolerate the default `None` so they work outside a loop. |
-| DB connection | `backend/app/db/sqlite.py` (`connect()`, `init_db()`) | All repos open via `connect()`; no other sqlite entry points. |
-| Migrations | `backend/app/db/migrations/*.sql` | Lex-sorted, applied once. Never edit an applied file; add a new one. |
-| Background work | `backend/app/tasks/` (Huey decorators) | Anything > ~100ms or that hits the LLM enqueues a task; no ad-hoc threads. |
+| DB schema | `backend/app/db/models.py` (`Base`, `User`, `Document`, `Trigger`, `Event`, `DocumentFts`, `LLMSettings`, `WebSettings`, `IngestSettings`, `AgentActivity`, `McpConnection`, `CronState`) | Single source of truth for table shape. `init_db()` runs `alembic upgrade head` against the configured Postgres. New schema = edit a model + `alembic revision --autogenerate -m "<slug>"` (writes a versioned diff into `backend/app/db/migrations/versions/`). |
+| DB session | `backend/app/db/session.py` (`session()`, `init_db()`) | Repos open ``session()`` per call (commits on clean exit, rolls back on exception). Engine is built lazily from ``CONFIG.database_url``; ``reset_engine_for_tests()`` rebuilds it for per-test schemas. |
+| Raw SQL via ORM | `backend/app/db/fts.py` and `backend/app/tasks/queue.py` only | pg_textsearch's `<@>`/`to_bm25query` and pgmq's `send/read/delete/archive` have no ORM equivalent — both go through ``session.execute(text(...))``. No other raw-SQL sites in app code. |
+| Background work | `backend/app/tasks/` (pgmq decorators) | Anything > ~100ms or that hits the LLM enqueues a task; no ad-hoc threads. |
 | HTTP error envelope | `{"error": "<msg>"}` (see `backend/app/api/auth.py`) | All API errors use this shape; the frontend's `ApiError` parses it. |
 
 ### Backend — plural (registry)
@@ -86,7 +87,7 @@ shape *before* the second implementation lands so it doesn't fork.
 | --- | --- | --- |
 | Agent runtime / loop | `backend/app/llm/agents/loop.py` | `chat.py` (176 lines, streaming, multi-turn tool loop) and `document_updater.py` (27 lines, single-shot) will diverge. Extract `run_chat_loop_stream` to a shared loop both call. |
 | Prompt loader | `backend/app/llm/prompts/__init__.py:load_prompt` | Already exists implicitly. Make it the only way prompts are read so admin-editable prompts (likely soon) plug in here. |
-| Search backend | `backend/app/wiki/search.py:search` | Pin the return shape (`{path, title, score}`) in a model so the chat tool and any future surface don't bind to `sqlite3.Row`. FTS today, vector later. |
+| Search backend | `backend/app/wiki/search.py:search` | Pin the return shape (`{path, title, score}`) in a model so the chat tool and any future surface don't bind to ORM rows. `pg_textsearch` BM25 today, vector later. |
 | Event sink | `backend/app/events/repo.py:record(kind, actor, payload)` | Trigger fires, doc updates, agent runs all want to write events. One repo function so audit/metrics later isn't a refactor. |
 | MCP server (inbound) tool surface | `backend/app/mcp_server/__init__.py` | Mounts `/api/mcp` (Streamable HTTP). Tool registry merges the agent-tool registry with mcp-only tools (`update_doc_nl`, `apply_patch`, `ask_nl_question`, `read_doc(sha)`, `list_history`). See [mcp-server](mcp-server/mcp-server.md). |
 | MCP client (outbound) connections | `backend/app/api/mcp_connections.py` | User-managed list of external MCP servers our agent harness consumes. Currently lives in `app/api/mcp.py`; rename when the inbound surface lands. |

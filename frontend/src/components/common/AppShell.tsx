@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { useAuth } from "@/lib/auth";
+import { useLLMStatus } from "@/lib/llm";
 
 interface NavItem {
   href: string;
@@ -159,7 +160,88 @@ export function AppShell({ children }: { children: ReactNode }) {
           );
         })}
       </nav>
-      <div style={{ flex: 1, minWidth: 0 }}>{children}</div>
+      <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
+        <LLMSetupBanner />
+        <div style={{ flex: 1, minWidth: 0 }}>{children}</div>
+      </div>
+    </div>
+  );
+}
+
+function LLMSetupBanner() {
+  const { user, loading } = useAuth();
+  // Skip the fetch until we have a logged-in user — `/llm/status` is
+  // login-gated, so calling it pre-auth just produces 401s.
+  const { status } = useLLMStatus({ skip: loading || !user });
+  const [dismissed, setDismissed] = useState(false);
+
+  useEffect(() => {
+    if (typeof window !== "undefined" && sessionStorage.getItem("llm-banner-dismissed") === "1") {
+      setDismissed(true);
+    }
+  }, []);
+
+  if (!user || status?.configured !== false || dismissed) return null;
+
+  const isAdmin = !!user.is_admin;
+
+  return (
+    <div
+      role="alert"
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 12,
+        padding: "10px 16px",
+        background: "#fef3c7",
+        borderBottom: "1px solid #fcd34d",
+        color: "#78350f",
+        fontSize: 14,
+      }}
+    >
+      <span aria-hidden style={{ fontSize: 16, lineHeight: 1 }}>⚠️</span>
+      <span style={{ flex: 1 }}>
+        <strong>No language model is configured.</strong>{" "}
+        {isAdmin ? (
+          <>
+            AI features (chat, document updates, trigger evaluation) are disabled until you add a
+            provider and API key on the{" "}
+            <Link
+              href="/admin/llm"
+              style={{ color: "#78350f", textDecoration: "underline", fontWeight: 600 }}
+            >
+              LLM settings page
+            </Link>
+            .
+          </>
+        ) : (
+          <>
+            AI features (chat, document updates, trigger evaluation) are disabled. Please ask a
+            workspace admin to finish setup.
+          </>
+        )}
+      </span>
+      <button
+        onClick={() => {
+          if (typeof window !== "undefined") {
+            sessionStorage.setItem("llm-banner-dismissed", "1");
+          }
+          setDismissed(true);
+        }}
+        aria-label="Dismiss"
+        style={{
+          background: "transparent",
+          border: "none",
+          color: "#78350f",
+          cursor: "pointer",
+          fontSize: 18,
+          lineHeight: 1,
+          padding: "2px 6px",
+          borderRadius: 4,
+        }}
+      >
+        ×
+      </button>
     </div>
   );
 }

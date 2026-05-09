@@ -1,7 +1,7 @@
 """Manage MCP server connections used by the agent harness."""
 from __future__ import annotations
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint
 
 from app.auth import login_required
 

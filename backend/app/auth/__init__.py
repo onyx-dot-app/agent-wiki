@@ -10,17 +10,18 @@ authenticated can read or write, except for endpoints behind ``admin_required``.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
 from functools import wraps
-from typing import Callable
+from typing import Any, Callable, TypeVar, cast
 
 from flask import g, jsonify, session
+from pydantic import BaseModel
 
 from app.auth import users as users_repo
 
+F = TypeVar("F", bound=Callable[..., Any])
 
-@dataclass
-class User:
+
+class User(BaseModel):
     id: str
     email: str
     name: str | None = None
@@ -28,40 +29,41 @@ class User:
 
 
 def current_user() -> User | None:
-    user = getattr(g, "user", None)
-    if user is not None:
-        return user
+    cached = cast("User | None", getattr(g, "user", None))
+    if cached is not None:
+        return cached
     user_id = session.get("user_id")
     if not user_id:
         return None
     row = users_repo.get_by_id(user_id)
     if row is None:
         return None
-    g.user = User(
+    user = User(
         id=row["id"],
         email=row["email"],
         name=row["name"],
         is_admin=bool(row["is_admin"]),
     )
-    return g.user
+    g.user = user
+    return user
 
 
-def login_required(fn: Callable) -> Callable:
+def login_required(fn: F) -> F:
     @wraps(fn)
-    def wrapper(*args, **kwargs):
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
         if current_user() is None:
             return jsonify(error="unauthorized"), 401
         return fn(*args, **kwargs)
-    return wrapper
+    return cast(F, wrapper)
 
 
-def admin_required(fn: Callable) -> Callable:
+def admin_required(fn: F) -> F:
     @wraps(fn)
-    def wrapper(*args, **kwargs):
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
         user = current_user()
         if user is None:
             return jsonify(error="unauthorized"), 401
         if not user.is_admin:
             return jsonify(error="forbidden"), 403
         return fn(*args, **kwargs)
-    return wrapper
+    return cast(F, wrapper)

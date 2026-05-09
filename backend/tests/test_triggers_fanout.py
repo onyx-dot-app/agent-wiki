@@ -7,24 +7,37 @@ wiki snapshot are patched so we can exercise the SQL match + LLM verdict
 """
 from __future__ import annotations
 
-import json
 
-from app.db.sqlite import connect
+import pytest
+
+from app.triggers.natural_language import MatchResult, NewFileEvalResult
+
+from tests._seed import Event, count_rows, list_events, seed_trigger, seed_user
+
+
+@pytest.fixture(autouse=True)
+def _immediate_triggers():
+    """Run trigger-eval handlers inline so assertions land before yield."""
+    from app.tasks.queues import triggers_queue
+
+    with triggers_queue.immediate_mode():
+        yield
 
 
 def _seed_user_and_trigger(
-    conn, *, scope_path: str, tid: str = "trg_1",
-    message: str = "tell me when status changes", destination=None,
+    *,
+    scope_path: str,
+    tid: str = "trg_1",
+    message: str = "tell me when status changes",
+    destination: object | None = None,
 ) -> None:
-    conn.execute(
-        "INSERT INTO users(id, email, password_hash, is_admin) VALUES (?, ?, ?, ?)",
-        ("usr_1", "u@x.com", "x", 1),
-    )
-    action_json = json.dumps({"message": message, "destination": destination})
-    conn.execute(
-        "INSERT INTO triggers(id, owner_user_id, scope_path, kind, nl_description, action_json, enabled) "
-        "VALUES (?, ?, ?, 'delta', ?, ?, 1)",
-        (tid, "usr_1", scope_path, "fire when status changes", action_json),
+    seed_user(uid="usr_1", email="u@x.com", is_admin=True)
+    seed_trigger(
+        tid=tid,
+        owner_user_id="usr_1",
+        scope_path=scope_path,
+        message=message,
+        destination=destination,
     )
 
 
@@ -42,31 +55,19 @@ def _patch_io(monkeypatch, before: str, after: str) -> None:
     )
 
 
-def _enable_immediate(monkeypatch) -> None:
-    from app.tasks.huey_app import triggers_huey
-
-    monkeypatch.setattr(triggers_huey, "immediate", True)
-
-
 def test_fan_out_records_event_on_match_with_rendered_message(tmp_db, monkeypatch):
     from app.tasks import triggers as trig_task
     from app.triggers import engine
 
-    _enable_immediate(monkeypatch)
-    conn = connect()
-    try:
-        _seed_user_and_trigger(
-            conn,
-            scope_path="projects/foo.md",
-            tid="trg_match",
-            message="tell me when status flips",
-        )
-    finally:
-        conn.close()
+    _seed_user_and_trigger(
+        scope_path="projects/foo.md",
+        tid="trg_match",
+        message="tell me when status flips",
+    )
 
     _patch_io(monkeypatch, before="status: green\n", after="status: yellow\n")
     monkeypatch.setattr(
-        engine, "nl_matches", lambda *a, **kw: (True, "green→yellow")
+        engine, "nl_matches", lambda *a, **kw: MatchResult(matched=True, reason="green→yellow")
     )
 
     captured: dict = {}
@@ -81,13 +82,9 @@ def test_fan_out_records_event_on_match_with_rendered_message(tmp_db, monkeypatc
 
     trig_task.fan_out_trigger_eval("projects/foo.md", "deadbeef", "edit", "u@x.com")
 
-    conn = connect()
-    try:
-        rows = conn.execute("SELECT * FROM events WHERE kind='trigger.fire'").fetchall()
-    finally:
-        conn.close()
+    rows = list_events(kind="trigger.fire")
     assert len(rows) == 1
-    payload = json.loads(rows[0]["payload_json"])
+    payload = rows[0]["payload"]
     assert payload["doc_path"] == "projects/foo.md"
     assert payload["change_kind"] == "edit"
     assert payload["sha"] == "deadbeef"
@@ -109,15 +106,10 @@ def test_fan_out_skips_event_when_no_match(tmp_db, monkeypatch):
     from app.tasks import triggers as trig_task
     from app.triggers import engine
 
-    _enable_immediate(monkeypatch)
-    conn = connect()
-    try:
-        _seed_user_and_trigger(conn, scope_path="projects/foo.md")
-    finally:
-        conn.close()
+    _seed_user_and_trigger(scope_path="projects/foo.md")
 
     _patch_io(monkeypatch, before="x", after="y")
-    monkeypatch.setattr(engine, "nl_matches", lambda *a, **kw: (False, "no signal"))
+    monkeypatch.setattr(engine, "nl_matches", lambda *a, **kw: MatchResult(matched=False, reason="no signal"))
 
     def boom(*a, **kw):
         raise AssertionError("render should not run when match=False")
@@ -126,18 +118,11 @@ def test_fan_out_skips_event_when_no_match(tmp_db, monkeypatch):
 
     trig_task.fan_out_trigger_eval("projects/foo.md", "deadbeef", "edit", None)
 
-    conn = connect()
-    try:
-        n = conn.execute("SELECT COUNT(*) AS c FROM events").fetchone()["c"]
-    finally:
-        conn.close()
-    assert n == 0
+    assert count_rows(Event) == 0
 
 
 def test_fan_out_no_triggers_short_circuits(tmp_db, monkeypatch):
     from app.tasks import triggers as trig_task
-
-    _enable_immediate(monkeypatch)
 
     called = {"n": 0}
 
@@ -158,17 +143,11 @@ def test_fan_out_directory_scope_new_file_uses_combined_json_call(tmp_db, monkey
     from app.tasks import triggers as trig_task
     from app.triggers import engine
 
-    _enable_immediate(monkeypatch)
-    conn = connect()
-    try:
-        _seed_user_and_trigger(
-            conn,
-            scope_path="projects",
-            tid="trg_dir",
-            message="tell me about new project docs",
-        )
-    finally:
-        conn.close()
+    _seed_user_and_trigger(
+        scope_path="projects",
+        tid="trg_dir",
+        message="tell me about new project docs",
+    )
 
     _patch_io(monkeypatch, before="", after="# Project Foo\n\nstatus: green\n")
 
@@ -178,7 +157,7 @@ def test_fan_out_directory_scope_new_file_uses_combined_json_call(tmp_db, monkey
         captured["nl"] = nl
         captured["instruction"] = instruction
         captured["payload"] = payload
-        return True, "New project doc 'Foo' added with status green."
+        return NewFileEvalResult(triggered=True, message="New project doc 'Foo' added with status green.")
 
     monkeypatch.setattr(
         engine, "nl_evaluate_new_file_in_dir", fake_new_file_eval
@@ -192,14 +171,10 @@ def test_fan_out_directory_scope_new_file_uses_combined_json_call(tmp_db, monkey
 
     trig_task.fan_out_trigger_eval("projects/new.md", "abc123", "create", None)
 
-    conn = connect()
-    try:
-        rows = conn.execute("SELECT * FROM events WHERE kind='trigger.fire'").fetchall()
-    finally:
-        conn.close()
+    rows = list_events(kind="trigger.fire")
     assert len(rows) == 1
     assert rows[0]["target"] == "trg_dir"
-    payload = json.loads(rows[0]["payload_json"])
+    payload = rows[0]["payload"]
     assert payload["message"] == "New project doc 'Foo' added with status green."
     assert payload["message_instruction"] == "tell me about new project docs"
     assert payload["reason"] == "new file under directory scope"
@@ -217,16 +192,11 @@ def test_fan_out_directory_scope_edit_uses_two_phase_flow(tmp_db, monkeypatch):
     from app.tasks import triggers as trig_task
     from app.triggers import engine
 
-    _enable_immediate(monkeypatch)
-    conn = connect()
-    try:
-        _seed_user_and_trigger(conn, scope_path="projects", tid="trg_dir")
-    finally:
-        conn.close()
+    _seed_user_and_trigger(scope_path="projects", tid="trg_dir")
 
     _patch_io(monkeypatch, before="status: green\n", after="status: yellow\n")
     monkeypatch.setattr(
-        engine, "nl_matches", lambda *a, **kw: (True, "green→yellow")
+        engine, "nl_matches", lambda *a, **kw: MatchResult(matched=True, reason="green→yellow")
     )
     monkeypatch.setattr(
         engine, "nl_render_message", lambda *a, **kw: "rendered text"
@@ -239,13 +209,9 @@ def test_fan_out_directory_scope_edit_uses_two_phase_flow(tmp_db, monkeypatch):
 
     trig_task.fan_out_trigger_eval("projects/foo.md", "abc123", "edit", None)
 
-    conn = connect()
-    try:
-        rows = conn.execute("SELECT * FROM events WHERE kind='trigger.fire'").fetchall()
-    finally:
-        conn.close()
+    rows = list_events(kind="trigger.fire")
     assert len(rows) == 1
-    payload = json.loads(rows[0]["payload_json"])
+    payload = rows[0]["payload"]
     assert payload["message"] == "rendered text"
     assert payload["reason"] == "green→yellow"
 
@@ -256,18 +222,11 @@ def test_fan_out_doc_scope_create_uses_two_phase_flow(tmp_db, monkeypatch):
     from app.tasks import triggers as trig_task
     from app.triggers import engine
 
-    _enable_immediate(monkeypatch)
-    conn = connect()
-    try:
-        _seed_user_and_trigger(
-            conn, scope_path="projects/foo.md", tid="trg_doc"
-        )
-    finally:
-        conn.close()
+    _seed_user_and_trigger(scope_path="projects/foo.md", tid="trg_doc")
 
     _patch_io(monkeypatch, before="", after="# Foo\n")
     monkeypatch.setattr(
-        engine, "nl_matches", lambda *a, **kw: (True, "doc created")
+        engine, "nl_matches", lambda *a, **kw: MatchResult(matched=True, reason="doc created")
     )
     monkeypatch.setattr(
         engine, "nl_render_message", lambda *a, **kw: "doc created"
@@ -280,9 +239,5 @@ def test_fan_out_doc_scope_create_uses_two_phase_flow(tmp_db, monkeypatch):
 
     trig_task.fan_out_trigger_eval("projects/foo.md", "abc123", "create", None)
 
-    conn = connect()
-    try:
-        rows = conn.execute("SELECT * FROM events WHERE kind='trigger.fire'").fetchall()
-    finally:
-        conn.close()
+    rows = list_events(kind="trigger.fire")
     assert len(rows) == 1

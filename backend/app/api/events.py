@@ -8,22 +8,39 @@ from __future__ import annotations
 
 import json
 import logging
+from typing import Any, cast
 
 from flask import Blueprint, jsonify, request
+from sqlalchemy import select
 
 from app.auth import login_required
-from app.db.sqlite import connect
+from app.db.models import Event as EventRow
+from app.db.session import session
+from app.models.event import Event, EventListResponse
+from app.models._helpers import error
 
 bp = Blueprint("events", __name__)
 log = logging.getLogger(__name__)
 
 
-def _parse_payload(raw: str) -> dict:
+def _parse_payload(raw: str) -> dict[str, Any]:
     try:
-        return json.loads(raw) if raw else {}
+        parsed: Any = json.loads(raw) if raw else {}
     except json.JSONDecodeError:
         log.warning("malformed event payload_json: %r", raw[:200])
         return {}
+    return cast(dict[str, Any], parsed) if isinstance(parsed, dict) else {}
+
+
+def _to_view(e: EventRow) -> Event:
+    return Event(
+        id=e.id,
+        ts=e.ts,
+        kind=e.kind,
+        actor=e.actor,
+        target=e.target,
+        payload=_parse_payload(e.payload_json),
+    )
 
 
 @bp.get("")
@@ -32,60 +49,25 @@ def list_events():
     try:
         limit = int(request.args.get("limit", 100))
     except ValueError:
-        return jsonify(error="limit must be an integer"), 400
+        return error("limit must be an integer", 400)
     limit = max(1, min(limit, 500))
     kind = request.args.get("kind")
 
-    conn = connect()
-    try:
-        if kind:
-            rows = conn.execute(
-                "SELECT id, ts, kind, actor, target, payload_json FROM events "
-                "WHERE kind = ? ORDER BY id DESC LIMIT ?",
-                (kind, limit),
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                "SELECT id, ts, kind, actor, target, payload_json FROM events "
-                "ORDER BY id DESC LIMIT ?",
-                (limit,),
-            ).fetchall()
-    finally:
-        conn.close()
+    stmt = select(EventRow).order_by(EventRow.id.desc()).limit(limit)
+    if kind:
+        stmt = stmt.where(EventRow.kind == kind)
 
-    return jsonify(
-        events=[
-            {
-                "id": r["id"],
-                "ts": r["ts"],
-                "kind": r["kind"],
-                "actor": r["actor"],
-                "target": r["target"],
-                "payload": _parse_payload(r["payload_json"]),
-            }
-            for r in rows
-        ]
-    )
+    with session() as s:
+        rows = s.scalars(stmt).all()
+
+    return jsonify(EventListResponse(events=[_to_view(e) for e in rows]).model_dump())
 
 
 @bp.get("/<int:event_id>")
 @login_required
 def get_event(event_id: int):
-    conn = connect()
-    try:
-        row = conn.execute(
-            "SELECT id, ts, kind, actor, target, payload_json FROM events WHERE id = ?",
-            (event_id,),
-        ).fetchone()
-    finally:
-        conn.close()
-    if row is None:
-        return jsonify(error="not found"), 404
-    return jsonify(
-        id=row["id"],
-        ts=row["ts"],
-        kind=row["kind"],
-        actor=row["actor"],
-        target=row["target"],
-        payload=_parse_payload(row["payload_json"]),
-    )
+    with session() as s:
+        e = s.get(EventRow, event_id)
+    if e is None:
+        return error("not found", 404)
+    return jsonify(_to_view(e).model_dump())

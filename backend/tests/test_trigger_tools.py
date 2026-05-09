@@ -1,31 +1,19 @@
 """Tests for the trigger tools (create_trigger, update_trigger).
 
-Direct handler tests against a tmp wiki repo + sqlite. We stub
+Direct handler tests against a tmp wiki repo + DB. We stub
 ``current_user`` since the handlers depend on it for ownership.
 """
 from __future__ import annotations
 
 import pytest
 
-from app.db.sqlite import connect
-
-
-def _seed_user(uid: str = "usr_1", email: str = "u@x.com") -> str:
-    conn = connect()
-    try:
-        conn.execute(
-            "INSERT INTO users(id, email, password_hash, is_admin) VALUES (?, ?, ?, 0)",
-            (uid, email, "x"),
-        )
-    finally:
-        conn.close()
-    return uid
+from tests._seed import seed_user
 
 
 @pytest.fixture
 def as_user(tmp_repo, monkeypatch):
     """Seed a user and stub current_user so the tool handlers see them."""
-    uid = _seed_user()
+    uid = seed_user(email="u@x.com")
 
     class FakeUser:
         id = uid
@@ -93,9 +81,10 @@ def test_create_trigger_rejects_non_null_destination(as_user):
 
 
 def _seed_trigger(uid: str, **kw) -> str:
+    from typing import Any
     from app.triggers import repo
 
-    args = dict(
+    args: dict[str, Any] = dict(
         owner_user_id=uid,
         scope_path="guide.md",
         nl_description="orig",
@@ -146,7 +135,7 @@ def test_update_trigger_rejects_other_users_trigger(as_user, monkeypatch):
     from app.llm.agents.tools.update_trigger import handle
 
     # Seed a second user and a trigger they own.
-    other_id = _seed_user(uid="usr_2", email="b@x.com")
+    other_id = seed_user(uid="usr_2", email="b@x.com")
     other_trigger = _seed_trigger(other_id)
 
     out = handle({"trigger_id": other_trigger, "trigger_fire_message": "hijack"})

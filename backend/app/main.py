@@ -5,12 +5,13 @@ from datetime import timedelta
 
 from flask import Flask, jsonify
 
-from app.api import admin, auth, chat, documents, events, health, mcp, triggers, users, webhooks
+from app.api import admin, auth, chat, documents, events, health, llm, mcp, triggers, users, webhooks
 from app.auth.oidc import init_oauth
 from app.config import CONFIG
-from app.db.sqlite import init_db
+from app.db.session import init_db
+from app.models._helpers import ErrorResponse, QueueFullErrorResponse, RequestError
 from app.tasks.agent_activity import schedule_all_pending_cleanups
-from app.tasks.huey_app import QueueFullError
+from app.tasks.queues import QueueFullError
 from app.triggers import repo as triggers_repo
 from app.utils.logging import setup_logging
 from app.wiki.git import ensure_wiki_repo
@@ -20,7 +21,7 @@ from app.wiki.search import bootstrap_index_if_empty
 def create_app() -> Flask:
     setup_logging()
     app = Flask(__name__)
-    app.config.update(
+    app.config.update(  # pyright: ignore[reportUnknownMemberType]
         SECRET_KEY=CONFIG.secret_key,
         SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE="Lax",
@@ -46,15 +47,20 @@ def create_app() -> Flask:
     app.register_blueprint(webhooks.bp, url_prefix="/api/webhooks")
     app.register_blueprint(chat.bp, url_prefix="/api/chat")
     app.register_blueprint(health.bp, url_prefix="/api/health")
+    app.register_blueprint(llm.bp, url_prefix="/api/llm")
 
     @app.errorhandler(QueueFullError)
     def _queue_full(err: QueueFullError):  # type: ignore[unused-ignore]
-        return jsonify(
+        return jsonify(QueueFullErrorResponse(
             error=str(err),
             queue=err.queue_name,
             size=err.size,
             limit=err.limit,
-        ), 503
+        ).model_dump()), 503
+
+    @app.errorhandler(RequestError)
+    def _request_error(err: RequestError):  # type: ignore[unused-ignore]
+        return jsonify(ErrorResponse(error=err.message).model_dump()), err.status
 
     return app
 

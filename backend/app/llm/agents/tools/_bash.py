@@ -31,7 +31,8 @@ import os
 import shlex
 import subprocess
 import time
-from dataclasses import dataclass
+
+from pydantic import BaseModel, ConfigDict
 
 from app import config as app_config
 
@@ -71,18 +72,20 @@ _SEARCH_COMMANDS: frozenset[str] = frozenset({"grep", "find"})
 # --------------------------------------------------------------------------- #
 
 
-@dataclass(frozen=True)
-class ChainSegment:
+class ChainSegment(BaseModel):
     """One link in a piped command chain. ``operator`` is the symbol
     *following* the segment (``|``, ``&&``, ``||``, ``;``); ``None`` for the
     final segment."""
+
+    model_config = ConfigDict(frozen=True)
 
     command: str
     operator: str | None
 
 
-@dataclass(frozen=True)
-class BashResult:
+class BashResult(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     output: str
     exit_code: int
     elapsed_ms: int
@@ -126,19 +129,19 @@ def parse_chain(command_string: str) -> list[ChainSegment]:
         if i + 1 < n:
             two = command_string[i : i + 2]
             if two in ("&&", "||"):
-                segments.append(ChainSegment("".join(current).strip(), two))
+                segments.append(ChainSegment(command="".join(current).strip(), operator=two))
                 current = []
                 i += 2
                 continue
 
         if ch == "|":
-            segments.append(ChainSegment("".join(current).strip(), "|"))
+            segments.append(ChainSegment(command="".join(current).strip(), operator="|"))
             current = []
             i += 1
             continue
 
         if ch == ";":
-            segments.append(ChainSegment("".join(current).strip(), ";"))
+            segments.append(ChainSegment(command="".join(current).strip(), operator=";"))
             current = []
             i += 1
             continue
@@ -148,7 +151,7 @@ def parse_chain(command_string: str) -> list[ChainSegment]:
 
     remaining = "".join(current).strip()
     if remaining:
-        segments.append(ChainSegment(remaining, None))
+        segments.append(ChainSegment(command=remaining, operator=None))
     return [s for s in segments if s.command.strip()]
 
 
@@ -204,10 +207,11 @@ def _is_binary(data: bytes) -> bool:
 
 def execute_chain(
     command_string: str, *, cwd: str | None = None
-) -> tuple[str, int, float]:
+) -> BashResult:
     """Run a (possibly piped) chain of allowlisted commands.
 
-    Returns ``(output, exit_code, elapsed_ms)``. ``cwd`` defaults to
+    Returns a ``BashResult`` with ``truncated=False`` — the caller (``run``)
+    layers truncation on top via ``format_output``. ``cwd`` defaults to
     ``CONFIG.wiki_dir`` so the model explores the wiki working tree, not
     the Flask source.
     """
@@ -217,22 +221,20 @@ def execute_chain(
     # been bound to the original Config at import time).
     cwd = cwd or app_config.CONFIG.wiki_dir
 
+    def _result(output: str, rc: int) -> BashResult:
+        elapsed_ms = int((time.monotonic() - t0) * 1000)
+        return BashResult(output=output, exit_code=rc, elapsed_ms=elapsed_ms, truncated=False)
+
     segments = parse_chain(command_string)
     if not segments:
-        elapsed = (time.monotonic() - t0) * 1000
         allowed = ", ".join(sorted(ALLOWED_COMMANDS))
-        return (
-            f"[error] empty command — available: {allowed}",
-            1,
-            elapsed,
-        )
+        return _result(f"[error] empty command — available: {allowed}", 1)
 
     # Upfront allowlist gate: every segment is checked before any
     # subprocess fires. Pipes can't smuggle a disallowed command.
     err = validate_chain(segments)
     if err:
-        elapsed = (time.monotonic() - t0) * 1000
-        return (err, 1, elapsed)
+        return _result(err, 1)
 
     stdin_data: bytes | None = None
     last_stdout: bytes = b""
@@ -251,17 +253,14 @@ def execute_chain(
                 timeout=COMMAND_TIMEOUT_SECONDS,
             )
         except subprocess.TimeoutExpired:
-            elapsed = (time.monotonic() - t0) * 1000
-            return (
+            return _result(
                 f"[error] command timed out after {COMMAND_TIMEOUT_SECONDS} seconds. "
                 "Try narrowing the search: scope content search to a specific "
                 "subdirectory or use `find -name` for filename discovery.",
                 1,
-                elapsed,
             )
         except Exception as exc:
-            elapsed = (time.monotonic() - t0) * 1000
-            return (f"[error] command failed: {exc}", 1, elapsed)
+            return _result(f"[error] command failed: {exc}", 1)
 
         stdout = proc.stdout
         stderr = proc.stderr
@@ -271,15 +270,13 @@ def execute_chain(
         # segments may legitimately contain null bytes.
         is_last = seg.operator is None
         if is_last and _is_binary(stdout):
-            elapsed = (time.monotonic() - t0) * 1000
-            return ("[error] binary file detected.", 1, elapsed)
+            return _result("[error] binary file detected.", 1)
 
         # Non-zero rc *with* stderr is a real error and aborts the chain.
         # Non-zero rc *without* stderr (e.g. `grep` no-match → rc=1) is normal.
         if rc != 0 and stderr:
-            elapsed = (time.monotonic() - t0) * 1000
             error_output = stderr.decode("utf-8", errors="replace").strip()
-            return (f"[stderr] {error_output}", rc, elapsed)
+            return _result(f"[stderr] {error_output}", rc)
 
         operator = seg.operator
         if operator == "|":
@@ -310,9 +307,7 @@ def execute_chain(
         last_returncode = rc
         i += 1
 
-    elapsed = (time.monotonic() - t0) * 1000
-    decoded = last_stdout.decode("utf-8", errors="replace")
-    return (decoded, last_returncode, elapsed)
+    return _result(last_stdout.decode("utf-8", errors="replace"), last_returncode)
 
 
 # --------------------------------------------------------------------------- #
@@ -368,9 +363,11 @@ def _apply_generic_truncation(output: str) -> tuple[str, str]:
     return shown, f"--- output truncated ({desc}) ---"
 
 
-def format_output(raw: str, command: str) -> tuple[str, bool]:
-    """Apply search-cap then generic truncation. Returns ``(text, truncated)``."""
-    out, search_hint = _apply_search_truncation(raw, command)
+def format_output(result: BashResult, command: str) -> BashResult:
+    """Apply search-cap then generic truncation to ``result.output``,
+    returning a new ``BashResult`` with the formatted text and the
+    ``truncated`` flag set."""
+    out, search_hint = _apply_search_truncation(result.output, command)
     out, generic_hint = _apply_generic_truncation(out)
 
     parts: list[str] = [out]
@@ -378,7 +375,10 @@ def format_output(raw: str, command: str) -> tuple[str, bool]:
         parts.append(search_hint)
     if generic_hint:
         parts.append(generic_hint)
-    return "\n".join(p for p in parts if p), bool(search_hint or generic_hint)
+    return result.model_copy(update={
+        "output": "\n".join(p for p in parts if p),
+        "truncated": bool(search_hint or generic_hint),
+    })
 
 
 # --------------------------------------------------------------------------- #
@@ -388,8 +388,4 @@ def format_output(raw: str, command: str) -> tuple[str, bool]:
 
 def run(command: str, *, cwd: str | None = None) -> BashResult:
     """Run ``command`` and return a fully formatted result."""
-    raw, rc, elapsed_ms = execute_chain(command, cwd=cwd)
-    text, truncated = format_output(raw, command)
-    return BashResult(
-        output=text, exit_code=rc, elapsed_ms=int(elapsed_ms), truncated=truncated
-    )
+    return format_output(execute_chain(command, cwd=cwd), command)

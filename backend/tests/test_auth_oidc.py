@@ -7,7 +7,6 @@ state/PKCE handling is not under test here.
 """
 from __future__ import annotations
 
-from dataclasses import replace
 from unittest.mock import MagicMock
 
 import pytest
@@ -25,12 +24,13 @@ def oidc_config(tmp_repo, monkeypatch):
     ``tmp_repo`` already gives us a tmp DB + wiki repo; we just rebind
     every captured CONFIG reference to one with auth_mode="oidc".
     """
-    cfg = replace(
-        tmp_repo,
-        auth_mode="oidc",
-        oidc_issuer="https://accounts.google.com",
-        oidc_client_id="test-client-id",
-        oidc_client_secret="test-client-secret",
+    cfg = tmp_repo.model_copy(
+        update={
+            "auth_mode": "oidc",
+            "oidc_issuer": "https://accounts.google.com",
+            "oidc_client_id": "test-client-id",
+            "oidc_client_secret": "test-client-secret",
+        }
     )
     monkeypatch.setattr("app.config.CONFIG", cfg)
     monkeypatch.setattr("app.api.auth.CONFIG", cfg)
@@ -43,7 +43,17 @@ def app(oidc_config):
     app = Flask(__name__)
     app.config.update(SECRET_KEY="test-secret", TESTING=True)
     app.register_blueprint(auth_api.bp, url_prefix="/api/auth")
+    _register_request_error(app)
     return app
+
+
+def _register_request_error(app):
+    from flask import jsonify
+    from app.models._helpers import RequestError
+
+    @app.errorhandler(RequestError)
+    def _on_request_error(err: RequestError):
+        return jsonify(error=err.message), err.status
 
 
 @pytest.fixture
@@ -79,6 +89,7 @@ def test_upsert_creates_user_when_missing(tmp_repo):
 def test_upsert_first_user_is_admin(tmp_repo):
     user_id = upsert_oidc_user(email="first@example.com", name=None)
     row = users_repo.get_by_id(user_id)
+    assert row is not None
     assert bool(row["is_admin"]) is True
 
 
@@ -86,6 +97,7 @@ def test_upsert_subsequent_users_not_admin(tmp_repo):
     upsert_oidc_user(email="first@example.com", name=None)
     second = upsert_oidc_user(email="second@example.com", name="Second")
     row = users_repo.get_by_id(second)
+    assert row is not None
     assert bool(row["is_admin"]) is False
 
 
@@ -95,6 +107,7 @@ def test_upsert_existing_user_returns_same_id(tmp_repo):
     assert first == second
     # Existing rows aren't overwritten — name stays as originally created.
     row = users_repo.get_by_id(first)
+    assert row is not None
     assert row["name"] == "Alice"
 
 
@@ -104,11 +117,12 @@ def test_upsert_existing_user_returns_same_id(tmp_repo):
 
 
 def test_login_disabled_when_auth_mode_basic(tmp_repo, monkeypatch):
-    cfg = replace(tmp_repo, auth_mode="basic")
+    cfg = tmp_repo.model_copy(update={"auth_mode": "basic"})
     monkeypatch.setattr("app.api.auth.CONFIG", cfg)
     app = Flask(__name__)
     app.config.update(SECRET_KEY="test-secret", TESTING=True)
     app.register_blueprint(auth_api.bp, url_prefix="/api/auth")
+    _register_request_error(app)
     resp = app.test_client().get("/api/auth/oidc/login")
     assert resp.status_code == 400
     assert resp.get_json() == {"error": "oidc disabled"}

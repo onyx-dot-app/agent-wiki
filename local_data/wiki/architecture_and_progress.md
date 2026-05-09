@@ -17,7 +17,7 @@ _Last updated: 2026-05-08_
 - [Natural-language triggers](natural-language-triggers/natural-language-triggers.md)
 - [Frontend (ChatUI + Wiki UI + Events + Admin)](frontend/frontend.md)
 - [Onyx-side push integration](onyx-push/onyx-push.md)
-- [Background tasks (Huey)](background-tasks/background-tasks.md)
+- [Background tasks (pgmq)](background-tasks/background-tasks.md)
 - [Exploration work](exploration/exploration.md)
 - [MCP server (inbound)](mcp-server/mcp-server.md)
 - [Infra](infra/infra.md)
@@ -129,7 +129,7 @@ top-level tab.
   each message to the backend. The agent uses it to answer "what's here?"
   and to scope edits / new triggers.
 - **Multi-turn LLM loop with tools.** v0 tool surface:
-  - `search_wiki(query)` — bm25 over the FTS5 index. _(read-only; no ack
+  - `search_wiki(query)` — bm25 over the BM25 index. _(read-only; no ack
     needed)_
   - `propose_doc_edit(path, body, message?)` — emits a draft diff into the
     chat thread. **Does not write.** The user clicks **Apply** to commit
@@ -184,12 +184,15 @@ actually built and what's left to do.
 
 - **Backend container**
   - Flask web framework
-  - SQLite + FTS5 (bm25)
-  - 2 volumes — 1 for SQLite, 1 for the wiki file system
+  - SQLAlchemy 2.0 ORM against Postgres 17 (with `pg_textsearch` BM25
+    for search)
+  - One volume — the wiki working tree (git-backed). DB state lives in
+    Postgres.
   - Flask shells out to git via subprocess
 - **Queue**
-  - Huey (works well with SQLite, no Redis/Celery)
-  - `queue.sqlite` for Huey, `app.sqlite` for the app
+  - pgmq (Postgres-native — `pgmq.q_<name>` tables in the same DB)
+  - One queue per logical lane: `documents_queue`, `triggers_queue`,
+    `wiki_bm25_queue`
   - Runs the document updates
 - **Frontend container**
   - TypeScript, same stack as Onyx — can reuse a lot of the components, but
@@ -257,12 +260,13 @@ actually built and what's left to do.
 [nginx :80]  --/api/*-->  [backend :8080]    Flask, sessions
                                 |
                                 v
-                         [SQLite app.sqlite]   users / docs metadata / triggers cache /
-                                              events / FTS5 / llm_settings
-                         [SQLite queue.sqlite] Huey (separate file)
+                         [Postgres 17 + pg_textsearch + pgmq]
+                                              users / docs metadata / triggers cache /
+                                              events / documents_fts (BM25) /
+                                              llm_settings / pgmq.q_*
                                 |
                                 v
-                         [worker container]   python -m app.tasks.run_worker
+                         [worker container × 3]   python -m app.tasks.run_worker <queue>
                                 |
                                 v
                          [git wiki working tree]  ←--volume mount: wiki-data
@@ -295,7 +299,7 @@ root already points the data paths at `local_data/` and sets
   not the repo root.
 - **Env loading** — `app/config.py` calls `dotenv.load_dotenv()` against the
   repo-root `.env`, so the backend and worker can be launched directly
-  (`python -m app.main`, pytest, huey worker) without sourcing the env first.
+  (`python -m app.main`, pytest, task worker) without sourcing the env first.
 - **Open at** http://localhost:3000 (not `:8080` — no nginx).
 - **Readiness** — `curl -sf http://localhost:8080/api/health` and
   `curl -sf http://localhost:3000`.
@@ -310,16 +314,18 @@ rulebook; per-area docs reference these and add their own area-specific rules.
 - **Single LLM seam.** `app/llm/client.py:complete()` is the only path to a
   provider. See [agents/chat-agent.md](agents/chat-agent.md) and
   [agents/document-updater.md](agents/document-updater.md).
-- **No ORM.** Direct sqlite + small repo modules; schema changes are
-  numbered SQL migrations. See [flask-and-apis](flask-and-apis/flask-and-apis.md).
+- **SQLAlchemy 2.0 ORM, small repo modules.** Repos open a `session()`
+  from `app/db/session.py`, return plain dicts, and never leak ORM rows
+  to callers. See [flask-and-apis](flask-and-apis/flask-and-apis.md).
 - **Wiki is git-backed.** `app/wiki/git.py` is the only entry point that
   shells out to git.
-- **Triggers live in SQLite only.** YAML/git-backed storage was originally
-  planned but dropped for v0 — see decision log entry 2026-05-06. Source of
-  truth is the `triggers` table; CRUD goes through `app/triggers/repo.py`.
+- **Triggers are git-backed YAML with a Postgres cache.** The
+  `<dir>/.trigger_*.yaml` file is canonical; the `triggers` row in
+  Postgres is a denormalized cache for fan-out. CRUD goes through
+  `app/triggers/storage.py` (file) + `app/triggers/repo.py` (cache).
 - **Chat agent loop is pure** (messages-in / messages-out). The HTTP layer
   owns persistence. See [agents/chat-agent.md](agents/chat-agent.md).
-- **Tasks via Huey.** Anything taking >100ms goes to the worker. See
+- **Tasks via pgmq.** Anything taking >100ms goes to the worker. See
   [background-tasks](background-tasks/background-tasks.md).
 - **Frontend network/auth via `lib/api.ts` + `lib/auth.tsx`.** No raw
   `fetch`, no raw session reads. See [frontend](frontend/frontend.md).
@@ -331,11 +337,11 @@ rulebook; per-area docs reference these and add their own area-specific rules.
 | `users`           | id, email, name, password_hash, is_admin, created_at | flask-and-apis |
 | `mcp_connections` | per-user MCP server entries | flask-and-apis |
 | `documents`       | metadata only — body lives in git | flask-and-apis |
-| `triggers`        | cache of YAML in `<wiki>/.triggers/` | natural-language-triggers |
+| `triggers`        | Postgres cache of inline `<dir>/.trigger_*.yaml` files | natural-language-triggers |
 | `events`          | append-only audit log | flask-and-apis (write surface), frontend (events view) |
-| `documents_fts`   | FTS5 virtual table (porter+unicode61, bm25) | flask-and-apis (search), background-tasks (reindex) |
+| `documents_fts`   | BM25 virtual table (porter+unicode61, bm25) | flask-and-apis (search), background-tasks (reindex) |
 | `llm_settings`    | single-row provider/model/keys | flask-and-apis (admin) |
-| `_migrations`     | applied filenames | flask-and-apis |
+| *(removed — schema is driven by `app/db/models.py`)*
 
 ### Key cross-area design decisions
 
@@ -348,7 +354,7 @@ rulebook; per-area docs reference these and add their own area-specific rules.
 | 2026-05-06 | Sidebar = Wiki / Triggers / Events; chat is a side panel | Chat needs to follow the user across pages and stay context-aware |
 | 2026-05-06 | Triggers per-user (owner-only visibility) in v0 | Simplest model that ships; sharing is backlog |
 | 2026-05-06 | Chat propose-and-apply for writes | No silent edits while we lack eval data |
-| 2026-05-06 | Direct sqlite + small repo modules, no ORM | Tight surface, easy to test |
+| 2026-05-06 | Postgres + SQLAlchemy 2.0 ORM with small dict-returning repos | Real DB semantics (LISTEN/NOTIFY, advisory locks, multi-replica) without leaking ORM rows past the repo |
 | 2026-05-06 | Single LLM seam (`app/llm/client.py:complete`) | Provider-swappable; one place to mock in tests |
 | 2026-05-06 | Mock LLM SDKs at the per-provider `_client`, not at `complete` | Lets tests exercise the real translation layer |
 | 2026-05-06 | Chat agent loop is pure (messages-in / messages-out) | Persistence wired separately at the HTTP edge |
@@ -383,7 +389,7 @@ One line per area; the per-area doc has the real picture.
 | Flask + APIs | Auth + admin live; documents read-only; triggers/events/webhooks/MCP/users stubs | [flask-and-apis](flask-and-apis/flask-and-apis.md) |
 | Document-updater agent | Stub; system+user prompts written | [agents/document-updater.md](agents/document-updater.md) |
 | Chat agent | Loop primitive + stateless HTTP wired (SSE streaming); tools off; persistence stub. Next: location context, propose-and-apply tools, wiki traversal | [agents/chat-agent.md](agents/chat-agent.md) |
-| NL triggers | CRUD API + repo + Triggers tab + create modal live (SQLite-only); fire-path on human edits live; time-based stubs | [natural-language-triggers](natural-language-triggers/natural-language-triggers.md) |
+| NL triggers | CRUD API + repo + Triggers tab + create modal live (Postgres cache + git YAML); fire-path on human edits live; time-based stubs | [natural-language-triggers](natural-language-triggers/natural-language-triggers.md) |
 | Frontend | Auth/admin/wiki-read/chat live; chat needs to move from `/chat` page to a side panel; sidebar needs to become Wiki/Triggers/Events; no editor, no inline-triggers panel, no events view yet | [frontend](frontend/frontend.md) |
 | Onyx push | Not started; ingest endpoint stub | [onyx-push](onyx-push/onyx-push.md) |
 | Background tasks | Reindex live; doc-update + periodic stubs; trigger fan-out task TBD | [background-tasks](background-tasks/background-tasks.md) |
@@ -398,7 +404,7 @@ One line per area; the per-area doc has the real picture.
 Cross-cutting decisions only — area-specific design choices live in the
 area docs.
 
-- **2026-05-06** — Repo scaffolded; backend (Flask + Huey + SQLite) and
+- **2026-05-06** — Repo scaffolded; backend (Flask + Postgres + pgmq) and
   frontend (Next.js) skeletons in place; basic auth + signup with optional
   email whitelist; admin UI for user/LLM management; wiki page renders
   markdown from a list+file endpoint.
@@ -415,7 +421,7 @@ area docs.
   message-list-in / message-list-out, tools off by default.
 - **2026-05-06** — Backend pytest harness landed; convention: mock SDKs at
   the per-provider `_client` seam; never import the real provider SDKs
-  from tests; use real tmp SQLite via `tmp_db` fixture.
+  from tests; use a real per-test Postgres schema via the `tmp_db` fixture.
 - **2026-05-06** — V0 brief preserved verbatim under §2 as the durable
   reference.
 - **2026-05-06** — Admin UI split from a single tabbed page into three
@@ -437,17 +443,16 @@ area docs.
   Trigger CRUD/storage/UI still stubs; rows must be seeded via SQL to
   exercise the path.
 - **2026-05-06** — Trigger CRUD + UI landed. Backend: `app/triggers/repo.py`
-  (SQLite repo) and full `/api/triggers` CRUD (owner-scoped, kind=delta only).
-  Frontend: new "Triggers" sidebar item between Chat and Events
+  (Postgres cache) and full `/api/triggers` CRUD (owner-scoped, kind=delta
+  only). Frontend: new "Triggers" sidebar item between Chat and Events
   (`/triggers`); reusable `<TriggerModal>` opens both from the Triggers tab
   and a new "+ Trigger" button on the wiki doc reader (with `scope_path`
   pinned to the current doc).
-- **2026-05-06** — **YAML/git-backed trigger storage dropped.** Original
-  design called for `<wiki>/.triggers/<id>.yaml` as source of truth with
-  SQLite as cache; v0 keeps everything in SQLite to ship faster.
-  `triggers.action_json` continues to be stored as `'{}'` (no v0 dispatch).
-  `app/triggers/storage.py` is now dead and can be deleted on a future
-  cleanup pass.
+- **2026-05-07** — Trigger storage moved to git-backed inline YAML
+  (`<dir>/.trigger_<id>*.yaml`), with the Postgres `triggers` row as a
+  denormalized cache. `app/triggers/storage.py` owns the file write;
+  `app/triggers/repo.py` owns the cache. `rebuild_from_filesystem`
+  re-converges the cache on boot.
 
 - **2026-05-06** — Documented host-run dev workflow (no Docker) under §3
   "Local dev — running on the host". Compose stays the canonical path;
@@ -502,7 +507,7 @@ area docs.
   `LLMError` moved to `app/llm/errors.py` (no client.py back-compat
   re-export). The admin UI now exposes provider/model + per-provider
   credentials (Anthropic key, OpenAI key, Gemini key, Ollama base URL).
-  Required `google-genai>=1.0` and `ollama>=0.4`; migration 0006 added
+  Required `google-genai>=1.0` and `ollama>=0.4`; the `LLMSettings` model added
   `gemini_api_key` and `ollama_base_url` columns.
 - **2026-05-07** — **EKS + Helm deploy scaffolding landed under `deploy/`.**
   Terraform (`deploy/terraform/`) provisions VPC + EKS via the community
@@ -511,10 +516,10 @@ area docs.
   ingress-nginx (NLB) + cert-manager (with an optional `letsencrypt-prod`
   ClusterIssuer). State is local + gitignored. Helm chart
   (`deploy/helm/agent-workspace/`) deploys backend + worker + frontend with
-  two PVCs (`app-data` 5Gi, `wiki-data` 10Gi, both RWO `gp3`); backend and
-  worker are pinned to one replica with `Recreate` strategy and
-  `podAffinity` co-scheduling because SQLite is single-writer and the wiki
-  working tree has no concurrent-write story. The in-cluster nginx pod from
+  one PVC (`wiki-data` 10Gi, RWO `gp3`); backend and worker are pinned to
+  one replica with `Recreate` strategy and `podAffinity` co-scheduling
+  because the wiki working tree has no concurrent-write story (and the
+  in-process periodic-task scheduler must be single-replica). The in-cluster nginx pod from
   compose is **dropped** — the Ingress handles `/api/*` → backend, `/` →
   frontend directly. Image registry assumed to be a public GHCR/Docker Hub
   repo (no ECR provisioning). Two-step flow: `terraform apply` once per
@@ -538,11 +543,12 @@ area docs.
   `usage_metadata.thoughts_token_count`; Anthropic and Ollama emit `0`.
 
 - **2026-05-08** — **Background work split into three queues.** One
-  `SqliteHuey` instance per queue, all sharing `queue.sqlite` via
-  `name=` namespacing: `documents_huey` (LLM doc-reconciliation —
-  `update_document_*`, `stale_doc_review`), `triggers_huey` (NL trigger
+  `TaskQueue` instance per queue, each backed by its own pgmq queue in
+  the app's Postgres (`pgmq.q_documents`, `pgmq.q_triggers`,
+  `pgmq.q_wiki_bm25`): `documents_queue` (LLM doc-reconciliation —
+  `update_document_*`, `stale_doc_review`), `triggers_queue` (NL trigger
   eval, both `fan_out_trigger_eval` and the cron
-  `evaluate_scheduled_triggers`), `wiki_bm25_huey` (FTS5/BM25
+  `evaluate_scheduled_triggers`), `wiki_bm25_queue` (BM25
   reindex). Three worker containers in `docker-compose.yml`
   (`worker-documents`, `worker-triggers`, `worker-wiki-bm25`),
   each launched via `python -m app.tasks.run_worker <queue>`. Goal:
@@ -560,7 +566,7 @@ area docs.
 
 - **2026-05-08** — **Helm chart published as a Helm repo from `gh-pages`**
   via `.github/workflows/helm-release.yml` (chart-releaser-action). Chart
-  shape evolved from the initial scaffold: one `Deployment` per Huey
+  shape evolved from the initial scaffold: one `Deployment` per pgmq
   queue (`documents`, `triggers`, `wiki_bm25`); single-AZ node group;
   AWS LB Controller for ingress (`type=external`, `nlb-target-type=ip`,
   `scheme=internet-facing`) instead of the legacy in-tree NLB. The

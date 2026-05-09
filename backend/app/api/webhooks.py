@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint
 
 bp = Blueprint("webhooks", __name__)
 log = logging.getLogger(__name__)

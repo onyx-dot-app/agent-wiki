@@ -50,17 +50,17 @@ the next turn so it can self-correct.
 
 Legend:
 
-- **Latency:** `fast` (<100ms, no I/O beyond sqlite/git), `slow` (LLM call
+- **Latency:** `fast` (<100ms, no I/O beyond Postgres/git), `slow` (LLM call
   or web fetch — seconds), `varies` (depends on argument size).
 - **Writes:** `none` (read-only), `git+fts+triggers` (commit via
   `commit_and_fan_out` → FTS reindex + NL-trigger fan-out via
-  `app.wiki.notify.after_doc_write`), `db` (sqlite-only side effect).
+  `app.wiki.notify.after_doc_write`), `db` (Postgres-only side effect).
 
 ### Discovery / read
 
 | Tool | Inputs | Returns | Latency | Writes | Notes |
 | --- | --- | --- | --- | --- | --- |
-| `search_wiki` | `query: str`, `limit?: int` (≤20) | `{results: [{path, title, snippet, score}]}` | fast | none | BM25 over the FTS5 index. Snippets are ~64 tokens with matches in `**bold**`. **Does not** count as a "read" for read-before-write — call `read_page` / `read_doc` on the result before editing. |
+| `search_wiki` | `query: str`, `limit?: int` (≤20) | `{results: [{path, title, snippet, score}]}` | fast | none | BM25 over the BM25 index. Snippets are ~64 tokens with matches in `**bold**`. **Does not** count as a "read" for read-before-write — call `read_page` / `read_doc` on the result before editing. |
 | `read_page` | `path: str` (`.md`) | `{path, title, body}` | fast | none | Full HEAD body. Populates session `seen_doc_paths` so doc-edit tools accept edits to this path. |
 | `read_doc` | `path: str`, `sha?: str` | `{path, body, sha, is_head}` | fast | none | Like `read_page` but accepts an optional commit SHA for historical reads. Only HEAD reads populate `seen_doc_paths` — a historical read does **not** authorize a subsequent edit. |
 | `list_history` | `path: str`, `limit?: int` (≤100, default 20) | `{path, history: [{sha, author, ts, message}]}` | fast | none | Newest-first, follows renames (`git log --follow`). Use to find a sha to pass to `read_doc`. |
@@ -96,7 +96,7 @@ the planned MCP pubsub will hook in here too — see
 ### Triggers
 
 Trigger CRUD is git-backed (`<dir>/.trigger_<id>*.yaml`) with the
-sqlite `triggers` table as a denormalized cache for fan-out lookup. See
+Postgres `triggers` table as a denormalized cache for fan-out lookup. See
 [natural-language-triggers](../natural-language-triggers/natural-language-triggers.md).
 
 | Tool | Inputs | Returns | Latency | Writes | Notes |
@@ -187,7 +187,7 @@ Three sub-agents are dispatched **from** tools:
 | Sub-agent | Entry point | Triggered by | Pattern |
 | --- | --- | --- | --- |
 | `wiki_qa` | `app/llm/agents/wiki_qa.py:run` | `ask_nl_question` | One-shot `run_chat_loop` with `search_wiki` + `read_page` only, max 6 iterations. Returns synthesized answer + sources. |
-| `document_updater` | `app/llm/agents/document_updater.py:run` | `update_doc_nl`, also (planned) Huey doc-update task | Single `client.complete` call with the system+user prompts under `app/llm/prompts/`. Returns `None` on `NO_CHANGE` else the new body string. |
+| `document_updater` | `app/llm/agents/document_updater.py:run` | `update_doc_nl`, also (planned) pgmq doc-update task | Single `client.complete` call with the system+user prompts under `app/llm/prompts/`. Returns `None` on `NO_CHANGE` else the new body string. |
 | `chat` (the user-facing one) | `app/llm/agents/chat.py:run_chat_stream` | `/api/chat/messages` HTTP endpoint | Multi-iteration tool-using loop; SSE-streamed back to the browser. Owns the canonical `seen_doc_paths` lifecycle. |
 
 `wiki_qa` lazy-imports `chat` to avoid the circular `chat → tools →

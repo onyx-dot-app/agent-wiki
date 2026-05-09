@@ -6,5 +6,5 @@ nl_description: when any document mentions ice cream or a change adds the phrase
   cream
 message: 'Wiki mention: ice cream'
 destination: null
-enabled: true
+enabled: false
 created_at: '2026-05-08T02:07:48+00:00'

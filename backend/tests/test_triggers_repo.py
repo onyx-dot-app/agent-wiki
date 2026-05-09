@@ -3,19 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.db.sqlite import connect
-
-
-def _seed_user(uid: str = "usr_1", email: str = "a@b.com") -> str:
-    conn = connect()
-    try:
-        conn.execute(
-            "INSERT INTO users(id, email, password_hash, is_admin) VALUES (?, ?, ?, 0)",
-            (uid, email, "x"),
-        )
-    finally:
-        conn.close()
-    return uid
+from tests._seed import seed_user
 
 
 def _create(repo, *, owner_user_id, scope_path, nl_description, **kw):
@@ -32,7 +20,7 @@ def _create(repo, *, owner_user_id, scope_path, nl_description, **kw):
 def test_create_and_get(tmp_repo):
     from app.triggers import repo
 
-    uid = _seed_user()
+    uid = seed_user(email="a@b.com")
     t = _create(
         repo,
         owner_user_id=uid,
@@ -54,8 +42,8 @@ def test_create_and_get(tmp_repo):
 def test_list_for_owner_filters_by_owner(tmp_repo):
     from app.triggers import repo
 
-    a = _seed_user("usr_a", "a@x.com")
-    b = _seed_user("usr_b", "b@x.com")
+    a = seed_user("usr_a", "a@x.com")
+    b = seed_user("usr_b", "b@x.com")
     _create(repo, owner_user_id=a, scope_path="x.md", nl_description="x")
     _create(repo, owner_user_id=a, scope_path="y.md", nl_description="y")
     _create(repo, owner_user_id=b, scope_path="z.md", nl_description="z")
@@ -69,7 +57,7 @@ def test_list_for_owner_filters_by_owner(tmp_repo):
 def test_update_partial(tmp_repo):
     from app.triggers import repo
 
-    uid = _seed_user()
+    uid = seed_user(email="a@b.com")
     t = _create(
         repo,
         owner_user_id=uid,
@@ -79,16 +67,19 @@ def test_update_partial(tmp_repo):
     )
 
     updated = repo.update(t["id"], nl_description="changed")
+    assert updated is not None
     assert updated["nl_description"] == "changed"
     assert updated["scope_path"] == "a.md"
     assert updated["enabled"] is True
     assert updated["message"] == "m"
 
     re_msg = repo.update(t["id"], message="m2")
+    assert re_msg is not None
     assert re_msg["message"] == "m2"
     assert re_msg["nl_description"] == "changed"
 
     toggled = repo.update(t["id"], enabled=False)
+    assert toggled is not None
     assert toggled["enabled"] is False
     assert toggled["message"] == "m2"
 
@@ -96,7 +87,7 @@ def test_update_partial(tmp_repo):
 def test_update_with_no_fields_returns_current(tmp_repo):
     from app.triggers import repo
 
-    uid = _seed_user()
+    uid = seed_user(email="a@b.com")
     t = _create(repo, owner_user_id=uid, scope_path="a.md", nl_description="x")
     out = repo.update(t["id"])
     assert out == t
@@ -105,7 +96,7 @@ def test_update_with_no_fields_returns_current(tmp_repo):
 def test_delete(tmp_repo):
     from app.triggers import repo
 
-    uid = _seed_user()
+    uid = seed_user(email="a@b.com")
     t = _create(repo, owner_user_id=uid, scope_path="a.md", nl_description="x")
     assert repo.delete(t["id"]) is True
     assert repo.get(t["id"]) is None
@@ -115,7 +106,7 @@ def test_delete(tmp_repo):
 def test_create_rejects_unsupported_kind(tmp_repo):
     from app.triggers import repo
 
-    uid = _seed_user()
+    uid = seed_user(email="a@b.com")
     with pytest.raises(ValueError):
         _create(
             repo,
@@ -129,7 +120,7 @@ def test_create_rejects_unsupported_kind(tmp_repo):
 def test_create_rejects_missing_message(tmp_repo):
     from app.triggers import repo
 
-    uid = _seed_user()
+    uid = seed_user(email="a@b.com")
     with pytest.raises(ValueError, match="message"):
         repo.create(
             owner_user_id=uid,
@@ -142,7 +133,7 @@ def test_create_rejects_missing_message(tmp_repo):
 def test_create_rejects_unsupported_destination(tmp_repo):
     from app.triggers import repo
 
-    uid = _seed_user()
+    uid = seed_user(email="a@b.com")
     with pytest.raises(ValueError, match="destination"):
         repo.create(
             owner_user_id=uid,
@@ -156,7 +147,7 @@ def test_create_rejects_unsupported_destination(tmp_repo):
 def test_update_rejects_empty_message(tmp_repo):
     from app.triggers import repo
 
-    uid = _seed_user()
+    uid = seed_user(email="a@b.com")
     t = _create(repo, owner_user_id=uid, scope_path="a.md", nl_description="x")
     with pytest.raises(ValueError, match="message"):
         repo.update(t["id"], message="")

@@ -1,8 +1,8 @@
 {{- /*
-One Deployment per Huey queue. The backend's `app.tasks.run_worker`
+One Deployment per pgmq queue. The backend's `app.tasks.run_worker`
 requires a queue argument (`documents`, `triggers`, or `wiki_bm25`),
 and each queue gets its own consumer process to keep slow LLM doc
-work from backpressuring fast paths like FTS reindex.
+work from backpressuring fast paths like the BM25 reindex.
 */ -}}
 {{- range $queue := .Values.worker.queues }}
 ---
@@ -16,8 +16,9 @@ metadata:
     agent-workspace.onyx.app/queue: {{ $queue }}
 spec:
   replicas: {{ $.Values.worker.replicaCount }}
-  # The worker mounts the same RWO PVCs as the backend; Recreate avoids two pods
-  # holding the wiki working tree at once during rollouts.
+  # The worker mounts the same RWO wiki-data PVC as the backend; Recreate
+  # avoids two pods holding the wiki working tree at once during rollouts.
+  # It also keeps the in-process periodic scheduler single-replica.
   strategy:
     type: Recreate
   selector:

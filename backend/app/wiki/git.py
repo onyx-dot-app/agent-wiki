@@ -10,12 +10,26 @@ import logging
 import subprocess
 from pathlib import Path
 
+from pydantic import BaseModel
+
 from app.config import CONFIG
 
 log = logging.getLogger(__name__)
 
 
-def _run(args: list[str], cwd: str | None = None, check: bool = True) -> subprocess.CompletedProcess:
+class CommitInfo(BaseModel):
+    """One commit in a path's history (newest first)."""
+
+    sha: str
+    author: str
+    ts: str          # ISO-8601 author date
+    message: str     # commit subject
+    body: str        # commit body (may be empty)
+
+
+def _run(
+    args: list[str], cwd: str | None = None, check: bool = True
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["git", *args],
         cwd=cwd or CONFIG.wiki_dir,
@@ -138,7 +152,7 @@ def read_file(rel_path: str, ref: str = "HEAD") -> str:
     return _run(["show", f"{ref}:{rel_path}"]).stdout
 
 
-def history(rel_path: str, limit: int = 100) -> list[dict]:
+def history(rel_path: str, limit: int = 100) -> list[CommitInfo]:
     """Return commit metadata (incl. body) for a path, newest first."""
     sep_field = "\x1f"
     sep_record = "\x1e"
@@ -146,7 +160,7 @@ def history(rel_path: str, limit: int = 100) -> list[dict]:
     out = _run(
         ["log", f"-n{limit}", "--follow", f"--pretty=format:{fmt}", "--", rel_path]
     ).stdout
-    rows: list[dict] = []
+    rows: list[CommitInfo] = []
     for record in out.split(sep_record):
         record = record.strip("\n")
         if not record:
@@ -155,13 +169,7 @@ def history(rel_path: str, limit: int = 100) -> list[dict]:
         if len(parts) < 5:
             continue
         sha, author, iso, subject, body = parts
-        rows.append({
-            "sha": sha,
-            "author": author,
-            "ts": iso,
-            "message": subject,
-            "body": body,
-        })
+        rows.append(CommitInfo(sha=sha, author=author, ts=iso, message=subject, body=body))
     return rows
 
 

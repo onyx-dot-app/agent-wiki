@@ -24,7 +24,7 @@ def repo_with_doc(tmp_repo, tmp_config):
 
 @pytest.fixture(autouse=True)
 def _stub_side_effects(monkeypatch):
-    """Skip Huey + trigger fan-out for these tests.
+    """Skip task fan-out + trigger eval for these tests.
 
     The post-write seam is ``app.wiki.notify.after_doc_write`` — patching
     it short-circuits both the FTS reindex and the trigger fan-out task

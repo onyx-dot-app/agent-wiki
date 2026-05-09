@@ -5,7 +5,7 @@ only on full success do we commit. Any failure aborts with no write.
 """
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 from app.llm.agents.tools import _doc_helpers as h
 from app.wiki import edit as wiki_edit
@@ -14,12 +14,13 @@ from app.wiki import edit as wiki_edit
 def handle(args: dict[str, Any]) -> Any:
     try:
         rel = h.validate_doc_path(args.get("path"))
-        edits = args.get("edits")
+        edits_raw = args.get("edits")
         commit_message = args.get("commit_message")
-        if not isinstance(edits, list) or not edits:
+        if not isinstance(edits_raw, list) or not edits_raw:
             raise h.ToolError("edits must be a non-empty array")
         if not isinstance(commit_message, str) or not commit_message.strip():
             raise h.ToolError("commit_message is required")
+        edits = cast(list[Any], edits_raw)
 
         if not h.file_exists(rel):
             raise h.ToolError(f"file not found: {rel}")
@@ -30,13 +31,14 @@ def handle(args: dict[str, Any]) -> Any:
         for i, edit in enumerate(edits):
             if not isinstance(edit, dict):
                 raise h.ToolError(f"edit #{i + 1}: must be an object")
-            old_string = edit.get("old_string")
-            new_string = edit.get("new_string")
+            edit_dict = cast(dict[str, Any], edit)
+            old_string = edit_dict.get("old_string")
+            new_string = edit_dict.get("new_string")
             if not isinstance(old_string, str) or old_string == "":
                 raise h.ToolError(f"edit #{i + 1}: old_string is required and non-empty")
             if not isinstance(new_string, str):
                 raise h.ToolError(f"edit #{i + 1}: new_string is required (string)")
-            replace_all = bool(edit.get("replace_all", False))
+            replace_all = bool(edit_dict.get("replace_all", False))
             try:
                 body = wiki_edit.replace(body, old_string, new_string, replace_all)
             except wiki_edit.ReplaceError as exc:

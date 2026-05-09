@@ -33,12 +33,7 @@ def handle(args: dict[str, Any]) -> Any:
     return {
         "path": rel,
         "history": [
-            {
-                "sha": r["sha"],
-                "author": r["author"],
-                "ts": r["ts"],
-                "message": r["message"],
-            }
+            {"sha": r.sha, "author": r.author, "ts": r.ts, "message": r.message}
             for r in rows
         ],
     }

@@ -1,11 +1,11 @@
 """Post-commit trigger fan-out.
 
-Tasks in this module run on the ``triggers_huey`` queue — the queue
+Tasks in this module run on the ``triggers_queue`` queue — the queue
 dedicated to natural-language trigger evaluation, both event-driven (this
 file) and time-based (``app/tasks/periodic.py:evaluate_scheduled_triggers``).
 Trigger eval is read-only (no commits), so it sits on its own queue
-between the LLM-heavy ``documents_huey`` and the cheap
-``wiki_bm25_huey``: a flood of trigger fires can't delay an FTS
+between the LLM-heavy ``documents_queue`` and the cheap
+``wiki_bm25_queue``: a flood of trigger fires can't delay a BM25
 reindex, and a backlogged doc-updater can't delay an event-log entry.
 
 After a successful ``commit_file`` on a wiki doc, the API (or an agent
@@ -26,7 +26,7 @@ dirs, and routes each one through the appropriate evaluation flow:
 Each fire becomes one ``trigger.fire`` row in the events table. V0 has
 no outbound dispatch (see ``local_data/wiki/natural-language-triggers``).
 
-See ``app/tasks/huey_app.py`` for the queue rationale.
+See ``app/tasks/queues.py`` for the queue rationale.
 """
 from __future__ import annotations
 
@@ -34,10 +34,12 @@ import json
 import logging
 import subprocess
 
-from app.db.sqlite import connect
-from app.tasks.huey_app import triggers_huey
+from app.db.models import Event
+from app.db.session import session
+from app.tasks.queues import triggers_queue
 from app.triggers import diff as diff_helper
 from app.triggers.engine import (
+    TriggerRecord,
     evaluate_delta,
     evaluate_new_file_in_dir,
     find_matching_triggers,
@@ -48,7 +50,7 @@ from app.wiki import git as wiki_git
 log = logging.getLogger(__name__)
 
 
-@triggers_huey.task()
+@triggers_queue.task()
 def fan_out_trigger_eval(
     doc_path: str,
     sha: str,
@@ -86,27 +88,27 @@ def fan_out_trigger_eval(
 
     fired = 0
     for trigger in triggers:
-        from app.triggers.repo import _parse_action  # local import avoids cycle
-        action = _parse_action(trigger["action_json"])
-        instruction = action.get("message") or ""
-        destination = action.get("destination")
+        instruction = trigger.message or ""
+        destination = trigger.destination
 
-        if change_kind == "create" and trigger["scope_path"] != doc_path:
+        if change_kind == "create" and trigger.scope_path != doc_path:
             assert new_file_payload is not None
-            triggered, rendered = evaluate_new_file_in_dir(
+            new_file_result = evaluate_new_file_in_dir(
                 trigger, instruction, new_file_payload
             )
-            if not triggered:
+            if not new_file_result.triggered:
                 continue
+            rendered = new_file_result.message
             reason = "new file under directory scope"
             log.info(
                 "trigger fired (new-file-in-dir) id=%s doc=%s",
-                trigger["id"], doc_path,
+                trigger.id, doc_path,
             )
         else:
-            matched, reason = evaluate_delta(trigger, delta_payload)
-            if not matched:
+            match = evaluate_delta(trigger, delta_payload)
+            if not match.matched:
                 continue
+            reason = match.reason
             rendered = (
                 render_delta_message(instruction, delta_payload, reason=reason)
                 if instruction
@@ -114,7 +116,7 @@ def fan_out_trigger_eval(
             )
             log.info(
                 "trigger fired id=%s doc=%s reason=%s",
-                trigger["id"], doc_path, reason,
+                trigger.id, doc_path, reason,
             )
 
         fired += 1
@@ -143,7 +145,7 @@ def _read_at(ref: str, rel_path: str) -> str:
 
 def _record_fire(
     *,
-    trigger: dict,
+    trigger: TriggerRecord,
     doc_path: str,
     sha: str,
     change_kind: str,
@@ -164,12 +166,12 @@ def _record_fire(
         log.warning(
             "trigger %s has destination=%r but only null (Event Log) is "
             "supported in v0; recording to events anyway",
-            trigger["id"], destination,
+            trigger.id, destination,
         )
 
     event_payload = json.dumps(
         {
-            "trigger_id": trigger["id"],
+            "trigger_id": trigger.id,
             "doc_path": doc_path,
             "sha": sha,
             "change_kind": change_kind,
@@ -179,11 +181,12 @@ def _record_fire(
             "destination": destination,
         }
     )
-    conn = connect()
-    try:
-        conn.execute(
-            "INSERT INTO events(kind, actor, target, payload_json) VALUES (?, ?, ?, ?)",
-            ("trigger.fire", actor, trigger["id"], event_payload),
+    with session() as s:
+        s.add(
+            Event(
+                kind="trigger.fire",
+                actor=actor,
+                target=trigger.id,
+                payload_json=event_payload,
+            )
         )
-    finally:
-        conn.close()

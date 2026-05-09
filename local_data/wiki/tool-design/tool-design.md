@@ -299,7 +299,7 @@ Storage:
 - The YAML on disk gets two new top-level keys (`message`, `destination`).
 - `storage.parse` is tolerant of pre-existing YAML files that lack these
   keys (they default to `None`); `_parse_action` in the repo does the
-  same for old SQLite rows.
+  same for old Postgres rows.
 
 Fan-out (`app/tasks/triggers.py:_deliver_fire`):
 
