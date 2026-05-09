@@ -143,11 +143,39 @@ domain via `allowedEmails`.
 
 See `deploy/README.md` for the apply/install flow.
 
+### Automated CI/CD
+
+The dogfood deploy is fully automated. Two cron-driven workflows in two
+repos form the chain:
+
+1. **`agent-wiki:.github/workflows/nightly-build.yml`** — daily at 10 UTC
+   and on-demand. Matrix-builds backend + frontend, multi-arch
+   (`linux/amd64,linux/arm64`), pushes
+   `onyxdotapp/agent-wiki-{backend,frontend}:nightly-latest-YYYYMMDD` to
+   Docker Hub.
+2. **A deploy workflow in the private cluster repo** — runs an hour later
+   (11 UTC) and can be dispatched ad-hoc with a `version_tag` input.
+   Probes Docker Hub for both images at the requested tag, assumes an
+   IAM role via GitHub OIDC, pulls `SECRET_KEY` and the OIDC client
+   secret from AWS Secrets Manager, runs `helm upgrade --install` with
+   `--set image.{backend,frontend}.tag` + the secrets, and waits for
+   rollout. Slack notifications on kickoff + result for ad-hoc runs;
+   failure-only for scheduled.
+
+Tag-driven `v*` builds (`docker-build-push.yml`) still exist for cutting a
+named release; the automated path uses the date-rolled `nightly-latest-*`
+tag instead so the deploy side doesn't have to chase a moving "latest".
+
+**Ad-hoc deploy.** `ods deploy wiki` (shipped in the `onyx-devtools` PyPI
+package) wraps the same chain end-to-end: dispatches the build workflow,
+polls it to completion, then dispatches the deploy workflow with today's
+tag. `--no-build` skips the rebuild and deploys whatever's already on
+Docker Hub for the day's tag; `--no-wait-deploy` returns once the deploy
+run starts. The deploy workflow itself can also be dispatched directly
+from the cluster repo's Actions UI with an explicit `version_tag` to roll
+back to a prior day.
+
 ### Production deltas (still to do)
-- Real `SECRET_KEY` + `OIDC_CLIENT_SECRET` from a secret store (External
-  Secrets / AWS Secrets Manager). Chart currently takes them via `--set`.
-- Automated CI/CD: image build + helm upgrade on push (today: tag-driven
-  build, manual `helm upgrade`).
 - A health check that exercises `init_db()` and an LLM ping (optional).
 - Backup automation (cron `git push --mirror` for the wiki PVC, `VACUUM INTO`
   for SQLite). Not wired.
@@ -171,6 +199,13 @@ See `deploy/README.md` for the apply/install flow.
 - **Image build/push** to Docker Hub (`onyxdotapp/agent-wiki-{backend,frontend}`)
   on `v*` tag in `agent-wiki:main` via `.github/workflows/docker-build-push.yml`.
   Multi-arch (`linux/amd64,linux/arm64`).
+- **Nightly automated deploy.** `agent-wiki:.github/workflows/nightly-build.yml`
+  cron-builds and pushes `:nightly-latest-YYYYMMDD` to Docker Hub at 10 UTC; a
+  matching workflow in the private cluster repo runs an hour later and rolls
+  the chart via `helm upgrade --install`, with secrets pulled from AWS Secrets
+  Manager via GitHub OIDC. Both also support `workflow_dispatch` for ad-hoc
+  runs, and `ods deploy wiki` (in `onyx-devtools` on PyPI) drives the chain
+  from a single command. See "Automated CI/CD" above.
 
 ### Stubbed / partial
 - `nginx.conf` is minimal — fine for local, may need tuning for prod
@@ -180,27 +215,15 @@ See `deploy/README.md` for the apply/install flow.
   output — works but unverified at production load.
 
 ### Not started
-- **Automated CI/CD.** Today: cut a tag → image builds → `helm upgrade`
-  is manual. Want: on push to `agent-wiki:main`, build images and roll
-  out via a workflow in the private cluster repo. See "Next up".
-- Secrets in a real secret store. Today `secretKey` + `auth.oidc.clientSecret`
-  are passed via `helm --set` from 1Password.
 - Backup automation.
 - Metrics / tracing.
 - Healthcheck endpoint that exercises more than a static `{status: ok}`.
 - Per-deploy migration safety (rollback path if a migration breaks).
 
 ### Next up (concrete work units)
-1. **Automated deploy workflow.** Mirror the org's existing deploy
-   workflow pattern: on push to `agent-wiki:main`, fire image build,
-   then `repository_dispatch` to the cluster repo, which runs
-   `helm upgrade` against the live cluster.
-2. **Secrets to AWS Secrets Manager.** Move `secretKey` +
-   `auth.oidc.clientSecret` out of 1Password / `--set` into Secrets
-   Manager so the deploy workflow can pull them via OIDC.
-3. **`/api/health` improvement** — verify DB reachable, queue path
+1. **`/api/health` improvement** — verify DB reachable, queue path
    writable, optionally pull an LLM-settings row count.
-4. **Backup recipe** — short doc covering: cron `git push --mirror` for
+2. **Backup recipe** — short doc covering: cron `git push --mirror` for
    the wiki, `VACUUM INTO` for SQLite.
 
 ### Open questions
