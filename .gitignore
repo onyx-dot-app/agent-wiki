@@ -43,9 +43,8 @@ local_data/pgdata/
 .vscode/
 *.swp
 
-# claude code (runtime state + per-user settings; team-shared files in .claude/ stay tracked)
-.claude/*.lock
-.claude/settings.local.json
+# claude code — entire dir is local-only (runtime state + per-user settings).
+.claude/
 
 # terraform (deploy/terraform/ is a template; lock file is intentionally not tracked here)
 *.tfstate
