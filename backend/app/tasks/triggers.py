@@ -35,6 +35,8 @@ import json
 import logging
 import subprocess
 
+from datetime import datetime, timezone
+
 from sqlalchemy import select
 
 from app.db.models import Event, User
@@ -42,12 +44,16 @@ from app.db.session import session
 from app.tasks.queues import triggers_queue
 from app.triggers import destinations as destinations_repo
 from app.triggers import diff as diff_helper
+from app.triggers import repo as triggers_repo
 from app.triggers.engine import (
     TriggerRecord,
     evaluate_delta,
     evaluate_new_file_in_dir,
+    evaluate_schedule,
+    find_due_schedule_triggers,
     find_matching_triggers,
     render_delta_message,
+    render_schedule_message,
 )
 from app.wiki import acl as wiki_acl
 from app.wiki import git as wiki_git
@@ -175,6 +181,103 @@ def fan_out_trigger_eval(
         "fan_out_trigger_eval %s: %d/%d fired (%d skipped on owner ACL)",
         doc_path, fired, len(triggers), skipped_acl,
     )
+
+
+def evaluate_due_schedule_triggers(now: datetime) -> int:
+    """Evaluate every schedule trigger whose next cron fire is ≤ ``now``.
+
+    Returns the number that fired (matched). Called by the
+    ``evaluate_scheduled_triggers`` periodic task. Each trigger gets its
+    own owner-ACL re-check + LLM gate, mirroring the delta path. Always
+    advances ``schedule_last_fired_at`` to ``now`` regardless of
+    match/skip — otherwise the same tick re-evaluates next pass.
+    """
+    triggers = find_due_schedule_triggers(now)
+    if not triggers:
+        log.debug("schedule eval: no due triggers")
+        return 0
+
+    log.info("schedule eval: %d due trigger(s)", len(triggers))
+    wiki_snapshot = diff_helper.build_wiki_snapshot()
+    now_iso = now.astimezone(timezone.utc).isoformat(timespec="seconds")
+
+    fired = 0
+    for trigger in triggers:
+        try:
+            if _evaluate_one_schedule(trigger, now_iso=now_iso, wiki_snapshot=wiki_snapshot):
+                fired += 1
+        finally:
+            # Always advance last_fired_at, even on no-match or exception,
+            # so the next tick doesn't re-evaluate the same window.
+            triggers_repo.record_schedule_fire(trigger.id, now_iso)
+    log.info("schedule eval: %d/%d fired", fired, len(triggers))
+    return fired
+
+
+def _evaluate_one_schedule(
+    trigger: TriggerRecord,
+    *,
+    now_iso: str,
+    wiki_snapshot: str,
+) -> bool:
+    """Evaluate a single schedule trigger; record a ``trigger.fire`` event
+    on match. Returns True if it fired.
+    """
+    if not _owner_can_read_scope(trigger):
+        log.info(
+            "schedule trigger %s skipped: owner %s lacks read on %s",
+            trigger.id, trigger.owner_user_id, trigger.scope_path,
+        )
+        return False
+
+    payload = diff_helper.build_schedule_payload(
+        scope_path=trigger.scope_path,
+        when_iso=now_iso,
+        wiki_snapshot=wiki_snapshot,
+    )
+    match = evaluate_schedule(trigger, payload)
+    if not match.matched:
+        return False
+
+    instruction = trigger.message or ""
+    rendered = (
+        render_schedule_message(instruction, payload, reason=match.reason)
+        if instruction
+        else ""
+    )
+    log.info(
+        "schedule trigger fired id=%s scope=%s reason=%s",
+        trigger.id, trigger.scope_path, match.reason,
+    )
+    _record_fire(
+        trigger=trigger,
+        doc_path=trigger.scope_path,
+        sha="",
+        change_kind="schedule",
+        reason=match.reason,
+        instruction=instruction,
+        rendered_message=rendered,
+        destination=trigger.destination,
+        actor=None,
+    )
+    return True
+
+
+def _owner_can_read_scope(trigger: TriggerRecord) -> bool:
+    """Re-check the owner's read access against the trigger's scope at
+    fire-time, mirroring the delta path.
+
+    Same semantics as the inline check in ``fan_out_trigger_eval``: an
+    owner whose access was revoked after creation shouldn't fire a
+    rendered message that embeds doc body excerpts.
+    """
+    with session() as s:
+        user_row = s.scalars(
+            select(User).where(User.id == trigger.owner_user_id)
+        ).one_or_none()
+    if user_row is None:
+        return False
+    return wiki_acl.can(user_row.id, user_row.is_admin, "read", trigger.scope_path)
 
 
 def _read_at(ref: str, rel_path: str) -> str:

@@ -21,7 +21,7 @@ inventory; this doc is the concrete runbook.
 - `node_modules/` present in `frontend/`.
 - `.env` at the repo root:
   - `WIKI_DIR=…/local_data/wiki`
-  - `DATABASE_URL=postgresql://agent:agent@localhost:5432/agent_wiki` — app
+  - `DATABASE_URL=postgresql://postgres:postgres@localhost:5432/agent_wiki` — app
     state and pgmq queues both live here. The host needs Postgres 17 with
     the `pg_textsearch` and `pgmq` extensions installed (or run
     `docker compose up postgres` and connect to the compose service).
@@ -146,7 +146,7 @@ commit the seed as the initial revision.
 > the wiki repo:
 >
 > ```bash
-> pg_dump -U agent agent_wiki \
+> pg_dump -U postgres agent_wiki \
 >   --data-only \
 >   --table=groups --table=group_members \
 >   --table=wiki_owners --table=acl_entries \
@@ -521,7 +521,7 @@ uv run pytest
 
 Tests use a separate Postgres database, `agent_wiki_test`, pointed at
 by `TEST_DATABASE_URL` (defaults to
-`postgresql://agent:agent@localhost:5432/agent_wiki_test`). Each test
+`postgresql://postgres:postgres@localhost:5432/agent_wiki_test`). Each test
 gets its own schema inside that DB; create the database once with
 `pg_textsearch` + `pgmq` installed, and `pytest -n auto` will drop
 and recreate schemas per test. CLAUDE.md's "Testing" section has the

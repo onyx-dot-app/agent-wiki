@@ -1,6 +1,6 @@
 {
   "name": "move_path",
-  "description": "Rename or move a wiki file or directory in a single git commit. Works for both `.md` documents and folders (folders move recursively, preserving everything inside). Content is unchanged — this is a pure rename. The old path must exist; the new path must not. Use when the user wants to reorganize the wiki — e.g. rename a folder, move a doc into a subfolder, or rename a document. Only call after the user has explicitly asked for the move or confirmed when you proposed it. Returns the commit SHA, the resolved old/new paths, and the list of every tracked file that was moved (useful when the source was a directory).",
+  "description": "Rename or move a wiki file or directory. Works for both `.md` documents and folders (folders move recursively, preserving everything inside). Content is unchanged — this is a pure rename. The old path must exist; the new path must not. Returns the commit SHA, the resolved old/new paths, and the list of every tracked file that was moved (useful when the source was a directory).",
   "input_schema": {
     "type": "object",
     "properties": {

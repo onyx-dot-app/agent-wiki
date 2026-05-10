@@ -22,10 +22,14 @@ class TriggerAction(BaseModel):
 
 
 class CreateTriggerRequest(BaseModel):
-    """v0 only honors ``kind=delta``; ``destination`` is a slug from the
-    ``trigger_destinations`` table (default ``"event_log"``). Validation
-    against the destinations catalog happens in the repo for a single
-    source of truth."""
+    """``destination`` is a slug from the ``trigger_destinations`` table
+    (default ``"event_log"``). Validation against the destinations
+    catalog happens in the repo for a single source of truth.
+
+    For ``kind="schedule"`` triggers, ``schedule_cron`` and
+    ``schedule_timezone`` are required and ``schedule_start_at`` is
+    optional. Schedule-field validation also lives in the repo.
+    """
 
     scope_path: str = Field(min_length=1)
     nl_description: str = Field(min_length=1)
@@ -33,6 +37,9 @@ class CreateTriggerRequest(BaseModel):
     destination: str | None = None
     kind: str = "delta"
     enabled: bool = True
+    schedule_cron: str | None = None
+    schedule_timezone: str | None = None
+    schedule_start_at: str | None = None
 
 
 class UpdateTriggerRequest(BaseModel):
@@ -43,6 +50,9 @@ class UpdateTriggerRequest(BaseModel):
     message: str | None = None
     destination: str | None = None
     enabled: bool | None = None
+    schedule_cron: str | None = None
+    schedule_timezone: str | None = None
+    schedule_start_at: str | None = None
 
 
 # --------------------------------------------------------------------------- #
@@ -52,7 +62,8 @@ class UpdateTriggerRequest(BaseModel):
 
 class TriggerView(BaseModel):
     """API view of a trigger row. ``message`` and ``destination`` are
-    flattened from ``Trigger.action_json``."""
+    flattened from ``Trigger.action_json``. Schedule fields are only
+    populated for ``kind="schedule"`` triggers."""
 
     id: str
     owner_user_id: str
@@ -65,6 +76,10 @@ class TriggerView(BaseModel):
     created_at: str | None
     last_edited_at: str | None
     file_path: str | None
+    schedule_cron: str | None = None
+    schedule_timezone: str | None = None
+    schedule_start_at: str | None = None
+    schedule_last_fired_at: str | None = None
 
 
 class TriggerListResponse(BaseModel):
@@ -105,3 +120,7 @@ class TriggerVersionResponse(BaseModel):
     enabled: bool
     sha: str
     path: str
+    kind: str | None = None
+    schedule_cron: str | None = None
+    schedule_timezone: str | None = None
+    schedule_start_at: str | None = None

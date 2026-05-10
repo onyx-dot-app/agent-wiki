@@ -29,11 +29,13 @@ export function formatScopePath(scope_path: string, maxLen = 60): string {
   return isFile ? `/.../${last}` : `/.../${last}/`;
 }
 
+export type TriggerKind = "delta" | "schedule";
+
 export interface Trigger {
   id: string;
   owner_user_id: string;
   scope_path: string;
-  kind: "delta";
+  kind: TriggerKind;
   nl_description: string;
   message: string | null;
   destination: string | null;
@@ -41,6 +43,10 @@ export interface Trigger {
   created_at: string;
   last_edited_at: string;
   file_path: string | null;
+  schedule_cron: string | null;
+  schedule_timezone: string | null;
+  schedule_start_at: string | null;
+  schedule_last_fired_at: string | null;
 }
 
 export interface TriggerCommit {
@@ -57,6 +63,10 @@ export interface TriggerCreateInput {
   message: string;
   destination?: string | null;
   enabled?: boolean;
+  kind?: TriggerKind;
+  schedule_cron?: string | null;
+  schedule_timezone?: string | null;
+  schedule_start_at?: string | null;
 }
 
 export interface TriggerUpdateInput {
@@ -65,6 +75,9 @@ export interface TriggerUpdateInput {
   message?: string;
   destination?: string | null;
   enabled?: boolean;
+  schedule_cron?: string | null;
+  schedule_timezone?: string | null;
+  schedule_start_at?: string | null;
 }
 
 export function useTriggers() {
@@ -108,6 +121,10 @@ export interface TriggerVersion {
   enabled: boolean;
   sha: string;
   path: string;
+  kind: TriggerKind | null;
+  schedule_cron: string | null;
+  schedule_timezone: string | null;
+  schedule_start_at: string | null;
 }
 
 export function getTriggerVersion(id: string, sha: string): Promise<TriggerVersion> {

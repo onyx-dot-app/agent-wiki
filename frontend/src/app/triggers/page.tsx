@@ -10,6 +10,7 @@ import { TriggerModal } from "@/components/triggers/TriggerModal";
 import { useRequireAuth } from "@/lib/auth";
 import { color, radius } from "@/lib/theme";
 import { useIsMobile } from "@/lib/viewport";
+import { describeCron } from "@/lib/cron";
 import {
   deleteTrigger,
   formatScopePath,
@@ -31,6 +32,24 @@ const sentenceTagStyle: CSSProperties = {
   textTransform: "uppercase",
   letterSpacing: 0.3,
 };
+
+function kindBadgeStyle(kind: Trigger["kind"]): CSSProperties {
+  return {
+    flexShrink: 0,
+    fontSize: 10,
+    fontWeight: 700,
+    padding: "1px 6px",
+    borderRadius: radius.xs,
+    border: `1px solid ${color.accent.subtleBorder}`,
+    background:
+      kind === "schedule" ? color.state.info.bg : color.accent.subtleBg,
+    color:
+      kind === "schedule" ? color.state.info.fg : color.accent.subtleFg,
+    letterSpacing: 0.3,
+    fontFamily:
+      "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+  };
+}
 
 function formatRelative(iso: string | null | undefined): string {
   if (!iso) return "";
@@ -176,6 +195,7 @@ export default function TriggersPage() {
                       alignItems: "baseline",
                     }}
                   >
+                    <span style={kindBadgeStyle(t.kind)}>{t.kind.toUpperCase()}</span>
                     <span title={t.scope_path}>{formatScopePath(t.scope_path)}</span>
                     {t.last_edited_at && (
                       <span
@@ -187,6 +207,30 @@ export default function TriggersPage() {
                     )}
                   </div>
                   <div style={{ fontSize: 14, color: color.text.primary, lineHeight: 1.55 }}>
+                    {t.kind === "schedule" && (
+                      <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 6 }}>
+                        <span style={sentenceTagStyle}>WHEN</span>
+                        <span style={{ flex: 1, minWidth: 0 }}>
+                          {describeCron(t.schedule_cron, t.schedule_timezone)}
+                          {t.schedule_start_at && (
+                            <>
+                              {" "}
+                              <span style={{ color: color.text.muted, fontSize: 12 }}>
+                                · starting {new Date(t.schedule_start_at).toLocaleString()}
+                              </span>
+                            </>
+                          )}
+                          {t.schedule_last_fired_at && (
+                            <>
+                              {" "}
+                              <span style={{ color: color.text.faint, fontSize: 12 }}>
+                                · last fired {formatRelative(t.schedule_last_fired_at)}
+                              </span>
+                            </>
+                          )}
+                        </span>
+                      </div>
+                    )}
                     <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
                       <span style={sentenceTagStyle}>IF</span>
                       <span style={{ flex: 1, minWidth: 0 }}>{t.nl_description}</span>
@@ -302,6 +346,10 @@ export default function TriggersPage() {
                 message: version.message,
                 destination: version.destination,
                 enabled: version.enabled,
+                kind: version.kind ?? historyFor.kind,
+                schedule_cron: version.schedule_cron,
+                schedule_timezone: version.schedule_timezone,
+                schedule_start_at: version.schedule_start_at,
               });
               setHistoryFor(null);
               setModalOpen(true);

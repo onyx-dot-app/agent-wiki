@@ -61,6 +61,10 @@ def seed_trigger(
     destination: str = "event_log",
     enabled: bool = True,
     kind: str = "delta",
+    schedule_cron: str | None = None,
+    schedule_timezone: str | None = None,
+    schedule_start_at: str | None = None,
+    schedule_last_fired_at: str | None = None,
 ) -> str:
     action_json = json.dumps({"message": message, "destination": destination})
     with session() as s:
@@ -73,6 +77,10 @@ def seed_trigger(
                 nl_description=nl_description,
                 action_json=action_json,
                 enabled=enabled,
+                schedule_cron=schedule_cron,
+                schedule_timezone=schedule_timezone,
+                schedule_start_at=schedule_start_at,
+                schedule_last_fired_at=schedule_last_fired_at,
             )
         )
     return tid

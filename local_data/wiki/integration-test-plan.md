@@ -14,8 +14,8 @@ Same recipe as the rest of `tests/integration/` — see
 
 ```bash
 cd backend
-DATABASE_URL=postgresql://agent:agent@localhost:5432/agent_wiki \
-TEST_DATABASE_URL=postgresql://agent:agent@localhost:5432/agent_wiki_test \
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/agent_wiki \
+TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/agent_wiki_test \
 .venv/bin/pytest tests/integration -q
 ```
 

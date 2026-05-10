@@ -372,7 +372,7 @@ PR. Don't accumulate parallel ad-hoc colors.
 - `pytest`. The Flask app exposes `create_app()` → use Flask's `test_client`.
 - Per-test isolation:
   - the conftest creates a unique Postgres schema per test against
-    `TEST_DATABASE_URL` (default `postgresql://agent:agent@localhost:5432/agent_wiki_test`)
+    `TEST_DATABASE_URL` (default `postgresql://postgres:postgres@localhost:5432/agent_wiki_test`)
     and points `CONFIG.database_url` at it via libpq's `options=-csearch_path=...`;
     the schema is dropped on teardown. The test database itself must already
     exist with `pg_textsearch` and `pgmq` installed.

@@ -229,6 +229,131 @@ def render_message(
 
 
 # --------------------------------------------------------------------------- #
+# Schedule path — phase 1 (snapshot eval) + phase 2 (snapshot render)         #
+# --------------------------------------------------------------------------- #
+
+_SCHEDULE_EVAL_SYSTEM_PROMPT = """\
+You evaluate whether the current state of a wiki satisfies a \
+natural-language trigger description. The trigger fires on a schedule, \
+not on an edit, so there is no diff to inspect — only the latest \
+version of the wiki and the scope the trigger is watching.
+
+The user message gives you, in order:
+  1. The trigger description ("if …").
+  2. A snapshot of the whole wiki at its latest version.
+  3. A SCHEDULED CHECK block naming the trigger's scope and the tick time.
+
+How to evaluate:
+  * Evaluate the trigger description against the **current state** of \
+the wiki, focusing on the document(s) under the listed scope. There is \
+no diff: this is a state check, not a change check.
+  * Be conservative: false positives are louder than false negatives. \
+If the wiki state doesn't clearly satisfy the description, say no.
+  * Use only what is in the payload below. Do not bring in outside \
+knowledge or speculate.
+  * The reason must quote or paraphrase the specific state that \
+satisfies the trigger.
+
+Always respond by calling the `report` tool exactly once.\
+"""
+
+
+def matches_snapshot(nl_description: str, payload: str) -> MatchResult:
+    """Phase 1 for schedule triggers: does current wiki state satisfy the
+    trigger?
+
+    ``payload`` is the wiki-snapshot + SCHEDULED CHECK block from
+    ``app.triggers.diff.build_schedule_payload``.
+    """
+    user_msg = f"Trigger description (if):\n{nl_description}\n\n{payload}"
+    try:
+        resp = complete(
+            [
+                {"role": "system", "content": _SCHEDULE_EVAL_SYSTEM_PROMPT},
+                {"role": "user", "content": user_msg},
+            ],
+            tools=[_REPORT_TOOL],
+            max_tokens=512,
+        )
+    except LLMError as e:
+        log.warning("trigger schedule eval llm_error code=%s msg=%s", e.code, e.message)
+        return MatchResult(matched=False, reason=f"llm_error: {e.code}")
+
+    for call in resp.tool_calls:
+        if call.name == "report":
+            return MatchResult(
+                matched=bool(call.arguments.get("matches")),
+                reason=str(call.arguments.get("reason") or ""),
+            )
+    return MatchResult(matched=False, reason="no_tool_call")
+
+
+_SCHEDULE_RENDER_SYSTEM_PROMPT = """\
+You compose the notification message that a scheduled wiki trigger \
+delivers when it fires. The trigger's owner has already written a short \
+instruction describing what they want the message to say; your job is \
+to produce the final text a human (or downstream system) will see.
+
+The user message gives you, in order:
+  1. The owner's message instruction ("send …").
+  2. A one-line "match reason" produced by the firing-condition check.
+  3. A snapshot of the whole wiki at its latest version.
+  4. A SCHEDULED CHECK block naming the trigger's scope and tick time.
+
+Guidance:
+  * Follow the owner's instruction. Keep the message concise and \
+specific — quote concrete values from the wiki where useful.
+  * Ground the message in the current wiki state, scoped to the \
+SCHEDULED CHECK scope.
+  * Do not include meta-commentary ("the trigger fired because…"), \
+internal IDs, or explanations of your reasoning. Output only the \
+delivered message text.
+  * Plain text or markdown is fine. No greetings, no signoff.
+
+Always respond by calling the `render` tool exactly once.\
+"""
+
+
+def render_snapshot_message(
+    message_instruction: str, payload: str, *, reason: str
+) -> str:
+    """Phase 2 for schedule triggers. Returns the rendered message text.
+
+    On any failure we fall back to ``message_instruction`` itself so the
+    Event Log still receives something the owner authored.
+    """
+    user_msg = (
+        f"Owner's message instruction:\n{message_instruction}\n\n"
+        f"Match reason:\n{reason}\n\n"
+        f"{payload}"
+    )
+    try:
+        resp = complete(
+            [
+                {"role": "system", "content": _SCHEDULE_RENDER_SYSTEM_PROMPT},
+                {"role": "user", "content": user_msg},
+            ],
+            tools=[_RENDER_TOOL],
+            max_tokens=1024,
+        )
+    except LLMError as e:
+        log.warning(
+            "trigger schedule render llm_error code=%s msg=%s", e.code, e.message
+        )
+        return message_instruction
+
+    for call in resp.tool_calls:
+        if call.name == "render":
+            rendered = str(call.arguments.get("message") or "").strip()
+            if rendered:
+                return rendered
+    log.warning(
+        "trigger schedule render: no tool call, falling back to instruction"
+    )
+    return message_instruction
+
+
+# --------------------------------------------------------------------------- #
 # New-file-in-dir path                                                        #
 # --------------------------------------------------------------------------- #
 

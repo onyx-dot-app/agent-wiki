@@ -144,8 +144,8 @@ both `complete` and `stream`. The stream version yields one
 
 ```bash
 cd backend
-DATABASE_URL=postgresql://agent:agent@localhost:5432/agent_wiki \
-TEST_DATABASE_URL=postgresql://agent:agent@localhost:5432/agent_wiki_test \
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/agent_wiki \
+TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/agent_wiki_test \
 .venv/bin/pytest tests/integration -q
 ```
 
@@ -155,8 +155,8 @@ service and run:
 
 ```bash
 docker compose up -d postgres
-psql -h localhost -U agent -d postgres -c 'CREATE DATABASE agent_wiki_test'
-psql -h localhost -U agent -d agent_wiki_test -c 'CREATE EXTENSION pg_textsearch; CREATE EXTENSION pgmq;'
+psql -h localhost -U postgres -d postgres -c 'CREATE DATABASE agent_wiki_test'
+psql -h localhost -U postgres -d agent_wiki_test -c 'CREATE EXTENSION pg_textsearch; CREATE EXTENSION pgmq;'
 ```
 
 Per-test schemas live inside that database; `tmp_config` creates and

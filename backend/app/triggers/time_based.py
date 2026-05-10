@@ -1,9 +1,16 @@
-"""Schedule-kind trigger evaluation. Driven by tasks/periodic.py."""
+"""Schedule-kind trigger evaluation. Driven by ``app/tasks/periodic.py``.
+
+The selection logic lives in ``app.triggers.engine.find_due_schedule_triggers``
+— this module is a thin wrapper kept so callers that already import
+``app.triggers.time_based.due_triggers`` don't have to switch.
+"""
 from __future__ import annotations
 
-from typing import Any
+from datetime import datetime, timezone
+
+from app.triggers.engine import TriggerRecord, find_due_schedule_triggers
 
 
-def due_triggers(now_iso: str) -> list[dict[str, Any]]:
-    # TODO: load enabled schedule triggers whose cron matches ``now_iso``.
-    raise NotImplementedError
+def due_triggers(now: datetime | None = None) -> list[TriggerRecord]:
+    """Return enabled schedule triggers whose next cron fire is ≤ ``now``."""
+    return find_due_schedule_triggers(now or datetime.now(timezone.utc))

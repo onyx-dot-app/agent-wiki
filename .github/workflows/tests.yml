@@ -18,7 +18,7 @@ jobs:
     timeout-minutes: 30
 
     env:
-      TEST_DATABASE_URL: postgresql://agent:agent@localhost:5432/agent_wiki_test
+      TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/agent_wiki_test
       SECRET_KEY: ci-test-secret
 
     steps:
@@ -33,8 +33,8 @@ jobs:
       - name: Start Postgres
         run: |
           docker run -d --name agent-wiki-pg \
-            -e POSTGRES_USER=agent \
-            -e POSTGRES_PASSWORD=agent \
+            -e POSTGRES_USER=postgres \
+            -e POSTGRES_PASSWORD=postgres \
             -e POSTGRES_DB=agent_wiki \
             -p 127.0.0.1:5432:5432 \
             agent-wiki-postgres:ci \
@@ -43,7 +43,7 @@ jobs:
       - name: Wait for Postgres
         run: |
           for i in $(seq 1 60); do
-            if docker exec agent-wiki-pg pg_isready -U agent -d agent_wiki >/dev/null 2>&1; then
+            if docker exec agent-wiki-pg pg_isready -U postgres -d agent_wiki >/dev/null 2>&1; then
               echo "Postgres ready"; exit 0
             fi
             sleep 1
@@ -52,8 +52,8 @@ jobs:
 
       - name: Create test database with extensions
         run: |
-          docker exec -u postgres agent-wiki-pg createdb -O agent agent_wiki_test
-          docker exec agent-wiki-pg psql -U agent -d agent_wiki_test \
+          docker exec agent-wiki-pg createdb -U postgres agent_wiki_test
+          docker exec agent-wiki-pg psql -U postgres -d agent_wiki_test \
             -c 'CREATE EXTENSION pg_textsearch;' \
             -c 'CREATE EXTENSION pgmq;'
 

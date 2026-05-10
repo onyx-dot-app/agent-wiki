@@ -1,45 +1,39 @@
-# agent-wiki — what it is and how to use it
+# Agent Wiki — what it is and how to use it
 
-agent-wiki is a self-updating wiki where humans and AI agents collaborate on living documentation. It runs as three things stitched together:
-
-## The wiki
-
-A git-backed tree of markdown files, browseable in the **Wiki** tab. Click a folder to see its contents; click a `.md` file to read it; toggle into the editor to make changes. Every save is a real git commit, so history is preserved and recoverable. Files outside `.md` are not supported — the wiki is markdown-only.
+Agent Wiki is a self-updating wiki where humans and AI agents collaborate on living documentation. It doubles as a workspace for humans and agents to collaborate efficiently. The wiki is comprised of `.md` documents in a file system. The history of all changes is backed by Git.
 
 ## The chat agent (this conversation)
 
-The chat panel — accessible from any page — is a tool-using AI agent that knows the current wiki location and can act on the user's behalf. It can:
+The wiki provides the user with a chat widget which is available from any page. The agent is there to assist the user, generally with using the wiki and performing wiki actions. The agent is able to do the following:
 
-- **Search and read** the wiki: `search_wiki` finds candidate docs by bm25; `read_page` returns the full body of one.
-- **Edit and write** docs: `edit_doc` for surgical find-and-replace, `multi_edit` for atomic batch edits, `write_doc` for new files or wholesale rewrites. Also `create_directory` and `move_path` for tree changes.
-- **Reach the public web**: `web_search` (used sparingly, only for things that may need recent info) and `open_urls` to fetch one or more pages in a single call.
-- **Manage triggers**: `create_trigger`, `update_trigger`, and `get_trigger_destinations` to list where a trigger fire can be delivered.
+- **Search and read the wiki** to get relevant context and help answer specific user questions.
+- **Edit and write documents** to help the user modify the wiki to their specifications.
+- **Organize the wiki** according to user requests by moving files and folders to user requested locations.
+- **Manage triggers** for the user or help answer questions about triggers.
+- **Provide general help** to the user using LLM internal knowledge.
 
-The agent always confirms changes in chat before committing them — describe → wait for acknowledgement → apply. After an edit it confirms what was committed and surfaces any broken links it noticed.
+## Navigating the UI
 
-## Triggers and events
+The main functionality of the app can all be accessed through the sidebar. Users can reach the Wiki, Triggers, Events, and Agents pages via the sidebar.
 
-A **trigger** watches a wiki file or directory and fires when an update matches a natural-language condition. Each trigger has three parts:
+There is also a profile button which provides the entry point for the Admin pages, personal settings, and for signing out.
 
-- **If condition** — what kind of change should fire it (e.g. "when the auth flow's session timeout policy changes").
-- **Message** — the notification body delivered when it fires.
-- **Destination** — where to deliver. The catalog lives in the `trigger_destinations` table (call `get_trigger_destinations` to see them). v0 ships a single destination, **Event Log**, which records every fire there with the message attached; outbound dispatch (webhook, agent message, etc.) lands later.
+The chat widget also provides the user with the ability to create new messages or see past messages via the "clock" icon.
 
-Triggers are owned by the user who created them and are listed in the **Triggers** tab. The **Events** tab shows fire history.
+To find relevant pages, users can use the search bar which is also available in the left hand sidebar. It provides a search over all of the wiki documents as well as the folders of the wiki.
 
-## Admin
+## Admins
 
-The **Admin** area (visible only to admins) holds configuration:
+The **Admin** area (visible only to admins) holds general system configuration information. It is useful for getting the system set up for all of the users.
 
-- **LLM provider** — set the model and API key for the chat agent.
-- **Web** — set the Serper (search) and Firecrawl (page fetch) API keys; without these the web tools error with "not configured."
-- **Users** — basic user management.
+There is no special access priviledge to the admin role as far as being able to audit user interactions, view extra pages of the wiki, see other users' triggers, or anything which may leak sensitive information.
 
-The first account created on a fresh install is auto-promoted to admin.
+The first account created on a fresh install is auto-promoted to admin. Admins can promote other users to admins.
 
-## Typical flows
+## Scopes
 
-- **Ask a question about your wiki** — the agent searches first, reads the most relevant page(s), and answers with citations to the wiki paths.
-- **Edit a doc** — describe what you want changed; the agent reads the doc, proposes a diff, and commits after you say go.
-- **Set up a notification** — tell the agent "let me know when the X policy changes": it'll create a trigger with an if-condition matching that change and a message you'll see in the Event Log when it fires.
-- **Pull in outside info** — for current events, third-party docs, or news, the agent can web-search and open a URL, citing sources back in chat or in any doc it writes.
+Wiki pages can be shared with users or groups and can also be made public. The scopes of documents can be managed by users with write access.
+
+Triggers are only visible to the users who created them.
+
+Events are only visible to the users who own the associated triggers.

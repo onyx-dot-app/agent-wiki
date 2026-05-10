@@ -547,6 +547,7 @@ function Row({
   onFolderDragLeave?: () => void;
   onFolderDrop?: () => void;
 }) {
+  const router = useRouter();
   const [hover, setHover] = useState(false);
   const [draft, setDraft] = useState(label);
 
@@ -554,10 +555,35 @@ function Row({
     if (renaming) setDraft(label);
   }, [renaming, label]);
 
+  // The whole row acts as the click target *and* the drag source.
+  // Clicks navigate via router.push(href) instead of relying on a
+  // child <Link>, which previously left a dead zone around the icon
+  // and trailing whitespace where the cursor showed "grab" but didn't
+  // navigate. Drags from the action buttons (rename/delete) are
+  // suppressed so a careless drag near the right edge doesn't kick off
+  // a move operation; their clicks stop propagation so they don't
+  // double-fire row navigation.
   return (
     <li
       draggable={!renaming}
+      onClick={(e) => {
+        if (renaming) return;
+        // If the click landed on a button or inside the rename form,
+        // let that element handle it — we don't want delete/rename
+        // taps to also navigate into the doc.
+        const target = e.target as HTMLElement;
+        if (target.closest("button, form, input")) return;
+        router.push(href);
+      }}
       onDragStart={(e) => {
+        // Cancel drags that start on the action buttons so the user
+        // can mash on rename/delete without yanking the row into a
+        // move state.
+        const target = e.target as HTMLElement;
+        if (target.closest("button, form, input")) {
+          e.preventDefault();
+          return;
+        }
         e.dataTransfer.effectAllowed = "move";
         e.dataTransfer.setData("text/plain", path);
         onDragStart();
@@ -630,21 +656,22 @@ function Row({
           </Button>
         </form>
       ) : (
-        <Link
-          href={href}
-          draggable={false}
+        // The label is a plain span — the click target is the parent
+        // <li>. flex: 1 keeps it stretching to fill the space between
+        // icon and action buttons, so any click on the label area
+        // still hits the row's onClick.
+        <span
           style={{
             display: "flex",
             alignItems: "center",
             gap: 10,
             flex: 1,
             color: color.text.primary,
-            textDecoration: "none",
             fontSize: 14,
           }}
         >
-          <span>{label}</span>
-        </Link>
+          {label}
+        </span>
       )}
       {!renaming && (
         <>

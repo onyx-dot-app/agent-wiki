@@ -56,7 +56,7 @@ def compute_path(*, scope_path: str, trigger_id: str) -> str:
 
 
 def serialize(trigger: dict[str, Any]) -> str:
-    payload = {
+    payload: dict[str, Any] = {
         "id": trigger["id"],
         "owner_user_id": trigger["owner_user_id"],
         "scope_path": trigger["scope_path"],
@@ -67,13 +67,20 @@ def serialize(trigger: dict[str, Any]) -> str:
         "enabled": bool(trigger["enabled"]),
         "created_at": trigger.get("created_at"),
     }
+    # Schedule fields are emitted only when the trigger is schedule-kind, so
+    # delta YAMLs stay clean. ``schedule_last_fired_at`` is intentionally
+    # *never* written — it's runtime state, and persisting it would commit
+    # to the wiki repo on every fire.
+    for key in ("schedule_cron", "schedule_timezone", "schedule_start_at"):
+        value = trigger.get(key)
+        if value is not None:
+            payload[key] = value
     return yaml.safe_dump(payload, sort_keys=False)
 
 
 def parse(yaml_text: str) -> dict[str, Any]:
-    """Parse a trigger YAML file. ``message`` / ``destination`` are
-    optional (default to ``None``) so old or hand-written files without
-    them still load.
+    """Parse a trigger YAML file. Optional fields default to ``None`` so
+    old or hand-written files without them still load.
     """
     data: object = yaml.safe_load(yaml_text)
     if not isinstance(data, dict) or "id" not in data:
@@ -81,6 +88,9 @@ def parse(yaml_text: str) -> dict[str, Any]:
     typed = cast(dict[str, Any], data)
     typed.setdefault("message", None)
     typed.setdefault("destination", None)
+    typed.setdefault("schedule_cron", None)
+    typed.setdefault("schedule_timezone", None)
+    typed.setdefault("schedule_start_at", None)
     return typed
 
 

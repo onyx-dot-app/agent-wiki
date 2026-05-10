@@ -31,6 +31,7 @@
   - [] explain_functionality (needs manual rewrite)
   - [x] run_bash
   - [] edit_doc_nl natural language
+- [] Agents to know about other agents working on the same docs
 
 ## Document Updater
 - [] From Onyx connector pushes
@@ -50,7 +51,7 @@
 - [] Document processing queue
 - [x] Trigger evaluation queue
 - [x] BM25 indexing queue
-- [] Cron jobs and task queuing
+- [x] Cron jobs and task queuing
 - [x] Task creation (trigger evals + BM25 update) on document updates from agents, chat, human saving
 
 ## Core Architecture
