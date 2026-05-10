@@ -172,6 +172,32 @@ classes in `app/models/`.
 - Field names can't start with `_` — use a public name (or `PrivateAttr`
   if it's truly internal).
 
+### LLM tracing — `app/tracing/`, never instrument inline
+
+Every LLM exchange and tool dispatch is already wrapped at the
+chokepoint (`app/llm/client.py:stream` and
+`app/llm/agents/chat.py:_drive_loop`). Anything new that calls
+`client.stream` / `client.complete` picks up an `llm:<provider>`
+span automatically; tool dispatch through the chat loop picks up
+`tool:<name>` spans automatically.
+
+For a new top-level flow (a new agent, a new background task, a new
+API handler that drives the LLM), wrap its entry point:
+
+```python
+from app.tracing import trace_flow
+with trace_flow("agent.my_thing", user_id=user_id, ...):
+    ...
+```
+
+That's the whole API. Don't reach for `start_llm_span` /
+`start_tool_span` directly — they're already wired at the seams.
+Don't `import braintrust` outside `app/tracing/braintrust.py`.
+
+Config (project, API key, enabled flag) is admin-managed at
+`/admin/braintrust`. No env-var fallback. See
+`local_data/wiki/observability/braintrust-tracing.md`.
+
 ### Wiki edits — through `app/wiki/git.py`
 
 Never `subprocess.run(["git", ...])` from anywhere else. The wrapper enforces
@@ -248,6 +274,23 @@ Error responses use `{"error": "<message>"}` with the right status code (see
 `app/api/auth.py`). The frontend's `ApiError` parses this shape.
 
 ## Frontend rules
+
+### Every change considers light mode, dark mode, and responsiveness
+
+Before declaring a frontend change done, verify it in **both themes** and at
+**both viewport sizes**. The app supports light and dark mode (toggled via
+`data-theme` on `<html>`; tokens live in `src/lib/theme.ts` + `globals.css`)
+and a mobile breakpoint (`useIsMobile()` from `src/lib/viewport.ts`).
+
+- Don't introduce raw hex/rgb/named colors — always go through `color.*` /
+  `shadow.*` from `src/lib/theme.ts`. New shades must be added to both
+  `:root` and `:root[data-theme="dark"]` in `globals.css`.
+- Don't use `background: "white"` (or any literal) — use `color.bg.page`.
+- Bare `<input>` / `<textarea>` / `<select>` inherit themed defaults from
+  `globals.css`; keep them themed when overriding.
+- Layouts must hold up at the mobile breakpoint — gate dense desktop
+  chrome with `isMobile`, and avoid hardcoded widths that overflow
+  narrow viewports.
 
 ### Network — only via `src/lib/api.ts:apiFetch`
 

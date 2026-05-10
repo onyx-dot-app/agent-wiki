@@ -5,3 +5,224 @@
 html {
   scrollbar-gutter: stable;
 }
+
+/* Theme tokens — light is the default, dark overrides via the
+   ``data-theme="dark"`` attribute toggled by ThemeProvider on <html>.
+   Raw hex values live here; ``lib/theme.ts`` exposes them as CSS
+   variable references that components consume. */
+
+:root {
+  /* Tells the browser to use light variants for native UI (scrollbars,
+     autofill, calendar/date popouts, etc.). The dark-theme block flips
+     this. Without it, native form controls keep their hardcoded white
+     surfaces in dark mode and look broken. */
+  color-scheme: light;
+
+  /* Text */
+  --color-text-primary: #37352f;
+  --color-text-secondary: #5a5854;
+  --color-text-muted: #787671;
+  --color-text-faint: #9b9a96;
+  --color-text-inverse: #ffffff;
+
+  /* Backgrounds */
+  --color-bg-page: #ffffff;
+  --color-bg-panel: #fbfbfa;
+  --color-bg-sunken: #f7f6f3;
+  --color-bg-hover: #efeeec;
+  --color-bg-active: #e8e7e4;
+
+  /* Borders */
+  --color-border-subtle: #f1f0ee;
+  --color-border-default: #ebebea;
+  --color-border-strong: #d9d8d5;
+  --color-border-focus: #37352f;
+
+  /* Accent (near-black warm grey, not a hue) */
+  --color-accent-bg: #37352f;
+  --color-accent-bg-hover: #1f1d1a;
+  --color-accent-fg: #ffffff;
+  --color-accent-subtle-bg: #f1f0ee;
+  --color-accent-subtle-bg-hover: #e8e7e4;
+  --color-accent-subtle-fg: #37352f;
+  --color-accent-subtle-border: #dcdbd8;
+
+  /* Semantic state colors */
+  --color-state-success-bg: #dcfce7;
+  --color-state-success-border: #86efac;
+  --color-state-success-fg: #166534;
+
+  --color-state-warning-bg: #fef3c7;
+  --color-state-warning-border: #fcd34d;
+  --color-state-warning-fg: #78350f;
+
+  --color-state-danger-bg: #fee2e2;
+  --color-state-danger-border: #fca5a5;
+  --color-state-danger-fg: #7f1d1d;
+
+  --color-state-info-bg: #e0f2fe;
+  --color-state-info-border: #7dd3fc;
+  --color-state-info-fg: #075985;
+
+  /* Modal scrim */
+  --color-overlay: rgba(15, 15, 15, 0.45);
+
+  /* Shadows */
+  --shadow-sm: 0 1px 2px rgba(15, 15, 15, 0.06);
+  --shadow-md: 0 4px 12px rgba(15, 15, 15, 0.08);
+  --shadow-popover: 0 8px 24px rgba(15, 15, 15, 0.10);
+  --shadow-fab: 0 6px 20px rgba(15, 15, 15, 0.18);
+  --shadow-modal: 0 24px 60px rgba(15, 15, 15, 0.18);
+  --shadow-panel: -4px 0 24px rgba(15, 15, 15, 0.08);
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  /* Text — inverted hierarchy so warm-grey character is preserved. */
+  --color-text-primary: #ededec;
+  --color-text-secondary: #bdbcb8;
+  --color-text-muted: #8d8c87;
+  --color-text-faint: #6a6965;
+  --color-text-inverse: #1f1d1a;
+
+  /* Backgrounds — climbing tonal scale from page → active. */
+  --color-bg-page: #1f1d1a;
+  --color-bg-panel: #2a2826;
+  --color-bg-sunken: #36332f;
+  --color-bg-hover: #3d3a36;
+  --color-bg-active: #46433e;
+
+  /* Borders — visible without glaring against the dark surfaces. */
+  --color-border-subtle: #2f2c29;
+  --color-border-default: #3d3a36;
+  --color-border-strong: #555049;
+  --color-border-focus: #ededec;
+
+  /* Accent inverts: light surface, dark text. */
+  --color-accent-bg: #ededec;
+  --color-accent-bg-hover: #ffffff;
+  --color-accent-fg: #1f1d1a;
+  --color-accent-subtle-bg: #36332f;
+  --color-accent-subtle-bg-hover: #46433e;
+  --color-accent-subtle-fg: #ededec;
+  --color-accent-subtle-border: #555049;
+
+  /* State colors — desaturated for dark mode, foregrounds lifted. */
+  --color-state-success-bg: #14361f;
+  --color-state-success-border: #2a6b3c;
+  --color-state-success-fg: #86efac;
+
+  --color-state-warning-bg: #3d2c10;
+  --color-state-warning-border: #6b521e;
+  --color-state-warning-fg: #fcd34d;
+
+  --color-state-danger-bg: #3a1313;
+  --color-state-danger-border: #6b2727;
+  --color-state-danger-fg: #fca5a5;
+
+  --color-state-info-bg: #0f2c3d;
+  --color-state-info-border: #1f4f6b;
+  --color-state-info-fg: #7dd3fc;
+
+  /* Heavier scrim — dark UI behind a modal still needs separation. */
+  --color-overlay: rgba(0, 0, 0, 0.6);
+
+  /* Shadows lean on near-black + higher alpha. */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.45);
+  --shadow-popover: 0 8px 24px rgba(0, 0, 0, 0.5);
+  --shadow-fab: 0 6px 20px rgba(0, 0, 0, 0.55);
+  --shadow-modal: 0 24px 60px rgba(0, 0, 0, 0.6);
+  --shadow-panel: -4px 0 24px rgba(0, 0, 0, 0.45);
+}
+
+/* Apply the page background + base text color at the document root
+   so unmounted areas (e.g. between route transitions) don't flash
+   white in dark mode. */
+html,
+body {
+  background: var(--color-bg-page);
+  color: var(--color-text-primary);
+}
+
+/* Native form controls — components that don't pass explicit color/background
+   would otherwise render white-on-white in dark mode. These rules only
+   establish defaults; component-level inline styles still win when set. */
+input,
+textarea,
+select {
+  background: var(--color-bg-page);
+  color: var(--color-text-primary);
+}
+input::placeholder,
+textarea::placeholder {
+  color: var(--color-text-faint);
+}
+
+/* Markdown rendering (wiki article body uses className="markdown"). The
+   wiki uses react-markdown with no styling layer; without these rules
+   <pre>/<code>/<blockquote>/<table> render with browser defaults that
+   look fine in light mode but unreadable in dark. */
+.markdown {
+  color: var(--color-text-primary);
+  line-height: 1.6;
+}
+.markdown h1,
+.markdown h2,
+.markdown h3,
+.markdown h4 {
+  color: var(--color-text-primary);
+}
+.markdown a {
+  color: var(--color-text-primary);
+  text-decoration: underline;
+}
+.markdown a:hover {
+  color: var(--color-accent-bg);
+}
+.markdown code {
+  background: var(--color-bg-sunken);
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-size: 0.92em;
+}
+.markdown pre {
+  background: var(--color-bg-sunken);
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border-default);
+  border-radius: 6px;
+  padding: 12px 14px;
+  overflow-x: auto;
+}
+.markdown pre code {
+  background: transparent;
+  border: none;
+  padding: 0;
+  font-size: inherit;
+}
+.markdown blockquote {
+  border-left: 3px solid var(--color-border-strong);
+  margin: 12px 0;
+  padding: 4px 12px;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-panel);
+}
+.markdown table {
+  border-collapse: collapse;
+}
+.markdown th,
+.markdown td {
+  border: 1px solid var(--color-border-default);
+  padding: 6px 10px;
+}
+.markdown th {
+  background: var(--color-bg-sunken);
+}
+.markdown hr {
+  border: none;
+  border-top: 1px solid var(--color-border-default);
+  margin: 16px 0;
+}

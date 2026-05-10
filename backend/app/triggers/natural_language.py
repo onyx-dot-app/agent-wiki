@@ -42,6 +42,7 @@ from pydantic import BaseModel
 
 from app.llm.client import complete
 from app.llm.errors import LLMError
+from app.tracing import trace_flow
 
 log = logging.getLogger(__name__)
 
@@ -125,14 +126,15 @@ def matches(nl_description: str, payload: str) -> MatchResult:
     """
     user_msg = f"Trigger description (if):\n{nl_description}\n\n{payload}"
     try:
-        resp = complete(
-            [
-                {"role": "system", "content": _EVAL_SYSTEM_PROMPT},
-                {"role": "user", "content": user_msg},
-            ],
-            tools=[_REPORT_TOOL],
-            max_tokens=512,
-        )
+        with trace_flow("trigger.matches"):
+            resp = complete(
+                [
+                    {"role": "system", "content": _EVAL_SYSTEM_PROMPT},
+                    {"role": "user", "content": user_msg},
+                ],
+                tools=[_REPORT_TOOL],
+                max_tokens=512,
+            )
     except LLMError as e:
         log.warning("trigger eval llm_error code=%s msg=%s", e.code, e.message)
         return MatchResult(matched=False, reason=f"llm_error: {e.code}")
@@ -207,14 +209,15 @@ def render_message(
         f"{payload}"
     )
     try:
-        resp = complete(
-            [
-                {"role": "system", "content": _RENDER_SYSTEM_PROMPT},
-                {"role": "user", "content": user_msg},
-            ],
-            tools=[_RENDER_TOOL],
-            max_tokens=1024,
-        )
+        with trace_flow("trigger.render_message"):
+            resp = complete(
+                [
+                    {"role": "system", "content": _RENDER_SYSTEM_PROMPT},
+                    {"role": "user", "content": user_msg},
+                ],
+                tools=[_RENDER_TOOL],
+                max_tokens=1024,
+            )
     except LLMError as e:
         log.warning("trigger render llm_error code=%s msg=%s", e.code, e.message)
         return message_instruction
@@ -267,14 +270,15 @@ def matches_snapshot(nl_description: str, payload: str) -> MatchResult:
     """
     user_msg = f"Trigger description (if):\n{nl_description}\n\n{payload}"
     try:
-        resp = complete(
-            [
-                {"role": "system", "content": _SCHEDULE_EVAL_SYSTEM_PROMPT},
-                {"role": "user", "content": user_msg},
-            ],
-            tools=[_REPORT_TOOL],
-            max_tokens=512,
-        )
+        with trace_flow("trigger.matches_snapshot"):
+            resp = complete(
+                [
+                    {"role": "system", "content": _SCHEDULE_EVAL_SYSTEM_PROMPT},
+                    {"role": "user", "content": user_msg},
+                ],
+                tools=[_REPORT_TOOL],
+                max_tokens=512,
+            )
     except LLMError as e:
         log.warning("trigger schedule eval llm_error code=%s msg=%s", e.code, e.message)
         return MatchResult(matched=False, reason=f"llm_error: {e.code}")
@@ -328,14 +332,15 @@ def render_snapshot_message(
         f"{payload}"
     )
     try:
-        resp = complete(
-            [
-                {"role": "system", "content": _SCHEDULE_RENDER_SYSTEM_PROMPT},
-                {"role": "user", "content": user_msg},
-            ],
-            tools=[_RENDER_TOOL],
-            max_tokens=1024,
-        )
+        with trace_flow("trigger.render_snapshot_message"):
+            resp = complete(
+                [
+                    {"role": "system", "content": _SCHEDULE_RENDER_SYSTEM_PROMPT},
+                    {"role": "user", "content": user_msg},
+                ],
+                tools=[_RENDER_TOOL],
+                max_tokens=1024,
+            )
     except LLMError as e:
         log.warning(
             "trigger schedule render llm_error code=%s msg=%s", e.code, e.message
@@ -434,13 +439,14 @@ def evaluate_new_file_in_dir(
         f"{payload}"
     )
     try:
-        resp = complete(
-            [
-                {"role": "system", "content": _NEW_FILE_SYSTEM_PROMPT},
-                {"role": "user", "content": user_msg},
-            ],
-            max_tokens=1024,
-        )
+        with trace_flow("trigger.evaluate_new_file_in_dir"):
+            resp = complete(
+                [
+                    {"role": "system", "content": _NEW_FILE_SYSTEM_PROMPT},
+                    {"role": "user", "content": user_msg},
+                ],
+                max_tokens=1024,
+            )
     except LLMError as e:
         log.warning(
             "trigger new-file-in-dir llm_error code=%s msg=%s", e.code, e.message

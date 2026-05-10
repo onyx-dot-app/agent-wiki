@@ -21,6 +21,7 @@ from app.llm import client
 from app.llm.agents import tools as tool_registry
 from app.llm.agents._session import seen_doc_paths
 from app.llm.prompts import load_prompt
+from app.tracing import start_tool_span
 from app.wiki import agent_activity
 
 log = logging.getLogger(__name__)
@@ -52,7 +53,7 @@ StreamEvent = dict[str, Any]
 #   {"type": "iteration_done"}        # one model turn finished, may loop again
 
 DEFAULT_SYSTEM_PROMPT = "You are a helpful AI assistant"
-DEFAULT_MAX_ITERATIONS = 8
+DEFAULT_MAX_ITERATIONS = 16
 
 
 def run_chat_loop_stream(
@@ -140,11 +141,14 @@ def _drive_loop(
         assert tool_dispatch is not None
         for call in tool_calls:
             _debug_dump("chat tool call", call)
-            try:
-                result = tool_dispatch(call["name"], call["arguments"])
-            except Exception as exc:  # surface tool errors back to the model
-                log.exception("tool dispatch failed name=%s id=%s", call["name"], call["id"])
-                result = {"error": str(exc)}
+            with start_tool_span(name=call["name"], arguments=call["arguments"]) as tspan:
+                try:
+                    result = tool_dispatch(call["name"], call["arguments"])
+                except Exception as exc:  # surface tool errors back to the model
+                    log.exception("tool dispatch failed name=%s id=%s", call["name"], call["id"])
+                    result = {"error": str(exc)}
+                if tspan is not None:
+                    tspan.log(output=result)
             _record_seen_paths(call["name"], result)
             content_str = result if isinstance(result, str) else _stringify(result)
             messages.append(
@@ -206,6 +210,90 @@ def run_chat_stream(
         )
     finally:
         agent_activity.agent_name_var.reset(token)
+
+
+def messages_from_history(history: list[dict[str, Any]]) -> list[Message]:
+    """Rebuild the agent-format message list from persisted chat rows.
+
+    ``history`` is the output of ``app.chat.sessions.get_messages``: one row
+    per persisted user / assistant turn, with assistant rows carrying the
+    full streamed event log under ``events``. We replay each assistant
+    turn's events back into the same ``{assistant, tool_calls} +
+    {role: "tool", tool_call_id, content}`` shape ``_drive_loop`` produces
+    live, so the model sees its prior tool calls and tool results when
+    continuing the conversation. Without this, the model loses all
+    knowledge of what tools it ran in earlier turns and what they returned.
+    """
+    out: list[Message] = []
+    for row in history:
+        role = row.get("role")
+        content = row.get("content", "")
+        events = row.get("events")
+        if role == "user" or not events:
+            out.append({"role": role, "content": content})
+            continue
+        out.extend(_replay_assistant_events(events, fallback_text=content))
+    return out
+
+
+def _replay_assistant_events(
+    events: list[dict[str, Any]], *, fallback_text: str
+) -> list[Message]:
+    """Convert one assistant row's saved event log back into messages.
+
+    The live loop alternates ``assistant`` (text + tool_calls) with one
+    ``role: "tool"`` per call, then loops. Events arrive as
+    ``text_delta`` → ``tool_call`` → ``tool_result`` → ``iteration_done``
+    per iteration, with ``done`` ending the final iteration. We flush an
+    iteration's accumulated state on either terminator.
+    """
+    out: list[Message] = []
+    text_parts: list[str] = []
+    tool_calls: list[dict[str, Any]] = []
+    tool_results: dict[str, str] = {}
+
+    def flush() -> None:
+        if not text_parts and not tool_calls:
+            return
+        msg: Message = {"role": "assistant", "content": "".join(text_parts)}
+        if tool_calls:
+            msg["tool_calls"] = list(tool_calls)
+        out.append(msg)
+        for call in tool_calls:
+            out.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": call["id"],
+                    "content": tool_results.get(call["id"], ""),
+                }
+            )
+        text_parts.clear()
+        tool_calls.clear()
+        tool_results.clear()
+
+    for ev in events:
+        t = ev.get("type")
+        if t == "text_delta":
+            text_parts.append(ev.get("text", ""))
+        elif t == "tool_call":
+            tool_calls.append(
+                {
+                    "id": ev["id"],
+                    "name": ev["name"],
+                    "arguments": ev.get("arguments", {}),
+                }
+            )
+        elif t == "tool_result":
+            tool_results[ev["id"]] = ev.get("content", "")
+        elif t in ("iteration_done", "done"):
+            flush()
+
+    # Flush anything left over (defensive — a clean run ends with `done`).
+    flush()
+
+    if not out:
+        out.append({"role": "assistant", "content": fallback_text})
+    return out
 
 
 def run_chat(messages: list[Message], *, model: str | None = None) -> list[Message]:

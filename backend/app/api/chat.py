@@ -36,7 +36,7 @@ from flask import Blueprint, Response, jsonify, request, stream_with_context
 
 from app.auth import current_user, login_required
 from app.chat import sessions as sessions_repo
-from app.llm.agents.chat import run_chat_stream
+from app.llm.agents.chat import messages_from_history, run_chat_stream
 from app.llm.errors import LLMError
 from app.models._helpers import error, parse_body
 from app.models.chat import (
@@ -46,6 +46,7 @@ from app.models.chat import (
     SendChatRequest,
 )
 from app.tasks.chat_title import generate_chat_title
+from app.tracing import trace_flow
 
 bp = Blueprint("chat", __name__)
 log = logging.getLogger(__name__)
@@ -153,25 +154,30 @@ def send_message():
     )
 
     # Hydrate prior history from the DB (now including the just-saved user
-    # turn) into the role+content shape the agent loop expects. We don't
-    # replay tool-call/tool-result blocks — the rendered text trace is
-    # sufficient context for continuation.
+    # turn). Each assistant row carries its full streamed event log; we
+    # replay those back into the agent-format message list so the model
+    # sees the exact tool_call / tool_result blocks it produced earlier.
     history = sessions_repo.get_messages(req.session_id)
-    messages: list[dict[str, Any]] = [
-        {"role": m["role"], "content": m["content"]} for m in history
-    ]
+    messages: list[dict[str, Any]] = messages_from_history(history)
 
     session_id = req.session_id
+    user_id = user.id
 
     def generate() -> Iterator[str]:
         events: list[dict[str, Any]] = []
         text_parts: list[str] = []
         try:
-            for ev in run_chat_stream(messages):
-                events.append(ev)
-                if ev.get("type") == "text_delta":
-                    text_parts.append(ev.get("text", ""))
-                yield _sse(ev)
+            with trace_flow(
+                "chat.send_message",
+                chat_session_id=session_id,
+                user_id=user_id,
+                is_first_turn=is_first_turn,
+            ):
+                for ev in run_chat_stream(messages):
+                    events.append(ev)
+                    if ev.get("type") == "text_delta":
+                        text_parts.append(ev.get("text", ""))
+                    yield _sse(ev)
         except LLMError as exc:
             yield _sse({"type": "error", "code": exc.code, "message": exc.message})
             return

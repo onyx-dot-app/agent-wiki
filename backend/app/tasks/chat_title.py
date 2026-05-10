@@ -17,6 +17,7 @@ from app.chat import sessions as sessions_repo
 from app.llm import client
 from app.llm.errors import LLMError
 from app.tasks.queues import documents_queue
+from app.tracing import trace_flow
 
 log = logging.getLogger(__name__)
 
@@ -48,15 +49,19 @@ def generate_chat_title(session_id: str) -> None:
         {
             "role": "user",
             "content": (
-                f"User: {user_msg['content']}\n\n"
-                f"Assistant: {assistant_msg['content']}\n\n"
+                f"Message 1, User:\n```\n{user_msg['content']}\n```\n\n"
+                f"Message 2, Assistant:\n```\n{assistant_msg['content']}\n```\n\n"
+                "Write a concise 3-6 word title summarizing the conversation "
+                "above. Output the title text only — no quotes, no trailing "
+                "punctuation, no preamble.\n"
                 "Title:"
             ),
         },
     ]
 
     try:
-        result = client.complete(prompt, max_tokens=64)
+        with trace_flow("task.chat_title", chat_session_id=session_id):
+            result = client.complete(prompt, max_tokens=64)
     except LLMError:
         log.exception("generate_chat_title llm error session_id=%s", session_id)
         return

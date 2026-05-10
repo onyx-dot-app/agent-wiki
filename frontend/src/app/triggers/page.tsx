@@ -11,9 +11,9 @@ import { useRequireAuth } from "@/lib/auth";
 import { color, radius } from "@/lib/theme";
 import { useIsMobile } from "@/lib/viewport";
 import { describeCron } from "@/lib/cron";
+import { formatScopePath } from "@/lib/format";
 import {
   deleteTrigger,
-  formatScopePath,
   getTriggerVersion,
   updateTrigger,
   useTriggerDestinations,
@@ -178,6 +178,9 @@ export default function TriggersPage() {
                     }}
                   >
                     <span title={t.scope_path}>{formatScopePath(t.scope_path)}</span>
+                    <span style={{ fontFamily: "inherit", fontSize: 11, color: color.text.faint }}>
+                      {t.id}
+                    </span>
                     {t.last_edited_at && (
                       <span
                         title={new Date(t.last_edited_at).toLocaleString()}

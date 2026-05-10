@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
+from app.models.user_settings import UserSettings
+
 
 class SignupRequest(BaseModel):
     email: str = Field(min_length=1)
@@ -27,6 +29,7 @@ class AuthSession(BaseModel):
     email: str
     name: str | None
     is_admin: bool
+    settings: UserSettings = Field(default_factory=UserSettings)
 
 
 class AuthConfig(BaseModel):

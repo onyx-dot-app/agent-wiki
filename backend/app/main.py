@@ -18,6 +18,7 @@ from app.api import (
     mcp_tokens,
     permissions,
     triggers,
+    user as user_api,
     users,
     webhooks,
 )
@@ -60,6 +61,7 @@ def create_app() -> Flask:
 
     app.register_blueprint(auth.bp, url_prefix="/api/auth")
     app.register_blueprint(admin.bp, url_prefix="/api/admin")
+    app.register_blueprint(user_api.bp, url_prefix="/api/user")
     app.register_blueprint(users.bp, url_prefix="/api/users")
     app.register_blueprint(mcp_tokens.bp, url_prefix="/api/mcp/tokens")
     app.register_blueprint(mcp_connections.bp, url_prefix="/api/mcp/connections")

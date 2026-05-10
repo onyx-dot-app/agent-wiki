@@ -5,12 +5,14 @@ import { Button } from "@/components/common/Button";
 import { PageHeader } from "@/components/common/PageHeader";
 import { useRequireAuth } from "@/lib/auth";
 import { useEvents } from "@/lib/events";
+import { formatInTimezone, formatScopePath } from "@/lib/format";
 import { color, radius } from "@/lib/theme";
 import { useIsMobile } from "@/lib/viewport";
 
 export default function EventsPage() {
   const { user, loading } = useRequireAuth();
   const isMobile = useIsMobile();
+  const timezone = user?.settings.timezone ?? "UTC";
   const { events, error, isValidating, refresh } = useEvents({
     kind: "trigger.fire",
     limit: 200,
@@ -58,7 +60,6 @@ export default function EventsPage() {
               change_kind?: string;
               reason?: string;
               trigger_id?: string;
-              sha?: string;
             };
             return (
               <li
@@ -87,7 +88,11 @@ export default function EventsPage() {
                       color: color.text.primary,
                     }}
                   >
-                    {p.doc_path ?? <em style={{ color: color.text.faint }}>(no path)</em>}
+                    {p.doc_path ? (
+                      <span title={p.doc_path}>{formatScopePath(p.doc_path)}</span>
+                    ) : (
+                      <em style={{ color: color.text.faint }}>(no path)</em>
+                    )}
                     {p.change_kind && (
                       <span
                         style={{
@@ -105,7 +110,7 @@ export default function EventsPage() {
                       </span>
                     )}
                   </div>
-                  <span style={{ fontSize: 12, color: color.text.muted }}>{formatTs(ev.ts)}</span>
+                  <span style={{ fontSize: 12, color: color.text.muted }}>{formatTs(ev.ts, timezone)}</span>
                 </div>
                 {p.reason && (
                   <div style={{ fontSize: 14, color: color.text.secondary, whiteSpace: "pre-wrap" }}>
@@ -113,7 +118,7 @@ export default function EventsPage() {
                   </div>
                 )}
                 <div style={{ marginTop: 8, fontSize: 11, color: color.text.faint }}>
-                  trigger {ev.target ?? "?"} · sha {p.sha?.slice(0, 7) ?? "?"}
+                  trigger {ev.target ?? "?"}
                 </div>
               </li>
             );
@@ -124,10 +129,8 @@ export default function EventsPage() {
   );
 }
 
-function formatTs(ts: string): string {
+function formatTs(ts: string, timezone: string): string {
   // SQLite's `datetime('now')` is UTC without a Z; treat as UTC.
   const iso = ts.includes("T") ? ts : `${ts.replace(" ", "T")}Z`;
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return ts;
-  return d.toLocaleString();
+  return formatInTimezone(iso, timezone) || ts;
 }
