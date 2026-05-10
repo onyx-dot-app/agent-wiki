@@ -33,24 +33,6 @@ const sentenceTagStyle: CSSProperties = {
   letterSpacing: 0.3,
 };
 
-function kindBadgeStyle(kind: Trigger["kind"]): CSSProperties {
-  return {
-    flexShrink: 0,
-    fontSize: 10,
-    fontWeight: 700,
-    padding: "1px 6px",
-    borderRadius: radius.xs,
-    border: `1px solid ${color.accent.subtleBorder}`,
-    background:
-      kind === "schedule" ? color.state.info.bg : color.accent.subtleBg,
-    color:
-      kind === "schedule" ? color.state.info.fg : color.accent.subtleFg,
-    letterSpacing: 0.3,
-    fontFamily:
-      "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-  };
-}
-
 function formatRelative(iso: string | null | undefined): string {
   if (!iso) return "";
   const t = new Date(iso).getTime();
@@ -127,7 +109,7 @@ export default function TriggersPage() {
       <main style={{ padding: isMobile ? "16px 12px" : "24px 32px", height: "100vh", overflowY: "auto" }}>
         <PageHeader
           title="Triggers"
-          description="Triggers watch a doc (or folder) and notice when something specific changes. When that happens, the message you wrote shows up on the Events tab so you can review it."
+          description="Triggers watch a document (or folder) and notice when something specific changes, or check on a recurring schedule. When the trigger fires, the message you wrote shows up on the Events tab so you can review it."
           actions={
             <Button
               variant="primary"
@@ -158,7 +140,7 @@ export default function TriggersPage() {
 
         {triggers.length === 0 && !listError && (
           <p style={{ color: color.text.muted, fontSize: 14 }}>
-            No triggers yet. Create one to start watching docs for changes.
+            No triggers yet. Create one to start watching documents for changes.
           </p>
         )}
 
@@ -195,7 +177,6 @@ export default function TriggersPage() {
                       alignItems: "baseline",
                     }}
                   >
-                    <span style={kindBadgeStyle(t.kind)}>{t.kind.toUpperCase()}</span>
                     <span title={t.scope_path}>{formatScopePath(t.scope_path)}</span>
                     {t.last_edited_at && (
                       <span

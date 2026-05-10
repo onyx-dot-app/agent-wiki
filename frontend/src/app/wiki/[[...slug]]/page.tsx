@@ -617,7 +617,11 @@ function Row({
         background: dropActive ? color.accent.subtleBg : hover ? color.bg.sunken : "transparent",
         outline: dropActive ? `2px solid ${color.accent.bg}` : undefined,
         opacity: busy ? 0.5 : 1,
-        cursor: renaming ? "default" : "grab",
+        // Click is the primary action; drag is secondary. Pointer
+        // matches the row's main affordance and lines up with how
+        // every other list row in the app feels. Drag still works
+        // from anywhere in the row regardless of cursor style.
+        cursor: renaming ? "default" : "pointer",
       }}
     >
       <span style={{ color: color.text.muted, display: "flex", marginRight: 10 }}>{icon}</span>

@@ -242,12 +242,12 @@ export function TriggerModal({ open, initial, onClose, onSaved, lockScope }: Pro
             disabled={busy || isEdit}
             style={{ ...inputStyle, cursor: isEdit ? "not-allowed" : "pointer" }}
           >
-            <option value="delta">On a doc update (delta)</option>
-            <option value="schedule">On a schedule (cron)</option>
+            <option value="delta">On a document update</option>
+            <option value="schedule">On a schedule</option>
           </select>
           {isEdit && (
             <span style={fieldHintStyle}>
-              The trigger kind can&rsquo;t be changed after creation. Delete
+              The trigger type can&rsquo;t be changed after creation. Delete
               and recreate to switch.
             </span>
           )}
@@ -263,8 +263,9 @@ export function TriggerModal({ open, initial, onClose, onSaved, lockScope }: Pro
             style={inputStyle}
           />
           <span style={fieldHintStyle}>
-            e.g. <code>projects/foo.md</code> for one doc, <code>projects</code>{" "}
-            for a folder, or <code>/</code> to watch the whole wiki.
+            e.g. <code>projects/foo.md</code> for one document,{" "}
+            <code>projects</code> for a folder, or <code>/</code> to watch
+            the whole wiki.
           </span>
         </label>
 
@@ -297,9 +298,9 @@ export function TriggerModal({ open, initial, onClose, onSaved, lockScope }: Pro
           />
           {kind === "schedule" && (
             <span style={fieldHintStyle}>
-              On each scheduled tick, the trigger fires only when this
-              condition is satisfied by the current state of the docs
-              under <em>Watching</em>.
+              On each scheduled run, the trigger fires only when this
+              condition is satisfied by the current state of the
+              documents under <em>Watching</em>.
             </span>
           )}
         </label>
@@ -480,7 +481,8 @@ function ScheduleFields({
           />
           <span style={fieldHintStyle}>
             Months without this day (e.g. day 31 in February) skip that
-            month entirely &mdash; cron does not roll over.
+            month entirely &mdash; the schedule does not roll over to the
+            next valid day.
           </span>
         </label>
       )}
@@ -501,8 +503,8 @@ function ScheduleFields({
           ))}
         </select>
         <span style={fieldHintStyle}>
-          The cron expression is interpreted in this IANA timezone.
-          Daylight-saving transitions are honored.
+          The schedule runs in this timezone. Daylight-saving
+          transitions are handled automatically.
         </span>
       </label>
 
@@ -516,9 +518,9 @@ function ScheduleFields({
           style={inputStyle}
         />
         <span style={fieldHintStyle}>
-          Anchored to your local time. Leave empty to start firing on the
-          next cron match. Useful for delaying a launch (e.g. &ldquo;don&rsquo;t
-          start until next Monday&rdquo;).
+          Anchored to your local time. Leave empty to start at the next
+          scheduled run. Useful for delaying a launch (e.g.
+          &ldquo;don&rsquo;t start until next Monday&rdquo;).
         </span>
       </label>
 
@@ -587,8 +589,8 @@ function ScheduleFields({
 
       <div
         style={{
-          fontSize: 12,
-          color: color.text.secondary,
+          fontSize: 13,
+          color: color.text.primary,
           background: color.bg.page,
           border: `1px solid ${color.border.subtle}`,
           borderRadius: radius.xs,
@@ -596,12 +598,7 @@ function ScheduleFields({
           lineHeight: 1.5,
         }}
       >
-        <div>
-          <strong style={{ color: color.text.primary }}>{cronSummary}</strong>
-        </div>
-        <code style={{ fontSize: 11, color: color.text.muted }}>
-          cron: <span>{computedCron || "—"}</span>
-        </code>
+        <strong>{cronSummary}</strong>
       </div>
     </div>
   );
