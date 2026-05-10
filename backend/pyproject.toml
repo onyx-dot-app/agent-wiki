@@ -18,6 +18,7 @@ dependencies = [
     "openai>=1.50",     # Responses API + streaming events
     "google-genai>=1.0", # Gemini provider
     "ollama>=0.4",       # Local-model provider (uses Ollama HTTP API)
+    "braintrust>=0.0.190", # LLM tracing — admin-configured project + key
     "pyyaml>=6.0",       # trigger files on disk
     "gunicorn>=21",      # dev/prod WSGI; --reload + --graceful-timeout for in-flight-safe reloads
 ]

@@ -37,6 +37,17 @@ class IngestConfigRequest(BaseModel):
     max_doc_chars: int
 
 
+class BraintrustConfigRequest(BaseModel):
+    """Empty-string ``api_key`` means 'leave existing untouched'; explicit
+    ``null`` clears it. The blueprint resolves that semantic. ``enabled``
+    is rejected by the blueprint when the resolved key/project would be
+    empty — the UI mirrors that gating, but we re-check server-side."""
+
+    project: str
+    api_key: str | None = None
+    enabled: bool = False
+
+
 class OkResponse(BaseModel):
     ok: bool = True
 
@@ -90,3 +101,12 @@ class WebView(BaseModel):
 
 class IngestView(BaseModel):
     max_doc_chars: int
+
+
+class BraintrustView(BaseModel):
+    """Admin view of the Braintrust tracing settings."""
+
+    project: str
+    api_key_set: bool
+    api_key_hint: str
+    enabled: bool

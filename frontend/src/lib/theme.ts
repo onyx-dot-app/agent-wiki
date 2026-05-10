@@ -1,8 +1,11 @@
 // Centralized design tokens for the agent-wiki frontend.
 //
-// Why a constant module instead of CSS variables: the codebase is
-// inline-style React (no Tailwind, no CSS-in-JS), and TS constants stay
-// type-checked, autocomplete cleanly, and survive refactors.
+// Tokens resolve to CSS custom properties (e.g. ``var(--color-text-primary)``)
+// rather than literal hex values, so a single ``data-theme="dark"`` attribute
+// on ``<html>`` swaps the entire UI without re-rendering. The actual hex
+// values for each theme live in ``app/globals.css`` keyed off ``:root`` and
+// ``:root[data-theme="dark"]``. ThemeProvider (``lib/theme-provider.tsx``)
+// reads the user preference and toggles the attribute.
 //
 // Palette intent: warm greyscale (Notion/Linear-flavored). The "accent"
 // role is near-black, not indigo — primary actions stand out by tonal
@@ -10,49 +13,66 @@
 // badges, and danger buttons keep their semantic punch.
 //
 // Rule of thumb: never write a raw hex in a component. If you need a new
-// shade, add it here.
+// shade, add it here AND add the matching CSS variable in globals.css for
+// both light and dark themes.
 
 export const color = {
   text: {
-    primary: "#37352f",
-    secondary: "#5a5854",
-    muted: "#787671",
-    faint: "#9b9a96",
-    inverse: "#ffffff",
+    primary: "var(--color-text-primary)",
+    secondary: "var(--color-text-secondary)",
+    muted: "var(--color-text-muted)",
+    faint: "var(--color-text-faint)",
+    inverse: "var(--color-text-inverse)",
   },
   bg: {
-    page: "#ffffff",
-    panel: "#fbfbfa",
-    sunken: "#f7f6f3",
-    hover: "#efeeec",
-    active: "#e8e7e4",
+    page: "var(--color-bg-page)",
+    panel: "var(--color-bg-panel)",
+    sunken: "var(--color-bg-sunken)",
+    hover: "var(--color-bg-hover)",
+    active: "var(--color-bg-active)",
   },
   border: {
-    subtle: "#f1f0ee",
-    default: "#ebebea",
-    strong: "#d9d8d5",
-    focus: "#37352f",
+    subtle: "var(--color-border-subtle)",
+    default: "var(--color-border-default)",
+    strong: "var(--color-border-strong)",
+    focus: "var(--color-border-focus)",
   },
   // Primary action surface. "subtle" variants are for selected rows,
   // hover states on item lists, and badges that shouldn't shout.
   accent: {
-    bg: "#37352f",
-    bgHover: "#1f1d1a",
-    fg: "#ffffff",
-    subtleBg: "#f1f0ee",
-    subtleBgHover: "#e8e7e4",
-    subtleFg: "#37352f",
-    subtleBorder: "#dcdbd8",
+    bg: "var(--color-accent-bg)",
+    bgHover: "var(--color-accent-bg-hover)",
+    fg: "var(--color-accent-fg)",
+    subtleBg: "var(--color-accent-subtle-bg)",
+    subtleBgHover: "var(--color-accent-subtle-bg-hover)",
+    subtleFg: "var(--color-accent-subtle-fg)",
+    subtleBorder: "var(--color-accent-subtle-border)",
   },
   state: {
-    success: { bg: "#dcfce7", border: "#86efac", fg: "#166534" },
-    warning: { bg: "#fef3c7", border: "#fcd34d", fg: "#78350f" },
-    danger: { bg: "#fee2e2", border: "#fca5a5", fg: "#7f1d1d" },
-    info: { bg: "#e0f2fe", border: "#7dd3fc", fg: "#075985" },
+    success: {
+      bg: "var(--color-state-success-bg)",
+      border: "var(--color-state-success-border)",
+      fg: "var(--color-state-success-fg)",
+    },
+    warning: {
+      bg: "var(--color-state-warning-bg)",
+      border: "var(--color-state-warning-border)",
+      fg: "var(--color-state-warning-fg)",
+    },
+    danger: {
+      bg: "var(--color-state-danger-bg)",
+      border: "var(--color-state-danger-border)",
+      fg: "var(--color-state-danger-fg)",
+    },
+    info: {
+      bg: "var(--color-state-info-bg)",
+      border: "var(--color-state-info-border)",
+      fg: "var(--color-state-info-fg)",
+    },
   },
   // Fixed overlay tint for modal scrims. Warm near-black to match the
   // palette; never use slate (rgba(15,23,42,…)) or pure black.
-  overlay: "rgba(15, 15, 15, 0.45)",
+  overlay: "var(--color-overlay)",
 } as const;
 
 export const radius = {
@@ -64,14 +84,41 @@ export const radius = {
 } as const;
 
 export const shadow = {
-  sm: "0 1px 2px rgba(15, 15, 15, 0.06)",
-  md: "0 4px 12px rgba(15, 15, 15, 0.08)",
-  popover: "0 8px 24px rgba(15, 15, 15, 0.10)",
-  fab: "0 6px 20px rgba(15, 15, 15, 0.18)",
+  sm: "var(--shadow-sm)",
+  md: "var(--shadow-md)",
+  popover: "var(--shadow-popover)",
+  fab: "var(--shadow-fab)",
   // Centered focal modals (RunAgentModal, TriggerModal, ShareDialog,
   // history modal). One token so every modal lifts off the page the
   // same amount.
-  modal: "0 24px 60px rgba(15, 15, 15, 0.18)",
+  modal: "var(--shadow-modal)",
   // Side panels anchored to a screen edge (chat widget expanded mode).
-  panel: "-4px 0 24px rgba(15, 15, 15, 0.08)",
+  panel: "var(--shadow-panel)",
 } as const;
+
+// Concrete hex palettes — used by SVG illustrations (the only legal
+// raw-hex consumers per CLAUDE.md) when they need to pick the right
+// stroke/fill for the active theme. Keep in lock-step with globals.css.
+export const lightPalette = {
+  textPrimary: "#37352f",
+  textSecondary: "#5a5854",
+  textMuted: "#787671",
+  textFaint: "#9b9a96",
+  bgPage: "#ffffff",
+  bgPanel: "#fbfbfa",
+  bgSunken: "#f7f6f3",
+  borderDefault: "#ebebea",
+} as const;
+
+export const darkPalette = {
+  textPrimary: "#ededec",
+  textSecondary: "#bdbcb8",
+  textMuted: "#8d8c87",
+  textFaint: "#6a6965",
+  bgPage: "#1f1d1a",
+  bgPanel: "#2a2826",
+  bgSunken: "#36332f",
+  borderDefault: "#3d3a36",
+} as const;
+
+export type PaletteHex = typeof lightPalette;

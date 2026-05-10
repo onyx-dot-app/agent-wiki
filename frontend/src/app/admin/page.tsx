@@ -66,6 +66,12 @@ export default function AdminPage() {
             description="Backend liveness and background queue depth."
             icon={<HealthIcon />}
           />
+          <AdminCard
+            href="/admin/braintrust"
+            title="Braintrust tracing"
+            description="Send every LLM exchange to a Braintrust project for inspection."
+            icon={<TraceIcon />}
+          />
         </div>
       </main>
     </AppShell>
@@ -150,6 +156,19 @@ function HealthIcon() {
   return (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <path d="M3 12h4l2-6 4 12 2-6h6" />
+    </svg>
+  );
+}
+
+function TraceIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <circle cx="6" cy="6" r="2.5" />
+      <circle cx="18" cy="18" r="2.5" />
+      <circle cx="6" cy="18" r="2.5" />
+      <path d="M6 8.5v7" />
+      <path d="M8.5 18h7" />
+      <path d="M8 8l8 8" />
     </svg>
   );
 }

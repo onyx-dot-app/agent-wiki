@@ -15,7 +15,7 @@ const POLL_MS = 5000;
 const QUEUE_LABELS: Record<string, string> = {
   documents: "Document update processing",
   triggers: "Trigger evaluations",
-  wiki_bm25: "Wiki page indexing",
+  lightweight_maintenance: "Lightweight maintenance",
 };
 
 export default function AdminHealthPage() {

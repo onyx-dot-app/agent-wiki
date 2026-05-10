@@ -6,10 +6,12 @@ import uuid
 from typing import Any
 
 from sqlalchemy import func, select
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.auth.passwords import hash_password
 from app.db.models import User
 from app.db.session import session
+from app.models.user_settings import UserSettings
 
 log = logging.getLogger(__name__)
 
@@ -22,7 +24,14 @@ def _to_dict(u: User) -> dict[str, Any]:
         "password_hash": u.password_hash,
         "is_admin": u.is_admin,
         "created_at": u.created_at,
+        "settings": _settings_with_defaults(u.settings),
     }
+
+
+def _settings_with_defaults(raw: dict[str, Any] | None) -> dict[str, Any]:
+    """Run a (possibly stale or empty) JSONB blob through ``UserSettings``
+    so callers always see every field populated with the current default."""
+    return UserSettings.model_validate(raw or {}).model_dump()
 
 
 def get_by_email(email: str) -> dict[str, Any] | None:
@@ -86,3 +95,42 @@ def delete(user_id: str) -> None:
         u = s.get(User, user_id)
         if u is not None:
             s.delete(u)
+
+
+def update_name(user_id: str, name: str | None) -> dict[str, Any] | None:
+    """Set the user's display name. Returns the refreshed user dict, or
+    None if the user doesn't exist."""
+    with session() as s:
+        u = s.get(User, user_id)
+        if u is None:
+            return None
+        u.name = name
+        s.flush()
+        return _to_dict(u)
+
+
+def get_settings(user_id: str) -> dict[str, Any] | None:
+    with session() as s:
+        u = s.get(User, user_id)
+        if u is None:
+            return None
+        return _settings_with_defaults(u.settings)
+
+
+def update_settings(user_id: str, partial: dict[str, Any]) -> dict[str, Any] | None:
+    """Merge ``partial`` into the user's stored settings, validate, persist.
+
+    Returns the resulting full settings dict (defaults filled), or None
+    if the user doesn't exist.
+    """
+    with session() as s:
+        u = s.get(User, user_id)
+        if u is None:
+            return None
+        merged = {**(u.settings or {}), **partial}
+        validated = UserSettings.model_validate(merged).model_dump()
+        u.settings = validated
+        # JSONB stored as a dict — SQLAlchemy can't tell we mutated by
+        # assignment vs. in-place; flag it explicitly so the UPDATE fires.
+        flag_modified(u, "settings")
+        return validated

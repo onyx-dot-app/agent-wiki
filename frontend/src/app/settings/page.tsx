@@ -1,0 +1,331 @@
+"use client";
+
+import { useEffect, useMemo, useState, type CSSProperties, type FormEvent, type ReactNode } from "react";
+
+import { AppShell } from "@/components/common/AppShell";
+import { Button } from "@/components/common/Button";
+import { BackLink, PageHeader } from "@/components/common/PageHeader";
+import { useRequireAuth } from "@/lib/auth";
+import { color, radius } from "@/lib/theme";
+import { setLocalThemePreview } from "@/lib/theme-provider";
+import { useIsMobile } from "@/lib/viewport";
+import type { DefaultLanding, ThemeSetting, UserSettings } from "@/types";
+
+const DEFAULT_SETTINGS: UserSettings = {
+  theme: "system",
+  timezone: "UTC",
+  default_landing: "wiki_home",
+};
+
+// A short curated IANA list — covers the common cases without dumping
+// the full ~600-zone list into a <select>. The text input below is the
+// escape hatch for anything else.
+const COMMON_TIMEZONES = [
+  "UTC",
+  "America/Los_Angeles",
+  "America/Denver",
+  "America/Chicago",
+  "America/New_York",
+  "America/Sao_Paulo",
+  "Europe/London",
+  "Europe/Berlin",
+  "Europe/Athens",
+  "Asia/Dubai",
+  "Asia/Kolkata",
+  "Asia/Singapore",
+  "Asia/Tokyo",
+  "Australia/Sydney",
+];
+
+export default function SettingsPage() {
+  const { user, loading, updateSettings, updateProfile } = useRequireAuth();
+  const isMobile = useIsMobile();
+
+  if (loading || !user) {
+    return <main style={{ padding: isMobile ? 16 : 32 }}>Loading…</main>;
+  }
+
+  return (
+    <AppShell>
+      <main style={{ padding: isMobile ? "16px 12px" : "24px 32px", maxWidth: 720 }}>
+        <BackLink href="/" label="← Home" />
+        <PageHeader
+          title="Personal settings"
+          description="Profile fields and preferences scoped to your account. Saved on the server, so they follow you across browsers."
+        />
+        <Section title="Profile">
+          <ProfileForm initialName={user.name} updateProfile={updateProfile} />
+        </Section>
+        <Section title="Preferences">
+          <SettingsForm initial={user.settings} updateSettings={updateSettings} />
+        </Section>
+      </main>
+    </AppShell>
+  );
+}
+
+function Section({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section style={{ marginTop: 24 }}>
+      <h2
+        style={{
+          margin: "0 0 12px",
+          fontSize: 14,
+          fontWeight: 600,
+          textTransform: "uppercase",
+          letterSpacing: 0.4,
+          color: color.text.muted,
+        }}
+      >
+        {title}
+      </h2>
+      {children}
+    </section>
+  );
+}
+
+function ProfileForm({
+  initialName,
+  updateProfile,
+}: {
+  initialName: string | null;
+  updateProfile: (partial: { name: string }) => Promise<unknown>;
+}) {
+  const [name, setName] = useState<string>(initialName ?? "");
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setName(initialName ?? "");
+  }, [initialName]);
+
+  const dirty = name !== (initialName ?? "");
+
+  async function onSubmit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!dirty) return;
+    setSaving(true);
+    setError(null);
+    setSaved(false);
+    try {
+      await updateProfile({ name });
+      setSaved(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "failed to save");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <form onSubmit={onSubmit} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <label>
+        <div style={lblStyle}>Display name</div>
+        <input
+          value={name}
+          onChange={(e) => {
+            setName(e.target.value);
+            setSaved(false);
+            setError(null);
+          }}
+          placeholder="e.g. Ada Lovelace"
+          maxLength={200}
+          style={inputStyle}
+        />
+        <div style={hintStyle}>
+          Shown in the app header and on activity attributed to you. Leave blank to fall back to your email.
+        </div>
+      </label>
+
+      {error && <div style={{ color: color.state.danger.fg }}>{error}</div>}
+      {saved && <div style={{ color: color.state.success.fg }}>Saved.</div>}
+      <div>
+        <Button type="submit" variant="primary" disabled={saving || !dirty}>
+          {saving ? "Saving…" : "Save"}
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+function SettingsForm({
+  initial,
+  updateSettings,
+}: {
+  initial: UserSettings;
+  updateSettings: (partial: Partial<UserSettings>) => Promise<UserSettings>;
+}) {
+  const [draft, setDraft] = useState<UserSettings>({ ...DEFAULT_SETTINGS, ...initial });
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [tzCustom, setTzCustom] = useState<boolean>(
+    !COMMON_TIMEZONES.includes(initial.timezone),
+  );
+
+  // Pull future updates (e.g. another tab) back into the form.
+  useEffect(() => {
+    setDraft({ ...DEFAULT_SETTINGS, ...initial });
+    setTzCustom(!COMMON_TIMEZONES.includes(initial.timezone));
+  }, [initial]);
+
+  const dirty = useMemo(() => {
+    return (Object.keys(draft) as (keyof UserSettings)[]).some(
+      (k) => draft[k] !== initial[k],
+    );
+  }, [draft, initial]);
+
+  function update<K extends keyof UserSettings>(key: K, value: UserSettings[K]) {
+    setDraft((d) => ({ ...d, [key]: value }));
+    setSaved(false);
+    setError(null);
+  }
+
+  function pickTheme(theme: ThemeSetting) {
+    update("theme", theme);
+    // Apply immediately so the user sees the change without waiting for
+    // the round-trip — Save still needs to hit the server to persist.
+    setLocalThemePreview(theme);
+  }
+
+  async function onSubmit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!dirty) return;
+    setSaving(true);
+    setError(null);
+    setSaved(false);
+    try {
+      const partial: Partial<UserSettings> = {};
+      (Object.keys(draft) as (keyof UserSettings)[]).forEach((k) => {
+        if (draft[k] !== initial[k]) {
+          (partial as Record<string, unknown>)[k] = draft[k];
+        }
+      });
+      await updateSettings(partial);
+      setSaved(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "failed to save");
+      // Revert the optimistic theme apply if the server rejected.
+      setLocalThemePreview(initial.theme);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <form onSubmit={onSubmit} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <label>
+        <div style={lblStyle}>Theme</div>
+        <select
+          value={draft.theme}
+          onChange={(e) => pickTheme(e.target.value as ThemeSetting)}
+          style={inputStyle}
+        >
+          <option value="system">System (match OS)</option>
+          <option value="light">Light</option>
+          <option value="dark">Dark</option>
+        </select>
+        <div style={hintStyle}>Visual chrome of the app on this account.</div>
+      </label>
+
+      <label>
+        <div style={lblStyle}>Timezone</div>
+        {tzCustom ? (
+          <input
+            value={draft.timezone}
+            onChange={(e) => update("timezone", e.target.value)}
+            placeholder="e.g. America/Los_Angeles"
+            style={inputStyle}
+          />
+        ) : (
+          <select
+            value={draft.timezone}
+            onChange={(e) => {
+              if (e.target.value === "__custom__") {
+                setTzCustom(true);
+                return;
+              }
+              update("timezone", e.target.value);
+            }}
+            style={inputStyle}
+          >
+            {COMMON_TIMEZONES.map((tz) => (
+              <option key={tz} value={tz}>
+                {tz}
+              </option>
+            ))}
+            <option value="__custom__">Other…</option>
+          </select>
+        )}
+        <div style={hintStyle}>
+          Used for timestamps and scheduled-trigger displays.
+          {tzCustom && (
+            <>
+              {" "}
+              <button
+                type="button"
+                onClick={() => {
+                  setTzCustom(false);
+                  if (!COMMON_TIMEZONES.includes(draft.timezone)) {
+                    update("timezone", "UTC");
+                  }
+                }}
+                style={linkButtonStyle}
+              >
+                Pick from common list
+              </button>
+            </>
+          )}
+        </div>
+      </label>
+
+      <label>
+        <div style={lblStyle}>Default landing page</div>
+        <select
+          value={draft.default_landing}
+          onChange={(e) => update("default_landing", e.target.value as DefaultLanding)}
+          style={inputStyle}
+        >
+          <option value="wiki_home">Wiki home</option>
+          <option value="recent">Recently edited</option>
+          <option value="last_viewed">Last viewed page</option>
+        </select>
+        <div style={hintStyle}>Where the app opens after sign-in.</div>
+      </label>
+
+      {error && <div style={{ color: color.state.danger.fg }}>{error}</div>}
+      {saved && <div style={{ color: color.state.success.fg }}>Saved.</div>}
+      <div>
+        <Button type="submit" variant="primary" disabled={saving || !dirty}>
+          {saving ? "Saving…" : "Save"}
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+const inputStyle: CSSProperties = {
+  width: "100%",
+  padding: "8px 10px",
+  boxSizing: "border-box",
+  border: `1px solid ${color.border.default}`,
+  borderRadius: radius.sm,
+  fontSize: 14,
+};
+const lblStyle: CSSProperties = { marginBottom: 4, fontSize: 13, fontWeight: 500 };
+const hintStyle: CSSProperties = {
+  marginTop: 4,
+  fontSize: 12,
+  color: color.text.muted,
+  lineHeight: 1.5,
+};
+const linkButtonStyle: CSSProperties = {
+  background: "transparent",
+  border: "none",
+  padding: 0,
+  fontSize: 12,
+  color: color.text.muted,
+  cursor: "pointer",
+  textDecoration: "underline",
+};

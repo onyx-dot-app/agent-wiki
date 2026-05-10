@@ -20,6 +20,7 @@ from app.models.auth import (
     OkResponse,
     SignupRequest,
 )
+from app.models.user_settings import UserSettings
 
 bp = Blueprint("auth", __name__)
 log = logging.getLogger(__name__)
@@ -32,8 +33,13 @@ def _start_session(user: User) -> None:
 
 
 def _session_payload(user: User) -> dict[str, Any]:
+    settings = users_repo.get_settings(user.id) or {}
     return AuthSession(
-        id=user.id, email=user.email, name=user.name, is_admin=user.is_admin
+        id=user.id,
+        email=user.email,
+        name=user.name,
+        is_admin=user.is_admin,
+        settings=UserSettings.model_validate(settings),
     ).model_dump()
 
 

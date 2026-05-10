@@ -44,6 +44,7 @@ from pydantic import BaseModel, Field
 from app.llm import providers
 from app.llm.errors import LLMError
 from app.llm.settings import get as get_llm_settings
+from app.tracing import start_llm_span
 
 log = logging.getLogger(__name__)
 
@@ -129,24 +130,45 @@ def stream(
     tool_calls: list[dict[str, Any]] = []
     stop_reason = ""
     usage: dict[str, int] = {"input_tokens": 0, "output_tokens": 0, "reasoning_tokens": 0}
-    for ev in provider.stream(
-        messages,
+    with start_llm_span(
+        provider=settings.provider,
         model=chosen_model,
+        messages=messages,
         tools=tools,
         max_tokens=max_tokens,
-        settings=settings,
-    ):
-        t = ev.get("type")
-        if t == "text_delta":
-            text_parts.append(ev["text"])
-        elif t == "tool_call":
-            tool_calls.append(
-                {"id": ev["id"], "name": ev["name"], "arguments": ev["arguments"]}
-            )
-        elif t == "done":
-            stop_reason = ev.get("stop_reason", "") or ""
-            usage = ev.get("usage") or usage
-        yield ev
+    ) as span:
+        for ev in provider.stream(
+            messages,
+            model=chosen_model,
+            tools=tools,
+            max_tokens=max_tokens,
+            settings=settings,
+        ):
+            t = ev.get("type")
+            if t == "text_delta":
+                text_parts.append(ev["text"])
+            elif t == "tool_call":
+                tool_calls.append(
+                    {"id": ev["id"], "name": ev["name"], "arguments": ev["arguments"]}
+                )
+            elif t == "done":
+                stop_reason = ev.get("stop_reason", "") or ""
+                usage = ev.get("usage") or usage
+                # Log the output on the ``done`` event, BEFORE the yield —
+                # if the caller abandons iteration after this (or never
+                # advances past the final yield), the span still carries
+                # the full output. Doing it post-loop is fragile because
+                # a GeneratorExit raised at the yield unwinds the ``with``
+                # without ever hitting the post-loop branch.
+                if span is not None:
+                    span.log(
+                        output=[
+                            _build_assistant_message("".join(text_parts), tool_calls)
+                        ],
+                        metrics=_usage_to_metrics(usage),
+                        metadata={"stop_reason": stop_reason},
+                    )
+            yield ev
     _debug_dump(
         "llm response",
         {
@@ -156,6 +178,37 @@ def stream(
             "usage": usage,
         },
     )
+
+
+def _build_assistant_message(
+    text: str, tool_calls: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """Shape an assistant turn the way Braintrust's UI expects.
+
+    Mirrors the OpenAI chat-completions message shape — role + content,
+    plus an optional ``tool_calls`` array. Empty tool_calls are dropped
+    so the rendered span stays tidy.
+    """
+    msg: dict[str, Any] = {"role": "assistant", "content": text}
+    if tool_calls:
+        msg["tool_calls"] = tool_calls
+    return msg
+
+
+def _usage_to_metrics(usage: dict[str, int]) -> dict[str, int]:
+    """Translate our normalized usage dict to the Braintrust ``metrics``
+    keys the UI renders (prompt_tokens / completion_tokens / tokens)."""
+    prompt_tokens = int(usage.get("input_tokens", 0))
+    completion_tokens = int(usage.get("output_tokens", 0))
+    reasoning_tokens = int(usage.get("reasoning_tokens", 0))
+    metrics: dict[str, int] = {
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
+        "tokens": prompt_tokens + completion_tokens,
+    }
+    if reasoning_tokens:
+        metrics["reasoning_tokens"] = reasoning_tokens
+    return metrics
 
 
 def complete(

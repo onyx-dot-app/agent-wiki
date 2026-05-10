@@ -16,6 +16,7 @@ import { ShareDialog } from "@/components/wiki/ShareDialog";
 import { FolderIcon, FileIcon } from "@/components/wiki/WikiIcons";
 import { apiFetch } from "@/lib/api";
 import { useRequireAuth } from "@/lib/auth";
+import { rememberWikiPath } from "@/lib/lastViewed";
 import { color, radius, shadow } from "@/lib/theme";
 import { useIsMobile } from "@/lib/viewport";
 import type { DocumentActivity, DocumentActivityResponse } from "@/types";
@@ -65,6 +66,12 @@ export default function WikiRoute() {
   });
   const slugPath = slugParts.join("/");
   const isFile = slugPath.endsWith(".md");
+
+  // Remember the most recent wiki path so the "Last viewed" landing
+  // setting has something to fall back to.
+  useEffect(() => {
+    rememberWikiPath("/wiki" + (slugPath ? "/" + slugPath : ""));
+  }, [slugPath]);
 
   if (loading || !user) return <main style={{ padding: isMobile ? 16 : 32 }}>Loading…</main>;
 

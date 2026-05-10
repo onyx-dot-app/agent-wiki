@@ -95,7 +95,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const displayName = user?.name || user?.email || "";
 
   return (
-    <div style={{ display: "flex", minHeight: "100vh", background: "white" }}>
+    <div style={{ display: "flex", minHeight: "100vh", background: color.bg.page }}>
       {/* Mobile drawer backdrop. Only rendered when the sidebar is
           expanded on a phone — tapping it closes the drawer. */}
       {isMobileDrawer && (
@@ -271,6 +271,14 @@ export function AppShell({ children }: { children: ReactNode }) {
                   )}
                 </div>
                 <div style={{ height: 1, background: color.border.subtle, margin: "4px 0" }} />
+                <MenuButton
+                  onClick={() => {
+                    setMenuOpen(false);
+                    router.push("/settings");
+                  }}
+                >
+                  Settings
+                </MenuButton>
                 {user?.is_admin && (
                   <MenuButton
                     onClick={() => {
@@ -555,7 +563,7 @@ function BackendHealthBanner({
       <strong>{unreachable ? "Backend unreachable." : "Backend degraded."}</strong>{" "}
       {unreachable
         ? "The frontend can't reach the backend. Some features will not work until it recovers."
-        : "One or more background queues are reporting errors."}{" "}
+        : "The backend isn't fully healthy. Background work like search indexing and scheduled triggers may be delayed until it recovers."}{" "}
       {isAdmin ? (
         <Link
           href="/admin/health"

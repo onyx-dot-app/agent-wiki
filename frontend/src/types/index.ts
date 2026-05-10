@@ -5,6 +5,17 @@ export interface Document {
   updated_at: string;
 }
 
+export type ThemeSetting = "light" | "dark" | "system";
+export type DefaultLanding = "wiki_home" | "recent" | "last_viewed";
+
+export interface UserSettings {
+  theme: ThemeSetting;
+  timezone: string;
+  default_landing: DefaultLanding;
+}
+
+export type UserSettingsUpdate = Partial<UserSettings>;
+
 export type { Trigger, TriggerKind } from "@/lib/triggers";
 
 export interface Event {

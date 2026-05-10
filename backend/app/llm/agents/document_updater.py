@@ -18,6 +18,7 @@ from typing import Any
 
 from app.llm import client
 from app.llm.prompts import load_prompt
+from app.tracing import trace_flow
 
 log = logging.getLogger(__name__)
 
@@ -38,12 +39,13 @@ def run(doc_id: str, current_body: str, payload: dict[str, Any], source: str) ->
         current_body=current_body,
         payload=payload,
     )
-    result = client.complete(
-        messages=[
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ],
-    )
+    with trace_flow("agent.document_updater", doc_id=doc_id, source=source):
+        result = client.complete(
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+        )
     text = result.text.strip()
     if not text:
         log.warning("document_updater returned empty text for %s", doc_id)

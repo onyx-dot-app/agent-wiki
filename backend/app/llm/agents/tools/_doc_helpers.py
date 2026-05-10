@@ -117,20 +117,14 @@ def assert_read_before_write(rel: str) -> None:
 
 
 def author_string() -> str | None:
-    """Best-effort author derived from the current request's user.
+    """Git author for any wiki commit driven by the chat agent's tools.
 
-    Tools usually run inside ``stream_with_context`` so the Flask app
-    context is available. Outside that (tests, periodic tasks invoking
-    the same helpers) we silently fall back to ``None`` and let the git
-    wrapper use its default identity.
+    Chat-flow writes are attributed to a bot identity rather than the
+    prompting user — the user didn't author the diff, the agent did on
+    their behalf. Direct UI/API edits keep their own per-user attribution
+    (see ``app/api/triggers.py:_git_author``).
     """
-    try:
-        user = current_user()
-    except RuntimeError:
-        return None
-    if user is None:
-        return None
-    return f"{user.name or user.email} <{user.email}>"
+    return "AI Wiki Helper <ai-wiki-helper@local>"
 
 
 # --------------------------------------------------------------------------- #

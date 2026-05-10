@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from "react";
 
+import { formatScopePath } from "@/lib/format";
 import {
-  formatScopePath,
   getTriggerHistory,
   type Trigger,
   type TriggerCommit,

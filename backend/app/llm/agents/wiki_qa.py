@@ -15,6 +15,7 @@ import logging
 from typing import Any, cast
 
 from app.llm.prompts import load_prompt
+from app.tracing import trace_flow
 
 log = logging.getLogger(__name__)
 
@@ -39,14 +40,15 @@ def run(query: str, *, model: str | None = None) -> dict[str, Any]:
     system_prompt = load_prompt("wiki_qa.system")
     tools = [spec for spec in tool_registry.TOOL_SPECS if spec["name"] in _READ_TOOLS]
     messages: list[dict[str, Any]] = [{"role": "user", "content": query}]
-    chat_agent.run_chat_loop(
-        messages,
-        system_prompt=system_prompt,
-        tools=tools,
-        tool_dispatch=tool_registry.dispatch,
-        model=model,
-        max_iterations=_MAX_ITERATIONS,
-    )
+    with trace_flow("agent.wiki_qa", query=query):
+        chat_agent.run_chat_loop(
+            messages,
+            system_prompt=system_prompt,
+            tools=tools,
+            tool_dispatch=tool_registry.dispatch,
+            model=model,
+            max_iterations=_MAX_ITERATIONS,
+        )
     answer = _final_assistant_text(messages)
     sources = _collect_sources(messages)
     return {"answer": answer, "sources": sources}

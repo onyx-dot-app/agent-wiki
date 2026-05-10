@@ -17,6 +17,8 @@ dicts derived from these objects so callers don't depend on the ORM.
 """
 from __future__ import annotations
 
+from typing import Any
+
 from sqlalchemy import (
     BigInteger,
     Boolean,
@@ -28,6 +30,7 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 # Default for TEXT timestamp columns. Stored as ISO-formatted strings so
@@ -57,6 +60,14 @@ class User(Base):
     password_hash: Mapped[str | None] = mapped_column(Text)
     is_admin: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("FALSE"))
     created_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
+    # Per-user preferences (theme, timezone, etc.). Shape is enforced by the
+    # ``UserSettings`` pydantic model in ``app/models/user_settings.py``;
+    # the column itself is a free-form JSONB so adding a new preference
+    # doesn't require a migration. Defaults to ``{}``; the API fills in
+    # field defaults from the pydantic model on read.
+    settings: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
 
 
 class McpConnection(Base):
@@ -368,6 +379,18 @@ class IngestSettings(Base):
     updated_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
 
     __table_args__ = (CheckConstraint("id = 1", name="ingest_settings_singleton"),)
+
+
+class BraintrustSettings(Base):
+    __tablename__ = "braintrust_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
+    project: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
+    api_key: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    updated_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
+
+    __table_args__ = (CheckConstraint("id = 1", name="braintrust_settings_singleton"),)
 
 
 # --------------------------------------------------------------------------- #

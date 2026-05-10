@@ -4,12 +4,20 @@ import { createContext, useCallback, useContext, useEffect, useState, type React
 import { useRouter, usePathname } from "next/navigation";
 
 import { ApiError, apiFetch } from "@/lib/api";
+import type { UserSettings, UserSettingsUpdate } from "@/types";
+
+const DEFAULT_USER_SETTINGS: UserSettings = {
+  theme: "system",
+  timezone: "UTC",
+  default_landing: "wiki_home",
+};
 
 export interface AuthUser {
   id: string;
   email: string;
   name: string | null;
   is_admin: boolean;
+  settings: UserSettings;
 }
 
 export interface AuthConfig {
@@ -24,6 +32,8 @@ interface AuthContextValue {
   login: (email: string, password: string) => Promise<void>;
   signup: (email: string, password: string, name?: string) => Promise<void>;
   logout: () => Promise<void>;
+  updateSettings: (partial: UserSettingsUpdate) => Promise<UserSettings>;
+  updateProfile: (partial: { name: string }) => Promise<AuthUser>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -40,7 +50,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         apiFetch<AuthConfig>("/auth/config"),
       ]);
       if (me.status === "fulfilled") {
-        setUser(me.value);
+        setUser(withDefaultSettings(me.value));
       } else if (me.reason instanceof ApiError && me.reason.status === 401) {
         setUser(null);
       } else {
@@ -61,7 +71,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       method: "POST",
       body: JSON.stringify({ email, password }),
     });
-    setUser(me);
+    setUser(withDefaultSettings(me));
   }, []);
 
   const signup = useCallback(async (email: string, password: string, name?: string) => {
@@ -69,7 +79,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       method: "POST",
       body: JSON.stringify({ email, password, name }),
     });
-    setUser(me);
+    setUser(withDefaultSettings(me));
   }, []);
 
   const logout = useCallback(async () => {
@@ -77,11 +87,47 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
   }, []);
 
+  const updateSettings = useCallback(
+    async (partial: UserSettingsUpdate): Promise<UserSettings> => {
+      const updated = await apiFetch<UserSettings>("/user/settings", {
+        method: "PUT",
+        body: JSON.stringify(partial),
+      });
+      setUser((prev) => (prev ? { ...prev, settings: updated } : prev));
+      return updated;
+    },
+    [],
+  );
+
+  const updateProfile = useCallback(
+    async (partial: { name: string }): Promise<AuthUser> => {
+      const updated = await apiFetch<AuthUser>("/user/profile", {
+        method: "PUT",
+        body: JSON.stringify(partial),
+      });
+      const normalized = withDefaultSettings(updated);
+      setUser(normalized);
+      return normalized;
+    },
+    [],
+  );
+
   return (
-    <AuthContext.Provider value={{ user, config, loading, login, signup, logout }}>
+    <AuthContext.Provider
+      value={{ user, config, loading, login, signup, logout, updateSettings, updateProfile }}
+    >
       {children}
     </AuthContext.Provider>
   );
+}
+
+// Older /auth/me responses or partial JSON shouldn't crash the UI —
+// fill in any missing settings fields with defaults.
+function withDefaultSettings(u: AuthUser): AuthUser {
+  return {
+    ...u,
+    settings: { ...DEFAULT_USER_SETTINGS, ...(u.settings ?? {}) },
+  };
 }
 
 export function useAuth(): AuthContextValue {

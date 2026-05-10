@@ -2,33 +2,6 @@ import useSWR from "swr";
 
 import { apiFetch } from "@/lib/api";
 
-/** Display form of a trigger scope path.
- *
- * Files (ending in `.md`) → `/full/path/to/file.md`.
- * Directories → `/full/path/to/dir/` (trailing slash signals dir-scope).
- * Root dir → `/`.
- *
- * If the result exceeds `maxLen`, the middle is replaced with `...` while
- * keeping the leading anchor segment and the final segment intact, e.g.
- * `/somepath/.../somefile.md`.
- */
-export function formatScopePath(scope_path: string, maxLen = 60): string {
-  const trimmed = scope_path.trim().replace(/^\/+|\/+$/g, "");
-  if (trimmed === "" || trimmed === ".") return "/";
-  const isFile = trimmed.endsWith(".md");
-  const full = isFile ? `/${trimmed}` : `/${trimmed}/`;
-  if (full.length <= maxLen) return full;
-
-  const segs = trimmed.split("/");
-  if (segs.length <= 2) return full;
-
-  const first = segs[0];
-  const last = segs[segs.length - 1];
-  const candidate = isFile ? `/${first}/.../${last}` : `/${first}/.../${last}/`;
-  if (candidate.length <= maxLen) return candidate;
-  return isFile ? `/.../${last}` : `/.../${last}/`;
-}
-
 export type TriggerKind = "delta" | "schedule";
 
 export interface Trigger {

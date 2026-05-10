@@ -9,8 +9,9 @@
 
 ## LLM Interface
 - [x] Basic interface + tools
-- [] Support for major LLM providers
-- [] Nice UX for LLM setup
+- [ ] Support for major LLM providers
+- [ ] Nice UX for LLM setup
+- [x] Braintrust Tracing
 
 ## Chat Harness
 - [x] Basic chat loop
@@ -28,27 +29,27 @@
   - [x] write_doc
   - [x] create_directory
   - [x] move_path
-  - [] explain_functionality (needs manual rewrite)
+  - [ ] explain_functionality (needs manual rewrite)
   - [x] run_bash
-  - [] edit_doc_nl natural language
-- [] Agents to know about other agents working on the same docs
+  - [ ] edit_doc_nl natural language
+- [ ] Agents to know about other agents working on the same docs
 
 ## Document Updater
-- [] From Onyx connector pushes
-- [] From natural language
-- [] From direct diff from Agents
+- [ ] From Onyx connector pushes
+- [ ] From natural language
+- [ ] From direct diff from Agents
 - [x] Agent activities are tracked as metadata to the docs
-- [] Need to ensure the updates are not too frequent or infrequent. Need to make sure they dont bloat over time.
+- [ ] Need to ensure the updates are not too frequent or infrequent. Need to make sure they dont bloat over time.
 
 ## Trigger Evaluation
-- [] Basic trigger eval on doc change
-- [] Trigger eval on directory level + explanation of how it works (it only sees the 1 doc that changed)
-- [] Time based trigger scoping, what docs to pass in (with a maximum or agent approach)
+- [ ] Basic trigger eval on doc change
+- [ ] Trigger eval on directory level + explanation of how it works (it only sees the 1 doc that changed)
+- [ ] Time based trigger scoping, what docs to pass in (with a maximum or agent approach)
 
 ## Background Tasks
 - [x] Implement queue
 - [x] Implement workers
-- [] Document processing queue
+- [ ] Document processing queue
 - [x] Trigger evaluation queue
 - [x] BM25 indexing queue
 - [x] Cron jobs and task queuing
@@ -70,7 +71,7 @@
 ## Infra/Deployment
 - [x] Docker Compose
 - [x] Helm
-- [] Cloud deployment handling
+- [ ] Cloud deployment handling
 
 ## CI/Testing
 - [x] Unit test framework
@@ -84,12 +85,14 @@
 - [x] Renaming documents and folders
 - [x] Moving documents and folders
 - [x] Responsive UI
+- [x] Dark Mode
+- [x] Personal Settings
 
 ## Random TODOs
-- [] Mark documents that haven't been touched in a long time.
-- [] Chat and triggers need to know who the user is
-- [] Chat needs to know what page the user is on
-- [] Make sure when user is editing manually, the doc is locked from updates
-- [] Make sure the user edit is loading the latest so it doesn't write over a save
-- [] Triggers need to know about the document
-- [] Chat widget does not stream and does not show tool calls
+- [ ] Mark documents that haven't been touched in a long time.
+- [ ] Chat and triggers need to know who the user is
+- [ ] Chat needs to know what page the user is on
+- [ ] Make sure when user is editing manually, the doc is locked from updates
+- [ ] Make sure the user edit is loading the latest so it doesn't write over a save
+- [ ] Triggers need to know about the document
+- [ ] Chat widget does not stream and does not show tool calls

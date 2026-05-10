@@ -16,6 +16,8 @@ from app.models._helpers import error, parse_body
 from app.models.admin import (
     AdminUserListResponse,
     AdminUserView,
+    BraintrustConfigRequest,
+    BraintrustView,
     IngestConfigRequest,
     IngestView,
     LLMConfigRequest,
@@ -25,6 +27,8 @@ from app.models.admin import (
     WebConfigRequest,
     WebView,
 )
+from app.tracing import settings as braintrust_settings
+from app.tracing.settings import BraintrustSettings
 from app.web import settings as web_settings
 from app.web.settings import WebSettings
 
@@ -264,3 +268,62 @@ def put_ingest():
         actor.id if actor else "?", req.max_doc_chars,
     )
     return jsonify(_ingest_view(ingest_settings.get()).model_dump())
+
+
+# --------------------------------------------------------------------------- #
+# Braintrust tracing settings                                                 #
+# --------------------------------------------------------------------------- #
+
+
+def _braintrust_view(s: BraintrustSettings) -> BraintrustView:
+    return BraintrustView(
+        project=s.project,
+        api_key_set=bool(s.api_key),
+        api_key_hint=_redact(s.api_key),
+        enabled=s.enabled,
+    )
+
+
+@bp.get("/braintrust")
+@admin_required
+def get_braintrust():
+    return jsonify(_braintrust_view(braintrust_settings.get()).model_dump())
+
+
+@bp.put("/braintrust")
+@admin_required
+def put_braintrust():
+    raw: dict[str, Any] = request.get_json(silent=True) or {}
+    req = parse_body(BraintrustConfigRequest, raw)
+    project = req.project.strip()
+    current = braintrust_settings.get()
+
+    # Same convention as the LLM settings: empty string = "leave existing
+    # untouched"; explicit null = "clear". For non-secret fields (project,
+    # enabled) the request value is the authoritative one.
+    def _resolve_secret(field: str, sent: str | None, existing: str) -> str:
+        if field not in raw:
+            return existing
+        if sent is None:
+            return ""
+        if sent == "":
+            return existing
+        return sent
+
+    api_key = _resolve_secret("api_key", req.api_key, current.api_key)
+    # Tracing can only be enabled when both project and key are set —
+    # mirrors the UI gating but is also enforced server-side so a stale
+    # form can't flip it on incorrectly.
+    enabled = bool(req.enabled and project and api_key)
+
+    braintrust_settings.upsert(project=project, api_key=api_key, enabled=enabled)
+    # The tracing module caches its logger keyed by (project, api_key), so
+    # rotating credentials transparently picks up the new value on the
+    # next call. Toggling ``enabled`` without changing credentials short-
+    # circuits before the cache lookup, so no explicit invalidation needed.
+    actor = current_user()
+    log.info(
+        "admin: %s updated braintrust settings project=%s key_set=%s enabled=%s",
+        actor.id if actor else "?", project, bool(api_key), enabled,
+    )
+    return jsonify(_braintrust_view(braintrust_settings.get()).model_dump())
