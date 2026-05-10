@@ -2,14 +2,14 @@
 
 The other e2e file (``test_save_to_fire_e2e.py``) asserts trigger fan-out
 goes through. This file asserts the **other** half of the post-write
-seam — the ``wiki_bm25_queue``-routed ``reindex_path`` task — actually
-executes and populates ``documents_fts``.
+seam — the ``lightweight_maintenance_queue``-routed ``reindex_path``
+task — actually executes and populates ``documents_fts``.
 
-We run with ``wiki_bm25_queue.immediate = True`` so the worker
-loop is replaced by inline execution. That proves the wiring (decorator
-registration, queue routing, fts.upsert_document call) without needing
-a real consumer process. Production parity check is in
-``docker-compose.yml`` (``worker-wiki-bm25``).
+We run with ``lightweight_maintenance_queue.immediate = True`` so the
+worker loop is replaced by inline execution. That proves the wiring
+(decorator registration, queue routing, fts.upsert_document call)
+without needing a real consumer process. Production parity check is in
+``docker-compose.yml`` (``worker-lightweight-maintenance``).
 """
 from __future__ import annotations
 
@@ -44,17 +44,17 @@ def signed_in(app, tmp_repo):
 
 @pytest.fixture(autouse=True)
 def _immediate_queues():
-    """Run the bm25 + triggers queues inline.
+    """Run the maintenance + triggers queues inline.
 
     We don't care about trigger fires here, but the save path enqueues
     on both queues and we want neither to block.
     """
     from contextlib import ExitStack
 
-    from app.tasks.queues import triggers_queue, wiki_bm25_queue
+    from app.tasks.queues import lightweight_maintenance_queue, triggers_queue
 
     with ExitStack() as stack:
-        stack.enter_context(wiki_bm25_queue.immediate_mode())
+        stack.enter_context(lightweight_maintenance_queue.immediate_mode())
         stack.enter_context(triggers_queue.immediate_mode())
         yield
 
@@ -148,8 +148,9 @@ def test_delete_removes_doc_from_fts(signed_in):
 
 
 def test_manual_reindex_endpoint_routes_through_same_queue(signed_in):
-    """``POST /api/documents/reindex`` enqueues a task on wiki_bm25_queue too,
-    so the same immediate-mode patch covers it."""
+    """``POST /api/documents/reindex`` enqueues a task on
+    lightweight_maintenance_queue too, so the same immediate-mode patch
+    covers it."""
     from app.wiki import git as wiki_git
 
     # Commit directly via git, bypassing the API so FTS isn't pre-populated.

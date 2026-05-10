@@ -1,7 +1,21 @@
 "use client";
 
-import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 
+import { Button } from "@/components/common/Button";
+import {
+  PRESET_OPTIONS,
+  WEEKDAY_NAMES,
+  browserTimezone,
+  cronToParts,
+  defaultScheduleParts,
+  describeCron,
+  listTimezones,
+  localInputToUtcIso,
+  partsToCron,
+  utcIsoToLocalInput,
+  type FrequencyPreset,
+} from "@/lib/cron";
 import {
   createTrigger,
   getTriggerDestinations,
@@ -9,7 +23,9 @@ import {
   type Trigger,
   type TriggerCreateInput,
   type TriggerDestination,
+  type TriggerKind,
 } from "@/lib/triggers";
+import { color, radius, shadow } from "@/lib/theme";
 
 interface Props {
   open: boolean;
@@ -20,9 +36,6 @@ interface Props {
   lockScope?: boolean;
 }
 
-// Fallback used while the catalog is loading or if the fetch fails — keeps
-// the form usable on a transient network blip. Live values come from
-// GET /api/triggers/destinations.
 const FALLBACK_DESTINATIONS: TriggerDestination[] = [
   { id: "event_log", name: "Event Log", description: "Tracked in the event log only." },
 ];
@@ -41,8 +54,15 @@ export function TriggerModal({ open, initial, onClose, onSaved, lockScope }: Pro
     FALLBACK_DESTINATIONS,
   );
   const [destination, setDestination] = useState(FALLBACK_DESTINATIONS[0].id);
+  const [kind, setKind] = useState<TriggerKind>("delta");
+  const [scheduleParts, setScheduleParts] = useState(defaultScheduleParts());
+  const [customCron, setCustomCron] = useState("");
+  const [tz, setTz] = useState(browserTimezone());
+  const [startAtLocal, setStartAtLocal] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const tzOptions = useMemo(() => listTimezones(), []);
 
   useEffect(() => {
     if (!open) return;
@@ -50,6 +70,12 @@ export function TriggerModal({ open, initial, onClose, onSaved, lockScope }: Pro
     setIfText(initial?.nl_description ?? "");
     setSendText(initial?.message ?? "");
     setDestination(initial?.destination ?? FALLBACK_DESTINATIONS[0].id);
+    setKind((initial?.kind as TriggerKind) ?? "delta");
+    const parts = cronToParts(initial?.schedule_cron ?? null);
+    setScheduleParts(parts);
+    setCustomCron(parts.preset === "custom" ? (initial?.schedule_cron ?? "") : "");
+    setTz(initial?.schedule_timezone ?? browserTimezone());
+    setStartAtLocal(utcIsoToLocalInput(initial?.schedule_start_at ?? null));
     setError(null);
   }, [
     open,
@@ -58,6 +84,10 @@ export function TriggerModal({ open, initial, onClose, onSaved, lockScope }: Pro
     initial?.nl_description,
     initial?.message,
     initial?.destination,
+    initial?.kind,
+    initial?.schedule_cron,
+    initial?.schedule_timezone,
+    initial?.schedule_start_at,
   ]);
 
   useEffect(() => {
@@ -67,11 +97,10 @@ export function TriggerModal({ open, initial, onClose, onSaved, lockScope }: Pro
       .then((rows) => {
         if (cancelled || rows.length === 0) return;
         setDestinations(rows);
-        // If the current selection isn't in the catalog, fall back to the first row.
         setDestination((cur) => (rows.some((r) => r.id === cur) ? cur : rows[0].id));
       })
       .catch(() => {
-        // Keep the fallback list silently — the form stays usable.
+        // Keep fallback list silently.
       });
     return () => {
       cancelled = true;
@@ -80,6 +109,9 @@ export function TriggerModal({ open, initial, onClose, onSaved, lockScope }: Pro
 
   if (!open) return null;
 
+  const computedCron = partsToCron(scheduleParts, customCron);
+  const cronSummary = describeCron(computedCron || null, tz);
+
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
@@ -87,22 +119,38 @@ export function TriggerModal({ open, initial, onClose, onSaved, lockScope }: Pro
     try {
       const nl = ifText.trim();
       const msg = sendText.trim();
+      const baseInput: TriggerCreateInput = {
+        scope_path: scopePath.trim(),
+        nl_description: nl,
+        message: msg,
+        destination,
+        kind,
+      };
+      if (kind === "schedule") {
+        if (!computedCron) {
+          throw new Error("schedule_cron is required");
+        }
+        baseInput.schedule_cron = computedCron;
+        baseInput.schedule_timezone = tz;
+        baseInput.schedule_start_at = localInputToUtcIso(startAtLocal);
+      }
       let saved: Trigger;
       if (isEdit && initial?.id) {
+        // ``kind`` is immutable on update — don't include it. Schedule
+        // fields are sent only when this is a schedule trigger; for
+        // delta we explicitly null them so a kind-flip in the DB stays
+        // consistent (the API already enforces the invariant).
         saved = await updateTrigger(initial.id, {
           scope_path: scopePath.trim(),
           nl_description: nl,
           message: msg,
           destination,
+          schedule_cron: kind === "schedule" ? computedCron : null,
+          schedule_timezone: kind === "schedule" ? tz : null,
+          schedule_start_at: kind === "schedule" ? localInputToUtcIso(startAtLocal) : null,
         });
       } else {
-        const input: TriggerCreateInput = {
-          scope_path: scopePath.trim(),
-          nl_description: nl,
-          message: msg,
-          destination,
-        };
-        saved = await createTrigger(input);
+        saved = await createTrigger(baseInput);
       }
       onSaved(saved);
       onClose();
@@ -113,9 +161,12 @@ export function TriggerModal({ open, initial, onClose, onSaved, lockScope }: Pro
     }
   }
 
-  const canSave = scopePath.trim() && ifText.trim() && sendText.trim();
+  const canSave =
+    scopePath.trim() &&
+    ifText.trim() &&
+    sendText.trim() &&
+    (kind === "delta" || (computedCron && tz));
   const selectedDest = destinations.find((d) => d.id === destination);
-  const destLabel = selectedDest?.name ?? destination;
   const destDescription = selectedDest?.description ?? "";
 
   return (
@@ -126,14 +177,13 @@ export function TriggerModal({ open, initial, onClose, onSaved, lockScope }: Pro
       style={{
         position: "fixed",
         inset: 0,
-        background: "rgba(15,23,42,0.45)",
+        background: color.overlay,
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
         zIndex: 100,
       }}
     >
-      {/* Blurred filled-in example, peeking out from behind the form. */}
       <div
         aria-hidden
         style={{
@@ -160,13 +210,13 @@ export function TriggerModal({ open, initial, onClose, onSaved, lockScope }: Pro
         onSubmit={onSubmit}
         style={{
           position: "relative",
-          background: "white",
-          borderRadius: 14,
+          background: color.bg.page,
+          borderRadius: radius.lg,
           width: "min(560px, 92vw)",
           maxHeight: "92vh",
           overflowY: "auto",
           padding: 24,
-          boxShadow: "0 32px 80px rgba(0,0,0,0.28)",
+          boxShadow: shadow.modal,
           display: "flex",
           flexDirection: "column",
           gap: 16,
@@ -174,15 +224,34 @@ export function TriggerModal({ open, initial, onClose, onSaved, lockScope }: Pro
         }}
       >
         <div>
-          <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700 }}>
+          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600, color: color.text.primary }}>
             {isEdit ? "Edit trigger" : "Create a trigger"}
           </h2>
-          <p style={{ margin: "8px 0 0", fontSize: 13, color: "#4b5563", lineHeight: 1.55 }}>
-            A trigger keeps an eye on a doc (or folder) and reacts when something
-            you care about changes. Tell us what to look for, what to say when it
-            happens, and where to send the message. We'll watch the edits for you.
+          <p style={{ margin: "6px 0 0", fontSize: 13, color: color.text.secondary, lineHeight: 1.55 }}>
+            Triggers monitor documents or folders and send events when a
+            specified condition is met. They can fire on document updates
+            or on a recurring schedule.
           </p>
         </div>
+
+        <label style={fieldStyle}>
+          <span style={fieldLabelStyle}>When to run</span>
+          <select
+            value={kind}
+            onChange={(e) => setKind(e.target.value as TriggerKind)}
+            disabled={busy || isEdit}
+            style={{ ...inputStyle, cursor: isEdit ? "not-allowed" : "pointer" }}
+          >
+            <option value="delta">On a document update</option>
+            <option value="schedule">On a schedule</option>
+          </select>
+          {isEdit && (
+            <span style={fieldHintStyle}>
+              The trigger type can&rsquo;t be changed after creation. Delete
+              and recreate to switch.
+            </span>
+          )}
+        </label>
 
         <label style={fieldStyle}>
           <span style={fieldLabelStyle}>Watching</span>
@@ -194,12 +263,31 @@ export function TriggerModal({ open, initial, onClose, onSaved, lockScope }: Pro
             style={inputStyle}
           />
           <span style={fieldHintStyle}>
-            e.g. <code>projects/foo.md</code> for one doc, <code>projects</code>{" "}
-            for a folder, or <code>/</code> to watch the whole wiki.
+            e.g. <code>projects/foo.md</code> for one document,{" "}
+            <code>projects</code> for a folder, or <code>/</code> to watch
+            the whole wiki.
           </span>
         </label>
 
-        <SentenceRow label="If" tone="if">
+        {kind === "schedule" && (
+          <ScheduleFields
+            parts={scheduleParts}
+            onPartsChange={setScheduleParts}
+            customCron={customCron}
+            onCustomCronChange={setCustomCron}
+            tz={tz}
+            onTzChange={setTz}
+            tzOptions={tzOptions}
+            startAtLocal={startAtLocal}
+            onStartAtChange={setStartAtLocal}
+            cronSummary={cronSummary}
+            computedCron={computedCron}
+            disabled={busy}
+          />
+        )}
+
+        <label style={fieldStyle}>
+          <span style={fieldLabelStyle}>If</span>
           <textarea
             value={ifText}
             onChange={(e) => setIfText(e.target.value)}
@@ -208,9 +296,17 @@ export function TriggerModal({ open, initial, onClose, onSaved, lockScope }: Pro
             rows={2}
             style={{ ...inputStyle, fontFamily: "inherit", resize: "vertical" }}
           />
-        </SentenceRow>
+          {kind === "schedule" && (
+            <span style={fieldHintStyle}>
+              On each scheduled run, the trigger fires only when this
+              condition is satisfied by the current state of the
+              documents under <em>Watching</em>.
+            </span>
+          )}
+        </label>
 
-        <SentenceRow label="then send" tone="send">
+        <label style={fieldStyle}>
+          <span style={fieldLabelStyle}>Then send</span>
           <textarea
             value={sendText}
             onChange={(e) => setSendText(e.target.value)}
@@ -219,14 +315,15 @@ export function TriggerModal({ open, initial, onClose, onSaved, lockScope }: Pro
             rows={2}
             style={{ ...inputStyle, fontFamily: "inherit", resize: "vertical" }}
           />
-        </SentenceRow>
+        </label>
 
-        <SentenceRow label="to" tone="to">
+        <label style={fieldStyle}>
+          <span style={fieldLabelStyle}>To</span>
           <select
             value={destination}
             onChange={(e) => setDestination(e.target.value)}
             disabled={busy}
-            style={{ ...inputStyle, cursor: "pointer", appearance: "auto" }}
+            style={{ ...inputStyle, cursor: "pointer" }}
           >
             {destinations.map((d) => (
               <option key={d.id} value={d.id}>
@@ -234,20 +331,15 @@ export function TriggerModal({ open, initial, onClose, onSaved, lockScope }: Pro
               </option>
             ))}
           </select>
-        </SentenceRow>
-
-        {destDescription && (
-          <p style={{ margin: 0, fontSize: 12, color: "#6b7280", lineHeight: 1.5 }}>
-            {destDescription}
-          </p>
-        )}
+          {destDescription && <span style={fieldHintStyle}>{destDescription}</span>}
+        </label>
 
         {error && (
           <div
             style={{
-              background: "#fef2f2",
-              color: "#991b1b",
-              borderRadius: 6,
+              background: color.state.danger.bg,
+              color: color.state.danger.fg,
+              borderRadius: radius.sm,
               padding: 10,
               fontSize: 13,
             }}
@@ -257,59 +349,271 @@ export function TriggerModal({ open, initial, onClose, onSaved, lockScope }: Pro
         )}
 
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-          <button type="button" onClick={onClose} disabled={busy} style={secondaryBtn}>
+          <Button type="button" onClick={onClose} disabled={busy}>
             Cancel
-          </button>
-          <button
-            type="submit"
-            disabled={busy || !canSave}
-            style={{ ...primaryBtn, opacity: busy || !canSave ? 0.6 : 1 }}
-          >
+          </Button>
+          <Button type="submit" variant="primary" disabled={busy || !canSave}>
             {busy ? "Saving…" : isEdit ? "Save" : "Create"}
-          </button>
+          </Button>
         </div>
       </form>
     </div>
   );
 }
 
-function SentenceRow({
-  label,
-  tone,
-  children,
-}: {
-  label: string;
-  tone: "if" | "send" | "to";
-  children: ReactNode;
-}) {
-  const colors = {
-    if: { bg: "#fffbeb", fg: "#92400e", border: "#fde68a" },
-    send: { bg: "#ecfdf5", fg: "#047857", border: "#a7f3d0" },
-    to: { bg: "#eef2ff", fg: "#4338ca", border: "#c7d2fe" },
-  }[tone];
+interface ScheduleFieldsProps {
+  parts: ReturnType<typeof defaultScheduleParts>;
+  onPartsChange: (p: ReturnType<typeof defaultScheduleParts>) => void;
+  customCron: string;
+  onCustomCronChange: (s: string) => void;
+  tz: string;
+  onTzChange: (s: string) => void;
+  tzOptions: string[];
+  startAtLocal: string;
+  onStartAtChange: (s: string) => void;
+  cronSummary: string;
+  computedCron: string;
+  disabled?: boolean;
+}
+
+function ScheduleFields({
+  parts,
+  onPartsChange,
+  customCron,
+  onCustomCronChange,
+  tz,
+  onTzChange,
+  tzOptions,
+  startAtLocal,
+  onStartAtChange,
+  cronSummary,
+  computedCron,
+  disabled,
+}: ScheduleFieldsProps) {
+  const showTimeOfDay = parts.preset === "daily" || parts.preset === "weekly" || parts.preset === "monthly";
+  const showWeekday = parts.preset === "weekly";
+  const showDayOfMonth = parts.preset === "monthly";
+  const isCustom = parts.preset === "custom";
+
+  const timeValue = `${pad(parts.hour)}:${pad(parts.minute)}`;
+
   return (
-    <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
-      <span
+    <div
+      style={{
+        border: `1px solid ${color.border.default}`,
+        borderRadius: radius.sm,
+        padding: 14,
+        display: "flex",
+        flexDirection: "column",
+        gap: 12,
+        background: color.bg.panel,
+      }}
+    >
+      <label style={fieldStyle}>
+        <span style={fieldLabelStyle}>Frequency</span>
+        <select
+          value={parts.preset}
+          onChange={(e) => onPartsChange({ ...parts, preset: e.target.value as FrequencyPreset })}
+          disabled={disabled}
+          style={{ ...inputStyle, cursor: "pointer" }}
+        >
+          {PRESET_OPTIONS.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      {showTimeOfDay && (
+        <label style={fieldStyle}>
+          <span style={fieldLabelStyle}>Time of day</span>
+          <input
+            type="time"
+            value={timeValue}
+            onChange={(e) => {
+              const [h, m] = e.target.value.split(":").map(Number);
+              if (Number.isFinite(h) && Number.isFinite(m)) {
+                onPartsChange({ ...parts, hour: h, minute: m });
+              }
+            }}
+            disabled={disabled}
+            style={inputStyle}
+          />
+          <span style={fieldHintStyle}>Interpreted in the timezone selected below.</span>
+        </label>
+      )}
+
+      {showWeekday && (
+        <label style={fieldStyle}>
+          <span style={fieldLabelStyle}>Day of week</span>
+          <select
+            value={parts.dayOfWeek}
+            onChange={(e) => onPartsChange({ ...parts, dayOfWeek: Number(e.target.value) })}
+            disabled={disabled}
+            style={{ ...inputStyle, cursor: "pointer" }}
+          >
+            {WEEKDAY_NAMES.map((name, i) => (
+              <option key={i} value={i}>
+                {name}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+
+      {showDayOfMonth && (
+        <label style={fieldStyle}>
+          <span style={fieldLabelStyle}>Day of month</span>
+          <input
+            type="number"
+            min={1}
+            max={31}
+            value={parts.dayOfMonth}
+            onChange={(e) => {
+              const n = Number(e.target.value);
+              if (Number.isFinite(n) && n >= 1 && n <= 31) {
+                onPartsChange({ ...parts, dayOfMonth: n });
+              }
+            }}
+            disabled={disabled}
+            style={inputStyle}
+          />
+          <span style={fieldHintStyle}>
+            Months without this day (e.g. day 31 in February) skip that
+            month entirely &mdash; the schedule does not roll over to the
+            next valid day.
+          </span>
+        </label>
+      )}
+
+      <label style={fieldStyle}>
+        <span style={fieldLabelStyle}>Timezone</span>
+        <select
+          value={tz}
+          onChange={(e) => onTzChange(e.target.value)}
+          disabled={disabled}
+          style={{ ...inputStyle, cursor: "pointer" }}
+        >
+          {tzOptions.includes(tz) ? null : <option value={tz}>{tz}</option>}
+          {tzOptions.map((zone) => (
+            <option key={zone} value={zone}>
+              {zone}
+            </option>
+          ))}
+        </select>
+        <span style={fieldHintStyle}>
+          The schedule runs in this timezone. Daylight-saving
+          transitions are handled automatically.
+        </span>
+      </label>
+
+      <label style={fieldStyle}>
+        <span style={fieldLabelStyle}>Do not fire before (optional)</span>
+        <input
+          type="datetime-local"
+          value={startAtLocal}
+          onChange={(e) => onStartAtChange(e.target.value)}
+          disabled={disabled}
+          style={inputStyle}
+        />
+        <span style={fieldHintStyle}>
+          Anchored to your local time. Leave empty to start at the next
+          scheduled run. Useful for delaying a launch (e.g.
+          &ldquo;don&rsquo;t start until next Monday&rdquo;).
+        </span>
+      </label>
+
+      <details>
+        <summary
+          style={{
+            cursor: "pointer",
+            fontSize: 12,
+            fontWeight: 600,
+            color: color.text.secondary,
+            userSelect: "none",
+          }}
+        >
+          Advanced &mdash; raw cron expression
+        </summary>
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 8,
+            marginTop: 10,
+          }}
+        >
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(5, 1fr)",
+              gap: 6,
+            }}
+          >
+            {CRON_FIELD_HELP.map((f) => (
+              <div key={f.label}>
+                <div
+                  style={{
+                    fontSize: 10,
+                    fontWeight: 700,
+                    color: color.text.muted,
+                    textTransform: "uppercase",
+                    letterSpacing: 0.06,
+                  }}
+                >
+                  {f.label}
+                </div>
+                <div style={{ fontSize: 11, color: color.text.faint, lineHeight: 1.4 }}>
+                  {f.help}
+                </div>
+              </div>
+            ))}
+          </div>
+          <input
+            value={isCustom ? customCron : computedCron}
+            onChange={(e) => {
+              onCustomCronChange(e.target.value);
+              onPartsChange({ ...parts, preset: "custom" });
+            }}
+            disabled={disabled}
+            placeholder="*/15 * * * *"
+            style={{ ...inputStyle, fontFamily: "ui-monospace, Menlo, monospace" }}
+          />
+          <span style={fieldHintStyle}>
+            Standard 5-field cron. Editing this switches the frequency to
+            &ldquo;Custom&rdquo;.
+          </span>
+        </div>
+      </details>
+
+      <div
         style={{
-          flexShrink: 0,
-          marginTop: 6,
-          padding: "3px 10px",
-          background: colors.bg,
-          color: colors.fg,
-          border: `1px solid ${colors.border}`,
-          borderRadius: 999,
-          fontSize: 11,
-          fontWeight: 700,
-          letterSpacing: "0.04em",
-          textTransform: "uppercase",
-          whiteSpace: "nowrap",
+          fontSize: 13,
+          color: color.text.primary,
+          background: color.bg.page,
+          border: `1px solid ${color.border.subtle}`,
+          borderRadius: radius.xs,
+          padding: 8,
+          lineHeight: 1.5,
         }}
       >
-        {label}
-      </span>
-      <div style={{ flex: 1, minWidth: 0 }}>{children}</div>
+        <strong>{cronSummary}</strong>
+      </div>
     </div>
   );
+}
+
+const CRON_FIELD_HELP: { label: string; help: string }[] = [
+  { label: "Minute", help: "0–59" },
+  { label: "Hour", help: "0–23" },
+  { label: "Day of month", help: "1–31, * for any" },
+  { label: "Month", help: "1–12" },
+  { label: "Day of week", help: "0–6, Sun=0" },
+];
+
+function pad(n: number): string {
+  return n.toString().padStart(2, "0");
 }
 
 function PreviewCard({
@@ -326,34 +630,37 @@ function PreviewCard({
   return (
     <div
       style={{
-        background: "white",
-        borderRadius: 14,
+        background: color.bg.page,
+        borderRadius: radius.lg,
         padding: 24,
-        boxShadow: "0 12px 40px rgba(0,0,0,0.18)",
+        boxShadow: shadow.modal,
         display: "flex",
         flexDirection: "column",
         gap: 16,
       }}
     >
       <div>
-        <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700 }}>Create a trigger</h2>
-        <p style={{ margin: "8px 0 0", fontSize: 13, color: "#4b5563" }}>
-          A trigger keeps an eye on a doc and reacts when something changes.
+        <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600, color: color.text.primary }}>Create a trigger</h2>
+        <p style={{ margin: "6px 0 0", fontSize: 13, color: color.text.secondary }}>
+          Triggers monitor documents or folders and send events when a specified change occurs.
         </p>
       </div>
       <div style={fieldStyle}>
         <span style={fieldLabelStyle}>Watching</span>
-        <div style={{ ...inputStyle, color: "#111" }}>{scope}</div>
+        <div style={{ ...inputStyle, color: color.text.primary }}>{scope}</div>
       </div>
-      <SentenceRow label="If" tone="if">
-        <div style={{ ...inputStyle, color: "#111", whiteSpace: "pre-wrap" }}>{ifText}</div>
-      </SentenceRow>
-      <SentenceRow label="then send" tone="send">
-        <div style={{ ...inputStyle, color: "#111", whiteSpace: "pre-wrap" }}>{sendText}</div>
-      </SentenceRow>
-      <SentenceRow label="to" tone="to">
-        <div style={{ ...inputStyle, color: "#111" }}>{destLabel}</div>
-      </SentenceRow>
+      <div style={fieldStyle}>
+        <span style={fieldLabelStyle}>If</span>
+        <div style={{ ...inputStyle, color: color.text.primary, whiteSpace: "pre-wrap" }}>{ifText}</div>
+      </div>
+      <div style={fieldStyle}>
+        <span style={fieldLabelStyle}>Then send</span>
+        <div style={{ ...inputStyle, color: color.text.primary, whiteSpace: "pre-wrap" }}>{sendText}</div>
+      </div>
+      <div style={fieldStyle}>
+        <span style={fieldLabelStyle}>To</span>
+        <div style={{ ...inputStyle, color: color.text.primary }}>{destLabel}</div>
+      </div>
     </div>
   );
 }
@@ -363,46 +670,24 @@ const fieldStyle: React.CSSProperties = { display: "flex", flexDirection: "colum
 const fieldLabelStyle: React.CSSProperties = {
   fontSize: 11,
   fontWeight: 700,
-  color: "#6b7280",
+  color: color.text.muted,
   textTransform: "uppercase",
   letterSpacing: "0.06em",
 };
 
 const fieldHintStyle: React.CSSProperties = {
   fontSize: 12,
-  color: "#6b7280",
+  color: color.text.muted,
   lineHeight: 1.4,
 };
 
 const inputStyle: React.CSSProperties = {
-  padding: "9px 11px",
-  border: "1px solid #d1d5db",
-  borderRadius: 6,
+  padding: "8px 10px",
+  border: `1px solid ${color.border.default}`,
+  borderRadius: radius.sm,
   fontSize: 14,
   outline: "none",
   width: "100%",
   boxSizing: "border-box",
-  background: "white",
-};
-
-const primaryBtn: React.CSSProperties = {
-  padding: "8px 14px",
-  background: "#6366f1",
-  color: "white",
-  border: "none",
-  borderRadius: 8,
-  cursor: "pointer",
-  fontWeight: 600,
-  fontSize: 13,
-};
-
-const secondaryBtn: React.CSSProperties = {
-  padding: "8px 14px",
-  background: "transparent",
-  color: "#374151",
-  border: "1px solid #ddd",
-  borderRadius: 8,
-  cursor: "pointer",
-  fontWeight: 600,
-  fontSize: 13,
+  background: color.bg.page,
 };

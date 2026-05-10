@@ -7,8 +7,8 @@ services:
     build: ./deploy/postgres
     image: agent-wiki-postgres:local
     environment:
-      - POSTGRES_USER=agent
-      - POSTGRES_PASSWORD=agent
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
       - POSTGRES_DB=agent_wiki
     command:
       - "postgres"
@@ -23,7 +23,7 @@ services:
       # against the compose Postgres without compose `exec`.
       - "127.0.0.1:5432:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U agent -d agent_wiki"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d agent_wiki"]
       interval: 2s
       timeout: 3s
       retries: 30
@@ -32,7 +32,7 @@ services:
     build: ./backend
     env_file: .env
     environment:
-      - DATABASE_URL=postgresql://agent:agent@postgres:5432/agent_wiki
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/agent_wiki
       - WIKI_DIR=/data/wiki
     volumes:
       - ./local_data:/data
@@ -49,7 +49,7 @@ services:
     command: ["python", "-m", "app.tasks.run_worker", "documents"]
     env_file: .env
     environment:
-      - DATABASE_URL=postgresql://agent:agent@postgres:5432/agent_wiki
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/agent_wiki
       - WIKI_DIR=/data/wiki
     volumes:
       - ./local_data:/data
@@ -64,7 +64,7 @@ services:
     command: ["python", "-m", "app.tasks.run_worker", "triggers"]
     env_file: .env
     environment:
-      - DATABASE_URL=postgresql://agent:agent@postgres:5432/agent_wiki
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/agent_wiki
       - WIKI_DIR=/data/wiki
     volumes:
       - ./local_data:/data
@@ -74,12 +74,12 @@ services:
       postgres:
         condition: service_healthy
 
-  worker-wiki-bm25:
+  worker-lightweight-maintenance:
     build: ./backend
-    command: ["python", "-m", "app.tasks.run_worker", "wiki_bm25"]
+    command: ["python", "-m", "app.tasks.run_worker", "lightweight_maintenance"]
     env_file: .env
     environment:
-      - DATABASE_URL=postgresql://agent:agent@postgres:5432/agent_wiki
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/agent_wiki
       - WIKI_DIR=/data/wiki
     volumes:
       - ./local_data:/data

@@ -6,7 +6,7 @@
 |---|---|
 | `postgres` | Postgres 17 with `pg_textsearch` (BM25 search) and `pgmq` (task queue). pg_textsearch is loaded via `shared_preload_libraries`. Local image — see `deploy/postgres/Dockerfile`. |
 | `backend`  | Flask app on :8080. Hosts the API. |
-| `worker-*` | Same image as backend, runs one `app.tasks.run_worker <queue>` per pgmq queue (`documents`, `triggers`, `wiki_bm25`). |
+| `worker-*` | Same image as backend, runs one `app.tasks.run_worker <queue>` per pgmq queue (`documents`, `triggers`, `lightweight_maintenance`). |
 | `frontend` | Next.js + TS UI on :3000. |
 | `nginx`    | Reverse proxy on :80 — `/api/*` → backend, everything else → frontend. |
 
@@ -26,7 +26,7 @@ data dir.
 - **Wiki content & triggers** — files in the `wiki-data` volume, committed to git on every write. Triggers live as YAML beside their scope (`.trigger_<id>_<doc>.yaml` or `.trigger_<id>.yaml`).
 - **App state** — Postgres (`DATABASE_URL`): users, MCP connections, document metadata, trigger cache, events, plus the BM25-indexed `documents_fts` table. Schema lives in `backend/app/db/models.py` (SQLAlchemy 2.0 ORM) and is applied by Alembic on every boot — `init_db()` runs `alembic upgrade head` against the configured URL. Migration files live in `backend/app/db/migrations/versions/`.
 - **Search** — `documents_fts(doc_id, path, title, body)` with a `pg_textsearch` BM25 index on `(coalesce(title,'') || ' ' || coalesce(body,''))`. Rebuilt by `tasks.reindex` after every doc commit. Snippets are synthesized in Python (`app/db/fts.py`) since pg_textsearch has no `snippet()` function.
-- **Queue** — pgmq queues `pgmq.q_documents`, `pgmq.q_triggers`, `pgmq.q_wiki_bm25` in the same Postgres. Failed messages are archived to `pgmq.a_<queue>` after `MAX_RETRIES` redeliveries.
+- **Queue** — pgmq queues `pgmq.q_documents`, `pgmq.q_triggers`, `pgmq.q_lightweight_maintenance` in the same Postgres. Failed messages are archived to `pgmq.a_<queue>` after `MAX_RETRIES` redeliveries.
 
 ## Data flow: doc gets updated as work happens
 
@@ -34,7 +34,7 @@ data dir.
 2. Backend records an `events` row and enqueues `update_document_from_payload` on `pgmq.q_documents`.
 3. Worker pulls the task, calls the **document-updater agent** (`app/llm/agents/document_updater.py`).
 4. If the agent returns a new body, the worker commits it via `app.wiki.git.commit_file`.
-5. Worker enqueues `reindex_document` on `pgmq.q_wiki_bm25` to refresh the BM25 index.
+5. Worker enqueues `reindex_document` on `pgmq.q_lightweight_maintenance` to refresh the BM25 index.
 6. Worker enqueues `fan_out_trigger_eval` on `pgmq.q_triggers`. That task evaluates **delta triggers** scoped to the doc and to each parent directory; matched triggers record `trigger.fire` events (v0 has no outbound dispatch yet).
 
 ## Data flow: scheduled trigger

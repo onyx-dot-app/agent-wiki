@@ -1,6 +1,6 @@
 {
   "name": "write_doc",
-  "description": "Overwrite a wiki markdown document with a new full body, OR create a new file if `path` doesn't exist. Use ONLY for new documents or wholesale restructures (more than ~half the file changing). For surgical changes prefer `edit_doc`. Always pass the COMPLETE new body, not a patch. Existing files must have been seen via `search_wiki` earlier in the conversation. Only call after the user has explicitly approved the change. Returns the commit SHA, the unified diff, and any broken markdown links the new body introduces.",
+  "description": "Overwrite a wiki markdown document with a new full body, OR create a new file if `path` doesn't exist. Use ONLY for new documents or wholesale restructures (more than ~half the file changing). For surgical changes prefer `edit_doc`. Always pass the COMPLETE new body, not a patch. Returns the commit SHA, the unified diff, and any broken markdown links the new body introduces.",
   "input_schema": {
     "type": "object",
     "properties": {

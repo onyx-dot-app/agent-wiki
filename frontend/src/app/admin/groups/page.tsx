@@ -1,12 +1,15 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { AppShell } from "@/components/common/AppShell";
+import { Button } from "@/components/common/Button";
+import { BackLink, PageHeader } from "@/components/common/PageHeader";
 import { ApiError, apiFetch } from "@/lib/api";
 import { useRequireAuth } from "@/lib/auth";
+import { color, radius } from "@/lib/theme";
+import { useIsMobile } from "@/lib/viewport";
 import {
   addGroupMember,
   createGroup,
@@ -26,24 +29,23 @@ interface AdminUser {
 export default function AdminGroupsPage() {
   const { user, loading } = useRequireAuth();
   const router = useRouter();
+  const isMobile = useIsMobile();
 
   useEffect(() => {
     if (!loading && user && !user.is_admin) router.replace("/");
   }, [loading, user, router]);
 
-  if (loading || !user) return <main style={{ padding: 32 }}>Loading…</main>;
+  if (loading || !user) return <main style={{ padding: isMobile ? 16 : 32 }}>Loading…</main>;
   if (!user.is_admin) return null;
 
   return (
     <AppShell>
-      <main style={{ padding: 32, maxWidth: 960 }}>
-        <Link href="/admin" style={{ fontSize: 13, color: "#4f46e5", textDecoration: "none" }}>
-          ← Admin
-        </Link>
-        <h1 style={{ marginTop: 8 }}>Groups</h1>
-        <p style={{ color: "#666", marginTop: 0 }}>
-          Groups bundle users so wiki pages can be shared with the whole group at once.
-        </p>
+      <main style={{ padding: isMobile ? "16px 12px" : "24px 32px", maxWidth: 960 }}>
+        <BackLink />
+        <PageHeader
+          title="Groups"
+          description="Groups bundle users so wiki pages can be shared with the whole group at once."
+        />
         <GroupsManager />
       </main>
     </AppShell>
@@ -51,6 +53,7 @@ export default function AdminGroupsPage() {
 }
 
 function GroupsManager() {
+  const isMobile = useIsMobile();
   const { groups, error, isLoading, refresh } = useGroups();
   const [selected, setSelected] = useState<string | null>(null);
   const [name, setName] = useState("");
@@ -84,11 +87,11 @@ function GroupsManager() {
   }
 
   if (error) {
-    return <div style={{ color: "crimson" }}>{error.message}</div>;
+    return <div style={{ color: color.state.danger.fg }}>{error.message}</div>;
   }
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "320px 1fr", gap: 24 }}>
+    <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "320px 1fr", gap: isMobile ? 16 : 24 }}>
       <div>
         <form onSubmit={onCreate} style={{ marginBottom: 16 }}>
           <h3 style={{ marginTop: 0, fontSize: 14 }}>New group</h3>
@@ -104,38 +107,44 @@ function GroupsManager() {
             placeholder="description (optional)"
             style={{ ...inputStyle, marginTop: 6 }}
           />
-          <button type="submit" disabled={busy || !name.trim()} style={{ ...btnStyle, marginTop: 8 }}>
+          <Button
+            type="submit"
+            variant="primary"
+            size="sm"
+            disabled={busy || !name.trim()}
+            style={{ marginTop: 8 }}
+          >
             Create group
-          </button>
+          </Button>
           {createError && (
-            <div style={{ color: "crimson", marginTop: 8, fontSize: 13 }}>{createError}</div>
+            <div style={{ color: color.state.danger.fg, marginTop: 8, fontSize: 13 }}>{createError}</div>
           )}
         </form>
 
         <h3 style={{ fontSize: 14 }}>Groups</h3>
         {isLoading ? (
-          <div style={{ color: "#666", fontSize: 13 }}>Loading…</div>
+          <div style={{ color: color.text.muted, fontSize: 13 }}>Loading…</div>
         ) : groups.length === 0 ? (
-          <div style={{ color: "#666", fontSize: 13 }}>No groups yet.</div>
+          <div style={{ color: color.text.muted, fontSize: 13 }}>No groups yet.</div>
         ) : (
           <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
             {groups.map((g) => (
               <li key={g.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0" }}>
-                <button
+                <Button
+                  size="sm"
                   onClick={() => setSelected(g.id)}
                   style={{
-                    ...btnStyle,
                     flex: 1,
                     textAlign: "left",
-                    background: selected === g.id ? "#eef2ff" : "white",
+                    background: selected === g.id ? color.accent.subtleBg : color.bg.page,
                     fontWeight: selected === g.id ? 600 : 400,
                   }}
                 >
                   {g.name}
-                </button>
-                <button onClick={() => void onDelete(g)} style={{ ...btnStyle, color: "#b91c1c" }}>
+                </Button>
+                <Button size="sm" variant="danger" onClick={() => void onDelete(g)}>
                   Delete
-                </button>
+                </Button>
               </li>
             ))}
           </ul>
@@ -144,7 +153,7 @@ function GroupsManager() {
 
       <div>
         {selected ? <GroupDetail groupId={selected} /> : (
-          <div style={{ color: "#666", fontSize: 13 }}>Select a group to manage members.</div>
+          <div style={{ color: color.text.muted, fontSize: 13 }}>Select a group to manage members.</div>
         )}
       </div>
     </div>
@@ -196,12 +205,12 @@ function GroupDetail({ groupId }: { groupId: string }) {
     }
   }
 
-  if (isLoading || !group) return <div style={{ color: "#666" }}>Loading…</div>;
+  if (isLoading || !group) return <div style={{ color: color.text.muted }}>Loading…</div>;
 
   return (
     <div>
       <h2 style={{ margin: 0 }}>{group.name}</h2>
-      {group.description && <p style={{ marginTop: 4, color: "#666" }}>{group.description}</p>}
+      {group.description && <p style={{ marginTop: 4, color: color.text.muted }}>{group.description}</p>}
 
       <h3 style={{ fontSize: 14, marginTop: 24 }}>Add member</h3>
       <div style={{ display: "flex", gap: 8 }}>
@@ -217,15 +226,15 @@ function GroupDetail({ groupId }: { groupId: string }) {
             </option>
           ))}
         </select>
-        <button onClick={() => void add()} disabled={!pickedId || busy} style={btnStyle}>
+        <Button onClick={() => void add()} disabled={!pickedId || busy}>
           Add
-        </button>
+        </Button>
       </div>
-      {error && <div style={{ color: "crimson", marginTop: 8, fontSize: 13 }}>{error}</div>}
+      {error && <div style={{ color: color.state.danger.fg, marginTop: 8, fontSize: 13 }}>{error}</div>}
 
       <h3 style={{ fontSize: 14, marginTop: 24 }}>Members ({members.length})</h3>
       {members.length === 0 ? (
-        <div style={{ color: "#666", fontSize: 13 }}>No members yet.</div>
+        <div style={{ color: color.text.muted, fontSize: 13 }}>No members yet.</div>
       ) : (
         <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
           {members.map((m) => (
@@ -236,15 +245,15 @@ function GroupDetail({ groupId }: { groupId: string }) {
                 alignItems: "center",
                 justifyContent: "space-between",
                 padding: "8px 0",
-                borderBottom: "1px solid #f0f0f0",
+                borderBottom: `1px solid ${color.border.subtle}`,
               }}
             >
               <span>
-                {m.email} {m.name ? <span style={{ color: "#666" }}>({m.name})</span> : null}
+                {m.email} {m.name ? <span style={{ color: color.text.muted }}>({m.name})</span> : null}
               </span>
-              <button onClick={() => void remove(m.id)} disabled={busy} style={{ ...btnStyle, color: "#b91c1c" }}>
+              <Button size="sm" variant="danger" onClick={() => void remove(m.id)} disabled={busy}>
                 Remove
-              </button>
+              </Button>
             </li>
           ))}
         </ul>
@@ -257,15 +266,7 @@ const inputStyle: React.CSSProperties = {
   width: "100%",
   padding: "8px 10px",
   fontSize: 14,
-  border: "1px solid #d4d4d8",
-  borderRadius: 4,
+  border: `1px solid ${color.border.default}`,
+  borderRadius: radius.sm,
   boxSizing: "border-box",
-};
-const btnStyle: React.CSSProperties = {
-  padding: "8px 12px",
-  border: "1px solid #d4d4d8",
-  background: "white",
-  borderRadius: 4,
-  cursor: "pointer",
-  fontSize: 13,
 };

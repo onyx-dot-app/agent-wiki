@@ -56,11 +56,11 @@ def _immediate_queues():
     """
     from contextlib import ExitStack
 
-    from app.tasks.queues import triggers_queue, wiki_bm25_queue
+    from app.tasks.queues import lightweight_maintenance_queue, triggers_queue
 
     with ExitStack() as stack:
         stack.enter_context(triggers_queue.immediate_mode())
-        stack.enter_context(wiki_bm25_queue.immediate_mode())
+        stack.enter_context(lightweight_maintenance_queue.immediate_mode())
         yield
 
 

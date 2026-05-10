@@ -11,6 +11,7 @@ import {
   type ChatSession,
 } from "@/lib/chat";
 import { ChatHistoryPanel } from "@/components/chat/ChatHistoryPanel";
+import { color, radius, shadow } from "@/lib/theme";
 
 interface ChatMessage {
   role: "user" | "assistant";
@@ -306,14 +307,14 @@ export function ChatWidget() {
           position: "fixed",
           right: 20,
           bottom: 20,
-          width: 56,
-          height: 56,
-          borderRadius: "50%",
-          background: "#6366f1",
-          color: "white",
+          width: 48,
+          height: 48,
+          borderRadius: radius.lg,
+          background: color.accent.bg,
+          color: color.accent.fg,
           border: "none",
           cursor: "pointer",
-          boxShadow: "0 6px 20px rgba(0,0,0,0.18)",
+          boxShadow: shadow.fab,
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
@@ -333,69 +334,79 @@ export function ChatWidget() {
         right: 0,
         height: "100vh",
         width: expandedWidth,
-        background: "white",
-        borderLeft: "1px solid #e5e7eb",
-        boxShadow: "-4px 0 24px rgba(0,0,0,0.08)",
-        display: "flex",
-        flexDirection: "column",
+        background: color.bg.page,
+        borderLeft: `1px solid ${color.border.strong}`,
+        boxShadow: shadow.panel,
         zIndex: 1000,
       }
     : {
         position: "fixed",
         right: 20,
         bottom: 20,
-        width: 380,
-        height: 560,
-        maxHeight: "calc(100vh - 40px)",
-        background: "white",
-        border: "1px solid #e5e7eb",
-        borderRadius: 12,
-        boxShadow: "0 12px 32px rgba(0,0,0,0.18)",
-        display: "flex",
-        flexDirection: "column",
+        // Clamp width and height so the widget never overflows on
+        // narrow phones. `calc(100vw - 24px)` leaves 4px of breathing
+        // room either side of the right:20 anchor.
+        width: "min(380px, calc(100vw - 24px))",
+        height: "min(560px, calc(100vh - 80px))",
+        background: color.bg.page,
+        border: `1px solid ${color.border.default}`,
+        borderRadius: radius.lg,
+        boxShadow: shadow.modal,
         zIndex: 1000,
-        overflow: "hidden",
       };
 
   return (
     <div style={containerStyle} role="dialog" aria-label="Chat">
-      <header
+      {/* Inner clipped surface — keeps the history panel's slide animation
+          contained and lets it cover the chat header. The resize handle in
+          expanded mode lives outside this so it can extend past the left edge. */}
+      <div
         style={{
+          position: "relative",
+          height: "100%",
+          width: "100%",
           display: "flex",
-          alignItems: "center",
-          gap: 8,
-          padding: "10px 12px",
-          borderBottom: "1px solid #eee",
-          background: "#fafafa",
-          flexShrink: 0,
+          flexDirection: "column",
+          overflow: "hidden",
+          borderRadius: isExpanded ? 0 : radius.lg,
         }}
       >
-        <div style={{ fontWeight: 600, fontSize: 14, flex: 1 }}>Chat</div>
-        <IconButton
-          title="New chat"
-          onClick={onNewChat}
-          disabled={sending || (sessionId === null && messages.length === 0)}
+        <header
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            padding: "10px 12px",
+            borderBottom: `1px solid ${color.border.subtle}`,
+            background: color.bg.panel,
+            flexShrink: 0,
+          }}
         >
-          <NewChatIcon />
-        </IconButton>
-        <IconButton
-          title="History"
-          onClick={() => setHistoryOpen((v) => !v)}
-        >
-          <HistoryIcon />
-        </IconButton>
-        <IconButton
-          title={isExpanded ? "Collapse" : "Expand"}
-          onClick={() => setMode(isExpanded ? "widget" : "expanded")}
-        >
-          {isExpanded ? <CollapseIcon /> : <ExpandIcon />}
-        </IconButton>
-        <IconButton title="Close" onClick={() => setMode("closed")}>
-          <CloseIcon />
-        </IconButton>
-      </header>
+          <div style={{ fontWeight: 600, fontSize: 14, flex: 1 }}>Chat</div>
+          <IconButton
+            title="New chat"
+            onClick={onNewChat}
+            disabled={sending || (sessionId === null && messages.length === 0)}
+          >
+            <NewChatIcon />
+          </IconButton>
+          <IconButton
+            title="History"
+            onClick={() => setHistoryOpen((v) => !v)}
+          >
+            <HistoryIcon />
+          </IconButton>
+          <IconButton
+            title={isExpanded ? "Collapse" : "Expand"}
+            onClick={() => setMode(isExpanded ? "widget" : "expanded")}
+          >
+            {isExpanded ? <CollapseIcon /> : <ExpandIcon />}
+          </IconButton>
+          <IconButton title="Close" onClick={() => setMode("closed")}>
+            <CloseIcon />
+          </IconButton>
+        </header>
 
-      <div style={{ position: "relative", flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
         <div
           ref={scrollRef}
           style={{
@@ -405,20 +416,24 @@ export function ChatWidget() {
             display: "flex",
             flexDirection: "column",
             gap: 10,
+            minHeight: 0,
           }}
         >
           {messages.length === 0 && (
-            <p style={{ color: "#888", fontSize: 13, margin: 0 }}>
+            <p style={{ color: color.text.muted, fontSize: 13, margin: 0 }}>
               Hi, I can help create pages, make changes, explain things, help
               you create triggers, or explain how this wiki works. Ask me
               anything!
             </p>
           )}
-          {messages.map((m, i) => (
-            <Bubble key={i} role={m.role} content={m.content} />
-          ))}
+          {messages.map((m, i) => {
+            // Skip the optimistic empty assistant bubble — the "…" placeholder
+            // below renders in its place while we wait for the first delta.
+            if (m.role === "assistant" && m.content === "") return null;
+            return <Bubble key={i} role={m.role} content={m.content} />;
+          })}
           {sending && toolHint && (
-            <div style={{ paddingLeft: 4, color: "#6b7280", fontStyle: "italic", fontSize: 13 }}>
+            <div style={{ paddingLeft: 4, color: color.text.muted, fontStyle: "italic", fontSize: 13 }}>
               {toolHint}
             </div>
           )}
@@ -436,10 +451,10 @@ export function ChatWidget() {
               gap: 8,
               margin: "0 12px 8px",
               padding: "8px 10px",
-              background: "#fef2f2",
-              border: "1px solid #fecaca",
-              color: "#991b1b",
-              borderRadius: 6,
+              background: color.state.danger.bg,
+              border: `1px solid ${color.state.danger.border}`,
+              color: color.state.danger.fg,
+              borderRadius: radius.sm,
               fontSize: 12,
             }}
           >
@@ -450,10 +465,10 @@ export function ChatWidget() {
                 disabled={sending}
                 style={{
                   padding: "3px 8px",
-                  background: "white",
-                  border: "1px solid #fecaca",
-                  borderRadius: 4,
-                  color: "#991b1b",
+                  background: color.bg.page,
+                  border: `1px solid ${color.state.danger.border}`,
+                  borderRadius: radius.xs,
+                  color: color.state.danger.fg,
                   cursor: sending ? "not-allowed" : "pointer",
                   fontSize: 11,
                   fontWeight: 600,
@@ -472,7 +487,7 @@ export function ChatWidget() {
             display: "flex",
             gap: 6,
             padding: 10,
-            borderTop: "1px solid #eee",
+            borderTop: `1px solid ${color.border.subtle}`,
             flexShrink: 0,
           }}
         >
@@ -494,10 +509,12 @@ export function ChatWidget() {
               boxSizing: "border-box",
               resize: "none",
               padding: 8,
-              border: "1px solid #ddd",
-              borderRadius: 6,
+              border: `1px solid ${color.border.default}`,
+              borderRadius: radius.sm,
               fontFamily: "inherit",
               fontSize: 13,
+              color: color.text.primary,
+              background: color.bg.page,
             }}
           />
           <button
@@ -505,10 +522,10 @@ export function ChatWidget() {
             disabled={sending || !input.trim()}
             style={{
               padding: "0 14px",
-              background: "#6366f1",
-              color: "white",
+              background: color.accent.bg,
+              color: color.accent.fg,
               border: "none",
-              borderRadius: 6,
+              borderRadius: radius.sm,
               cursor: sending || !input.trim() ? "not-allowed" : "pointer",
               opacity: sending || !input.trim() ? 0.5 : 1,
               fontWeight: 600,
@@ -594,9 +611,9 @@ function Bubble({
         style={{
           maxWidth: "85%",
           padding: "8px 12px",
-          borderRadius: 10,
-          background: isUser ? "#6366f1" : "#f3f4f6",
-          color: isUser ? "white" : "#111",
+          borderRadius: radius.md,
+          background: isUser ? color.accent.bg : color.bg.sunken,
+          color: isUser ? color.accent.fg : color.text.primary,
           whiteSpace: "pre-wrap",
           fontSize: 13,
           lineHeight: 1.5,
@@ -631,16 +648,16 @@ function IconButton({
         height: 28,
         border: "none",
         background: "transparent",
-        borderRadius: 4,
+        borderRadius: radius.xs,
         cursor: disabled ? "not-allowed" : "pointer",
-        color: "#4b5563",
+        color: color.text.secondary,
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
         opacity: disabled ? 0.4 : 1,
       }}
       onMouseEnter={(e) => {
-        if (!disabled) e.currentTarget.style.background = "#eef2ff";
+        if (!disabled) e.currentTarget.style.background = color.bg.hover;
       }}
       onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
     >

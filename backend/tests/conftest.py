@@ -30,7 +30,7 @@ from app.config import Config
 
 _BASE_URL = os.environ.get(
     "TEST_DATABASE_URL",
-    "postgresql://agent:agent@localhost:5432/agent_wiki_test",
+    "postgresql://postgres:postgres@localhost:5432/agent_wiki_test",
 )
 
 

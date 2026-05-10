@@ -26,6 +26,11 @@ jobs:
         with:
           version: v3.13.3
 
+      # The ruff and basedpyright hooks are language: system and shell out to
+      # `uv run --project backend --extra dev …`, so uv must be on PATH.
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v3
+
       - name: Run pre-commit
         uses: j178/prek-action@v2.0.2
         with:

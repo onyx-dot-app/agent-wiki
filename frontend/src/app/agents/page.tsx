@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 
 import { AppShell } from "@/components/common/AppShell";
+import { Button } from "@/components/common/Button";
+import { PageHeader } from "@/components/common/PageHeader";
 import { ApiError } from "@/lib/api";
 import {
   createToken,
@@ -13,23 +15,22 @@ import {
   type TokenSummary,
 } from "@/lib/agents";
 import { useRequireAuth } from "@/lib/auth";
+import { color, radius } from "@/lib/theme";
+import { useIsMobile } from "@/lib/viewport";
 
 export default function AgentsPage() {
   const { user, loading } = useRequireAuth();
+  const isMobile = useIsMobile();
 
-  if (loading || !user) return <main style={{ padding: 32 }}>Loading…</main>;
+  if (loading || !user) return <main style={{ padding: isMobile ? 16 : 32 }}>Loading…</main>;
 
   return (
     <AppShell>
-      <main style={{ padding: "24px 32px", maxWidth: 880 }}>
-        <header style={{ marginBottom: 20 }}>
-          <h1 style={{ margin: 0, fontSize: 22, fontWeight: 600 }}>Agents</h1>
-          <p style={{ color: "#555", margin: "6px 0 0", fontSize: 14, lineHeight: 1.5 }}>
-            Give your agents the ability to read and update this wiki. Generate a
-            personal API key below, then drop it into your coding agent&apos;s MCP
-            configuration.
-          </p>
-        </header>
+      <main style={{ padding: isMobile ? "16px 12px" : "24px 32px", maxWidth: 880 }}>
+        <PageHeader
+          title="Agents"
+          description="Give your agents the ability to read and update this wiki. Generate a personal API key below, then drop it into your coding agent's MCP configuration."
+        />
 
         <EndpointBlock />
         <TokenManager />
@@ -52,12 +53,12 @@ function EndpointBlock() {
 
   return (
     <section style={card}>
-      <div style={{ fontSize: 13, color: "#666", marginBottom: 6 }}>MCP server URL</div>
+      <div style={{ fontSize: 13, color: color.text.muted, marginBottom: 6 }}>MCP server URL</div>
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
         <code style={codeBlock}>{endpoint || "—"}</code>
         <CopyButton text={endpoint} />
       </div>
-      <div style={{ fontSize: 12, color: "#777", marginTop: 8 }}>
+      <div style={{ fontSize: 12, color: color.text.muted, marginTop: 8 }}>
         Send the API key in the <code style={inlineCode}>Authorization</code> header as{" "}
         <code style={inlineCode}>Bearer mcp_…</code>.
       </div>
@@ -85,13 +86,13 @@ function TokenManager() {
         }}
       >
         <h2 style={{ margin: 0, fontSize: 16 }}>API keys</h2>
-        <button
+        <Button
+          variant="primary"
           onClick={() => setShowCreate(true)}
-          style={primaryBtn}
           disabled={showCreate || reveal !== null}
         >
           Generate API key
-        </button>
+        </Button>
       </div>
 
       {error && (
@@ -116,11 +117,11 @@ function TokenManager() {
       )}
 
       {isLoading && tokens.length === 0 && !error && (
-        <p style={{ color: "#888", fontSize: 14 }}>Loading…</p>
+        <p style={{ color: color.text.muted, fontSize: 14 }}>Loading…</p>
       )}
 
       {!isLoading && tokens.length === 0 && (
-        <p style={{ color: "#888", fontSize: 14 }}>
+        <p style={{ color: color.text.muted, fontSize: 14 }}>
           No keys yet — generate one above.
         </p>
       )}
@@ -161,22 +162,22 @@ function TokenRow({ token, onRevoked }: { token: TokenSummary; onRevoked: () => 
         alignItems: "center",
         gap: 12,
         padding: "10px 12px",
-        border: "1px solid #e5e7eb",
-        borderRadius: 6,
+        border: `1px solid ${color.border.default}`,
+        borderRadius: radius.sm,
         marginTop: 8,
-        background: "white",
+        background: color.bg.page,
       }}
     >
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontWeight: 500, fontSize: 14, color: "#111" }}>{token.name}</div>
-        <div style={{ fontSize: 12, color: "#6b7280", marginTop: 2 }}>
+        <div style={{ fontWeight: 500, fontSize: 14, color: color.text.primary }}>{token.name}</div>
+        <div style={{ fontSize: 12, color: color.text.muted, marginTop: 2 }}>
           Created {token.created_at}
           {token.last_used_at ? ` · last used ${token.last_used_at}` : " · never used"}
         </div>
       </div>
-      <button onClick={onRevoke} disabled={busy} style={dangerBtn}>
+      <Button size="sm" variant="danger" onClick={onRevoke} disabled={busy}>
         {busy ? "Revoking…" : "Revoke"}
-      </button>
+      </Button>
     </li>
   );
 }
@@ -211,13 +212,13 @@ function CreateForm({
       onSubmit={onSubmit}
       style={{
         padding: 12,
-        background: "#f9fafb",
-        border: "1px solid #e5e7eb",
-        borderRadius: 6,
+        background: color.bg.panel,
+        border: `1px solid ${color.border.default}`,
+        borderRadius: radius.sm,
         marginBottom: 12,
       }}
     >
-      <label style={{ fontSize: 13, color: "#374151" }}>
+      <label style={{ fontSize: 13, color: color.text.secondary }}>
         Name
         <input
           autoFocus
@@ -230,12 +231,12 @@ function CreateForm({
       </label>
       {err && <div style={{ ...errorBanner, marginTop: 10 }}>{err}</div>}
       <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-        <button type="submit" disabled={busy || !name.trim()} style={primaryBtn}>
+        <Button type="submit" variant="primary" disabled={busy || !name.trim()}>
           {busy ? "Creating…" : "Create"}
-        </button>
-        <button type="button" onClick={onCancel} disabled={busy} style={secondaryBtn}>
+        </Button>
+        <Button type="button" onClick={onCancel} disabled={busy}>
           Cancel
-        </button>
+        </Button>
       </div>
     </form>
   );
@@ -246,25 +247,25 @@ function RevealOnce({ token, onClose }: { token: CreatedToken; onClose: () => vo
     <div
       style={{
         padding: 14,
-        background: "#fffbeb",
-        border: "1px solid #fcd34d",
-        borderRadius: 6,
+        background: color.state.warning.bg,
+        border: `1px solid ${color.state.warning.border}`,
+        borderRadius: radius.sm,
         marginBottom: 12,
       }}
     >
-      <div style={{ fontWeight: 600, color: "#78350f", fontSize: 14 }}>
+      <div style={{ fontWeight: 600, color: color.state.warning.fg, fontSize: 14 }}>
         Copy your key now — this is the only time it&apos;ll be shown.
       </div>
       <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 10 }}>
         <code style={codeBlock}>{token.token}</code>
         <CopyButton text={token.token} />
       </div>
-      <div style={{ fontSize: 12, color: "#92400e", marginTop: 8 }}>
+      <div style={{ fontSize: 12, color: color.state.warning.fg, marginTop: 8 }}>
         If you lose it, revoke this key and generate a new one.
       </div>
-      <button onClick={onClose} style={{ ...secondaryBtn, marginTop: 12 }}>
+      <Button onClick={onClose} style={{ marginTop: 12 }}>
         I&apos;ve saved it
-      </button>
+      </Button>
     </div>
   );
 }
@@ -305,18 +306,18 @@ function ClientConfigHelp() {
           cursor: "pointer",
           fontSize: 14,
           fontWeight: 500,
-          color: "#1f2937",
+          color: color.text.primary,
           display: "flex",
           alignItems: "center",
           gap: 6,
         }}
       >
-        <span style={{ fontSize: 12, color: "#6b7280" }}>{open ? "▾" : "▸"}</span>
+        <span style={{ fontSize: 12, color: color.text.muted }}>{open ? "▾" : "▸"}</span>
         How to wire this into Claude Code, Cursor, or Codex
       </button>
       {open && (
         <div style={{ marginTop: 12 }}>
-          <div style={{ fontSize: 13, color: "#374151", marginBottom: 6 }}>
+          <div style={{ fontSize: 13, color: color.text.secondary, marginBottom: 6 }}>
             Sample <code style={inlineCode}>mcp_servers.json</code> entry — replace
             the placeholder with your generated key:
           </div>
@@ -359,35 +360,35 @@ function CopyButton({ text }: { text: string }) {
   }
 
   return (
-    <button onClick={copy} style={secondaryBtn} disabled={!text}>
+    <Button size="sm" onClick={copy} disabled={!text}>
       {copied ? "Copied" : "Copy"}
-    </button>
+    </Button>
   );
 }
 
 const card: React.CSSProperties = {
   padding: 16,
-  border: "1px solid #e5e7eb",
-  borderRadius: 8,
-  background: "white",
+  border: `1px solid ${color.border.default}`,
+  borderRadius: radius.md,
+  background: color.bg.page,
   marginBottom: 16,
 };
 
 const codeBlock: React.CSSProperties = {
   flex: 1,
   padding: "8px 10px",
-  background: "#f3f4f6",
-  borderRadius: 4,
+  background: color.bg.sunken,
+  borderRadius: radius.xs,
   fontFamily: "ui-monospace, Menlo, monospace",
   fontSize: 12,
-  color: "#111",
+  color: color.text.primary,
   overflowX: "auto",
 };
 
 const inlineCode: React.CSSProperties = {
   padding: "1px 4px",
-  background: "#f3f4f6",
-  borderRadius: 3,
+  background: color.bg.sunken,
+  borderRadius: radius.xs,
   fontFamily: "ui-monospace, Menlo, monospace",
   fontSize: 12,
 };
@@ -395,46 +396,16 @@ const inlineCode: React.CSSProperties = {
 const inputStyle: React.CSSProperties = {
   width: "100%",
   padding: "8px 10px",
-  border: "1px solid #d1d5db",
-  borderRadius: 4,
+  border: `1px solid ${color.border.default}`,
+  borderRadius: radius.sm,
   fontSize: 14,
-};
-
-const primaryBtn: React.CSSProperties = {
-  padding: "6px 12px",
-  border: "1px solid #4f46e5",
-  background: "#4f46e5",
-  color: "white",
-  borderRadius: 4,
-  fontSize: 13,
-  cursor: "pointer",
-};
-
-const secondaryBtn: React.CSSProperties = {
-  padding: "6px 12px",
-  border: "1px solid #d1d5db",
-  background: "white",
-  color: "#111",
-  borderRadius: 4,
-  fontSize: 13,
-  cursor: "pointer",
-};
-
-const dangerBtn: React.CSSProperties = {
-  padding: "5px 10px",
-  border: "1px solid #fca5a5",
-  background: "white",
-  color: "#b91c1c",
-  borderRadius: 4,
-  fontSize: 12,
-  cursor: "pointer",
 };
 
 const errorBanner: React.CSSProperties = {
   padding: 10,
-  background: "#fef2f2",
-  color: "#991b1b",
-  borderRadius: 6,
+  background: color.state.danger.bg,
+  color: color.state.danger.fg,
+  borderRadius: radius.sm,
   fontSize: 13,
   marginBottom: 8,
 };

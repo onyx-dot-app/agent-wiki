@@ -1,6 +1,6 @@
 {
   "name": "explain_functionality",
-  "description": "Describes what agent-wiki is and how to use it. Call only for meta questions about the app itself, not for wiki content or general help questions. Takes no arguments.",
+  "description": "Describes what Agent Wiki is and how to use it. Call only for meta questions about the app itself, not for wiki content or general help questions.",
   "input_schema": {
     "type": "object",
     "properties": {},

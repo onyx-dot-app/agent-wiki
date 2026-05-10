@@ -87,7 +87,7 @@ worker:
   queues:
     - documents
     - triggers
-    - wiki_bm25
+    - lightweight_maintenance
   resources:
     requests:
       cpu: 100m

@@ -127,12 +127,24 @@ def remove_group_member(group_id: str, user_id: str):
 # --------------------------------------------------------------------------- #
 
 
-def _can_manage_path(path: str) -> bool:
-    """Owner-or-admin gate for ACL mutation endpoints.
+def _can_share_path(path: str) -> bool:
+    """Write-or-admin gate for ACL mutation endpoints.
 
-    Read-only listing has its own check (the user must be able to read
-    the page itself) — that goes through ``acl.can(..., "read", ...)``.
+    Anyone who can write a page can also share it / change its access
+    scope — that includes the owner (writes implicitly), explicit
+    write-grant holders, and admins. Read-only callers can't reach
+    these endpoints, which prevents probing the ACL of pages they
+    can't see.
     """
+    user = current_user()
+    if user is None:
+        return False
+    return acl.can(user.id, user.is_admin, "write", path)
+
+
+def _is_owner_or_admin(path: str) -> bool:
+    """Tighter gate for actions that change who owns a page. Write-grant
+    holders shouldn't be able to yank ownership away from the owner."""
     user = current_user()
     if user is None:
         return False
@@ -153,9 +165,10 @@ def list_acl():
         return error(str(exc), 400)
     user = current_user()
     assert user is not None
-    # Listing the ACL is owner-or-admin-only; otherwise users could probe
-    # who has access to private pages they can't see.
-    if not _can_manage_path(path):
+    # Anyone who can write the page can see/manage its ACL. Read-only
+    # callers are denied so they can't probe who else has access to a
+    # page they can't edit.
+    if not _can_share_path(path):
         return error("forbidden", 403)
     entries = [AclEntryOut(**e) for e in acl.list_for_path(path)]
     return jsonify(AclListResponse(
@@ -173,7 +186,7 @@ def create_acl_entry():
         path = filesystem.safe_rel_path(req.resource_path)
     except ValueError as exc:
         return error(str(exc), 400)
-    if not _can_manage_path(path):
+    if not _can_share_path(path):
         return error("forbidden", 403)
 
     # Validate principal_id refers to a real row before the resolver
@@ -213,7 +226,7 @@ def delete_acl_entry(entry_id: str):
         if e is None:
             return error("not found", 404)
         path_for_check = e.resource_path
-    if not _can_manage_path(path_for_check):
+    if not _can_share_path(path_for_check):
         return error("forbidden", 403)
     acl.revoke(entry_id)
     return ("", 204)
@@ -232,7 +245,7 @@ def transfer_ownership():
         path = filesystem.safe_rel_path(req.path)
     except ValueError as exc:
         return error(str(exc), 400)
-    if not _can_manage_path(path):
+    if not _is_owner_or_admin(path):
         return error("forbidden", 403)
     if req.new_owner_user_id is not None and users_repo.get_by_id(req.new_owner_user_id) is None:
         return error("user not found", 404)

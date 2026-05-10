@@ -140,14 +140,14 @@ def test_list_documents_hides_unauthorized_pages(integration):
     integration.signin(email="bob@x.com")
     resp = integration.client.get("/api/documents")
     assert resp.status_code == 200
-    md_paths = {p for p in resp.get_json()["paths"] if p.endswith(".md")}
+    md_paths = {e["path"] for e in resp.get_json()["entries"] if e["path"].endswith(".md")}
     assert "docs/a.md" in md_paths
     assert "docs/b.md" not in md_paths
 
     # Alice sees both.
     integration.signin(user_id=alice)
     resp = integration.client.get("/api/documents")
-    md_paths = {p for p in resp.get_json()["paths"] if p.endswith(".md")}
+    md_paths = {e["path"] for e in resp.get_json()["entries"] if e["path"].endswith(".md")}
     assert {"docs/a.md", "docs/b.md"} <= md_paths
 
 
@@ -399,3 +399,165 @@ def test_search_returns_hits_via_folder_cascade(integration):
     resp = integration.client.get("/api/documents/search?q=zonekeyword")
     paths = {h["path"] for h in resp.get_json()["hits"]}
     assert paths == {"zone/a.md", "zone/sub/b.md"}
+
+
+# --------------------------------------------------------------------------- #
+# Sharing rights — write-access can share, read-access cannot                 #
+# --------------------------------------------------------------------------- #
+
+
+def test_writer_can_share_and_change_acl(integration):
+    """A non-owner with write access can list, grant, and revoke ACL
+    entries on the page (matches the share UI's expectation that
+    editors can manage access)."""
+    integration.signup(email="admin@x.com")
+    alice = integration.signup(email="alice@x.com")
+    bob = integration.signup(email="bob@x.com")
+    carol = integration.signup(email="carol@x.com")
+    integration.signin(user_id=alice)
+    integration.put_doc("docs/spec.md", "# Spec")
+    # Lock the page down so the per-user grants are the only access.
+    for g in acl.list_for_path("docs/spec.md"):
+        if g["principal_kind"] == "everyone":
+            acl.revoke(g["id"])
+    # Grant Bob write (Bob is not the owner).
+    acl.grant(
+        resource_kind="page",
+        resource_path="docs/spec.md",
+        principal_kind="user",
+        principal_id=bob,
+        permission="write",
+        granted_by_user_id=alice,
+    )
+
+    integration.signin(user_id=bob)
+
+    # Bob can list the ACL.
+    r = integration.client.get("/api/wiki/acl?path=docs/spec.md")
+    assert r.status_code == 200, r.get_data(as_text=True)
+
+    # Bob can grant Carol read access.
+    r = integration.client.post(
+        "/api/wiki/acl",
+        json={
+            "resource_kind": "page",
+            "resource_path": "docs/spec.md",
+            "principal_kind": "user",
+            "principal_id": carol,
+            "permission": "read",
+        },
+    )
+    assert r.status_code == 201, r.get_data(as_text=True)
+    new_eid = r.get_json()["id"]
+
+    # Carol can now actually read the page.
+    integration.signin(user_id=carol)
+    r = integration.client.get("/api/documents/file?path=docs/spec.md")
+    assert r.status_code == 200
+
+    # Bob can revoke that grant too.
+    integration.signin(user_id=bob)
+    r = integration.client.delete(f"/api/wiki/acl/{new_eid}")
+    assert r.status_code == 204
+
+    # Carol is back to no-access.
+    integration.signin(user_id=carol)
+    r = integration.client.get("/api/documents/file?path=docs/spec.md")
+    assert r.status_code == 403
+
+
+def test_reader_cannot_share_or_change_acl(integration):
+    """A user with only read access cannot list, grant, revoke, or
+    transfer ownership — read-only really means read-only."""
+    integration.signup(email="admin@x.com")
+    alice = integration.signup(email="alice@x.com")
+    bob = integration.signup(email="bob@x.com")
+    carol = integration.signup(email="carol@x.com")
+    integration.signin(user_id=alice)
+    integration.put_doc("docs/spec.md", "# Spec")
+    for g in acl.list_for_path("docs/spec.md"):
+        if g["principal_kind"] == "everyone":
+            acl.revoke(g["id"])
+    # Bob gets read-only.
+    acl.grant(
+        resource_kind="page",
+        resource_path="docs/spec.md",
+        principal_kind="user",
+        principal_id=bob,
+        permission="read",
+        granted_by_user_id=alice,
+    )
+    bob_grant_id = next(
+        g["id"]
+        for g in acl.list_for_path("docs/spec.md")
+        if g.get("principal_id") == bob
+    )
+
+    integration.signin(user_id=bob)
+
+    # Bob can read the page.
+    r = integration.client.get("/api/documents/file?path=docs/spec.md")
+    assert r.status_code == 200
+
+    # But cannot list its ACL.
+    r = integration.client.get("/api/wiki/acl?path=docs/spec.md")
+    assert r.status_code == 403, r.get_data(as_text=True)
+
+    # Cannot grant Carol access.
+    r = integration.client.post(
+        "/api/wiki/acl",
+        json={
+            "resource_kind": "page",
+            "resource_path": "docs/spec.md",
+            "principal_kind": "user",
+            "principal_id": carol,
+            "permission": "read",
+        },
+    )
+    assert r.status_code == 403
+
+    # Cannot revoke an existing entry (even one targeting himself).
+    r = integration.client.delete(f"/api/wiki/acl/{bob_grant_id}")
+    assert r.status_code == 403
+
+    # Cannot transfer ownership.
+    r = integration.client.post(
+        "/api/wiki/transfer-ownership",
+        json={"path": "docs/spec.md", "new_owner_user_id": bob},
+    )
+    assert r.status_code == 403
+
+    # Sanity: Alice (owner) is still the owner; Bob's grant still exists.
+    assert acl.get_owner("docs/spec.md") == alice
+    assert any(
+        g["id"] == bob_grant_id for g in acl.list_for_path("docs/spec.md")
+    )
+
+
+def test_writer_cannot_transfer_ownership(integration):
+    """Write-access shares the ACL but does NOT include yanking
+    ownership — transfer stays owner-or-admin."""
+    integration.signup(email="admin@x.com")
+    alice = integration.signup(email="alice@x.com")
+    bob = integration.signup(email="bob@x.com")
+    integration.signin(user_id=alice)
+    integration.put_doc("docs/spec.md", "# Spec")
+    for g in acl.list_for_path("docs/spec.md"):
+        if g["principal_kind"] == "everyone":
+            acl.revoke(g["id"])
+    acl.grant(
+        resource_kind="page",
+        resource_path="docs/spec.md",
+        principal_kind="user",
+        principal_id=bob,
+        permission="write",
+        granted_by_user_id=alice,
+    )
+
+    integration.signin(user_id=bob)
+    r = integration.client.post(
+        "/api/wiki/transfer-ownership",
+        json={"path": "docs/spec.md", "new_owner_user_id": bob},
+    )
+    assert r.status_code == 403
+    assert acl.get_owner("docs/spec.md") == alice

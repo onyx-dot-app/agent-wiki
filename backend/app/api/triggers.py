@@ -1,8 +1,9 @@
 """Trigger CRUD.
 
-Owner-scoped: a user only sees and mutates the triggers they own. v0 only
-honors ``kind=delta``; the schema supports ``schedule`` but the eval path
-isn't wired yet so we reject it at the API boundary.
+Owner-scoped: a user only sees and mutates the triggers they own.
+``kind="delta"`` triggers fire on doc commits; ``kind="schedule"``
+triggers fire on a cron in the trigger's timezone (``schedule_cron`` +
+``schedule_timezone``, with an optional ``schedule_start_at`` anchor).
 
 Storage is git-backed YAML — see ``app/triggers/storage.py``. Postgres is
 a cache populated by ``app/triggers/repo.py``.
@@ -104,7 +105,7 @@ def create_trigger():
     require_can("read", scope_path)
 
     if req.kind not in triggers_repo.ALLOWED_KINDS:
-        return error(f"kind {req.kind!r} not supported in v0", 400)
+        return error(f"unsupported kind: {req.kind!r}", 400)
 
     try:
         trigger = triggers_repo.create(
@@ -116,6 +117,9 @@ def create_trigger():
             kind=req.kind,
             enabled=req.enabled,
             actor=_git_author(),
+            schedule_cron=req.schedule_cron,
+            schedule_timezone=req.schedule_timezone,
+            schedule_start_at=req.schedule_start_at,
         )
     except ValueError as exc:
         return error(str(exc), 400)
@@ -170,6 +174,16 @@ def update_trigger(trigger_id: str):
 
     if "enabled" in raw:
         kwargs["enabled"] = req.enabled
+
+    if "schedule_cron" in raw:
+        kwargs["schedule_cron"] = req.schedule_cron
+
+    if "schedule_timezone" in raw:
+        kwargs["schedule_timezone"] = req.schedule_timezone
+
+    if "schedule_start_at" in raw:
+        # Pass through ``None`` so the user can clear the anchor.
+        kwargs["schedule_start_at"] = req.schedule_start_at
 
     try:
         updated = triggers_repo.update(trigger_id, actor=_git_author(), **kwargs)
@@ -255,4 +269,8 @@ def trigger_version(trigger_id: str, sha: str):
         enabled=bool(data.get("enabled", True)),
         sha=sha,
         path=path,
+        kind=data.get("kind"),
+        schedule_cron=data.get("schedule_cron"),
+        schedule_timezone=data.get("schedule_timezone"),
+        schedule_start_at=data.get("schedule_start_at"),
     ).model_dump())

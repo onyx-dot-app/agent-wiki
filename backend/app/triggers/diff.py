@@ -146,6 +146,29 @@ def build_payload(
     return f"{snapshot}\n\n{change}"
 
 
+def build_schedule_payload(
+    *,
+    scope_path: str,
+    when_iso: str,
+    wiki_snapshot: str | None = None,
+) -> str:
+    """Payload for a schedule-kind trigger evaluation.
+
+    No diff section — schedule ticks aren't tied to a commit. We give the
+    LLM the full wiki snapshot plus a SCHEDULED CHECK block that names
+    the trigger's scope and the tick time, so the prompt can tell the
+    model to evaluate against current state.
+    """
+    snapshot = wiki_snapshot if wiki_snapshot is not None else build_wiki_snapshot()
+    scope_label = scope_path or "(whole wiki)"
+    block = (
+        f"=== SCHEDULED CHECK ===\n"
+        f"Scope: {scope_label}\n"
+        f"Time: {when_iso}\n"
+    )
+    return f"{snapshot}\n\n{block}"
+
+
 def _unified_diff(before: str, after: str) -> str:
     return "".join(
         difflib.unified_diff(

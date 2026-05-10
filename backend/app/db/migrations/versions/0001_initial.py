@@ -33,7 +33,7 @@ branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 
-_PGMQ_QUEUES = ("documents", "triggers", "wiki_bm25")
+_PGMQ_QUEUES = ("documents", "triggers", "lightweight_maintenance")
 
 
 def upgrade() -> None:

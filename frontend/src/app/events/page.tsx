@@ -1,48 +1,44 @@
 "use client";
 
 import { AppShell } from "@/components/common/AppShell";
+import { Button } from "@/components/common/Button";
+import { PageHeader } from "@/components/common/PageHeader";
 import { useRequireAuth } from "@/lib/auth";
 import { useEvents } from "@/lib/events";
+import { color, radius } from "@/lib/theme";
+import { useIsMobile } from "@/lib/viewport";
 
 export default function EventsPage() {
   const { user, loading } = useRequireAuth();
+  const isMobile = useIsMobile();
   const { events, error, isValidating, refresh } = useEvents({
     kind: "trigger.fire",
     limit: 200,
   });
   const errorMessage = error?.message ?? null;
 
-  if (loading || !user) return <main style={{ padding: 32 }}>Loading…</main>;
+  if (loading || !user) return <main style={{ padding: isMobile ? 16 : 32 }}>Loading…</main>;
 
   return (
     <AppShell>
-      <main style={{ padding: "24px 32px", height: "100vh", overflowY: "auto" }}>
-        <header
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            marginBottom: 16,
-          }}
-        >
-          <div>
-            <h1 style={{ margin: 0, fontSize: 22, fontWeight: 600 }}>Events</h1>
-            <p style={{ color: "#666", margin: "4px 0 0", fontSize: 13 }}>
-              Trigger fires, newest first.
-            </p>
-          </div>
-          <button onClick={() => void refresh()} disabled={isValidating} style={secondaryBtn}>
-            {isValidating ? "Loading…" : "Refresh"}
-          </button>
-        </header>
+      <main style={{ padding: isMobile ? "16px 12px" : "24px 32px", height: "100vh", overflowY: "auto" }}>
+        <PageHeader
+          title="Events"
+          description="Trigger fires, newest first."
+          actions={
+            <Button onClick={() => void refresh()} disabled={isValidating}>
+              {isValidating ? "Loading…" : "Refresh"}
+            </Button>
+          }
+        />
 
         {errorMessage && (
           <div
             style={{
               padding: 10,
-              background: "#fef2f2",
-              color: "#991b1b",
-              borderRadius: 6,
+              background: color.state.danger.bg,
+              color: color.state.danger.fg,
+              borderRadius: radius.sm,
               fontSize: 13,
               marginBottom: 12,
             }}
@@ -52,7 +48,7 @@ export default function EventsPage() {
         )}
 
         {events.length === 0 && !errorMessage && !isValidating && (
-          <p style={{ color: "#888", fontSize: 14 }}>No trigger fires yet.</p>
+          <p style={{ color: color.text.muted, fontSize: 14 }}>No trigger fires yet.</p>
         )}
 
         <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
@@ -69,10 +65,10 @@ export default function EventsPage() {
                 key={ev.id}
                 style={{
                   padding: "14px 16px",
-                  border: "1px solid #e5e7eb",
-                  borderRadius: 8,
+                  border: `1px solid ${color.border.default}`,
+                  borderRadius: radius.md,
                   marginBottom: 10,
-                  background: "white",
+                  background: color.bg.page,
                 }}
               >
                 <div
@@ -88,18 +84,18 @@ export default function EventsPage() {
                     style={{
                       fontFamily: "ui-monospace, Menlo, monospace",
                       fontSize: 12,
-                      color: "#111",
+                      color: color.text.primary,
                     }}
                   >
-                    {p.doc_path ?? <em style={{ color: "#9ca3af" }}>(no path)</em>}
+                    {p.doc_path ?? <em style={{ color: color.text.faint }}>(no path)</em>}
                     {p.change_kind && (
                       <span
                         style={{
                           marginLeft: 8,
                           padding: "1px 6px",
-                          background: "#eef2ff",
-                          color: "#3730a3",
-                          borderRadius: 4,
+                          background: color.accent.subtleBg,
+                          color: color.accent.subtleFg,
+                          borderRadius: radius.xs,
                           fontSize: 10,
                           fontWeight: 600,
                           textTransform: "uppercase",
@@ -109,14 +105,14 @@ export default function EventsPage() {
                       </span>
                     )}
                   </div>
-                  <span style={{ fontSize: 12, color: "#6b7280" }}>{formatTs(ev.ts)}</span>
+                  <span style={{ fontSize: 12, color: color.text.muted }}>{formatTs(ev.ts)}</span>
                 </div>
                 {p.reason && (
-                  <div style={{ fontSize: 14, color: "#374151", whiteSpace: "pre-wrap" }}>
+                  <div style={{ fontSize: 14, color: color.text.secondary, whiteSpace: "pre-wrap" }}>
                     {p.reason}
                   </div>
                 )}
-                <div style={{ marginTop: 8, fontSize: 11, color: "#9ca3af" }}>
+                <div style={{ marginTop: 8, fontSize: 11, color: color.text.faint }}>
                   trigger {ev.target ?? "?"} · sha {p.sha?.slice(0, 7) ?? "?"}
                 </div>
               </li>
@@ -135,13 +131,3 @@ function formatTs(ts: string): string {
   if (Number.isNaN(d.getTime())) return ts;
   return d.toLocaleString();
 }
-
-const secondaryBtn: React.CSSProperties = {
-  padding: "6px 12px",
-  background: "transparent",
-  color: "#374151",
-  border: "1px solid #ddd",
-  borderRadius: 6,
-  cursor: "pointer",
-  fontSize: 13,
-};

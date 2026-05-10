@@ -33,17 +33,24 @@ Queues:
   because trigger eval is read-only (no commits) and we want one queue's
   backlog to be the only thing that delays an event-log entry.
 
-* ``wiki_bm25_queue`` — **BM25 indexer.** Cheap, frequent, no LLM.
-  Re-indexes a single wiki path into the ``documents_fts`` table from the
-  current git working tree. Runs after every successful ``commit_file``
-  (whether human edit, agent edit, move, or doc-updater commit) and on
-  demand from ``POST /api/documents/reindex``. On its own queue so search
-  staleness is bounded by indexer throughput alone — never blocked behind
-  a multi-second LLM call.
+* ``lightweight_maintenance_queue`` — **fast upkeep tasks.** Sub-second,
+  no LLM, no external HTTP, no wiki commits. Anything that fits that
+  profile and isn't worth its own queue lives here. The placement rule
+  matters: this queue runs wider concurrency (4 workers) on the
+  assumption that handlers return quickly, so dropping a slow task in
+  here would silently starve the others. If a new task can't honor the
+  rule, give it its own queue rather than co-tenanting on this one.
+  Today:
+    - BM25 reindex of a single wiki path from the git working tree
+      (``reindex_path``, ``reindex_document``) — runs after every
+      ``commit_file`` and on demand from ``POST /api/documents/reindex``.
+    - Agent-activity expiration cleanup
+      (``cleanup_expired_activity``) — a single ``DELETE`` enqueued
+      with a delay equal to the row's ``expires_at``.
 
 Each consumer runs as a separate worker container — see
 ``docker-compose.yml`` (``worker-documents``, ``worker-triggers``,
-``worker-wiki-bm25``) and ``app/tasks/run_worker.py``.
+``worker-lightweight-maintenance``) and ``app/tasks/run_worker.py``.
 """
 from __future__ import annotations
 
@@ -54,8 +61,8 @@ __all__ = [
     "QueueFullError",
     "QUEUES",
     "documents_queue",
+    "lightweight_maintenance_queue",
     "triggers_queue",
-    "wiki_bm25_queue",
 ]
 
 
@@ -65,12 +72,12 @@ def _make(name: str) -> TaskQueue:
 
 documents_queue = _make("documents")
 triggers_queue = _make("triggers")
-wiki_bm25_queue = _make("wiki_bm25")
+lightweight_maintenance_queue = _make("lightweight_maintenance")
 
 # Map queue-name → instance, used by run_worker.py to launch the right
 # consumer per worker container.
 QUEUES = {
     "documents": documents_queue,
     "triggers": triggers_queue,
-    "wiki_bm25": wiki_bm25_queue,
+    "lightweight_maintenance": lightweight_maintenance_queue,
 }

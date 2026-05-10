@@ -1,7 +1,7 @@
 """BM25 ranked search over a synthetic 15-doc corpus.
 
 Seeds 15 fake docs into the wiki repo, runs each through the real
-``wiki_bm25_queue`` reindex task (synchronously thanks to
+``lightweight_maintenance_queue`` reindex task (synchronously thanks to
 ``immediate_queues``), and asserts that ``fts.search`` ranks the
 designed "obvious winner" doc first for each test query. The corpus
 is engineered so each query has exactly one strongly-matching doc and
@@ -162,9 +162,9 @@ def seeded_corpus(tmp_repo, immediate_queues):
     """Commit all 15 docs and run them through the real reindex task.
 
     Uses ``immediate_queues`` so ``reindex_path`` executes inline on the
-    ``wiki_bm25_queue`` queue — same code path as production, just
-    synchronous. After this fixture returns, ``documents_fts`` has 15
-    rows and the BM25 index is queryable.
+    ``lightweight_maintenance_queue`` queue — same code path as
+    production, just synchronous. After this fixture returns,
+    ``documents_fts`` has 15 rows and the BM25 index is queryable.
     """
     for path, body in _CORPUS:
         git.commit_file(path, body, message=f"seed {path}")

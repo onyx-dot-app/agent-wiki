@@ -43,6 +43,9 @@ local_data/pgdata/
 .vscode/
 *.swp
 
+# claude code — entire dir is local-only (runtime state + per-user settings).
+.claude/
+
 # terraform (deploy/terraform/ is a template; lock file is intentionally not tracked here)
 *.tfstate
 *.tfstate.*

@@ -176,6 +176,16 @@ class Trigger(Base):
     nl_description: Mapped[str] = mapped_column(Text, nullable=False)
     action_json: Mapped[str] = mapped_column(Text, nullable=False)
     schedule_cron: Mapped[str | None] = mapped_column(Text)
+    # IANA timezone name (e.g. "America/Los_Angeles") that ``schedule_cron``
+    # is interpreted in. Required when ``kind="schedule"``.
+    schedule_timezone: Mapped[str | None] = mapped_column(Text)
+    # Optional UTC ISO 8601 anchor — schedule eval skips ticks before this
+    # moment, so users can schedule a trigger to start on a specific date.
+    schedule_start_at: Mapped[str | None] = mapped_column(Text)
+    # UTC ISO 8601 of the most recent fire (or attempted fire). Updated by
+    # the schedule evaluator on each tick so croniter advances. DB-only —
+    # not persisted to the YAML file (would commit on every fire).
+    schedule_last_fired_at: Mapped[str | None] = mapped_column(Text)
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("TRUE"))
     file_path: Mapped[str | None] = mapped_column(Text)
     last_edited_at: Mapped[str | None] = mapped_column(Text)
@@ -381,6 +391,12 @@ class AgentActivity(Base):
         Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
     )
     expires_at: Mapped[str] = mapped_column(Text, nullable=False)   # ISO 8601 UTC
+    # pgmq msg_id of the cleanup task scheduled to fire at expires_at.
+    # Tracked so re-registration (which slides expires_at forward) can
+    # cancel the prior scheduled fire instead of leaking it as an orphan
+    # delayed message. Null when no cleanup has been scheduled yet, or
+    # when the prior message has already fired/been archived.
+    cleanup_msg_id: Mapped[int | None] = mapped_column(BigInteger)
 
     __table_args__ = (
         CheckConstraint(

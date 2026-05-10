@@ -2,21 +2,26 @@
 
 Quick reference for an agent (or human) running and debugging
 agent-wiki on the host **without Docker**. The compose path in the
-README is canonical; this is the fast-iteration alternative we actually use
-day-to-day. See `architecture_and_progress.md` §3 "Local dev" for the
-architectural context; this doc is the concrete runbook.
+README is canonical; this is the fast-iteration alternative we actually
+use day-to-day. See [Architecture Overview](Architecture%20Overview.md)
+for the big picture and [Code Layout](Code%20Layout.md) for the file
+inventory; this doc is the concrete runbook.
 
 ---
 
 ## Prereqs (already set up on this machine)
 
-- Repo at `/Users/yuhongsun/Projects/agent-workspace`.
-- Backend venv at `backend/.venv` (Python 3.11). Deps installed via
-  `pip install -e .` from `backend/pyproject.toml`.
+- Repo at `/Users/yuhongsun/Projects/agent-wiki`.
+- Backend venv at `backend/.venv` (Python ≥ 3.11), managed by **uv**.
+  Deps installed via `uv sync --extra dev` from `backend/`. The venv
+  isn't created by hand — `uv` materializes it from
+  `backend/pyproject.toml`.
+- Pre-commit hooks installed via `pre-commit install` (once per
+  clone). Same ruff + basedpyright that CI runs.
 - `node_modules/` present in `frontend/`.
 - `.env` at the repo root:
   - `WIKI_DIR=…/local_data/wiki`
-  - `DATABASE_URL=postgresql://agent:agent@localhost:5432/agent_wiki` — app
+  - `DATABASE_URL=postgresql://postgres:postgres@localhost:5432/agent_wiki` — app
     state and pgmq queues both live here. The host needs Postgres 17 with
     the `pg_textsearch` and `pgmq` extensions installed (or run
     `docker compose up postgres` and connect to the compose service).
@@ -125,7 +130,8 @@ commit the seed as the initial revision.
 
 > **Operational warning.** Wiki page permissions (ACLs, group
 > definitions, group memberships, page ownership) live entirely in
-> Postgres — see `permissions/permissions.md`. They are **not**
+> Postgres — see [Auth and Permissions](Specific%20Features/Auth%20and%20Permissions.md).
+> They are **not**
 > committed to the wiki git repo, **not** stored in the `wiki-data`
 > Docker volume, and **not** exported by:
 >
@@ -140,7 +146,7 @@ commit the seed as the initial revision.
 > the wiki repo:
 >
 > ```bash
-> pg_dump -U agent agent_wiki \
+> pg_dump -U postgres agent_wiki \
 >   --data-only \
 >   --table=groups --table=group_members \
 >   --table=wiki_owners --table=acl_entries \
@@ -148,16 +154,15 @@ commit the seed as the initial revision.
 > ```
 >
 > This is by design — Postgres-only storage gives us fast filtering
-> for list/search queries. See `permissions/permissions.md` for the
-> tradeoff and the open `.acl.yaml`-in-git option.
+> for list/search queries. See [Auth and Permissions](Specific%20Features/Auth%20and%20Permissions.md)
+> for the tradeoff and the open `.acl.yaml`-in-git option.
 
 ---
 
 ## How to run — five processes
 
 Background work is split into three pgmq queues, each with its own worker
-process (see
-[background-tasks](background-tasks/background-tasks.md#three-queues--one-pgmq-queue-per-logical-lane)).
+process (see [Background Tasks](Specific%20Features/Background%20Tasks.md)).
 So a full local stack is **backend + three workers + frontend**. All five
 are long-lived, so an agent should background them.
 
@@ -170,7 +175,7 @@ reload mid-call would error out the response).
 
 ```
 cd backend
-./.venv/bin/gunicorn 'app.main:create_app()' \
+uv run gunicorn 'app.main:create_app()' \
   --bind 127.0.0.1:8080 \
   --workers 1 \
   --reload \
@@ -200,7 +205,7 @@ Cold-start to first HTTP 200 is ~250 ms on a recent Mac. Reload latency on
 a file save ≈ longest in-flight request + ~250 ms.
 
 If you want the simpler dev server (no graceful reload — kills in-flight
-requests on save), `./.venv/bin/python -m app.main` still works.
+requests on save), `uv run python -m app.main` still works.
 
 ### 2. Workers (pgmq) — three processes, one per queue
 
@@ -210,20 +215,22 @@ three are alive:
 
 ```
 cd backend
-./.venv/bin/python -m app.tasks.run_worker documents   # LLM doc-updater
-./.venv/bin/python -m app.tasks.run_worker triggers    # NL trigger eval (delta + scheduled)
-./.venv/bin/python -m app.tasks.run_worker wiki_bm25   # BM25 reindex
+uv run python -m app.tasks.run_worker documents   # LLM doc-updater
+uv run python -m app.tasks.run_worker triggers    # NL trigger eval (delta + scheduled)
+uv run python -m app.tasks.run_worker lightweight_maintenance   # BM25 reindex + agent-activity expirations
 ```
 
 Same venv. Same dotenv auto-load. All three pull from `pgmq.q_<name>`
-in the configured Postgres (`DATABASE_URL`); the `pgmq.create()` calls in `init_db`
-creates the queues on first `init_db()`, so there's no separate setup.
+in the configured Postgres (`DATABASE_URL`); the queues are created by
+the `0001_initial` migration, which `init_db()` runs at every boot, so
+there's no separate setup.
 
 What each queue owns, what breaks if you skip its worker, and the full
 design rationale live in
-[background-tasks](background-tasks/background-tasks.md). The short
-version: the `wiki_bm25` worker keeps search fresh, `triggers` runs
-trigger fan-out + the scheduled-trigger cron, `documents` runs LLM
+[Background Tasks](Specific%20Features/Background%20Tasks.md). The
+short version: the `lightweight_maintenance` worker keeps search
+fresh and runs delayed agent-activity expirations, `triggers`
+runs trigger fan-out + the scheduled-trigger cron, `documents` runs LLM
 doc-updater work; iterating on the chat agent without trigger eval (for
 example) is fine — just expect that queue's tasks to back up until you
 launch its worker.
@@ -263,10 +270,19 @@ lsof -ti:3000,8080 | xargs -r kill -9
 
 ## Running from VS Code / Cursor
 
-A `.vscode/launch.json` is checked in with five launch configs (backend,
-three task workers, frontend) plus a compound that starts all of them
-together. The configs use the same Python venv (`backend/.venv`) and the
-repo-root `.env` that the CLI path uses, so behavior matches.
+A `.vscode/launch.json` is checked in with six launch configs (backend,
+three task workers, frontend, plus an optional Chrome attach) and a
+compound that starts the first five together. The configs use the same
+Python venv (`backend/.venv`) and the repo-root `.env` that the CLI path
+uses, so behavior matches — with **two intentional differences** noted
+in the table below.
+
+A shared `preLaunchTask` (`Postgres: ensure compose service is up`)
+runs `docker compose up -d --no-recreate postgres` before the backend
+or any worker starts. So the editor flow doesn't require you to start
+Postgres yourself; it'll be brought up idempotently on first launch and
+left alone if already running. The task is defined in
+`.vscode/tasks.json`.
 
 ### Prereqs
 
@@ -286,13 +302,13 @@ the "Python: Select Interpreter" command and point it at
 
 | Config | What it does | Notes |
 |---|---|---|
-| `Backend (Flask via gunicorn)` | `python -m gunicorn app.main:create_app() --bind 127.0.0.1:8080 --workers 1 --reload --graceful-timeout 30 --timeout 60`, cwd `backend/`. | Reloads on Python save with **graceful drain** of in-flight requests. `subProcess: true` so debugpy follows the worker fork (and re-attaches to the new worker after `--reload`). `justMyCode: false` lets you step into Flask/gunicorn/etc. |
-| `Worker — documents (LLM doc-updater)` | `python -m app.tasks.run_worker documents`. | Drains `documents_queue` — see [background-tasks](background-tasks/background-tasks.md). |
-| `Worker — triggers (NL trigger eval)` | `python -m app.tasks.run_worker triggers`. | Drains `triggers_queue` — see [background-tasks](background-tasks/background-tasks.md). |
-| `Worker — wiki_bm25 (BM25)` | `python -m app.tasks.run_worker wiki_bm25`. | Drains `wiki_bm25_queue` — see [background-tasks](background-tasks/background-tasks.md). |
+| `Backend (Flask via gunicorn)` | `python -m gunicorn app.main:create_app() --bind 127.0.0.1:8080 --workers 1 --graceful-timeout 30 --timeout 60`, cwd `backend/`. | **No `--reload`** here — debugpy doesn't play well with gunicorn's reload-fork dance, so the editor path drops it and you restart the debug session manually after a Python save. The CLI path keeps `--reload` (see §"How to run" above) when you want save-on-reload. `subProcess: true` so debugpy follows the worker fork; `justMyCode: false` lets you step into Flask/gunicorn/etc. macOS-only env: `OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES` to silence Apple's fork-after-init warning during gunicorn's worker spawn. |
+| `Worker — documents (LLM doc-updater)` | `python -m app.tasks.run_worker documents`. | Drains `documents_queue` — see [Background Tasks](Specific%20Features/Background%20Tasks.md). |
+| `Worker — triggers (NL trigger eval)` | `python -m app.tasks.run_worker triggers`. | Drains `triggers_queue` — see [Background Tasks](Specific%20Features/Background%20Tasks.md). |
+| `Worker — lightweight_maintenance (BM25 + expirations)` | `python -m app.tasks.run_worker lightweight_maintenance`. | Drains `lightweight_maintenance_queue` — see [Background Tasks](Specific%20Features/Background%20Tasks.md). |
 | `Frontend (Next dev)` | `npm run dev` in `frontend/`, env loaded from repo-root `.env`. | This is the `set -a / source ../.env` dance, but done by VS Code. |
-| `Browser (Chrome attach)` | Launches Chrome at `http://localhost:3000`. | Optional — only if you want frontend breakpoints. |
-| `App: backend + 3 workers + frontend` (compound) | Runs the five above in parallel. `stopAll` so killing one stops the others. | The single click that boots the whole stack. |
+| `Browser (Chrome attach)` | Launches Chrome at `http://localhost:3000`. | Optional — only if you want frontend breakpoints. Not in the compound. |
+| `App: backend + 3 workers + frontend` (compound) | Runs the five non-browser configs in parallel. `stopAll` so killing one stops the others. | The single click that boots the whole stack. |
 
 ### How to use it
 
@@ -326,13 +342,16 @@ the shell `source ../.env`, just driven by the editor.
 - The frontend launch runs through `npm`, so killing the debug session
   sends SIGTERM to the npm wrapper. If a stray Next dev server keeps
   holding `:3000`, fall back to `lsof -ti:3000 | xargs -r kill -9`.
-- Hot reload works for both ends:
+- Hot reload differs between ends:
   - Frontend: Next.js HMR — saves under `frontend/src/**` propagate to the
     browser within ~1 s; component state is preserved where possible.
-  - Backend: gunicorn `--reload` watches `backend/app/**`; saves trigger a
-    graceful worker swap. Each reload, debugpy's `subProcess: true`
-    re-attaches to the new worker. If you've set breakpoints, they survive
-    the swap.
+  - Backend (VS Code): **no auto-reload** — the editor path drops
+    `--reload` so debugpy stays attached cleanly. After a Python save,
+    restart the Backend launch (or the compound). Workers behave the
+    same way — saves to `backend/app/tasks/**` need a worker restart.
+  - Backend (CLI): `uv run gunicorn ... --reload` does watch
+    `backend/app/**` and gracefully swap the worker on save. Pick this
+    path if save-driven reloads matter more than step-debugging.
 
 ---
 
@@ -350,7 +369,7 @@ Each backgrounded `Bash(run_in_background: true)` invocation gets a
 `task_id` (e.g. `bnz2gdll6`) and writes its merged stdout+stderr to:
 
 ```
-/private/tmp/claude-501/-Users-yuhongsun-Projects-agent-workspace/<session-id>/tasks/<task-id>.output
+/private/tmp/claude-501/-Users-yuhongsun-Projects-agent-wiki/<session-id>/tasks/<task-id>.output
 ```
 
 The exact `<session-id>` is per-harness-session (a UUID) and is reported in
@@ -362,21 +381,22 @@ There is **no rotated log file** outside this. If you want persistent logs
 across runs, redirect manually, e.g.:
 
 ```
-./.venv/bin/python -m app.main > /tmp/agent-wiki-backend.log 2>&1
+uv run python -m app.main > /tmp/agent-wiki-backend.log 2>&1
 ```
 
 ### Postgres (useful for poking at state)
 
 App state (users, documents, triggers cache, events, BM25-indexed
 `documents_fts`, `llm_settings`, schema state) and the three pgmq
-queues (`pgmq.q_documents`, `pgmq.q_triggers`, `pgmq.q_wiki_bm25`)
-all live in the database pointed at by `DATABASE_URL`.
+queues (`pgmq.q_documents`, `pgmq.q_triggers`,
+`pgmq.q_lightweight_maintenance`) all live in the database pointed at
+by `DATABASE_URL`.
 
 ```
 psql "$DATABASE_URL"
 \dt                     # app state tables
 \dt pgmq.*              # queue tables
-SELECT count(*) FROM pgmq.q_wiki_bm25;
+SELECT count(*) FROM pgmq.q_lightweight_maintenance;
 ```
 
 ### Wiki git history
@@ -446,7 +466,7 @@ To author a new migration after editing `app/db/models.py`:
 
 ```
 cd backend
-./.venv/bin/alembic revision --autogenerate -m "<short-slug>"
+uv run alembic revision --autogenerate -m "<short-slug>"
 ```
 
 The new file lands under `app/db/migrations/versions/`. Review it
@@ -463,23 +483,49 @@ add a new one.
 
 ## Bootstrap from a fresh clone
 
-1. `cp .env.example .env`; set `SECRET_KEY` and adjust the local data
-   paths to point under `local_data/` (or wherever you want them).
-2. Backend venv:
+1. `cp .env.example .env`; set `SECRET_KEY` and (if running the
+   frontend on the host while talking to the compose Postgres) set
+   `BACKEND_URL=http://localhost:8080` so the Next dev-server rewrite
+   targets host-Flask instead of the docker hostname `backend:8080`.
+2. Backend deps with uv:
    ```
    cd backend
-   python3.11 -m venv .venv
-   ./.venv/bin/pip install -e .
+   uv sync --extra dev
    ```
+   `uv` materializes `backend/.venv` from `pyproject.toml`. No manual
+   `python -m venv`.
 3. Frontend deps: `cd frontend && npm install`.
-4. (Optional) Seed the wiki: `mkdir -p local_data/wiki && cp -R wiki/seed/. local_data/wiki/`. Do this **before** the first backend start so `ensure_wiki_repo()` commits the seed as the initial revision. See "Wiki dir — git requirements and setup" above for why this matters and what to do if you've already started the backend with an empty wiki dir.
-5. Start the three processes per the section above. The first hit to the
-   backend will run `init_db()` against `DATABASE_URL`, run migrations, and
-   `ensure_wiki_repo()` will init `local_data/wiki/` as a git repo.
-6. Sign up at http://localhost:3000/signup — the first account is
+4. Pre-commit hooks (one-time): `pre-commit install` from the repo
+   root. Each commit then runs ruff + basedpyright with the same
+   versions CI uses.
+5. (Optional) Seed the wiki: `mkdir -p local_data/wiki && cp -R wiki/seed/. local_data/wiki/`. Do this **before** the first backend start so `ensure_wiki_repo()` commits the seed as the initial revision. See "Wiki dir — git requirements and setup" above for why this matters and what to do if you've already started the backend with an empty wiki dir.
+6. Bring up Postgres (`docker compose up -d postgres` from the repo
+   root) — needs `pg_textsearch` + `pgmq` and the local image bakes
+   both in (`deploy/postgres/Dockerfile`).
+7. Start the five processes per the section above. The first hit to the
+   backend will run `init_db()` against `DATABASE_URL`, run migrations
+   (which create the pgmq queues), and `ensure_wiki_repo()` will init
+   `local_data/wiki/` as a git repo.
+8. Sign up at http://localhost:3000/signup — the first account is
    auto-promoted to admin.
-7. In Admin → LLM, set provider/model/API key (env-var keys are only the
-   pre-row fallback).
+9. In Admin → LLM, set provider/model/API key. There is no env-var
+   fallback — all provider settings come from the DB row written by
+   that page.
+
+### Running the test suite
+
+```
+cd backend
+uv run pytest
+```
+
+Tests use a separate Postgres database, `agent_wiki_test`, pointed at
+by `TEST_DATABASE_URL` (defaults to
+`postgresql://postgres:postgres@localhost:5432/agent_wiki_test`). Each test
+gets its own schema inside that DB; create the database once with
+`pg_textsearch` + `pgmq` installed, and `pytest -n auto` will drop
+and recreate schemas per test. CLAUDE.md's "Testing" section has the
+finer details.
 
 ---
 
@@ -494,5 +540,20 @@ add a new one.
 - `frontend/src/lib/api.ts` — `apiFetch` (the only allowed network call).
 - `frontend/src/lib/auth.tsx` — auth context.
 
-For deeper detail on any area, follow the per-area links in
-`architecture_and_progress.md`.
+For deeper detail on any area, see:
+
+- [Architecture Overview](Architecture%20Overview.md) — diagram +
+  data flows.
+- [Code Layout](Code%20Layout.md) — file-by-file inventory.
+- [Background Tasks](Specific%20Features/Background%20Tasks.md) —
+  the three-queue design and worker semantics.
+- [Auth and Permissions](Specific%20Features/Auth%20and%20Permissions.md)
+  — sessions, OIDC, MCP tokens, ACL.
+- [LLM Interfaces](Specific%20Features/LLM%20Interfaces.md) — the
+  provider seam and agents layer.
+- [Chat Harness](Specific%20Features/Chat%20Harness.md) — the
+  in-app chat loop and tool registry.
+- [MCP Server Inbound](Specific%20Features/MCP%20Server%20Inbound.md)
+  — the inbound MCP transport.
+- `CLAUDE.md` (repo root) — the architectural seams and rules an
+  agent working in this codebase must follow.

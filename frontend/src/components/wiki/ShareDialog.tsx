@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 
+import { Button } from "@/components/common/Button";
 import { ApiError, apiFetch } from "@/lib/api";
 import {
   grantAcl,
@@ -14,6 +15,7 @@ import {
   type Permission,
   type PrincipalKind,
 } from "@/lib/permissions";
+import { color, radius, shadow } from "@/lib/theme";
 
 interface AdminUser {
   id: string;
@@ -51,13 +53,13 @@ export function ShareDialog({ path, open, onClose }: ShareDialogProps) {
         <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
           <div>
             <h2 style={{ margin: 0, fontSize: 18 }}>Share</h2>
-            <code style={{ fontSize: 12, color: "#666" }}>{path}</code>
+            <code style={{ fontSize: 12, color: color.text.muted }}>{path}</code>
           </div>
           <button onClick={onClose} style={iconBtnStyle}>×</button>
         </header>
 
         {error && (
-          <div style={{ color: "crimson", marginBottom: 12 }}>
+          <div style={{ color: color.state.danger.fg, marginBottom: 12 }}>
             {error instanceof ApiError && error.status === 403
               ? "Only the owner or an admin can manage sharing for this page."
               : error.message}
@@ -65,11 +67,11 @@ export function ShareDialog({ path, open, onClose }: ShareDialogProps) {
         )}
 
         {isLoading || !acl ? (
-          <div style={{ color: "#666", fontSize: 14 }}>Loading…</div>
+          <div style={{ color: color.text.muted, fontSize: 14 }}>Loading…</div>
         ) : (
           <>
             <Section title="Visibility">
-              <div style={{ fontSize: 14, color: "#444" }}>
+              <div style={{ fontSize: 14, color: color.text.secondary }}>
                 {(() => {
                   const v = visibility(acl);
                   if (v === "private") {
@@ -138,7 +140,7 @@ export function ShareDialog({ path, open, onClose }: ShareDialogProps) {
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section style={{ marginBottom: 20 }}>
-      <h3 style={{ fontSize: 13, fontWeight: 600, color: "#555", margin: "0 0 8px 0" }}>
+      <h3 style={{ fontSize: 13, fontWeight: 600, color: color.text.secondary, margin: "0 0 8px 0" }}>
         {title}
       </h3>
       {children}
@@ -192,11 +194,11 @@ function OwnerControls({
             </option>
           ))}
         </select>
-        <button onClick={() => void transfer()} disabled={busy || !transferTo} style={btnStyle}>
+        <Button size="sm" onClick={() => void transfer()} disabled={busy || !transferTo}>
           Transfer
-        </button>
+        </Button>
       </div>
-      {err && <div style={{ color: "crimson", marginTop: 6, fontSize: 13 }}>{err}</div>}
+      {err && <div style={{ color: color.state.danger.fg, marginTop: 6, fontSize: 13 }}>{err}</div>}
     </div>
   );
 }
@@ -213,7 +215,7 @@ function Grants({
   onRevoke: (id: string) => Promise<void>;
 }) {
   if (entries.length === 0) {
-    return <div style={{ fontSize: 13, color: "#666" }}>No explicit grants.</div>;
+    return <div style={{ fontSize: 13, color: color.text.muted }}>No explicit grants.</div>;
   }
   return (
     <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
@@ -225,7 +227,7 @@ function Grants({
             alignItems: "center",
             justifyContent: "space-between",
             padding: "6px 0",
-            borderBottom: "1px solid #f3f3f3",
+            borderBottom: `1px solid ${color.border.subtle}`,
             fontSize: 13,
           }}
         >
@@ -237,7 +239,7 @@ function Grants({
               groups={groups}
             />
             {" "}
-            <span style={{ color: "#666" }}>
+            <span style={{ color: color.text.muted }}>
               · {e.permission}
               {e.resource_kind === "folder"
                 ? ` · folder${e.resource_path ? ` "${e.resource_path}"` : " (root)"}`
@@ -245,11 +247,11 @@ function Grants({
             </span>
           </span>
           {e.resource_kind === "page" ? (
-            <button onClick={() => void onRevoke(e.id)} style={{ ...btnStyle, color: "#b91c1c" }}>
+            <Button size="sm" variant="danger" onClick={() => void onRevoke(e.id)}>
               Revoke
-            </button>
+            </Button>
           ) : (
-            <span style={{ fontSize: 11, color: "#999" }}>inherited</span>
+            <span style={{ fontSize: 11, color: color.text.faint }}>inherited</span>
           )}
         </li>
       ))}
@@ -354,7 +356,7 @@ function GrantForm({
             ))}
           </select>
         ) : (
-          <span style={{ flex: 1, fontSize: 13, color: "#666", alignSelf: "center" }}>
+          <span style={{ flex: 1, fontSize: 13, color: color.text.muted, alignSelf: "center" }}>
             All signed-in users
           </span>
         )}
@@ -363,10 +365,10 @@ function GrantForm({
           <option value="write">Write</option>
         </select>
       </div>
-      <button onClick={() => void submit()} disabled={!canSubmit} style={btnStyle}>
+      <Button onClick={() => void submit()} disabled={!canSubmit}>
         Grant access
-      </button>
-      {err && <div style={{ color: "crimson", fontSize: 13 }}>{err}</div>}
+      </Button>
+      {err && <div style={{ color: color.state.danger.fg, fontSize: 13 }}>{err}</div>}
     </div>
   );
 }
@@ -378,44 +380,41 @@ function GrantForm({
 const overlayStyle: React.CSSProperties = {
   position: "fixed",
   inset: 0,
-  background: "rgba(0, 0, 0, 0.4)",
+  background: color.overlay,
   display: "flex",
   alignItems: "flex-start",
   justifyContent: "center",
-  paddingTop: 80,
+  // 80px on tall viewports for a generous top gap; clamps down to 5vh
+  // (~33px on a 667px-tall iPhone) so the modal doesn't get pushed off
+  // screen on short phone viewports.
+  paddingTop: "max(20px, min(80px, 5vh))",
+  paddingLeft: 16,
+  paddingRight: 16,
   zIndex: 50,
 };
 const modalStyle: React.CSSProperties = {
-  background: "white",
-  borderRadius: 8,
-  width: "min(560px, 90vw)",
-  maxHeight: "calc(100vh - 120px)",
+  background: color.bg.page,
+  borderRadius: radius.lg,
+  width: "min(560px, 100%)",
+  maxHeight: "calc(100vh - 80px)",
   overflowY: "auto",
   padding: 24,
-  boxShadow: "0 12px 40px rgba(0,0,0,0.18)",
+  boxShadow: shadow.modal,
 };
 const inputStyle: React.CSSProperties = {
   flex: 1,
   padding: "6px 10px",
   fontSize: 13,
-  border: "1px solid #d4d4d8",
-  borderRadius: 4,
-  background: "white",
-};
-const btnStyle: React.CSSProperties = {
-  padding: "6px 12px",
-  border: "1px solid #d4d4d8",
-  background: "white",
-  borderRadius: 4,
-  cursor: "pointer",
-  fontSize: 13,
+  border: `1px solid ${color.border.default}`,
+  borderRadius: radius.sm,
+  background: color.bg.page,
 };
 const iconBtnStyle: React.CSSProperties = {
   background: "transparent",
   border: "none",
   fontSize: 24,
   cursor: "pointer",
-  color: "#666",
+  color: color.text.muted,
   width: 32,
   height: 32,
   lineHeight: 1,

@@ -1,0 +1,12 @@
+id: trg_dba27d190418
+owner_user_id: 330a21dd-1ffe-4e75-b346-9e5b2182865b
+scope_path: ''
+kind: delta
+nl_description: "Fire when any update adds a mention of \u201CYuhong\u201D in any\
+  \ capitalization (e.g., Yuhong, yuhong, YUHONG) anywhere in the wiki."
+message: 'Yuhong mention detected (case-insensitive). Please review: {{path}}. Context:
+  include the surrounding sentence/paragraph around the newly added mention and point
+  to the diff hunk(s) where it appears.'
+destination: event_log
+enabled: false
+created_at: '2026-05-10T02:58:58+00:00'

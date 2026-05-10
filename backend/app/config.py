@@ -62,7 +62,7 @@ def load_config() -> Config:
         wiki_dir=_resolve_wiki_dir(),
         database_url=os.environ.get(
             "DATABASE_URL",
-            "postgresql://agent:agent@postgres:5432/agent_wiki",
+            "postgresql://postgres:postgres@postgres:5432/agent_wiki",
         ),
         max_queue_size=_positive_int("MAX_QUEUE_SIZE", 1000),
         auth_mode=os.environ.get("AUTH_MODE", "basic"),

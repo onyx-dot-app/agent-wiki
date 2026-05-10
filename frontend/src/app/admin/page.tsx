@@ -5,32 +5,35 @@ import { useEffect, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 
 import { AppShell } from "@/components/common/AppShell";
+import { PageHeader } from "@/components/common/PageHeader";
 import { useRequireAuth } from "@/lib/auth";
+import { color, radius, shadow } from "@/lib/theme";
+import { useIsMobile } from "@/lib/viewport";
 
 export default function AdminPage() {
   const { user, loading } = useRequireAuth();
   const router = useRouter();
+  const isMobile = useIsMobile();
 
   useEffect(() => {
     if (!loading && user && !user.is_admin) router.replace("/");
   }, [loading, user, router]);
 
-  if (loading || !user) return <main style={{ padding: 32 }}>Loading…</main>;
+  if (loading || !user) return <main style={{ padding: isMobile ? 16 : 32 }}>Loading…</main>;
   if (!user.is_admin) return null;
 
   return (
     <AppShell>
-      <main style={{ padding: 32, maxWidth: 960 }}>
-        <h1 style={{ marginTop: 0 }}>Admin</h1>
-        <p style={{ color: "#666", marginTop: 0 }}>
-          Manage who can sign in and which LLM the workspace uses.
-        </p>
+      <main style={{ padding: isMobile ? "16px 12px" : "24px 32px", maxWidth: 960 }}>
+        <PageHeader
+          title="Admin"
+          description="Manage who can sign in and which LLM the workspace uses."
+        />
         <div
           style={{
             display: "grid",
             gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
             gap: 16,
-            marginTop: 24,
           }}
         >
           <AdminCard
@@ -86,27 +89,27 @@ function AdminCard({
       style={{
         display: "block",
         padding: 20,
-        border: "1px solid #e5e5e5",
-        borderRadius: 8,
+        border: `1px solid ${color.border.default}`,
+        borderRadius: radius.md,
         textDecoration: "none",
         color: "inherit",
-        background: "white",
+        background: color.bg.page,
         transition: "border-color 0.15s, box-shadow 0.15s",
       }}
       onMouseEnter={(e) => {
-        e.currentTarget.style.borderColor = "#a5b4fc";
-        e.currentTarget.style.boxShadow = "0 4px 16px rgba(79, 70, 229, 0.08)";
+        e.currentTarget.style.borderColor = color.border.strong;
+        e.currentTarget.style.boxShadow = shadow.sm;
       }}
       onMouseLeave={(e) => {
-        e.currentTarget.style.borderColor = "#e5e5e5";
+        e.currentTarget.style.borderColor = color.border.default;
         e.currentTarget.style.boxShadow = "none";
       }}
     >
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
-        <span style={{ color: "#4f46e5" }}>{icon}</span>
+        <span style={{ color: color.text.primary }}>{icon}</span>
         <h2 style={{ margin: 0, fontSize: 16 }}>{title}</h2>
       </div>
-      <p style={{ margin: 0, color: "#666", fontSize: 14 }}>{description}</p>
+      <p style={{ margin: 0, color: color.text.muted, fontSize: 14 }}>{description}</p>
     </Link>
   );
 }

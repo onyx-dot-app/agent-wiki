@@ -301,12 +301,12 @@ def test_call_with_missing_name_is_invalid_params(client):
 
 def test_search_wiki_returns_results_via_mcp(client):
     uid = seed_user(uid="u1", email="u1@x.com")
-    # The reindex task is bound to wiki_bm25_queue. Run it inline here
-    # so the search index sees the doc the test seeded.
-    from app.tasks.queues import wiki_bm25_queue
+    # The reindex task is bound to lightweight_maintenance_queue. Run it
+    # inline here so the search index sees the doc the test seeded.
+    from app.tasks.queues import lightweight_maintenance_queue
     from app.tasks.reindex import reindex_path_inline
 
-    with wiki_bm25_queue.immediate_mode():
+    with lightweight_maintenance_queue.immediate_mode():
         wiki_git.commit_file("guide.md", "# Distributed search rocks\n", "seed", author=None)
         reindex_path_inline("guide.md")
 
