@@ -1,0 +1,7 @@
+/* Reserve the scrollbar gutter on the root scroll container so layout
+   width stays constant whether content fits or overflows. Without this,
+   pages that toggle between short and tall content cause a horizontal
+   shift as the scrollbar appears/disappears. */
+html {
+  scrollbar-gutter: stable;
+}

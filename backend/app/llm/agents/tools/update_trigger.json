@@ -1,16 +1,16 @@
 {
   "name": "update_trigger",
-  "description": "Update an existing trigger owned by the current user. Pass only the fields you want to change; omitted fields are left alone. The same three-part shape applies: `trigger_nl_condition` is the **if** condition, `trigger_fire_message` is what to deliver, `destination` is where (a destination id from `get_trigger_destinations`). Use `enabled` to disable/re-enable a trigger without deleting it. Only call after the user has explicitly asked for the update.",
+  "description": "Update an existing trigger. Pass only the fields you want to change; omitted fields are left alone. The same three-part shape applies: `trigger_nl_condition` is the **if** condition, `trigger_fire_message` is what to deliver, `destination` is where (a destination id from `get_trigger_destinations`). Use `enabled` to disable/re-enable a trigger without deleting it. Only call if the user is specifically asking for a trigger update.",
   "input_schema": {
     "type": "object",
     "properties": {
       "trigger_id": {
         "type": "string",
-        "description": "ID of the trigger to update (e.g. `trg_abc123...`). The trigger must be owned by the current user."
+        "description": "ID of the trigger to update (e.g. `trg_abc123...`)."
       },
       "scope_path": {
         "type": "string",
-        "description": "New scope (wiki-relative file or directory; use `/` or an empty string for the whole wiki). If the scope changes, the YAML moves to match. Omit to keep current."
+        "description": "New scope (wiki-relative file or directory; use `/` or an empty string for the whole wiki). Omit to keep current."
       },
       "trigger_nl_condition": {
         "type": "string",
@@ -18,7 +18,7 @@
       },
       "trigger_fire_message": {
         "type": "string",
-        "description": "New **fire message** body delivered on fire. Omit to keep current."
+        "description": "New **fire message** body delivered on fire. This can be natural language and pull in information from the relevant document(s). Omit to keep current."
       },
       "destination": {
         "type": "string",

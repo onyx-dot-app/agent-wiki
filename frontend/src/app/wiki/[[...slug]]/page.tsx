@@ -8,16 +8,25 @@ import remarkGfm from "remark-gfm";
 import useSWR from "swr";
 
 import { AppShell } from "@/components/common/AppShell";
+import { Button } from "@/components/common/Button";
+import { PageHeader } from "@/components/common/PageHeader";
 import { TriggerModal } from "@/components/triggers/TriggerModal";
 import { RunAgentModal } from "@/components/wiki/RunAgentModal";
 import { ShareDialog } from "@/components/wiki/ShareDialog";
-import { WikiSearch } from "@/components/wiki/WikiSearch";
+import { FolderIcon, FileIcon } from "@/components/wiki/WikiIcons";
 import { apiFetch } from "@/lib/api";
 import { useRequireAuth } from "@/lib/auth";
+import { color, radius, shadow } from "@/lib/theme";
+import { useIsMobile } from "@/lib/viewport";
 import type { DocumentActivity, DocumentActivityResponse } from "@/types";
 
+interface DocEntry {
+  path: string;
+  updated_at: string;
+}
+
 interface ListResponse {
-  paths: string[];
+  entries: DocEntry[];
 }
 
 interface FileResponse {
@@ -42,6 +51,7 @@ interface HistoryResponse {
 
 export default function WikiRoute() {
   const { user, loading } = useRequireAuth();
+  const isMobile = useIsMobile();
   const params = useParams<{ slug?: string[] }>();
   const rawSlugParts = (params?.slug ?? []) as string[];
   // Next.js may hand back percent-encoded segments (e.g. "local%20testing").
@@ -56,20 +66,10 @@ export default function WikiRoute() {
   const slugPath = slugParts.join("/");
   const isFile = slugPath.endsWith(".md");
 
-  if (loading || !user) return <main style={{ padding: 32 }}>Loading…</main>;
+  if (loading || !user) return <main style={{ padding: isMobile ? 16 : 32 }}>Loading…</main>;
 
   return (
     <AppShell>
-      <div
-        style={{
-          padding: "16px 32px 0",
-          display: "flex",
-          alignItems: "center",
-          gap: 16,
-        }}
-      >
-        <WikiSearch />
-      </div>
       {isFile ? <FileViewer path={slugPath} /> : <Explorer dir={slugPath} />}
     </AppShell>
   );
@@ -77,8 +77,9 @@ export default function WikiRoute() {
 
 function Explorer({ dir }: { dir: string }) {
   const router = useRouter();
+  const isMobile = useIsMobile();
   const { data, error: listError, mutate: mutatePaths } = useSWR<ListResponse>("/documents");
-  const paths = data?.paths ?? [];
+  const entries = data?.entries ?? [];
   const [mutationError, setMutationError] = useState<string | null>(null);
   const error = mutationError ?? (listError instanceof Error ? listError.message : null);
   const setError = setMutationError;
@@ -91,34 +92,47 @@ function Explorer({ dir }: { dir: string }) {
   const [creating, setCreating] = useState<"doc" | "folder" | null>(null);
   const [newName, setNewName] = useState("");
   const [createBusy, setCreateBusy] = useState(false);
-  const [groupOrder, setGroupOrder] = useState<"folders" | "docs">("folders");
-  const [direction, setDirection] = useState<"asc" | "desc">("asc");
+  const [sort, setSort] = useState<"name-asc" | "name-desc" | "recent">("name-asc");
   const [renaming, setRenaming] = useState<string | null>(null);
   const [dragSource, setDragSource] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
 
   const { subdirs, files } = useMemo(() => {
     const prefix = dir ? dir + "/" : "";
-    const dirSet = new Set<string>();
-    const fileList: string[] = [];
-    for (const p of paths) {
-      if (!p.startsWith(prefix)) continue;
-      const rest = p.slice(prefix.length);
+    // Folder mtime = max of descendant entries' timestamps.
+    const dirMtime = new Map<string, string>();
+    const fileList: { name: string; updated_at: string }[] = [];
+    for (const e of entries) {
+      if (!e.path.startsWith(prefix)) continue;
+      const rest = e.path.slice(prefix.length);
       if (!rest) continue;
       const slash = rest.indexOf("/");
       if (slash === -1) {
-        if (rest.endsWith(".md")) fileList.push(rest);
+        if (rest.endsWith(".md")) fileList.push({ name: rest, updated_at: e.updated_at });
       } else {
-        dirSet.add(rest.slice(0, slash));
+        const name = rest.slice(0, slash);
+        const cur = dirMtime.get(name);
+        if (!cur || (e.updated_at && e.updated_at > cur)) {
+          dirMtime.set(name, e.updated_at);
+        }
       }
     }
-    const cmp = (a: string, b: string) =>
-      direction === "asc" ? a.localeCompare(b) : b.localeCompare(a);
+    const dirList = [...dirMtime.entries()].map(([name, updated_at]) => ({ name, updated_at }));
+    const byName = (asc: boolean) => (a: { name: string }, b: { name: string }) =>
+      asc ? a.name.localeCompare(b.name) : b.name.localeCompare(a.name);
+    // Newest first; empty timestamps sink to the bottom.
+    const byRecent = (a: { updated_at: string }, b: { updated_at: string }) => {
+      if (!a.updated_at && !b.updated_at) return 0;
+      if (!a.updated_at) return 1;
+      if (!b.updated_at) return -1;
+      return b.updated_at.localeCompare(a.updated_at);
+    };
+    const cmp = sort === "recent" ? byRecent : byName(sort === "name-asc");
     return {
-      subdirs: [...dirSet].sort(cmp),
+      subdirs: dirList.sort(cmp),
       files: fileList.sort(cmp),
     };
-  }, [paths, dir, direction]);
+  }, [entries, dir, sort]);
 
   const segments = dir ? dir.split("/") : [];
 
@@ -237,59 +251,44 @@ function Explorer({ dir }: { dir: string }) {
   }
 
   return (
-    <main style={{ padding: "24px 32px", height: "100vh", overflowY: "auto" }}>
-      <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20, gap: 8, flexWrap: "wrap" }}>
-        <Breadcrumbs
-          segments={segments}
-          onDropToCrumb={(crumbPath) => {
-            if (dragSource && crumbPath !== dir) onMove(dragSource, crumbPath);
-            setDragSource(null);
-            setDropTarget(null);
-          }}
-          dropTarget={dropTarget}
-          onCrumbDragOver={(crumbPath) => setDropTarget(crumbPath)}
-          onCrumbDragLeave={() => setDropTarget(null)}
-          currentDir={dir}
-        />
-        <div style={{ display: "flex", gap: 8 }}>
-          <button
-            onClick={() => {
-              setNewName("");
-              setCreating((v) => (v === "folder" ? null : "folder"));
+    <main style={{ padding: isMobile ? "16px 12px" : "24px 32px", height: "100vh", overflowY: "auto" }}>
+      <PageHeader
+        title={
+          <Breadcrumbs
+            segments={segments}
+            onDropToCrumb={(crumbPath) => {
+              if (dragSource && crumbPath !== dir) onMove(dragSource, crumbPath);
+              setDragSource(null);
+              setDropTarget(null);
             }}
-            style={{
-              padding: "8px 14px",
-              background: "transparent",
-              color: "#374151",
-              border: "1px solid #ddd",
-              borderRadius: 8,
-              cursor: "pointer",
-              fontWeight: 600,
-              fontSize: 13,
-            }}
-          >
-            + New folder
-          </button>
-          <button
-            onClick={() => {
-              setNewName("");
-              setCreating((v) => (v === "doc" ? null : "doc"));
-            }}
-            style={{
-              padding: "8px 14px",
-              background: "#6366f1",
-              color: "white",
-              border: "none",
-              borderRadius: 8,
-              cursor: "pointer",
-              fontWeight: 600,
-              fontSize: 13,
-            }}
-          >
-            + New document
-          </button>
-        </div>
-      </header>
+            dropTarget={dropTarget}
+            onCrumbDragOver={(crumbPath) => setDropTarget(crumbPath)}
+            onCrumbDragLeave={() => setDropTarget(null)}
+            currentDir={dir}
+          />
+        }
+        actions={
+          <>
+            <Button
+              onClick={() => {
+                setNewName("");
+                setCreating((v) => (v === "folder" ? null : "folder"));
+              }}
+            >
+              + New folder
+            </Button>
+            <Button
+              variant="primary"
+              onClick={() => {
+                setNewName("");
+                setCreating((v) => (v === "doc" ? null : "doc"));
+              }}
+            >
+              + New document
+            </Button>
+          </>
+        }
+      />
 
       {creating && (
         <form
@@ -299,9 +298,9 @@ function Explorer({ dir }: { dir: string }) {
             gap: 8,
             marginBottom: 16,
             padding: 12,
-            background: "#f9fafb",
-            border: "1px solid #e5e5e5",
-            borderRadius: 8,
+            background: color.bg.panel,
+            border: `1px solid ${color.border.default}`,
+            borderRadius: radius.md,
           }}
         >
           {creating === "doc" ? (
@@ -310,9 +309,9 @@ function Explorer({ dir }: { dir: string }) {
                 flex: 1,
                 display: "flex",
                 alignItems: "stretch",
-                border: "1px solid #ddd",
-                borderRadius: 6,
-                background: "white",
+                border: `1px solid ${color.border.default}`,
+                borderRadius: radius.sm,
+                background: color.bg.page,
                 overflow: "hidden",
               }}
             >
@@ -337,9 +336,9 @@ function Explorer({ dir }: { dir: string }) {
                   display: "flex",
                   alignItems: "center",
                   padding: "0 10px",
-                  background: "#f3f4f6",
-                  borderLeft: "1px solid #e5e7eb",
-                  color: "#4b5563",
+                  background: color.bg.sunken,
+                  borderLeft: `1px solid ${color.border.default}`,
+                  color: color.text.secondary,
                   fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
                   fontSize: 13,
                   fontWeight: 600,
@@ -355,80 +354,71 @@ function Explorer({ dir }: { dir: string }) {
               onChange={(e) => setNewName(e.target.value)}
               placeholder="folder-name (or subdir/folder-name)"
               disabled={createBusy}
-              style={{ flex: 1, padding: 8, border: "1px solid #ddd", borderRadius: 6, fontSize: 14 }}
+              style={{
+                flex: 1,
+                padding: 8,
+                border: `1px solid ${color.border.default}`,
+                borderRadius: radius.sm,
+                fontSize: 14,
+              }}
             />
           )}
-          <button
+          <Button
             type="submit"
+            variant="primary"
             disabled={createBusy || !newName.trim()}
-            style={{
-              padding: "0 16px",
-              background: "#6366f1",
-              color: "white",
-              border: "none",
-              borderRadius: 6,
-              cursor: createBusy ? "not-allowed" : "pointer",
-              fontWeight: 600,
-              fontSize: 13,
-              opacity: createBusy ? 0.6 : 1,
-            }}
           >
             {creating === "folder" ? "Create folder" : "Create document"}
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
             onClick={() => {
               setCreating(null);
               setNewName("");
             }}
-            style={{
-              padding: "0 12px",
-              background: "transparent",
-              border: "1px solid #ddd",
-              borderRadius: 6,
-              cursor: "pointer",
-              fontSize: 13,
-            }}
           >
             Cancel
-          </button>
+          </Button>
         </form>
       )}
 
       {error && (
-        <div style={{ padding: 10, background: "#fef2f2", color: "#991b1b", borderRadius: 6, fontSize: 13, marginBottom: 12 }}>
+        <div
+          style={{
+            padding: 10,
+            background: color.state.danger.bg,
+            color: color.state.danger.fg,
+            borderRadius: radius.sm,
+            fontSize: 13,
+            marginBottom: 12,
+          }}
+        >
           {error}
         </div>
       )}
 
       {subdirs.length === 0 && files.length === 0 && !error && (
-        <p style={{ color: "#888", fontSize: 14 }}>This folder is empty. Create a document to get started.</p>
+        <p style={{ color: color.text.muted, fontSize: 14 }}>This folder is empty. Create a document to get started.</p>
       )}
 
       {(subdirs.length > 0 || files.length > 0) && (
-        <SortBar
-          groupOrder={groupOrder}
-          setGroupOrder={setGroupOrder}
-          direction={direction}
-          setDirection={setDirection}
-        />
+        <SortBar value={sort} onChange={setSort} />
       )}
 
       <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
         {(() => {
-          const dirEntries = subdirs.map((name) => ({ name, isFile: false }));
-          const fileEntries = files.map((name) => ({ name, isFile: true }));
-          const ordered =
-            groupOrder === "folders"
-              ? [...dirEntries, ...fileEntries]
-              : [...fileEntries, ...dirEntries];
-          return ordered.map(({ name, isFile }) => {
+          const dirEntries = subdirs.map((d) => ({ ...d, isFile: false }));
+          const fileEntries = files.map((f) => ({ ...f, isFile: true }));
+          // Folders always above docs; ordering within each group is set by `sort`.
+          const ordered = [...dirEntries, ...fileEntries];
+          return ordered.map(({ name, updated_at, isFile }) => {
             const childPath = (dir ? dir + "/" : "") + name;
             return (
               <Row
                 key={(isFile ? "f:" : "d:") + name}
                 icon={isFile ? <FileIcon /> : <FolderIcon />}
                 label={name}
+                updatedAt={updated_at}
                 href={`/wiki/${childPath}`}
                 path={childPath}
                 isFile={isFile}
@@ -476,89 +466,44 @@ function Explorer({ dir }: { dir: string }) {
   );
 }
 
+type SortMode = "name-asc" | "name-desc" | "recent";
+
 function SortBar({
-  groupOrder,
-  setGroupOrder,
-  direction,
-  setDirection,
+  value,
+  onChange,
 }: {
-  groupOrder: "folders" | "docs";
-  setGroupOrder: (v: "folders" | "docs") => void;
-  direction: "asc" | "desc";
-  setDirection: (v: "asc" | "desc") => void;
+  value: SortMode;
+  onChange: (v: SortMode) => void;
 }) {
   return (
     <div
       style={{
         display: "flex",
         alignItems: "center",
-        gap: 12,
+        gap: 8,
         marginBottom: 8,
         fontSize: 12,
-        color: "#6b7280",
+        color: color.text.muted,
       }}
     >
-      <span>Sort:</span>
-      <Segmented
-        value={groupOrder}
-        onChange={setGroupOrder}
-        options={[
-          { value: "folders", label: "Folders first" },
-          { value: "docs", label: "Docs first" },
-        ]}
-      />
-      <Segmented
-        value={direction}
-        onChange={setDirection}
-        options={[
-          { value: "asc", label: "A → Z" },
-          { value: "desc", label: "Z → A" },
-        ]}
-      />
-    </div>
-  );
-}
-
-function Segmented<T extends string>({
-  value,
-  onChange,
-  options,
-}: {
-  value: T;
-  onChange: (v: T) => void;
-  options: { value: T; label: string }[];
-}) {
-  return (
-    <div
-      style={{
-        display: "inline-flex",
-        border: "1px solid #e5e5e5",
-        borderRadius: 6,
-        overflow: "hidden",
-      }}
-    >
-      {options.map((opt, i) => {
-        const active = opt.value === value;
-        return (
-          <button
-            key={opt.value}
-            type="button"
-            onClick={() => onChange(opt.value)}
-            style={{
-              padding: "4px 10px",
-              background: active ? "#eef2ff" : "white",
-              color: active ? "#4338ca" : "#374151",
-              border: "none",
-              borderLeft: i === 0 ? "none" : "1px solid #e5e5e5",
-              cursor: "pointer",
-              fontSize: 12,
-              fontWeight: active ? 600 : 500,
-            }}
-          >
-            {opt.label}
-          </button>
-        );
-      })}
+      <label htmlFor="wiki-sort">Sort:</label>
+      <select
+        id="wiki-sort"
+        value={value}
+        onChange={(e) => onChange(e.target.value as SortMode)}
+        style={{
+          padding: "4px 8px",
+          border: `1px solid ${color.border.default}`,
+          borderRadius: radius.sm,
+          background: color.bg.page,
+          color: color.text.primary,
+          fontSize: 12,
+        }}
+      >
+        <option value="name-asc">Name (A → Z)</option>
+        <option value="name-desc">Name (Z → A)</option>
+        <option value="recent">Recently updated</option>
+      </select>
     </div>
   );
 }
@@ -566,6 +511,7 @@ function Segmented<T extends string>({
 function Row({
   icon,
   label,
+  updatedAt,
   href,
   path,
   isFile,
@@ -584,6 +530,7 @@ function Row({
 }: {
   icon: React.ReactNode;
   label: string;
+  updatedAt: string;
   href: string;
   path: string;
   isFile: boolean;
@@ -640,14 +587,14 @@ function Row({
         display: "flex",
         alignItems: "center",
         padding: "10px 12px",
-        borderBottom: "1px solid #f1f1f1",
-        background: dropActive ? "#eef2ff" : hover ? "#f9fafb" : "transparent",
-        outline: dropActive ? "2px solid #6366f1" : undefined,
+        borderBottom: `1px solid ${color.border.subtle}`,
+        background: dropActive ? color.accent.subtleBg : hover ? color.bg.sunken : "transparent",
+        outline: dropActive ? `2px solid ${color.accent.bg}` : undefined,
         opacity: busy ? 0.5 : 1,
         cursor: renaming ? "default" : "grab",
       }}
     >
-      <span style={{ color: "#6b7280", display: "flex", marginRight: 10 }}>{icon}</span>
+      <span style={{ color: color.text.muted, display: "flex", marginRight: 10 }}>{icon}</span>
       {renaming ? (
         <form
           onSubmit={(e) => {
@@ -667,39 +614,20 @@ function Row({
               }
             }}
             disabled={busy}
-            style={{ flex: 1, padding: "4px 8px", border: "1px solid #ddd", borderRadius: 6, fontSize: 14 }}
+            style={{
+              flex: 1,
+              padding: "4px 8px",
+              border: `1px solid ${color.border.default}`,
+              borderRadius: radius.sm,
+              fontSize: 14,
+            }}
           />
-          <button
-            type="submit"
-            disabled={busy || !draft.trim()}
-            style={{
-              padding: "0 10px",
-              background: "#6366f1",
-              color: "white",
-              border: "none",
-              borderRadius: 6,
-              cursor: busy ? "not-allowed" : "pointer",
-              fontSize: 12,
-              fontWeight: 600,
-            }}
-          >
+          <Button type="submit" size="sm" variant="primary" disabled={busy || !draft.trim()}>
             Save
-          </button>
-          <button
-            type="button"
-            onClick={onCancelRename}
-            disabled={busy}
-            style={{
-              padding: "0 10px",
-              background: "transparent",
-              border: "1px solid #ddd",
-              borderRadius: 6,
-              cursor: "pointer",
-              fontSize: 12,
-            }}
-          >
+          </Button>
+          <Button type="button" size="sm" onClick={onCancelRename} disabled={busy}>
             Cancel
-          </button>
+          </Button>
         </form>
       ) : (
         <Link
@@ -710,7 +638,7 @@ function Row({
             alignItems: "center",
             gap: 10,
             flex: 1,
-            color: "#111",
+            color: color.text.primary,
             textDecoration: "none",
             fontSize: 14,
           }}
@@ -720,6 +648,16 @@ function Row({
       )}
       {!renaming && (
         <>
+          <span
+            style={{
+              fontSize: 12,
+              color: color.text.faint,
+              marginRight: 8,
+              whiteSpace: "nowrap",
+            }}
+          >
+            {updatedAt ? formatRelative(updatedAt) : "—"}
+          </span>
           <button
             onClick={onStartRename}
             disabled={busy}
@@ -728,7 +666,7 @@ function Row({
             style={{
               background: "transparent",
               border: "none",
-              color: hover ? "#374151" : "transparent",
+              color: hover ? color.text.secondary : "transparent",
               cursor: busy ? "not-allowed" : "pointer",
               padding: 6,
               display: "flex",
@@ -745,7 +683,7 @@ function Row({
             style={{
               background: "transparent",
               border: "none",
-              color: hover ? "#dc2626" : "transparent",
+              color: hover ? color.state.danger.fg : "transparent",
               cursor: busy ? "not-allowed" : "pointer",
               padding: 6,
               display: "flex",
@@ -789,8 +727,8 @@ function Breadcrumbs({
         const last = i === crumbs.length - 1;
         const targetKey = c.path === "" ? ROOT : c.path;
         const droppable = onDropToCrumb && c.path !== currentDir;
-        const active = droppable && dropTarget === targetKey;
-        const dropHandlers = droppable
+        const active = !!droppable && dropTarget === targetKey;
+        const dropHandlers: Record<string, unknown> = droppable
           ? {
               onDragOver: (e: React.DragEvent) => {
                 e.preventDefault();
@@ -804,25 +742,25 @@ function Breadcrumbs({
               },
             }
           : {};
-        const crumbStyle: React.CSSProperties = active
+        const activeStyle: React.CSSProperties = active
           ? {
-              background: "#eef2ff",
-              outline: "2px solid #6366f1",
-              borderRadius: 6,
+              background: color.accent.subtleBg,
+              outline: `2px solid ${color.accent.bg}`,
+              borderRadius: radius.sm,
               padding: "2px 6px",
             }
           : {};
         return (
           <span key={c.href} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            {i > 0 && <span style={{ color: "#9ca3af" }}>/</span>}
+            {i > 0 && <span style={{ color: color.text.faint }}>/</span>}
             {last ? (
-              <span style={{ fontWeight: 600, ...crumbStyle }} {...dropHandlers}>
+              <span style={{ fontWeight: 600, ...activeStyle }} {...dropHandlers}>
                 {c.label}
               </span>
             ) : (
               <Link
                 href={c.href}
-                style={{ color: "#6366f1", textDecoration: "none", ...crumbStyle }}
+                style={{ color: color.text.primary, textDecoration: "underline", ...activeStyle }}
                 {...dropHandlers}
               >
                 {c.label}
@@ -837,14 +775,14 @@ function Breadcrumbs({
 
 function FileViewer({ path }: { path: string }) {
   const router = useRouter();
+  const isMobile = useIsMobile();
   const [body, setBody] = useState("");
   const [draft, setDraft] = useState("");
   const [editing, setEditing] = useState(false);
+  const [filenameDraft, setFilenameDraft] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [reindexBusy, setReindexBusy] = useState(false);
-  const [reindexStatus, setReindexStatus] = useState<string | null>(null);
   const [triggerModalOpen, setTriggerModalOpen] = useState(false);
   const [triggerStatus, setTriggerStatus] = useState<string | null>(null);
   const [runAgentOpen, setRunAgentOpen] = useState(false);
@@ -944,31 +882,90 @@ function FileViewer({ path }: { path: string }) {
     }
   }
 
-  async function onReindex() {
-    setReindexBusy(true);
-    setReindexStatus(null);
-    try {
-      await apiFetch("/documents/reindex", {
-        method: "POST",
-        body: JSON.stringify({ path }),
-      });
-      setReindexStatus("Queued reindex job");
-    } catch (e) {
-      setReindexStatus(e instanceof Error ? e.message : "reindex failed");
-    } finally {
-      setReindexBusy(false);
-    }
+  const segments = path.split("/");
+  const parentSlug = segments.slice(0, -1).join("/");
+  const backHref = parentSlug ? `/wiki/${parentSlug}` : "/wiki";
+  const currentBasename = segments[segments.length - 1] ?? path;
+  const currentBasenameNoExt = currentBasename.replace(/\.md$/i, "");
+  const trimmedFilename = filenameDraft.trim().replace(/^\/+|\/+$/g, "");
+  const filenameNoExt = trimmedFilename.replace(/\.md$/i, "");
+  const filenameValid = !!filenameNoExt && !filenameNoExt.includes("/");
+  const renamed = editing && filenameValid && filenameNoExt !== currentBasenameNoExt;
+  const bodyChanged = editing && draft !== body;
+  const dirty = editing && (bodyChanged || renamed);
+  const viewingOld = viewingSha !== null && viewingSha !== headSha;
+
+  // Guard against losing unsaved edits when the user navigates away.
+  // - beforeunload: tab close, refresh, typing a URL — browser shows a
+  //   native confirm dialog (custom message is ignored on modern browsers).
+  // - click capture: in-app links (back arrow, breadcrumbs, sidebar nav)
+  //   don't fire beforeunload, so we intercept anchor clicks and confirm
+  //   inline. Programmatic router.push (e.g. on rename-save) bypasses this
+  //   on purpose — those navigations are intentional.
+  useEffect(() => {
+    if (!dirty) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    const onDocClick = (e: MouseEvent) => {
+      if (e.defaultPrevented) return;
+      if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      const target = e.target as HTMLElement | null;
+      const anchor = target?.closest("a");
+      if (!anchor) return;
+      const href = anchor.getAttribute("href");
+      if (!href || href.startsWith("#")) return;
+      if (anchor.target && anchor.target !== "_self") return;
+      const url = new URL(href, window.location.href);
+      if (url.origin !== window.location.origin) return;
+      if (url.pathname === window.location.pathname) return;
+      if (!window.confirm("You have unsaved changes. Discard them and leave?")) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    document.addEventListener("click", onDocClick, true);
+    return () => {
+      window.removeEventListener("beforeunload", onBeforeUnload);
+      document.removeEventListener("click", onDocClick, true);
+    };
+  }, [dirty]);
+
+  function startEdit() {
+    setFilenameDraft(currentBasenameNoExt);
+    setError(null);
+    setEditing(true);
   }
 
   async function onSave() {
+    if (!filenameValid) {
+      setError("Filename cannot be empty or contain '/'.");
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
-      const baseSha = viewingSha ?? headSha;
-      await apiFetch("/documents/file", {
-        method: "PUT",
-        body: JSON.stringify({ path, body: draft, ...(baseSha ? { base_sha: baseSha } : {}) }),
-      });
+      if (bodyChanged) {
+        const baseSha = viewingSha ?? headSha;
+        await apiFetch("/documents/file", {
+          method: "PUT",
+          body: JSON.stringify({ path, body: draft, ...(baseSha ? { base_sha: baseSha } : {}) }),
+        });
+      }
+      if (renamed) {
+        const finalName = filenameNoExt + ".md";
+        const newRel = parentSlug ? `${parentSlug}/${finalName}` : finalName;
+        await apiFetch("/documents/move", {
+          method: "POST",
+          body: JSON.stringify({ old_path: path, new_path: newRel }),
+        });
+        // Navigation will remount FileViewer with the new path; loadLatest
+        // there resets editing/body/headSha. Bail out before touching state.
+        router.push(`/wiki/${newRel}`);
+        return;
+      }
       setBody(draft);
       setEditing(false);
       setViewingSha(null);
@@ -989,46 +986,15 @@ function FileViewer({ path }: { path: string }) {
 
   function onCancel() {
     setDraft(body);
+    setFilenameDraft(currentBasenameNoExt);
     setEditing(false);
     setError(null);
   }
 
-  async function onRename() {
-    const segs = path.split("/");
-    const currentName = segs[segs.length - 1];
-    const parent = segs.slice(0, -1).join("/");
-    const input = prompt("Rename document to:", currentName);
-    if (input === null) return;
-    const trimmed = input.trim().replace(/^\/+|\/+$/g, "");
-    if (!trimmed || trimmed.includes("/")) {
-      setError("Name cannot be empty or contain '/'.");
-      return;
-    }
-    const finalName = trimmed.endsWith(".md") ? trimmed : trimmed + ".md";
-    const newRel = parent ? `${parent}/${finalName}` : finalName;
-    if (newRel === path) return;
-    setError(null);
-    try {
-      await apiFetch("/documents/move", {
-        method: "POST",
-        body: JSON.stringify({ old_path: path, new_path: newRel }),
-      });
-      router.push(`/wiki/${newRel}`);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "rename failed");
-    }
-  }
-
-  const segments = path.split("/");
-  const parentSlug = segments.slice(0, -1).join("/");
-  const backHref = parentSlug ? `/wiki/${parentSlug}` : "/wiki";
-  const dirty = editing && draft !== body;
-  const viewingOld = viewingSha !== null && viewingSha !== headSha;
-
   return (
     <main
       style={{
-        padding: "24px 32px",
+        padding: isMobile ? "16px 12px" : "24px 32px",
         height: "100vh",
         boxSizing: "border-box",
         display: "flex",
@@ -1040,7 +1006,10 @@ function FileViewer({ path }: { path: string }) {
         style={{
           display: "flex",
           alignItems: "center",
-          gap: 12,
+          // Tighter gap on mobile so wrapped button rows don't waste
+          // vertical space; the spacer below still pushes the action
+          // buttons onto their own row(s) below the breadcrumbs.
+          gap: isMobile ? 8 : 12,
           marginBottom: 16,
           flexWrap: "wrap",
         }}
@@ -1055,9 +1024,9 @@ function FileViewer({ path }: { path: string }) {
             justifyContent: "center",
             width: 32,
             height: 32,
-            borderRadius: 8,
-            border: "1px solid #e5e5e5",
-            color: "#374151",
+            borderRadius: radius.md,
+            border: `1px solid ${color.border.default}`,
+            color: color.text.secondary,
             textDecoration: "none",
             flexShrink: 0,
           }}
@@ -1068,60 +1037,41 @@ function FileViewer({ path }: { path: string }) {
         <div style={{ flex: 1 }} />
         {!editing && !loading && !error && (
           <>
-            <button
-              onClick={() => setRunAgentOpen(true)}
-              style={secondaryBtn}
-            >
-              Run Agent
-            </button>
-            <button
-              onClick={() => setTriggerModalOpen(true)}
-              style={secondaryBtn}
-            >
-              + Trigger
-            </button>
-            <button onClick={() => setShareOpen(true)} style={secondaryBtn}>
-              Share
-            </button>
-            <button onClick={onRename} style={secondaryBtn}>
-              Rename
-            </button>
-            <button
-              onClick={onReindex}
-              disabled={reindexBusy}
-              style={{ ...secondaryBtn, opacity: reindexBusy ? 0.6 : 1 }}
-            >
-              {reindexBusy ? "Queuing…" : "Reindex"}
-            </button>
-            <button
-              onClick={toggleHistory}
-              style={{
-                ...secondaryBtn,
-                ...(historyOpen
-                  ? { background: "#eef2ff", color: "#4338ca", borderColor: "#c7d2fe" }
-                  : null),
-              }}
-              aria-pressed={historyOpen}
-            >
-              History
-            </button>
-            <button onClick={() => setEditing(true)} style={primaryBtn}>
+            <div style={{ display: "flex", gap: 8 }}>
+              <Button onClick={() => setRunAgentOpen(true)}>Run Agent</Button>
+              <Button onClick={() => setTriggerModalOpen(true)}>+ Trigger</Button>
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <Button onClick={() => setShareOpen(true)}>Share</Button>
+              <Button
+                onClick={toggleHistory}
+                aria-pressed={historyOpen}
+                style={
+                  historyOpen
+                    ? {
+                        background: color.accent.subtleBg,
+                        color: color.accent.subtleFg,
+                        borderColor: color.accent.subtleBorder,
+                      }
+                    : undefined
+                }
+              >
+                History
+              </Button>
+            </div>
+            <Button variant="primary" onClick={startEdit}>
               Edit
-            </button>
+            </Button>
           </>
         )}
         {editing && (
           <>
-            <button onClick={onCancel} disabled={saving} style={secondaryBtn}>
+            <Button onClick={onCancel} disabled={saving}>
               Cancel
-            </button>
-            <button
-              onClick={onSave}
-              disabled={saving || !dirty}
-              style={{ ...primaryBtn, opacity: saving || !dirty ? 0.6 : 1 }}
-            >
+            </Button>
+            <Button variant="primary" onClick={onSave} disabled={saving || !dirty}>
               {saving ? "Saving…" : "Save"}
-            </button>
+            </Button>
           </>
         )}
       </header>
@@ -1135,12 +1085,8 @@ function FileViewer({ path }: { path: string }) {
         />
       )}
 
-      {!editing && reindexStatus && (
-        <div style={{ fontSize: 12, color: "#4b5563", marginBottom: 12 }}>{reindexStatus}</div>
-      )}
-
       {!editing && triggerStatus && (
-        <div style={{ fontSize: 12, color: "#4b5563", marginBottom: 12 }}>{triggerStatus}</div>
+        <div style={{ fontSize: 12, color: color.text.secondary, marginBottom: 12 }}>{triggerStatus}</div>
       )}
 
       <TriggerModal
@@ -1163,9 +1109,9 @@ function FileViewer({ path }: { path: string }) {
         <div
           style={{
             padding: 10,
-            background: "#fef2f2",
-            color: "#991b1b",
-            borderRadius: 6,
+            background: color.state.danger.bg,
+            color: color.state.danger.fg,
+            borderRadius: radius.sm,
             fontSize: 13,
             marginBottom: 12,
           }}
@@ -1182,11 +1128,11 @@ function FileViewer({ path }: { path: string }) {
             gap: 12,
             padding: "8px 12px",
             marginBottom: 12,
-            background: "#fffbeb",
-            border: "1px solid #fde68a",
-            borderRadius: 8,
+            background: color.state.warning.bg,
+            border: `1px solid ${color.state.warning.border}`,
+            borderRadius: radius.md,
             fontSize: 13,
-            color: "#92400e",
+            color: color.state.warning.fg,
           }}
         >
           <span>
@@ -1196,12 +1142,9 @@ function FileViewer({ path }: { path: string }) {
               : " Click Edit to fork from this version."}
           </span>
           <div style={{ flex: 1 }} />
-          <button
-            onClick={loadLatest}
-            style={{ ...secondaryBtn, padding: "4px 10px", fontSize: 12 }}
-          >
+          <Button size="sm" onClick={loadLatest}>
             Back to latest
-          </button>
+          </Button>
         </div>
       )}
 
@@ -1209,27 +1152,35 @@ function FileViewer({ path }: { path: string }) {
 
       {!loading && !error && (
         <div style={{ flex: 1, minHeight: 0, display: "flex", gap: 16 }}>
-          <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
+          <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 12 }}>
             {editing ? (
-              <textarea
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                spellCheck={false}
-                style={{
-                  flex: 1,
-                  minHeight: 0,
-                  width: "100%",
-                  boxSizing: "border-box",
-                  padding: 16,
-                  border: "1px solid #ddd",
-                  borderRadius: 8,
-                  fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-                  fontSize: 14,
-                  lineHeight: 1.6,
-                  resize: "none",
-                  outline: "none",
-                }}
-              />
+              <>
+                <FilenameRow
+                  parent={parentSlug}
+                  value={filenameDraft}
+                  onChange={setFilenameDraft}
+                  disabled={saving}
+                />
+                <textarea
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  spellCheck={false}
+                  style={{
+                    flex: 1,
+                    minHeight: 0,
+                    width: "100%",
+                    boxSizing: "border-box",
+                    padding: 16,
+                    border: `1px solid ${color.border.default}`,
+                    borderRadius: radius.md,
+                    fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+                    fontSize: 14,
+                    lineHeight: 1.6,
+                    resize: "none",
+                    outline: "none",
+                  }}
+                />
+              </>
             ) : (
               <article
                 className="markdown"
@@ -1239,7 +1190,7 @@ function FileViewer({ path }: { path: string }) {
               </article>
             )}
           </div>
-          {historyOpen && (
+          {historyOpen && !isMobile && (
             <HistoryPanel
               commits={commits}
               error={historyError}
@@ -1251,6 +1202,47 @@ function FileViewer({ path }: { path: string }) {
             />
           )}
         </div>
+      )}
+      {historyOpen && isMobile && (
+        // Mobile: render history as a fixed slide-in sheet over the
+        // markdown content rather than a 320px side-panel that would
+        // squeeze the body to nothing on a 375px screen.
+        <>
+          <div
+            onClick={() => setHistoryOpen(false)}
+            aria-hidden
+            style={{ position: "fixed", inset: 0, background: color.overlay, zIndex: 60 }}
+          />
+          <div
+            style={{
+              position: "fixed",
+              top: 0,
+              right: 0,
+              bottom: 0,
+              width: "min(360px, 100vw)",
+              zIndex: 70,
+              display: "flex",
+              boxShadow: shadow.panel,
+            }}
+          >
+            <HistoryPanel
+              commits={commits}
+              error={historyError}
+              headSha={headSha}
+              viewingSha={viewingSha}
+              onPick={(sha) => {
+                onPickCommit(sha);
+                setHistoryOpen(false);
+              }}
+              onPickLatest={() => {
+                loadLatest();
+                setHistoryOpen(false);
+              }}
+              onClose={() => setHistoryOpen(false)}
+              fullHeight
+            />
+          </div>
+        </>
       )}
     </main>
   );
@@ -1264,6 +1256,7 @@ function HistoryPanel({
   onPick,
   onPickLatest,
   onClose,
+  fullHeight = false,
 }: {
   commits: CommitInfo[] | null;
   error: string | null;
@@ -1272,16 +1265,21 @@ function HistoryPanel({
   onPick: (sha: string) => void;
   onPickLatest: () => void;
   onClose: () => void;
+  /** When true (mobile sheet mode), fill the entire host container
+   *  edge-to-edge instead of rendering as a fixed-width rounded card. */
+  fullHeight?: boolean;
 }) {
   const latestActive = viewingSha === null;
   return (
     <aside
       style={{
-        width: 320,
+        width: fullHeight ? "100%" : 320,
+        height: fullHeight ? "100%" : undefined,
         flexShrink: 0,
-        border: "1px solid #e5e5e5",
-        borderRadius: 8,
-        background: "#fafafa",
+        border: fullHeight ? "none" : `1px solid ${color.border.default}`,
+        borderLeft: fullHeight ? `1px solid ${color.border.default}` : undefined,
+        borderRadius: fullHeight ? 0 : radius.md,
+        background: color.bg.panel,
         display: "flex",
         flexDirection: "column",
         minHeight: 0,
@@ -1292,10 +1290,10 @@ function HistoryPanel({
           display: "flex",
           alignItems: "center",
           padding: "10px 12px",
-          borderBottom: "1px solid #eee",
+          borderBottom: `1px solid ${color.border.subtle}`,
           fontSize: 13,
           fontWeight: 600,
-          color: "#374151",
+          color: color.text.secondary,
         }}
       >
         <span>History</span>
@@ -1306,7 +1304,7 @@ function HistoryPanel({
           style={{
             background: "transparent",
             border: "none",
-            color: "#6b7280",
+            color: color.text.muted,
             cursor: "pointer",
             fontSize: 16,
             lineHeight: 1,
@@ -1318,13 +1316,13 @@ function HistoryPanel({
       </div>
       <div style={{ overflowY: "auto", flex: 1 }}>
         {error && (
-          <div style={{ padding: 12, fontSize: 12, color: "#991b1b" }}>{error}</div>
+          <div style={{ padding: 12, fontSize: 12, color: color.state.danger.fg }}>{error}</div>
         )}
         {!error && commits === null && (
-          <div style={{ padding: 12, fontSize: 12, color: "#6b7280" }}>Loading…</div>
+          <div style={{ padding: 12, fontSize: 12, color: color.text.muted }}>Loading…</div>
         )}
         {!error && commits && commits.length === 0 && (
-          <div style={{ padding: 12, fontSize: 12, color: "#6b7280" }}>No history yet.</div>
+          <div style={{ padding: 12, fontSize: 12, color: color.text.muted }}>No history yet.</div>
         )}
         {!error && commits && commits.length > 0 && (
           <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
@@ -1373,10 +1371,10 @@ function CommitRow({
           width: "100%",
           textAlign: "left",
           padding: "10px 12px",
-          background: active ? "#eef2ff" : "transparent",
-          color: active ? "#3730a3" : "#111",
+          background: active ? color.accent.subtleBg : "transparent",
+          color: color.text.primary,
           border: "none",
-          borderBottom: "1px solid #f1f1f1",
+          borderBottom: `1px solid ${color.border.subtle}`,
           cursor: "pointer",
           display: "block",
         }}
@@ -1384,7 +1382,7 @@ function CommitRow({
         <div style={{ fontSize: 13, fontWeight: active ? 600 : 500, lineHeight: 1.35 }}>
           {title}
         </div>
-        <div style={{ fontSize: 11, color: active ? "#4338ca" : "#6b7280", marginTop: 4 }}>
+        <div style={{ fontSize: 11, color: color.text.muted, marginTop: 4 }}>
           {subtitle}
           {meta ? ` · ${meta}` : ""}
         </div>
@@ -1428,47 +1426,67 @@ function ActiveAgentsBar({
   onToggle: () => void;
 }) {
   const count = agents.length;
-  const summary = count === 0 ? "No agents active" : `Active agents (${count})`;
+  const expandable = count > 0;
   return (
     <div
       style={{
         marginBottom: 12,
-        border: "1px solid #e5e5e5",
-        borderRadius: 8,
-        background: count > 0 ? "#f0f9ff" : "#fafafa",
+        border: `1px solid ${color.border.default}`,
+        borderRadius: radius.md,
+        background: color.bg.panel,
         overflow: "hidden",
       }}
     >
       <button
-        onClick={onToggle}
-        aria-expanded={open}
+        onClick={expandable ? onToggle : undefined}
+        aria-expanded={expandable ? open : undefined}
+        disabled={!expandable}
         style={{
           width: "100%",
           textAlign: "left",
           padding: "8px 12px",
           background: "transparent",
           border: "none",
-          cursor: "pointer",
+          cursor: expandable ? "pointer" : "default",
           fontSize: 13,
-          fontWeight: 600,
-          color: count > 0 ? "#0c4a6e" : "#6b7280",
+          color: expandable ? color.text.primary : color.text.muted,
           display: "flex",
           alignItems: "center",
           gap: 8,
         }}
       >
-        <span style={{ display: "inline-block", width: 8 }}>{open ? "▾" : "▸"}</span>
-        <span>{summary}</span>
-        {error && <span style={{ color: "#991b1b", fontWeight: 500 }}> — {error}</span>}
+        <Chevron open={open} disabled={!expandable} />
+        <span style={{ fontWeight: 500 }}>
+          {expandable ? "Active agents" : "No agents active"}
+        </span>
+        {expandable && (
+          <span
+            style={{
+              fontSize: 11,
+              fontWeight: 600,
+              padding: "1px 6px",
+              borderRadius: radius.pill,
+              background: color.accent.subtleBg,
+              color: color.accent.subtleFg,
+            }}
+          >
+            {count}
+          </span>
+        )}
+        {error && (
+          <span style={{ marginLeft: "auto", fontSize: 12, color: color.state.danger.fg }}>
+            {error}
+          </span>
+        )}
       </button>
-      {open && count > 0 && (
+      {expandable && open && (
         <ul
           style={{
             listStyle: "none",
             padding: 0,
             margin: 0,
-            borderTop: "1px solid #e0f2fe",
-            background: "white",
+            borderTop: `1px solid ${color.border.default}`,
+            background: color.bg.page,
           }}
         >
           {agents.map((a, i) => (
@@ -1484,6 +1502,32 @@ function ActiveAgentsBar({
   );
 }
 
+function Chevron({ open, disabled }: { open: boolean; disabled: boolean }) {
+  return (
+    <svg
+      width="10"
+      height="10"
+      viewBox="0 0 10 10"
+      aria-hidden
+      style={{
+        flexShrink: 0,
+        color: disabled ? color.text.faint : color.text.muted,
+        transform: open ? "rotate(90deg)" : "rotate(0deg)",
+        transition: "transform 120ms ease",
+      }}
+    >
+      <path
+        d="M3 1.5l4 3.5-4 3.5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 function ActiveAgentRow({
   a,
   isLast,
@@ -1491,23 +1535,11 @@ function ActiveAgentRow({
   a: DocumentActivity;
   isLast: boolean;
 }) {
-  const wrote = a.activity === "wrote";
-  const pillStyle: React.CSSProperties = {
-    flexShrink: 0,
-    fontSize: 11,
-    fontWeight: 600,
-    padding: "2px 8px",
-    borderRadius: 999,
-    textTransform: "uppercase",
-    letterSpacing: 0.3,
-    background: wrote ? "#fef3c7" : "#dbeafe",
-    color: wrote ? "#92400e" : "#1e40af",
-  };
   return (
     <li
       style={{
-        padding: "8px 12px",
-        borderBottom: isLast ? "none" : "1px solid #f1f5f9",
+        padding: "10px 12px",
+        borderBottom: isLast ? "none" : `1px solid ${color.border.subtle}`,
         fontSize: 13,
         display: "flex",
         alignItems: "center",
@@ -1516,19 +1548,33 @@ function ActiveAgentRow({
         overflow: "hidden",
       }}
     >
-      <span style={pillStyle}>{a.activity}</span>
+      <span
+        style={{
+          flexShrink: 0,
+          fontSize: 10,
+          fontWeight: 600,
+          padding: "1px 6px",
+          borderRadius: radius.xs,
+          background: color.accent.subtleBg,
+          color: color.accent.subtleFg,
+          textTransform: "uppercase",
+          letterSpacing: 0.3,
+        }}
+      >
+        {a.activity}
+      </span>
 
-      <span style={{ fontWeight: 600, color: "#0f172a", flexShrink: 0 }}>
+      <span style={{ fontWeight: 500, color: color.text.primary, flexShrink: 0 }}>
         {a.owner_display}
       </span>
       {a.agent_name ? (
-        <span style={{ color: "#64748b", flexShrink: 0 }}>· {a.agent_name}</span>
+        <span style={{ color: color.text.muted, flexShrink: 0 }}>· {a.agent_name}</span>
       ) : null}
 
       {a.description ? (
         <span
           style={{
-            color: "#475569",
+            color: color.text.secondary,
             fontStyle: "italic",
             overflow: "hidden",
             textOverflow: "ellipsis",
@@ -1544,103 +1590,95 @@ function ActiveAgentRow({
       )}
 
       <span
-        style={{ fontSize: 12, color: "#475569", flexShrink: 0 }}
-        title={`Started ${formatTs(a.registered_at)}`}
+        style={{ fontSize: 11, color: color.text.faint, flexShrink: 0 }}
+        title={`Started ${formatTs(a.registered_at)} · Expires ${formatTs(a.expires_at)}`}
       >
-        {formatRelative(a.registered_at)}
-      </span>
-      <span
-        style={{
-          fontSize: 11,
-          color: "#94a3b8",
-          flexShrink: 0,
-          paddingLeft: 4,
-          borderLeft: "1px solid #e2e8f0",
-          marginLeft: 4,
-        }}
-        title={`Expires ${formatTs(a.expires_at)}`}
-      >
-        expires {formatRelative(a.expires_at)}
+        {formatRelative(a.registered_at)} · expires {formatRelative(a.expires_at)}
       </span>
     </li>
   );
 }
 
-const primaryBtn: React.CSSProperties = {
-  padding: "8px 14px",
-  background: "#6366f1",
-  color: "white",
-  border: "none",
-  borderRadius: 8,
-  cursor: "pointer",
-  fontWeight: 600,
-  fontSize: 13,
-};
-
-const secondaryBtn: React.CSSProperties = {
-  padding: "8px 14px",
-  background: "transparent",
-  color: "#374151",
-  border: "1px solid #ddd",
-  borderRadius: 8,
-  cursor: "pointer",
-  fontWeight: 600,
-  fontSize: 13,
-};
+function FilenameRow({
+  parent,
+  value,
+  onChange,
+  disabled,
+}: {
+  parent: string;
+  value: string;
+  onChange: (v: string) => void;
+  disabled: boolean;
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "stretch",
+        border: `1px solid ${color.border.default}`,
+        borderRadius: radius.sm,
+        background: color.bg.page,
+        overflow: "hidden",
+        flexShrink: 0,
+      }}
+    >
+      {parent && (
+        <span
+          style={{
+            display: "flex",
+            alignItems: "center",
+            padding: "0 10px",
+            background: color.bg.sunken,
+            borderRight: `1px solid ${color.border.default}`,
+            color: color.text.secondary,
+            fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+            fontSize: 13,
+          }}
+        >
+          {parent}/
+        </span>
+      )}
+      <input
+        value={value.replace(/\.md$/i, "")}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder="filename"
+        disabled={disabled}
+        spellCheck={false}
+        style={{
+          flex: 1,
+          padding: "8px 10px",
+          border: "none",
+          outline: "none",
+          fontSize: 14,
+          fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+          background: "transparent",
+        }}
+      />
+      <span
+        aria-hidden
+        style={{
+          display: "flex",
+          alignItems: "center",
+          padding: "0 10px",
+          background: color.bg.sunken,
+          borderLeft: `1px solid ${color.border.default}`,
+          color: color.text.secondary,
+          fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+          fontSize: 13,
+          fontWeight: 600,
+        }}
+      >
+        .md
+      </span>
+    </div>
+  );
+}
 
 function BackIcon() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <path d="M19 12H5" />
       <path d="M12 19l-7-7 7-7" />
-    </svg>
-  );
-}
-
-function FolderIcon() {
-  // Filled amber folder with a tab — clearly differentiated from documents.
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden>
-      <path
-        d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"
-        fill="#fbbf24"
-        stroke="#b45309"
-        strokeWidth="1.25"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M3 9h18v1H3z"
-        fill="#b45309"
-        opacity="0.35"
-      />
-    </svg>
-  );
-}
-
-function FileIcon() {
-  // Markdown-style document with a folded corner and content lines, in blue.
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden>
-      <path
-        d="M7 3h7l5 5v11a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"
-        fill="#dbeafe"
-        stroke="#2563eb"
-        strokeWidth="1.25"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M14 3v5h5"
-        fill="#bfdbfe"
-        stroke="#2563eb"
-        strokeWidth="1.25"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M8 13h8M8 16h8M8 19h5"
-        stroke="#2563eb"
-        strokeWidth="1.25"
-        strokeLinecap="round"
-      />
     </svg>
   );
 }

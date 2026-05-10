@@ -1,9 +1,9 @@
 """Entry point for a worker container.
 
 Run with: ``python -m app.tasks.run_worker <queue>`` where ``<queue>`` is
-one of ``documents``, ``triggers``, ``wiki_bm25``. Each queue gets its
-own worker process — see ``app/tasks/queues.py`` for the queue
-rationale.
+one of ``documents``, ``triggers``, ``lightweight_maintenance``. Each
+queue gets its own worker process — see ``app/tasks/queues.py`` for the
+queue rationale.
 
 We import every task module up front (regardless of which queue we're
 serving) so all ``@<queue>.task()`` decorators run and the per-queue
@@ -27,7 +27,7 @@ from app.utils.logging import setup_logging
 _CONCURRENCY = {
     "documents": 1,
     "triggers": 4,
-    "wiki_bm25": 4,
+    "lightweight_maintenance": 4,
 }
 
 

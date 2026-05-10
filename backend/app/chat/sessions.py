@@ -102,6 +102,8 @@ def delete(session_id: str, user_id: str) -> bool:
 
 
 def update_title(session_id: str, title: str) -> None:
+    if title:
+        title = title[:1].upper() + title[1:]
     with session() as s:
         row = s.get(ChatSession, session_id)
         if row is not None:

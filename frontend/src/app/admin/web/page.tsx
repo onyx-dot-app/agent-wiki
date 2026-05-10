@@ -1,12 +1,15 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 
 import { AppShell } from "@/components/common/AppShell";
+import { Button } from "@/components/common/Button";
+import { BackLink, PageHeader } from "@/components/common/PageHeader";
 import { apiFetch } from "@/lib/api";
 import { useRequireAuth } from "@/lib/auth";
+import { color, radius } from "@/lib/theme";
+import { useIsMobile } from "@/lib/viewport";
 
 interface WebSettings {
   search_provider: "serper";
@@ -20,35 +23,32 @@ interface WebSettings {
 export default function AdminWebPage() {
   const { user, loading } = useRequireAuth();
   const router = useRouter();
+  const isMobile = useIsMobile();
 
   useEffect(() => {
     if (!loading && user && !user.is_admin) router.replace("/");
   }, [loading, user, router]);
 
-  if (loading || !user) return <main style={{ padding: 32 }}>Loading…</main>;
+  if (loading || !user) return <main style={{ padding: isMobile ? 16 : 32 }}>Loading…</main>;
   if (!user.is_admin) return null;
 
   return (
     <AppShell>
-      <main style={{ padding: 32, maxWidth: 720 }}>
+      <main style={{ padding: isMobile ? "16px 12px" : "24px 32px", maxWidth: 720 }}>
         <BackLink />
-        <h1 style={{ marginTop: 8 }}>Web search & crawl</h1>
-        <p style={{ color: "#666", marginTop: 0 }}>
-          Search results come from <strong>Serper</strong>; full page contents come from{" "}
-          <strong>Firecrawl</strong>. Keys are stored in the database and never echoed back
-          to the browser.
-        </p>
+        <PageHeader
+          title="Web search & crawl"
+          description={
+            <>
+              Search results come from <strong>Serper</strong>; full page contents come from{" "}
+              <strong>Firecrawl</strong>. Keys are stored in the database and never echoed back
+              to the browser.
+            </>
+          }
+        />
         <WebForm />
       </main>
     </AppShell>
-  );
-}
-
-function BackLink() {
-  return (
-    <Link href="/admin" style={{ fontSize: 13, color: "#4f46e5", textDecoration: "none" }}>
-      ← Admin
-    </Link>
   );
 }
 
@@ -130,7 +130,7 @@ function WebForm() {
         clearDisabled={saving || !settings.serper_api_key_set}
       />
 
-      <div style={{ height: 1, background: "#eee", margin: "8px 0" }} />
+      <div style={{ height: 1, background: color.border.subtle, margin: "8px 0" }} />
 
       <ProviderRow label="Crawl" value="Firecrawl" url="https://www.firecrawl.dev/" />
       <KeyField
@@ -144,12 +144,12 @@ function WebForm() {
         clearDisabled={saving || !settings.firecrawl_api_key_set}
       />
 
-      {error && <div style={{ color: "crimson" }}>{error}</div>}
-      {saved && <div style={{ color: "#15803d" }}>Saved.</div>}
+      {error && <div style={{ color: color.state.danger.fg }}>{error}</div>}
+      {saved && <div style={{ color: color.state.success.fg }}>Saved.</div>}
       <div>
-        <button type="submit" disabled={saving} style={{ ...btnStyle, padding: "10px 20px" }}>
+        <Button type="submit" variant="primary" disabled={saving}>
           {saving ? "Saving…" : "Save"}
-        </button>
+        </Button>
       </div>
     </form>
   );
@@ -158,9 +158,9 @@ function WebForm() {
 function ProviderRow({ label, value, url }: { label: string; value: string; url: string }) {
   return (
     <div style={{ display: "flex", alignItems: "baseline", gap: 8, fontSize: 13 }}>
-      <span style={{ color: "#666", width: 60 }}>{label}</span>
+      <span style={{ color: color.text.muted, width: 60 }}>{label}</span>
       <span style={{ fontWeight: 500 }}>{value}</span>
-      <a href={url} target="_blank" rel="noreferrer" style={{ color: "#4f46e5", fontSize: 12 }}>
+      <a href={url} target="_blank" rel="noreferrer" style={{ color: color.text.primary, fontSize: 12, textDecoration: "underline" }}>
         get key ↗
       </a>
     </div>
@@ -193,14 +193,16 @@ function KeyField({
         {isSet && <span style={hintStyle}>currently {hint}</span>}
         <span style={{ flex: 1 }} />
         {isSet && (
-          <button
+          <Button
             type="button"
+            size="sm"
+            variant="danger"
             onClick={onClear}
             disabled={clearDisabled}
-            style={{ ...btnStyle, color: "#b91c1c", padding: "2px 8px", fontSize: 12 }}
+            style={{ padding: "2px 8px", fontSize: 12 }}
           >
             Clear
-          </button>
+          </Button>
         )}
       </div>
       <input
@@ -214,26 +216,18 @@ function KeyField({
   );
 }
 
-const btnStyle: React.CSSProperties = {
-  padding: "6px 12px",
-  border: "1px solid #d4d4d8",
-  background: "white",
-  borderRadius: 4,
-  cursor: "pointer",
-  fontSize: 13,
-};
 const inputStyle: React.CSSProperties = {
   width: "100%",
-  padding: 8,
+  padding: "8px 10px",
   boxSizing: "border-box",
-  border: "1px solid #d4d4d8",
-  borderRadius: 4,
+  border: `1px solid ${color.border.default}`,
+  borderRadius: radius.sm,
   fontSize: 14,
 };
 const lblStyle: React.CSSProperties = { marginBottom: 4, fontSize: 13, fontWeight: 500 };
 const hintStyle: React.CSSProperties = {
   fontWeight: 400,
-  color: "#888",
+  color: color.text.muted,
   fontFamily: "ui-monospace, monospace",
   fontSize: 12,
 };

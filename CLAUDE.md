@@ -1,19 +1,7 @@
 # CLAUDE.md
 
-> **The `local_data/wiki/` directory is the source of truth** for product/UX
-> intent, architectural decisions, work ownership, and what's actually built
-> vs. planned. Browse it at the start of every session and reference the
-> relevant pages throughout your work. **Keep it up to date** for every
-> change, update, or decision — when you finish a piece of work, make a
-> decision, or invalidate an assumption, edit the appropriate page (or add
-> a new one) so the wiki reflects current reality. CLAUDE.md is the durable
-> rulebook; `local_data/wiki/` is the living state.
-
-Guidance for Claude (and other agents) working on **agent-wiki** — a
-self-updating wiki for AI agents. Read this before changing code.
-
 CRITICAL: When starting new work, make sure to check the wiki for relevant documentation and update accordingly.
-As you make progress, make sure to periodically update the wiki.
+As you make progress, make sure to periodically update the wiki so that nothing is inconsistent with the code base.
 
 ## Stack at a glance
 
@@ -23,18 +11,6 @@ As you make progress, make sure to periodically update the wiki.
 - App state and queues both live in Postgres (connection via `DATABASE_URL`). Wiki working tree on volume `wiki-data`.
 
 See `docs/architecture.md` for the data flows.
-
-## Run it
-
-```bash
-cp .env.example .env       # set SECRET_KEY; ALLOWED_EMAILS optional
-docker compose up --build
-```
-
-App at http://localhost:8080. First account created is auto-promoted to admin
-(see `users.create` in `backend/app/auth/users.py`). LLM provider/keys are
-configured at runtime in the admin UI — env vars are only the fallback before
-any row exists in `llm_settings`.
 
 ## Pre-commit hooks
 
@@ -211,13 +187,20 @@ If something might take more than ~100ms, queue it. Tasks live under
 `app/tasks/` and bind to one of three `TaskQueue` instances in
 `app/tasks/queues.py` — `documents_queue` (LLM doc-reconciliation),
 `triggers_queue` (NL trigger eval, delta + scheduled), or
-`wiki_bm25_queue` (BM25). Each queue's messages live in
+`lightweight_maintenance_queue` (sub-second upkeep — BM25 reindex,
+agent-activity expiration cleanup). Each queue's messages live in
 `pgmq.q_<name>` in the same Postgres as app state; the abstraction
 itself is in `app/tasks/queue.py`. Each queue has its own worker
 process (`python -m app.tasks.run_worker <queue>`); make sure new
 task modules are imported by `run_worker.py` so they register on
 boot. The variable names and the `queues.py` filename are kept
 from the TaskQueue era so call sites didn't have to change.
+
+The placement rule for `lightweight_maintenance_queue`: handlers must
+be sub-second, no LLM, no external HTTP, no wiki commits. Anything
+slower belongs on its own queue — that's the contract that lets us
+run wider concurrency on this one without a slow task starving the
+others.
 
 **For all the detail — queue rationale, routing rules, run commands,
 docker / launch.json wiring, what breaks if a worker isn't running —
@@ -288,6 +271,92 @@ there.
 
 Use `react-markdown` + `remark-gfm` (already wired in the wiki page). Don't
 inject HTML from the backend.
+
+### Design tokens — only via `src/lib/theme.ts`
+
+The frontend has no Tailwind / CSS-in-JS — components style themselves with
+inline `style={{...}}`. Centralized tokens live in `src/lib/theme.ts` and
+are the **only** source of color, radius, and shadow values:
+
+- `color.text` — `primary | secondary | muted | faint | inverse`
+- `color.bg` — `page | panel | sunken | hover | active`
+- `color.border` — `subtle | default | strong | focus`
+- `color.accent` — primary action surface (`bg`, `bgHover`, `fg`) + subtle
+  variants (`subtleBg`, `subtleFg`, `subtleBorder`) for selected rows /
+  badges / hover-active states
+- `color.state` — `success | warning | danger | info`, each with
+  `{ bg, border, fg }` for banners, alerts, semantic chips
+- `color.overlay` — fixed warm-near-black tint for modal scrims
+- `radius` — `xs (4) | sm (6) | md (8) | lg (12) | pill (9999)`
+- `shadow` — `sm | md | popover | fab | modal | panel`
+
+**Rules:**
+
+- Don't write a raw hex (`#xxxxxx`) in a component. If the shade you need
+  isn't in `theme.ts`, add it there (with a name that describes intent, not
+  appearance — `accent.bg` not `nearBlack`) and import it.
+- The accent color is **near-black warm grey**, not a hue. Primary buttons,
+  selected sidebar avatars, FABs, and active text all flow from
+  `color.accent`. If you find yourself reaching for blue/indigo/purple to
+  mark "primary," use the accent instead.
+- Status colors (`color.state.*`) are reserved for semantic signals
+  (banners, error toasts, "destructive" buttons). Don't use them as
+  decorative chips — use `color.accent.subtle*` for that.
+- Pick a radius from the scale; don't sprinkle arbitrary integers. Inputs
+  / pills inside dense rows = `xs`. Buttons / inputs / list items = `sm`.
+  Cards / popovers / modals = `md`–`lg`.
+- Decorative SVG icon glyphs (e.g. the amber folder, the blue file icon)
+  are the only place raw hex is acceptable — they're illustrations, not UI
+  surfaces. Don't extend that exception to anything that paints chrome.
+
+### Buttons — only via `<Button>` from `src/components/common/Button.tsx`
+
+There's one button component, four variants, two sizes:
+
+- `variant="primary"` — accent surface; one per row at most (form submit,
+  primary CTA in a header)
+- `variant="secondary"` (default) — neutral with subtle border; the
+  workhorse
+- `variant="danger"` — destructive (Revoke, Delete); uses `state.danger`
+- `variant="ghost"` — transparent surface for low-emphasis text actions
+- `size="md"` (default) — forms, modal actions, page headers
+- `size="sm"` — dense rows, table cells, inline actions
+
+Don't write ad-hoc `<button style={{ ... }}>` for primary/secondary/danger
+chrome. If you need an unusual one-off (icon-only toolbar buttons in
+`AppShell` / `ChatWidget`, the wiki row hover actions), keep them inline
+but pull every color/radius from the theme — never raw hex.
+
+### Modals — fixed scrim and shadow
+
+All modal-style dialogs (`TriggerModal`, `TriggerHistoryModal`,
+`RunAgentModal`, `ShareDialog`) use:
+
+- scrim: `color.overlay` (warm near-black, never slate, never pure black)
+- shadow: `shadow.modal`
+- radius: `radius.lg` for the surface
+- buttons: `<Button>`, with the action row at `justifyContent: flex-end`,
+  Cancel first, primary action last
+
+Side panels anchored to a screen edge use `shadow.panel`.
+
+### Inputs / selects — consistent border and radius
+
+Form inputs and `<select>` controls use:
+
+- border: `1px solid ${color.border.default}` (use `border.strong` only
+  for emphasis — most inputs should be `default`)
+- radius: `radius.sm`
+- padding: `8px 10px` (or `padding: 8` for compact contexts)
+
+Don't set `appearance: "auto"` on a `<select>` — it bypasses the rest of
+the styling and produces a native control next to custom-looking ones.
+- Modal scrims are `rgba(15, 15, 15, 0.45)` (warm-neutral, matches the
+  greyscale palette). Don't use slate-tinted scrims (`rgba(15, 23, 42, ...)`).
+
+Adding a new token: edit `theme.ts`, leave a one-line comment if the
+intent isn't obvious from the name, and migrate any callers in the same
+PR. Don't accumulate parallel ad-hoc colors.
 
 ### Components
 
@@ -360,6 +429,14 @@ so they're trivially testable.
   — every wiki commit should be additive history.
 - Don't reach for `@dataclass` — use `pydantic.BaseModel` (see the data
   classes seam above).
+- Don't write a raw hex color, border-radius integer, or shadow string in a
+  React component — import from `src/lib/theme.ts`. If the shade isn't
+  there, add it there. (See the design tokens seam above.)
+- Don't roll a new primary/secondary/danger button in a component — use
+  `<Button>` from `src/components/common/Button.tsx`. (See the buttons seam.)
+- Don't use slate-tinted (`rgba(15,23,42,…)`) or pure-black modal scrims —
+  use `color.overlay`. Don't invent ad-hoc modal shadows — use
+  `shadow.modal`. (See the modals seam.)
 
 ## Open questions worth knowing
 

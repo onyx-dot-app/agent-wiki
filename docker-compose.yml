@@ -74,9 +74,9 @@ services:
       postgres:
         condition: service_healthy
 
-  worker-wiki-bm25:
+  worker-lightweight-maintenance:
     build: ./backend
-    command: ["python", "-m", "app.tasks.run_worker", "wiki_bm25"]
+    command: ["python", "-m", "app.tasks.run_worker", "lightweight_maintenance"]
     env_file: .env
     environment:
       - DATABASE_URL=postgresql://agent:agent@postgres:5432/agent_wiki

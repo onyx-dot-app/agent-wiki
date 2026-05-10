@@ -2,8 +2,10 @@
 
 import { useRouter } from "next/navigation";
 import {
+  forwardRef,
   useCallback,
   useEffect,
+  useImperativeHandle,
   useMemo,
   useRef,
   useState,
@@ -11,6 +13,14 @@ import {
 } from "react";
 
 import { apiFetch, ApiError } from "@/lib/api";
+import { color, radius, shadow } from "@/lib/theme";
+
+// Imperative handle so the sidebar can focus the search input after
+// expanding from a collapsed state (the input only mounts when the
+// sidebar is expanded).
+export interface WikiSearchHandle {
+  focus: () => void;
+}
 
 interface SearchHit {
   doc_id: string;
@@ -20,31 +30,51 @@ interface SearchHit {
   score: number;
 }
 
+interface FolderHit {
+  path: string;
+}
+
 interface SearchResponse {
   query: string;
   hits: SearchHit[];
+  folders?: FolderHit[];
 }
 
-const DEBOUNCE_MS = 150;
-const RESULT_LIMIT = 8;
+type Row =
+  | { kind: "folder"; folder: FolderHit }
+  | { kind: "doc"; hit: SearchHit };
 
-export function WikiSearch() {
+const DEBOUNCE_MS = 150;
+const RESULT_LIMIT = 10;
+
+export const WikiSearch = forwardRef<WikiSearchHandle>(function WikiSearch(_, ref) {
   const router = useRouter();
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<SearchHit[]>([]);
+  const [folders, setFolders] = useState<FolderHit[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const [activeIdx, setActiveIdx] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   // Track the latest in-flight request so a slower response can't overwrite
   // a fresher one's results.
   const requestSeq = useRef(0);
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      focus: () => inputRef.current?.focus(),
+    }),
+    [],
+  );
 
   useEffect(() => {
     const trimmed = query.trim();
     if (!trimmed) {
       setHits([]);
+      setFolders([]);
       setLoading(false);
       setError(null);
       return;
@@ -59,11 +89,13 @@ export function WikiSearch() {
         .then((r) => {
           if (seq !== requestSeq.current) return;
           setHits(r.hits);
+          setFolders(r.folders ?? []);
           setActiveIdx(0);
         })
         .catch((e) => {
           if (seq !== requestSeq.current) return;
           setHits([]);
+          setFolders([]);
           setError(e instanceof ApiError ? e.message : "search failed");
         })
         .finally(() => {
@@ -85,30 +117,40 @@ export function WikiSearch() {
     return () => window.removeEventListener("mousedown", handleClick);
   }, [open]);
 
+  // Folders render first; both groups share one keyboard cursor.
+  const rows = useMemo<Row[]>(
+    () => [
+      ...folders.map<Row>((f) => ({ kind: "folder", folder: f })),
+      ...hits.map<Row>((h) => ({ kind: "doc", hit: h })),
+    ],
+    [folders, hits],
+  );
+
   const pick = useCallback(
-    (hit: SearchHit) => {
+    (row: Row) => {
       setOpen(false);
       setQuery("");
-      router.push(`/wiki/${hit.path}`);
+      const path = row.kind === "folder" ? row.folder.path : row.hit.path;
+      router.push(`/wiki/${path}`);
     },
     [router],
   );
 
   function onKeyDown(e: KeyboardEvent<HTMLInputElement>) {
-    if (!open || hits.length === 0) {
+    if (!open || rows.length === 0) {
       if (e.key === "Escape") setOpen(false);
       return;
     }
     if (e.key === "ArrowDown") {
       e.preventDefault();
-      setActiveIdx((i) => (i + 1) % hits.length);
+      setActiveIdx((i) => (i + 1) % rows.length);
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
-      setActiveIdx((i) => (i - 1 + hits.length) % hits.length);
+      setActiveIdx((i) => (i - 1 + rows.length) % rows.length);
     } else if (e.key === "Enter") {
       e.preventDefault();
-      const hit = hits[activeIdx];
-      if (hit) pick(hit);
+      const row = rows[activeIdx];
+      if (row) pick(row);
     } else if (e.key === "Escape") {
       setOpen(false);
     }
@@ -116,27 +158,28 @@ export function WikiSearch() {
 
   const showDropdown = open && query.trim().length > 0;
   const showEmpty = useMemo(
-    () => showDropdown && !loading && !error && hits.length === 0,
-    [showDropdown, loading, error, hits.length],
+    () => showDropdown && !loading && !error && rows.length === 0,
+    [showDropdown, loading, error, rows.length],
   );
 
   return (
-    <div ref={containerRef} style={{ position: "relative", flex: 1, maxWidth: 560 }}>
+    <div ref={containerRef} style={{ position: "relative", width: "100%" }}>
       <div style={{ position: "relative" }}>
         <span
           aria-hidden
           style={{
             position: "absolute",
-            left: 10,
+            left: 8,
             top: "50%",
             transform: "translateY(-50%)",
-            color: "#9ca3af",
+            color: color.text.faint,
             display: "flex",
           }}
         >
           <SearchIcon />
         </span>
         <input
+          ref={inputRef}
           type="search"
           value={query}
           onChange={(e) => {
@@ -145,16 +188,17 @@ export function WikiSearch() {
           }}
           onFocus={() => setOpen(true)}
           onKeyDown={onKeyDown}
-          placeholder="Search wiki…"
+          placeholder="Search…"
           aria-label="Search wiki"
           style={{
             width: "100%",
-            padding: "8px 32px 8px 32px",
-            border: "1px solid #ddd",
-            borderRadius: 8,
-            fontSize: 14,
+            padding: "6px 28px 6px 28px",
+            border: `1px solid ${color.border.default}`,
+            borderRadius: radius.sm,
+            fontSize: 13,
             outline: "none",
-            background: "white",
+            background: color.bg.page,
+            color: color.text.primary,
             boxSizing: "border-box",
           }}
         />
@@ -168,12 +212,12 @@ export function WikiSearch() {
             aria-label="Clear search"
             style={{
               position: "absolute",
-              right: 6,
+              right: 4,
               top: "50%",
               transform: "translateY(-50%)",
               background: "transparent",
               border: "none",
-              color: "#9ca3af",
+              color: color.text.faint,
               cursor: "pointer",
               padding: 4,
               display: "flex",
@@ -191,90 +235,58 @@ export function WikiSearch() {
             position: "absolute",
             top: "calc(100% + 4px)",
             left: 0,
-            right: 0,
-            background: "white",
-            border: "1px solid #e5e5e5",
-            borderRadius: 8,
-            boxShadow: "0 8px 24px rgba(0,0,0,0.08)",
+            minWidth: "100%",
+            width: 360,
+            maxWidth: "70vw",
+            background: color.bg.page,
+            border: `1px solid ${color.border.default}`,
+            borderRadius: radius.md,
+            boxShadow: shadow.popover,
             maxHeight: 420,
             overflowY: "auto",
             zIndex: 40,
           }}
         >
           {error && (
-            <div style={{ padding: 12, fontSize: 13, color: "#991b1b" }}>{error}</div>
+            <div style={{ padding: 12, fontSize: 13, color: color.state.danger.fg }}>{error}</div>
           )}
-          {!error && loading && hits.length === 0 && (
-            <div style={{ padding: 12, fontSize: 13, color: "#6b7280" }}>Searching…</div>
+          {!error && loading && rows.length === 0 && (
+            <div style={{ padding: 12, fontSize: 13, color: color.text.muted }}>Searching…</div>
           )}
           {showEmpty && (
-            <div style={{ padding: 12, fontSize: 13, color: "#6b7280" }}>No matches.</div>
+            <div style={{ padding: 12, fontSize: 13, color: color.text.muted }}>No matches.</div>
           )}
-          {!error && hits.length > 0 && (
+          {!error && rows.length > 0 && (
             <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
-              {hits.map((h, i) => {
+              {rows.map((row, i) => {
                 const active = i === activeIdx;
+                const key =
+                  row.kind === "folder" ? `f:${row.folder.path}` : `d:${row.hit.doc_id}`;
                 return (
-                  <li key={h.doc_id}>
+                  <li key={key}>
                     <button
                       type="button"
                       onMouseEnter={() => setActiveIdx(i)}
                       onMouseDown={(e) => {
                         // mousedown so the input doesn't blur first.
                         e.preventDefault();
-                        pick(h);
+                        pick(row);
                       }}
                       style={{
                         width: "100%",
                         textAlign: "left",
                         padding: "10px 12px",
                         border: "none",
-                        background: active ? "#eef2ff" : "transparent",
+                        background: active ? color.accent.subtleBg : "transparent",
                         cursor: "pointer",
                         display: "block",
-                        borderBottom: "1px solid #f3f4f6",
+                        borderBottom: `1px solid ${color.border.subtle}`,
                       }}
                     >
-                      <div
-                        style={{
-                          fontSize: 13,
-                          fontWeight: 600,
-                          color: active ? "#3730a3" : "#111",
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                          whiteSpace: "nowrap",
-                        }}
-                      >
-                        {h.title || h.path}
-                      </div>
-                      <div
-                        style={{
-                          fontSize: 11,
-                          color: active ? "#4338ca" : "#6b7280",
-                          marginTop: 2,
-                          fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                          whiteSpace: "nowrap",
-                        }}
-                      >
-                        {h.path}
-                      </div>
-                      {h.snippet && (
-                        <div
-                          style={{
-                            fontSize: 12,
-                            color: "#4b5563",
-                            marginTop: 4,
-                            lineHeight: 1.4,
-                            display: "-webkit-box",
-                            WebkitLineClamp: 2,
-                            WebkitBoxOrient: "vertical",
-                            overflow: "hidden",
-                          }}
-                        >
-                          <SnippetText text={h.snippet} />
-                        </div>
+                      {row.kind === "folder" ? (
+                        <FolderRow folder={row.folder} />
+                      ) : (
+                        <DocRow hit={row.hit} />
                       )}
                     </button>
                   </li>
@@ -285,6 +297,97 @@ export function WikiSearch() {
         </div>
       )}
     </div>
+  );
+});
+
+function FolderRow({ folder }: { folder: FolderHit }) {
+  const leaf = folder.path.split("/").pop() || folder.path;
+  const parent = folder.path.includes("/")
+    ? folder.path.slice(0, folder.path.lastIndexOf("/"))
+    : "";
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+      <span style={{ color: color.text.muted, display: "flex", flexShrink: 0 }}>
+        <FolderIcon />
+      </span>
+      <div style={{ minWidth: 0, flex: 1 }}>
+        <div
+          style={{
+            fontSize: 13,
+            fontWeight: 600,
+            color: color.text.primary,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {leaf}
+        </div>
+        {parent && (
+          <div
+            style={{
+              fontSize: 11,
+              color: color.text.muted,
+              marginTop: 2,
+              fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {parent}/
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function DocRow({ hit }: { hit: SearchHit }) {
+  return (
+    <>
+      <div
+        style={{
+          fontSize: 13,
+          fontWeight: 600,
+          color: color.text.primary,
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {hit.title || hit.path}
+      </div>
+      <div
+        style={{
+          fontSize: 11,
+          color: color.text.muted,
+          marginTop: 2,
+          fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {hit.path}
+      </div>
+      {hit.snippet && (
+        <div
+          style={{
+            fontSize: 12,
+            color: color.text.secondary,
+            marginTop: 4,
+            lineHeight: 1.4,
+            display: "-webkit-box",
+            WebkitLineClamp: 2,
+            WebkitBoxOrient: "vertical",
+            overflow: "hidden",
+          }}
+        >
+          <SnippetText text={hit.snippet} />
+        </div>
+      )}
+    </>
   );
 }
 
@@ -297,7 +400,7 @@ function SnippetText({ text }: { text: string }) {
       {parts.map((p, i) => {
         if (p.startsWith("**") && p.endsWith("**")) {
           return (
-            <strong key={i} style={{ color: "#111", fontWeight: 700 }}>
+            <strong key={i} style={{ color: color.text.primary, fontWeight: 700 }}>
               {p.slice(2, -2)}
             </strong>
           );
@@ -313,6 +416,14 @@ function SearchIcon() {
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <circle cx="11" cy="11" r="7" />
       <path d="m21 21-4.3-4.3" />
+    </svg>
+  );
+}
+
+function FolderIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M10 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2z" />
     </svg>
   );
 }

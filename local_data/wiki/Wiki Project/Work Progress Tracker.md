@@ -1,13 +1,5 @@
 # Work Progress Tracker
 
-## Random UX Things
-- [] Mark documents that haven't been touched in a long time.
-- [] Chat and triggers need to know who the user is
-- [] Chat needs to know what page the user is on
-- [] Make sure when user is editing manually, the doc is locked from updates
-- [] Make sure the user edit is loading the latest so it doesn't write over a save
-- [] Triggers need to know about the document
-
 ## User Auth
 - [x] Basic
 - [x] OAuth
@@ -38,12 +30,19 @@
   - [x] move_path
   - [] explain_functionality (needs manual rewrite)
   - [x] run_bash
+  - [] edit_doc_nl natural language
 
 ## Document Updater
 - [] From Onyx connector pushes
 - [] From natural language
 - [] From direct diff from Agents
 - [x] Agent activities are tracked as metadata to the docs
+- [] Need to ensure the updates are not too frequent or infrequent. Need to make sure they dont bloat over time.
+
+## Trigger Evaluation
+- [] Basic trigger eval on doc change
+- [] Trigger eval on directory level + explanation of how it works (it only sees the 1 doc that changed)
+- [] Time based trigger scoping, what docs to pass in (with a maximum or agent approach)
 
 ## Background Tasks
 - [x] Implement queue
@@ -77,3 +76,19 @@
 - [x] Integration tests
 - [x] Reasonable coverage for existing features
 - [x] Positive and negative tests for ACLs and Authz
+
+## UX Items
+- [x] BM25 Search + Typeahead search + Keyword folder search
+- [x] Editing documents
+- [x] Renaming documents and folders
+- [x] Moving documents and folders
+- [x] Responsive UI
+
+## Random TODOs
+- [] Mark documents that haven't been touched in a long time.
+- [] Chat and triggers need to know who the user is
+- [] Chat needs to know what page the user is on
+- [] Make sure when user is editing manually, the doc is locked from updates
+- [] Make sure the user edit is loading the latest so it doesn't write over a save
+- [] Triggers need to know about the document
+- [] Chat widget does not stream and does not show tool calls

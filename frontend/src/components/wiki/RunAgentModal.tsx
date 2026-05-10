@@ -2,6 +2,9 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 
+import { Button } from "@/components/common/Button";
+import { color, radius, shadow } from "@/lib/theme";
+
 interface Props {
   open: boolean;
   onClose: () => void;
@@ -48,7 +51,7 @@ export function RunAgentModal({ open, onClose }: Props) {
       style={{
         position: "fixed",
         inset: 0,
-        background: "rgba(15,23,42,0.45)",
+        background: color.overlay,
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
@@ -61,18 +64,18 @@ export function RunAgentModal({ open, onClose }: Props) {
         aria-modal="true"
         aria-label="Run agent"
         style={{
-          background: "white",
-          borderRadius: 12,
+          background: color.bg.page,
+          borderRadius: radius.lg,
           width: "min(520px, 92vw)",
           padding: 22,
-          boxShadow: "0 24px 60px rgba(0,0,0,0.18)",
+          boxShadow: shadow.modal,
           display: "flex",
           flexDirection: "column",
           gap: 14,
         }}
       >
-        <h2 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>Run agent</h2>
-        <p style={{ margin: 0, fontSize: 13, color: "#6b7280" }}>
+        <h2 style={{ margin: 0, fontSize: 16, fontWeight: 600, color: color.text.primary }}>Run agent</h2>
+        <p style={{ margin: 0, fontSize: 13, color: color.text.muted }}>
           Pick an agent and write the message to send along with this document.
         </p>
 
@@ -102,62 +105,41 @@ export function RunAgentModal({ open, onClose }: Props) {
             rows={4}
             style={{
               padding: 10,
-              border: "1px solid #ddd",
-              borderRadius: 8,
+              border: `1px solid ${color.border.default}`,
+              borderRadius: radius.md,
               fontFamily: "inherit",
               fontSize: 14,
               lineHeight: 1.5,
               resize: "vertical",
               minHeight: 96,
+              color: color.text.primary,
+              background: color.bg.page,
             }}
           />
         </label>
 
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 4 }}>
-          <button
-            type="button"
-            onClick={onClose}
-            style={{
-              padding: "8px 14px",
-              background: "transparent",
-              border: "1px solid #ddd",
-              borderRadius: 8,
-              color: "#374151",
-              cursor: "pointer",
-              fontWeight: 600,
-              fontSize: 13,
-            }}
-          >
+          <Button type="button" onClick={onClose}>
             Cancel
-          </button>
-          <button
+          </Button>
+          <Button
             type="submit"
+            variant="primary"
             disabled={!canRun}
-            style={{
-              padding: "8px 14px",
-              background: "#6366f1",
-              color: "white",
-              border: "none",
-              borderRadius: 8,
-              cursor: canRun ? "pointer" : "not-allowed",
-              fontWeight: 600,
-              fontSize: 13,
-              opacity: canRun ? 1 : 0.5,
-              transition: "transform 80ms ease, background 80ms ease",
-            }}
+            title="Coming Soon!"
             onMouseDown={(e) => {
               if (!canRun) return;
               e.currentTarget.style.transform = "scale(0.97)";
-              e.currentTarget.style.background = "#4f46e5";
+              e.currentTarget.style.background = color.accent.bgHover;
             }}
             onMouseUp={(e) => {
               if (!canRun) return;
               e.currentTarget.style.transform = "scale(1)";
-              e.currentTarget.style.background = "#6366f1";
+              e.currentTarget.style.background = color.accent.bg;
             }}
           >
             Run
-          </button>
+          </Button>
         </div>
       </form>
     </div>
@@ -187,17 +169,17 @@ function AgentOption({
         textAlign: "left",
         width: "100%",
         padding: "10px 12px",
-        background: selected ? "#eef2ff" : "white",
-        border: `1px solid ${selected ? "#6366f1" : "#e5e7eb"}`,
-        borderRadius: 8,
+        background: selected ? color.accent.subtleBg : color.bg.page,
+        border: `1px solid ${selected ? color.accent.bg : color.border.default}`,
+        borderRadius: radius.md,
         cursor: "pointer",
         transition: "transform 80ms ease, background 80ms ease, border-color 80ms ease",
       }}
       onMouseEnter={(e) => {
-        if (!selected) e.currentTarget.style.background = "#f9fafb";
+        if (!selected) e.currentTarget.style.background = color.bg.sunken;
       }}
       onMouseLeave={(e) => {
-        if (!selected) e.currentTarget.style.background = "white";
+        if (!selected) e.currentTarget.style.background = color.bg.page;
       }}
       onMouseDown={(e) => {
         e.currentTarget.style.transform = "scale(0.98)";
@@ -206,10 +188,10 @@ function AgentOption({
         e.currentTarget.style.transform = "scale(1)";
       }}
     >
-      <span style={{ fontSize: 14, fontWeight: 600, color: selected ? "#3730a3" : "#111" }}>
+      <span style={{ fontSize: 14, fontWeight: 600, color: color.text.primary }}>
         {name}
       </span>
-      <span style={{ fontSize: 12, color: "#6b7280", marginTop: 2 }}>{tagline}</span>
+      <span style={{ fontSize: 12, color: color.text.muted, marginTop: 2 }}>{tagline}</span>
     </button>
   );
 }
@@ -217,7 +199,7 @@ function AgentOption({
 const labelStyle: React.CSSProperties = {
   fontSize: 12,
   fontWeight: 600,
-  color: "#374151",
+  color: color.text.secondary,
   textTransform: "uppercase",
   letterSpacing: "0.04em",
 };

@@ -7,6 +7,7 @@ import {
   deleteSession,
   listSessions,
 } from "@/lib/chat";
+import { color, radius } from "@/lib/theme";
 
 interface Props {
   open: boolean;
@@ -71,7 +72,7 @@ export function ChatHistoryPanel({
       style={{
         position: "absolute",
         inset: 0,
-        background: "white",
+        background: color.bg.page,
         display: "flex",
         flexDirection: "column",
         transform: open ? "translateX(0)" : "translateX(-100%)",
@@ -85,8 +86,8 @@ export function ChatHistoryPanel({
           alignItems: "center",
           gap: 8,
           padding: "10px 12px",
-          borderBottom: "1px solid #eee",
-          background: "#fafafa",
+          borderBottom: `1px solid ${color.border.subtle}`,
+          background: color.bg.panel,
           flexShrink: 0,
         }}
       >
@@ -98,15 +99,15 @@ export function ChatHistoryPanel({
         >
           <BackIcon />
         </button>
-        <div style={{ fontWeight: 600, fontSize: 14, flex: 1 }}>History</div>
+        <div style={{ fontWeight: 600, fontSize: 14, flex: 1, color: color.text.primary }}>History</div>
         <button
           onClick={onNewChat}
           style={{
             padding: "5px 10px",
-            background: "#6366f1",
-            color: "white",
+            background: color.accent.bg,
+            color: color.accent.fg,
             border: "none",
-            borderRadius: 6,
+            borderRadius: radius.sm,
             cursor: "pointer",
             fontSize: 12,
             fontWeight: 600,
@@ -123,10 +124,10 @@ export function ChatHistoryPanel({
             style={{
               margin: "4px 4px 8px",
               padding: "8px 10px",
-              background: "#fef2f2",
-              border: "1px solid #fecaca",
-              color: "#991b1b",
-              borderRadius: 6,
+              background: color.state.danger.bg,
+              border: `1px solid ${color.state.danger.border}`,
+              color: color.state.danger.fg,
+              borderRadius: radius.sm,
               fontSize: 12,
             }}
           >
@@ -134,10 +135,10 @@ export function ChatHistoryPanel({
           </div>
         )}
         {loading && sessions.length === 0 && (
-          <p style={{ color: "#888", fontSize: 13, padding: 8, margin: 0 }}>Loading…</p>
+          <p style={{ color: color.text.muted, fontSize: 13, padding: 8, margin: 0 }}>Loading…</p>
         )}
         {!loading && sessions.length === 0 && !error && (
-          <p style={{ color: "#888", fontSize: 13, padding: 8, margin: 0 }}>
+          <p style={{ color: color.text.muted, fontSize: 13, padding: 8, margin: 0 }}>
             No past conversations yet.
           </p>
         )}
@@ -189,9 +190,9 @@ function SessionRow({
         alignItems: "center",
         gap: 6,
         padding: "8px 10px",
-        borderRadius: 6,
+        borderRadius: radius.sm,
         cursor: "pointer",
-        background: active ? "#eef2ff" : hover ? "#f5f5f5" : "transparent",
+        background: active ? color.bg.active : hover ? color.bg.hover : "transparent",
       }}
     >
       <div style={{ flex: 1, minWidth: 0 }}>
@@ -199,7 +200,7 @@ function SessionRow({
           style={{
             fontSize: 13,
             fontWeight: active ? 600 : 500,
-            color: "#111",
+            color: color.text.primary,
             whiteSpace: "nowrap",
             overflow: "hidden",
             textOverflow: "ellipsis",
@@ -207,7 +208,7 @@ function SessionRow({
         >
           {title}
         </div>
-        <div style={{ fontSize: 11, color: "#888" }}>{formatRelative(session.updated_at)}</div>
+        <div style={{ fontSize: 11, color: color.text.muted }}>{formatRelative(session.updated_at)}</div>
       </div>
       {hover && (
         <button
@@ -218,7 +219,7 @@ function SessionRow({
             ...iconButtonStyle,
             width: 24,
             height: 24,
-            color: "#9ca3af",
+            color: color.text.faint,
           }}
         >
           <TrashIcon />
@@ -233,9 +234,9 @@ const iconButtonStyle: React.CSSProperties = {
   height: 28,
   border: "none",
   background: "transparent",
-  borderRadius: 4,
+  borderRadius: radius.xs,
   cursor: "pointer",
-  color: "#4b5563",
+  color: color.text.secondary,
   display: "flex",
   alignItems: "center",
   justifyContent: "center",

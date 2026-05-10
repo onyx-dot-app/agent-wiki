@@ -1,19 +1,36 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type CSSProperties } from "react";
 
 import { AppShell } from "@/components/common/AppShell";
+import { Button } from "@/components/common/Button";
+import { PageHeader } from "@/components/common/PageHeader";
 import { TriggerHistoryModal } from "@/components/triggers/TriggerHistoryModal";
 import { TriggerModal } from "@/components/triggers/TriggerModal";
 import { useRequireAuth } from "@/lib/auth";
+import { color, radius } from "@/lib/theme";
+import { useIsMobile } from "@/lib/viewport";
 import {
   deleteTrigger,
   formatScopePath,
   getTriggerVersion,
   updateTrigger,
+  useTriggerDestinations,
   useTriggers,
   type Trigger,
 } from "@/lib/triggers";
+
+const sentenceTagStyle: CSSProperties = {
+  flexShrink: 0,
+  fontSize: 10,
+  fontWeight: 600,
+  padding: "1px 6px",
+  borderRadius: radius.xs,
+  background: color.accent.subtleBg,
+  color: color.accent.subtleFg,
+  textTransform: "uppercase",
+  letterSpacing: 0.3,
+};
 
 function formatRelative(iso: string | null | undefined): string {
   if (!iso) return "";
@@ -33,7 +50,11 @@ function formatRelative(iso: string | null | undefined): string {
 
 export default function TriggersPage() {
   const { user, loading } = useRequireAuth();
+  const isMobile = useIsMobile();
   const { triggers, error: listSwrError, refresh } = useTriggers();
+  const destinations = useTriggerDestinations();
+  const destinationLabel = (id: string | null | undefined) =>
+    destinations.find((d) => d.id === id)?.name ?? id ?? "—";
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
@@ -42,7 +63,7 @@ export default function TriggersPage() {
 
   const listError = mutationError ?? listSwrError?.message ?? null;
 
-  if (loading || !user) return <main style={{ padding: 32 }}>Loading…</main>;
+  if (loading || !user) return <main style={{ padding: isMobile ? 16 : 32 }}>Loading…</main>;
 
   async function onToggle(t: Trigger) {
     setBusyId(t.id);
@@ -84,40 +105,30 @@ export default function TriggersPage() {
 
   return (
     <AppShell>
-      <main style={{ padding: "24px 32px", height: "100vh", overflowY: "auto" }}>
-        <header
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            marginBottom: 20,
-          }}
-        >
-          <h1 style={{ margin: 0, fontSize: 22, fontWeight: 600 }}>Triggers</h1>
-          <button
-            onClick={() => {
-              setEditing(null);
-              setModalOpen(true);
-            }}
-            style={primaryBtn}
-          >
-            + New trigger
-          </button>
-        </header>
-
-        <p style={{ color: "#6b7280", fontSize: 13, marginTop: 0, marginBottom: 16, lineHeight: 1.55 }}>
-          Triggers watch a doc (or folder) and notice when something specific
-          changes. When that happens, the message you wrote shows up on the
-          Events tab so you can review it.
-        </p>
+      <main style={{ padding: isMobile ? "16px 12px" : "24px 32px", height: "100vh", overflowY: "auto" }}>
+        <PageHeader
+          title="Triggers"
+          description="Triggers watch a doc (or folder) and notice when something specific changes. When that happens, the message you wrote shows up on the Events tab so you can review it."
+          actions={
+            <Button
+              variant="primary"
+              onClick={() => {
+                setEditing(null);
+                setModalOpen(true);
+              }}
+            >
+              + New trigger
+            </Button>
+          }
+        />
 
         {listError && (
           <div
             style={{
               padding: 10,
-              background: "#fef2f2",
-              color: "#991b1b",
-              borderRadius: 6,
+              background: color.state.danger.bg,
+              color: color.state.danger.fg,
+              borderRadius: radius.sm,
               fontSize: 13,
               marginBottom: 12,
             }}
@@ -127,7 +138,7 @@ export default function TriggersPage() {
         )}
 
         {triggers.length === 0 && !listError && (
-          <p style={{ color: "#6b7280", fontSize: 14 }}>
+          <p style={{ color: color.text.muted, fontSize: 14 }}>
             No triggers yet. Create one to start watching docs for changes.
           </p>
         )}
@@ -138,10 +149,10 @@ export default function TriggersPage() {
               key={t.id}
               style={{
                 padding: "14px 16px",
-                border: "1px solid #e5e7eb",
-                borderRadius: 8,
+                border: `1px solid ${color.border.default}`,
+                borderRadius: radius.md,
                 marginBottom: 10,
-                background: "white",
+                background: color.bg.page,
                 opacity: busyId === t.id ? 0.6 : 1,
               }}
             >
@@ -158,7 +169,7 @@ export default function TriggersPage() {
                     style={{
                       fontFamily: "ui-monospace, Menlo, monospace",
                       fontSize: 12,
-                      color: "#6b7280",
+                      color: color.text.muted,
                       marginBottom: 4,
                       display: "flex",
                       gap: 10,
@@ -169,67 +180,86 @@ export default function TriggersPage() {
                     {t.last_edited_at && (
                       <span
                         title={new Date(t.last_edited_at).toLocaleString()}
-                        style={{ fontFamily: "inherit", fontSize: 11, color: "#9ca3af" }}
+                        style={{ fontFamily: "inherit", fontSize: 11, color: color.text.faint }}
                       >
                         edited {formatRelative(t.last_edited_at)}
                       </span>
                     )}
                   </div>
-                  <div style={{ fontSize: 14, color: "#111", whiteSpace: "pre-wrap" }}>
-                    <span style={{ color: "#92400e", fontWeight: 600 }}>If</span> {t.nl_description}
+                  <div style={{ fontSize: 14, color: color.text.primary, lineHeight: 1.55 }}>
+                    <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+                      <span style={sentenceTagStyle}>IF</span>
+                      <span style={{ flex: 1, minWidth: 0 }}>{t.nl_description}</span>
+                    </div>
                     {t.message && (
-                      <>
-                        {"\n"}
-                        <span style={{ color: "#047857", fontWeight: 600 }}>then send</span>{" "}
-                        {t.message}
-                      </>
+                      <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginTop: 6 }}>
+                        <span style={sentenceTagStyle}>THEN SEND</span>
+                        <span style={{ flex: 1, minWidth: 0 }}>{t.message}</span>
+                      </div>
                     )}
+                    <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginTop: 6 }}>
+                      <span style={sentenceTagStyle}>TO</span>
+                      <span style={{ flex: 1, minWidth: 0, color: color.text.secondary }}>
+                        {destinationLabel(t.destination)}
+                      </span>
+                    </div>
                   </div>
                 </div>
                 <div style={{ display: "flex", gap: 6, alignItems: "center", flexShrink: 0 }}>
                   <span
                     style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 6,
                       fontSize: 11,
                       padding: "2px 8px",
-                      borderRadius: 999,
-                      background: t.enabled ? "#dcfce7" : "#f3f4f6",
-                      color: t.enabled ? "#166534" : "#6b7280",
+                      borderRadius: radius.pill,
+                      background: t.enabled ? color.accent.subtleBg : color.bg.sunken,
+                      color: t.enabled ? color.accent.subtleFg : color.text.muted,
+                      border: `1px solid ${t.enabled ? color.accent.subtleBorder : color.border.default}`,
                       fontWeight: 600,
+                      letterSpacing: 0.3,
                     }}
                   >
+                    <span
+                      aria-hidden
+                      style={{
+                        width: 6,
+                        height: 6,
+                        borderRadius: "50%",
+                        background: t.enabled ? color.state.success.fg : color.text.faint,
+                      }}
+                    />
                     {t.enabled ? "ENABLED" : "DISABLED"}
                   </span>
-                  <button
-                    onClick={() => onToggle(t)}
-                    disabled={busyId === t.id}
-                    style={iconBtn}
-                  >
+                  <Button size="sm" onClick={() => onToggle(t)} disabled={busyId === t.id}>
                     {t.enabled ? "Disable" : "Enable"}
-                  </button>
-                  <button
+                  </Button>
+                  <Button
+                    size="sm"
                     onClick={() => {
                       setEditing(t);
                       setModalOpen(true);
                     }}
                     disabled={busyId === t.id}
-                    style={iconBtn}
                   >
                     Edit
-                  </button>
-                  <button
+                  </Button>
+                  <Button
+                    size="sm"
                     onClick={() => setHistoryFor(t)}
                     disabled={busyId === t.id}
-                    style={iconBtn}
                   >
                     History
-                  </button>
-                  <button
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="danger"
                     onClick={() => onDelete(t)}
                     disabled={busyId === t.id}
-                    style={{ ...iconBtn, color: "#dc2626", borderColor: "#fecaca" }}
                   >
                     Delete
-                  </button>
+                  </Button>
                 </div>
               </div>
             </li>
@@ -284,24 +314,3 @@ export default function TriggersPage() {
     </AppShell>
   );
 }
-
-const primaryBtn: React.CSSProperties = {
-  padding: "8px 14px",
-  background: "#6366f1",
-  color: "white",
-  border: "none",
-  borderRadius: 8,
-  cursor: "pointer",
-  fontWeight: 600,
-  fontSize: 13,
-};
-
-const iconBtn: React.CSSProperties = {
-  padding: "5px 10px",
-  background: "white",
-  color: "#374151",
-  border: "1px solid #e5e7eb",
-  borderRadius: 6,
-  cursor: "pointer",
-  fontSize: 12,
-};

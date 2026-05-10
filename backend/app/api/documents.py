@@ -24,6 +24,7 @@ from app.models.document import (
     CreateFolderResponse,
     DeleteDocumentResponse,
     DocumentActivityResponse,
+    DocumentEntry,
     FileHistoryResponse,
     GetDocumentResponse,
     IngestRequest,
@@ -37,6 +38,7 @@ from app.models.document import (
     PutDocumentResponse,
     ReindexRequest,
     ReindexResponse,
+    FolderHitView,
     SearchHitView,
     SearchResponse,
 )
@@ -66,16 +68,17 @@ _DEPRECATES_RE = re.compile(r"^Deprecates:\s*(.+)$", re.MULTILINE)
 @login_required
 def list_documents():
     prefix = request.args.get("prefix", "")
-    paths = wiki_git.list_paths(prefix)
+    raw = wiki_git.list_paths_with_mtime(prefix)
     user = current_user()
-    md_paths = [p for p in paths if p.endswith(".md")]
     if user is not None and not user.is_admin:
         from app.wiki import acl as _acl
+        md_paths = [p for p, _ in raw if p.endswith(".md")]
         visible = set(_acl.filter_paths_in_python(user.id, False, md_paths))
         # Keep non-md paths (folders, .gitkeep) so the explorer can render
         # the tree; permission checks happen on actual page access.
-        paths = [p for p in paths if not p.endswith(".md") or p in visible]
-    return jsonify(ListDocumentsResponse(paths=paths).model_dump())
+        raw = [(p, ts) for p, ts in raw if not p.endswith(".md") or p in visible]
+    entries = [DocumentEntry(path=p, updated_at=ts) for p, ts in raw]
+    return jsonify(ListDocumentsResponse(entries=entries).model_dump())
 
 
 @bp.get("/file")
@@ -92,8 +95,11 @@ def get_document_by_path():
     require_can("read", rel)
     head_sha = wiki_git.head_sha_for_path(rel)
     if ref:
+        # The path may have been different at this ref (rename). Resolve it
+        # via --follow so old commits don't 404 on the current name.
+        historical = wiki_git.path_at_ref(rel, ref) or rel
         try:
-            body = wiki_git.read_file(rel, ref=ref)
+            body = wiki_git.read_file(historical, ref=ref)
         except subprocess.CalledProcessError:
             return error("not found at ref", 404)
         return jsonify(GetDocumentResponse(
@@ -301,9 +307,13 @@ def search_documents():
         return error("limit must be an integer", 400)
     limit = max(1, min(limit, 50))
     user = current_user()
+    folders = wiki_search.search_folders(query, limit=limit)
+    # Folders take precedence in the dropdown; docs share the remaining
+    # budget so the combined list never exceeds ``limit``.
+    doc_limit = max(1, limit - len(folders))
     hits = wiki_search.search(
         query,
-        limit=limit,
+        limit=doc_limit,
         user_id=user.id if user else None,
         is_admin=bool(user and user.is_admin),
     )
@@ -319,6 +329,7 @@ def search_documents():
             )
             for h in hits
         ],
+        folders=[FolderHitView(path=f.path) for f in folders],
     ).model_dump())
 
 

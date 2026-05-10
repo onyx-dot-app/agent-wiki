@@ -381,6 +381,12 @@ class AgentActivity(Base):
         Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
     )
     expires_at: Mapped[str] = mapped_column(Text, nullable=False)   # ISO 8601 UTC
+    # pgmq msg_id of the cleanup task scheduled to fire at expires_at.
+    # Tracked so re-registration (which slides expires_at forward) can
+    # cancel the prior scheduled fire instead of leaking it as an orphan
+    # delayed message. Null when no cleanup has been scheduled yet, or
+    # when the prior message has already fired/been archived.
+    cleanup_msg_id: Mapped[int | None] = mapped_column(BigInteger)
 
     __table_args__ = (
         CheckConstraint(

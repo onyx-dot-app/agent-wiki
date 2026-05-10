@@ -126,3 +126,10 @@ export async function getTriggerDestinations(): Promise<TriggerDestination[]> {
   );
   return r.destinations;
 }
+
+export function useTriggerDestinations() {
+  const { data } = useSWR<{ destinations: TriggerDestination[] }>(
+    "/triggers/destinations",
+  );
+  return data?.destinations ?? [];
+}

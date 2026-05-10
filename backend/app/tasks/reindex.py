@@ -1,9 +1,9 @@
 """Reindex a single wiki doc into the BM25 search index.
 
-Tasks in this module run on the ``wiki_bm25_queue`` queue — the cheap,
-LLM-free queue dedicated to keeping the search index in sync with the git
-working tree. Triggered after every wiki write (human edit, agent edit, move,
-doc-updater commit) and on demand via ``POST /api/documents/reindex``.
+Tasks in this module run on the ``lightweight_maintenance_queue`` queue —
+the cheap, LLM-free queue for fast upkeep work. Triggered after every wiki
+write (human edit, agent edit, move, doc-updater commit) and on demand via
+``POST /api/documents/reindex``.
 
 See ``app/tasks/queues.py`` for the queue rationale.
 """
@@ -13,7 +13,7 @@ import logging
 from pathlib import Path
 
 from app.db import fts
-from app.tasks.queues import wiki_bm25_queue
+from app.tasks.queues import lightweight_maintenance_queue
 from app.wiki import git
 
 log = logging.getLogger(__name__)
@@ -40,14 +40,14 @@ def reindex_path_inline(path: str) -> None:
     fts.upsert_document(doc_id=path, path=path, title=_derive_title(path, body), body=body)
 
 
-@wiki_bm25_queue.task()
+@lightweight_maintenance_queue.task()
 def reindex_document(doc_id: str, path: str, title: str) -> None:
     log.debug("reindex_document doc_id=%s path=%s", doc_id, path)
     body = git.read_file(path)
     fts.upsert_document(doc_id=doc_id, path=path, title=title, body=body)
 
 
-@wiki_bm25_queue.task()
+@lightweight_maintenance_queue.task()
 def reindex_path(path: str) -> None:
     """Reindex a wiki path into the BM25 index. Path doubles as the doc_id."""
     reindex_path_inline(path)

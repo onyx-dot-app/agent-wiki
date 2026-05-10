@@ -1,10 +1,24 @@
 "use client";
 
 import Link from "next/link";
-import { Suspense, useEffect, useState, type FormEvent } from "react";
+import { Suspense, useEffect, useState, type CSSProperties, type FormEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
+import { Button } from "@/components/common/Button";
 import { useAuth } from "@/lib/auth";
+import { color, radius, shadow } from "@/lib/theme";
+
+const inputStyle: CSSProperties = {
+  width: "100%",
+  padding: "8px 10px",
+  fontSize: 14,
+  border: `1px solid ${color.border.default}`,
+  borderRadius: radius.sm,
+  background: color.bg.page,
+  color: color.text.primary,
+  boxSizing: "border-box",
+  outline: "none",
+};
 
 function SignupForm() {
   const { signup, config } = useAuth();
@@ -43,49 +57,98 @@ function SignupForm() {
   const loginHref = next ? `/login?next=${encodeURIComponent(next)}` : "/login";
 
   return (
-    <main style={{ maxWidth: 360, margin: "10vh auto", padding: 24 }}>
-      <h1 style={{ marginBottom: 24 }}>Create account</h1>
-      <form onSubmit={onSubmit} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        <label>
-          <div style={{ marginBottom: 4 }}>Email</div>
-          <input
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-            autoFocus
-            style={{ width: "100%", padding: 8, boxSizing: "border-box" }}
-          />
-        </label>
-        <label>
-          <div style={{ marginBottom: 4 }}>Name (optional)</div>
-          <input
-            type="text"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            style={{ width: "100%", padding: 8, boxSizing: "border-box" }}
-          />
-        </label>
-        <label>
-          <div style={{ marginBottom: 4 }}>Password</div>
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-            minLength={8}
-            style={{ width: "100%", padding: 8, boxSizing: "border-box" }}
-          />
-          <div style={{ fontSize: 12, color: "#666", marginTop: 4 }}>At least 8 characters.</div>
-        </label>
-        {error && <div style={{ color: "crimson" }}>{error}</div>}
-        <button type="submit" disabled={submitting} style={{ padding: "10px 16px", marginTop: 8 }}>
-          {submitting ? "Creating…" : "Create account"}
-        </button>
-      </form>
-      <p style={{ marginTop: 16, fontSize: 14, color: "#666" }}>
-        Already have an account? <Link href={loginHref}>Sign in</Link>
-      </p>
+    <main
+      style={{
+        minHeight: "100vh",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 24,
+        background: color.bg.sunken,
+      }}
+    >
+      <div
+        style={{
+          width: "100%",
+          maxWidth: 400,
+          background: color.bg.page,
+          border: `1px solid ${color.border.default}`,
+          borderRadius: radius.lg,
+          padding: 32,
+          boxShadow: shadow.md,
+        }}
+      >
+        <h1 style={{ margin: 0, marginBottom: 6, fontSize: 22, color: color.text.primary }}>
+          Create account
+        </h1>
+        <p style={{ margin: 0, marginBottom: 24, fontSize: 14, color: color.text.muted }}>
+          Set up your workspace login.
+        </p>
+        <form onSubmit={onSubmit} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <label style={{ fontSize: 13, color: color.text.secondary }}>
+            <div style={{ marginBottom: 6 }}>Email</div>
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+              autoFocus
+              style={inputStyle}
+            />
+          </label>
+          <label style={{ fontSize: 13, color: color.text.secondary }}>
+            <div style={{ marginBottom: 6 }}>Name (optional)</div>
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              style={inputStyle}
+            />
+          </label>
+          <label style={{ fontSize: 13, color: color.text.secondary }}>
+            <div style={{ marginBottom: 6 }}>Password</div>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+              minLength={8}
+              style={inputStyle}
+            />
+            <div style={{ fontSize: 12, color: color.text.muted, marginTop: 6 }}>
+              At least 8 characters.
+            </div>
+          </label>
+          {error && (
+            <div
+              style={{
+                padding: "10px 12px",
+                fontSize: 13,
+                background: color.state.danger.bg,
+                border: `1px solid ${color.state.danger.border}`,
+                color: color.state.danger.fg,
+                borderRadius: radius.sm,
+              }}
+            >
+              {error}
+            </div>
+          )}
+          <Button
+            type="submit"
+            variant="primary"
+            disabled={submitting}
+            style={{ marginTop: 4, width: "100%" }}
+          >
+            {submitting ? "Creating…" : "Create account"}
+          </Button>
+        </form>
+        <p style={{ marginTop: 20, marginBottom: 0, fontSize: 13, color: color.text.muted }}>
+          Already have an account?{" "}
+          <Link href={loginHref} style={{ color: color.text.primary, textDecoration: "underline" }}>
+            Sign in
+          </Link>
+        </p>
+      </div>
     </main>
   );
 }

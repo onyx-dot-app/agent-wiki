@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 
+import { Button } from "@/components/common/Button";
 import {
   createTrigger,
   getTriggerDestinations,
@@ -10,6 +11,7 @@ import {
   type TriggerCreateInput,
   type TriggerDestination,
 } from "@/lib/triggers";
+import { color, radius, shadow } from "@/lib/theme";
 
 interface Props {
   open: boolean;
@@ -126,7 +128,7 @@ export function TriggerModal({ open, initial, onClose, onSaved, lockScope }: Pro
       style={{
         position: "fixed",
         inset: 0,
-        background: "rgba(15,23,42,0.45)",
+        background: color.overlay,
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
@@ -160,13 +162,13 @@ export function TriggerModal({ open, initial, onClose, onSaved, lockScope }: Pro
         onSubmit={onSubmit}
         style={{
           position: "relative",
-          background: "white",
-          borderRadius: 14,
+          background: color.bg.page,
+          borderRadius: radius.lg,
           width: "min(560px, 92vw)",
           maxHeight: "92vh",
           overflowY: "auto",
           padding: 24,
-          boxShadow: "0 32px 80px rgba(0,0,0,0.28)",
+          boxShadow: shadow.modal,
           display: "flex",
           flexDirection: "column",
           gap: 16,
@@ -174,13 +176,14 @@ export function TriggerModal({ open, initial, onClose, onSaved, lockScope }: Pro
         }}
       >
         <div>
-          <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700 }}>
+          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600, color: color.text.primary }}>
             {isEdit ? "Edit trigger" : "Create a trigger"}
           </h2>
-          <p style={{ margin: "8px 0 0", fontSize: 13, color: "#4b5563", lineHeight: 1.55 }}>
-            A trigger keeps an eye on a doc (or folder) and reacts when something
-            you care about changes. Tell us what to look for, what to say when it
-            happens, and where to send the message. We'll watch the edits for you.
+          <p style={{ margin: "6px 0 0", fontSize: 13, color: color.text.secondary, lineHeight: 1.55 }}>
+            Triggers monitor documents or folders and send events when a
+            specified change occurs. They run on document updates or on a
+            schedule. Set the conditions to watch for, the event message to
+            send, and where it should land.
           </p>
         </div>
 
@@ -199,7 +202,8 @@ export function TriggerModal({ open, initial, onClose, onSaved, lockScope }: Pro
           </span>
         </label>
 
-        <SentenceRow label="If" tone="if">
+        <label style={fieldStyle}>
+          <span style={fieldLabelStyle}>If</span>
           <textarea
             value={ifText}
             onChange={(e) => setIfText(e.target.value)}
@@ -208,9 +212,10 @@ export function TriggerModal({ open, initial, onClose, onSaved, lockScope }: Pro
             rows={2}
             style={{ ...inputStyle, fontFamily: "inherit", resize: "vertical" }}
           />
-        </SentenceRow>
+        </label>
 
-        <SentenceRow label="then send" tone="send">
+        <label style={fieldStyle}>
+          <span style={fieldLabelStyle}>Then send</span>
           <textarea
             value={sendText}
             onChange={(e) => setSendText(e.target.value)}
@@ -219,14 +224,15 @@ export function TriggerModal({ open, initial, onClose, onSaved, lockScope }: Pro
             rows={2}
             style={{ ...inputStyle, fontFamily: "inherit", resize: "vertical" }}
           />
-        </SentenceRow>
+        </label>
 
-        <SentenceRow label="to" tone="to">
+        <label style={fieldStyle}>
+          <span style={fieldLabelStyle}>To</span>
           <select
             value={destination}
             onChange={(e) => setDestination(e.target.value)}
             disabled={busy}
-            style={{ ...inputStyle, cursor: "pointer", appearance: "auto" }}
+            style={{ ...inputStyle, cursor: "pointer" }}
           >
             {destinations.map((d) => (
               <option key={d.id} value={d.id}>
@@ -234,20 +240,15 @@ export function TriggerModal({ open, initial, onClose, onSaved, lockScope }: Pro
               </option>
             ))}
           </select>
-        </SentenceRow>
-
-        {destDescription && (
-          <p style={{ margin: 0, fontSize: 12, color: "#6b7280", lineHeight: 1.5 }}>
-            {destDescription}
-          </p>
-        )}
+          {destDescription && <span style={fieldHintStyle}>{destDescription}</span>}
+        </label>
 
         {error && (
           <div
             style={{
-              background: "#fef2f2",
-              color: "#991b1b",
-              borderRadius: 6,
+              background: color.state.danger.bg,
+              color: color.state.danger.fg,
+              borderRadius: radius.sm,
               padding: 10,
               fontSize: 13,
             }}
@@ -257,57 +258,14 @@ export function TriggerModal({ open, initial, onClose, onSaved, lockScope }: Pro
         )}
 
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-          <button type="button" onClick={onClose} disabled={busy} style={secondaryBtn}>
+          <Button type="button" onClick={onClose} disabled={busy}>
             Cancel
-          </button>
-          <button
-            type="submit"
-            disabled={busy || !canSave}
-            style={{ ...primaryBtn, opacity: busy || !canSave ? 0.6 : 1 }}
-          >
+          </Button>
+          <Button type="submit" variant="primary" disabled={busy || !canSave}>
             {busy ? "Saving…" : isEdit ? "Save" : "Create"}
-          </button>
+          </Button>
         </div>
       </form>
-    </div>
-  );
-}
-
-function SentenceRow({
-  label,
-  tone,
-  children,
-}: {
-  label: string;
-  tone: "if" | "send" | "to";
-  children: ReactNode;
-}) {
-  const colors = {
-    if: { bg: "#fffbeb", fg: "#92400e", border: "#fde68a" },
-    send: { bg: "#ecfdf5", fg: "#047857", border: "#a7f3d0" },
-    to: { bg: "#eef2ff", fg: "#4338ca", border: "#c7d2fe" },
-  }[tone];
-  return (
-    <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
-      <span
-        style={{
-          flexShrink: 0,
-          marginTop: 6,
-          padding: "3px 10px",
-          background: colors.bg,
-          color: colors.fg,
-          border: `1px solid ${colors.border}`,
-          borderRadius: 999,
-          fontSize: 11,
-          fontWeight: 700,
-          letterSpacing: "0.04em",
-          textTransform: "uppercase",
-          whiteSpace: "nowrap",
-        }}
-      >
-        {label}
-      </span>
-      <div style={{ flex: 1, minWidth: 0 }}>{children}</div>
     </div>
   );
 }
@@ -326,34 +284,37 @@ function PreviewCard({
   return (
     <div
       style={{
-        background: "white",
-        borderRadius: 14,
+        background: color.bg.page,
+        borderRadius: radius.lg,
         padding: 24,
-        boxShadow: "0 12px 40px rgba(0,0,0,0.18)",
+        boxShadow: shadow.modal,
         display: "flex",
         flexDirection: "column",
         gap: 16,
       }}
     >
       <div>
-        <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700 }}>Create a trigger</h2>
-        <p style={{ margin: "8px 0 0", fontSize: 13, color: "#4b5563" }}>
-          A trigger keeps an eye on a doc and reacts when something changes.
+        <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600, color: color.text.primary }}>Create a trigger</h2>
+        <p style={{ margin: "6px 0 0", fontSize: 13, color: color.text.secondary }}>
+          Triggers monitor documents or folders and send events when a specified change occurs.
         </p>
       </div>
       <div style={fieldStyle}>
         <span style={fieldLabelStyle}>Watching</span>
-        <div style={{ ...inputStyle, color: "#111" }}>{scope}</div>
+        <div style={{ ...inputStyle, color: color.text.primary }}>{scope}</div>
       </div>
-      <SentenceRow label="If" tone="if">
-        <div style={{ ...inputStyle, color: "#111", whiteSpace: "pre-wrap" }}>{ifText}</div>
-      </SentenceRow>
-      <SentenceRow label="then send" tone="send">
-        <div style={{ ...inputStyle, color: "#111", whiteSpace: "pre-wrap" }}>{sendText}</div>
-      </SentenceRow>
-      <SentenceRow label="to" tone="to">
-        <div style={{ ...inputStyle, color: "#111" }}>{destLabel}</div>
-      </SentenceRow>
+      <div style={fieldStyle}>
+        <span style={fieldLabelStyle}>If</span>
+        <div style={{ ...inputStyle, color: color.text.primary, whiteSpace: "pre-wrap" }}>{ifText}</div>
+      </div>
+      <div style={fieldStyle}>
+        <span style={fieldLabelStyle}>Then send</span>
+        <div style={{ ...inputStyle, color: color.text.primary, whiteSpace: "pre-wrap" }}>{sendText}</div>
+      </div>
+      <div style={fieldStyle}>
+        <span style={fieldLabelStyle}>To</span>
+        <div style={{ ...inputStyle, color: color.text.primary }}>{destLabel}</div>
+      </div>
     </div>
   );
 }
@@ -363,46 +324,24 @@ const fieldStyle: React.CSSProperties = { display: "flex", flexDirection: "colum
 const fieldLabelStyle: React.CSSProperties = {
   fontSize: 11,
   fontWeight: 700,
-  color: "#6b7280",
+  color: color.text.muted,
   textTransform: "uppercase",
   letterSpacing: "0.06em",
 };
 
 const fieldHintStyle: React.CSSProperties = {
   fontSize: 12,
-  color: "#6b7280",
+  color: color.text.muted,
   lineHeight: 1.4,
 };
 
 const inputStyle: React.CSSProperties = {
-  padding: "9px 11px",
-  border: "1px solid #d1d5db",
-  borderRadius: 6,
+  padding: "8px 10px",
+  border: `1px solid ${color.border.default}`,
+  borderRadius: radius.sm,
   fontSize: 14,
   outline: "none",
   width: "100%",
   boxSizing: "border-box",
-  background: "white",
-};
-
-const primaryBtn: React.CSSProperties = {
-  padding: "8px 14px",
-  background: "#6366f1",
-  color: "white",
-  border: "none",
-  borderRadius: 8,
-  cursor: "pointer",
-  fontWeight: 600,
-  fontSize: 13,
-};
-
-const secondaryBtn: React.CSSProperties = {
-  padding: "8px 14px",
-  background: "transparent",
-  color: "#374151",
-  border: "1px solid #ddd",
-  borderRadius: 8,
-  cursor: "pointer",
-  fontWeight: 600,
-  fontSize: 13,
+  background: color.bg.page,
 };

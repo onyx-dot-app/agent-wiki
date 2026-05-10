@@ -1,6 +1,6 @@
 {
   "name": "create_directory",
-  "description": "Create a new (empty) directory in the wiki. Git doesn't track empty dirs, so a tiny `.gitkeep` marker is committed inside. Use when the user wants a new section/folder before populating it with docs. The path must NOT end in `.md` and must not already exist as a file or directory. Only call after the user has explicitly asked for the directory or confirmed when you proposed it. Returns the commit SHA and the created path.",
+  "description": "Create a new (empty) directory in the wiki. Returns the commit SHA and the created path.",
   "input_schema": {
     "type": "object",
     "properties": {

@@ -140,14 +140,14 @@ def test_list_documents_hides_unauthorized_pages(integration):
     integration.signin(email="bob@x.com")
     resp = integration.client.get("/api/documents")
     assert resp.status_code == 200
-    md_paths = {p for p in resp.get_json()["paths"] if p.endswith(".md")}
+    md_paths = {e["path"] for e in resp.get_json()["entries"] if e["path"].endswith(".md")}
     assert "docs/a.md" in md_paths
     assert "docs/b.md" not in md_paths
 
     # Alice sees both.
     integration.signin(user_id=alice)
     resp = integration.client.get("/api/documents")
-    md_paths = {p for p in resp.get_json()["paths"] if p.endswith(".md")}
+    md_paths = {e["path"] for e in resp.get_json()["entries"] if e["path"].endswith(".md")}
     assert {"docs/a.md", "docs/b.md"} <= md_paths
 
 

@@ -167,6 +167,49 @@ def read_file(rel_path: str, ref: str = "HEAD") -> str:
     return _run(["show", f"{ref}:{rel_path}"]).stdout
 
 
+def path_at_ref(current_rel_path: str, ref: str) -> str | None:
+    """Return the path ``current_rel_path`` had at commit ``ref``.
+
+    ``git show <ref>:<path>`` only works if the file was at ``<path>`` in that
+    commit — for a renamed file, older commits refer to the old name. Walk
+    ``--follow``'s name-status output newest-first, tracking the active name
+    across rename boundaries, and report what it was at ``ref``. Returns
+    ``None`` if ``ref`` doesn't appear in the file's follow-history.
+    """
+    out = _run(
+        [
+            "log",
+            "--follow",
+            "--name-status",
+            "--pretty=format:\x1f%H",
+            "--",
+            current_rel_path,
+        ],
+        check=False,
+    ).stdout
+    sha: str | None = None
+    name = current_rel_path
+    for line in out.splitlines():
+        if line.startswith("\x1f"):
+            sha = line[1:]
+            continue
+        if not line or sha is None:
+            continue
+        parts = line.split("\t")
+        status = parts[0]
+        if status.startswith("R") and len(parts) == 3:
+            old, new = parts[1], parts[2]
+            # The rename commit itself records the file at its new name.
+            if sha == ref:
+                return new
+            # Older commits refer to the pre-rename name.
+            if name == new:
+                name = old
+        elif sha == ref:
+            return parts[-1]
+    return None
+
+
 def history(rel_path: str, limit: int = 100) -> list[CommitInfo]:
     """Return commit metadata (incl. body) for a path, newest first."""
     sep_field = "\x1f"
@@ -210,6 +253,29 @@ def list_paths(prefix: str = "") -> list[str]:
     """List tracked files under a path prefix."""
     out = _run(["ls-files", prefix or "."]).stdout
     return [line for line in out.splitlines() if line]
+
+
+def list_paths_with_mtime(prefix: str = "") -> list[tuple[str, str]]:
+    """``(path, ISO-8601 author-time)`` for every tracked file under ``prefix``.
+
+    One batched ``git log`` walk newest-first; the first sighting of a path
+    wins. Untracked files (and any that somehow appear in ``ls-files`` but
+    not in any commit) get an empty timestamp string.
+    """
+    sep = "\x1f"
+    out = _run(["log", "--name-only", f"--pretty=format:{sep}%aI"]).stdout
+    mtime: dict[str, str] = {}
+    current_ts: str | None = None
+    for line in out.splitlines():
+        if line.startswith(sep):
+            current_ts = line[len(sep):]
+            continue
+        if not line or current_ts is None:
+            continue
+        if line not in mtime:
+            mtime[line] = current_ts
+    tracked = list_paths(prefix)
+    return [(p, mtime.get(p, "")) for p in tracked]
 
 
 def paths_changed_in(sha: str) -> list[str]:

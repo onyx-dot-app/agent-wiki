@@ -4,9 +4,12 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
+import { WikiSearch, type WikiSearchHandle } from "@/components/wiki/WikiSearch";
 import { useAuth } from "@/lib/auth";
 import { useHealth } from "@/lib/health";
 import { useLLMStatus } from "@/lib/llm";
+import { color, radius, shadow } from "@/lib/theme";
+import { MOBILE_BREAKPOINT, useIsMobile } from "@/lib/viewport";
 
 interface NavItem {
   href: string;
@@ -22,13 +25,60 @@ const NAV: NavItem[] = [
 ];
 
 const BANNER_HEALTH_POLL_MS = 15000;
+const SIDEBAR_WIDTH = 248;
+// Tight icon column. 28px avatar + 10px symmetric breathing room = 48.
+// Items are optically centered via per-element padding (see profile
+// button + nav link + search button styles below).
+const SIDEBAR_COLLAPSED_WIDTH = 48;
+const COLLAPSED_KEY = "agent-wiki:sidebar-collapsed";
 
 export function AppShell({ children }: { children: ReactNode }) {
   const { user, logout } = useAuth();
   const pathname = usePathname();
   const router = useRouter();
+  const isMobile = useIsMobile();
   const [menuOpen, setMenuOpen] = useState(false);
+  // AppShell only mounts client-side (each page gates on useRequireAuth
+  // before rendering us), so reading localStorage in the lazy initializer
+  // is safe — and avoids the expanded→collapsed animation flicker on every
+  // route change that an effect-based hydration would cause.
+  //
+  // On mobile, default to collapsed unless the user has an explicit
+  // stored preference. (Desktop users with no preference default to
+  // expanded — preserves the existing behavior.)
+  const [collapsed, setCollapsed] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    const stored = window.localStorage.getItem(COLLAPSED_KEY);
+    if (stored === "1") return true;
+    if (stored === "0") return false;
+    return window.innerWidth < MOBILE_BREAKPOINT;
+  });
+  // Visibility of the hover-rail toggle. `navHover` covers cursor inside
+  // the sidebar; `railHover` covers the toggle itself, which protrudes
+  // past the sidebar's right edge.
+  const [navHover, setNavHover] = useState(false);
+  const [railHover, setRailHover] = useState(false);
+  const showRail = navHover || railHover;
   const menuRef = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<WikiSearchHandle>(null);
+
+  // Mobile: when sidebar is expanded it floats over content as an
+  // overlay drawer. Tapping a nav link (or the backdrop) closes it.
+  const isMobileDrawer = isMobile && !collapsed;
+
+  function expandAndFocusSearch() {
+    setCollapsed(false);
+    // Wait for WikiSearch to mount on the next render before focusing.
+    // setTimeout(0) yields to React's commit phase; the imperative
+    // handle is set during commit, so the focus call lands on the
+    // mounted input.
+    setTimeout(() => searchRef.current?.focus(), 0);
+  }
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(COLLAPSED_KEY, collapsed ? "1" : "0");
+  }, [collapsed]);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -42,126 +92,386 @@ export function AppShell({ children }: { children: ReactNode }) {
   }, [menuOpen]);
 
   const initial = (user?.name || user?.email || "?").charAt(0).toUpperCase();
+  const displayName = user?.name || user?.email || "";
 
   return (
-    <div style={{ display: "flex", minHeight: "100vh" }}>
+    <div style={{ display: "flex", minHeight: "100vh", background: "white" }}>
+      {/* Mobile drawer backdrop. Only rendered when the sidebar is
+          expanded on a phone — tapping it closes the drawer. */}
+      {isMobileDrawer && (
+        <div
+          onClick={() => setCollapsed(true)}
+          aria-hidden
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: color.overlay,
+            zIndex: 50,
+          }}
+        />
+      )}
       <nav
+        onMouseEnter={() => setNavHover(true)}
+        onMouseLeave={() => setNavHover(false)}
         style={{
-          width: 56,
-          background: "#0f172a",
-          color: "#e2e8f0",
+          width: collapsed ? SIDEBAR_COLLAPSED_WIDTH : SIDEBAR_WIDTH,
+          background: color.bg.panel,
+          // Right edge drawn as an inset box-shadow rather than a
+          // border-right. A 1px asymmetric border would shift the
+          // optical center of the sidebar by 0.5px and consume layout
+          // width — fine in a 248px expanded bar, very visible in a
+          // 48px collapsed bar where icons need to sit dead-center.
+          boxShadow: isMobileDrawer
+            ? `inset -1px 0 0 0 ${color.border.default}, ${shadow.panel}`
+            : `inset -1px 0 0 0 ${color.border.default}`,
+          color: color.text.primary,
           display: "flex",
           flexDirection: "column",
-          alignItems: "center",
-          padding: "12px 0",
-          gap: 4,
+          // border-box so `width: 48` is the *visible* width, not the
+          // content area. Without this the project's default
+          // content-box would render the sidebar at 48 + 8 (padding)
+          // + 1 (border) = 57px wide.
+          boxSizing: "border-box",
+          // Side padding 4 + 28px avatar + 4px on the right = 36
+          // content; the leftover 12px of the 48 visible bar splits
+          // around the avatar's button padding to keep it centered.
+          padding: "10px 4px",
+          gap: 2,
           flexShrink: 0,
+          // Mobile expanded state: float as a fixed overlay so the
+          // 248px drawer doesn't push the page content off-screen on
+          // a 375px phone. Desktop / collapsed: in-flow.
+          position: isMobileDrawer ? "fixed" : "relative",
+          ...(isMobileDrawer
+            ? { top: 0, left: 0, height: "100vh", zIndex: 60 }
+            : {}),
+          transition: "width 160ms ease",
+          // Intentionally NOT overflow: hidden — would clip the profile
+          // dropdown menu and the search results popover, both of which
+          // legitimately extend past the sidebar's right edge.
         }}
       >
-        <div ref={menuRef} style={{ position: "relative", marginBottom: 8 }}>
-          <button
-            onClick={() => setMenuOpen((v) => !v)}
-            title={user?.email ?? "Profile"}
-            aria-label="Profile menu"
-            style={{
-              width: 36,
-              height: 36,
-              borderRadius: "50%",
-              background: "#6366f1",
-              color: "white",
-              border: "none",
-              cursor: "pointer",
-              fontWeight: 600,
-              fontSize: 14,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-            }}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 4,
+            // No collapse-conditional alignment. Children stay anchored
+            // to flex-start in both states so the avatar's x-coordinate
+            // doesn't shift during the width transition.
+            marginBottom: 6,
+          }}
+        >
+          <div
+            ref={menuRef}
+            // Always flex:1 so the menuRef left edge sits at the nav's
+            // content-left anchor (x=8) regardless of state.
+            style={{ position: "relative", flex: 1, minWidth: 0 }}
           >
-            {initial}
-          </button>
-          {menuOpen && (
-            <div
+            <button
+              onClick={() => setMenuOpen((v) => !v)}
+              title={user?.email ?? "Profile"}
+              aria-label="Profile menu"
               style={{
-                position: "absolute",
-                top: 0,
-                left: 48,
-                background: "white",
-                color: "#111",
-                border: "1px solid #e5e5e5",
-                borderRadius: 8,
-                boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
-                minWidth: 200,
-                padding: 8,
-                zIndex: 50,
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                width: "100%",
+                minWidth: 0,
+                // Collapsed: button-padding-left 6 + nav-padding-left 4
+                // = avatar at x=10. Avatar-center at x=24, equal to
+                // sidebar-center (48/2). Optically centered.
+                // Expanded: padding-left 8 leaves room for the name.
+                padding: collapsed ? "4px 6px" : "4px 8px",
+                background: "transparent",
+                border: "none",
+                cursor: "pointer",
+                borderRadius: radius.sm,
+                color: color.text.primary,
+                textAlign: "left",
+                transition: "padding 160ms ease",
               }}
+              onMouseEnter={(e) => (e.currentTarget.style.background = color.bg.hover)}
+              onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
             >
-              <div style={{ padding: "6px 8px", fontSize: 12, color: "#666" }}>
-                {user?.email}
-                {user?.is_admin && (
-                  <span
-                    style={{
-                      marginLeft: 6,
-                      padding: "1px 6px",
-                      background: "#eef2ff",
-                      color: "#3730a3",
-                      borderRadius: 4,
-                      fontSize: 10,
-                      fontWeight: 600,
-                    }}
-                  >
-                    ADMIN
-                  </span>
-                )}
-              </div>
-              <div style={{ height: 1, background: "#eee", margin: "4px 0" }} />
-              {user?.is_admin && (
-                <MenuButton
-                  onClick={() => {
-                    setMenuOpen(false);
-                    router.push("/admin");
-                  }}
-                >
-                  Admin
-                </MenuButton>
-              )}
-              <MenuButton
-                onClick={async () => {
-                  setMenuOpen(false);
-                  await logout();
-                  router.replace("/login");
+              <span
+                style={{
+                  width: 28,
+                  height: 28,
+                  borderRadius: radius.sm,
+                  background: color.accent.bg,
+                  color: color.accent.fg,
+                  fontWeight: 600,
+                  fontSize: 12,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
                 }}
               >
-                Sign out
-              </MenuButton>
-            </div>
-          )}
+                {initial}
+              </span>
+              {!collapsed && (
+                <>
+                  <span
+                    style={{
+                      flex: 1,
+                      minWidth: 0,
+                      fontSize: 13,
+                      fontWeight: 500,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {displayName}
+                  </span>
+                  <span style={{ color: color.text.muted, display: "flex", flexShrink: 0 }}>
+                    <ChevronDown />
+                  </span>
+                </>
+              )}
+            </button>
+            {menuOpen && (
+              <div
+                style={{
+                  position: "absolute",
+                  top: "calc(100% + 4px)",
+                  left: 0,
+                  background: color.bg.page,
+                  color: color.text.primary,
+                  border: `1px solid ${color.border.default}`,
+                  borderRadius: radius.md,
+                  boxShadow: shadow.md,
+                  minWidth: 220,
+                  // Cap so the menu can't overflow the right edge of the
+                  // viewport on narrow phones.
+                  maxWidth: "calc(100vw - 24px)",
+                  padding: 6,
+                  zIndex: 70,
+                }}
+              >
+                <div style={{ padding: "6px 8px", fontSize: 12, color: color.text.muted }}>
+                  {user?.email}
+                  {user?.is_admin && (
+                    <span
+                      style={{
+                        marginLeft: 6,
+                        padding: "1px 6px",
+                        background: color.bg.active,
+                        color: color.text.primary,
+                        borderRadius: radius.xs,
+                        fontSize: 10,
+                        fontWeight: 600,
+                        letterSpacing: 0.4,
+                      }}
+                    >
+                      ADMIN
+                    </span>
+                  )}
+                </div>
+                <div style={{ height: 1, background: color.border.subtle, margin: "4px 0" }} />
+                {user?.is_admin && (
+                  <MenuButton
+                    onClick={() => {
+                      setMenuOpen(false);
+                      router.push("/admin");
+                    }}
+                  >
+                    Admin
+                  </MenuButton>
+                )}
+                <MenuButton
+                  onClick={async () => {
+                    setMenuOpen(false);
+                    await logout();
+                    router.replace("/login");
+                  }}
+                >
+                  Sign out
+                </MenuButton>
+              </div>
+            )}
+          </div>
+          {/* Collapse/expand handled by the hover-rail toggle (below). */}
         </div>
-        <div style={{ height: 1, width: 28, background: "#1e293b", margin: "4px 0 8px" }} />
-        {NAV.map((item) => {
-          const active = pathname?.startsWith(item.href);
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              title={item.label}
-              aria-label={item.label}
+
+        {collapsed ? (
+          // Search affordance in the icon column. Click expands the
+          // sidebar and focuses the freshly-mounted search input —
+          // discoverability + one-click search from collapsed state.
+          <button
+            onClick={expandAndFocusSearch}
+            title="Search"
+            aria-label="Search wiki"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              width: "100%",
+              height: 30,
+              // padding-left 11: icon at x=4 (nav) + 11 (button) = 15;
+              // icon-center at x=24 = sidebar-center.
+              padding: "0 11px",
+              marginBottom: 6,
+              background: "transparent",
+              border: "none",
+              cursor: "pointer",
+              borderRadius: radius.sm,
+              color: color.text.muted,
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = color.bg.hover;
+              e.currentTarget.style.color = color.text.primary;
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = "transparent";
+              e.currentTarget.style.color = color.text.muted;
+            }}
+          >
+            <span
               style={{
-                width: 36,
-                height: 36,
-                borderRadius: 8,
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
-                color: active ? "white" : "#94a3b8",
-                background: active ? "#1e293b" : "transparent",
-                textDecoration: "none",
+                width: 18,
+                height: 18,
+                flexShrink: 0,
               }}
             >
-              {item.icon}
-            </Link>
-          );
-        })}
+              <SearchGlyph />
+            </span>
+          </button>
+        ) : (
+          <div style={{ padding: "0 0 6px" }}>
+            <WikiSearch ref={searchRef} />
+          </div>
+        )}
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+          {NAV.map((item) => {
+            const active = pathname?.startsWith(item.href) ?? false;
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                title={collapsed ? item.label : undefined}
+                aria-label={item.label}
+                onClick={() => {
+                  // Mobile drawer: nav navigation closes the overlay
+                  // so the user lands on the page content, not still
+                  // looking at a half-screen drawer.
+                  if (isMobileDrawer) setCollapsed(true);
+                }}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                  height: 30,
+                  // Collapsed: link-padding-left 11 + nav-padding-left 4
+                  // = icon at x=15. Icon-center at x=24 = sidebar-center.
+                  // Expanded: padding-left 8 aligns with the profile
+                  // button label spacing.
+                  padding: collapsed ? "0 11px" : "0 8px",
+                  borderRadius: radius.sm,
+                  color: active ? color.text.primary : color.text.muted,
+                  background: active ? color.bg.active : "transparent",
+                  textDecoration: "none",
+                  fontSize: 14,
+                  fontWeight: active ? 500 : 400,
+                  transition: "padding 160ms ease, background 80ms ease, color 80ms ease",
+                }}
+                onMouseEnter={(e) => {
+                  if (!active) {
+                    e.currentTarget.style.background = color.bg.hover;
+                    e.currentTarget.style.color = color.text.primary;
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (!active) {
+                    e.currentTarget.style.background = "transparent";
+                    e.currentTarget.style.color = color.text.muted;
+                  }
+                }}
+              >
+                <span
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    width: 18,
+                    height: 18,
+                    color: "currentColor",
+                    flexShrink: 0,
+                  }}
+                >
+                  {item.icon}
+                </span>
+                {!collapsed && (
+                  <span
+                    style={{
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {item.label}
+                  </span>
+                )}
+              </Link>
+            );
+          })}
+        </div>
+
+        {/* Hover-rail collapse/expand toggle. Hidden on mobile — touch
+            devices don't hover, and the drawer pattern uses backdrop-tap
+            to close. The collapsed-state search button is the entry
+            point to expand on mobile. */}
+        {!isMobile && (
+        <button
+          onMouseEnter={(e) => {
+            setRailHover(true);
+            e.currentTarget.style.color = color.text.primary;
+          }}
+          onMouseLeave={(e) => {
+            setRailHover(false);
+            e.currentTarget.style.color = color.text.muted;
+          }}
+          onClick={() => setCollapsed((c) => !c)}
+          title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          style={{
+            position: "absolute",
+            // Vertically centered on the sidebar (which is full
+            // viewport height), so the toggle sits at mid-screen
+            // regardless of how tall the nav list grows.
+            top: "50%",
+            right: -10,
+            width: 20,
+            height: 20,
+            borderRadius: "50%",
+            background: color.bg.page,
+            border: `1px solid ${color.border.default}`,
+            boxShadow: shadow.sm,
+            color: color.text.muted,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            cursor: "pointer",
+            padding: 0,
+            opacity: showRail ? 1 : 0,
+            // Combined transform: vertical centering (-50%) plus a
+            // horizontal slide-in nudge driven by hover state.
+            transform: showRail
+              ? "translate(0, -50%)"
+              : "translate(-4px, -50%)",
+            transition: "opacity 120ms ease, transform 120ms ease, color 80ms ease",
+            zIndex: 30,
+          }}
+        >
+          {collapsed ? <ChevronRight /> : <ChevronLeft />}
+        </button>
+        )}
       </nav>
       <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
         <StatusBanner />
@@ -208,10 +518,7 @@ function BannerShell({
   tone: "warning" | "error";
   children: ReactNode;
 }) {
-  const palette =
-    tone === "error"
-      ? { background: "#fee2e2", border: "#fca5a5", color: "#7f1d1d" }
-      : { background: "#fef3c7", border: "#fcd34d", color: "#78350f" };
+  const palette = tone === "error" ? color.state.danger : color.state.warning;
   return (
     <div
       role="alert"
@@ -220,9 +527,9 @@ function BannerShell({
         alignItems: "center",
         gap: 12,
         padding: "10px 16px",
-        background: palette.background,
+        background: palette.bg,
         borderBottom: `1px solid ${palette.border}`,
-        color: palette.color,
+        color: palette.fg,
         fontSize: 14,
       }}
     >
@@ -288,7 +595,7 @@ function LLMSetupBanner({ isAdmin }: { isAdmin: boolean }) {
               provider and API key on the{" "}
               <Link
                 href="/admin/llm"
-                style={{ color: "#78350f", textDecoration: "underline", fontWeight: 600 }}
+                style={{ color: color.state.warning.fg, textDecoration: "underline", fontWeight: 600 }}
               >
                 LLM settings page
               </Link>
@@ -312,12 +619,12 @@ function LLMSetupBanner({ isAdmin }: { isAdmin: boolean }) {
           style={{
             background: "transparent",
             border: "none",
-            color: "#78350f",
+            color: color.state.warning.fg,
             cursor: "pointer",
             fontSize: 18,
             lineHeight: 1,
             padding: "2px 6px",
-            borderRadius: 4,
+            borderRadius: radius.xs,
           }}
         >
           ×
@@ -340,9 +647,10 @@ function MenuButton({ children, onClick }: { children: ReactNode; onClick: () =>
         background: "transparent",
         cursor: "pointer",
         fontSize: 14,
-        borderRadius: 4,
+        borderRadius: radius.xs,
+        color: color.text.primary,
       }}
-      onMouseEnter={(e) => (e.currentTarget.style.background = "#f5f5f5")}
+      onMouseEnter={(e) => (e.currentTarget.style.background = color.bg.hover)}
       onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
     >
       {children}
@@ -350,37 +658,81 @@ function MenuButton({ children, onClick }: { children: ReactNode; onClick: () =>
   );
 }
 
+function ChevronDown() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+      <path d="m6 9 6 6 6-6" />
+    </svg>
+  );
+}
+
+function SearchGlyph() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="11" cy="11" r="7" />
+      <path d="m21 21-4.3-4.3" />
+    </svg>
+  );
+}
+
+function ChevronLeft() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="m15 18-6-6 6-6" />
+    </svg>
+  );
+}
+
+function ChevronRight() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="m9 18 6-6-6-6" />
+    </svg>
+  );
+}
+
 function BookIcon() {
   return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="M4 4h12a3 3 0 0 1 3 3v13H7a3 3 0 0 0-3 3z" />
-      <path d="M4 4v16" />
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 4h6a3 3 0 0 1 3 3v13a2 2 0 0 0-2-2H3z" />
+      <path d="M21 4h-6a3 3 0 0 0-3 3v13a2 2 0 0 1 2-2h7z" />
     </svg>
   );
 }
 function BoltIcon() {
   return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M13 2 4 14h7l-1 8 9-12h-7z" />
     </svg>
   );
 }
 function EventsIcon() {
   return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <circle cx="12" cy="12" r="9" />
-      <path d="M12 7v5l3 2" />
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="2" />
+      <path d="M16.24 7.76a6 6 0 0 1 0 8.49" />
+      <path d="M7.76 16.24a6 6 0 0 1 0-8.49" />
+      <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
+      <path d="M4.93 19.07a10 10 0 0 1 0-14.14" />
     </svg>
   );
 }
 function AgentsIcon() {
   return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <rect x="4" y="7" width="16" height="12" rx="2" />
-      <path d="M12 3v4" />
-      <circle cx="9" cy="13" r="1" />
-      <circle cx="15" cy="13" r="1" />
-      <path d="M9 17h6" />
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      {/* twin angled antennae */}
+      <path d="M8 3l-1 3" />
+      <path d="M16 3l1 3" />
+      {/* head */}
+      <rect x="4" y="6" width="16" height="13" rx="3" />
+      {/* side bolts */}
+      <path d="M2 11v3" />
+      <path d="M22 11v3" />
+      {/* eyes (outline, no fill) */}
+      <circle cx="9" cy="12" r="1.3" />
+      <circle cx="15" cy="12" r="1.3" />
+      {/* mouth */}
+      <path d="M9 16h6" />
     </svg>
   );
 }

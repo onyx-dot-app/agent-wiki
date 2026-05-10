@@ -1,6 +1,6 @@
 {
   "name": "multi_edit",
-  "description": "Apply multiple find-and-replace operations to one wiki document atomically. Each edit operates on the result of the previous edit. If ANY edit fails (no match, multi-match without `replace_all`, or empty `old_string`), nothing is written and the whole batch is reported as failed. One commit covers all edits. Prefer this over multiple `edit_doc` calls when changing several parts of the same document — saves round-trips and gives all-or-nothing semantics. The file must have been seen via `search_wiki` earlier in the conversation, and must already exist (use `write_doc` for new files). Only call after the user has explicitly approved the change. Returns the commit SHA, the unified diff, and any broken markdown links the result introduces.",
+  "description": "Apply multiple find-and-replace operations to one wiki document atomically. Each edit operates on the result of the previous edit. If ANY edit fails (no match, multi-match without `replace_all`, or empty `old_string`), nothing is written and the whole batch is reported as failed. Prefer this over multiple `edit_doc` calls when changing several parts of the same document — saves round-trips and gives all-or-nothing semantics. Returns the commit SHA, the unified diff, and any broken markdown links the result introduces.",
   "input_schema": {
     "type": "object",
     "properties": {

@@ -6,6 +6,7 @@ The decorator-shaped API the rest of the app uses:
   * ``@queue.periodic_task(crontab(minute="*/5"))`` — register a cron handler
   * ``task(*args, **kwargs)``                      — direct call → enqueue
   * ``task.schedule(args=(...), eta=dt)``          — enqueue with a delay/eta
+  * ``queue.depth()``                              — ready/delayed/in_flight counts
   * ``queue.immediate = True``                     — synchronous mode for tests
   * ``QueueFullError``                             — raised when at the cap
 
@@ -135,6 +136,24 @@ def _install_signal_handlers() -> None:
 # --------------------------------------------------------------------------- #
 
 
+class QueueDepth(BaseModel):
+    """Snapshot of pgmq message counts, broken down by state.
+
+    See ``TaskQueue.depth`` for the per-field semantics. ``pending``
+    (``ready + delayed``) is the producer-relevant figure that matches
+    the cap-check predicate: a delayed message still consumes a slot
+    because it will eventually become ready.
+    """
+
+    ready: int
+    delayed: int
+    in_flight: int
+
+    @property
+    def pending(self) -> int:
+        return self.ready + self.delayed
+
+
 class _PeriodicEntry(BaseModel):
     cron_spec: str
     task_name: str
@@ -190,33 +209,48 @@ class TaskQueue(BaseModel):
         finally:
             self.immediate = prev
 
-    # ----- size + enqueue ---------------------------------------------------
+    # ----- depth + enqueue --------------------------------------------------
 
-    def size(self) -> int:
-        """Pending + future-scheduled message count, excluding in-flight.
+    def depth(self) -> "QueueDepth":
+        """Per-state message counts in one query.
 
-        "In-flight" here means a worker has already read the message and
-        its VT hasn't expired yet (``read_ct > 0 AND vt > now()``). Those
-        represent work in progress and shouldn't count toward the cap or
-        the healthcheck backlog — otherwise a slow consumer locks out
-        producers entirely.
+        pgmq messages live in three states the rest of the app cares
+        about distinguishing:
 
-        Returns 0 in immediate mode (messages execute synchronously and
-        never sit in pgmq).
+        * ``ready`` — ``vt <= now()``: a worker can claim the message on
+          the next ``pgmq.read``. Includes both fresh no-delay sends
+          (``read_ct = 0``) and retry-eligible ones (``read_ct > 0``)
+          whose backoff window has elapsed.
+        * ``delayed`` — ``read_ct = 0 AND vt > now()``: scheduled for a
+          future fire (``schedule(..., eta=...)`` or ``delay=...``). No
+          worker has touched it yet. The user-facing distinction the
+          healthcheck cares about: these are *waiting on the clock*, not
+          on consumer throughput.
+        * ``in_flight`` — ``read_ct > 0 AND vt > now()``: currently held
+          by a worker. Not eligible for redelivery until the VT expires.
+
+        Returns all-zeros in immediate mode (messages execute
+        synchronously and never sit in pgmq).
         """
         if self.immediate:
-            return 0
+            return QueueDepth(ready=0, delayed=0, in_flight=0)
         with session() as s:
             row = s.execute(
                 text(
-                    f'SELECT count(*) AS n FROM pgmq."q_{self.name}" '
-                    "WHERE read_ct = 0 OR vt <= now()"
+                    f"SELECT "
+                    f"count(*) FILTER (WHERE vt <= now()) AS ready, "
+                    f"count(*) FILTER (WHERE read_ct = 0 AND vt > now()) AS delayed, "
+                    f"count(*) FILTER (WHERE read_ct > 0 AND vt > now()) AS in_flight "
+                    f'FROM pgmq."q_{self.name}"'
                 )
             ).mappings().first()
-            if row is None:
-                return 0
-            n = row["n"]
-            return int(n) if n is not None else 0
+        if row is None:
+            return QueueDepth(ready=0, delayed=0, in_flight=0)
+        return QueueDepth(
+            ready=int(row["ready"] or 0),
+            delayed=int(row["delayed"] or 0),
+            in_flight=int(row["in_flight"] or 0),
+        )
 
     def enqueue(
         self,
@@ -226,19 +260,22 @@ class TaskQueue(BaseModel):
         *,
         eta: datetime | None = None,
         delay: int | None = None,
-    ) -> None:
+    ) -> int | None:
+        """Enqueue a task. Returns the pgmq ``msg_id`` of the new message,
+        or ``None`` in immediate mode (the handler ran synchronously)."""
         if self.immediate:
             handler = self.handlers[task_name]
             handler(*args, **(kwargs or {}))
-            return
+            return None
 
         delay_seconds = _resolve_delay(eta, delay)
         body = {"task": task_name, "args": list(args), "kwargs": dict(kwargs or {})}
 
         # Single transaction: take the per-queue advisory lock, count
-        # pending + future-scheduled rows, enqueue if under the cap. The
-        # lock serializes only enqueues *on this queue*, so the three
-        # queues stay independent. Released on commit/rollback.
+        # pending rows (ready + delayed = everything except in-flight),
+        # enqueue if under the cap. The lock serializes only enqueues
+        # *on this queue*, so the three queues stay independent. Released
+        # on commit/rollback.
         with session() as s:
             s.execute(
                 text("SELECT pg_advisory_xact_lock(hashtext(:k))"),
@@ -252,10 +289,11 @@ class TaskQueue(BaseModel):
             ).scalar() or 0
             if size >= self.max_size:
                 raise QueueFullError(self.name, size, self.max_size)
-            s.execute(
+            msg_id = s.execute(
                 text("SELECT pgmq.send(:q, CAST(:msg AS jsonb), :delay)"),
                 {"q": self.name, "msg": json.dumps(body), "delay": delay_seconds},
-            )
+            ).scalar()
+        return int(msg_id) if msg_id is not None else None
 
 
 class Task(BaseModel):
@@ -267,10 +305,11 @@ class Task(BaseModel):
     name: str
     fn: Callable[..., Any]
 
-    def __call__(self, *args: Any, **kwargs: Any) -> None:
+    def __call__(self, *args: Any, **kwargs: Any) -> int | None:
         """Direct call enqueues — never executes synchronously unless
-        ``queue.immediate`` is set (only in tests)."""
-        self.queue.enqueue(self.name, args, kwargs)
+        ``queue.immediate`` is set (only in tests). Returns the pgmq
+        ``msg_id`` of the new message, or ``None`` in immediate mode."""
+        return self.queue.enqueue(self.name, args, kwargs)
 
     def schedule(
         self,
@@ -279,9 +318,16 @@ class Task(BaseModel):
         kwargs: dict[str, Any] | None = None,
         eta: datetime | None = None,
         delay: int | None = None,
-    ) -> None:
-        """Enqueue with a future ``eta`` or relative ``delay`` (seconds)."""
-        self.queue.enqueue(self.name, tuple(args), kwargs or {}, eta=eta, delay=delay)
+    ) -> int | None:
+        """Enqueue with a future ``eta`` or relative ``delay`` (seconds).
+
+        Returns the pgmq ``msg_id`` so callers that want to cancel the
+        scheduled fire later (e.g. ``agent_activity`` re-registration)
+        can pass the id to ``pgmq.delete``.
+        """
+        return self.queue.enqueue(
+            self.name, tuple(args), kwargs or {}, eta=eta, delay=delay
+        )
 
 
 # --------------------------------------------------------------------------- #

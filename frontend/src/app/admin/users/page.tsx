@@ -1,12 +1,15 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { AppShell } from "@/components/common/AppShell";
+import { Button } from "@/components/common/Button";
+import { BackLink, PageHeader } from "@/components/common/PageHeader";
 import { apiFetch } from "@/lib/api";
 import { useRequireAuth } from "@/lib/auth";
+import { color } from "@/lib/theme";
+import { useIsMobile } from "@/lib/viewport";
 
 interface AdminUser {
   id: string;
@@ -19,37 +22,31 @@ interface AdminUser {
 export default function AdminUsersPage() {
   const { user, loading } = useRequireAuth();
   const router = useRouter();
+  const isMobile = useIsMobile();
 
   useEffect(() => {
     if (!loading && user && !user.is_admin) router.replace("/");
   }, [loading, user, router]);
 
-  if (loading || !user) return <main style={{ padding: 32 }}>Loading…</main>;
+  if (loading || !user) return <main style={{ padding: isMobile ? 16 : 32 }}>Loading…</main>;
   if (!user.is_admin) return null;
 
   return (
     <AppShell>
-      <main style={{ padding: 32, maxWidth: 960 }}>
+      <main style={{ padding: isMobile ? "16px 12px" : "24px 32px", maxWidth: 960 }}>
         <BackLink />
-        <h1 style={{ marginTop: 8 }}>Users</h1>
-        <p style={{ color: "#666", marginTop: 0 }}>
-          Promote or demote admins, or remove accounts. The last admin cannot be demoted or deleted.
-        </p>
+        <PageHeader
+          title="Users"
+          description="Promote or demote admins, or remove accounts. The last admin cannot be demoted or deleted."
+        />
         <UsersTable currentUserId={user.id} />
       </main>
     </AppShell>
   );
 }
 
-function BackLink() {
-  return (
-    <Link href="/admin" style={{ fontSize: 13, color: "#4f46e5", textDecoration: "none" }}>
-      ← Admin
-    </Link>
-  );
-}
-
 function UsersTable({ currentUserId }: { currentUserId: string }) {
+  const isMobile = useIsMobile();
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -99,14 +96,14 @@ function UsersTable({ currentUserId }: { currentUserId: string }) {
 
   return (
     <div>
-      {error && <div style={{ color: "crimson", marginBottom: 12 }}>{error}</div>}
+      {error && <div style={{ color: color.state.danger.fg, marginBottom: 12 }}>{error}</div>}
       <table style={{ width: "100%", borderCollapse: "collapse" }}>
         <thead>
-          <tr style={{ textAlign: "left", borderBottom: "1px solid #e5e5e5" }}>
+          <tr style={{ textAlign: "left", borderBottom: `1px solid ${color.border.default}` }}>
             <Th>Email</Th>
-            <Th>Name</Th>
+            {!isMobile && <Th>Name</Th>}
             <Th>Role</Th>
-            <Th>Created</Th>
+            {!isMobile && <Th>Created</Th>}
             <Th>Actions</Th>
           </tr>
         </thead>
@@ -115,33 +112,35 @@ function UsersTable({ currentUserId }: { currentUserId: string }) {
             const isSelf = u.id === currentUserId;
             const busy = busyId === u.id;
             return (
-              <tr key={u.id} style={{ borderBottom: "1px solid #f0f0f0" }}>
+              <tr key={u.id} style={{ borderBottom: `1px solid ${color.border.subtle}` }}>
                 <Td>{u.email}</Td>
-                <Td>{u.name ?? "—"}</Td>
+                {!isMobile && <Td>{u.name ?? "—"}</Td>}
                 <Td>
                   {u.is_admin ? (
-                    <span style={{ color: "#3730a3", fontWeight: 600 }}>Admin</span>
+                    <span style={{ color: color.text.primary, fontWeight: 600 }}>Admin</span>
                   ) : (
-                    <span style={{ color: "#666" }}>User</span>
+                    <span style={{ color: color.text.muted }}>User</span>
                   )}
                 </Td>
-                <Td>{u.created_at.split(" ")[0]}</Td>
+                {!isMobile && <Td>{u.created_at.split(" ")[0]}</Td>}
                 <Td>
-                  <button
+                  <Button
+                    size="sm"
                     onClick={() => void toggleAdmin(u)}
                     disabled={busy || (u.is_admin && isSelf)}
                     title={u.is_admin && isSelf ? "Use another admin to demote yourself" : ""}
-                    style={btnStyle}
                   >
                     {u.is_admin ? "Demote" : "Promote"}
-                  </button>
-                  <button
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="danger"
                     onClick={() => void remove(u)}
                     disabled={busy || isSelf}
-                    style={{ ...btnStyle, marginLeft: 8, color: "#b91c1c" }}
+                    style={{ marginLeft: 8 }}
                   >
                     Delete
-                  </button>
+                  </Button>
                 </Td>
               </tr>
             );
@@ -153,16 +152,8 @@ function UsersTable({ currentUserId }: { currentUserId: string }) {
 }
 
 const Th = ({ children }: { children: React.ReactNode }) => (
-  <th style={{ padding: "10px 8px", fontSize: 13, fontWeight: 600, color: "#555" }}>{children}</th>
+  <th style={{ padding: "10px 8px", fontSize: 13, fontWeight: 600, color: color.text.secondary }}>{children}</th>
 );
 const Td = ({ children }: { children: React.ReactNode }) => (
   <td style={{ padding: "10px 8px", fontSize: 14 }}>{children}</td>
 );
-const btnStyle: React.CSSProperties = {
-  padding: "6px 12px",
-  border: "1px solid #d4d4d8",
-  background: "white",
-  borderRadius: 4,
-  cursor: "pointer",
-  fontSize: 13,
-};

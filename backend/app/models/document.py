@@ -63,8 +63,13 @@ class IngestRequest(BaseModel):
 # --------------------------------------------------------------------------- #
 
 
+class DocumentEntry(BaseModel):
+    path: str
+    updated_at: str  # ISO-8601 author-time of the most recent commit touching the path
+
+
 class ListDocumentsResponse(BaseModel):
-    paths: list[str]
+    entries: list[DocumentEntry]
 
 
 class GetDocumentResponse(BaseModel):
@@ -141,9 +146,14 @@ class SearchHitView(BaseModel):
     score: float
 
 
+class FolderHitView(BaseModel):
+    path: str
+
+
 class SearchResponse(BaseModel):
     query: str
     hits: list[SearchHitView]
+    folders: list[FolderHitView] = []
 
 
 # --------------------------------------------------------------------------- #

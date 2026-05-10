@@ -1,8 +1,9 @@
 {{- /*
 One Deployment per pgmq queue. The backend's `app.tasks.run_worker`
-requires a queue argument (`documents`, `triggers`, or `wiki_bm25`),
-and each queue gets its own consumer process to keep slow LLM doc
-work from backpressuring fast paths like the BM25 reindex.
+requires a queue argument (`documents`, `triggers`, or
+`lightweight_maintenance`), and each queue gets its own consumer
+process to keep slow LLM doc work from backpressuring fast paths like
+the BM25 reindex or agent-activity expiration cleanup.
 */ -}}
 {{- range $queue := .Values.worker.queues }}
 ---
