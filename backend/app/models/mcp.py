@@ -25,8 +25,8 @@ class JsonRpcRequest(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    jsonrpc: str
-    method: str
+    jsonrpc: str | None = None
+    method: str | None = None
     id: str | int | None = None
     params: dict[str, Any] | None = None
 
