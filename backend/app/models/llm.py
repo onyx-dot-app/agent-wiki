@@ -10,3 +10,15 @@ class LLMStatusResponse(BaseModel):
 
     configured: bool
     provider: str
+    model: str
+
+
+class AvailableProvider(BaseModel):
+    provider: str
+    label: str
+    default_model: str
+    models: list[str]
+
+
+class AvailableProvidersResponse(BaseModel):
+    providers: list[AvailableProvider]

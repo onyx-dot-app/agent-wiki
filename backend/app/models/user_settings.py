@@ -27,6 +27,9 @@ class UserSettings(BaseModel):
     theme: Literal["light", "dark", "system"] = "system"
     timezone: str = "UTC"
     default_landing: Literal["wiki_home", "recent", "last_viewed"] = "wiki_home"
+    # Preferred provider + model for chat. None = use the global agent settings.
+    chat_provider: str | None = None
+    chat_model: str | None = None
 
     @field_validator("timezone")
     @classmethod
@@ -47,6 +50,14 @@ class UserSettingsUpdate(BaseModel):
     theme: Literal["light", "dark", "system"] | None = Field(default=None)
     timezone: str | None = Field(default=None)
     default_landing: Literal["wiki_home", "recent", "last_viewed"] | None = Field(default=None)
+    chat_provider: str | None = Field(default=None)
+    chat_model: str | None = Field(default=None)
 
     def non_null(self) -> dict[str, Any]:
-        return {k: v for k, v in self.model_dump().items() if v is not None}
+        sent = self.model_fields_set
+        result: dict[str, Any] = {}
+        for k, v in self.model_dump().items():
+            if k not in sent:
+                continue
+            result[k] = v
+        return result

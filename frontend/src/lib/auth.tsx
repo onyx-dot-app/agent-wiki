@@ -10,6 +10,8 @@ const DEFAULT_USER_SETTINGS: UserSettings = {
   theme: "system",
   timezone: "UTC",
   default_landing: "wiki_home",
+  chat_provider: null,
+  chat_model: null,
 };
 
 export interface AuthUser {

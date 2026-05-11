@@ -358,6 +358,7 @@ class LLMSettings(Base):
     openai_api_key: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
     gemini_api_key: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
     ollama_base_url: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
+    provider_models: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
     updated_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
 
     __table_args__ = (CheckConstraint("id = 1", name="llm_settings_singleton"),)

@@ -12,6 +12,8 @@ export interface UserSettings {
   theme: ThemeSetting;
   timezone: string;
   default_landing: DefaultLanding;
+  chat_provider: string | null;
+  chat_model: string | null;
 }
 
 export type UserSettingsUpdate = Partial<UserSettings>;

@@ -97,6 +97,7 @@ def stream(
     messages: list[dict[str, Any]],
     *,
     model: str | None = None,
+    provider: str | None = None,
     tools: list[dict[str, Any]] | None = None,
     max_tokens: int = DEFAULT_MAX_TOKENS,
 ) -> Iterator[StreamEvent]:
@@ -111,33 +112,34 @@ def stream(
     if tools:
         _debug_dump("llm request tools", tools)
     settings = get_llm_settings()
-    if not settings.provider:
+    chosen_provider_name = provider or settings.provider
+    if not chosen_provider_name:
         raise LLMError(
             "not_configured",
             "LLM is not configured. An admin needs to set the provider, model, and API key on the admin page.",
         )
-    provider = providers.get(settings.provider)
-    if provider is None:
-        raise LLMError("not_configured", f"Unknown LLM provider: {settings.provider}")
-    if not settings.model:
+    chosen_provider = providers.get(chosen_provider_name)
+    if chosen_provider is None:
+        raise LLMError("not_configured", f"Unknown LLM provider: {chosen_provider_name}")
+    chosen_model = model or settings.model
+    if not chosen_model:
         raise LLMError(
             "not_configured",
-            f"No model selected for provider '{settings.provider}'. An admin needs to set the model on the admin page.",
+            f"No model selected for provider '{chosen_provider_name}'. An admin needs to set the model on the admin page.",
         )
-    provider.check_configured(settings)
-    chosen_model = model or settings.model
+    chosen_provider.check_configured(settings)
     text_parts: list[str] = []
     tool_calls: list[dict[str, Any]] = []
     stop_reason = ""
     usage: dict[str, int] = {"input_tokens": 0, "output_tokens": 0, "reasoning_tokens": 0}
     with start_llm_span(
-        provider=settings.provider,
+        provider=chosen_provider_name,
         model=chosen_model,
         messages=messages,
         tools=tools,
         max_tokens=max_tokens,
     ) as span:
-        for ev in provider.stream(
+        for ev in chosen_provider.stream(
             messages,
             model=chosen_model,
             tools=tools,

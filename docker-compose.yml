@@ -21,7 +21,7 @@ services:
     ports:
       # Publish to the host for local psql / smoke tests / running tests
       # against the compose Postgres without compose `exec`.
-      - "127.0.0.1:5432:5432"
+      - "127.0.0.1:5433:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d agent_wiki"]
       interval: 2s
@@ -100,7 +100,7 @@ services:
   nginx:
     build: ./nginx
     ports:
-      - "8080:80"
+      - "8082:80"
     depends_on:
       - backend
       - frontend

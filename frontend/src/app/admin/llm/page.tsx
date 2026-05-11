@@ -8,17 +8,54 @@ import { Button } from "@/components/common/Button";
 import { BackLink, PageHeader } from "@/components/common/PageHeader";
 import { apiFetch } from "@/lib/api";
 import { useRequireAuth } from "@/lib/auth";
-import { color, radius } from "@/lib/theme";
+import { color, radius, shadow } from "@/lib/theme";
 import { useIsMobile } from "@/lib/viewport";
 
 type Provider = "anthropic" | "openai" | "gemini" | "ollama";
 
-const PROVIDERS: { value: Provider; label: string; modelHint: string }[] = [
-  { value: "anthropic", label: "Anthropic", modelHint: "claude-opus-4-7" },
-  { value: "openai", label: "OpenAI", modelHint: "gpt-4o" },
-  { value: "gemini", label: "Gemini", modelHint: "gemini-2.5-pro" },
-  { value: "ollama", label: "Ollama (local)", modelHint: "llama3.1" },
-];
+interface ProviderMeta {
+  label: string;
+  defaultModel: string;
+  keyLabel: string;
+  keyPlaceholder: string;
+  initial: string;
+}
+
+const PROVIDER_META: Record<Provider, ProviderMeta> = {
+  anthropic: { label: "Anthropic", defaultModel: "claude-sonnet-4-6", keyLabel: "API key", keyPlaceholder: "sk-ant-…", initial: "A" },
+  openai:    { label: "OpenAI",    defaultModel: "gpt-5.5",          keyLabel: "API key", keyPlaceholder: "sk-…",     initial: "O" },
+  gemini:    { label: "Gemini",    defaultModel: "gemini-3.1-pro-preview", keyLabel: "API key", keyPlaceholder: "AIza…",    initial: "G" },
+  ollama:    { label: "Ollama",    defaultModel: "llama3.1",         keyLabel: "Base URL", keyPlaceholder: "http://localhost:11434", initial: "L" },
+};
+
+const ALL_PROVIDERS: Provider[] = ["anthropic", "openai", "gemini", "ollama"];
+
+const PROVIDER_MODELS: Record<Provider, string[]> = {
+  anthropic: [
+    "claude-sonnet-4-6",
+    "claude-opus-4-7",
+    "claude-opus-4-6",
+    "claude-haiku-4-5",
+  ],
+  openai: [
+    "gpt-5.5",
+    "gpt-5.4",
+    "gpt-5.2",
+  ],
+  gemini: [
+    "gemini-3.1-pro-preview",
+    "gemini-3-flash-preview",
+  ],
+  ollama: [
+    "llama3.1",
+    "llama3.2",
+    "mistral",
+    "phi3",
+    "qwen2.5",
+    "deepseek-r1",
+  ],
+};
+
 
 interface LLMSettings {
   provider: Provider;
@@ -30,6 +67,23 @@ interface LLMSettings {
   openai_api_key_hint: string;
   gemini_api_key_hint: string;
   ollama_base_url: string;
+  provider_models: Record<string, string[]>;
+}
+
+function isConfigured(p: Provider, s: LLMSettings): boolean {
+  if (p === "anthropic") return s.anthropic_api_key_set;
+  if (p === "openai") return s.openai_api_key_set;
+  if (p === "gemini") return s.gemini_api_key_set;
+  if (p === "ollama") return !!s.ollama_base_url;
+  return false;
+}
+
+function keyHint(p: Provider, s: LLMSettings): string {
+  if (p === "anthropic") return s.anthropic_api_key_hint;
+  if (p === "openai") return s.openai_api_key_hint;
+  if (p === "gemini") return s.gemini_api_key_hint;
+  if (p === "ollama") return s.ollama_base_url || "http://localhost:11434";
+  return "";
 }
 
 export default function AdminLLMPage() {
@@ -46,70 +100,126 @@ export default function AdminLLMPage() {
 
   return (
     <AppShell>
-      <main style={{ padding: isMobile ? "16px 12px" : "24px 32px", maxWidth: 720 }}>
+      <main style={{ padding: isMobile ? "16px 12px" : "24px 32px", maxWidth: 760 }}>
         <BackLink />
         <PageHeader
-          title="LLM configuration"
-          description="Provider, model, and credentials used for chat, the document updater, and trigger evaluations. Secrets are stored in the database and never echoed back to the browser."
+          title="Language models"
+          description="Manage provider credentials and set the model used by agents. Users can override the model for their own chats in Settings."
         />
-        <LLMForm />
+        <LLMPage />
       </main>
     </AppShell>
   );
 }
 
-function LLMForm() {
+function LLMPage() {
   const [settings, setSettings] = useState<LLMSettings | null>(null);
-  const [provider, setProvider] = useState<Provider>("anthropic");
-  const [model, setModel] = useState("");
-  const [anthropicKey, setAnthropicKey] = useState("");
-  const [openaiKey, setOpenaiKey] = useState("");
-  const [geminiKey, setGeminiKey] = useState("");
-  const [ollamaBaseUrl, setOllamaBaseUrl] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
-  const [saving, setSaving] = useState(false);
+  const [expandedProvider, setExpandedProvider] = useState<Provider | null>(null);
 
   async function load() {
     try {
       const r = await apiFetch<LLMSettings>("/admin/llm");
       setSettings(r);
-      setProvider(PROVIDERS.some((p) => p.value === r.provider) ? r.provider : "anthropic");
-      setModel(r.model);
-      setOllamaBaseUrl(r.ollama_base_url);
     } catch (e) {
       setError(e instanceof Error ? e.message : "failed to load");
     }
   }
 
-  useEffect(() => {
-    void load();
-  }, []);
+  useEffect(() => { void load(); }, []);
 
-  async function onSubmit(e: FormEvent<HTMLFormElement>) {
+  if (error) return <div style={{ color: color.state.danger.fg }}>{error}</div>;
+  if (!settings) return <div style={{ color: color.text.muted }}>Loading…</div>;
+
+  const configured = ALL_PROVIDERS.filter((p) => isConfigured(p, settings));
+  const unconfigured = ALL_PROVIDERS.filter((p) => !isConfigured(p, settings));
+
+  function toggle(p: Provider) {
+    setExpandedProvider((prev) => (prev === p ? null : p));
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 32 }}>
+      <AgentModelSection settings={settings} onSaved={load} />
+
+      <div style={{ borderTop: `1px solid ${color.border.subtle}` }} />
+
+      {/* Available Providers */}
+      <section>
+        <div style={sectionHeaderStyle}>Available providers</div>
+        {configured.length === 0 && (
+          <div style={{ color: color.text.muted, fontSize: 14 }}>No providers configured yet.</div>
+        )}
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {configured.map((p) => (
+            <ProviderCard
+              key={p}
+              provider={p}
+              settings={settings}
+              isActive={settings.provider === p}
+              expanded={expandedProvider === p}
+              onToggle={() => toggle(p)}
+              onSaved={() => { void load(); setExpandedProvider(null); }}
+            />
+          ))}
+        </div>
+      </section>
+
+      {/* Add Provider */}
+      {unconfigured.length > 0 && (
+        <>
+          <div style={{ borderTop: `1px solid ${color.border.subtle}` }} />
+          <section>
+            <div style={sectionHeaderStyle}>Add provider</div>
+            <div style={{ color: color.text.muted, fontSize: 13, marginBottom: 12 }}>
+              Connect a provider to make it available for agent and chat use.
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {unconfigured.map((p) => (
+                <ProviderCard
+                  key={p}
+                  provider={p}
+                  settings={settings}
+                  isActive={false}
+                  expanded={expandedProvider === p}
+                  onToggle={() => toggle(p)}
+                  onSaved={() => { void load(); setExpandedProvider(null); }}
+                />
+              ))}
+            </div>
+          </section>
+        </>
+      )}
+    </div>
+  );
+}
+
+function AgentModelSection({ settings, onSaved }: { settings: LLMSettings; onSaved: () => void }) {
+  const [editing, setEditing] = useState(false);
+  const [provider, setProvider] = useState<Provider>(settings.provider);
+  const [model, setModel] = useState(settings.model);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Only providers that have credentials configured.
+  const availableProviders = ALL_PROVIDERS.filter((p) => isConfigured(p, settings));
+
+  useEffect(() => {
+    setProvider(settings.provider);
+    setModel(settings.model);
+  }, [settings]);
+
+  async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setSaving(true);
     setError(null);
-    setSaved(false);
     try {
-      const body: Record<string, unknown> = { provider, model };
-      if (anthropicKey) body.anthropic_api_key = anthropicKey;
-      if (openaiKey) body.openai_api_key = openaiKey;
-      if (geminiKey) body.gemini_api_key = geminiKey;
-      // The base URL isn't secret — send it whenever it's been edited so
-      // empty-string ("use default") is reachable by clearing the field.
-      if (settings && ollamaBaseUrl !== settings.ollama_base_url) {
-        body.ollama_base_url = ollamaBaseUrl === "" ? null : ollamaBaseUrl;
-      }
-      await apiFetch<LLMSettings>("/admin/llm", {
+      await apiFetch("/admin/llm", {
         method: "PUT",
-        body: JSON.stringify(body),
+        body: JSON.stringify({ provider, model }),
       });
-      setAnthropicKey("");
-      setOpenaiKey("");
-      setGeminiKey("");
-      setSaved(true);
-      await load();
+      setEditing(false);
+      onSaved();
     } catch (e) {
       setError(e instanceof Error ? e.message : "failed to save");
     } finally {
@@ -117,151 +227,294 @@ function LLMForm() {
     }
   }
 
-  async function clearKey(field: "anthropic_api_key" | "openai_api_key" | "gemini_api_key") {
-    if (!confirm("Clear this API key?")) return;
+  return (
+    <section>
+      <div style={sectionHeaderStyle}>Default model</div>
+      {!editing ? (
+        <div style={{
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          padding: "12px 16px", border: `1px solid ${color.border.default}`,
+          borderRadius: radius.md, background: color.bg.panel,
+        }}>
+          <div>
+            <span style={{ fontSize: 14, fontWeight: 500 }}>{PROVIDER_META[settings.provider].label}</span>
+            <span style={{ fontSize: 14, color: color.text.muted, marginLeft: 8 }}>{settings.model || "—"}</span>
+          </div>
+          <Button size="sm" variant="secondary" onClick={() => setEditing(true)}>Edit</Button>
+        </div>
+      ) : (
+        <form onSubmit={onSubmit} style={{
+          padding: "16px", border: `1px solid ${color.border.default}`,
+          borderRadius: radius.md, background: color.bg.panel,
+          display: "flex", flexDirection: "column", gap: 12,
+        }}>
+          <label>
+            <div style={lblStyle}>Provider</div>
+            <select
+              value={provider}
+              onChange={(e) => {
+                const p = e.target.value as Provider;
+                setProvider(p);
+                setModel(PROVIDER_MODELS[p]?.[0] ?? PROVIDER_META[p].defaultModel);
+              }}
+              style={inputStyle}
+            >
+              {availableProviders.length === 0 && (
+                <option disabled value="">No providers configured — add one below</option>
+              )}
+              {availableProviders.map((p) => (
+                <option key={p} value={p}>{PROVIDER_META[p].label}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <div style={lblStyle}>Model</div>
+            <select value={model} onChange={(e) => setModel(e.target.value)} required style={inputStyle}>
+              {(settings.provider_models[provider]?.length
+                ? settings.provider_models[provider]
+                : PROVIDER_MODELS[provider] ?? [PROVIDER_META[provider].defaultModel]
+              ).map((m) => (
+                <option key={m} value={m}>{m}</option>
+              ))}
+            </select>
+          </label>
+          {error && <div style={{ color: color.state.danger.fg, fontSize: 13 }}>{error}</div>}
+          <div style={{ display: "flex", gap: 8 }}>
+            <Button type="submit" variant="primary" size="sm" disabled={saving}>
+              {saving ? "Saving…" : "Set as active"}
+            </Button>
+            <Button type="button" variant="secondary" size="sm" onClick={() => { setEditing(false); setError(null); }}>
+              Cancel
+            </Button>
+          </div>
+        </form>
+      )}
+    </section>
+  );
+}
+
+function ProviderCard({
+  provider, settings, isActive, expanded, onToggle, onSaved,
+}: {
+  provider: Provider;
+  settings: LLMSettings;
+  isActive: boolean;
+  expanded: boolean;
+  onToggle: () => void;
+  onSaved: () => void;
+}) {
+  const meta = PROVIDER_META[provider];
+  const configured = isConfigured(provider, settings);
+  const hint = keyHint(provider, settings);
+
+  return (
+    <div style={{
+      border: `1px solid ${color.border.default}`,
+      borderRadius: radius.md,
+      overflow: "hidden",
+    }}>
+      {/* Card header row */}
+      <div style={{
+        display: "flex", alignItems: "center", gap: 12,
+        padding: "12px 16px", background: color.bg.panel,
+      }}>
+        {/* Provider initial icon */}
+        <div style={{
+          width: 32, height: 32, borderRadius: radius.sm,
+          background: color.bg.sunken, display: "flex", alignItems: "center",
+          justifyContent: "center", fontSize: 13, fontWeight: 700,
+          color: color.text.secondary, flexShrink: 0,
+        }}>
+          {meta.initial}
+        </div>
+
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 14, fontWeight: 500 }}>{meta.label}</span>
+            {isActive && (
+              <span style={{
+                fontSize: 11, fontWeight: 600, padding: "2px 6px",
+                borderRadius: radius.pill, background: color.accent.subtleBg,
+                color: color.accent.subtleFg, border: `1px solid ${color.accent.subtleBorder}`,
+              }}>Agent</span>
+            )}
+          </div>
+          {configured && hint && (
+            <div style={{ fontSize: 12, color: color.text.muted, fontFamily: "ui-monospace, monospace", marginTop: 2 }}>
+              {hint}
+            </div>
+          )}
+        </div>
+
+        <Button
+          type="button"
+          size="sm"
+          variant={configured ? "secondary" : "primary"}
+          onClick={onToggle}
+        >
+          {configured ? (expanded ? "Close" : "Edit") : (expanded ? "Close" : "Connect")}
+        </Button>
+      </div>
+
+      {/* Expanded form */}
+      {expanded && (
+        <div style={{ borderTop: `1px solid ${color.border.subtle}`, padding: 16, background: color.bg.page }}>
+          <ProviderForm
+            provider={provider}
+            settings={settings}
+            configured={configured}
+            onSaved={onSaved}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ProviderForm({
+  provider, settings, configured, onSaved,
+}: {
+  provider: Provider;
+  settings: LLMSettings;
+  configured: boolean;
+  onSaved: () => void;
+}) {
+  const meta = PROVIDER_META[provider];
+  const isOllama = provider === "ollama";
+  const knownModels = PROVIDER_MODELS[provider];
+  const savedModels = settings.provider_models[provider] ?? [];
+  const [keyValue, setKeyValue] = useState("");
+  const [selectedModels, setSelectedModels] = useState<Set<string>>(
+    () => new Set(savedModels.length ? savedModels : knownModels),
+  );
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+
+  const keyField = `${provider}_api_key` as "anthropic_api_key" | "openai_api_key" | "gemini_api_key";
+  const currentHint = keyHint(provider, settings);
+
+  function toggleModel(id: string) {
+    setSelectedModels((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+
+  async function onSubmit(e: FormEvent) {
+    e.preventDefault();
     setSaving(true);
     setError(null);
+    setSaved(false);
     try {
-      await apiFetch<LLMSettings>("/admin/llm", {
-        method: "PUT",
-        body: JSON.stringify({ provider, model, [field]: null }),
-      });
-      await load();
+      const body: Record<string, unknown> = {};
+      if (isOllama) {
+        body.ollama_base_url = keyValue === "" ? null : keyValue;
+      } else if (keyValue) {
+        body[keyField] = keyValue;
+      }
+      const enabledModels = knownModels.filter((m) => selectedModels.has(m));
+      const updated = { ...settings.provider_models, [provider]: enabledModels };
+      body.provider_models = updated;
+      await apiFetch("/admin/llm", { method: "PUT", body: JSON.stringify(body) });
+      setKeyValue("");
+      setSaved(true);
+      onSaved();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "failed to clear");
+      setError(e instanceof Error ? e.message : "failed to save");
     } finally {
       setSaving(false);
     }
   }
 
-  if (!settings) return <div>Loading…</div>;
-
-  const selected = PROVIDERS.find((p) => p.value === provider);
+  async function onClear() {
+    if (!confirm(`Remove ${meta.label} credentials?`)) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const body: Record<string, unknown> = isOllama ? { ollama_base_url: null } : { [keyField]: null };
+      await apiFetch("/admin/llm", { method: "PUT", body: JSON.stringify(body) });
+      onSaved();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "failed to remove");
+    } finally {
+      setSaving(false);
+    }
+  }
 
   return (
     <form onSubmit={onSubmit} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <label>
-        <div style={lblStyle}>Provider</div>
-        <select
-          value={provider}
-          onChange={(e) => setProvider(e.target.value as Provider)}
-          style={inputStyle}
-        >
-          {PROVIDERS.map((p) => (
-            <option key={p.value} value={p.value}>
-              {p.label}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label>
-        <div style={lblStyle}>Model</div>
+        <div style={lblStyle}>{meta.keyLabel}</div>
         <input
-          value={model}
-          onChange={(e) => setModel(e.target.value)}
-          placeholder={selected?.modelHint ?? ""}
-          required
+          type={isOllama ? "text" : "password"}
+          value={keyValue}
+          onChange={(e) => setKeyValue(e.target.value)}
+          placeholder={configured ? (isOllama ? currentHint : "leave blank to keep current") : meta.keyPlaceholder}
           style={inputStyle}
         />
       </label>
 
-      <KeyField
-        label="Anthropic API key"
-        value={anthropicKey}
-        onChange={setAnthropicKey}
-        isSet={settings.anthropic_api_key_set}
-        hint={settings.anthropic_api_key_hint}
-        placeholder="sk-ant-…"
-        onClear={() => void clearKey("anthropic_api_key")}
-        clearDisabled={saving || !settings.anthropic_api_key_set}
-      />
-      <KeyField
-        label="OpenAI API key"
-        value={openaiKey}
-        onChange={setOpenaiKey}
-        isSet={settings.openai_api_key_set}
-        hint={settings.openai_api_key_hint}
-        placeholder="sk-…"
-        onClear={() => void clearKey("openai_api_key")}
-        clearDisabled={saving || !settings.openai_api_key_set}
-      />
-      <KeyField
-        label="Gemini API key"
-        value={geminiKey}
-        onChange={setGeminiKey}
-        isSet={settings.gemini_api_key_set}
-        hint={settings.gemini_api_key_hint}
-        placeholder="AIza…"
-        onClear={() => void clearKey("gemini_api_key")}
-        clearDisabled={saving || !settings.gemini_api_key_set}
-      />
-      <label>
-        <div style={lblStyle}>Ollama base URL</div>
-        <input
-          value={ollamaBaseUrl}
-          onChange={(e) => setOllamaBaseUrl(e.target.value)}
-          placeholder="http://localhost:11434 (leave blank for default)"
-          style={inputStyle}
-        />
-      </label>
-
-      {error && <div style={{ color: color.state.danger.fg }}>{error}</div>}
-      {saved && <div style={{ color: color.state.success.fg }}>Saved.</div>}
       <div>
-        <Button type="submit" variant="primary" disabled={saving}>
+        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 8 }}>
+          <div style={lblStyle}>Models</div>
+          <div style={{ fontSize: 12, color: color.text.muted }}>Select models to make available</div>
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {knownModels.map((id) => {
+            const checked = selectedModels.has(id);
+            return (
+              <button
+                key={id}
+                type="button"
+                onClick={() => toggleModel(id)}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                  padding: "10px 12px",
+                  border: `1px solid ${checked ? color.accent.subtleBorder : color.border.default}`,
+                  borderRadius: radius.md,
+                  background: checked ? color.accent.subtleBg : color.bg.page,
+                  cursor: "pointer",
+                  textAlign: "left",
+                }}
+              >
+                <div style={{
+                  width: 18, height: 18, borderRadius: radius.xs, flexShrink: 0,
+                  border: checked ? "none" : `1.5px solid ${color.border.strong}`,
+                  background: checked ? color.accent.bg : "transparent",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                }}>
+                  {checked && (
+                    <svg width="11" height="11" viewBox="0 0 12 12" fill="none">
+                      <path d="M2 6l3 3 5-5" stroke={color.accent.fg} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  )}
+                </div>
+                <span style={{ fontSize: 13, color: checked ? color.accent.subtleFg : color.text.primary, fontFamily: "ui-monospace, monospace" }}>
+                  {id}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {error && <div style={{ color: color.state.danger.fg, fontSize: 13 }}>{error}</div>}
+      {saved && <div style={{ color: color.state.success.fg, fontSize: 13 }}>Saved.</div>}
+      <div style={{ display: "flex", gap: 8 }}>
+        <Button type="submit" variant="primary" size="sm" disabled={saving}>
           {saving ? "Saving…" : "Save"}
         </Button>
-      </div>
-    </form>
-  );
-}
-
-function KeyField({
-  label,
-  value,
-  onChange,
-  isSet,
-  hint,
-  placeholder,
-  onClear,
-  clearDisabled,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  isSet: boolean;
-  hint: string;
-  placeholder: string;
-  onClear: () => void;
-  clearDisabled: boolean;
-}) {
-  return (
-    <label>
-      <div style={{ ...lblStyle, display: "flex", alignItems: "center", gap: 6 }}>
-        <span>{label}</span>
-        {isSet && <span style={hintStyle}>currently {hint}</span>}
-        <span style={{ flex: 1 }} />
-        {isSet && (
-          <Button
-            type="button"
-            size="sm"
-            variant="danger"
-            onClick={onClear}
-            disabled={clearDisabled}
-            style={{ padding: "2px 8px", fontSize: 12 }}
-          >
-            Clear
+        {configured && (
+          <Button type="button" variant="danger" size="sm" disabled={saving} onClick={onClear}>
+            Remove
           </Button>
         )}
       </div>
-      <input
-        type="password"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={isSet ? "leave blank to keep" : placeholder}
-        style={inputStyle}
-      />
-    </label>
+    </form>
   );
 }
 
@@ -274,9 +527,7 @@ const inputStyle: React.CSSProperties = {
   fontSize: 14,
 };
 const lblStyle: React.CSSProperties = { marginBottom: 4, fontSize: 13, fontWeight: 500 };
-const hintStyle: React.CSSProperties = {
-  fontWeight: 400,
-  color: color.text.muted,
-  fontFamily: "ui-monospace, monospace",
-  fontSize: 12,
+const sectionHeaderStyle: React.CSSProperties = {
+  fontSize: 13, fontWeight: 600, color: color.text.secondary,
+  textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 12,
 };
