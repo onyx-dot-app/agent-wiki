@@ -268,7 +268,6 @@ class IntegrationHarness:
         uid = self.signup(email=email, password=password)
         # signup already creates a session, but be explicit so the harness
         # behaves the same in tests that bypass /signup.
-        self.signin(uid)
         return uid
 
     # ----- documents --------------------------------------------------------
