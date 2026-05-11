@@ -147,11 +147,17 @@ system stays swappable.
 
 ## Where to go next
 
-- [Running Locally](Wiki%20Project/Running%20Locally.md) — five-process
-  dev loop, VS Code launch configs, debugging recipes.
-- [MCP Server Inbound](Wiki%20Project/Specific%20Features/MCP%20Server%20Inbound.md)
-  — exposing wiki content over MCP.
+- [Running Locally](Running%20Locally.md) — five-process dev loop, VS Code
+  launch configs, debugging recipes.
+- [MCP Server (inbound)](Specific%20Features/MCP%20Server%20Inbound.md) — exposing wiki
+  content over MCP.
 - `docs/architecture.md` — container/volume/data-flow reference shipped
   with the repo.
 - `docs/api.md` — HTTP API surface.
 - `CLAUDE.md` — the rules an agent working in this codebase must follow.
+
+> Note: `docs/*` and `CLAUDE.md` are files in the source repo, not wiki pages, so they aren’t clickable here.
+
+## TODO
+
+- [ ] (Yuhong) Follow up with Chris on SSO.

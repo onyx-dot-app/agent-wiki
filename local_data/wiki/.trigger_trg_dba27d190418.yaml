@@ -8,5 +8,5 @@ message: 'Yuhong mention detected (case-insensitive). Please review: {{path}}. C
   include the surrounding sentence/paragraph around the newly added mention and point
   to the diff hunk(s) where it appears.'
 destination: event_log
-enabled: false
+enabled: true
 created_at: '2026-05-10T02:58:58+00:00'

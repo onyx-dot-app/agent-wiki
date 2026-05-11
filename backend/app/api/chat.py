@@ -19,7 +19,11 @@ from starlette.concurrency import iterate_in_threadpool, run_in_threadpool
 from app.auth import User
 from app.auth.deps import require_user
 from app.chat import sessions as sessions_repo
-from app.llm.agents.chat import messages_from_history, run_chat_stream
+from app.llm.agents.chat import (
+    chat_agent_scope,
+    messages_from_history,
+    run_chat_stream,
+)
 from app.llm.errors import LLMError
 from app.models.chat import (
     ChatMessageOut, ChatSessionDetail, ChatSessionOut, SendChatRequest,
@@ -148,11 +152,16 @@ async def send_message(
                 chat_session_id=session_id,
                 user_id=user_id,
                 is_first_turn=is_first_turn,
-            ):
+            ), chat_agent_scope():
                 gen = run_chat_stream(messages)
                 # iterate_in_threadpool yields each item from the sync
                 # generator on a worker thread, so token emission
-                # doesn't block the event loop.
+                # doesn't block the event loop. The agent-name
+                # ContextVar must be set in *this* task context
+                # (chat_agent_scope above) — setting it inside the
+                # generator would bind it in a per-next() copied
+                # context that neither propagates to other next()
+                # calls nor permits reset across them.
                 async for ev in iterate_in_threadpool(gen):
                     if await request.is_disconnected():
                         break

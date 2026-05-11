@@ -15,7 +15,8 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Callable, Iterator
+from contextlib import contextmanager
+from typing import Any, Callable, Generator, Iterator
 
 from app.llm import client
 from app.llm.agents import skills as skill_registry
@@ -237,22 +238,43 @@ def _chat_dispatch(name: str, args: dict[str, Any]) -> Any:
     return tool_registry.dispatch(name, args)
 
 
+@contextmanager
+def chat_agent_scope() -> Generator[None]:
+    """Bind ``CHAT_AGENT_NAME`` on ``agent_name_var`` for the enclosed block.
+
+    Must be entered in the caller's own context — *not* inside
+    ``run_chat_stream``'s generator body. Starlette's
+    ``iterate_in_threadpool`` runs each ``next()`` in a fresh copied
+    context, so a Token created in one copy can't be reset from another
+    and the ContextVar wouldn't propagate to tool dispatches anyway.
+    Wrapping the iteration in this scope sets the var on the async task
+    context that ``copy_context()`` propagates into every worker thread.
+    """
+    token = agent_activity.agent_name_var.set(CHAT_AGENT_NAME)
+    try:
+        yield
+    finally:
+        agent_activity.agent_name_var.reset(token)
+
+
 def run_chat_stream(
     messages: list[Message], *, model: str | None = None
 ) -> Iterator[StreamEvent]:
-    """Streaming chat agent with the standard wiki tool set + chat.system prompt."""
-    token = agent_activity.agent_name_var.set(CHAT_AGENT_NAME)
-    try:
-        yield from run_chat_loop_stream(
-            messages,
-            system_prompt=load_prompt("chat.system"),
-            tools_provider=_chat_tools_for_turn,
-            tool_dispatch=_chat_dispatch,
-            model=model,
-            force_final_answer=True,
-        )
-    finally:
-        agent_activity.agent_name_var.reset(token)
+    """Streaming chat agent with the standard wiki tool set + chat.system prompt.
+
+    Callers iterating across a thread boundary (e.g. via
+    ``iterate_in_threadpool``) must wrap the iteration in
+    ``chat_agent_scope()`` so the agent-name ContextVar is bound in their
+    own task context.
+    """
+    return run_chat_loop_stream(
+        messages,
+        system_prompt=load_prompt("chat.system"),
+        tools_provider=_chat_tools_for_turn,
+        tool_dispatch=_chat_dispatch,
+        model=model,
+        force_final_answer=True,
+    )
 
 
 def messages_from_history(history: list[dict[str, Any]]) -> list[Message]:
@@ -341,8 +363,7 @@ def _replay_assistant_events(
 
 def run_chat(messages: list[Message], *, model: str | None = None) -> list[Message]:
     """Non-streaming wrapper. Mutates and returns ``messages``."""
-    token = agent_activity.agent_name_var.set(CHAT_AGENT_NAME)
-    try:
+    with chat_agent_scope():
         return run_chat_loop(
             messages,
             system_prompt=load_prompt("chat.system"),
@@ -351,8 +372,6 @@ def run_chat(messages: list[Message], *, model: str | None = None) -> list[Messa
             model=model,
             force_final_answer=True,
         )
-    finally:
-        agent_activity.agent_name_var.reset(token)
 
 
 def _ensure_system_prompt(messages: list[Message], system_prompt: str) -> None:
