@@ -358,3 +358,35 @@ def test_sse_endpoint_rejects_unknown_session(signed_in_client):
     )
     assert resp.status_code == 404
     assert "error" in resp.json()
+
+
+def test_sse_endpoint_real_run_chat_stream_under_iterate_in_threadpool(
+    signed_in_client, monkeypatch
+):
+    """Regression: the agent-name ContextVar must NOT be set/reset from
+    inside ``run_chat_stream``'s generator body. ``iterate_in_threadpool``
+    invokes each ``next()`` in a fresh copied context, so a Token created
+    in one ``next()`` can't be reset from another — the stream would die
+    with ``ValueError: Token was created in a different Context``. This
+    test exercises the real ``run_chat_stream`` (other SSE tests stub it
+    out, which hid this bug)."""
+    # Only stub the LLM provider seam — leave run_chat_stream real.
+    def fake_stream(messages, *, model=None, tools=None, max_tokens=4096):
+        yield {"type": "text_delta", "text": "hi"}
+        yield _done()
+
+    monkeypatch.setattr(chat_agent.client, "stream", fake_stream)
+
+    sid = _create_session(signed_in_client)
+    resp = signed_in_client.post(
+        "/api/chat/messages",
+        json={"session_id": sid, "content": "hello"},
+    )
+
+    assert resp.status_code == 200
+    events = _parse_sse(resp.text)
+    types = [e.get("type") for e in events]
+    # If the ContextVar reset crashes the stream, the handler emits an
+    # ``error`` event. A healthy run ends on ``done``.
+    assert "error" not in types, f"stream errored: {events}"
+    assert types[-1] == "done", f"got events: {events}"
