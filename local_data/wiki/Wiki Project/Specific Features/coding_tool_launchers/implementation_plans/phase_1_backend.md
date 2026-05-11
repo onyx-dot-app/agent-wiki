@@ -12,6 +12,223 @@
 
 ---
 
+## Audit fixes — apply during task execution
+
+A self-audit after the plan was written found 8 issues in Phase 1's task bodies. **Apply these inline as you execute each named task.** They are listed here in one place so the executing agent picks them up regardless of which task they start with.
+
+### AF#1 — ACL check on `POST /api/launch` (audit critical)
+
+**Affects: Task 16.**
+
+In `post_launch`, **before** reading the page body or parsing frontmatter, gate by ACL:
+
+```python
+from app.wiki import acl as wiki_acl
+
+if req.wiki_path is not None:
+    if not wiki_acl.can("read", req.wiki_path, user):
+        raise HTTPException(status_code=403, detail="forbidden")
+```
+
+(Use whichever helper exists — `app.auth.require_can(...)` or `app.wiki.acl.can(...)`; verify by grep on Task 16 prep.)
+
+Add an `test_post_launch_forbidden_on_unreadable_page` test to `test_launch_api.py` — seed a doc, deny read for the user via ACL, POST launch → expect 403.
+
+### AF#2 — Heartbeat / cli-session / close routes accept bearer OR cookie (audit critical)
+
+**Affects: Task 19.**
+
+The helper has only an MCP bearer; current plan's `Depends(require_user)` requires cookie. Replace with a new `require_user_or_bearer` dependency:
+
+```python
+# In app/auth/deps.py — new dependency
+from fastapi import Request
+
+def require_user_or_bearer(request: Request) -> User:
+    # Try cookie first (works in tests + browser-driven calls).
+    user = _maybe_user_from_cookie(request)
+    if user is not None:
+        return user
+    # Fall back to MCP bearer.
+    return require_bearer(request)
+```
+
+Update Task 19's router to use `Depends(require_user_or_bearer)` on `/heartbeat`, `/cli-session`, `/close`. Add tests:
+
+- `test_heartbeat_with_bearer` — helper-style call with `Authorization: Bearer mcp_…` succeeds (204).
+- `test_heartbeat_with_foreign_bearer_403` — bearer for user B against session of user A returns 403 (already covered by `_require_own_session` after the dep resolves).
+
+### AF#3 — `launcher_tokens.get_or_mint_for_user` race fix (audit critical)
+
+**Affects: Task 17.4.**
+
+Current plan: two `with session()` blocks separated by `tokens_repo.create()`. Race: two concurrent launches both see "no token" → both mint.
+
+Patch: add a unique constraint to `launcher_tokens.user_id` so only one row per user exists. Migration change (Task 6):
+
+```python
+# In 0014_launchers.py upgrade — replace the launcher_tokens block:
+op.create_table(
+    "launcher_tokens",
+    sa.Column(
+        "mcp_token_id",
+        sa.Text(),
+        sa.ForeignKey("mcp_tokens.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    # NEW: unique constraint on user_id so concurrent mints collide.
+    sa.Column(
+        "user_id",
+        sa.Text(),
+        sa.ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+    ),
+    sa.Column("ciphertext", sa.LargeBinary(), nullable=False),
+    sa.Column("nonce", sa.LargeBinary(), nullable=False),
+    sa.Column("created_at", sa.Text(), nullable=False, server_default=_NOW_TEXT_DEFAULT),
+)
+```
+
+And the LauncherToken model gains `user_id: Mapped[str] = mapped_column(Text, ForeignKey("users.id"), unique=True, nullable=False)`.
+
+Patch `get_or_mint_for_user` to use `pg_insert(...).on_conflict_do_nothing(index_elements=["user_id"])` semantics:
+
+```python
+def get_or_mint_for_user(user_id: str, *, name: str) -> tuple[str, str]:
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+    # First, optimistic SELECT.
+    with session() as s:
+        row = s.scalar(select(LauncherToken).where(LauncherToken.user_id == user_id))
+        if row is not None:
+            try:
+                raw = AESGCM(_key()).decrypt(row.nonce, row.ciphertext, None).decode("utf-8")
+                return row.mcp_token_id, raw
+            except Exception:
+                log.warning("launcher_token decrypt failed for user=%s; re-minting", user_id)
+                s.delete(row)  # delete stale ciphertext (audit fix #15)
+
+    # Mint fresh — guarded by unique constraint, so a concurrent racer hits IntegrityError.
+    token_id, raw = tokens_repo.create(user_id, name)
+    nonce = secrets.token_bytes(12)
+    ciphertext = AESGCM(_key()).encrypt(nonce, raw.encode("utf-8"), None)
+    with session() as s:
+        stmt = pg_insert(LauncherToken).values(
+            mcp_token_id=token_id, user_id=user_id, ciphertext=ciphertext, nonce=nonce,
+        ).on_conflict_do_nothing(index_elements=["user_id"])
+        result = s.execute(stmt)
+        if result.rowcount == 0:
+            # Lost the race; the OTHER request inserted. Roll back our mcp_token row
+            # (it's now orphaned) and re-fetch theirs.
+            tokens_repo.revoke(token_id, user_id)
+            row = s.scalar(select(LauncherToken).where(LauncherToken.user_id == user_id))
+            assert row is not None
+            raw = AESGCM(_key()).decrypt(row.nonce, row.ciphertext, None).decode("utf-8")
+            return row.mcp_token_id, raw
+    return token_id, raw
+```
+
+Add `test_launcher_tokens_concurrent_mint_idempotent` to a new `test_launcher_tokens.py` — exercises the conflict path.
+
+### AF#5 — Validator rejects `${prompt_file_path}` in resume (audit critical)
+
+**Affects: Task 10.2.**
+
+In `registry.py`'s `LaunchBlock._validate_vars`, when the block is a `ResumeBlock`, also reject `${prompt_file_path}` anywhere. The cleanest way: pass a `block_kind` literal through (`"launch"` | `"resume"`) and gate the check:
+
+```python
+class ResumeBlock(LaunchBlock):
+    @model_validator(mode="after")
+    def _validate_resume_specific(self) -> "ResumeBlock":
+        for i, a in enumerate(self.argv):
+            if "${first_turn_prompt}" in a or "${prompt_file_path}" in a:
+                raise ValueError(
+                    f"${{first_turn_prompt}} / ${{prompt_file_path}} forbidden in "
+                    f"resume.argv (first-turn-only). Offending argv[{i}]={a!r}."
+                )
+        for k, v in self.env.items():
+            if "${first_turn_prompt}" in v or "${prompt_file_path}" in v:
+                raise ValueError(f"forbidden in resume.env.{k}")
+        if self.cwd and ("${first_turn_prompt}" in self.cwd or "${prompt_file_path}" in self.cwd):
+            raise ValueError("forbidden in resume.cwd")
+        return self
+```
+
+Add the test `test_prompt_file_path_in_resume_rejected` to `test_launchers_registry.py`.
+
+### AF#10 — Catalog filter on `available_for_launch` (audit high)
+
+**Affects: Task 15.1 (LauncherCatalogEntry) + Task 16.2 (post_launch).**
+
+Add `available_for_launch: bool` to `LauncherCatalogEntry` (Task 14). Compute in `get_catalog`:
+
+```python
+def _entry_available(m: Manifest) -> bool:
+    if m.kind == "local_cli":
+        return True  # backend has the launch path
+    if m.kind == "in_app":
+        return False  # onyx-craft has no shipped POST /api/craft/launch yet
+    if m.kind == "web_handoff":
+        return False
+    return False
+```
+
+Frontend (Phase 2) hides tools where `available_for_launch == False` from the Run-radio. They still render on `/agents` Coding tools section as "configure-only" / "coming soon".
+
+Backend already 400s on in_app via Task 16 — keep that as defense-in-depth.
+
+### AF#11 — `status=failed` mapping on close (audit high)
+
+**Affects: Task 19.4 close route.**
+
+Current plan always sets `status=closed`. Patch:
+
+```python
+_ERROR_REASONS = frozenset({
+    "cli_not_found",
+    "invalid_workdir",
+    "spawn_failed",
+    "binary_not_allowed",
+    "manifest_version_unsupported",
+})
+
+@router.post("/{sid}/close", status_code=status.HTTP_204_NO_CONTENT)
+def close_session(
+    sid: str, req: CloseRequest, user: User = Depends(require_user_or_bearer),
+) -> Response:
+    _check_flag()
+    _require_own_session(sid, user)
+    reason = req.reason or "user_clicked"
+    if reason in _ERROR_REASONS:
+        sessions_repo.mark_failed(sid, reason=reason)
+    else:
+        sessions_repo.close(sid, reason=reason)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+```
+
+Add tests:
+
+- `test_close_with_error_reason_marks_failed` — POST close with `reason="cli_not_found"` → `status=failed`.
+- `test_close_with_user_reason_marks_closed` — POST close with `reason="user_clicked"` → `status=closed`.
+
+### AF#12 — Drop `AGENTWIKI_MCP_TOKEN` from env in shipped manifests (audit high)
+
+**Affects: Task 11.2 (claude_code.json) + Task 11.3 (codex.json).**
+
+In both shipped manifests, remove the `AGENTWIKI_MCP_TOKEN` env entry. Token lives only in the `mcp_config_path` tmpfile (`claude_json` / `codex_toml` adapters already write it there). Env keeps `AGENTWIKI_SESSION_ID` + `AGENTWIKI_ENDPOINT`.
+
+Update `test_claude_manifest_passes_token_argv_rule` (Task 11.1) to additionally assert `"${token}" not in (manifest.launch.env or {}).values()`.
+
+The validator itself stays permissive (other tools may need env-side token by explicit declaration); shipped v1 manifests are the policy enforcement.
+
+### AF#15 — Graceful AES decrypt failure (audit medium)
+
+**Affects: Task 17.4 (already covered in AF#3 above — re-mint on decrypt failure rather than 500).**
+
+The patched `get_or_mint_for_user` in AF#3 already handles this. No additional fix needed; AF#3 references this.
+
+---
+
 ## Pre-flight
 
 - [ ] **Step 0.1: Confirm dev env**

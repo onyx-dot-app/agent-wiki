@@ -123,7 +123,8 @@ remains data-driven.
 ## Data model
 
 Three new tables. All Postgres + SQLAlchemy ORM. Migration
-`backend/app/db/migrations/versions/0005_launchers.py`.
+`backend/app/db/migrations/versions/0014_launchers.py` (next free number
+after the existing `0013_bm25_reconcile_state.py`).
 
 ### `launch_codes`
 
@@ -195,9 +196,10 @@ linked_working_dir_hint: "~/code/onyx" # display-only suggestion; per-user real 
 ---
 ```
 
-Parsed by existing `app/wiki/frontmatter.py`. Repo URLs are shared
-across users (they're project metadata); the local checkout path is
-per-user (different machines).
+Parsed by a new `app/wiki/linked_repos.py` helper (no `frontmatter.py`
+exists in the codebase today — earlier draft was wrong). Repo URLs
+are shared across users (they're project metadata); the local
+checkout path is per-user (different machines).
 
 ### `agent_activities` extension
 
@@ -315,11 +317,15 @@ manifest's `resume.argv` (e.g. `claude --resume <cli_session_id>`).
 Same working dir, same conversation.
 
 **Manifest validator rule (enforced at registry load + at helper
-exchange time):** if any element of `resume.argv` or any value in
-`resume.env` references `${first_turn_prompt}`, the manifest is
-rejected. The prompt is a first-turn-only signal by construction —
-re-injecting it on resume duplicates context and burns tokens (P1
-#6).
+exchange time):** the validator rejects, in any element of
+`resume.argv` / `resume.env` / `resume.cwd`, references to either
+`${first_turn_prompt}` or `${prompt_file_path}`. The prompt is a
+first-turn-only signal by construction (re-injecting it on resume
+duplicates context and burns tokens — P1 #6); the prompt tmpfile is
+only materialized for first-turn launches, so resume substitutions
+into `${prompt_file_path}` would resolve to `null` and crash the
+spawn or pass a literal "null" string. Both rules belong at the
+validator layer so a manifest can't accidentally re-inject either.
 
 ### Heartbeat + sweep
 
@@ -357,8 +363,7 @@ existing `lightweight_maintenance_queue`, cron every 60s:
     "argv": ["--mcp-config", "${mcp_config_path}"],
     "env": {
       "AGENTWIKI_SESSION_ID": "${session_id}",
-      "AGENTWIKI_ENDPOINT": "${endpoint}",
-      "AGENTWIKI_MCP_TOKEN": "${token}"
+      "AGENTWIKI_ENDPOINT": "${endpoint}"
     },
     "cwd": "${working_dir}"
   },
@@ -370,8 +375,7 @@ existing `lightweight_maintenance_queue`, cron every 60s:
       "${mcp_config_path}"
     ],
     "env": {
-      "AGENTWIKI_SESSION_ID": "${session_id}",
-      "AGENTWIKI_MCP_TOKEN": "${token}"
+      "AGENTWIKI_SESSION_ID": "${session_id}"
     },
     "cwd": "${working_dir}"
   },
@@ -399,13 +403,30 @@ The prompt is **never** interpolated into argv. The DSL validator
 rejects any manifest whose `launch.argv` references
 `${first_turn_prompt}` (P1 #3, ARG_MAX).
 
-**MCP config tmpfile contract** (P1 #2): when
+**MCP config tmpfile contract** (P1 #2 + audit fix #12): when
 `mcp_config_format != "none"`, the helper writes the config blob to
 a tmpfile with mode `0600` and deletes it in a `finally` block after
-spawn returns. The token MUST appear in argv only via the env var
-`${token}` → `AGENTWIKI_MCP_TOKEN` (and only in `env` blocks, never
-`argv`). The validator rejects `${token}` inside any element of
-`launch.argv` or `resume.argv`.
+the CLI process exits (NOT after spawn — see the cleanup-races-spawn
+fix below). The token lives **only** in that tmpfile. The validator
+rejects `${token}` inside any element of `launch.argv` / `resume.argv`,
+AND by default for v1 shipped manifests we keep `${token}` out of
+`env` as well — manifests that need an env-side token must opt in by
+declaring it explicitly (none of the shipped v1 manifests do).
+
+**Spawn / tmpfile lifecycle (audit fix #8).** Plain
+`open Terminal.app; sleep 1.5s; unlink tmpfile` races: Terminal.app
+may not have launched `claude` yet when we delete. Instead the
+helper writes a tiny wrapper shell script that:
+
+1. `cd ${working_dir}`
+2. exports `AGENTWIKI_SESSION_ID` / `AGENTWIKI_ENDPOINT`
+3. `exec claude --mcp-config <inline-here-doc>`
+4. has a `trap 'rm -f $TMPFILES' EXIT` that cleans up on shell exit.
+
+The wrapper itself is also a 0600 tmpfile; macOS Terminal.app gets
+the wrapper path; the wrapper holds the lifetime of the tmpfiles
+until the CLI exits. Helper process can exit immediately after
+handing the wrapper to Terminal.app; the wrapper handles cleanup.
 
 ### `kind` enum
 
@@ -422,18 +443,18 @@ Helper enforces an allow-list. Anything else in `${…}` → manifest
 rejected at validation, helper exits with error. No nesting, no
 shell substitution, no command chaining.
 
-| var                    | source                                                                 | argv-allowed?                        | env-allowed? |
-| ---------------------- | ---------------------------------------------------------------------- | ------------------------------------ | ------------ |
-| `${token}`             | exchange response `mcp_token`                                          | **no** (P1 #2)                       | yes          |
-| `${endpoint}`          | exchange response `endpoint`                                           | yes                                  | yes          |
-| `${session_id}`        | exchange response `payload.session_id`                                 | yes                                  | yes          |
-| `${cli_session_id}`    | exchange response `payload.cli_session_id` (resume only)               | yes                                  | yes          |
-| `${working_dir}`       | exchange response `payload.working_dir`                                | yes                                  | yes          |
-| `${first_turn_prompt}` | exchange response `payload.first_turn_prompt` (first-turn launch only) | **no** (P1 #3)                       | **no**       |
-| `${prompt_file_path}`  | helper-local tmpfile (mode 0600) holding `first_turn_prompt`           | yes                                  | yes          |
-| `${mcp_config_path}`   | helper-local tmpfile (mode 0600) written per `mcp_config_format`       | yes                                  | yes          |
-| `${home}`              | `os.homedir()`                                                         | yes                                  | yes          |
-| `${dirhash}`           | manifest-defined hash of `working_dir` for file_watch capture          | yes (`session_id_capture.path` only) | no           |
+| var                    | source                                                                 | argv-allowed?                        | env-allowed?                                                 |
+| ---------------------- | ---------------------------------------------------------------------- | ------------------------------------ | ------------------------------------------------------------ |
+| `${token}`             | exchange response `mcp_token`                                          | **no** (P1 #2)                       | discouraged; allowed only if manifest opt-in (audit fix #12) |
+| `${endpoint}`          | exchange response `endpoint`                                           | yes                                  | yes                                                          |
+| `${session_id}`        | exchange response `payload.session_id`                                 | yes                                  | yes                                                          |
+| `${cli_session_id}`    | exchange response `payload.cli_session_id` (resume only)               | yes                                  | yes                                                          |
+| `${working_dir}`       | exchange response `payload.working_dir`                                | yes                                  | yes                                                          |
+| `${first_turn_prompt}` | exchange response `payload.first_turn_prompt` (first-turn launch only) | **no** (P1 #3)                       | **no**                                                       |
+| `${prompt_file_path}`  | helper-local tmpfile (mode 0600) holding `first_turn_prompt`           | yes                                  | yes                                                          |
+| `${mcp_config_path}`   | helper-local tmpfile (mode 0600) written per `mcp_config_format`       | yes                                  | yes                                                          |
+| `${home}`              | `os.homedir()`                                                         | yes                                  | yes                                                          |
+| `${dirhash}`           | manifest-defined hash of `working_dir` for file_watch capture          | yes (`session_id_capture.path` only) | no                                                           |
 
 `${first_turn_prompt}` is never substituted directly; the helper
 materializes it as a tmpfile and exposes it via
@@ -555,10 +576,26 @@ user. Auto-mints "claude-launcher" if none exist.
 
 ### Default working dir resolution order
 
-1. User's most recent `page_working_dirs` entry for this wiki path.
+The default consults `page_working_dirs[user, machine_id, wiki_path]`,
+which requires the browser to know `machine_id`. The probe pipeline
+collects it: the helper persists `machine_id` to
+`~/.agentwiki/machine.id` on first install, includes it in the
+`/api/launch/probe-ack` POST, and the frontend reads it back via
+`/api/launch/probe-status`. Once the frontend has `machine_id`, it
+calls `GET /api/launchers?machine_id=<id>` to retrieve a catalog
+whose `setup_status` block carries the per-page default. The
+resolution order, executed in the wizard:
+
+1. `setup_status.default_working_dir` from the catalog response
+   (server-side: `page_working_dirs[user, machine_id, wiki_path]`).
 2. Frontmatter `linked_working_dir_hint` (display-only; user must
-   confirm and write to `page_working_dirs`).
+   confirm and write to `page_working_dirs` on next launch).
 3. Scratch `~/.agentwiki/sessions/<id>/`.
+
+If the helper isn't installed yet, the frontend has no `machine_id`,
+and `default_working_dir` comes back null — the wizard falls back to
+the input field with no autofill. That's correct: there's no machine
+binding to resolve until the user installs the helper.
 
 ## New backend modules
 
@@ -705,6 +742,28 @@ packages/agentwiki-launcher/    (npm workspace, publishes
   prompts OS-native confirm for paths outside `$HOME`. `working_dir`
   validation also checks the path is a directory the helper user can
   read + write — not a symlink to root.
+- **Wiki-page ACL check on launch (P0 audit fix #1).** `POST /api/launch`
+  calls `require_can("read", wiki_path, user)` before reading the
+  page body or parsing `linked_repos` frontmatter. Otherwise a user
+  could launch on a path they can't read and exfiltrate the body via
+  `agent_sessions.first_turn_prompt` (visible in their own
+  `/agents` session list). 403 on deny.
+- **Random helper port, never hardcoded (P0 audit fix #4).** The
+  helper picks an ephemeral port at startup, persists it to
+  `~/.agentwiki/launcher.port` (mode 0600), and reports it via
+  `/api/launch/probe-ack`. A hardcoded port lets a malicious local
+  process bind first and impersonate the helper. Frontend only ever
+  reads `helper_port` from the matching `probe-status` response (not
+  from a constant).
+- **No bearer token in spawned-process env (P0 audit fix #12).**
+  Even though the user owns the env vars in their own terminal,
+  putting the bearer in `AGENTWIKI_MCP_TOKEN` propagates it into
+  every child process the agent forks. Drop the token from env
+  entirely; it lives in the `mcp_config_path` tmpfile (mode 0600).
+  Env keeps `AGENTWIKI_SESSION_ID` + `AGENTWIKI_ENDPOINT` only.
+  Manifests are patched accordingly; validator may reject
+  `${token}` in env too (kept allowed in DSL for tools that
+  _require_ env-side tokens — they have to explicitly opt in).
 - **Auto-minted launcher token = user ACL (no scoping in v1).**
   Inherits full ACL; same as manually-created MCP tokens. (P2 #8
   follow-up: launcher tokens get TTL + per-session rotation.)
@@ -780,7 +839,9 @@ OSes: macOS (Terminal.app), Linux Ubuntu (gnome-terminal), Windows (Windows Term
 
 ## Open questions / deferred items
 
-### Resolved in this revision (post-review)
+### Resolved in this revision (post-review + post-audit)
+
+External review findings (closed):
 
 - ~~Manifest trust model~~ — closed by helper-side binary allow-list (P1 #1).
 - ~~Token in argv~~ — closed via env + 0600 tmpfile contract (P1 #2).
@@ -789,6 +850,24 @@ OSes: macOS (Terminal.app), Linux Ubuntu (gnome-terminal), Windows (Windows Term
 - ~~`page_working_dirs` PK missing `machine_id`~~ — closed (P1 #5).
 - ~~Resume re-injecting first-turn prompt~~ — closed by rename + validator rule (P1 #6).
 - ~~Cross-user `X-Agentwiki-Session`~~ — folded into P1; middleware returns 403 (P2 #7).
+
+Self-audit findings (closed):
+
+- ~~`POST /api/launch` skipped wiki-page ACL check~~ — closed by adding `require_can("read", wiki_path, user)` before reading body + frontmatter (audit fix #1).
+- ~~Heartbeat endpoint required cookie auth, helper has bearer~~ — closed by accepting `require_user_or_bearer` on heartbeat / cli-session / close routes (audit fix #2).
+- ~~`launcher_tokens` mint race~~ — closed by wrapping select+mint+insert in one transaction with `ON CONFLICT DO NOTHING` on a unique `user_id` column (audit fix #3).
+- ~~Hardcoded helper port 31415~~ — closed by helper picking a random port at startup and including it in `probe-ack` (audit fix #4).
+- ~~Validator allowed `${prompt_file_path}` in resume.\*~~ — closed by extending validator to reject both `${first_turn_prompt}` AND `${prompt_file_path}` in `resume.*` (audit fix #5).
+- ~~`dirhash` algorithm not verified against Claude Code~~ — closed by adding an explicit verification step in Phase 3 Task 14 (audit fix #6).
+- ~~Migration number stated as `0005` in spec, `0014` in plan~~ — closed; spec corrected (audit fix #7).
+- ~~Tmpfile cleanup races spawn~~ — closed by wrapper-script approach with `trap EXIT` cleanup; helper exits immediately, wrapper holds tmpfile lifetime (audit fix #8).
+- ~~Browser custom-scheme iframe probe may be blocked~~ — closed by adding a click-triggered fallback button in the wizard (audit fix #9).
+- ~~`onyx-craft` in catalog → 400 toast on launch~~ — closed by adding `available_for_launch` flag on catalog entries; in_app tools without a shipped backend path are gated out of the launch radio (audit fix #10).
+- ~~`status=failed` never set~~ — closed by mapping `reason` → status in the close route (audit fix #11).
+- ~~`AGENTWIKI_MCP_TOKEN` in env leaks to child processes~~ — closed by removing token from env in shipped manifests; token lives only in `mcp_config_path` tmpfile (audit fix #12).
+- ~~`linked_repos` source-of-truth said `frontmatter.py` (nonexistent)~~ — closed; corrected to new `app/wiki/linked_repos.py` (audit fix #13).
+- ~~Default workdir defaulting needed `machine_id` not yet known~~ — closed by threading `machine_id` through probe-ack → probe-status → frontend → `GET /api/launchers?machine_id=` (audit fix #14).
+- ~~`secret_key` rotation breaks `launcher_tokens`~~ — closed by graceful fallback: decrypt failure → log warning + treat as missing → re-mint (audit fix #15).
 
 ### Deferred (track for P2 or v2 — not blocking P0 backend)
 

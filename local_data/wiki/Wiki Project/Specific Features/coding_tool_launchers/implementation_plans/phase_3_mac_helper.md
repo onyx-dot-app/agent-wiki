@@ -12,6 +12,161 @@
 
 ---
 
+## Audit fixes — apply during task execution
+
+### AF#4 — Random helper port + machine_id on probe-ack (audit critical)
+
+**Affects: Task 1 (package layout adds `probe_server.ts`) + Task 12 (`handleProbeAck`).**
+
+The plan hardcodes `helper_port: 31415`. That collides on multi-user machines and lets a malicious local process bind first to impersonate the helper. Fixes:
+
+1. **Random ephemeral port at helper startup.** Bind `0` (kernel-assigned), then `address.port`. Persist to `~/.agentwiki/launcher.port` (mode 0600) so subsequent invocations of the same helper instance reuse the port:
+
+   ```typescript
+   // src/probe_server.ts (new module)
+   import { createServer } from "node:http";
+   import { writeFileSync } from "node:fs";
+   import { join } from "node:path";
+   import { homedir } from "node:os";
+
+   export async function startProbeServer(): Promise<number> {
+     const server = createServer(/* /probe-cli handler */);
+     await new Promise<void>((resolve) =>
+       server.listen(0, "127.0.0.1", resolve),
+     );
+     const port = (server.address() as { port: number }).port;
+     writeFileSync(
+       join(homedir(), ".agentwiki", "launcher.port"),
+       String(port),
+       { mode: 0o600 },
+     );
+     return port;
+   }
+   ```
+
+2. **`handleProbeAck` reads the live port, NOT a constant.** Update `src/cli.ts`:
+
+   ```typescript
+   async function handleProbeAck(uri: string): Promise<void> {
+     const parsed = parseLaunchUri(uri);
+     if (parsed.action !== "probe") throw new Error("expected probe action");
+     const port = await startProbeServer();
+     await fetch(new URL("/api/launch/probe-ack", parsed.endpoint).toString(), {
+       method: "POST",
+       headers: { "Content-Type": "application/json" },
+       body: JSON.stringify({
+         nonce: parsed.nonce,
+         helper_port: port,
+         machine_id: getOrCreateMachineId(), // AF#14 — frontend uses this for workdir defaulting
+       }),
+     });
+   }
+   ```
+
+3. **Helper instance lifecycle.** The probe-ack handler is a short-lived process invoked by the OS URI router; the probe server it starts dies when that process exits. Solution: spawn a detached daemon (`spawn(node, ['serve-probe-port'], { detached: true })`) once on first probe-ack, persist its PID + port, reuse via the `.port` file on subsequent calls.
+
+Add `probe_server.test.ts` — assert random port in valid range, file written 0600.
+
+### AF#6 — Verify `dirhash` algorithm against real Claude Code (audit critical)
+
+**Affects: Task 14 (CLI verification).**
+
+The plan's `spawn.ts` computes `dirhash = sha256(cwd)[:16]`. Claude Code uses ITS OWN dirhash to name `~/.claude/projects/<dirhash>/`. If they differ, `file_watch` reads the wrong directory and `cli_session_id` is never captured. Resume permanently broken.
+
+**Add a sub-step to Task 14.1 — Step 14.1b: Empirically verify the dirhash algorithm.**
+
+```bash
+# 1. Pick a known directory.
+TEST_DIR="/tmp/agentwiki-dirhash-test"
+mkdir -p "$TEST_DIR"
+cd "$TEST_DIR"
+
+# 2. Start a quick claude session.
+claude -p "say hi" 2>&1 | head -5  # or: claude, then immediately exit
+# 3. Check what dir name claude actually used.
+ls -la ~/.claude/projects/
+# Look for the most recently created dir. Note its name.
+
+# 4. Compare to our computed hash:
+python3 -c "import hashlib; print(hashlib.sha256('$TEST_DIR'.encode()).hexdigest()[:16])"
+
+# If they don't match — try common alternatives:
+#   - full sha256 (no truncation)
+#   - md5
+#   - Claude's project-name slugification (replaces / with -, etc.)
+# Walk through ~/.claude/projects/ entries on your machine vs known cwds
+# to reverse-engineer.
+```
+
+If the algorithm differs from `sha256(cwd)[:16]`, patch `src/spawn.ts:buildSpawnCommand`'s `dirhash` computation to match. Then patch the manifest's `session_id_capture.path` if needed.
+
+Don't ship this phase until the test directory's `cli_session_id` is captured correctly end-to-end.
+
+### AF#8 — Wrapper script for tmpfile lifetime (audit high)
+
+**Affects: Task 11 (terminal/darwin.ts) + Task 12 (`handleRun`).**
+
+Current plan: open Terminal.app, sleep 1500ms, unlink tmpfiles. On a slow Mac (Spotlight indexing, cold launch), Terminal.app may not have invoked `claude` yet → `claude --mcp-config <gone>` fails.
+
+Patch: write a self-cleaning wrapper script that holds the tmpfile lifetime until the CLI exits.
+
+```typescript
+// src/terminal/darwin.ts — replace openInTerminalApp
+import { execFile } from "node:child_process";
+import { writeFileSync, chmodSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { randomBytes } from "node:crypto";
+
+export function openInTerminalApp(opts: {
+  binary: string;
+  argv: string[];
+  env: Record<string, string>;
+  cwd: string;
+  tmpfilesToClean: string[]; // paths the wrapper should unlink on exit
+}): void {
+  const dir = mkdtempSync(join(tmpdir(), "agw-wrap-"));
+  const wrapper = join(dir, "run.sh");
+  const envExports = Object.entries(opts.env)
+    .map(([k, v]) => `export ${k}=${JSON.stringify(v)}`)
+    .join("\n");
+  const argvQuoted = opts.argv.map((a) => JSON.stringify(a)).join(" ");
+  const cleanList = opts.tmpfilesToClean
+    .concat([wrapper, dir])
+    .map((p) => JSON.stringify(p))
+    .join(" ");
+
+  writeFileSync(
+    wrapper,
+    `#!/bin/bash
+set -e
+trap 'rm -rf ${cleanList}' EXIT
+cd ${JSON.stringify(opts.cwd)}
+${envExports}
+exec ${opts.binary} ${argvQuoted}
+`,
+  );
+  chmodSync(wrapper, 0o700);
+
+  const osascript = `tell application "Terminal" to do script "${wrapper.replace(
+    /"/g,
+    '\\"',
+  )}"`;
+  execFile("osascript", ["-e", osascript], { stdio: "ignore" });
+}
+```
+
+And patch `handleRun` (Task 12.1) to:
+
+1. Move `withSecureTmpfiles` to write tmpfiles WITHOUT auto-cleanup (raw `writeSecureTmpfile` returns).
+2. Hand the paths to `openInTerminalApp` via `tmpfilesToClean`.
+3. Helper process exits immediately (no `await new Promise(setTimeout 1500)`).
+
+The wrapper script's `trap EXIT` cleans up when `claude` exits, regardless of how long the user keeps the session open. Tests in `terminal/darwin.test.ts` (mocked) assert the wrapper contains the expected `trap` line + path list.
+
+---
+
 ## Pre-flight
 
 - [ ] **Step 0.1: Install Claude Code locally + verify available**

@@ -12,6 +12,63 @@
 
 ---
 
+## Audit fixes — apply during task execution
+
+### AF#9 — Custom-scheme iframe probe may be blocked (audit high)
+
+**Affects: Task 1 (`probeHelper` in `lib/launchers.ts`) + Task 3 (`InstallHelperPane`).**
+
+Browsers (Chrome, Firefox) may block `agentwiki://` from a hidden iframe. The plan's `probeHelper()` will silently fail to ack, leaving the user permanently on "Launcher not installed." Fixes:
+
+1. **Retry 3× with 800ms windows.**
+
+   ```typescript
+   export async function probeHelper(opts: { retries?: number } = {}): Promise<...> {
+     const retries = opts.retries ?? 3;
+     for (let i = 0; i < retries; i++) {
+       const result = await probeHelperOnce();
+       if (result.acked) return result;
+     }
+     return { acked: false, helperPort: null, machineId: null };
+   }
+   ```
+
+2. **User-gesture fallback button.** In `InstallHelperPane`, add a "Test launcher manually" button that runs a top-level `window.location.href = "agentwiki://probe?nonce=..."` navigation. After the URI dispatches and the user returns, the wizard polls `/api/launch/probe-status` for 5s.
+
+3. **"Copy manual install command"** button as a last-resort fallback for managed-machine users where postinstall fails:
+
+   ```tsx
+   <Button
+     size="sm"
+     variant="ghost"
+     onClick={() =>
+       navigator.clipboard.writeText("npm install -g @agentwiki/launcher")
+     }
+   >
+     Copy manual install command
+   </Button>
+   ```
+
+Tests: `probeHelper.test.ts` mocks `fetch` + DOM; assert 3× retry behavior; assert `sessionStorage` cache invalidates between retries.
+
+### AF#14 — Thread `machine_id` from probe → launch (audit medium)
+
+**Affects: Task 1 (`lib/launchers.ts`) + Task 7 (`RunAgentModal`).**
+
+The wizard's default-working-dir flow needs `machine_id`, which the browser only learns after the helper acks. Patches:
+
+1. **`probe-ack` carries `machine_id`** (Phase 1 Task 18 also needs this — see Phase 1's AF section). `ProbeStatusResponse` gains `machine_id: string | null`.
+
+2. **`probeHelper()` returns `machineId`** in its result tuple. `useLauncherCatalog` accepts an optional `machineId` arg and forwards it as a `?machine_id=…` query param. Backend returns `setup_status.default_working_dir` for the current `wiki_path` when both are present.
+
+3. **`useLauncherCatalog(machineId, wikiPath)` in `RunAgentModal`** — once probe acks, re-fetch the catalog with `machineId` so `setup_status.default_working_dir` populates. Autofill `workingDir` state with it.
+
+4. **`POST /api/launch` body carries `machine_id`** so the backend can write to `page_working_dirs` when the user ticks the "remember as default for this page" box. Phase 1 Task 16 needs `machine_id` on `LaunchRequest`.
+
+Tests: `RunAgentModal.test.tsx` — mock `probeHelper` returning machineId; assert `WorkingDirInput.value` populates from catalog response.
+
+---
+
 ## Pre-flight
 
 - [ ] **Step 0.1: Confirm Phase 1 merged + flag set**
