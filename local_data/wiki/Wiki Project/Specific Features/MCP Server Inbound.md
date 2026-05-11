@@ -28,8 +28,9 @@ External agents authenticated with a personal API token can:
   rename / move (`move_path`), and folder creation (`create_directory`).
 - **Stay safe** — every write tool accepts a `base_sha` parameter for
   optimistic concurrency. `write_doc` *requires* `base_sha` on overwrites
-  because full-body writes have no fuzzy fallback. `read_before_write` is
-  enforced via the same ContextVar the chat agent uses.
+  because full-body writes have no fuzzy fallback. The same
+  `assert_base_sha` helper that backs the chat agent backs the MCP
+  surface.
 - **Stay in scope** — every tool consults `app/wiki/acl.py`, so an MCP
   token can read or modify exactly what the same user could via the web
   UI. Search results are pre-filtered through ACL in SQL.
@@ -78,24 +79,27 @@ same bearer auth.
                           │
                           ▼
    ┌──────────────────────────────────────────────────────┐
-   │  app/api/mcp_server.py  — Flask blueprint @ /api/mcp │
+   │  app/api/mcp_server.py  — FastAPI router @ /api/mcp  │
    └──────────────────────────────┬───────────────────────┘
                                   │
                                   ▼
    ┌─────────────────────────────────────────────────────────┐
-   │  app/mcp_server/auth.py                                 │
-   │  bearer_required → tokens_repo.verify(raw)              │
-   │                  → flask.g.user = User(...)             │  ← single seam:
-   │                                                         │    everything below
-   │  401 if missing / unknown / revoked                     │    reads g.user via
-   └──────────────────────────────┬──────────────────────────┘    current_user()
-                                  │
+   │  app/auth/deps.py:require_bearer (FastAPI Depends)      │
+   │  → tokens_repo.verify(raw) → returns User               │
+   │                                                         │  ← single seam:
+   │  401 if missing / unknown / revoked                     │    the route then
+   │                                                         │    enters
+   │  Route body: `with set_current_user(user):`             │    set_current_user(...)
+   │  binds current_user_ctx (the same ContextVar            │    so every helper
+   │  CurrentUserMiddleware sets on cookie-authed requests)  │    below reads the
+   └──────────────────────────────┬──────────────────────────┘    user via
+                                  │                               current_user()
                                   ▼
    ┌─────────────────────────────────────────────────────────┐
    │  app/mcp_server/transport.py — dispatch(message)        │
    │  - validates jsonrpc==2.0                               │
    │  - routes by method:                                    │
-   │      initialize → mcp_session.create(g.user)            │
+   │      initialize → mcp_session.create(current_user())    │
    │      notifications/initialized → flips initialized=True │
    │      tools/list, tools/call → mcp_tools                 │
    │      resources/list, /read, /subscribe, /unsubscribe    │
@@ -107,7 +111,6 @@ same bearer auth.
    ┌─────────────────────────────────────────────────────────┐
    │  app/mcp_server/tools.py                                │
    │  - allow-list filter (MCP_ALLOWED_TOOLS)                │
-   │  - bind seen_doc_paths ContextVar = sess.seen_paths     │
    │  - registry_dispatch(name, args)                        │
    │  - auto-subscribe on read_doc(is_head=true)             │
    │  - wrap result: {content:[{type:text,text:json(...)}],  │
@@ -119,7 +122,6 @@ same bearer auth.
    │  app/llm/agents/tools/<name>.py — SHARED with chat agent│
    │  - validate args                                        │
    │  - require_can("read"|"write", path)  ← ACL gate        │
-   │  - assert_read_before_write(rel)                        │
    │  - assert_base_sha(rel, base_sha)                       │
    │  - body manipulation (wiki.edit / wiki.patch)           │
    │  - commit_and_fan_out → wiki.git + wiki.notify          │
@@ -145,7 +147,7 @@ same bearer auth.
 │  Mcp-Session-Id: <id>                                            │
 └─────────────────────────┬───────────────────────────────────────┘
                           │
-                          ▼  bearer_required + session check
+                          ▼  Depends(require_bearer) + session check
    ┌─────────────────────────────────────────────────────────┐
    │  app/api/mcp_server.py:transport_sse                    │
    │  - per-iteration: pubsub.drain_blocking(sess_id, 15s)   │
@@ -195,39 +197,41 @@ at creation and never persisted.
 - Repo: `app/auth/mcp_tokens.py` — `create()`, `list_for_user()`,
   `revoke()`, `verify()`.
 - HTTP: `GET / POST / DELETE /api/mcp/tokens` —
-  `app/api/mcp_tokens.py`, `@login_required` (cookie-authenticated user
-  managing their own tokens).
+  `app/api/mcp_tokens.py`, `Depends(require_user)` (cookie-authenticated
+  user managing their own tokens).
 - Format: `mcp_<24-byte-urlsafe>` plaintext, distinguishable in logs.
 - Verification (`verify`): bcrypt-walks every row and bumps
   `last_used_at` on the matching one. Linear scan is fine at the
   per-user-keys-each scale; revisit if we ever ship machine-generated
   tokens at volume.
 
-The bearer middleware (`app/mcp_server/auth.py:bearer_required`) is the
-**single seam** that turns a token into a request principal. It resolves
-the token to a `User` and stuffs it into `flask.g.user` — exactly the
-same field the cookie-based `current_user()` reads. Everything below this
-line (`require_can`, `commit_and_fan_out`, agent-activity attribution,
-trigger `actor` field, frontmatter rendering) sees the right user with
-zero MCP-specific code.
+The bearer dependency (`app/auth/deps.py:require_bearer`) is the
+**single seam** that turns a token into a request principal. It
+resolves the token to a `User`; the MCP route then wraps its dispatch
+in `with set_current_user(user):`, which binds the same
+`current_user_ctx` ContextVar that `CurrentUserMiddleware` populates
+on cookie-authed requests. Everything below this line (`require_can`,
+`commit_and_fan_out`, agent-activity attribution, trigger `actor`
+field, frontmatter rendering) reads `app.auth.current_user()` and
+sees the right user with zero MCP-specific code.
 
 ## Authorization — ACL is the same as the web UI
 
-There is **no MCP-specific ACL code path.** Once `g.user` is set, every
-existing helper in `app/wiki/acl.py` and `require_can(action, path)`
-fires unchanged.
+There is **no MCP-specific ACL code path.** Once `current_user_ctx` is
+bound, every existing helper in `app/wiki/acl.py` and
+`require_can(action, path, user)` fires unchanged.
 
 | MCP surface | Check |
 | --- | --- |
 | `read_doc(path, sha?)` | `require_can("read", path)`. Returns the standard `forbidden` error envelope. |
 | `list_history(path)` | `require_can("read", path)`. |
 | `search_wiki(query)` | Filtered through `acl.visible_paths_filter` — the BM25 query joins ACL in SQL, unauthorized hits never get scored or returned. |
-| `ask_nl_question(query)` | The wiki_qa harness's read tools all go through the same gates because they read `g.user`. |
+| `ask_nl_question(query)` | The wiki_qa harness's read tools all go through the same gates because they read `current_user()`. |
 | `edit_doc` / `multi_edit` / `apply_patch` | `require_can("write", path)` enforced inside `commit_and_fan_out`. |
 | `write_doc` (overwrite) | `require_can("write", path)`. |
 | `write_doc` (create) | Allowed for any authenticated user. New page gets default-public ACL rows + an owner stamp via the lifecycle hook in `app/wiki/notify.py:after_doc_write(change_kind="create", owner_user_id=user.id)` — see the [permissions doc](../permissions/permissions.md) for the rationale. |
 | `move_path` | `require_can("write", old)` (and creates owner rows on the new path). |
-| Token CRUD (`/api/mcp/tokens`) | `@login_required` — a user can only mint and revoke their own tokens. |
+| Token CRUD (`/api/mcp/tokens`) | `Depends(require_user)` — a user can only mint and revoke their own tokens. |
 
 Admins still bypass page-level checks per the permissions doc, mirroring
 the web UI.
@@ -236,14 +240,15 @@ the web UI.
 
 Sessions are **in-memory and process-local** in
 `app/mcp_server/session.py`. A `McpSession` carries `(id, user_id,
-initialized, seen_paths)`. They die when the process restarts —
+is_admin, initialized)`. They die when the process restarts —
 persistent subscriptions across reconnects are an explicit non-goal.
 
 ```
 client                                 server
   │                                       │
-  │── POST initialize ───────────────────▶│  bearer_required → g.user
-  │                                       │  mcp_session.create(g.user)
+  │── POST initialize ───────────────────▶│  Depends(require_bearer) → user
+  │                                       │  set_current_user(user)
+  │                                       │  mcp_session.create(current_user())
   │                                       │  → returns sess (initialized=False)
   │◀─ result + Mcp-Session-Id: <new id> ──│
   │                                       │
@@ -255,8 +260,8 @@ client                                 server
   │                                       │  reshape input_schema → inputSchema
   │◀─ result: {tools: [...]} ─────────────│
   │                                       │
-  │── POST tools/call ───────────────────▶│  bind seen_doc_paths to sess.seen_paths
-  │   {name, arguments}                   │  registry_dispatch(name, args)
+  │── POST tools/call ───────────────────▶│  registry_dispatch(name, args)
+  │   {name, arguments}                   │
   │                                       │  wrap in {content,isError,stale_paths}
   │◀─ result: {content:[...]} ────────────│
 ```
@@ -268,16 +273,18 @@ v0 ships single-process so this is automatic and not a concern yet.
 ## JSON-RPC transport
 
 Hand-rolled in `app/mcp_server/transport.py` rather than via the `mcp`
-Python SDK. The SDK is async-first / ASGI-only, and the WSGI Flask app
-would need an ASGI bridge plus event-loop work to host it — too much
-infra for what is currently six methods (`initialize`,
+Python SDK. The SDK is async-first and prescribes its own ASGI mount
+shape — hosting it alongside our existing FastAPI routes would
+require either letting the SDK own a sub-app or wiring an awkward
+adapter between its session manager and our auth/session model. Too
+much infra for what is currently six methods (`initialize`,
 `notifications/initialized`, `ping`, `tools/list`, `tools/call`, plus
 errors). The MCP doc's Phase-2 fallback path explicitly allows this.
 
 If/when the surface grows enough that the SDK pays off — or a future
 client expects strictly spec-compliant capability negotiation we
 haven't reproduced — the transport module is small enough to swap
-behind the same blueprint without touching callers.
+behind the same router without touching callers.
 
 Spec: MCP `2025-03-26`. Errors follow JSON-RPC 2.0:
 `-32600 INVALID_REQUEST`, `-32601 METHOD_NOT_FOUND`, `-32602
@@ -297,7 +304,7 @@ make sense over MCP yet (e.g. `run_bash`, `web_search`).
 
 | Tool | Purpose | MCP-specific extras |
 | --- | --- | --- |
-| `read_doc(path, sha?)` | Read HEAD or a historical sha. Returns `{path, body, sha, is_head}`. Adds the path to the session's `seen_paths` only when `is_head` (a historical read doesn't authorize an edit). | `sha` parameter for historical reads. |
+| `read_doc(path, sha?)` | Read HEAD or a historical sha. Returns `{path, body, sha, is_head}`. Pass the returned HEAD `sha` to a subsequent edit as `base_sha` for optimistic concurrency. | `sha` parameter for historical reads. |
 | `search_wiki(query, limit?)` | BM25 search filtered through ACL. Returns `{path, title, snippet, score}`. | — |
 | `list_history(path, limit?)` | Per-path commit history. Returns `[{sha, author, ts, message, deprecated_by}, ...]`. | — |
 | `ask_nl_question(query)` | RAG-style answer with sources. Wraps `app.llm.agents.wiki_qa` (read-only chat-loop instance). | — |
@@ -311,13 +318,11 @@ make sense over MCP yet (e.g. `run_bash`, `web_search`).
 
 `tools/list` translates the internal JSON specs (`input_schema` →
 `inputSchema` per MCP spec) and filters to the allow-list.
-`tools/call` dispatches into the same handler the chat agent uses,
-binding `seen_doc_paths` to the MCP session's `seen_paths` set so
-read-before-write is enforced consistently across both surfaces.
+`tools/call` dispatches into the same handler the chat agent uses.
 
 ## Concurrency — the staleness model
 
-Three layers, strongest to weakest:
+Two layers, strongest to weakest:
 
 ### 1. `base_sha` optimistic concurrency — hard correctness
 
@@ -347,19 +352,10 @@ longer matches HEAD for `rel`, the call returns:
 
 `read_doc` returns the current HEAD sha so an agent can immediately
 round-trip it: `read_doc → edit_doc(base_sha=that_sha)`. The returned
-sha is captured **after** `mark_doc_read` runs so it always matches
-the body returned to the agent (the agent-activity registry's
-frontmatter refresh would otherwise advance HEAD silently).
+sha is captured **after** the agent-activity frontmatter refresh runs
+so it always matches the body returned to the agent.
 
-### 2. Read-before-write — primary signal
-
-`assert_read_before_write(rel)` consults the `seen_doc_paths`
-ContextVar (set per-MCP-session in `tools.call_for_mcp`). A write to a
-file the session hasn't `read_doc`-ed at HEAD this session fails with
-"You must call read_page first." Historical reads (with `sha`) do
-**not** mark seen — the agent saw the old body.
-
-### 3. `stale_paths` field — belt-and-suspenders
+### 2. `stale_paths` field — belt-and-suspenders
 
 Every MCP tool result carries a `stale_paths` array — paths the
 session is subscribed to that have a pending update since the last
@@ -375,14 +371,14 @@ state.
 ```
 backend/app/mcp_server/
   __init__.py           Package marker + status doc
-  auth.py               bearer_required decorator → flask.g.user
   session.py            McpSession + in-memory registry, all_session_ids
   transport.py          JSON-RPC dispatcher (initialize, tools/*,
-                        resources/*, ping, errors)
+                        resources/*, ping, errors) — receives the
+                        bearer-resolved User as an explicit arg from
+                        the FastAPI route
   tools.py              MCP_ALLOWED_TOOLS allow-list,
                         list_for_mcp() (input_schema → inputSchema),
-                        call_for_mcp() (binds seen_doc_paths,
-                                        auto-subscribes read_doc,
+                        call_for_mcp() (auto-subscribes read_doc,
                                         computes stale_paths)
   resources.py          list / read / subscribe / unsubscribe handlers
                         for wiki:///<path> AND job://<id> URIs
@@ -392,13 +388,15 @@ backend/app/mcp_server/
                         + publish_job_update for job:// subscribers
   jobs.py               Async-job repo (create / get / update / dedupe by
                         idempotency_key / debounce window lookup)
-  worker_context.py     as_user(uid): pushes a Flask app+request context
-                        and binds g.user so commit_and_fan_out, ACL,
-                        and agent-activity attribution Just Work in the
-                        worker process
+
+(The worker rebinds `current_user_ctx` directly via
+`app.auth.set_current_user(load_user(uid))` — see
+`backend/app/tasks/document_update.py`. No process-local request-context
+shim is needed — the ContextVar carries the principal across the
+worker call.)
 
 backend/app/api/
-  mcp_server.py         POST /api/mcp + GET /api/mcp (SSE) blueprint
+  mcp_server.py         POST /api/mcp + GET /api/mcp (SSE) FastAPI router
   mcp_tokens.py         GET / POST / DELETE /api/mcp/tokens (cookie auth)
   mcp_connections.py    Outbound MCP-client connection list (existing,
                         renamed from mcp.py; mounted at /api/mcp/connections)
@@ -435,9 +433,10 @@ backend/app/main.py
 backend/app/tasks/document_update.py
   agent_update_document_nl(job_id)
                         Worker task on documents_queue. Loads job row,
-                        runs as_user(...), validates base_sha + debounce,
-                        invokes document_updater, marks succeeded /
-                        failed, publishes job state changes via pubsub.
+                        runs `with set_current_user(load_user(job.user_id)):`,
+                        validates base_sha + debounce, invokes
+                        document_updater, marks succeeded / failed,
+                        publishes job state changes via pubsub.
 ```
 
 Frontend:
@@ -486,15 +485,15 @@ What the page does **not** include in v1:
 ## Testing
 
 Backend unit + integration tests against per-test Postgres schemas, real
-git, and a real Flask `test_client`. No SDK mocking — these exercise the
+git, and FastAPI's `TestClient`. No SDK mocking — these exercise the
 HTTP transport end-to-end.
 
 | File | Coverage |
 | --- | --- |
 | `tests/test_mcp_tokens.py` | Repo round-trip, hash collision, revocation, multi-user isolation, `last_used_at` bump, plus HTTP layer (401 unauth, 201 reveal-once, 400 validation, 204 revoke, 404 second-revoke, cross-user revoke = 404). |
 | `tests/test_mcp_server_transport.py` | Bearer auth (no header / wrong scheme / unknown / revoked), `initialize` shape, `Mcp-Session-Id` header, full handshake → tools/list → ping flow, missing-session protocol error, pre-initialized rejection, unknown method, missing `jsonrpc` field, non-dict body rejection, `current_user()` visible inside dispatch. |
-| `tests/test_mcp_server_tools.py` | `tools/list` shape (`inputSchema` not `input_schema`) and allow-list, `read_doc` HEAD vs historical, `seen_paths` populated only on HEAD reads, ACL forbid on `read_doc` and `list_history`, disallowed and unknown tool rejection, `tools/call` parameter validation, search round-trip via MCP. |
-| `tests/test_mcp_server_writes.py` | End-to-end read → edit_doc(base_sha) → success; stale base_sha rejection; edit_doc without base_sha; read-before-write enforcement (skip-read fails; historical read doesn't satisfy); multi_edit happy path + atomic abort; apply_patch with correct base_sha; write_doc create vs overwrite; `base_sha_required_for_overwrite`; ACL forbid on write; `stale_paths` present on every result. |
+| `tests/test_mcp_server_tools.py` | `tools/list` shape (`inputSchema` not `input_schema`) and allow-list, `read_doc` HEAD vs historical, ACL forbid on `read_doc` and `list_history`, disallowed and unknown tool rejection, `tools/call` parameter validation, search round-trip via MCP. |
+| `tests/test_mcp_server_writes.py` | End-to-end read → edit_doc(base_sha) → success; stale base_sha rejection; edit_doc without base_sha; multi_edit happy path + atomic abort; apply_patch with correct base_sha; write_doc create vs overwrite; `base_sha_required_for_overwrite`; ACL forbid on write; `stale_paths` present on every result. |
 | `tests/test_mcp_server_subscriptions.py` | `resources/list` (ACL filtered, admin sees all); `resources/read` (HEAD body, forbidden, malformed URI); explicit subscribe + publish round-trip; auto-subscribe via `read_doc(subscribe=true)`, suppressed for historical reads and `subscribe=false`; `unsubscribe` stops delivery; per-subscriber ACL recheck drops post-revoke; end-to-end `edit_doc` → `after_doc_write` → push lands in subscriber's queue; `create` fires `list_changed`; `stale_paths` lists pending paths non-destructively; SSE stream rejects pre-init, requires correct session ownership, delivers a frame, cleans up on disconnect. |
 | `tests/test_mcp_server_jobs.py` | `update_doc_nl` enqueue → worker → succeed-with-commit; `NO_CHANGE` path; missing instruction / unread file / blocked ACL rejected at enqueue; explicit-key idempotency collapses retries; default key collapses identical retries; different instructions get different jobs; worker rechecks `base_sha` and fails with `stale_base` on drift; debounce skips redundant commits within the window; `resources/read job://<id>` returns the public view (no `user_id`); cross-user reads return not-found; cross-user subscribe returns forbidden; the wrapper auto-subscribes the calling session and the SSE queue receives the terminal status. |
 | `tests/test_doc_tools.py` | Chat-agent regression — confirms `base_sha` round-trip works for the in-process loop too (write_doc with sha succeeds; without sha returns `base_sha_required_for_overwrite`; with stale sha returns `stale_base`). |

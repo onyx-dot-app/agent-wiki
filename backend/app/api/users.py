@@ -1,26 +1,24 @@
-"""Users CRUD. v0 stubs."""
+"""FastAPI port of ``app/api/users.py`` (Phase 2). All v0 stubs."""
 from __future__ import annotations
 
-from flask import Blueprint
+from fastapi import APIRouter, Depends
 
-from app.auth import login_required
+from app.auth import User
+from app.auth.deps import require_user
 
-bp = Blueprint("users", __name__)
+router = APIRouter()
 
 
-@bp.get("")
-@login_required
-def list_users():
+@router.get("")
+def list_users(_user: User = Depends(require_user)) -> None:
     raise NotImplementedError
 
 
-@bp.post("")
-@login_required
-def create_user():
+@router.post("")
+def create_user(_user: User = Depends(require_user)) -> None:
     raise NotImplementedError
 
 
-@bp.get("/<user_id>")
-@login_required
-def get_user(user_id: str):
+@router.get("/{user_id}")
+def get_user(user_id: str, _user: User = Depends(require_user)) -> None:
     raise NotImplementedError

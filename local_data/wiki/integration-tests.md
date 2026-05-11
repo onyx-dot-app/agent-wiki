@@ -8,7 +8,7 @@ _Last updated: 2026-05-08_
 
 Integration tests exercise full request-to-side-effect flows against
 the real Postgres (per-test schema), the real wiki git repo, the real
-Flask app, and the real pgmq queues. The only seam that's stubbed is
+FastAPI app, and the real pgmq queues. The only seam that's stubbed is
 the LLM — `app.llm.client.complete` and `stream` are routed through a
 scripted mock so test runs don't hit a provider and don't depend on
 keys.
@@ -34,7 +34,7 @@ The `integration` fixture is the one-stop entry point. It composes:
 | `tmp_repo` | Per-test Postgres schema with `init_db()` already run + an initialized wiki git repo on disk. |
 | `immediate_queues` | All three `TaskQueue` instances run handlers inline — `reindex`, `fan_out_trigger_eval`, `cleanup_expired_activity` all execute in the request thread. No polling. |
 | `mock_llm` | `app.llm.client.complete` and `stream` patched with a scripted mock. Tests script responses via `llm.respond(...)`; unscripted calls return a benign empty answer. |
-| `flask_app` / `client` | `app.main.create_app()` against the per-test schema, with Flask's test client. |
+| `app` / `client` | `app.main.create_app()` against the per-test schema, wrapped in FastAPI's `TestClient`. |
 
 Don't pull in the underlying fixtures by hand unless you need to skip
 one of them — for example, a test that's **about** the queue's

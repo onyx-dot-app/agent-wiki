@@ -2,8 +2,8 @@
 
 Line-anchored unified-diff editor. Calls into ``app.wiki.patch.apply``
 which does the parsing, line-anchored match, and fuzzy fallback. This
-handler is the tool-side adapter: argument validation, read-before-write
-enforcement, optional ``base_sha`` staleness check, commit + fan-out.
+handler is the tool-side adapter: argument validation, optional
+``base_sha`` staleness check, commit + fan-out.
 """
 from __future__ import annotations
 
@@ -20,6 +20,7 @@ def handle(args: dict[str, Any]) -> Any:
         patch = args.get("patch")
         commit_message = args.get("commit_message")
         base_sha = args.get("base_sha")
+        activity_ttl = h.parse_expires_in_seconds(args.get("expires_in_seconds"))
         if not isinstance(patch, str) or not patch.strip():
             raise h.ToolError("patch is required (non-empty string)")
         if not isinstance(commit_message, str) or not commit_message.strip():
@@ -29,7 +30,6 @@ def handle(args: dict[str, Any]) -> Any:
 
         if not h.file_exists(rel):
             raise h.ToolError(f"file not found: {rel}")
-        h.assert_read_before_write(rel)
 
         head_sha = wiki_git.head_sha_for_path(rel)
         if base_sha and base_sha != head_sha:
@@ -54,7 +54,10 @@ def handle(args: dict[str, Any]) -> Any:
                 "patch produced no change (every hunk was a no-op)"
             )
 
-        sha = h.commit_and_fan_out(rel, new_body, commit_message.strip(), change_kind="edit")
+        sha = h.commit_and_fan_out(
+            rel, new_body, commit_message.strip(),
+            change_kind="edit", activity_ttl=activity_ttl,
+        )
 
         return {
             "path": rel,

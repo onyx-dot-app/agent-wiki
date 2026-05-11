@@ -32,14 +32,16 @@ git repo or the `wiki-data` volume), see the operational warning in
 │  Cursor, …)  │                   │   │               │
 └──────────────┘                   ▼   ▼               ▼
                              ┌──────────────────────────────────┐
-                             │           Flask backend          │
+                             │          FastAPI backend         │
                              │                                  │
-                             │  app/mcp_server/auth.py          │
-                             │   bearer_required → g.user       │
+                             │  app/auth/deps.py                │
+                             │   require_user / require_admin / │
+                             │   require_bearer + CurrentUser-  │
+                             │   Middleware                     │
                              │                                  │
                              │  app/auth/__init__.py            │
-                             │   current_user / login_required /│
-                             │   admin_required / require_can   │
+                             │   current_user_ctx ContextVar /  │
+                             │   set_current_user / require_can │
                              │                                  │
                              │  app/api/auth.py    (login/me)   │
                              │  app/api/admin.py   (users)      │
@@ -72,7 +74,9 @@ git repo or the `wiki-data` volume), see the operational warning in
 ## Authentication
 
 Two ways in for humans, one way in for agents. All three converge on
-the same `g.user` so everything below this layer is auth-mode-agnostic.
+the same `current_user_ctx` ContextVar (read via
+`app.auth.current_user()`) so everything below this layer is
+auth-mode-agnostic.
 
 ### Modes
 
@@ -90,8 +94,12 @@ the same `g.user` so everything below this layer is auth-mode-agnostic.
   hash, since the schema demands non-null) or returns the existing one.
 
 Both modes hand off to `_start_session(user)` which writes
-`session["user_id"] = user.id` and marks the cookie permanent. From
-that point the session cookie alone authenticates each request.
+`request.session["user_id"] = user.id` (Starlette's
+`SessionMiddleware`, installed in `app/main.py:create_app`, signs and
+serializes the cookie). From that point the session cookie alone
+authenticates each request — `CurrentUserMiddleware` reads
+`request.session["user_id"]`, loads the `User`, and binds it into
+`current_user_ctx` for the request's lifetime.
 
 ### Signup whitelist
 
@@ -124,38 +132,43 @@ per-request with `Authorization: Bearer mcp_<token>`.
 - Tokens are minted via `app/auth/mcp_tokens.py:create` — prefix
   `mcp_` + 24 random bytes (`secrets.token_urlsafe`). The raw value is
   shown to the user **once**; the DB stores a bcrypt hash.
-- `app/mcp_server/auth.py:bearer_required` verifies the header,
-  resolves it through `tokens_repo.verify` (linear bcrypt walk —
-  fine at hand-minted scale), and writes the resolved user into
-  `flask.g.user`. From there everything downstream
-  (`current_user`, `require_can`, ACL hooks, agent-activity
-  attribution, trigger `actor`) sees the right principal.
-- This is why `current_user()` reads from `g.user` first and falls
-  back to `session["user_id"]` — bearer-authenticated requests have
-  no cookie, but `g.user` is already populated.
+- `app/auth/deps.py:require_bearer` is a FastAPI dependency that
+  verifies the `Authorization: Bearer mcp_<token>` header, resolves
+  it through `tokens_repo.verify` (linear bcrypt walk — fine at
+  hand-minted scale), and returns the resolved `User`. The MCP route
+  wraps its dispatch in `with set_current_user(user):` so downstream
+  helpers (`current_user`, `require_can`, ACL hooks, agent-activity
+  attribution, trigger `actor`) see the right principal.
+- This is why `current_user()` is ContextVar-only: both
+  cookie-authenticated requests (via `CurrentUserMiddleware`) and
+  bearer-authenticated requests (via the explicit
+  `set_current_user(...)` block) populate the same
+  `current_user_ctx`, so the read path is identical.
 
 ### Why `current_user()` returns `None` outside a request
 
-Background tasks and tests run with no Flask request context. The
-`try/except RuntimeError` in `app/auth/__init__.py:current_user`
-treats that as the anonymous principal. The ACL resolver applies the
-same rules (`everyone` grants only) it would for a logged-out caller,
-and the chat agent / MCP job worker explicitly reconstitute `g.user`
-from the job row before doing any wiki write. See
+Background tasks and tests run with no HTTP request, so
+`CurrentUserMiddleware` never fires and `current_user_ctx` keeps its
+`None` default. `app/auth/__init__.py:current_user` just reads the
+ContextVar, so the anonymous principal is the natural fallback. The
+ACL resolver applies the same rules (`everyone` grants only) it
+would for a logged-out caller, and the chat agent / MCP job worker
+explicitly bind the user via `with set_current_user(load_user(uid)):`
+before doing any wiki write. See
 `Wiki Project/Specific Features/MCP Server Inbound.md` for the
 worker handoff.
 
 ## Authorization seams
 
-Three decorators / helpers gate everything. **Use these — don't read
-`flask.session` or `acl_entries` directly from a blueprint.**
+FastAPI dependencies + a helper gate everything. **Use these — don't
+read `request.session` or `acl_entries` directly from a router.**
 
 | Helper | Purpose |
 |---|---|
-| `@login_required` | 401 if no user. The default for everything except public endpoints (signup, login, `/auth/config`, webhooks). |
-| `@admin_required` | 401 if no user, 403 if `is_admin` is false. |
-| `require_can(action, path)` | Raises `PermissionDenied` (→ 403) if the current user lacks `read` or `write` on the wiki path. Admins always pass. Compose with `@login_required` on the route. |
-| `bearer_required` | MCP-only. Verifies the bearer header, populates `g.user`, then runs the view. |
+| `Depends(require_user)` | 401 if no user. The default on every route except the explicit public endpoints (signup, login, `/auth/config`, webhooks). Returns the typed `User`. |
+| `Depends(require_admin)` | 401 if no user, 403 if `is_admin` is false. Returns the `User`. |
+| `Depends(require_bearer)` | MCP-only. Verifies the `Authorization: Bearer mcp_<token>` header. Returns the `User`; the caller wraps work in `with set_current_user(user):` so downstream code sees the principal. |
+| `require_can(action, path, user)` | Raises `PermissionDenied` (→ 403) if `user` lacks `read` or `write` on the wiki path. Admins always pass. Called after `Depends(require_user)` so the resolved `User` is on hand. |
 
 `require_can` lazily imports `app.wiki.acl` to avoid a cycle, then
 calls `acl.can(user_id, is_admin, action, path)`.
@@ -254,12 +267,12 @@ state stays consistent with the git working tree.
 - `acl.on_path_moved(moves)` rewrites `resource_path` in both
   `wiki_owners` and `acl_entries` for page + folder moves.
 
-Don't call into `wiki_owners` / `acl_entries` from blueprints or
-agent tools — go through the public functions in `app.wiki.acl`.
+Don't call into `wiki_owners` / `acl_entries` from routers or agent
+tools — go through the public functions in `app.wiki.acl`.
 
 ## API surface
 
-Blueprints + their mount points:
+Routers + their mount points:
 
 - `/api/auth` (`app/api/auth.py`) — `signup`, `login`, `logout`,
   `me`, `oidc/login`, `oidc/callback`, `config`.
@@ -272,8 +285,8 @@ Blueprints + their mount points:
 - `/api` (`app/api/permissions.py`) — groups + ACL:
   - `GET/POST /api/groups`, `GET/DELETE /api/groups/<id>`,
     `POST/DELETE /api/groups/<id>/members[/<user_id>]`. Listing is
-    `@login_required` (admins see all, users see their own); mutations
-    are `@admin_required`.
+    `Depends(require_user)` (admins see all, users see their own);
+    mutations use `Depends(require_admin)`.
   - `GET /api/wiki/acl?path=<path>` — page grants. Owner-or-admin
     only (gate is `_can_manage_path`).
   - `POST /api/wiki/acl` — create grant. Owner-or-admin.
@@ -328,14 +341,15 @@ UI surfaces:
 
 | Concern | File |
 |---|---|
-| Decorators (`login_required`, `admin_required`, `require_can`) | `backend/app/auth/__init__.py` |
+| `current_user_ctx` ContextVar, `set_current_user`, `require_can` | `backend/app/auth/__init__.py` |
+| FastAPI deps (`require_user`, `require_admin`, `require_bearer`) + `CurrentUserMiddleware` | `backend/app/auth/deps.py` |
 | Email/password auth | `backend/app/auth/basic.py`, `passwords.py` |
 | User repo | `backend/app/auth/users.py` |
 | Group repo | `backend/app/auth/groups.py` |
 | Signup whitelist | `backend/app/auth/whitelist.py` |
 | OIDC | `backend/app/auth/oidc.py` |
 | MCP token repo | `backend/app/auth/mcp_tokens.py` |
-| MCP bearer middleware | `backend/app/mcp_server/auth.py` |
+| MCP bearer dependency | `backend/app/auth/deps.py:require_bearer` |
 | Wiki ACL repo + resolver + filter | `backend/app/wiki/acl.py` |
 | ACL lifecycle hooks | `backend/app/wiki/notify.py` |
 | ORM tables (`users`, `mcp_tokens`, `groups`, `group_members`, `wiki_owners`, `acl_entries`) | `backend/app/db/models.py` |

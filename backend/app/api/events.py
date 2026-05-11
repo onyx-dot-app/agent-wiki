@@ -1,33 +1,20 @@
-"""Audit log of events.
-
-V0 scope: list newest-first with a simple limit. Time filters / pagination
-come later; the table has indices on ``ts`` and ``(kind, ts)`` so this is
-cheap to extend when needed.
-
-Owner-scoping (2026-05-09): ``trigger.fire`` rows reference the trigger's
-id in ``target``, and triggers carry an ``owner_user_id``. Both endpoints
-filter to events the caller owns by joining through that subquery —
-non-fire events without a trigger id are excluded by design until we add
-an explicit user attribution column for them. ``get_event`` returns
-``404`` rather than ``403`` on cross-owner reads so we don't leak
-existence.
-"""
+"""FastAPI port of ``app/api/events.py`` (Phase 2)."""
 from __future__ import annotations
 
 import json
 import logging
 from typing import Any, cast
 
-from flask import Blueprint, jsonify, request
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 
-from app.auth import current_user, login_required
+from app.auth import User
+from app.auth.deps import require_user
 from app.db.models import Event as EventRow, Trigger
 from app.db.session import session
 from app.models.event import Event, EventListResponse
-from app.models._helpers import error
 
-bp = Blueprint("events", __name__)
+router = APIRouter()
 log = logging.getLogger(__name__)
 
 
@@ -51,18 +38,12 @@ def _to_view(e: EventRow) -> Event:
     )
 
 
-@bp.get("")
-@login_required
-def list_events():
-    user = current_user()
-    assert user is not None
-    try:
-        limit = int(request.args.get("limit", 100))
-    except ValueError:
-        return error("limit must be an integer", 400)
-    limit = max(1, min(limit, 500))
-    kind = request.args.get("kind")
-
+@router.get("", response_model=EventListResponse)
+def list_events(
+    user: User = Depends(require_user),
+    limit: int = Query(100, ge=1, le=500),
+    kind: str | None = None,
+) -> EventListResponse:
     owned_trigger_ids = select(Trigger.id).where(Trigger.owner_user_id == user.id)
     stmt = (
         select(EventRow)
@@ -76,24 +57,21 @@ def list_events():
     with session() as s:
         rows = s.scalars(stmt).all()
 
-    return jsonify(EventListResponse(events=[_to_view(e) for e in rows]).model_dump())
+    return EventListResponse(events=[_to_view(e) for e in rows])
 
 
-@bp.get("/<int:event_id>")
-@login_required
-def get_event(event_id: int):
-    user = current_user()
-    assert user is not None
+@router.get("/{event_id}", response_model=Event)
+def get_event(event_id: int, user: User = Depends(require_user)) -> Event:
     with session() as s:
         e = s.get(EventRow, event_id)
         if e is None:
-            return error("not found", 404)
+            raise HTTPException(status_code=404, detail="not found")
         # Hide cross-owner rows behind a 404 so we don't leak existence.
         if e.target is None:
-            return error("not found", 404)
+            raise HTTPException(status_code=404, detail="not found")
         owner = s.scalar(
             select(Trigger.owner_user_id).where(Trigger.id == e.target)
         )
         if owner != user.id:
-            return error("not found", 404)
-        return jsonify(_to_view(e).model_dump())
+            raise HTTPException(status_code=404, detail="not found")
+        return _to_view(e)

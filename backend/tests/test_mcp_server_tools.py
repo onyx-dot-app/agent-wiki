@@ -2,8 +2,8 @@
 
 Verifies ``tools/list`` exposes the right allow-list with MCP-shape
 field names, and ``tools/call`` dispatches into the existing
-chat-agent handlers — including ACL enforcement, the ``seen_paths``
-binding, and historical (sha-pinned) reads.
+chat-agent handlers — including ACL enforcement and historical
+(sha-pinned) reads.
 """
 from __future__ import annotations
 
@@ -11,13 +11,12 @@ import json
 from typing import Any
 
 import pytest
-from flask import Flask, jsonify
+from fastapi.testclient import TestClient
 
-from app.api import mcp_server as mcp_server_api
 from app.auth import mcp_tokens as tokens_repo
+from app.main import create_app
 from app.mcp_server import session as mcp_session
 from app.mcp_server import tools as mcp_tools
-from app.models._helpers import ErrorResponse, RequestError
 from app.wiki import acl as wiki_acl
 from app.wiki import git as wiki_git
 
@@ -26,16 +25,8 @@ from tests._seed import seed_user
 
 @pytest.fixture
 def client(tmp_repo):
-    app = Flask(__name__)
-    app.config.update(SECRET_KEY="test-secret", TESTING=True)
-    app.register_blueprint(mcp_server_api.bp, url_prefix="/api/mcp")
-
-    @app.errorhandler(RequestError)
-    def _request_error(err: RequestError):  # type: ignore[unused-ignore]
-        return jsonify(ErrorResponse(error=err.message).model_dump()), err.status
-
     mcp_session.reset_for_tests()
-    yield app.test_client()
+    yield TestClient(create_app())
     mcp_session.reset_for_tests()
 
 
@@ -80,7 +71,7 @@ def _call_tool(
         },
         headers=headers,
     )
-    return res.get_json()
+    return res.json()
 
 
 def _payload_from_call_response(rpc: dict[str, Any]) -> tuple[dict[str, Any], bool]:
@@ -110,7 +101,7 @@ def test_tools_list_uses_mcp_shape_and_allow_list(client):
         json={"jsonrpc": "2.0", "id": 5, "method": "tools/list"},
         headers=headers,
     )
-    body = res.get_json()
+    body = res.json()
     tools = body["result"]["tools"]
 
     names = {t["name"] for t in tools}
@@ -150,7 +141,7 @@ def test_tools_list_matches_module_allow_list(client):
         json={"jsonrpc": "2.0", "id": 5, "method": "tools/list"},
         headers=headers,
     )
-    listed = {t["name"] for t in res.get_json()["result"]["tools"]}
+    listed = {t["name"] for t in res.json()["result"]["tools"]}
     assert listed == set(mcp_tools.MCP_ALLOWED_TOOLS)
 
 
@@ -173,15 +164,8 @@ def test_read_doc_head(client):
     assert payload["is_head"] is True
     assert payload["sha"]
 
-    # HEAD reads must populate the session's seen_paths so Phase 4
-    # write tools accept edits to the path.
-    sess_id = headers["Mcp-Session-Id"]
-    sess = mcp_session.get(sess_id)
-    assert sess is not None
-    assert "guide.md" in sess.seen_paths
 
-
-def test_read_doc_at_sha_does_not_mark_seen(client):
+def test_read_doc_at_sha(client):
     uid = seed_user(uid="u1", email="u1@x.com")
     first = wiki_git.commit_file("page.md", "# v1\n", "v1", author=None)
     wiki_git.commit_file("page.md", "# v2\n", "v2", author=None)
@@ -194,12 +178,6 @@ def test_read_doc_at_sha_does_not_mark_seen(client):
     assert payload["body"].startswith("# v1")
     assert payload["is_head"] is False
     assert payload["sha"] == first
-
-    # Historical read is explicitly NOT a "seen" (the agent saw the old
-    # body, not the current one — editing HEAD blindly would drift).
-    sess = mcp_session.get(headers["Mcp-Session-Id"])
-    assert sess is not None
-    assert "page.md" not in sess.seen_paths
 
 
 def test_read_doc_unknown_sha_returns_error(client):
@@ -289,7 +267,7 @@ def test_call_with_missing_name_is_invalid_params(client):
         },
         headers=headers,
     )
-    body = res.get_json()
+    body = res.json()
     # JSON-RPC "Invalid params" — protocol-level, not result-level.
     assert body["error"]["code"] == -32602
 

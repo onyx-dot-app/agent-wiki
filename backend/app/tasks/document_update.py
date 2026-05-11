@@ -28,7 +28,7 @@ from app.llm.agents.tools import _doc_helpers as h
 from app.llm.errors import LLMError
 from app.mcp_server import jobs as mcp_jobs
 from app.mcp_server import pubsub as mcp_pubsub
-from app.mcp_server.worker_context import UserMissingError, as_user
+from app.auth import UserMissingError, load_user, set_current_user
 from app.tasks.queues import documents_queue
 from app.wiki import git as wiki_git
 
@@ -89,7 +89,8 @@ def agent_update_document_nl(job_id: str) -> None:
     base_sha = payload.get("base_sha")
 
     try:
-        with as_user(job["user_id"]):
+        user = load_user(job["user_id"])
+        with set_current_user(user):
             mcp_jobs.mark_running(job_id)
             _run_inner(job_id, rel, instruction, base_sha)
     except UserMissingError as exc:
@@ -191,13 +192,13 @@ def _run_inner(job_id: str, rel: str, instruction: str, base_sha: str | None) ->
 
 
 def _current_user_id() -> str:
-    """Read the user id off ``g.user`` — set by ``as_user``. Asserts
-    rather than degrades because every caller is inside the context
-    manager."""
-    from flask import g
+    """Read the user id off the ContextVar — bound by
+    ``set_current_user(...)`` in the outer task. Asserts rather than
+    degrades because every caller is inside that context manager."""
+    from app.auth import current_user
 
-    user = getattr(g, "user", None)
-    assert user is not None, "_run_inner must execute inside as_user(...)"
+    user = current_user()
+    assert user is not None, "_run_inner must execute inside set_current_user(...)"
     return user.id
 
 

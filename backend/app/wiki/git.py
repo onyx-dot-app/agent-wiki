@@ -255,6 +255,57 @@ def list_paths(prefix: str = "") -> list[str]:
     return [line for line in out.splitlines() if line]
 
 
+def paths_touched_since(since_iso: str) -> set[str]:
+    """Paths added, modified, renamed, or deleted by any commit at or
+    after ``since_iso`` (any timestamp that ``git log --since`` accepts).
+
+    Returns a set — order and frequency don't matter; the caller will
+    look up each path's current HEAD sha to decide reindex vs delete.
+    Used by the hourly reconcile sweep to scope its work to recent
+    activity rather than the whole repo.
+    """
+    out = _run(
+        [
+            "log",
+            f"--since={since_iso}",
+            "--name-only",
+            "--diff-filter=AMRD",
+            "--pretty=format:",
+        ],
+        check=False,
+    ).stdout
+    return {line for line in out.splitlines() if line.strip()}
+
+
+def list_paths_with_head_sha(prefix: str = "") -> list[tuple[str, str]]:
+    """``(path, HEAD-touching sha)`` for every tracked file under ``prefix``.
+
+    One batched ``git log --name-only`` walk newest-first; the first
+    sighting of a path wins. Mirrors ``list_paths_with_mtime`` but emits
+    ``%H`` instead of ``%aI``. The reconcile sweep uses this to compute
+    expected shas for the whole tree in a single subprocess call rather
+    than ``head_sha_for_path`` per file.
+    """
+    sep = "\x1f"
+    res = _run(
+        ["log", "--name-only", f"--pretty=format:{sep}%H"], check=False
+    )
+    if res.returncode != 0:
+        return []
+    head: dict[str, str] = {}
+    current_sha: str | None = None
+    for line in res.stdout.splitlines():
+        if line.startswith(sep):
+            current_sha = line[len(sep):]
+            continue
+        if not line or current_sha is None:
+            continue
+        if line not in head:
+            head[line] = current_sha
+    tracked = list_paths(prefix)
+    return [(p, head.get(p, "")) for p in tracked]
+
+
 def list_paths_with_mtime(prefix: str = "") -> list[tuple[str, str]]:
     """``(path, ISO-8601 author-time)`` for every tracked file under ``prefix``.
 

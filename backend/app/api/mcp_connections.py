@@ -1,32 +1,25 @@
-"""Manage outbound MCP server connections — the user-managed list of
-external MCP servers our in-process agent harness consumes as a
-*client*. The inbound surface (where this app exposes itself *as* an
-MCP server to external coding agents) lives separately under
-``app/mcp_server/`` and ``app/api/mcp_tokens.py``.
-"""
+"""FastAPI port of ``app/api/mcp_connections.py`` (Phase 2). All v0 stubs."""
 from __future__ import annotations
 
-from flask import Blueprint
+from fastapi import APIRouter, Depends
 
-from app.auth import login_required
+from app.auth import User
+from app.auth.deps import require_user
 
-bp = Blueprint("mcp_connections", __name__)
+router = APIRouter()
 
 
-@bp.get("")
-@login_required
-def list_connections():
+@router.get("")
+def list_connections(_user: User = Depends(require_user)) -> None:
     raise NotImplementedError
 
 
-@bp.post("")
-@login_required
-def create_connection():
+@router.post("")
+def create_connection(_user: User = Depends(require_user)) -> None:
     # body: {name, transport, config}
     raise NotImplementedError
 
 
-@bp.delete("/<conn_id>")
-@login_required
-def delete_connection(conn_id: str):
+@router.delete("/{conn_id}")
+def delete_connection(conn_id: str, _user: User = Depends(require_user)) -> None:
     raise NotImplementedError

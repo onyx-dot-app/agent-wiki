@@ -16,6 +16,7 @@ def handle(args: dict[str, Any]) -> Any:
         body = args.get("body")
         commit_message = args.get("commit_message")
         base_sha = args.get("base_sha")
+        activity_ttl = h.parse_expires_in_seconds(args.get("expires_in_seconds"))
         if not isinstance(body, str):
             raise h.ToolError("body is required (string)")
         if not isinstance(commit_message, str) or not commit_message.strip():
@@ -25,13 +26,9 @@ def handle(args: dict[str, Any]) -> Any:
 
         existed = h.file_exists(rel)
         if existed:
-            # Order matters: read-before-write is the primary signal —
-            # if the agent didn't even see the doc, there's no point
-            # asking for the sha it would have remembered. base_sha is
-            # the secondary check, enforced because full-body overwrite
-            # has no fuzzy `old_string` chain to fall back on if HEAD
-            # drifted out from under the agent.
-            h.assert_read_before_write(rel)
+            # Full-body overwrite has no fuzzy `old_string` chain to fall
+            # back on if HEAD drifted, so every overwrite must opt in via
+            # ``base_sha`` (the sha the agent last read).
             if base_sha is None:
                 return {
                     "error": "base_sha_required_for_overwrite",
@@ -49,7 +46,10 @@ def handle(args: dict[str, Any]) -> Any:
             old = ""
 
         change_kind = "edit" if existed else "create"
-        sha = h.commit_and_fan_out(rel, body, commit_message.strip(), change_kind=change_kind)
+        sha = h.commit_and_fan_out(
+            rel, body, commit_message.strip(),
+            change_kind=change_kind, activity_ttl=activity_ttl,
+        )
 
         return {
             "path": rel,

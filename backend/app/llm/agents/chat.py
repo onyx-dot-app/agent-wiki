@@ -18,8 +18,8 @@ import logging
 from typing import Any, Callable, Iterator
 
 from app.llm import client
+from app.llm.agents import skills as skill_registry
 from app.llm.agents import tools as tool_registry
-from app.llm.agents._session import seen_doc_paths
 from app.llm.prompts import load_prompt
 from app.tracing import start_tool_span
 from app.wiki import agent_activity
@@ -44,6 +44,7 @@ def _debug_dump(label: str, obj: Any) -> None:
 
 Message = dict[str, Any]
 ToolDispatch = Callable[[str, dict[str, Any]], Any]
+ToolsProvider = Callable[[list["Message"]], list[dict[str, Any]]]
 StreamEvent = dict[str, Any]
 # Yielded event shapes (superset of client.stream events):
 #   {"type": "text_delta",  "text": str}
@@ -55,15 +56,24 @@ StreamEvent = dict[str, Any]
 DEFAULT_SYSTEM_PROMPT = "You are a helpful AI assistant"
 DEFAULT_MAX_ITERATIONS = 16
 
+FINAL_CYCLE_REMINDER = (
+    "<system-reminder> You are on your last cycle, you must not use any more "
+    "tools, directly answer the request to the best of your abilities, clarify "
+    "any limitations encountered if you are unable to provide a full response. "
+    "</system-reminder>"
+)
+
 
 def run_chat_loop_stream(
     messages: list[Message],
     *,
     system_prompt: str = DEFAULT_SYSTEM_PROMPT,
     tools: list[dict[str, Any]] | None = None,
+    tools_provider: ToolsProvider | None = None,
     tool_dispatch: ToolDispatch | None = None,
     model: str | None = None,
     max_iterations: int = DEFAULT_MAX_ITERATIONS,
+    force_final_answer: bool = False,
 ) -> Iterator[StreamEvent]:
     """Stream a tool-using chat loop until a final assistant turn (no tool calls).
 
@@ -78,41 +88,54 @@ def run_chat_loop_stream(
       forward to the browser as-is.
     * The loop stops when the model returns a turn without any tool calls.
       ``max_iterations`` is a hard cap to prevent runaway loops.
+
+    ``tools_provider`` (if given) takes precedence over ``tools`` and is
+    invoked once per iteration with the live ``messages`` list, so the tool
+    list can change between turns (used by the chat agent's skills mechanism).
+
+    If ``force_final_answer`` is True and the loop reaches its final allowed
+    iteration, a user-role ``<system-reminder>`` message is appended and the
+    model is called with no tools — guaranteeing a textual answer instead of
+    raising ``RuntimeError`` on iteration exhaustion.
     """
-    if tools and tool_dispatch is None:
+    if (tools or tools_provider) and tool_dispatch is None:
         raise ValueError("tool_dispatch is required when tools are provided")
 
     _ensure_system_prompt(messages, system_prompt)
 
-    # Track wiki paths the model has read this turn so write tools can
-    # enforce read-before-write. Reset on exit so callers outside a loop
-    # (tests, direct invocation) see the default (None) and skip the check.
-    seen_token = seen_doc_paths.set(set())
-    try:
-        yield from _drive_loop(
-            messages,
-            tools=tools,
-            tool_dispatch=tool_dispatch,
-            model=model,
-            max_iterations=max_iterations,
-        )
-    finally:
-        seen_doc_paths.reset(seen_token)
+    yield from _drive_loop(
+        messages,
+        tools=tools,
+        tools_provider=tools_provider,
+        tool_dispatch=tool_dispatch,
+        model=model,
+        max_iterations=max_iterations,
+        force_final_answer=force_final_answer,
+    )
 
 
 def _drive_loop(
     messages: list[Message],
     *,
     tools: list[dict[str, Any]] | None,
+    tools_provider: ToolsProvider | None,
     tool_dispatch: ToolDispatch | None,
     model: str | None,
     max_iterations: int,
+    force_final_answer: bool = False,
 ) -> Iterator[StreamEvent]:
-    for _ in range(max_iterations):
+    for i in range(max_iterations):
         text_parts: list[str] = []
         tool_calls: list[dict[str, Any]] = []
 
-        for ev in client.stream(messages, model=model, tools=tools):
+        is_final_cycle = force_final_answer and i == max_iterations - 1
+        if is_final_cycle:
+            messages.append({"role": "user", "content": FINAL_CYCLE_REMINDER})
+            turn_tools = None
+        else:
+            turn_tools = tools_provider(messages) if tools_provider is not None else tools
+
+        for ev in client.stream(messages, model=model, tools=turn_tools):
             t = ev["type"]
             if t == "text_delta":
                 text_parts.append(ev["text"])
@@ -149,7 +172,6 @@ def _drive_loop(
                     result = {"error": str(exc)}
                 if tspan is not None:
                     tspan.log(output=result)
-            _record_seen_paths(call["name"], result)
             content_str = result if isinstance(result, str) else _stringify(result)
             messages.append(
                 {"role": "tool", "tool_call_id": call["id"], "content": content_str}
@@ -178,21 +200,41 @@ def run_chat_loop(
     *,
     system_prompt: str = DEFAULT_SYSTEM_PROMPT,
     tools: list[dict[str, Any]] | None = None,
+    tools_provider: ToolsProvider | None = None,
     tool_dispatch: ToolDispatch | None = None,
     model: str | None = None,
     max_iterations: int = DEFAULT_MAX_ITERATIONS,
+    force_final_answer: bool = False,
 ) -> list[Message]:
     """Drain the streaming loop. Returns ``messages`` for caller convenience."""
     for _ in run_chat_loop_stream(
         messages,
         system_prompt=system_prompt,
         tools=tools,
+        tools_provider=tools_provider,
         tool_dispatch=tool_dispatch,
         model=model,
         max_iterations=max_iterations,
+        force_final_answer=force_final_answer,
     ):
         pass
     return messages
+
+
+def _chat_tools_for_turn(messages: list[Message]) -> list[dict[str, Any]]:
+    """Per-turn tool list for the chat agent: base + load_skill + active skills."""
+    return [
+        *skill_registry.base_tool_specs(),
+        skill_registry.LOAD_SKILL_SPEC,
+        *skill_registry.specs_for_active_skills(skill_registry.active_skills(messages)),
+    ]
+
+
+def _chat_dispatch(name: str, args: dict[str, Any]) -> Any:
+    """Tool dispatcher for the chat agent — intercepts ``load_skill``."""
+    if name == skill_registry.LOAD_SKILL_TOOL_NAME:
+        return skill_registry.load_skill_handler(args)
+    return tool_registry.dispatch(name, args)
 
 
 def run_chat_stream(
@@ -204,9 +246,10 @@ def run_chat_stream(
         yield from run_chat_loop_stream(
             messages,
             system_prompt=load_prompt("chat.system"),
-            tools=tool_registry.TOOL_SPECS,
-            tool_dispatch=tool_registry.dispatch,
+            tools_provider=_chat_tools_for_turn,
+            tool_dispatch=_chat_dispatch,
             model=model,
+            force_final_answer=True,
         )
     finally:
         agent_activity.agent_name_var.reset(token)
@@ -303,9 +346,10 @@ def run_chat(messages: list[Message], *, model: str | None = None) -> list[Messa
         return run_chat_loop(
             messages,
             system_prompt=load_prompt("chat.system"),
-            tools=tool_registry.TOOL_SPECS,
-            tool_dispatch=tool_registry.dispatch,
+            tools_provider=_chat_tools_for_turn,
+            tool_dispatch=_chat_dispatch,
             model=model,
+            force_final_answer=True,
         )
     finally:
         agent_activity.agent_name_var.reset(token)
@@ -315,25 +359,6 @@ def _ensure_system_prompt(messages: list[Message], system_prompt: str) -> None:
     if any(m["role"] == "system" for m in messages):
         return
     messages.insert(0, {"role": "system", "content": system_prompt})
-
-
-def _record_seen_paths(tool_name: str, result: Any) -> None:
-    """Track which wiki docs the model has actually read this turn.
-
-    Only ``read_page`` counts — ``search_wiki`` returns ~64-token snippets,
-    which is not enough context to safely edit a doc. The doc-edit tools
-    consult ``seen_doc_paths`` to enforce read-before-write.
-    """
-    if tool_name != "read_page":
-        return
-    seen = seen_doc_paths.get()
-    if seen is None or not isinstance(result, dict):
-        return
-    from typing import cast
-    result_dict = cast(dict[str, Any], result)
-    path = result_dict.get("path")
-    if isinstance(path, str) and path:
-        seen.add(path)
 
 
 def _stringify(value: Any) -> str:

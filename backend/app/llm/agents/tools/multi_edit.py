@@ -17,6 +17,7 @@ def handle(args: dict[str, Any]) -> Any:
         edits_raw = args.get("edits")
         commit_message = args.get("commit_message")
         base_sha = args.get("base_sha")
+        activity_ttl = h.parse_expires_in_seconds(args.get("expires_in_seconds"))
         if not isinstance(edits_raw, list) or not edits_raw:
             raise h.ToolError("edits must be a non-empty array")
         if not isinstance(commit_message, str) or not commit_message.strip():
@@ -27,7 +28,6 @@ def handle(args: dict[str, Any]) -> Any:
 
         if not h.file_exists(rel):
             raise h.ToolError(f"file not found: {rel}")
-        h.assert_read_before_write(rel)
 
         stale = h.assert_base_sha(rel, base_sha)
         if stale is not None:
@@ -54,7 +54,10 @@ def handle(args: dict[str, Any]) -> Any:
         if body == old_body:
             raise h.ToolError("edits produced no change")
 
-        sha = h.commit_and_fan_out(rel, body, commit_message.strip(), change_kind="edit")
+        sha = h.commit_and_fan_out(
+            rel, body, commit_message.strip(),
+            change_kind="edit", activity_ttl=activity_ttl,
+        )
 
         return {
             "path": rel,

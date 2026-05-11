@@ -1,18 +1,25 @@
-"""Auth endpoints — signup / login / logout / me / OIDC login + callback."""
+"""Auth endpoints — signup / login / logout / me / OIDC login + callback.
+
+Session cookies are minted via Starlette's ``SessionMiddleware``
+(installed in ``app.main``); setting ``request.session["user_id"]``
+is all that's needed to "log in", and ``request.session.clear()`` to
+log out.
+"""
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, cast
 
-from flask import Blueprint, current_app, jsonify, redirect, request, session, url_for
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import RedirectResponse, Response
 from sqlalchemy.exc import IntegrityError
 
-from app.auth import User, current_user, login_required, users as users_repo
+from app.auth import User, users as users_repo
 from app.auth.basic import authenticate
-from app.auth.oidc import CLIENT_NAME as OIDC_CLIENT_NAME, upsert_oidc_user
+from app.auth.deps import require_user
+from app.auth.oidc import client as oidc_client, upsert_oidc_user
 from app.auth.whitelist import is_allowed, is_open
 from app.config import CONFIG
-from app.models._helpers import error, parse_body
 from app.models.auth import (
     AuthConfig,
     AuthSession,
@@ -22,17 +29,11 @@ from app.models.auth import (
 )
 from app.models.user_settings import UserSettings
 
-bp = Blueprint("auth", __name__)
+router = APIRouter()
 log = logging.getLogger(__name__)
 
 
-def _start_session(user: User) -> None:
-    session.clear()
-    session["user_id"] = user.id
-    session.permanent = True
-
-
-def _session_payload(user: User) -> dict[str, Any]:
+def _session_payload(user: User) -> AuthSession:
     settings = users_repo.get_settings(user.id) or {}
     return AuthSession(
         id=user.id,
@@ -40,132 +41,135 @@ def _session_payload(user: User) -> dict[str, Any]:
         name=user.name,
         is_admin=user.is_admin,
         settings=UserSettings.model_validate(settings),
-    ).model_dump()
+    )
 
 
-@bp.post("/signup")
-def signup():
+@router.post(
+    "/signup",
+    response_model=AuthSession,
+    status_code=status.HTTP_201_CREATED,
+)
+def signup(req: SignupRequest, request: Request) -> AuthSession:
     if CONFIG.auth_mode != "basic":
-        return error("signup disabled", 400)
-    req = parse_body(SignupRequest, request.get_json(silent=True))
+        raise HTTPException(status_code=400, detail="signup disabled")
     email = req.email.strip().lower()
     name = (req.name or "").strip() or None
     if not email:
-        return error("email is required", 400)
+        raise HTTPException(status_code=400, detail="email is required")
     if not is_allowed(email):
-        return error("email not allowed", 403)
+        raise HTTPException(status_code=403, detail="email not allowed")
     if users_repo.get_by_email(email) is not None:
-        return error("account already exists", 409)
+        raise HTTPException(status_code=409, detail="account already exists")
     try:
         user_id = users_repo.create(email=email, password=req.password, name=name)
-    except IntegrityError:
+    except IntegrityError as exc:
         log.warning("signup race: account already exists for %s", email, exc_info=True)
-        return error("account already exists", 409)
+        raise HTTPException(status_code=409, detail="account already exists") from exc
     row = users_repo.get_by_id(user_id)
     assert row is not None
     user = User(id=row["id"], email=row["email"], name=row["name"], is_admin=row["is_admin"])
-    _start_session(user)
+    request.session.clear()
+    request.session["user_id"] = user.id
     log.info("signup: user %s (%s) is_admin=%s", user.id, user.email, user.is_admin)
-    return jsonify(_session_payload(user)), 201
+    return _session_payload(user)
 
 
-@bp.post("/login")
-def login():
+@router.post("/login", response_model=AuthSession)
+def login(req: LoginRequest, request: Request) -> AuthSession:
     if CONFIG.auth_mode != "basic":
-        return error("basic auth disabled", 400)
-    req = parse_body(LoginRequest, request.get_json(silent=True))
+        raise HTTPException(status_code=400, detail="basic auth disabled")
     email = req.email.strip()
     if not email:
-        return error("email is required", 400)
+        raise HTTPException(status_code=400, detail="email is required")
     user = authenticate(email, req.password)
     if user is None:
         log.warning("login failed for %s", email)
-        return error("invalid credentials", 401)
-    _start_session(user)
+        raise HTTPException(status_code=401, detail="invalid credentials")
+    request.session.clear()
+    request.session["user_id"] = user.id
     log.info("login: user %s (%s)", user.id, user.email)
-    return jsonify(_session_payload(user))
+    return _session_payload(user)
 
 
-@bp.post("/logout")
-def logout():
-    session.clear()
-    return jsonify(OkResponse().model_dump())
+@router.post("/logout", response_model=OkResponse)
+def logout(request: Request) -> OkResponse:
+    request.session.clear()
+    return OkResponse()
 
 
-def _oidc_client():
-    """Return the registered OIDC client, or None if OIDC isn't configured."""
-    oauth = current_app.extensions.get("authlib.integrations.flask_client")
-    if oauth is None:
-        return None
-    return oauth.create_client(OIDC_CLIENT_NAME)
-
-
-@bp.get("/oidc/login")
-def oidc_login():
+@router.get("/oidc/login")
+async def oidc_login(request: Request) -> Response:
     """Kick off the OIDC authorization-code flow."""
     if CONFIG.auth_mode != "oidc":
-        return error("oidc disabled", 400)
-    client = _oidc_client()
+        raise HTTPException(status_code=400, detail="oidc disabled")
+    client = oidc_client()
     if client is None:
-        return error("oidc not configured", 503)
-    # Use the explicit redirect URI when set (matches what's registered with
-    # the IdP); otherwise reconstruct from the request so dev/local also works.
-    redirect_uri = CONFIG.oidc_redirect_uri or url_for("auth.oidc_callback", _external=True)
-    return client.authorize_redirect(redirect_uri)
+        raise HTTPException(status_code=503, detail="oidc not configured")
+    redirect_uri = CONFIG.oidc_redirect_uri or str(
+        request.url_for("oidc_callback"),
+    )
+    return cast(
+        Response,
+        await client.authorize_redirect(request, redirect_uri),  # pyright: ignore[reportUnknownMemberType]
+    )
 
 
-@bp.get("/oidc/callback")
-def oidc_callback():
-    """OIDC redirect handler — exchanges code for token, upserts user, starts session."""
+@router.get("/oidc/callback", name="oidc_callback")
+async def oidc_callback(request: Request) -> Response:
+    """OIDC redirect handler — exchanges code for token, upserts user,
+    starts session."""
     if CONFIG.auth_mode != "oidc":
-        return error("oidc disabled", 400)
-    client = _oidc_client()
+        raise HTTPException(status_code=400, detail="oidc disabled")
+    client = oidc_client()
     if client is None:
-        return error("oidc not configured", 503)
+        raise HTTPException(status_code=503, detail="oidc not configured")
     try:
-        token = client.authorize_access_token()
+        token = cast(
+            "dict[str, Any]",
+            await client.authorize_access_token(request),  # pyright: ignore[reportUnknownMemberType]
+        )
     except Exception:
         log.exception("oidc: failed to exchange authorization code")
-        return redirect("/login?error=oidc_exchange_failed")
+        return RedirectResponse(url="/login?error=oidc_exchange_failed")
 
-    userinfo = token.get("userinfo")
-    if userinfo is None:
+    userinfo_raw = token.get("userinfo")
+    if userinfo_raw is None:
         try:
-            userinfo = client.userinfo(token=token)
+            userinfo_raw = await client.userinfo(token=token)  # pyright: ignore[reportUnknownMemberType]
         except Exception:
             log.exception("oidc: failed to fetch userinfo")
-            return redirect("/login?error=oidc_userinfo_failed")
+            return RedirectResponse(url="/login?error=oidc_userinfo_failed")
+    userinfo = cast("dict[str, Any]", userinfo_raw)
 
     email = (userinfo.get("email") or "").strip().lower()
     if not email:
         log.warning("oidc: userinfo missing email; payload keys=%s", list(userinfo.keys()))
-        return redirect("/login?error=oidc_no_email")
+        return RedirectResponse(url="/login?error=oidc_no_email")
     if userinfo.get("email_verified") is False:
         log.warning("oidc: email not verified for %s", email)
-        return redirect("/login?error=oidc_email_unverified")
+        return RedirectResponse(url="/login?error=oidc_email_unverified")
     if not is_allowed(email):
         log.info("oidc: email %s not in allow list", email)
-        return redirect("/login?error=oidc_email_not_allowed")
+        return RedirectResponse(url="/login?error=oidc_email_not_allowed")
 
-    name = userinfo.get("name") or None
+    name_raw = userinfo.get("name")
+    name = name_raw if isinstance(name_raw, str) else None
     user_id = upsert_oidc_user(email=email, name=name)
     row = users_repo.get_by_id(user_id)
     assert row is not None
     user = User(id=row["id"], email=row["email"], name=row["name"], is_admin=row["is_admin"])
-    _start_session(user)
+    request.session.clear()
+    request.session["user_id"] = user.id
     log.info("oidc login: user %s (%s)", user.id, user.email)
-    return redirect("/")
+    return RedirectResponse(url="/")
 
 
-@bp.get("/me")
-@login_required
-def me():
-    user = current_user()
-    assert user is not None  # login_required guarantees this
-    return jsonify(_session_payload(user))
+@router.get("/me", response_model=AuthSession)
+def me(user: User = Depends(require_user)) -> AuthSession:
+    return _session_payload(user)
 
 
-@bp.get("/config")
-def auth_config():
+@router.get("/config", response_model=AuthConfig)
+def auth_config() -> AuthConfig:
     """Public — frontend uses this to know whether to show the signup form."""
-    return jsonify(AuthConfig(mode=CONFIG.auth_mode, signup_open=is_open()).model_dump())
+    return AuthConfig(mode=CONFIG.auth_mode, signup_open=is_open())

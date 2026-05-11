@@ -27,25 +27,19 @@ from tests._seed import list_events
 
 
 @pytest.fixture
-def app(tmp_repo):
+def signed_in(tmp_repo):
+    """Seed a user, log in, return ``(client, user_id)``."""
+    from fastapi.testclient import TestClient
+
+    from app.auth import users as users_repo
     from app.main import create_app
 
-    flask_app = create_app()
-    flask_app.config["TESTING"] = True
-    return flask_app
-
-
-@pytest.fixture
-def signed_in(app, tmp_repo):
-    """Seed a user, log in, return ``(client, user_id)``."""
-    from app.auth import users as users_repo
-
-    user_id = users_repo.create(email="u@x.com", password="hunter2", name="U")
-    client = app.test_client()
+    user_id = users_repo.create(email="u@x.com", password="hunter22", name="U")
+    client = TestClient(create_app())
     resp = client.post(
-        "/api/auth/login", json={"email": "u@x.com", "password": "hunter2"}
+        "/api/auth/login", json={"email": "u@x.com", "password": "hunter22"}
     )
-    assert resp.status_code == 200, resp.get_data(as_text=True)
+    assert resp.status_code == 200, resp.text
     return client, user_id
 
 
@@ -122,13 +116,13 @@ def test_save_fires_doc_scoped_trigger_to_event_log(signed_in, monkeypatch):
     resp = _put_doc(
         client, path="projects/foo.md", body="status: green\n"
     )
-    assert resp.status_code == 200, resp.get_data(as_text=True)
+    assert resp.status_code == 200, resp.text
 
     # Second save: an edit. This is what the save button typically triggers.
     resp = _put_doc(
         client, path="projects/foo.md", body="status: yellow\n"
     )
-    assert resp.status_code == 200, resp.get_data(as_text=True)
+    assert resp.status_code == 200, resp.text
 
     fires = _list_fires()
     # Two fires expected — one for the create commit, one for the edit.
@@ -288,23 +282,17 @@ def test_chat_agent_edit_fires_through_same_seam(signed_in, monkeypatch):
     from app.wiki import git as wiki_git
     wiki_git.commit_file("agent_doc.md", "before\n", "seed", author=None)
 
-    # Mark the path as "seen" so the read-before-write guard passes,
-    # then call the chat-agent edit tool directly.
-    from app.llm.agents._session import seen_doc_paths
+    # Call the chat-agent edit tool directly.
     from app.llm.agents.tools.edit_doc import handle as edit_doc
 
-    token = seen_doc_paths.set({"agent_doc.md"})
-    try:
-        out = edit_doc(
-            {
-                "path": "agent_doc.md",
-                "old_string": "before",
-                "new_string": "after",
-                "commit_message": "tighten",
-            }
-        )
-    finally:
-        seen_doc_paths.reset(token)
+    out = edit_doc(
+        {
+            "path": "agent_doc.md",
+            "old_string": "before",
+            "new_string": "after",
+            "commit_message": "tighten",
+        }
+    )
     assert "error" not in out, out
 
     fires = _list_fires()
@@ -351,7 +339,7 @@ def test_move_fires_delete_on_old_and_create_on_new(signed_in, monkeypatch):
         "/api/documents/move",
         json={"old_path": "src/foo.md", "new_path": "dst/foo.md"},
     )
-    assert resp.status_code == 200, resp.get_data(as_text=True)
+    assert resp.status_code == 200, resp.text
 
     fires_by_target = {row["target"]: row for row in _list_fires()}
     assert old_dir_trigger["id"] in fires_by_target, (
@@ -390,7 +378,7 @@ def test_delete_fires_with_change_kind_delete(signed_in, monkeypatch):
     clear_events()
 
     resp = client.delete("/api/documents/file?path=docs/old.md")
-    assert resp.status_code == 200, resp.get_data(as_text=True)
+    assert resp.status_code == 200, resp.text
 
     fires = _list_fires()
     assert len(fires) == 1

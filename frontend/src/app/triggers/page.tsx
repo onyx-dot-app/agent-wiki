@@ -106,7 +106,7 @@ export default function TriggersPage() {
 
   return (
     <AppShell>
-      <main style={{ padding: isMobile ? "16px 12px" : "24px 32px", height: "100vh", overflowY: "auto" }}>
+      <main style={{ padding: isMobile ? "16px 12px" : "24px 32px" }}>
         <PageHeader
           title="Triggers"
           description="Triggers watch a document (or folder) and notice when something specific changes, or check on a recurring schedule. When the trigger fires, the message you wrote shows up on the Events tab so you can review it."
@@ -160,80 +160,47 @@ export default function TriggersPage() {
               <div
                 style={{
                   display: "flex",
-                  alignItems: "flex-start",
+                  alignItems: "center",
                   justifyContent: "space-between",
                   gap: 12,
+                  flexWrap: "wrap",
+                  marginBottom: 10,
                 }}
               >
-                <div style={{ minWidth: 0, flex: 1 }}>
-                  <div
-                    style={{
-                      fontFamily: "ui-monospace, Menlo, monospace",
-                      fontSize: 12,
-                      color: color.text.muted,
-                      marginBottom: 4,
-                      display: "flex",
-                      gap: 10,
-                      alignItems: "baseline",
-                    }}
-                  >
-                    <span title={t.scope_path}>{formatScopePath(t.scope_path)}</span>
-                    <span style={{ fontFamily: "inherit", fontSize: 11, color: color.text.faint }}>
-                      {t.id}
+                <div
+                  style={{
+                    fontFamily: "ui-monospace, Menlo, monospace",
+                    fontSize: 12,
+                    color: color.text.muted,
+                    display: "flex",
+                    gap: 10,
+                    alignItems: "baseline",
+                    flexWrap: "wrap",
+                    minWidth: 0,
+                  }}
+                >
+                  <span title={t.scope_path}>{formatScopePath(t.scope_path)}</span>
+                  <span style={{ fontFamily: "inherit", fontSize: 11, color: color.text.faint }}>
+                    {t.id}
+                  </span>
+                  {t.last_edited_at && (
+                    <span
+                      title={new Date(t.last_edited_at).toLocaleString()}
+                      style={{ fontFamily: "inherit", fontSize: 11, color: color.text.faint }}
+                    >
+                      edited {formatRelative(t.last_edited_at)}
                     </span>
-                    {t.last_edited_at && (
-                      <span
-                        title={new Date(t.last_edited_at).toLocaleString()}
-                        style={{ fontFamily: "inherit", fontSize: 11, color: color.text.faint }}
-                      >
-                        edited {formatRelative(t.last_edited_at)}
-                      </span>
-                    )}
-                  </div>
-                  <div style={{ fontSize: 14, color: color.text.primary, lineHeight: 1.55 }}>
-                    {t.kind === "schedule" && (
-                      <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 6 }}>
-                        <span style={sentenceTagStyle}>WHEN</span>
-                        <span style={{ flex: 1, minWidth: 0 }}>
-                          {describeCron(t.schedule_cron, t.schedule_timezone)}
-                          {t.schedule_start_at && (
-                            <>
-                              {" "}
-                              <span style={{ color: color.text.muted, fontSize: 12 }}>
-                                · starting {new Date(t.schedule_start_at).toLocaleString()}
-                              </span>
-                            </>
-                          )}
-                          {t.schedule_last_fired_at && (
-                            <>
-                              {" "}
-                              <span style={{ color: color.text.faint, fontSize: 12 }}>
-                                · last fired {formatRelative(t.schedule_last_fired_at)}
-                              </span>
-                            </>
-                          )}
-                        </span>
-                      </div>
-                    )}
-                    <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-                      <span style={sentenceTagStyle}>IF</span>
-                      <span style={{ flex: 1, minWidth: 0 }}>{t.nl_description}</span>
-                    </div>
-                    {t.message && (
-                      <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginTop: 6 }}>
-                        <span style={sentenceTagStyle}>THEN SEND</span>
-                        <span style={{ flex: 1, minWidth: 0 }}>{t.message}</span>
-                      </div>
-                    )}
-                    <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginTop: 6 }}>
-                      <span style={sentenceTagStyle}>TO</span>
-                      <span style={{ flex: 1, minWidth: 0, color: color.text.secondary }}>
-                        {destinationLabel(t.destination)}
-                      </span>
-                    </div>
-                  </div>
+                  )}
                 </div>
-                <div style={{ display: "flex", gap: 6, alignItems: "center", flexShrink: 0 }}>
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 6,
+                    alignItems: "center",
+                    flexShrink: 0,
+                    flexWrap: "wrap",
+                  }}
+                >
                   <span
                     style={{
                       display: "inline-flex",
@@ -288,6 +255,48 @@ export default function TriggersPage() {
                   >
                     Delete
                   </Button>
+                </div>
+              </div>
+              <div style={{ fontSize: 14, color: color.text.primary, lineHeight: 1.55 }}>
+                {t.kind === "schedule" && (
+                  <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 6 }}>
+                    <span style={sentenceTagStyle}>WHEN</span>
+                    <span style={{ flex: 1, minWidth: 0 }}>
+                      {describeCron(t.schedule_cron, t.schedule_timezone)}
+                      {t.schedule_start_at && (
+                        <>
+                          {" "}
+                          <span style={{ color: color.text.muted, fontSize: 12 }}>
+                            · starting {new Date(t.schedule_start_at).toLocaleString()}
+                          </span>
+                        </>
+                      )}
+                      {t.schedule_last_fired_at && (
+                        <>
+                          {" "}
+                          <span style={{ color: color.text.faint, fontSize: 12 }}>
+                            · last fired {formatRelative(t.schedule_last_fired_at)}
+                          </span>
+                        </>
+                      )}
+                    </span>
+                  </div>
+                )}
+                <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+                  <span style={sentenceTagStyle}>IF</span>
+                  <span style={{ flex: 1, minWidth: 0 }}>{t.nl_description}</span>
+                </div>
+                {t.message && (
+                  <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginTop: 6 }}>
+                    <span style={sentenceTagStyle}>THEN SEND</span>
+                    <span style={{ flex: 1, minWidth: 0 }}>{t.message}</span>
+                  </div>
+                )}
+                <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginTop: 6 }}>
+                  <span style={sentenceTagStyle}>TO</span>
+                  <span style={{ flex: 1, minWidth: 0, color: color.text.secondary }}>
+                    {destinationLabel(t.destination)}
+                  </span>
                 </div>
               </div>
             </li>

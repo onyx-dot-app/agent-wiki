@@ -1,25 +1,33 @@
 """Auth surface. Session-cookie based.
 
-v0 supports two AUTH_MODEs:
-  * ``basic`` — email + password, bcrypt-hashed in the users table
-  * ``oidc``  — TODO
+Two ``AUTH_MODE`` values are supported:
 
-In both modes the active session is identified by a Flask server-side session
-cookie keyed by user id. Per-resource permissioning for wiki pages goes
-through ``require_can`` (below), which delegates to ``app.wiki.acl``;
-``admin_required`` still gates the admin-only endpoints.
+  * ``basic`` — email + password, bcrypt-hashed in the users table
+  * ``oidc``  — authorization-code flow via ``authlib`` against a
+    configured IdP
+
+In both modes the active session is identified by a signed
+``Starlette SessionMiddleware`` cookie keyed by user id. Per-resource
+permissioning for wiki pages goes through :func:`require_can`
+(below), which delegates to ``app.wiki.acl``.
+
+:data:`current_user_ctx` is the ContextVar that carries the active
+user across non-HTTP code paths (workers, agent tools dispatched from
+a chat loop). FastAPI's ``CurrentUserMiddleware`` binds it for every
+request; worker tasks bind it via :func:`set_current_user`. Reading
+the active principal anywhere — ACL checks, agent activity
+attribution, trigger ``actor`` fields — goes through
+:func:`current_user`.
 """
 from __future__ import annotations
 
-from functools import wraps
-from typing import Any, Callable, TypeVar, cast
+from contextlib import contextmanager
+from contextvars import ContextVar
+from typing import Generator
 
-from flask import g, jsonify, session
 from pydantic import BaseModel
 
 from app.auth import users as users_repo
-
-F = TypeVar("F", bound=Callable[..., Any])
 
 
 class User(BaseModel):
@@ -30,78 +38,82 @@ class User(BaseModel):
 
 
 class PermissionDenied(Exception):
-    """Raised when a wiki path access check fails. The Flask error
-    handler (``app.main``) translates this into a 403."""
+    """Raised when a wiki path access check fails. The FastAPI error
+    handler in ``app.main`` translates this into a 403."""
 
     def __init__(self, message: str = "forbidden") -> None:
         super().__init__(message)
         self.message = message
 
 
-def current_user() -> User | None:
-    # ``g``/``session`` raise ``RuntimeError`` outside an app/request
-    # context. Treat that as "no current user" — agent tools dispatched
-    # from a test or background-task harness (no Flask request) get the
-    # anonymous principal, and the resolver applies the same rules
-    # (``everyone`` grants only) it would for a logged-out caller.
-    try:
-        cached = cast("User | None", getattr(g, "user", None))
-    except RuntimeError:
-        return None
-    if cached is not None:
-        return cached
-    try:
-        user_id = session.get("user_id")
-    except RuntimeError:
-        return None
-    if not user_id:
-        return None
+class UserMissingError(Exception):
+    """Resolving a stored ``user_id`` (e.g. from an ``mcp_jobs`` row)
+    found no matching user row. Background tasks raise this and mark
+    themselves failed rather than silently degrading to anonymous."""
+
+    def __init__(self, user_id: str) -> None:
+        super().__init__(f"user {user_id!r} not found")
+        self.user_id = user_id
+
+
+def load_user(user_id: str) -> User:
+    """Resolve a stored ``user_id`` to a ``User`` value object. Raises
+    :class:`UserMissingError` if the row has been deleted. Used by
+    worker tasks (``app.tasks.document_update``) to reconstitute the
+    principal before binding it via :func:`set_current_user`."""
     row = users_repo.get_by_id(user_id)
     if row is None:
-        return None
-    user = User(
+        raise UserMissingError(user_id)
+    return User(
         id=row["id"],
         email=row["email"],
         name=row["name"],
         is_admin=bool(row["is_admin"]),
     )
-    g.user = user
-    return user
 
 
-def login_required(fn: F) -> F:
-    @wraps(fn)
-    def wrapper(*args: Any, **kwargs: Any) -> Any:
-        if current_user() is None:
-            return jsonify(error="unauthorized"), 401
-        return fn(*args, **kwargs)
-    return cast(F, wrapper)
+# ContextVar seam for the active user. FastAPI's ``CurrentUserMiddleware``
+# sets it from the session cookie on every request; worker tasks set it
+# via :func:`set_current_user`. Reads via :func:`current_user` cascade
+# through the ContextVar only — no Flask fallback.
+current_user_ctx: ContextVar[User | None] = ContextVar("current_user", default=None)
 
 
-def admin_required(fn: F) -> F:
-    @wraps(fn)
-    def wrapper(*args: Any, **kwargs: Any) -> Any:
-        user = current_user()
-        if user is None:
-            return jsonify(error="unauthorized"), 401
-        if not user.is_admin:
-            return jsonify(error="forbidden"), 403
-        return fn(*args, **kwargs)
-    return cast(F, wrapper)
+@contextmanager
+def set_current_user(user: User | None) -> Generator[None, None, None]:
+    """Bind ``user`` as the active principal for the enclosed block.
+
+    Used by background tasks and any code that wants downstream calls
+    reading :func:`current_user` to see the request's user without
+    threading a parameter. Restores the prior value on exit."""
+    token = current_user_ctx.set(user)
+    try:
+        yield
+    finally:
+        current_user_ctx.reset(token)
 
 
-def require_can(action: str, path: str) -> None:
-    """Raise ``PermissionDenied`` if the current user lacks ``action`` on
-    ``path``. ``action`` is ``"read"`` or ``"write"``.
+def current_user() -> User | None:
+    """Return the active user, or ``None`` for an unauthenticated /
+    background-task-without-binding caller."""
+    return current_user_ctx.get()
 
-    Callers are expected to be ``@login_required`` already — the helper
-    treats an unauthenticated caller the same as any other principal
-    without grants. Admins always pass. Imported lazily so
-    ``app.wiki.acl`` can depend on ``app.auth`` without a cycle.
+
+def require_can(action: str, path: str, user: User | None = None) -> None:
+    """Raise :class:`PermissionDenied` if the given user lacks
+    ``action`` on ``path``. ``action`` is ``"read"`` or ``"write"``.
+
+    ``user`` defaults to :func:`current_user` so call sites that don't
+    yet thread a user explicitly still work; FastAPI routes pass it
+    explicitly from the ``Depends(require_user)`` resolution. Admins
+    always pass. Unauthenticated callers (``user is None``) get the
+    same treatment as any principal without grants. Imported lazily
+    so ``app.wiki.acl`` can depend on ``app.auth`` without a cycle.
     """
     from app.wiki import acl as _acl
 
-    user = current_user()
+    if user is None:
+        user = current_user()
     user_id = user.id if user is not None else None
     is_admin = bool(user is not None and user.is_admin)
     if not _acl.can(user_id, is_admin, action, path):

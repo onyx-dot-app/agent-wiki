@@ -25,6 +25,7 @@ from app.tracing.braintrust import (
     is_enabled,
     start_llm_span,
     start_tool_span,
+    to_openai_message_shape,
     trace_flow,
 )
 
@@ -32,5 +33,6 @@ __all__ = [
     "is_enabled",
     "start_llm_span",
     "start_tool_span",
+    "to_openai_message_shape",
     "trace_flow",
 ]

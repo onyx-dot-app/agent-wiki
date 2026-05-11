@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 import { ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -605,22 +607,35 @@ function Bubble({
   muted?: boolean;
 }) {
   const isUser = role === "user";
+  const renderMarkdown = !isUser && !muted;
   return (
-    <div style={{ display: "flex", justifyContent: isUser ? "flex-end" : "flex-start" }}>
+    <div style={{ display: "flex", justifyContent: isUser ? "flex-end" : "flex-start", minWidth: 0 }}>
       <div
+        className={renderMarkdown ? "markdown markdown-chat" : undefined}
         style={{
           maxWidth: "85%",
+          minWidth: 0,
           padding: "8px 12px",
           borderRadius: radius.md,
           background: isUser ? color.accent.bg : color.bg.sunken,
           color: isUser ? color.accent.fg : color.text.primary,
-          whiteSpace: "pre-wrap",
+          // User messages preserve newlines via pre-wrap; assistant
+          // messages flow through react-markdown which produces real
+          // block elements, so pre-wrap would just inject blank gaps.
+          whiteSpace: renderMarkdown ? "normal" : "pre-wrap",
+          // Without this, a long unbroken token (URL, path, hash) blows
+          // past the 85% max-width and pushes the layout horizontally.
+          overflowWrap: "anywhere",
           fontSize: 13,
           lineHeight: 1.5,
           opacity: muted ? 0.6 : 1,
         }}
       >
-        {content}
+        {renderMarkdown ? (
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+        ) : (
+          content
+        )}
       </div>
     </div>
   );

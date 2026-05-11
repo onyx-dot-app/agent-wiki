@@ -2,9 +2,9 @@
 
 Covers the full handshake → read → edit-with-base_sha → success flow,
 plus the staleness contract (`stale_base` rejection on drift), the
-read-before-write rule, the `base_sha_required_for_overwrite` rule for
-``write_doc``, ACL enforcement on writes, and the always-present
-``stale_paths`` field on tool results.
+`base_sha_required_for_overwrite` rule for ``write_doc``, ACL
+enforcement on writes, and the always-present ``stale_paths`` field
+on tool results.
 """
 from __future__ import annotations
 
@@ -12,12 +12,11 @@ import json
 from typing import Any
 
 import pytest
-from flask import Flask, jsonify
+from fastapi.testclient import TestClient
 
-from app.api import mcp_server as mcp_server_api
 from app.auth import mcp_tokens as tokens_repo
+from app.main import create_app
 from app.mcp_server import session as mcp_session
-from app.models._helpers import ErrorResponse, RequestError
 from app.wiki import acl as wiki_acl
 from app.wiki import git as wiki_git
 
@@ -26,16 +25,8 @@ from tests._seed import seed_user
 
 @pytest.fixture
 def client(tmp_repo):
-    app = Flask(__name__)
-    app.config.update(SECRET_KEY="test-secret", TESTING=True)
-    app.register_blueprint(mcp_server_api.bp, url_prefix="/api/mcp")
-
-    @app.errorhandler(RequestError)
-    def _request_error(err: RequestError):  # type: ignore[unused-ignore]
-        return jsonify(ErrorResponse(error=err.message).model_dump()), err.status
-
     mcp_session.reset_for_tests()
-    yield app.test_client()
+    yield TestClient(create_app())
     mcp_session.reset_for_tests()
 
 
@@ -83,7 +74,7 @@ def _call(
         },
         headers=headers,
     )
-    body = res.get_json()
+    body = res.json()
     result = body["result"]
     payload: dict[str, Any] = json.loads(result["content"][0]["text"])
     return payload, bool(result.get("isError"))
@@ -178,59 +169,6 @@ def test_edit_doc_without_base_sha_still_works_via_mcp(client):
         },
     )
     assert not is_error, payload
-
-
-# --------------------------------------------------------------------------- #
-# Read-before-write                                                           #
-# --------------------------------------------------------------------------- #
-
-
-def test_edit_doc_without_prior_read_is_rejected(client):
-    uid = seed_user(uid="u1", email="u1@x.com")
-    wiki_git.commit_file("unread.md", "# x\nold\n", "seed", author=None)
-
-    headers = _handshake(client, _mint(uid))
-    # Skip read_doc entirely.
-
-    payload, is_error = _call(
-        client,
-        headers,
-        "edit_doc",
-        {
-            "path": "unread.md",
-            "old_string": "old",
-            "new_string": "new",
-            "commit_message": "blind",
-        },
-    )
-    assert is_error
-    assert "read_page" in payload["error"]
-
-
-def test_historical_read_does_not_satisfy_read_before_write(client):
-    """Reading at a sha (not HEAD) must NOT mark the path as seen — the
-    agent saw the old body, not the current one."""
-    uid = seed_user(uid="u1", email="u1@x.com")
-    first = wiki_git.commit_file("page.md", "# v1\n", "v1", author=None)
-    wiki_git.commit_file("page.md", "# v2\n", "v2", author=None)
-
-    headers = _handshake(client, _mint(uid))
-    out, _ = _call(client, headers, "read_doc", {"path": "page.md", "sha": first})
-    assert out["is_head"] is False
-
-    payload, is_error = _call(
-        client,
-        headers,
-        "edit_doc",
-        {
-            "path": "page.md",
-            "old_string": "# v2",
-            "new_string": "# v2 edited",
-            "commit_message": "blind from history",
-        },
-    )
-    assert is_error
-    assert "read_page" in payload["error"]
 
 
 # --------------------------------------------------------------------------- #
@@ -355,7 +293,6 @@ def test_write_doc_overwrite_without_base_sha_is_rejected(client):
     wiki_git.commit_file("d.md", "# v1\n", "seed", author=None)
 
     headers = _handshake(client, _mint(uid))
-    _read(client, headers, "d.md")  # satisfy read-before-write
 
     payload, is_error = _call(
         client,

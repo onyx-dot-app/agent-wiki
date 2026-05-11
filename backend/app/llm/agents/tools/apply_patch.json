@@ -1,6 +1,6 @@
 {
   "name": "apply_patch",
-  "description": "Apply a unified-diff patch (one or more `@@ -L,N +L,M @@` hunks) to a wiki document. Atomic: if any hunk fails to apply, nothing is committed. Each hunk is matched line-anchored first; if line drift makes that fail, falls back to the same fuzzy chain `edit_doc` uses (the context + `-` lines must match somewhere uniquely in the file). Use this when you have a line-numbered diff in hand. For find-and-replace edits without line numbers, prefer `edit_doc` or `multi_edit`. The file must have been read this session via `read_page`/`read_doc` (HEAD).",
+  "description": "Apply a unified-diff patch (one or more `@@ -L,N +L,M @@` hunks) to a wiki document. Atomic: if any hunk fails to apply, nothing is committed. Each hunk is matched line-anchored first; if line drift makes that fail, falls back to the same fuzzy chain `edit_doc` uses (the context + `-` lines must match somewhere uniquely in the file). Use this when you have a line-numbered diff in hand. For find-and-replace edits without line numbers, prefer `edit_doc` or `multi_edit`.",
   "input_schema": {
     "type": "object",
     "properties": {
@@ -19,6 +19,10 @@
       "base_sha": {
         "type": "string",
         "description": "Optional SHA the patch was authored against. If set and HEAD has moved, returns `stale_base` with the current sha and the diff since `base_sha` so you can rebase. Omit only if you've just read HEAD."
+      },
+      "expires_in_seconds": {
+        "type": "integer",
+        "description": "Optional. How long (in seconds) you anticipate continuing to work on this file or feature before you're done. Sets the TTL on your row in the Active agents list, replacing the 24h default. You only have ONE row in the list at a time per (user, agent), so the latest write's value wins. Range: 60 to 604800 (7 days)."
       }
     },
     "required": ["path", "patch", "commit_message"]

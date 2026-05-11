@@ -17,6 +17,7 @@ def handle(args: dict[str, Any]) -> Any:
         new_string = args.get("new_string")
         commit_message = args.get("commit_message")
         base_sha = args.get("base_sha")
+        activity_ttl = h.parse_expires_in_seconds(args.get("expires_in_seconds"))
         if not isinstance(old_string, str) or old_string == "":
             raise h.ToolError("old_string is required and must be non-empty")
         if not isinstance(new_string, str):
@@ -29,7 +30,6 @@ def handle(args: dict[str, Any]) -> Any:
 
         if not h.file_exists(rel):
             raise h.ToolError(f"file not found: {rel}")
-        h.assert_read_before_write(rel)
 
         stale = h.assert_base_sha(rel, base_sha)
         if stale is not None:
@@ -41,7 +41,10 @@ def handle(args: dict[str, Any]) -> Any:
         except wiki_edit.ReplaceError as exc:
             raise h.ToolError(str(exc))
 
-        sha = h.commit_and_fan_out(rel, new_body, commit_message.strip(), change_kind="edit")
+        sha = h.commit_and_fan_out(
+            rel, new_body, commit_message.strip(),
+            change_kind="edit", activity_ttl=activity_ttl,
+        )
 
         return {
             "path": rel,

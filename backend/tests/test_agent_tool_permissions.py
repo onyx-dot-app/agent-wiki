@@ -51,18 +51,6 @@ def _stub_side_effects(monkeypatch):
     )
 
 
-@pytest.fixture
-def seen():
-    from app.llm.agents._session import seen_doc_paths
-
-    s: set[str] = set()
-    token = seen_doc_paths.set(s)
-    try:
-        yield s
-    finally:
-        seen_doc_paths.reset(token)
-
-
 @contextmanager
 def _as_user(monkeypatch, user_id: str | None, *, is_admin: bool = False):
     """Patch ``current_user`` everywhere it's been imported so tools see
@@ -153,10 +141,9 @@ def test_read_doc_allows_after_grant(repo_with_private_page, monkeypatch):
 # --------------------------------------------------------------------------- #
 
 
-def test_edit_doc_denies_unauthorized_user(repo_with_private_page, monkeypatch, seen):
+def test_edit_doc_denies_unauthorized_user(repo_with_private_page, monkeypatch):
     from app.llm.agents.tools.edit_doc import handle
 
-    seen.add("docs/spec.md")  # bypass read-before-write check
     with _as_user(monkeypatch, repo_with_private_page["bob"]):
         out = handle({
             "path": "docs/spec.md",
@@ -168,7 +155,7 @@ def test_edit_doc_denies_unauthorized_user(repo_with_private_page, monkeypatch, 
     assert "forbidden" in out["error"].lower()
 
 
-def test_edit_doc_allows_user_with_write_grant(repo_with_private_page, monkeypatch, seen):
+def test_edit_doc_allows_user_with_write_grant(repo_with_private_page, monkeypatch):
     from app.llm.agents.tools.edit_doc import handle
 
     bob = repo_with_private_page["bob"]
@@ -180,7 +167,6 @@ def test_edit_doc_allows_user_with_write_grant(repo_with_private_page, monkeypat
         permission="write",
         granted_by_user_id=repo_with_private_page["alice"],
     )
-    seen.add("docs/spec.md")
     with _as_user(monkeypatch, bob):
         out = handle({
             "path": "docs/spec.md",
@@ -192,7 +178,7 @@ def test_edit_doc_allows_user_with_write_grant(repo_with_private_page, monkeypat
 
 
 def test_edit_doc_read_only_grant_still_denies_write(
-    repo_with_private_page, monkeypatch, seen
+    repo_with_private_page, monkeypatch
 ):
     """A user with ``read`` but not ``write`` should still be blocked
     by edit_doc — read-only grant doesn't promote to writer."""
@@ -207,7 +193,6 @@ def test_edit_doc_read_only_grant_still_denies_write(
         permission="read",
         granted_by_user_id=repo_with_private_page["alice"],
     )
-    seen.add("docs/spec.md")
     with _as_user(monkeypatch, bob):
         out = handle({
             "path": "docs/spec.md",

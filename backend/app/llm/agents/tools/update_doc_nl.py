@@ -24,6 +24,7 @@ def handle(args: dict[str, Any]) -> Any:
         rel = h.validate_doc_path(args.get("path"))
         instruction = args.get("instruction")
         base_sha = args.get("base_sha")
+        activity_ttl = h.parse_expires_in_seconds(args.get("expires_in_seconds"))
         if not isinstance(instruction, str) or not instruction.strip():
             raise h.ToolError("instruction is required (non-empty string)")
         if base_sha is not None and not isinstance(base_sha, str):
@@ -31,7 +32,6 @@ def handle(args: dict[str, Any]) -> Any:
 
         if not h.file_exists(rel):
             raise h.ToolError(f"file not found: {rel}")
-        h.assert_read_before_write(rel)
 
         head_sha = wiki_git.head_sha_for_path(rel)
         if base_sha and base_sha != head_sha:
@@ -70,6 +70,7 @@ def handle(args: dict[str, Any]) -> Any:
             new_body,
             f"Doc update: {instruction.strip()[:80]}",
             change_kind="edit",
+            activity_ttl=activity_ttl,
         )
         return {
             "path": rel,

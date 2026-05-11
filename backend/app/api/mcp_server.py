@@ -1,50 +1,62 @@
-"""Inbound MCP server transport — endpoints at ``POST /api/mcp`` and
-``GET /api/mcp``.
+"""FastAPI port of ``app/api/mcp_server.py``.
 
-External coding agents (Claude Code, Cursor, Codex) connect here over
-JSON-RPC 2.0 with a bearer token. The hard work — auth, session
-state, JSON-RPC dispatch, pub-sub — lives in ``app.mcp_server``; this
-module is the thin Flask glue.
+POST (JSON-RPC request/response) lands in Phase 3. GET (long-lived
+SSE for server-initiated frames) is the heart of the migration's
+payoff and lives here — one coroutine per idle MCP client instead
+of one OS thread per client, which is the actual reason for the
+ASGI move.
 
-POST is per-call request/response. GET is the long-lived SSE stream
-for server-initiated frames (``notifications/resources/updated``,
-``notifications/resources/list_changed``). Both wear the same bearer
-auth.
+Adopting the upstream MCP Python SDK to replace the hand-rolled
+JSON-RPC dispatcher is a follow-up PR; the existing dispatch is
+preserved here so the cutover is small + reversible.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
-from typing import Any, Iterator, cast
+from collections.abc import AsyncIterator
+from typing import Any
 
-from flask import Blueprint, Response, jsonify, request, stream_with_context
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi.responses import StreamingResponse
 
+from app.auth import User, set_current_user
+from app.auth.deps import require_bearer
 from app.mcp_server import pubsub as mcp_pubsub
 from app.mcp_server import session as mcp_session
-from app.mcp_server.auth import bearer_required
 from app.mcp_server.transport import dispatch
+from app.models.mcp import JsonRpcRequest
 
+router = APIRouter()
 log = logging.getLogger(__name__)
-
-bp = Blueprint("mcp_server", __name__)
 
 SESSION_HEADER = "Mcp-Session-Id"
 
-# How long the SSE writer parks waiting for a notification before
-# checking liveness / yielding a comment. Keeps the connection from
-# looking idle to nginx without requiring a separate keepalive thread.
+# Same value the Flask transport uses — kept aligned so observers
+# see the same idle behavior on both stacks during the transition.
 _SSE_HEARTBEAT_SECONDS = 15.0
 
 
-@bp.post("")
-@bearer_required
-def transport_post():
-    body = request.get_json(silent=True)
-    if not isinstance(body, dict):
-        return jsonify(error="request body must be a JSON-RPC object"), 400
+@router.post("")
+async def transport_post(
+    rpc: JsonRpcRequest,
+    request: Request,
+    user: User = Depends(require_bearer),
+) -> Response:
+    # The dispatcher reads "id absent" to detect JSON-RPC notifications,
+    # so we feed it only the fields the client actually sent. ``extra``
+    # is allowed on the envelope to keep forward-compat with new
+    # protocol fields, so we round-trip those too.
+    body: dict[str, Any] = rpc.model_dump(exclude_unset=True)
 
     incoming = request.headers.get(SESSION_HEADER)
-    response, outgoing = dispatch(cast("dict[str, Any]", body), incoming)
+    # Bind the bearer user to the ContextVar so downstream tool handlers
+    # (which call ``current_user()`` to read the principal) see the
+    # right user. Bearer auth doesn't go through the cookie-reading
+    # ``CurrentUserMiddleware``, so we bind it here at the seam.
+    with set_current_user(user):
+        response, outgoing = dispatch(body, incoming, user)
 
     headers: dict[str, str] = {}
     if outgoing:
@@ -53,61 +65,67 @@ def transport_post():
     if response is None:
         # Notification — JSON-RPC convention: no body. 202 Accepted is
         # the MCP-recommended status for notification POSTs.
-        return Response(status=202, headers=headers)
+        return Response(status_code=202, headers=headers)
 
-    return jsonify(response), 200, headers
+    return Response(
+        content=json.dumps(response),
+        media_type="application/json",
+        status_code=200,
+        headers=headers,
+    )
 
 
-@bp.get("")
-@bearer_required
-def transport_sse():
+@router.get("")
+async def transport_sse(
+    request: Request, bearer_user: User = Depends(require_bearer),
+) -> Response:
     """Open the long-lived SSE stream for server-initiated frames.
 
-    Pre-conditions:
-      * Bearer token (handled by ``@bearer_required``).
-      * ``Mcp-Session-Id`` header pointing at an *initialized* session
-        owned by the bearer's user — the client must have completed
-        ``initialize`` + ``notifications/initialized`` first.
-
-    On disconnect the generator's ``finally`` clause runs
-    ``mcp_session.drop(session_id)``, which clears the session row
-    *and* its pub-sub subscriptions and queue (see
-    ``app.mcp_server.pubsub.forget``).
+    Idle clients cost one asyncio task each (not one OS thread). The
+    publisher path bridges into the writer loop via
+    ``mcp_pubsub.register_async_consumer`` / ``loop.call_soon_threadsafe``
+    so cross-thread + cross-process notifications still reach this
+    handler safely. On disconnect ``mcp_session.drop(session_id)``
+    fires from the cleanup branch, which clears the session row, its
+    sync queue, and its async queue.
     """
     sess_id = request.headers.get(SESSION_HEADER)
     if not sess_id:
-        return jsonify(error=f"missing {SESSION_HEADER} header"), 400
+        raise HTTPException(status_code=400, detail=f"missing {SESSION_HEADER} header")
     sess = mcp_session.get(sess_id)
     if sess is None or not sess.initialized:
-        return jsonify(error="session not initialized"), 400
-
-    from flask import g
-
-    bearer_user = g.user
+        raise HTTPException(status_code=400, detail="session not initialized")
     if sess.user_id != bearer_user.id:
-        # The bearer resolves to user A but the supplied session id was
-        # minted for user B — almost certainly an attempted hijack. Refuse.
-        return jsonify(error="session does not belong to this bearer"), 403
+        # Bearer resolves to user A but the supplied session id was
+        # minted for user B — refuse rather than risk hijack.
+        raise HTTPException(
+            status_code=403, detail="session does not belong to this bearer",
+        )
 
-    def stream() -> Iterator[str]:
+    # Bind an asyncio.Queue + this loop into pubsub so subsequent
+    # publishes for ``sess_id`` enqueue here via call_soon_threadsafe.
+    queue = mcp_pubsub.register_async_consumer(sess_id)
+
+    async def stream() -> AsyncIterator[bytes]:
         try:
             while True:
-                notif = mcp_pubsub.drain_blocking(sess_id, _SSE_HEARTBEAT_SECONDS)
+                if await request.is_disconnected():
+                    break
+                notif = await mcp_pubsub.drain_async(queue, _SSE_HEARTBEAT_SECONDS)
                 if notif is None:
-                    # Heartbeat — comment line keeps proxies from idling
-                    # the connection without showing up in the JSON-RPC
+                    # Heartbeat comment — keeps proxies from idling the
+                    # connection without showing up in the JSON-RPC
                     # event stream.
-                    yield ": keepalive\n\n"
+                    yield b": keepalive\n\n"
                     continue
                 frame: dict[str, Any] = {
                     "jsonrpc": "2.0",
                     "method": notif.method,
                     "params": notif.params,
                 }
-                yield f"data: {json.dumps(frame)}\n\n"
-        except GeneratorExit:
-            # Client disconnected — Flask raises this when the
-            # response is closed. Fall through to the finally block.
+                yield f"data: {json.dumps(frame)}\n\n".encode("utf-8")
+        except asyncio.CancelledError:
+            # FastAPI cancels the generator when the client disconnects.
             raise
         finally:
             mcp_session.drop(sess_id)
@@ -115,11 +133,9 @@ def transport_sse():
 
     headers = {
         "Cache-Control": "no-cache",
-        # Same nginx hint the chat stream uses — flush on every yield.
+        # nginx hint — flush on every yield.
         "X-Accel-Buffering": "no",
     }
-    return Response(
-        stream_with_context(stream()),
-        mimetype="text/event-stream",
-        headers=headers,
+    return StreamingResponse(
+        stream(), media_type="text/event-stream", headers=headers,
     )

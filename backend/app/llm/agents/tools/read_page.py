@@ -1,10 +1,8 @@
 """Handler for the `read_page` tool. Spec lives in `read_page.json`.
 
 Returns the full body of a single wiki doc plus the active agent
-activity rows for that path. Registers the path as "read" in the chat
-session (via the loop's ``_record_seen_paths`` hook, which keys off
-the ``path`` field in this tool's result) and as a ``read`` activity
-in the registry so co-occupant agents see each other.
+activity rows for that path. Registers a ``read`` activity in the
+registry so co-occupant agents see each other.
 """
 from __future__ import annotations
 

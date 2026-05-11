@@ -2,17 +2,17 @@
 
 The fuzzy replacer (`app.wiki.edit.replace`) and broken-link checker
 (`app.wiki.links`) are pure wiki primitives. This module is the tool-side
-adapter: argument validation, read-before-write enforcement, commit +
+adapter: argument validation, optimistic-concurrency check, commit +
 reindex + trigger fan-out, and assembling the result dict the model sees.
 """
 from __future__ import annotations
 
 import difflib
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
 from app.auth import current_user
-from app.llm.agents._session import seen_doc_paths
 from app.wiki import (
     agent_activity,
     filesystem,
@@ -53,7 +53,7 @@ def validate_doc_path(raw_path: Any) -> str:
 
 
 # --------------------------------------------------------------------------- #
-# Read-before-write                                                           #
+# Optimistic concurrency                                                      #
 # --------------------------------------------------------------------------- #
 
 
@@ -65,12 +65,9 @@ def assert_base_sha(rel: str, base_sha: str | None) -> dict[str, str] | None:
     same shape every write tool returns — when ``base_sha`` no longer
     matches HEAD for ``rel``.
 
-    Used by the MCP write surface (Phase 4 in
-    ``local_data/wiki/mcp-server/mcp-server.md``) so external agents
-    can rebase against drift instead of clobbering. The chat agent
-    holds direct loop state and rarely passes ``base_sha``; that's
-    fine — both flows go through the same handler, the check is a
-    no-op when ``base_sha`` is None.
+    Used by both the chat agent and the MCP write surface so external
+    agents can rebase against drift instead of clobbering. The check
+    is a no-op when ``base_sha`` is None.
     """
     if base_sha is None:
         return None
@@ -88,27 +85,6 @@ def assert_base_sha(rel: str, base_sha: str | None) -> dict[str, str] | None:
             "read_doc, re-derive the edit, and retry"
         ),
     }
-
-
-def assert_read_before_write(rel: str) -> None:
-    """Refuse to edit an existing doc the model has not seen this turn.
-
-    A no-op when called outside a chat loop (``seen_doc_paths`` is the
-    default ``None``) or when the file does not yet exist.
-    """
-    seen = seen_doc_paths.get()
-    if seen is None:
-        return
-    abs_path = filesystem.absolute(rel)
-    if not Path(abs_path).is_file():
-        return
-    if rel in seen:
-        return
-    raise ToolError(
-        f"You must call read_page({rel!r}) before editing it. Searching alone "
-        "isn't enough — search_wiki returns short snippets, not full bodies. "
-        "This protects against blind overwrites."
-    )
 
 
 # --------------------------------------------------------------------------- #
@@ -133,11 +109,17 @@ def author_string() -> str | None:
 
 
 def commit_and_fan_out(
-    rel: str, body: str, message: str, *, change_kind: str
+    rel: str, body: str, message: str, *, change_kind: str,
+    activity_ttl: timedelta | None = None,
 ) -> str:
     """Commit ``body`` to ``rel``, queue reindex, fan out to triggers.
 
     Returns the commit SHA. ``change_kind`` is ``"create"`` or ``"edit"``.
+
+    ``activity_ttl`` overrides the default 24h TTL on the resulting
+    Active-agents row — write tools surface this through their
+    ``expires_in_seconds`` argument so an agent can declare how long
+    it expects to keep working.
 
     Side effects:
       1. Permission gate (write on existing pages).
@@ -160,20 +142,21 @@ def commit_and_fan_out(
     user = _current_user_or_none()
     if user is not None:
         agent_name = agent_activity.agent_name_var.get()
-        expires_at = agent_activity.upsert_activity(
+        upsert_kwargs: dict[str, Any] = dict(
             user_id=user.id,
             agent_name=agent_name,
             doc_path=rel,
             activity="wrote",
             description=message,
         )
+        if activity_ttl is not None:
+            upsert_kwargs["ttl"] = activity_ttl
+        expires_at = agent_activity.upsert_activity(**upsert_kwargs)
         # Local import: avoids loading the tasks package at tool-load time.
         from app.tasks.agent_activity import schedule_cleanup_for_natural_key
         schedule_cleanup_for_natural_key(
             user_id=user.id,
             agent_name=agent_name,
-            doc_path=rel,
-            activity="wrote",
             expires_at=expires_at,
         )
 
@@ -207,10 +190,40 @@ def mark_doc_read(rel: str) -> None:
     schedule_cleanup_for_natural_key(
         user_id=user.id,
         agent_name=agent_name,
-        doc_path=rel,
-        activity="read",
         expires_at=expires_at,
     )
+
+
+# --------------------------------------------------------------------------- #
+# Argument parsing                                                            #
+# --------------------------------------------------------------------------- #
+
+
+# Bounds on the agent-supplied TTL override. 60s lower bound prevents
+# trivially-short fires that would just churn the cleanup queue; 7-day
+# upper bound caps how long a stale row can hang around if the agent
+# disappears mid-task.
+_EXPIRES_IN_MIN_SECONDS = 60
+_EXPIRES_IN_MAX_SECONDS = 7 * 24 * 60 * 60
+
+
+def parse_expires_in_seconds(raw: Any) -> timedelta | None:
+    """Validate and convert the optional ``expires_in_seconds`` arg.
+
+    Returns ``None`` when not provided; otherwise a ``timedelta``.
+    Raises ``ToolError`` on invalid values so callers can return
+    ``{"error": ...}`` to the model.
+    """
+    if raw is None:
+        return None
+    if isinstance(raw, bool) or not isinstance(raw, int):
+        raise ToolError("expires_in_seconds must be an integer when provided")
+    if raw < _EXPIRES_IN_MIN_SECONDS or raw > _EXPIRES_IN_MAX_SECONDS:
+        raise ToolError(
+            f"expires_in_seconds must be between {_EXPIRES_IN_MIN_SECONDS} "
+            f"and {_EXPIRES_IN_MAX_SECONDS}"
+        )
+    return timedelta(seconds=raw)
 
 
 def _current_user_or_none():

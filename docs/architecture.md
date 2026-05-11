@@ -5,7 +5,7 @@
 | Container | Role |
 |---|---|
 | `postgres` | Postgres 17 with `pg_textsearch` (BM25 search) and `pgmq` (task queue). pg_textsearch is loaded via `shared_preload_libraries`. Local image — see `deploy/postgres/Dockerfile`. |
-| `backend`  | Flask app on :8080. Hosts the API. |
+| `backend`  | FastAPI app on :8080 (uvicorn). Hosts the API. |
 | `worker-*` | Same image as backend, runs one `app.tasks.run_worker <queue>` per pgmq queue (`documents`, `triggers`, `lightweight_maintenance`). |
 | `frontend` | Next.js + TS UI on :3000. |
 | `nginx`    | Reverse proxy on :80 — `/api/*` → backend, everything else → frontend. |

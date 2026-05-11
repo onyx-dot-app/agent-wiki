@@ -20,18 +20,28 @@ Single endpoint at `/api/mcp`, both methods bearer-authed:
 Plus a tiny user-facing CRUD on `/api/mcp/tokens` (cookie-authed; the
 **Agents** sidebar page uses it).
 
+### Initialize handshake
+
+The `initialize` response carries the standard `protocolVersion`,
+`capabilities`, and `serverInfo` envelope, plus a top-level
+`instructions` string (`app/mcp_server/transport.py:SERVER_INSTRUCTIONS`).
+Spec-compliant clients (Claude, Cursor, etc.) surface this to the model
+as a system-level briefing on what the wiki is and how to use it —
+search before working, keep pages current, prefer cross-links, prompt
+before adding new top-level deliverables. Edit the constant rather than
+threading per-tool descriptions to change the agent-facing contract.
+
 ### Tools
 
 Every tool listed below is a thin re-export of the chat agent's
 existing handler at `app/llm/agents/tools/<name>.py`. The MCP layer
-adds an allow-list filter, a `seen_paths` ContextVar binding, the
-`stale_paths` field on every result, and the optional `subscribe`
-parameter on `read_doc`.
+adds an allow-list filter, the `stale_paths` field on every result,
+and the optional `subscribe` parameter on `read_doc`.
 
 | Tool | What it does |
 |---|---|
 | `search_wiki(query, limit?)` | BM25 over `pg_textsearch`. Pre-filtered through `acl.visible_paths_filter` so unauthorized hits never get scored. |
-| `read_doc(path, sha?, subscribe=true)` | Read at HEAD (default) or any historical sha. Returns `{path, body, sha, is_head}`. HEAD reads auto-subscribe the session and populate `seen_paths`; historical reads do neither. |
+| `read_doc(path, sha?, subscribe=true)` | Read at HEAD (default) or any historical sha. Returns `{path, body, sha, is_head}`. HEAD reads auto-subscribe the session; pass the returned `sha` to a subsequent edit as `base_sha` for optimistic concurrency. |
 | `list_history(path, limit?)` | Per-path commit log. Same shape as `GET /api/documents/file/history`. |
 | `ask_nl_question(query)` | RAG-style answer + citations via `app.llm.agents.wiki_qa` (a read-only chat-loop instance). |
 | `edit_doc(path, old_string, new_string, commit_message, base_sha?)` | Surgical fuzzy find-and-replace. |
@@ -67,20 +77,20 @@ messages); cross-user job subscribe returns `forbidden`.
 ```
 backend/app/mcp_server/
   __init__.py            Package marker
-  auth.py                @bearer_required → flask.g.user
   session.py             McpSession + thread-safe in-memory registry
-  transport.py           JSON-RPC dispatcher
+  transport.py           JSON-RPC dispatcher (takes the bearer user as
+                         an explicit arg, threaded from the FastAPI
+                         route)
   tools.py               MCP_ALLOWED_TOOLS, tools/list, tools/call
                          (sync + async routes)
   resources.py           list/read/subscribe/unsubscribe handlers
   pubsub.py              Subscription registry + per-session queue +
                          Postgres LISTEN/NOTIFY bridge
-  jobs.py                mcp_jobs repo
-  worker_context.py      as_user(uid): pushes Flask app+request context
-                         and binds g.user in the worker process
 
 backend/app/api/
-  mcp_server.py          POST + GET /api/mcp blueprint
+  mcp_server.py          POST + GET /api/mcp FastAPI router. POST
+                         dispatches JSON-RPC; GET is the long-lived
+                         async SSE channel.
   mcp_tokens.py          Cookie-authed token CRUD
   mcp_connections.py     Outbound (renamed from mcp.py)
 
@@ -111,13 +121,15 @@ backend/app/llm/agents/tools/_doc_helpers.py
 
 backend/app/tasks/document_update.py
   agent_update_document_nl(job_id)
-                         Worker on documents_queue. Loads job, enters
-                         as_user(...), validates base_sha + debounce,
-                         invokes document_updater, marks succeeded /
-                         failed, publishes job state.
+                         Worker on documents_queue. Loads job, binds
+                         the user via ``set_current_user(load_user(uid))``,
+                         validates base_sha + debounce, invokes
+                         document_updater, marks succeeded / failed,
+                         publishes job state.
 
 backend/app/main.py
-  create_app()           Calls mcp_pubsub.start_listener() at boot
+  create_app()           FastAPI factory. The lifespan calls
+                         mcp_pubsub.start_listener() at boot
                          (web process only)
 
 frontend/src/
@@ -135,16 +147,18 @@ External agent
 
 app/api/mcp_server.py:transport_post
   ↓
-app/mcp_server/auth.py:bearer_required
+app/auth/deps.py:require_bearer  (FastAPI dependency)
   - tokens_repo.verify(raw) → User                   ← bcrypt walk + last_used_at bump
-  - flask.g.user = user                              ← single seam: every helper below
-                                                       reads g.user via current_user()
   - 401 on missing / unknown / revoked
+  ↓
+with set_current_user(user):                          ← single seam: every helper below
+                                                       reads the user via current_user()
+                                                       (ContextVar-backed)
   ↓
 app/mcp_server/transport.py:dispatch(message, session_id)
   - validates jsonrpc==2.0
   - routes by method:
-      initialize                → mcp_session.create(g.user)
+      initialize                → mcp_session.create(current_user())
       notifications/initialized → flips initialized=True
       ping                      → {}
       tools/list                → mcp_tools.list_for_mcp()
@@ -155,8 +169,6 @@ app/mcp_server/transport.py:dispatch(message, session_id)
   ↓
 app/mcp_server/tools.py:call_for_mcp
   - allow-list filter
-  - seen_doc_paths.set(sess.seen_paths)              ← shares the read-before-write
-                                                       ContextVar with the chat agent
   - sync tools  → registry_dispatch(name, args)
   - async tools → _call_async_nl_update(sess, args)
                   → ACL + idempotency + jobs.create + enqueue
@@ -166,7 +178,6 @@ app/mcp_server/tools.py:call_for_mcp
 app/llm/agents/tools/<name>.py        ← SHARED with chat agent
   - validate args
   - require_can("read"|"write", path)              ← ACL
-  - assert_read_before_write(rel)
   - assert_base_sha(rel, base_sha)
   - body manipulation
   - commit_and_fan_out(rel, body, msg, ...)
@@ -187,7 +198,7 @@ External agent
   ↓               +  Mcp-Session-Id: <id>         (must be initialized)
 
 app/api/mcp_server.py:transport_sse
-  - bearer_required + session-belongs-to-bearer check
+  - Depends(require_bearer) + session-belongs-to-bearer check
   - generator loop:
       pubsub.drain_blocking(sess_id, 15s)
         ↓ on notification
@@ -244,11 +255,13 @@ scale; revisit if we ever ship machine-generated tokens.
 
 ## Authorization
 
-There is **no MCP-specific ACL code path**. The bearer middleware
-populates `flask.g.user`, which is the same field cookie-authenticated
-requests populate. Every helper below — `require_can`, ACL lifecycle
-hooks, agent-activity attribution, trigger `actor` field — reads from
-the same place.
+There is **no MCP-specific ACL code path**. The bearer dependency
+(`require_bearer`) binds the user into the `current_user_ctx`
+ContextVar via `set_current_user(...)`, the same seam cookie-authed
+requests use (the `CurrentUserMiddleware` populates it from the
+Starlette session). Every helper below — `require_can`, ACL
+lifecycle hooks, agent-activity attribution, trigger `actor` field —
+reads from the same place via `app.auth.current_user()`.
 
 | Surface | Check |
 |---|---|
@@ -257,19 +270,19 @@ the same place.
 | `ask_nl_question` | Wraps a chat-loop instance whose own tools call `require_can`. |
 | `edit_doc` / `multi_edit` / `apply_patch` / `write_doc(overwrite)` | `require_can("write", path)`. |
 | `write_doc(create)` / `move_path(new)` | Allowed for any authenticated user; new pages get default-public ACL + owner stamp via `wiki/notify.py:after_doc_write`. |
-| `update_doc_nl` (enqueue) | `require_can("write", path)` + `assert_read_before_write` here, since the worker can't see `seen_doc_paths`. |
-| `update_doc_nl` (worker) | Re-enters `g.user` via `as_user(job.user_id)` so `commit_and_fan_out`'s `require_can` runs. |
+| `update_doc_nl` (enqueue) | `require_can("write", path)` here, since the worker can't re-check ACL. |
+| `update_doc_nl` (worker) | Re-binds `current_user_ctx` via `set_current_user(load_user(job.user_id))` so `commit_and_fan_out`'s `require_can` runs. |
 | `resources/list` | Filtered through `acl.visible_paths_filter`. |
 | `resources/read wiki:///<path>` | `require_can("read", path)`. |
 | `resources/subscribe wiki:///<path>` | `require_can("read", path)` at subscribe; `acl.can(...)` recheck before each push. |
 | `resources/{read,subscribe} job://<id>` | Owner-only (`job.user_id == sess.user_id`). |
-| `/api/mcp/tokens/*` | `@login_required` — users only manage their own tokens. |
+| `/api/mcp/tokens/*` | `Depends(require_user)` — users only manage their own tokens. |
 
 Admins still bypass page-level checks (matching the web UI).
 
 ## Concurrency
 
-Three layers, strongest to weakest:
+Two layers, strongest to weakest:
 
 ### 1. `base_sha` — hard correctness
 
@@ -294,21 +307,11 @@ Every write tool accepts an optional `base_sha`. When set,
 | `update_doc_nl` | Optional, recorded on the job; worker re-checks before invoking the LLM. |
 | `move_path` | N/A — content unchanged. |
 
-`read_doc` returns the current HEAD sha, captured **after**
-`mark_doc_read` runs so the value points at the body the agent is
-reading (the agent-activity registry refresh would otherwise make
-the returned sha immediately stale).
+`read_doc` returns the current HEAD sha, captured **after** the
+agent-activity frontmatter refresh so the returned sha points at the
+exact body the agent is reading.
 
-### 2. Read-before-write — primary signal
-
-`assert_read_before_write(rel)` consults the `seen_doc_paths`
-ContextVar (set by `tools.call_for_mcp` for the duration of an MCP
-dispatch). Writes to a file the session hasn't `read_doc`-ed at HEAD
-fail with the standard "must call read_page first" error. Historical
-reads (`sha` set) don't satisfy this — the agent saw the old body,
-not the current one.
-
-### 3. `stale_paths` — belt-and-suspenders
+### 2. `stale_paths` — belt-and-suspenders
 
 Every MCP tool result carries `stale_paths`: a list of subscribed
 paths with a pending push since the last tool call. Computed by
@@ -328,18 +331,17 @@ client                                      server
   │── tools/call update_doc_nl ──────────▶│  enqueue:
   │   {path, instruction,                 │    1. validate path + instruction
   │    base_sha?, idempotency_key?}       │    2. require_can("write", path) — at enqueue
-  │                                       │    3. assert_read_before_write — at enqueue
-  │                                       │    4. find_by_idempotency_key → return existing
-  │                                       │    5. mcp_jobs.create(...)
-  │                                       │    6. agent_update_document_nl(job_id)
-  │                                       │    7. mcp_pubsub.subscribe_job(sess.id, job.id)
+  │                                       │    3. find_by_idempotency_key → return existing
+  │                                       │    4. mcp_jobs.create(...)
+  │                                       │    5. agent_update_document_nl(job_id)
+  │                                       │    6. mcp_pubsub.subscribe_job(sess.id, job.id)
   │◀──── {job_id, status_uri,             │
   │       status: "pending",              │
   │       deduplicated: false} ───────────│
   │                                       │
   │                                       │  worker (documents_queue):
   │                                       │    1. mcp_jobs.get(job_id)
-  │                                       │    2. with as_user(job.user_id):
+  │                                       │    2. with set_current_user(load_user(job.user_id)):
   │                                       │       a. mark_running
   │                                       │       b. base_sha recheck
   │                                       │       c. debounce check (30s window)
@@ -367,27 +369,28 @@ window (default `MCP_NL_DEBOUNCE_SECONDS=30`), the worker skips the
 LLM call and marks the job `succeeded committed=false
 reason=debounced previous_job_id=<earlier>`.
 
-**Worker user context.** The worker process has no Flask request, so
-`commit_and_fan_out` would see `current_user() is None`. The
-`worker_context.as_user(user_id)` context manager pushes a Flask
-app+request context (a module-level singleton bare app) and stuffs
-the resolved User into `g.user` for the task duration. Below that
-seam, every helper sees the same execution shape an HTTP request
-has — ACL, agent-activity attribution, trigger `actor`, frontmatter
-rendering.
+**Worker user context.** The worker process has no HTTP request, so
+`commit_and_fan_out` would see `current_user() is None`. The task
+loads the job's owner via `load_user(job.user_id)` and wraps the
+execution in `with set_current_user(user):`, which binds the
+resolved `User` into `current_user_ctx` (the same ContextVar
+`CurrentUserMiddleware` sets on web requests) for the task duration.
+Below that seam, every helper sees the same execution shape an HTTP
+request has — ACL, agent-activity attribution, trigger `actor`,
+frontmatter rendering.
 
 ## Sessions
 
 In-memory and process-local. `McpSession` carries `(id, user_id,
-is_admin, initialized, seen_paths)`. They die when the process
+is_admin, initialized)`. They die when the process
 restarts — persistent subscriptions across reconnects is an explicit
 non-goal.
 
 ```
 client                              server
   │
-  │── POST initialize ──────────▶│  bearer_required → g.user
-  │                              │  mcp_session.create(g.user)
+  │── POST initialize ──────────▶│  require_bearer → set_current_user(user)
+  │                              │  mcp_session.create(current_user())
   │                              │  → returns sess (initialized=False)
   │◀── result + Mcp-Session-Id ──│
   │
@@ -413,6 +416,16 @@ this is automatic.
 The wiki UI has an **Agents** tab in the left sidebar. Open it,
 generate an API key (you see the value once), and drop it into your
 agent's MCP config. The endpoint is `<origin>/api/mcp`.
+
+In production (docker-compose nginx or the Helm ingress) point the
+client at the public origin — both proxies are configured for the
+streamable-HTTP transport (`proxy_buffering off`, long
+`proxy_read_timeout`; see `nginx/nginx.conf` and the
+`ingress.annotations` block in `deploy/helm/.../values.yaml`). In
+**local dev** point the client at the FastAPI backend directly
+(`http://localhost:8080/api/mcp`) — the Next.js dev server's
+`/api/:path*` rewrite buffers the response and breaks the transport
+when the client sends `Accept: text/event-stream`.
 
 **Claude Code** — `~/.config/claude/mcp_servers.json`:
 ```json
@@ -457,8 +470,8 @@ async with streamablehttp_client(
 |---|---|
 | `tests/test_mcp_tokens.py` | Token repo + HTTP CRUD, multi-user isolation, revocation. |
 | `tests/test_mcp_server_transport.py` | Bearer auth, `initialize` handshake, JSON-RPC errors, `current_user()` visibility inside dispatch. |
-| `tests/test_mcp_server_tools.py` | `tools/list` allow-list + `inputSchema` shape, `read_doc` HEAD vs historical, `seen_paths` semantics, ACL forbid on reads, search via MCP. |
-| `tests/test_mcp_server_writes.py` | `base_sha` happy path + stale rejection, read-before-write, multi_edit atomic abort, apply_patch fuzzy fallback, write_doc create vs overwrite, `base_sha_required_for_overwrite`, ACL forbid on write, `stale_paths` field. |
+| `tests/test_mcp_server_tools.py` | `tools/list` allow-list + `inputSchema` shape, `read_doc` HEAD vs historical, ACL forbid on reads, search via MCP. |
+| `tests/test_mcp_server_writes.py` | `base_sha` happy path + stale rejection, multi_edit atomic abort, apply_patch fuzzy fallback, write_doc create vs overwrite, `base_sha_required_for_overwrite`, ACL forbid on write, `stale_paths` field. |
 | `tests/test_mcp_server_subscriptions.py` | `resources/list` ACL filter, `resources/read` with forbidden + malformed URI, explicit subscribe + publish round-trip, auto-subscribe via `read_doc`, `unsubscribe`, per-subscriber ACL recheck on revoke, end-to-end commit → notify, `create` fires `list_changed`, `stale_paths` non-destructive peek, SSE delivery + disconnect cleanup + cross-user 403. |
 | `tests/test_mcp_server_jobs.py` | `update_doc_nl` enqueue → worker → succeed-with-commit; `NO_CHANGE` path; validation; idempotency (explicit + default key); worker `base_sha` recheck; debounce; `job://<id>` resource read + cross-user not-found; cross-user subscribe forbidden; auto-subscribe + SSE status pushes. |
 | `tests/test_mcp_e2e.py` | Full lifecycle: cookie-authed mint → bearer init → tools/list → read → edit(base_sha) → re-read; revoke kills the bearer; cross-user ACL isolation. |

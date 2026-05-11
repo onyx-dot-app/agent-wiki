@@ -1,169 +1,145 @@
-"""Chat endpoint backing the in-app ChatUI.
+"""FastAPI port of ``app/api/chat.py``.
 
-Conversations are persisted server-side. Each user owns a list of
-``chat_sessions`` rows; each session holds an ordered list of
-``chat_messages`` (user + assistant turns; assistant turns also carry the
-full streamed event log as JSON for re-rendering).
-
-Routes:
-
-* ``GET    /api/chat/sessions``           — list the caller's sessions
-* ``POST   /api/chat/sessions``           — create a new (untitled) session
-* ``GET    /api/chat/sessions/<id>``      — session metadata + messages
-* ``DELETE /api/chat/sessions/<id>``      — hard-delete the session
-* ``POST   /api/chat/messages``           — send a user turn (SSE stream)
-
-Streaming protocol — Server-Sent Events. Each event is one line of body:
-
-    data: {"type": ..., ...}\\n\\n
-
-Event types the frontend handles:
-
-* ``text_delta``     — ``{text}``                assistant tokens to append
-* ``tool_call``      — ``{id, name, arguments}`` agent invoked a tool
-* ``tool_result``    — ``{id, name, content}``   tool returned
-* ``iteration_done`` — ``{}``                    one model turn finished, agent loops
-* ``done``           — ``{}``                    final assistant turn, stream closes
-* ``error``          — ``{code, message}``       fatal; stream closes after this
+The 4 session-CRUD routes land in Phase 3 (plain JSON). The SSE
+endpoint ``POST /api/chat/messages`` lands here in Phase 4 — async
+streaming so the model worker isn't pinned to one OS thread per
+in-flight chat the way the Flask sync-worker setup is today.
 """
 from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Iterator
+from collections.abc import AsyncIterator
+from typing import Any
 
-from flask import Blueprint, Response, jsonify, request, stream_with_context
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi.responses import StreamingResponse
+from starlette.concurrency import iterate_in_threadpool, run_in_threadpool
 
-from app.auth import current_user, login_required
+from app.auth import User
+from app.auth.deps import require_user
 from app.chat import sessions as sessions_repo
 from app.llm.agents.chat import messages_from_history, run_chat_stream
 from app.llm.errors import LLMError
-from app.models._helpers import error, parse_body
 from app.models.chat import (
-    ChatMessageOut,
-    ChatSessionDetail,
-    ChatSessionOut,
-    SendChatRequest,
+    ChatMessageOut, ChatSessionDetail, ChatSessionOut, SendChatRequest,
 )
 from app.tasks.chat_title import generate_chat_title
 from app.tracing import trace_flow
 
-bp = Blueprint("chat", __name__)
+router = APIRouter()
 log = logging.getLogger(__name__)
 
 
-def _session_out(row: dict[str, Any]) -> dict[str, Any]:
+def _sse(event: dict[str, Any]) -> bytes:
+    return f"data: {json.dumps(event)}\n\n".encode("utf-8")
+
+
+def _session_out(row: dict[str, Any]) -> ChatSessionOut:
     return ChatSessionOut(
         id=row["id"],
         title=row["title"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
-    ).model_dump()
+    )
 
 
-# --------------------------------------------------------------------------- #
-# Session CRUD                                                                #
-# --------------------------------------------------------------------------- #
-
-
-@bp.get("/sessions")
-@login_required
-def list_sessions():
-    user = current_user()
-    assert user is not None  # @login_required guard
+@router.get("/sessions", response_model=list[ChatSessionOut])
+def list_sessions(user: User = Depends(require_user)) -> list[ChatSessionOut]:
     rows = sessions_repo.list_for_user(user.id)
-    return jsonify([_session_out(r) for r in rows])
+    return [_session_out(r) for r in rows]
 
 
-@bp.post("/sessions")
-@login_required
-def create_session():
-    user = current_user()
-    assert user is not None
+@router.post(
+    "/sessions",
+    response_model=ChatSessionOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_session(user: User = Depends(require_user)) -> ChatSessionOut:
     row = sessions_repo.create(user.id)
-    return jsonify(_session_out(row)), 201
+    return _session_out(row)
 
 
-@bp.get("/sessions/<session_id>")
-@login_required
-def get_session(session_id: str):
-    user = current_user()
-    assert user is not None
+@router.get("/sessions/{session_id}", response_model=ChatSessionDetail)
+def get_session(
+    session_id: str, user: User = Depends(require_user),
+) -> ChatSessionDetail:
     row = sessions_repo.get(session_id, user.id)
     if row is None:
-        return error("session not found", 404)
+        raise HTTPException(status_code=404, detail="session not found")
     messages = sessions_repo.get_messages(session_id)
-    return jsonify(
-        ChatSessionDetail(
-            session=ChatSessionOut(
-                id=row["id"],
-                title=row["title"],
-                created_at=row["created_at"],
-                updated_at=row["updated_at"],
-            ),
-            messages=[
-                ChatMessageOut(
-                    id=m["id"],
-                    role=m["role"],
-                    content=m["content"],
-                    events=m["events"],
-                    created_at=m["created_at"],
-                )
-                for m in messages
-            ],
-        ).model_dump()
+    return ChatSessionDetail(
+        session=ChatSessionOut(
+            id=row["id"],
+            title=row["title"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        ),
+        messages=[
+            ChatMessageOut(
+                id=m["id"],
+                role=m["role"],
+                content=m["content"],
+                events=m["events"],
+                created_at=m["created_at"],
+            )
+            for m in messages
+        ],
     )
 
 
-@bp.delete("/sessions/<session_id>")
-@login_required
-def delete_session(session_id: str):
-    user = current_user()
-    assert user is not None
-    deleted = sessions_repo.delete(session_id, user.id)
-    if not deleted:
-        return error("session not found", 404)
-    return ("", 204)
+@router.delete("/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_session(
+    session_id: str, user: User = Depends(require_user),
+) -> Response:
+    if not sessions_repo.delete(session_id, user.id):
+        raise HTTPException(status_code=404, detail="session not found")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-# --------------------------------------------------------------------------- #
-# Streaming send                                                              #
-# --------------------------------------------------------------------------- #
+@router.post("/messages")
+async def send_message(
+    req: SendChatRequest, request: Request, user: User = Depends(require_user),
+) -> Response:
+    """Run one user turn through the chat agent, streaming JSON-RPC-like
+    SSE frames back to the client.
 
-
-@bp.post("/messages")
-@login_required
-def send_message():
-    user = current_user()
-    assert user is not None
-
-    req = parse_body(SendChatRequest, request.get_json(silent=True))
-    sess = sessions_repo.get(req.session_id, user.id)
+    The agent generator (``run_chat_stream``) is sync — wrapped via
+    ``iterate_in_threadpool`` so the event loop isn't blocked while
+    the model produces tokens. DB writes happen via
+    ``run_in_threadpool`` for the same reason.
+    """
+    sess = await run_in_threadpool(
+        sessions_repo.get, req.session_id, user.id,
+    )
     if sess is None:
-        return error("session not found", 404)
+        raise HTTPException(status_code=404, detail="session not found")
 
-    # Was this the first user turn? Used after the stream finishes to
-    # decide whether to enqueue title generation.
-    prior_count = sessions_repo.count_messages(req.session_id)
+    # First turn? Used after the stream finishes to decide whether to
+    # enqueue title generation.
+    prior_count = await run_in_threadpool(
+        sessions_repo.count_messages, req.session_id,
+    )
     is_first_turn = prior_count == 0
 
-    # Persist the user message before we start streaming. If the LLM call
-    # fails halfway the user's message is still on the timeline.
-    sessions_repo.append_message(
-        req.session_id, role="user", content=req.content, events=None
+    # Persist the user message before streaming. If the LLM call fails
+    # halfway, the user's turn is still on the timeline.
+    await run_in_threadpool(
+        lambda: sessions_repo.append_message(
+            req.session_id, role="user", content=req.content, events=None,
+        ),
     )
 
-    # Hydrate prior history from the DB (now including the just-saved user
-    # turn). Each assistant row carries its full streamed event log; we
-    # replay those back into the agent-format message list so the model
-    # sees the exact tool_call / tool_result blocks it produced earlier.
-    history = sessions_repo.get_messages(req.session_id)
+    # Hydrate prior history (now including the just-saved user turn).
+    history = await run_in_threadpool(
+        sessions_repo.get_messages, req.session_id,
+    )
     messages: list[dict[str, Any]] = messages_from_history(history)
 
     session_id = req.session_id
     user_id = user.id
 
-    def generate() -> Iterator[str]:
+    async def stream() -> AsyncIterator[bytes]:
         events: list[dict[str, Any]] = []
         text_parts: list[str] = []
         try:
@@ -173,7 +149,13 @@ def send_message():
                 user_id=user_id,
                 is_first_turn=is_first_turn,
             ):
-                for ev in run_chat_stream(messages):
+                gen = run_chat_stream(messages)
+                # iterate_in_threadpool yields each item from the sync
+                # generator on a worker thread, so token emission
+                # doesn't block the event loop.
+                async for ev in iterate_in_threadpool(gen):
+                    if await request.is_disconnected():
+                        break
                     events.append(ev)
                     if ev.get("type") == "text_delta":
                         text_parts.append(ev.get("text", ""))
@@ -194,35 +176,30 @@ def send_message():
 
         # Stream completed cleanly — persist the assistant turn.
         try:
-            sessions_repo.append_message(
-                session_id,
-                role="assistant",
-                content="".join(text_parts),
-                events=events,
+            await run_in_threadpool(
+                lambda: sessions_repo.append_message(
+                    session_id,
+                    role="assistant",
+                    content="".join(text_parts),
+                    events=events,
+                ),
             )
-            sessions_repo.touch(session_id)
+            await run_in_threadpool(sessions_repo.touch, session_id)
         except Exception:
             log.exception("failed to persist assistant turn session_id=%s", session_id)
 
         if is_first_turn:
             try:
-                generate_chat_title(session_id)
+                await run_in_threadpool(generate_chat_title, session_id)
             except Exception:
                 # Title generation failures are non-fatal — log and move on.
                 log.exception("failed to enqueue title task session_id=%s", session_id)
 
     headers = {
         "Cache-Control": "no-cache",
-        # Disable buffering in nginx so events flush in real time. The dev
-        # proxy and prod nginx both honor this.
+        # nginx hint — flush on every yield.
         "X-Accel-Buffering": "no",
     }
-    return Response(
-        stream_with_context(generate()),
-        mimetype="text/event-stream",
-        headers=headers,
+    return StreamingResponse(
+        stream(), media_type="text/event-stream", headers=headers,
     )
-
-
-def _sse(event: dict[str, Any]) -> str:
-    return f"data: {json.dumps(event)}\n\n"

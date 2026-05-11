@@ -31,8 +31,9 @@ What this file adds:
   * ``mock_llm``        — patches ``app.llm.client.complete`` and ``stream``
     with a scripted responder. Tests register canned answers and assert on
     captured calls.
-  * ``flask_app`` / ``client`` — a real Flask app via ``app.main.create_app``
-    minus the ``init_db`` call (the schema is already migrated by ``tmp_db``).
+  * ``app`` / ``client`` — a real FastAPI app via ``app.main.create_app``
+    (the test factory builds the app without the lifespan firing — the
+    schema is already migrated by ``tmp_db``).
   * ``integration``     — composite fixture that bundles the above plus a
     handful of high-level helpers (signup, login, PUT doc, list events).
 
@@ -48,11 +49,13 @@ import re
 from typing import Any, Callable, Iterator
 
 import pytest
-from flask import Flask
-from flask.testing import FlaskClient
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 from app.llm.client import CompletionResult
 from app.tasks.queues import QUEUES
+
+from tests._auth import login_fastapi
 
 
 # --------------------------------------------------------------------------- #
@@ -200,22 +203,20 @@ def mock_llm(monkeypatch) -> MockLLM:
 
 
 # --------------------------------------------------------------------------- #
-# Flask app + client                                                          #
+# FastAPI app + client                                                        #
 # --------------------------------------------------------------------------- #
 
 
 @pytest.fixture
-def flask_app(tmp_repo) -> Flask:
+def app(tmp_repo) -> FastAPI:
     """Real ``create_app`` against the per-test schema + wiki repo."""
     from app.main import create_app
-    app = create_app()
-    app.config["TESTING"] = True
-    return app
+    return create_app()
 
 
 @pytest.fixture
-def client(flask_app) -> FlaskClient:
-    return flask_app.test_client()
+def client(app) -> TestClient:
+    return TestClient(app)
 
 
 # --------------------------------------------------------------------------- #
@@ -224,28 +225,28 @@ def client(flask_app) -> FlaskClient:
 
 
 class IntegrationHarness:
-    """Bundle of a Flask client + LLM mock + assertion helpers.
+    """Bundle of a FastAPI client + LLM mock + assertion helpers.
 
     Don't add domain logic here that doesn't have a counterpart in the
     real app — the harness exists to exercise the same code paths a
     request would, not to fake out half the system.
     """
 
-    def __init__(self, client: FlaskClient, llm: MockLLM, queues: dict[str, Any]) -> None:
+    def __init__(self, client: TestClient, llm: MockLLM, queues: dict[str, Any]) -> None:
         self.client = client
         self.llm = llm
         self.queues = queues
 
     # ----- auth -------------------------------------------------------------
 
-    def signup(self, email: str = "u@x.com", password: str = "hunter2-x", name: str | None = "U") -> str:
+    def signup(self, email: str = "u@x.com", password: str = "hunter22", name: str | None = "U") -> str:
         """POST /api/auth/signup. Returns the new user_id."""
         resp = self.client.post(
             "/api/auth/signup",
             json={"email": email, "password": password, "name": name},
         )
-        assert resp.status_code == 201, resp.get_data(as_text=True)
-        return resp.get_json()["id"]
+        assert resp.status_code == 201, resp.text
+        return resp.json()["id"]
 
     def signin(self, user_id: str | None = None, *, email: str | None = None) -> str:
         """Set a session for the given user. Either ``user_id`` directly,
@@ -260,11 +261,10 @@ class IntegrationHarness:
             resolved_id = row["id"]
         else:
             resolved_id = user_id
-        with self.client.session_transaction() as sess:
-            sess["user_id"] = resolved_id
+        login_fastapi(self.client, resolved_id)
         return resolved_id
 
-    def signup_and_signin(self, email: str = "u@x.com", password: str = "hunter2-x") -> str:
+    def signup_and_signin(self, email: str = "u@x.com", password: str = "hunter22") -> str:
         uid = self.signup(email=email, password=password)
         # signup already creates a session, but be explicit so the harness
         # behaves the same in tests that bypass /signup.
@@ -274,12 +274,12 @@ class IntegrationHarness:
 
     def put_doc(self, path: str, body: str) -> dict:
         resp = self.client.put("/api/documents/file", json={"path": path, "body": body})
-        assert resp.status_code in (200, 201), resp.get_data(as_text=True)
-        return resp.get_json()
+        assert resp.status_code in (200, 201), resp.text
+        return resp.json()
 
     def delete_doc(self, path: str) -> None:
         resp = self.client.delete(f"/api/documents/file?path={path}")
-        assert resp.status_code == 200, resp.get_data(as_text=True)
+        assert resp.status_code == 200, resp.text
 
     # ----- triggers ---------------------------------------------------------
 
@@ -289,8 +289,8 @@ class IntegrationHarness:
             "/api/triggers",
             json={"scope_path": scope_path, "nl_description": condition, "message": message},
         )
-        assert resp.status_code == 201, resp.get_data(as_text=True)
-        return resp.get_json()["id"]
+        assert resp.status_code == 201, resp.text
+        return resp.json()["id"]
 
     # ----- events / state ---------------------------------------------------
 
@@ -300,8 +300,8 @@ class IntegrationHarness:
         if kind:
             path += f"&kind={kind}"
         resp = self.client.get(path)
-        assert resp.status_code == 200, resp.get_data(as_text=True)
-        return resp.get_json()["events"]
+        assert resp.status_code == 200, resp.text
+        return resp.json()["events"]
 
     def fired_triggers(self) -> list[dict]:
         return self.events(kind="trigger.fire")

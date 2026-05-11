@@ -23,7 +23,7 @@ export default function EventsPage() {
 
   return (
     <AppShell>
-      <main style={{ padding: isMobile ? "16px 12px" : "24px 32px", height: "100vh", overflowY: "auto" }}>
+      <main style={{ padding: isMobile ? "16px 12px" : "24px 32px" }}>
         <PageHeader
           title="Events"
           description="Trigger fires, newest first."

@@ -22,7 +22,7 @@ def test_settings_persist_across_logout_and_login(integration):
     integration.signup(email="u@x.com", password="hunter2-x")
 
     # Defaults right after signup.
-    me = integration.client.get("/api/auth/me").get_json()
+    me = integration.client.get("/api/auth/me").json()
     assert me["settings"]["theme"] == "system"
     assert me["settings"]["timezone"] == "UTC"
     assert me["settings"]["default_landing"] == "wiki_home"
@@ -36,7 +36,7 @@ def test_settings_persist_across_logout_and_login(integration):
             "default_landing": "last_viewed",
         },
     )
-    assert resp.status_code == 200, resp.get_data(as_text=True)
+    assert resp.status_code == 200, resp.text
 
     # Logout drops the session cookie.
     integration.client.post("/api/auth/logout")
@@ -46,14 +46,14 @@ def test_settings_persist_across_logout_and_login(integration):
     resp = integration.client.post(
         "/api/auth/login", json={"email": "u@x.com", "password": "hunter2-x"}
     )
-    assert resp.status_code == 200, resp.get_data(as_text=True)
-    body = resp.get_json()
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
     assert body["settings"]["theme"] == "dark"
     assert body["settings"]["timezone"] == "America/Los_Angeles"
     assert body["settings"]["default_landing"] == "last_viewed"
 
     # /auth/me on the new session also reflects the persisted values.
-    me = integration.client.get("/api/auth/me").get_json()
+    me = integration.client.get("/api/auth/me").json()
     assert me["settings"]["theme"] == "dark"
     assert me["settings"]["timezone"] == "America/Los_Angeles"
     assert me["settings"]["default_landing"] == "last_viewed"
@@ -61,23 +61,23 @@ def test_settings_persist_across_logout_and_login(integration):
 
 def test_settings_persist_across_fresh_app_boot(tmp_repo):
     """A fresh ``create_app()`` reads the same DB state — proves
-    persistence isn't memoized in the Flask app instance.
+    persistence isn't memoized in the app instance.
 
     Bypasses the ``integration`` fixture so we can spin up a second
-    Flask app pointed at the same per-test schema.
+    app pointed at the same per-test schema.
     """
+    from fastapi.testclient import TestClient
+
     from app.main import create_app
 
-    app1 = create_app()
-    app1.config["TESTING"] = True
-    c1 = app1.test_client()
+    c1 = TestClient(create_app())
 
     # Signup + write settings on app1.
     resp = c1.post(
         "/api/auth/signup",
         json={"email": "p@x.com", "password": "hunter2-x", "name": "P"},
     )
-    assert resp.status_code == 201, resp.get_data(as_text=True)
+    assert resp.status_code == 201, resp.text
 
     resp = c1.put(
         "/api/user/settings",
@@ -91,16 +91,14 @@ def test_settings_persist_across_fresh_app_boot(tmp_repo):
 
     # Simulate a process restart — fresh app, fresh client (the new
     # client gets its own empty session, so app1's cookie is irrelevant).
-    app2 = create_app()
-    app2.config["TESTING"] = True
-    c2 = app2.test_client()
+    c2 = TestClient(create_app())
 
     # Login on the new app instance, verify the saved settings come back.
     resp = c2.post(
         "/api/auth/login", json={"email": "p@x.com", "password": "hunter2-x"}
     )
-    assert resp.status_code == 200, resp.get_data(as_text=True)
-    body = resp.get_json()
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
     assert body["settings"]["theme"] == "light"
     assert body["settings"]["timezone"] == "Europe/Berlin"
     assert body["settings"]["default_landing"] == "recent"
@@ -118,7 +116,7 @@ def test_settings_partial_update_preserves_other_fields(integration):
         "/api/user/settings", json={"default_landing": "recent"}
     )
 
-    me = integration.client.get("/api/auth/me").get_json()
+    me = integration.client.get("/api/auth/me").json()
     assert me["settings"]["theme"] == "dark"
     assert me["settings"]["timezone"] == "Asia/Tokyo"
     assert me["settings"]["default_landing"] == "recent"
@@ -157,7 +155,7 @@ def test_settings_isolated_between_users(integration):
     integration.client.post("/api/auth/logout")
 
     integration.signup(email="bob@x.com", password="hunter2-x")
-    me = integration.client.get("/api/auth/me").get_json()
+    me = integration.client.get("/api/auth/me").json()
     # Bob is a new account — should see defaults, not Alice's values.
     assert me["settings"]["theme"] == "system"
     assert me["settings"]["timezone"] == "UTC"
@@ -171,7 +169,7 @@ def test_settings_isolated_between_users(integration):
         json={"email": "alice@x.com", "password": "hunter2-x"},
     )
     assert resp.status_code == 200
-    assert resp.get_json()["settings"]["theme"] == "dark"
+    assert resp.json()["settings"]["theme"] == "dark"
 
 
 def test_invalid_settings_rejected_and_db_unchanged(integration):
@@ -221,5 +219,5 @@ def test_each_field_round_trips_independently(integration, field, valid_value):
     integration.signup(email="u@x.com", password="hunter2-x")
     resp = integration.client.put("/api/user/settings", json={field: valid_value})
     assert resp.status_code == 200
-    me = integration.client.get("/api/auth/me").get_json()
+    me = integration.client.get("/api/auth/me").json()
     assert me["settings"][field] == valid_value

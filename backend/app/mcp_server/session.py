@@ -19,7 +19,7 @@ import logging
 import secrets
 import threading
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 
 from app.auth import User
 
@@ -31,8 +31,7 @@ class McpSession(BaseModel):
 
     ``initialized`` flips to ``True`` on receipt of the
     ``notifications/initialized`` ack from the client; before that, only
-    ``initialize`` is allowed. ``seen_paths`` enforces the
-    "must-have-read-before-edit" rule shared with the chat agent.
+    ``initialize`` is allowed.
 
     ``is_admin`` is cached from the bearer-resolved User at session
     creation so the per-subscriber ACL recheck in
@@ -49,7 +48,6 @@ class McpSession(BaseModel):
     user_id: str
     is_admin: bool = False
     initialized: bool = False
-    seen_paths: set[str] = Field(default_factory=set)
 
 
 _SESSIONS: dict[str, McpSession] = {}

@@ -45,20 +45,15 @@ log = logging.getLogger(__name__)
 def cleanup_expired_activity(
     user_id: str,
     agent_name: str | None,
-    doc_path: str,
-    activity: str,
     expected_expires_at: str,
 ) -> None:
     row = agent_activity.get_by_natural_key(
-        user_id=user_id,
-        agent_name=agent_name,
-        doc_path=doc_path,
-        activity=activity,
+        user_id=user_id, agent_name=agent_name,
     )
     if row is None:
         log.debug(
-            "agent_activity cleanup: row already gone user=%s agent=%s doc=%s activity=%s",
-            user_id, agent_name, doc_path, activity,
+            "agent_activity cleanup: row already gone user=%s agent=%s",
+            user_id, agent_name,
         )
         return
     if row.expires_at != expected_expires_at:
@@ -70,10 +65,7 @@ def cleanup_expired_activity(
         )
         return
     agent_activity.delete_by_natural_key(
-        user_id=user_id,
-        agent_name=agent_name,
-        doc_path=doc_path,
-        activity=activity,
+        user_id=user_id, agent_name=agent_name,
     )
 
 
@@ -81,8 +73,6 @@ def schedule_cleanup_for_natural_key(
     *,
     user_id: str,
     agent_name: str | None,
-    doc_path: str,
-    activity: str,
     expires_at: str,
 ) -> None:
     """Schedule a cleanup at ``expires_at``, replacing any prior fire.
@@ -104,7 +94,7 @@ def schedule_cleanup_for_natural_key(
     """
     eta = _parse_eta(expires_at)
     new_msg_id = cleanup_expired_activity.schedule(
-        args=(user_id, agent_name, doc_path, activity, expires_at),
+        args=(user_id, agent_name, expires_at),
         eta=eta,
     )
     if new_msg_id is None:
@@ -116,15 +106,13 @@ def schedule_cleanup_for_natural_key(
             select(AgentActivity).where(
                 AgentActivity.user_id == user_id,
                 AgentActivity.agent_name.is_not_distinct_from(agent_name),
-                AgentActivity.doc_path == doc_path,
-                AgentActivity.activity == activity,
             )
         )
         if row is None:
             log.warning(
                 "agent_activity cleanup schedule: row gone, canceling new fire "
-                "user=%s agent=%s doc=%s activity=%s",
-                user_id, agent_name, doc_path, activity,
+                "user=%s agent=%s",
+                user_id, agent_name,
             )
             _pgmq_delete(lightweight_maintenance_queue.name, new_msg_id)
             return
@@ -164,8 +152,6 @@ def schedule_all_pending_cleanups() -> None:
         schedule_cleanup_for_natural_key(
             user_id=r.user_id,
             agent_name=r.agent_name,
-            doc_path=r.doc_path,
-            activity=r.activity,
             expires_at=r.expires_at,
         )
     log.info(

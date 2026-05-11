@@ -18,7 +18,7 @@ the links at the bottom.
                              │        │
                   ┌──────────▼─┐  ┌───▼─────────┐
                   │  backend   │  │  frontend   │
-                  │  Flask     │  │  Next.js 14 │
+                  │  FastAPI   │  │  Next.js 14 │
                   │  :8080     │  │  :3000      │
                   └────┬───┬───┘  └─────────────┘
                        │   │
@@ -53,13 +53,14 @@ the links at the bottom.
 
 ## What each piece does
 
-**nginx** — reverse proxy on `:80`. `/api/*` → Flask, everything else →
-Next.js. In local dev (no nginx) the Next dev server's rewrite plays
+**nginx** — reverse proxy on `:80`. `/api/*` → FastAPI, everything else
+→ Next.js. In local dev (no nginx) the Next dev server's rewrite plays
 the same role.
 
-**backend (Flask, :8080)** — the API. Blueprints under `app/api/` stay
-thin: parse, gate via `@login_required` / `@admin_required` /
-`require_can`, delegate to a domain module
+**backend (FastAPI, :8080)** — the API, served by **uvicorn**
+(`uvicorn --factory app.main:create_app`). `APIRouter`s under
+`app/api/` stay thin: parse, gate via `Depends(require_user)` /
+`Depends(require_admin)` / `require_can`, delegate to a domain module
 (`app/auth/`, `app/wiki/`, `app/triggers/`, `app/llm/agents/`),
 serialize. Anything slow (LLM calls, reindex, trigger fan-out) is
 pushed to a pgmq queue.
@@ -120,7 +121,7 @@ client.
 
 1. Browser hits `/wiki/<path>`; `apiFetch` calls
    `/api/documents/<path>`.
-2. Blueprint runs `@login_required` then
+2. The router applies `Depends(require_user)` then
    `require_can("read", path)` (ACL check via `app/wiki/acl.py`).
 3. Domain layer reads via `git show HEAD:<path>`; response goes back
    as markdown, rendered with `react-markdown` + `remark-gfm`.
