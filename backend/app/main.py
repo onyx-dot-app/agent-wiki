@@ -40,7 +40,7 @@ from app.api import (
 )
 from app.auth import PermissionDenied
 from app.auth.deps import CurrentUserMiddleware
-from app.config import CONFIG
+import app.config as _app_config
 from app.mcp_server import pubsub as mcp_pubsub
 from app.models._helpers import ErrorResponse, QueueFullErrorResponse, RequestError
 from app.tasks.queues import QueueFullError
@@ -118,7 +118,7 @@ async def _lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     from app.wiki.git import ensure_wiki_repo
 
     setup_logging()
-    log.info("agent-wiki backend starting (database=%s)", CONFIG.database_url.split("@")[-1])
+    log.info("agent-wiki backend starting (database=%s)", _app_config.CONFIG.database_url.split("@")[-1])
     init_db()
     ensure_wiki_repo()
     triggers_repo.purge_invalid_triggers(actor="system <system@agent-wiki>")
@@ -150,10 +150,10 @@ def create_app() -> FastAPI:
     app.add_middleware(CurrentUserMiddleware)
     app.add_middleware(
         SessionMiddleware,
-        secret_key=CONFIG.secret_key,
+        secret_key=_app_config.CONFIG.secret_key,
         session_cookie="session",
         same_site="lax",
-        https_only=CONFIG.secure_cookies,
+        https_only=_app_config.CONFIG.secure_cookies,
         max_age=30 * 24 * 3600,
     )
     _install_error_handlers(app)
