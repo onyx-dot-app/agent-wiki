@@ -1,22 +1,17 @@
-"""Document APIs.
-
-Three callers we care about:
-  * Humans (browse, read, edit) — addressed by ``path``.
-  * Agents updating a doc — addressed by ``doc_id``; updates are git-committed.
-  * Connectors pushing generic updates that need to be reconciled by the
-    LLM agent — these are queued for background processing.
-"""
+"""FastAPI port of ``app/api/documents.py`` (Phase 3)."""
 from __future__ import annotations
 
 import logging
 import re
 import subprocess
 
-from flask import Blueprint, jsonify, request
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import JSONResponse
 
-from app.auth import current_user, login_required, require_can
+from app.auth import User, require_can
+from app.auth.deps import require_user
 from app.ingest import settings as ingest_settings
-from app.models._helpers import RequestError, error, parse_body
+from app.models._helpers import RequestError
 from app.models.document import (
     ActivityRowView,
     CommitView,
@@ -26,6 +21,7 @@ from app.models.document import (
     DocumentActivityResponse,
     DocumentEntry,
     FileHistoryResponse,
+    FolderHitView,
     GetDocumentResponse,
     IngestRequest,
     IngestResponse,
@@ -38,13 +34,13 @@ from app.models.document import (
     PutDocumentResponse,
     ReindexRequest,
     ReindexResponse,
-    FolderHitView,
     SearchHitView,
     SearchResponse,
 )
 from app.tasks.document_update import process_pushed_document
 from app.tasks.queues import QueueFullError
 from app.tasks.reindex import reindex_path
+from app.triggers import repo as triggers_repo
 from app.wiki import (
     agent_activity,
     filesystem,
@@ -52,25 +48,29 @@ from app.wiki import (
     notify as wiki_notify,
     search as wiki_search,
 )
-from app.triggers import repo as triggers_repo
 
-bp = Blueprint("documents", __name__)
+router = APIRouter()
 log = logging.getLogger(__name__)
 
-# A rollback-edit records the SHAs it supersedes in a "Deprecates:" trailer in
-# the new commit body. The history endpoint hides any sha listed in any later
-# commit's trailer, so rolled-back-over revisions disappear without rewriting
-# git history.
+# A rollback-edit records the SHAs it supersedes in a "Deprecates:" trailer
+# in the new commit body. The history endpoint hides any sha listed in any
+# later commit's trailer, so rolled-back-over revisions disappear without
+# rewriting git history.
 _DEPRECATES_RE = re.compile(r"^Deprecates:\s*(.+)$", re.MULTILINE)
 
 
-@bp.get("")
-@login_required
-def list_documents():
-    prefix = request.args.get("prefix", "")
+def _git_author(user: User | None) -> str | None:
+    if user is None:
+        return None
+    return f"{user.name or user.email} <{user.email}>"
+
+
+@router.get("", response_model=ListDocumentsResponse)
+def list_documents(
+    user: User = Depends(require_user), prefix: str = "",
+) -> ListDocumentsResponse:
     raw = wiki_git.list_paths_with_mtime(prefix)
-    user = current_user()
-    if user is not None and not user.is_admin:
+    if not user.is_admin:
         from app.wiki import acl as _acl
         md_paths = [p for p, _ in raw if p.endswith(".md")]
         visible = set(_acl.filter_paths_in_python(user.id, False, md_paths))
@@ -78,60 +78,56 @@ def list_documents():
         # the tree; permission checks happen on actual page access.
         raw = [(p, ts) for p, ts in raw if not p.endswith(".md") or p in visible]
     entries = [DocumentEntry(path=p, updated_at=ts) for p, ts in raw]
-    return jsonify(ListDocumentsResponse(entries=entries).model_dump())
+    return ListDocumentsResponse(entries=entries)
 
 
-@bp.get("/file")
-@login_required
-def get_document_by_path():
-    path = request.args.get("path", "")
-    ref = request.args.get("ref")
+@router.get("/file", response_model=GetDocumentResponse)
+def get_document_by_path(
+    user: User = Depends(require_user),
+    path: str = "",
+    ref: str | None = None,
+) -> GetDocumentResponse:
     if not path:
-        return error("path required", 400)
+        raise HTTPException(status_code=400, detail="path required")
     try:
         rel = filesystem.safe_rel_path(path)
     except ValueError as e:
-        return error(str(e), 400)
-    require_can("read", rel)
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    require_can("read", rel, user)
     head_sha = wiki_git.head_sha_for_path(rel)
     if ref:
-        # The path may have been different at this ref (rename). Resolve it
+        # The path may have been different at this ref (rename). Resolve
         # via --follow so old commits don't 404 on the current name.
         historical = wiki_git.path_at_ref(rel, ref) or rel
         try:
             body = wiki_git.read_file(historical, ref=ref)
-        except subprocess.CalledProcessError:
-            return error("not found at ref", 404)
-        return jsonify(GetDocumentResponse(
-            path=rel, body=body, head_sha=head_sha, ref=ref,
-        ).model_dump())
+        except subprocess.CalledProcessError as exc:
+            raise HTTPException(status_code=404, detail="not found at ref") from exc
+        return GetDocumentResponse(path=rel, body=body, head_sha=head_sha, ref=ref)
     abs_path = filesystem.absolute(rel)
     if not abs_path.is_file():
-        return error("not found", 404)
-    return jsonify(GetDocumentResponse(
-        path=rel, body=abs_path.read_text(), head_sha=head_sha,
-    ).model_dump())
+        raise HTTPException(status_code=404, detail="not found")
+    return GetDocumentResponse(path=rel, body=abs_path.read_text(), head_sha=head_sha)
 
 
-@bp.put("/file")
-@login_required
-def put_document_by_path():
-    req = parse_body(PutDocumentRequest, request.get_json(silent=True))
+@router.put("/file", response_model=PutDocumentResponse)
+def put_document_by_path(
+    req: PutDocumentRequest, user: User = Depends(require_user),
+) -> PutDocumentResponse:
     try:
         rel = filesystem.safe_rel_path(req.path)
     except ValueError as e:
-        return error(str(e), 400)
+        raise HTTPException(status_code=400, detail=str(e)) from e
     if not rel.endswith(".md"):
-        return error("only .md files are supported", 400)
+        raise HTTPException(status_code=400, detail="only .md files are supported")
     abs_path = filesystem.absolute(rel)
     existed = abs_path.is_file()
     if existed:
-        # Editing an existing page requires write access to *that* page.
-        # Creating a new page is always allowed for an authenticated user;
-        # the creator becomes the owner and gets full rights.
-        require_can("write", rel)
-    user = current_user()
-    author = f"{user.name or user.email} <{user.email}>" if user else None
+        # Editing an existing page requires write on *that* page. Creating
+        # a new page is always allowed for an authenticated user; the
+        # creator becomes the owner and gets full rights.
+        require_can("write", rel, user)
+    author = _git_author(user)
     change_kind = "edit" if existed else "create"
     msg = f"{change_kind} {rel}"
     deprecated: list[str] = []
@@ -144,169 +140,162 @@ def put_document_by_path():
     sha = wiki_git.commit_file(rel, req.body, msg, author=author)
     wiki_notify.after_doc_write(
         rel, sha, change_kind, author,
-        owner_user_id=user.id if (user and change_kind == "create") else None,
+        owner_user_id=user.id if change_kind == "create" else None,
     )
     log.info("doc %s %s by %s sha=%s", change_kind, rel, author or "?", sha[:8])
-    return jsonify(PutDocumentResponse(
+    return PutDocumentResponse(
         path=rel, sha=sha, created=not existed, deprecated=deprecated,
-    ).model_dump())
+    )
 
 
-@bp.post("/folder")
-@login_required
-def create_folder():
-    """Create an (empty) wiki folder.
-
-    Git doesn't track empty directories, so we drop a tiny `.gitkeep` marker
-    inside. The explorer hides dotfiles, so the folder appears empty in the UI.
-    """
-    req = parse_body(CreateFolderRequest, request.get_json(silent=True))
+@router.post(
+    "/folder",
+    response_model=CreateFolderResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_folder(
+    req: CreateFolderRequest, user: User = Depends(require_user),
+) -> CreateFolderResponse:
+    """Create an (empty) wiki folder via a `.gitkeep` marker."""
     path = req.path.strip().strip("/")
     if not path:
-        return error("path required", 400)
+        raise HTTPException(status_code=400, detail="path required")
     try:
         rel = filesystem.safe_rel_path(path)
     except ValueError as e:
-        return error(str(e), 400)
+        raise HTTPException(status_code=400, detail=str(e)) from e
     if rel.endswith(".md"):
-        return error("folder path must not end in .md", 400)
+        raise HTTPException(status_code=400, detail="folder path must not end in .md")
     abs_path = filesystem.absolute(rel)
     if abs_path.is_file():
-        return error("a file with that path already exists", 409)
+        raise HTTPException(status_code=409, detail="a file with that path already exists")
     if abs_path.is_dir():
-        return error("folder already exists", 409)
-    user = current_user()
-    author = f"{user.name or user.email} <{user.email}>" if user else None
+        raise HTTPException(status_code=409, detail="folder already exists")
+    author = _git_author(user)
     sha = wiki_git.commit_file(f"{rel}/.gitkeep", "", f"create folder {rel}", author=author)
     log.info("folder created %s by %s sha=%s", rel, author or "?", sha[:8])
-    return jsonify(CreateFolderResponse(path=rel, sha=sha).model_dump()), 201
+    return CreateFolderResponse(path=rel, sha=sha)
 
 
-@bp.post("/move")
-@login_required
-def move_document_or_folder():
-    """Rename or relocate a document or folder, single git commit.
-
-    Used by the explorer's drag-and-drop and rename actions. Conflicts (the
-    destination already exists) return 409 — the UI surfaces that as an error
-    and leaves the source untouched.
-    """
-    req = parse_body(MovePathRequest, request.get_json(silent=True))
+@router.post("/move", response_model=MovePathResponse)
+def move_document_or_folder(
+    req: MovePathRequest, user: User = Depends(require_user),
+) -> MovePathResponse:
+    """Rename or relocate a document or folder, single git commit."""
     old_raw = req.old_path.strip().strip("/")
     new_raw = req.new_path.strip().strip("/")
     if not old_raw or not new_raw:
-        return error("old_path and new_path required", 400)
+        raise HTTPException(status_code=400, detail="old_path and new_path required")
     try:
         old_rel = filesystem.safe_rel_path(old_raw)
         new_rel = filesystem.safe_rel_path(new_raw)
     except ValueError as e:
-        return error(str(e), 400)
+        raise HTTPException(status_code=400, detail=str(e)) from e
     if old_rel == new_rel:
-        return error("old_path and new_path are identical", 400)
+        raise HTTPException(status_code=400, detail="old_path and new_path are identical")
     old_abs = filesystem.absolute(old_rel)
     new_abs = filesystem.absolute(new_rel)
     if not old_abs.exists():
-        return error("not found", 404)
+        raise HTTPException(status_code=404, detail="not found")
     if new_abs.exists():
-        return error("a file or folder with that name already exists", 409)
+        raise HTTPException(
+            status_code=409, detail="a file or folder with that name already exists",
+        )
     if old_abs.is_file() and old_rel.endswith(".md") and not new_rel.endswith(".md"):
-        return error("renaming a .md file requires the new name to end in .md", 400)
+        raise HTTPException(
+            status_code=400,
+            detail="renaming a .md file requires the new name to end in .md",
+        )
     if old_abs.is_dir() and new_rel.endswith(".md"):
-        return error("folder name must not end in .md", 400)
+        raise HTTPException(status_code=400, detail="folder name must not end in .md")
 
-    # Moving a page requires write on it. Moving a folder requires
-    # write on every page underneath it (we expand the check at write
-    # time so the whole move is atomic — refuse if any page is denied).
+    # Moving a page requires write on it. Moving a folder requires write
+    # on every page underneath it (we expand the check at write time so
+    # the whole move is atomic — refuse if any page is denied).
     if old_abs.is_file() and old_rel.endswith(".md"):
-        require_can("write", old_rel)
+        require_can("write", old_rel, user)
     elif old_abs.is_dir():
         for p in wiki_git.list_paths(old_rel):
             if p.endswith(".md"):
-                require_can("write", p)
+                require_can("write", p, user)
 
-    user = current_user()
-    author = f"{user.name or user.email} <{user.email}>" if user else None
+    author = _git_author(user)
     msg = f"move {old_rel} -> {new_rel}"
     try:
         sha, moves = wiki_git.move_path(old_rel, new_rel, msg, author=author)
     except subprocess.CalledProcessError as exc:
         log.warning("move_path git error %s -> %s: %s", old_rel, new_rel, exc.stderr)
-        return error("git move failed", 500)
+        raise HTTPException(status_code=500, detail="git move failed") from exc
 
     wiki_notify.after_path_move(moves, sha, author)
 
     # Trigger YAML files may have moved with their containing folder. The
-    # Postgres cache stores their absolute file_path, so reconverge it from
-    # disk. Cheap relative to the size of typical trigger sets.
+    # Postgres cache stores their absolute file_path; reconverge from disk.
     try:
         triggers_repo.rebuild_from_filesystem()
     except Exception:
         log.exception("trigger cache rebuild after move %s -> %s failed", old_rel, new_rel)
 
     log.info("move %s -> %s by %s sha=%s files=%d", old_rel, new_rel, author or "?", sha[:8], len(moves))
-    return jsonify(MovePathResponse(
+    return MovePathResponse(
         old_path=old_rel,
         new_path=new_rel,
         sha=sha,
         moved=[MovedFile(old=o, new=n) for o, n in moves],
-    ).model_dump())
+    )
 
 
-@bp.delete("/file")
-@login_required
-def delete_document_by_path():
-    path = request.args.get("path", "")
+@router.delete("/file", response_model=DeleteDocumentResponse)
+def delete_document_by_path(
+    user: User = Depends(require_user), path: str = "",
+) -> DeleteDocumentResponse:
     if not path:
-        return error("path required", 400)
+        raise HTTPException(status_code=400, detail="path required")
     try:
         rel = filesystem.safe_rel_path(path)
     except ValueError as e:
-        return error(str(e), 400)
+        raise HTTPException(status_code=400, detail=str(e)) from e
     abs_path = filesystem.absolute(rel)
     if not abs_path.exists():
-        return error("not found", 404)
+        raise HTTPException(status_code=404, detail="not found")
     if abs_path.is_file() and rel.endswith(".md"):
-        require_can("write", rel)
+        require_can("write", rel, user)
     elif abs_path.is_dir():
         for p in wiki_git.list_paths(rel):
             if p.endswith(".md"):
-                require_can("write", p)
-    user = current_user()
-    author = f"{user.name or user.email} <{user.email}>" if user else None
+                require_can("write", p, user)
+    author = _git_author(user)
     sha = wiki_git.delete_path(rel, f"delete {rel}", author=author)
     wiki_notify.after_doc_delete(rel, sha, author)
     log.info("doc deleted %s by %s sha=%s", rel, author or "?", sha[:8])
-    return jsonify(DeleteDocumentResponse(sha=sha).model_dump())
+    return DeleteDocumentResponse(sha=sha)
 
 
-@bp.post("/reindex")
-@login_required
-def reindex_document_by_path():
-    req = parse_body(ReindexRequest, request.get_json(silent=True))
+@router.post("/reindex", response_model=ReindexResponse)
+def reindex_document_by_path(
+    req: ReindexRequest, user: User = Depends(require_user),
+) -> ReindexResponse:
     try:
         rel = filesystem.safe_rel_path(req.path)
     except ValueError as e:
-        return error(str(e), 400)
+        raise HTTPException(status_code=400, detail=str(e)) from e
     abs_path = filesystem.absolute(rel)
     if not abs_path.is_file():
-        return error("not found", 404)
-    require_can("read", rel)
+        raise HTTPException(status_code=404, detail="not found")
+    require_can("read", rel, user)
     reindex_path(rel)
-    return jsonify(ReindexResponse(path=rel, queued=True).model_dump())
+    return ReindexResponse(path=rel, queued=True)
 
 
-@bp.get("/search")
-@login_required
-def search_documents():
-    query = (request.args.get("q") or "").strip()
+@router.get("/search", response_model=SearchResponse)
+def search_documents(
+    user: User = Depends(require_user),
+    q: str = "",
+    limit: int = Query(10, ge=1, le=50),
+) -> SearchResponse:
+    query = q.strip()
     if not query:
-        return jsonify(SearchResponse(query="", hits=[]).model_dump())
-    try:
-        limit = int(request.args.get("limit") or 10)
-    except ValueError:
-        return error("limit must be an integer", 400)
-    limit = max(1, min(limit, 50))
-    user = current_user()
+        return SearchResponse(query="", hits=[])
     folders = wiki_search.search_folders(query, limit=limit)
     # Folders take precedence in the dropdown; docs share the remaining
     # budget so the combined list never exceeds ``limit``.
@@ -314,10 +303,10 @@ def search_documents():
     hits = wiki_search.search(
         query,
         limit=doc_limit,
-        user_id=user.id if user else None,
-        is_admin=bool(user and user.is_admin),
+        user_id=user.id,
+        is_admin=user.is_admin,
     )
-    return jsonify(SearchResponse(
+    return SearchResponse(
         query=query,
         hits=[
             SearchHitView(
@@ -330,83 +319,20 @@ def search_documents():
             for h in hits
         ],
         folders=[FolderHitView(path=f.path) for f in folders],
-    ).model_dump())
-
-
-@bp.get("/<doc_id>")
-@login_required
-def get_document(doc_id: str):
-    # TODO: read from git working tree, return body + metadata
-    raise NotImplementedError
-
-
-@bp.put("/<doc_id>")
-@login_required
-def update_document(doc_id: str):
-    # Used by agents directly editing a doc.
-    # TODO: write file, git commit, enqueue reindex task, write event.
-    raise NotImplementedError
-
-
-@bp.post("/ingest")
-def ingest_update():
-    """Receive a document push from an external system (e.g. Onyx connectors).
-
-    Validates the payload, enforces the admin-configured size cap, enqueues
-    a ``process_pushed_document`` task on ``documents_queue``, and acks 202
-    immediately. The doc-updater agent picks the target wiki page(s); this
-    layer does no routing.
-
-    Auth: not yet implemented. Matches the ``webhooks`` pattern — the
-    receiving cluster is expected to be private network or fronted by an
-    auth proxy until the bearer-token / HMAC layer lands.
-    """
-    req = parse_body(IngestRequest, request.get_json(silent=True))
-    if not req.content.strip():
-        raise RequestError("content is required and must be a non-empty string")
-
-    max_chars = ingest_settings.get().max_doc_chars
-    # Bound content + diff together — both are LLM-bound input on the consumer.
-    total_chars = len(req.content) + (len(req.diff) if req.diff else 0)
-    if total_chars > max_chars:
-        return jsonify(IngestTooLargeResponse(
-            error=(
-                f"document too large: {total_chars} chars exceeds the configured "
-                f"max of {max_chars} (set on /admin/ingest)"
-            ),
-            limit=max_chars,
-            received=total_chars,
-        ).model_dump()), 413
-
-    push = req.model_dump()
-    try:
-        result = process_pushed_document(push)
-    except QueueFullError:
-        # Let the app-level errorhandler translate this — it has the queue
-        # name + numbers and produces a clearer 503 than this generic catch.
-        raise
-    except Exception:
-        log.exception("failed to enqueue process_pushed_document source_type=%s", req.source_type)
-        return error("failed to enqueue background task", 503)
-    task_id = getattr(result, "id", None)
-    log.info(
-        "ingest enqueued source_type=%s title=%s len=%d task_id=%s",
-        req.source_type, req.title, total_chars, task_id,
     )
-    return jsonify(IngestResponse(queued=True, task_id=task_id).model_dump()), 202
 
 
-@bp.get("/file/history")
-@login_required
-def file_history():
-    path = request.args.get("path", "")
+@router.get("/file/history", response_model=FileHistoryResponse)
+def file_history(
+    user: User = Depends(require_user), path: str = "",
+) -> FileHistoryResponse:
     if not path:
-        return error("path required", 400)
+        raise HTTPException(status_code=400, detail="path required")
     try:
         rel = filesystem.safe_rel_path(path)
     except ValueError as e:
-        return error(str(e), 400)
-    require_can("read", rel)
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    require_can("read", rel, user)
     rows = wiki_git.history(rel)
     deprecated: set[str] = set()
     for r in rows:
@@ -419,30 +345,23 @@ def file_history():
         for r in rows
         if r.sha not in deprecated
     ]
-    return jsonify(FileHistoryResponse(
-        path=rel, head_sha=head_sha, commits=visible,
-    ).model_dump())
+    return FileHistoryResponse(path=rel, head_sha=head_sha, commits=visible)
 
 
-@bp.get("/file/activity")
-@login_required
-def file_activity():
-    """Active agent-activity rows for a doc.
-
-    Drives the wiki page header's "Active agents" panel. Read-gated by
-    the same per-page ACL the body endpoint uses; rows are derived
-    from the ``agent_activity`` Postgres table, never from disk.
-    """
-    path = request.args.get("path", "")
+@router.get("/file/activity", response_model=DocumentActivityResponse)
+def file_activity(
+    user: User = Depends(require_user), path: str = "",
+) -> DocumentActivityResponse:
+    """Active agent-activity rows for a doc."""
     if not path:
-        return error("path required", 400)
+        raise HTTPException(status_code=400, detail="path required")
     try:
         rel = filesystem.safe_rel_path(path)
     except ValueError as e:
-        return error(str(e), 400)
-    require_can("read", rel)
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    require_can("read", rel, user)
     rows = agent_activity.list_for_doc(rel)
-    return jsonify(DocumentActivityResponse(
+    return DocumentActivityResponse(
         path=rel,
         agents=[
             ActivityRowView(
@@ -455,11 +374,74 @@ def file_activity():
             )
             for r in rows
         ],
-    ).model_dump())
+    )
 
 
-@bp.get("/<doc_id>/history")
-@login_required
-def document_history(doc_id: str):
-    # TODO: shell out to `git log` for the doc path (by id).
+@router.post(
+    "/ingest",
+    response_model=IngestResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    responses={413: {"model": IngestTooLargeResponse}},
+)
+def ingest_update(req: IngestRequest) -> IngestResponse | JSONResponse:
+    """Receive a document push from an external system. Returns 202
+    on enqueue, 413 on size overflow.
+
+    Auth: not yet implemented — matches the ``webhooks`` pattern."""
+    if not req.content.strip():
+        raise RequestError("content is required and must be a non-empty string")
+
+    max_chars = ingest_settings.get().max_doc_chars
+    total_chars = len(req.content) + (len(req.diff) if req.diff else 0)
+    if total_chars > max_chars:
+        # 413 has its own response shape (limit/received), so we step
+        # outside ``response_model`` and return the typed envelope as
+        # a ``JSONResponse``. The route's ``responses=`` metadata still
+        # documents the alternate shape for OpenAPI consumers.
+        too_large = IngestTooLargeResponse(
+            error=(
+                f"document too large: {total_chars} chars exceeds the configured "
+                f"max of {max_chars} (set on /admin/ingest)"
+            ),
+            limit=max_chars,
+            received=total_chars,
+        )
+        return JSONResponse(status_code=413, content=too_large.model_dump())
+
+    push = req.model_dump()
+    try:
+        result = process_pushed_document(push)
+    except QueueFullError:
+        # Let the app-level handler translate this — it has the queue name
+        # + numbers and produces a clearer 503 than a generic catch.
+        raise
+    except Exception as exc:
+        log.exception(
+            "failed to enqueue process_pushed_document source_type=%s", req.source_type,
+        )
+        raise HTTPException(
+            status_code=503, detail="failed to enqueue background task",
+        ) from exc
+    task_id = getattr(result, "id", None)
+    log.info(
+        "ingest enqueued source_type=%s title=%s len=%d task_id=%s",
+        req.source_type, req.title, total_chars, task_id,
+    )
+    return IngestResponse(queued=True, task_id=task_id)
+
+
+@router.get("/{doc_id}")
+def get_document(doc_id: str, _user: User = Depends(require_user)) -> None:
+    # TODO: read from git working tree, return body + metadata
+    raise NotImplementedError
+
+
+@router.put("/{doc_id}")
+def update_document(doc_id: str, _user: User = Depends(require_user)) -> None:
+    # Used by agents directly editing a doc.
+    raise NotImplementedError
+
+
+@router.get("/{doc_id}/history")
+def document_history(doc_id: str, _user: User = Depends(require_user)) -> None:
     raise NotImplementedError

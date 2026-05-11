@@ -27,6 +27,10 @@
       "base_sha": {
         "type": "string",
         "description": "Optional. The sha you last read for `path` (returned by `read_doc`). When set, the edit aborts with `stale_base` if HEAD has moved since — re-read with `read_doc` and retry. Strongly recommended over MCP; the chat agent can omit it (the loop has direct state)."
+      },
+      "expires_in_seconds": {
+        "type": "integer",
+        "description": "Optional. How long (in seconds) you anticipate continuing to work on this file or feature before you're done. Sets the TTL on your row in the Active agents list, replacing the 24h default — use a smaller value for a focused short session, a larger one when you expect to be on the same task for hours. You only have ONE row in the list at a time per (user, agent), so the latest write's value wins. Range: 60 to 604800 (7 days)."
       }
     },
     "required": ["path", "old_string", "new_string", "commit_message"]

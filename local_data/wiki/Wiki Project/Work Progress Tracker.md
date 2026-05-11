@@ -55,8 +55,14 @@
 - [x] Cron jobs and task queuing
 - [x] Task creation (trigger evals + BM25 update) on document updates from agents, chat, human saving
 
+## MCP Connection from third party agents
+- [x] Basic MCP connection
+- [x] Subscription to resource updates
+- [x] Usage guidance
+- [] Tools are all hooked up and can correctly interact with the wiki
+
 ## Core Architecture
-- [x] Flask API
+- [x] FastAPI API (served by uvicorn)
 - [x] SqlAlchemy ORM
 - [x] Postgres DB
 - [x] pg_textsearch for BM25

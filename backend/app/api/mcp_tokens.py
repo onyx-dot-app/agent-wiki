@@ -1,17 +1,11 @@
-"""User-facing CRUD for inbound MCP API tokens.
-
-Mounted at ``/api/mcp/tokens``. Every route is ``@login_required`` — a
-user can only see and revoke their own tokens. Admin sees their own too;
-there is no admin-wide "all tokens" view in v1 (out of scope per the
-design doc).
-"""
+"""FastAPI port of ``app/api/mcp_tokens.py`` (Phase 2)."""
 from __future__ import annotations
 
-from flask import Blueprint, jsonify, request
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 
-from app.auth import current_user, login_required
+from app.auth import User
 from app.auth import mcp_tokens as tokens_repo
-from app.models._helpers import error, parse_body
+from app.auth.deps import require_user
 from app.models.mcp import (
     CreateMcpTokenRequest,
     CreatedMcpToken,
@@ -19,16 +13,13 @@ from app.models.mcp import (
     McpTokenSummary,
 )
 
-bp = Blueprint("mcp_tokens", __name__)
+router = APIRouter()
 
 
-@bp.get("")
-@login_required
-def list_tokens():
-    user = current_user()
-    assert user is not None
+@router.get("", response_model=McpTokenList)
+def list_tokens(user: User = Depends(require_user)) -> McpTokenList:
     rows = tokens_repo.list_for_user(user.id)
-    payload = McpTokenList(
+    return McpTokenList(
         tokens=[
             McpTokenSummary(
                 id=r["id"],
@@ -39,40 +30,31 @@ def list_tokens():
             for r in rows
         ]
     )
-    return jsonify(payload.model_dump())
 
 
-@bp.post("")
-@login_required
-def create_token():
-    user = current_user()
-    assert user is not None
-    req = parse_body(CreateMcpTokenRequest, request.get_json(silent=True))
+@router.post(
+    "", response_model=CreatedMcpToken, status_code=status.HTTP_201_CREATED
+)
+def create_token(
+    req: CreateMcpTokenRequest, user: User = Depends(require_user)
+) -> CreatedMcpToken:
     try:
         token_id, raw = tokens_repo.create(user.id, req.name)
     except ValueError as exc:
-        return error(str(exc), 400)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     rows = tokens_repo.list_for_user(user.id)
     me = next((r for r in rows if r["id"] == token_id), None)
     assert me is not None
-    return (
-        jsonify(
-            CreatedMcpToken(
-                id=me["id"],
-                name=me["name"],
-                created_at=me["created_at"],
-                token=raw,
-            ).model_dump()
-        ),
-        201,
+    return CreatedMcpToken(
+        id=me["id"],
+        name=me["name"],
+        created_at=me["created_at"],
+        token=raw,
     )
 
 
-@bp.delete("/<token_id>")
-@login_required
-def revoke_token(token_id: str):
-    user = current_user()
-    assert user is not None
+@router.delete("/{token_id}", status_code=status.HTTP_204_NO_CONTENT)
+def revoke_token(token_id: str, user: User = Depends(require_user)) -> Response:
     if not tokens_repo.revoke(token_id, user.id):
-        return error("not found", 404)
-    return "", 204
+        raise HTTPException(status_code=404, detail="not found")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

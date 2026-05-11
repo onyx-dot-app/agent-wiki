@@ -42,7 +42,6 @@ The two adjacent docs are required reading:
 │     ─ tools = TOOL_SPECS (from tools/ registry)          │
 │     ─ tool_dispatch = registry.dispatch                  │
 │     ─ agent_activity.agent_name_var = "Wiki AI Assistant"│
-│     ─ seen_doc_paths ContextVar (read-before-write)      │
 └──────────────────────────┬───────────────────────────────┘
                            │
                            ▼
@@ -129,26 +128,23 @@ Behavior contract:
   model usually recovers gracefully ("I hit an error trying X, let
   me try Y").
 
-### `seen_doc_paths` — read-before-write
+### Concurrency control — `base_sha`, not session state
 
-Set by the loop on entry, reset on exit. A `ContextVar[set[str] |
-None]` shared with tool handlers via `app/llm/agents/_session.py`.
+The chat loop does **not** track which docs the model has read this
+turn. Edit safety is handled at the tool layer via the optional
+`base_sha` argument: when the model passes the sha it last read for a
+doc, the write tool (`edit_doc`, `multi_edit`, `apply_patch`,
+`update_doc_nl`) checks it against current HEAD and returns
+`{error: "stale_base", base_sha, current_sha, ...}` if HEAD has
+drifted. `write_doc` makes `base_sha` **required** for overwrites of
+existing files (full-body has no fuzzy fallback if HEAD moved).
 
-- `read_page` adds the path it returns to the set
-  (`_record_seen_paths` in chat.py — keys off the `path` field in
-  the result dict; only `read_page` counts because `search_wiki`
-  snippets are too short to ground a safe edit).
-- The doc-edit tools (`edit_doc`, `multi_edit`, `apply_patch`,
-  `write_doc` overwrites) call `assert_read_before_write(rel)` in
-  `_doc_helpers.py`. If `seen_doc_paths.get()` is `None` we're
-  outside a chat loop (tests, MCP server uses its own equivalent),
-  so the check is a no-op. Otherwise refusing to edit an existing
-  file the model hasn't seen.
-- The reset on exit is `seen_doc_paths.reset(token)` in a `finally`
-  block, so callers outside a loop always see the default.
-
-The same ContextVar is set by the inbound MCP server — see
-[MCP Server Inbound](MCP%20Server%20Inbound.md) for the parallel.
+Conversation history is replayed in full on every turn (see "How
+history is built" below), so prior `read_page` / `read_doc` results
+stay in the model's context across turns — the model can edit a doc
+it read several turns ago without re-reading, as long as it carries
+the `base_sha` forward and the file hasn't been changed by another
+writer.
 
 ### `agent_activity.agent_name_var` — attribution
 
@@ -320,12 +316,10 @@ copy-paste:
 
 - **`validate_doc_path`** — normalize, reject traversal, reject
   non-`.md`. Raises `ToolError`.
-- **`assert_read_before_write(rel)`** — the ContextVar guard.
-  No-op when out of loop or the file doesn't exist (creating).
-- **`assert_base_sha(rel, base_sha)`** — optimistic concurrency. The
-  chat agent rarely passes `base_sha` (it holds direct loop state);
-  MCP clients always do. Same handler, same check, no-op when
-  `base_sha is None`.
+- **`assert_base_sha(rel, base_sha)`** — optimistic concurrency.
+  Returns the `stale_base` error dict when `base_sha` no longer
+  matches HEAD; no-op when `base_sha is None`. Both the chat agent
+  and MCP clients go through the same check.
 - **`require_can(action, path)`** — every read/write tool gates
   through ACL. `ToolError(str(exc))` becomes `{"error": ...}` to
   the model, so the model can apologize and pivot rather than

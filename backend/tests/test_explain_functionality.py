@@ -10,8 +10,8 @@ def test_returns_app_help_content():
     assert isinstance(out["content"], str)
     # Sanity-check that the canonical blurb is what's returned, not some
     # stale or wrong file. Anchor on a stable section header.
-    assert "agent-wiki" in out["content"]
-    assert "## Triggers and events" in out["content"]
+    assert "Agent Wiki" in out["content"]
+    assert "## The chat agent" in out["content"]
 
 
 def test_takes_no_arguments_and_ignores_extras():

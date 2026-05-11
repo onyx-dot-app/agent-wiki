@@ -30,7 +30,7 @@ verbatim.)
 |---|---:|---:|---|
 | `documents_queue` | LLM doc-reconciliation | 1 | `agent_update_document_nl`, `generate_chat_title` |
 | `triggers_queue` | NL trigger eval (delta + scheduled) | 4 | `fan_out_trigger_eval`, `evaluate_scheduled_triggers` |
-| `lightweight_maintenance_queue` | Sub-second upkeep — BM25 reindex, agent-activity expiration cleanup | 4 | `reindex_path`, `reindex_document`, `cleanup_expired_activity` |
+| `lightweight_maintenance_queue` | Sub-second upkeep — BM25 reindex, agent-activity expiration cleanup, hourly BM25 reconcile sweep | 4 | `reindex_path`, `reindex_document`, `cleanup_expired_activity`, `reconcile_bm25_index` |
 
 **Placement rule for `lightweight_maintenance_queue`:** handlers must
 be sub-second, no LLM, no external HTTP, no wiki commits. The wider
@@ -123,7 +123,8 @@ The lock is per-queue, so the three queues stay independent. It
 auto-releases on transaction commit, so contention is bounded by the
 duration of one INSERT.
 
-A Flask error handler in `app/main.py` translates `QueueFullError`
+A FastAPI exception handler registered in
+`app/main.py:_install_error_handlers` translates `QueueFullError`
 into HTTP **503** with a structured body (`queue`, `size`, `limit`).
 Producer sites that want graceful degradation should catch
 `QueueFullError` themselves; the periodic scheduler does this and
@@ -195,10 +196,15 @@ again. That window is unavoidable with pgmq.
 ## The periodic scheduler
 
 Cron-shaped tasks are registered with
-`@<queue>.periodic_task(crontab(minute="*/5"))`. Today there's just
-one: `evaluate_scheduled_triggers` on `triggers_queue`. The scheduler
-is **leader-elected per queue** so scaling worker replicas doesn't
-double-fire schedules.
+`@<queue>.periodic_task(crontab(minute="*/5"))`. Today there are two:
+
+- `evaluate_scheduled_triggers` on `triggers_queue` (every 5 min) —
+  fires schedule-kind triggers whose next cron evaluation is due.
+- `reconcile_bm25_index` on `lightweight_maintenance_queue` (top of
+  every hour) — the BM25 drift sweep, described below.
+
+The scheduler is **leader-elected per queue** so scaling worker
+replicas doesn't double-fire schedules.
 
 ```
 queue %s: periodic scheduler is leader — N task(s)
@@ -236,6 +242,79 @@ Two design choices worth understanding:
 
 If `enqueue` raises `QueueFullError`, the scheduler logs and skips
 the tick; the next cron evaluation will try again.
+
+## BM25 reconciliation: catching missed reindexes
+
+Every wiki write fans out through `after_doc_write` → `reindex_path`
+on `lightweight_maintenance_queue`. If that enqueue is ever lost — a
+crashed worker, a dropped pgmq message, a new write path that forgot
+to call the lifecycle hook — the FTS row for that doc stays stale
+forever. `reconcile_bm25_index` is the hourly safety net.
+
+### How "indexed" is marked
+
+`DocumentFts.indexed_sha` stamps the git HEAD sha that touched the
+path at the moment of indexing. Every call through `reindex_path` /
+`reindex_document` computes `git.head_sha_for_path(path)` and writes
+it as part of the upsert. The reconciler compares this against the
+live HEAD: a mismatch (or NULL on a fresh row) means drift.
+
+```
+git HEAD for foo.md   ── compared against ──   DocumentFts.indexed_sha
+       │                                                │
+       └──── if !=, reindex_path(foo.md) is enqueued ────┘
+```
+
+### Bootstrap vs windowed runs
+
+The sweep is **cursored** to avoid rescanning the whole tree every
+hour. State lives in the singleton `bm25_reconcile_state` row,
+which carries `last_completed_at` (advanced only on successful
+completion — `QueueFullError` mid-fan-out aborts without advancing,
+so the next cycle retries the same window).
+
+- **Bootstrap (cursor NULL, once per deploy).** Batched `git log
+  --name-only --pretty=%H` walk over the whole tree. Also sweeps
+  `documents_fts` for repo-wide orphans (paths in FTS but no longer
+  tracked). This pass picks up the NULL `indexed_sha` rows the
+  migration leaves behind.
+- **Windowed (cursor set, every subsequent hour).** Uses `git log
+  --since=<cursor - 5min> --diff-filter=AMRD --name-only` to scope
+  candidates to paths git touched in the window (5-minute overlap
+  avoids edge races near the cursor). Per-candidate
+  `head_sha_for_path` lookup; mismatches enqueue `reindex_path`,
+  window-local deletions delete the FTS row.
+
+The trade-off vs. a perpetual whole-repo scan: drift older than the
+window is invisible if a previous reconcile run was lost. The escape
+hatch is `POST /api/documents/reindex` to force a single-path
+reindex.
+
+### Why the cursor isn't `cron_state.last_fired_at`
+
+The scheduler writes `cron_state.last_fired_at` *before* the task
+runs (`_record_cron_fire` immediately follows `queue.enqueue`), so
+the task can't read it to learn when the previous run finished —
+it'd just see its own fire time. `bm25_reconcile_state` is a
+separate cursor stamped on completion, advancing only on success.
+
+### When you'd touch this
+
+- **You introduce a new wiki-write path.** Still call
+  `after_doc_write` — don't rely on the reconciler. The hourly sweep
+  is a backstop, not the primary indexing path; an hour of stale
+  search results is bad UX. The reconciler only kicks in if you
+  miss.
+- **You change the FTS row shape** (new column on `DocumentFts`).
+  Either re-stamp `indexed_sha` to NULL in the same migration so the
+  next bootstrap re-indexes everything, or backfill in-migration if
+  the new column is cheap to compute.
+- **An incident drops the FTS index.** Wipe `bm25_reconcile_state`
+  (`UPDATE bm25_reconcile_state SET last_completed_at = NULL WHERE
+  id = 1`) — the next sweep runs in bootstrap mode and re-indexes
+  everything in one pass.
+
+Source: `app/tasks/reindex.py`. Tests: `tests/test_bm25_reconcile.py`.
 
 ## Delayed tasks: the agent-activity cleanup pattern
 
@@ -320,6 +399,8 @@ as app state.
 | `pgmq.q_documents`, `pgmq.q_triggers`, `pgmq.q_lightweight_maintenance` | The live queues (created by migration `0001_initial`; `0007` renames the BM25 queue) |
 | `pgmq.a_<name>` | Archive tables — messages exceeding `MAX_RETRIES` end up here |
 | `cron_state` | `(queue_name, task_name, last_fired_at)` — one row per periodic task |
+| `bm25_reconcile_state` | Singleton `last_completed_at` — cursor for the hourly BM25 reconcile sweep |
+| `documents_fts.indexed_sha` | Per-FTS-row git HEAD sha at last index time; how reconcile detects drift |
 | `agent_activity.cleanup_msg_id` | The pgmq msg_id of the row's currently-scheduled cleanup; nullable |
 
 The pgmq SQL functions (`pgmq.send`, `pgmq.read`, `pgmq.delete`,

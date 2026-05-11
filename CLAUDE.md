@@ -5,7 +5,7 @@ As you make progress, make sure to periodically update the wiki so that nothing 
 
 ## Stack at a glance
 
-- **Backend** — Flask + Postgres 17 (with `pg_textsearch` for BM25 search and `pgmq` for the task queue) + custom workers. Git is shelled out to.
+- **Backend** — FastAPI (uvicorn) + Postgres 17 (with `pg_textsearch` for BM25 search and `pgmq` for the task queue) + custom workers. Git is shelled out to.
 - **Frontend** — Next.js 14 (App Router) + TypeScript.
 - **Nginx** in front, reverse-proxying `/api/*` → backend, everything else → frontend.
 - App state and queues both live in Postgres (connection via `DATABASE_URL`). Wiki working tree on volume `wiki-data`.
@@ -37,7 +37,7 @@ Add new checks as hooks here, not as one-off CI steps.
 
 ```
 backend/app/
-  api/            Flask blueprints — thin HTTP layer, no business logic
+  api/            FastAPI routers — thin HTTP layer, no business logic
   auth/           sessions, bcrypt, whitelist, admin flags
   db/             SQLAlchemy ORM models (Postgres + pg_textsearch BM25)
   llm/            provider-agnostic LLM client + DB-backed settings + agents
@@ -85,31 +85,42 @@ max_tokens, settings)`).
   or the per-provider `_client` for SDK-shape tests. Never import the real
   provider SDKs in tests.
 
-### Auth — decorators, not raw session reads
+### Auth — `Depends(...)`, not raw session reads
 
-In API code, gate routes with `@login_required` or `@admin_required` from
-`app.auth`. Read the active user with `current_user()`. Don't touch
-`flask.session["user_id"]` outside `app/auth/`.
+In API code, gate routes with `Depends(require_user)` or
+`Depends(require_admin)` from `app.auth.deps`. The dependency
+function returns a typed `User`; bind it on the route signature and
+pass it down (e.g. to `require_can(action, path, user)`). For
+non-HTTP code paths (worker tasks, agent tools), read the active
+user with `app.auth.current_user()` — it reads the ContextVar bound
+by ``app.auth.deps.CurrentUserMiddleware`` for HTTP requests or by
+``set_current_user(user)`` for background tasks. Don't touch
+`request.session["user_id"]` outside `app/api/auth.py`.
 
-- Public endpoints (signup, login, `/auth/config`, inbound webhooks) are
-  explicit — everything else uses `@login_required`.
+- Public endpoints (signup, login, `/auth/config`, inbound webhooks)
+  are explicit — everything else takes a `Depends(require_user)`
+  parameter.
 - The first registered user is auto-admin (`users_repo.create` checks
-  `count() == 0`). Admin can't be left at zero (see `app/api/admin.py` —
-  demote/delete guard against `admin_count() <= 1`).
+  `count() == 0`). Admin can't be left at zero (see `app/api/admin.py`
+  — demote/delete guard against `admin_count() <= 1`).
+- The session cookie is signed by Starlette's ``SessionMiddleware``
+  (installed in ``app/main.py:create_app``); ``app.auth.deps.current_user``
+  reads ``request.session["user_id"]``.
 
 ### Wiki page authorization — `require_can` + `app/wiki/acl.py`
 
 Per-page permissions live in Postgres (`acl_entries`, `wiki_owners`,
-`groups`, `group_members`). Routes that read or mutate a wiki page must
-gate via `app.auth.require_can("read"|"write", path)` after the
-`@login_required` / `@admin_required` decorator. Search and listing
-endpoints filter through `app.wiki.acl.visible_paths_filter` (SQL
-predicate) or `acl.filter_paths_in_python` (in-memory).
+`groups`, `group_members`). Routes that read or mutate a wiki page
+must gate via `app.auth.require_can("read"|"write", path, user)`
+where ``user`` is the value resolved by ``Depends(require_user)``.
+Search and listing endpoints filter through
+`app.wiki.acl.visible_paths_filter` (SQL predicate) or
+`acl.filter_paths_in_python` (in-memory).
 
 - New pages get default-public ACL rows + an owner stamp via the
   lifecycle hook in `app.wiki.notify.after_doc_write` — call that helper
   with `change_kind="create"` and pass `owner_user_id`.
-- Don't read/write `acl_entries` or `wiki_owners` directly from blueprints
+- Don't read/write `acl_entries` or `wiki_owners` directly from routers
   or agent tools — go through `app.wiki.acl` (`grant`, `revoke`,
   `set_owner`, `effective`, `visible_paths_filter`).
 - Group membership goes through `app.auth.groups` (CRUD + lookup).
@@ -263,15 +274,18 @@ triggers, write/delete the file first via `app/triggers/storage.py`, then
 upsert/delete the row, in the same task. `app/triggers/repo.py:rebuild_from_filesystem`
 re-converges the cache by walking tracked `.trigger_*.yaml` paths.
 
-### HTTP API — blueprints stay thin
+### HTTP API — routers stay thin
 
-Blueprints in `app/api/` parse the request, call into a domain module, and
-serialize the result. Business logic lives in `app/auth/`, `app/wiki/`,
-`app/triggers/`, `app/llm/agents/`. If you find yourself doing a multi-step
-workflow inside a route handler, push it down.
+`APIRouter`s in `app/api/` parse the request, call into a domain module,
+and serialize the result. Business logic lives in `app/auth/`,
+`app/wiki/`, `app/triggers/`, `app/llm/agents/`. If you find yourself
+doing a multi-step workflow inside a route handler, push it down.
 
-Error responses use `{"error": "<message>"}` with the right status code (see
-`app/api/auth.py`). The frontend's `ApiError` parses this shape.
+Error responses use `{"error": "<message>"}` with the right status
+code — domain exceptions (``HTTPException``, ``PermissionDenied``,
+``RequestError``, ``QueueFullError``) are translated by the handlers
+installed in `app/main.py:_install_error_handlers`. The frontend's
+`ApiError` parses this shape.
 
 ## Frontend rules
 
@@ -412,7 +426,10 @@ PR. Don't accumulate parallel ad-hoc colors.
 
 ### Backend
 
-- `pytest`. The Flask app exposes `create_app()` → use Flask's `test_client`.
+- `pytest`. The FastAPI app exposes `create_app()` → wrap with
+  `fastapi.testclient.TestClient`. Sign in a test client via
+  `tests/_auth.py:login_fastapi(client, user_id)` which mints a
+  ``SessionMiddleware``-compatible cookie.
 - Per-test isolation:
   - the conftest creates a unique Postgres schema per test against
     `TEST_DATABASE_URL` (default `postgresql://postgres:postgres@localhost:5432/agent_wiki_test`)
@@ -433,8 +450,8 @@ PR. Don't accumulate parallel ad-hoc colors.
   `queue.immediate = True` directly — the bare assignment will leak
   state across tests if the body raises.
 - Full-stack flow tests live under `tests/integration/`. The
-  `integration` fixture there wires a Flask client + real DB + real
-  wiki repo + scripted LLM mock. See
+  `integration` fixture there wires a FastAPI ``TestClient`` + real
+  DB + real wiki repo + scripted LLM mock. See
   `local_data/wiki/integration-tests.md`.
 
 ### Frontend
@@ -448,8 +465,9 @@ so they're trivially testable.
 1. New persistent state? Edit `app/db/models.py`.
 2. New repo functions in `app/<area>/<thing>.py` — keep them tight, return rows.
 3. New domain logic next to the repo, not inside the API route.
-4. Expose via a blueprint in `app/api/<thing>.py`. Gate with
-   `@login_required` or `@admin_required`.
+4. Expose via an `APIRouter` in `app/api/<thing>.py`, registered in
+   `app/main.py:create_app`. Gate with `Depends(require_user)` or
+   `Depends(require_admin)`.
 5. If the work is non-trivial or hits the LLM, queue a task.
 6. Add a pydantic model in `app/models/` for any non-trivial request/response.
 7. Frontend: add a typed call in a `src/lib/<thing>.ts` (or extend an existing
@@ -459,9 +477,11 @@ so they're trivially testable.
 
 - Don't import `anthropic`, `openai`, `google.genai`, or `ollama` outside the
   matching `app/llm/providers/<name>.py` module.
-- Don't read `flask.session` outside `app/auth/`.
+- Don't read `request.session` outside `app/api/auth.py` (where login/logout
+  write it) and `app/auth/deps.py` (where ``current_user`` reads it).
 - Don't shell out to `git` outside `app/wiki/git.py`.
-- Don't put business logic inside a Flask blueprint — push it to a domain module.
+- Don't put business logic inside a FastAPI route handler — push it to a
+  domain module.
 - Don't write raw SQL outside `app/db/fts.py` (pg_textsearch operator)
   and `app/tasks/queue.py` (pgmq functions). Use the ORM session.
 - Don't read provider keys from `os.environ` or `CONFIG` at call time —

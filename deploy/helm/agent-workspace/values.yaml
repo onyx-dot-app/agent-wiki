@@ -24,7 +24,8 @@ image:
 
 imagePullSecrets: []
 
-# Flask SECRET_KEY. Generate with `openssl rand -hex 32`. Required.
+# Session-cookie signing key (used by Starlette SessionMiddleware).
+# Generate with `openssl rand -hex 32`. Required.
 secretKey: ""
 
 # Postgres connection string for app state + pgmq task queues. Required.
@@ -35,6 +36,10 @@ databaseUrl: ""
 
 # Comma-separated email whitelist for signup. Empty = anyone.
 allowedEmails: ""
+
+# Per-queue max backlog for pgmq queues. New enqueues fail fast with HTTP 503
+# when a queue reaches this size. Applies to all three queues. Default 1000.
+maxQueueSize: 1000
 
 auth:
   # basic | oidc
@@ -130,6 +135,10 @@ ingress:
     nginx.ingress.kubernetes.io/proxy-body-size: "25m"
     nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+    # /api/chat and /api/mcp serve `text/event-stream`. With buffering on,
+    # the ingress holds events until the response completes — chat
+    # streaming and the MCP long-poll both break.
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
 
 serviceAccount:
   create: true

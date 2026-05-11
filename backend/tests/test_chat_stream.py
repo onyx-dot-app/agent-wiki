@@ -136,71 +136,97 @@ def test_loop_stream_tool_dispatch_errors_are_surfaced_to_model(stub_stream):
     assert json.loads(tool_msg["content"]) == {"error": "nope"}
 
 
-def test_loop_populates_seen_paths_from_read_page_results(stub_stream):
-    """``read_page`` feeds the target ``path`` into ``seen_doc_paths``;
-    ``search_wiki`` snippets do NOT count as a read."""
-    from app.llm.agents._session import seen_doc_paths
+def test_force_final_answer_strips_tools_and_injects_reminder(stub_stream, monkeypatch):
+    """On the last cycle, ``client.stream`` should be called with ``tools=None``
+    and a user ``<system-reminder>`` message should be appended just before it."""
+    captured_tools: list = []
+    captured_messages_len: list[int] = []
 
-    # Iter 1: search_wiki (snippets only — must NOT count as read).
-    # Iter 2: read_page on guide.md (counts).
-    # Iter 3: peek captures seen-set contents.
-    # Iter 4: text + done.
-    stub_stream(
-        [
-            [
-                {"type": "tool_call", "id": "c1", "name": "search_wiki",
-                 "arguments": {"query": "x"}},
-                _done(),
-            ],
-            [
-                {"type": "tool_call", "id": "c2", "name": "read_page",
-                 "arguments": {"path": "guide.md"}},
-                _done(),
-            ],
-            [
-                {"type": "tool_call", "id": "c3", "name": "peek", "arguments": {}},
-                _done(),
-            ],
-            [{"type": "text_delta", "text": "ok"}, _done()],
-        ]
-    )
+    def fake_stream(messages, *, model=None, tools=None, max_tokens=4096):
+        captured_tools.append(tools)
+        captured_messages_len.append(len(messages))
+        # Cycle 1: keep calling tools; Cycle 2 (final): emit text.
+        if len(captured_tools) == 1:
+            yield {"type": "tool_call", "id": "c1", "name": "e", "arguments": {}}
+            yield _done()
+            return
+        yield {"type": "text_delta", "text": "best-effort answer"}
+        yield _done()
 
-    captured: dict = {}
+    monkeypatch.setattr(chat_agent.client, "stream", fake_stream)
 
-    def dispatch(name, args):
-        if name == "search_wiki":
-            return {
-                "results": [
-                    {"path": "auth/passwords.md", "title": "pw", "snippet": "..."},
-                    {"path": "guide.md", "title": "Guide", "snippet": "..."},
-                ]
-            }
-        if name == "read_page":
-            return {"path": args["path"], "title": "Guide", "body": "# Guide\n"}
-        if name == "peek":
-            captured["seen"] = set(seen_doc_paths.get() or [])
-            return {}
-        return {}
-
-    list(
+    messages: list[dict] = [{"role": "user", "content": "go"}]
+    events = list(
         chat_agent.run_chat_loop_stream(
-            [{"role": "user", "content": "go"}],
-            tools=[
-                {"name": "search_wiki", "description": "",
-                 "input_schema": {"type": "object"}},
-                {"name": "read_page", "description": "",
-                 "input_schema": {"type": "object"}},
-                {"name": "peek", "description": "",
-                 "input_schema": {"type": "object"}},
-            ],
-            tool_dispatch=dispatch,
+            messages,
+            tools=[{"name": "e", "description": "", "input_schema": {"type": "object"}}],
+            tool_dispatch=lambda n, a: "ok",
+            max_iterations=2,
+            force_final_answer=True,
         )
     )
 
-    # Only read_page's path is in seen — search_wiki paths are NOT.
-    assert captured["seen"] == {"guide.md"}
-    # Outside the loop the ContextVar resets to default (None).
-    assert seen_doc_paths.get() is None
+    # First cycle had tools; last cycle had none.
+    assert captured_tools[0] is not None
+    assert captured_tools[1] is None
+
+    # The reminder was injected as a user message just before the final cycle.
+    reminder_msg = messages[-2]  # final assistant turn is the last entry
+    assert reminder_msg["role"] == "user"
+    assert reminder_msg["content"] == chat_agent.FINAL_CYCLE_REMINDER
+
+    # And it should end on a clean `done`, not a RuntimeError.
+    assert events[-1]["type"] == "done"
+    assert messages[-1] == {"role": "assistant", "content": "best-effort answer"}
+
+
+def test_force_final_answer_off_by_default_still_raises(stub_stream):
+    """Default behavior is unchanged — exhausting iterations raises."""
+    stub_stream(
+        [
+            [{"type": "tool_call", "id": f"c{i}", "name": "e", "arguments": {}}, _done()]
+            for i in range(3)
+        ]
+    )
+
+    with pytest.raises(RuntimeError, match="did not terminate"):
+        list(
+            chat_agent.run_chat_loop_stream(
+                [{"role": "user", "content": "go"}],
+                tools=[{"name": "e", "description": "", "input_schema": {"type": "object"}}],
+                tool_dispatch=lambda n, a: "",
+                max_iterations=2,
+                # force_final_answer left at default False
+            )
+        )
+
+
+def test_force_final_answer_no_op_when_loop_finishes_early(stub_stream):
+    """If the model emits a final answer before the last cycle, the reminder
+    must NOT be injected — force_final_answer only kicks in at the boundary."""
+    stub_stream(
+        [
+            # Cycle 1: final answer immediately.
+            [{"type": "text_delta", "text": "done early"}, _done()],
+        ]
+    )
+
+    messages: list[dict] = [{"role": "user", "content": "hi"}]
+    list(
+        chat_agent.run_chat_loop_stream(
+            messages,
+            tools=[{"name": "e", "description": "", "input_schema": {"type": "object"}}],
+            tool_dispatch=lambda n, a: "",
+            max_iterations=4,
+            force_final_answer=True,
+        )
+    )
+
+    # No reminder anywhere in the conversation.
+    assert all(
+        m.get("content") != chat_agent.FINAL_CYCLE_REMINDER for m in messages
+    )
+    assert messages[-1]["content"] == "done early"
 
 
 def test_loop_stream_max_iterations_raises(stub_stream):
@@ -233,27 +259,21 @@ def test_loop_stream_max_iterations_raises(stub_stream):
 
 
 @pytest.fixture
-def app(tmp_db, monkeypatch):
+def signed_in_client(tmp_db):
+    """Create a user, log in, and hand back a FastAPI test client."""
+    from fastapi.testclient import TestClient
+
+    from app.auth import users as users_repo
     from app.main import create_app
 
-    flask_app = create_app()
-    flask_app.config["TESTING"] = True
-    return flask_app
+    users_repo.create(email="t@example.com", password="hunter22", name="t")
 
-
-@pytest.fixture
-def signed_in_client(app, tmp_db):
-    """Create a user, log in, and hand back a Flask test client."""
-    from app.auth import users as users_repo
-
-    users_repo.create(email="t@example.com", password="hunter2", name="t")
-
-    client = app.test_client()
+    client = TestClient(create_app())
     resp = client.post(
         "/api/auth/login",
-        json={"email": "t@example.com", "password": "hunter2"},
+        json={"email": "t@example.com", "password": "hunter22"},
     )
-    assert resp.status_code == 200, resp.get_data(as_text=True)
+    assert resp.status_code == 200, resp.text
     return client
 
 
@@ -271,8 +291,8 @@ def _parse_sse(body: str) -> list[dict]:
 
 def _create_session(client) -> str:
     resp = client.post("/api/chat/sessions")
-    assert resp.status_code == 201, resp.get_data(as_text=True)
-    return resp.get_json()["id"]
+    assert resp.status_code == 201, resp.text
+    return resp.json()["id"]
 
 
 def test_sse_endpoint_streams_text_then_done(signed_in_client, monkeypatch):
@@ -290,8 +310,8 @@ def test_sse_endpoint_streams_text_then_done(signed_in_client, monkeypatch):
     )
 
     assert resp.status_code == 200
-    assert resp.mimetype == "text/event-stream"
-    events = _parse_sse(resp.get_data(as_text=True))
+    assert resp.headers["content-type"].startswith("text/event-stream")
+    events = _parse_sse(resp.text)
     assert events == [
         {"type": "text_delta", "text": "hi "},
         {"type": "text_delta", "text": "there"},
@@ -315,7 +335,7 @@ def test_sse_endpoint_emits_error_event_on_llm_error(signed_in_client, monkeypat
     )
 
     assert resp.status_code == 200
-    events = _parse_sse(resp.get_data(as_text=True))
+    events = _parse_sse(resp.text)
     assert events[0] == {"type": "text_delta", "text": "partial"}
     assert events[-1] == {
         "type": "error",
@@ -328,8 +348,7 @@ def test_sse_endpoint_validates_request_body(signed_in_client):
     # Missing session_id → 400 with JSON envelope (NOT an SSE error event).
     resp = signed_in_client.post("/api/chat/messages", json={"content": "hi"})
     assert resp.status_code == 400
-    assert resp.is_json
-    assert "error" in resp.get_json()
+    assert "error" in resp.json()
 
 
 def test_sse_endpoint_rejects_unknown_session(signed_in_client):
@@ -338,4 +357,4 @@ def test_sse_endpoint_rejects_unknown_session(signed_in_client):
         json={"session_id": "no-such-session", "content": "hi"},
     )
     assert resp.status_code == 404
-    assert "error" in resp.get_json()
+    assert "error" in resp.json()

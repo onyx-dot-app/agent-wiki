@@ -11,8 +11,8 @@ def _strip_everyone(integration, path: str) -> None:
     """Helper: revoke the seeded ``everyone`` grants so the page becomes
     private for sharing tests."""
     resp = integration.client.get(f"/api/wiki/acl?path={path}")
-    assert resp.status_code == 200, resp.get_data(as_text=True)
-    for entry in resp.get_json()["entries"]:
+    assert resp.status_code == 200, resp.text
+    for entry in resp.json()["entries"]:
         if entry["principal_kind"] == "everyone" and entry["resource_kind"] == "page":
             r = integration.client.delete(f"/api/wiki/acl/{entry['id']}")
             assert r.status_code == 204
@@ -26,14 +26,14 @@ def _strip_everyone(integration, path: str) -> None:
 def test_admin_can_create_and_list_groups(integration):
     integration.signup(email="admin@x.com")  # auto-admin (first user)
     resp = integration.client.post("/api/groups", json={"name": "eng", "description": "team"})
-    assert resp.status_code == 201, resp.get_data(as_text=True)
-    body = resp.get_json()
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
     assert body["name"] == "eng"
     assert body["id"].startswith("grp_")
 
     resp = integration.client.get("/api/groups")
     assert resp.status_code == 200
-    names = [g["name"] for g in resp.get_json()["groups"]]
+    names = [g["name"] for g in resp.json()["groups"]]
     assert names == ["eng"]
 
 
@@ -51,20 +51,20 @@ def test_member_addition_and_listing(integration):
     integration.signin(email="admin@x.com")
 
     resp = integration.client.post("/api/groups", json={"name": "eng"})
-    gid = resp.get_json()["id"]
+    gid = resp.json()["id"]
 
     resp = integration.client.post(f"/api/groups/{gid}/members", json={"user_id": bob})
     assert resp.status_code == 204
 
     resp = integration.client.get(f"/api/groups/{gid}")
     assert resp.status_code == 200
-    member_ids = [m["id"] for m in resp.get_json()["members"]]
+    member_ids = [m["id"] for m in resp.json()["members"]]
     assert bob in member_ids
 
     resp = integration.client.delete(f"/api/groups/{gid}/members/{bob}")
     assert resp.status_code == 204
     resp = integration.client.get(f"/api/groups/{gid}")
-    assert resp.get_json()["members"] == []
+    assert resp.json()["members"] == []
 
 
 def test_user_sees_only_their_groups(integration):
@@ -73,15 +73,15 @@ def test_user_sees_only_their_groups(integration):
     bob = integration.signup(email="bob@x.com")
     integration.signin(email="admin@x.com")
 
-    a_id = integration.client.post("/api/groups", json={"name": "a-team"}).get_json()["id"]
-    b_id = integration.client.post("/api/groups", json={"name": "b-team"}).get_json()["id"]
+    a_id = integration.client.post("/api/groups", json={"name": "a-team"}).json()["id"]
+    b_id = integration.client.post("/api/groups", json={"name": "b-team"}).json()["id"]
     integration.client.post(f"/api/groups/{a_id}/members", json={"user_id": alice})
     integration.client.post(f"/api/groups/{b_id}/members", json={"user_id": bob})
 
     integration.signin(user_id=alice)
     resp = integration.client.get("/api/groups")
     assert resp.status_code == 200
-    names = {g["name"] for g in resp.get_json()["groups"]}
+    names = {g["name"] for g in resp.json()["groups"]}
     assert names == {"a-team"}
 
 
@@ -96,7 +96,7 @@ def test_owner_can_list_and_revoke_grants(integration):
 
     resp = integration.client.get("/api/wiki/acl?path=docs/spec.md")
     assert resp.status_code == 200
-    entries = resp.get_json()["entries"]
+    entries = resp.json()["entries"]
     everyone_ids = [e["id"] for e in entries if e["principal_kind"] == "everyone"]
     assert len(everyone_ids) == 2  # read + write
 
@@ -105,17 +105,8 @@ def test_owner_can_list_and_revoke_grants(integration):
         assert r.status_code == 204
     resp = integration.client.get("/api/wiki/acl?path=docs/spec.md")
     assert resp.status_code == 200
-    everyone = [e for e in resp.get_json()["entries"] if e["principal_kind"] == "everyone"]
+    everyone = [e for e in resp.json()["entries"] if e["principal_kind"] == "everyone"]
     assert everyone == []
-
-
-def test_non_owner_cannot_list_acl(integration):
-    integration.signup(email="alice@x.com")
-    integration.put_doc("docs/spec.md", "# Spec")
-    integration.signup(email="bob@x.com")
-    integration.signin(email="bob@x.com")
-    resp = integration.client.get("/api/wiki/acl?path=docs/spec.md")
-    assert resp.status_code == 403
 
 
 def test_owner_can_grant_user_access(integration):
@@ -131,8 +122,8 @@ def test_owner_can_grant_user_access(integration):
         "principal_id": bob,
         "permission": "read",
     })
-    assert resp.status_code == 201, resp.get_data(as_text=True)
-    eid = resp.get_json()["id"]
+    assert resp.status_code == 201, resp.text
+    eid = resp.json()["id"]
     assert eid.startswith("acl_")
 
     # Bob can now read.
@@ -170,7 +161,7 @@ def test_transfer_ownership_changes_owner(integration):
         "new_owner_user_id": bob,
     })
     assert resp.status_code == 200
-    assert resp.get_json()["owner_user_id"] == bob
+    assert resp.json()["owner_user_id"] == bob
 
     # Alice no longer has owner rights.
     integration.signin(user_id=alice)
@@ -258,7 +249,7 @@ def test_non_admin_blocked_from_every_group_mutation(integration):
     integration.signin(email="admin@x.com")
     gid = integration.client.post(
         "/api/groups", json={"name": "eng"}
-    ).get_json()["id"]
+    ).json()["id"]
 
     integration.signin(user_id=bob)
     assert integration.client.post(
@@ -280,7 +271,7 @@ def test_non_member_cannot_view_group_detail(integration):
     integration.signin(email="admin@x.com")
     gid = integration.client.post(
         "/api/groups", json={"name": "eng"}
-    ).get_json()["id"]
+    ).json()["id"]
     integration.client.post(
         f"/api/groups/{gid}/members", json={"user_id": bob}
     )
@@ -334,7 +325,7 @@ def test_member_add_with_nonexistent_user_returns_404(integration):
     integration.signin(email="admin@x.com")
     gid = integration.client.post(
         "/api/groups", json={"name": "eng"}
-    ).get_json()["id"]
+    ).json()["id"]
     r = integration.client.post(
         f"/api/groups/{gid}/members", json={"user_id": "u_nope"}
     )

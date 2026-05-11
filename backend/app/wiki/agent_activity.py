@@ -1,8 +1,10 @@
-"""Agent activity registry — per-doc visibility for active agents.
+"""Agent activity registry — per-agent visibility for active work.
 
 The DB (`agent_activity` table) is the source of truth. Each row says
 which user (and optionally which named agent) is currently reading or
-writing a wiki doc, with a 24h TTL. The state is exposed through:
+writing a wiki doc, with a TTL. There is **one row per
+(user, agent)** at any moment — a newer upsert replaces the prior row
+in place. The state is exposed through:
 
 * The ``read_page`` / ``read_doc`` tool responses (an ``agents`` field
   on every HEAD read), so co-occupant agents can see each other.
@@ -15,11 +17,14 @@ frontmatter on each ``.md``.
 
 Lifecycle:
 * ``read`` registers on successful HEAD reads via ``read_page`` /
-  ``read_doc``.
+  ``read_doc``, using ``DEFAULT_TTL`` (24h).
 * ``wrote`` registers on successful writes through the doc-edit
-  tools.
-* Both share ``DEFAULT_TTL``; re-registration slides ``expires_at``
-  via a natural-key UPSERT.
+  tools. Write tools accept an optional ``expires_in_seconds`` arg
+  letting an agent declare "I'll be working on this for X seconds";
+  that value becomes the row's TTL for that upsert.
+* Each upsert overwrites ``expires_at``. ``read`` after a custom
+  ``expires_in_seconds`` resets to the 24h default — the most
+  recent action wins.
 * At ``expires_at`` the cleanup task in ``app/tasks/agent_activity.py``
   deletes the row. Server restart re-schedules cleanups for every
   active row.
@@ -31,7 +36,7 @@ from contextvars import ContextVar
 from datetime import datetime, timedelta, timezone
 
 from pydantic import BaseModel
-from sqlalchemy import and_, func, select
+from sqlalchemy import func, select
 
 from app.db.models import AgentActivity, User
 from app.db.session import session
@@ -150,8 +155,12 @@ def upsert_activity(
 ) -> str:
     """UPSERT a row. Returns the resulting `expires_at` ISO string.
 
-    The natural key is (user_id, agent_name, doc_path, activity); a
-    re-register slides `expires_at` forward and overwrites `description`.
+    The natural key is ``(user_id, agent_name)`` — there is exactly one
+    row per (user, agent) at any moment. A new upsert overwrites the
+    prior row's ``doc_path``, ``activity``, ``description``,
+    ``registered_at``, ``expires_at``, and clears ``cleanup_msg_id``
+    (the prior scheduled fire is canceled by
+    ``schedule_cleanup_for_natural_key`` after this returns).
     """
     if activity not in ("read", "wrote"):
         raise ValueError(f"unsupported activity: {activity!r}")
@@ -161,15 +170,13 @@ def upsert_activity(
     with session() as s:
         existing = s.scalar(
             select(AgentActivity).where(
-                and_(
-                    AgentActivity.user_id == user_id,
-                    AgentActivity.agent_name.is_not_distinct_from(agent_name),
-                    AgentActivity.doc_path == doc_path,
-                    AgentActivity.activity == activity,
-                )
+                AgentActivity.user_id == user_id,
+                AgentActivity.agent_name.is_not_distinct_from(agent_name),
             )
         )
         if existing is not None:
+            existing.doc_path = doc_path
+            existing.activity = activity
             existing.description = description
             existing.registered_at = registered_at
             existing.expires_at = expires_at
@@ -193,15 +200,13 @@ def upsert_activity(
 
 
 def get_by_natural_key(
-    *, user_id: str, agent_name: str | None, doc_path: str, activity: str
+    *, user_id: str, agent_name: str | None
 ) -> ActivityRow | None:
     with session() as s:
         row = s.execute(
             _select_with_owner().where(
                 AgentActivity.user_id == user_id,
                 AgentActivity.agent_name.is_not_distinct_from(agent_name),
-                AgentActivity.doc_path == doc_path,
-                AgentActivity.activity == activity,
             )
         ).first()
         if row is None:
@@ -211,15 +216,13 @@ def get_by_natural_key(
 
 
 def delete_by_natural_key(
-    *, user_id: str, agent_name: str | None, doc_path: str, activity: str
+    *, user_id: str, agent_name: str | None
 ) -> None:
     with session() as s:
         existing = s.scalar(
             select(AgentActivity).where(
                 AgentActivity.user_id == user_id,
                 AgentActivity.agent_name.is_not_distinct_from(agent_name),
-                AgentActivity.doc_path == doc_path,
-                AgentActivity.activity == activity,
             )
         )
         if existing is not None:

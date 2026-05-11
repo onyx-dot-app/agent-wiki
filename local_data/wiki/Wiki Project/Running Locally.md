@@ -26,7 +26,7 @@ inventory; this doc is the concrete runbook.
     the `pg_textsearch` and `pgmq` extensions installed (or run
     `docker compose up postgres` and connect to the compose service).
   - `BACKEND_URL=http://localhost:8080` — used by the Next dev-server
-    rewrite to proxy `/api/*` to Flask.
+    rewrite to proxy `/api/*` to the FastAPI backend.
 - The wiki dir is a git repo; for files to show up in the UI they must be
   **tracked** (`/api/documents` is built from `git ls-files`). See the
   next section for setup details and recovery.
@@ -166,46 +166,35 @@ process (see [Background Tasks](Specific%20Features/Background%20Tasks.md)).
 So a full local stack is **backend + three workers + frontend**. All five
 are long-lived, so an agent should background them.
 
-### 1. Backend (Flask, :8080)
+### 1. Backend (FastAPI via uvicorn, :8080)
 
-We run the backend under **gunicorn** with `--reload` and a
-`--graceful-timeout` so file saves don't kill in-flight requests (the chat
-agent's multi-turn LLM calls hold a request for several seconds; a naive
-reload mid-call would error out the response).
+We run the backend under **uvicorn** with `--reload` so file saves
+hot-swap the worker. FastAPI's app factory (`create_app`) is the
+ASGI entry point; pass it via `--factory`.
 
 ```
 cd backend
-uv run gunicorn 'app.main:create_app()' \
-  --bind 127.0.0.1:8080 \
-  --workers 1 \
-  --reload \
-  --graceful-timeout 30 \
-  --timeout 60
+uv run uvicorn --factory app.main:create_app \
+  --host 127.0.0.1 \
+  --port 8080 \
+  --reload
 ```
 
-- `app.main:create_app()` — gunicorn calls the factory; no app-level glue
-  needed.
-- `--workers 1` — single worker matches the production deployment (the
-  per-queue cron scheduler runs in-process and doesn't tolerate replicas
-  fighting over leadership; Postgres itself handles concurrency fine).
-- `--reload` — gunicorn's master watches `backend/app/**` and signals the
-  worker on change.
-- `--graceful-timeout 30` — on reload, the master gives the old worker up
-  to 30 s to finish in-flight requests before killing it. New requests
-  queue at the listener until the new worker comes up; nothing gets
-  dropped.
-- `--timeout 60` — bound on individual request duration (raise if you have
-  longer-running endpoints; LLM tool-call rounds in chat usually finish in
-  a few seconds).
+- `--factory app.main:create_app` — uvicorn calls the factory each
+  time it (re)imports the app; no module-level glue needed.
+- `--reload` — uvicorn's reloader watches `backend/app/**` and
+  restarts the worker on change. In-flight requests get aborted
+  on restart; the chat agent's multi-turn LLM calls will surface
+  as a dropped stream if you save mid-call. Production (Dockerfile
+  `CMD`) drops `--reload` and runs `--workers 2`.
+- Single worker is the dev default; multi-worker is fine but
+  duplicates the per-queue cron scheduler — keep workers=1 locally
+  unless you're stress-testing.
 
 `app/config.py` calls `dotenv.load_dotenv()` against the repo-root `.env`,
 so no `source .env` is needed.
 
-Cold-start to first HTTP 200 is ~250 ms on a recent Mac. Reload latency on
-a file save ≈ longest in-flight request + ~250 ms.
-
-If you want the simpler dev server (no graceful reload — kills in-flight
-requests on save), `uv run python -m app.main` still works.
+Cold-start to first HTTP 200 is ~250 ms on a recent Mac.
 
 ### 2. Workers (pgmq) — three processes, one per queue
 
@@ -250,7 +239,7 @@ The `set -a / source` dance is required here because Next only auto-loads
 ### Open at
 
 http://localhost:3000 — **not** :8080. There is no nginx in this setup;
-the Next dev server proxies `/api/*` to Flask via the rewrite in
+the Next dev server proxies `/api/*` to FastAPI via the rewrite in
 `frontend/next.config.js`.
 
 ### Readiness check
@@ -302,7 +291,7 @@ the "Python: Select Interpreter" command and point it at
 
 | Config | What it does | Notes |
 |---|---|---|
-| `Backend (Flask via gunicorn)` | `python -m gunicorn app.main:create_app() --bind 127.0.0.1:8080 --workers 1 --graceful-timeout 30 --timeout 60`, cwd `backend/`. | **No `--reload`** here — debugpy doesn't play well with gunicorn's reload-fork dance, so the editor path drops it and you restart the debug session manually after a Python save. The CLI path keeps `--reload` (see §"How to run" above) when you want save-on-reload. `subProcess: true` so debugpy follows the worker fork; `justMyCode: false` lets you step into Flask/gunicorn/etc. macOS-only env: `OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES` to silence Apple's fork-after-init warning during gunicorn's worker spawn. |
+| `Backend (FastAPI via uvicorn)` | `python -m uvicorn --factory app.main:create_app --host 127.0.0.1 --port 8080 --reload`, cwd `backend/`. | `--reload` is on — uvicorn's reloader and debugpy coexist (debugpy survives the worker swap; breakpoints stick). `subProcess: true` so debugpy follows any child the app spawns; `justMyCode: false` lets you step into Starlette / uvicorn / library code. macOS-only env: `OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES` silences Apple's fork-after-init warning. |
 | `Worker — documents (LLM doc-updater)` | `python -m app.tasks.run_worker documents`. | Drains `documents_queue` — see [Background Tasks](Specific%20Features/Background%20Tasks.md). |
 | `Worker — triggers (NL trigger eval)` | `python -m app.tasks.run_worker triggers`. | Drains `triggers_queue` — see [Background Tasks](Specific%20Features/Background%20Tasks.md). |
 | `Worker — lightweight_maintenance (BM25 + expirations)` | `python -m app.tasks.run_worker lightweight_maintenance`. | Drains `lightweight_maintenance_queue` — see [Background Tasks](Specific%20Features/Background%20Tasks.md). |
@@ -345,13 +334,13 @@ the shell `source ../.env`, just driven by the editor.
 - Hot reload differs between ends:
   - Frontend: Next.js HMR — saves under `frontend/src/**` propagate to the
     browser within ~1 s; component state is preserved where possible.
-  - Backend (VS Code): **no auto-reload** — the editor path drops
-    `--reload` so debugpy stays attached cleanly. After a Python save,
-    restart the Backend launch (or the compound). Workers behave the
-    same way — saves to `backend/app/tasks/**` need a worker restart.
-  - Backend (CLI): `uv run gunicorn ... --reload` does watch
-    `backend/app/**` and gracefully swap the worker on save. Pick this
-    path if save-driven reloads matter more than step-debugging.
+  - Backend: `uvicorn --reload` watches `backend/app/**` and restarts
+    the worker on save under both the CLI and VS Code launch. In-flight
+    requests get cancelled on restart — if you're stepping through a
+    request and want to keep the debug session attached across saves,
+    drop `--reload` from the launch args.
+  - Workers: no built-in reloader — saves to `backend/app/tasks/**`
+    require restarting the worker launch by hand.
 
 ---
 
@@ -360,8 +349,9 @@ the shell `source ../.env`, just driven by the editor.
 ### When a human runs the processes in their own terminals
 
 Each process logs to stdout/stderr in the terminal where it was started.
-Flask logs through `werkzeug` at INFO; pgmq logs to stdout. Nothing is
-written to a file by default.
+uvicorn logs at INFO (access + lifespan); the app's own loggers go through
+`app.utils.logging.setup_logging` at `LOG_LEVEL` (default INFO); pgmq logs
+to stdout. Nothing is written to a file by default.
 
 ### When an agent runs the processes via the Claude Code task harness
 
@@ -448,8 +438,11 @@ cookie.
 
 ### Backend changes aren't picked up
 
-The Flask dev server here runs without `debug=True`, so it does **not**
-auto-reload. Restart the backend after editing Python code.
+If you launched uvicorn without `--reload` (the CLI snippet above keeps
+it on, but the VS Code path can be customized to drop it), there's no
+auto-reload — restart the backend after editing Python code. If
+`--reload` is on and a save still isn't reflecting, check the uvicorn
+log for an import error that aborted the reload.
 
 ### Frontend changes aren't picked up
 
@@ -486,7 +479,7 @@ add a new one.
 1. `cp .env.example .env`; set `SECRET_KEY` and (if running the
    frontend on the host while talking to the compose Postgres) set
    `BACKEND_URL=http://localhost:8080` so the Next dev-server rewrite
-   targets host-Flask instead of the docker hostname `backend:8080`.
+   targets host-FastAPI instead of the docker hostname `backend:8080`.
 2. Backend deps with uv:
    ```
    cd backend
@@ -531,7 +524,7 @@ finer details.
 
 ## Pointers into the codebase
 
-- `backend/app/main.py` — Flask app factory; lists registered blueprints.
+- `backend/app/main.py` — FastAPI app factory; lists registered routers, middleware, and exception handlers.
 - `backend/app/config.py` — env loading.
 - `backend/app/wiki/git.py` — only place that shells out to git.
 - `backend/app/api/documents.py` — wiki listing/read endpoints.

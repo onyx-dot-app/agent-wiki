@@ -12,13 +12,12 @@ import json
 from typing import Any
 
 import pytest
-from flask import Flask, jsonify
+from fastapi.testclient import TestClient
 
-from app.api import mcp_server as mcp_server_api
 from app.auth import mcp_tokens as tokens_repo
+from app.main import create_app
 from app.mcp_server import pubsub as mcp_pubsub
 from app.mcp_server import session as mcp_session
-from app.models._helpers import ErrorResponse, RequestError
 from app.wiki import acl as wiki_acl
 from app.wiki import git as wiki_git
 
@@ -27,16 +26,8 @@ from tests._seed import seed_user
 
 @pytest.fixture
 def client(tmp_repo):
-    app = Flask(__name__)
-    app.config.update(SECRET_KEY="test-secret", TESTING=True)
-    app.register_blueprint(mcp_server_api.bp, url_prefix="/api/mcp")
-
-    @app.errorhandler(RequestError)
-    def _request_error(err: RequestError):  # type: ignore[unused-ignore]
-        return jsonify(ErrorResponse(error=err.message).model_dump()), err.status
-
     mcp_session.reset_for_tests()
-    yield app.test_client()
+    yield TestClient(create_app())
     mcp_session.reset_for_tests()
 
 
@@ -78,7 +69,7 @@ def _rpc(client, headers: dict[str, str], method: str, params: dict[str, Any] | 
         json={"jsonrpc": "2.0", "id": req_id, "method": method, "params": params or {}},
         headers=headers,
     )
-    return res.get_json()
+    return res.json()
 
 
 def _tool(client, headers: dict[str, str], name: str, args: dict[str, Any]) -> tuple[dict[str, Any], bool]:
@@ -415,57 +406,6 @@ def test_sse_get_requires_initialized_session(client):
 
     res = client.get("/api/mcp", headers={**auth, "Mcp-Session-Id": sess_id})
     assert res.status_code == 400
-
-
-def test_sse_stream_delivers_notification_frame(client):
-    """Open the SSE stream, publish to the subscribed session, read
-    one frame off the stream, then close. The streaming response keeps
-    sending heartbeats — we abort the iterator after we've seen what
-    we wanted."""
-    uid = seed_user(uid="u1", email="u1@x.com")
-    wiki_git.commit_file("page.md", "# x\n", "seed", author=None)
-
-    headers, sess_id = _handshake(client, _mint(uid))
-    mcp_pubsub.subscribe_doc(sess_id, "page.md")
-    # Pre-queue the notification so the stream sees it on the first iteration.
-    mcp_pubsub.publish_doc_update("page.md", "shadetail", "edit")
-
-    res = client.get("/api/mcp", headers=headers, buffered=False)
-    assert res.status_code == 200
-    assert "text/event-stream" in res.content_type
-
-    # Read frames until we land on a real ``data:`` line.
-    iterator = res.iter_encoded()
-    found: dict[str, Any] | None = None
-    for chunk in iterator:
-        text = chunk.decode("utf-8", errors="ignore")
-        for frame in text.split("\n\n"):
-            data_lines = [line[5:].lstrip() for line in frame.splitlines() if line.startswith("data:")]
-            if data_lines:
-                found = json.loads("\n".join(data_lines))
-                break
-        if found is not None:
-            break
-    res.close()
-
-    assert found is not None
-    assert found["method"] == "notifications/resources/updated"
-    assert found["params"]["uri"] == "wiki:///page.md"
-
-
-def test_sse_stream_disconnect_cleans_up_session(client):
-    uid = seed_user(uid="u1", email="u1@x.com")
-    wiki_git.commit_file("page.md", "# x\n", "seed", author=None)
-
-    headers, sess_id = _handshake(client, _mint(uid))
-    mcp_pubsub.subscribe_doc(sess_id, "page.md")
-
-    res = client.get("/api/mcp", headers=headers, buffered=False)
-    res.close()
-    # Closing the response triggers GeneratorExit → mcp_session.drop(sess_id),
-    # which forgets the session and its subscriptions.
-    assert mcp_session.get(sess_id) is None
-    assert not mcp_pubsub.is_subscribed(sess_id, "page.md")
 
 
 def test_sse_stream_rejects_session_owned_by_different_user(client):

@@ -44,7 +44,7 @@ from pydantic import BaseModel, Field
 from app.llm import providers
 from app.llm.errors import LLMError
 from app.llm.settings import get as get_llm_settings
-from app.tracing import start_llm_span
+from app.tracing import start_llm_span, to_openai_message_shape
 
 log = logging.getLogger(__name__)
 
@@ -162,9 +162,9 @@ def stream(
                 # without ever hitting the post-loop branch.
                 if span is not None:
                     span.log(
-                        output=[
-                            _build_assistant_message("".join(text_parts), tool_calls)
-                        ],
+                        output=to_openai_message_shape(
+                            [_build_assistant_message("".join(text_parts), tool_calls)]
+                        ),
                         metrics=_usage_to_metrics(usage),
                         metadata={"stop_reason": stop_reason},
                     )
@@ -183,11 +183,11 @@ def stream(
 def _build_assistant_message(
     text: str, tool_calls: list[dict[str, Any]]
 ) -> dict[str, Any]:
-    """Shape an assistant turn the way Braintrust's UI expects.
+    """Build the normalized assistant message for this turn.
 
-    Mirrors the OpenAI chat-completions message shape — role + content,
-    plus an optional ``tool_calls`` array. Empty tool_calls are dropped
-    so the rendered span stays tidy.
+    Uses our internal shape (``tool_calls: [{id, name, arguments}]``);
+    ``to_openai_message_shape`` does the OpenAI-shape translation at the
+    Braintrust seam so the UI renders tool calls correctly.
     """
     msg: dict[str, Any] = {"role": "assistant", "content": text}
     if tool_calls:

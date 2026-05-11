@@ -19,8 +19,7 @@ from app.tracing import trace_flow
 
 log = logging.getLogger(__name__)
 
-_READ_TOOLS = ("search_wiki", "read_page")
-_MAX_ITERATIONS = 6
+_MAX_ITERATIONS = 10
 
 
 def run(query: str, *, model: str | None = None) -> dict[str, Any]:
@@ -35,10 +34,13 @@ def run(query: str, *, model: str | None = None) -> dict[str, Any]:
     # module. Deferring the chat / registry imports until call time keeps
     # the import graph acyclic.
     from app.llm.agents import chat as chat_agent
+    from app.llm.agents import skills as skill_registry
     from app.llm.agents import tools as tool_registry
 
     system_prompt = load_prompt("wiki_qa.system")
-    tools = [spec for spec in tool_registry.TOOL_SPECS if spec["name"] in _READ_TOOLS]
+    # Read-only sub-agent: base toolset only, no `load_skill` (cannot escalate
+    # to writes / shell / web).
+    tools = skill_registry.base_tool_specs()
     messages: list[dict[str, Any]] = [{"role": "user", "content": query}]
     with trace_flow("agent.wiki_qa", query=query):
         chat_agent.run_chat_loop(
@@ -48,6 +50,7 @@ def run(query: str, *, model: str | None = None) -> dict[str, Any]:
             tool_dispatch=tool_registry.dispatch,
             model=model,
             max_iterations=_MAX_ITERATIONS,
+            force_final_answer=True,
         )
     answer = _final_assistant_text(messages)
     sources = _collect_sources(messages)

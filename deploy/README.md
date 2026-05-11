@@ -114,7 +114,12 @@ to admin (see `app/auth/users.py`). Configure the LLM provider/keys from
   Postgres 17 with the `pg_textsearch` and `pgmq` extensions is reachable
   via `DATABASE_URL` (set on the backend + worker env). Provision it
   however you want — RDS, Cloud SQL, a self-managed instance, etc. — see
-  `local_data/wiki/infra/infra.md` and `CLAUDE.md`.
+  `local_data/wiki/infra/infra.md` and `CLAUDE.md`. **`pg_textsearch` must
+  be loaded via `shared_preload_libraries`** (a server config / parameter
+  group setting that requires a Postgres restart) — `CREATE EXTENSION` on
+  its own is not enough. `pgmq` is a regular extension and only needs
+  `CREATE EXTENSION pgmq`. The bundled `deploy/postgres/Dockerfile` and
+  `docker-compose.yml` show the exact wiring for self-managed setups.
 - **No multi-replica backend/worker.** Two reasons, both still binding
   after the Postgres migration: (a) the `wiki-data` PVC is RWO and the
   pods share it, so replicas would fight over the git working tree; and

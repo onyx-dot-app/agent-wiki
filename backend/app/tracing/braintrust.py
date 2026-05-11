@@ -18,6 +18,7 @@ need to thread parents.
 """
 from __future__ import annotations
 
+import json
 import logging
 from contextlib import contextmanager
 from typing import Any, Generator
@@ -93,6 +94,48 @@ def trace_flow(name: str, **metadata: Any) -> Generator[Any | None, None, None]:
         yield span
 
 
+def to_openai_message_shape(
+    messages: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Translate our normalized message shape to OpenAI Chat Completions shape.
+
+    Braintrust's UI renders LLM span input/output as OpenAI chat-completions
+    messages: assistant ``tool_calls`` must be ``[{id, type: "function",
+    function: {name, arguments: "<json str>"}}]``. Our internal shape uses
+    ``[{id, name, arguments: <dict>}]``, which Braintrust doesn't recognize —
+    so without this conversion, assistant turns that *only* call tools render
+    as empty bubbles and the call arguments don't appear at all. Tool result
+    messages already match (``{role: "tool", tool_call_id, content}``).
+    """
+    out: list[dict[str, Any]] = []
+    for m in messages:
+        if m.get("role") == "assistant" and m.get("tool_calls"):
+            tool_calls: list[dict[str, Any]] = []
+            for tc in m["tool_calls"]:
+                args = tc.get("arguments", {})
+                args_str = args if isinstance(args, str) else json.dumps(args)
+                tool_calls.append(
+                    {
+                        "id": tc["id"],
+                        "type": "function",
+                        "function": {"name": tc["name"], "arguments": args_str},
+                    }
+                )
+            content = m.get("content", "")
+            out.append(
+                {
+                    "role": "assistant",
+                    # OpenAI uses null when the assistant only called tools;
+                    # this keeps Braintrust from rendering an empty text bubble.
+                    "content": content if content else None,
+                    "tool_calls": tool_calls,
+                }
+            )
+        else:
+            out.append(m)
+    return out
+
+
 @contextmanager
 def start_llm_span(
     *,
@@ -118,7 +161,7 @@ def start_llm_span(
         span_cm: Any = braintrust.start_span(
             name=f"llm:{provider}",
             type=SpanTypeAttribute.LLM,
-            input=messages,
+            input=to_openai_message_shape(messages),
             metadata={
                 "provider": provider,
                 "model": model,

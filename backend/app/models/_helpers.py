@@ -1,29 +1,24 @@
-"""Helpers for request/response model handling in Flask blueprints.
+"""Shared HTTP-shape helpers for the API routers.
 
-Pattern in routes:
+* :class:`ErrorResponse` is the standard ``{"error": "..."}`` envelope
+  every 4xx/5xx body matches.
+* :class:`QueueFullErrorResponse` is the 503 body the task-queue
+  backpressure path returns.
+* :class:`RequestError` is raised by helpers (notably
+  :func:`parse_body`) to surface "bad input" with a status code; the
+  app-level exception handler in ``app.main`` translates it into the
+  envelope above.
 
-    req = parse_body(MyRequest, request.get_json(silent=True))
-    ...
-    return jsonify(MyResponse(...).model_dump()), 200
-
-``parse_body`` raises ``RequestError`` on invalid input; an error handler
-in ``app.main`` converts it into ``ErrorResponse`` with the right status.
-For inline error returns (404, 409, etc.), call ``error(...)``.
-
-Why not ``flask-pydantic``?
-    The ``@validate()`` decorator looks tempting but it's a poor fit for a
-    pyright-checked codebase: it injects validated args (``body``, ``query``,
-    etc.) that the type checker can't see, so handlers either lose type info
-    on those params or need explicit annotations that defeat the point. The
-    explicit ``parse_body`` call below stays type-checkable end to end.
-    If we ever want OpenAPI docs on top of this, ``APIFlask`` is a better
-    fit than ``flask-pydantic`` for the same reason.
+FastAPI's body-binding (typed Pydantic parameter on a route) handles
+most validation cases natively. :func:`parse_body` is here for routes
+that accept a raw ``dict[str, Any]`` body and want field presence
+information that strict Pydantic models hide (see ``put_llm`` for the
+canonical example).
 """
 from __future__ import annotations
 
-from typing import Any, TypeVar
+from typing import TypeVar
 
-from flask import jsonify
 from pydantic import BaseModel, ValidationError
 
 T = TypeVar("T", bound=BaseModel)
@@ -54,7 +49,8 @@ class RequestError(Exception):
 
 
 def parse_body(model_cls: type[T], raw: object) -> T:
-    """Validate a JSON body against ``model_cls``. Raise RequestError on failure."""
+    """Validate a JSON body against ``model_cls``. Raise RequestError
+    on failure."""
     if raw is None:
         raw = {}
     if not isinstance(raw, dict):
@@ -65,16 +61,12 @@ def parse_body(model_cls: type[T], raw: object) -> T:
         raise RequestError(_format_error(exc)) from exc
 
 
-def error(message: str, status: int = 400) -> tuple[Any, int]:
-    """Build a typed ``ErrorResponse`` JSON response with the given status."""
-    return jsonify(ErrorResponse(error=message).model_dump()), status
-
-
 def _format_error(exc: ValidationError) -> str:
     """First validation error, formatted for end users.
 
-    Pydantic's full error report is too noisy for an API ``{"error": ...}``;
-    we surface just the first failing field plus its message.
+    Pydantic's full error report is too noisy for an API
+    ``{"error": ...}``; we surface just the first failing field plus
+    its message.
     """
     err = exc.errors()[0]
     loc = ".".join(str(x) for x in err.get("loc", []))

@@ -1,30 +1,24 @@
 """Tests for ``app/api/events.py``.
 
-Owner-scoping (2026-05-09): the events endpoints filter to ``trigger.fire``
-rows whose target trigger is owned by the current user. Tests that assert
-on visibility seed both the user and the trigger so the join finds them.
+Owner-scoping (2026-05-09): the events endpoints filter to
+``trigger.fire`` rows whose target trigger is owned by the current
+user. Tests that assert on visibility seed both the user and the
+trigger so the join finds them.
 """
 from __future__ import annotations
 
 import pytest
-from flask import Flask
+from fastapi.testclient import TestClient
 
-from app.api import events as events_api
+from app.main import create_app
 
+from tests._auth import login_fastapi
 from tests._seed import insert_event, seed_trigger, seed_user
 
 
 @pytest.fixture
 def client(tmp_db):
-    app = Flask(__name__)
-    app.config.update(SECRET_KEY="test-secret", TESTING=True)
-    app.register_blueprint(events_api.bp, url_prefix="/api/events")
-    return app.test_client()
-
-
-def _login(client, uid: str) -> None:
-    with client.session_transaction() as sess:
-        sess["user_id"] = uid
+    return TestClient(create_app())
 
 
 def test_unauthenticated_is_401(client):
@@ -33,13 +27,13 @@ def test_unauthenticated_is_401(client):
 
 def test_list_returns_newest_first_with_parsed_payload(client):
     uid = seed_user(email="usr_1@x.com")
-    _login(client, uid)
+    login_fastapi(client, uid)
     seed_trigger(tid="trg_a", owner_user_id=uid, scope_path="a.md", message="m")
     seed_trigger(tid="trg_b", owner_user_id=uid, scope_path="b.md", message="m")
     insert_event("trigger.fire", "trg_a", {"reason": "first"})
     insert_event("trigger.fire", "trg_b", {"reason": "second"})
 
-    body = client.get("/api/events").get_json()
+    body = client.get("/api/events").json()
     targets = [e["target"] for e in body["events"]]
     assert targets == ["trg_b", "trg_a"]
     assert body["events"][0]["payload"]["reason"] == "second"
@@ -47,37 +41,37 @@ def test_list_returns_newest_first_with_parsed_payload(client):
 
 def test_filter_by_kind(client):
     uid = seed_user(email="usr_1@x.com")
-    _login(client, uid)
+    login_fastapi(client, uid)
     seed_trigger(tid="trg_a", owner_user_id=uid, scope_path="a.md", message="m")
     insert_event("trigger.fire", "trg_a", {})
-    # ``doc.update`` events have no owning trigger and shouldn't surface in
-    # the owner-scoped list — owner-scoping is the point of this endpoint
-    # in v0.
+    # ``doc.update`` events have no owning trigger and shouldn't surface
+    # in the owner-scoped list — owner-scoping is the point of this
+    # endpoint in v0.
     insert_event("doc.update", "doc_a", {})
 
-    body = client.get("/api/events?kind=trigger.fire").get_json()
+    body = client.get("/api/events?kind=trigger.fire").json()
     assert len(body["events"]) == 1
     assert body["events"][0]["kind"] == "trigger.fire"
 
 
 def test_limit_clamped(client):
     uid = seed_user(email="usr_1@x.com")
-    _login(client, uid)
+    login_fastapi(client, uid)
     for i in range(5):
         seed_trigger(tid=f"trg_{i}", owner_user_id=uid, scope_path="a.md", message="m")
         insert_event("trigger.fire", f"trg_{i}", {})
-    body = client.get("/api/events?limit=2").get_json()
+    body = client.get("/api/events?limit=2").json()
     assert len(body["events"]) == 2
 
 
 def test_get_event_by_id(client):
     uid = seed_user(email="usr_1@x.com")
-    _login(client, uid)
+    login_fastapi(client, uid)
     seed_trigger(tid="trg_a", owner_user_id=uid, scope_path="a.md", message="m")
     insert_event("trigger.fire", "trg_a", {"reason": "hi"})
-    eid = client.get("/api/events").get_json()["events"][0]["id"]
+    eid = client.get("/api/events").json()["events"][0]["id"]
 
-    body = client.get(f"/api/events/{eid}").get_json()
+    body = client.get(f"/api/events/{eid}").json()
     assert body["target"] == "trg_a"
     assert body["payload"]["reason"] == "hi"
 
@@ -98,19 +92,19 @@ def test_list_hides_other_owners_fires(client):
     insert_event("trigger.fire", "trg_a", {"reason": "a's fire"})
     insert_event("trigger.fire", "trg_b", {"reason": "b's fire"})
 
-    _login(client, b)
-    body = client.get("/api/events").get_json()
+    login_fastapi(client, b)
+    body = client.get("/api/events").json()
     targets = [e["target"] for e in body["events"]]
     assert targets == ["trg_b"]
 
 
 def test_get_event_404s_for_other_owners_event(client):
-    """Cross-owner reads on the detail endpoint return 404 (not 403) so we
-    don't leak existence."""
+    """Cross-owner reads on the detail endpoint return 404 (not 403)
+    so we don't leak existence."""
     a = seed_user("usr_a", "a@x.com")
     b = seed_user("usr_b", "b@x.com")
     seed_trigger(tid="trg_a", owner_user_id=a, scope_path="a.md", message="m")
     eid = insert_event("trigger.fire", "trg_a", {})
 
-    _login(client, b)
+    login_fastapi(client, b)
     assert client.get(f"/api/events/{eid}").status_code == 404

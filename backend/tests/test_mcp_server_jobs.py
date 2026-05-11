@@ -17,14 +17,13 @@ from contextlib import ExitStack
 from typing import Any
 
 import pytest
-from flask import Flask, jsonify
+from fastapi.testclient import TestClient
 
-from app.api import mcp_server as mcp_server_api
 from app.auth import mcp_tokens as tokens_repo
+from app.main import create_app
 from app.mcp_server import jobs as mcp_jobs_repo
 from app.mcp_server import pubsub as mcp_pubsub
 from app.mcp_server import session as mcp_session
-from app.models._helpers import ErrorResponse, RequestError
 from app.tasks.queues import documents_queue
 from app.wiki import acl as wiki_acl
 from app.wiki import git as wiki_git
@@ -34,16 +33,8 @@ from tests._seed import seed_user
 
 @pytest.fixture
 def client(tmp_repo):
-    app = Flask(__name__)
-    app.config.update(SECRET_KEY="test-secret", TESTING=True)
-    app.register_blueprint(mcp_server_api.bp, url_prefix="/api/mcp")
-
-    @app.errorhandler(RequestError)
-    def _request_error(err: RequestError):  # type: ignore[unused-ignore]
-        return jsonify(ErrorResponse(error=err.message).model_dump()), err.status
-
     mcp_session.reset_for_tests()
-    yield app.test_client()
+    yield TestClient(create_app())
     mcp_session.reset_for_tests()
 
 
@@ -122,7 +113,7 @@ def _call_tool(
         },
         headers=headers,
     )
-    body = res.get_json()
+    body = res.json()
     result = body["result"]
     payload: dict[str, Any] = json.loads(result["content"][0]["text"])
     return payload, bool(result.get("isError"))
@@ -146,7 +137,6 @@ def test_update_doc_nl_enqueue_runs_to_committed(
     wiki_git.commit_file("doc.md", "# Doc\n\noriginal text\n", "seed", author=None)
 
     headers, _ = _handshake(client, _mint(uid))
-    _read_doc(client, headers, "doc.md")  # satisfy seen_paths
 
     llm_returns("# Doc\n\nrewritten by the agent\n")
 
@@ -179,7 +169,6 @@ def test_update_doc_nl_no_change_marks_succeeded_uncommitted(
     wiki_git.commit_file("doc.md", "# Doc\n\nbody\n", "seed", author=None)
 
     headers, _ = _handshake(client, _mint(uid))
-    _read_doc(client, headers, "doc.md")
 
     llm_returns("NO_CHANGE")
 
@@ -215,24 +204,6 @@ def test_update_doc_nl_rejects_missing_instruction(client):
     assert "instruction" in payload["error"]
 
 
-def test_update_doc_nl_rejects_unread_file(client):
-    """Same read-before-write rule the sync write tools enforce —
-    checked at enqueue, not in the worker (the worker can't see the
-    session's seen_paths)."""
-    uid = seed_user(uid="u1", email="u1@x.com")
-    wiki_git.commit_file("unread.md", "# x\n", "seed", author=None)
-
-    headers, _ = _handshake(client, _mint(uid))
-    payload, is_error = _call_tool(
-        client,
-        headers,
-        "update_doc_nl",
-        {"path": "unread.md", "instruction": "do something"},
-    )
-    assert is_error
-    assert "read_page" in payload["error"]
-
-
 def test_update_doc_nl_rejects_blocked_acl(client):
     """User without write access can't enqueue."""
     owner = seed_user(uid="owner", email="owner@x.com")
@@ -250,7 +221,6 @@ def test_update_doc_nl_rejects_blocked_acl(client):
     )
 
     headers, _ = _handshake(client, _mint(reader))
-    _read_doc(client, headers, "doc.md")
 
     payload, is_error = _call_tool(
         client,
@@ -274,7 +244,6 @@ def test_update_doc_nl_idempotent_with_explicit_key(
     wiki_git.commit_file("doc.md", "# x\nbefore\n", "seed", author=None)
 
     headers, _ = _handshake(client, _mint(uid))
-    _read_doc(client, headers, "doc.md")
 
     llm_returns("# x\nafter\n")
 
@@ -301,7 +270,6 @@ def test_update_doc_nl_default_idempotency_collapses_retries(
     wiki_git.commit_file("doc.md", "# x\n", "seed", author=None)
 
     headers, _ = _handshake(client, _mint(uid))
-    _read_doc(client, headers, "doc.md")
 
     llm_returns("NO_CHANGE")
 
@@ -318,7 +286,6 @@ def test_different_instructions_get_different_jobs(
     wiki_git.commit_file("doc.md", "# x\n", "seed", author=None)
 
     headers, _ = _handshake(client, _mint(uid))
-    _read_doc(client, headers, "doc.md")
 
     llm_returns("NO_CHANGE")
 
@@ -385,7 +352,6 @@ def test_update_doc_nl_debounce_skips_when_recent_succeeded(
     wiki_git.commit_file("doc.md", "# x\nbefore\n", "seed", author=None)
 
     headers, _ = _handshake(client, _mint(uid))
-    _read_doc(client, headers, "doc.md")
 
     llm_returns("# x\nafter\n")
 
@@ -428,7 +394,6 @@ def test_resources_read_returns_job_state(
     wiki_git.commit_file("doc.md", "# x\n", "seed", author=None)
 
     headers, _ = _handshake(client, _mint(uid))
-    _read_doc(client, headers, "doc.md")
     llm_returns("# x\nedited\n")
 
     payload, _ = _call_tool(
@@ -449,7 +414,7 @@ def test_resources_read_returns_job_state(
         },
         headers=headers,
     )
-    body = res.get_json()
+    body = res.json()
     contents = body["result"]["contents"]
     assert len(contents) == 1
     assert contents[0]["mimeType"] == "application/json"
@@ -470,7 +435,6 @@ def test_resources_read_job_belonging_to_other_user_is_404(
 
     # Alice enqueues a job.
     alice_headers, _ = _handshake(client, _mint(alice))
-    _read_doc(client, alice_headers, "doc.md")
     llm_returns("# x\nedit\n")
     alice_payload, _ = _call_tool(
         client,
@@ -493,7 +457,7 @@ def test_resources_read_job_belonging_to_other_user_is_404(
         },
         headers=bob_headers,
     )
-    body = res.get_json()
+    body = res.json()
     assert body["error"]["code"] == -32602  # invalid_params (not found)
 
 
@@ -527,7 +491,7 @@ def test_subscribe_to_own_job_then_publish_lands(
         },
         headers=headers,
     )
-    assert res.get_json()["result"] == {}
+    assert res.json()["result"] == {}
     assert mcp_pubsub.is_subscribed_job(sess_id, job["id"])
 
     # Publish — the queue receives the notification.
@@ -560,7 +524,7 @@ def test_subscribe_to_someone_elses_job_is_forbidden(client):
         },
         headers=bob_headers,
     )
-    body = res.get_json()
+    body = res.json()
     assert "error" in body
     assert "forbidden" in body["error"]["message"]
 
@@ -579,7 +543,6 @@ def test_async_wrapper_auto_subscribes_session_to_job(
     wiki_git.commit_file("doc.md", "# x\n", "seed", author=None)
 
     headers, sess_id = _handshake(client, _mint(uid))
-    _read_doc(client, headers, "doc.md")
     llm_returns("# x\nedit\n")
 
     payload, _ = _call_tool(

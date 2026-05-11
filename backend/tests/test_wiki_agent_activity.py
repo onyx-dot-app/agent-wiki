@@ -19,6 +19,7 @@ def seeded_user(tmp_db):
 
 
 def test_upsert_creates_then_renews(seeded_user):
+    """Same (user, agent) ⇒ second upsert overwrites the first row."""
     from app.wiki import agent_activity
 
     e1 = agent_activity.upsert_activity(
@@ -30,11 +31,49 @@ def test_upsert_creates_then_renews(seeded_user):
         activity="read", description=None,
         ttl=timedelta(hours=48),
     )
-    # Same natural key ⇒ second call slides expires_at, doesn't insert.
     rows = agent_activity.list_for_doc("guide.md")
     assert len(rows) == 1
     assert rows[0].expires_at == e2
     assert e2 > e1  # 48h horizon is later than 24h
+
+
+def test_second_doc_replaces_first_for_same_agent(seeded_user):
+    """A new upsert against a different doc replaces the prior row in
+    place — one row per (user, agent), not one per doc."""
+    from app.wiki import agent_activity
+
+    agent_activity.upsert_activity(
+        user_id=seeded_user, agent_name="alpha", doc_path="first.md",
+        activity="wrote", description="initial",
+    )
+    agent_activity.upsert_activity(
+        user_id=seeded_user, agent_name="alpha", doc_path="second.md",
+        activity="wrote", description="moved on",
+    )
+    # The agent's row now points at second.md; first.md has none.
+    assert agent_activity.list_for_doc("first.md") == []
+    rows = agent_activity.list_for_doc("second.md")
+    assert len(rows) == 1
+    assert rows[0].doc_path == "second.md"
+    assert rows[0].description == "moved on"
+
+
+def test_read_replaces_wrote_for_same_agent(seeded_user):
+    """A read after a write also collapses onto the single row."""
+    from app.wiki import agent_activity
+
+    agent_activity.upsert_activity(
+        user_id=seeded_user, agent_name="alpha", doc_path="x.md",
+        activity="wrote", description="touched",
+    )
+    agent_activity.upsert_activity(
+        user_id=seeded_user, agent_name="alpha", doc_path="x.md",
+        activity="read", description=None,
+    )
+    rows = agent_activity.list_for_doc("x.md")
+    assert len(rows) == 1
+    assert rows[0].activity == "read"
+    assert rows[0].description is None
 
 
 def test_upsert_distinct_agent_names_are_separate_rows(seeded_user):
@@ -94,16 +133,16 @@ def test_get_and_delete_by_natural_key_round_trip(seeded_user):
         activity="wrote", description="initial",
     )
     row = agent_activity.get_by_natural_key(
-        user_id=seeded_user, agent_name=None, doc_path="x.md", activity="wrote",
+        user_id=seeded_user, agent_name=None,
     )
     assert row is not None
     assert row.description == "initial"
 
     agent_activity.delete_by_natural_key(
-        user_id=seeded_user, agent_name=None, doc_path="x.md", activity="wrote",
+        user_id=seeded_user, agent_name=None,
     )
     assert agent_activity.get_by_natural_key(
-        user_id=seeded_user, agent_name=None, doc_path="x.md", activity="wrote",
+        user_id=seeded_user, agent_name=None,
     ) is None
 
 

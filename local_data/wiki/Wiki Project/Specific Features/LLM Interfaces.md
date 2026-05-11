@@ -272,7 +272,6 @@ app/llm/agents/
 ├── chat.py             generic streaming chat loop + run_chat_stream wrapper
 ├── document_updater.py one-shot doc-reconciliation
 ├── wiki_qa.py          one-shot read-only NL Q&A
-├── _session.py         ContextVars (seen_doc_paths) shared with tool handlers
 └── tools/              tool registry: <name>.json + <name>.py pairs
 ```
 
@@ -298,11 +297,9 @@ Behavior contract:
   at index 0.
 - The loop stops when the model returns a turn with no tool calls.
   `max_iterations` (default 8) is the runaway guard.
-- A `seen_doc_paths` ContextVar tracks which wiki paths the model
-  has read this turn (today: only `read_page` results count;
-  search snippets don't). Doc-edit tools consult it to enforce
-  read-before-write. The MCP server uses the same ContextVar — see
-  [MCP Server Inbound](MCP%20Server%20Inbound.md).
+- Edit safety is handled at the tool layer via the optional
+  `base_sha` arg, not via session state. See
+  [Chat Harness](Chat%20Harness.md) §"Concurrency control".
 
 `run_chat_stream` and `run_chat` wrap the loop with the standard
 wiki tool set and `chat.system` prompt. They also set

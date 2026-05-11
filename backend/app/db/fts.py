@@ -41,12 +41,32 @@ _SNIPPET_ELLIPSIS = "…"
 _TOKEN_RE = re.compile(r"\w+", re.UNICODE)
 
 
-def upsert_document(doc_id: str, path: str, title: str, body: str) -> None:
-    """Insert or replace a document in the BM25 index."""
-    stmt = pg_insert(DocumentFts).values(doc_id=doc_id, path=path, title=title, body=body)
+def upsert_document(
+    doc_id: str,
+    path: str,
+    title: str,
+    body: str,
+    *,
+    indexed_sha: str | None = None,
+) -> None:
+    """Insert or replace a document in the BM25 index.
+
+    ``indexed_sha`` records the git HEAD sha for ``path`` at the moment
+    of indexing; the hourly reconcile sweep compares it to the live
+    HEAD to detect drift. Callers reading from the wiki repo should
+    always pass it.
+    """
+    stmt = pg_insert(DocumentFts).values(
+        doc_id=doc_id, path=path, title=title, body=body, indexed_sha=indexed_sha
+    )
     stmt = stmt.on_conflict_do_update(
         index_elements=[DocumentFts.doc_id],
-        set_={"path": stmt.excluded.path, "title": stmt.excluded.title, "body": stmt.excluded.body},
+        set_={
+            "path": stmt.excluded.path,
+            "title": stmt.excluded.title,
+            "body": stmt.excluded.body,
+            "indexed_sha": stmt.excluded.indexed_sha,
+        },
     )
     with session() as s:
         s.execute(stmt)

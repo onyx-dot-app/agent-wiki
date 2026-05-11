@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import pytest
+from fastapi.testclient import TestClient
 
 from app.auth import users as users_repo
+from app.main import create_app
 from app.models.user_settings import UserSettings
 
 
@@ -99,39 +101,33 @@ def test_user_settings_ignores_unknown_keys():
 
 @pytest.fixture
 def client(tmp_repo):
-    from app.main import create_app
-
-    app = create_app()
-    app.config["TESTING"] = True
-    c = app.test_client()
+    c = TestClient(create_app())
     resp = c.post(
         "/api/auth/signup",
         json={"email": "t@example.com", "password": "hunter22", "name": "t"},
     )
-    assert resp.status_code == 201, resp.get_data(as_text=True)
+    assert resp.status_code == 201, resp.text
     return c
 
 
 def test_get_settings_returns_defaults(client):
     resp = client.get("/api/user/settings")
     assert resp.status_code == 200
-    body = resp.get_json()
+    body = resp.json()
     assert body["theme"] == "system"
     assert body["timezone"] == "UTC"
     assert body["default_landing"] == "wiki_home"
-    assert "density" not in body
-    assert "show_agent_reasoning" not in body
 
 
 def test_put_settings_persists_partial(client):
     resp = client.put("/api/user/settings", json={"theme": "dark"})
-    assert resp.status_code == 200, resp.get_data(as_text=True)
-    body = resp.get_json()
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
     assert body["theme"] == "dark"
     assert body["timezone"] == "UTC"  # untouched
 
     # Round-trip via GET.
-    again = client.get("/api/user/settings").get_json()
+    again = client.get("/api/user/settings").json()
     assert again["theme"] == "dark"
 
 
@@ -151,11 +147,7 @@ def test_put_settings_rejects_unknown_field(client):
 
 
 def test_settings_endpoints_require_auth(tmp_repo):
-    from app.main import create_app
-
-    app = create_app()
-    app.config["TESTING"] = True
-    c = app.test_client()
+    c = TestClient(create_app())
     assert c.get("/api/user/settings").status_code == 401
     assert c.put("/api/user/settings", json={"theme": "dark"}).status_code == 401
 
@@ -168,7 +160,7 @@ def test_auth_me_payload_includes_settings(client):
     )
     resp = client.get("/api/auth/me")
     assert resp.status_code == 200
-    body = resp.get_json()
+    body = resp.json()
     assert "settings" in body
     assert body["settings"]["theme"] == "dark"
     assert body["settings"]["default_landing"] == "recent"

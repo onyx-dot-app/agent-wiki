@@ -1,6 +1,6 @@
 {
   "name": "search_wiki",
-  "description": "BM25 keyword search for the wiki. Use plain words separated by spaces with no punctuation. Returns the top-ranked matches with `path`, `title`, and a short `snippet`. Snippets are often NOT enough context to answer detailed questions or to edit a doc. After identifying the right document(s), call `read_page(path)` to get the full body.",
+  "description": "BM25 keyword search for the wiki. Use plain words separated by spaces with no punctuation (queries like `path:Wiki%20Project` do not work). Returns the top-ranked matches with `path`, `title`, and a short `snippet`. Snippets are often NOT enough context to answer detailed questions or to edit a doc. After identifying the right document(s), call `read_page(path)` to get the full body.",
   "input_schema": {
     "type": "object",
     "properties": {

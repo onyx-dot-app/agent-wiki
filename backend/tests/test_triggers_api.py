@@ -1,45 +1,18 @@
-"""HTTP tests for ``app/api/triggers.py`` via Flask test client.
-
-Builds a minimal app (no wiki / FTS bootstrap) so the suite stays fast and
-doesn't need a real wiki dir.
-"""
+"""HTTP tests for ``app/api/triggers.py``."""
 from __future__ import annotations
 
 import pytest
-from flask import Flask, jsonify
+from fastapi.testclient import TestClient
 
-from app.api import triggers as triggers_api
-from app.auth import PermissionDenied
-from app.models._helpers import RequestError
+from app.main import create_app
 
+from tests._auth import login_fastapi
 from tests._seed import seed_user
 
 
 @pytest.fixture
-def app(tmp_repo):
-    app = Flask(__name__)
-    app.config.update(SECRET_KEY="test-secret", TESTING=True)
-    app.register_blueprint(triggers_api.bp, url_prefix="/api/triggers")
-
-    @app.errorhandler(RequestError)
-    def _on_request_error(err: RequestError):
-        return jsonify(error=err.message), err.status
-
-    @app.errorhandler(PermissionDenied)
-    def _on_permission_denied(err: PermissionDenied):
-        return jsonify(error=err.message), 403
-
-    return app
-
-
-@pytest.fixture
-def client(app):
-    return app.test_client()
-
-
-def _login(client, user_id: str) -> None:
-    with client.session_transaction() as sess:
-        sess["user_id"] = user_id
+def client(tmp_repo):
+    return TestClient(create_app())
 
 
 def test_unauthenticated_list_is_401(client):
@@ -49,14 +22,18 @@ def test_unauthenticated_list_is_401(client):
 
 def test_create_then_list(client):
     uid = seed_user(email="a@b.com")
-    _login(client, uid)
+    login_fastapi(client, uid)
 
     res = client.post(
         "/api/triggers",
-        json={"scope_path": "projects/foo.md", "nl_description": "fire on status flip", "message": "status flipped"},
+        json={
+            "scope_path": "projects/foo.md",
+            "nl_description": "fire on status flip",
+            "message": "status flipped",
+        },
     )
-    assert res.status_code == 201, res.get_json()
-    body = res.get_json()
+    assert res.status_code == 201, res.json()
+    body = res.json()
     assert body["id"].startswith("trg_")
     assert body["enabled"] is True
     assert body["message"] == "status flipped"
@@ -64,14 +41,14 @@ def test_create_then_list(client):
 
     res = client.get("/api/triggers")
     assert res.status_code == 200
-    rows = res.get_json()["triggers"]
+    rows = res.json()["triggers"]
     assert len(rows) == 1
     assert rows[0]["scope_path"] == "projects/foo.md"
 
 
 def test_create_validation_errors(client):
     uid = seed_user(email="a@b.com")
-    _login(client, uid)
+    login_fastapi(client, uid)
 
     # missing scope_path
     res = client.post("/api/triggers", json={"nl_description": "x", "message": "m"})
@@ -112,32 +89,32 @@ def test_owner_isolation_on_list(client):
     a = seed_user("usr_a", "a@x.com")
     b = seed_user("usr_b", "b@x.com")
 
-    _login(client, a)
+    login_fastapi(client, a)
     client.post("/api/triggers", json={"scope_path": "a.md", "nl_description": "x", "message": "m"})
 
-    _login(client, b)
+    login_fastapi(client, b)
     client.post("/api/triggers", json={"scope_path": "b.md", "nl_description": "y", "message": "m"})
-    rows = client.get("/api/triggers").get_json()["triggers"]
+    rows = client.get("/api/triggers").json()["triggers"]
     assert {r["scope_path"] for r in rows} == {"b.md"}
 
 
 def test_update_disable_then_re_enable(client):
     uid = seed_user(email="a@b.com")
-    _login(client, uid)
+    login_fastapi(client, uid)
     tid = client.post(
         "/api/triggers",
         json={"scope_path": "a.md", "nl_description": "orig", "message": "m"},
-    ).get_json()["id"]
+    ).json()["id"]
 
     res = client.put(f"/api/triggers/{tid}", json={"enabled": False})
     assert res.status_code == 200
-    assert res.get_json()["enabled"] is False
+    assert res.json()["enabled"] is False
 
     res = client.put(
         f"/api/triggers/{tid}",
         json={"enabled": True, "nl_description": "new", "message": "m2"},
     )
-    body = res.get_json()
+    body = res.json()
     assert body["enabled"] is True
     assert body["nl_description"] == "new"
     assert body["message"] == "m2"
@@ -155,22 +132,22 @@ def test_cannot_modify_anothers_trigger(client):
     a = seed_user("usr_a", "a@x.com")
     b = seed_user("usr_b", "b@x.com")
 
-    _login(client, a)
+    login_fastapi(client, a)
     tid = client.post(
         "/api/triggers", json={"scope_path": "a.md", "nl_description": "x", "message": "m"}
-    ).get_json()["id"]
+    ).json()["id"]
 
-    _login(client, b)
+    login_fastapi(client, b)
     assert client.put(f"/api/triggers/{tid}", json={"enabled": False}).status_code == 403
     assert client.delete(f"/api/triggers/{tid}").status_code == 403
 
 
 def test_delete_then_404(client):
     uid = seed_user(email="a@b.com")
-    _login(client, uid)
+    login_fastapi(client, uid)
     tid = client.post(
         "/api/triggers", json={"scope_path": "a.md", "nl_description": "x", "message": "m"}
-    ).get_json()["id"]
+    ).json()["id"]
 
     assert client.delete(f"/api/triggers/{tid}").status_code == 204
     assert client.put(f"/api/triggers/{tid}", json={"enabled": False}).status_code == 404
@@ -183,8 +160,8 @@ def test_delete_then_404(client):
 
 
 def test_create_blocks_when_scope_path_unreadable(client):
-    """A user without read access to a managed path can't create a trigger
-    that watches it."""
+    """A user without read access to a managed path can't create a
+    trigger that watches it."""
     from app.wiki import acl
 
     owner = seed_user("usr_owner", "owner@x.com")
@@ -200,7 +177,7 @@ def test_create_blocks_when_scope_path_unreadable(client):
         granted_by_user_id=owner,
     )
 
-    _login(client, other)
+    login_fastapi(client, other)
     res = client.post(
         "/api/triggers",
         json={
@@ -228,11 +205,11 @@ def test_update_blocks_when_rebinding_to_unreadable_scope(client):
         granted_by_user_id=owner,
     )
 
-    _login(client, other)
+    login_fastapi(client, other)
     tid = client.post(
         "/api/triggers",
         json={"scope_path": "public.md", "nl_description": "x", "message": "m"},
-    ).get_json()["id"]
+    ).json()["id"]
 
     res = client.put(
         f"/api/triggers/{tid}", json={"scope_path": "private/secret.md"}
@@ -241,9 +218,7 @@ def test_update_blocks_when_rebinding_to_unreadable_scope(client):
 
 
 # --------------------------------------------------------------------------- #
-# Positive ACL regression cases — make sure the gate isn't accidentally       #
-# over-restrictive. Each scenario exercises a different way a user can        #
-# legitimately reach a managed scope.                                          #
+# Positive ACL regression cases                                               #
 # --------------------------------------------------------------------------- #
 
 
@@ -254,8 +229,6 @@ def _lock_path_to(owner_id: str, path: str) -> None:
     from app.wiki import acl
 
     acl.set_owner(path, owner_id)
-    # Make sure the owner has an explicit row too so revoking the per-user
-    # grant in negative tests doesn't accidentally take their own access.
     acl.grant(
         resource_kind="page",
         resource_path=path,
@@ -283,7 +256,7 @@ def test_create_allowed_when_user_has_explicit_read_grant(client):
         granted_by_user_id=owner,
     )
 
-    _login(client, invitee)
+    login_fastapi(client, invitee)
     res = client.post(
         "/api/triggers",
         json={
@@ -292,7 +265,7 @@ def test_create_allowed_when_user_has_explicit_read_grant(client):
             "message": "msg",
         },
     )
-    assert res.status_code == 201, res.get_json()
+    assert res.status_code == 201, res.json()
 
 
 def test_create_allowed_for_admin_on_private_scope(client):
@@ -301,7 +274,7 @@ def test_create_allowed_for_admin_on_private_scope(client):
     admin = seed_user("usr_admin", "admin@x.com", is_admin=True)
     _lock_path_to(owner, "private/secret.md")
 
-    _login(client, admin)
+    login_fastapi(client, admin)
     res = client.post(
         "/api/triggers",
         json={
@@ -310,23 +283,16 @@ def test_create_allowed_for_admin_on_private_scope(client):
             "message": "msg",
         },
     )
-    assert res.status_code == 201, res.get_json()
+    assert res.status_code == 201, res.json()
 
 
 def test_create_allowed_via_folder_grant(client):
-    """Positive case: a folder-level `read` grant cascades to a doc inside.
-
-    Today the resolver matches folder rows for any descendant; this test
-    pins the behavior so a future regressive narrowing of folder cascade
-    surfaces here.
-    """
+    """Positive case: a folder-level `read` grant cascades to a doc inside."""
     from app.wiki import acl
 
     owner = seed_user("usr_owner", "owner@x.com")
     invitee = seed_user("usr_invitee", "invitee@x.com")
-    # Stamp the doc as managed by giving it an owner.
     _lock_path_to(owner, "private/secret.md")
-    # Grant invitee read on the *folder*, not the doc itself.
     acl.grant(
         resource_kind="folder",
         resource_path="private",
@@ -336,7 +302,7 @@ def test_create_allowed_via_folder_grant(client):
         granted_by_user_id=owner,
     )
 
-    _login(client, invitee)
+    login_fastapi(client, invitee)
     res = client.post(
         "/api/triggers",
         json={
@@ -345,19 +311,13 @@ def test_create_allowed_via_folder_grant(client):
             "message": "msg",
         },
     )
-    assert res.status_code == 201, res.get_json()
-
-
-# --------------------------------------------------------------------------- #
-# Update-time gate — both rebinding and toggling-without-rebind                #
-# --------------------------------------------------------------------------- #
+    assert res.status_code == 201, res.json()
 
 
 def test_update_blocks_when_existing_scope_unreadable(client):
     """Negative regression: even a no-op-ish update (e.g. toggling
     ``enabled``) is blocked when the user has lost read access to the
-    *existing* scope. Without this, a revoked user could still mutate
-    their old triggers."""
+    *existing* scope."""
     from app.wiki import acl
 
     owner = seed_user("usr_owner", "owner@x.com")
@@ -372,7 +332,7 @@ def test_update_blocks_when_existing_scope_unreadable(client):
         granted_by_user_id=owner,
     )
 
-    _login(client, invitee)
+    login_fastapi(client, invitee)
     tid = client.post(
         "/api/triggers",
         json={
@@ -380,7 +340,7 @@ def test_update_blocks_when_existing_scope_unreadable(client):
             "nl_description": "x",
             "message": "m",
         },
-    ).get_json()["id"]
+    ).json()["id"]
 
     # Revoke after creation.
     acl.revoke(grant_id)
@@ -405,7 +365,7 @@ def test_update_allowed_when_user_has_explicit_grant(client):
         granted_by_user_id=owner,
     )
 
-    _login(client, invitee)
+    login_fastapi(client, invitee)
     tid = client.post(
         "/api/triggers",
         json={
@@ -413,10 +373,10 @@ def test_update_allowed_when_user_has_explicit_grant(client):
             "nl_description": "x",
             "message": "m",
         },
-    ).get_json()["id"]
+    ).json()["id"]
     res = client.put(f"/api/triggers/{tid}", json={"enabled": False})
     assert res.status_code == 200
-    assert res.get_json()["enabled"] is False
+    assert res.json()["enabled"] is False
 
 
 # --------------------------------------------------------------------------- #
@@ -431,10 +391,10 @@ def test_list_destinations_unauthenticated_is_401(client):
 
 def test_list_destinations_returns_event_log(client):
     uid = seed_user(email="a@b.com")
-    _login(client, uid)
+    login_fastapi(client, uid)
     res = client.get("/api/triggers/destinations")
     assert res.status_code == 200
-    body = res.get_json()
+    body = res.json()
     assert "destinations" in body
     ids = {d["id"] for d in body["destinations"]}
     assert "event_log" in ids

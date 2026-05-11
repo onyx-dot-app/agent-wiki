@@ -1,33 +1,25 @@
-"""Healthcheck endpoint.
+"""FastAPI version of ``app/api/health.py``.
 
-Reports liveness of the Flask process plus the current backlog of each
-pgmq queue against its configured cap (``MAX_QUEUE_SIZE``). Exposed so
-the frontend ``/health`` page (and any external probe) can poll the
-backlog without hitting Postgres directly.
-
-The per-queue read goes through ``TaskQueue.depth()`` — one filtered
-``count(*)`` against ``pgmq.q_<name>`` that splits messages into
-``ready`` / ``delayed`` / ``in_flight``. The split matters: a queue
-sitting at "size 9" because of nine ``schedule(..., eta=tomorrow)``
-fires is healthy; the same number from ready messages no consumer is
-draining is not. Cheap enough to hit on every poll.
+Phase 1 of the Flask→FastAPI migration. The route logic is identical;
+only the framework wiring (``APIRouter`` + return-the-model vs
+``Blueprint`` + ``jsonify(model.model_dump())``) differs. Both versions
+coexist until Phase 5, when this file is renamed back to ``health.py``
+and the Flask blueprint is deleted.
 """
 from __future__ import annotations
 
 import logging
 
-from flask import Blueprint, jsonify
+from fastapi import APIRouter
 
 from app.models.health import HealthResponse, QueueHealth
 from app.tasks.queues import QUEUES
 
-bp = Blueprint("health", __name__)
+router = APIRouter()
 log = logging.getLogger(__name__)
 
 
-@bp.get("")
-@bp.get("/")
-def health():
+def _build() -> HealthResponse:
     queues: list[QueueHealth] = []
     for name, queue in QUEUES.items():
         try:
@@ -51,8 +43,17 @@ def health():
             ok=ok,
             error=error,
         ))
-
     overall_ok = all(q.ok for q in queues)
-    return jsonify(HealthResponse(
+    return HealthResponse(
         status="ok" if overall_ok else "degraded", queues=queues,
-    ).model_dump())
+    )
+
+
+@router.get("", response_model=HealthResponse)
+def health() -> HealthResponse:
+    return _build()
+
+
+@router.get("/", response_model=HealthResponse, include_in_schema=False)
+def health_trailing() -> HealthResponse:
+    return _build()

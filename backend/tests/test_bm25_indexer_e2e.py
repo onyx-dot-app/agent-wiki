@@ -21,22 +21,16 @@ from tests._seed import list_fts_rows
 
 
 @pytest.fixture
-def app(tmp_repo):
+def signed_in(tmp_repo):
+    from fastapi.testclient import TestClient
+
+    from app.auth import users as users_repo
     from app.main import create_app
 
-    flask_app = create_app()
-    flask_app.config["TESTING"] = True
-    return flask_app
-
-
-@pytest.fixture
-def signed_in(app, tmp_repo):
-    from app.auth import users as users_repo
-
-    users_repo.create(email="u@x.com", password="hunter2", name="U")
-    client = app.test_client()
+    users_repo.create(email="u@x.com", password="hunter22", name="U")
+    client = TestClient(create_app())
     resp = client.post(
-        "/api/auth/login", json={"email": "u@x.com", "password": "hunter2"}
+        "/api/auth/login", json={"email": "u@x.com", "password": "hunter22"}
     )
     assert resp.status_code == 200
     return client
@@ -74,7 +68,7 @@ def _put_doc(client, *, path, body):
 
 def test_save_indexes_doc_into_fts(signed_in):
     resp = _put_doc(signed_in, path="guide.md", body="# Guide\n\nfindable\n")
-    assert resp.status_code == 200, resp.get_data(as_text=True)
+    assert resp.status_code == 200, resp.text
 
     rows = _fts_rows()
     assert len(rows) == 1
@@ -121,7 +115,7 @@ def test_move_drops_old_path_and_indexes_new_path(signed_in):
         "/api/documents/move",
         json={"old_path": "src/foo.md", "new_path": "dst/foo.md"},
     )
-    assert resp.status_code == 200, resp.get_data(as_text=True)
+    assert resp.status_code == 200, resp.text
 
     paths = {r["path"] for r in _fts_rows()}
     assert "src/foo.md" not in paths, "stale FTS row should have been dropped"
@@ -136,7 +130,7 @@ def test_delete_removes_doc_from_fts(signed_in):
     assert any(r["path"] == "goodbye.md" for r in _fts_rows())
 
     resp = signed_in.delete("/api/documents/file?path=goodbye.md")
-    assert resp.status_code == 200, resp.get_data(as_text=True)
+    assert resp.status_code == 200, resp.text
 
     paths = {r["path"] for r in _fts_rows()}
     assert "goodbye.md" not in paths
@@ -158,7 +152,7 @@ def test_manual_reindex_endpoint_routes_through_same_queue(signed_in):
     assert not [r for r in _fts_rows() if r["path"] == "manual.md"]
 
     resp = signed_in.post("/api/documents/reindex", json={"path": "manual.md"})
-    assert resp.status_code == 200, resp.get_data(as_text=True)
+    assert resp.status_code == 200, resp.text
 
     hits = fts.search("indexable")
     assert any(h.path == "manual.md" for h in hits)
@@ -172,7 +166,6 @@ def test_manual_reindex_endpoint_routes_through_same_queue(signed_in):
 def test_chat_agent_edit_reindexes(signed_in):
     """Chat agent edits run through `_doc_helpers.commit_and_fan_out` →
     `wiki.notify.after_doc_write` → `reindex_path` — same queue."""
-    from app.llm.agents._session import seen_doc_paths
     from app.llm.agents.tools.edit_doc import handle as edit_doc
     from app.wiki import git as wiki_git
 
@@ -180,18 +173,14 @@ def test_chat_agent_edit_reindexes(signed_in):
     # `wiki_git.commit_file` doesn't auto-reindex — confirm the seed isn't in FTS.
     assert not [r for r in _fts_rows() if r["path"] == "agent.md"]
 
-    token = seen_doc_paths.set({"agent.md"})
-    try:
-        out = edit_doc(
-            {
-                "path": "agent.md",
-                "old_string": "beforetoken",
-                "new_string": "aftertoken",
-                "commit_message": "tweak",
-            }
-        )
-    finally:
-        seen_doc_paths.reset(token)
+    out = edit_doc(
+        {
+            "path": "agent.md",
+            "old_string": "beforetoken",
+            "new_string": "aftertoken",
+            "commit_message": "tweak",
+        }
+    )
     assert "error" not in out, out
 
     hits = fts.search("aftertoken")

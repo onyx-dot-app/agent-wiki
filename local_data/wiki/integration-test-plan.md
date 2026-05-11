@@ -41,7 +41,7 @@ All four flows below run inside the `integration` fixture
   Tests script tool-call responses; unscripted calls return a benign
   empty answer.
 
-What stays **real**: Flask app, auth, repos, git wrapper, BM25 indexer,
+What stays **real**: FastAPI app, auth, repos, git wrapper, BM25 indexer,
 trigger evaluator wiring, event log writer.
 
 ---
@@ -154,9 +154,10 @@ and re-renders the doc body so the committed file carries an
 1. `signup_and_signin()`.
 2. `put_doc("guide.md", "# Guide\n\noriginal body\n")` — no frontmatter
    yet on disk.
-3. Inside `flask_app.test_request_context()` with
-   `session["user_id"]` set, set `agent_activity.agent_name_var` to a
-   per-turn name, then call `app.llm.agents.tools.read_page.handle({...})`.
+3. Bind the active user with `with app.auth.set_current_user(user):`
+   (the ContextVar-backed seam the worker uses), set
+   `agent_activity.agent_name_var` to a per-turn name, then call
+   `app.llm.agents.tools.read_page.handle({...})`.
 4. Read the doc back via `app.wiki.git.read_file` and assert the
    leading frontmatter contains the expected `owner`, `agent`,
    `activity`, and a future `expires_at`.
@@ -244,15 +245,6 @@ shape of the LLM seam.
   still commits, no event row, no exception escapes the worker.
 * **Unparseable new-file-in-dir text** — junk JSON is dropped, not
   fired.
-
-`tests/integration/test_doc_tamper_flow.py`:
-
-* **Frontmatter tamper** — agent submitting a body that mutates the
-  registry-managed `agents:` block gets a `ToolError`; disk + head
-  sha unchanged.
-* **Read-before-write** — write tool refuses to overwrite a doc not
-  in `seen_doc_paths`; positive complement asserts the same write
-  goes through once the path is registered.
 
 `MockLLM.raise_for(exc, when=...)` simulates provider failures
 without patching the seam itself — needed for the `LLMError` path.

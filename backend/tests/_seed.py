@@ -145,7 +145,13 @@ def list_fts_rows() -> list[dict[str, Any]]:
     with session() as s:
         rows = s.scalars(select(DocumentFts).order_by(DocumentFts.path.asc())).all()
     return [
-        {"doc_id": r.doc_id, "path": r.path, "title": r.title, "body": r.body}
+        {
+            "doc_id": r.doc_id,
+            "path": r.path,
+            "title": r.title,
+            "body": r.body,
+            "indexed_sha": r.indexed_sha,
+        }
         for r in rows
     ]
 

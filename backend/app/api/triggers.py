@@ -1,23 +1,14 @@
-"""Trigger CRUD.
-
-Owner-scoped: a user only sees and mutates the triggers they own.
-``kind="delta"`` triggers fire on doc commits; ``kind="schedule"``
-triggers fire on a cron in the trigger's timezone (``schedule_cron`` +
-``schedule_timezone``, with an optional ``schedule_start_at`` anchor).
-
-Storage is git-backed YAML — see ``app/triggers/storage.py``. Postgres is
-a cache populated by ``app/triggers/repo.py``.
-"""
+"""FastAPI port of ``app/api/triggers.py`` (Phase 3)."""
 from __future__ import annotations
 
 import logging
 import re
 from typing import Any
 
-from flask import Blueprint, jsonify, request
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 
-from app.auth import current_user, login_required, require_can
-from app.models._helpers import error, parse_body
+from app.auth import User, require_can
+from app.auth.deps import require_user
 from app.models.trigger import (
     CreateTriggerRequest,
     TriggerCommit,
@@ -34,22 +25,17 @@ from app.triggers import repo as triggers_repo
 from app.triggers import storage as triggers_storage
 from app.wiki import git as wiki_git
 
-bp = Blueprint("triggers", __name__)
+router = APIRouter()
 log = logging.getLogger(__name__)
 
 _SHA_RE = re.compile(r"^[0-9a-f]{4,40}$")
 
 
-def _git_author() -> str | None:
-    user = current_user()
-    if not user:
-        return None
+def _git_author(user: User) -> str:
     return f"{user.name or user.email} <{user.email}>"
 
 
 def _normalize_scope_path(raw: str) -> str:
-    """Normalize a user-supplied scope path. Raises ``ValueError`` with a
-    user-facing message if the value is missing or invalid."""
     if not raw.strip():
         raise ValueError("scope_path is required")
     return triggers_storage.normalize_scope_path(raw)
@@ -59,53 +45,46 @@ def _to_view(row: dict[str, Any]) -> TriggerView:
     return TriggerView.model_validate(row)
 
 
-@bp.get("")
-@login_required
-def list_triggers():
-    user = current_user()
-    assert user is not None
+@router.get("", response_model=TriggerListResponse)
+def list_triggers(user: User = Depends(require_user)) -> TriggerListResponse:
     rows = triggers_repo.list_for_owner(user.id)
-    return jsonify(TriggerListResponse(
-        triggers=[_to_view(r) for r in rows],
-    ).model_dump())
+    return TriggerListResponse(triggers=[_to_view(r) for r in rows])
 
 
-@bp.get("/destinations")
-@login_required
-def list_destinations():
-    """Catalog of where a trigger fire can be delivered. Global, login-only —
-    no per-user filter (the catalog itself contains no user data; whether a
-    user can *use* a destination is enforced at trigger-creation time).
-    """
+@router.get("/destinations", response_model=TriggerDestinationsResponse)
+def list_destinations(
+    _user: User = Depends(require_user),
+) -> TriggerDestinationsResponse:
+    """Catalog of where a trigger fire can be delivered. Global,
+    login-only — no per-user filter."""
     rows = destinations_repo.list_all()
-    return jsonify(TriggerDestinationsResponse(
+    return TriggerDestinationsResponse(
         destinations=[
             TriggerDestinationView(
                 id=r["id"], name=r["name"], description=r["description"]
             )
             for r in rows
         ],
-    ).model_dump())
+    )
 
 
-@bp.post("")
-@login_required
-def create_trigger():
-    user = current_user()
-    assert user is not None
-    req = parse_body(CreateTriggerRequest, request.get_json(silent=True))
-
+@router.post(
+    "", response_model=TriggerView, status_code=status.HTTP_201_CREATED
+)
+def create_trigger(
+    req: CreateTriggerRequest, user: User = Depends(require_user),
+) -> TriggerView:
     try:
         scope_path = _normalize_scope_path(req.scope_path)
     except ValueError as exc:
-        return error(str(exc), 400)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     # A trigger reads the scope at fire-time to render its message; require
     # the same up-front so users can't watch paths they can't see.
-    require_can("read", scope_path)
+    require_can("read", scope_path, user)
 
     if req.kind not in triggers_repo.ALLOWED_KINDS:
-        return error(f"unsupported kind: {req.kind!r}", 400)
+        raise HTTPException(status_code=400, detail=f"unsupported kind: {req.kind!r}")
 
     try:
         trigger = triggers_repo.create(
@@ -116,152 +95,150 @@ def create_trigger():
             destination=req.destination,
             kind=req.kind,
             enabled=req.enabled,
-            actor=_git_author(),
+            actor=_git_author(user),
             schedule_cron=req.schedule_cron,
             schedule_timezone=req.schedule_timezone,
             schedule_start_at=req.schedule_start_at,
         )
     except ValueError as exc:
-        return error(str(exc), 400)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     log.info(
         "trigger created id=%s owner=%s scope=%s kind=%s enabled=%s",
         trigger.get("id"), user.id, scope_path, req.kind, req.enabled,
     )
-    return jsonify(_to_view(trigger).model_dump()), 201
+    return _to_view(trigger)
 
 
-@bp.put("/<trigger_id>")
-@login_required
-def update_trigger(trigger_id: str):
-    user = current_user()
-    assert user is not None
+@router.put("/{trigger_id}", response_model=TriggerView)
+def update_trigger(
+    trigger_id: str,
+    req: UpdateTriggerRequest,
+    user: User = Depends(require_user),
+) -> TriggerView:
     existing = triggers_repo.get(trigger_id)
     if existing is None:
-        return error("not found", 404)
+        raise HTTPException(status_code=404, detail="not found")
     if existing["owner_user_id"] != user.id:
-        return error("forbidden", 403)
+        raise HTTPException(status_code=403, detail="forbidden")
 
-    raw: dict[str, Any] = request.get_json(silent=True) or {}
-    req = parse_body(UpdateTriggerRequest, raw)
+    # ``model_fields_set`` lets us treat fields the client *sent* —
+    # including explicit ``null`` clears for ``schedule_start_at`` —
+    # differently from fields it omitted (left untouched).
+    sent_fields = req.model_fields_set
     kwargs: dict[str, Any] = {}
 
-    if "scope_path" in raw:
+    if "scope_path" in sent_fields:
         try:
             kwargs["scope_path"] = _normalize_scope_path(req.scope_path or "")
         except ValueError as exc:
-            return error(str(exc), 400)
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    # Require read access against whichever scope ends up sticking — the new
-    # one if rebinding, otherwise the existing one (in case ACLs were
-    # revoked after the trigger was created).
+    # Require read access against whichever scope ends up sticking — the
+    # new one if rebinding, otherwise the existing one (in case ACLs
+    # were revoked after the trigger was created).
     final_scope = kwargs.get("scope_path", existing["scope_path"])
-    require_can("read", final_scope)
+    require_can("read", final_scope, user)
 
-    if "nl_description" in raw:
+    if "nl_description" in sent_fields:
         nl = (req.nl_description or "").strip()
         if not nl:
-            return error("nl_description cannot be empty", 400)
+            raise HTTPException(status_code=400, detail="nl_description cannot be empty")
         kwargs["nl_description"] = nl
 
-    if "message" in raw:
+    if "message" in sent_fields:
         msg = (req.message or "").strip()
         if not msg:
-            return error("message cannot be empty", 400)
+            raise HTTPException(status_code=400, detail="message cannot be empty")
         kwargs["message"] = msg
 
-    if "destination" in raw:
+    if "destination" in sent_fields:
         kwargs["destination"] = req.destination
 
-    if "enabled" in raw:
+    if "enabled" in sent_fields:
         kwargs["enabled"] = req.enabled
 
-    if "schedule_cron" in raw:
+    if "schedule_cron" in sent_fields:
         kwargs["schedule_cron"] = req.schedule_cron
 
-    if "schedule_timezone" in raw:
+    if "schedule_timezone" in sent_fields:
         kwargs["schedule_timezone"] = req.schedule_timezone
 
-    if "schedule_start_at" in raw:
+    if "schedule_start_at" in sent_fields:
         # Pass through ``None`` so the user can clear the anchor.
         kwargs["schedule_start_at"] = req.schedule_start_at
 
     try:
-        updated = triggers_repo.update(trigger_id, actor=_git_author(), **kwargs)
+        updated = triggers_repo.update(trigger_id, actor=_git_author(user), **kwargs)
     except ValueError as exc:
-        return error(str(exc), 400)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     if updated is None:
-        return error("not found", 404)
+        raise HTTPException(status_code=404, detail="not found")
     log.info(
         "trigger updated id=%s owner=%s fields=%s",
         trigger_id, user.id, sorted(kwargs.keys()),
     )
-    return jsonify(_to_view(updated).model_dump())
+    return _to_view(updated)
 
 
-@bp.delete("/<trigger_id>")
-@login_required
-def delete_trigger(trigger_id: str):
-    user = current_user()
-    assert user is not None
+@router.delete("/{trigger_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_trigger(
+    trigger_id: str, user: User = Depends(require_user),
+) -> Response:
     existing = triggers_repo.get(trigger_id)
     if existing is None:
-        return error("not found", 404)
+        raise HTTPException(status_code=404, detail="not found")
     if existing["owner_user_id"] != user.id:
-        return error("forbidden", 403)
-    triggers_repo.delete(trigger_id, actor=_git_author())
+        raise HTTPException(status_code=403, detail="forbidden")
+    triggers_repo.delete(trigger_id, actor=_git_author(user))
     log.info("trigger deleted id=%s owner=%s", trigger_id, user.id)
-    return ("", 204)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@bp.get("/<trigger_id>/history")
-@login_required
-def trigger_history(trigger_id: str):
+@router.get("/{trigger_id}/history", response_model=TriggerHistoryResponse)
+def trigger_history(
+    trigger_id: str, user: User = Depends(require_user),
+) -> TriggerHistoryResponse:
     """Git history for the trigger's YAML file (config edits, not fires).
 
     Fire history lives in the events table — see ``GET /api/events``.
     """
-    user = current_user()
-    assert user is not None
     existing = triggers_repo.get(trigger_id)
     if existing is None:
-        return error("not found", 404)
+        raise HTTPException(status_code=404, detail="not found")
     if existing["owner_user_id"] != user.id:
-        return error("forbidden", 403)
+        raise HTTPException(status_code=403, detail="forbidden")
     file_path = existing.get("file_path")
     if not file_path:
-        return jsonify(TriggerHistoryResponse(commits=[]).model_dump())
+        return TriggerHistoryResponse(commits=[])
     commits = [TriggerCommit(**c.model_dump()) for c in wiki_git.history(file_path)]
-    return jsonify(TriggerHistoryResponse(commits=commits).model_dump())
+    return TriggerHistoryResponse(commits=commits)
 
 
-@bp.get("/<trigger_id>/version/<sha>")
-@login_required
-def trigger_version(trigger_id: str, sha: str):
-    """Read the trigger's fields as they existed at a specific commit.
-
-    Used by the UI to populate the edit form with a historical version. Saving
-    from there goes through the normal PUT and creates a new commit.
-    """
+@router.get(
+    "/{trigger_id}/version/{sha}", response_model=TriggerVersionResponse
+)
+def trigger_version(
+    trigger_id: str, sha: str, user: User = Depends(require_user),
+) -> TriggerVersionResponse:
+    """Read the trigger's fields as they existed at a specific commit."""
     if not _SHA_RE.match(sha):
-        return error("invalid sha", 400)
-    user = current_user()
-    assert user is not None
+        raise HTTPException(status_code=400, detail="invalid sha")
     existing = triggers_repo.get(trigger_id)
     if existing is None:
-        return error("not found", 404)
+        raise HTTPException(status_code=404, detail="not found")
     if existing["owner_user_id"] != user.id:
-        return error("forbidden", 403)
+        raise HTTPException(status_code=403, detail="forbidden")
 
     path = triggers_storage.find_path_at_sha(trigger_id, sha)
     if not path:
-        return error("trigger not present at that revision", 404)
+        raise HTTPException(status_code=404, detail="trigger not present at that revision")
     try:
         data = triggers_storage.read_trigger_at(path, sha)
-    except Exception:
+    except Exception as exc:
         log.exception("failed to read trigger %s at %s", trigger_id, sha)
-        return error("failed to read version", 500)
+        raise HTTPException(status_code=500, detail="failed to read version") from exc
 
-    return jsonify(TriggerVersionResponse(
+    return TriggerVersionResponse(
         scope_path=data.get("scope_path"),
         nl_description=data.get("nl_description"),
         message=data.get("message"),
@@ -273,4 +250,4 @@ def trigger_version(trigger_id: str, sha: str):
         schedule_cron=data.get("schedule_cron"),
         schedule_timezone=data.get("schedule_timezone"),
         schedule_start_at=data.get("schedule_start_at"),
-    ).model_dump())
+    )

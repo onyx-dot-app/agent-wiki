@@ -321,6 +321,11 @@ class DocumentFts(Base):
     path: Mapped[str] = mapped_column(Text, nullable=False)
     title: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
     body: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
+    # HEAD sha at the time this row was last indexed. Compared against
+    # ``git log -n1 -- <path>`` by the hourly reconcile task to spot
+    # drift; ``NULL`` means the row predates the column or hasn't been
+    # touched since the migration — both look stale to the sweep.
+    indexed_sha: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     __table_args__ = (
         Index(
@@ -425,11 +430,13 @@ class AgentActivity(Base):
         CheckConstraint(
             "activity IN ('read', 'wrote')", name="agent_activity_kind_check"
         ),
-        # Postgres 15+ NULLS NOT DISTINCT lets nullable agent_name participate
-        # in uniqueness directly — no COALESCE-to-empty-string workaround.
+        # One row per (user, agent): a new upsert replaces the prior row
+        # in place. Postgres 15+ NULLS NOT DISTINCT lets nullable
+        # agent_name participate in uniqueness directly — no
+        # COALESCE-to-empty-string workaround.
         UniqueConstraint(
-            "user_id", "agent_name", "doc_path", "activity",
-            name="idx_agent_activity_natural_key",
+            "user_id", "agent_name",
+            name="idx_agent_activity_user_agent",
             postgresql_nulls_not_distinct=True,
         ),
         Index("idx_agent_activity_doc_path", "doc_path"),
@@ -450,6 +457,22 @@ class CronState(Base):
     queue_name: Mapped[str] = mapped_column(Text, primary_key=True)
     task_name: Mapped[str] = mapped_column(Text, primary_key=True)
     last_fired_at: Mapped[str | None] = mapped_column(Text)
+
+
+class BM25ReconcileState(Base):
+    """Cursor for the hourly BM25 reconcile sweep.
+
+    Stamped after a successful completion so the next run can scope its
+    git walk to ``--since=<last_completed_at>`` instead of rescanning
+    the whole repo. NULL = bootstrap (whole-repo scan on first run).
+    """
+
+    __tablename__ = "bm25_reconcile_state"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
+    last_completed_at: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    __table_args__ = (CheckConstraint("id = 1", name="bm25_reconcile_state_singleton"),)
 
 
 # --------------------------------------------------------------------------- #

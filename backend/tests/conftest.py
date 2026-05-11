@@ -27,11 +27,30 @@ import pytest
 from psycopg import sql
 
 from app.config import Config
+from app.mcp_server import pubsub as _mcp_pubsub
+from app.mcp_server import session as _mcp_session
+
+# Suppress the cross-process Postgres LISTEN bridge in tests. ``create_app``'s
+# lifespan calls ``mcp_pubsub.start_listener`` (app/main.py), which would
+# open a connection on the shared test DB and receive every NOTIFY emitted
+# by every other xdist worker. Tests exercise in-process delivery directly,
+# so the listener has no value and only adds cross-worker noise.
+_mcp_pubsub.start_listener = lambda: None  # type: ignore[assignment]
 
 _BASE_URL = os.environ.get(
     "TEST_DATABASE_URL",
     "postgresql://postgres:postgres@localhost:5432/agent_wiki_test",
 )
+
+
+@pytest.fixture(autouse=True)
+def _reset_mcp_state():
+    """Module-level pubsub/session state lives in process memory and can
+    leak across tests on the same xdist worker. Reset before each test
+    so subscriptions, queues, and session rows from the previous test
+    can't bleed in. Autouse so new tests can't forget."""
+    _mcp_session.reset_for_tests()
+    yield
 
 
 def _with_search_path(url: str, schema: str) -> str:

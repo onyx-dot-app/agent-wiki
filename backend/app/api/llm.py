@@ -1,26 +1,20 @@
-"""LLM status endpoint — readable by any logged-in user.
-
-Distinct from ``app.api.admin``'s ``/admin/llm`` (admin-only, full settings
-view): this exposes only whether the system has a usable LLM configured,
-so the frontend can surface a setup banner to non-admins without leaking
-keys or model names.
-"""
+"""FastAPI port of ``app/api/llm.py`` (Phase 2)."""
 from __future__ import annotations
 
-from flask import Blueprint, jsonify
+from fastapi import APIRouter, Depends
 
-from app.auth import login_required
+from app.auth import User
+from app.auth.deps import require_user
 from app.llm import providers as llm_providers
 from app.llm import settings as llm_settings
 from app.llm.errors import LLMError
 from app.models.llm import LLMStatusResponse
 
-bp = Blueprint("llm", __name__)
+router = APIRouter()
 
 
-@bp.get("/status")
-@login_required
-def status():
+@router.get("/status", response_model=LLMStatusResponse)
+def status(_user: User = Depends(require_user)) -> LLMStatusResponse:
     s = llm_settings.get()
     provider = llm_providers.get(s.provider) if s.provider else None
     configured = False
@@ -30,7 +24,4 @@ def status():
             configured = True
         except LLMError:
             configured = False
-    return jsonify(LLMStatusResponse(
-        configured=configured,
-        provider=s.provider,
-    ).model_dump())
+    return LLMStatusResponse(configured=configured, provider=s.provider)

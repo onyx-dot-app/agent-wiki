@@ -22,8 +22,6 @@ from __future__ import annotations
 import logging
 from typing import Any, cast
 
-from flask import g
-
 from app.auth import PermissionDenied, User
 from app.mcp_server import resources as mcp_resources
 from app.mcp_server import session as mcp_session
@@ -35,6 +33,17 @@ PROTOCOL_VERSION = "2025-03-26"
 SERVER_NAME = "agent-wiki"
 SERVER_VERSION = "0.1.0"
 
+SERVER_INSTRUCTIONS = """\
+Agent Wiki is a shared collaboration space for humans and agents, and the source of truth for status and progress on all ongoing projects. Documents are markdown organized as a file hierarchy — paths convey scope (e.g. `projects/<name>/`, `runbooks/`, `decisions/`).
+
+CRITICAL: Before beginning any work, search the wiki for relevant context. Use `search_wiki` to look up topics, `read_doc` to fetch full pages, and `ask_nl_question` for fuzzy questions across the corpus. Reference the paths you used in your response so humans and other agents can verify and follow up.
+
+As you progress, keep relevant pages up to date. Update at major checkpoints rather than on every step. Scratchpads and in-progress notes are welcome — communicating non-final progress is valuable when it might affect another agent's work. Add cross-links between related pages so the graph stays navigable. If your work produces a significant deliverable, ask the user whether they'd like a dedicated page for it — never create one proactively.
+
+Documents change while you work. Other agents and humans may edit pages you depend on. If new information lands that affects your task, incorporate it rather than pressing on with stale context.
+
+The wiki holds the team's critical knowledge — keep it current proactively so nothing important is lost, and prune or correct anything that's been invalidated. Remember that this wiki is intended for use by both humans and AI agents — keep it organized and free from bloat."""
+
 # JSON-RPC 2.0 standard error codes
 PARSE_ERROR = -32700
 INVALID_REQUEST = -32600
@@ -44,7 +53,7 @@ INTERNAL_ERROR = -32603
 
 
 def dispatch(
-    message: dict[str, Any], session_id: str | None
+    message: dict[str, Any], session_id: str | None, bearer_user: User,
 ) -> tuple[dict[str, Any] | None, str | None]:
     """Process one JSON-RPC message.
 
@@ -55,6 +64,11 @@ def dispatch(
       * The returned ``session_id`` is what the transport puts in the
         ``Mcp-Session-Id`` response header. ``initialize`` mints a fresh
         id; everything else echoes the incoming id.
+
+    ``bearer_user`` is the user resolved by the transport layer's
+    bearer auth (``app.auth.deps.require_bearer``) — threaded
+    explicitly so this module has no implicit
+    request-context dependency.
     """
     if message.get("jsonrpc") != "2.0":
         return _error(message.get("id"), INVALID_REQUEST, "missing jsonrpc=2.0"), session_id
@@ -71,7 +85,7 @@ def dispatch(
     )
 
     try:
-        return _route(method, params, request_id, is_notification, session_id)
+        return _route(method, params, request_id, is_notification, session_id, bearer_user)
     except Exception:
         log.exception("mcp transport: handler raised for method=%s", method)
         if is_notification:
@@ -85,12 +99,13 @@ def _route(
     request_id: Any,
     is_notification: bool,
     session_id: str | None,
+    bearer_user: User,
 ) -> tuple[dict[str, Any] | None, str | None]:
     if method == "initialize":
         if is_notification:
             # ``initialize`` is a request, not a notification, per spec.
             return None, session_id
-        result, new_session_id = _handle_initialize(params)
+        result, new_session_id = _handle_initialize(params, bearer_user)
         return _success(request_id, result), new_session_id
 
     sess = mcp_session.get(session_id)
@@ -200,14 +215,15 @@ def _handle_resources_unsubscribe(
         return _error(request_id, INVALID_PARAMS, str(exc))
 
 
-def _handle_initialize(_params: dict[str, Any]) -> tuple[dict[str, Any], str]:
+def _handle_initialize(
+    _params: dict[str, Any], bearer_user: User,
+) -> tuple[dict[str, Any], str]:
     """Mint a fresh session for the authenticated user, return the
     capabilities envelope. The session is created in the
     ``initialized=False`` state — the client must follow up with
     ``notifications/initialized`` to flip it to ``True``.
     """
-    user = _bearer_user()
-    sess = mcp_session.create(user)
+    sess = mcp_session.create(bearer_user)
 
     return (
         {
@@ -217,6 +233,7 @@ def _handle_initialize(_params: dict[str, Any]) -> tuple[dict[str, Any], str]:
                 "resources": {"subscribe": True, "listChanged": True},
             },
             "serverInfo": {"name": SERVER_NAME, "version": SERVER_VERSION},
+            "instructions": SERVER_INSTRUCTIONS,
         },
         sess.id,
     )
@@ -243,16 +260,6 @@ def _handle_tools_call(
         request_id,
         {"content": mcp_tools.to_mcp_content(payload), "isError": is_error},
     )
-
-
-def _bearer_user() -> User:
-    """Pull the bearer-authenticated user from ``flask.g``. The
-    transport never runs without ``bearer_required`` having populated
-    this — assert rather than degrade gracefully so a wiring bug fails
-    loud."""
-    user = getattr(g, "user", None)
-    assert user is not None, "bearer_required must run before dispatch()"
-    return user
 
 
 def _success(request_id: Any, result: Any) -> dict[str, Any]:

@@ -1,18 +1,17 @@
-"""Admin endpoints — user management + LLM settings. Gated on is_admin."""
+"""FastAPI port of ``app/api/admin.py`` (Phase 3)."""
 from __future__ import annotations
 
 import logging
-
 from typing import Any
 
-from flask import Blueprint, jsonify, request
+from fastapi import APIRouter, Depends, HTTPException
 
-from app.auth import admin_required, current_user, users as users_repo
+from app.auth import User, users as users_repo
+from app.auth.deps import require_admin
 from app.ingest import settings as ingest_settings
 from app.ingest.settings import IngestSettings
 from app.llm import settings as llm_settings
 from app.llm.settings import LLMSettings
-from app.models._helpers import error, parse_body
 from app.models.admin import (
     AdminUserListResponse,
     AdminUserView,
@@ -32,7 +31,7 @@ from app.tracing.settings import BraintrustSettings
 from app.web import settings as web_settings
 from app.web.settings import WebSettings
 
-bp = Blueprint("admin", __name__)
+router = APIRouter()
 log = logging.getLogger(__name__)
 
 
@@ -51,49 +50,45 @@ def _user_view(row: dict[str, Any]) -> AdminUserView:
     )
 
 
-@bp.get("/users")
-@admin_required
-def list_users():
-    return jsonify(AdminUserListResponse(
+@router.get("/users", response_model=AdminUserListResponse)
+def list_users(_actor: User = Depends(require_admin)) -> AdminUserListResponse:
+    return AdminUserListResponse(
         users=[_user_view(r) for r in users_repo.list_all()],
-    ).model_dump())
+    )
 
 
-@bp.patch("/users/<user_id>")
-@admin_required
-def update_user(user_id: str):
-    req = parse_body(UpdateUserRequest, request.get_json(silent=True))
+@router.patch("/users/{user_id}", response_model=AdminUserView)
+def update_user(
+    user_id: str,
+    req: UpdateUserRequest,
+    actor: User = Depends(require_admin),
+) -> AdminUserView:
     target = users_repo.get_by_id(user_id)
     if target is None:
-        return error("not found", 404)
+        raise HTTPException(status_code=404, detail="not found")
     if not req.is_admin and bool(target["is_admin"]) and users_repo.admin_count() <= 1:
-        return error("cannot demote the last admin", 400)
+        raise HTTPException(status_code=400, detail="cannot demote the last admin")
     users_repo.set_admin(user_id, req.is_admin)
-    actor = current_user()
     log.info(
-        "admin: %s set is_admin=%s on user %s",
-        actor.id if actor else "?", req.is_admin, user_id,
+        "admin: %s set is_admin=%s on user %s", actor.id, req.is_admin, user_id,
     )
     row = users_repo.get_by_id(user_id)
     assert row is not None
-    return jsonify(_user_view(row).model_dump())
+    return _user_view(row)
 
 
-@bp.delete("/users/<user_id>")
-@admin_required
-def delete_user(user_id: str):
-    me = current_user()
-    assert me is not None
-    if me.id == user_id:
-        return error("cannot delete yourself", 400)
+@router.delete("/users/{user_id}", response_model=OkResponse)
+def delete_user(user_id: str, actor: User = Depends(require_admin)) -> OkResponse:
+    if actor.id == user_id:
+        raise HTTPException(status_code=400, detail="cannot delete yourself")
     target = users_repo.get_by_id(user_id)
     if target is None:
-        return error("not found", 404)
+        raise HTTPException(status_code=404, detail="not found")
     if bool(target["is_admin"]) and users_repo.admin_count() <= 1:
-        return error("cannot delete the last admin", 400)
+        raise HTTPException(status_code=400, detail="cannot delete the last admin")
     users_repo.delete(user_id)
-    log.info("admin: %s deleted user %s", me.id, user_id)
-    return jsonify(OkResponse().model_dump())
+    log.info("admin: %s deleted user %s", actor.id, user_id)
+    return OkResponse()
 
 
 # --------------------------------------------------------------------------- #
@@ -126,33 +121,32 @@ def _llm_view(s: LLMSettings) -> LLMView:
     )
 
 
-@bp.get("/llm")
-@admin_required
-def get_llm():
-    return jsonify(_llm_view(llm_settings.get()).model_dump())
+@router.get("/llm", response_model=LLMView)
+def get_llm(_actor: User = Depends(require_admin)) -> LLMView:
+    return _llm_view(llm_settings.get())
 
 
-@bp.put("/llm")
-@admin_required
-def put_llm():
-    raw: dict[str, Any] = request.get_json(silent=True) or {}
-    req = parse_body(LLMConfigRequest, raw)
+@router.put("/llm", response_model=LLMView)
+def put_llm(
+    req: LLMConfigRequest,
+    actor: User = Depends(require_admin),
+) -> LLMView:
+    # ``req.model_fields_set`` distinguishes "client omitted this field"
+    # from "client sent null/empty" — required for the
+    # empty-string-means-keep convention below.
+    sent_fields = req.model_fields_set
     provider = req.provider.strip().lower()
     model = req.model.strip()
     if provider not in _ALLOWED_PROVIDERS:
         allowed = ", ".join(f"'{p}'" for p in _ALLOWED_PROVIDERS)
-        return error(f"provider must be one of {allowed}", 400)
+        raise HTTPException(status_code=400, detail=f"provider must be one of {allowed}")
     if not model:
-        return error("model is required", 400)
+        raise HTTPException(status_code=400, detail="model is required")
 
     current = llm_settings.get()
 
-    # Empty string means "leave existing secret untouched"; explicit null
-    # clears it. Same convention for the Ollama base URL even though it
-    # isn't a secret, so the form can submit "no change" without echoing
-    # back stored config.
     def _resolve_secret(field: str, sent: str | None, existing: str) -> str:
-        if field not in raw:
+        if field not in sent_fields:
             return existing
         if sent is None:
             return ""
@@ -173,12 +167,11 @@ def put_llm():
         gemini_api_key=gemini_key,
         ollama_base_url=ollama_base_url,
     )
-    actor = current_user()
     log.info(
         "admin: %s updated llm settings provider=%s model=%s",
-        actor.id if actor else "?", provider, model,
+        actor.id, provider, model,
     )
-    return jsonify(_llm_view(llm_settings.get()).model_dump())
+    return _llm_view(llm_settings.get())
 
 
 # --------------------------------------------------------------------------- #
@@ -195,22 +188,21 @@ def _web_view(s: WebSettings) -> WebView:
     )
 
 
-@bp.get("/web")
-@admin_required
-def get_web():
-    return jsonify(_web_view(web_settings.get()).model_dump())
+@router.get("/web", response_model=WebView)
+def get_web(_actor: User = Depends(require_admin)) -> WebView:
+    return _web_view(web_settings.get())
 
 
-@bp.put("/web")
-@admin_required
-def put_web():
-    raw: dict[str, Any] = request.get_json(silent=True) or {}
-    req = parse_body(WebConfigRequest, raw)
+@router.put("/web", response_model=WebView)
+def put_web(
+    req: WebConfigRequest,
+    actor: User = Depends(require_admin),
+) -> WebView:
+    sent_fields = req.model_fields_set
     current = web_settings.get()
 
-    # Empty string means "leave existing key untouched"; explicit null clears it.
     def _resolve(field: str, sent: str | None, existing: str) -> str:
-        if field not in raw:
+        if field not in sent_fields:
             return existing
         if sent is None:
             return ""
@@ -225,12 +217,11 @@ def put_web():
         serper_api_key=serper_key,
         firecrawl_api_key=firecrawl_key,
     )
-    actor = current_user()
     log.info(
         "admin: %s updated web settings serper_set=%s firecrawl_set=%s",
-        actor.id if actor else "?", bool(serper_key), bool(firecrawl_key),
+        actor.id, bool(serper_key), bool(firecrawl_key),
     )
-    return jsonify(_web_view(web_settings.get()).model_dump())
+    return _web_view(web_settings.get())
 
 
 # --------------------------------------------------------------------------- #
@@ -238,9 +229,6 @@ def put_web():
 # --------------------------------------------------------------------------- #
 
 
-# Floor at 1k chars (smaller than this and meaningful docs get rejected) and
-# cap at 5M (single LLM context budget; anything larger is almost certainly a
-# misconfiguration on the pushing side).
 _MIN_DOC_CHARS = 1_000
 _MAX_DOC_CHARS = 5_000_000
 
@@ -249,25 +237,26 @@ def _ingest_view(s: IngestSettings) -> IngestView:
     return IngestView(max_doc_chars=s.max_doc_chars)
 
 
-@bp.get("/ingest")
-@admin_required
-def get_ingest():
-    return jsonify(_ingest_view(ingest_settings.get()).model_dump())
+@router.get("/ingest", response_model=IngestView)
+def get_ingest(_actor: User = Depends(require_admin)) -> IngestView:
+    return _ingest_view(ingest_settings.get())
 
 
-@bp.put("/ingest")
-@admin_required
-def put_ingest():
-    req = parse_body(IngestConfigRequest, request.get_json(silent=True))
+@router.put("/ingest", response_model=IngestView)
+def put_ingest(
+    req: IngestConfigRequest, actor: User = Depends(require_admin),
+) -> IngestView:
     if req.max_doc_chars < _MIN_DOC_CHARS or req.max_doc_chars > _MAX_DOC_CHARS:
-        return error(f"max_doc_chars must be between {_MIN_DOC_CHARS} and {_MAX_DOC_CHARS}", 400)
+        raise HTTPException(
+            status_code=400,
+            detail=f"max_doc_chars must be between {_MIN_DOC_CHARS} and {_MAX_DOC_CHARS}",
+        )
     ingest_settings.upsert(max_doc_chars=req.max_doc_chars)
-    actor = current_user()
     log.info(
         "admin: %s updated ingest settings max_doc_chars=%d",
-        actor.id if actor else "?", req.max_doc_chars,
+        actor.id, req.max_doc_chars,
     )
-    return jsonify(_ingest_view(ingest_settings.get()).model_dump())
+    return _ingest_view(ingest_settings.get())
 
 
 # --------------------------------------------------------------------------- #
@@ -284,25 +273,22 @@ def _braintrust_view(s: BraintrustSettings) -> BraintrustView:
     )
 
 
-@bp.get("/braintrust")
-@admin_required
-def get_braintrust():
-    return jsonify(_braintrust_view(braintrust_settings.get()).model_dump())
+@router.get("/braintrust", response_model=BraintrustView)
+def get_braintrust(_actor: User = Depends(require_admin)) -> BraintrustView:
+    return _braintrust_view(braintrust_settings.get())
 
 
-@bp.put("/braintrust")
-@admin_required
-def put_braintrust():
-    raw: dict[str, Any] = request.get_json(silent=True) or {}
-    req = parse_body(BraintrustConfigRequest, raw)
+@router.put("/braintrust", response_model=BraintrustView)
+def put_braintrust(
+    req: BraintrustConfigRequest,
+    actor: User = Depends(require_admin),
+) -> BraintrustView:
+    sent_fields = req.model_fields_set
     project = req.project.strip()
     current = braintrust_settings.get()
 
-    # Same convention as the LLM settings: empty string = "leave existing
-    # untouched"; explicit null = "clear". For non-secret fields (project,
-    # enabled) the request value is the authoritative one.
     def _resolve_secret(field: str, sent: str | None, existing: str) -> str:
-        if field not in raw:
+        if field not in sent_fields:
             return existing
         if sent is None:
             return ""
@@ -311,19 +297,11 @@ def put_braintrust():
         return sent
 
     api_key = _resolve_secret("api_key", req.api_key, current.api_key)
-    # Tracing can only be enabled when both project and key are set —
-    # mirrors the UI gating but is also enforced server-side so a stale
-    # form can't flip it on incorrectly.
     enabled = bool(req.enabled and project and api_key)
 
     braintrust_settings.upsert(project=project, api_key=api_key, enabled=enabled)
-    # The tracing module caches its logger keyed by (project, api_key), so
-    # rotating credentials transparently picks up the new value on the
-    # next call. Toggling ``enabled`` without changing credentials short-
-    # circuits before the cache lookup, so no explicit invalidation needed.
-    actor = current_user()
     log.info(
         "admin: %s updated braintrust settings project=%s key_set=%s enabled=%s",
-        actor.id if actor else "?", project, bool(api_key), enabled,
+        actor.id, project, bool(api_key), enabled,
     )
-    return jsonify(_braintrust_view(braintrust_settings.get()).model_dump())
+    return _braintrust_view(braintrust_settings.get())

@@ -13,11 +13,8 @@ adapter:
   * ``list_for_mcp()`` — translates the chat-agent JSON specs into
     MCP's ``tools/list`` shape (``input_schema`` → ``inputSchema``).
 
-  * ``call_for_mcp()`` — dispatches into the chat-agent registry,
-    binding the MCP session's ``seen_paths`` to the
-    ``seen_doc_paths`` ContextVar so the existing read-before-write
-    enforcement works the same way it does inside a chat loop.
-    Translates the handler's return shape into MCP's
+  * ``call_for_mcp()`` — dispatches into the chat-agent registry and
+    translates the handler's return shape into MCP's
     ``{content, isError}`` envelope.
 
 Design: ``local_data/wiki/mcp-server/mcp-server.md`` (Phase 3+).
@@ -28,7 +25,6 @@ import json
 import logging
 from typing import Any, cast
 
-from app.llm.agents._session import seen_doc_paths
 from app.llm.agents.tools import TOOL_SPECS, dispatch as registry_dispatch
 from app.mcp_server.session import McpSession
 
@@ -124,13 +120,6 @@ def call_for_mcp(
     True)`` — same shape the chat agent already produces, so the MCP
     wrapper doesn't need a custom translation table.
 
-    The session's ``seen_paths`` set is bound to the
-    ``seen_doc_paths`` ContextVar for the duration of the dispatch so
-    that ``read_doc`` registers HEAD reads against the *MCP* session,
-    and the write tools (``edit_doc``, ``multi_edit``, ``write_doc``,
-    ``apply_patch``) refuse edits to paths the session hasn't read at
-    HEAD.
-
     Every successful payload also carries a ``stale_paths`` array —
     paths the session has subscribed to that have changed since the
     last tool call. Phase 4 always returns ``[]`` here because
@@ -145,14 +134,11 @@ def call_for_mcp(
     if name in MCP_ASYNC_TOOLS:
         return _call_async_nl_update(sess, arguments)
 
-    token = seen_doc_paths.set(sess.seen_paths)
     try:
         result = registry_dispatch(name, arguments)
     except Exception as exc:
         log.exception("mcp tool dispatch raised name=%s", name)
         return {"error": f"internal error: {exc}", "stale_paths": []}, True
-    finally:
-        seen_doc_paths.reset(token)
 
     is_error = isinstance(result, dict) and "error" in result
     payload: dict[str, Any] = (
@@ -168,13 +154,11 @@ def _call_async_nl_update(
 ) -> tuple[dict[str, Any], bool]:
     """MCP-side wrapper for ``update_doc_nl``.
 
-    Validates inputs, enforces ACL + read-before-write at *enqueue*
-    time (the worker can't re-check ``seen_paths`` — the ContextVar
-    only exists in this process), dedupes via the idempotency key,
-    inserts the ``mcp_jobs`` row, enqueues the worker task, and
-    auto-subscribes the calling session to ``job://<id>`` so the SSE
-    stream pushes status changes without a separate
-    ``resources/subscribe`` call.
+    Validates inputs, enforces ACL at *enqueue* time, dedupes via the
+    idempotency key, inserts the ``mcp_jobs`` row, enqueues the
+    worker task, and auto-subscribes the calling session to
+    ``job://<id>`` so the SSE stream pushes status changes without a
+    separate ``resources/subscribe`` call.
 
     Returns ``({job_id, status_uri, status, ...}, False)`` on enqueue,
     ``({error, ...}, True)`` on validation / ACL failure.
@@ -227,16 +211,7 @@ def _call_async_nl_update(
             True,
         )
 
-    # ---- ACL + seen_paths gate at enqueue (worker can't re-check) ----
-    seen_token = seen_doc_paths.set(sess.seen_paths)
-    try:
-        try:
-            h.assert_read_before_write(rel)
-        except h.ToolError as exc:
-            return {"error": str(exc), "stale_paths": _compute_stale_paths(sess)}, True
-    finally:
-        seen_doc_paths.reset(seen_token)
-
+    # ---- ACL gate at enqueue (worker can't re-check) ----
     try:
         require_can("write", rel)
     except PermissionDenied as exc:

@@ -1,13 +1,34 @@
-"""HTTP shapes for the inbound MCP token surface (``/api/mcp/tokens``).
+"""HTTP shapes for the inbound MCP token surface (``/api/mcp/tokens``)
+and the JSON-RPC envelope the MCP transport accepts.
 
-The MCP server transport itself doesn't go through these models — it
-speaks JSON-RPC over Streamable HTTP and uses the ``mcp`` SDK's framing.
-These shapes only cover the user-facing CRUD a person uses to mint and
-revoke API keys.
+The MCP server transport itself only validates the envelope here; the
+``params`` payload is shaped per-method inside ``app.mcp_server`` and
+isn't worth a discriminated-union at the FastAPI layer.
 """
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from typing import Any
+
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class JsonRpcRequest(BaseModel):
+    """JSON-RPC 2.0 envelope.
+
+    ``id`` is intentionally absent for notifications; the dispatcher
+    distinguishes notifications from requests by checking
+    ``model_fields_set`` rather than the value (``id == null`` is a
+    legal request id in JSON-RPC and is not a notification). ``params``
+    is left as a free-form object because individual MCP methods shape
+    it themselves; FastAPI still rejects non-object request bodies.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    jsonrpc: str
+    method: str
+    id: str | int | None = None
+    params: dict[str, Any] | None = None
 
 
 class CreateMcpTokenRequest(BaseModel):

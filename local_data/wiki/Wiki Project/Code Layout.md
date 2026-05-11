@@ -9,7 +9,7 @@ interfaces and seams") and the [Architecture Overview](Architecture%20Overview.m
 
 ```
 agent-wiki/
-├── backend/                 Flask app, workers, tests, migrations
+├── backend/                 FastAPI app, workers, tests, migrations
 ├── frontend/                Next.js 14 (App Router) + TypeScript
 ├── nginx/                   reverse proxy (prod compose only)
 ├── deploy/                  helm chart, terraform, custom postgres image
@@ -40,9 +40,9 @@ backend/
 
 ```
 backend/app/
-├── main.py                  Flask app factory; blueprint registration
+├── main.py                  FastAPI app factory; router registration
 ├── config.py                env loading, CONFIG dataclass
-├── api/                     thin HTTP layer (blueprints)
+├── api/                     thin HTTP layer (APIRouters)
 ├── auth/                    sessions, bcrypt, OIDC, MCP tokens, groups
 ├── wiki/                    git wrapper, ACL, search, edit primitives
 ├── triggers/                NL trigger storage + evaluation engine
@@ -58,7 +58,7 @@ backend/app/
 └── scripts/                 (currently empty)
 ```
 
-#### `app/api/` — HTTP blueprints
+#### `app/api/` — HTTP routers
 
 ```
 app/api/
@@ -78,15 +78,18 @@ app/api/
 └── webhooks.py              public connector webhooks
 ```
 
-Mount points are wired in `app.main:create_app` (`/api/auth`,
-`/api/admin`, etc.). Blueprints stay thin — they parse, gate, and
-delegate. Business logic lives in the domain modules below.
+Mount points are wired in `app.main:create_app` via
+`app.include_router(...)` (`/api/auth`, `/api/admin`, etc.). Routers
+stay thin — they parse, gate via `Depends(require_user)` /
+`Depends(require_admin)` / `require_can`, and delegate. Business
+logic lives in the domain modules below.
 
 #### `app/auth/` — identity + groups
 
 ```
 app/auth/
-├── __init__.py              decorators (login/admin_required, require_can)
+├── __init__.py              User type, current_user_ctx ContextVar, set_current_user, require_can
+├── deps.py                  FastAPI deps: require_user, require_admin, require_bearer + CurrentUserMiddleware
 ├── basic.py                 email/password authenticate()
 ├── passwords.py             bcrypt hash + verify
 ├── users.py                 user repo (first-user-is-admin rule)
@@ -193,14 +196,19 @@ protocol; the client doesn't branch on backend.
 ```
 app/mcp_server/
 ├── transport.py             JSON-RPC over POST + SSE on GET /api/mcp
-├── auth.py                  bearer_required → g.user
+│                            (takes the bearer-resolved User as an
+│                             explicit arg from the FastAPI route)
 ├── session.py               per-connection state
 ├── tools.py                 tool registration (read_doc, edit_doc, …)
 ├── resources.py             wiki:///<path> resource resolution
 ├── pubsub.py                Postgres LISTEN/NOTIFY fan-out for SSE
-├── jobs.py                  async update_doc_nl job lifecycle
-└── worker_context.py        reconstitute g.user inside worker writes
+└── jobs.py                  async update_doc_nl job lifecycle
 ```
+
+The bearer dependency itself lives in `app/auth/deps.py:require_bearer`
+(shared with `require_user` / `require_admin`). The worker rebinds the
+active user via `app.auth.set_current_user(load_user(uid))` in
+`app/tasks/document_update.py`.
 
 See [MCP Server Inbound](Specific%20Features/MCP%20Server%20Inbound.md).
 
@@ -311,7 +319,7 @@ backend/tests/
 ├── test_triggers_api.py / _diff.py / _engine.py / _fanout.py / _natural_language.py / _repo.py
 ├── test_trigger_tools.py
 └── integration/
-    ├── conftest.py          full-stack fixture (Flask + DB + wiki + scripted LLM)
+    ├── conftest.py          full-stack fixture (FastAPI TestClient + DB + wiki + scripted LLM)
     ├── test_smoke.py
     ├── test_doc_ingest_flow.py
     ├── test_doc_tamper_flow.py
@@ -323,8 +331,8 @@ backend/tests/
     └── test_smoke.py
 ```
 
-Unit tests sit at the top; `integration/` exercises the Flask client
-+ real DB + real wiki repo + scripted LLM mock end-to-end.
+Unit tests sit at the top; `integration/` exercises the FastAPI
+`TestClient` + real DB + real wiki repo + scripted LLM mock end-to-end.
 
 ## `frontend/`
 

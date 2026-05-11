@@ -4,23 +4,24 @@ version = "0.0.1"
 description = "Backend for agent-wiki: a self-updating wiki for AI agents"
 requires-python = ">=3.11"
 dependencies = [
-    "croniter>=2.0",      # cron-spec parsing for periodic background tasks
-    "flask>=3.0",
+    "croniter>=2.0",     # cron-spec parsing for periodic background tasks
     "psycopg[binary]>=3.1",
     "pydantic>=2.6",
     "sqlalchemy>=2.0",
-    "alembic>=1.13",      # schema migrations applied on init_db()
+    "alembic>=1.13",     # schema migrations applied on init_db()
     "python-dotenv>=1.0",
     "requests>=2.31",
-    "authlib>=1.3",          # OIDC
-    "bcrypt>=4.1",           # basic auth password hashing
+    "authlib>=1.3",      # OIDC via authlib.integrations.starlette_client
+    "bcrypt>=4.1",       # basic auth password hashing
     "anthropic>=0.40",
-    "openai>=1.50",     # Responses API + streaming events
+    "openai>=1.50",      # Responses API + streaming events
     "google-genai>=1.0", # Gemini provider
     "ollama>=0.4",       # Local-model provider (uses Ollama HTTP API)
     "braintrust>=0.0.190", # LLM tracing — admin-configured project + key
     "pyyaml>=6.0",       # trigger files on disk
-    "gunicorn>=21",      # dev/prod WSGI; --reload + --graceful-timeout for in-flight-safe reloads
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",  # ASGI server — production entry via Dockerfile CMD
+    "itsdangerous>=2.1", # Starlette SessionMiddleware signs the session cookie
 ]
 
 [project.optional-dependencies]
@@ -30,6 +31,7 @@ dev = [
     "pytest-xdist>=3.5",
     "ruff>=0.4",
     "basedpyright>=1.18",
+    "httpx>=0.27",       # fastapi.testclient.TestClient transport
 ]
 
 [tool.setuptools.packages.find]

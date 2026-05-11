@@ -66,25 +66,50 @@ call. Historical reads (`read_doc` with `sha != HEAD`) return
 * **`read`** — registered automatically on successful HEAD reads
   through `read_page` / `read_doc`.
 * **`wrote`** — registered automatically on successful writes through
-  `write_doc`, `edit_doc`, `multi_edit`, or `apply_patch`. The commit
-  message becomes the `description`.
+  `write_doc`, `edit_doc`, `multi_edit`, `apply_patch`, or
+  `update_doc_nl`. The commit message becomes the `description`.
 
 Both go through `app.wiki.agent_activity.upsert_activity`. The
-natural key is `(user_id, agent_name, doc_path, activity)` (Postgres
-NULLS NOT DISTINCT), so re-registering by the same user+agent+activity
-slides `expires_at` forward and overwrites `description` rather than
-inserting a duplicate.
+natural key is `(user_id, agent_name)` (Postgres NULLS NOT DISTINCT)
+— **one row per `(user, agent)` at any moment**. A new upsert
+overwrites the prior row in place, so the row always answers "what
+is this agent doing right now?", not "every doc this agent has
+touched in the last 24h". An agent that reads doc A then writes
+doc B has one row, on doc B; the doc-A row is gone.
+
+The corollary: a doc's "Active agents" panel shows only agents whose
+*current* focus is that doc. When an agent moves on, the row moves
+with them.
 
 ## TTL and cleanup
 
-`DEFAULT_TTL = 24h`. On every UPSERT the caller schedules a delayed
-task on `triggers_queue` (see
-`app/tasks/agent_activity.py:cleanup_expired_activity`). At
-`expires_at` the task fires, double-checks the row hasn't been
-re-registered (renewals stamp a later `expires_at`, so the old fire
-detects the mismatch and no-ops), then deletes it. Activity is
-DB-only, so cleanup is a single `DELETE` — no body refresh, no
-commit.
+`DEFAULT_TTL = 24h`. Each upsert overwrites `expires_at` to
+`now + ttl`. The cleanup task on
+`lightweight_maintenance_queue` (see
+`app/tasks/agent_activity.py:cleanup_expired_activity`) is scheduled
+at the new `expires_at`; the prior scheduled fire is canceled in the
+same transaction. At `expires_at` the task fires, double-checks the
+row hasn't been re-registered with a later expiry (renewals stamp a
+later `expires_at`, so the stale fire no-ops), then deletes it.
+Activity is DB-only, so cleanup is a single `DELETE` — no body
+refresh, no commit.
+
+### Agent-supplied TTL — `expires_in_seconds`
+
+Every write tool (`edit_doc`, `multi_edit`, `write_doc`,
+`apply_patch`, `update_doc_nl`) accepts an optional integer
+`expires_in_seconds` argument. When set, that value becomes the row's
+TTL for that upsert, replacing the 24h default. Use it to declare
+"I expect to keep working on this for X seconds" — the agent can
+hold its row open for a long-running task or auto-fade after a
+short focused edit.
+
+Range: `60` (1 minute) to `604800` (7 days). Out-of-range or
+non-integer values return `{"error": "expires_in_seconds must be ..."}`.
+
+Reads always use the 24h default. A read that follows a write with
+`expires_in_seconds=300` will reset the row to 24h — the most recent
+upsert wins. If you want a short window to stick, write last.
 
 On server restart, `app/main.py:create_app` calls
 `schedule_all_pending_cleanups()`, which schedules a fresh cleanup
@@ -118,7 +143,9 @@ exist on disk for anyone to corrupt or mis-render.
   just need to be wired into `app/wiki/notify.py:after_path_move` /
   `after_doc_delete`.
 * **MCP / external agents** — registration runs from inside the chat
-  agent's tool handlers under a Flask request context, so an
+  agent's tool handlers with `current_user_ctx` already bound (by
+  `CurrentUserMiddleware` on cookie requests, by the MCP route's
+  `set_current_user(user)` block on bearer requests), so an
   authenticated `current_user()` is available. Tasks that don't have
   a request user (pgmq background work, the document-updater agent)
   skip registration silently.

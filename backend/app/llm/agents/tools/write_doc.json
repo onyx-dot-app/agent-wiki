@@ -19,6 +19,10 @@
       "base_sha": {
         "type": "string",
         "description": "REQUIRED when overwriting an existing file (the sha you last read). Optional for new-file creates. Without it on an overwrite, returns `base_sha_required_for_overwrite` — full-body overwrite has no fuzzy fallback so the staleness check can't be skipped."
+      },
+      "expires_in_seconds": {
+        "type": "integer",
+        "description": "Optional. How long (in seconds) you anticipate continuing to work on this file or feature before you're done. Sets the TTL on your row in the Active agents list, replacing the 24h default. You only have ONE row in the list at a time per (user, agent), so the latest write's value wins. Range: 60 to 604800 (7 days)."
       }
     },
     "required": ["path", "body", "commit_message"]

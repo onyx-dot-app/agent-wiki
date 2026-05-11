@@ -46,7 +46,7 @@ def test_disabled_trigger_does_not_fire(integration):
     """`enabled=false` must short-circuit before the LLM is even called."""
     tid = _seed_doc_trigger(integration)
     resp = integration.client.put(f"/api/triggers/{tid}", json={"enabled": False})
-    assert resp.status_code == 200, resp.get_data(as_text=True)
+    assert resp.status_code == 200, resp.text
 
     # Script a definite "yes" — if the disabled path leaks, we'll see a fire.
     integration.llm.respond(

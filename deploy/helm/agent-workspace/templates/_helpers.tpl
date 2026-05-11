@@ -55,6 +55,8 @@ and wiki path stay in lockstep.
       key: secret-key
 - name: ALLOWED_EMAILS
   value: {{ .Values.allowedEmails | quote }}
+- name: MAX_QUEUE_SIZE
+  value: {{ .Values.maxQueueSize | quote }}
 - name: AUTH_MODE
   value: {{ .Values.auth.mode | quote }}
 - name: SECURE_COOKIES

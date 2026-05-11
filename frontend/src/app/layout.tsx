@@ -27,7 +27,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
             users don't see a light-mode flash on first paint. */}
         <ThemeBootstrapScript />
       </head>
-      <body style={{ fontFamily: "system-ui, sans-serif", margin: 0 }}>
+      <body style={{ fontFamily: "system-ui, sans-serif", margin: 0, boxSizing: "border-box" }}>
         <SWRProvider>
           <AuthProvider>
             <ThemeProvider>

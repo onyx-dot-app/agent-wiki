@@ -30,6 +30,7 @@ auto-subscribe.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import threading
@@ -58,8 +59,15 @@ _subscribers_by_path: dict[str, set[str]] = {}
 _job_subscriptions: dict[str, set[str]] = {}
 # job_id → set of session_ids
 _subscribers_by_job: dict[str, set[str]] = {}
-# session_id → pending-delivery queue
+# session_id → pending-delivery queue (sync — Flask SSE writer drains this)
 _queues: dict[str, "Queue[Notification]"] = {}
+# session_id → (asyncio.Queue, owning event loop) — FastAPI SSE writer
+# registers these at stream open via ``register_async_consumer``. A
+# session has at most one async consumer at a time. Coexists with the
+# sync ``_queues`` during the Phase 4-5 migration so both transports
+# work; Phase 5 deletes the sync path.
+_async_queues: dict[str, "asyncio.Queue[Notification]"] = {}
+_async_loops: dict[str, asyncio.AbstractEventLoop] = {}
 
 _lock = threading.Lock()
 
@@ -146,6 +154,8 @@ def forget(session_id: str) -> None:
                 if not _subscribers_by_job[job_id]:
                     del _subscribers_by_job[job_id]
         _queues.pop(session_id, None)
+        _async_queues.pop(session_id, None)
+        _async_loops.pop(session_id, None)
 
 
 def reset_for_tests() -> None:
@@ -155,6 +165,73 @@ def reset_for_tests() -> None:
         _job_subscriptions.clear()
         _subscribers_by_job.clear()
         _queues.clear()
+        _async_queues.clear()
+        _async_loops.clear()
+
+
+# --------------------------------------------------------------------------- #
+# Async-consumer seam (FastAPI SSE writer)                                    #
+# --------------------------------------------------------------------------- #
+
+
+def register_async_consumer(session_id: str) -> "asyncio.Queue[Notification]":
+    """Create-and-register an ``asyncio.Queue`` for the active session,
+    bound to the currently-running event loop. Called by the FastAPI
+    SSE writer at stream open. Subsequent publishes for ``session_id``
+    enqueue via ``loop.call_soon_threadsafe`` so cross-thread pushes
+    (from sync request handlers, pgmq workers via PG NOTIFY, the
+    LISTEN thread) hand off safely to the writer's loop.
+
+    Drains any items already queued on the sync side at registration
+    time — covers the small race window where a subscribe + publish
+    happen before the SSE writer opens. After this returns, the async
+    queue is the only path the writer drains."""
+    loop = asyncio.get_running_loop()
+    q: asyncio.Queue[Notification] = asyncio.Queue()
+    with _lock:
+        sync_q = _queues.get(session_id)
+        pending: list[Notification] = []
+        if sync_q is not None:
+            try:
+                while True:
+                    pending.append(sync_q.get_nowait())
+            except Empty:
+                pass
+        _async_queues[session_id] = q
+        _async_loops[session_id] = loop
+    for notif in pending:
+        q.put_nowait(notif)
+    return q
+
+
+def _push_async(session_id: str, notif: Notification) -> None:
+    """Thread-safe push to the per-session asyncio.Queue. No-op when no
+    async consumer is registered (the only reader is the Flask SSE
+    writer draining ``_queues`` via ``drain_blocking``)."""
+    with _lock:
+        q = _async_queues.get(session_id)
+        loop = _async_loops.get(session_id)
+    if q is None or loop is None:
+        return
+    try:
+        loop.call_soon_threadsafe(q.put_nowait, notif)
+    except RuntimeError:
+        # Loop closed (consumer disconnected before cleanup ran). Drop
+        # silently; the cleanup path will remove the stale registration
+        # on the next ``forget``.
+        log.debug("async push: loop closed for session %s", session_id)
+
+
+async def drain_async(
+    queue: "asyncio.Queue[Notification]", timeout: float,
+) -> Notification | None:
+    """Await the next notification with a timeout. Returns ``None`` on
+    timeout so the SSE writer can emit a heartbeat / check liveness.
+    Symmetric with the sync ``drain_blocking``."""
+    try:
+        return await asyncio.wait_for(queue.get(), timeout=timeout)
+    except asyncio.TimeoutError:
+        return None
 
 
 # --------------------------------------------------------------------------- #
@@ -206,6 +283,7 @@ def publish_list_changed() -> None:
 
     for session_id in mcp_session.all_session_ids():
         queue_for(session_id).put(notif)
+        _push_async(session_id, notif)
     _emit_pg_notify({"kind": "list_changed"})
 
 
@@ -227,6 +305,7 @@ def _publish_local(rel: str, notif: Notification) -> None:
             )
             continue
         queue_for(session_id).put(notif)
+        _push_async(session_id, notif)
 
 
 def _should_deliver(session_id: str, rel: str) -> bool:
@@ -272,6 +351,7 @@ def _publish_local_job(job_id: str, notif: Notification) -> None:
         sessions = list(_subscribers_by_job.get(job_id, set()))
     for session_id in sessions:
         queue_for(session_id).put(notif)
+        _push_async(session_id, notif)
 
 
 # --------------------------------------------------------------------------- #
@@ -394,6 +474,7 @@ def _dispatch_notify_payload(raw: str) -> None:
 
         for session_id in mcp_session.all_session_ids():
             queue_for(session_id).put(notif)
+            _push_async(session_id, notif)
     elif kind == "job_update":
         _publish_local_job(
             payload["job_id"],

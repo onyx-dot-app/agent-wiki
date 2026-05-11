@@ -48,7 +48,7 @@ Key functions:
 
 ## HTTP API
 
-Routes on the `chat` blueprint (see `backend/app/api/chat.py`):
+Routes on the `chat` router (see `backend/app/api/chat.py`):
 
 | Method | Path | Body | Returns |
 |---|---|---|---|

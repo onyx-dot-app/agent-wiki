@@ -20,7 +20,7 @@ the Python handler is what runs server-side.
 ```
 backend/app/llm/agents/tools/
   __init__.py            # auto-loads every <name>.json + <name>.py at import
-  _doc_helpers.py        # shared: validate path, read-before-write, commit + fan-out
+  _doc_helpers.py        # shared: validate path, optimistic-concurrency, commit + fan-out
   _bash.py               # shared bash execution primitive
   <name>.json            # function-call spec — the LLM-facing contract
   <name>.py              # `handle(args: dict) -> Any` — server-side dispatch
@@ -60,9 +60,9 @@ Legend:
 
 | Tool | Inputs | Returns | Latency | Writes | Notes |
 | --- | --- | --- | --- | --- | --- |
-| `search_wiki` | `query: str`, `limit?: int` (≤20) | `{results: [{path, title, snippet, score}]}` | fast | none | BM25 over the BM25 index. Snippets are ~64 tokens with matches in `**bold**`. **Does not** count as a "read" for read-before-write — call `read_page` / `read_doc` on the result before editing. |
-| `read_page` | `path: str` (`.md`) | `{path, title, body}` | fast | none | Full HEAD body. Populates session `seen_doc_paths` so doc-edit tools accept edits to this path. |
-| `read_doc` | `path: str`, `sha?: str` | `{path, body, sha, is_head}` | fast | none | Like `read_page` but accepts an optional commit SHA for historical reads. Only HEAD reads populate `seen_doc_paths` — a historical read does **not** authorize a subsequent edit. |
+| `search_wiki` | `query: str`, `limit?: int` (≤20) | `{results: [{path, title, snippet, score}]}` | fast | none | BM25 over the BM25 index. Snippets are ~64 tokens with matches in `**bold**`. Snippets are not enough to safely edit a doc — call `read_page` / `read_doc` first to grab the full body and a `base_sha`. |
+| `read_page` | `path: str` (`.md`) | `{path, title, body}` | fast | none | Full HEAD body. Returns the doc's current sha (via `agents` payload) so you can pass it to a subsequent edit as `base_sha`. |
+| `read_doc` | `path: str`, `sha?: str` | `{path, body, sha, is_head}` | fast | none | Like `read_page` but accepts an optional commit SHA for historical reads. Pass the returned HEAD `sha` to a write tool as `base_sha` for optimistic-concurrency. |
 | `list_history` | `path: str`, `limit?: int` (≤100, default 20) | `{path, history: [{sha, author, ts, message}]}` | fast | none | Newest-first, follows renames (`git log --follow`). Use to find a sha to pass to `read_doc`. |
 | `ask_nl_question` | `query: str` | `{answer: str, sources: [{path}]}` | slow (LLM) | none | Spawns a one-shot read-only sub-agent (`app.llm.agents.wiki_qa`) with `search_wiki` + `read_page` and a 6-iteration cap. Synthesized answer + the doc paths it actually fetched. |
 | `run_bash` | `command: str` | `{output, exit_code, elapsed_ms, truncated}` | varies | none | **Backup tool.** Read-only Unix commands (`cat, find, grep, ls, head, tail, wc`) chained with `|` / `&&` / `||` / `;`. cwd pinned to wiki root, 30s/segment timeout, output capped at 2000 lines / 50 KB (100 lines if the chain ends in `grep` / `find`). Allowlist enforced upfront before any segment runs — no smuggling via `xargs`. |
@@ -70,27 +70,31 @@ Legend:
 
 ### Doc edits / writes
 
-All of these enforce **read-before-write**: the file must already be in
-the session's `seen_doc_paths` (populated by `read_page` or `read_doc`
-HEAD). New-file writes via `write_doc` are exempt. All commit through
-`commit_and_fan_out`, which fires
+All commit through `commit_and_fan_out`, which fires
 `app.wiki.notify.after_doc_write` (FTS reindex + NL-trigger fan-out;
 the planned MCP pubsub will hook in here too — see
 [seams.md](../seams.md)).
 
+Concurrency is handled by **optional `base_sha`**: pass the sha you last
+read for the doc; the write returns `{error: "stale_base", base_sha,
+current_sha}` if HEAD has drifted, so you can re-read and re-derive the
+edit. `write_doc` makes `base_sha` **required** for overwrites of
+existing files (full-body has no fuzzy fallback if HEAD moved). The
+other write tools accept it optionally.
+
 | Tool | Inputs | Returns | Latency | Writes | Notes |
 | --- | --- | --- | --- | --- | --- |
-| `edit_doc` | `path`, `old_string`, `new_string`, `replace_all?`, `commit_message` | `{path, sha, diff, broken_links}` | fast | git+fts+triggers | Surgical find-and-replace. Fuzzy match via the 9-strategy chain in `app.wiki.edit:replace`. Errors `old_string not found` or `multiple matches` — caller adds context and retries. |
-| `multi_edit` | `path`, `edits: [{old_string, new_string, replace_all?}]`, `commit_message` | `{path, sha, diff, broken_links, applied_count}` | fast | git+fts+triggers | Atomic batch: each edit applies against the result of the previous; any failure aborts the whole batch with no commit. One commit, one reindex, one fan-out. |
-| `write_doc` | `path`, `body`, `commit_message` | `{path, sha, diff, broken_links, created}` | fast | git+fts+triggers | Full-body create or overwrite. Use **only** for new docs or wholesale rewrites (>50% of lines changing). |
-| `apply_patch` | `path`, `patch`, `commit_message`, `base_sha?` | `{path, sha, diff, broken_links}` _or_ `{error: "stale_base", base_sha, current_sha}` | fast | git+fts+triggers | Unified-diff editor. Each hunk tries line-anchored apply first (the `@@ -L,N` header is honored); on drift falls back to `wiki.edit.replace`. Atomic across hunks. Pure-insertion hunks (no context) require a valid line anchor — no fallback. Optional `base_sha` rejects stale writes. |
+| `edit_doc` | `path`, `old_string`, `new_string`, `replace_all?`, `commit_message`, `base_sha?` | `{path, sha, diff, broken_links}` _or_ `{error: "stale_base", ...}` | fast | git+fts+triggers | Surgical find-and-replace. Fuzzy match via the 9-strategy chain in `app.wiki.edit:replace`. Errors `old_string not found` or `multiple matches` — caller adds context and retries. |
+| `multi_edit` | `path`, `edits: [{old_string, new_string, replace_all?}]`, `commit_message`, `base_sha?` | `{path, sha, diff, broken_links, applied_count}` _or_ `{error: "stale_base", ...}` | fast | git+fts+triggers | Atomic batch: each edit applies against the result of the previous; any failure aborts the whole batch with no commit. One commit, one reindex, one fan-out. |
+| `write_doc` | `path`, `body`, `commit_message`, `base_sha?` | `{path, sha, diff, broken_links, created}` _or_ `{error: "base_sha_required_for_overwrite" \| "stale_base", ...}` | fast | git+fts+triggers | Full-body create or overwrite. Use **only** for new docs or wholesale rewrites (>50% of lines changing). Overwrites of existing files **require** `base_sha`. |
+| `apply_patch` | `path`, `patch`, `commit_message`, `base_sha?` | `{path, sha, diff, broken_links}` _or_ `{error: "stale_base", ...}` | fast | git+fts+triggers | Unified-diff editor. Each hunk tries line-anchored apply first (the `@@ -L,N` header is honored); on drift falls back to `wiki.edit.replace`. Atomic across hunks. Pure-insertion hunks (no context) require a valid line anchor — no fallback. |
 | `update_doc_nl` | `path`, `instruction`, `base_sha?` | `{path, committed: bool, sha, diff?, broken_links?, reason?}` _or_ `{error: "stale_base", ...}` | slow (LLM) | git+fts+triggers (only if committed) | Sync wrapper around `document_updater.run`. Loads the body, calls the LLM with the instruction, commits if the LLM returns a new body, returns `{committed: false, reason: "no_change"}` if it returned `NO_CHANGE`. Optional `base_sha` rejects stale writes before the LLM call. |
 
 ### Wiki filesystem ops
 
 | Tool | Inputs | Returns | Latency | Writes | Notes |
 | --- | --- | --- | --- | --- | --- |
-| `move_path` | `old_path`, `new_path`, `commit_message` | `{old_path, new_path, sha, moved: [(old, new)]}` | fast | git (no fan-out) | Pure rename via `git mv`, single commit. Files **and** directories. Content unchanged → no read-before-write check, no trigger fan-out. FTS reindexes the new paths and drops the old ones. |
+| `move_path` | `old_path`, `new_path`, `commit_message` | `{old_path, new_path, sha, moved: [(old, new)]}` | fast | git (no fan-out) | Pure rename via `git mv`, single commit. Files **and** directories. Content unchanged → no trigger fan-out. FTS reindexes the new paths and drops the old ones. |
 | `create_directory` | `path`, `commit_message` | `{path, sha, created: true}` | fast | git (no fan-out) | Empty folders aren't tracked by git, so this commits a `.gitkeep` marker inside. Rejects `.md` extensions and existing paths. |
 
 ### Triggers
@@ -114,27 +118,24 @@ Postgres `triggers` table as a denormalized cache for fan-out lookup. See
 
 ## Cross-cutting contracts
 
-### Read-before-write
+### Optimistic concurrency (`base_sha`)
 
-`app.llm.agents._session.seen_doc_paths` is a `ContextVar[set[str] |
-None]`. The chat loop sets it to an empty set on entry and resets on
-exit; tools mutate it.
+Write tools accept an optional `base_sha` argument and call
+`assert_base_sha(rel, base_sha)` in `_doc_helpers.py`:
 
-- **Populates `seen_doc_paths`:** `read_page` (via the loop's
-  `_record_seen_paths` hook), `read_doc` when `is_head=True` (via its
-  own self-registration so it works outside the chat loop too).
-- **Reads `seen_doc_paths`:** `edit_doc`, `multi_edit`, `write_doc`
-  (existing-file overwrites only), `apply_patch`, `update_doc_nl`. If
-  the var is `None` (called outside any session — tests, periodic
-  tasks) the check is skipped. If the path isn't in the set AND the
-  file already exists, the tool returns:
+- `None` → skip the check (the caller has opted out).
+- equal to current `HEAD` for `rel` → write proceeds.
+- not equal → return `{error: "stale_base", base_sha, current_sha,
+  message}` — same shape every write tool returns. The caller re-reads
+  the doc, re-derives the edit against the new body, and retries.
 
-  > `You must call read_page('<path>') before editing it…`
-
-- **`search_wiki` does NOT populate.** Its 64-token snippets aren't
-  full-body context.
-- **`run_bash` does NOT populate** — the model could `cat` a file but
-  we don't try to extract the path from a free-form shell command.
+`write_doc` makes `base_sha` **required** for overwrites of existing
+files (`{error: "base_sha_required_for_overwrite"}` if missing) — full-
+body overwrite has no fuzzy `old_string` chain to fall back on if HEAD
+drifted. The other write tools (`edit_doc`, `multi_edit`, `apply_patch`,
+`update_doc_nl`) treat it as optional; the agent typically passes it
+when it has just read the doc and wants the write to fail fast on drift
+rather than silently apply against a different body.
 
 ### Post-write side-effect chain
 
@@ -189,7 +190,7 @@ Three sub-agents are dispatched **from** tools:
 | --- | --- | --- | --- |
 | `wiki_qa` | `app/llm/agents/wiki_qa.py:run` | `ask_nl_question` | One-shot `run_chat_loop` with `search_wiki` + `read_page` only, max 6 iterations. Returns synthesized answer + sources. |
 | `document_updater` | `app/llm/agents/document_updater.py:run` | `update_doc_nl`, also (planned) pgmq doc-update task | Single `client.complete` call with the system+user prompts under `app/llm/prompts/`. Returns `None` on `NO_CHANGE` else the new body string. |
-| `chat` (the user-facing one) | `app/llm/agents/chat.py:run_chat_stream` | `/api/chat/messages` HTTP endpoint | Multi-iteration tool-using loop; SSE-streamed back to the browser. Owns the canonical `seen_doc_paths` lifecycle. |
+| `chat` (the user-facing one) | `app/llm/agents/chat.py:run_chat_stream` | `/api/chat/messages` HTTP endpoint | Multi-iteration tool-using loop; SSE-streamed back to the browser. |
 
 `wiki_qa` lazy-imports `chat` to avoid the circular `chat → tools →
 ask_nl_question → wiki_qa → chat` cycle. Don't move those imports back
@@ -200,8 +201,9 @@ to module top-level.
 1. Drop `<name>.json` (LLM-facing spec) and `<name>.py` (handler) into
    `backend/app/llm/agents/tools/`. Match `name`, filename stem, and
    module name exactly.
-2. Reuse `_doc_helpers` for path validation, read-before-write,
-   commit + fan-out, and result assembly. Don't re-implement those.
+2. Reuse `_doc_helpers` for path validation, optimistic-concurrency
+   check, commit + fan-out, and result assembly. Don't re-implement
+   those.
 3. If the tool writes, prefer `commit_and_fan_out` over calling
    `wiki_git.commit_file` directly — it's the seam that triggers
    reindex + trigger fan-out + (future) MCP pubsub.

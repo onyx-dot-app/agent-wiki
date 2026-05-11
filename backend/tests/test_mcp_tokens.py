@@ -2,11 +2,12 @@
 from __future__ import annotations
 
 import pytest
-from flask import Flask
+from fastapi.testclient import TestClient
 
-from app.api import mcp_tokens as mcp_tokens_api
 from app.auth import mcp_tokens as tokens_repo
+from app.main import create_app
 
+from tests._auth import login_fastapi
 from tests._seed import seed_user
 
 
@@ -22,8 +23,6 @@ def test_create_returns_prefixed_raw_and_persists_hash(tmp_db):
 
     assert token_id.startswith("mtk_")
     assert raw.startswith("mcp_")
-    # Plaintext is at least the 24 random bytes worth of url-safe base64
-    # plus the prefix; just sanity-check it's non-trivial.
     assert len(raw) > 20
 
     rows = tokens_repo.list_for_user(uid)
@@ -116,26 +115,7 @@ def test_verify_bumps_last_used_at(tmp_db):
 
 @pytest.fixture
 def client(tmp_db):
-    app = Flask(__name__)
-    app.config.update(SECRET_KEY="test-secret", TESTING=True)
-    app.register_blueprint(mcp_tokens_api.bp, url_prefix="/api/mcp/tokens")
-
-    # Re-register the RequestError handler the same way main.py does so
-    # parse_body validation comes back as 400 JSON instead of a 500.
-    from flask import jsonify
-
-    from app.models._helpers import ErrorResponse, RequestError
-
-    @app.errorhandler(RequestError)
-    def _request_error(err: RequestError):  # type: ignore[unused-ignore]
-        return jsonify(ErrorResponse(error=err.message).model_dump()), err.status
-
-    return app.test_client()
-
-
-def _login(client, uid: str) -> None:
-    with client.session_transaction() as sess:
-        sess["user_id"] = uid
+    return TestClient(create_app())
 
 
 def test_unauthenticated_is_401(client):
@@ -146,16 +126,16 @@ def test_unauthenticated_is_401(client):
 
 def test_create_returns_raw_once_then_list_hides_it(client):
     uid = seed_user(uid="u1", email="u1@x.com")
-    _login(client, uid)
+    login_fastapi(client, uid)
 
     res = client.post("/api/mcp/tokens", json={"name": "claude-code"})
     assert res.status_code == 201
-    body = res.get_json()
+    body = res.json()
     assert body["name"] == "claude-code"
     assert body["token"].startswith("mcp_")
     token_id = body["id"]
 
-    listing = client.get("/api/mcp/tokens").get_json()
+    listing = client.get("/api/mcp/tokens").json()
     assert len(listing["tokens"]) == 1
     summary = listing["tokens"][0]
     assert summary["id"] == token_id
@@ -165,35 +145,35 @@ def test_create_returns_raw_once_then_list_hides_it(client):
 
 def test_create_validates_name(client):
     uid = seed_user(uid="u1", email="u1@x.com")
-    _login(client, uid)
+    login_fastapi(client, uid)
     assert client.post("/api/mcp/tokens", json={}).status_code == 400
     assert client.post("/api/mcp/tokens", json={"name": ""}).status_code == 400
 
 
 def test_revoke_then_404(client):
     uid = seed_user(uid="u1", email="u1@x.com")
-    _login(client, uid)
+    login_fastapi(client, uid)
 
-    token_id = client.post("/api/mcp/tokens", json={"name": "k"}).get_json()["id"]
+    token_id = client.post("/api/mcp/tokens", json={"name": "k"}).json()["id"]
 
     assert client.delete(f"/api/mcp/tokens/{token_id}").status_code == 204
     # Second time: gone.
     assert client.delete(f"/api/mcp/tokens/{token_id}").status_code == 404
     # Listing is empty.
-    assert client.get("/api/mcp/tokens").get_json()["tokens"] == []
+    assert client.get("/api/mcp/tokens").json()["tokens"] == []
 
 
 def test_user_cannot_revoke_other_users_token(client):
     a = seed_user(uid="ua", email="a@x.com")
     b = seed_user(uid="ub", email="b@x.com")
 
-    _login(client, a)
-    token_id = client.post("/api/mcp/tokens", json={"name": "alice"}).get_json()["id"]
+    login_fastapi(client, a)
+    token_id = client.post("/api/mcp/tokens", json={"name": "alice"}).json()["id"]
 
-    _login(client, b)
+    login_fastapi(client, b)
     assert client.delete(f"/api/mcp/tokens/{token_id}").status_code == 404
 
     # Bob's listing is still empty; alice's token still exists.
-    assert client.get("/api/mcp/tokens").get_json()["tokens"] == []
-    _login(client, a)
-    assert len(client.get("/api/mcp/tokens").get_json()["tokens"]) == 1
+    assert client.get("/api/mcp/tokens").json()["tokens"] == []
+    login_fastapi(client, a)
+    assert len(client.get("/api/mcp/tokens").json()["tokens"]) == 1
