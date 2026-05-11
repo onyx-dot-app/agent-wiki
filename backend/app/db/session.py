@@ -97,6 +97,10 @@ def session() -> Generator[Session, None, None]:
 
 _MIGRATIONS_DIR = Path(__file__).resolve().parent / "migrations"
 
+# Advisory lock key used to serialise concurrent init_db() callers.
+# "alem" in ASCII — just a stable identifier, not a secret.
+_MIGRATION_ADVISORY_LOCK = 0x616c656d
+
 
 def _alembic_config():
     """Build an Alembic ``Config`` pointed at our migrations + URL.
@@ -130,8 +134,20 @@ def init_db() -> None:
     Per-test schema isolation works because ``CONFIG.database_url``
     carries the schema in its ``options=-csearch_path=…`` query string
     — Alembic picks it up from the URL like any other connection.
+
+    A Postgres advisory lock (``_MIGRATION_ADVISORY_LOCK``) serialises concurrent
+    callers — uvicorn ``--workers N`` fires the lifespan in every worker
+    process simultaneously, so without this lock they race to CREATE TABLE
+    alembic_version and the second writer crashes with UniqueViolation.
     """
+    import sqlalchemy as sa
     from alembic import command
 
-    log.info("running alembic upgrade head")
-    command.upgrade(_alembic_config(), "head")
+    engine = get_engine()
+    with engine.connect() as conn:
+        conn.execute(sa.text("SELECT pg_advisory_lock(:lock_key)"), {"lock_key": _MIGRATION_ADVISORY_LOCK})
+        try:
+            log.info("running alembic upgrade head")
+            command.upgrade(_alembic_config(), "head")
+        finally:
+            conn.execute(sa.text("SELECT pg_advisory_unlock(:lock_key)"), {"lock_key": _MIGRATION_ADVISORY_LOCK})

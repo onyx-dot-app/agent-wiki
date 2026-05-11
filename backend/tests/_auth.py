@@ -15,13 +15,17 @@ from base64 import b64encode
 import itsdangerous
 from fastapi.testclient import TestClient
 
-from app.config import CONFIG
+import app.config as _app_config
 
 
 def signed_session_cookie(user_id: str) -> str:
     """Build a Starlette-``SessionMiddleware``-compatible signed cookie
     payload for the given user."""
-    signer = itsdangerous.TimestampSigner(str(CONFIG.secret_key))
+    # Read CONFIG via the module attribute at call time, not at import time.
+    # ``tmp_config`` monkeypatches ``app.config.CONFIG``; a ``from ... import``
+    # binding captures the original value (ci-test-secret in CI) and would
+    # produce a key mismatch against the app's SessionMiddleware.
+    signer = itsdangerous.TimestampSigner(str(_app_config.CONFIG.secret_key))
     data = b64encode(json.dumps({"user_id": user_id}).encode("utf-8"))
     return signer.sign(data).decode("utf-8")
 
