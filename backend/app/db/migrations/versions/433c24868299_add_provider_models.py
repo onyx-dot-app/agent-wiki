@@ -19,7 +19,7 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    op.add_column('llm_settings', sa.Column('provider_models', postgresql.JSONB(astext_type=sa.Text()), server_default=sa.text("'{}'::jsonb"), nullable=False))
+    op.execute(sa.text("ALTER TABLE llm_settings ADD COLUMN IF NOT EXISTS provider_models JSONB DEFAULT '{}'::jsonb NOT NULL"))
 
 
 def downgrade() -> None:
