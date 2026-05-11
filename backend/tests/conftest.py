@@ -12,11 +12,22 @@ import os
 
 # Make sure required env vars exist before ``app.config`` is imported by any
 # subsequent test module. ``app.config.load_config()`` runs at import.
+# QUEUE_DB_PATH must be set before huey_app.py is imported — it creates the
+# SqliteHuey instance at module level using this value.
 os.environ.setdefault("SECRET_KEY", "test-secret")
+os.environ.setdefault("QUEUE_DB_PATH", "/tmp/test-queue.sqlite")
 
 import pytest
 
 from app.config import Config
+
+
+@pytest.fixture(autouse=True)
+def huey_immediate(monkeypatch):
+    """Run Huey tasks synchronously in-process so tests don't need a real queue."""
+    from app.tasks.huey_app import huey
+
+    monkeypatch.setattr(huey, "immediate", True)
 
 
 @pytest.fixture
