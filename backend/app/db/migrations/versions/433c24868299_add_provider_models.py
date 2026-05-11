@@ -10,7 +10,6 @@ from typing import Sequence
 
 from alembic import op
 import sqlalchemy as sa
-from sqlalchemy.dialects import postgresql
 
 revision: str = '433c24868299'
 down_revision: str | None = '0013'
