@@ -169,7 +169,7 @@ def test_send_message_persists_user_and_assistant_turn(tmp_db, monkeypatch):
     end up in the DB."""
     client = _signed_in_client(tmp_db, "alice@example.com")
 
-    def fake_stream(messages, *, model=None):
+    def fake_stream(messages, *, model=None, provider=None):
         yield {"type": "tool_call", "id": "c1", "name": "wiki_search", "arguments": {"q": "x"}}
         yield {"type": "tool_result", "id": "c1", "name": "wiki_search", "content": "[]"}
         yield {"type": "iteration_done"}
@@ -210,7 +210,7 @@ def test_send_message_does_not_persist_assistant_on_llm_error(tmp_db, monkeypatc
 
     client = _signed_in_client(tmp_db, "alice@example.com")
 
-    def fake_stream(messages, *, model=None):
+    def fake_stream(messages, *, model=None, provider=None):
         yield {"type": "text_delta", "text": "partial"}
         raise LLMError("rate_limit", "boom")
 
@@ -231,7 +231,7 @@ def test_send_message_does_not_persist_assistant_on_llm_error(tmp_db, monkeypatc
 def test_send_message_enqueues_title_generation_only_on_first_turn(tmp_db, monkeypatch):
     client = _signed_in_client(tmp_db, "alice@example.com")
 
-    def fake_stream(messages, *, model=None):
+    def fake_stream(messages, *, model=None, provider=None):
         yield {"type": "text_delta", "text": "ok"}
         yield {"type": "done"}
 
