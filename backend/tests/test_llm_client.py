@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -34,9 +35,9 @@ from app.llm.providers import anthropic as anthropic_provider
 from app.llm.providers import openai as openai_provider
 
 
-def _upsert(**overrides) -> None:
+def _upsert(**overrides: Any) -> None:
     """upsert() with empty defaults so tests only set fields they care about."""
-    base = {
+    base: dict[str, Any] = {
         "provider": "",
         "model": "",
         "anthropic_api_key": "",
