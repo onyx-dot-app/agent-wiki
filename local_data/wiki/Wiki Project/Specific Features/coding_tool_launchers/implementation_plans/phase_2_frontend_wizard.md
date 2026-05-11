@@ -51,6 +51,92 @@ Browsers (Chrome, Firefox) may block `agentwiki://` from a hidden iframe. The pl
 
 Tests: `probeHelper.test.ts` mocks `fetch` + DOM; assert 3× retry behavior; assert `sessionStorage` cache invalidates between retries.
 
+### R2#6 — Frontend tool-radio filters `available_for_launch` (round-2 high)
+
+**Affects: Task 7 (`RunAgentModal` tool list).**
+
+Phase 1's AF#10 added `available_for_launch: boolean` to `LauncherCatalogEntry`. Update `lib/launchers.ts` interface AND the `ToolList` component in `RunAgentModal`:
+
+```typescript
+export interface LauncherCatalogEntry {
+  // ... existing ...
+  available_for_launch: boolean;
+}
+```
+
+In `ToolList`:
+
+```tsx
+const launchable = catalog.filter((c) => c.available_for_launch);
+// render `launchable` in the radio. Tools that are not launchable
+// still show on /agents Coding tools section as "Set up" only.
+```
+
+Add a Vitest test that asserts `onyx-craft` (available_for_launch=false until Craft ships) is NOT in the tool radio but IS in the `/agents` coding-tools section.
+
+### R7#1 — Per-retry iframe cleanup (round-7 high)
+
+**Affects: Task 1 (`probeHelperOnce`).**
+
+3× retry creates 3 iframes if cleanup is in outer-scope `finally`. Move cleanup inside the per-retry function:
+
+```typescript
+async function probeHelperOnce(): Promise<...> {
+  const iframe = document.createElement("iframe");
+  try {
+    iframe.style.display = "none";
+    iframe.src = `agentwiki://probe?nonce=${nonce}`;
+    document.body.appendChild(iframe);
+    // ... polling loop ...
+  } finally {
+    if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
+  }
+}
+```
+
+### R7#2 — Persist modal state across URI navigation (round-7 medium)
+
+**Affects: Task 7 (`RunAgentModal.onRun`).**
+
+`window.location.href = res.uri` navigates the current page. If URI dispatch fails or the user comes back, the modal's `workingDir` + `message` + `selectedId` state is gone.
+
+Patch: before navigation, persist to `sessionStorage`:
+
+```typescript
+sessionStorage.setItem(
+  "agentwiki:pending-launch",
+  JSON.stringify({
+    wikiPath,
+    selectedId,
+    workingDir,
+    message,
+    agent_session_id: res.agent_session_id,
+  }),
+);
+window.location.href = res.uri;
+```
+
+On `RunAgentModal` open, check `sessionStorage` for a pending-launch keyed to this wikiPath; if present, restore state + show a "Last launch was X minutes ago — still running? [Check status] [Discard]" banner.
+
+### R8#1 — `/agents` page launcher-status badge (round-8 high)
+
+**Affects: Task 9 (CodingToolsSection).**
+
+Don't just show "Set up tools" button. Render a live status badge driven by `probeHelper`:
+
+```tsx
+<div>
+  Launcher:{" "}
+  {helperAcked === null
+    ? "checking..."
+    : helperAcked
+      ? "✓ detected"
+      : "⚠ not detected on this machine"}
+</div>
+```
+
+If `!helperAcked`, render the manual-install command + the "Test launcher manually" CTA (AF#9). Lets users diagnose silent postinstall failures.
+
 ### AF#14 — Thread `machine_id` from probe → launch (audit medium)
 
 **Affects: Task 1 (`lib/launchers.ts`) + Task 7 (`RunAgentModal`).**

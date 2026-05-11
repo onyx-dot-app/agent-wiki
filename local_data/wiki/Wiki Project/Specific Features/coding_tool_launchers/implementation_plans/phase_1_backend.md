@@ -14,7 +14,7 @@
 
 ## Audit fixes — apply during task execution
 
-A self-audit after the plan was written found 8 issues in Phase 1's task bodies. **Apply these inline as you execute each named task.** They are listed here in one place so the executing agent picks them up regardless of which task they start with.
+A two-round self-audit after the plan was written found 12 issues in Phase 1's task bodies. **Apply these inline as you execute each named task.** They are listed here in one place so the executing agent picks them up regardless of which task they start with. AF#1–AF#15 are round-1 findings; R2 entries are round-2.
 
 ### AF#1 — ACL check on `POST /api/launch` (audit critical)
 
@@ -226,6 +226,262 @@ The validator itself stays permissive (other tools may need env-side token by ex
 **Affects: Task 17.4 (already covered in AF#3 above — re-mint on decrypt failure rather than 500).**
 
 The patched `get_or_mint_for_user` in AF#3 already handles this. No additional fix needed; AF#3 references this.
+
+---
+
+## Round-2 audit fixes
+
+### R2#2 — `wiki_path` traversal (critical)
+
+**Affects: Task 16 (`_maybe_read_page_body` + the ACL check from AF#1).**
+
+Before the ACL check, run the path through the existing traversal-protection helper:
+
+```python
+from app.wiki import filesystem as wiki_fs
+
+if req.wiki_path is not None:
+    try:
+        canonical = wiki_fs.safe_rel_path(req.wiki_path)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="invalid wiki_path")
+    # AF#1 uses `canonical` from here on, not the raw input.
+    if not wiki_acl.can("read", canonical, user):
+        raise HTTPException(status_code=403, detail="forbidden")
+```
+
+Add `test_post_launch_rejects_traversal` — POST with `wiki_path="../etc/passwd"` → 400.
+
+### R2#4 — Set `agent_name` for launcher-driven activity (high)
+
+**Affects: Task 21 (MCP commit pipeline threading).**
+
+`agent_activity` has both `user_id` and `agent_name`. Today the chat-agent flow sets `agent_name`; the launcher flow currently leaves it None, so launcher edits won't be attributed to "claude-code" vs "codex" in the UI.
+
+Patch in `_doc_helpers.commit_and_fan_out` (or wherever `upsert_activity` is called):
+
+```python
+from app.launchers.current_session import current_agent_session_id
+from app.launchers import sessions as sessions_repo
+
+sid = current_agent_session_id()
+if sid is not None:
+    sess = sessions_repo.get(sid)
+    agent_name = sess["tool_id"] if sess else None
+else:
+    agent_name = None  # chat-agent path keeps existing behavior
+
+agent_activity.upsert_activity(
+    user_id=user.id,
+    agent_name=agent_name,
+    ...
+    agent_session_id=sid,
+)
+```
+
+Add `test_mcp_session_stamps_agent_name` to `test_mcp_session_stamp.py` — assert activity row's `agent_name="claude-code"` when launched via that manifest.
+
+### R2#5 — Strip `first_turn_prompt` from repo list functions (high — defense-in-depth)
+
+**Affects: Task 8 (`agent_sessions` repo).**
+
+Add a separate `list_for_user_summary()` / `list_for_page_summary()` that selects only the summary columns (no `first_turn_prompt`). Update `agent_sessions` API router (Task 19) to call the summary variants. Keep `get()` returning the full row for the resume path.
+
+### R2#10 — `X-Agentwiki-Session` header validation (medium)
+
+**Affects: Task 21.**
+
+Before lookup:
+
+```python
+import re
+_SESSION_ID_RE = re.compile(r"^as_[a-zA-Z0-9-]{1,64}$")
+
+def _resolve_agent_session_id(request: Request, user: User) -> str | None:
+    header = request.headers.get(AGENT_SESSION_HEADER)
+    if not header:
+        return None
+    if not _SESSION_ID_RE.match(header):
+        raise HTTPException(status_code=400, detail="malformed agent session id")
+    row = sessions_repo.get(header)
+    ...
+```
+
+Add `test_mcp_session_rejects_malformed_header` — header `as_xx\nINJECT` → 400.
+
+### R2#7 — TTL constants live in `Config` (medium)
+
+**Affects: Task 1 (config additions) + Task 7 (launch_codes constant).**
+
+Move:
+
+```python
+# config.py
+launch_code_ttl_seconds: int   # default 60
+agent_session_idle_seconds: int  # default 300
+agent_session_close_after_idle_seconds: int  # default 86400
+```
+
+`launch_codes.py` and `sessions.py` read from `CONFIG.*` instead of module-level constants. Lets ops bump TTL (P2 #10) without code change.
+
+---
+
+## Rounds 3-10 audit fixes
+
+Further audit rounds surfaced additional issues. Apply during the named tasks.
+
+### R3#1 — Serialize concurrent resume (round-3 critical)
+
+**Affects: Task 16 (`post_launch` resume branch).**
+
+Two tabs hit Resume → two helpers → two `claude --resume <id>` invocations → CLI corruption. Reject resume if the session is already in flight:
+
+```python
+if req.resume_session_id is not None:
+    existing = sessions_repo.get(req.resume_session_id)
+    if existing is None or existing["user_id"] != user.id:
+        raise HTTPException(status_code=404, detail="resume session not found")
+    if existing["status"] in ("pending", "active"):
+        raise HTTPException(status_code=409, detail="session already in flight; close it first")
+    # ... continue with resume flow ...
+```
+
+Add test `test_resume_rejects_when_session_active`.
+
+### R4#1 — Manifest size cap at registry load (round-4 high)
+
+**Affects: Task 10 (`ManifestRegistry.__init__`).**
+
+```python
+_MAX_MANIFEST_BYTES = 64 * 1024
+for p in sorted(manifest_dir.glob("*.json")):
+    if p.stat().st_size > _MAX_MANIFEST_BYTES:
+        raise ValueError(f"manifest {p} exceeds {_MAX_MANIFEST_BYTES}B cap")
+    # ... existing load ...
+```
+
+### R4#2 — Truncate `first_turn_prompt` at 256KB (round-4 high)
+
+**Affects: Task 13 (`prompt_builder.build_first_turn_prompt`).**
+
+```python
+_MAX_PROMPT_BYTES = 256 * 1024
+def build_first_turn_prompt(...) -> str:
+    out = "\n".join(parts)
+    encoded = out.encode("utf-8")
+    if len(encoded) > _MAX_PROMPT_BYTES:
+        # Truncate page_body specifically (preserve headers + message).
+        # Reconstruct with body capped.
+        ...
+    return out
+```
+
+Add test `test_prompt_builder_truncates_oversized_body`.
+
+### R4#3 — Cap `message` in `LaunchRequest` (round-4 low)
+
+**Affects: Task 14 (`LaunchRequest`).**
+
+```python
+class LaunchRequest(BaseModel):
+    message: str = Field(..., max_length=16_384)
+```
+
+### R5#1 — `machine_id` on resume must not silently flip (round-5 high)
+
+**Affects: Task 8 (`mark_active`) or Task 17 (`post_exchange`).**
+
+If the session's stored `machine_id` is non-NULL and differs from the helper's reported `machine_id` on exchange, refuse the exchange:
+
+```python
+sess = sessions_repo.get(consumed["agent_session_id"])
+if sess["machine_id"] is not None and sess["machine_id"] != req.machine_id:
+    raise HTTPException(status_code=409, detail="session belongs to a different machine; start a new session instead of resuming")
+```
+
+Test: `test_exchange_rejects_machine_id_mismatch_on_resume`.
+
+### R5#2 — Heartbeat respects `status=closed` (round-5 medium)
+
+**Affects: Task 8 (`sessions_repo.touch_activity`).**
+
+A stale helper continuing to POST heartbeats after UI-driven close would update `last_activity_at` and confuse the sweep:
+
+```python
+def touch_activity(sid: str) -> None:
+    with session() as s:
+        s.execute(
+            update(AgentSession)
+            .where(
+                AgentSession.id == sid,
+                AgentSession.status.in_(("pending", "active", "idle")),  # not closed/failed
+            )
+            .values(last_activity_at=_now_iso())
+        )
+```
+
+`mark_stale_idle` similarly guards `status == 'active'` (already does); double-check `evict_idle_to_closed` only matches `status == 'idle'` (already does).
+
+### R5#3 — Test idle→closed transitions cross-tick (round-5 medium)
+
+**Affects: Task 8 / Task 20 tests.**
+
+Add `test_session_idle_then_closed_across_two_ticks` — manipulate `last_activity_at` to be > 24h ago, run `mark_stale_idle()` then `evict_idle_to_closed()`, verify final status.
+
+### R6#1 — Structured event rows for launcher lifecycle (round-6 high)
+
+**Affects: Task 16 + 17 + 19.**
+
+Insert an `events` row at each lifecycle transition (uses existing `app/db/models.py:Event`):
+
+| event_kind                    | when                       |
+| ----------------------------- | -------------------------- |
+| `launcher.launch_created`     | `POST /api/launch` returns |
+| `launcher.exchange_succeeded` | exchange returns 200       |
+| `launcher.exchange_failed`    | exchange returns 4xx/5xx   |
+| `launcher.session_closed`     | close route + sweep close  |
+| `launcher.session_failed`     | mark_failed                |
+
+Payload includes `agent_session_id`, `tool_id`, `user_id`, error reason if applicable. Ops can grep `events` table for "how many launches yesterday".
+
+### R6#3 — Verify alembic downgrade (round-6 medium)
+
+**Affects: Task 6 (migration creation).**
+
+Add Step 6.4:
+
+```bash
+cd /Users/nikolas/agent-wiki/backend
+uv run --extra dev alembic downgrade -1
+uv run --extra dev alembic upgrade head
+```
+
+Both must succeed cleanly. Otherwise the down path is broken (FK ordering, missing index drops).
+
+### R9#1 — Spawn-OK beacon (round-9 high)
+
+**Affects: Task 19 (close route) + Task 20 (expire task).**
+
+Exchange marks `status=active`. If the helper crashes between exchange and CLI spawn, session stays `active` 5 minutes until `mark_stale_idle` notices. Bad UX.
+
+Patch:
+
+1. Helper POSTs `/api/agent-sessions/:id/spawn-ok` immediately after `openInTerminalApp` returns (Phase 3 fix).
+2. Backend tracks `spawn_ok_at: str | None` on `AgentSession`. Migration adds nullable column.
+3. New sweep in `expire_launch_artifacts`: sessions in `active` with `spawn_ok_at IS NULL` AND `started_at < now - 30s` get `mark_failed(reason='spawn_missed')`.
+
+Tests: `test_sweep_marks_failed_when_no_spawn_ok_within_30s`.
+
+### Test additions
+
+Add to existing test files:
+
+- `test_launch_codes.py` — `test_launch_code_fk_blocks_session_delete_cascades` — deleting session_id cascades to launch_codes.
+- `test_launchers_sessions.py` — R5#1, R5#2, R5#3 tests above.
+- `test_launch_api.py` — R3#1, R4#3 tests above; `test_post_launch_rejects_traversal` (R2#2).
+- `test_launchers_manifests.py` — R4#1 oversized-file rejection.
+- `test_launchers_prompt_builder.py` — R4#2 truncation.
+- `test_expire_launch_artifacts.py` — R9#1 spawn_missed branch.
 
 ---
 

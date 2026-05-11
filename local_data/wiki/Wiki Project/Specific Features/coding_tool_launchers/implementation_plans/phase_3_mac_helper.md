@@ -102,6 +102,107 @@ If the algorithm differs from `sha256(cwd)[:16]`, patch `src/spawn.ts:buildSpawn
 
 Don't ship this phase until the test directory's `cli_session_id` is captured correctly end-to-end.
 
+### R2#1 — Pin endpoint at install time, ignore URI's `endpoint` param (round-2 critical)
+
+**Affects: Task 9 (`exchange.ts`) + Task 12 (`handleRun`/`handleProbeAck`) + Task 13 (postinstall + new `set-endpoint` subcommand).**
+
+The `agentwiki://run?...&endpoint=...` URI is attacker-craftable. If helper trusts URI's endpoint, attacker captures `machine_id` and returns a forged manifest with attacker's `mcp_token` → full session hijack.
+
+Patches:
+
+1. **New CLI subcommand `set-endpoint`** writes to `~/.agentwiki/endpoint.url` (mode 0600):
+
+   ```typescript
+   async function handleSetEndpoint(url: string): Promise<void> {
+     new URL(url); // validate
+     const path = join(homedir(), ".agentwiki", "endpoint.url");
+     mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+     writeFileSync(path, url, { mode: 0o600 });
+   }
+   ```
+
+2. **`handleRun` reads pinned endpoint** instead of URI's:
+
+   ```typescript
+   const pinnedPath = join(homedir(), ".agentwiki", "endpoint.url");
+   if (!existsSync(pinnedPath)) {
+     console.error(
+       "agentwiki-launcher not configured — run `agentwiki-launcher set-endpoint <url>` first.",
+     );
+     process.exit(2);
+   }
+   const pinned = readFileSync(pinnedPath, "utf-8").trim();
+   const parsed = parseLaunchUri(uri);
+   if (parsed.endpoint !== pinned) {
+     console.error(
+       `URI endpoint ${parsed.endpoint} does not match pinned ${pinned}; refusing.`,
+     );
+     process.exit(2);
+   }
+   const exchanged = await exchange(pinned, parsed.code, machineId); // use pinned, not parsed
+   ```
+
+3. **Probe-ack also uses pinned endpoint** (same pattern).
+
+4. **`/agents` page documents `set-endpoint`** as a one-time step after install.
+
+Add `endpoint_pinning.test.ts` — assert helper refuses to run when URI endpoint differs from pinned.
+
+### R2#3 — Round 4 placeholder scaffold (round-2 critical — Phase 4 issue, called out here)
+
+**Affects: Phase 4 Task 6 (cross-OS plan).**
+
+`e2e_mocked.test.ts` ends with `assert.ok(true, "scaffold — fill in once symlink setup works")`. That's a placeholder. Fix Phase 4 Task 6 to flesh out the symlink-PATH + spawn + assertion logic; see the Phase 4 plan's audit-fix section.
+
+### R8#2 — `npm publish --provenance` (round-8 medium)
+
+**Affects: Task 16.2 (publish step).**
+
+```bash
+npm publish --access public --tag alpha --provenance
+```
+
+Provenance attestation ties the published artifact to a specific GitHub Actions workflow run. Closes supply-chain trust gap.
+
+### R8#3 — Exact-pin dependencies (round-8 medium)
+
+**Affects: Task 1.1 (`package.json`).**
+
+Replace `"^8.12.0"` with `"8.12.0"`. Any version bumps go through Renovate / Dependabot with review. Otherwise a transitively-pulled compromised version on `npm install` runs arbitrary code via the postinstall scripts of dependencies.
+
+### R9#1 helper-side beacon (round-9 high)
+
+**Affects: Task 12 (`handleRun`).**
+
+Immediately after `openInTerminalApp(...)` returns (which is after `osascript` exits, NOT after `claude` starts — but it's the best we can do from the helper):
+
+```typescript
+await postSpawnOk(
+  exchanged.endpoint,
+  exchanged.payload.session_id,
+  exchanged.mcp_token,
+);
+```
+
+Where `postSpawnOk` POSTs `/api/agent-sessions/:id/spawn-ok` with the bearer. Backend (Phase 1 R9#1) stamps `spawn_ok_at`. If `osascript` exits successfully, the wrapper script will run claude shortly; backend's 30s sweep catches the case where it doesn't.
+
+### R10#1 — Wrapper script tests (round-10 medium)
+
+**Affects: Task 11.**
+
+Add `terminal/darwin.test.ts`:
+
+```typescript
+test("wrapper script contains trap EXIT line and full cleanup path list", () => {
+  // Construct openInTerminalApp inputs, intercept the wrapper write,
+  // read its contents, assert the trap line + each tmpfile path appears.
+});
+
+test("wrapper script env exports match command.env exactly", () => {
+  // Spawn cmd has env { A: 'a', B: 'b' } → wrapper has `export A='a'\nexport B='b'`.
+});
+```
+
 ### AF#8 — Wrapper script for tmpfile lifetime (audit high)
 
 **Affects: Task 11 (terminal/darwin.ts) + Task 12 (`handleRun`).**

@@ -12,6 +12,28 @@
 
 ---
 
+## Audit fixes — apply during task execution
+
+### R2#3 — Phase 4 Task 6's `e2e_mocked.test.ts` had a placeholder scaffold (round-2 critical)
+
+**Affects: Task 6.2.**
+
+Earlier draft ended the test body with `assert.ok(true, "scaffold — fill in once symlink setup works")`. That was a plan failure (no placeholders allowed). The patch in Task 6.2 below is the full, executable version — no placeholder.
+
+### R8#1 — Linux `xdg-mime` registration failure must be surfaced (round-8 high)
+
+**Affects: Task 4.2.**
+
+If `update-desktop-database` or `xdg-mime default` fails, the current plan just `console.warn`s. The user has no way to know from the wiki UI. Patch: write a `~/.agentwiki/postinstall-status.json` file with the failure reason; the helper's `/probe-cli` endpoint returns this status to the frontend so `/agents` can render the manual command.
+
+### R10#2 — Windows install: handle non-standard `npm prefix` (round-10 low)
+
+**Affects: Task 5.1.**
+
+`%APPDATA%\npm\agentwiki-launcher.cmd` assumes default `npm config get prefix`. If user has nvm-windows or scoop, location differs. Patch: at install time, run `npm config get prefix` and substitute the actual location into the registry edit.
+
+---
+
 ## Pre-flight
 
 - [ ] **Step 0.1: Confirm Phase 3 merged + alpha published**
