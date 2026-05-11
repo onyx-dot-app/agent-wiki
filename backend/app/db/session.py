@@ -130,8 +130,20 @@ def init_db() -> None:
     Per-test schema isolation works because ``CONFIG.database_url``
     carries the schema in its ``options=-csearch_path=…`` query string
     — Alembic picks it up from the URL like any other connection.
+
+    A Postgres advisory lock (key 0x616c656d) serialises concurrent
+    callers — uvicorn ``--workers N`` fires the lifespan in every worker
+    process simultaneously, so without this lock they race to CREATE TABLE
+    alembic_version and the second writer crashes with UniqueViolation.
     """
+    import sqlalchemy as sa
     from alembic import command
 
-    log.info("running alembic upgrade head")
-    command.upgrade(_alembic_config(), "head")
+    engine = get_engine()
+    with engine.connect() as conn:
+        conn.execute(sa.text("SELECT pg_advisory_lock(x'616c656d'::bigint)"))
+        try:
+            log.info("running alembic upgrade head")
+            command.upgrade(_alembic_config(), "head")
+        finally:
+            conn.execute(sa.text("SELECT pg_advisory_unlock(x'616c656d'::bigint)"))
