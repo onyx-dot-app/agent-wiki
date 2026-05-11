@@ -17,6 +17,7 @@ from fastapi.responses import StreamingResponse
 from starlette.concurrency import iterate_in_threadpool, run_in_threadpool
 
 from app.auth import User
+from app.auth import users as users_repo
 from app.auth.deps import require_user
 from app.chat import sessions as sessions_repo
 from app.llm.agents.chat import (
@@ -24,6 +25,7 @@ from app.llm.agents.chat import (
     messages_from_history,
     run_chat_stream,
 )
+from app.models.user_settings import UserSettings
 from app.llm.errors import LLMError
 from app.models.chat import (
     ChatMessageOut, ChatSessionDetail, ChatSessionOut, SendChatRequest,
@@ -153,7 +155,13 @@ async def send_message(
                 user_id=user_id,
                 is_first_turn=is_first_turn,
             ), chat_agent_scope():
-                gen = run_chat_stream(messages)
+                raw_settings = await run_in_threadpool(users_repo.get_settings, user_id)
+                user_prefs = UserSettings.model_validate(raw_settings or {})
+                gen = run_chat_stream(
+                    messages,
+                    model=user_prefs.chat_model,
+                    provider=user_prefs.chat_provider,
+                )
                 # iterate_in_threadpool yields each item from the sync
                 # generator on a worker thread, so token emission
                 # doesn't block the event loop. The agent-name

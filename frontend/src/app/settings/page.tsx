@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState, type CSSProperties, type FormEvent, type 
 import { AppShell } from "@/components/common/AppShell";
 import { Button } from "@/components/common/Button";
 import { BackLink, PageHeader } from "@/components/common/PageHeader";
+import { apiFetch } from "@/lib/api";
 import { useRequireAuth } from "@/lib/auth";
 import { color, radius } from "@/lib/theme";
 import { setLocalThemePreview } from "@/lib/theme-provider";
@@ -15,6 +16,8 @@ const DEFAULT_SETTINGS: UserSettings = {
   theme: "system",
   timezone: "UTC",
   default_landing: "wiki_home",
+  chat_provider: null,
+  chat_model: null,
 };
 
 // A short curated IANA list — covers the common cases without dumping
@@ -58,6 +61,9 @@ export default function SettingsPage() {
         </Section>
         <Section title="Preferences">
           <SettingsForm initial={user.settings} updateSettings={updateSettings} />
+        </Section>
+        <Section title="Chat model">
+          <ChatModelForm initial={user.settings} updateSettings={updateSettings} />
         </Section>
       </main>
     </AppShell>
@@ -298,6 +304,78 @@ function SettingsForm({
       {saved && <div style={{ color: color.state.success.fg }}>Saved.</div>}
       <div>
         <Button type="submit" variant="primary" disabled={saving || !dirty}>
+          {saving ? "Saving…" : "Save"}
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+interface LLMStatus {
+  configured: boolean;
+  provider: string;
+  model: string;
+}
+
+function ChatModelForm({
+  initial,
+  updateSettings,
+}: {
+  initial: UserSettings;
+  updateSettings: (partial: Partial<UserSettings>) => Promise<UserSettings>;
+}) {
+  const [chatModel, setChatModel] = useState<string>(initial.chat_model ?? "");
+  const [llmStatus, setLlmStatus] = useState<LLMStatus | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setChatModel(initial.chat_model ?? "");
+  }, [initial.chat_model]);
+
+  useEffect(() => {
+    apiFetch<LLMStatus>("/llm/status").then(setLlmStatus).catch(() => null);
+  }, []);
+
+  async function onSubmit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setSaving(true);
+    setError(null);
+    setSaved(false);
+    try {
+      await updateSettings({ chat_model: chatModel.trim() || null });
+      setSaved(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "failed to save");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const placeholder = llmStatus?.model
+    ? `${llmStatus.model} (agent default)`
+    : "leave blank to use agent default";
+
+  return (
+    <form onSubmit={onSubmit} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <label>
+        <div style={lblStyle}>Chat model</div>
+        <input
+          value={chatModel}
+          onChange={(e) => { setChatModel(e.target.value); setSaved(false); setError(null); }}
+          placeholder={placeholder}
+          style={inputStyle}
+        />
+        <div style={hintStyle}>
+          Override the model used in your chat sessions. Leave blank to use the admin-configured agent default
+          {llmStatus?.configured ? ` (currently ${llmStatus.provider} / ${llmStatus.model})` : ""}.
+        </div>
+      </label>
+      {error && <div style={{ color: color.state.danger.fg }}>{error}</div>}
+      {saved && <div style={{ color: color.state.success.fg }}>Saved.</div>}
+      <div>
+        <Button type="submit" variant="primary" disabled={saving}>
           {saving ? "Saving…" : "Save"}
         </Button>
       </div>

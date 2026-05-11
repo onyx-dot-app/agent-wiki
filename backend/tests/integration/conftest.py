@@ -167,7 +167,7 @@ class MockLLM:
 
     # ---- patched seam ------------------------------------------------------
 
-    def complete(self, messages, *, tools=None, max_tokens=None, model=None) -> Any:
+    def complete(self, messages, *, tools=None, max_tokens=None, model=None, provider=None) -> Any:
         call = {"messages": messages, "tools": tools, "max_tokens": max_tokens, "model": model}
         self.calls.append(call)
         for matcher, build in self._scripts:
@@ -175,7 +175,7 @@ class MockLLM:
                 return build()
         return _make_default_response()
 
-    def stream(self, messages, *, tools=None, max_tokens=None, model=None) -> Iterator[dict]:
+    def stream(self, messages, *, tools=None, max_tokens=None, model=None, provider=None) -> Iterator[dict]:
         resp = self.complete(messages, tools=tools, max_tokens=max_tokens, model=model)
         if resp.text:
             yield {"type": "text_delta", "text": resp.text}

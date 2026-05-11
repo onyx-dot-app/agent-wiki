@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from "react"
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
-import { ApiError } from "@/lib/api";
+import { apiFetch, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import {
   createSession,
@@ -36,8 +36,16 @@ const STORAGE_KEY_SESSION = "chat-widget:session-id";
 const DEFAULT_EXPANDED_WIDTH = 480;
 const MIN_EXPANDED_WIDTH = 280;
 
+interface AvailableProvider {
+  provider: string;
+  label: string;
+  default_model: string;
+  models: string[];
+}
+
+
 export function ChatWidget() {
-  const { user } = useAuth();
+  const { user, updateSettings } = useAuth();
   const [mode, setMode] = useState<Mode>("closed");
   const [expandedWidth, setExpandedWidth] = useState<number>(DEFAULT_EXPANDED_WIDTH);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -48,9 +56,21 @@ export function ChatWidget() {
   const [sending, setSending] = useState(false);
   const [toolHint, setToolHint] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [availableProviders, setAvailableProviders] = useState<AvailableProvider[]>([]);
+  const [agentModel, setAgentModel] = useState<{ provider: string; model: string } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const resizingRef = useRef(false);
   const hydratedSessionRef = useRef(false);
+
+  useEffect(() => {
+    apiFetch<{ providers: AvailableProvider[] }>("/llm/available")
+      .then((r) => setAvailableProviders(r.providers))
+      .catch(() => null);
+    apiFetch<{ configured: boolean; provider: string; model: string }>("/llm/status")
+      .then((r) => { if (r.configured) setAgentModel({ provider: r.provider, model: r.model }); })
+      .catch(() => null);
+  }, []);
+
 
   // Hydrate persisted UI state on mount.
   useEffect(() => {
@@ -384,7 +404,52 @@ export function ChatWidget() {
             flexShrink: 0,
           }}
         >
-          <div style={{ fontWeight: 600, fontSize: 14, flex: 1 }}>Chat</div>
+          <div style={{ fontWeight: 600, fontSize: 14 }}>Chat</div>
+          {availableProviders.length > 0 && (
+            <select
+              value={
+                user?.settings.chat_provider && user?.settings.chat_model
+                  ? `${user.settings.chat_provider}:${user.settings.chat_model}`
+                  : ""
+              }
+              onChange={(e) => {
+                const val = e.target.value;
+                if (!val) {
+                  void updateSettings({ chat_provider: null, chat_model: null });
+                } else {
+                  const idx = val.indexOf(":");
+                  const p = val.slice(0, idx);
+                  const m = val.slice(idx + 1);
+                  void updateSettings({ chat_provider: p, chat_model: m });
+                }
+              }}
+              style={{
+                flex: 1,
+                minWidth: 0,
+                fontSize: 12,
+                padding: "3px 6px",
+                border: `1px solid ${color.border.default}`,
+                borderRadius: radius.xs,
+                background: color.bg.page,
+                color: color.text.primary,
+              }}
+            >
+              <option value="">
+                {agentModel ? `${agentModel.model} (Default)` : "Default model"}
+              </option>
+              {availableProviders.map((p) => {
+                const models = p.models.length ? p.models : [p.default_model];
+                return (
+                  <optgroup key={p.provider} label={p.label}>
+                    {models.map((m) => (
+                      <option key={m} value={`${p.provider}:${m}`}>{m}</option>
+                    ))}
+                  </optgroup>
+                );
+              })}
+            </select>
+          )}
+          {availableProviders.length === 0 && <div style={{ flex: 1 }} />}
           <IconButton
             title="New chat"
             onClick={onNewChat}

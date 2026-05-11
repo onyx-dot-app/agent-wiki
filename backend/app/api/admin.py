@@ -118,6 +118,7 @@ def _llm_view(s: LLMSettings) -> LLMView:
         openai_api_key_hint=_redact(s.openai_api_key),
         gemini_api_key_hint=_redact(s.gemini_api_key),
         ollama_base_url=s.ollama_base_url,
+        provider_models=s.provider_models,
     )
 
 
@@ -135,15 +136,19 @@ def put_llm(
     # from "client sent null/empty" — required for the
     # empty-string-means-keep convention below.
     sent_fields = req.model_fields_set
-    provider = req.provider.strip().lower()
-    model = req.model.strip()
-    if provider not in _ALLOWED_PROVIDERS:
-        allowed = ", ".join(f"'{p}'" for p in _ALLOWED_PROVIDERS)
-        raise HTTPException(status_code=400, detail=f"provider must be one of {allowed}")
-    if not model:
-        raise HTTPException(status_code=400, detail="model is required")
-
     current = llm_settings.get()
+
+    if "provider" in sent_fields or "model" in sent_fields:
+        provider = (req.provider or "").strip().lower()
+        model = (req.model or "").strip()
+        if provider not in _ALLOWED_PROVIDERS:
+            allowed = ", ".join(f"'{p}'" for p in _ALLOWED_PROVIDERS)
+            raise HTTPException(status_code=400, detail=f"provider must be one of {allowed}")
+        if not model:
+            raise HTTPException(status_code=400, detail="model is required")
+    else:
+        provider = current.provider
+        model = current.model
 
     def _resolve_secret(field: str, sent: str | None, existing: str) -> str:
         if field not in sent_fields:
@@ -159,6 +164,8 @@ def put_llm(
     gemini_key = _resolve_secret("gemini_api_key", req.gemini_api_key, current.gemini_api_key)
     ollama_base_url = _resolve_secret("ollama_base_url", req.ollama_base_url, current.ollama_base_url)
 
+    new_provider_models = req.provider_models if "provider_models" in sent_fields else None
+
     llm_settings.upsert(
         provider=provider,
         model=model,
@@ -166,6 +173,7 @@ def put_llm(
         openai_api_key=openai_key,
         gemini_api_key=gemini_key,
         ollama_base_url=ollama_base_url,
+        provider_models=new_provider_models,
     )
     log.info(
         "admin: %s updated llm settings provider=%s model=%s",

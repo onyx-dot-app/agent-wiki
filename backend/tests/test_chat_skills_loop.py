@@ -20,7 +20,7 @@ def script_stream(monkeypatch):
     def install(events: list[list[dict]]):
         scripted.extend(events)
 
-    def fake_stream(messages, *, model=None, tools=None, max_tokens=4096):
+    def fake_stream(messages, *, model=None, provider=None, tools=None, max_tokens=4096):
         if not scripted:
             raise AssertionError("script_stream exhausted")
         captured_tools.append(list(tools) if tools is not None else None)

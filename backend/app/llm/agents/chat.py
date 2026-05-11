@@ -73,6 +73,7 @@ def run_chat_loop_stream(
     tools_provider: ToolsProvider | None = None,
     tool_dispatch: ToolDispatch | None = None,
     model: str | None = None,
+    provider: str | None = None,
     max_iterations: int = DEFAULT_MAX_ITERATIONS,
     force_final_answer: bool = False,
 ) -> Iterator[StreamEvent]:
@@ -110,6 +111,7 @@ def run_chat_loop_stream(
         tools_provider=tools_provider,
         tool_dispatch=tool_dispatch,
         model=model,
+        provider=provider,
         max_iterations=max_iterations,
         force_final_answer=force_final_answer,
     )
@@ -122,6 +124,7 @@ def _drive_loop(
     tools_provider: ToolsProvider | None,
     tool_dispatch: ToolDispatch | None,
     model: str | None,
+    provider: str | None = None,
     max_iterations: int,
     force_final_answer: bool = False,
 ) -> Iterator[StreamEvent]:
@@ -136,7 +139,7 @@ def _drive_loop(
         else:
             turn_tools = tools_provider(messages) if tools_provider is not None else tools
 
-        for ev in client.stream(messages, model=model, tools=turn_tools):
+        for ev in client.stream(messages, model=model, provider=provider, tools=turn_tools):
             t = ev["type"]
             if t == "text_delta":
                 text_parts.append(ev["text"])
@@ -258,7 +261,7 @@ def chat_agent_scope() -> Generator[None]:
 
 
 def run_chat_stream(
-    messages: list[Message], *, model: str | None = None
+    messages: list[Message], *, model: str | None = None, provider: str | None = None
 ) -> Iterator[StreamEvent]:
     """Streaming chat agent with the standard wiki tool set + chat.system prompt.
 
@@ -273,6 +276,7 @@ def run_chat_stream(
         tools_provider=_chat_tools_for_turn,
         tool_dispatch=_chat_dispatch,
         model=model,
+        provider=provider,
         force_final_answer=True,
     )
 

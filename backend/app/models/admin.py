@@ -20,12 +20,13 @@ class LLMConfigRequest(BaseModel):
     # `model` is a real field, so silence pydantic's ``model_*`` namespace warning.
     model_config = ConfigDict(protected_namespaces=())
 
-    provider: str
-    model: str
+    provider: str | None = None
+    model: str | None = None
     anthropic_api_key: str | None = None
     openai_api_key: str | None = None
     gemini_api_key: str | None = None
     ollama_base_url: str | None = None
+    provider_models: dict[str, list[str]] | None = None
 
 
 class WebConfigRequest(BaseModel):
@@ -86,6 +87,7 @@ class LLMView(BaseModel):
     gemini_api_key_hint: str
     # Ollama doesn't have an API key — surface the base URL directly.
     ollama_base_url: str
+    provider_models: dict[str, list[str]]
 
 
 class WebView(BaseModel):

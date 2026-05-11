@@ -31,7 +31,7 @@ def stub_stream(monkeypatch):
     def install(scripted: list[list[dict]]):
         queue.extend(scripted)
 
-    def fake_stream(messages, *, model=None, tools=None, max_tokens=4096):
+    def fake_stream(messages, *, model=None, provider=None, tools=None, max_tokens=4096):
         if not queue:
             raise AssertionError("stub_stream exhausted but client.stream was called")
         events = queue.pop(0)
@@ -142,7 +142,7 @@ def test_force_final_answer_strips_tools_and_injects_reminder(stub_stream, monke
     captured_tools: list = []
     captured_messages_len: list[int] = []
 
-    def fake_stream(messages, *, model=None, tools=None, max_tokens=4096):
+    def fake_stream(messages, *, model=None, provider=None, tools=None, max_tokens=4096):
         captured_tools.append(tools)
         captured_messages_len.append(len(messages))
         # Cycle 1: keep calling tools; Cycle 2 (final): emit text.
@@ -296,7 +296,7 @@ def _create_session(client) -> str:
 
 
 def test_sse_endpoint_streams_text_then_done(signed_in_client, monkeypatch):
-    def fake_stream(messages, *, model=None):
+    def fake_stream(messages, *, model=None, provider=None):
         yield {"type": "text_delta", "text": "hi "}
         yield {"type": "text_delta", "text": "there"}
         yield {"type": "done"}
@@ -320,7 +320,7 @@ def test_sse_endpoint_streams_text_then_done(signed_in_client, monkeypatch):
 
 
 def test_sse_endpoint_emits_error_event_on_llm_error(signed_in_client, monkeypatch):
-    def fake_stream(messages, *, model=None):
+    def fake_stream(messages, *, model=None, provider=None):
         # Yield one delta to prove a partial stream still terminates with an
         # error event (the frontend uses that to drop the empty placeholder).
         yield {"type": "text_delta", "text": "partial"}
@@ -371,7 +371,7 @@ def test_sse_endpoint_real_run_chat_stream_under_iterate_in_threadpool(
     test exercises the real ``run_chat_stream`` (other SSE tests stub it
     out, which hid this bug)."""
     # Only stub the LLM provider seam — leave run_chat_stream real.
-    def fake_stream(messages, *, model=None, tools=None, max_tokens=4096):
+    def fake_stream(messages, *, model=None, provider=None, tools=None, max_tokens=4096):
         yield {"type": "text_delta", "text": "hi"}
         yield _done()
 

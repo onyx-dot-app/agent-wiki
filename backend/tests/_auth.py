@@ -29,5 +29,11 @@ def signed_session_cookie(user_id: str) -> str:
 def login_fastapi(client: TestClient, user_id: str) -> None:
     """Counterpart to the Flask ``client.session_transaction()`` login
     pattern. Sets the ``session`` cookie SessionMiddleware would write
-    so subsequent ``client.get/post/...`` calls authenticate."""
+    so subsequent ``client.get/post/...`` calls authenticate.
+
+    Clears any existing session cookies first so there is exactly one
+    session cookie in the jar — prevents stale server-set cookies from
+    a prior signup from shadowing the new one.
+    """
+    client.cookies.delete("session")
     client.cookies.set("session", signed_session_cookie(user_id))

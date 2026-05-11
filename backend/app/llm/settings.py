@@ -21,6 +21,7 @@ class LLMSettings(BaseModel):
     openai_api_key: str
     gemini_api_key: str
     ollama_base_url: str
+    provider_models: dict[str, list[str]]
 
 
 _EMPTY = LLMSettings(
@@ -30,6 +31,7 @@ _EMPTY = LLMSettings(
     openai_api_key="",
     gemini_api_key="",
     ollama_base_url="",
+    provider_models={},
 )
 
 
@@ -45,6 +47,7 @@ def get() -> LLMSettings:
             openai_api_key=row.openai_api_key,
             gemini_api_key=row.gemini_api_key,
             ollama_base_url=row.ollama_base_url,
+            provider_models=row.provider_models or {},
         )
 
 
@@ -56,6 +59,7 @@ def upsert(
     openai_api_key: str,
     gemini_api_key: str,
     ollama_base_url: str,
+    provider_models: dict[str, list[str]] | None = None,
 ) -> None:
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     with session() as s:
@@ -70,6 +74,7 @@ def upsert(
                     openai_api_key=openai_api_key,
                     gemini_api_key=gemini_api_key,
                     ollama_base_url=ollama_base_url,
+                    provider_models=provider_models or {},
                     updated_at=now,
                 )
             )
@@ -80,5 +85,7 @@ def upsert(
             row.openai_api_key = openai_api_key
             row.gemini_api_key = gemini_api_key
             row.ollama_base_url = ollama_base_url
+            if provider_models is not None:
+                row.provider_models = provider_models
             row.updated_at = now
     log.info("llm_settings upserted provider=%s model=%s", provider, model)

@@ -1,19 +1,21 @@
 """Tests for app/llm/settings.py — DB-backed LLM configuration."""
 from __future__ import annotations
 
+from typing import Any
+
 from app.db.models import LLMSettings as LLMSettingsRow
 from app.llm import settings as llm_settings
 
 from tests._seed import count_rows
 
 
-def _upsert(**overrides) -> None:
+def _upsert(**overrides: Any) -> None:
     """Upsert with empty defaults for fields the test doesn't care about.
 
     Keeps test bodies focused on the field-under-test instead of a long
     list of empty-string positional arguments.
     """
-    base = {
+    base: dict[str, Any] = {
         "provider": "",
         "model": "",
         "anthropic_api_key": "",
