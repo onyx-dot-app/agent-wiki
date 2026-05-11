@@ -237,8 +237,14 @@ function AgentModelSection({ settings, onSaved }: { settings: LLMSettings; onSav
           borderRadius: radius.md, background: color.bg.panel,
         }}>
           <div>
-            <span style={{ fontSize: 14, fontWeight: 500 }}>{PROVIDER_META[settings.provider].label}</span>
-            <span style={{ fontSize: 14, color: color.text.muted, marginLeft: 8 }}>{settings.model || "—"}</span>
+            {settings.provider && PROVIDER_META[settings.provider] ? (
+              <>
+                <span style={{ fontSize: 14, fontWeight: 500 }}>{PROVIDER_META[settings.provider].label}</span>
+                <span style={{ fontSize: 14, color: color.text.muted, marginLeft: 8 }}>{settings.model || "—"}</span>
+              </>
+            ) : (
+              <span style={{ fontSize: 14, color: color.text.muted }}>No model selected — configure a provider below.</span>
+            )}
           </div>
           <Button size="sm" variant="secondary" onClick={() => setEditing(true)}>Edit</Button>
         </div>
