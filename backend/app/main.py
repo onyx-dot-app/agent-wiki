@@ -24,6 +24,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from app.api import (
     admin,
+    agent_sessions,
     auth,
     chat,
     documents,
@@ -186,6 +187,7 @@ def create_app() -> FastAPI:
     app.include_router(templates.router, prefix="/api/templates")
     app.include_router(permissions.router, prefix="/api")
     app.include_router(launchers.router, prefix="/api")
+    app.include_router(agent_sessions.router, prefix="/api/agent-sessions")
     app.include_router(triggers.router, prefix="/api/triggers")
     app.include_router(wiki.router, prefix="/api/wiki")
     app.include_router(documents.router, prefix="/api/documents")

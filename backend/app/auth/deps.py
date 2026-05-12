@@ -10,6 +10,7 @@ Bearer-token auth for the MCP transport stays its own seam — it
 parses the ``Authorization`` header and returns a :class:`User`
 without going through ``request.session``.
 """
+
 from __future__ import annotations
 
 import logging
@@ -71,6 +72,22 @@ class BearerPrincipal(BaseModel):
     agent_name: str
 
 
+def require_user_or_bearer(request: Request) -> User:
+    """Accept either a session-cookie user OR a bearer token.
+
+    Used by routes the launcher helper drives (heartbeat / cli-session /
+    close on ``/api/agent-sessions/*``) — the helper has only the MCP
+    bearer, the browser has only the session cookie. Both must work.
+    """
+    try:
+        user = current_user(request)
+    except Exception:
+        user = None
+    if user is not None:
+        return user
+    return require_bearer(request).user
+
+
 def require_bearer(request: Request) -> BearerPrincipal:
     """Bearer-token auth for the inbound MCP transport. Distinct seam
     from session-cookie auth so a bad token returns a precise 401
@@ -79,7 +96,7 @@ def require_bearer(request: Request) -> BearerPrincipal:
     header = request.headers.get("Authorization", "")
     if not header.startswith(_BEARER_PREFIX):
         raise HTTPException(status_code=401, detail="missing bearer token")
-    raw = header[len(_BEARER_PREFIX):].strip()
+    raw = header[len(_BEARER_PREFIX) :].strip()
     resolved = tokens_repo.verify(raw)
     if resolved is None:
         log.info("mcp bearer rejected (token unrecognized)")
