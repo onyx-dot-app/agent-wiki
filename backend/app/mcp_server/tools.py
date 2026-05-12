@@ -240,11 +240,17 @@ def _call_async_nl_update(
 
     # ---- Insert + enqueue ----
     head_sha = wiki_git.head_sha_for_path(rel)
+    # Capture the per-key agent identity here so the worker can rebind
+    # it before commit_and_fan_out — the bearer ContextVar is gone by
+    # the time the worker runs.
+    from app.wiki import agent_activity
+
     payload: dict[str, Any] = {
         "path": rel,
         "instruction": instruction.strip(),
         "base_sha": base_sha,
         "head_at_enqueue": head_sha,
+        "agent_name": agent_activity.agent_name_var.get(),
     }
     job = mcp_jobs.create(
         user_id=sess.user_id,

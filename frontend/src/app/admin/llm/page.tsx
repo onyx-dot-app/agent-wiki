@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
+import { mutate as globalMutate } from "swr";
 
 import { AppShell } from "@/components/common/AppShell";
 import { Button } from "@/components/common/Button";
@@ -220,6 +221,7 @@ function AgentModelSection({ settings, onSaved }: { settings: LLMSettings; onSav
       });
       setEditing(false);
       onSaved();
+      void globalMutate("/llm/status");
     } catch (e) {
       setError(e instanceof Error ? e.message : "failed to save");
     } finally {
@@ -427,6 +429,7 @@ function ProviderForm({
       setKeyValue("");
       setSaved(true);
       onSaved();
+      void globalMutate("/llm/status");
     } catch (e) {
       setError(e instanceof Error ? e.message : "failed to save");
     } finally {

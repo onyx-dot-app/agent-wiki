@@ -237,6 +237,12 @@ class ChatSession(Base):
     )
     # NULL until the title-generation task fills it in after the first turn.
     title: Mapped[str | None] = mapped_column(Text)
+    # Sessions created to bootstrap "drafting from template" conversations
+    # are hidden from the session history list (the row stays so the
+    # transcript can be re-rendered if anything in code still has the id).
+    hidden: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("FALSE")
+    )
     created_at: Mapped[str] = mapped_column(
         Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
     )
@@ -268,6 +274,11 @@ class ChatMessage(Base):
     role: Mapped[str] = mapped_column(Text, nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
     events_json: Mapped[str | None] = mapped_column(Text)
+    # Hidden seed messages live in the LLM history (so the model has the
+    # template context) but are filtered out of the rendered transcript.
+    hidden: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("FALSE")
+    )
     created_at: Mapped[str] = mapped_column(
         Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
     )
@@ -277,6 +288,66 @@ class ChatMessage(Base):
             "role IN ('user', 'assistant')", name="chat_messages_role_check"
         ),
         Index("idx_chat_messages_session_order", "session_id", "ordering"),
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Document templates — admin-managed seed content for new wiki pages          #
+# --------------------------------------------------------------------------- #
+
+
+class DocumentTemplate(Base):
+    """Admin-defined template used to seed a brand-new wiki page.
+
+    Selected from the new-doc picker; the template's body is committed
+    as the initial content, and ``system_prompt`` (when set) overrides
+    the chat agent's system prompt while the user is still drafting.
+    """
+
+    __tablename__ = "document_templates"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    name: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    system_prompt: Mapped[str | None] = mapped_column(Text)
+    # Admin-controlled ordering for the picker. Lower values render
+    # first; ties fall back to ``name`` alphabetical. New rows land at
+    # the end (max(sort_order) + 1) so admins decide where they live.
+    sort_order: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    created_by_user_id: Mapped[str | None] = mapped_column(
+        Text, ForeignKey("users.id", ondelete="SET NULL")
+    )
+    created_at: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
+    )
+    updated_at: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
+    )
+
+
+class DocumentDraft(Base):
+    """Active "drafting from template" state for a wiki page.
+
+    Inserted when a user creates a page from a template; deleted when
+    the page body diverges from ``template_body_snapshot`` (i.e. the
+    user has made real edits) or when the page is deleted.
+    """
+
+    __tablename__ = "document_drafts"
+
+    path: Mapped[str] = mapped_column(Text, primary_key=True)
+    template_id: Mapped[str] = mapped_column(
+        Text, ForeignKey("document_templates.id", ondelete="CASCADE"), nullable=False
+    )
+    template_body_snapshot: Mapped[str] = mapped_column(Text, nullable=False)
+    created_by_user_id: Mapped[str | None] = mapped_column(
+        Text, ForeignKey("users.id", ondelete="SET NULL")
+    )
+    created_at: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
     )
 
 
@@ -474,6 +545,28 @@ class BM25ReconcileState(Base):
     last_completed_at: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     __table_args__ = (CheckConstraint("id = 1", name="bm25_reconcile_state_singleton"),)
+
+
+class WikiSeedState(Base):
+    """One-shot marker: has the bundled onboarding seed run on this DB?
+
+    Stamped to an ISO-8601 timestamp the first time the lifespan's
+    ``seed_if_empty`` either writes the seed or observes that the wiki
+    already has user content. Once non-null, the seed will never run
+    again on this database — so if a user deletes every onboarding
+    page and reboots, they get an empty wiki, not a re-seed.
+
+    Tied to the database (not the wiki working tree) on purpose: the
+    wiki can be wiped (volume reset, manual ``rm -rf``) and the marker
+    survives, preserving the user's intent to start fresh.
+    """
+
+    __tablename__ = "wiki_seed_state"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
+    seeded_at: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    __table_args__ = (CheckConstraint("id = 1", name="wiki_seed_state_singleton"),)
 
 
 # --------------------------------------------------------------------------- #

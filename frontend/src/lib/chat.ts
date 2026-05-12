@@ -46,7 +46,7 @@ export function streamMessage(
   sessionId: string,
   content: string,
   onEvent: (data: unknown) => void,
-  signal?: AbortSignal,
+  options?: { signal?: AbortSignal },
 ): Promise<void> {
   return apiStream(
     "/chat/messages",
@@ -55,6 +55,28 @@ export function streamMessage(
       body: JSON.stringify({ session_id: sessionId, content }),
     },
     onEvent,
-    signal,
+    options?.signal,
+  );
+}
+
+/** Bootstrap a hidden drafting session. Pass a ``templateId`` to seed
+ *  the session from that template, or ``null`` to seed a generic
+ *  "blank document" prime that hints at the wiki's auto-fill behavior.
+ *  Streams the agent's kickoff turn. The first event is
+ *  ``{type: "session_created", session_id: …}`` — the caller should
+ *  pin subsequent ``streamMessage`` calls to that id. */
+export function streamDraftingInit(
+  templateId: string | null,
+  onEvent: (data: unknown) => void,
+  options?: { signal?: AbortSignal },
+): Promise<void> {
+  return apiStream(
+    "/chat/drafting/init",
+    {
+      method: "POST",
+      body: JSON.stringify({ template_id: templateId }),
+    },
+    onEvent,
+    options?.signal,
   );
 }

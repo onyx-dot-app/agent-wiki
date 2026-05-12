@@ -92,15 +92,29 @@ def assert_base_sha(rel: str, base_sha: str | None) -> dict[str, str] | None:
 # --------------------------------------------------------------------------- #
 
 
-def author_string() -> str | None:
-    """Git author for any wiki commit driven by the chat agent's tools.
+_FALLBACK_AUTHOR = "AI Wiki Helper <ai-wiki-helper@local>"
 
-    Chat-flow writes are attributed to a bot identity rather than the
-    prompting user — the user didn't author the diff, the agent did on
-    their behalf. Direct UI/API edits keep their own per-user attribution
-    (see ``app/api/triggers.py:_git_author``).
+
+def author_string() -> str | None:
+    """Git author for a wiki commit driven by an agent tool call.
+
+    Resolves to ``"<user-display> via <agent-name> <email>"`` when both
+    the current user and an agent identity are bound — so commits made
+    via MCP credit the human and name the agent acting on their behalf
+    (e.g. ``"Yuhong Sun via Claude Code <yuhong@onyx.app>"``). With only
+    a user bound, drops the ``via`` clause; with neither, falls back to
+    the legacy bot author so seed scripts and orphaned background paths
+    still produce a valid commit. Direct UI/API edits set their own
+    per-user author at the API seam (see ``app/api/documents.py``).
     """
-    return "AI Wiki Helper <ai-wiki-helper@local>"
+    user = _current_user_or_none()
+    if user is None:
+        return _FALLBACK_AUTHOR
+    display = user.name or user.email
+    agent_name = agent_activity.agent_name_var.get()
+    if agent_name:
+        return f"{display} via {agent_name} <{user.email}>"
+    return f"{display} <{user.email}>"
 
 
 # --------------------------------------------------------------------------- #

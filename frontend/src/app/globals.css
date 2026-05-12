@@ -264,3 +264,14 @@ textarea::placeholder {
   background: var(--color-bg-hover);
   padding: 8px 10px;
 }
+
+/* Horizontal scroll containers (e.g. the mobile template picker) that
+   want native swipe/scroll behavior without a visible scrollbar. The
+   container still scrolls — only the chrome is hidden. */
+.scroll-x-hidden {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.scroll-x-hidden::-webkit-scrollbar {
+  display: none;
+}

@@ -16,6 +16,7 @@ import logging
 from collections.abc import Awaitable, Callable
 
 from fastapi import Depends, HTTPException, Request
+from pydantic import BaseModel
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 
@@ -58,7 +59,19 @@ def require_admin(user: User = Depends(require_user)) -> User:
     return user
 
 
-def require_bearer(request: Request) -> User:
+class BearerPrincipal(BaseModel):
+    """A successfully-authenticated MCP bearer principal.
+
+    ``agent_name`` is the token's user-supplied label — repurposed as
+    the per-key agent identity that downstream code stamps onto
+    ``AgentActivity`` rows and weaves into git commit authors.
+    """
+
+    user: User
+    agent_name: str
+
+
+def require_bearer(request: Request) -> BearerPrincipal:
     """Bearer-token auth for the inbound MCP transport. Distinct seam
     from session-cookie auth so a bad token returns a precise 401
     (``missing`` vs ``invalid``) and never falls through to the
@@ -67,11 +80,12 @@ def require_bearer(request: Request) -> User:
     if not header.startswith(_BEARER_PREFIX):
         raise HTTPException(status_code=401, detail="missing bearer token")
     raw = header[len(_BEARER_PREFIX):].strip()
-    user = tokens_repo.verify(raw)
-    if user is None:
+    resolved = tokens_repo.verify(raw)
+    if resolved is None:
         log.info("mcp bearer rejected (token unrecognized)")
         raise HTTPException(status_code=401, detail="invalid bearer token")
-    return user
+    user, agent_name = resolved
+    return BearerPrincipal(user=user, agent_name=agent_name)
 
 
 class CurrentUserMiddleware(BaseHTTPMiddleware):

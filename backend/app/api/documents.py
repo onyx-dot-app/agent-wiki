@@ -19,6 +19,7 @@ from app.models.document import (
     CreateFolderResponse,
     DeleteDocumentResponse,
     DocumentActivityResponse,
+    DocumentDraftView,
     DocumentEntry,
     FileHistoryResponse,
     FolderHitView,
@@ -36,6 +37,7 @@ from app.models.document import (
     ReindexResponse,
     SearchHitView,
     SearchResponse,
+    SetDocumentDraftRequest,
 )
 from app.tasks.document_update import process_pushed_document
 from app.tasks.queues import QueueFullError
@@ -43,10 +45,12 @@ from app.tasks.reindex import reindex_path
 from app.triggers import repo as triggers_repo
 from app.wiki import (
     agent_activity,
+    drafts as wiki_drafts,
     filesystem,
     git as wiki_git,
     notify as wiki_notify,
     search as wiki_search,
+    templates as templates_repo,
 )
 
 router = APIRouter()
@@ -142,6 +146,10 @@ def put_document_by_path(
         rel, sha, change_kind, author,
         owner_user_id=user.id if change_kind == "create" else None,
     )
+    # Drafting state: if the saved body diverges from the template
+    # snapshot, the user has made it their own — clear the row so the
+    # chat banner drops and the template's system prompt stops applying.
+    wiki_drafts.clear_if_diverged(rel, req.body)
     log.info("doc %s %s by %s sha=%s", change_kind, rel, author or "?", sha[:8])
     return PutDocumentResponse(
         path=rel, sha=sha, created=not existed, deprecated=deprecated,
@@ -267,6 +275,7 @@ def delete_document_by_path(
     author = _git_author(user)
     sha = wiki_git.delete_path(rel, f"delete {rel}", author=author)
     wiki_notify.after_doc_delete(rel, sha, author)
+    wiki_drafts.delete(rel)
     log.info("doc deleted %s by %s sha=%s", rel, author or "?", sha[:8])
     return DeleteDocumentResponse(sha=sha)
 
@@ -374,6 +383,81 @@ def file_activity(
             )
             for r in rows
         ],
+    )
+
+
+@router.get("/file/draft", response_model=DocumentDraftView | None)
+def file_draft(
+    user: User = Depends(require_user), path: str = "",
+) -> DocumentDraftView | None:
+    """Return active "drafting from template" state for a doc, or null.
+
+    Reconciles divergence at read time as well as write time: if the
+    current body no longer matches the template snapshot — e.g. an
+    agent edited the page through a path that didn't route through the
+    user PUT handler — the draft row is cleared here and the response
+    is ``null``. That way revisiting the doc shows a normal chat, not
+    the drafting banner.
+    """
+    if not path:
+        raise HTTPException(status_code=400, detail="path required")
+    try:
+        rel = filesystem.safe_rel_path(path)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    require_can("read", rel, user)
+    row = wiki_drafts.get(rel)
+    if row is None:
+        return None
+    abs_path = filesystem.absolute(rel)
+    current_body = abs_path.read_text() if abs_path.is_file() else ""
+    if wiki_drafts.clear_if_diverged(rel, current_body):
+        return None
+    return DocumentDraftView(
+        path=row["path"],
+        template_id=row["template_id"],
+        template_name=row["template_name"],
+        system_prompt=row["system_prompt"],
+        created_at=row["created_at"],
+    )
+
+
+@router.post("/file/draft", response_model=DocumentDraftView | None)
+def set_file_draft(
+    req: SetDocumentDraftRequest, user: User = Depends(require_user),
+) -> DocumentDraftView | None:
+    """Record that ``path`` is being drafted from ``template_id`` — or
+    clear the record when ``template_id`` is null.
+
+    Called by the wiki editor's inline template gallery: clicking a
+    template applies its body to the local editor state and posts here
+    so the chat widget can drop into drafting mode for the live session.
+    """
+    try:
+        rel = filesystem.safe_rel_path(req.path)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    require_can("write", rel, user)
+    if req.template_id is None:
+        wiki_drafts.delete(rel)
+        return None
+    tmpl = templates_repo.get(req.template_id)
+    if tmpl is None:
+        raise HTTPException(status_code=404, detail="template not found")
+    wiki_drafts.create(
+        path=rel,
+        template_id=tmpl["id"],
+        template_body_snapshot=tmpl["body"],
+        created_by_user_id=user.id,
+    )
+    row = wiki_drafts.get(rel)
+    assert row is not None
+    return DocumentDraftView(
+        path=row["path"],
+        template_id=row["template_id"],
+        template_name=row["template_name"],
+        system_prompt=row["system_prompt"],
+        created_at=row["created_at"],
     )
 
 

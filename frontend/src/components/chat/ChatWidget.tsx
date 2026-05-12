@@ -9,9 +9,11 @@ import { useAuth } from "@/lib/auth";
 import {
   createSession,
   getSession,
+  streamDraftingInit,
   streamMessage,
   type ChatSession,
 } from "@/lib/chat";
+import { useDrafting, type DraftingState } from "@/lib/drafting";
 import { ChatHistoryPanel } from "@/components/chat/ChatHistoryPanel";
 import { color, radius, shadow } from "@/lib/theme";
 
@@ -26,7 +28,8 @@ type StreamEvent =
   | { type: "tool_result"; id: string; name: string; content: string }
   | { type: "iteration_done" }
   | { type: "done" }
-  | { type: "error"; code: string; message: string };
+  | { type: "error"; code: string; message: string }
+  | { type: "session_created"; session_id: string };
 
 type Mode = "closed" | "widget" | "expanded";
 
@@ -36,16 +39,9 @@ const STORAGE_KEY_SESSION = "chat-widget:session-id";
 const DEFAULT_EXPANDED_WIDTH = 480;
 const MIN_EXPANDED_WIDTH = 280;
 
-interface AvailableProvider {
-  provider: string;
-  label: string;
-  default_model: string;
-  models: string[];
-}
-
-
 export function ChatWidget() {
-  const { user, updateSettings } = useAuth();
+  const { user } = useAuth();
+  const { drafting, expandTick } = useDrafting();
   const [mode, setMode] = useState<Mode>("closed");
   const [expandedWidth, setExpandedWidth] = useState<number>(DEFAULT_EXPANDED_WIDTH);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -56,21 +52,20 @@ export function ChatWidget() {
   const [sending, setSending] = useState(false);
   const [toolHint, setToolHint] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [availableProviders, setAvailableProviders] = useState<AvailableProvider[]>([]);
-  const [agentModel, setAgentModel] = useState<{ provider: string; model: string } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const resizingRef = useRef(false);
   const hydratedSessionRef = useRef(false);
-
-  useEffect(() => {
-    apiFetch<{ providers: AvailableProvider[] }>("/llm/available")
-      .then((r) => setAvailableProviders(r.providers))
-      .catch(() => null);
-    apiFetch<{ configured: boolean; provider: string; model: string }>("/llm/status")
-      .then((r) => { if (r.configured) setAgentModel({ provider: r.provider, model: r.model }); })
-      .catch(() => null);
-  }, []);
-
+  // Drafting bookkeeping. ``draftingKey`` is a string we derive from
+  // the active drafting state (``tpl:<id>`` or ``blank``) — used so
+  // brief null→same-key flips (NewDocView → FileViewer hand-off) don't
+  // trigger a re-init, and so picking a different template (or
+  // switching between blank and a template) DOES trigger one. The
+  // pre-drafting snapshot is restored when the user leaves drafting so
+  // their regular conversation isn't lost.
+  const [draftingKey, setDraftingKey] = useState<string | null>(null);
+  const preDraftingRef = useRef<{ sessionId: string | null; messages: ChatMessage[] } | null>(
+    null,
+  );
 
   // Hydrate persisted UI state on mount.
   useEffect(() => {
@@ -106,13 +101,18 @@ export function ChatWidget() {
   }, [expandedWidth]);
 
   useEffect(() => {
+    // Drafting sessions are hidden + ephemeral — don't persist their id
+    // to localStorage, otherwise refreshing would resurrect a session
+    // the user can't browse to. The pre-drafting id, if any, stays in
+    // localStorage from the prior write and gets restored on unmount.
+    if (draftingKey !== null) return;
     try {
       if (sessionId) window.localStorage.setItem(STORAGE_KEY_SESSION, sessionId);
       else window.localStorage.removeItem(STORAGE_KEY_SESSION);
     } catch {
       // ignore
     }
-  }, [sessionId]);
+  }, [sessionId, draftingKey]);
 
   // Hydrate the active session's messages when the widget first opens with
   // a stored session id. Runs once per page load — switching sessions via
@@ -170,6 +170,113 @@ export function ChatWidget() {
       window.removeEventListener("mouseup", onUp);
     };
   }, [mode]);
+
+  // Pop into expanded mode whenever the drafting context fires an
+  // expand request (e.g. just after a template-seeded doc was created).
+  // We watch the tick rather than ``drafting`` itself so re-visiting an
+  // already-drafting page doesn't keep yanking the widget open.
+  useEffect(() => {
+    if (expandTick === 0) return;
+    setMode("expanded");
+  }, [expandTick]);
+
+  // Drafting orchestration. When the wiki page raises a new drafting
+  // state we (a) save the current chat as the pre-drafting snapshot,
+  // (b) swap to a fresh hidden session, and (c) call the init endpoint
+  // so the agent kicks off with template-aware guiding questions (or a
+  // generic "what do you want to work on" prime for blank). When the
+  // page leaves drafting we restore the snapshot. Brief null
+  // transitions (NewDocView → FileViewer hand-off) are debounced so we
+  // don't flap.
+  //
+  // We watch a derived ``desiredKey`` rather than ``templateId``
+  // directly so that "blank" is a distinct watch value (template_A →
+  // blank → template_A all re-trigger init), and so a deleted template
+  // id (null) doesn't collide with the "no drafting" state.
+  const desiredKey: string | null =
+    drafting === null
+      ? null
+      : drafting.kind === "template"
+        ? `tpl:${drafting.templateId ?? "deleted"}`
+        : "blank";
+  useEffect(() => {
+    // Activate immediately when a drafting state arrives.
+    if (desiredKey !== null && drafting !== null) {
+      if (desiredKey === draftingKey) return; // already in sync
+      if (preDraftingRef.current === null) {
+        // First entry into drafting — remember the prior conversation.
+        preDraftingRef.current = { sessionId, messages };
+      }
+      setDraftingKey(desiredKey);
+      setError(null);
+      setToolHint(null);
+      setSessionId(null);
+      // Empty assistant bubble; tokens stream into it below.
+      setMessages([{ role: "assistant", content: "" }]);
+      setSending(true);
+      const tidForInit =
+        drafting.kind === "template" ? drafting.templateId : null;
+      void (async () => {
+        try {
+          await streamDraftingInit(tidForInit, (raw) => {
+            const ev = raw as StreamEvent;
+            switch (ev.type) {
+              case "session_created":
+                setSessionId(ev.session_id);
+                break;
+              case "text_delta":
+                setMessages((prev) => {
+                  const next = [...prev];
+                  const last = next[next.length - 1];
+                  if (!last || last.role !== "assistant") return prev;
+                  next[next.length - 1] = { ...last, content: last.content + ev.text };
+                  return next;
+                });
+                break;
+              case "tool_call":
+                setToolHint(`${humanizeTool(ev.name)}…`);
+                break;
+              case "tool_result":
+              case "iteration_done":
+              case "done":
+                setToolHint(null);
+                break;
+              case "error":
+                setError(ev.message);
+                break;
+            }
+          });
+        } catch (e) {
+          setError(formatError(e));
+        } finally {
+          setSending(false);
+          setToolHint(null);
+        }
+      })();
+      return;
+    }
+
+    // Deactivate, but debounce so a brief null between page hand-offs
+    // (NewDocView unmounts before FileViewer mounts) doesn't tear down
+    // the drafting conversation only to spin up another one immediately.
+    if (draftingKey === null) return;
+    const handle = window.setTimeout(() => {
+      const snapshot = preDraftingRef.current;
+      preDraftingRef.current = null;
+      setDraftingKey(null);
+      if (snapshot) {
+        setSessionId(snapshot.sessionId);
+        setMessages(snapshot.messages);
+      } else {
+        setSessionId(null);
+        setMessages([]);
+      }
+      setError(null);
+      setToolHint(null);
+    }, 300);
+    return () => window.clearTimeout(handle);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [desiredKey]);
 
   // When expanded, reserve real layout space on the right so the page is
   // pushed left rather than being overlaid by the panel.
@@ -405,51 +512,7 @@ export function ChatWidget() {
           }}
         >
           <div style={{ fontWeight: 600, fontSize: 14 }}>Chat</div>
-          {availableProviders.length > 0 && (
-            <select
-              value={
-                user?.settings.chat_provider && user?.settings.chat_model
-                  ? `${user.settings.chat_provider}:${user.settings.chat_model}`
-                  : ""
-              }
-              onChange={(e) => {
-                const val = e.target.value;
-                if (!val) {
-                  void updateSettings({ chat_provider: null, chat_model: null });
-                } else {
-                  const idx = val.indexOf(":");
-                  const p = val.slice(0, idx);
-                  const m = val.slice(idx + 1);
-                  void updateSettings({ chat_provider: p, chat_model: m });
-                }
-              }}
-              style={{
-                flex: 1,
-                minWidth: 0,
-                fontSize: 12,
-                padding: "3px 6px",
-                border: `1px solid ${color.border.default}`,
-                borderRadius: radius.xs,
-                background: color.bg.page,
-                color: color.text.primary,
-              }}
-            >
-              <option value="">
-                {agentModel ? `${agentModel.model} (Default)` : "Default model"}
-              </option>
-              {availableProviders.map((p) => {
-                const models = p.models.length ? p.models : [p.default_model];
-                return (
-                  <optgroup key={p.provider} label={p.label}>
-                    {models.map((m) => (
-                      <option key={m} value={`${p.provider}:${m}`}>{m}</option>
-                    ))}
-                  </optgroup>
-                );
-              })}
-            </select>
-          )}
-          {availableProviders.length === 0 && <div style={{ flex: 1 }} />}
+          <div style={{ flex: 1 }} />
           <IconButton
             title="New chat"
             onClick={onNewChat}
@@ -473,6 +536,8 @@ export function ChatWidget() {
             <CloseIcon />
           </IconButton>
         </header>
+
+        {drafting && <DraftingBanner state={drafting} />}
 
         <div
           ref={scrollRef}
@@ -660,6 +725,62 @@ function formatError(err: unknown): string {
   }
   if (err instanceof Error) return err.message;
   return "Failed to send message";
+}
+
+function DraftingBanner({ state }: { state: DraftingState }) {
+  const docName = state.path ? state.path.split("/").pop() ?? state.path : null;
+  const templateName = state.kind === "template" ? state.templateName : null;
+  return (
+    <div
+      role="status"
+      style={{
+        display: "flex",
+        alignItems: "flex-start",
+        gap: 8,
+        padding: "8px 12px",
+        background: color.accent.subtleBg,
+        borderBottom: `1px solid ${color.accent.subtleBorder}`,
+        color: color.accent.subtleFg,
+        fontSize: 12,
+        flexShrink: 0,
+      }}
+    >
+      <DraftIcon />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontWeight: 600 }}>Drafting initial version</div>
+        <div style={{ marginTop: 2, color: color.text.secondary, overflowWrap: "anywhere" }}>
+          {docName && templateName ? (
+            <>
+              Helping draft <strong>{docName}</strong> from the{" "}
+              <em>{templateName}</em> template.
+            </>
+          ) : docName ? (
+            <>Helping draft <strong>{docName}</strong>.</>
+          ) : templateName ? (
+            <>
+              Helping draft a new doc from the <em>{templateName}</em> template.
+            </>
+          ) : (
+            <>Helping draft a new doc.</>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DraftIcon() {
+  return (
+    <svg
+      width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+      style={{ flexShrink: 0, marginTop: 1 }}
+    >
+      <path d="M14 3v4a1 1 0 0 0 1 1h4" />
+      <path d="M17 21H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2z" />
+      <path d="M9 13l2 2 4-4" />
+    </svg>
+  );
 }
 
 function Bubble({

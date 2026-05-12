@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import useSWR from "swr";
@@ -16,7 +16,15 @@ import { ShareDialog } from "@/components/wiki/ShareDialog";
 import { FolderIcon, FileIcon } from "@/components/wiki/WikiIcons";
 import { apiFetch } from "@/lib/api";
 import { useRequireAuth } from "@/lib/auth";
+import { useDrafting } from "@/lib/drafting";
 import { rememberWikiPath } from "@/lib/lastViewed";
+import {
+  getDraftState,
+  getTemplate,
+  listTemplateSummaries,
+  setDraftTemplate,
+  type DocumentTemplateSummary,
+} from "@/lib/templates";
 import { color, radius, shadow } from "@/lib/theme";
 import { useIsMobile } from "@/lib/viewport";
 import type { DocumentActivity, DocumentActivityResponse } from "@/types";
@@ -54,6 +62,8 @@ export default function WikiRoute() {
   const { user, loading } = useRequireAuth();
   const isMobile = useIsMobile();
   const params = useParams<{ slug?: string[] }>();
+  const searchParams = useSearchParams();
+  const isNewMode = searchParams?.get("new") === "1";
   const rawSlugParts = (params?.slug ?? []) as string[];
   // Next.js may hand back percent-encoded segments (e.g. "local%20testing").
   // Decode so labels and downstream API paths use literal characters.
@@ -77,7 +87,13 @@ export default function WikiRoute() {
 
   return (
     <AppShell>
-      {isFile ? <FileViewer path={slugPath} /> : <Explorer dir={slugPath} />}
+      {isFile ? (
+        <FileViewer path={slugPath} />
+      ) : isNewMode ? (
+        <NewDocView dir={slugPath} />
+      ) : (
+        <Explorer dir={slugPath} />
+      )}
     </AppShell>
   );
 }
@@ -96,9 +112,13 @@ function Explorer({ dir }: { dir: string }) {
     void mutatePaths();
   }, [mutatePaths]);
   const [busyPath, setBusyPath] = useState<string | null>(null);
-  const [creating, setCreating] = useState<"doc" | "folder" | null>(null);
+  // Folders still use an inline filename form; new docs route to
+  // NewDocView where filename + template + body are chosen together.
+  const [creating, setCreating] = useState<"folder" | null>(null);
   const [newName, setNewName] = useState("");
   const [createBusy, setCreateBusy] = useState(false);
+  const [triggerModalOpen, setTriggerModalOpen] = useState(false);
+  const [triggerStatus, setTriggerStatus] = useState<string | null>(null);
   const [sort, setSort] = useState<"name-asc" | "name-desc" | "recent">("name-asc");
   const [renaming, setRenaming] = useState<string | null>(null);
   const [dragSource, setDragSource] = useState<string | null>(null);
@@ -147,40 +167,22 @@ function Explorer({ dir }: { dir: string }) {
     e.preventDefault();
     const raw = newName.trim();
     if (!raw) return;
+    // Only folders go through this inline form; new docs are handled by
+    // NewDocView, which the +New document button routes to directly.
+    if (creating !== "folder") return;
     setCreateBusy(true);
     setError(null);
     try {
-      if (creating === "folder") {
-        const folderName = raw.replace(/\/+$/, "");
-        const fullPath = (dir ? dir + "/" : "") + folderName;
-        await apiFetch("/documents/folder", {
-          method: "POST",
-          body: JSON.stringify({ path: fullPath }),
-        });
-        setNewName("");
-        setCreating(null);
-        refresh();
-        router.push(`/wiki/${fullPath}`);
-      } else {
-        // Strip any user-typed .md so we don't end up with foo.md.md when the
-        // suffix adornment also adds it.
-        const stripped = raw.replace(/\.md$/i, "");
-        if (!stripped) {
-          setError("Filename cannot be empty.");
-          setCreateBusy(false);
-          return;
-        }
-        const name = stripped + ".md";
-        const fullPath = (dir ? dir + "/" : "") + name;
-        await apiFetch("/documents/file", {
-          method: "PUT",
-          body: JSON.stringify({ path: fullPath, body: `# ${name.replace(/\.md$/, "")}\n` }),
-        });
-        setNewName("");
-        setCreating(null);
-        refresh();
-        router.push(`/wiki/${fullPath}`);
-      }
+      const folderName = raw.replace(/\/+$/, "");
+      const fullPath = (dir ? dir + "/" : "") + folderName;
+      await apiFetch("/documents/folder", {
+        method: "POST",
+        body: JSON.stringify({ path: fullPath }),
+      });
+      setNewName("");
+      setCreating(null);
+      refresh();
+      router.push(`/wiki/${fullPath}`);
     } catch (e) {
       setError(e instanceof Error ? e.message : "create failed");
     } finally {
@@ -276,6 +278,7 @@ function Explorer({ dir }: { dir: string }) {
         }
         actions={
           <>
+            <Button onClick={() => setTriggerModalOpen(true)}>+ Trigger</Button>
             <Button
               onClick={() => {
                 setNewName("");
@@ -286,16 +289,25 @@ function Explorer({ dir }: { dir: string }) {
             </Button>
             <Button
               variant="primary"
-              onClick={() => {
-                setNewName("");
-                setCreating((v) => (v === "doc" ? null : "doc"));
-              }}
+              onClick={() => router.push(`/wiki/${dir}?new=1`)}
             >
               + New document
             </Button>
           </>
         }
       />
+
+      <TriggerModal
+        open={triggerModalOpen}
+        initial={{ scope_path: dir || "/" }}
+        lockScope
+        onClose={() => setTriggerModalOpen(false)}
+        onSaved={(t) => setTriggerStatus(`Created trigger for ${t.scope_path}`)}
+      />
+
+      {triggerStatus && (
+        <div style={{ fontSize: 12, color: color.text.secondary, marginBottom: 12 }}>{triggerStatus}</div>
+      )}
 
       {creating && (
         <form
@@ -310,72 +322,26 @@ function Explorer({ dir }: { dir: string }) {
             borderRadius: radius.md,
           }}
         >
-          {creating === "doc" ? (
-            <div
-              style={{
-                flex: 1,
-                display: "flex",
-                alignItems: "stretch",
-                border: `1px solid ${color.border.default}`,
-                borderRadius: radius.sm,
-                background: color.bg.page,
-                overflow: "hidden",
-              }}
-            >
-              <input
-                autoFocus
-                value={newName.replace(/\.md$/i, "")}
-                onChange={(e) => setNewName(e.target.value)}
-                placeholder="filename (or subdir/filename)"
-                disabled={createBusy}
-                style={{
-                  flex: 1,
-                  padding: 8,
-                  border: "none",
-                  outline: "none",
-                  fontSize: 14,
-                  background: "transparent",
-                }}
-              />
-              <span
-                aria-hidden
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  padding: "0 10px",
-                  background: color.bg.sunken,
-                  borderLeft: `1px solid ${color.border.default}`,
-                  color: color.text.secondary,
-                  fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-                  fontSize: 13,
-                  fontWeight: 600,
-                }}
-              >
-                .md
-              </span>
-            </div>
-          ) : (
-            <input
-              autoFocus
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              placeholder="folder-name (or subdir/folder-name)"
-              disabled={createBusy}
-              style={{
-                flex: 1,
-                padding: 8,
-                border: `1px solid ${color.border.default}`,
-                borderRadius: radius.sm,
-                fontSize: 14,
-              }}
-            />
-          )}
+          <input
+            autoFocus
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            placeholder="folder-name (or subdir/folder-name)"
+            disabled={createBusy}
+            style={{
+              flex: 1,
+              padding: 8,
+              border: `1px solid ${color.border.default}`,
+              borderRadius: radius.sm,
+              fontSize: 14,
+            }}
+          />
           <Button
             type="submit"
             variant="primary"
             disabled={createBusy || !newName.trim()}
           >
-            {creating === "folder" ? "Create folder" : "Create document"}
+            Create folder
           </Button>
           <Button
             type="button"
@@ -470,6 +436,483 @@ function Explorer({ dir }: { dir: string }) {
         })()}
       </ul>
     </main>
+  );
+}
+
+function NewDocView({ dir }: { dir: string }) {
+  const router = useRouter();
+  const isMobile = useIsMobile();
+  const { setDrafting, requestExpand } = useDrafting();
+  const [filename, setFilename] = useState("");
+  const [draft, setDraft] = useState("");
+  const [templates, setTemplates] = useState<DocumentTemplateSummary[] | null>(null);
+  const [appliedTemplateId, setAppliedTemplateId] = useState<string | null>(null);
+  const [appliedTemplateBody, setAppliedTemplateBody] = useState<string | null>(null);
+  const [applyingTemplateId, setApplyingTemplateId] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Pop the chat widget open once on mount — the assistant can help
+  // while the user picks a template / drafts initial content.
+  useEffect(() => {
+    requestExpand();
+  }, [requestExpand]);
+
+  useEffect(() => {
+    let cancelled = false;
+    listTemplateSummaries()
+      .then((rows) => {
+        if (!cancelled) setTemplates(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setTemplates([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Sync drafting context with the current pick — including the
+  // initial "no template chosen yet" state, which maps to ``blank``
+  // drafting so the chat kicks off the moment +New routes into this
+  // view. Picking a template later swaps ``desiredKey`` from "blank"
+  // to "tpl:<id>" and the chat widget re-inits a fresh session for it.
+  useEffect(() => {
+    if (appliedTemplateId) {
+      if (!templates) return; // wait until we can resolve the name
+      const t = templates.find((x) => x.id === appliedTemplateId);
+      setDrafting({
+        kind: "template",
+        path: null,
+        templateId: appliedTemplateId,
+        templateName: t?.name ?? null,
+      });
+    } else {
+      setDrafting({ kind: "blank", path: null });
+    }
+  }, [appliedTemplateId, templates, setDrafting]);
+  useEffect(() => {
+    return () => setDrafting(null);
+  }, [setDrafting]);
+
+  const trimmedFilename = filename.trim().replace(/^\/+|\/+$/g, "");
+  const filenameNoExt = trimmedFilename.replace(/\.md$/i, "");
+  const filenameValid = !!filenameNoExt && !filenameNoExt.includes("/");
+  const canCreate = filenameValid && !saving;
+
+  async function onPickTemplate(template: DocumentTemplateSummary) {
+    setApplyingTemplateId(template.id);
+    setError(null);
+    try {
+      const full = await getTemplate(template.id);
+      setDraft(full.body);
+      setAppliedTemplateBody(full.body);
+      setAppliedTemplateId(template.id);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "failed to apply template");
+    } finally {
+      setApplyingTemplateId(null);
+    }
+  }
+
+  function onPickBlank() {
+    setDraft("");
+    setAppliedTemplateBody(null);
+    setAppliedTemplateId(null);
+    // Kick the chat widget into blank-drafting mode so it spins up a
+    // hidden session with the generic "what would you like to work on"
+    // prime, the same way a template pick spins up a template-aware
+    // session.
+    setDrafting({ kind: "blank", path: null });
+  }
+
+  async function onCreate() {
+    if (!filenameValid) {
+      setError("Filename cannot be empty or contain '/'.");
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      const name = filenameNoExt + ".md";
+      const fullPath = (dir ? dir + "/" : "") + name;
+      await apiFetch("/documents/file", {
+        method: "PUT",
+        body: JSON.stringify({ path: fullPath, body: draft }),
+      });
+      // If a template was applied, record the draft row so the chat
+      // banner + template system prompt persist on the saved doc.
+      if (appliedTemplateId) {
+        await setDraftTemplate(fullPath, appliedTemplateId);
+      }
+      router.push(`/wiki/${fullPath}?new=1`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "create failed");
+      setSaving(false);
+    }
+  }
+
+  const isBlank = draft.trim() === "";
+  const matchesApplied =
+    appliedTemplateBody !== null && draft === appliedTemplateBody;
+  const showGallery =
+    (isBlank || matchesApplied) && templates !== null && templates.length > 0;
+  const parentSlug = dir;
+
+  return (
+    <main
+      style={{
+        padding: isMobile ? "16px 12px" : "24px 32px",
+        height: "100vh",
+        display: "flex",
+        flexDirection: "column",
+        boxSizing: "border-box",
+        gap: 12,
+      }}
+    >
+      <PageHeader
+        title="New document"
+        actions={
+          <>
+            <Button
+              onClick={() => router.push(`/wiki/${dir}`)}
+              disabled={saving}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              onClick={() => void onCreate()}
+              disabled={!canCreate}
+              title={
+                !filenameValid && !saving
+                  ? "Give the file a name first."
+                  : undefined
+              }
+            >
+              {saving ? "Creating…" : "Create"}
+            </Button>
+          </>
+        }
+      />
+
+      <FilenameRow
+        parent={parentSlug}
+        value={filename}
+        onChange={setFilename}
+        disabled={saving}
+        autoFocus
+        placeholder="filename for the new doc"
+      />
+
+      {error && (
+        <div
+          style={{
+            padding: 10,
+            background: color.state.danger.bg,
+            color: color.state.danger.fg,
+            borderRadius: radius.sm,
+            fontSize: 13,
+          }}
+        >
+          {error}
+        </div>
+      )}
+
+      {showGallery && (
+        <TemplateGallery
+          templates={templates!}
+          activeId={matchesApplied ? appliedTemplateId : null}
+          applyingId={applyingTemplateId}
+          blankActive={isBlank && appliedTemplateId === null}
+          onPick={(t) => void onPickTemplate(t)}
+          onBlank={onPickBlank}
+        />
+      )}
+
+      <textarea
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        spellCheck={false}
+        placeholder={
+          templates && templates.length > 0
+            ? "Start typing, or pick a template above…"
+            : "Start typing your new document…"
+        }
+        style={{
+          flex: 1,
+          minHeight: 0,
+          width: "100%",
+          boxSizing: "border-box",
+          padding: 16,
+          border: `1px solid ${color.border.default}`,
+          borderRadius: radius.md,
+          fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+          fontSize: 14,
+          lineHeight: 1.6,
+          resize: "none",
+          outline: "none",
+        }}
+      />
+    </main>
+  );
+}
+
+function TemplateGallery({
+  templates,
+  activeId,
+  applyingId,
+  blankActive,
+  onPick,
+  onBlank,
+}: {
+  templates: DocumentTemplateSummary[];
+  activeId: string | null;
+  applyingId: string | null;
+  blankActive: boolean;
+  onPick: (t: DocumentTemplateSummary) => void;
+  onBlank: () => void;
+}) {
+  // Always a single-row strip — the picker never wraps to a second
+  // line. On wide screens the user scrolls / clicks chevrons through
+  // the row; on narrow screens the same layout becomes a swipe strip.
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 10,
+        padding: 14,
+        background: color.bg.panel,
+        border: `1px solid ${color.border.default}`,
+        borderRadius: radius.md,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+        <span style={{ fontSize: 13, fontWeight: 600, color: color.text.primary }}>
+          Start from a template
+        </span>
+        <span style={{ fontSize: 12, color: color.text.muted }}>
+          Scroll or use the arrows to browse — tap to apply.
+        </span>
+      </div>
+      <TemplateStrip
+        templates={templates}
+        activeId={activeId}
+        applyingId={applyingId}
+        blankActive={blankActive}
+        onPick={onPick}
+        onBlank={onBlank}
+      />
+    </div>
+  );
+}
+
+function TemplateStrip({
+  templates,
+  activeId,
+  applyingId,
+  blankActive,
+  onPick,
+  onBlank,
+}: {
+  templates: DocumentTemplateSummary[];
+  activeId: string | null;
+  applyingId: string | null;
+  blankActive: boolean;
+  onPick: (t: DocumentTemplateSummary) => void;
+  onBlank: () => void;
+}) {
+  const scrollerRef = useRef<HTMLDivElement | null>(null);
+  const [edges, setEdges] = useState<{ left: boolean; right: boolean }>({
+    left: false,
+    right: false,
+  });
+
+  const recomputeEdges = useCallback(() => {
+    const el = scrollerRef.current;
+    if (!el) return;
+    const atStart = el.scrollLeft <= 1;
+    const atEnd = el.scrollLeft + el.clientWidth >= el.scrollWidth - 1;
+    setEdges({ left: !atStart, right: !atEnd });
+  }, []);
+
+  useEffect(() => {
+    recomputeEdges();
+    const el = scrollerRef.current;
+    if (!el) return;
+    el.addEventListener("scroll", recomputeEdges, { passive: true });
+    window.addEventListener("resize", recomputeEdges);
+    return () => {
+      el.removeEventListener("scroll", recomputeEdges);
+      window.removeEventListener("resize", recomputeEdges);
+    };
+  }, [recomputeEdges, templates.length]);
+
+  const scrollBy = useCallback((dx: number) => {
+    const el = scrollerRef.current;
+    if (!el) return;
+    el.scrollBy({ left: dx, behavior: "smooth" });
+  }, []);
+
+  // One full card width per click feels right — the user advances by
+  // a card rather than by a viewport, so they never lose their place.
+  const CARD_WIDTH = 200;
+  const STEP = CARD_WIDTH + 8; // card width + gap
+
+  return (
+    <div style={{ position: "relative" }}>
+      <div
+        ref={scrollerRef}
+        className="scroll-x-hidden"
+        style={{
+          display: "flex",
+          gap: 8,
+          overflowX: "auto",
+          scrollSnapType: "x mandatory",
+          WebkitOverflowScrolling: "touch",
+          paddingBottom: 2, // leave room for focus rings
+        }}
+      >
+        <div style={{ flex: "0 0 auto", scrollSnapAlign: "start", width: CARD_WIDTH }}>
+          <TemplateCard
+            title="Blank document"
+            description="Empty file — just start typing."
+            active={blankActive}
+            busy={false}
+            onClick={onBlank}
+          />
+        </div>
+        {templates.map((t) => (
+          <div
+            key={t.id}
+            style={{ flex: "0 0 auto", scrollSnapAlign: "start", width: CARD_WIDTH }}
+          >
+            <TemplateCard
+              title={t.name}
+              description={t.description}
+              active={activeId === t.id}
+              busy={applyingId === t.id}
+              onClick={() => onPick(t)}
+            />
+          </div>
+        ))}
+      </div>
+      {edges.left && (
+        <StripArrow direction="left" onClick={() => scrollBy(-STEP)} />
+      )}
+      {edges.right && (
+        <StripArrow direction="right" onClick={() => scrollBy(STEP)} />
+      )}
+    </div>
+  );
+}
+
+function StripArrow({
+  direction,
+  onClick,
+}: {
+  direction: "left" | "right";
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={direction === "left" ? "Scroll left" : "Scroll right"}
+      style={{
+        position: "absolute",
+        top: "50%",
+        transform: "translateY(-50%)",
+        ...(direction === "left" ? { left: 4 } : { right: 4 }),
+        width: 28,
+        height: 28,
+        borderRadius: radius.pill,
+        background: color.bg.page,
+        border: `1px solid ${color.border.default}`,
+        boxShadow: shadow.sm,
+        cursor: "pointer",
+        color: color.text.secondary,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 0,
+      }}
+    >
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        {direction === "left" ? <path d="M15 18l-6-6 6-6" /> : <path d="M9 6l6 6-6 6" />}
+      </svg>
+    </button>
+  );
+}
+
+function TemplateCard({
+  title,
+  description,
+  active,
+  busy,
+  onClick,
+}: {
+  title: string;
+  description: string | null;
+  active: boolean;
+  busy: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={busy}
+      style={{
+        textAlign: "left",
+        padding: "10px 12px",
+        background: active ? color.accent.subtleBg : color.bg.page,
+        border: `1px solid ${active ? color.accent.subtleBorder : color.border.default}`,
+        borderRadius: radius.sm,
+        cursor: busy ? "wait" : "pointer",
+        color: color.text.primary,
+        // Fill the wrapper (grid cell or strip slot) so adjacent cards
+        // align even when their description text differs in length.
+        width: "100%",
+        height: "100%",
+        boxSizing: "border-box",
+        minHeight: 64,
+        display: "flex",
+        flexDirection: "column",
+        gap: 4,
+        opacity: busy ? 0.7 : 1,
+        transition: "background 80ms ease, border-color 80ms ease",
+      }}
+      onMouseEnter={(e) => {
+        if (!active && !busy) {
+          e.currentTarget.style.background = color.bg.hover;
+          e.currentTarget.style.borderColor = color.border.strong;
+        }
+      }}
+      onMouseLeave={(e) => {
+        if (!active && !busy) {
+          e.currentTarget.style.background = color.bg.page;
+          e.currentTarget.style.borderColor = color.border.default;
+        }
+      }}
+    >
+      <div style={{ fontSize: 13, fontWeight: 600 }}>{title}</div>
+      {description && (
+        <div
+          style={{
+            fontSize: 12,
+            color: color.text.muted,
+            overflow: "hidden",
+            display: "-webkit-box",
+            WebkitLineClamp: 2,
+            WebkitBoxOrient: "vertical",
+          }}
+        >
+          {description}
+        </div>
+      )}
+    </button>
   );
 }
 
@@ -813,7 +1256,9 @@ function Breadcrumbs({
 
 function FileViewer({ path }: { path: string }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const isMobile = useIsMobile();
+  const { setDrafting, requestExpand } = useDrafting();
   const [body, setBody] = useState("");
   const [draft, setDraft] = useState("");
   const [editing, setEditing] = useState(false);
@@ -839,6 +1284,15 @@ function FileViewer({ path }: { path: string }) {
   const [agentsOpen, setAgentsOpen] = useState(false);
   const [agents, setAgents] = useState<DocumentActivity[]>([]);
   const [agentsError, setAgentsError] = useState<string | null>(null);
+  // Inline template gallery state. We show clickable cards above the
+  // editor whenever the draft is "empty enough" — either truly blank
+  // or still matching the body of the template the user just applied
+  // (so they can keep swapping without losing work). Once they edit on
+  // top of a template, the gallery disappears.
+  const [templates, setTemplates] = useState<DocumentTemplateSummary[] | null>(null);
+  const [appliedTemplateBody, setAppliedTemplateBody] = useState<string | null>(null);
+  const [appliedTemplateId, setAppliedTemplateId] = useState<string | null>(null);
+  const [applyingTemplateId, setApplyingTemplateId] = useState<string | null>(null);
 
   const loadLatest = useCallback(() => {
     setLoading(true);
@@ -860,6 +1314,70 @@ function FileViewer({ path }: { path: string }) {
     setHistoryOpen(false);
     setCommits(null);
   }, [loadLatest]);
+
+  // Fetch template summaries once; the gallery uses them as its menu
+  // and falls back to "no templates configured" when the list is empty.
+  useEffect(() => {
+    let cancelled = false;
+    listTemplateSummaries()
+      .then((rows) => {
+        if (!cancelled) setTemplates(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setTemplates([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // ``?new=1`` is set by NewDocView after first-create. The doc body
+  // was already chosen there, so we land in the rendered view (not
+  // edit mode); the param's only remaining job is to expand the chat
+  // widget so the assistant is right there on the freshly-created doc.
+  const isFreshDoc = searchParams?.get("new") === "1";
+
+  // Drafting state: per-doc template-seeded draft tracked server-side.
+  // We re-fetch when the path changes and after each save (the server
+  // clears the row once the body diverges from the template snapshot).
+  // ``?new=1`` triggers a one-shot expand of the chat widget so the
+  // assistant is immediately available while drafting.
+  const refreshDraftState = useCallback(async () => {
+    try {
+      const state = await getDraftState(path);
+      setDrafting(
+        state
+          ? {
+              kind: "template",
+              path: state.path,
+              templateName: state.template_name,
+              templateId: state.template_id,
+            }
+          : null,
+      );
+      return state;
+    } catch {
+      setDrafting(null);
+      return null;
+    }
+  }, [path, setDrafting]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      await refreshDraftState();
+      if (!cancelled && isFreshDoc) requestExpand();
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [refreshDraftState, isFreshDoc, requestExpand]);
+
+  // Clear drafting context on unmount so the banner doesn't follow the
+  // user to other pages.
+  useEffect(() => {
+    return () => setDrafting(null);
+  }, [setDrafting]);
 
   const refreshAgents = useCallback(() => {
     setAgentsError(null);
@@ -1015,10 +1533,48 @@ function FileViewer({ path }: { path: string }) {
         `/documents/file?path=${encodeURIComponent(path)}`
       );
       setHeadSha(fresh.head_sha ?? null);
+      // The server clears the draft row when the body diverges from
+      // the template snapshot — re-sync our context so the chat
+      // banner disappears at the same moment.
+      await refreshDraftState();
     } catch (e) {
       setError(e instanceof Error ? e.message : "save failed");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function onPickTemplate(template: DocumentTemplateSummary) {
+    setApplyingTemplateId(template.id);
+    setError(null);
+    try {
+      const full = await getTemplate(template.id);
+      setDraft(full.body);
+      setAppliedTemplateBody(full.body);
+      setAppliedTemplateId(template.id);
+      await setDraftTemplate(path, template.id);
+      await refreshDraftState();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "failed to apply template");
+    } finally {
+      setApplyingTemplateId(null);
+    }
+  }
+
+  async function onPickBlank() {
+    setDraft("");
+    setAppliedTemplateBody(null);
+    setAppliedTemplateId(null);
+    setError(null);
+    try {
+      await setDraftTemplate(path, null);
+      // Don't go through ``refreshDraftState`` — the server only knows
+      // about template-backed drafts (``document_drafts``), so it would
+      // return null and clear drafting. Set blank-drafting locally
+      // instead so the chat widget spins up a generic kickoff session.
+      setDrafting({ kind: "blank", path });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "failed to clear template");
     }
   }
 
@@ -1199,10 +1755,35 @@ function FileViewer({ path }: { path: string }) {
                   onChange={setFilenameDraft}
                   disabled={saving}
                 />
+                {(() => {
+                  // Cards visible while the body is still "empty enough"
+                  // to discard without losing user work: truly blank, or
+                  // still verbatim equal to the template the user just
+                  // applied (so they can keep swapping templates).
+                  const isBlank = draft.trim() === "";
+                  const matchesApplied =
+                    appliedTemplateBody !== null && draft === appliedTemplateBody;
+                  const showGallery =
+                    (isBlank || matchesApplied) &&
+                    templates !== null &&
+                    templates.length > 0;
+                  if (!showGallery) return null;
+                  return (
+                    <TemplateGallery
+                      templates={templates!}
+                      activeId={matchesApplied ? appliedTemplateId : null}
+                      applyingId={applyingTemplateId}
+                      blankActive={isBlank && appliedTemplateId === null}
+                      onPick={(t) => void onPickTemplate(t)}
+                      onBlank={() => void onPickBlank()}
+                    />
+                  );
+                })()}
                 <textarea
                   value={draft}
                   onChange={(e) => setDraft(e.target.value)}
                   spellCheck={false}
+                  placeholder="Start typing, or pick a template above…"
                   style={{
                     flex: 1,
                     minHeight: 0,
@@ -1642,11 +2223,15 @@ function FilenameRow({
   value,
   onChange,
   disabled,
+  autoFocus = false,
+  placeholder = "filename",
 }: {
   parent: string;
   value: string;
   onChange: (v: string) => void;
   disabled: boolean;
+  autoFocus?: boolean;
+  placeholder?: string;
 }) {
   return (
     <div
@@ -1677,9 +2262,11 @@ function FilenameRow({
         </span>
       )}
       <input
+        // eslint-disable-next-line jsx-a11y/no-autofocus
+        autoFocus={autoFocus}
         value={value.replace(/\.md$/i, "")}
         onChange={(e) => onChange(e.target.value)}
-        placeholder="filename"
+        placeholder={placeholder}
         disabled={disabled}
         spellCheck={false}
         style={{

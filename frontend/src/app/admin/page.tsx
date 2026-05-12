@@ -72,6 +72,12 @@ export default function AdminPage() {
             description="Send every LLM exchange to a Braintrust project for inspection."
             icon={<TraceIcon />}
           />
+          <AdminCard
+            href="/admin/templates"
+            title="Document templates"
+            description="Reusable starting points for new wiki pages, plus optional chat prompts."
+            icon={<TemplateIcon />}
+          />
         </div>
       </main>
     </AppShell>
@@ -156,6 +162,17 @@ function HealthIcon() {
   return (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <path d="M3 12h4l2-6 4 12 2-6h6" />
+    </svg>
+  );
+}
+
+function TemplateIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <rect x="4" y="3" width="16" height="18" rx="2" />
+      <path d="M8 7h8" />
+      <path d="M8 11h8" />
+      <path d="M8 15h5" />
     </svg>
   );
 }

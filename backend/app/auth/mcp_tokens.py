@@ -117,11 +117,15 @@ def revoke(token_id: str, user_id: str) -> bool:
 # --------------------------------------------------------------------------- #
 
 
-def verify(raw_token: str) -> User | None:
-    """Resolve a raw bearer token to its owning ``User``, or ``None`` if
-    the token is invalid / revoked / malformed. Constant-ish-time:
+def verify(raw_token: str) -> tuple[User, str] | None:
+    """Resolve a raw bearer token to ``(User, agent_name)``, or ``None``
+    if the token is invalid / revoked / malformed. Constant-ish-time:
     bcrypt is run against every row, so an attacker can't tell from
     timing whether any prefix matched.
+
+    ``agent_name`` is the token's user-supplied label, repurposed as
+    the agent identity that gets stamped onto activity rows and woven
+    into the git commit author.
 
     On success, also bumps ``last_used_at`` so the UI can show "last
     used 3 minutes ago" without an extra audit trail.
@@ -153,9 +157,12 @@ def verify(raw_token: str) -> User | None:
 
         match.last_used_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
-        return User(
-            id=user.id,
-            email=user.email,
-            name=user.name,
-            is_admin=bool(user.is_admin),
+        return (
+            User(
+                id=user.id,
+                email=user.email,
+                name=user.name,
+                is_admin=bool(user.is_admin),
+            ),
+            match.name,
         )

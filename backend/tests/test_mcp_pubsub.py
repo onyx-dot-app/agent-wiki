@@ -152,9 +152,13 @@ def test_sse_handler_finally_drops_session_on_close(tmp_repo):
         async def is_disconnected(self) -> bool:
             return False
 
+    from app.auth.deps import BearerPrincipal
+
+    principal = BearerPrincipal(user=user, agent_name="test-agent")
+
     async def run() -> None:
         resp = await transport_sse(
-            cast(Request, FakeRequest(sess_id)), bearer_user=user,
+            cast(Request, FakeRequest(sess_id)), principal=principal,
         )
         body = cast(
             AsyncGenerator[bytes, None],
