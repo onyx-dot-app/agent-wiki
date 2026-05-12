@@ -2,7 +2,14 @@
 
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import useSWR from "swr";
@@ -83,7 +90,8 @@ export default function WikiRoute() {
     rememberWikiPath("/wiki" + (slugPath ? "/" + slugPath : ""));
   }, [slugPath]);
 
-  if (loading || !user) return <main style={{ padding: isMobile ? 16 : 32 }}>Loading…</main>;
+  if (loading || !user)
+    return <main style={{ padding: isMobile ? 16 : 32 }}>Loading…</main>;
 
   return (
     <AppShell>
@@ -104,7 +112,8 @@ function Explorer({ dir }: { dir: string }) {
   const { data, error: listError, mutate: mutatePaths } = useSWR<ListResponse>("/wiki");
   const entries = data?.entries ?? [];
   const [mutationError, setMutationError] = useState<string | null>(null);
-  const error = mutationError ?? (listError instanceof Error ? listError.message : null);
+  const error =
+    mutationError ?? (listError instanceof Error ? listError.message : null);
   const setError = setMutationError;
   // Force the cache to revalidate from the server. Used after writes
   // (create / delete / move) to pull in the new tree.
@@ -135,7 +144,8 @@ function Explorer({ dir }: { dir: string }) {
       if (!rest) continue;
       const slash = rest.indexOf("/");
       if (slash === -1) {
-        if (rest.endsWith(".md")) fileList.push({ name: rest, updated_at: e.updated_at });
+        if (rest.endsWith(".md"))
+          fileList.push({ name: rest, updated_at: e.updated_at });
       } else {
         const name = rest.slice(0, slash);
         const cur = dirMtime.get(name);
@@ -144,9 +154,13 @@ function Explorer({ dir }: { dir: string }) {
         }
       }
     }
-    const dirList = [...dirMtime.entries()].map(([name, updated_at]) => ({ name, updated_at }));
-    const byName = (asc: boolean) => (a: { name: string }, b: { name: string }) =>
-      asc ? a.name.localeCompare(b.name) : b.name.localeCompare(a.name);
+    const dirList = [...dirMtime.entries()].map(([name, updated_at]) => ({
+      name,
+      updated_at,
+    }));
+    const byName =
+      (asc: boolean) => (a: { name: string }, b: { name: string }) =>
+        asc ? a.name.localeCompare(b.name) : b.name.localeCompare(a.name);
     // Newest first; empty timestamps sink to the bottom.
     const byRecent = (a: { updated_at: string }, b: { updated_at: string }) => {
       if (!a.updated_at && !b.updated_at) return 0;
@@ -237,7 +251,8 @@ function Explorer({ dir }: { dir: string }) {
     const segs = rel.split("/");
     const parent = segs.slice(0, -1).join("/");
     const isFile = rel.endsWith(".md");
-    const finalName = isFile && !trimmed.endsWith(".md") ? trimmed + ".md" : trimmed;
+    const finalName =
+      isFile && !trimmed.endsWith(".md") ? trimmed + ".md" : trimmed;
     const newRel = parent ? `${parent}/${finalName}` : finalName;
     if (newRel === rel) {
       setRenaming(null);
@@ -260,13 +275,20 @@ function Explorer({ dir }: { dir: string }) {
   }
 
   return (
-    <main style={{ padding: isMobile ? "16px 12px" : "24px 32px", height: "100vh", overflowY: "auto" }}>
+    <main
+      style={{
+        padding: isMobile ? "16px 12px" : "24px 32px",
+        height: "100vh",
+        overflowY: "auto",
+      }}
+    >
       <PageHeader
         title={
           <Breadcrumbs
             segments={segments}
             onDropToCrumb={(crumbPath) => {
-              if (dragSource && crumbPath !== dir) onMove(dragSource, crumbPath);
+              if (dragSource && crumbPath !== dir)
+                onMove(dragSource, crumbPath);
               setDragSource(null);
               setDropTarget(null);
             }}
@@ -371,7 +393,9 @@ function Explorer({ dir }: { dir: string }) {
       )}
 
       {subdirs.length === 0 && files.length === 0 && !error && (
-        <p style={{ color: color.text.muted, fontSize: 14 }}>This folder is empty. Create a document to get started.</p>
+        <p style={{ color: color.text.muted, fontSize: 14 }}>
+          This folder is empty. Create a document to get started.
+        </p>
       )}
 
       {(subdirs.length > 0 || files.length > 0) && (
@@ -417,7 +441,10 @@ function Explorer({ dir }: { dir: string }) {
                       }
                 }
                 onFolderDragLeave={
-                  isFile ? undefined : () => setDropTarget((cur) => (cur === childPath ? null : cur))
+                  isFile
+                    ? undefined
+                    : () =>
+                        setDropTarget((cur) => (cur === childPath ? null : cur))
                 }
                 onFolderDrop={
                   isFile
@@ -1064,7 +1091,11 @@ function Row({
         alignItems: "center",
         padding: "10px 12px",
         borderBottom: `1px solid ${color.border.subtle}`,
-        background: dropActive ? color.accent.subtleBg : hover ? color.bg.sunken : "transparent",
+        background: dropActive
+          ? color.accent.subtleBg
+          : hover
+            ? color.bg.sunken
+            : "transparent",
         outline: dropActive ? `2px solid ${color.accent.bg}` : undefined,
         opacity: busy ? 0.5 : 1,
         // Click is the primary action; drag is secondary. Pointer
@@ -1074,7 +1105,11 @@ function Row({
         cursor: renaming ? "default" : "pointer",
       }}
     >
-      <span style={{ color: color.text.muted, display: "flex", marginRight: 10 }}>{icon}</span>
+      <span
+        style={{ color: color.text.muted, display: "flex", marginRight: 10 }}
+      >
+        {icon}
+      </span>
       {renaming ? (
         <form
           onSubmit={(e) => {
@@ -1102,10 +1137,20 @@ function Row({
               fontSize: 14,
             }}
           />
-          <Button type="submit" size="sm" variant="primary" disabled={busy || !draft.trim()}>
+          <Button
+            type="submit"
+            size="sm"
+            variant="primary"
+            disabled={busy || !draft.trim()}
+          >
             Save
           </Button>
-          <Button type="button" size="sm" onClick={onCancelRename} disabled={busy}>
+          <Button
+            type="button"
+            size="sm"
+            onClick={onCancelRename}
+            disabled={busy}
+          >
             Cancel
           </Button>
         </form>
@@ -1203,7 +1248,15 @@ function Breadcrumbs({
     crumbs.push({ label: seg, href: `/wiki/${path}`, path });
   });
   return (
-    <nav style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 14, flexWrap: "wrap" }}>
+    <nav
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 6,
+        fontSize: 14,
+        flexWrap: "wrap",
+      }}
+    >
       {crumbs.map((c, i) => {
         const last = i === crumbs.length - 1;
         const targetKey = c.path === "" ? ROOT : c.path;
@@ -1232,16 +1285,26 @@ function Breadcrumbs({
             }
           : {};
         return (
-          <span key={c.href} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <span
+            key={c.href}
+            style={{ display: "flex", alignItems: "center", gap: 6 }}
+          >
             {i > 0 && <span style={{ color: color.text.faint }}>/</span>}
             {last ? (
-              <span style={{ fontWeight: 600, ...activeStyle }} {...dropHandlers}>
+              <span
+                style={{ fontWeight: 600, ...activeStyle }}
+                {...dropHandlers}
+              >
                 {c.label}
               </span>
             ) : (
               <Link
                 href={c.href}
-                style={{ color: color.text.primary, textDecoration: "underline", ...activeStyle }}
+                style={{
+                  color: color.text.primary,
+                  textDecoration: "underline",
+                  ...activeStyle,
+                }}
                 {...dropHandlers}
               >
                 {c.label}
@@ -1386,7 +1449,9 @@ function FileViewer({ path }: { path: string }) {
     )
       .then((r) => setAgents(r.agents))
       .catch((e) =>
-        setAgentsError(e instanceof Error ? e.message : "failed to load activity"),
+        setAgentsError(
+          e instanceof Error ? e.message : "failed to load activity",
+        ),
       );
   }, [path]);
 
@@ -1409,7 +1474,11 @@ function FileViewer({ path }: { path: string }) {
         setCommits(r.commits);
         setHeadSha(r.head_sha);
       })
-      .catch((e) => setHistoryError(e instanceof Error ? e.message : "failed to load history"));
+      .catch((e) =>
+        setHistoryError(
+          e instanceof Error ? e.message : "failed to load history",
+        ),
+      );
   }, [path]);
 
   function toggleHistory() {
@@ -1446,7 +1515,8 @@ function FileViewer({ path }: { path: string }) {
   const trimmedFilename = filenameDraft.trim().replace(/^\/+|\/+$/g, "");
   const filenameNoExt = trimmedFilename.replace(/\.md$/i, "");
   const filenameValid = !!filenameNoExt && !filenameNoExt.includes("/");
-  const renamed = editing && filenameValid && filenameNoExt !== currentBasenameNoExt;
+  const renamed =
+    editing && filenameValid && filenameNoExt !== currentBasenameNoExt;
   const bodyChanged = editing && draft !== body;
   const dirty = editing && (bodyChanged || renamed);
   const viewingOld = viewingSha !== null && viewingSha !== headSha;
@@ -1466,7 +1536,8 @@ function FileViewer({ path }: { path: string }) {
     };
     const onDocClick = (e: MouseEvent) => {
       if (e.defaultPrevented) return;
-      if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey)
+        return;
       const target = e.target as HTMLElement | null;
       const anchor = target?.closest("a");
       if (!anchor) return;
@@ -1476,7 +1547,9 @@ function FileViewer({ path }: { path: string }) {
       const url = new URL(href, window.location.href);
       if (url.origin !== window.location.origin) return;
       if (url.pathname === window.location.pathname) return;
-      if (!window.confirm("You have unsaved changes. Discard them and leave?")) {
+      if (
+        !window.confirm("You have unsaved changes. Discard them and leave?")
+      ) {
         e.preventDefault();
         e.stopPropagation();
       }
@@ -1507,7 +1580,11 @@ function FileViewer({ path }: { path: string }) {
         const baseSha = viewingSha ?? headSha;
         await apiFetch("/wiki/file", {
           method: "PUT",
-          body: JSON.stringify({ path, body: draft, ...(baseSha ? { base_sha: baseSha } : {}) }),
+          body: JSON.stringify({
+            path,
+            body: draft,
+            ...(baseSha ? { base_sha: baseSha } : {}),
+          }),
         });
       }
       if (renamed) {
@@ -1633,7 +1710,9 @@ function FileViewer({ path }: { path: string }) {
           <>
             <div style={{ display: "flex", gap: 8 }}>
               <Button onClick={() => setRunAgentOpen(true)}>Run Agent</Button>
-              <Button onClick={() => setTriggerModalOpen(true)}>+ Trigger</Button>
+              <Button onClick={() => setTriggerModalOpen(true)}>
+                + Trigger
+              </Button>
             </div>
             <div style={{ display: "flex", gap: 8 }}>
               <Button onClick={() => setShareOpen(true)}>Share</Button>
@@ -1663,7 +1742,11 @@ function FileViewer({ path }: { path: string }) {
             <Button onClick={onCancel} disabled={saving}>
               Cancel
             </Button>
-            <Button variant="primary" onClick={onSave} disabled={saving || !dirty}>
+            <Button
+              variant="primary"
+              onClick={onSave}
+              disabled={saving || !dirty}
+            >
               {saving ? "Saving…" : "Save"}
             </Button>
           </>
@@ -1680,7 +1763,15 @@ function FileViewer({ path }: { path: string }) {
       )}
 
       {!editing && triggerStatus && (
-        <div style={{ fontSize: 12, color: color.text.secondary, marginBottom: 12 }}>{triggerStatus}</div>
+        <div
+          style={{
+            fontSize: 12,
+            color: color.text.secondary,
+            marginBottom: 12,
+          }}
+        >
+          {triggerStatus}
+        </div>
       )}
 
       <TriggerModal
@@ -1697,7 +1788,11 @@ function FileViewer({ path }: { path: string }) {
         onClose={() => setShareOpen(false)}
       />
 
-      <RunAgentModal open={runAgentOpen} onClose={() => setRunAgentOpen(false)} />
+      <RunAgentModal
+        open={runAgentOpen}
+        onClose={() => setRunAgentOpen(false)}
+        wikiPath={path || null}
+      />
 
       {error && (
         <div
@@ -1730,7 +1825,8 @@ function FileViewer({ path }: { path: string }) {
           }}
         >
           <span>
-            Viewing an older version{viewingSha ? ` (${viewingSha.slice(0, 7)})` : ""}.
+            Viewing an older version
+            {viewingSha ? ` (${viewingSha.slice(0, 7)})` : ""}.
             {editing
               ? " Saving will replace the current version and mark the in-between revisions as deprecated."
               : " Click Edit to fork from this version."}
@@ -1746,7 +1842,15 @@ function FileViewer({ path }: { path: string }) {
 
       {!loading && !error && (
         <div style={{ flex: 1, minHeight: 0, display: "flex", gap: 16 }}>
-          <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 12 }}>
+          <div
+            style={{
+              flex: 1,
+              minWidth: 0,
+              display: "flex",
+              flexDirection: "column",
+              gap: 12,
+            }}
+          >
             {editing ? (
               <>
                 <FilenameRow
@@ -1792,7 +1896,8 @@ function FileViewer({ path }: { path: string }) {
                     padding: 16,
                     border: `1px solid ${color.border.default}`,
                     borderRadius: radius.md,
-                    fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+                    fontFamily:
+                      "ui-monospace, SFMono-Regular, Menlo, monospace",
                     fontSize: 14,
                     lineHeight: 1.6,
                     resize: "none",
@@ -1805,7 +1910,9 @@ function FileViewer({ path }: { path: string }) {
                 className="markdown"
                 style={{ flex: 1, minHeight: 0, overflowY: "auto" }}
               >
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{body}</ReactMarkdown>
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  {body}
+                </ReactMarkdown>
               </article>
             )}
           </div>
@@ -1830,7 +1937,12 @@ function FileViewer({ path }: { path: string }) {
           <div
             onClick={() => setHistoryOpen(false)}
             aria-hidden
-            style={{ position: "fixed", inset: 0, background: color.overlay, zIndex: 60 }}
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: color.overlay,
+              zIndex: 60,
+            }}
           />
           <div
             style={{
@@ -1896,7 +2008,9 @@ function HistoryPanel({
         height: fullHeight ? "100%" : undefined,
         flexShrink: 0,
         border: fullHeight ? "none" : `1px solid ${color.border.default}`,
-        borderLeft: fullHeight ? `1px solid ${color.border.default}` : undefined,
+        borderLeft: fullHeight
+          ? `1px solid ${color.border.default}`
+          : undefined,
         borderRadius: fullHeight ? 0 : radius.md,
         background: color.bg.panel,
         display: "flex",
@@ -1935,13 +2049,21 @@ function HistoryPanel({
       </div>
       <div style={{ overflowY: "auto", flex: 1 }}>
         {error && (
-          <div style={{ padding: 12, fontSize: 12, color: color.state.danger.fg }}>{error}</div>
+          <div
+            style={{ padding: 12, fontSize: 12, color: color.state.danger.fg }}
+          >
+            {error}
+          </div>
         )}
         {!error && commits === null && (
-          <div style={{ padding: 12, fontSize: 12, color: color.text.muted }}>Loading…</div>
+          <div style={{ padding: 12, fontSize: 12, color: color.text.muted }}>
+            Loading…
+          </div>
         )}
         {!error && commits && commits.length === 0 && (
-          <div style={{ padding: 12, fontSize: 12, color: color.text.muted }}>No history yet.</div>
+          <div style={{ padding: 12, fontSize: 12, color: color.text.muted }}>
+            No history yet.
+          </div>
         )}
         {!error && commits && commits.length > 0 && (
           <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
@@ -1998,7 +2120,13 @@ function CommitRow({
           display: "block",
         }}
       >
-        <div style={{ fontSize: 13, fontWeight: active ? 600 : 500, lineHeight: 1.35 }}>
+        <div
+          style={{
+            fontSize: 13,
+            fontWeight: active ? 600 : 500,
+            lineHeight: 1.35,
+          }}
+        >
           {title}
         </div>
         <div style={{ fontSize: 11, color: color.text.muted, marginTop: 4 }}>
@@ -2093,7 +2221,13 @@ function ActiveAgentsBar({
           </span>
         )}
         {error && (
-          <span style={{ marginLeft: "auto", fontSize: 12, color: color.state.danger.fg }}>
+          <span
+            style={{
+              marginLeft: "auto",
+              fontSize: 12,
+              color: color.state.danger.fg,
+            }}
+          >
             {error}
           </span>
         )}
@@ -2110,7 +2244,9 @@ function ActiveAgentsBar({
         >
           {agents.map((a, i) => (
             <ActiveAgentRow
-              key={`${a.owner_display}-${a.agent_name ?? ""}-${a.activity}-${i}`}
+              key={`${a.owner_display}-${a.agent_name ?? ""}-${
+                a.activity
+              }-${i}`}
               a={a}
               isLast={i === agents.length - 1}
             />
@@ -2183,11 +2319,15 @@ function ActiveAgentRow({
         {a.activity}
       </span>
 
-      <span style={{ fontWeight: 500, color: color.text.primary, flexShrink: 0 }}>
+      <span
+        style={{ fontWeight: 500, color: color.text.primary, flexShrink: 0 }}
+      >
         {a.owner_display}
       </span>
       {a.agent_name ? (
-        <span style={{ color: color.text.muted, flexShrink: 0 }}>· {a.agent_name}</span>
+        <span style={{ color: color.text.muted, flexShrink: 0 }}>
+          · {a.agent_name}
+        </span>
       ) : null}
 
       {a.description ? (
@@ -2210,9 +2350,12 @@ function ActiveAgentRow({
 
       <span
         style={{ fontSize: 11, color: color.text.faint, flexShrink: 0 }}
-        title={`Started ${formatTs(a.registered_at)} · Expires ${formatTs(a.expires_at)}`}
+        title={`Started ${formatTs(a.registered_at)} · Expires ${formatTs(
+          a.expires_at,
+        )}`}
       >
-        {formatRelative(a.registered_at)} · expires {formatRelative(a.expires_at)}
+        {formatRelative(a.registered_at)} · expires{" "}
+        {formatRelative(a.expires_at)}
       </span>
     </li>
   );
@@ -2301,7 +2444,14 @@ function FilenameRow({
 
 function BackIcon() {
   return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <svg
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+    >
       <path d="M19 12H5" />
       <path d="M12 19l-7-7 7-7" />
     </svg>
@@ -2310,7 +2460,14 @@ function BackIcon() {
 
 function PencilIcon() {
   return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+    >
       <path d="M12 20h9" />
       <path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4z" />
     </svg>
@@ -2319,7 +2476,14 @@ function PencilIcon() {
 
 function TrashIcon() {
   return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+    >
       <path d="M3 6h18" />
       <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
       <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
