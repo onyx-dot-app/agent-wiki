@@ -18,6 +18,7 @@ import { AppShell } from "@/components/common/AppShell";
 import { Button } from "@/components/common/Button";
 import { PageHeader } from "@/components/common/PageHeader";
 import { TriggerModal } from "@/components/triggers/TriggerModal";
+import { ActiveSessionsList } from "@/components/wiki/ActiveSessionsList";
 import { RunAgentModal } from "@/components/wiki/RunAgentModal";
 import { ShareDialog } from "@/components/wiki/ShareDialog";
 import { FolderIcon, FileIcon } from "@/components/wiki/WikiIcons";
@@ -1787,6 +1788,8 @@ function FileViewer({ path }: { path: string }) {
         open={shareOpen}
         onClose={() => setShareOpen(false)}
       />
+
+      <ActiveSessionsList wikiPath={path} />
 
       <RunAgentModal
         open={runAgentOpen}
