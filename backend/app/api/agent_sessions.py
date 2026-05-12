@@ -46,7 +46,7 @@ def _check_flag() -> None:
         raise HTTPException(status_code=404, detail="launchers disabled")
 
 
-def _require_own_session(sid: str, user: User) -> dict:
+def _require_own_session(sid: str, user: User) -> dict[str, object]:
     row = sessions_repo.get(sid)
     if row is None:
         raise HTTPException(status_code=404, detail="session not found")

@@ -210,7 +210,7 @@ def mark_stale_idle() -> int:
             )
             .values(status="idle")
         )
-        return int(result.rowcount or 0)
+        return int(result.rowcount or 0)  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType, reportUnknownArgumentType]
 
 
 def evict_idle_to_closed() -> int:
@@ -228,7 +228,7 @@ def evict_idle_to_closed() -> int:
             )
             .values(status="closed", closed_at=now)
         )
-        return int(result.rowcount or 0)
+        return int(result.rowcount or 0)  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType, reportUnknownArgumentType]
 
 
 def evict_spawn_missed() -> int:
@@ -246,4 +246,4 @@ def evict_spawn_missed() -> int:
             )
             .values(status="failed", closed_at=now)
         )
-        return int(result.rowcount or 0)
+        return int(result.rowcount or 0)  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType, reportUnknownArgumentType]

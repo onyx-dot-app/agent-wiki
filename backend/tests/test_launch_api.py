@@ -15,6 +15,13 @@ from tests._auth import login_fastapi
 from tests._seed import seed_user
 
 
+def _get_session_dict(sid):
+    from app.launchers import sessions as _sr
+    row = _sr.get(sid)
+    assert row is not None
+    return row
+
+
 @pytest.fixture
 def client(tmp_config):
     init_db()
@@ -275,6 +282,7 @@ def test_exchange_transitions_session_to_active_with_machine_id(client):
         json={"code": launch_body["launch_code"], "machine_id": "m_xyz"},
     )
     row = sessions_repo.get(launch_body["agent_session_id"])
+    assert row is not None
     assert row["status"] == "active"
     assert row["machine_id"] == "m_xyz"
 

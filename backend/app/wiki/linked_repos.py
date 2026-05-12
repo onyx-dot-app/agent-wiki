@@ -27,12 +27,12 @@ def parse_linked_repos(body: str) -> list[str]:
     if match is None:
         return []
     try:
-        data = yaml.safe_load(match.group(1))
+        data: object = yaml.safe_load(match.group(1))
     except yaml.YAMLError:
         return []
     if not isinstance(data, dict):
         return []
-    raw = data.get("linked_repos")
+    raw: object = data.get("linked_repos")  # type: ignore[union-attr]
     if not isinstance(raw, list):
         return []
-    return [item for item in raw if isinstance(item, str)]
+    return [item for item in raw if isinstance(item, str)]  # type: ignore[reportUnknownVariableType]

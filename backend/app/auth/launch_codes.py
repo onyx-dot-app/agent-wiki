@@ -88,4 +88,4 @@ def expire_sweep() -> int:
     now_iso = _iso(datetime.now(timezone.utc))
     with session() as s:
         result = s.execute(delete(LaunchCode).where(LaunchCode.expires_at <= now_iso))
-        return int(result.rowcount or 0)
+        return int(result.rowcount or 0)  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType, reportUnknownArgumentType]

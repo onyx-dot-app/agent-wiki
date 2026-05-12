@@ -226,8 +226,12 @@ def get_registry() -> ManifestRegistry:
     return _registry_singleton
 
 
-def _reset_registry_for_tests() -> None:
+def reset_registry_for_tests() -> None:
     """Test-only: drop the cached singleton so a fresh load picks up
     on-disk changes."""
     global _registry_singleton
     _registry_singleton = None
+
+
+# Backwards-compatible alias (tests + future modules may reference either).
+_reset_registry_for_tests = reset_registry_for_tests

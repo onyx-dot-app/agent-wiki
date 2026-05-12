@@ -27,7 +27,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.auth import mcp_tokens as tokens_repo
 from app.config import CONFIG
-from app.db.models import LauncherToken, McpToken
+from app.db.models import LauncherToken
 from app.db.session import session
 
 log = logging.getLogger(__name__)
@@ -80,7 +80,7 @@ def get_or_mint_for_user(user_id: str, *, name: str) -> tuple[str, str]:
             .on_conflict_do_nothing(index_elements=["user_id"])
         )
         result = s.execute(stmt)
-        if result.rowcount == 0:
+        if result.rowcount == 0:  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
             # Lost the race. Revoke our orphan mcp_token, return the winner's.
             log.info("launcher_token mint race lost for user=%s; revoking orphan", user_id)
             tokens_repo.revoke(token_id, user_id)

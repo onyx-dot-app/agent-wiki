@@ -14,6 +14,13 @@ from tests._auth import login_fastapi
 from tests._seed import seed_user
 
 
+def _get_session_dict(sid):
+    from app.launchers import sessions as _sr
+    row = _sr.get(sid)
+    assert row is not None
+    return row
+
+
 @pytest.fixture
 def client(tmp_config):
     init_db()
@@ -65,10 +72,10 @@ def test_heartbeat_updates_last_activity(client):
     login_fastapi(client, uid)
     sid = _seed_session(uid)
     sessions_repo.mark_active(sid, machine_id="m")
-    before = sessions_repo.get(sid)["last_activity_at"]
+    before = _get_session_dict(sid)["last_activity_at"]
     res = client.post(f"/api/agent-sessions/{sid}/heartbeat")
     assert res.status_code == 204
-    after = sessions_repo.get(sid)["last_activity_at"]
+    after = _get_session_dict(sid)["last_activity_at"]
     assert after >= before
 
 
@@ -102,7 +109,7 @@ def test_cli_session_id_post(client):
         json={"cli_session_id": "cli_xyz"},
     )
     assert res.status_code == 204
-    assert sessions_repo.get(sid)["cli_session_id"] == "cli_xyz"
+    assert _get_session_dict(sid)["cli_session_id"] == "cli_xyz"
 
 
 def test_spawn_ok_post(client):
@@ -110,10 +117,10 @@ def test_spawn_ok_post(client):
     uid = seed_user()
     login_fastapi(client, uid)
     sid = _seed_session(uid)
-    assert sessions_repo.get(sid)["spawn_ok_at"] is None
+    assert _get_session_dict(sid)["spawn_ok_at"] is None
     res = client.post(f"/api/agent-sessions/{sid}/spawn-ok")
     assert res.status_code == 204
-    assert sessions_repo.get(sid)["spawn_ok_at"] is not None
+    assert _get_session_dict(sid)["spawn_ok_at"] is not None
 
 
 def test_close_with_user_reason_marks_closed(client):
@@ -122,7 +129,7 @@ def test_close_with_user_reason_marks_closed(client):
     sid = _seed_session(uid)
     res = client.post(f"/api/agent-sessions/{sid}/close", json={"reason": "user_clicked"})
     assert res.status_code == 204
-    assert sessions_repo.get(sid)["status"] == "closed"
+    assert _get_session_dict(sid)["status"] == "closed"
 
 
 def test_close_with_error_reason_marks_failed(client):
@@ -135,4 +142,4 @@ def test_close_with_error_reason_marks_failed(client):
         json={"reason": "cli_not_found"},
     )
     assert res.status_code == 204
-    assert sessions_repo.get(sid)["status"] == "failed"
+    assert _get_session_dict(sid)["status"] == "failed"

@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
-from app.config import Config
 from app.db.session import init_db
 from app.launchers import sessions as sessions_repo
 
 from tests._seed import seed_user
+
+
+def _get_session_dict(sid):
+    from app.launchers import sessions as _sr
+    row = _sr.get(sid)
+    assert row is not None
+    return row
 
 
 def _shrink_idle(monkeypatch, *, idle=0, close_after=0):
@@ -37,6 +43,7 @@ def test_create_minimal(tmp_config):
     assert sid.startswith("as_")
     row = sessions_repo.get(sid)
     assert row is not None
+    assert row is not None
     assert row["user_id"] == uid
     assert row["status"] == "pending"
     assert row["machine_id"] is None
@@ -54,6 +61,7 @@ def test_mark_active_sets_machine_id(tmp_config):
     )
     sessions_repo.mark_active(sid, machine_id="m_abc")
     row = sessions_repo.get(sid)
+    assert row is not None
     assert row["status"] == "active"
     assert row["machine_id"] == "m_abc"
 
@@ -69,7 +77,7 @@ def test_set_cli_session_id(tmp_config):
         working_dir=None,
     )
     sessions_repo.set_cli_session_id(sid, "cli_xyz")
-    assert sessions_repo.get(sid)["cli_session_id"] == "cli_xyz"
+    assert _get_session_dict(sid)["cli_session_id"] == "cli_xyz"
 
 
 def test_mark_spawn_ok(tmp_config):
@@ -82,9 +90,9 @@ def test_mark_spawn_ok(tmp_config):
         wiki_path=None,
         working_dir=None,
     )
-    assert sessions_repo.get(sid)["spawn_ok_at"] is None
+    assert _get_session_dict(sid)["spawn_ok_at"] is None
     sessions_repo.mark_spawn_ok(sid)
-    assert sessions_repo.get(sid)["spawn_ok_at"] is not None
+    assert _get_session_dict(sid)["spawn_ok_at"] is not None
 
 
 def test_touch_activity_does_not_resurrect_closed(tmp_config):
@@ -101,8 +109,10 @@ def test_touch_activity_does_not_resurrect_closed(tmp_config):
     )
     sessions_repo.close(sid, reason="user")
     before = sessions_repo.get(sid)
+    assert before is not None
     sessions_repo.touch_activity(sid)
     after = sessions_repo.get(sid)
+    assert after is not None
     assert after["status"] == "closed"
     assert after["last_activity_at"] == before["last_activity_at"]
 
@@ -119,6 +129,7 @@ def test_close_marks_status_and_closed_at(tmp_config):
     )
     sessions_repo.close(sid, reason="user_clicked")
     row = sessions_repo.get(sid)
+    assert row is not None
     assert row["status"] == "closed"
     assert row["closed_at"] is not None
 
@@ -135,6 +146,7 @@ def test_mark_failed(tmp_config):
     )
     sessions_repo.mark_failed(sid, reason="cli_not_found")
     row = sessions_repo.get(sid)
+    assert row is not None
     assert row["status"] == "failed"
     assert row["closed_at"] is not None
 
@@ -211,7 +223,7 @@ def test_sweep_marks_idle(tmp_config, monkeypatch):
     _shrink_idle(monkeypatch, idle=0)
     n = sessions_repo.mark_stale_idle()
     assert n == 1
-    assert sessions_repo.get(sid)["status"] == "idle"
+    assert _get_session_dict(sid)["status"] == "idle"
 
 
 def test_sweep_evicts_idle_to_closed_across_two_ticks(tmp_config, monkeypatch):
@@ -230,12 +242,11 @@ def test_sweep_evicts_idle_to_closed_across_two_ticks(tmp_config, monkeypatch):
     sessions_repo.mark_stale_idle()
     n = sessions_repo.evict_idle_to_closed()
     assert n == 1
-    assert sessions_repo.get(sid)["status"] == "closed"
+    assert _get_session_dict(sid)["status"] == "closed"
 
 
 def test_evict_spawn_missed(tmp_config, monkeypatch):
     """R9#1 — active session without spawn_ok beacon gets failed after 30s."""
-    import time
     from datetime import datetime, timedelta, timezone
 
     init_db()
@@ -258,4 +269,4 @@ def test_evict_spawn_missed(tmp_config, monkeypatch):
         s.execute(_u(_AS).where(_AS.id == sid).values(started_at=past))
     n = sessions_repo.evict_spawn_missed()
     assert n == 1
-    assert sessions_repo.get(sid)["status"] == "failed"
+    assert _get_session_dict(sid)["status"] == "failed"

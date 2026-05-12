@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from app.auth import launch_codes as codes_repo
 from app.auth import mcp_tokens as tokens_repo
 from app.db.models import AgentSession

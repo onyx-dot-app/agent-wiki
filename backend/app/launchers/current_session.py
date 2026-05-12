@@ -23,7 +23,7 @@ def current_agent_session_id() -> str | None:
     return current_agent_session_id_ctx.get()
 
 
-@contextmanager
+@contextmanager  # pyright: ignore[reportDeprecated]
 def set_current_agent_session_id(sid: str | None) -> Iterator[None]:
     token = current_agent_session_id_ctx.set(sid)
     try:

@@ -17,6 +17,13 @@ from app.tasks.queues import lightweight_maintenance_queue
 from tests._seed import seed_user
 
 
+def _get_session_dict(sid):
+    from app.launchers import sessions as _sr
+    row = _sr.get(sid)
+    assert row is not None
+    return row
+
+
 def test_sweep_runs_on_empty_db(tmp_config):
     init_db()
     with lightweight_maintenance_queue.immediate_mode():
@@ -64,7 +71,7 @@ def test_sweep_marks_stale_active_as_idle(tmp_config, monkeypatch):
     )
     with lightweight_maintenance_queue.immediate_mode():
         expire_launch_artifacts()
-    assert sessions_repo.get(sid)["status"] == "idle"
+    assert _get_session_dict(sid)["status"] == "idle"
 
 
 def test_sweep_marks_failed_when_no_spawn_ok_within_30s(tmp_config):
@@ -85,4 +92,4 @@ def test_sweep_marks_failed_when_no_spawn_ok_within_30s(tmp_config):
         s.execute(update(AgentSession).where(AgentSession.id == sid).values(started_at=past))
     with lightweight_maintenance_queue.immediate_mode():
         expire_launch_artifacts()
-    assert sessions_repo.get(sid)["status"] == "failed"
+    assert _get_session_dict(sid)["status"] == "failed"
