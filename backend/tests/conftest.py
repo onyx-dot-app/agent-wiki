@@ -71,7 +71,7 @@ def tmp_config(tmp_path, monkeypatch):
         secret_key="test-secret",
         wiki_dir=str(wiki_dir),
         database_url=_with_search_path(_BASE_URL, schema),
-        redis_url=os.environ.get("TEST_REDIS_URL", "redis://localhost:6379/1"),
+        redis_url=os.environ.get("TEST_REDIS_URL", "redis://localhost:6380/1"),
         max_queue_size=1000,
         auth_mode="basic",
         oidc_issuer="",
