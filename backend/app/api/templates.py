@@ -18,6 +18,7 @@ from app.models.template import (
     DocumentTemplateSummary,
     DocumentTemplateSummaryListResponse,
     DocumentTemplateView,
+    ReorderDocumentTemplatesRequest,
     UpdateDocumentTemplateRequest,
 )
 from app.wiki import templates as templates_repo
@@ -34,6 +35,7 @@ def _view(row: dict[str, Any]) -> DocumentTemplateView:
         body=row["body"],
         description=row["description"],
         system_prompt=row["system_prompt"],
+        sort_order=row["sort_order"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
     )
@@ -150,3 +152,20 @@ def delete_template(
         raise HTTPException(status_code=404, detail="not found")
     log.info("admin: %s deleted template %s", actor.id, template_id)
     return OkResponse()
+
+
+@admin_router.post("/reorder", response_model=DocumentTemplateListResponse)
+def reorder_templates(
+    req: ReorderDocumentTemplatesRequest,
+    actor: User = Depends(require_admin),
+) -> DocumentTemplateListResponse:
+    """Set the picker order. Body lists every current template id once,
+    in the desired order; the server sets ``sort_order`` to that index."""
+    try:
+        templates_repo.reorder(req.template_ids)
+    except templates_repo.ReorderMismatch as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    log.info("admin: %s reordered %d templates", actor.id, len(req.template_ids))
+    return DocumentTemplateListResponse(
+        templates=[_view(r) for r in templates_repo.list_all()],
+    )

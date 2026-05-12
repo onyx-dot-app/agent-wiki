@@ -8,13 +8,25 @@ and MCP fan-out all fire as if a user had created each page through
 the UI. The lifespan invokes this *after* ``ensure_wiki_repo`` so the
 git repo is already initialized when we start committing.
 
+Seed-once contract: the hook stamps a marker in ``wiki_seed_state``
+the first time it runs on a given database, whether it wrote the
+seed or observed pre-existing content. Once that marker is set, the
+seed never runs again — so a user who deletes every onboarding page
+and reboots gets an empty wiki, not a re-seed. The marker lives in
+Postgres on purpose, so wiping the wiki working tree alone doesn't
+re-arm seeding.
+
 The CLI in ``app/scripts/seed_onboarding.py`` shares the helper below
-to write pages onto an already-populated wiki without nuking it.
+to write pages onto an already-populated wiki without nuking it. The
+CLI bypasses the marker because it's explicitly user-driven.
 """
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 from pathlib import Path
+
+from sqlalchemy import text
 
 log = logging.getLogger(__name__)
 
@@ -74,22 +86,64 @@ def write_seed_pages(
     return processed
 
 
-def seed_if_empty(target_dir: str) -> bool:
-    """If the wiki tracks no markdown pages, populate it from the bundled seed.
+def _read_seed_marker() -> str | None:
+    """Return the ``seeded_at`` ISO timestamp, or None if not yet stamped."""
+    from app.db.session import session
 
-    Returns True if pages were written. Must be called *after*
-    ``ensure_wiki_repo`` so the git repo exists. Detects "fresh" by
-    looking for any tracked ``.md`` file (not by checking ``.git`` —
-    the lifespan has already initialized git by this point).
+    with session() as s:
+        row = s.execute(
+            text("SELECT seeded_at FROM wiki_seed_state WHERE id = 1")
+        ).first()
+    return row[0] if row else None
+
+
+def _stamp_seed_marker() -> None:
+    """Stamp ``seeded_at`` to now (UTC, ISO). Upserts the singleton row."""
+    from app.db.session import session
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    with session() as s:
+        s.execute(
+            text(
+                "INSERT INTO wiki_seed_state (id, seeded_at) VALUES (1, :ts) "
+                "ON CONFLICT (id) DO UPDATE SET seeded_at = EXCLUDED.seeded_at"
+            ),
+            {"ts": now_iso},
+        )
+    log.info("wiki_seed_state marker stamped at %s", now_iso)
+
+
+def seed_if_empty(target_dir: str) -> bool:
+    """If this DB has never been seeded, populate the wiki from the bundled seed.
+
+    Honors a one-shot marker (``wiki_seed_state.seeded_at``) so the
+    seed never runs twice on the same database. Must be called *after*
+    ``ensure_wiki_repo`` so the git repo exists, and *after*
+    ``init_db`` so the marker table is migrated.
+
+    Returns True if pages were written, False otherwise (marker
+    already set, wiki has pre-existing content, or seed source
+    missing). In the "wiki has pre-existing content" case the marker
+    is still stamped — so future content deletions won't trigger a
+    re-seed.
     """
+    if _read_seed_marker() is not None:
+        log.debug("wiki_seed_state marker already set, skipping seed")
+        return False
     if not SEED_SOURCE_DIR.is_dir():
         log.debug("no bundled wiki seed at %s, skipping", SEED_SOURCE_DIR)
         return False
     from app.wiki.git import list_paths
 
     if any(p.endswith(".md") for p in list_paths()):
-        log.debug("wiki already has tracked pages, skipping seed")
+        # Pre-existing content (admin seeded another way, migrating from
+        # an older install). Stamp the marker so a future delete-all
+        # doesn't trigger re-seeding.
+        log.info("wiki already has tracked pages, stamping marker without seeding")
+        _stamp_seed_marker()
         return False
     log.info("seeding empty wiki at %s from %s", target_dir, SEED_SOURCE_DIR)
     written = write_seed_pages(Path(target_dir), overwrite_existing=False)
+    if written > 0:
+        _stamp_seed_marker()
     return written > 0

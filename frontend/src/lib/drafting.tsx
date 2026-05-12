@@ -9,17 +9,29 @@ import {
   type ReactNode,
 } from "react";
 
-export interface DraftingState {
-  /** Canonical wiki path the user is drafting. ``null`` while the doc
-   *  is still being composed in NewDocView (no file on disk yet). */
-  path: string | null;
-  /** Display name of the template (null if it was deleted after creation). */
-  templateName: string | null;
-  /** Template id, used to fetch the system prompt server-side. ``null``
-   *  when drafting state is sourced from a draft row whose template was
-   *  later deleted (the path-based prompt lookup still works). */
-  templateId: string | null;
-}
+/** Active drafting state. Discriminated on ``kind``:
+ *
+ *  - ``template`` — user picked a named template; chat is seeded with
+ *    that template's body and (optional) system prompt.
+ *  - ``blank`` — user picked "Blank document"; chat gets a generic
+ *    "what do you want to work on" prime that hints at the wiki's
+ *    auto-fill behavior. No template row on the server.
+ *
+ *  Both variants carry ``path`` — null while the doc is still being
+ *  composed in NewDocView (no file on disk yet). */
+export type DraftingState =
+  | {
+      kind: "template";
+      path: string | null;
+      templateName: string | null;
+      /** Used to fetch the system prompt server-side. ``null`` when the
+       *  draft row's template was deleted after creation. */
+      templateId: string | null;
+    }
+  | {
+      kind: "blank";
+      path: string | null;
+    };
 
 interface DraftingContextValue {
   /** Active drafting state, or null if not drafting from a template. */

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import useSWR from "swr";
@@ -474,14 +474,15 @@ function NewDocView({ dir }: { dir: string }) {
 
   // Sync drafting context with the picked template so chat applies
   // the right system prompt while we're still on this pre-save view.
-  // Clears on unmount.
+  // The "Blank document" case is handled imperatively in onPickBlank —
+  // we don't fire it from here because the initial render has
+  // ``appliedTemplateId === null`` too, and we don't want to auto-start
+  // a blank chat the moment the page mounts.
   useEffect(() => {
-    if (!appliedTemplateId || !templates) {
-      setDrafting(null);
-      return;
-    }
+    if (!appliedTemplateId || !templates) return;
     const t = templates.find((x) => x.id === appliedTemplateId);
     setDrafting({
+      kind: "template",
       path: null,
       templateId: appliedTemplateId,
       templateName: t?.name ?? null,
@@ -515,6 +516,11 @@ function NewDocView({ dir }: { dir: string }) {
     setDraft("");
     setAppliedTemplateBody(null);
     setAppliedTemplateId(null);
+    // Kick the chat widget into blank-drafting mode so it spins up a
+    // hidden session with the generic "what would you like to work on"
+    // prime, the same way a template pick spins up a template-aware
+    // session.
+    setDrafting({ kind: "blank", path: null });
   }
 
   async function onCreate() {
@@ -664,6 +670,9 @@ function TemplateGallery({
   onPick: (t: DocumentTemplateSummary) => void;
   onBlank: () => void;
 }) {
+  // Always a single-row strip — the picker never wraps to a second
+  // line. On wide screens the user scrolls / clicks chevrons through
+  // the row; on narrow screens the same layout becomes a swipe strip.
   return (
     <div
       style={{
@@ -681,35 +690,156 @@ function TemplateGallery({
           Start from a template
         </span>
         <span style={{ fontSize: 12, color: color.text.muted }}>
-          Click to fill the editor — pick a different one any time, or just start typing.
+          Scroll or use the arrows to browse — tap to apply.
         </span>
       </div>
+      <TemplateStrip
+        templates={templates}
+        activeId={activeId}
+        applyingId={applyingId}
+        blankActive={blankActive}
+        onPick={onPick}
+        onBlank={onBlank}
+      />
+    </div>
+  );
+}
+
+function TemplateStrip({
+  templates,
+  activeId,
+  applyingId,
+  blankActive,
+  onPick,
+  onBlank,
+}: {
+  templates: DocumentTemplateSummary[];
+  activeId: string | null;
+  applyingId: string | null;
+  blankActive: boolean;
+  onPick: (t: DocumentTemplateSummary) => void;
+  onBlank: () => void;
+}) {
+  const scrollerRef = useRef<HTMLDivElement | null>(null);
+  const [edges, setEdges] = useState<{ left: boolean; right: boolean }>({
+    left: false,
+    right: false,
+  });
+
+  const recomputeEdges = useCallback(() => {
+    const el = scrollerRef.current;
+    if (!el) return;
+    const atStart = el.scrollLeft <= 1;
+    const atEnd = el.scrollLeft + el.clientWidth >= el.scrollWidth - 1;
+    setEdges({ left: !atStart, right: !atEnd });
+  }, []);
+
+  useEffect(() => {
+    recomputeEdges();
+    const el = scrollerRef.current;
+    if (!el) return;
+    el.addEventListener("scroll", recomputeEdges, { passive: true });
+    window.addEventListener("resize", recomputeEdges);
+    return () => {
+      el.removeEventListener("scroll", recomputeEdges);
+      window.removeEventListener("resize", recomputeEdges);
+    };
+  }, [recomputeEdges, templates.length]);
+
+  const scrollBy = useCallback((dx: number) => {
+    const el = scrollerRef.current;
+    if (!el) return;
+    el.scrollBy({ left: dx, behavior: "smooth" });
+  }, []);
+
+  // One full card width per click feels right — the user advances by
+  // a card rather than by a viewport, so they never lose their place.
+  const CARD_WIDTH = 200;
+  const STEP = CARD_WIDTH + 8; // card width + gap
+
+  return (
+    <div style={{ position: "relative" }}>
       <div
+        ref={scrollerRef}
+        className="scroll-x-hidden"
         style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))",
+          display: "flex",
           gap: 8,
+          overflowX: "auto",
+          scrollSnapType: "x mandatory",
+          WebkitOverflowScrolling: "touch",
+          paddingBottom: 2, // leave room for focus rings
         }}
       >
-        <TemplateCard
-          title="Blank document"
-          description="Empty file — just start typing."
-          active={blankActive}
-          busy={false}
-          onClick={onBlank}
-        />
-        {templates.map((t) => (
+        <div style={{ flex: "0 0 auto", scrollSnapAlign: "start", width: CARD_WIDTH }}>
           <TemplateCard
-            key={t.id}
-            title={t.name}
-            description={t.description}
-            active={activeId === t.id}
-            busy={applyingId === t.id}
-            onClick={() => onPick(t)}
+            title="Blank document"
+            description="Empty file — just start typing."
+            active={blankActive}
+            busy={false}
+            onClick={onBlank}
           />
+        </div>
+        {templates.map((t) => (
+          <div
+            key={t.id}
+            style={{ flex: "0 0 auto", scrollSnapAlign: "start", width: CARD_WIDTH }}
+          >
+            <TemplateCard
+              title={t.name}
+              description={t.description}
+              active={activeId === t.id}
+              busy={applyingId === t.id}
+              onClick={() => onPick(t)}
+            />
+          </div>
         ))}
       </div>
+      {edges.left && (
+        <StripArrow direction="left" onClick={() => scrollBy(-STEP)} />
+      )}
+      {edges.right && (
+        <StripArrow direction="right" onClick={() => scrollBy(STEP)} />
+      )}
     </div>
+  );
+}
+
+function StripArrow({
+  direction,
+  onClick,
+}: {
+  direction: "left" | "right";
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={direction === "left" ? "Scroll left" : "Scroll right"}
+      style={{
+        position: "absolute",
+        top: "50%",
+        transform: "translateY(-50%)",
+        ...(direction === "left" ? { left: 4 } : { right: 4 }),
+        width: 28,
+        height: 28,
+        borderRadius: radius.pill,
+        background: color.bg.page,
+        border: `1px solid ${color.border.default}`,
+        boxShadow: shadow.sm,
+        cursor: "pointer",
+        color: color.text.secondary,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 0,
+      }}
+    >
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        {direction === "left" ? <path d="M15 18l-6-6 6-6" /> : <path d="M9 6l6 6-6 6" />}
+      </svg>
+    </button>
   );
 }
 
@@ -739,6 +869,11 @@ function TemplateCard({
         borderRadius: radius.sm,
         cursor: busy ? "wait" : "pointer",
         color: color.text.primary,
+        // Fill the wrapper (grid cell or strip slot) so adjacent cards
+        // align even when their description text differs in length.
+        width: "100%",
+        height: "100%",
+        boxSizing: "border-box",
         minHeight: 64,
         display: "flex",
         flexDirection: "column",
@@ -1210,6 +1345,7 @@ function FileViewer({ path }: { path: string }) {
       setDrafting(
         state
           ? {
+              kind: "template",
               path: state.path,
               templateName: state.template_name,
               templateId: state.template_id,
@@ -1429,7 +1565,11 @@ function FileViewer({ path }: { path: string }) {
     setError(null);
     try {
       await setDraftTemplate(path, null);
-      await refreshDraftState();
+      // Don't go through ``refreshDraftState`` — the server only knows
+      // about template-backed drafts (``document_drafts``), so it would
+      // return null and clear drafting. Set blank-drafting locally
+      // instead so the chat widget spins up a generic kickoff session.
+      setDrafting({ kind: "blank", path });
     } catch (e) {
       setError(e instanceof Error ? e.message : "failed to clear template");
     }

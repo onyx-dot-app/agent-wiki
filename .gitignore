@@ -33,9 +33,10 @@ data/
 *.sqlite-wal
 *.sqlite-shm
 
-# runtime-only state inside local_data/ (wiki content itself is tracked)
-local_data/wiki/.git/
-local_data/pgdata/
+# all runtime state — wiki working tree, pgdata, sqlite, etc.
+# Onboarding content is seeded into a fresh install from
+# `backend/wiki_seed/`; nothing under `local_data/` should be committed.
+local_data/
 tmp_workspace/
 
 # editor / OS

@@ -229,13 +229,36 @@ async def send_message(
     )
 
 
+def _compose_blank_seed_message() -> str:
+    """Synthetic user turn used by the "Blank document" picker option.
+
+    Generic — no template body, no system prompt. Hints at the wiki's
+    ability to auto-fill described sections so the user knows the
+    shape of useful first instructions to give the agent.
+    """
+    return "\n".join(
+        [
+            "I am creating a new blank doc.",
+            "",
+            "Reply in a very short response — just a couple of sentences total. "
+            "Do not lecture or list options. Open with one short, welcoming line "
+            "like \"Great, what would you like to work on?\" and briefly mention "
+            "that I can describe topics or sections I care about (a project I "
+            "want to track, recurring updates, a running list) and the wiki "
+            "will fill those in and keep them updated over time. Keep the "
+            "overall response short.",
+        ]
+    )
+
+
 def _compose_drafting_seed_message(template: dict[str, Any]) -> str:
     """Synthetic user turn that primes the agent for drafting from a
     template. Sent hidden so the user only sees the agent's response."""
     body = template["body"]
+    name = template.get("name") or "document"
     system_prompt = template.get("system_prompt")
     parts = [
-        "I am creating a doc with the following template:",
+        f"I am creating a new {name} doc from the following template:",
         "",
         "```",
         body,
@@ -245,28 +268,30 @@ def _compose_drafting_seed_message(template: dict[str, Any]) -> str:
         parts.extend(
             [
                 "",
-                "To help me create the document, refer to the following "
-                "instructions that came along with the template:",
+                "Template instructions:",
                 "",
                 "```",
                 system_prompt,
                 "```",
-                "",
-                "Respond with something positive and say that you're ready "
-                "to help me fill out the wiki page, and give me some "
-                "guiding questions based on the instructions above or the "
-                "template itself.",
             ]
         )
-    else:
-        parts.extend(
-            [
-                "",
-                "Respond with something positive and say that you're ready "
-                "to help me fill out the wiki page, and give me some "
-                "guiding questions based on the template itself.",
-            ]
-        )
+    parts.extend(
+        [
+            "",
+            "Reply in a very short response — just a couple of sentences total. "
+            "Do not summarize, describe, or comment on the template itself. "
+            f"Open with one short sentence like \"Great, let's build out this {name} together\" "
+            "and then ask 1 or 2 specific guiding questions to help me start filling "
+            "in the most important parts. The goal is to help me complete the doc with "
+            "as little effort as possible.",
+            "",
+            "Also mention, in one line, that I can have future agents fill in any section "
+            "later by leaving a short note in the doc itself describing what belongs there "
+            "(for example, \"This section auto-fills with new updates over time\" or "
+            "\"Log every mention of this project here with context\") — the wiki will pick "
+            "that up. Keep the overall response short.",
+        ]
+    )
     return "\n".join(parts)
 
 
@@ -276,16 +301,19 @@ async def drafting_init(
     request: Request,
     user: User = Depends(require_user),
 ) -> Response:
-    """Bootstrap a hidden chat session for drafting from a template.
+    """Bootstrap a hidden chat session for drafting a new doc.
 
-    Creates the session, appends a hidden user message composed from the
-    template body + system prompt, then streams the agent's first reply.
-    The very first SSE event is ``{"type": "session_created", "session_id": …}``
-    so the client can pin subsequent ``send_message`` calls to this id.
+    With a ``template_id``: seeds the session from that template's body
+    and (optional) system prompt. Without one: seeds a generic blank
+    "what do you want to work on" prime. Either way the very first SSE
+    event is ``{"type": "session_created", "session_id": …}`` so the
+    client can pin subsequent ``send_message`` calls to this id.
     """
-    tmpl = await run_in_threadpool(wiki_templates.get, req.template_id)
-    if tmpl is None:
-        raise HTTPException(status_code=404, detail="template not found")
+    tmpl: dict[str, Any] | None = None
+    if req.template_id is not None:
+        tmpl = await run_in_threadpool(wiki_templates.get, req.template_id)
+        if tmpl is None:
+            raise HTTPException(status_code=404, detail="template not found")
 
     sess = await run_in_threadpool(
         lambda: sessions_repo.create(user.id, hidden=True),
@@ -293,7 +321,11 @@ async def drafting_init(
     session_id = sess["id"]
     user_id = user.id
 
-    seed_text = _compose_drafting_seed_message(tmpl)
+    seed_text = (
+        _compose_drafting_seed_message(tmpl)
+        if tmpl is not None
+        else _compose_blank_seed_message()
+    )
     await run_in_threadpool(
         lambda: sessions_repo.append_message(
             session_id,
@@ -320,7 +352,7 @@ async def drafting_init(
                 "chat.drafting_init",
                 chat_session_id=session_id,
                 user_id=user_id,
-                template_id=tmpl["id"],
+                template_id=tmpl["id"] if tmpl is not None else None,
             ), chat_agent_scope():
                 gen = run_chat_stream(messages)
                 async for ev in iterate_in_threadpool(gen):

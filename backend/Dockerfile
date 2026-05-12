@@ -21,6 +21,11 @@ COPY app ./app
 # installs land on a populated instance.
 COPY wiki_seed ./wiki_seed
 
+# Bundled starter document templates (RFC, ADR, runbook, etc.).
+# Read by `app/wiki/templates.py:seed_starter_templates_if_empty` on
+# first boot when the document_templates table is empty.
+COPY starter_templates ./starter_templates
+
 EXPOSE 8080
 
 CMD ["uvicorn", "--factory", "app.main:create_app", "--host", "0.0.0.0", "--port", "8080", "--workers", "2"]

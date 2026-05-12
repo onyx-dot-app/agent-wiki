@@ -12,6 +12,7 @@ class DocumentTemplateView(BaseModel):
     body: str
     description: str | None
     system_prompt: str | None
+    sort_order: int
     created_at: str
     updated_at: str
 
@@ -46,3 +47,10 @@ class UpdateDocumentTemplateRequest(BaseModel):
     body: str = Field(min_length=1)
     description: str | None = None
     system_prompt: str | None = None
+
+
+class ReorderDocumentTemplatesRequest(BaseModel):
+    """Full ordered list of every template id — the new order in which
+    they should appear in the picker. Partial lists are rejected."""
+
+    template_ids: list[str] = Field(min_length=1)

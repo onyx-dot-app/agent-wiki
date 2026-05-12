@@ -14,12 +14,51 @@ this process.
 from __future__ import annotations
 
 import argparse
+import logging
+import time
+
+from sqlalchemy import text
 
 # Importing modules registers tasks on their respective queues.
 from app.tasks import agent_activity, chat_title, document_update, periodic, reindex, triggers  # noqa: F401  # pyright: ignore[reportUnusedImport]
 from app.tasks.queues import QUEUES
 from app.tasks.queue import run_consumer
 from app.utils.logging import setup_logging
+
+log = logging.getLogger(__name__)
+
+
+def _wait_for_pgmq(timeout_s: float = 60.0, poll_s: float = 1.0) -> None:
+    """Block until the ``pgmq`` schema exists in the connected database.
+
+    The backend's lifespan installs the extension via alembic migration
+    0001 on first boot. Workers are launched in parallel with the
+    backend (via launch.json compound / docker compose), so they can
+    race the schema into existence. Poll instead of failing loudly.
+    """
+    from app.db.session import session
+
+    deadline = time.monotonic() + timeout_s
+    while True:
+        try:
+            with session() as s:
+                ready = s.execute(
+                    text(
+                        "SELECT 1 FROM information_schema.schemata "
+                        "WHERE schema_name = 'pgmq'"
+                    )
+                ).scalar()
+        except Exception:
+            ready = None
+        if ready:
+            return
+        if time.monotonic() >= deadline:
+            raise RuntimeError(
+                f"pgmq schema not available after {timeout_s:.0f}s — "
+                "is the backend running its migrations?"
+            )
+        log.info("waiting for pgmq schema (backend migrations) …")
+        time.sleep(poll_s)
 
 # Per-queue handler concurrency (= number of worker threads in this process).
 # ``documents`` is LLM-bound; we don't want concurrent provider calls from a
@@ -37,6 +76,7 @@ def main() -> None:
     args = parser.parse_args()
 
     setup_logging()
+    _wait_for_pgmq()
     queue = QUEUES[args.queue]
     concurrency = _CONCURRENCY[args.queue]
 

@@ -311,6 +311,12 @@ class DocumentTemplate(Base):
     body: Mapped[str] = mapped_column(Text, nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
     system_prompt: Mapped[str | None] = mapped_column(Text)
+    # Admin-controlled ordering for the picker. Lower values render
+    # first; ties fall back to ``name`` alphabetical. New rows land at
+    # the end (max(sort_order) + 1) so admins decide where they live.
+    sort_order: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
     created_by_user_id: Mapped[str | None] = mapped_column(
         Text, ForeignKey("users.id", ondelete="SET NULL")
     )
@@ -539,6 +545,28 @@ class BM25ReconcileState(Base):
     last_completed_at: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     __table_args__ = (CheckConstraint("id = 1", name="bm25_reconcile_state_singleton"),)
+
+
+class WikiSeedState(Base):
+    """One-shot marker: has the bundled onboarding seed run on this DB?
+
+    Stamped to an ISO-8601 timestamp the first time the lifespan's
+    ``seed_if_empty`` either writes the seed or observes that the wiki
+    already has user content. Once non-null, the seed will never run
+    again on this database — so if a user deletes every onboarding
+    page and reboots, they get an empty wiki, not a re-seed.
+
+    Tied to the database (not the wiki working tree) on purpose: the
+    wiki can be wiped (volume reset, manual ``rm -rf``) and the marker
+    survives, preserving the user's intent to start fresh.
+    """
+
+    __tablename__ = "wiki_seed_state"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
+    seeded_at: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    __table_args__ = (CheckConstraint("id = 1", name="wiki_seed_state_singleton"),)
 
 
 # --------------------------------------------------------------------------- #

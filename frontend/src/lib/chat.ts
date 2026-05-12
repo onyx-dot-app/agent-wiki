@@ -59,12 +59,14 @@ export function streamMessage(
   );
 }
 
-/** Bootstrap a hidden drafting session seeded from a template.
+/** Bootstrap a hidden drafting session. Pass a ``templateId`` to seed
+ *  the session from that template, or ``null`` to seed a generic
+ *  "blank document" prime that hints at the wiki's auto-fill behavior.
  *  Streams the agent's kickoff turn. The first event is
  *  ``{type: "session_created", session_id: …}`` — the caller should
  *  pin subsequent ``streamMessage`` calls to that id. */
 export function streamDraftingInit(
-  templateId: string,
+  templateId: string | null,
   onEvent: (data: unknown) => void,
   options?: { signal?: AbortSignal },
 ): Promise<void> {

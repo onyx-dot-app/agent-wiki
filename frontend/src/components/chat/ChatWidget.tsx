@@ -65,12 +65,14 @@ export function ChatWidget() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const resizingRef = useRef(false);
   const hydratedSessionRef = useRef(false);
-  // Drafting bookkeeping. ``draftingTemplateId`` is the template id we
-  // last kicked off a session for — used so brief null→same-id flips
-  // (NewDocView → FileViewer hand-off) don't trigger a re-init. The
+  // Drafting bookkeeping. ``draftingKey`` is a string we derive from
+  // the active drafting state (``tpl:<id>`` or ``blank``) — used so
+  // brief null→same-key flips (NewDocView → FileViewer hand-off) don't
+  // trigger a re-init, and so picking a different template (or
+  // switching between blank and a template) DOES trigger one. The
   // pre-drafting snapshot is restored when the user leaves drafting so
   // their regular conversation isn't lost.
-  const [draftingTemplateId, setDraftingTemplateId] = useState<string | null>(null);
+  const [draftingKey, setDraftingKey] = useState<string | null>(null);
   const preDraftingRef = useRef<{ sessionId: string | null; messages: ChatMessage[] } | null>(
     null,
   );
@@ -123,14 +125,14 @@ export function ChatWidget() {
     // to localStorage, otherwise refreshing would resurrect a session
     // the user can't browse to. The pre-drafting id, if any, stays in
     // localStorage from the prior write and gets restored on unmount.
-    if (draftingTemplateId !== null) return;
+    if (draftingKey !== null) return;
     try {
       if (sessionId) window.localStorage.setItem(STORAGE_KEY_SESSION, sessionId);
       else window.localStorage.removeItem(STORAGE_KEY_SESSION);
     } catch {
       // ignore
     }
-  }, [sessionId, draftingTemplateId]);
+  }, [sessionId, draftingKey]);
 
   // Hydrate the active session's messages when the widget first opens with
   // a stored session id. Runs once per page load — switching sessions via
@@ -198,32 +200,45 @@ export function ChatWidget() {
     setMode("expanded");
   }, [expandTick]);
 
-  // Drafting orchestration. When the wiki page raises a new templateId
-  // we (a) save the current chat as the pre-drafting snapshot, (b) swap
-  // to a fresh hidden session, and (c) call the init endpoint so the
-  // agent kicks off with template-aware guiding questions. When the
-  // page leaves drafting we restore the snapshot. Brief null transitions
-  // (NewDocView → FileViewer hand-off) are debounced so we don't flap.
-  const desiredTemplateId = drafting?.templateId ?? null;
+  // Drafting orchestration. When the wiki page raises a new drafting
+  // state we (a) save the current chat as the pre-drafting snapshot,
+  // (b) swap to a fresh hidden session, and (c) call the init endpoint
+  // so the agent kicks off with template-aware guiding questions (or a
+  // generic "what do you want to work on" prime for blank). When the
+  // page leaves drafting we restore the snapshot. Brief null
+  // transitions (NewDocView → FileViewer hand-off) are debounced so we
+  // don't flap.
+  //
+  // We watch a derived ``desiredKey`` rather than ``templateId``
+  // directly so that "blank" is a distinct watch value (template_A →
+  // blank → template_A all re-trigger init), and so a deleted template
+  // id (null) doesn't collide with the "no drafting" state.
+  const desiredKey: string | null =
+    drafting === null
+      ? null
+      : drafting.kind === "template"
+        ? `tpl:${drafting.templateId ?? "deleted"}`
+        : "blank";
   useEffect(() => {
-    // Activate immediately when a templateId arrives.
-    if (desiredTemplateId !== null) {
-      if (desiredTemplateId === draftingTemplateId) return; // already in sync
+    // Activate immediately when a drafting state arrives.
+    if (desiredKey !== null && drafting !== null) {
+      if (desiredKey === draftingKey) return; // already in sync
       if (preDraftingRef.current === null) {
         // First entry into drafting — remember the prior conversation.
         preDraftingRef.current = { sessionId, messages };
       }
-      setDraftingTemplateId(desiredTemplateId);
+      setDraftingKey(desiredKey);
       setError(null);
       setToolHint(null);
       setSessionId(null);
       // Empty assistant bubble; tokens stream into it below.
       setMessages([{ role: "assistant", content: "" }]);
       setSending(true);
-      const tid = desiredTemplateId;
+      const tidForInit =
+        drafting.kind === "template" ? drafting.templateId : null;
       void (async () => {
         try {
-          await streamDraftingInit(tid, (raw) => {
+          await streamDraftingInit(tidForInit, (raw) => {
             const ev = raw as StreamEvent;
             switch (ev.type) {
               case "session_created":
@@ -264,11 +279,11 @@ export function ChatWidget() {
     // Deactivate, but debounce so a brief null between page hand-offs
     // (NewDocView unmounts before FileViewer mounts) doesn't tear down
     // the drafting conversation only to spin up another one immediately.
-    if (draftingTemplateId === null) return;
+    if (draftingKey === null) return;
     const handle = window.setTimeout(() => {
       const snapshot = preDraftingRef.current;
       preDraftingRef.current = null;
-      setDraftingTemplateId(null);
+      setDraftingKey(null);
       if (snapshot) {
         setSessionId(snapshot.sessionId);
         setMessages(snapshot.messages);
@@ -281,7 +296,7 @@ export function ChatWidget() {
     }, 300);
     return () => window.clearTimeout(handle);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [desiredTemplateId]);
+  }, [desiredKey]);
 
   // When expanded, reserve real layout space on the right so the page is
   // pushed left rather than being overlaid by the panel.
@@ -778,6 +793,7 @@ function formatError(err: unknown): string {
 
 function DraftingBanner({ state }: { state: DraftingState }) {
   const docName = state.path ? state.path.split("/").pop() ?? state.path : null;
+  const templateName = state.kind === "template" ? state.templateName : null;
   return (
     <div
       role="status"
@@ -797,16 +813,16 @@ function DraftingBanner({ state }: { state: DraftingState }) {
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontWeight: 600 }}>Drafting initial version</div>
         <div style={{ marginTop: 2, color: color.text.secondary, overflowWrap: "anywhere" }}>
-          {docName && state.templateName ? (
+          {docName && templateName ? (
             <>
               Helping draft <strong>{docName}</strong> from the{" "}
-              <em>{state.templateName}</em> template.
+              <em>{templateName}</em> template.
             </>
           ) : docName ? (
             <>Helping draft <strong>{docName}</strong>.</>
-          ) : state.templateName ? (
+          ) : templateName ? (
             <>
-              Helping draft a new doc from the <em>{state.templateName}</em> template.
+              Helping draft a new doc from the <em>{templateName}</em> template.
             </>
           ) : (
             <>Helping draft a new doc.</>

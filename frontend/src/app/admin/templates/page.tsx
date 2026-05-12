@@ -10,6 +10,7 @@ import { useRequireAuth } from "@/lib/auth";
 import {
   createTemplate,
   deleteTemplate,
+  reorderTemplates,
   updateTemplate,
   useAdminTemplates,
   type DocumentTemplate,
@@ -46,9 +47,44 @@ export default function AdminTemplatesPage() {
 function TemplatesList() {
   const { templates, error, isLoading, refresh } = useAdminTemplates();
   const [editing, setEditing] = useState<DocumentTemplate | "new" | null>(null);
+  // Tracks the id whose row is mid-reorder so we can disable its arrow
+  // buttons. A single in-flight request at a time keeps the optimistic
+  // ordering and the server's view in sync without manual reconciliation.
+  const [reordering, setReordering] = useState<string | null>(null);
+  const [reorderError, setReorderError] = useState<string | null>(null);
 
   if (isLoading) return <div>Loading…</div>;
   if (error) return <div style={{ color: color.state.danger.fg }}>{error.message}</div>;
+
+  async function move(index: number, direction: -1 | 1) {
+    const target = index + direction;
+    if (target < 0 || target >= templates.length) return;
+    const next = [...templates];
+    const [moved] = next.splice(index, 1);
+    next.splice(target, 0, moved);
+    const ids = next.map((t) => t.id);
+    // Optimistic update so the row jumps immediately; SWR returns the
+    // authoritative list on success.
+    setReordering(moved.id);
+    setReorderError(null);
+    void refresh(
+      async () => {
+        try {
+          return await reorderTemplates(ids);
+        } catch (e) {
+          setReorderError(e instanceof Error ? e.message : "reorder failed");
+          throw e;
+        } finally {
+          setReordering(null);
+        }
+      },
+      {
+        optimisticData: { templates: next },
+        rollbackOnError: true,
+        revalidate: false,
+      },
+    );
+  }
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -57,6 +93,20 @@ function TemplatesList() {
           New template
         </Button>
       </div>
+      {reorderError && (
+        <div
+          style={{
+            padding: "8px 12px",
+            background: color.state.danger.bg,
+            border: `1px solid ${color.state.danger.border}`,
+            color: color.state.danger.fg,
+            borderRadius: radius.sm,
+            fontSize: 13,
+          }}
+        >
+          {reorderError}
+        </div>
+      )}
       {templates.length === 0 ? (
         <div
           style={{
@@ -71,7 +121,7 @@ function TemplatesList() {
         </div>
       ) : (
         <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 8 }}>
-          {templates.map((t) => (
+          {templates.map((t, i) => (
             <li
               key={t.id}
               style={{
@@ -84,6 +134,13 @@ function TemplatesList() {
                 gap: 12,
               }}
             >
+              <ReorderHandle
+                disabled={reordering !== null}
+                canUp={i > 0}
+                canDown={i < templates.length - 1}
+                onUp={() => void move(i, -1)}
+                onDown={() => void move(i, 1)}
+              />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontWeight: 600, fontSize: 14 }}>{t.name}</div>
                 {t.description && (
@@ -133,6 +190,80 @@ function TemplatesList() {
         />
       )}
     </div>
+  );
+}
+
+function ReorderHandle({
+  canUp,
+  canDown,
+  disabled,
+  onUp,
+  onDown,
+}: {
+  canUp: boolean;
+  canDown: boolean;
+  disabled: boolean;
+  onUp: () => void;
+  onDown: () => void;
+}) {
+  return (
+    <div
+      style={{ display: "flex", flexDirection: "column", gap: 2, flexShrink: 0 }}
+      aria-label="Reorder template"
+    >
+      <ArrowButton
+        title="Move up"
+        disabled={disabled || !canUp}
+        onClick={onUp}
+        direction="up"
+      />
+      <ArrowButton
+        title="Move down"
+        disabled={disabled || !canDown}
+        onClick={onDown}
+        direction="down"
+      />
+    </div>
+  );
+}
+
+function ArrowButton({
+  direction,
+  title,
+  disabled,
+  onClick,
+}: {
+  direction: "up" | "down";
+  title: string;
+  disabled: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      aria-label={title}
+      style={{
+        width: 24,
+        height: 18,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        background: "transparent",
+        border: `1px solid ${color.border.default}`,
+        borderRadius: radius.xs,
+        color: color.text.secondary,
+        cursor: disabled ? "not-allowed" : "pointer",
+        opacity: disabled ? 0.35 : 1,
+        padding: 0,
+      }}
+    >
+      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+        {direction === "up" ? <path d="M6 15l6-6 6 6" /> : <path d="M6 9l6 6 6-6" />}
+      </svg>
+    </button>
   );
 }
 

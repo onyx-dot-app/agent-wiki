@@ -8,6 +8,7 @@ export interface DocumentTemplate {
   body: string;
   description: string | null;
   system_prompt: string | null;
+  sort_order: number;
   created_at: string;
   updated_at: string;
 }
@@ -81,6 +82,21 @@ export function updateTemplate(
 
 export function deleteTemplate(id: string): Promise<void> {
   return apiFetch<void>(`/admin/templates/${id}`, { method: "DELETE" });
+}
+
+/** Set the picker order. ``templateIds`` must list every current
+ *  template id exactly once, in the desired order. Returns the
+ *  authoritative full list after the update. */
+export function reorderTemplates(
+  templateIds: string[],
+): Promise<{ templates: DocumentTemplate[] }> {
+  return apiFetch<{ templates: DocumentTemplate[] }>(
+    "/admin/templates/reorder",
+    {
+      method: "POST",
+      body: JSON.stringify({ template_ids: templateIds }),
+    },
+  );
 }
 
 /** Drafting state for a wiki page (null when not drafting from a template). */

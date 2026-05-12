@@ -118,6 +118,7 @@ async def _lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     from app.utils.logging import setup_logging
     from app.wiki.git import ensure_wiki_repo
     from app.wiki.seed import seed_if_empty
+    from app.wiki.templates import seed_starter_templates_if_empty
 
     setup_logging()
     log.info("agent-wiki backend starting (database=%s)", _app_config.CONFIG.database_url.split("@")[-1])
@@ -127,6 +128,9 @@ async def _lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     # through the normal commit + notify path (FTS index, ACLs, MCP
     # fan-out all fire identically to a UI save).
     seed_if_empty(_app_config.CONFIG.wiki_dir)
+    # Starter document templates seed once on a brand-new DB; users
+    # who delete a starter will not see it re-appear after a reboot.
+    seed_starter_templates_if_empty()
     triggers_repo.purge_invalid_triggers(actor="system <system@agent-wiki>")
     triggers_repo.rebuild_from_filesystem()
     schedule_all_pending_cleanups()
