@@ -24,6 +24,20 @@ class SendChatRequest(BaseModel):
     content: str = Field(min_length=1)
 
 
+class DraftingInitRequest(BaseModel):
+    """Body for ``POST /api/chat/drafting/init``.
+
+    Creates a fresh hidden chat session seeded with a synthetic user
+    message (also hidden) that primes the agent with the chosen
+    template's body + optional system prompt. Streams the agent's
+    kickoff response. The user never sees the seed turn; they just see
+    the assistant respond with guiding questions about filling out the
+    page.
+    """
+
+    template_id: str = Field(min_length=1)
+
+
 class ChatSessionOut(BaseModel):
     id: str
     title: str | None

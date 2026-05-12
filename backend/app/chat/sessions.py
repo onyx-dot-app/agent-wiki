@@ -27,6 +27,7 @@ def _session_to_dict(s: ChatSession) -> dict[str, Any]:
         "id": s.id,
         "user_id": s.user_id,
         "title": s.title,
+        "hidden": s.hidden,
         "created_at": s.created_at,
         "updated_at": s.updated_at,
     }
@@ -47,14 +48,15 @@ def _message_to_dict(m: ChatMessage) -> dict[str, Any]:
         "role": m.role,
         "content": m.content,
         "events": events,
+        "hidden": m.hidden,
         "created_at": m.created_at,
     }
 
 
-def create(user_id: str) -> dict[str, Any]:
+def create(user_id: str, *, hidden: bool = False) -> dict[str, Any]:
     sid = str(uuid.uuid4())
     with session() as s:
-        row = ChatSession(id=sid, user_id=user_id, title=None)
+        row = ChatSession(id=sid, user_id=user_id, title=None, hidden=hidden)
         s.add(row)
         s.flush()
         s.refresh(row)
@@ -73,10 +75,14 @@ def get(session_id: str, user_id: str) -> dict[str, Any] | None:
 
 
 def list_for_user(user_id: str) -> list[dict[str, Any]]:
+    """User-visible sessions: hidden=TRUE rows are excluded by design."""
     with session() as s:
         rows = s.scalars(
             select(ChatSession)
-            .where(ChatSession.user_id == user_id)
+            .where(
+                ChatSession.user_id == user_id,
+                ChatSession.hidden.is_(False),
+            )
             .order_by(ChatSession.updated_at.desc())
         ).all()
         return [_session_to_dict(r) for r in rows]
@@ -125,10 +131,15 @@ def append_message(
     role: str,
     content: str,
     events: list[dict[str, Any]] | None = None,
+    hidden: bool = False,
 ) -> dict[str, Any]:
     """Append a message and return the inserted row as a dict.
 
     Allocates ``ordering`` as ``max(ordering)+1`` for the session.
+
+    ``hidden=True`` keeps the row out of UI transcripts (``get_messages``
+    defaults to filtering it) but it still flows into the LLM history
+    when callers request ``include_hidden=True``.
     """
     if role not in ("user", "assistant"):
         raise ValueError(f"invalid role: {role!r}")
@@ -151,6 +162,7 @@ def append_message(
             role=role,
             content=content,
             events_json=events_json,
+            hidden=hidden,
         )
         s.add(row)
         s.flush()
@@ -158,13 +170,21 @@ def append_message(
         return _message_to_dict(row)
 
 
-def get_messages(session_id: str) -> list[dict[str, Any]]:
+def get_messages(
+    session_id: str, *, include_hidden: bool = False,
+) -> list[dict[str, Any]]:
+    """Return messages in order. ``include_hidden=False`` (default) drops
+    rows the UI shouldn't render — pass ``True`` when rebuilding LLM
+    history so the model still sees seed turns the user never wrote."""
     with session() as s:
-        rows = s.scalars(
+        stmt = (
             select(ChatMessage)
             .where(ChatMessage.session_id == session_id)
             .order_by(ChatMessage.ordering.asc())
-        ).all()
+        )
+        if not include_hidden:
+            stmt = stmt.where(ChatMessage.hidden.is_(False))
+        rows = s.scalars(stmt).all()
         return [_message_to_dict(r) for r in rows]
 
 

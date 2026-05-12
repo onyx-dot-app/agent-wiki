@@ -237,6 +237,12 @@ class ChatSession(Base):
     )
     # NULL until the title-generation task fills it in after the first turn.
     title: Mapped[str | None] = mapped_column(Text)
+    # Sessions created to bootstrap "drafting from template" conversations
+    # are hidden from the session history list (the row stays so the
+    # transcript can be re-rendered if anything in code still has the id).
+    hidden: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("FALSE")
+    )
     created_at: Mapped[str] = mapped_column(
         Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
     )
@@ -268,6 +274,11 @@ class ChatMessage(Base):
     role: Mapped[str] = mapped_column(Text, nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
     events_json: Mapped[str | None] = mapped_column(Text)
+    # Hidden seed messages live in the LLM history (so the model has the
+    # template context) but are filtered out of the rendered transcript.
+    hidden: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("FALSE")
+    )
     created_at: Mapped[str] = mapped_column(
         Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
     )
@@ -277,6 +288,60 @@ class ChatMessage(Base):
             "role IN ('user', 'assistant')", name="chat_messages_role_check"
         ),
         Index("idx_chat_messages_session_order", "session_id", "ordering"),
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Document templates — admin-managed seed content for new wiki pages          #
+# --------------------------------------------------------------------------- #
+
+
+class DocumentTemplate(Base):
+    """Admin-defined template used to seed a brand-new wiki page.
+
+    Selected from the new-doc picker; the template's body is committed
+    as the initial content, and ``system_prompt`` (when set) overrides
+    the chat agent's system prompt while the user is still drafting.
+    """
+
+    __tablename__ = "document_templates"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    name: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    system_prompt: Mapped[str | None] = mapped_column(Text)
+    created_by_user_id: Mapped[str | None] = mapped_column(
+        Text, ForeignKey("users.id", ondelete="SET NULL")
+    )
+    created_at: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
+    )
+    updated_at: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
+    )
+
+
+class DocumentDraft(Base):
+    """Active "drafting from template" state for a wiki page.
+
+    Inserted when a user creates a page from a template; deleted when
+    the page body diverges from ``template_body_snapshot`` (i.e. the
+    user has made real edits) or when the page is deleted.
+    """
+
+    __tablename__ = "document_drafts"
+
+    path: Mapped[str] = mapped_column(Text, primary_key=True)
+    template_id: Mapped[str] = mapped_column(
+        Text, ForeignKey("document_templates.id", ondelete="CASCADE"), nullable=False
+    )
+    template_body_snapshot: Mapped[str] = mapped_column(Text, nullable=False)
+    created_by_user_id: Mapped[str | None] = mapped_column(
+        Text, ForeignKey("users.id", ondelete="SET NULL")
+    )
+    created_at: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
     )
 
 

@@ -33,6 +33,7 @@ from app.api import (
     mcp_server,
     mcp_tokens,
     permissions,
+    templates,
     triggers,
     user,
     users,
@@ -116,11 +117,16 @@ async def _lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     from app.triggers import repo as triggers_repo
     from app.utils.logging import setup_logging
     from app.wiki.git import ensure_wiki_repo
+    from app.wiki.seed import seed_if_empty
 
     setup_logging()
     log.info("agent-wiki backend starting (database=%s)", _app_config.CONFIG.database_url.split("@")[-1])
     init_db()
     ensure_wiki_repo()
+    # Seed-on-empty runs after the repo is initialized so writes go
+    # through the normal commit + notify path (FTS index, ACLs, MCP
+    # fan-out all fire identically to a UI save).
+    seed_if_empty(_app_config.CONFIG.wiki_dir)
     triggers_repo.purge_invalid_triggers(actor="system <system@agent-wiki>")
     triggers_repo.rebuild_from_filesystem()
     schedule_all_pending_cleanups()
@@ -166,6 +172,8 @@ def create_app() -> FastAPI:
     app.include_router(mcp_tokens.router, prefix="/api/mcp/tokens")
     app.include_router(webhooks.router, prefix="/api/webhooks")
     app.include_router(admin.router, prefix="/api/admin")
+    app.include_router(templates.admin_router, prefix="/api/admin/templates")
+    app.include_router(templates.router, prefix="/api/templates")
     app.include_router(permissions.router, prefix="/api")
     app.include_router(triggers.router, prefix="/api/triggers")
     app.include_router(documents.router, prefix="/api/documents")

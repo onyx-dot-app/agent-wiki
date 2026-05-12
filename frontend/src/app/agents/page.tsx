@@ -29,7 +29,7 @@ export default function AgentsPage() {
       <main style={{ padding: isMobile ? "16px 12px" : "24px 32px", maxWidth: 880 }}>
         <PageHeader
           title="Agents"
-          description="Give your agents the ability to read and update this wiki. Generate a personal API key below, then drop it into your coding agent's MCP configuration."
+          description="Give your agents the ability to read and update this wiki. Generate a personal API key below, then drop it into your coding agent's MCP configuration. Each key's name becomes that agent's identity — it shows up next to its activity on wiki pages and in commit history."
         />
 
         <EndpointBlock />
@@ -219,15 +219,20 @@ function CreateForm({
       }}
     >
       <label style={{ fontSize: 13, color: color.text.secondary }}>
-        Name
+        Agent name
         <input
           autoFocus
           value={name}
           onChange={(e) => setName(e.target.value)}
-          placeholder="e.g. claude-code laptop"
+          placeholder="e.g. Claude Code, Cursor, Codex"
           style={{ ...inputStyle, marginTop: 4 }}
           maxLength={80}
         />
+        <div style={{ fontSize: 12, color: color.text.muted, marginTop: 6 }}>
+          Appears next to this agent&apos;s reads, writes, and commits on the
+          wiki. Pick something you&apos;ll recognize — you can have several
+          agents per user.
+        </div>
       </label>
       {err && <div style={{ ...errorBanner, marginTop: 10 }}>{err}</div>}
       <div style={{ display: "flex", gap: 8, marginTop: 12 }}>

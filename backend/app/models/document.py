@@ -181,3 +181,29 @@ class ActivityRowView(BaseModel):
 class DocumentActivityResponse(BaseModel):
     path: str
     agents: list[ActivityRowView]
+
+
+# --------------------------------------------------------------------------- #
+# Document drafting (template-seeded pages)                                   #
+# --------------------------------------------------------------------------- #
+
+
+class DocumentDraftView(BaseModel):
+    """Active "drafting from template" state for a wiki page."""
+
+    path: str
+    template_id: str
+    template_name: str | None
+    system_prompt: str | None
+    created_at: str
+
+
+class SetDocumentDraftRequest(BaseModel):
+    """Body for ``POST /api/documents/file/draft``.
+
+    ``template_id=None`` clears the draft row. Otherwise upserts: the
+    template's current body becomes the divergence snapshot.
+    """
+
+    path: str = Field(min_length=1)
+    template_id: str | None = None

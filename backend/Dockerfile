@@ -16,6 +16,11 @@ RUN pip install --upgrade pip && pip install -e .
 
 COPY app ./app
 
+# Bundled onboarding wiki content. Copied into WIKI_DIR by
+# `app/wiki/seed.py` on first boot when the wiki is empty, so fresh
+# installs land on a populated instance.
+COPY wiki_seed ./wiki_seed
+
 EXPOSE 8080
 
 CMD ["uvicorn", "--factory", "app.main:create_app", "--host", "0.0.0.0", "--port", "8080", "--workers", "2"]

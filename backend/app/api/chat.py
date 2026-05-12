@@ -28,10 +28,15 @@ from app.llm.agents.chat import (
 from app.models.user_settings import UserSettings
 from app.llm.errors import LLMError
 from app.models.chat import (
-    ChatMessageOut, ChatSessionDetail, ChatSessionOut, SendChatRequest,
+    ChatMessageOut,
+    ChatSessionDetail,
+    ChatSessionOut,
+    DraftingInitRequest,
+    SendChatRequest,
 )
 from app.tasks.chat_title import generate_chat_title
 from app.tracing import trace_flow
+from app.wiki import templates as wiki_templates
 
 router = APIRouter()
 log = logging.getLogger(__name__)
@@ -137,8 +142,10 @@ async def send_message(
     )
 
     # Hydrate prior history (now including the just-saved user turn).
+    # Hidden seed messages (e.g. drafting-from-template kickoffs) flow
+    # into the model context but stay out of the rendered transcript.
     history = await run_in_threadpool(
-        sessions_repo.get_messages, req.session_id,
+        lambda: sessions_repo.get_messages(req.session_id, include_hidden=True),
     )
     messages: list[dict[str, Any]] = messages_from_history(history)
 
@@ -215,6 +222,145 @@ async def send_message(
     headers = {
         "Cache-Control": "no-cache",
         # nginx hint — flush on every yield.
+        "X-Accel-Buffering": "no",
+    }
+    return StreamingResponse(
+        stream(), media_type="text/event-stream", headers=headers,
+    )
+
+
+def _compose_drafting_seed_message(template: dict[str, Any]) -> str:
+    """Synthetic user turn that primes the agent for drafting from a
+    template. Sent hidden so the user only sees the agent's response."""
+    body = template["body"]
+    system_prompt = template.get("system_prompt")
+    parts = [
+        "I am creating a doc with the following template:",
+        "",
+        "```",
+        body,
+        "```",
+    ]
+    if system_prompt:
+        parts.extend(
+            [
+                "",
+                "To help me create the document, refer to the following "
+                "instructions that came along with the template:",
+                "",
+                "```",
+                system_prompt,
+                "```",
+                "",
+                "Respond with something positive and say that you're ready "
+                "to help me fill out the wiki page, and give me some "
+                "guiding questions based on the instructions above or the "
+                "template itself.",
+            ]
+        )
+    else:
+        parts.extend(
+            [
+                "",
+                "Respond with something positive and say that you're ready "
+                "to help me fill out the wiki page, and give me some "
+                "guiding questions based on the template itself.",
+            ]
+        )
+    return "\n".join(parts)
+
+
+@router.post("/drafting/init")
+async def drafting_init(
+    req: DraftingInitRequest,
+    request: Request,
+    user: User = Depends(require_user),
+) -> Response:
+    """Bootstrap a hidden chat session for drafting from a template.
+
+    Creates the session, appends a hidden user message composed from the
+    template body + system prompt, then streams the agent's first reply.
+    The very first SSE event is ``{"type": "session_created", "session_id": …}``
+    so the client can pin subsequent ``send_message`` calls to this id.
+    """
+    tmpl = await run_in_threadpool(wiki_templates.get, req.template_id)
+    if tmpl is None:
+        raise HTTPException(status_code=404, detail="template not found")
+
+    sess = await run_in_threadpool(
+        lambda: sessions_repo.create(user.id, hidden=True),
+    )
+    session_id = sess["id"]
+    user_id = user.id
+
+    seed_text = _compose_drafting_seed_message(tmpl)
+    await run_in_threadpool(
+        lambda: sessions_repo.append_message(
+            session_id,
+            role="user",
+            content=seed_text,
+            events=None,
+            hidden=True,
+        ),
+    )
+
+    history = await run_in_threadpool(
+        lambda: sessions_repo.get_messages(session_id, include_hidden=True),
+    )
+    messages: list[dict[str, Any]] = messages_from_history(history)
+
+    async def stream() -> AsyncIterator[bytes]:
+        # Announce the session id up front so the client can switch over
+        # before the first text_delta lands.
+        yield _sse({"type": "session_created", "session_id": session_id})
+        events: list[dict[str, Any]] = []
+        text_parts: list[str] = []
+        try:
+            with trace_flow(
+                "chat.drafting_init",
+                chat_session_id=session_id,
+                user_id=user_id,
+                template_id=tmpl["id"],
+            ), chat_agent_scope():
+                gen = run_chat_stream(messages)
+                async for ev in iterate_in_threadpool(gen):
+                    if await request.is_disconnected():
+                        break
+                    events.append(ev)
+                    if ev.get("type") == "text_delta":
+                        text_parts.append(ev.get("text", ""))
+                    yield _sse(ev)
+        except LLMError as exc:
+            yield _sse({"type": "error", "code": exc.code, "message": exc.message})
+            return
+        except Exception:
+            log.exception("drafting init stream failed")
+            yield _sse(
+                {
+                    "type": "error",
+                    "code": "unknown",
+                    "message": "The chat agent hit an unexpected error. Check the server logs.",
+                }
+            )
+            return
+
+        try:
+            await run_in_threadpool(
+                lambda: sessions_repo.append_message(
+                    session_id,
+                    role="assistant",
+                    content="".join(text_parts),
+                    events=events,
+                ),
+            )
+            await run_in_threadpool(sessions_repo.touch, session_id)
+        except Exception:
+            log.exception(
+                "failed to persist drafting kickoff turn session_id=%s", session_id,
+            )
+
+    headers = {
+        "Cache-Control": "no-cache",
         "X-Accel-Buffering": "no",
     }
     return StreamingResponse(

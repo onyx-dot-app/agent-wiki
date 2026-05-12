@@ -36,6 +36,7 @@ data/
 # runtime-only state inside local_data/ (wiki content itself is tracked)
 local_data/wiki/.git/
 local_data/pgdata/
+tmp_workspace/
 
 # editor / OS
 .DS_Store

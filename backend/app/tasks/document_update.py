@@ -30,7 +30,7 @@ from app.mcp_server import jobs as mcp_jobs
 from app.mcp_server import pubsub as mcp_pubsub
 from app.auth import UserMissingError, load_user, set_current_user
 from app.tasks.queues import documents_queue
-from app.wiki import git as wiki_git
+from app.wiki import agent_activity, git as wiki_git
 
 log = logging.getLogger(__name__)
 
@@ -87,12 +87,17 @@ def agent_update_document_nl(job_id: str) -> None:
     rel = payload.get("path")
     instruction = payload.get("instruction") or ""
     base_sha = payload.get("base_sha")
+    agent_name = payload.get("agent_name")
 
     try:
         user = load_user(job["user_id"])
-        with set_current_user(user):
-            mcp_jobs.mark_running(job_id)
-            _run_inner(job_id, rel, instruction, base_sha)
+        agent_token = agent_activity.agent_name_var.set(agent_name)
+        try:
+            with set_current_user(user):
+                mcp_jobs.mark_running(job_id)
+                _run_inner(job_id, rel, instruction, base_sha)
+        finally:
+            agent_activity.agent_name_var.reset(agent_token)
     except UserMissingError as exc:
         log.warning("agent_update_document_nl: user %s missing for job %s", exc.user_id, job_id)
         mcp_jobs.mark_failed(job_id, error="user_missing")

@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 
 import { ChatWidget } from "@/components/chat/ChatWidget";
 import { AuthProvider } from "@/lib/auth";
+import { DraftingProvider } from "@/lib/drafting";
 import { SWRProvider } from "@/lib/swr";
 import { ThemeBootstrapScript, ThemeProvider } from "@/lib/theme-provider";
 
@@ -31,8 +32,10 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         <SWRProvider>
           <AuthProvider>
             <ThemeProvider>
-              {children}
-              <ChatWidget />
+              <DraftingProvider>
+                {children}
+                <ChatWidget />
+              </DraftingProvider>
             </ThemeProvider>
           </AuthProvider>
         </SWRProvider>

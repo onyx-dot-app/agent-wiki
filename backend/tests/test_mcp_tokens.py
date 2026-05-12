@@ -40,15 +40,17 @@ def test_create_rejects_blank_name(tmp_db):
         tokens_repo.create(uid, "   ")
 
 
-def test_verify_round_trip_returns_user(tmp_db):
+def test_verify_round_trip_returns_user_and_agent_name(tmp_db):
     uid = seed_user(uid="u1", email="u1@x.com", name="One")
-    _, raw = tokens_repo.create(uid, "k")
+    _, raw = tokens_repo.create(uid, "Claude Code")
 
-    user = tokens_repo.verify(raw)
-    assert user is not None
+    resolved = tokens_repo.verify(raw)
+    assert resolved is not None
+    user, agent_name = resolved
     assert user.id == uid
     assert user.email == "u1@x.com"
     assert user.name == "One"
+    assert agent_name == "Claude Code"
 
 
 def test_verify_rejects_unknown_token(tmp_db):

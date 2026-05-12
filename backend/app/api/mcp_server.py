@@ -16,17 +16,17 @@ import asyncio
 import json
 import logging
 from collections.abc import AsyncIterator
-from typing import Any
+from typing import Any, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
 
-from app.auth import User, set_current_user
-from app.auth.deps import require_bearer
+from app.auth import set_current_user
+from app.auth.deps import BearerPrincipal, require_bearer
 from app.mcp_server import pubsub as mcp_pubsub
 from app.mcp_server import session as mcp_session
 from app.mcp_server.transport import dispatch
-from app.models.mcp import JsonRpcRequest
+from app.wiki import agent_activity
 
 router = APIRouter()
 log = logging.getLogger(__name__)
@@ -40,23 +40,37 @@ _SSE_HEARTBEAT_SECONDS = 15.0
 
 @router.post("")
 async def transport_post(
-    rpc: JsonRpcRequest,
     request: Request,
-    user: User = Depends(require_bearer),
+    principal: BearerPrincipal = Depends(require_bearer),
 ) -> Response:
-    # The dispatcher reads "id absent" to detect JSON-RPC notifications,
-    # so we feed it only the fields the client actually sent. ``extra``
-    # is allowed on the envelope to keep forward-compat with new
-    # protocol fields, so we round-trip those too.
-    body: dict[str, Any] = rpc.model_dump(exclude_unset=True)
+    # Read the raw JSON body rather than binding a pydantic model. The
+    # JSON-RPC dispatcher must own envelope validation so missing fields
+    # come back as a JSON-RPC error envelope (code -32600) per spec,
+    # not as FastAPI's 400 ``{"error": "<str>"}`` validation envelope.
+    # Non-object bodies still return HTTP 400 since they aren't a valid
+    # JSON-RPC message at all.
+    try:
+        body = await request.json()
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="invalid JSON body") from exc
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="body must be a JSON object")
 
     incoming = request.headers.get(SESSION_HEADER)
-    # Bind the bearer user to the ContextVar so downstream tool handlers
-    # (which call ``current_user()`` to read the principal) see the
-    # right user. Bearer auth doesn't go through the cookie-reading
-    # ``CurrentUserMiddleware``, so we bind it here at the seam.
-    with set_current_user(user):
-        response, outgoing = dispatch(body, incoming, user)
+    user = principal.user
+    # Bind the bearer user and the per-key agent identity to ContextVars
+    # so downstream tool handlers stamp the right principal + agent
+    # onto activity rows and git commit authors. Bearer auth doesn't
+    # go through the cookie-reading ``CurrentUserMiddleware``, so we
+    # bind it here at the seam.
+    agent_token = agent_activity.agent_name_var.set(principal.agent_name)
+    try:
+        with set_current_user(user):
+            response, outgoing = dispatch(
+                cast("dict[str, Any]", body), incoming, user
+            )
+    finally:
+        agent_activity.agent_name_var.reset(agent_token)
 
     headers: dict[str, str] = {}
     if outgoing:
@@ -77,8 +91,9 @@ async def transport_post(
 
 @router.get("")
 async def transport_sse(
-    request: Request, bearer_user: User = Depends(require_bearer),
+    request: Request, principal: BearerPrincipal = Depends(require_bearer),
 ) -> Response:
+    bearer_user = principal.user
     """Open the long-lived SSE stream for server-initiated frames.
 
     Idle clients cost one asyncio task each (not one OS thread). The
