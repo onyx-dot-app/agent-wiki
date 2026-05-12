@@ -5,6 +5,7 @@ The fuzzy replacer (`app.wiki.edit.replace`) and broken-link checker
 adapter: argument validation, optimistic-concurrency check, commit +
 reindex + trigger fan-out, and assembling the result dict the model sees.
 """
+
 from __future__ import annotations
 
 import difflib
@@ -123,7 +124,11 @@ def author_string() -> str | None:
 
 
 def commit_and_fan_out(
-    rel: str, body: str, message: str, *, change_kind: str,
+    rel: str,
+    body: str,
+    message: str,
+    *,
+    change_kind: str,
     activity_ttl: timedelta | None = None,
 ) -> str:
     """Commit ``body`` to ``rel``, queue reindex, fan out to triggers.
@@ -156,18 +161,32 @@ def commit_and_fan_out(
     user = _current_user_or_none()
     if user is not None:
         agent_name = agent_activity.agent_name_var.get()
+        # R2#4 — if a launcher session is driving this commit, override
+        # agent_name with the manifest's tool_id so the UI attributes
+        # the edit to "claude-code" / "codex" instead of nothing.
+        from app.launchers.current_session import current_agent_session_id
+        from app.launchers import sessions as _sessions
+
+        launcher_sid = current_agent_session_id()
+        if launcher_sid is not None and agent_name is None:
+            sess_row = _sessions.get(launcher_sid)
+            if sess_row is not None:
+                agent_name = sess_row["tool_id"]
+
         upsert_kwargs: dict[str, Any] = dict(
             user_id=user.id,
             agent_name=agent_name,
             doc_path=rel,
             activity="wrote",
             description=message,
+            agent_session_id=launcher_sid,
         )
         if activity_ttl is not None:
             upsert_kwargs["ttl"] = activity_ttl
         expires_at = agent_activity.upsert_activity(**upsert_kwargs)
         # Local import: avoids loading the tasks package at tool-load time.
         from app.tasks.agent_activity import schedule_cleanup_for_natural_key
+
         schedule_cleanup_for_natural_key(
             user_id=user.id,
             agent_name=agent_name,
@@ -177,7 +196,10 @@ def commit_and_fan_out(
     author = author_string()
     sha = wiki_git.commit_file(rel, body, message, author=author)
     wiki_notify.after_doc_write(
-        rel, sha, change_kind, author,
+        rel,
+        sha,
+        change_kind,
+        author,
         owner_user_id=user.id if (user is not None and change_kind == "create") else None,
     )
     return sha
@@ -193,14 +215,26 @@ def mark_doc_read(rel: str) -> None:
     if user is None:
         return
     agent_name = agent_activity.agent_name_var.get()
+    # R2#4 — derive agent_name from launcher session if not set.
+    from app.launchers.current_session import current_agent_session_id
+    from app.launchers import sessions as _sessions
+
+    launcher_sid = current_agent_session_id()
+    if launcher_sid is not None and agent_name is None:
+        sess_row = _sessions.get(launcher_sid)
+        if sess_row is not None:
+            agent_name = sess_row["tool_id"]
+
     expires_at = agent_activity.upsert_activity(
         user_id=user.id,
         agent_name=agent_name,
         doc_path=rel,
         activity="read",
         description=None,
+        agent_session_id=launcher_sid,
     )
     from app.tasks.agent_activity import schedule_cleanup_for_natural_key
+
     schedule_cleanup_for_natural_key(
         user_id=user.id,
         agent_name=agent_name,
@@ -273,6 +307,5 @@ def unified_diff(old: str, new: str, rel: str) -> str:
 
 def broken_links(rel: str, body: str) -> list[dict[str, str]]:
     return [
-        {"target": b.target, "resolved": b.resolved}
-        for b in links.find_broken_links(body, rel)
+        {"target": b.target, "resolved": b.resolved} for b in links.find_broken_links(body, rel)
     ]

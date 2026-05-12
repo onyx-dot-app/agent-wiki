@@ -10,6 +10,7 @@ Adopting the upstream MCP Python SDK to replace the hand-rolled
 JSON-RPC dispatcher is a follow-up PR; the existing dispatch is
 preserved here so the cutover is small + reversible.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -21,8 +22,12 @@ from typing import Any, cast
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
 
-from app.auth import set_current_user
+import re
+
+from app.auth import User, set_current_user
 from app.auth.deps import BearerPrincipal, require_bearer
+from app.db import agent_sessions as agent_sessions_repo
+from app.launchers.current_session import set_current_agent_session_id
 from app.mcp_server import pubsub as mcp_pubsub
 from app.mcp_server import session as mcp_session
 from app.mcp_server.transport import dispatch
@@ -32,6 +37,33 @@ router = APIRouter()
 log = logging.getLogger(__name__)
 
 SESSION_HEADER = "Mcp-Session-Id"
+AGENT_SESSION_HEADER = "X-Agentwiki-Session"
+_AGENT_SESSION_RE = re.compile(r"^as_[a-zA-Z0-9-]{1,64}$")  # R2#10 strict regex
+
+
+def _resolve_agent_session_id(request: Request, user: User) -> str | None:
+    """Validate + bind launcher session id from X-Agentwiki-Session header.
+
+    R2#10 — strict regex rejects header injection / overlong values.
+    Cross-user 403 (P2 #7 fold-in) — bearer holder can't stamp a
+    session that belongs to another user.
+    """
+    header = request.headers.get(AGENT_SESSION_HEADER)
+    if not header:
+        return None
+    if not _AGENT_SESSION_RE.match(header):
+        raise HTTPException(status_code=400, detail="malformed agent session id")
+    row = agent_sessions_repo.get(header)
+    if row is None:
+        raise HTTPException(status_code=400, detail="unknown agent session id")
+    if row["user_id"] != user.id:
+        raise HTTPException(
+            status_code=403,
+            detail="agent session does not belong to this user",
+        )
+    agent_sessions_repo.touch_activity(header)
+    return header
+
 
 # Same value the Flask transport uses — kept aligned so observers
 # see the same idle behavior on both stacks during the transition.
@@ -58,17 +90,18 @@ async def transport_post(
 
     incoming = request.headers.get(SESSION_HEADER)
     user = principal.user
-    # Bind the bearer user and the per-key agent identity to ContextVars
-    # so downstream tool handlers stamp the right principal + agent
-    # onto activity rows and git commit authors. Bearer auth doesn't
-    # go through the cookie-reading ``CurrentUserMiddleware``, so we
-    # bind it here at the seam.
+    # Resolve launcher agent_session_id from header BEFORE binding user
+    # so cross-user 403 happens before any tool dispatch.
+    agent_sid = _resolve_agent_session_id(request, user)
+    # Bind the bearer user, agent name, and agent_session_id to
+    # ContextVars so downstream tool handlers stamp the right principal,
+    # agent label, and session onto activity rows and git commit
+    # authors. Bearer auth doesn't go through ``CurrentUserMiddleware``,
+    # so we bind it here at the seam.
     agent_token = agent_activity.agent_name_var.set(principal.agent_name)
     try:
-        with set_current_user(user):
-            response, outgoing = dispatch(
-                cast("dict[str, Any]", body), incoming, user
-            )
+        with set_current_user(user), set_current_agent_session_id(agent_sid):
+            response, outgoing = dispatch(cast("dict[str, Any]", body), incoming, user)
     finally:
         agent_activity.agent_name_var.reset(agent_token)
 
@@ -91,7 +124,8 @@ async def transport_post(
 
 @router.get("")
 async def transport_sse(
-    request: Request, principal: BearerPrincipal = Depends(require_bearer),
+    request: Request,
+    principal: BearerPrincipal = Depends(require_bearer),
 ) -> Response:
     bearer_user = principal.user
     """Open the long-lived SSE stream for server-initiated frames.
@@ -114,7 +148,8 @@ async def transport_sse(
         # Bearer resolves to user A but the supplied session id was
         # minted for user B — refuse rather than risk hijack.
         raise HTTPException(
-            status_code=403, detail="session does not belong to this bearer",
+            status_code=403,
+            detail="session does not belong to this bearer",
         )
 
     # Bind an asyncio.Queue + this loop into pubsub so subsequent
@@ -152,5 +187,7 @@ async def transport_sse(
         "X-Accel-Buffering": "no",
     }
     return StreamingResponse(
-        stream(), media_type="text/event-stream", headers=headers,
+        stream(),
+        media_type="text/event-stream",
+        headers=headers,
     )
