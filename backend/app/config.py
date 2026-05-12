@@ -19,7 +19,8 @@ class Config(BaseModel):
 
     secret_key: str
     wiki_dir: str
-    database_url: str          # Postgres connection string for app state + pgmq queues
+    database_url: str
+    redis_url: str
     max_queue_size: int
 
     auth_mode: str  # "basic" | "oidc"
@@ -64,6 +65,7 @@ def load_config() -> Config:
             "DATABASE_URL",
             "postgresql://postgres:postgres@postgres:5432/agent_wiki",
         ),
+        redis_url=os.environ.get("REDIS_URL", "redis://redis:6379/0"),
         max_queue_size=_positive_int("MAX_QUEUE_SIZE", 1000),
         auth_mode=os.environ.get("AUTH_MODE", "basic"),
         oidc_issuer=os.environ.get("OIDC_ISSUER", ""),

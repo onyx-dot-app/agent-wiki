@@ -46,6 +46,11 @@ and wiki path stay in lockstep.
     secretKeyRef:
       name: {{ include "agent-workspace.fullname" . }}-secrets
       key: database-url
+- name: REDIS_URL
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "agent-workspace.fullname" . }}-secrets
+      key: redis-url
 - name: WIKI_DIR
   value: /wiki
 - name: SECRET_KEY

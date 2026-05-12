@@ -1,6 +1,6 @@
 """Handler for the `search_wiki` tool. Spec lives in `search_wiki.json`.
 
-Discovery layer over the BM25 index (pg_textsearch). Returns
+Discovery layer over the search index. Returns
 ``{path, title, snippet, score}`` per hit. The ``snippet`` is a
 match-aware extraction (~64 tokens of context around the densest cluster
 of matched terms, with matches wrapped in ``**...**``). Full bodies

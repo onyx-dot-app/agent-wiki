@@ -6,20 +6,13 @@ poll — instead, every time a row is upserted we schedule a delayed
 task at exactly ``expires_at``, and on server restart we re-schedule
 the same for every active row.
 
-Why ``lightweight_maintenance_queue``: the cleanup is a single
-``DELETE`` against ``agent_activity`` — sub-second, no LLM, no external
-HTTP, no wiki commits. That matches the queue's placement rule, and
-co-locating with BM25 reindex means a flood of trigger evals can't
-delay an expiration cleanup (the prior wart, when this task lived on
-``triggers_queue``).
-
 Re-registration cancels the prior scheduled cleanup: each row stores
-the pgmq ``msg_id`` of its current scheduled fire in
+the queue ``msg_id`` of its current scheduled fire in
 ``cleanup_msg_id``. When ``upsert_activity`` slides ``expires_at``
 forward, ``schedule_cleanup_for_natural_key`` enqueues a fresh task,
-``pgmq.delete``s the old msg_id, and writes the new id back — all in a
-single transaction. Without this, every re-read would leave the prior
-delayed message orphaned in pgmq for the full TTL.
+cancels the old msg_id, and writes the new id back. Without this,
+every re-read would leave the prior delayed message orphaned for the
+full TTL.
 
 A cleanup is "stale" when the row has already been re-registered with
 a later ``expires_at`` (the cancel may have raced the read). The
@@ -30,11 +23,11 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 
-from sqlalchemy import select, text
-from sqlalchemy.orm import Session
+from sqlalchemy import select
 
 from app.db.models import AgentActivity
 from app.db.session import session
+from app.tasks.queue import cancel_delayed_message
 from app.tasks.queues import lightweight_maintenance_queue
 from app.wiki import agent_activity
 
@@ -77,15 +70,12 @@ def schedule_cleanup_for_natural_key(
 ) -> None:
     """Schedule a cleanup at ``expires_at``, replacing any prior fire.
 
-    Two-step swap:
+    Enqueues a fresh delayed message (cap-checked, gets back the new
+    ``msg_id``), then reads the row's current ``cleanup_msg_id``,
+    cancels the old delayed message, and writes the new id back.
 
-    1. ``cleanup_expired_activity.schedule(...)`` enqueues a fresh
-       delayed message (cap-checked, gets back the new ``msg_id``).
-    2. In one transaction: read the row's current ``cleanup_msg_id``,
-       overwrite it with the new id, and ``pgmq.delete`` the old.
-
-    The two steps aren't a single transaction — if the process dies
-    between them, we leak the new msg_id (it'll fire and no-op via the
+    The two steps aren't atomic — if the process dies between them, we
+    leak the new msg_id (it'll fire and no-op via the
     ``expected_expires_at`` stale check). Cheap.
 
     No-op if the row is gone (``upsert`` rolled back or it was deleted
@@ -114,12 +104,12 @@ def schedule_cleanup_for_natural_key(
                 "user=%s agent=%s",
                 user_id, agent_name,
             )
-            _pgmq_delete(lightweight_maintenance_queue.name, new_msg_id)
+            cancel_delayed_message(lightweight_maintenance_queue.name, new_msg_id)
             return
         old_msg_id = row.cleanup_msg_id
         row.cleanup_msg_id = new_msg_id
         if old_msg_id is not None and old_msg_id != new_msg_id:
-            _pgmq_delete(lightweight_maintenance_queue.name, old_msg_id, sql_session=s)
+            cancel_delayed_message(lightweight_maintenance_queue.name, old_msg_id)
 
 
 def schedule_all_pending_cleanups() -> None:
@@ -160,41 +150,6 @@ def schedule_all_pending_cleanups() -> None:
     )
 
 
-def _pgmq_delete(queue_name: str, msg_id: int, *, sql_session: Session | None = None) -> None:
-    """Delete a message by id. ``pgmq.delete`` returns false when the
-    message is already gone (already fired or archived) — log and move on.
-
-    Pass ``sql_session`` to participate in an existing transaction so the
-    delete commits with the row update; otherwise opens its own session.
-    """
-    sql = text("SELECT pgmq.delete(:q, CAST(:m AS bigint))")
-    params = {"q": queue_name, "m": msg_id}
-    try:
-        if sql_session is not None:
-            ok = sql_session.execute(sql, params).scalar()
-        else:
-            with session() as s:
-                ok = s.execute(sql, params).scalar()
-    except Exception:
-        # Failure here means we leak one orphan; the stale check at fire
-        # time keeps it correct, just adds noise. Don't propagate.
-        log.exception(
-            "agent_activity cleanup cancel: pgmq.delete failed queue=%s msg=%s",
-            queue_name, msg_id,
-        )
-        return
-    if not ok:
-        log.debug(
-            "agent_activity cleanup cancel: msg %s already gone in queue %s",
-            msg_id, queue_name,
-        )
-
-
 def _parse_eta(expires_at: str) -> datetime:
-    """Parse the stored ISO timestamp into a UTC-aware datetime.
-
-    The queue's enqueue path converts an ``eta`` (timezone-aware datetime)
-    into a pgmq delay in seconds; passing aware UTC keeps the math right
-    regardless of where the worker process happens to run.
-    """
+    """Parse the stored ISO timestamp into a UTC-aware datetime."""
     return datetime.fromisoformat(expires_at)

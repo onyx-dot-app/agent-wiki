@@ -28,17 +28,21 @@ imagePullSecrets: []
 # Generate with `openssl rand -hex 32`. Required.
 secretKey: ""
 
-# Postgres connection string for app state + pgmq task queues. Required.
-# Postgres 17 with `pg_textsearch` (BM25 search) and `pgmq` (task queue)
-# extensions installed — the chart does not provision Postgres. Form:
-# postgresql://USER:PASSWORD@HOST:5432/DBNAME
+# Postgres 17 connection string for app state. Required.
+# Standard RDS Postgres — no custom extensions needed.
+# Form: postgresql://USER:PASSWORD@HOST:5432/DBNAME
 databaseUrl: ""
+
+# Redis connection string for task queues. Required.
+# ElastiCache Redis (TLS) or any Redis 7+ instance.
+# Form: rediss://HOST:6379/0  (rediss:// = TLS; redis:// = plaintext)
+redisUrl: ""
 
 # Comma-separated email whitelist for signup. Empty = anyone.
 allowedEmails: ""
 
-# Per-queue max backlog for pgmq queues. New enqueues fail fast with HTTP 503
-# when a queue reaches this size. Applies to all three queues. Default 1000.
+# Per-queue max backlog. New enqueues fail fast with HTTP 503 when a queue
+# reaches this size. Applies to all three queues. Default 1000.
 maxQueueSize: 1000
 
 auth:
@@ -86,7 +90,7 @@ worker:
   # co-schedule, AND the per-queue periodic-task scheduler runs in-process
   # (running multiple replicas would double-fire the cron tasks).
   replicaCount: 1
-  # Three pgmq queues, one consumer process each. Match
+  # Three Redis Stream queues, one consumer process each. Match
   # `backend/app/tasks/queues.py:QUEUES`. Don't add a fourth without
   # corresponding code.
   queues:
@@ -111,10 +115,8 @@ frontend:
       memory: 512Mi
 
 persistence:
-  # App state and task queues both live in Postgres (not modeled by this
-  # chart yet — provision a managed Postgres 17 with `pg_textsearch` and
-  # `pgmq` extensions, then set DATABASE_URL on the backend + worker pods).
-  # The only volume the workload still needs is the wiki working tree.
+  # App state lives in Postgres (DATABASE_URL); task queues in Redis
+  # (REDIS_URL). The only volume the workload needs is the wiki working tree.
   wikiData:
     # Git working tree. Mounted at /wiki on backend + worker.
     size: 10Gi

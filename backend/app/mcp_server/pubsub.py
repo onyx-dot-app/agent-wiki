@@ -179,7 +179,7 @@ def register_async_consumer(session_id: str) -> "asyncio.Queue[Notification]":
     bound to the currently-running event loop. Called by the FastAPI
     SSE writer at stream open. Subsequent publishes for ``session_id``
     enqueue via ``loop.call_soon_threadsafe`` so cross-thread pushes
-    (from sync request handlers, pgmq workers via PG NOTIFY, the
+    (from sync request handlers, task workers via PG NOTIFY, the
     LISTEN thread) hand off safely to the writer's loop.
 
     Drains any items already queued on the sync side at registration

@@ -6,11 +6,10 @@ on teardown) and a fresh wiki dir under ``tmp_path``. We construct a new
 ``from app.config import CONFIG`` — those bindings are captured at import
 time, so patching ``app.config.CONFIG`` alone is not enough.
 
-The test database itself (with ``pg_textsearch`` already installed) must
-already exist; point ``TEST_DATABASE_URL`` at it. Locally:
+The test database must already exist; point ``TEST_DATABASE_URL`` at it.
+Locally:
 
   createdb agent_wiki_test
-  psql agent_wiki_test -c 'CREATE EXTENSION pg_textsearch;'
 """
 from __future__ import annotations
 
@@ -55,10 +54,6 @@ def _reset_mcp_state():
 
 def _with_search_path(url: str, schema: str) -> str:
     sep = "&" if "?" in url else "?"
-    # Include ``public`` as a fallback so pg_textsearch's functions
-    # (``to_bm25query``, ``bm25_*``) and pgmq's helpers — both installed
-    # into ``public`` by ``CREATE EXTENSION`` — resolve when the test's
-    # primary schema is the per-test isolation schema.
     return f"{url}{sep}options={quote(f'-csearch_path={schema},public')}"
 
 
@@ -76,6 +71,7 @@ def tmp_config(tmp_path, monkeypatch):
         secret_key="test-secret",
         wiki_dir=str(wiki_dir),
         database_url=_with_search_path(_BASE_URL, schema),
+        redis_url=os.environ.get("TEST_REDIS_URL", "redis://localhost:6380/1"),
         max_queue_size=1000,
         auth_mode="basic",
         oidc_issuer="",

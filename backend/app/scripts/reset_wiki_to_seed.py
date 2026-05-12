@@ -15,7 +15,7 @@ Preserved across the reset:
 Cleared:
 
 - Every tracked file under ``WIKI_DIR`` (the working tree itself).
-- ``documents`` / ``documents_fts`` — page metadata + BM25 index.
+- ``documents`` — page metadata.
 - ``acl_entries`` / ``wiki_owners`` — per-page permissions and owners.
 - ``triggers`` and ``events`` — trigger cache and event log.
 - ``agent_activity`` and ``document_drafts`` — in-flight session state.
@@ -52,7 +52,6 @@ log = logging.getLogger(__name__)
 _WIKI_CONTENT_TABLES = (
     "wiki_seed_state",
     "documents",
-    "documents_fts",
     "acl_entries",
     "wiki_owners",
     "triggers",

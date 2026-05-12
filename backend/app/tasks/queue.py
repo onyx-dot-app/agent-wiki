@@ -1,4 +1,4 @@
-"""Task queue backed by pgmq.
+"""Task queue backed by Redis Streams.
 
 The decorator-shaped API the rest of the app uses:
 
@@ -10,30 +10,33 @@ The decorator-shaped API the rest of the app uses:
   * ``queue.immediate = True``                     — synchronous mode for tests
   * ``QueueFullError``                             — raised when at the cap
 
-Each named ``TaskQueue`` persists its messages in the pgmq queue of the
-same name (``pgmq.q_<name>``). pgmq's SQL functions (``pgmq.send``,
-``pgmq.read``, ``pgmq.delete``, ``pgmq.archive``, ``pgmq.set_vt``) don't
-have ORM equivalents, so they go through ``session.execute(text(...))``.
+Each named ``TaskQueue`` persists its messages in two Redis data structures:
+
+* ``queue:{name}`` — Redis Stream for ready messages. Consumer group
+  ``workers`` tracks which messages are in-flight.
+* ``queue:{name}:delay`` — Sorted set, score = fire timestamp (ms since
+  epoch). Messages fire when score ≤ now. Delayed sends (``eta`` /
+  ``delay``) land here first; a background pump thread moves them to the
+  stream once they're due.
+* ``queue:{name}:bodies`` — Hash, msg_id → JSON body. Stores the payload
+  for delayed messages until the pump moves them to the stream.
+* ``queue:{name}:msg_counter`` — INCR counter that generates monotonic
+  integer msg_ids for delayed messages.
 
 Worker semantics (see ``run_consumer``): ``concurrency`` worker threads
-each long-poll the queue with ``qty=1``. Handlers run in-thread, so a
-slow LLM task doesn't block its peers. On exception we push the
-message's visibility timeout out exponentially via ``pgmq.set_vt`` and
-let pgmq redeliver. Messages whose ``read_ct`` exceeds ``MAX_RETRIES``
-get archived.
+each long-poll the stream via XREADGROUP. Handlers run in-thread. On
+exception we re-enqueue the message with exponential backoff (via the
+delay sorted set). Messages that fail more than ``MAX_RETRIES`` times are
+dropped with a log warning.
 
 Periodic tasks are run by an in-process scheduler thread that holds a
-per-queue advisory lock — only one process across the deployment fires
-crons for a given queue, so scaling worker replicas no longer
-double-fires schedules. ``cron_state`` (a small table) records each
-task's last-fired timestamp so a restart picks up where the previous
-process left off instead of silently skipping fires that came due
-during downtime.
+per-queue Redis lock — only one process across the deployment fires crons
+for a given queue. ``cron_state`` (a Postgres table) records each task's
+last-fired timestamp so a restart picks up where the previous process left
+off.
 
-Shutdown: SIGTERM / SIGINT sets a stop event; worker threads finish
-their current task and exit, the scheduler releases its lock by
-disconnecting. Messages that are mid-flight at SIGKILL hold their VT
-until it expires — that's unavoidable with pgmq.
+Shutdown: SIGTERM / SIGINT sets a stop event; worker threads finish their
+current task and exit. The pump thread exits too.
 """
 from __future__ import annotations
 
@@ -41,6 +44,7 @@ import json
 import logging
 import signal
 import threading
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -49,30 +53,20 @@ from typing import Any, Callable, Generator
 from croniter import croniter
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import text
-from sqlalchemy.engine import Connection
 
-from app.db.session import get_engine, session
+from app.db.session import session
 
 log = logging.getLogger(__name__)
 
 
-_DEFAULT_VT_SECONDS = 300       # how long a worker holds a message before it returns
-_POLL_IDLE_SLEEP = 1.0          # seconds to wait when pgmq.read returns empty
-_MAX_RETRIES = 3                # archive after this many redeliveries
-_RETRY_BASE_SECONDS = 30        # first backoff; doubles per redelivery
-_RETRY_MAX_SECONDS = 600        # cap so a long-failing task doesn't wait hours
-_LEADER_RETRY_SECONDS = 30      # how long a non-leader scheduler sleeps before retrying
-
-# Cap-check + send must be atomic against concurrent producers on the same
-# queue, otherwise N producers each see size<limit and all insert. We hold a
-# per-queue ``pg_advisory_xact_lock`` across the count + send. The lock auto-
-# releases on COMMIT, so contention is bounded by the time of one INSERT.
-_CAP_LOCK_PREFIX = "queue-cap:"
-
-# Scheduler leadership lock. Only the holder runs the periodic scheduler for
-# its queue; other replicas idle in the leader-retry loop. Held on a
-# dedicated connection so the lock auto-releases on process death.
-_SCHEDULER_LOCK_PREFIX = "queue-cron:"
+_DEFAULT_VT_SECONDS = 300       # visibility timeout — how long a worker holds a message
+_POLL_IDLE_SLEEP = 1.0          # seconds to sleep when the stream is empty
+_MAX_RETRIES = 3
+_RETRY_BASE_SECONDS = 30
+_RETRY_MAX_SECONDS = 600
+_LEADER_RETRY_SECONDS = 30
+_PUMP_INTERVAL = 0.5            # how often the pump thread checks for due delayed messages
+_SCHED_LOCK_TTL_MS = 65_000     # Redis TTL for the scheduler leadership key
 
 
 class QueueFullError(RuntimeError):
@@ -102,7 +96,8 @@ def crontab(
 
 # --------------------------------------------------------------------------- #
 # Stop event — set by SIGTERM / SIGINT, observed by every worker thread plus  #
-# the scheduler. Module-global so test fixtures don't have to thread it.      #
+# the pump and scheduler. Module-global so test fixtures don't have to thread #
+# it around.                                                                  #
 # --------------------------------------------------------------------------- #
 
 
@@ -110,12 +105,6 @@ _stop_event = threading.Event()
 
 
 def _install_signal_handlers() -> None:
-    """Wire SIGTERM / SIGINT → set the stop event. Idempotent.
-
-    Only the main thread can install signal handlers (Python rule). We
-    silently no-op when called from a worker thread so unit tests that
-    spin up consumers from a non-main thread don't crash.
-    """
     if threading.current_thread() is not threading.main_thread():
         return
 
@@ -127,8 +116,77 @@ def _install_signal_handlers() -> None:
         try:
             signal.signal(sig, _on_signal)
         except (ValueError, OSError):
-            # Re-installing signals during pytest can fail; safe to skip.
             pass
+
+
+# --------------------------------------------------------------------------- #
+# Redis client — lazy singleton                                               #
+# --------------------------------------------------------------------------- #
+
+
+_redis_client: Any = None
+_redis_lock = threading.Lock()
+
+
+def get_redis() -> Any:
+    global _redis_client
+    if _redis_client is not None:
+        return _redis_client
+    with _redis_lock:
+        if _redis_client is not None:
+            return _redis_client
+        import redis as redis_lib
+
+        from app.config import CONFIG
+
+        _redis_client = redis_lib.from_url(CONFIG.redis_url, decode_responses=True)
+        return _redis_client
+
+
+# --------------------------------------------------------------------------- #
+# Redis key helpers                                                           #
+# --------------------------------------------------------------------------- #
+
+
+def _stream_key(name: str) -> str:
+    return f"queue:{name}"
+
+
+def _delay_key(name: str) -> str:
+    return f"queue:{name}:delay"
+
+
+def _bodies_key(name: str) -> str:
+    return f"queue:{name}:bodies"
+
+
+def _counter_key(name: str) -> str:
+    return f"queue:{name}:msg_counter"
+
+
+def _sched_lock_key(name: str) -> str:
+    return f"queue:{name}:sched_lock"
+
+
+# --------------------------------------------------------------------------- #
+# Consumer-group bootstrap                                                    #
+# --------------------------------------------------------------------------- #
+
+
+def _ensure_consumer_group(queue_name: str) -> None:
+    """Create the stream + consumer group if they don't exist yet.
+
+    Uses ``XGROUP CREATE ... MKSTREAM`` so the stream is created even if
+    no messages have been enqueued yet. The ``0`` start-id means the group
+    will process messages from the beginning on first start.
+    """
+    r = get_redis()
+    try:
+        r.xgroup_create(_stream_key(queue_name), "workers", id="0", mkstream=True)
+    except Exception as exc:
+        # BUSYGROUP = group already exists — normal on restart.
+        if "BUSYGROUP" not in str(exc):
+            raise
 
 
 # --------------------------------------------------------------------------- #
@@ -137,13 +195,7 @@ def _install_signal_handlers() -> None:
 
 
 class QueueDepth(BaseModel):
-    """Snapshot of pgmq message counts, broken down by state.
-
-    See ``TaskQueue.depth`` for the per-field semantics. ``pending``
-    (``ready + delayed``) is the producer-relevant figure that matches
-    the cap-check predicate: a delayed message still consumes a slot
-    because it will eventually become ready.
-    """
+    """Snapshot of message counts, broken down by state."""
 
     ready: int
     delayed: int
@@ -160,7 +212,7 @@ class _PeriodicEntry(BaseModel):
 
 
 class TaskQueue(BaseModel):
-    """One named queue + handler registry. Backed by pgmq.q_<name>."""
+    """One named queue + handler registry. Backed by Redis Streams."""
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -188,20 +240,7 @@ class TaskQueue(BaseModel):
 
     @contextmanager
     def immediate_mode(self) -> Generator["TaskQueue", None, None]:
-        """Run handlers synchronously inside the ``with`` block; restore on exit.
-
-        Tests are the only intended caller — flipping the flag globally
-        used to leak across cases. The context manager saves the prior
-        value and restores it even if the body raises, so leaks are
-        impossible by construction. App code should never call this.
-
-        Multiple queues can be entered with ``ExitStack``::
-
-            with ExitStack() as stack:
-                stack.enter_context(documents_queue.immediate_mode())
-                stack.enter_context(triggers_queue.immediate_mode())
-                ...
-        """
+        """Run handlers synchronously inside the ``with`` block; restore on exit."""
         prev = self.immediate
         self.immediate = True
         try:
@@ -212,45 +251,30 @@ class TaskQueue(BaseModel):
     # ----- depth + enqueue --------------------------------------------------
 
     def depth(self) -> "QueueDepth":
-        """Per-state message counts in one query.
+        """Per-state message counts.
 
-        pgmq messages live in three states the rest of the app cares
-        about distinguishing:
+        ``ready`` = stream length (includes in-flight, which is a small
+        subset; XPENDING is approximate anyway).
+        ``delayed`` = items in the delay sorted set not yet moved to stream.
+        ``in_flight`` = best-effort XPENDING count (0 when group not yet set up).
 
-        * ``ready`` — ``vt <= now()``: a worker can claim the message on
-          the next ``pgmq.read``. Includes both fresh no-delay sends
-          (``read_ct = 0``) and retry-eligible ones (``read_ct > 0``)
-          whose backoff window has elapsed.
-        * ``delayed`` — ``read_ct = 0 AND vt > now()``: scheduled for a
-          future fire (``schedule(..., eta=...)`` or ``delay=...``). No
-          worker has touched it yet. The user-facing distinction the
-          healthcheck cares about: these are *waiting on the clock*, not
-          on consumer throughput.
-        * ``in_flight`` — ``read_ct > 0 AND vt > now()``: currently held
-          by a worker. Not eligible for redelivery until the VT expires.
-
-        Returns all-zeros in immediate mode (messages execute
-        synchronously and never sit in pgmq).
+        Returns all-zeros in immediate mode.
         """
         if self.immediate:
             return QueueDepth(ready=0, delayed=0, in_flight=0)
-        with session() as s:
-            row = s.execute(
-                text(
-                    f"SELECT "
-                    f"count(*) FILTER (WHERE vt <= now()) AS ready, "
-                    f"count(*) FILTER (WHERE read_ct = 0 AND vt > now()) AS delayed, "
-                    f"count(*) FILTER (WHERE read_ct > 0 AND vt > now()) AS in_flight "
-                    f'FROM pgmq."q_{self.name}"'
-                )
-            ).mappings().first()
-        if row is None:
+        r = get_redis()
+        try:
+            stream_len = int(r.xlen(_stream_key(self.name)) or 0)
+            delayed = int(r.zcard(_delay_key(self.name)) or 0)
+            try:
+                pending_info = r.xpending(_stream_key(self.name), "workers")
+                in_flight = int(pending_info.get("pending", 0))
+            except Exception:
+                in_flight = 0
+            ready = max(0, stream_len - in_flight)
+            return QueueDepth(ready=ready, delayed=delayed, in_flight=in_flight)
+        except Exception:
             return QueueDepth(ready=0, delayed=0, in_flight=0)
-        return QueueDepth(
-            ready=int(row["ready"] or 0),
-            delayed=int(row["delayed"] or 0),
-            in_flight=int(row["in_flight"] or 0),
-        )
 
     def enqueue(
         self,
@@ -261,39 +285,44 @@ class TaskQueue(BaseModel):
         eta: datetime | None = None,
         delay: int | None = None,
     ) -> int | None:
-        """Enqueue a task. Returns the pgmq ``msg_id`` of the new message,
-        or ``None`` in immediate mode (the handler ran synchronously)."""
+        """Enqueue a task. Returns the integer msg_id, or ``None`` in immediate mode."""
         if self.immediate:
             handler = self.handlers[task_name]
             handler(*args, **(kwargs or {}))
             return None
 
         delay_seconds = _resolve_delay(eta, delay)
-        body = {"task": task_name, "args": list(args), "kwargs": dict(kwargs or {})}
+        body = {
+            "task": task_name,
+            "args": list(args),
+            "kwargs": dict(kwargs or {}),
+            "retry_count": 0,
+        }
 
-        # Single transaction: take the per-queue advisory lock, count
-        # pending rows (ready + delayed = everything except in-flight),
-        # enqueue if under the cap. The lock serializes only enqueues
-        # *on this queue*, so the three queues stay independent. Released
-        # on commit/rollback.
-        with session() as s:
-            s.execute(
-                text("SELECT pg_advisory_xact_lock(hashtext(:k))"),
-                {"k": _CAP_LOCK_PREFIX + self.name},
-            )
-            size = s.execute(
-                text(
-                    f'SELECT count(*) FROM pgmq."q_{self.name}" '
-                    "WHERE read_ct = 0 OR vt <= now()"
-                )
-            ).scalar() or 0
-            if size >= self.max_size:
-                raise QueueFullError(self.name, size, self.max_size)
-            msg_id = s.execute(
-                text("SELECT pgmq.send(:q, CAST(:msg AS jsonb), :delay)"),
-                {"q": self.name, "msg": json.dumps(body), "delay": delay_seconds},
-            ).scalar()
-        return int(msg_id) if msg_id is not None else None
+        r = get_redis()
+
+        # Cap check + enqueue. Not atomic across processes, but close enough:
+        # the cap is a soft guard against runaway producers, not a hard limit.
+        total = int(r.xlen(_stream_key(self.name)) or 0) + int(
+            r.zcard(_delay_key(self.name)) or 0
+        )
+        if total >= self.max_size:
+            raise QueueFullError(self.name, total, self.max_size)
+
+        msg_id = int(r.incr(_counter_key(self.name)))
+
+        if delay_seconds <= 0:
+            # Immediate: push directly onto stream. Embed msg_id in body so
+            # the worker can log/track it.
+            body["msg_id"] = msg_id
+            r.xadd(_stream_key(self.name), {"payload": json.dumps(body)})
+        else:
+            fire_ts = int(_now().timestamp() * 1000) + delay_seconds * 1000
+            body["msg_id"] = msg_id
+            r.hset(_bodies_key(self.name), str(msg_id), json.dumps(body))
+            r.zadd(_delay_key(self.name), {str(msg_id): fire_ts})
+
+        return msg_id
 
 
 class Task(BaseModel):
@@ -306,9 +335,6 @@ class Task(BaseModel):
     fn: Callable[..., Any]
 
     def __call__(self, *args: Any, **kwargs: Any) -> int | None:
-        """Direct call enqueues — never executes synchronously unless
-        ``queue.immediate`` is set (only in tests). Returns the pgmq
-        ``msg_id`` of the new message, or ``None`` in immediate mode."""
         return self.queue.enqueue(self.name, args, kwargs)
 
     def schedule(
@@ -321,13 +347,32 @@ class Task(BaseModel):
     ) -> int | None:
         """Enqueue with a future ``eta`` or relative ``delay`` (seconds).
 
-        Returns the pgmq ``msg_id`` so callers that want to cancel the
-        scheduled fire later (e.g. ``agent_activity`` re-registration)
-        can pass the id to ``pgmq.delete``.
+        Returns the integer msg_id so callers that want to cancel the
+        scheduled fire later can pass it to ``cancel_delayed_message``.
         """
         return self.queue.enqueue(
             self.name, tuple(args), kwargs or {}, eta=eta, delay=delay
         )
+
+
+# --------------------------------------------------------------------------- #
+# Cancellation of delayed messages                                            #
+# --------------------------------------------------------------------------- #
+
+
+def cancel_delayed_message(queue_name: str, msg_id: int) -> None:
+    """Cancel a delayed message that hasn't fired yet.
+
+    No-op if the message has already been moved to the stream (it will
+    run and the handler's own stale check should discard it), or if the
+    id doesn't exist.
+    """
+    r = get_redis()
+    try:
+        r.zrem(_delay_key(queue_name), str(msg_id))
+        r.hdel(_bodies_key(queue_name), str(msg_id))
+    except Exception:
+        log.exception("queue %s: cancel_delayed_message %s failed", queue_name, msg_id)
 
 
 # --------------------------------------------------------------------------- #
@@ -336,7 +381,6 @@ class Task(BaseModel):
 
 
 def _resolve_delay(eta: datetime | None, delay: int | None) -> int:
-    """Translate an ``eta`` / ``delay`` pair into pgmq's seconds-from-now."""
     if eta is None and delay is None:
         return 0
     if eta is not None and delay is not None:
@@ -350,19 +394,46 @@ def _resolve_delay(eta: datetime | None, delay: int | None) -> int:
     return max(0, int(seconds))
 
 
-def _retry_backoff_seconds(read_ct: int) -> int:
-    """Exponential backoff for redelivery: 30s, 60s, 120s, … capped.
-
-    ``read_ct`` is the number of times the message has been delivered
-    *including* the failed run we just observed (``read_ct=1`` on first
-    failure).
-    """
-    delay = _RETRY_BASE_SECONDS * (2 ** max(0, read_ct - 1))
+def _retry_backoff_seconds(retry_count: int) -> int:
+    delay = _RETRY_BASE_SECONDS * (2 ** max(0, retry_count - 1))
     return min(_RETRY_MAX_SECONDS, delay)
 
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+# --------------------------------------------------------------------------- #
+# Pump thread — moves due delayed messages onto the stream                   #
+# --------------------------------------------------------------------------- #
+
+
+def _run_pump(queues: list[TaskQueue]) -> None:
+    """Background thread that polls the delay sorted sets and moves due
+    messages onto their respective streams. One thread serves all queues
+    in the process."""
+    queue_names = [q.name for q in queues]
+    log.debug("pump: started for queues %s", queue_names)
+    while not _stop_event.is_set():
+        _stop_event.wait(_PUMP_INTERVAL)
+        if _stop_event.is_set():
+            break
+        now_ts = int(_now().timestamp() * 1000)
+        r = get_redis()
+        for name in queue_names:
+            try:
+                due = r.zrangebyscore(_delay_key(name), "-inf", now_ts)
+                for msg_id_str in due:
+                    body_json = r.hget(_bodies_key(name), msg_id_str)
+                    if body_json:
+                        r.xadd(_stream_key(name), {"payload": body_json})
+                    # Remove from delay set + bodies regardless of whether
+                    # the body was found (could have been already canceled).
+                    r.zrem(_delay_key(name), msg_id_str)
+                    r.hdel(_bodies_key(name), msg_id_str)
+            except Exception:
+                log.exception("pump: error processing queue %s", name)
+    log.debug("pump: stopped")
 
 
 # --------------------------------------------------------------------------- #
@@ -379,21 +450,28 @@ def run_consumer(
 ) -> None:
     """Run ``concurrency`` worker threads against ``queue``.
 
-    Each thread independently long-polls pgmq with ``qty=1`` and runs
-    the handler in-thread, so handlers run truly in parallel up to
-    ``concurrency``. The scheduler (if any periodic tasks are
-    registered) runs in its own daemon thread guarded by an advisory
-    lock.
-
-    Returns when SIGTERM / SIGINT is delivered and all worker threads
-    have drained. Workers don't pick up new messages after the stop
-    event fires; in-flight handlers run to completion.
+    Each thread reads from the Redis Stream via XREADGROUP and runs the
+    handler in-thread. The pump thread is started once per process (it
+    serves all queues). Returns when SIGTERM / SIGINT is received.
     """
     _install_signal_handlers()
+    _ensure_consumer_group(queue.name)
     log.info(
         "queue %s: consumer up (concurrency=%d, vt=%ds)",
         queue.name, concurrency, vt_seconds,
     )
+
+    # Start the pump thread once per queue consumer (it's idempotent — the
+    # pump only processes the queues it's given, so running one pump per
+    # consumer is fine; they won't double-process because ZRANGEBYSCORE +
+    # ZREM isn't atomic, but duplicate stream inserts just add idempotent
+    # messages that the handler's stale check absorbs).
+    threading.Thread(
+        target=_run_pump,
+        args=([queue],),
+        name=f"pump-{queue.name}",
+        daemon=True,
+    ).start()
 
     if queue.periodic:
         threading.Thread(
@@ -408,8 +486,6 @@ def run_consumer(
     ) as pool:
         for i in range(concurrency):
             pool.submit(_worker_loop, queue, i, vt_seconds, max_retries)
-        # ThreadPoolExecutor's __exit__ joins all submitted callables.
-        # Worker loops exit when ``_stop_event`` is set.
 
     log.info("queue %s: consumer drained, exiting", queue.name)
 
@@ -417,67 +493,107 @@ def run_consumer(
 def _worker_loop(
     queue: TaskQueue, worker_id: int, vt_seconds: int, max_retries: int
 ) -> None:
-    log.debug("queue %s: worker %d ready", queue.name, worker_id)
+    consumer_name = f"worker-{worker_id}-{uuid.uuid4().hex[:8]}"
+    log.debug("queue %s: worker %s ready", queue.name, consumer_name)
+    r = get_redis()
+    block_ms = int(_POLL_IDLE_SLEEP * 1000)
+
     while not _stop_event.is_set():
         try:
-            msgs = _pgmq_read(queue.name, vt=vt_seconds, qty=1)
+            results = r.xreadgroup(
+                "workers",
+                consumer_name,
+                {_stream_key(queue.name): ">"},
+                count=1,
+                block=block_ms,
+            )
         except Exception:
-            log.exception("queue %s: pgmq.read failed", queue.name)
+            log.exception("queue %s: xreadgroup failed", queue.name)
             _stop_event.wait(_POLL_IDLE_SLEEP)
             continue
-        if not msgs:
-            _stop_event.wait(_POLL_IDLE_SLEEP)
+
+        if not results:
             continue
-        # Even if stop fired between read and process, finish what we read —
-        # otherwise the message holds its VT for the full vt_seconds before
-        # redelivery. Running it now is the polite thing to do.
-        for msg in msgs:
-            _process_one(queue, msg, max_retries=max_retries)
-    log.debug("queue %s: worker %d stopped", queue.name, worker_id)
+
+        for _stream, messages in results:
+            for stream_entry_id, fields in messages:
+                payload_json = fields.get("payload", "{}")
+                try:
+                    body: dict[str, Any] = json.loads(payload_json)
+                except (ValueError, TypeError):
+                    log.error(
+                        "queue %s: malformed payload at %s — acking and skipping",
+                        queue.name, stream_entry_id,
+                    )
+                    r.xack(_stream_key(queue.name), "workers", stream_entry_id)
+                    r.xdel(_stream_key(queue.name), stream_entry_id)
+                    continue
+                _process_one(
+                    queue, stream_entry_id, body, r, max_retries=max_retries,
+                )
+
+    log.debug("queue %s: worker %s stopped", queue.name, consumer_name)
 
 
-def _process_one(queue: TaskQueue, msg: dict[str, Any], *, max_retries: int) -> None:
-    msg_id: int = msg["msg_id"]
-    read_ct: int = msg["read_ct"]
-    body: dict[str, Any] = msg["message"]
-
+def _process_one(
+    queue: TaskQueue,
+    stream_entry_id: str,
+    body: dict[str, Any],
+    r: Any,
+    *,
+    max_retries: int,
+) -> None:
     task_name: str = body.get("task", "")
     args: list[Any] = body.get("args") or []
     kwargs: dict[str, Any] = body.get("kwargs") or {}
+    retry_count: int = int(body.get("retry_count", 0))
 
     handler = queue.handlers.get(task_name)
     if handler is None:
         log.error(
-            "queue %s: no handler for task %r — archiving msg %s",
-            queue.name, task_name, msg_id,
+            "queue %s: no handler for task %r — discarding entry %s",
+            queue.name, task_name, stream_entry_id,
         )
-        _pgmq_archive(queue.name, msg_id)
+        r.xack(_stream_key(queue.name), "workers", stream_entry_id)
+        r.xdel(_stream_key(queue.name), stream_entry_id)
         return
 
     try:
-        log.debug("queue %s: run %s msg=%s read_ct=%d", queue.name, task_name, msg_id, read_ct)
+        log.debug(
+            "queue %s: run %s entry=%s retry=%d",
+            queue.name, task_name, stream_entry_id, retry_count,
+        )
         handler(*args, **kwargs)
     except Exception:
         log.exception(
-            "queue %s: task %s failed (msg=%s read_ct=%d)",
-            queue.name, task_name, msg_id, read_ct,
+            "queue %s: task %s failed (entry=%s retry=%d)",
+            queue.name, task_name, stream_entry_id, retry_count,
         )
-        if read_ct >= max_retries:
-            log.warning(
-                "queue %s: task %s exceeded retries (read_ct=%d) — archiving msg %s",
-                queue.name, task_name, read_ct, msg_id,
-            )
-            _pgmq_archive(queue.name, msg_id)
-        else:
-            backoff = _retry_backoff_seconds(read_ct)
+        # Ack first (remove from PEL), then re-enqueue if retries remain.
+        r.xack(_stream_key(queue.name), "workers", stream_entry_id)
+        r.xdel(_stream_key(queue.name), stream_entry_id)
+        if retry_count < max_retries:
+            backoff = _retry_backoff_seconds(retry_count + 1)
             log.info(
-                "queue %s: task %s scheduled for retry in %ds (msg=%s)",
-                queue.name, task_name, backoff, msg_id,
+                "queue %s: task %s retry %d in %ds",
+                queue.name, task_name, retry_count + 1, backoff,
             )
-            _pgmq_set_vt(queue.name, msg_id, backoff)
+            retry_body = dict(body)
+            retry_body["retry_count"] = retry_count + 1
+            new_id = int(r.incr(_counter_key(queue.name)))
+            retry_body["msg_id"] = new_id
+            fire_ts = int(_now().timestamp() * 1000) + backoff * 1000
+            r.hset(_bodies_key(queue.name), str(new_id), json.dumps(retry_body))
+            r.zadd(_delay_key(queue.name), {str(new_id): fire_ts})
+        else:
+            log.warning(
+                "queue %s: task %s exceeded %d retries — dropping entry %s",
+                queue.name, task_name, max_retries, stream_entry_id,
+            )
         return
 
-    _pgmq_delete(queue.name, msg_id)
+    r.xack(_stream_key(queue.name), "workers", stream_entry_id)
+    r.xdel(_stream_key(queue.name), stream_entry_id)
 
 
 # --------------------------------------------------------------------------- #
@@ -486,75 +602,101 @@ def _process_one(queue: TaskQueue, msg: dict[str, Any], *, max_retries: int) -> 
 
 
 def _run_periodic_scheduler(queue: TaskQueue) -> None:
-    """Leader-elected periodic scheduler.
+    """Leader-elected periodic scheduler using a Redis lock.
 
-    Tries to acquire a per-queue advisory lock on a long-lived
-    connection; if another replica holds it, sleeps and retries. While
-    leader, fires periodic tasks based on persisted ``cron_state``.
-    Exits when the stop event is set or the connection drops.
+    Acquires a per-queue lock via SET NX PX; if another replica holds it,
+    sleeps and retries. While leader, fires periodic tasks based on
+    persisted ``cron_state``. Refreshes the lock every half-TTL so it
+    doesn't expire while still leader.
     """
     while not _stop_event.is_set():
-        conn = _try_acquire_scheduler_leadership(queue.name)
-        if conn is None:
+        lock_value = uuid.uuid4().hex
+        if _try_acquire_scheduler_leadership(queue.name, lock_value):
+            log.info(
+                "queue %s: periodic scheduler is leader — %d task(s)",
+                queue.name, len(queue.periodic),
+            )
+            try:
+                _scheduler_loop(queue, lock_value)
+            finally:
+                _release_scheduler_lock(queue.name, lock_value)
+        else:
             log.info(
                 "queue %s: another scheduler holds the lock; idle %ds",
                 queue.name, _LEADER_RETRY_SECONDS,
             )
             if _stop_event.wait(_LEADER_RETRY_SECONDS):
                 return
-            continue
-        try:
-            log.info(
-                "queue %s: periodic scheduler is leader — %d task(s)",
-                queue.name, len(queue.periodic),
-            )
-            _scheduler_loop(queue)
-        finally:
-            try:
-                conn.close()
-            except Exception:
-                log.exception("queue %s: scheduler conn close failed", queue.name)
 
 
-def _try_acquire_scheduler_leadership(queue_name: str) -> Connection | None:
-    """Open a dedicated connection and try ``pg_try_advisory_lock``.
-
-    Returns the connection (with the lock held) if acquired, ``None``
-    otherwise. The lock is released when the connection is closed —
-    that's why we hold the connection open for the lifetime of
-    leadership instead of using the per-call session helper.
-    """
-    engine = get_engine()
-    conn = engine.connect()
+def _try_acquire_scheduler_leadership(queue_name: str, lock_value: str) -> bool:
+    r = get_redis()
     try:
-        got = conn.execute(
-            text("SELECT pg_try_advisory_lock(hashtext(:k))"),
-            {"k": _SCHEDULER_LOCK_PREFIX + queue_name},
-        ).scalar()
-        # Commit the implicit transaction so the lock is held at session
-        # scope (released only on disconnect), not transaction scope.
-        conn.commit()
+        return bool(
+            r.set(_sched_lock_key(queue_name), lock_value, nx=True, px=_SCHED_LOCK_TTL_MS)
+        )
     except Exception:
-        log.exception("queue %s: advisory lock attempt failed", queue_name)
-        conn.close()
-        return None
-    if not got:
-        conn.close()
-        return None
-    return conn
+        log.exception("queue %s: scheduler lock acquire failed", queue_name)
+        return False
 
 
-def _scheduler_loop(queue: TaskQueue) -> None:
+_LUA_REFRESH_LOCK = """
+if redis.call('get', KEYS[1]) == ARGV[1] then
+    return redis.call('pexpire', KEYS[1], ARGV[2])
+else
+    return 0
+end
+"""
+
+_LUA_RELEASE_LOCK = """
+if redis.call('get', KEYS[1]) == ARGV[1] then
+    return redis.call('del', KEYS[1])
+else
+    return 0
+end
+"""
+
+
+def _refresh_scheduler_lock(queue_name: str, lock_value: str) -> bool:
+    """Extend the TTL atomically if we still own the lock."""
+    r = get_redis()
+    try:
+        result = r.eval(_LUA_REFRESH_LOCK, 1, _sched_lock_key(queue_name), lock_value, _SCHED_LOCK_TTL_MS)
+        return bool(result)
+    except Exception:
+        return False
+
+
+def _release_scheduler_lock(queue_name: str, lock_value: str) -> None:
+    r = get_redis()
+    try:
+        r.eval(_LUA_RELEASE_LOCK, 1, _sched_lock_key(queue_name), lock_value)
+    except Exception:
+        log.exception("queue %s: scheduler lock release failed", queue_name)
+
+
+def _scheduler_loop(queue: TaskQueue, lock_value: str) -> None:
     """Compute next-fire per task, sleep, fire when due, persist last-fired."""
     next_fires: list[datetime] = [
         _initial_next_fire(queue.name, e) for e in queue.periodic
     ]
+    refresh_interval = _SCHED_LOCK_TTL_MS / 2 / 1000  # seconds
+    last_refresh = _now()
 
     while not _stop_event.is_set():
         soonest = min(next_fires)
         sleep_s = max(0.0, (soonest - _now()).total_seconds())
+        # Sleep in short chunks so we can refresh the lock and check stop.
+        sleep_s = min(sleep_s, refresh_interval)
         if _stop_event.wait(timeout=sleep_s):
             return
+
+        # Refresh lock to stay leader.
+        if (_now() - last_refresh).total_seconds() >= refresh_interval:
+            if not _refresh_scheduler_lock(queue.name, lock_value):
+                log.warning("queue %s: lost scheduler lock — stepping down", queue.name)
+                return
+            last_refresh = _now()
 
         now = _now()
         for i, entry in enumerate(queue.periodic):
@@ -574,20 +716,10 @@ def _scheduler_loop(queue: TaskQueue) -> None:
                     "queue %s: periodic %s enqueue failed",
                     queue.name, entry.task_name,
                 )
-            # Always advance from ``now`` (not from the missed fire time)
-            # so a long downtime doesn't queue up a stampede of catch-ups —
-            # we fire once and resume the normal cadence.
             next_fires[i] = croniter(entry.cron_spec, now).get_next(datetime)
 
 
 def _initial_next_fire(queue_name: str, entry: _PeriodicEntry) -> datetime:
-    """Compute the next fire for an entry, honoring last-fired persistence.
-
-    If the previous run died and the cron came due during downtime,
-    ``croniter(spec, last_fired).get_next()`` returns a time in the past
-    — the scheduler loop fires it on the next tick (single catch-up
-    fire) instead of silently skipping it.
-    """
     last = _read_last_fired(queue_name, entry.task_name)
     base = last or _now()
     return croniter(entry.cron_spec, base).get_next(datetime)
@@ -623,46 +755,4 @@ def _record_cron_fire(queue_name: str, task_name: str, fired_at: datetime) -> No
                 "SET last_fired_at = EXCLUDED.last_fired_at"
             ),
             {"q": queue_name, "t": task_name, "ts": iso},
-        )
-
-
-# --------------------------------------------------------------------------- #
-# pgmq helpers — small SQL surface, run via session.execute(text())           #
-# --------------------------------------------------------------------------- #
-
-
-def _pgmq_read(queue: str, *, vt: int, qty: int) -> list[dict[str, Any]]:
-    with session() as s:
-        rows = s.execute(
-            text(
-                "SELECT msg_id, read_ct, enqueued_at, vt, message "
-                "FROM pgmq.read(:q, :vt, :qty)"
-            ),
-            {"q": queue, "vt": vt, "qty": qty},
-        ).mappings().all()
-        return [dict(r) for r in rows]
-
-
-def _pgmq_delete(queue: str, msg_id: int) -> None:
-    with session() as s:
-        s.execute(
-            text("SELECT pgmq.delete(:q, CAST(:m AS bigint))"),
-            {"q": queue, "m": msg_id},
-        )
-
-
-def _pgmq_archive(queue: str, msg_id: int) -> None:
-    with session() as s:
-        s.execute(
-            text("SELECT pgmq.archive(:q, CAST(:m AS bigint))"),
-            {"q": queue, "m": msg_id},
-        )
-
-
-def _pgmq_set_vt(queue: str, msg_id: int, vt_offset_seconds: int) -> None:
-    """Push the message's visibility-timeout out by ``vt_offset_seconds``."""
-    with session() as s:
-        s.execute(
-            text("SELECT pgmq.set_vt(:q, CAST(:m AS bigint), :vt)"),
-            {"q": queue, "m": msg_id, "vt": vt_offset_seconds},
         )

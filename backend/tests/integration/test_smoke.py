@@ -1,25 +1,19 @@
 """Smoke test for the integration harness itself.
 
 Exercises the full stack: real Postgres (per-test schema), real wiki git
-repo, real Flask app, real pgmq queues in immediate mode, scripted LLM.
+repo, real app with task queues in immediate mode, scripted LLM.
 If this passes, the foundation is wired correctly; flow-specific tests
 live alongside.
 """
 from __future__ import annotations
 
 
-def test_signup_and_save_doc_and_search(integration):
-    """Signup → save → BM25 search round-trip via the real API."""
+def test_signup_and_save_doc(integration):
+    """Signup → save round-trip via the real API."""
     integration.signup_and_signin(email="u@x.com")
 
     integration.put_doc("guide.md", "# Bcrypt Guide\n\nwe use bcrypt for password hashing\n")
     integration.put_doc("auth.md", "# Auth\n\nsessions are signed with HMAC\n")
-
-    # Search hits the BM25 index (pg_textsearch) and the Python-side snippet path.
-    from app.db import fts
-    hits = fts.search("bcrypt")
-    assert any(h.path == "guide.md" for h in hits), hits
-    assert "**bcrypt**" in next(h for h in hits if h.path == "guide.md").snippet
 
 
 def test_trigger_fires_when_llm_says_match(integration):

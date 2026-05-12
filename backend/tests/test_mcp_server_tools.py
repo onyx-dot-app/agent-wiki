@@ -277,6 +277,7 @@ def test_call_with_missing_name_is_invalid_params(client):
 # --------------------------------------------------------------------------- #
 
 
+@pytest.mark.xfail(reason="search stubbed until OpenSearch lands", strict=True)
 def test_search_wiki_returns_results_via_mcp(client):
     uid = seed_user(uid="u1", email="u1@x.com")
     # The reindex task is bound to lightweight_maintenance_queue. Run it

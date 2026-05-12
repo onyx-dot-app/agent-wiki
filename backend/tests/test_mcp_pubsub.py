@@ -69,7 +69,7 @@ def test_drain_async_returns_none_on_timeout():
 
 def test_cross_thread_publish_reaches_async_consumer(tmp_repo):
     """The production hot path: a publisher on a different thread (a
-    pgmq worker, the LISTEN bridge) calls ``publish_doc_update`` and
+    task worker, the LISTEN bridge) calls ``publish_doc_update`` and
     the SSE writer's ``drain_async`` wakes up with the notification.
 
     We seed a real user + ACL so ``_should_deliver`` returns True; the

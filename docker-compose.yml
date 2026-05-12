@@ -1,26 +1,16 @@
 services:
   postgres:
-    # Postgres 17 with pg_textsearch (BM25 search) and pgmq (task queue).
-    # pg_textsearch must be loaded via `shared_preload_libraries`; pgmq is
-    # a regular extension. There's no upstream image bundling both, so this
-    # builds locally — see `deploy/postgres/Dockerfile`.
-    build: ./deploy/postgres
-    image: agent-wiki-postgres:local
+    image: postgres:17
     environment:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=postgres
       - POSTGRES_DB=agent_wiki
-    command:
-      - "postgres"
-      - "-c"
-      - "shared_preload_libraries=pg_textsearch"
     volumes:
       - ./local_data/pgdata:/var/lib/postgresql/data
     expose:
       - "5432"
     ports:
-      # Publish to the host for local psql / smoke tests / running tests
-      # against the compose Postgres without compose `exec`.
+      # Publish to the host for local psql / smoke tests.
       - "127.0.0.1:5433:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d agent_wiki"]
@@ -28,11 +18,24 @@ services:
       timeout: 3s
       retries: 30
 
+  redis:
+    image: redis:7-alpine
+    expose:
+      - "6379"
+    ports:
+      - "127.0.0.1:6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
   backend:
     build: ./backend
     env_file: .env
     environment:
       - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/agent_wiki
+      - REDIS_URL=redis://redis:6379/0
       - WIKI_DIR=/data/wiki
     volumes:
       - ./local_data:/data
@@ -41,15 +44,17 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
 
   # Three workers, one per queue (see backend/app/tasks/queues.py).
-  # Each worker reads from `pgmq.q_<queue>` in the shared Postgres.
   worker-documents:
     build: ./backend
     command: ["python", "-m", "app.tasks.run_worker", "documents"]
     env_file: .env
     environment:
       - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/agent_wiki
+      - REDIS_URL=redis://redis:6379/0
       - WIKI_DIR=/data/wiki
     volumes:
       - ./local_data:/data
@@ -57,6 +62,8 @@ services:
       backend:
         condition: service_started
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
 
   worker-triggers:
@@ -65,6 +72,7 @@ services:
     env_file: .env
     environment:
       - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/agent_wiki
+      - REDIS_URL=redis://redis:6379/0
       - WIKI_DIR=/data/wiki
     volumes:
       - ./local_data:/data
@@ -73,6 +81,8 @@ services:
         condition: service_started
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
 
   worker-lightweight-maintenance:
     build: ./backend
@@ -80,6 +90,7 @@ services:
     env_file: .env
     environment:
       - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/agent_wiki
+      - REDIS_URL=redis://redis:6379/0
       - WIKI_DIR=/data/wiki
     volumes:
       - ./local_data:/data
@@ -87,6 +98,8 @@ services:
       backend:
         condition: service_started
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
 
   frontend:

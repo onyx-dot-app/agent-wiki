@@ -1,11 +1,10 @@
 """SQLAlchemy engine + session factory.
 
-App state and the pgmq task queues both live in the Postgres pointed at
-by ``CONFIG.database_url``. ``init_db()`` is the canonical bootstrapper:
-it runs ``alembic upgrade head`` against the configured database, which
-applies every migration in ``app/db/migrations/versions/`` (extensions,
-tables, pgmq queues, future ALTERs) idempotently. Schema changes go in
-new migration files — see ``app/db/migrations/`` for how to author one.
+App state lives in the Postgres pointed at by ``CONFIG.database_url``.
+``init_db()`` is the canonical bootstrapper: it runs ``alembic upgrade
+head`` against the configured database, which applies every migration in
+``app/db/migrations/versions/`` idempotently. Schema changes go in new
+migration files — see ``app/db/migrations/`` for how to author one.
 
 Repos use the ``session()`` context manager. Each call opens a new
 ``Session`` (one transaction per call) — sharing a session across
@@ -127,9 +126,8 @@ def init_db() -> None:
     """Apply every pending migration. Idempotent; safe on every boot.
 
     Runs ``alembic upgrade head`` against ``CONFIG.database_url``. The
-    bootstrap migration creates the two extensions
-    (``pg_textsearch`` + ``pgmq``), every ORM-declared table, and the
-    three pgmq queues; subsequent migrations layer real ALTERs on top.
+    bootstrap migration creates every ORM-declared table; subsequent
+    migrations layer real ALTERs on top.
 
     Per-test schema isolation works because ``CONFIG.database_url``
     carries the schema in its ``options=-csearch_path=…`` query string

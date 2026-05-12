@@ -7,9 +7,7 @@ run ``cd backend && alembic revision --autogenerate -m "<slug>"`` and
 review the emitted diff before committing. The bootstrap migration
 ``0001_initial`` materializes the entire current schema via
 ``Base.metadata.create_all`` — every migration after it is an explicit
-``op.alter_table`` / ``op.add_column`` diff. Postgres-specific bits
-that ORM declarations can't express (extension creation, pgmq queue
-creation) also live in ``0001_initial``.
+``op.alter_table`` / ``op.add_column`` diff.
 
 Keep these models *narrow* — they describe DB shape. HTTP request /
 response shapes belong in ``app/models/`` (pydantic). Repos return
@@ -373,45 +371,6 @@ class Event(Base):
 
 
 # --------------------------------------------------------------------------- #
-# BM25 search index (pg_textsearch)                                           #
-# --------------------------------------------------------------------------- #
-
-
-class DocumentFts(Base):
-    """Wiki search index — title + body indexed via pg_textsearch.
-
-    The BM25 access method (``USING bm25``) is registered by the
-    extension; the ``0001_initial`` migration runs
-    ``CREATE EXTENSION pg_textsearch`` before ``Base.metadata.create_all``
-    so the index DDL succeeds.
-    """
-
-    __tablename__ = "documents_fts"
-
-    doc_id: Mapped[str] = mapped_column(Text, primary_key=True)
-    path: Mapped[str] = mapped_column(Text, nullable=False)
-    title: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
-    body: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
-    # HEAD sha at the time this row was last indexed. Compared against
-    # ``git log -n1 -- <path>`` by the hourly reconcile task to spot
-    # drift; ``NULL`` means the row predates the column or hasn't been
-    # touched since the migration — both look stale to the sweep.
-    indexed_sha: Mapped[str | None] = mapped_column(Text, nullable=True)
-
-    __table_args__ = (
-        Index(
-            "documents_fts_bm25",
-            text("(coalesce(title, '') || ' ' || coalesce(body, ''))"),
-            postgresql_using="bm25",
-            # Quote the value explicitly — SQLAlchemy's WITH renderer passes
-            # the dict value through as-is, and pg_textsearch's examples all
-            # use the quoted form (``text_config = 'english'``).
-            postgresql_with={"text_config": "'english'"},
-        ),
-    )
-
-
-# --------------------------------------------------------------------------- #
 # Single-row settings tables — id=1 always                                    #
 # --------------------------------------------------------------------------- #
 
@@ -491,11 +450,11 @@ class AgentActivity(Base):
         Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
     )
     expires_at: Mapped[str] = mapped_column(Text, nullable=False)   # ISO 8601 UTC
-    # pgmq msg_id of the cleanup task scheduled to fire at expires_at.
+    # Queue msg_id of the cleanup task scheduled to fire at expires_at.
     # Tracked so re-registration (which slides expires_at forward) can
     # cancel the prior scheduled fire instead of leaking it as an orphan
-    # delayed message. Null when no cleanup has been scheduled yet, or
-    # when the prior message has already fired/been archived.
+    # delayed message. Null when no cleanup has been scheduled yet or
+    # when the prior message has already fired.
     cleanup_msg_id: Mapped[int | None] = mapped_column(BigInteger)
 
     __table_args__ = (
@@ -531,22 +490,6 @@ class CronState(Base):
     last_fired_at: Mapped[str | None] = mapped_column(Text)
 
 
-class BM25ReconcileState(Base):
-    """Cursor for the hourly BM25 reconcile sweep.
-
-    Stamped after a successful completion so the next run can scope its
-    git walk to ``--since=<last_completed_at>`` instead of rescanning
-    the whole repo. NULL = bootstrap (whole-repo scan on first run).
-    """
-
-    __tablename__ = "bm25_reconcile_state"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
-    last_completed_at: Mapped[str | None] = mapped_column(Text, nullable=True)
-
-    __table_args__ = (CheckConstraint("id = 1", name="bm25_reconcile_state_singleton"),)
-
-
 class WikiSeedState(Base):
     """One-shot marker: has the bundled onboarding seed run on this DB?
 
@@ -567,6 +510,7 @@ class WikiSeedState(Base):
     seeded_at: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     __table_args__ = (CheckConstraint("id = 1", name="wiki_seed_state_singleton"),)
+
 
 
 # --------------------------------------------------------------------------- #
