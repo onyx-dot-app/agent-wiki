@@ -17,6 +17,7 @@ the service is up — docker compose runs it on port 9201.  Tests that
 require OpenSearch are marked ``@needs_opensearch`` and skipped when the
 instance is not reachable.
 """
+
 from __future__ import annotations
 
 import os
@@ -94,7 +95,7 @@ def tmp_config(tmp_path, monkeypatch):
     schema = f"test_{uuid.uuid4().hex[:12]}"
 
     with psycopg.connect(_BASE_URL, autocommit=True) as conn:
-        conn.execute(sql.SQL('CREATE SCHEMA {}').format(sql.Identifier(schema)))
+        conn.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(schema)))
 
     cfg = Config(
         secret_key="test-secret",
@@ -114,27 +115,34 @@ def tmp_config(tmp_path, monkeypatch):
         ingest_bm25_title_boost=2.0,
         ingest_bm25_limit=20,
         ingest_irrelevant_stop_n=2,
+        launchers_enabled=True,
+        launch_code_ttl_seconds=60,
+        agent_session_idle_seconds=300,
+        agent_session_close_after_idle_seconds=86400,
     )
     monkeypatch.setattr("app.config.CONFIG", cfg)
     monkeypatch.setattr("app.db.session.CONFIG", cfg)
 
     # Reset the lazy OpenSearch client so it re-reads CONFIG on next use.
     from app.db import fts as _fts
+
     _fts.reset_client_for_tests()
 
     # Each test rebuilds the engine so the new schema's search_path takes effect.
     from app.db.session import reset_engine_for_tests
+
     reset_engine_for_tests()
 
     yield cfg
 
     reset_engine_for_tests()
     from app.db import fts as _fts
+
     if _opensearch_up:
         _fts.drop_index_for_tests()  # delete the per-test index
     _fts.reset_client_for_tests()
     with psycopg.connect(_BASE_URL, autocommit=True) as conn:
-        conn.execute(sql.SQL('DROP SCHEMA {} CASCADE').format(sql.Identifier(schema)))
+        conn.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(schema)))
 
 
 @pytest.fixture

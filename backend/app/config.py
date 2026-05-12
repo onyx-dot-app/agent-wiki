@@ -1,4 +1,5 @@
 """Runtime configuration loaded from environment."""
+
 from __future__ import annotations
 
 import os
@@ -39,6 +40,13 @@ class Config(BaseModel):
     ingest_bm25_title_boost: float
     ingest_bm25_limit: int
     ingest_irrelevant_stop_n: int
+
+    # Coding-tool launchers (Run Agent button) — see
+    # local_data/wiki/Wiki Project/Specific Features/coding_tool_launchers/.
+    launchers_enabled: bool
+    launch_code_ttl_seconds: int
+    agent_session_idle_seconds: int
+    agent_session_close_after_idle_seconds: int
 
 
 def _positive_float(name: str, default: float) -> float:
@@ -100,6 +108,14 @@ def load_config() -> Config:
         oidc_client_secret=os.environ.get("OIDC_CLIENT_SECRET", ""),
         oidc_redirect_uri=os.environ.get("OIDC_REDIRECT_URI", ""),
         secure_cookies=os.environ.get("SECURE_COOKIES", "false").lower() in {"1", "true", "yes"},
+        launchers_enabled=os.environ.get("LAUNCHERS_ENABLED", "false").lower()
+        in {"1", "true", "yes"},
+        launch_code_ttl_seconds=_positive_int("LAUNCH_CODE_TTL_SECONDS", 60),
+        agent_session_idle_seconds=_positive_int("AGENT_SESSION_IDLE_SECONDS", 300),
+        agent_session_close_after_idle_seconds=_positive_int(
+            "AGENT_SESSION_CLOSE_AFTER_IDLE_SECONDS",
+            86400,
+        ),
     )
 
 
