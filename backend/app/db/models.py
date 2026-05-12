@@ -13,6 +13,7 @@ Keep these models *narrow* — they describe DB shape. HTTP request /
 response shapes belong in ``app/models/`` (pydantic). Repos return
 dicts derived from these objects so callers don't depend on the ORM.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -24,6 +25,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    LargeBinary,
     Text,
     UniqueConstraint,
     text,
@@ -76,7 +78,7 @@ class McpConnection(Base):
         Text, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
     name: Mapped[str] = mapped_column(Text, nullable=False)
-    transport: Mapped[str] = mapped_column(Text, nullable=False)   # "stdio" | "http"
+    transport: Mapped[str] = mapped_column(Text, nullable=False)  # "stdio" | "http"
     config_json: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
 
@@ -127,21 +129,20 @@ class McpJob(Base):
     user_id: Mapped[str] = mapped_column(
         Text, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
-    kind: Mapped[str] = mapped_column(Text, nullable=False)        # "update_doc_nl"
-    status: Mapped[str] = mapped_column(Text, nullable=False)      # pending|running|succeeded|failed
+    kind: Mapped[str] = mapped_column(Text, nullable=False)  # "update_doc_nl"
+    status: Mapped[str] = mapped_column(Text, nullable=False)  # pending|running|succeeded|failed
     idempotency_key: Mapped[str | None] = mapped_column(Text)
     payload_json: Mapped[str] = mapped_column(Text, nullable=False)
     result_json: Mapped[str | None] = mapped_column(Text)
     error: Mapped[str | None] = mapped_column(Text)
-    created_at: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
-    )
+    created_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
     finished_at: Mapped[str | None] = mapped_column(Text)
 
     __table_args__ = (
         Index(
             "idx_mcp_jobs_idemp",
-            "user_id", "idempotency_key",
+            "user_id",
+            "idempotency_key",
             unique=True,
             postgresql_where=text("idempotency_key IS NOT NULL"),
         ),
@@ -152,6 +153,104 @@ class McpJob(Base):
         # index is enough — the worker only walks rows within the
         # debounce window.
     )
+
+
+# --------------------------------------------------------------------------- #
+# Coding-tool launchers                                                       #
+# See local_data/wiki/Wiki Project/Specific Features/coding_tool_launchers/.  #
+# --------------------------------------------------------------------------- #
+
+
+class AgentSession(Base):
+    """One Run-Agent invocation. Tracks the launch through CLI lifetime."""
+
+    __tablename__ = "agent_sessions"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    user_id: Mapped[str] = mapped_column(
+        Text, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    machine_id: Mapped[str | None] = mapped_column(Text)
+    tool_id: Mapped[str] = mapped_column(Text, nullable=False)
+    wiki_path: Mapped[str | None] = mapped_column(Text)
+    working_dir: Mapped[str | None] = mapped_column(Text)
+    first_turn_prompt: Mapped[str] = mapped_column(Text, nullable=False)
+    cli_session_id: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'pending'"))
+    started_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
+    last_activity_at: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
+    )
+    spawn_ok_at: Mapped[str | None] = mapped_column(Text)  # R9#1 — beacon timestamp
+    closed_at: Mapped[str | None] = mapped_column(Text)
+
+    __table_args__ = (
+        Index("idx_agent_sessions_user_status", "user_id", "status"),
+        Index("idx_agent_sessions_wiki_path", "wiki_path"),
+        Index("idx_agent_sessions_user_machine", "user_id", "machine_id"),
+    )
+
+
+class LaunchCode(Base):
+    """Short-lived single-use bearer the helper exchanges for the MCP token + manifest."""
+
+    __tablename__ = "launch_codes"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    user_id: Mapped[str] = mapped_column(
+        Text, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    agent_session_id: Mapped[str] = mapped_column(
+        Text, ForeignKey("agent_sessions.id", ondelete="CASCADE"), nullable=False
+    )
+    mcp_token_id: Mapped[str] = mapped_column(
+        Text, ForeignKey("mcp_tokens.id", ondelete="CASCADE"), nullable=False
+    )
+    created_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
+    expires_at: Mapped[str] = mapped_column(Text, nullable=False)
+    consumed_at: Mapped[str | None] = mapped_column(Text)
+
+    __table_args__ = (Index("idx_launch_codes_expires_at", "expires_at"),)
+
+
+class PageWorkingDir(Base):
+    """Per-(user, machine, page) working directory binding."""
+
+    __tablename__ = "page_working_dirs"
+
+    user_id: Mapped[str] = mapped_column(
+        Text, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    machine_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    wiki_path: Mapped[str] = mapped_column(Text, primary_key=True)
+    working_dir: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
+
+
+class LauncherToken(Base):
+    """Encrypted plaintext bearer for launcher-minted MCP tokens.
+
+    Regular ``mcp_tokens`` only stores bcrypt hash. The helper needs
+    the raw bearer; we keep it AES-GCM encrypted here. ``user_id`` is
+    UNIQUE so concurrent mints collide via DB constraint (AF#3).
+    """
+
+    __tablename__ = "launcher_tokens"
+
+    mcp_token_id: Mapped[str] = mapped_column(
+        Text,
+        ForeignKey("mcp_tokens.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    user_id: Mapped[str] = mapped_column(
+        Text,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        unique=True,
+        nullable=False,
+    )
+    ciphertext: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    nonce: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    created_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
 
 
 # --------------------------------------------------------------------------- #
@@ -181,7 +280,7 @@ class Trigger(Base):
         Text, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
     scope_path: Mapped[str] = mapped_column(Text, nullable=False)
-    kind: Mapped[str] = mapped_column(Text, nullable=False)        # "delta" | "schedule"
+    kind: Mapped[str] = mapped_column(Text, nullable=False)  # "delta" | "schedule"
     nl_description: Mapped[str] = mapped_column(Text, nullable=False)
     action_json: Mapped[str] = mapped_column(Text, nullable=False)
     schedule_cron: Mapped[str | None] = mapped_column(Text)
@@ -216,9 +315,7 @@ class TriggerDestination(Base):
     id: Mapped[str] = mapped_column(Text, primary_key=True)
     name: Mapped[str] = mapped_column(Text, nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
-    created_at: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
-    )
+    created_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
 
 
 # --------------------------------------------------------------------------- #
@@ -238,15 +335,9 @@ class ChatSession(Base):
     # Sessions created to bootstrap "drafting from template" conversations
     # are hidden from the session history list (the row stays so the
     # transcript can be re-rendered if anything in code still has the id).
-    hidden: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, server_default=text("FALSE")
-    )
-    created_at: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
-    )
-    updated_at: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
-    )
+    hidden: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("FALSE"))
+    created_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
+    updated_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
 
     __table_args__ = (Index("idx_chat_sessions_user_updated", "user_id", "updated_at"),)
 
@@ -274,17 +365,11 @@ class ChatMessage(Base):
     events_json: Mapped[str | None] = mapped_column(Text)
     # Hidden seed messages live in the LLM history (so the model has the
     # template context) but are filtered out of the rendered transcript.
-    hidden: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, server_default=text("FALSE")
-    )
-    created_at: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
-    )
+    hidden: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("FALSE"))
+    created_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
 
     __table_args__ = (
-        CheckConstraint(
-            "role IN ('user', 'assistant')", name="chat_messages_role_check"
-        ),
+        CheckConstraint("role IN ('user', 'assistant')", name="chat_messages_role_check"),
         Index("idx_chat_messages_session_order", "session_id", "ordering"),
     )
 
@@ -312,18 +397,12 @@ class DocumentTemplate(Base):
     # Admin-controlled ordering for the picker. Lower values render
     # first; ties fall back to ``name`` alphabetical. New rows land at
     # the end (max(sort_order) + 1) so admins decide where they live.
-    sort_order: Mapped[int] = mapped_column(
-        Integer, nullable=False, server_default=text("0")
-    )
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
     created_by_user_id: Mapped[str | None] = mapped_column(
         Text, ForeignKey("users.id", ondelete="SET NULL")
     )
-    created_at: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
-    )
-    updated_at: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
-    )
+    created_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
+    updated_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
 
 
 class DocumentDraft(Base):
@@ -344,9 +423,7 @@ class DocumentDraft(Base):
     created_by_user_id: Mapped[str | None] = mapped_column(
         Text, ForeignKey("users.id", ondelete="SET NULL")
     )
-    created_at: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
-    )
+    created_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
 
 
 # --------------------------------------------------------------------------- #
@@ -388,7 +465,9 @@ class LLMSettings(Base):
     openai_api_key: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
     gemini_api_key: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
     ollama_base_url: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
-    provider_models: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    provider_models: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
     updated_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
 
     __table_args__ = (CheckConstraint("id = 1", name="llm_settings_singleton"),)
@@ -446,33 +525,39 @@ class AgentActivity(Base):
     agent_name: Mapped[str | None] = mapped_column(Text)
     doc_path: Mapped[str] = mapped_column(Text, nullable=False)
     activity: Mapped[str] = mapped_column(Text, nullable=False)
-    description: Mapped[str | None] = mapped_column(Text)   # null = "N/A" in rendered frontmatter
+    description: Mapped[str | None] = mapped_column(Text)  # null = "N/A" in rendered frontmatter
     registered_at: Mapped[str] = mapped_column(
         Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
     )
-    expires_at: Mapped[str] = mapped_column(Text, nullable=False)   # ISO 8601 UTC
-    # Queue msg_id of the cleanup task scheduled to fire at expires_at.
+    expires_at: Mapped[str] = mapped_column(Text, nullable=False)  # ISO 8601 UTC
+    # pgmq msg_id of the cleanup task scheduled to fire at expires_at.
     # Tracked so re-registration (which slides expires_at forward) can
     # cancel the prior scheduled fire instead of leaking it as an orphan
     # delayed message. Null when no cleanup has been scheduled yet or
     # when the prior message has already fired.
     cleanup_msg_id: Mapped[int | None] = mapped_column(BigInteger)
+    # Set by the MCP server when the request carries
+    # ``X-Agentwiki-Session: as_…``. NULL for chat-agent edits and any
+    # MCP call without the header. See coding_tool_launchers/design.md.
+    agent_session_id: Mapped[str | None] = mapped_column(
+        Text, ForeignKey("agent_sessions.id", ondelete="SET NULL")
+    )
 
     __table_args__ = (
-        CheckConstraint(
-            "activity IN ('read', 'wrote')", name="agent_activity_kind_check"
-        ),
+        CheckConstraint("activity IN ('read', 'wrote')", name="agent_activity_kind_check"),
         # One row per (user, agent): a new upsert replaces the prior row
         # in place. Postgres 15+ NULLS NOT DISTINCT lets nullable
         # agent_name participate in uniqueness directly — no
         # COALESCE-to-empty-string workaround.
         UniqueConstraint(
-            "user_id", "agent_name",
+            "user_id",
+            "agent_name",
             name="idx_agent_activity_user_agent",
             postgresql_nulls_not_distinct=True,
         ),
         Index("idx_agent_activity_doc_path", "doc_path"),
         Index("idx_agent_activity_expires_at", "expires_at"),
+        Index("idx_agent_activity_session", "agent_session_id"),
     )
 
 
@@ -513,7 +598,6 @@ class WikiSeedState(Base):
     __table_args__ = (CheckConstraint("id = 1", name="wiki_seed_state_singleton"),)
 
 
-
 # --------------------------------------------------------------------------- #
 # Permissions — groups, ACLs, page ownership                                  #
 # --------------------------------------------------------------------------- #
@@ -532,9 +616,7 @@ class Group(Base):
     created_by_user_id: Mapped[str | None] = mapped_column(
         Text, ForeignKey("users.id", ondelete="SET NULL")
     )
-    created_at: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
-    )
+    created_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
 
 
 class GroupMember(Base):
@@ -546,9 +628,7 @@ class GroupMember(Base):
     user_id: Mapped[str] = mapped_column(
         Text, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
     )
-    added_at: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
-    )
+    added_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
 
 
 class WikiOwner(Base):
@@ -599,9 +679,7 @@ class AclEntry(Base):
     granted_by_user_id: Mapped[str | None] = mapped_column(
         Text, ForeignKey("users.id", ondelete="SET NULL")
     )
-    created_at: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
-    )
+    created_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
 
     __table_args__ = (
         CheckConstraint(
