@@ -5,6 +5,7 @@ description = "Backend for agent-wiki: a self-updating wiki for AI agents"
 requires-python = ">=3.11"
 dependencies = [
     "croniter>=2.0",     # cron-spec parsing for periodic background tasks
+    "redis>=5.0",        # task queue (Redis Streams)
     "psycopg[binary]>=3.1",
     "pydantic>=2.6",
     "sqlalchemy>=2.0",

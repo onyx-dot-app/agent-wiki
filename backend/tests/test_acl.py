@@ -614,35 +614,37 @@ def test_deleting_owner_user_clears_owner_row(tmp_db):
 
 
 def test_visible_paths_filter_against_db(tmp_db):
-    """Exercise the SQL predicate end-to-end against documents_fts paths."""
+    """Exercise the SQL predicate end-to-end against the documents table."""
     from sqlalchemy import select as sa_select
 
-    from app.db.fts import upsert_document
-    from app.db.models import DocumentFts
+    from app.db.models import Document
     from app.db.session import session
 
     alice = seed_user(uid="u_alice", email="alice@x.com")
     bob = seed_user(uid="u_bob", email="bob@x.com")
 
-    # Public doc — Alice can see.
+    # Insert document rows so the predicate has something to filter.
+    with session() as s:
+        s.add(Document(id="d_public", path="public.md", title="Public"))
+        s.add(Document(id="d_private", path="private.md", title="Private"))
+
+    # Public doc — Alice can see (default-public ACL set by on_page_created).
     acl.on_page_created("public.md", owner_user_id=None)
-    upsert_document("d_public", "public.md", "Public", "hello")
 
     # Bob's private doc — Alice cannot see.
     acl.set_owner("private.md", bob)
-    upsert_document("d_private", "private.md", "Private", "secret")
 
-    pred = acl.visible_paths_filter(alice, False, DocumentFts.path)
+    pred = acl.visible_paths_filter(alice, False, Document.path)
     with session() as s:
         rows = s.scalars(
-            sa_select(DocumentFts.path).where(pred).order_by(DocumentFts.path)
+            sa_select(Document.path).where(pred).order_by(Document.path)
         ).all()
     assert list(rows) == ["public.md"]
 
     # Admin filter is universal-true.
-    pred_admin = acl.visible_paths_filter("u_admin", True, DocumentFts.path)
+    pred_admin = acl.visible_paths_filter("u_admin", True, Document.path)
     with session() as s:
         rows = s.scalars(
-            sa_select(DocumentFts.path).where(pred_admin).order_by(DocumentFts.path)
+            sa_select(Document.path).where(pred_admin).order_by(Document.path)
         ).all()
     assert list(rows) == ["private.md", "public.md"]

@@ -1,15 +1,12 @@
-"""Wiki search — BM25 over documents + lightweight folder-name match."""
+"""Wiki search — delegates to fts module (currently stubbed pending OpenSearch)."""
 from __future__ import annotations
 
 import re
 
 from pydantic import BaseModel
-from sqlalchemy import select
 
 from app.db import fts
 from app.db.fts import SearchHit
-from app.db.models import DocumentFts
-from app.db.session import session
 
 
 class FolderHit(BaseModel):
@@ -37,49 +34,35 @@ _NORMALIZE_RE = re.compile(r"[\s/_\-]+")
 
 
 def _normalize(s: str) -> str:
-    """Lowercase and strip whitespace/separators (`/`, `-`, `_`).
-
-    Used so a query like ``"local testing"`` matches a folder named
-    ``local-testing`` or ``local_testing`` etc.
-    """
     return _NORMALIZE_RE.sub("", s).lower()
 
 
 def search_folders(query: str, limit: int = 10) -> list[FolderHit]:
     """Return folder paths whose normalized name contains the normalized query.
 
-    Folder set is derived from ``documents_fts.path`` — every ancestor of
-    every indexed document is a folder. Sorted so prefix matches and
-    shorter paths come first; truncated to ``limit``.
-
-    Visibility: folders aren't ACL-gated in the explorer (only documents
-    are), so we don't filter here either. Page-level ACLs still apply on
-    navigation.
+    Derived from git-tracked ``.md`` paths. Sorted so prefix matches and
+    shorter paths come first.
     """
+    from app.wiki import git
+
     norm_q = _normalize(query)
     if not norm_q:
         return []
 
-    with session() as s:
-        rows = s.execute(select(DocumentFts.path)).scalars().all()
+    rows = [p for p in git.list_paths() if p.endswith(".md")]
 
     folders: set[str] = set()
     for path in rows:
-        # Walk every ancestor directory of the doc path.
         parts = path.split("/")
         for i in range(1, len(parts)):
             folders.add("/".join(parts[:i]))
 
     matches: list[tuple[int, int, str]] = []
     for folder in folders:
-        # Match against the leaf name (most useful), with a fallback to
-        # the full normalized path so users can find nested folders by
-        # typing a parent fragment.
         leaf = folder.rsplit("/", 1)[-1]
         norm_leaf = _normalize(leaf)
         norm_full = _normalize(folder)
         if norm_q in norm_leaf:
-            # 0 = leaf prefix, 1 = leaf substring, 2 = full-path substring.
             rank = 0 if norm_leaf.startswith(norm_q) else 1
             matches.append((rank, len(folder), folder))
         elif norm_q in norm_full:

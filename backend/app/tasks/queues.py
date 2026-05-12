@@ -1,11 +1,9 @@
-"""Three task queues, all backed by pgmq on Postgres.
+"""Three task queues backed by Redis Streams.
 
 We deliberately split background work into **three independent queues**, each
-with its own ``TaskQueue`` instance and its own consumer process. Each backs
-its messages to a pgmq queue (``pgmq.q_<name>``) inside the same Postgres
-database that holds app state, so the operational story stays simple — one
-DB, one backup target — but each queue's backlog is isolated from the
-others. A slow LLM doc-rewrite can't delay a BM25 reindex; a flood of
+with its own ``TaskQueue`` instance and its own consumer process. Each queue
+is a Redis Stream (``queue:{name}``) so each queue's backlog is isolated from
+the others. A slow LLM doc-rewrite can't delay a reindex; a flood of
 trigger evaluations can't backpressure connector ingest.
 
 Each constant below is the canonical entry point for tasks that belong on
@@ -41,9 +39,8 @@ Queues:
   here would silently starve the others. If a new task can't honor the
   rule, give it its own queue rather than co-tenanting on this one.
   Today:
-    - BM25 reindex of a single wiki path from the git working tree
-      (``reindex_path``, ``reindex_document``) — runs after every
-      ``commit_file`` and on demand from ``POST /api/documents/reindex``.
+    - Search reindex stubs (``reindex_path``, ``reindex_document``) —
+      no-ops until OpenSearch lands.
     - Agent-activity expiration cleanup
       (``cleanup_expired_activity``) — a single ``DELETE`` enqueued
       with a delay equal to the row's ``expires_at``.

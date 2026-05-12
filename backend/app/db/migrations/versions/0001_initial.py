@@ -1,4 +1,4 @@
-"""initial — extensions, tables, pgmq queues, seed catalogs.
+"""initial — tables and seed catalogs.
 
 Revision ID: 0001
 Revises:
@@ -13,9 +13,6 @@ we use ``alembic revision --autogenerate`` to produce explicit
 ``op.alter_table`` / ``op.add_column`` diffs.
 
 Side effects beyond ORM table creation:
-* The two extensions (``pg_textsearch`` for BM25 search, ``pgmq`` for
-  the task queue).
-* The three pgmq queues.
 * Seeded ``trigger_destinations`` rows (currently just ``event_log``).
 
 All idempotent so re-running against a partially-set-up DB is safe.
@@ -33,33 +30,13 @@ branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 
-_PGMQ_QUEUES = ("documents", "triggers", "lightweight_maintenance")
-
-
 def upgrade() -> None:
     bind = op.get_bind()
-
-    # Extensions first — ``DocumentFts`` declares an index ``USING bm25``
-    # that needs ``pg_textsearch`` registered, and the pgmq queue creation
-    # below needs the ``pgmq`` schema to exist.
-    bind.execute(sa.text("CREATE EXTENSION IF NOT EXISTS pg_textsearch"))
-    bind.execute(sa.text("CREATE EXTENSION IF NOT EXISTS pgmq"))
 
     # Materialize every ORM-declared table. Imported inside the function
     # so test fixtures that swap modules don't bind to a stale ``Base``.
     from app.db.models import Base
     Base.metadata.create_all(bind)
-
-    # Create the three pgmq queues. ``pgmq.create`` errors if a queue
-    # already exists; wrap each in a savepoint so the next iteration can
-    # continue cleanly on rerun.
-    for q in _PGMQ_QUEUES:
-        try:
-            with bind.begin_nested():
-                bind.execute(sa.text("SELECT pgmq.create(:q)"), {"q": q})
-        except Exception:
-            # Already exists — fine.
-            pass
 
     # Seed the v0 trigger destination. ``"event_log"`` means "record the
     # fire to the events table and don't dispatch outbound" — the only
@@ -79,9 +56,6 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    # Pre-ship migration; we don't support rolling back the bootstrap.
-    # When the schema becomes worth preserving, replace this with real
-    # ``op.drop_table`` / ``DROP EXTENSION`` calls.
     raise NotImplementedError(
         "0001 is the bootstrap migration; downgrading would drop the entire schema."
     )

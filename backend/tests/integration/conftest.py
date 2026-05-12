@@ -18,9 +18,8 @@ What's already provided by the parent ``tests/conftest.py``:
 
   * ``tmp_config`` — per-test Postgres schema; ``CONFIG`` patched.
   * ``tmp_db``     — same + ``init_db()`` (runs ``alembic upgrade head`` —
-                     extensions, ``Base.metadata.create_all`` via the
-                     bootstrap migration, and ``pgmq.create``) against
-                     that schema.
+                     ``Base.metadata.create_all`` via the bootstrap migration)
+                     against that schema.
   * ``tmp_repo``   — same + a freshly initialized wiki git repo.
 
 What this file adds:
@@ -68,10 +67,7 @@ def immediate_queues() -> Iterator[dict[str, Any]]:
     """Run every task queue in immediate mode (handlers execute inline).
 
     Background work fans out exactly like in production, but synchronously,
-    so test assertions can run on the post-state without polling. If a
-    test wants to exercise the real pgmq path it should not request this
-    fixture (and should be aware that pgmq tables are database-scoped, so
-    cross-test message leakage is possible).
+    so test assertions can run on the post-state without polling.
     """
     from contextlib import ExitStack
 

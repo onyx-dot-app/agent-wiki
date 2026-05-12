@@ -43,8 +43,7 @@ def repo_with_private_page(tmp_repo):
 
 @pytest.fixture(autouse=True)
 def _stub_side_effects(monkeypatch):
-    """Skip reindex / trigger fan-out so these tests don't depend on the
-    pgmq task harness (covered separately in test_save_to_fire_e2e.py)."""
+    """Skip reindex / trigger fan-out so these tests focus on ACL logic."""
     monkeypatch.setattr(
         "app.llm.agents.tools._doc_helpers.wiki_notify.after_doc_write",
         lambda *a, **kw: None,
