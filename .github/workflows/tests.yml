@@ -19,16 +19,11 @@ jobs:
 
     env:
       TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/agent_wiki_test
+      TEST_REDIS_URL: redis://localhost:6379/1
       SECRET_KEY: ci-test-secret
 
     steps:
       - uses: actions/checkout@v4
-
-      # Postgres has to be built locally because the image bakes in
-      # pg_textsearch (loaded via shared_preload_libraries) and pgmq.
-      # No upstream image bundles both — see deploy/postgres/Dockerfile.
-      - name: Build Postgres image
-        run: docker build -t agent-wiki-postgres:ci ./deploy/postgres
 
       - name: Start Postgres
         run: |
@@ -37,8 +32,13 @@ jobs:
             -e POSTGRES_PASSWORD=postgres \
             -e POSTGRES_DB=agent_wiki \
             -p 127.0.0.1:5432:5432 \
-            agent-wiki-postgres:ci \
-            postgres -c shared_preload_libraries=pg_textsearch
+            postgres:17
+
+      - name: Start Redis
+        run: |
+          docker run -d --name agent-wiki-redis \
+            -p 127.0.0.1:6379:6379 \
+            redis:7-alpine
 
       - name: Wait for Postgres
         run: |
@@ -50,12 +50,18 @@ jobs:
           done
           echo "Postgres did not become ready"; docker logs agent-wiki-pg; exit 1
 
-      - name: Create test database with extensions
+      - name: Wait for Redis
         run: |
-          docker exec agent-wiki-pg createdb -U postgres agent_wiki_test
-          docker exec agent-wiki-pg psql -U postgres -d agent_wiki_test \
-            -c 'CREATE EXTENSION pg_textsearch;' \
-            -c 'CREATE EXTENSION pgmq;'
+          for i in $(seq 1 30); do
+            if docker exec agent-wiki-redis redis-cli ping | grep -q PONG; then
+              echo "Redis ready"; exit 0
+            fi
+            sleep 1
+          done
+          echo "Redis did not become ready"; docker logs agent-wiki-redis; exit 1
+
+      - name: Create test database
+        run: docker exec agent-wiki-pg createdb -U postgres agent_wiki_test
 
       - uses: actions/setup-python@v5
         with:
@@ -79,3 +85,7 @@ jobs:
       - name: Postgres logs on failure
         if: failure()
         run: docker logs agent-wiki-pg
+
+      - name: Redis logs on failure
+        if: failure()
+        run: docker logs agent-wiki-redis
