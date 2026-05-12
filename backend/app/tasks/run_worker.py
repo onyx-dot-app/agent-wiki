@@ -11,20 +11,32 @@ handler registry is populated. The consumer then only pulls from the
 queue it was launched with; tasks bound to other queues are inert in
 this process.
 """
+
 from __future__ import annotations
 
 import argparse
+import importlib
 import logging
 import time
 
 from prometheus_client import start_http_server
 from sqlalchemy import text
 
-# Importing modules registers tasks on their respective queues.
-from app.tasks import agent_activity, chat_title, wiki_update, periodic, reindex, triggers  # noqa: F401  # pyright: ignore[reportUnusedImport]
 from app.tasks.queues import QUEUES
 from app.tasks.queue import run_consumer
 from app.utils.logging import setup_logging
+
+_TASK_MODULES = (
+    "app.tasks.agent_activity",
+    "app.tasks.chat_title",
+    "app.tasks.wiki_update",
+    "app.tasks.expire_launch_artifacts",
+    "app.tasks.periodic",
+    "app.tasks.reindex",
+    "app.tasks.triggers",
+)
+for _mod in _TASK_MODULES:
+    importlib.import_module(_mod)
 
 log = logging.getLogger(__name__)
 
@@ -43,10 +55,7 @@ def _wait_for_db(timeout_s: float = 60.0, poll_s: float = 1.0) -> None:
         try:
             with session() as s:
                 ready = s.execute(
-                    text(
-                        "SELECT 1 FROM information_schema.tables "
-                        "WHERE table_name = 'users'"
-                    )
+                    text("SELECT 1 FROM information_schema.tables WHERE table_name = 'users'")
                 ).scalar()
         except Exception:
             ready = None
@@ -59,6 +68,7 @@ def _wait_for_db(timeout_s: float = 60.0, poll_s: float = 1.0) -> None:
             )
         log.info("waiting for DB migrations …")
         time.sleep(poll_s)
+
 
 # Per-queue handler concurrency (= number of worker threads in this process).
 # ``documents`` is LLM-bound; we don't want concurrent provider calls from a
