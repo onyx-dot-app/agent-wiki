@@ -472,21 +472,24 @@ function NewDocView({ dir }: { dir: string }) {
     };
   }, []);
 
-  // Sync drafting context with the picked template so chat applies
-  // the right system prompt while we're still on this pre-save view.
-  // The "Blank document" case is handled imperatively in onPickBlank —
-  // we don't fire it from here because the initial render has
-  // ``appliedTemplateId === null`` too, and we don't want to auto-start
-  // a blank chat the moment the page mounts.
+  // Sync drafting context with the current pick — including the
+  // initial "no template chosen yet" state, which maps to ``blank``
+  // drafting so the chat kicks off the moment +New routes into this
+  // view. Picking a template later swaps ``desiredKey`` from "blank"
+  // to "tpl:<id>" and the chat widget re-inits a fresh session for it.
   useEffect(() => {
-    if (!appliedTemplateId || !templates) return;
-    const t = templates.find((x) => x.id === appliedTemplateId);
-    setDrafting({
-      kind: "template",
-      path: null,
-      templateId: appliedTemplateId,
-      templateName: t?.name ?? null,
-    });
+    if (appliedTemplateId) {
+      if (!templates) return; // wait until we can resolve the name
+      const t = templates.find((x) => x.id === appliedTemplateId);
+      setDrafting({
+        kind: "template",
+        path: null,
+        templateId: appliedTemplateId,
+        templateName: t?.name ?? null,
+      });
+    } else {
+      setDrafting({ kind: "blank", path: null });
+    }
   }, [appliedTemplateId, templates, setDrafting]);
   useEffect(() => {
     return () => setDrafting(null);

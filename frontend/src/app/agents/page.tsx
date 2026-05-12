@@ -400,6 +400,7 @@ const inlineCode: React.CSSProperties = {
 
 const inputStyle: React.CSSProperties = {
   width: "100%",
+  boxSizing: "border-box",
   padding: "8px 10px",
   border: `1px solid ${color.border.default}`,
   borderRadius: radius.sm,

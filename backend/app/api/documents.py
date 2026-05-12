@@ -390,7 +390,15 @@ def file_activity(
 def file_draft(
     user: User = Depends(require_user), path: str = "",
 ) -> DocumentDraftView | None:
-    """Return active "drafting from template" state for a doc, or null."""
+    """Return active "drafting from template" state for a doc, or null.
+
+    Reconciles divergence at read time as well as write time: if the
+    current body no longer matches the template snapshot — e.g. an
+    agent edited the page through a path that didn't route through the
+    user PUT handler — the draft row is cleared here and the response
+    is ``null``. That way revisiting the doc shows a normal chat, not
+    the drafting banner.
+    """
     if not path:
         raise HTTPException(status_code=400, detail="path required")
     try:
@@ -400,6 +408,10 @@ def file_draft(
     require_can("read", rel, user)
     row = wiki_drafts.get(rel)
     if row is None:
+        return None
+    abs_path = filesystem.absolute(rel)
+    current_body = abs_path.read_text() if abs_path.is_file() else ""
+    if wiki_drafts.clear_if_diverged(rel, current_body):
         return None
     return DocumentDraftView(
         path=row["path"],
