@@ -197,27 +197,34 @@ function LLMPage() {
 
 function AgentModelSection({ settings, onSaved }: { settings: LLMSettings; onSaved: () => void }) {
   const [editing, setEditing] = useState(false);
-  const [provider, setProvider] = useState<Provider>(settings.provider);
-  const [model, setModel] = useState(settings.model);
+  const [selProvider, setSelProvider] = useState<Provider | "">(settings.provider as Provider | "");
+  const [selModel, setSelModel] = useState(settings.model);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Only providers that have credentials configured.
   const availableProviders = ALL_PROVIDERS.filter((p) => isConfigured(p, settings));
 
+  // Flat list of every configured-provider + enabled-model combination.
+  const options = availableProviders.flatMap((p) => {
+    const models = settings.provider_models[p]?.length
+      ? settings.provider_models[p]
+      : PROVIDER_MODELS[p] ?? [];
+    return models.map((m) => ({ provider: p, model: m }));
+  });
+
   useEffect(() => {
-    setProvider(settings.provider);
-    setModel(settings.model);
+    setSelProvider(settings.provider as Provider | "");
+    setSelModel(settings.model);
   }, [settings]);
 
-  async function onSubmit(e: FormEvent) {
-    e.preventDefault();
+  async function onSave() {
+    if (!selProvider) return;
     setSaving(true);
     setError(null);
     try {
       await apiFetch("/admin/llm", {
         method: "PUT",
-        body: JSON.stringify({ provider, model }),
+        body: JSON.stringify({ provider: selProvider, model: selModel }),
       });
       setEditing(false);
       onSaved();
@@ -239,63 +246,68 @@ function AgentModelSection({ settings, onSaved }: { settings: LLMSettings; onSav
           borderRadius: radius.md, background: color.bg.panel,
         }}>
           <div>
-            {settings.provider && PROVIDER_META[settings.provider] ? (
+            {settings.provider && PROVIDER_META[settings.provider as Provider] ? (
               <>
-                <span style={{ fontSize: 14, fontWeight: 500 }}>{PROVIDER_META[settings.provider].label}</span>
+                <span style={{ fontSize: 14, fontWeight: 500 }}>{PROVIDER_META[settings.provider as Provider].label}</span>
                 <span style={{ fontSize: 14, color: color.text.muted, marginLeft: 8 }}>{settings.model || "—"}</span>
               </>
             ) : (
               <span style={{ fontSize: 14, color: color.text.muted }}>No model selected — configure a provider below.</span>
             )}
           </div>
-          <Button size="sm" variant="secondary" onClick={() => setEditing(true)}>Edit</Button>
+          <Button size="sm" variant="secondary" onClick={() => setEditing(true)} disabled={availableProviders.length === 0}>Edit</Button>
         </div>
       ) : (
-        <form onSubmit={onSubmit} style={{
-          padding: "16px", border: `1px solid ${color.border.default}`,
+        <div style={{
+          border: `1px solid ${color.border.default}`,
           borderRadius: radius.md, background: color.bg.panel,
-          display: "flex", flexDirection: "column", gap: 12,
+          display: "flex", flexDirection: "column",
         }}>
-          <label>
-            <div style={lblStyle}>Provider</div>
-            <select
-              value={provider}
-              onChange={(e) => {
-                const p = e.target.value as Provider;
-                setProvider(p);
-                setModel(PROVIDER_MODELS[p]?.[0] ?? PROVIDER_META[p].defaultModel);
-              }}
-              style={inputStyle}
-            >
-              {availableProviders.length === 0 && (
-                <option disabled value="">No providers configured — add one below</option>
-              )}
-              {availableProviders.map((p) => (
-                <option key={p} value={p}>{PROVIDER_META[p].label}</option>
-              ))}
-            </select>
-          </label>
-          <label>
-            <div style={lblStyle}>Model</div>
-            <select value={model} onChange={(e) => setModel(e.target.value)} required style={inputStyle}>
-              {(settings.provider_models[provider]?.length
-                ? settings.provider_models[provider]
-                : PROVIDER_MODELS[provider] ?? [PROVIDER_META[provider].defaultModel]
-              ).map((m) => (
-                <option key={m} value={m}>{m}</option>
-              ))}
-            </select>
-          </label>
-          {error && <div style={{ color: color.state.danger.fg, fontSize: 13 }}>{error}</div>}
-          <div style={{ display: "flex", gap: 8 }}>
-            <Button type="submit" variant="primary" size="sm" disabled={saving}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4, padding: 12 }}>
+            {options.map(({ provider: p, model: m }) => {
+              const isSelected = selProvider === p && selModel === m;
+              return (
+                <button
+                  key={`${p}:${m}`}
+                  type="button"
+                  onClick={() => { setSelProvider(p); setSelModel(m); }}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 12,
+                    padding: "10px 12px",
+                    border: `1px solid ${isSelected ? color.accent.subtleBorder : color.border.default}`,
+                    borderRadius: radius.sm,
+                    background: isSelected ? color.accent.subtleBg : color.bg.page,
+                    cursor: "pointer", textAlign: "left",
+                  }}
+                >
+                  <div style={{
+                    width: 16, height: 16, borderRadius: "50%", flexShrink: 0,
+                    border: isSelected ? "none" : `1.5px solid ${color.border.strong}`,
+                    background: isSelected ? color.accent.bg : "transparent",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                  }}>
+                    {isSelected && <div style={{ width: 8, height: 8, borderRadius: "50%", background: color.accent.fg }} />}
+                  </div>
+                  <span style={{ fontSize: 13, fontWeight: 500, color: isSelected ? color.accent.subtleFg : color.text.secondary, flexShrink: 0 }}>
+                    {PROVIDER_META[p].label}
+                  </span>
+                  <span style={{ fontSize: 13, color: isSelected ? color.accent.subtleFg : color.text.muted, fontFamily: "ui-monospace, monospace" }}>
+                    {m}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          {error && <div style={{ color: color.state.danger.fg, fontSize: 13, padding: "0 12px 8px" }}>{error}</div>}
+          <div style={{ display: "flex", gap: 8, padding: "4px 12px 12px" }}>
+            <Button type="button" variant="primary" size="sm" disabled={saving || !selProvider} onClick={() => void onSave()}>
               {saving ? "Saving…" : "Set as active"}
             </Button>
             <Button type="button" variant="secondary" size="sm" onClick={() => { setEditing(false); setError(null); }}>
               Cancel
             </Button>
           </div>
-        </form>
+        </div>
       )}
     </section>
   );
