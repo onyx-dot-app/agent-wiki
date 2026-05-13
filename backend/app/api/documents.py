@@ -3,9 +3,10 @@ from __future__ import annotations
 
 import logging
 import re
+import secrets
 import subprocess
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
 
 from app.auth import User, require_can
@@ -461,17 +462,26 @@ def set_file_draft(
     )
 
 
+def _require_ingest_key(request: Request) -> None:
+    auth = request.headers.get("Authorization", "")
+    if not auth.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="missing bearer token")
+    token = auth[len("Bearer "):]
+    stored = ingest_settings.get().api_key
+    if not stored or not secrets.compare_digest(token, stored):
+        raise HTTPException(status_code=401, detail="invalid api key")
+
+
 @router.post(
     "/ingest",
     response_model=IngestResponse,
     status_code=status.HTTP_202_ACCEPTED,
     responses={413: {"model": IngestTooLargeResponse}},
 )
-def ingest_update(req: IngestRequest) -> IngestResponse | JSONResponse:
+def ingest_update(request: Request, req: IngestRequest) -> IngestResponse | JSONResponse:
     """Receive a document push from an external system. Returns 202
-    on enqueue, 413 on size overflow.
-
-    Auth: not yet implemented — matches the ``webhooks`` pattern."""
+    on enqueue, 413 on size overflow."""
+    _require_ingest_key(request)
     if not req.content.strip():
         raise RequestError("content is required and must be a non-empty string")
 

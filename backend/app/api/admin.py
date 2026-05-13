@@ -19,6 +19,7 @@ from app.models.admin import (
     BraintrustView,
     IngestConfigRequest,
     IngestView,
+    RegenerateKeyResponse,
     LLMConfigRequest,
     LLMView,
     OkResponse,
@@ -242,7 +243,7 @@ _MAX_DOC_CHARS = 5_000_000
 
 
 def _ingest_view(s: IngestSettings) -> IngestView:
-    return IngestView(max_doc_chars=s.max_doc_chars)
+    return IngestView(max_doc_chars=s.max_doc_chars, api_key=s.api_key)
 
 
 @router.get("/ingest", response_model=IngestView)
@@ -265,6 +266,13 @@ def put_ingest(
         actor.id, req.max_doc_chars,
     )
     return _ingest_view(ingest_settings.get())
+
+
+@router.post("/ingest/regenerate-key", response_model=RegenerateKeyResponse)
+def regenerate_ingest_key(actor: User = Depends(require_admin)) -> RegenerateKeyResponse:
+    key = ingest_settings.regenerate_key()
+    log.info("admin: %s regenerated ingest api_key", actor.id)
+    return RegenerateKeyResponse(api_key=key)
 
 
 # --------------------------------------------------------------------------- #

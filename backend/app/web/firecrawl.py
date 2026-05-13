@@ -30,7 +30,7 @@ class FirecrawlClient(CrawlProvider):
     def __init__(self, api_key: str) -> None:
         if not api_key:
             raise ValueError("Firecrawl api_key is required")
-        self._headers = {
+        self._headers: dict[str, str | bytes] = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
         }

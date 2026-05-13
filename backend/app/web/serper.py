@@ -27,7 +27,7 @@ class SerperClient(SearchProvider):
     def __init__(self, api_key: str) -> None:
         if not api_key:
             raise ValueError("Serper api_key is required")
-        self._headers = {
+        self._headers: dict[str, str | bytes] = {
             "X-API-KEY": api_key,
             "Content-Type": "application/json",
         }

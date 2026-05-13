@@ -412,6 +412,7 @@ class IngestSettings(Base):
     max_doc_chars: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default=text("100000")
     )
+    api_key: Mapped[str | None] = mapped_column(Text, nullable=True)
     updated_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
 
     __table_args__ = (CheckConstraint("id = 1", name="ingest_settings_singleton"),)
