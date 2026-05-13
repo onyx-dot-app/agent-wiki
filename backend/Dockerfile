@@ -6,8 +6,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 # git is required — the wiki is a git repo and the backend shells out to it.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends git ca-certificates \
+ && apt-get install -y --no-install-recommends git ca-certificates libjemalloc2 \
  && rm -rf /var/lib/apt/lists/*
+
+# Use jemalloc instead of glibc malloc to reduce memory fragmentation
+ENV LD_PRELOAD=libjemalloc.so.2
 
 WORKDIR /app
 
