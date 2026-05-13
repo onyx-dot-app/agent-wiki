@@ -103,6 +103,11 @@ class WebView(BaseModel):
 
 class IngestView(BaseModel):
     max_doc_chars: int
+    api_key: str | None
+
+
+class RegenerateKeyResponse(BaseModel):
+    api_key: str
 
 
 class BraintrustView(BaseModel):
