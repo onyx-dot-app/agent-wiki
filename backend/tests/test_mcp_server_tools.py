@@ -18,6 +18,7 @@ from app.main import create_app
 from app.mcp_server import session as mcp_session
 from app.mcp_server import tools as mcp_tools
 from app.wiki import acl as wiki_acl
+from tests.conftest import needs_opensearch
 from app.wiki import git as wiki_git
 
 from tests._seed import seed_user
@@ -277,17 +278,17 @@ def test_call_with_missing_name_is_invalid_params(client):
 # --------------------------------------------------------------------------- #
 
 
-@pytest.mark.xfail(reason="search stubbed until OpenSearch lands", strict=True)
+@needs_opensearch
 def test_search_wiki_returns_results_via_mcp(client):
     uid = seed_user(uid="u1", email="u1@x.com")
     # The reindex task is bound to lightweight_maintenance_queue. Run it
     # inline here so the search index sees the doc the test seeded.
     from app.tasks.queues import lightweight_maintenance_queue
-    from app.tasks.reindex import reindex_path_inline
+    from app.tasks.reindex import index_path_inline
 
     with lightweight_maintenance_queue.immediate_mode():
         wiki_git.commit_file("guide.md", "# Distributed search rocks\n", "seed", author=None)
-        reindex_path_inline("guide.md")
+        index_path_inline("guide.md")
 
     headers = _handshake(client, _mint(uid))
     rpc = _call_tool(client, headers, "search_wiki", {"query": "distributed"})

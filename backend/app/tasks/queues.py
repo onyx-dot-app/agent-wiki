@@ -39,8 +39,7 @@ Queues:
   here would silently starve the others. If a new task can't honor the
   rule, give it its own queue rather than co-tenanting on this one.
   Today:
-    - Search reindex stubs (``reindex_path``, ``reindex_document``) —
-      no-ops until OpenSearch lands.
+    - Search index tasks (``index_path``) — BM25 via OpenSearch.
     - Agent-activity expiration cleanup
       (``cleanup_expired_activity``) — a single ``DELETE`` enqueued
       with a delay equal to the row's ``expires_at``.

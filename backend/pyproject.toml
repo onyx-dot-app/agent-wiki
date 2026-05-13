@@ -20,6 +20,7 @@ dependencies = [
     "ollama>=0.4",       # Local-model provider (uses Ollama HTTP API)
     "braintrust>=0.0.190", # LLM tracing — admin-configured project + key
     "pyyaml>=6.0",       # trigger files on disk
+    "opensearch-py>=2.4",  # BM25 full-text search
     "fastapi>=0.110",
     "uvicorn[standard]>=0.27",  # ASGI server — production entry via Dockerfile CMD
     "itsdangerous>=2.1", # Starlette SessionMiddleware signs the session cookie

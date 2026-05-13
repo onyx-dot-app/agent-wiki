@@ -7,9 +7,8 @@ every interesting branch.
 """
 from __future__ import annotations
 
-import pytest
-
 from app.wiki import acl
+from tests.conftest import needs_opensearch
 
 
 def test_creator_becomes_owner_and_others_can_access_default_public(integration):
@@ -105,7 +104,7 @@ def test_admin_bypasses_per_page_acls(integration):
     assert resp.status_code in (200, 201)
 
 
-@pytest.mark.xfail(reason="search stubbed until OpenSearch lands", strict=True)
+@needs_opensearch
 def test_search_filters_out_unauthorized_hits(integration):
     alice = integration.signup(email="alice@x.com")
     integration.put_doc("docs/public.md", "# Public\n\nfindme keyword")
@@ -349,7 +348,7 @@ def test_delete_then_recreate_does_not_inherit_old_grants(integration):
 # --------------------------------------------------------------------------- #
 
 
-@pytest.mark.xfail(reason="search stubbed until OpenSearch lands", strict=True)
+@needs_opensearch
 def test_search_returns_hits_via_group_grant(integration):
     admin = integration.signup(email="admin@x.com")
     alice = integration.signup(email="alice@x.com")
@@ -378,7 +377,7 @@ def test_search_returns_hits_via_group_grant(integration):
     assert "private/note.md" in paths
 
 
-@pytest.mark.xfail(reason="search stubbed until OpenSearch lands", strict=True)
+@needs_opensearch
 def test_search_returns_hits_via_folder_cascade(integration):
     integration.signup(email="admin@x.com")
     alice = integration.signup(email="alice@x.com")

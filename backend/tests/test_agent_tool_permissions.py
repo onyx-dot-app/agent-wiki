@@ -21,6 +21,7 @@ import pytest
 from app.auth import User
 from app.wiki import acl, git as wiki_git
 from tests._seed import seed_user
+from tests.conftest import needs_opensearch
 
 
 @pytest.fixture
@@ -207,15 +208,15 @@ def test_edit_doc_read_only_grant_still_denies_write(
 # --------------------------------------------------------------------------- #
 
 
-@pytest.mark.xfail(reason="search stubbed until OpenSearch lands", strict=True)
+@needs_opensearch
 def test_search_wiki_filters_hits_per_user(repo_with_private_page, monkeypatch):
     """search_wiki should respect the calling user's visibility — Bob
     cannot see hits in Alice's private page even when the BM25 index
     has them."""
     from app.llm.agents.tools.search_wiki import handle
-    from app.tasks.reindex import reindex_path_inline
+    from app.tasks.reindex import index_path_inline
 
-    reindex_path_inline("docs/spec.md")
+    index_path_inline("docs/spec.md")
 
     # Alice (owner) finds the hit.
     with _as_user(monkeypatch, repo_with_private_page["alice"]):
@@ -230,12 +231,12 @@ def test_search_wiki_filters_hits_per_user(repo_with_private_page, monkeypatch):
     assert "docs/spec.md" not in paths
 
 
-@pytest.mark.xfail(reason="search stubbed until OpenSearch lands", strict=True)
+@needs_opensearch
 def test_search_wiki_admin_sees_everything(repo_with_private_page, monkeypatch):
     from app.llm.agents.tools.search_wiki import handle
-    from app.tasks.reindex import reindex_path_inline
+    from app.tasks.reindex import index_path_inline
 
-    reindex_path_inline("docs/spec.md")
+    index_path_inline("docs/spec.md")
     with _as_user(monkeypatch, "u_admin", is_admin=True):
         out = handle({"query": "findme"})
     paths = [r["path"] for r in out.get("results", [])]
