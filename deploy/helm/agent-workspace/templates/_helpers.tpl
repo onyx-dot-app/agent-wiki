@@ -51,6 +51,11 @@ and wiki path stay in lockstep.
     secretKeyRef:
       name: {{ include "agent-workspace.fullname" . }}-secrets
       key: redis-url
+- name: OPENSEARCH_URL
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "agent-workspace.fullname" . }}-secrets
+      key: opensearch-url
 - name: WIKI_DIR
   value: /wiki
 - name: SECRET_KEY
