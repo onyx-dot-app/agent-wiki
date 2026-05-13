@@ -31,7 +31,7 @@ from __future__ import annotations
 
 from app.db import fts
 from app.mcp_server import pubsub as mcp_pubsub
-from app.tasks.reindex import reindex_path
+from app.tasks.reindex import index_path
 from app.tasks.triggers import fan_out_trigger_eval
 from app.wiki import acl
 
@@ -66,7 +66,7 @@ def after_doc_write(
         return
     if change_kind == "create":
         acl.on_page_created(rel_path, owner_user_id=owner_user_id)
-    reindex_path(rel_path)
+    index_path(rel_path)
     fan_out_trigger_eval(rel_path, sha, change_kind, actor)
     mcp_pubsub.publish_doc_update(rel_path, sha, change_kind)
     if change_kind == "create":
@@ -133,7 +133,7 @@ def after_path_move(
             mcp_pubsub.publish_doc_delete(old_p, sha)
             list_changed = True
         if new_is_md:
-            reindex_path(new_p)
+            index_path(new_p)
             fan_out_trigger_eval(new_p, sha, "create", actor)
             mcp_pubsub.publish_doc_update(new_p, sha, "create")
             list_changed = True

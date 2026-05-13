@@ -1,34 +1,83 @@
-"""Reindex stubs — search indexing is disabled until OpenSearch lands.
+"""Index wiki documents in OpenSearch for BM25 full-text search.
 
-pg_textsearch has been removed. The task handlers are kept registered on
-the lightweight_maintenance_queue so existing queue messages don't error
-with "no handler" — they just become silent no-ops until OpenSearch
-replaces this module.
+Three entry points:
+
+  index_path(path)        — async task on lightweight_maintenance_queue;
+                            used by after_doc_write / after_path_move.
+  index_path_inline(path) — synchronous version; tests call this directly
+                            so they can assert on search results immediately.
+  reconcile_bm25_index()    — hourly cron; re-indexes any .md files touched
+                              in the last 2 hours to heal missed events.
+
+All three swallow exceptions so a broken OpenSearch never aborts a doc
+write or hourly sweep.  Errors are logged at WARNING level.
+
+Neither function depends on the ``documents`` table — only the git
+working tree is consulted for content and path existence.
 """
 from __future__ import annotations
 
 import logging
+import re
 
+from app.db import fts
 from app.tasks.queue import crontab
 from app.tasks.queues import lightweight_maintenance_queue
 
 log = logging.getLogger(__name__)
 
+_H1_RE = re.compile(r"^#{1,2}\s+(.+)", re.MULTILINE)
+
+
+def _extract_title(body: str) -> str:
+    """Return the first # or ## heading, or empty string."""
+    m = _H1_RE.search(body)
+    return m.group(1).strip() if m else ""
+
+
+# --------------------------------------------------------------------------- #
+# Per-document reindex                                                         #
+# --------------------------------------------------------------------------- #
+
 
 @lightweight_maintenance_queue.task()
-def reindex_document(doc_id: str, path: str, title: str) -> None:
-    pass
+def index_path(path: str) -> None:
+    index_path_inline(path)
 
 
-@lightweight_maintenance_queue.task()
-def reindex_path(path: str) -> None:
-    pass
+def index_path_inline(path: str) -> None:
+    if not path.endswith(".md"):
+        return
+
+    from app.wiki import git as wiki_git
+
+    try:
+        body = wiki_git.read_file(path)
+    except Exception:
+        log.warning("index_path_inline: could not read %s, removing from index", path)
+        fts.delete_document(path)
+        return
+
+    fts.upsert_document(path, path, _extract_title(body), body)
 
 
-def reindex_path_inline(path: str) -> None:
-    pass
+# --------------------------------------------------------------------------- #
+# Hourly reconcile sweep                                                       #
+# --------------------------------------------------------------------------- #
 
 
 @lightweight_maintenance_queue.periodic_task(crontab(minute="0"))
 def reconcile_bm25_index() -> None:
-    pass
+    """Re-index any .md files touched in the last 2 hours."""
+    from app.wiki import git as wiki_git
+
+    touched = {p for p in wiki_git.paths_touched_since("2 hours ago") if p.endswith(".md")}
+    if not touched:
+        return
+
+    for path in touched:
+        try:
+            body = wiki_git.read_file(path)
+            fts.upsert_document(path, path, _extract_title(body), body)
+        except Exception:
+            log.warning("reconcile_bm25_index: failed to reindex %s", path, exc_info=True)

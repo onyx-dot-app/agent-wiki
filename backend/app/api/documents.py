@@ -41,7 +41,7 @@ from app.models.document import (
 )
 from app.tasks.document_update import process_pushed_document
 from app.tasks.queues import QueueFullError
-from app.tasks.reindex import reindex_path
+from app.tasks.reindex import index_path
 from app.triggers import repo as triggers_repo
 from app.wiki import (
     agent_activity,
@@ -292,7 +292,7 @@ def reindex_document_by_path(
     if not abs_path.is_file():
         raise HTTPException(status_code=404, detail="not found")
     require_can("read", rel, user)
-    reindex_path(rel)
+    index_path(rel)
     return ReindexResponse(path=rel, queued=True)
 
 

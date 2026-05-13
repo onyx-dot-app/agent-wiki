@@ -10,10 +10,17 @@ The test database must already exist; point ``TEST_DATABASE_URL`` at it.
 Locally:
 
   createdb agent_wiki_test
+
+OpenSearch tests require a running OpenSearch instance.  Set
+``TEST_OPENSEARCH_URL`` (default ``http://localhost:9201``) and make sure
+the service is up — docker compose runs it on port 9201.  Tests that
+require OpenSearch are marked ``@needs_opensearch`` and skipped when the
+instance is not reachable.
 """
 from __future__ import annotations
 
 import os
+import urllib.request
 import uuid
 from urllib.parse import quote
 
@@ -28,6 +35,28 @@ from psycopg import sql
 from app.config import Config
 from app.mcp_server import pubsub as _mcp_pubsub
 from app.mcp_server import session as _mcp_session
+
+# --------------------------------------------------------------------------- #
+# OpenSearch availability check (runs once at collection time)                #
+# --------------------------------------------------------------------------- #
+
+_TEST_OPENSEARCH_URL = os.environ.get("TEST_OPENSEARCH_URL", "http://localhost:9201")
+
+
+def _check_opensearch() -> bool:
+    try:
+        urllib.request.urlopen(f"{_TEST_OPENSEARCH_URL}/_cluster/health", timeout=2)
+        return True
+    except Exception:
+        return False
+
+
+_opensearch_up: bool = _check_opensearch()
+
+needs_opensearch = pytest.mark.skipif(
+    not _opensearch_up,
+    reason=f"OpenSearch not reachable at {_TEST_OPENSEARCH_URL}",
+)
 
 # Suppress the cross-process Postgres LISTEN bridge in tests. ``create_app``'s
 # lifespan calls ``mcp_pubsub.start_listener`` (app/main.py), which would
@@ -72,6 +101,8 @@ def tmp_config(tmp_path, monkeypatch):
         wiki_dir=str(wiki_dir),
         database_url=_with_search_path(_BASE_URL, schema),
         redis_url=os.environ.get("TEST_REDIS_URL", "redis://localhost:6380/1"),
+        opensearch_url=_TEST_OPENSEARCH_URL,
+        opensearch_index=f"wiki-docs-test-{schema}",  # isolated per test
         max_queue_size=1000,
         auth_mode="basic",
         oidc_issuer="",
@@ -83,6 +114,10 @@ def tmp_config(tmp_path, monkeypatch):
     monkeypatch.setattr("app.config.CONFIG", cfg)
     monkeypatch.setattr("app.db.session.CONFIG", cfg)
 
+    # Reset the lazy OpenSearch client so it re-reads CONFIG on next use.
+    from app.db import fts as _fts
+    _fts.reset_client_for_tests()
+
     # Each test rebuilds the engine so the new schema's search_path takes effect.
     from app.db.session import reset_engine_for_tests
     reset_engine_for_tests()
@@ -90,6 +125,10 @@ def tmp_config(tmp_path, monkeypatch):
     yield cfg
 
     reset_engine_for_tests()
+    from app.db import fts as _fts
+    if _opensearch_up:
+        _fts.drop_index_for_tests()  # delete the per-test index
+    _fts.reset_client_for_tests()
     with psycopg.connect(_BASE_URL, autocommit=True) as conn:
         conn.execute(sql.SQL('DROP SCHEMA {} CASCADE').format(sql.Identifier(schema)))
 

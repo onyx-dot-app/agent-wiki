@@ -21,6 +21,8 @@ class Config(BaseModel):
     wiki_dir: str
     database_url: str
     redis_url: str
+    opensearch_url: str
+    opensearch_index: str
     max_queue_size: int
 
     auth_mode: str  # "basic" | "oidc"
@@ -66,6 +68,8 @@ def load_config() -> Config:
             "postgresql://postgres:postgres@postgres:5432/agent_wiki",
         ),
         redis_url=os.environ.get("REDIS_URL", "redis://redis:6379/0"),
+        opensearch_url=os.environ.get("OPENSEARCH_URL", "http://opensearch:9200"),
+        opensearch_index=os.environ.get("OPENSEARCH_INDEX", "wiki-docs"),
         max_queue_size=_positive_int("MAX_QUEUE_SIZE", 1000),
         auth_mode=os.environ.get("AUTH_MODE", "basic"),
         oidc_issuer=os.environ.get("OIDC_ISSUER", ""),

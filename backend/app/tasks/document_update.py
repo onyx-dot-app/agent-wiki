@@ -6,7 +6,7 @@ wiki page. Each task may make a full LLM call and produce a new commit, so
 we keep this work off the indexer / trigger queues to prevent provider
 slowness from cascading into search staleness or delayed trigger fires.
 
-After a successful commit, these tasks re-enqueue ``reindex_path`` (on
+After a successful commit, these tasks re-enqueue ``index_path`` (on
 ``lightweight_maintenance_queue``) and ``fan_out_trigger_eval`` (on
 ``triggers_queue``) so the side effects fan out exactly like a human edit.
 
@@ -52,7 +52,7 @@ def update_document_from_payload(doc_id: str, source: str, payload: dict[str, An
     #   1. Load current doc body from git (app.wiki.git.read_file).
     #   2. Call app.llm.agents.document_updater.run(doc_id, body, payload, source).
     #   3. If the agent produced a new body, commit it (app.wiki.git.commit_file).
-    #   4. Enqueue reindex_path on lightweight_maintenance_queue.
+    #   4. Enqueue index_path on lightweight_maintenance_queue.
     #   5. Enqueue fan_out_trigger_eval on triggers_queue for doc + parent dirs.
     raise NotImplementedError
 
