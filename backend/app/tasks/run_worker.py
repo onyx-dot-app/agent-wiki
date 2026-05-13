@@ -28,13 +28,12 @@ from app.utils.logging import setup_logging
 log = logging.getLogger(__name__)
 
 
-def _wait_for_pgmq(timeout_s: float = 60.0, poll_s: float = 1.0) -> None:
-    """Block until the ``pgmq`` schema exists in the connected database.
+def _wait_for_db(timeout_s: float = 60.0, poll_s: float = 1.0) -> None:
+    """Block until the app schema exists (migrations have run).
 
-    The backend's lifespan installs the extension via alembic migration
-    0001 on first boot. Workers are launched in parallel with the
-    backend (via launch.json compound / docker compose), so they can
-    race the schema into existence. Poll instead of failing loudly.
+    Workers start in parallel with the backend. Poll until the ``users``
+    table exists so we know alembic has finished before we try to use
+    the DB.
     """
     from app.db.session import session
 
@@ -44,8 +43,8 @@ def _wait_for_pgmq(timeout_s: float = 60.0, poll_s: float = 1.0) -> None:
             with session() as s:
                 ready = s.execute(
                     text(
-                        "SELECT 1 FROM information_schema.schemata "
-                        "WHERE schema_name = 'pgmq'"
+                        "SELECT 1 FROM information_schema.tables "
+                        "WHERE table_name = 'users'"
                     )
                 ).scalar()
         except Exception:
@@ -54,10 +53,10 @@ def _wait_for_pgmq(timeout_s: float = 60.0, poll_s: float = 1.0) -> None:
             return
         if time.monotonic() >= deadline:
             raise RuntimeError(
-                f"pgmq schema not available after {timeout_s:.0f}s — "
+                f"DB schema not available after {timeout_s:.0f}s — "
                 "is the backend running its migrations?"
             )
-        log.info("waiting for pgmq schema (backend migrations) …")
+        log.info("waiting for DB migrations …")
         time.sleep(poll_s)
 
 # Per-queue handler concurrency (= number of worker threads in this process).
