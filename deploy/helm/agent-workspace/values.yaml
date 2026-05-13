@@ -38,6 +38,11 @@ databaseUrl: ""
 # Form: rediss://HOST:6379/0  (rediss:// = TLS; redis:// = plaintext)
 redisUrl: ""
 
+# OpenSearch connection URL for BM25 full-text search. Required.
+# AWS OpenSearch Service: https://admin:pass@vpc-xxx.us-west-2.es.amazonaws.com
+# Self-hosted pod:        http://opensearch:9200
+opensearchUrl: ""
+
 # Comma-separated email whitelist for signup. Empty = anyone.
 allowedEmails: ""
 
