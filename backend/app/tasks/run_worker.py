@@ -75,7 +75,7 @@ def main() -> None:
     args = parser.parse_args()
 
     setup_logging()
-    _wait_for_pgmq()
+    _wait_for_db()
     queue = QUEUES[args.queue]
     concurrency = _CONCURRENCY[args.queue]
 
