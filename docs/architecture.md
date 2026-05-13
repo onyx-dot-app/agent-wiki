@@ -1,51 +1,97 @@
-# Architecture (v0)
+# Architecture
 
 ## Containers
 
 | Container | Role |
 |---|---|
-| `postgres` | Postgres 17 with `pg_textsearch` (BM25 search) and `pgmq` (task queue). pg_textsearch is loaded via `shared_preload_libraries`. Local image — see `deploy/postgres/Dockerfile`. |
-| `backend`  | FastAPI app on :8080 (uvicorn). Hosts the API. |
-| `worker-*` | Same image as backend, runs one `app.tasks.run_worker <queue>` per pgmq queue (`documents`, `triggers`, `lightweight_maintenance`). |
-| `frontend` | Next.js + TS UI on :3000. |
-| `nginx`    | Reverse proxy on :80 — `/api/*` → backend, everything else → frontend. |
+| `postgres` | Postgres 17. Stores users, sessions, ACL, trigger config, events, ingest settings. Schema managed by Alembic — `init_db()` runs `alembic upgrade head` on every boot. |
+| `redis` | Redis 7. Backs the three Redis Streams task queues (`documents`, `triggers`, `lightweight_maintenance`). |
+| `opensearch` | OpenSearch 2.x. BM25 full-text search index (`wiki-docs`). One document per `.md` file; fields: `path` (keyword), `title` (text, boost 3×), `body` (text). |
+| `backend` | FastAPI app on :8080 (uvicorn, 2 workers). Hosts the REST API and MCP server. |
+| `worker-documents` | Same image as backend. Runs `app.tasks.run_worker documents` — LLM-bound doc-update tasks. |
+| `worker-triggers` | Same image as backend. Runs `app.tasks.run_worker triggers` — trigger evaluation and fan-out. |
+| `worker-lightweight-maintenance` | Same image as backend. Runs `app.tasks.run_worker lightweight_maintenance` — BM25 reindex, agent-activity cleanup, hourly reconcile sweep. |
+| `frontend` | Next.js + TypeScript UI on :3000. |
+| `nginx` | Reverse proxy on :80 — `/api/*` → backend, everything else → frontend. |
 
 ## Volumes
 
 | Volume | Mount | Purpose |
 |---|---|---|
-| `wiki-data` | `/wiki`  | Git-backed wiki working tree. The backend shells out to `git`. Backend + workers share an RWO mount, so they must co-schedule. |
-
-App state (users, MCP connections, document metadata, trigger cache,
-events, the BM25 search index) and the three pgmq queues all live in
-Postgres — no on-disk DB files outside the `postgres` service's own
-data dir.
+| `wiki-data` | `/data/wiki` | Git-backed wiki working tree. Backend shells out to `git`. Backend + all workers share an RWO mount and must co-schedule. |
 
 ## Storage
 
-- **Wiki content & triggers** — files in the `wiki-data` volume, committed to git on every write. Triggers live as YAML beside their scope (`.trigger_<id>_<doc>.yaml` or `.trigger_<id>.yaml`).
-- **App state** — Postgres (`DATABASE_URL`): users, MCP connections, document metadata, trigger cache, events, plus the BM25-indexed `documents_fts` table. Schema lives in `backend/app/db/models.py` (SQLAlchemy 2.0 ORM) and is applied by Alembic on every boot — `init_db()` runs `alembic upgrade head` against the configured URL. Migration files live in `backend/app/db/migrations/versions/`.
-- **Search** — `documents_fts(doc_id, path, title, body)` with a `pg_textsearch` BM25 index on `(coalesce(title,'') || ' ' || coalesce(body,''))`. Rebuilt by `tasks.reindex` after every doc commit. Snippets are synthesized in Python (`app/db/fts.py`) since pg_textsearch has no `snippet()` function.
-- **Queue** — pgmq queues `pgmq.q_documents`, `pgmq.q_triggers`, `pgmq.q_lightweight_maintenance` in the same Postgres. Failed messages are archived to `pgmq.a_<queue>` after `MAX_RETRIES` redeliveries.
+- **Wiki content** — files in `wiki-data`, committed to git on every write via `app.wiki.git`. Every write is a real git commit; history is always consistent with the working tree.
+- **App state** — Postgres: users, MCP sessions/tokens, ACL entries, trigger definitions, trigger events, ingest settings, agent-activity log. Schema in `backend/app/db/models.py`; migrations in `backend/app/db/migrations/versions/`.
+- **Search index** — OpenSearch `wiki-docs` index. Populated by `app.tasks.reindex.index_path` after every doc commit and by an hourly reconcile sweep (`reconcile_bm25_index`). Visibility filtering applied post-query in Python via `acl.filter_paths_in_python`.
+- **Task queues** — Redis Streams. Three queues: `documents` (LLM-bound, slow), `triggers` (fast fan-out), `lightweight_maintenance` (sub-second upkeep). Each queue has its own dedicated worker container.
 
-## Data flow: doc gets updated as work happens
+## Data flow: Onyx pushes a document
 
-1. Connector or webhook posts to `/api/documents/ingest` (or `/api/webhooks/<source>`).
-2. Backend records an `events` row and enqueues `update_document_from_payload` on `pgmq.q_documents`.
-3. Worker pulls the task, calls the **document-updater agent** (`app/llm/agents/document_updater.py`).
-4. If the agent returns a new body, the worker commits it via `app.wiki.git.commit_file`.
-5. Worker enqueues `reindex_document` on `pgmq.q_lightweight_maintenance` to refresh the BM25 index.
-6. Worker enqueues `fan_out_trigger_eval` on `pgmq.q_triggers`. That task evaluates **delta triggers** scoped to the doc and to each parent directory; matched triggers record `trigger.fire` events (v0 has no outbound dispatch yet).
+```
+ONYX                                       AGENT WIKI
+────────────────────────────────────────────────────────────────────
+
+                                           Admin UI
+                                             └─ POST /admin/ingest/regenerate-key
+                                                     │
+                                                ingest_settings (Postgres)
+                                                api_key = secrets.token_urlsafe(32)
+                                                     │
+                                                     │ admin copies base URL + key
+                                                     ▼
+env vars:
+AGENT_WIKI_ENABLED=true      ◀────────────  AGENT_WIKI_BASE_URL
+AGENT_WIKI_BASE_URL                          AGENT_WIKI_API_KEY
+AGENT_WIKI_API_KEY
+
+┌─────────────────────────┐
+│  Onyx indexer           │
+│  (Celery task, fires    │  POST /api/documents/ingest
+│   after each indexing   │  Authorization: Bearer <api_key>
+│   batch)                │─────────────────────────────────▶  FastAPI backend
+│                         │  {content, title, source_type,        │
+│  skips if:              │   metadata, updated_at}               │ validate bearer token
+│  - multi-tenant         │                                       │ check max_doc_chars
+│  - non-public connector │◀─────────────────────────────────────  202 Accepted
+│  - doc too large        │                                       │
+└─────────────────────────┘                                       │ enqueue
+                                                                  ▼
+                                                       documents_queue (Redis Streams)
+                                                                  │
+                                                                  ▼
+                                                       worker-documents
+                                                       process_pushed_document()
+                                                                  │
+                                                       resolve page + LLM update
+                                                                  │
+                                                           git commit
+                                                                  │
+                                                     ┌────────────┴────────────┐
+                                                     ▼                         ▼
+                                          lightweight_maintenance_queue    triggers_queue
+                                          index_path()                fan_out_trigger_eval()
+                                                  │
+                                                  ▼
+                                             OpenSearch
+```
+
+## Data flow: user edits a doc
+
+1. UI saves via `PUT /api/documents/<path>` or agent tool calls `commit_file`.
+2. Backend commits to git via `app.wiki.git.commit_file`.
+3. `notify.after_doc_write` fires: enqueues `index_path` on `lightweight_maintenance_queue` + `fan_out_trigger_eval` on `triggers_queue` + publishes MCP pub-sub event.
+4. `worker-lightweight-maintenance` picks up `index_path`, reads body from git, upserts into OpenSearch.
+5. `worker-triggers` picks up `fan_out_trigger_eval`, evaluates delta triggers scoped to the doc and parent dirs, records `trigger.fire` events.
 
 ## Data flow: scheduled trigger
 
-1. The in-process periodic scheduler on the `triggers` worker fires `evaluate_scheduled_triggers` every 5 minutes (cron-driven via `croniter`). The scheduler runs inside the consumer process — running >1 replica per queue would double-fire it.
-2. The handler loads enabled `kind=schedule` triggers due now, runs the configured action, and records `trigger.fire`.
+1. In-process periodic scheduler on `worker-triggers` fires `evaluate_scheduled_triggers` at minute 0 (hourly). Running more than one replica per queue would double-fire it.
+2. Handler loads enabled `kind=schedule` triggers due now, runs the configured action, records `trigger.fire`.
 
 ## Open questions
 
-- **Cost** — every connector update triggers an LLM pass on the relevant doc. Need batching / debounce; right now it's an explicit accept-cost decision.
-- **Doc bloat / loss** — the agent must avoid both growing docs unboundedly and dropping important context. The system prompt forbids both, but we'll need eval data to keep it honest.
-- **Agent hand-off discipline** — coding agents are supposed to update high-level project plans here without spamming. Open: is this best done via MCP tool description, or as a skill the agent loads?
-- **Permissioning** — out of scope for v0. Anything authenticated can read/write everything.
-- **Migrations** — Alembic on top of SQLAlchemy 2.0. Bootstrap migration `0001_initial` materializes the entire current schema via `Base.metadata.create_all`; subsequent changes are explicit autogenerated diffs (`cd backend && alembic revision --autogenerate -m "<slug>"`). `init_db()` runs `alembic upgrade head` on every boot, so deploys apply pending migrations automatically.
+- **Cost** — every Onyx connector update will trigger an LLM pass on the relevant wiki page. Need batching / debounce to avoid runaway cost at high connector volume.
+- **Doc bloat / loss** — the document-updater agent must not grow docs unboundedly or drop important context. System prompt enforces this but eval data is needed to keep it honest.
+- **`process_pushed_document` routing** — how the agent picks which wiki page(s) to update from a raw Onyx document push is not yet implemented. LLM-routed via the document-updater agent.
