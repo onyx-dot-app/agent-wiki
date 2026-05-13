@@ -32,7 +32,7 @@ def _run(
 ) -> subprocess.CompletedProcess[str]:
     try:
         return subprocess.run(
-            ["git", *args],
+            ["git", "-c", "core.quotepath=false", *args],
             cwd=cwd or CONFIG.wiki_dir,
             check=check,
             capture_output=True,
@@ -122,7 +122,7 @@ def move_path(
     file that was actually moved. For a directory rename this lists every
     nested file. Used by tools that move things without rewriting content.
     """
-    listed = _run(["ls-files", "--", old_rel_path]).stdout.splitlines()
+    listed = _run(["ls-files", "-z", "--", old_rel_path]).stdout.split("\0")
     tracked = [p for p in listed if p]
     moves: list[tuple[str, str]] = []
     for old_p in tracked:
@@ -251,8 +251,8 @@ def commits_between(base_sha: str, head_sha: str, rel_path: str) -> list[str]:
 
 def list_paths(prefix: str = "") -> list[str]:
     """List tracked files under a path prefix."""
-    out = _run(["ls-files", prefix or "."]).stdout
-    return [line for line in out.splitlines() if line]
+    out = _run(["ls-files", "-z", prefix or "."]).stdout
+    return [p for p in out.split("\0") if p]
 
 
 def paths_touched_since(since_iso: str) -> set[str]:
