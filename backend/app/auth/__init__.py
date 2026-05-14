@@ -59,7 +59,7 @@ class UserMissingError(Exception):
 def load_user(user_id: str) -> User:
     """Resolve a stored ``user_id`` to a ``User`` value object. Raises
     :class:`UserMissingError` if the row has been deleted. Used by
-    worker tasks (``app.tasks.document_update``) to reconstitute the
+    worker tasks (``app.tasks.wiki_update``) to reconstitute the
     principal before binding it via :func:`set_current_user`."""
     row = users_repo.get_by_id(user_id)
     if row is None:

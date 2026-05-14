@@ -20,17 +20,23 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from typing import Any
 
 from app.config import CONFIG
-from app.llm.agents import document_updater
+from app.ingest import search as ingest_search
+from app.ingest.source_tiers import is_filtered
+from app.llm.agents import wiki_updater
+from app.llm.agents.wiki_updater import IRRELEVANT_SENTINEL
 from app.llm.agents.tools import _doc_helpers as h
 from app.llm.errors import LLMError
 from app.mcp_server import jobs as mcp_jobs
 from app.mcp_server import pubsub as mcp_pubsub
 from app.auth import UserMissingError, load_user, set_current_user
 from app.tasks.queues import documents_queue
-from app.wiki import agent_activity, git as wiki_git
+from app.wiki import agent_activity, git as wiki_git, notify as wiki_notify
+
+_INGEST_AUTHOR = "Onyx Ingest <ingest@agent-wiki>"
 
 log = logging.getLogger(__name__)
 
@@ -50,7 +56,7 @@ def update_document_from_payload(doc_id: str, source: str, payload: dict[str, An
     log.info("update_document_from_payload doc_id=%s source=%s", doc_id, source)
     # TODO:
     #   1. Load current doc body from git (app.wiki.git.read_file).
-    #   2. Call app.llm.agents.document_updater.run(doc_id, body, payload, source).
+    #   2. Call app.llm.agents.wiki_updater.process_instruction(wiki_path, body, payload, source).
     #   3. If the agent produced a new body, commit it (app.wiki.git.commit_file).
     #   4. Enqueue index_path on lightweight_maintenance_queue.
     #   5. Enqueue fan_out_trigger_eval on triggers_queue for doc + parent dirs.
@@ -153,8 +159,8 @@ def _run_inner(job_id: str, rel: str, instruction: str, base_sha: str | None) ->
 
     old_body = h.read_existing(rel)
     try:
-        new_body = document_updater.run(
-            doc_id=rel,
+        new_body = wiki_updater.process_instruction(
+            wiki_path=rel,
             current_body=old_body,
             payload={"instruction": instruction},
             source="update_doc_nl",
@@ -216,18 +222,92 @@ _ = CONFIG
 def process_pushed_document(push: dict[str, Any]) -> None:
     """Reconcile a document pushed from an external system into the wiki.
 
-    ``push`` is the validated payload from POST /api/documents/ingest. Shape:
-    ``{content, title?, source_type?, metadata?, updated_at?, diff?}``. The
-    document-updater agent decides which wiki page(s) to update based on
-    these fields; the API layer does no routing.
+    ``push`` is the validated payload from POST /api/wiki/ingest. Shape:
+    ``{content, title?, source_type?, source_document_id?, metadata?,
+       updated_at?, diff?}``.
+
+    Pipeline:
+      1. Drop filtered sources silently.
+      2. BM25 search + title boost + score threshold to find candidates.
+      3. Walk candidates (best score first); call updater LLM on each.
+         - new body   → commit + fan-out, reset irrelevant counter
+         - NO_CHANGE  → skip commit, reset irrelevant counter
+         - IRRELEVANT → increment counter; stop when ≥ INGEST_IRRELEVANT_STOP_N
     """
+    source_type = push.get("source_type")
+    title = push.get("title")
+    content: str = push.get("content") or ""
+    doc_id = push.get("source_document_id") or push.get("title") or "unknown"
+
     log.info(
         "process_pushed_document source_type=%s title=%s len=%d",
-        push.get("source_type"), push.get("title"), len(push.get("content") or ""),
+        source_type, title, len(content),
     )
-    # TODO:
-    #   1. Resolve target wiki page(s) (LLM-routed via document-updater agent).
-    #   2. Run document-updater against the resolved page with the push.
-    #   3. On a body change, commit + reindex + trigger fan-out (mirrors the
-    #      update_document_from_payload pipeline above).
-    raise NotImplementedError
+
+    if is_filtered(source_type):
+        log.debug("process_pushed_document: filtered source %s, dropping", source_type)
+        return
+
+    t_start = time.monotonic()
+    hits = ingest_search.candidates(content, title)
+    if not hits:
+        log.info("process_pushed_document: no BM25 candidates above threshold, doc_id=%s", doc_id)
+        return
+
+    source_label = source_type or "external"
+    _meta: dict[str, Any] = push.get("metadata") or {}
+    url: str = str(_meta.get("url") or "")
+
+    consecutive_irrelevant = 0
+    llm_calls = 0
+    irrelevant = 0
+    committed = 0
+    stopped_early = False
+
+    for hit in hits:
+        try:
+            current_body = wiki_git.read_file(hit.path)
+        except Exception:
+            log.debug("process_pushed_document: skipping unreadable %s", hit.path)
+            continue
+
+        try:
+            result = wiki_updater.reconcile_document(
+                wiki_path=hit.path,
+                current_body=current_body,
+                source=source_label,
+                title=title,
+                url=url,
+                content=content,
+            )
+            llm_calls += 1
+        except LLMError:
+            log.warning("process_pushed_document: LLM error for %s, skipping", hit.path, exc_info=True)
+            continue
+
+        if result == IRRELEVANT_SENTINEL:
+            irrelevant += 1
+            consecutive_irrelevant += 1
+            log.debug(
+                "process_pushed_document: IRRELEVANT path=%s consecutive=%d",
+                hit.path, consecutive_irrelevant,
+            )
+            if consecutive_irrelevant >= CONFIG.ingest_irrelevant_stop_n:
+                stopped_early = True
+                break
+        else:
+            consecutive_irrelevant = 0
+            if result is not None:
+                message = f"ingest({source_label}): update {hit.path}"
+                sha = wiki_git.commit_file(hit.path, result, message, author=_INGEST_AUTHOR)
+                wiki_notify.after_doc_write(hit.path, sha, "edit", _INGEST_AUTHOR)
+                committed += 1
+                log.info("process_pushed_document: committed %s sha=%s", hit.path, sha)
+
+    log.info(
+        "process_pushed_document: done doc_id=%s source_type=%s candidates=%d "
+        "llm_calls=%d committed=%d irrelevant=%d stopped_early=%s duration_ms=%d",
+        doc_id, source_type, len(hits),
+        llm_calls, committed, irrelevant, stopped_early,
+        int((time.monotonic() - t_start) * 1000),
+    )

@@ -22,7 +22,7 @@ and never calls this module. That's by design; don't add a "smart"
 path filter here that tries to do both.
 
 Why this lives in ``app/wiki/`` and not ``app/llm/agents/tools/``:
-both API handlers (`api/documents.py`) and agent tools (`tools/*.py`)
+both API handlers (`api/wiki.py`) and agent tools (`tools/*.py`)
 need it. Putting it under ``tools/`` would couple the API to a tool
 package; putting it at the wiki layer keeps the dependency direction
 clean (``api/`` → ``wiki/`` ← ``tools/``).

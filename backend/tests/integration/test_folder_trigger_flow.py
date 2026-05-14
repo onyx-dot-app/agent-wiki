@@ -17,7 +17,7 @@ from __future__ import annotations
 def test_dir_trigger_fires_on_create_then_edit(integration):
     integration.signup_and_signin()
 
-    integration.client.post("/api/documents/folder", json={"path": "reports"})
+    integration.client.post("/api/wiki/folder", json={"path": "reports"})
 
     integration.create_trigger(
         scope_path="reports",

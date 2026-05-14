@@ -53,7 +53,7 @@ def llm_returns(monkeypatch):
         def fake(messages, **kwargs):
             return CompletionResult(text=text, tool_calls=[], stop_reason="end_turn", usage=Usage())
         monkeypatch.setattr("app.llm.client.complete", fake)
-        # The caller in app.llm.agents.document_updater imports
+        # The caller in app.llm.agents.wiki_updater imports
         # ``client`` and calls ``client.complete(...)``; patching the
         # bare module attribute is enough.
 

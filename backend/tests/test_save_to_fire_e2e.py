@@ -1,4 +1,4 @@
-"""End-to-end: ``PUT /api/documents/file`` → commit → trigger fan-out → event row.
+"""End-to-end: ``PUT /api/wiki/file`` → commit → trigger fan-out → event row.
 
 The save-button save path. The unit-level fan-out tests
 (``test_triggers_fanout.py``) exercise the task in isolation; this file
@@ -76,7 +76,7 @@ def _list_fires():
 
 def _put_doc(client, *, path, body):
     return client.put(
-        "/api/documents/file",
+        "/api/wiki/file",
         json={"path": path, "body": body},
     )
 
@@ -336,7 +336,7 @@ def test_move_fires_delete_on_old_and_create_on_new(signed_in, monkeypatch):
     clear_events()
 
     resp = client.post(
-        "/api/documents/move",
+        "/api/wiki/move",
         json={"old_path": "src/foo.md", "new_path": "dst/foo.md"},
     )
     assert resp.status_code == 200, resp.text
@@ -377,7 +377,7 @@ def test_delete_fires_with_change_kind_delete(signed_in, monkeypatch):
     from tests._seed import clear_events
     clear_events()
 
-    resp = client.delete("/api/documents/file?path=docs/old.md")
+    resp = client.delete("/api/wiki/file?path=docs/old.md")
     assert resp.status_code == 200, resp.text
 
     fires = _list_fires()

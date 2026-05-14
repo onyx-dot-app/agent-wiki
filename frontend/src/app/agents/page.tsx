@@ -362,7 +362,7 @@ function OnyxConnection() {
   const [notice, setNotice] = useState<string | null>(null);
 
   useEffect(() => {
-    setIngestUrl(`${window.location.origin}/api/documents/ingest`);
+    setIngestUrl(`${window.location.origin}/api/wiki/ingest`);
     apiFetch<IngestSettings>("/admin/ingest")
       .then(setSettings)
       .catch((e) => setError(e instanceof Error ? e.message : "failed to load"));

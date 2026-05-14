@@ -8,7 +8,7 @@ in place. The state is exposed through:
 
 * The ``read_page`` / ``read_doc`` tool responses (an ``agents`` field
   on every HEAD read), so co-occupant agents can see each other.
-* ``GET /api/documents/file/activity?path=...`` for the UI panel.
+* ``GET /api/wiki/file/activity?path=...`` for the UI panel.
 
 The doc body itself is *not* touched — there is no on-disk
 representation. This avoids the read→commit churn that broke

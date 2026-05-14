@@ -84,7 +84,7 @@ export const WikiSearch = forwardRef<WikiSearchHandle>(function WikiSearch(_, re
     setError(null);
     const handle = setTimeout(() => {
       apiFetch<SearchResponse>(
-        `/documents/search?q=${encodeURIComponent(trimmed)}&limit=${RESULT_LIMIT}`,
+        `/wiki/search?q=${encodeURIComponent(trimmed)}&limit=${RESULT_LIMIT}`,
       )
         .then((r) => {
           if (seq !== requestSeq.current) return;

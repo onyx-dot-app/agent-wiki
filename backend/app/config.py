@@ -34,6 +34,25 @@ class Config(BaseModel):
     # `True` when the app is served over HTTPS — toggles SESSION_COOKIE_SECURE.
     secure_cookies: bool
 
+    # Ingest pipeline tuning
+    ingest_bm25_min_score: float
+    ingest_bm25_title_boost: float
+    ingest_bm25_limit: int
+    ingest_irrelevant_stop_n: int
+
+
+def _positive_float(name: str, default: float) -> float:
+    raw = os.environ.get(name)
+    if raw is None or raw == "":
+        return default
+    try:
+        value = float(raw)
+    except ValueError as e:
+        raise ValueError(f"{name} must be a float, got {raw!r}") from e
+    if value <= 0:
+        raise ValueError(f"{name} must be a positive float, got {value}")
+    return value
+
 
 def _positive_int(name: str, default: int) -> int:
     raw = os.environ.get(name)
@@ -71,6 +90,10 @@ def load_config() -> Config:
         opensearch_url=os.environ.get("OPENSEARCH_URL", "http://opensearch:9200"),
         opensearch_index=os.environ.get("OPENSEARCH_INDEX", "wiki-docs"),
         max_queue_size=_positive_int("MAX_QUEUE_SIZE", 1000),
+        ingest_bm25_min_score=_positive_float("INGEST_BM25_MIN_SCORE", 1.0),
+        ingest_bm25_title_boost=_positive_float("INGEST_BM25_TITLE_BOOST", 2.0),
+        ingest_bm25_limit=_positive_int("INGEST_BM25_LIMIT", 20),
+        ingest_irrelevant_stop_n=_positive_int("INGEST_IRRELEVANT_STOP_N", 2),
         auth_mode=os.environ.get("AUTH_MODE", "basic"),
         oidc_issuer=os.environ.get("OIDC_ISSUER", ""),
         oidc_client_id=os.environ.get("OIDC_CLIENT_ID", ""),

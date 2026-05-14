@@ -172,7 +172,7 @@ def _call_async_nl_update(
     from app.llm.agents.tools import _doc_helpers as h
     from app.mcp_server import jobs as mcp_jobs
     from app.mcp_server import pubsub as mcp_pubsub
-    from app.tasks.document_update import agent_update_document_nl
+    from app.tasks.wiki_update import agent_update_document_nl
     from app.wiki import git as wiki_git
 
     # ---- Validate ----
