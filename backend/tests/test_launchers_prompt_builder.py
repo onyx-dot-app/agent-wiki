@@ -96,3 +96,17 @@ def test_prompt_builder_unicode_body_truncation_safe():
     # Decodes without error.
     p.encode("utf-8").decode("utf-8")
     assert "[truncated]" in p
+
+
+def test_prompt_builder_unicode_user_message_truncates_to_cap():
+    """Multi-byte user message without page body still honors byte cap."""
+    message = "💡" * 200_000  # > 256KB when encoded
+    p = build_first_turn_prompt(
+        wiki_path=None,
+        page_body=None,
+        working_dir=None,
+        linked_repos=[],
+        user_message=message,
+    )
+    assert len(p.encode("utf-8")) <= 256 * 1024
+    assert p.endswith("[truncated]")

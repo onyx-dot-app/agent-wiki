@@ -50,7 +50,15 @@ def build_first_turn_prompt(
     marker_len = len(_TRUNCATION_MARKER.encode("utf-8"))
     body_budget = _MAX_PROMPT_BYTES - overhead - marker_len - 16
     if body_budget <= 0 or page_body is None:
-        return out[: _MAX_PROMPT_BYTES - marker_len] + _TRUNCATION_MARKER
+        # Fallback: trim the composed prompt itself to the byte cap, then
+        # append the truncation marker. Slice on the encoded bytes so we
+        # don't overrun the limit when the prompt contains multi-byte
+        # characters (e.g. emoji).
+        max_bytes = _MAX_PROMPT_BYTES - marker_len
+        if max_bytes <= 0:
+            return _TRUNCATION_MARKER
+        trimmed = out.encode("utf-8")[:max_bytes].decode("utf-8", errors="ignore")
+        return trimmed + _TRUNCATION_MARKER
 
     body_bytes = page_body.encode("utf-8")
     truncated_body = body_bytes[:body_budget].decode("utf-8", errors="ignore") + _TRUNCATION_MARKER
