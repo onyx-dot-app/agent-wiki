@@ -85,6 +85,7 @@ class ActivityRow(BaseModel):
     description: str | None
     registered_at: str
     expires_at: str
+    agent_session_id: str | None
 
 
 def _row_to_dict(activity: AgentActivity, owner_display: str) -> ActivityRow:
@@ -98,6 +99,7 @@ def _row_to_dict(activity: AgentActivity, owner_display: str) -> ActivityRow:
         description=activity.description,
         registered_at=activity.registered_at,
         expires_at=activity.expires_at,
+        agent_session_id=activity.agent_session_id,
     )
 
 

@@ -179,6 +179,7 @@ class ActivityRowView(BaseModel):
     description: str | None
     registered_at: str
     expires_at: str
+    agent_session_id: str | None
 
 
 class DocumentActivityResponse(BaseModel):

@@ -14,6 +14,7 @@ from app.main import create_app
 from app.mcp_server import session as mcp_session
 from app.wiki import git as wiki_git
 
+from tests._auth import login_fastapi
 from tests._seed import seed_user
 
 
@@ -80,6 +81,41 @@ def test_header_stamps_agent_session_id_and_agent_name(client):
     matched = [a for a in rows if a.agent_session_id == agent_sid and a.doc_path == "x.md"]
     assert len(matched) == 1
     assert matched[0].agent_name == "claude-code"
+
+
+def test_file_activity_endpoint_includes_agent_session_id(client):
+    """HTTP activity view surfaces the launcher session id for frontend consumers."""
+    init_db()
+    uid = seed_user()
+    login_fastapi(client, uid)
+    _, raw = tokens_repo.create(uid, "k")
+    wiki_git.commit_file("x.md", "# Hello\n", message="seed")
+    agent_sid = sessions_repo.create(
+        user_id=uid,
+        tool_id="claude-code",
+        first_turn_prompt="x",
+        wiki_path="x.md",
+        working_dir=None,
+    )
+
+    headers = _handshake(client, raw)
+    headers["X-Agentwiki-Session"] = agent_sid
+    res = client.post(
+        "/api/mcp",
+        json={
+            "jsonrpc": "2.0",
+            "id": 100,
+            "method": "tools/call",
+            "params": {"name": "read_doc", "arguments": {"path": "x.md"}},
+        },
+        headers=headers,
+    )
+    assert res.status_code == 200, res.text
+
+    activity = client.get("/api/documents/file/activity", params={"path": "x.md"})
+    assert activity.status_code == 200, activity.text
+    payload = activity.json()
+    assert any(a["agent_session_id"] == agent_sid for a in payload["agents"])
 
 
 def test_unknown_session_id_returns_400(client):
