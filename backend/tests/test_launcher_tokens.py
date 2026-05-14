@@ -50,6 +50,24 @@ def test_decrypt_failure_remints_AF15(tmp_config):
     assert raw2 != raw1
 
 
+def test_get_raw_remints_after_secret_rotation(tmp_config, monkeypatch):
+    """AF#15 follow-through — decrypt failure via rotated secret re-mints on fetch."""
+    init_db()
+    uid = seed_user()
+    tid, raw = launcher_tokens.get_or_mint_for_user(uid, name="launcher")
+    # Rotate the secret so decrypting the stored ciphertext fails.
+    monkeypatch.setattr(
+        launcher_tokens,
+        "CONFIG",
+        launcher_tokens.CONFIG.model_copy(update={"secret_key": "rotated"}),
+    )
+    rotated_raw = launcher_tokens.get_raw_for_token_id(tid)
+    assert rotated_raw is not None
+    assert rotated_raw != raw
+    # Subsequent reads succeed without re-minting.
+    assert launcher_tokens.get_raw_for_token_id(tid) == rotated_raw
+
+
 def test_unique_user_id_constraint(tmp_config):
     """AF#3 — only one launcher_tokens row per user."""
     init_db()

@@ -24,10 +24,12 @@ import secrets
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.orm import Session
 
 from app.auth import mcp_tokens as tokens_repo
+from app.auth.passwords import hash_password
 from app.config import CONFIG
-from app.db.models import LauncherToken
+from app.db.models import LauncherToken, McpToken
 from app.db.session import session
 
 log = logging.getLogger(__name__)
@@ -46,6 +48,34 @@ def _try_decrypt(row: LauncherToken) -> str | None:
             row.user_id,
         )
         return None
+
+
+_TOKEN_BYTES = 24  # mirrors app.auth.mcp_tokens._TOKEN_BYTES
+
+
+def _mint_plaintext() -> str:
+    return tokens_repo.TOKEN_PREFIX + secrets.token_urlsafe(_TOKEN_BYTES)
+
+
+def _remint_after_decrypt_failure(db: Session, row: LauncherToken) -> str:
+    mcp_row = db.get(McpToken, row.mcp_token_id)
+    if mcp_row is None:
+        # Referential integrity should keep this aligned; guard defensively.
+        log.error(
+            "launcher_token remint failed: mcp_token row missing mcp_token_id=%s user_id=%s",
+            row.mcp_token_id,
+            row.user_id,
+        )
+        raise RuntimeError(
+            f"launcher_token remint failed: missing mcp_token row {row.mcp_token_id}"
+        )
+    raw = _mint_plaintext()
+    mcp_row.token_hash = hash_password(raw)
+    nonce = secrets.token_bytes(12)
+    row.nonce = nonce
+    row.ciphertext = AESGCM(_key()).encrypt(nonce, raw.encode("utf-8"), None)
+    log.info("launcher_token reminted after decrypt failure user=%s", row.user_id)
+    return raw
 
 
 def get_or_mint_for_user(user_id: str, *, name: str) -> tuple[str, str]:
@@ -95,7 +125,14 @@ def get_or_mint_for_user(user_id: str, *, name: str) -> tuple[str, str]:
 
 def get_raw_for_token_id(mcp_token_id: str) -> str | None:
     with session() as s:
-        row = s.get(LauncherToken, mcp_token_id)
+        row = s.scalar(
+            select(LauncherToken)
+            .where(LauncherToken.mcp_token_id == mcp_token_id)
+            .with_for_update()
+        )
         if row is None:
             return None
-        return _try_decrypt(row)
+        raw = _try_decrypt(row)
+        if raw is not None:
+            return raw
+        return _remint_after_decrypt_failure(s, row)
