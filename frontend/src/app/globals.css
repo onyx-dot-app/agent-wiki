@@ -1,13 +1,9 @@
-/* Opal design system tokens. The preset (registered in tailwind.config.cjs)
-   resolves utility classes (text-XX, background-neutral-XX, etc.) against
-   the CSS variables defined in colors.css. */
 @import "./css/colors.css" layer(base);
 @import "./css/opal-styles.css" layer(base);
-
-/* Tailwind v4 entry. @import "tw-animate-css" lives here (not inside the
-   Opal package's bundled CSS) because Tailwind v4's PostCSS @import resolver
-   doesn't walk node_modules from inside the @onyx-ai/opal/dist context. */
 @import "tailwindcss";
+/* @import "tw-animate-css" lives at the app level (not in opal-styles.css)
+   because Tailwind v4's PostCSS resolver doesn't walk node_modules from
+   inside @onyx-ai/opal/dist. */
 @import "tw-animate-css";
 @config "../../tailwind.config.cjs";
 
