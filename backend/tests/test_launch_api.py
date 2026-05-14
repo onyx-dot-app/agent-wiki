@@ -200,6 +200,51 @@ def test_post_launch_resume_rejects_active_session(client):
     assert res.status_code == 409
 
 
+def test_post_launch_resume_copies_cli_and_machine(client):
+    """Resume launch should thread CLI session + machine gate through new session."""
+    uid = seed_user()
+    login_fastapi(client, uid)
+    sid = sessions_repo.create(
+        user_id=uid,
+        tool_id="claude-code",
+        first_turn_prompt="x",
+        wiki_path=None,
+        working_dir=None,
+    )
+    sessions_repo.mark_active(sid, machine_id="m_laptop")
+    sessions_repo.set_cli_session_id(sid, "cli_resume")
+    sessions_repo.close(sid, reason="user")
+
+    res = client.post(
+        "/api/launch",
+        json={
+            "tool_id": "claude-code",
+            "wiki_path": None,
+            "message": "resume please",
+            "resume_session_id": sid,
+        },
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    new_sid = body["agent_session_id"]
+    assert new_sid != sid
+    row = sessions_repo.get(new_sid)
+    assert row is not None
+    assert row["machine_id"] == "m_laptop"
+    assert row["cli_session_id"] == "cli_resume"
+
+    fresh = _fresh_client()
+    exchange = fresh.post(
+        "/api/launch/exchange",
+        json={"code": body["launch_code"], "machine_id": "m_laptop"},
+    )
+    assert exchange.status_code == 200, exchange.text
+    payload = exchange.json()["payload"]
+    assert payload["session_id"] == new_sid
+    assert payload["cli_session_id"] == "cli_resume"
+    assert payload["first_turn_prompt"] is None
+
+
 # --------------------------------------------------------------------------- #
 # Exchange                                                                    #
 # --------------------------------------------------------------------------- #

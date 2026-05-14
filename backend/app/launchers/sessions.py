@@ -69,6 +69,8 @@ def create(
     first_turn_prompt: str,
     wiki_path: str | None,
     working_dir: str | None,
+    machine_id: str | None = None,
+    cli_session_id: str | None = None,
 ) -> str:
     sid = "as_" + uuid.uuid4().hex
     with session() as s:
@@ -76,10 +78,12 @@ def create(
             AgentSession(
                 id=sid,
                 user_id=user_id,
+                machine_id=machine_id,
                 tool_id=tool_id,
                 wiki_path=wiki_path,
                 working_dir=working_dir,
                 first_turn_prompt=first_turn_prompt,
+                cli_session_id=cli_session_id,
             )
         )
     log.info("agent_session created id=%s user=%s tool=%s", sid, user_id, tool_id)
