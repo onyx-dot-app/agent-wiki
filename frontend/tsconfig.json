@@ -14,8 +14,24 @@
     "jsx": "preserve",
     "incremental": true,
     "plugins": [{ "name": "next" }],
-    "paths": { "@/*": ["./src/*"] }
+    "paths": {
+      "@/*": ["./src/*"],
+      "@opal/components": ["./node_modules/@onyx-ai/opal/dist/components"],
+      "@opal/layouts": ["./node_modules/@onyx-ai/opal/dist/layouts"],
+      "@opal/core": ["./node_modules/@onyx-ai/opal/dist/core"],
+      "@opal/icons": ["./node_modules/@onyx-ai/opal/dist/icons"],
+      "@opal/illustrations": [
+        "./node_modules/@onyx-ai/opal/dist/illustrations"
+      ],
+      "@opal/types": ["./node_modules/@onyx-ai/opal/dist/types"],
+      "@opal/utils": ["./node_modules/@onyx-ai/opal/dist/utils"]
+    }
   },
-  "include": ["next-env.d.ts", "src/**/*.ts", "src/**/*.tsx", ".next/types/**/*.ts"],
+  "include": [
+    "next-env.d.ts",
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    ".next/types/**/*.ts"
+  ],
   "exclude": ["node_modules"]
 }

@@ -1,3 +1,12 @@
+@import "./css/colors.css" layer(base);
+@import "./css/opal-styles.css" layer(base);
+@import "tailwindcss";
+/* @import "tw-animate-css" lives at the app level (not in opal-styles.css)
+   because Tailwind v4's PostCSS resolver doesn't walk node_modules from
+   inside @onyx-ai/opal/dist. */
+@import "tw-animate-css";
+@config "../../tailwind.config.cjs";
+
 /* Reserve the scrollbar gutter on the root scroll container so layout
    width stays constant whether content fits or overflows. Without this,
    pages that toggle between short and tall content cause a horizontal
@@ -70,7 +79,7 @@ html {
   /* Shadows */
   --shadow-sm: 0 1px 2px rgba(15, 15, 15, 0.06);
   --shadow-md: 0 4px 12px rgba(15, 15, 15, 0.08);
-  --shadow-popover: 0 8px 24px rgba(15, 15, 15, 0.10);
+  --shadow-popover: 0 8px 24px rgba(15, 15, 15, 0.1);
   --shadow-fab: 0 6px 20px rgba(15, 15, 15, 0.18);
   --shadow-modal: 0 24px 60px rgba(15, 15, 15, 0.18);
   --shadow-panel: -4px 0 24px rgba(15, 15, 15, 0.08);
