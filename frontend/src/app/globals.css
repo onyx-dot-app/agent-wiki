@@ -1,3 +1,16 @@
+/* Opal design system tokens. The preset (registered in tailwind.config.cjs)
+   resolves utility classes (text-XX, background-neutral-XX, etc.) against
+   the CSS variables defined in colors.css. */
+@import "./css/colors.css" layer(base);
+@import "./css/opal-styles.css" layer(base);
+
+/* Tailwind v4 entry. @import "tw-animate-css" lives here (not inside the
+   Opal package's bundled CSS) because Tailwind v4's PostCSS @import resolver
+   doesn't walk node_modules from inside the @onyx-ai/opal/dist context. */
+@import "tailwindcss";
+@import "tw-animate-css";
+@config "../../tailwind.config.cjs";
+
 /* Reserve the scrollbar gutter on the root scroll container so layout
    width stays constant whether content fits or overflows. Without this,
    pages that toggle between short and tall content cause a horizontal
@@ -70,7 +83,7 @@ html {
   /* Shadows */
   --shadow-sm: 0 1px 2px rgba(15, 15, 15, 0.06);
   --shadow-md: 0 4px 12px rgba(15, 15, 15, 0.08);
-  --shadow-popover: 0 8px 24px rgba(15, 15, 15, 0.10);
+  --shadow-popover: 0 8px 24px rgba(15, 15, 15, 0.1);
   --shadow-fab: 0 6px 20px rgba(15, 15, 15, 0.18);
   --shadow-modal: 0 24px 60px rgba(15, 15, 15, 0.18);
   --shadow-panel: -4px 0 24px rgba(15, 15, 15, 0.08);
