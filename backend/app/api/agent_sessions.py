@@ -7,8 +7,6 @@ the helper runs without a cookie (AF#2 audit fix).
 
 from __future__ import annotations
 
-import logging
-
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 
 from app.auth import User
@@ -21,8 +19,6 @@ from app.models.launchers import (
     CliSessionUpdateRequest,
     CloseRequest,
 )
-
-log = logging.getLogger(__name__)
 
 router = APIRouter()
 

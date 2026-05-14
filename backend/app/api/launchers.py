@@ -16,7 +16,6 @@ See ``local_data/wiki/Wiki Project/Specific Features/coding_tool_launchers/desig
 
 from __future__ import annotations
 
-import logging
 from threading import RLock
 from time import time
 
@@ -49,8 +48,6 @@ from app.wiki import acl as wiki_acl
 from app.wiki import filesystem as wiki_fs
 from app.wiki import git as wiki_git
 from app.wiki import linked_repos as wiki_linked_repos
-
-log = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -167,6 +164,8 @@ def post_launch(
         first_turn_prompt = ""  # not replayed on resume — exchange omits it
         wiki_path = existing["wiki_path"]
         working_dir = existing["working_dir"]
+        machine_id = existing["machine_id"]
+        cli_session_id = existing["cli_session_id"]
     else:
         page_body: str | None = None
         repos: list[str] = []
@@ -181,6 +180,8 @@ def post_launch(
         )
         wiki_path = req.wiki_path
         working_dir = req.working_dir
+        machine_id = None
+        cli_session_id = None
 
     # AF#14 — record the user's workdir choice if they ticked "remember".
     if req.remember_workdir_for_page and req.machine_id and wiki_path and working_dir:
@@ -197,6 +198,8 @@ def post_launch(
         first_turn_prompt=first_turn_prompt,
         wiki_path=wiki_path,
         working_dir=working_dir,
+        machine_id=machine_id,
+        cli_session_id=cli_session_id,
     )
 
     # Auto-mint a launcher MCP token (via launcher_tokens for plaintext).
