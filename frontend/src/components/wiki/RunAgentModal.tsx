@@ -43,6 +43,7 @@ export function RunAgentModal({ open, onClose, wikiPath }: Props) {
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [workingDir, setWorkingDir] = useState("");
+  const [workdirEdited, setWorkdirEdited] = useState(false);
   const [rememberWorkdir, setRememberWorkdir] = useState(false);
   const [message, setMessage] = useState("");
   const [wizardOpen, setWizardOpen] = useState(false);
@@ -68,9 +69,12 @@ export function RunAgentModal({ open, onClose, wikiPath }: Props) {
           workingDir: string;
           message: string;
         };
-        if (s.selectedId) setSelectedId(s.selectedId);
-        if (s.workingDir) setWorkingDir(s.workingDir);
-        if (s.message) setMessage(s.message);
+        if (typeof s.selectedId === "string") setSelectedId(s.selectedId);
+        if (typeof s.workingDir === "string") {
+          setWorkingDir(s.workingDir);
+          setWorkdirEdited(true);
+        }
+        if (typeof s.message === "string") setMessage(s.message);
       } catch {
         sessionStorage.removeItem(key);
       }
@@ -87,26 +91,30 @@ export function RunAgentModal({ open, onClose, wikiPath }: Props) {
     if (!open) return;
     if (launchable.length === 0) {
       setSelectedId(null);
+      setWorkdirEdited(false);
       return;
     }
     if (selectedId === null) {
       setSelectedId(launchable[0].id);
+      setWorkdirEdited(false);
       return;
     }
     if (!launchable.some((c) => c.id === selectedId)) {
       setSelectedId(launchable[0].id);
+      setWorkdirEdited(false);
     }
   }, [open, launchable, selectedId]);
 
   useEffect(() => {
     if (!open) return;
-    // R7#2 — once we have a workdir default from the catalog and the user
-    // hasn't typed their own, autofill.
-    if (workingDir.trim().length === 0) {
-      const entry = launchers.find((c) => c.id === selectedId);
-      if (entry?.default_working_dir) setWorkingDir(entry.default_working_dir);
+    if (workdirEdited) return;
+    const entry = launchers.find((c) => c.id === selectedId);
+    if (!entry) return;
+    const next = entry.default_working_dir ?? "";
+    if (workingDir !== next) {
+      setWorkingDir(next);
     }
-  }, [open, launchers, selectedId, workingDir]);
+  }, [open, launchers, selectedId, workdirEdited, workingDir]);
 
   useEffect(() => {
     if (!open) return;
@@ -118,6 +126,11 @@ export function RunAgentModal({ open, onClose, wikiPath }: Props) {
   }, [open, onClose]);
 
   if (!open) return null;
+
+  const handleWorkdirChange = (next: string) => {
+    setWorkdirEdited(true);
+    setWorkingDir(next);
+  };
 
   async function onRun(e: FormEvent) {
     e.preventDefault();
@@ -219,7 +232,7 @@ export function RunAgentModal({ open, onClose, wikiPath }: Props) {
 
             <WorkingDirInput
               value={workingDir}
-              onChange={setWorkingDir}
+              onChange={handleWorkdirChange}
               remember={rememberWorkdir}
               onRememberChange={setRememberWorkdir}
               pageHasBinding={
