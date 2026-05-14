@@ -89,7 +89,11 @@ def test_sweep_marks_failed_when_no_spawn_ok_within_30s(tmp_config):
     # Backdate started_at to 60s ago.
     past = (datetime.now(timezone.utc) - timedelta(seconds=60)).strftime("%Y-%m-%d %H:%M:%S")
     with session() as s:
-        s.execute(update(AgentSession).where(AgentSession.id == sid).values(started_at=past))
+        s.execute(
+            update(AgentSession)
+            .where(AgentSession.id == sid)
+            .values(started_at=past, last_activity_at=past)
+        )
     with lightweight_maintenance_queue.immediate_mode():
         expire_launch_artifacts()
     assert _get_session_dict(sid)["status"] == "failed"

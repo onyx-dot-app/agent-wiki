@@ -266,7 +266,9 @@ def test_evict_spawn_missed(tmp_config, monkeypatch):
 
     past = (datetime.now(timezone.utc) - timedelta(seconds=60)).strftime("%Y-%m-%d %H:%M:%S")
     with _ss() as s:
-        s.execute(_u(_AS).where(_AS.id == sid).values(started_at=past))
+        s.execute(
+            _u(_AS).where(_AS.id == sid).values(started_at=past, last_activity_at=past)
+        )
     n = sessions_repo.evict_spawn_missed()
     assert n == 1
     assert _get_session_dict(sid)["status"] == "failed"

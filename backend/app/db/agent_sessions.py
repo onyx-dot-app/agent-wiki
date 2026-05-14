@@ -247,7 +247,7 @@ def evict_spawn_missed() -> int:
             .where(
                 AgentSession.status == "active",
                 AgentSession.spawn_ok_at.is_(None),
-                AgentSession.started_at < cutoff,
+                AgentSession.last_activity_at <= cutoff,
             )
             .values(status="failed", closed_at=now),
         )
