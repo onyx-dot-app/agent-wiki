@@ -14,7 +14,8 @@ import {
   useLauncherCatalog,
   type LauncherCatalogEntry,
 } from "@/lib/launchers";
-import { color, radius, shadow } from "@/lib/theme";
+
+import styles from "./RunAgentModal.module.css";
 
 interface Props {
   open: boolean;
@@ -181,35 +182,16 @@ export function RunAgentModal({ open, onClose, wikiPath }: Props) {
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: color.overlay,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        zIndex: 100,
-      }}
+      className={styles.scrim}
     >
       <form
         onSubmit={onRun}
         role="dialog"
         aria-modal="true"
         aria-label="Run agent"
-        style={{
-          background: color.bg.page,
-          borderRadius: radius.lg,
-          width: "min(560px, 92vw)",
-          padding: 22,
-          boxShadow: shadow.modal,
-          display: "flex",
-          flexDirection: "column",
-          gap: 14,
-          maxHeight: "90vh",
-          overflowY: "auto",
-        }}
+        className={styles.dialog}
       >
-        <h2 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>Run agent</h2>
+        <h2 className={styles.title}>Run agent</h2>
 
         {wizardOpen ? (
           <SetupWizard
@@ -241,59 +223,26 @@ export function RunAgentModal({ open, onClose, wikiPath }: Props) {
               }
             />
 
-            <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              <span
-                style={{
-                  fontSize: 12,
-                  color: color.text.secondary,
-                  fontWeight: 600,
-                }}
-              >
-                Message
-              </span>
+            <label className={styles.field}>
+              <span className={styles.fieldLabel}>Message</span>
               <textarea
                 value={message}
                 onChange={(e) => setMessage(e.target.value)}
                 placeholder="What should the agent do with this doc?"
                 rows={4}
                 maxLength={16_384}
-                style={{
-                  padding: 10,
-                  border: `1px solid ${color.border.default}`,
-                  borderRadius: radius.md,
-                  fontFamily: "inherit",
-                  fontSize: 14,
-                  lineHeight: 1.5,
-                  resize: "vertical",
-                  minHeight: 96,
-                  color: color.text.primary,
-                  background: color.bg.page,
-                }}
+                className={styles.textarea}
               />
             </label>
 
             {sessions.length > 0 && (
-              <div>
-                <div
-                  style={{
-                    fontSize: 12,
-                    color: color.text.secondary,
-                    fontWeight: 600,
-                    marginBottom: 4,
-                  }}
-                >
+              <div className={styles.sessions}>
+                <div className={styles.sessionsHeader}>
                   Active sessions on this page
                 </div>
-                <ul
-                  style={{
-                    listStyle: "none",
-                    padding: 0,
-                    margin: 0,
-                    fontSize: 13,
-                  }}
-                >
+                <ul className={styles.sessionsList}>
                   {sessions.map((s) => (
-                    <li key={s.id} style={{ color: color.text.muted }}>
+                    <li key={s.id} className={styles.sessionsRow}>
                       {s.tool_id} · {s.status} · {s.started_at}
                     </li>
                   ))}
@@ -301,43 +250,17 @@ export function RunAgentModal({ open, onClose, wikiPath }: Props) {
               </div>
             )}
 
-            {error && (
-              <div
-                style={{
-                  padding: 8,
-                  background: color.state.danger.bg,
-                  color: color.state.danger.fg,
-                  borderRadius: radius.sm,
-                  fontSize: 13,
-                }}
-              >
-                {error}
-              </div>
-            )}
+            {error && <div className={styles.error}>{error}</div>}
 
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                marginTop: 4,
-              }}
-            >
+            <div className={styles.footer}>
               <button
                 type="button"
                 onClick={() => setWizardOpen(true)}
-                style={{
-                  background: "transparent",
-                  border: "none",
-                  color: color.text.muted,
-                  fontSize: 12,
-                  cursor: "pointer",
-                  padding: 0,
-                }}
+                className={styles.linkButton}
               >
                 Set up another tool →
               </button>
-              <div style={{ display: "flex", gap: 8 }}>
+              <div className={styles.footerActions}>
                 <Button type="button" onClick={onClose}>
                   Cancel
                 </Button>
@@ -370,32 +293,15 @@ function ToolList({
 }) {
   if (catalog.length === 0) {
     return (
-      <div style={{ fontSize: 13, color: color.text.muted }}>
+      <div className={styles.toolListEmpty}>
         No launchable tools available yet.
       </div>
     );
   }
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-      <span
-        style={{
-          fontSize: 12,
-          color: color.text.secondary,
-          fontWeight: 600,
-        }}
-      >
-        Tool
-      </span>
-      <ul
-        style={{
-          listStyle: "none",
-          padding: 0,
-          margin: 0,
-          display: "flex",
-          flexDirection: "column",
-          gap: 8,
-        }}
-      >
+    <div className={styles.toolList}>
+      <span className={styles.fieldLabel}>Tool</span>
+      <ul className={styles.toolListItems}>
         {catalog.map((c) => (
           <li key={c.id}>
             <ToolCard

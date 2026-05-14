@@ -1,0 +1,33 @@
+.wrapper {
+  padding: 8px;
+  background: var(--color-accent-subtle-bg);
+  border: 1px solid var(--color-accent-subtle-border);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+}
+
+.heading {
+  font-weight: 600;
+  color: var(--color-accent-subtle-fg);
+  margin-bottom: 4px;
+}
+
+.list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.detail {
+  flex: 1;
+  color: var(--color-text-primary);
+}

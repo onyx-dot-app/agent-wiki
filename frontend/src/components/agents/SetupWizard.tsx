@@ -8,10 +8,10 @@ import {
   probeHelper,
   type LauncherCatalogEntry,
 } from "@/lib/launchers";
-import { color, radius } from "@/lib/theme";
 
 import { InstallHelperPane } from "./InstallHelperPane";
 import { ToolStatusBadge } from "./ToolStatusBadge";
+import styles from "./SetupWizard.module.css";
 
 interface Props {
   catalog: LauncherCatalogEntry[];
@@ -66,7 +66,7 @@ export function SetupWizard({ catalog, onDone, onCancel }: Props) {
   }, [step]);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+    <div className={styles.wrapper}>
       {step === 1 && (
         <Step1
           catalog={catalog}
@@ -111,60 +111,25 @@ function Step1({
 }) {
   return (
     <>
-      <div
-        style={{
-          fontSize: 14,
-          color: color.text.primary,
-          fontWeight: 600,
-        }}
-      >
+      <div className={styles.heading}>
         Pick which tools to set up — step 1 of 2
       </div>
-      <div style={{ fontSize: 12, color: color.text.muted }}>
+      <div className={styles.subheading}>
         You can add more later from the Agents page.
       </div>
-      <ul
-        style={{
-          listStyle: "none",
-          padding: 0,
-          margin: 0,
-          display: "flex",
-          flexDirection: "column",
-          gap: 8,
-        }}
-      >
+      <ul className={styles.toolList}>
         {catalog.map((c) => (
           <li key={c.id}>
-            <label
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 10,
-                padding: 10,
-                border: `1px solid ${color.border.default}`,
-                borderRadius: radius.sm,
-                cursor: "pointer",
-              }}
-            >
+            <label className={styles.toolOption}>
               <input
                 type="checkbox"
                 checked={selected.has(c.id)}
                 onChange={() => onToggle(c.id)}
               />
               <img src={c.icon_url} alt="" width={20} height={20} />
-              <div style={{ flex: 1 }}>
-                <div
-                  style={{
-                    fontSize: 14,
-                    fontWeight: 600,
-                    color: color.text.primary,
-                  }}
-                >
-                  {c.name}
-                </div>
-                <div style={{ fontSize: 12, color: color.text.muted }}>
-                  {c.tagline}
-                </div>
+              <div className={styles.toolOptionBody}>
+                <div className={styles.toolOptionName}>{c.name}</div>
+                <div className={styles.toolOptionTagline}>{c.tagline}</div>
               </div>
               <ToolStatusBadge
                 status="muted"
@@ -174,7 +139,7 @@ function Step1({
           </li>
         ))}
       </ul>
-      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+      <div className={styles.actions}>
         <Button onClick={onCancel}>Cancel</Button>
         <Button
           variant="primary"
@@ -215,37 +180,15 @@ function Step2({
 
   return (
     <>
-      <div
-        style={{
-          fontSize: 14,
-          color: color.text.primary,
-          fontWeight: 600,
-        }}
-      >
-        Setup checklist — step 2 of 2
-      </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <div className={styles.heading}>Setup checklist — step 2 of 2</div>
+      <div className={styles.checklist}>
         {catalog.map((c) => (
-          <div
-            key={c.id}
-            style={{
-              padding: 12,
-              border: `1px solid ${color.border.default}`,
-              borderRadius: radius.sm,
-            }}
-          >
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                marginBottom: 6,
-              }}
-            >
+          <div key={c.id} className={styles.checklistCard}>
+            <div className={styles.checklistHeader}>
               <img src={c.icon_url} alt="" width={20} height={20} />
-              <strong style={{ fontSize: 14 }}>{c.name}</strong>
+              <strong className={styles.checklistName}>{c.name}</strong>
             </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <div className={styles.checklistBadges}>
               <ToolStatusBadge
                 status={c.setup_status.token ? "ok" : "warn"}
                 label={
@@ -283,7 +226,7 @@ function Step2({
           <InstallHelperPane onReprobe={onReprobe} />
         )}
       </div>
-      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+      <div className={styles.actions}>
         <Button onClick={onBack}>Back</Button>
         <Button variant="primary" onClick={onDone} disabled={!allOk}>
           Done

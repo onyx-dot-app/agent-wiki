@@ -4,7 +4,8 @@ import { useState } from "react";
 
 import { Button } from "@/components/common/Button";
 import { invalidateHelperProbe } from "@/lib/launchers";
-import { color, radius } from "@/lib/theme";
+
+import styles from "./InstallHelperPane.module.css";
 
 const INSTALL_CMD = "npm install -g @agentwiki/launcher";
 
@@ -55,49 +56,17 @@ export function InstallHelperPane({
   }
 
   return (
-    <div
-      style={{
-        padding: 12,
-        background: color.state.warning.bg,
-        border: `1px solid ${color.state.warning.border}`,
-        borderRadius: radius.sm,
-      }}
-    >
-      <div
-        style={{
-          fontSize: 13,
-          color: color.state.warning.fg,
-          marginBottom: 8,
-        }}
-      >
+    <div className={styles.pane}>
+      <div className={styles.message}>
         Launcher isn&apos;t installed on this machine. Run:
       </div>
-      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-        <code
-          style={{
-            flex: 1,
-            padding: "6px 8px",
-            background: color.bg.sunken,
-            borderRadius: radius.xs,
-            fontFamily: "ui-monospace, Menlo, monospace",
-            fontSize: 12,
-            color: color.text.primary,
-          }}
-        >
-          {INSTALL_CMD}
-        </code>
+      <div className={styles.cmdRow}>
+        <code className={styles.cmd}>{INSTALL_CMD}</code>
         <Button size="sm" onClick={() => copy(INSTALL_CMD)}>
           {copied ? "Copied" : "Copy"}
         </Button>
       </div>
-      <div
-        style={{
-          marginTop: 10,
-          display: "flex",
-          gap: 8,
-          justifyContent: "flex-end",
-        }}
-      >
+      <div className={styles.actions}>
         <Button
           size="sm"
           variant="ghost"

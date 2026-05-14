@@ -1,8 +1,7 @@
 "use client";
 
-import { color, radius } from "@/lib/theme";
-
 import { ToolStatusBadge } from "./ToolStatusBadge";
+import styles from "./ToolCard.module.css";
 
 interface Props {
   id: string;
@@ -27,54 +26,28 @@ export function ToolCard({
   helperReady,
   cliReady,
 }: Props) {
+  const className = [
+    styles.card,
+    selected ? styles.selected : "",
+    onSelect ? styles.clickable : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
   return (
     <button
       type="button"
       onClick={onSelect}
       aria-pressed={selected}
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "flex-start",
-        textAlign: "left",
-        width: "100%",
-        padding: 12,
-        background: selected ? color.accent.subtleBg : color.bg.page,
-        border: `1px solid ${
-          selected ? color.accent.bg : color.border.default
-        }`,
-        borderRadius: radius.md,
-        cursor: onSelect ? "pointer" : "default",
-        gap: 8,
-      }}
+      className={className}
     >
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 10,
-          width: "100%",
-        }}
-      >
+      <div className={styles.header}>
         <img src={iconUrl} alt="" width={24} height={24} />
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div
-            style={{ fontSize: 14, fontWeight: 600, color: color.text.primary }}
-          >
-            {name}
-          </div>
-          <div
-            style={{
-              fontSize: 12,
-              color: color.text.muted,
-              marginTop: 1,
-            }}
-          >
-            {tagline}
-          </div>
+        <div className={styles.body}>
+          <div className={styles.name}>{name}</div>
+          <div className={styles.tagline}>{tagline}</div>
         </div>
       </div>
-      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+      <div className={styles.badges}>
         <ToolStatusBadge
           status={tokenReady ? "ok" : "warn"}
           label={tokenReady ? "Token" : "Need token"}

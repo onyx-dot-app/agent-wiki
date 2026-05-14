@@ -1,6 +1,6 @@
 "use client";
 
-import { color, radius } from "@/lib/theme";
+import styles from "./WorkingDirInput.module.css";
 
 interface Props {
   value: string;
@@ -18,16 +18,8 @@ export function WorkingDirInput({
   pageHasBinding,
 }: Props) {
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-      <label
-        style={{
-          fontSize: 12,
-          color: color.text.secondary,
-          fontWeight: 600,
-        }}
-      >
-        Working directory
-      </label>
+    <div className={styles.wrapper}>
+      <label className={styles.label}>Working directory</label>
       <input
         type="text"
         value={value}
@@ -35,23 +27,9 @@ export function WorkingDirInput({
         placeholder="(leave blank for scratch directory)"
         autoComplete="off"
         spellCheck={false}
-        style={{
-          padding: "8px 10px",
-          border: `1px solid ${color.border.default}`,
-          borderRadius: radius.sm,
-          fontSize: 14,
-          fontFamily: "ui-monospace, Menlo, monospace",
-        }}
+        className={styles.input}
       />
-      <label
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 6,
-          fontSize: 12,
-          color: color.text.muted,
-        }}
-      >
+      <label className={styles.rememberRow}>
         <input
           type="checkbox"
           checked={remember}
