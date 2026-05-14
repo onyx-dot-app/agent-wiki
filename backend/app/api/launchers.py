@@ -84,10 +84,14 @@ def get_catalog(
 
     default_workdir: str | None = None
     if machine_id and wiki_path:
+        try:
+            canonical = wiki_fs.safe_rel_path(wiki_path)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="invalid wiki_path") from exc
         default_workdir = page_dirs.get_for_page(
             user_id=user.id,
             machine_id=machine_id,
-            wiki_path=wiki_path,
+            wiki_path=canonical,
         )
 
     entries: list[LauncherCatalogEntry] = []
@@ -112,7 +116,9 @@ def get_catalog(
 # --------------------------------------------------------------------------- #
 
 
-def _maybe_read_page_body(wiki_path: str, user: User) -> tuple[str | None, list[str]]:
+def _maybe_read_page_body(
+    wiki_path: str, user: User
+) -> tuple[str, str | None, list[str]]:
     """Read page body + parse linked_repos. ACL-gated and
     traversal-protected . Returns ``(body, repos)`` or
     ``(None, [])`` if the file doesn't exist (acceptable — the wizard
@@ -130,8 +136,8 @@ def _maybe_read_page_body(wiki_path: str, user: User) -> tuple[str | None, list[
         body = wiki_git.read_file(canonical)
     except Exception:
         # File doesn't exist or git ref missing — treat as no body.
-        return None, []
-    return body, wiki_linked_repos.parse_linked_repos(body)
+        return canonical, None, []
+    return canonical, body, wiki_linked_repos.parse_linked_repos(body)
 
 
 @router.post("/launch", response_model=LaunchResponse)
@@ -167,18 +173,18 @@ def post_launch(
         machine_id = existing["machine_id"]
         cli_session_id = existing["cli_session_id"]
     else:
+        wiki_path: str | None = None
         page_body: str | None = None
         repos: list[str] = []
         if req.wiki_path is not None:
-            page_body, repos = _maybe_read_page_body(req.wiki_path, user)
+            wiki_path, page_body, repos = _maybe_read_page_body(req.wiki_path, user)
         first_turn_prompt = prompt_builder.build_first_turn_prompt(
-            wiki_path=req.wiki_path,
+            wiki_path=wiki_path,
             page_body=page_body,
             working_dir=req.working_dir,
             linked_repos=repos,
             user_message=req.message,
         )
-        wiki_path = req.wiki_path
         working_dir = req.working_dir
         machine_id = None
         cli_session_id = None

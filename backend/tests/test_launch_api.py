@@ -93,6 +93,26 @@ def test_catalog_with_machine_id_includes_default_workdir(client):
         assert entry["default_working_dir"] == "/home/u/proj"
 
 
+def test_catalog_normalizes_wiki_path_for_default_lookup(client):
+    from app.db import page_dirs
+
+    uid = seed_user()
+    login_fastapi(client, uid)
+    page_dirs.set_for_page(
+        user_id=uid,
+        machine_id="m_norm",
+        wiki_path="docs/x.md",
+        working_dir="/workspace",
+    )
+    res = client.get(
+        "/api/launchers",
+        params={"machine_id": "m_norm", "wiki_path": "./docs//x.md"},
+    )
+    assert res.status_code == 200, res.text
+    for entry in res.json()["launchers"]:
+        assert entry["default_working_dir"] == "/workspace"
+
+
 # --------------------------------------------------------------------------- #
 # POST /api/launch                                                            #
 # --------------------------------------------------------------------------- #
@@ -174,6 +194,22 @@ def test_post_launch_message_length_capped(client):
     )
     # App's error handler translates pydantic ValidationError to 400.
     assert res.status_code in (400, 422)
+
+
+def test_post_launch_normalizes_wiki_path(client):
+    uid = seed_user()
+    login_fastapi(client, uid)
+    res = client.post(
+        "/api/launch",
+        json={
+            "tool_id": "claude-code",
+            "wiki_path": "./docs//example.md",
+            "message": "x",
+        },
+    )
+    assert res.status_code == 200, res.text
+    row = _get_session_dict(res.json()["agent_session_id"])
+    assert row["wiki_path"] == "docs/example.md"
 
 
 def test_post_launch_resume_rejects_active_session(client):
