@@ -19,6 +19,7 @@ from app.models.launchers import (
     CliSessionUpdateRequest,
     CloseRequest,
 )
+from app.wiki import filesystem as wiki_fs
 
 router = APIRouter()
 
@@ -58,7 +59,11 @@ def list_sessions(
 ) -> AgentSessionList:
     _check_flag()
     if wiki_path is not None:
-        rows = sessions_repo.list_for_page(user_id=user.id, wiki_path=wiki_path)
+        try:
+            canonical = wiki_fs.safe_rel_path(wiki_path)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        rows = sessions_repo.list_for_page(user_id=user.id, wiki_path=canonical)
     else:
         rows = sessions_repo.list_for_user(user.id)
     return AgentSessionList(

@@ -57,6 +57,18 @@ def test_list_sessions_filtered_by_wiki_path(client):
     assert {s["id"] for s in res.json()["sessions"]} == {a}
 
 
+def test_list_sessions_normalizes_wiki_path(client):
+    uid = seed_user()
+    login_fastapi(client, uid)
+    sid = _seed_session(uid, wiki_path="docs/path.md")
+    res = client.get(
+        "/api/agent-sessions",
+        params={"wiki_path": "./docs//path.md"},
+    )
+    assert res.status_code == 200, res.text
+    assert {s["id"] for s in res.json()["sessions"]} == {sid}
+
+
 def test_list_sessions_only_returns_callers_own(client):
     a = seed_user("usr_a", email="a@x.com")
     b = seed_user("usr_b", email="b@x.com")
