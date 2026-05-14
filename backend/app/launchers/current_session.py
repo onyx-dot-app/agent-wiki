@@ -9,9 +9,9 @@ Mirrors ``app.auth.current_user_ctx``.
 
 from __future__ import annotations
 
+from collections.abc import Generator
 from contextlib import contextmanager
 from contextvars import ContextVar
-from typing import Iterator
 
 current_agent_session_id_ctx: ContextVar[str | None] = ContextVar(
     "current_agent_session_id",
@@ -23,8 +23,8 @@ def current_agent_session_id() -> str | None:
     return current_agent_session_id_ctx.get()
 
 
-@contextmanager  # pyright: ignore[reportDeprecated]
-def set_current_agent_session_id(sid: str | None) -> Iterator[None]:
+@contextmanager
+def set_current_agent_session_id(sid: str | None) -> Generator[None, None, None]:
     token = current_agent_session_id_ctx.set(sid)
     try:
         yield

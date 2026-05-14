@@ -15,14 +15,16 @@ We don't add a per-request scoped session — the Flask layer has no
 multi-step transactions today, and pushing one in would mean rewriting
 every repo to take a session argument. Revisit when we have a use case.
 """
+
 from __future__ import annotations
 
 import logging
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Generator
+from typing import Generator, cast
 
-from sqlalchemy import Engine, create_engine
+from sqlalchemy import Engine, Executable, create_engine
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.config import CONFIG
@@ -40,7 +42,7 @@ def _sa_url(database_url: str) -> str:
     want psycopg3, so prepend the driver tag here.
     """
     if database_url.startswith("postgresql://"):
-        return "postgresql+psycopg://" + database_url[len("postgresql://"):]
+        return "postgresql+psycopg://" + database_url[len("postgresql://") :]
     return database_url
 
 
@@ -57,11 +59,9 @@ def get_engine() -> Engine:
         _engine = create_engine(
             _sa_url(CONFIG.database_url),
             future=True,
-            pool_pre_ping=True,    # cheap dead-connection check
+            pool_pre_ping=True,  # cheap dead-connection check
         )
-        _session_factory = sessionmaker(
-            bind=_engine, expire_on_commit=False, autoflush=False
-        )
+        _session_factory = sessionmaker(bind=_engine, expire_on_commit=False, autoflush=False)
     return _engine
 
 
@@ -94,11 +94,19 @@ def session() -> Generator[Session, None, None]:
         s.close()
 
 
+def execute_dml(s: Session, stmt: Executable) -> int:
+    """Run a DML statement (INSERT/UPDATE/DELETE) and return the affected
+    row count. Centralises the ``CursorResult`` cast that ``Session.execute``
+    needs to expose ``rowcount`` cleanly under basedpyright strict mode.
+    """
+    return cast("CursorResult[tuple[object, ...]]", s.execute(stmt)).rowcount
+
+
 _MIGRATIONS_DIR = Path(__file__).resolve().parent / "migrations"
 
 # Advisory lock key used to serialise concurrent init_db() callers.
 # "alem" in ASCII — just a stable identifier, not a secret.
-_MIGRATION_ADVISORY_LOCK = 0x616c656d
+_MIGRATION_ADVISORY_LOCK = 0x616C656D
 
 
 def _alembic_config():
@@ -143,9 +151,14 @@ def init_db() -> None:
 
     engine = get_engine()
     with engine.connect() as conn:
-        conn.execute(sa.text("SELECT pg_advisory_lock(:lock_key)"), {"lock_key": _MIGRATION_ADVISORY_LOCK})
+        conn.execute(
+            sa.text("SELECT pg_advisory_lock(:lock_key)"), {"lock_key": _MIGRATION_ADVISORY_LOCK}
+        )
         try:
             log.info("running alembic upgrade head")
             command.upgrade(_alembic_config(), "head")
         finally:
-            conn.execute(sa.text("SELECT pg_advisory_unlock(:lock_key)"), {"lock_key": _MIGRATION_ADVISORY_LOCK})
+            conn.execute(
+                sa.text("SELECT pg_advisory_unlock(:lock_key)"),
+                {"lock_key": _MIGRATION_ADVISORY_LOCK},
+            )

@@ -18,7 +18,7 @@ from sqlalchemy import select, update
 
 from app.config import CONFIG
 from app.db.models import AgentSession
-from app.db.session import session
+from app.db.session import execute_dml, session
 
 log = logging.getLogger(__name__)
 
@@ -206,15 +206,15 @@ def mark_failed(sid: str, *, reason: str) -> None:
 def mark_stale_idle() -> int:
     cutoff = _iso(datetime.now(timezone.utc) - timedelta(seconds=CONFIG.agent_session_idle_seconds))
     with session() as s:
-        result = s.execute(
+        return execute_dml(
+            s,
             update(AgentSession)
             .where(
                 AgentSession.status == "active",
                 AgentSession.last_activity_at <= cutoff,
             )
-            .values(status="idle")
+            .values(status="idle"),
         )
-        return int(result.rowcount or 0)  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType, reportUnknownArgumentType]
 
 
 def evict_idle_to_closed() -> int:
@@ -224,30 +224,30 @@ def evict_idle_to_closed() -> int:
     )
     now = _now_iso()
     with session() as s:
-        result = s.execute(
+        return execute_dml(
+            s,
             update(AgentSession)
             .where(
                 AgentSession.status == "idle",
                 AgentSession.last_activity_at <= cutoff,
             )
-            .values(status="closed", closed_at=now)
+            .values(status="closed", closed_at=now),
         )
-        return int(result.rowcount or 0)  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType, reportUnknownArgumentType]
 
 
 def evict_spawn_missed() -> int:
-    """ — sessions that exchanged but never reported spawn_ok within
-    30s are marked ``failed`` so the UI stops showing them as live."""
+    """Sessions that exchanged but never reported spawn_ok within 30s
+    are marked ``failed`` so the UI stops showing them as live."""
     cutoff = _iso(datetime.now(timezone.utc) - timedelta(seconds=30))
     now = _now_iso()
     with session() as s:
-        result = s.execute(
+        return execute_dml(
+            s,
             update(AgentSession)
             .where(
                 AgentSession.status == "active",
                 AgentSession.spawn_ok_at.is_(None),
                 AgentSession.started_at < cutoff,
             )
-            .values(status="failed", closed_at=now)
+            .values(status="failed", closed_at=now),
         )
-        return int(result.rowcount or 0)  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType, reportUnknownArgumentType]

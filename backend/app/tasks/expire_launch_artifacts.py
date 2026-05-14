@@ -18,8 +18,8 @@ from __future__ import annotations
 
 import logging
 
-from app.auth import launch_codes as codes_repo
-from app.launchers import sessions as sessions_repo
+from app.db import launch_codes as codes_repo
+from app.db import agent_sessions as sessions_repo
 from app.tasks.queue import crontab
 from app.tasks.queues import lightweight_maintenance_queue
 

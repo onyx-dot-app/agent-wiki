@@ -5,10 +5,10 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-from app.auth import launch_codes as codes_repo
+from app.db import launch_codes as codes_repo
 from app.auth import mcp_tokens as tokens_repo
 from app.db.session import init_db
-from app.launchers import sessions as sessions_repo
+from app.db import agent_sessions as sessions_repo
 from app.main import create_app
 
 from tests._auth import login_fastapi
@@ -16,7 +16,7 @@ from tests._seed import seed_user
 
 
 def _get_session_dict(sid):
-    from app.launchers import sessions as _sr
+    from app.db import agent_sessions as _sr
     row = _sr.get(sid)
     assert row is not None
     return row
@@ -78,7 +78,7 @@ def test_catalog_available_for_launch_flag(client):
 def test_catalog_with_machine_id_includes_default_workdir(client):
     """ — when probe pipeline supplies machine_id + wiki_path, the
     response includes the stored working-dir default."""
-    from app.launchers import page_dirs
+    from app.db import page_dirs
 
     uid = seed_user()
     login_fastapi(client, uid)
@@ -346,7 +346,7 @@ def test_exchange_rejects_machine_id_mismatch_on_resume(client):
     sessions_repo.mark_active(sid, machine_id="m_original")
     # Force close so we can issue a resume launch.
     sessions_repo.close(sid, reason="user")
-    from app.launchers import launcher_tokens as lt_repo
+    from app.db import launcher_tokens as lt_repo
 
     tid, _ = lt_repo.get_or_mint_for_user(uid, name="launcher-claude-code")
     sessions_repo.set_cli_session_id(sid, "cli_xyz")

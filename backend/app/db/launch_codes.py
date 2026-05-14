@@ -17,7 +17,7 @@ from sqlalchemy import delete
 
 from app.config import CONFIG
 from app.db.models import LaunchCode
-from app.db.session import session
+from app.db.session import execute_dml, session
 
 log = logging.getLogger(__name__)
 
@@ -87,5 +87,4 @@ def expire_sweep() -> int:
     """Delete codes past ``expires_at``. Returns count deleted."""
     now_iso = _iso(datetime.now(timezone.utc))
     with session() as s:
-        result = s.execute(delete(LaunchCode).where(LaunchCode.expires_at <= now_iso))
-        return int(result.rowcount or 0)  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType, reportUnknownArgumentType]
+        return execute_dml(s, delete(LaunchCode).where(LaunchCode.expires_at <= now_iso))

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from app.db.session import init_db
-from app.launchers import page_dirs
+from app.db import page_dirs
 
 from tests._seed import seed_user
 

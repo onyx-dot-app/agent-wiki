@@ -22,16 +22,16 @@ from time import time
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from app.auth import User
-from app.auth import launch_codes as codes_repo
+from app.db import launch_codes as codes_repo
 from app.auth import mcp_tokens as tokens_repo
 from app.auth.deps import require_user
 from app.config import CONFIG
-from app.launchers import (
+from app.db import (
+    agent_sessions as sessions_repo,
     launcher_tokens,
     page_dirs,
-    prompt_builder,
-    sessions as sessions_repo,
 )
+from app.launchers import prompt_builder
 from app.launchers.registry import Manifest, get_registry
 from app.models.launchers import (
     ExchangePayload,
@@ -58,7 +58,7 @@ def _check_flag() -> None:
 
 
 def _entry_available(m: Manifest) -> bool:
-    """ — frontend filters by this flag. in_app tools without a
+    """— frontend filters by this flag. in_app tools without a
     backend launch path are not yet wired."""
     return m.kind == "local_cli"
 

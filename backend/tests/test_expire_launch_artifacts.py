@@ -6,11 +6,11 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import update
 
-from app.auth import launch_codes as codes_repo
+from app.db import launch_codes as codes_repo
 from app.auth import mcp_tokens as tokens_repo
 from app.db.models import AgentSession
 from app.db.session import init_db, session
-from app.launchers import sessions as sessions_repo
+from app.db import agent_sessions as sessions_repo
 from app.tasks.expire_launch_artifacts import expire_launch_artifacts
 from app.tasks.queues import lightweight_maintenance_queue
 
@@ -18,7 +18,7 @@ from tests._seed import seed_user
 
 
 def _get_session_dict(sid):
-    from app.launchers import sessions as _sr
+    from app.db import agent_sessions as _sr
     row = _sr.get(sid)
     assert row is not None
     return row

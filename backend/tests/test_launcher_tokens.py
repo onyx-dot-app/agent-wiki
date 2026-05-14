@@ -6,7 +6,7 @@ from sqlalchemy import select
 
 from app.db.models import LauncherToken
 from app.db.session import init_db, session
-from app.launchers import launcher_tokens
+from app.db import launcher_tokens
 
 from tests._seed import seed_user
 

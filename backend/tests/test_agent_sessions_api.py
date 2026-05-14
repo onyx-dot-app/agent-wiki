@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 
 from app.auth import mcp_tokens as tokens_repo
 from app.db.session import init_db
-from app.launchers import sessions as sessions_repo
+from app.db import agent_sessions as sessions_repo
 from app.main import create_app
 
 from tests._auth import login_fastapi
@@ -15,7 +15,7 @@ from tests._seed import seed_user
 
 
 def _get_session_dict(sid):
-    from app.launchers import sessions as _sr
+    from app.db import agent_sessions as _sr
     row = _sr.get(sid)
     assert row is not None
     return row

@@ -9,7 +9,7 @@ from sqlalchemy import select
 from app.auth import mcp_tokens as tokens_repo
 from app.db.models import AgentActivity
 from app.db.session import init_db, session
-from app.launchers import sessions as sessions_repo
+from app.db import agent_sessions as sessions_repo
 from app.main import create_app
 from app.mcp_server import session as mcp_session
 from app.wiki import git as wiki_git

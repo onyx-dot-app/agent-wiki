@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 from app.db.session import init_db
-from app.launchers import sessions as sessions_repo
+from app.db import agent_sessions as sessions_repo
 
 from tests._seed import seed_user
 
 
 def _get_session_dict(sid):
-    from app.launchers import sessions as _sr
+    from app.db import agent_sessions as _sr
     row = _sr.get(sid)
     assert row is not None
     return row

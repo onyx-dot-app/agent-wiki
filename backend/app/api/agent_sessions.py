@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 from app.auth import User
 from app.auth.deps import require_user_or_bearer
 from app.config import CONFIG
-from app.launchers import sessions as sessions_repo
+from app.db import agent_sessions as sessions_repo
 from app.models.launchers import (
     AgentSessionList,
     AgentSessionSummary,

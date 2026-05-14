@@ -38,7 +38,7 @@ log = logging.getLogger(__name__)
 
 SESSION_HEADER = "Mcp-Session-Id"
 AGENT_SESSION_HEADER = "X-Agentwiki-Session"
-_AGENT_SESSION_RE = re.compile(r"^as_[a-zA-Z0-9-]{1,64}$") # strict regex
+_AGENT_SESSION_RE = re.compile(r"^as_[a-zA-Z0-9-]{1,64}$")  # strict regex
 
 
 def _resolve_agent_session_id(request: Request, user: User) -> str | None:
