@@ -236,6 +236,29 @@ def test_post_launch_resume_rejects_active_session(client):
     assert res.status_code == 409
 
 
+def test_post_launch_resume_rejects_tool_mismatch(client):
+    uid = seed_user()
+    login_fastapi(client, uid)
+    sid = sessions_repo.create(
+        user_id=uid,
+        tool_id="claude-code",
+        first_turn_prompt="x",
+        wiki_path=None,
+        working_dir=None,
+    )
+    sessions_repo.close(sid, reason="user")
+    res = client.post(
+        "/api/launch",
+        json={
+            "tool_id": "codex",
+            "wiki_path": None,
+            "message": "resume",
+            "resume_session_id": sid,
+        },
+    )
+    assert res.status_code == 400
+
+
 def test_post_launch_resume_copies_cli_and_machine(client):
     """Resume launch should thread CLI session + machine gate through new session."""
     uid = seed_user()

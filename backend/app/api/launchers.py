@@ -167,6 +167,11 @@ def post_launch(
                 status_code=409,
                 detail="session already in flight; close it first",
             )
+        if existing["tool_id"] != req.tool_id:
+            raise HTTPException(
+                status_code=400,
+                detail="resume session tool_id mismatch",
+            )
         first_turn_prompt = ""  # not replayed on resume — exchange omits it
         wiki_path = existing["wiki_path"]
         working_dir = existing["working_dir"]
