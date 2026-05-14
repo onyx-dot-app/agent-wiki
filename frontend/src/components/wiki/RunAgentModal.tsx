@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 
 import { SetupWizard } from "@/components/agents/SetupWizard";
 import { ToolCard } from "@/components/agents/ToolCard";
@@ -35,6 +35,10 @@ export function RunAgentModal({ open, onClose, wikiPath }: Props) {
   });
   const { sessions, refresh: refreshSessions } = useAgentSessions(
     wikiPath ?? undefined,
+  );
+  const launchable = useMemo(
+    () => launchers.filter((c) => c.available_for_launch),
+    [launchers],
   );
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -81,12 +85,18 @@ export function RunAgentModal({ open, onClose, wikiPath }: Props) {
 
   useEffect(() => {
     if (!open) return;
-    if (selectedId === null && launchers.length > 0) {
-      const firstLaunchable =
-        launchers.find((c) => c.available_for_launch) ?? launchers[0];
-      setSelectedId(firstLaunchable.id);
+    if (launchable.length === 0) {
+      setSelectedId(null);
+      return;
     }
-  }, [open, launchers, selectedId]);
+    if (selectedId === null) {
+      setSelectedId(launchable[0].id);
+      return;
+    }
+    if (!launchable.some((c) => c.id === selectedId)) {
+      setSelectedId(launchable[0].id);
+    }
+  }, [open, launchable, selectedId]);
 
   useEffect(() => {
     if (!open) return;
@@ -148,8 +158,10 @@ export function RunAgentModal({ open, onClose, wikiPath }: Props) {
     }
   }
 
-  const canRun = message.trim().length > 0 && selectedId !== null;
-  const launchable = launchers.filter((c) => c.available_for_launch);
+  const canRun =
+    message.trim().length > 0 &&
+    selectedId !== null &&
+    launchable.some((c) => c.id === selectedId);
 
   return (
     <div
@@ -382,7 +394,13 @@ function ToolList({
               onSelect={() => onSelect(c.id)}
               tokenReady={c.setup_status.token}
               helperReady={c.kind === "in_app" || helperAcked === true}
-              cliReady={c.kind === "in_app" ? true : helperAcked ? null : false}
+              cliReady={
+                c.kind === "in_app"
+                  ? true
+                  : helperAcked === false
+                    ? false
+                    : null
+              }
             />
           </li>
         ))}

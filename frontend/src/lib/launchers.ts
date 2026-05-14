@@ -221,12 +221,11 @@ export async function probeCli(
     { present: boolean; version: string | null; meets_min: boolean }
   >
 > {
-  const res = await fetch(`http://127.0.0.1:${port}/probe-cli`, {
+  return apiFetch(`http://127.0.0.1:${port}/probe-cli`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ tool_ids: toolIds }),
+    credentials: "omit",
   });
-  return res.json();
 }
 
 function sleep(ms: number): Promise<void> {

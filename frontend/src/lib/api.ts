@@ -7,10 +7,18 @@ export class ApiError extends Error {
 }
 
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
+  const isAbsolute = /^https?:\/\//i.test(path);
+  const url = isAbsolute ? path : `${BASE}${path}`;
+  const headers: HeadersInit = {
+    "content-type": "application/json",
+    ...(init?.headers ?? {}),
+  };
+  const credentials: RequestCredentials =
+    init?.credentials ?? (isAbsolute ? "omit" : "include");
+  const res = await fetch(url, {
     ...init,
-    headers: { "content-type": "application/json", ...(init?.headers ?? {}) },
-    credentials: "include",
+    headers,
+    credentials,
   });
   if (!res.ok) {
     let message = `${res.status} ${res.statusText}`;
