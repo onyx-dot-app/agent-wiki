@@ -13,7 +13,7 @@ import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
 
-from sqlalchemy import delete
+from sqlalchemy import delete, select
 
 from app.config import CONFIG
 from app.db.models import LaunchCode
@@ -68,7 +68,11 @@ def consume(
         return None
     now_iso = _iso(datetime.now(timezone.utc))
     with session() as s:
-        row = s.get(LaunchCode, raw)
+        row = s.scalar(
+            select(LaunchCode)
+            .where(LaunchCode.id == raw)
+            .with_for_update()
+        )
         if row is None:
             return None
         if row.consumed_at is not None:
