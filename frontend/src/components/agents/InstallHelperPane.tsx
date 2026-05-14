@@ -48,6 +48,7 @@ export function InstallHelperPane({
       window.location.href = `agentwiki://probe?nonce=${encodeURIComponent(
         nonce,
       )}&endpoint=${encodeURIComponent(window.location.origin)}`;
+      await Promise.resolve(onReprobe());
     } finally {
       setManualBusy(false);
     }

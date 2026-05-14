@@ -564,8 +564,16 @@ function CodingToolsSection() {
   const [wizardOpen, setWizardOpen] = useState(false);
 
   useEffect(() => {
-    void probeHelper().then(setProbe);
-  }, []);
+    if (wizardOpen) return;
+    let cancelled = false;
+    void (async () => {
+      const result = await probeHelper();
+      if (!cancelled) setProbe(result);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [wizardOpen]);
 
   return (
     <section style={card}>

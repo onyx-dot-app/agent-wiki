@@ -206,10 +206,12 @@ function Step2({
   onDone: () => void;
 }) {
   const localCliTools = catalog.filter((c) => c.kind === "local_cli");
-  const allOk =
-    !probing &&
-    !!helperState?.acked &&
-    localCliTools.every((c) => cliState?.[c.id]?.meets_min);
+  const needsHelper = localCliTools.length > 0;
+  const helperReady = !needsHelper || helperState?.acked === true;
+  const cliReady =
+    !needsHelper ||
+    localCliTools.every((c) => cliState?.[c.id]?.meets_min === true);
+  const allOk = !probing && helperReady && cliReady;
 
   return (
     <>
@@ -277,7 +279,9 @@ function Step2({
             </div>
           </div>
         ))}
-        {!helperState?.acked && <InstallHelperPane onReprobe={onReprobe} />}
+        {needsHelper && !helperState?.acked && (
+          <InstallHelperPane onReprobe={onReprobe} />
+        )}
       </div>
       <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
         <Button onClick={onBack}>Back</Button>

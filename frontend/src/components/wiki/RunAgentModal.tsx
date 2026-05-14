@@ -45,6 +45,12 @@ export function RunAgentModal({ open, onClose, wikiPath }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  function refreshProbe() {
+    void probeHelper().then((r) =>
+      setProbe({ acked: r.acked, machineId: r.machineId }),
+    );
+  }
+
   // R7#2 — persist pending-launch state to sessionStorage in case the
   // browser navigates away to dispatch agentwiki:// and comes back.
   useEffect(() => {
@@ -70,9 +76,7 @@ export function RunAgentModal({ open, onClose, wikiPath }: Props) {
   useEffect(() => {
     if (!open) return;
     setError(null);
-    void probeHelper().then((r) =>
-      setProbe({ acked: r.acked, machineId: r.machineId }),
-    );
+    refreshProbe();
   }, [open]);
 
   useEffect(() => {
@@ -187,6 +191,7 @@ export function RunAgentModal({ open, onClose, wikiPath }: Props) {
             catalog={launchers}
             onDone={() => {
               setWizardOpen(false);
+              refreshProbe();
               void refreshCatalog();
             }}
             onCancel={() => setWizardOpen(false)}
