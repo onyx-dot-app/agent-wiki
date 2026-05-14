@@ -2,7 +2,7 @@
 
 Routes mounted under ``/api/agent-sessions``. All routes accept either
 session-cookie user (browser-driven) OR MCP bearer (helper-driven) —
-the helper runs without a cookie (AF#2 audit fix).
+the helper runs without a cookie ( audit fix).
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ from app.models.launchers import (
 router = APIRouter()
 
 
-# AF#11 — error reasons that should mark the session ``failed`` rather
+# error reasons that should mark the session ``failed`` rather
 # than ``closed``.
 _ERROR_REASONS = frozenset(
     {
@@ -101,7 +101,7 @@ def set_cli_session(
 
 @router.post("/{sid}/spawn-ok", status_code=status.HTTP_204_NO_CONTENT)
 def spawn_ok(sid: str, user: User = Depends(require_user_or_bearer)) -> Response:
-    """R9#1 — helper POSTs after handing the spawn to Terminal.app.
+    """ — helper POSTs after handing the spawn to Terminal.app.
 
     Sweep watches for this; if absent within 30s, session flips
     ``failed`` so the UI stops showing stale ``active`` sessions.
@@ -118,7 +118,7 @@ def close_session(
     req: CloseRequest,
     user: User = Depends(require_user_or_bearer),
 ) -> Response:
-    """AF#11 — error reasons mark the session ``failed`` rather than ``closed``."""
+    """ — error reasons mark the session ``failed`` rather than ``closed``."""
     _check_flag()
     _require_own_session(sid, user)
     reason = req.reason or "user_clicked"

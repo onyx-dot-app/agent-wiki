@@ -90,7 +90,7 @@ def test_first_turn_prompt_in_resume_rejected():
 
 
 def test_prompt_file_path_in_resume_rejected():
-    """R2 audit #5 — resume.argv must not reference the prompt tmpfile."""
+    """ — resume.argv must not reference the prompt tmpfile."""
     bad = _valid_claude_manifest()
     bad["resume"]["argv"].append("${prompt_file_path}")
     with pytest.raises(ValueError, match="\\$\\{prompt_file_path\\} forbidden"):
@@ -148,7 +148,7 @@ def test_registry_loads_empty_when_dir_missing(tmp_path):
 
 
 def test_registry_rejects_oversized_manifest(tmp_path):
-    """R4#1 — DoS guard at registry load."""
+    """ — DoS guard at registry load."""
     big = tmp_path / "huge.json"
     big.write_text("x" * (64 * 1024 + 1))
     with pytest.raises(ValueError, match="exceeds"):

@@ -1,4 +1,4 @@
-"""Encrypted launcher-token storage + AF#3 race / AF#15 rotation."""
+"""Encrypted launcher-token storage + race / rotation."""
 
 from __future__ import annotations
 
@@ -35,7 +35,7 @@ def test_get_raw_unknown_id_returns_none(tmp_config):
 
 
 def test_decrypt_failure_remints_AF15(tmp_config):
-    """AF#15 — corrupted ciphertext → re-mint instead of 500."""
+    """ — corrupted ciphertext → re-mint instead of 500."""
     init_db()
     uid = seed_user()
     tid1, raw1 = launcher_tokens.get_or_mint_for_user(uid, name="launcher")
@@ -51,7 +51,7 @@ def test_decrypt_failure_remints_AF15(tmp_config):
 
 
 def test_get_raw_remints_after_secret_rotation(tmp_config, monkeypatch):
-    """AF#15 follow-through — decrypt failure via rotated secret re-mints on fetch."""
+    """ follow-through — decrypt failure via rotated secret re-mints on fetch."""
     init_db()
     uid = seed_user()
     tid, raw = launcher_tokens.get_or_mint_for_user(uid, name="launcher")
@@ -69,7 +69,7 @@ def test_get_raw_remints_after_secret_rotation(tmp_config, monkeypatch):
 
 
 def test_unique_user_id_constraint(tmp_config):
-    """AF#3 — only one launcher_tokens row per user."""
+    """ — only one launcher_tokens row per user."""
     init_db()
     uid = seed_user()
     launcher_tokens.get_or_mint_for_user(uid, name="launcher")

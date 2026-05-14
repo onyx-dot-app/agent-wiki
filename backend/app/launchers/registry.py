@@ -6,14 +6,14 @@ for the full spec.
 
 This module defines pydantic models + enforces DSL rules:
 
-- No ``${token}`` in ``launch.argv`` / ``resume.argv`` (P1 #2).
-- No ``${first_turn_prompt}`` anywhere (P1 #3 / AF#5).
-- No ``${prompt_file_path}`` in ``resume.*`` (R2 audit #5).
+- No ``${token}`` in ``launch.argv`` / ``resume.argv`` .
+- No ``${first_turn_prompt}`` anywhere ( / ).
+- No ``${prompt_file_path}`` in ``resume.*`` .
 - No unknown ``${var}`` interpolation tokens.
-- Manifest size cap at registry load (R4#1).
+- Manifest size cap at registry load .
 
 The helper enforces the hardcoded **binary allow-list** (closing the
-RCE hole — P1 #1); the backend does NOT enforce it because the
+RCE hole — ); the backend does NOT enforce it because the
 manifests are git-tracked and reviewed at commit time. The validator
 here ensures the manifests are well-formed.
 """
@@ -47,7 +47,7 @@ _ALLOWED_VARS = frozenset(
 
 _VAR_RE = re.compile(r"\$\{([a-z_]+)\}")
 
-_MAX_MANIFEST_BYTES = 64 * 1024  # R4#1 — DoS guard at registry load
+_MAX_MANIFEST_BYTES = 64 * 1024 # DoS guard at registry load
 
 
 def _find_vars(s: str) -> set[str]:
@@ -117,7 +117,7 @@ class LaunchBlock(BaseModel):
 class ResumeBlock(LaunchBlock):
     """Resume blocks reject both ``${first_turn_prompt}`` AND
     ``${prompt_file_path}`` anywhere — the prompt tmpfile is only
-    materialized for first-turn launches (R2 audit fix #5)."""
+    materialized for first-turn launches ."""
 
     @model_validator(mode="after")
     def _validate_resume_specific(self) -> "ResumeBlock":

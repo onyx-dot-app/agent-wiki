@@ -75,7 +75,7 @@ def test_sweep_marks_stale_active_as_idle(tmp_config, monkeypatch):
 
 
 def test_sweep_marks_failed_when_no_spawn_ok_within_30s(tmp_config):
-    """R9#1 — active session without spawn beacon → failed."""
+    """ — active session without spawn beacon → failed."""
     init_db()
     uid = seed_user()
     sid = sessions_repo.create(

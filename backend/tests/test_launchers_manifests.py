@@ -29,7 +29,7 @@ def test_claude_manifest_token_argv_rule():
 
 
 def test_claude_manifest_no_token_in_env():
-    """AF#12 — shipped manifest must NOT put token in env."""
+    """ — shipped manifest must NOT put token in env."""
     r = get_registry()
     m = r.get("claude-code")
     assert m is not None
@@ -49,7 +49,7 @@ def test_codex_manifest_token_argv_rule():
 
 
 def test_codex_uses_file_watch_capture():
-    """P1 #4 — codex's session capture must be file_watch, never stdout_regex."""
+    """ — codex's session capture must be file_watch, never stdout_regex."""
     r = get_registry()
     m = r.get("codex")
     assert m is not None

@@ -23,11 +23,11 @@ class LauncherCatalogEntry(BaseModel):
     tagline: str
     icon_url: str
     kind: Literal["local_cli", "in_app", "web_handoff"]
-    # AF#10 — frontend filters by this flag; in_app tools without a
+    # frontend filters by this flag; in_app tools without a
     # backend launch path are gated out of the Run radio.
     available_for_launch: bool
     setup_status: dict[str, Any]
-    # AF#14 — when caller passes ``machine_id`` + ``wiki_path``, this is
+    # when caller passes ``machine_id`` + ``wiki_path``, this is
     # the resolved working-dir default for this page. Null otherwise.
     default_working_dir: str | None = None
 
@@ -45,11 +45,11 @@ class LaunchRequest(BaseModel):
     tool_id: str
     wiki_path: str | None = None
     working_dir: str | None = None
-    # R4#3 — cap message at 16KB so an attacker can't pad first_turn_prompt
+    # cap message at 16KB so an attacker can't pad first_turn_prompt
     # via the user-controlled field.
     message: str = Field(..., max_length=16_384)
     resume_session_id: str | None = None
-    machine_id: str | None = None  # AF#14
+    machine_id: str | None = None
     remember_workdir_for_page: bool = False
 
 
@@ -91,7 +91,7 @@ class ExchangeResponse(BaseModel):
 class ProbeAckRequest(BaseModel):
     nonce: str
     helper_port: int
-    # AF#14 — frontend reads this back from probe-status so it can
+    # frontend reads this back from probe-status so it can
     # default-fill working dirs from page_working_dirs.
     machine_id: str | None = None
 

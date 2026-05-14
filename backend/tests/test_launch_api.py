@@ -65,7 +65,7 @@ def test_setup_status_token_true_after_mint(client):
 
 
 def test_catalog_available_for_launch_flag(client):
-    """AF#10 — only local_cli tools are available_for_launch in v1."""
+    """ — only local_cli tools are available_for_launch in v1."""
     uid = seed_user()
     login_fastapi(client, uid)
     res = client.get("/api/launchers")
@@ -76,7 +76,7 @@ def test_catalog_available_for_launch_flag(client):
 
 
 def test_catalog_with_machine_id_includes_default_workdir(client):
-    """AF#14 — when probe pipeline supplies machine_id + wiki_path, the
+    """ — when probe pipeline supplies machine_id + wiki_path, the
     response includes the stored working-dir default."""
     from app.launchers import page_dirs
 
@@ -138,7 +138,7 @@ def test_post_launch_unknown_tool_returns_404(client):
 
 
 def test_post_launch_in_app_kind_returns_400(client):
-    """in_app routes through a separate endpoint (P2 #16); 400 here."""
+    """in_app routes through a separate endpoint ; 400 here."""
     uid = seed_user()
     login_fastapi(client, uid)
     res = client.post(
@@ -149,7 +149,7 @@ def test_post_launch_in_app_kind_returns_400(client):
 
 
 def test_post_launch_rejects_traversal(client):
-    """R2#2 — wiki_path traversal rejected at API boundary."""
+    """ — wiki_path traversal rejected at API boundary."""
     uid = seed_user()
     login_fastapi(client, uid)
     res = client.post(
@@ -164,7 +164,7 @@ def test_post_launch_rejects_traversal(client):
 
 
 def test_post_launch_message_length_capped(client):
-    """R4#3 — message capped at 16KB."""
+    """ — message capped at 16KB."""
     uid = seed_user()
     login_fastapi(client, uid)
     huge = "x" * (16 * 1024 + 1)
@@ -177,7 +177,7 @@ def test_post_launch_message_length_capped(client):
 
 
 def test_post_launch_resume_rejects_active_session(client):
-    """R3#1 — concurrent resume race protection."""
+    """ — concurrent resume race protection."""
     uid = seed_user()
     login_fastapi(client, uid)
     sid = sessions_repo.create(
@@ -333,7 +333,7 @@ def test_exchange_transitions_session_to_active_with_machine_id(client):
 
 
 def test_exchange_rejects_machine_id_mismatch_on_resume(client):
-    """R5#1 — exchange refuses if helper's machine_id differs from session's."""
+    """ — exchange refuses if helper's machine_id differs from session's."""
     uid = seed_user()
     login_fastapi(client, uid)
     sid = sessions_repo.create(

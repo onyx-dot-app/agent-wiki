@@ -89,7 +89,7 @@ def test_heartbeat_cross_user_forbidden(client):
 
 
 def test_heartbeat_with_bearer_succeeds(client):
-    """AF#2 — helper drives heartbeat with bearer, not cookie."""
+    """ — helper drives heartbeat with bearer, not cookie."""
     uid = seed_user()
     sid = _seed_session(uid)
     _, raw_token = tokens_repo.create(uid, "launcher")
@@ -113,7 +113,7 @@ def test_cli_session_id_post(client):
 
 
 def test_spawn_ok_post(client):
-    """R9#1 — helper acks the spawn so sweep doesn't mark failed."""
+    """ — helper acks the spawn so sweep doesn't mark failed."""
     uid = seed_user()
     login_fastapi(client, uid)
     sid = _seed_session(uid)
@@ -133,7 +133,7 @@ def test_close_with_user_reason_marks_closed(client):
 
 
 def test_close_with_error_reason_marks_failed(client):
-    """AF#11 — error reasons → status=failed."""
+    """ — error reasons → status=failed."""
     uid = seed_user()
     login_fastapi(client, uid)
     sid = _seed_session(uid)

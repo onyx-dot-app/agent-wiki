@@ -1,4 +1,4 @@
-"""X-Agentwiki-Session header threading + cross-user 403 + R2#10 + R2#4."""
+"""X-Agentwiki-Session header threading + cross-user 403 + + ."""
 
 from __future__ import annotations
 
@@ -47,7 +47,7 @@ def _handshake(client, raw: str) -> dict[str, str]:
 
 def test_header_stamps_agent_session_id_and_agent_name(client):
     """X-Agentwiki-Session header → activity rows carry both
-    agent_session_id AND agent_name=tool_id (R2#4)."""
+    agent_session_id AND agent_name=tool_id ."""
     init_db()
     uid = seed_user()
     _, raw = tokens_repo.create(uid, "k")
@@ -79,7 +79,7 @@ def test_header_stamps_agent_session_id_and_agent_name(client):
         rows = s.scalars(select(AgentActivity)).all()
     matched = [a for a in rows if a.agent_session_id == agent_sid and a.doc_path == "x.md"]
     assert len(matched) == 1
-    assert matched[0].agent_name == "claude-code"  # R2#4
+    assert matched[0].agent_name == "claude-code"
 
 
 def test_unknown_session_id_returns_400(client):
@@ -97,7 +97,7 @@ def test_unknown_session_id_returns_400(client):
 
 
 def test_malformed_session_id_returns_400(client):
-    """R2#10 — strict regex rejects header injection / overlong values."""
+    """ — strict regex rejects header injection / overlong values."""
     init_db()
     uid = seed_user()
     _, raw = tokens_repo.create(uid, "k")
@@ -128,7 +128,7 @@ def test_session_id_not_starting_with_prefix_returns_400(client):
 
 
 def test_cross_user_session_returns_403(client):
-    """P2 #7 / audit fix — bearer holder cannot stamp another user's session."""
+    """ / audit fix — bearer holder cannot stamp another user's session."""
     init_db()
     a = seed_user("usr_a", email="a@x.com")
     b = seed_user("usr_b", email="b@x.com")

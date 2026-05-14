@@ -181,7 +181,7 @@ class AgentSession(Base):
     last_activity_at: Mapped[str] = mapped_column(
         Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
     )
-    spawn_ok_at: Mapped[str | None] = mapped_column(Text)  # R9#1 — beacon timestamp
+    spawn_ok_at: Mapped[str | None] = mapped_column(Text) # beacon timestamp
     closed_at: Mapped[str | None] = mapped_column(Text)
 
     __table_args__ = (
@@ -232,7 +232,7 @@ class LauncherToken(Base):
 
     Regular ``mcp_tokens`` only stores bcrypt hash. The helper needs
     the raw bearer; we keep it AES-GCM encrypted here. ``user_id`` is
-    UNIQUE so concurrent mints collide via DB constraint (AF#3).
+    UNIQUE so concurrent mints collide via DB constraint .
     """
 
     __tablename__ = "launcher_tokens"

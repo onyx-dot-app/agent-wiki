@@ -161,7 +161,7 @@ def commit_and_fan_out(
     user = _current_user_or_none()
     if user is not None:
         agent_name = agent_activity.agent_name_var.get()
-        # R2#4 — if a launcher session is driving this commit, override
+        # if a launcher session is driving this commit, override
         # agent_name with the manifest's tool_id so the UI attributes
         # the edit to "claude-code" / "codex" instead of nothing.
         from app.launchers.current_session import current_agent_session_id
@@ -215,7 +215,7 @@ def mark_doc_read(rel: str) -> None:
     if user is None:
         return
     agent_name = agent_activity.agent_name_var.get()
-    # R2#4 — derive agent_name from launcher session if not set.
+    # derive agent_name from launcher session if not set.
     from app.launchers.current_session import current_agent_session_id
     from app.launchers import sessions as _sessions
 

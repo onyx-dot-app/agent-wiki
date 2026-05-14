@@ -2,8 +2,8 @@
 
 See ``local_data/wiki/Wiki Project/Specific Features/coding_tool_launchers/design.md``.
 
-TTL is read from ``CONFIG.launch_code_ttl_seconds`` (R2#7 audit fix) so
-ops can bump it without code change (P2 #10 — Windows cold starts).
+TTL is read from ``CONFIG.launch_code_ttl_seconds`` ( audit fix) so
+ops can bump it without code change ( — Windows cold starts).
 """
 
 from __future__ import annotations

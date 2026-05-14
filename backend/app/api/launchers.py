@@ -58,7 +58,7 @@ def _check_flag() -> None:
 
 
 def _entry_available(m: Manifest) -> bool:
-    """AF#10 — frontend filters by this flag. in_app tools without a
+    """ — frontend filters by this flag. in_app tools without a
     backend launch path are not yet wired."""
     return m.kind == "local_cli"
 
@@ -77,7 +77,7 @@ def get_catalog(
     """List shipped launchers + per-tool setup status.
 
     When both ``machine_id`` and ``wiki_path`` are supplied, the response
-    includes ``default_working_dir`` from ``page_working_dirs`` (AF#14).
+    includes ``default_working_dir`` from ``page_working_dirs`` .
     """
     _check_flag()
     has_token = len(tokens_repo.list_for_user(user.id)) > 0
@@ -113,8 +113,8 @@ def get_catalog(
 
 
 def _maybe_read_page_body(wiki_path: str, user: User) -> tuple[str | None, list[str]]:
-    """Read page body + parse linked_repos. ACL-gated (AF#1) and
-    traversal-protected (R2#2). Returns ``(body, repos)`` or
+    """Read page body + parse linked_repos. ACL-gated and
+    traversal-protected . Returns ``(body, repos)`` or
     ``(None, [])`` if the file doesn't exist (acceptable — the wizard
     can launch on paths that exist only in the frontend).
     """
@@ -144,7 +144,7 @@ def post_launch(
     if manifest is None:
         raise HTTPException(status_code=404, detail=f"unknown tool_id {req.tool_id!r}")
     if manifest.kind != "local_cli":
-        # in_app routes through /api/craft/launch (P2 #16 — not yet shipped).
+        # in_app routes through /api/craft/launch ( — not yet shipped).
         raise HTTPException(
             status_code=400,
             detail=f"tool {req.tool_id!r} kind={manifest.kind!r} not supported here",
@@ -155,7 +155,7 @@ def post_launch(
         existing = sessions_repo.get(req.resume_session_id)
         if existing is None or existing["user_id"] != user.id:
             raise HTTPException(status_code=404, detail="resume session not found")
-        # R3#1 — refuse resume if a helper already holds the session.
+        # refuse resume if a helper already holds the session.
         if existing["status"] in ("pending", "active"):
             raise HTTPException(
                 status_code=409,
@@ -183,7 +183,7 @@ def post_launch(
         machine_id = None
         cli_session_id = None
 
-    # AF#14 — record the user's workdir choice if they ticked "remember".
+    # record the user's workdir choice if they ticked "remember".
     if req.remember_workdir_for_page and req.machine_id and wiki_path and working_dir:
         page_dirs.set_for_page(
             user_id=user.id,
@@ -245,7 +245,7 @@ def post_exchange(req: ExchangeRequest, request: Request) -> ExchangeResponse:
     if manifest is None:
         raise HTTPException(status_code=500, detail="tool_id no longer recognized")
 
-    # R5#1 — machine_id mismatch on resume = 409.
+    # machine_id mismatch on resume = 409.
     if sess["machine_id"] is not None and sess["machine_id"] != req.machine_id:
         raise HTTPException(
             status_code=409,

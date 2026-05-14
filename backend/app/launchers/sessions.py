@@ -2,9 +2,9 @@
 
 See ``local_data/wiki/Wiki Project/Specific Features/coding_tool_launchers/design.md``.
 
-Idle / close thresholds read from ``CONFIG.*`` (R2#7 audit fix).
+Idle / close thresholds read from ``CONFIG.*`` ( audit fix).
 Heartbeat / activity-touch refuses to update closed/failed sessions
-(R5#2 audit fix).
+( audit fix).
 """
 
 from __future__ import annotations
@@ -50,7 +50,7 @@ def _to_dict(row: AgentSession) -> dict[str, Any]:
 
 
 def _to_summary(row: AgentSession) -> dict[str, Any]:
-    """Same shape as ``_to_dict`` minus ``first_turn_prompt`` (R2#5
+    """Same shape as ``_to_dict`` minus ``first_turn_prompt`` (
     defense-in-depth — keep page bodies out of list responses)."""
     d = _to_dict(row)
     d.pop("first_turn_prompt", None)
@@ -150,7 +150,7 @@ def set_cli_session_id(sid: str, cli_session_id: str) -> None:
 
 def mark_spawn_ok(sid: str) -> None:
     """Helper POSTs immediately after handing the spawn off to Terminal.app
-    (Phase 3 / R9#1). Sweep watches for this — if it never arrives, the
+    (Phase 3 / ). Sweep watches for this — if it never arrives, the
     session is marked ``failed`` 30s post-exchange.
     """
     now = _now_iso()
@@ -164,7 +164,7 @@ def mark_spawn_ok(sid: str) -> None:
 
 def touch_activity(sid: str) -> None:
     """Bump ``last_activity_at`` — refuses to resurrect closed/failed
-    sessions (R5#2)."""
+    sessions ."""
     with session() as s:
         s.execute(
             update(AgentSession)
@@ -236,7 +236,7 @@ def evict_idle_to_closed() -> int:
 
 
 def evict_spawn_missed() -> int:
-    """R9#1 — sessions that exchanged but never reported spawn_ok within
+    """ — sessions that exchanged but never reported spawn_ok within
     30s are marked ``failed`` so the UI stops showing them as live."""
     cutoff = _iso(datetime.now(timezone.utc) - timedelta(seconds=30))
     now = _now_iso()

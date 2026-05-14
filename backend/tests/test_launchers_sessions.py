@@ -96,7 +96,7 @@ def test_mark_spawn_ok(tmp_config):
 
 
 def test_touch_activity_does_not_resurrect_closed(tmp_config):
-    """R5#2 — closed/failed sessions stay closed even if a stale helper
+    """ — closed/failed sessions stay closed even if a stale helper
     keeps heartbeating."""
     init_db()
     uid = seed_user()
@@ -174,7 +174,7 @@ def test_list_for_user_excludes_closed_by_default(tmp_config):
 
 
 def test_list_for_user_strips_first_turn_prompt(tmp_config):
-    """R2#5 — list responses don't include first_turn_prompt."""
+    """ — list responses don't include first_turn_prompt."""
     init_db()
     uid = seed_user()
     sessions_repo.create(
@@ -227,7 +227,7 @@ def test_sweep_marks_idle(tmp_config, monkeypatch):
 
 
 def test_sweep_evicts_idle_to_closed_across_two_ticks(tmp_config, monkeypatch):
-    """R5#3 — idle → closed cross-tick."""
+    """ — idle → closed cross-tick."""
     init_db()
     uid = seed_user()
     sid = sessions_repo.create(
@@ -246,7 +246,7 @@ def test_sweep_evicts_idle_to_closed_across_two_ticks(tmp_config, monkeypatch):
 
 
 def test_evict_spawn_missed(tmp_config, monkeypatch):
-    """R9#1 — active session without spawn_ok beacon gets failed after 30s."""
+    """ — active session without spawn_ok beacon gets failed after 30s."""
     from datetime import datetime, timedelta, timezone
 
     init_db()

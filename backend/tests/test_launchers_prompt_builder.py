@@ -67,7 +67,7 @@ def test_page_body_section_only_when_provided():
 
 
 def test_prompt_builder_truncates_oversized_body():
-    """R4#2 — body capped at ~256KB; truncation marker present."""
+    """ — body capped at ~256KB; truncation marker present."""
     big_body = "X" * (300 * 1024)  # 300KB
     p = build_first_turn_prompt(
         wiki_path="x.md",

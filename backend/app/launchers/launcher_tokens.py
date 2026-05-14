@@ -5,12 +5,12 @@ The helper needs the raw bearer to wire claude/codex. Regular
 creation. For launcher-minted tokens we keep an AES-GCM encrypted
 plaintext here, decrypted server-side during ``POST /api/launch/exchange``.
 
-Race fix (AF#3): ``launcher_tokens.user_id`` is UNIQUE in the schema so
+Race fix: ``launcher_tokens.user_id`` is UNIQUE in the schema so
 concurrent mints collide at the DB level. We try the optimistic
 SELECT-then-INSERT; on conflict we revoke our orphan ``mcp_token`` and
 return the winner's row.
 
-Key rotation (AF#15): if AES decrypt fails (operator rotated SECRET_KEY,
+Key rotation: if AES decrypt fails (operator rotated SECRET_KEY,
 ciphertext corrupted), we log a warning, delete the stale row, and
 re-mint. The launcher caller gets a fresh token instead of a 500.
 """

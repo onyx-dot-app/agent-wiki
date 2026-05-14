@@ -10,7 +10,7 @@ Three actions per tick:
    ``CONFIG.agent_session_idle_seconds`` as ``idle``.
 3. Mark ``idle`` sessions older than
    ``CONFIG.agent_session_close_after_idle_seconds`` as ``closed``.
-4. R9#1 — mark ``active`` sessions that never reported ``spawn_ok``
+4. — mark ``active`` sessions that never reported ``spawn_ok``
    within 30s as ``failed`` (helper crashed mid-spawn).
 """
 

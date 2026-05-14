@@ -38,14 +38,14 @@ log = logging.getLogger(__name__)
 
 SESSION_HEADER = "Mcp-Session-Id"
 AGENT_SESSION_HEADER = "X-Agentwiki-Session"
-_AGENT_SESSION_RE = re.compile(r"^as_[a-zA-Z0-9-]{1,64}$")  # R2#10 strict regex
+_AGENT_SESSION_RE = re.compile(r"^as_[a-zA-Z0-9-]{1,64}$") # strict regex
 
 
 def _resolve_agent_session_id(request: Request, user: User) -> str | None:
     """Validate + bind launcher session id from X-Agentwiki-Session header.
 
-    R2#10 — strict regex rejects header injection / overlong values.
-    Cross-user 403 (P2 #7 fold-in) — bearer holder can't stamp a
+     — strict regex rejects header injection / overlong values.
+    Cross-user 403 ( fold-in) — bearer holder can't stamp a
     session that belongs to another user.
     """
     header = request.headers.get(AGENT_SESSION_HEADER)
