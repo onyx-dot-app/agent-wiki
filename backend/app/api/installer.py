@@ -1,0 +1,124 @@
+"""Serves the macOS helper binary + a one-shot install shell script.
+
+The shell script bakes the calling wiki's URL into a ``set-endpoint``
+call so the user's flow is:
+
+  1. Click "Download installer" in the wiki UI.
+  2. Open the downloaded shell script (or curl|sh) — it downloads the
+     binary from this same backend, chmod +x's it, pins the endpoint,
+     and registers the macOS .app + URL handler.
+  3. Click Run Agent — works.
+
+No npm install, no terminal command typing, no homebrew tap (yet).
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi.responses import FileResponse
+
+router = APIRouter()
+
+_BINARIES_DIR = Path(__file__).resolve().parents[2] / "static" / "installers"
+
+# Map (platform_arch) → on-disk filename. macOS is all we ship today.
+_BINARIES: dict[str, str] = {
+    "darwin-arm64": "agentwiki-launcher-darwin-arm64",
+    "darwin-amd64": "agentwiki-launcher-darwin-amd64",
+}
+
+
+def _detect_arch(user_agent: str) -> str:
+    """Cheap UA sniff. Apple Silicon Macs report ``Macintosh; Intel Mac OS X``
+    in browsers (Apple keeps the legacy "Intel" string for compat), so this
+    can't reliably tell arm64 from amd64 in a browser UA alone. Default to
+    arm64 (current Apple Silicon majority); the script can also be invoked
+    with an explicit ``?arch=…`` override.
+    """
+    ua = user_agent.lower()
+    if "mac" not in ua and "darwin" not in ua:
+        return "darwin-arm64"  # graceful fallback; non-mac not supported yet
+    return "darwin-arm64"
+
+
+def _wiki_base(request: Request) -> str:
+    return str(request.base_url).rstrip("/")
+
+
+@router.get("/installer/binary")
+def installer_binary(request: Request, arch: str | None = None) -> Response:
+    """Returns the macOS helper binary for the requested arch."""
+    if arch is None:
+        arch = _detect_arch(request.headers.get("user-agent", ""))
+    fname = _BINARIES.get(arch)
+    if fname is None:
+        raise HTTPException(status_code=404, detail=f"unsupported arch {arch!r}")
+    path = _BINARIES_DIR / fname
+    if not path.exists():
+        raise HTTPException(
+            status_code=503,
+            detail=f"installer binary missing on this server; expected at {path}",
+        )
+    return FileResponse(
+        path,
+        media_type="application/octet-stream",
+        filename=fname,
+    )
+
+
+@router.get("/installer/script")
+def installer_script(request: Request) -> Response:
+    """Returns a shell script the user runs once. The script downloads
+    the binary from this same backend, pins the wiki endpoint, and
+    registers the macOS .app for the ``agentwiki://`` URL scheme.
+    """
+    base = _wiki_base(request)
+    # macOS arch detection inside the script — works at install time
+    # rather than relying on the browser's User-Agent which lies about
+    # arm64 vs amd64.
+    script = f"""#!/bin/bash
+# agentwiki-launcher one-shot installer (macOS).
+# Downloads the helper binary from {base}, pins the wiki endpoint, and
+# registers the agentwiki:// URL handler with LaunchServices.
+
+set -euo pipefail
+
+WIKI_URL="{base}"
+INSTALL_DIR="$HOME/.agentwiki/bin"
+BIN_PATH="$INSTALL_DIR/agentwiki-launcher"
+
+arch=$(uname -m)
+case "$arch" in
+  arm64)  PLATFORM="darwin-arm64" ;;
+  x86_64) PLATFORM="darwin-amd64" ;;
+  *)      echo "unsupported arch: $arch" >&2; exit 1 ;;
+esac
+
+echo "[1/4] Downloading $PLATFORM binary from $WIKI_URL …"
+mkdir -p "$INSTALL_DIR"
+curl --fail --location --silent --show-error \\
+  "$WIKI_URL/api/installer/binary?arch=$PLATFORM" \\
+  -o "$BIN_PATH"
+chmod +x "$BIN_PATH"
+
+# Drop Gatekeeper's quarantine flag so the unsigned binary runs
+# without the user having to right-click → Open.
+xattr -d com.apple.quarantine "$BIN_PATH" 2>/dev/null || true
+
+echo "[2/4] Pinning wiki endpoint to $WIKI_URL …"
+"$BIN_PATH" set-endpoint "$WIKI_URL"
+
+echo "[3/4] Registering agentwiki:// URL handler …"
+"$BIN_PATH" install
+
+echo "[4/4] Done. You can close this window and click Run Agent in the wiki."
+"""
+    return Response(
+        content=script,
+        media_type="text/x-shellscript",
+        headers={
+            "Content-Disposition": 'attachment; filename="agentwiki-installer.sh"',
+        },
+    )

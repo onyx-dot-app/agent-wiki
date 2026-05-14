@@ -37,9 +37,18 @@ import (
 )
 
 func main() {
+	// Bare invocation (e.g. user double-clicks the downloaded binary in
+	// Finder) → auto-install the macOS .app + URL handler. No-op if
+	// already installed; idempotent.
 	if len(os.Args) < 2 {
-		usage()
-		os.Exit(2)
+		if err := doInstall(); err != nil {
+			fmt.Fprintln(os.Stderr, "[agentwiki-launcher] install error:", err)
+			os.Exit(1)
+		}
+		fmt.Fprintln(os.Stdout,
+			"Run `agentwiki-launcher set-endpoint <wiki-url>` next, then click Run Agent in the wiki.",
+		)
+		return
 	}
 	sub := os.Args[1]
 	arg := ""
