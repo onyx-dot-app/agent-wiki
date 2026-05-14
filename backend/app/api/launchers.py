@@ -251,6 +251,11 @@ def post_exchange(req: ExchangeRequest, request: Request) -> ExchangeResponse:
     sess = sessions_repo.get(consumed["agent_session_id"])
     if sess is None:
         raise HTTPException(status_code=500, detail="agent_session missing")
+    if sess["status"] != "pending":
+        raise HTTPException(
+            status_code=409,
+            detail="agent session is no longer pending",
+        )
 
     manifest = get_registry().get(sess["tool_id"])
     if manifest is None:

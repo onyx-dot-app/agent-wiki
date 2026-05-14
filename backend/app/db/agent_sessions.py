@@ -131,12 +131,19 @@ def list_for_page(*, user_id: str, wiki_path: str) -> list[dict[str, Any]]:
 
 
 def mark_active(sid: str, *, machine_id: str) -> None:
+    now = _now_iso()
     with session() as s:
-        s.execute(
+        updated = execute_dml(
+            s,
             update(AgentSession)
-            .where(AgentSession.id == sid)
-            .values(status="active", machine_id=machine_id, last_activity_at=_now_iso())
+            .where(
+                AgentSession.id == sid,
+                AgentSession.status == "pending",
+            )
+            .values(status="active", machine_id=machine_id, last_activity_at=now)
         )
+    if updated == 0:
+        log.info("agent_session mark_active ignored id=%s (status not pending)", sid)
 
 
 def set_cli_session_id(sid: str, cli_session_id: str) -> None:

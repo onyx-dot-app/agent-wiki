@@ -391,6 +391,35 @@ def test_exchange_transitions_session_to_active_with_machine_id(client):
     assert row["machine_id"] == "m_xyz"
 
 
+def test_exchange_rejects_when_session_closed_before_exchange(client):
+    """Closing the session before helper exchange must block reuse."""
+    uid = seed_user()
+    login_fastapi(client, uid)
+    launch_body = client.post(
+        "/api/launch",
+        json={"tool_id": "claude-code", "wiki_path": None, "message": "x"},
+    ).json()
+    sid = launch_body["agent_session_id"]
+    code = launch_body["launch_code"]
+
+    close = client.post(
+        f"/api/agent-sessions/{sid}/close",
+        json={"reason": "user_clicked"},
+    )
+    assert close.status_code == 204, close.text
+
+    fresh = _fresh_client()
+    res = fresh.post(
+        "/api/launch/exchange",
+        json={"code": code, "machine_id": "m_after_close"},
+    )
+    assert res.status_code == 409, res.text
+
+    row = sessions_repo.get(sid)
+    assert row is not None
+    assert row["status"] == "closed"
+
+
 def test_exchange_rejects_machine_id_mismatch_on_resume(client):
     """ — exchange refuses if helper's machine_id differs from session's."""
     uid = seed_user()
