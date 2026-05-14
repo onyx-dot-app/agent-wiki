@@ -1,4 +1,4 @@
-"""HTTP shapes for /api/documents."""
+"""HTTP shapes for /api/wiki."""
 from __future__ import annotations
 
 from typing import Any
@@ -50,9 +50,12 @@ class ReindexRequest(BaseModel):
 class IngestRequest(BaseModel):
     """Inbound document push from external systems (e.g. Onyx connectors)."""
 
+    model_config = {"populate_by_name": True}
+
     content: str = Field(min_length=1)
     title: str | None = None
     source_type: str | None = None
+    source_document_id: str | None = Field(default=None, alias="document_id")
     metadata: dict[str, Any] | None = None
     updated_at: str | None = None
     diff: str | None = None
@@ -199,7 +202,7 @@ class DocumentDraftView(BaseModel):
 
 
 class SetDocumentDraftRequest(BaseModel):
-    """Body for ``POST /api/documents/file/draft``.
+    """Body for ``POST /api/wiki/file/draft``.
 
     ``template_id=None`` clears the draft row. Otherwise upserts: the
     template's current body becomes the divergence snapshot.

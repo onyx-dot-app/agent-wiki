@@ -1,0 +1,226 @@
+"""Tests for the document ingest pipeline.
+
+Covers:
+  - app.ingest.source_tiers  — is_filtered()
+  - app.ingest.search        — title boost, score threshold, ranking
+  - app.tasks.wiki_update.process_pushed_document
+      - filtered source drop
+      - no BM25 candidates
+      - IRRELEVANT / NO_CHANGE / new body outputs
+      - N-consecutive IRRELEVANT stop rule
+      - observability counters
+"""
+from __future__ import annotations
+
+from typing import Any
+from unittest.mock import patch
+
+from app.config import CONFIG
+from app.db.fts import SearchHit
+from app.ingest import search as ingest_search
+from app.ingest.source_tiers import is_filtered
+from app.llm.agents.wiki_updater import IRRELEVANT_SENTINEL
+
+
+# --------------------------------------------------------------------------- #
+# source_tiers                                                                 #
+# --------------------------------------------------------------------------- #
+
+
+def test_is_filtered_none_source():
+    assert is_filtered(None) is False
+
+
+def test_is_filtered_unknown_source():
+    assert is_filtered("confluence") is False
+
+
+def test_is_filtered_known_filtered_source(monkeypatch):
+    monkeypatch.setattr("app.ingest.source_tiers.FILTERED_SOURCES", frozenset({"git_commit"}))
+    assert is_filtered("git_commit") is True
+
+
+def test_is_filtered_case_sensitive(monkeypatch):
+    monkeypatch.setattr("app.ingest.source_tiers.FILTERED_SOURCES", frozenset({"git_commit"}))
+    assert is_filtered("Git_Commit") is False
+
+
+# --------------------------------------------------------------------------- #
+# ingest.search — title boost + threshold                                      #
+# --------------------------------------------------------------------------- #
+
+
+def _hit(path: str, title: str | None, score: float) -> SearchHit:
+    return SearchHit(doc_id=path, path=path, title=title, snippet="", score=score)
+
+
+def test_candidates_empty_when_no_fts_results():
+    with patch("app.ingest.search.fts_search", return_value=[]):
+        result = ingest_search.candidates("some content", "Some Title")
+    assert result == []
+
+
+def test_candidates_drops_below_min_score(monkeypatch):
+    monkeypatch.setattr(ingest_search, "CONFIG", CONFIG.model_copy(update={"ingest_bm25_min_score": 5.0}))
+    hits = [_hit("a.md", "Alpha", 3.0), _hit("b.md", "Beta", 6.0)]
+    with patch("app.ingest.search.fts_search", return_value=hits):
+        result = ingest_search.candidates("content", None)
+    assert len(result) == 1
+    assert result[0].path == "b.md"
+
+
+def test_candidates_sorted_descending_by_score(monkeypatch):
+    monkeypatch.setattr(ingest_search, "CONFIG", CONFIG.model_copy(update={"ingest_bm25_min_score": 0.0}))
+    hits = [_hit("low.md", None, 1.0), _hit("high.md", None, 5.0), _hit("mid.md", None, 3.0)]
+    with patch("app.ingest.search.fts_search", return_value=hits):
+        result = ingest_search.candidates("content", None)
+    assert [h.path for h in result] == ["high.md", "mid.md", "low.md"]
+
+
+def test_title_boost_raises_score(monkeypatch):
+    monkeypatch.setattr(ingest_search, "CONFIG", CONFIG.model_copy(update={"ingest_bm25_min_score": 0.0, "ingest_bm25_title_boost": 4.0}))
+    # "deploy guide" has perfect Jaccard overlap with incoming title
+    hits = [_hit("deploy.md", "deploy guide", 2.0), _hit("other.md", "unrelated", 2.0)]
+    with patch("app.ingest.search.fts_search", return_value=hits):
+        result = ingest_search.candidates("content", "deploy guide")
+    assert result[0].path == "deploy.md"
+    assert result[0].score > result[1].score
+
+
+def test_title_boost_zero_when_no_incoming_title(monkeypatch):
+    monkeypatch.setattr(ingest_search, "CONFIG", CONFIG.model_copy(update={"ingest_bm25_min_score": 0.0, "ingest_bm25_title_boost": 4.0}))
+    hits = [_hit("a.md", "deploy guide", 2.0), _hit("b.md", "other", 3.0)]
+    with patch("app.ingest.search.fts_search", return_value=hits):
+        result = ingest_search.candidates("content", None)
+    # no boost applied — sorted purely by BM25 score
+    assert result[0].path == "b.md"
+
+
+def test_title_boost_threshold_interaction(monkeypatch):
+    monkeypatch.setattr(ingest_search, "CONFIG", CONFIG.model_copy(update={"ingest_bm25_min_score": 5.0, "ingest_bm25_title_boost": 4.0}))
+    # raw score 3.0 is below threshold, but title boost should push it over
+    hits = [_hit("a.md", "deploy guide", 3.0)]
+    with patch("app.ingest.search.fts_search", return_value=hits):
+        result = ingest_search.candidates("content", "deploy guide")
+    assert len(result) == 1
+
+
+# --------------------------------------------------------------------------- #
+# process_pushed_document                                                      #
+# --------------------------------------------------------------------------- #
+
+
+def _make_push(**kwargs: Any) -> dict[str, Any]:
+    base: dict[str, Any] = {
+        "content": "some content",
+        "title": "Test Doc",
+        "source_type": "confluence",
+        "source_document_id": "doc-abc",
+        "metadata": {},
+    }
+    base.update(kwargs)
+    return base
+
+
+def _run(push: dict[str, Any]) -> None:
+    from app.tasks.wiki_update import process_pushed_document
+    # Run synchronously via immediate_mode
+    from app.tasks.queues import documents_queue
+    with documents_queue.immediate_mode():
+        process_pushed_document(push)
+
+
+@patch("app.tasks.wiki_update.ingest_search.candidates", return_value=[])
+def test_filtered_source_drops_silently(mock_search, monkeypatch):
+    monkeypatch.setattr("app.ingest.source_tiers.FILTERED_SOURCES", frozenset({"git_commit"}))
+    _run(_make_push(source_type="git_commit"))
+    mock_search.assert_not_called()
+
+
+@patch("app.tasks.wiki_update.ingest_search.candidates", return_value=[])
+def test_no_candidates_returns_early(mock_search):
+    _run(_make_push())
+    mock_search.assert_called_once()
+
+
+@patch("app.tasks.wiki_update.wiki_notify.after_doc_write")
+@patch("app.tasks.wiki_update.wiki_git.commit_file", return_value="sha123")
+@patch("app.tasks.wiki_update.wiki_git.read_file", return_value="old body")
+@patch("app.tasks.wiki_update.wiki_updater.reconcile_document", return_value="new body")
+@patch("app.tasks.wiki_update.ingest_search.candidates")
+def test_new_body_commits(mock_search, mock_run, mock_read, mock_commit, mock_notify):
+    mock_search.return_value = [_hit("page.md", "Page", 5.0)]
+    _run(_make_push())
+    mock_commit.assert_called_once()
+    mock_notify.assert_called_once()
+
+
+@patch("app.tasks.wiki_update.wiki_git.commit_file")
+@patch("app.tasks.wiki_update.wiki_git.read_file", return_value="body")
+@patch("app.tasks.wiki_update.wiki_updater.reconcile_document", return_value=None)
+@patch("app.tasks.wiki_update.ingest_search.candidates")
+def test_no_change_does_not_commit(mock_search, mock_run, mock_read, mock_commit):
+    mock_search.return_value = [_hit("page.md", "Page", 5.0)]
+    _run(_make_push())
+    mock_commit.assert_not_called()
+
+
+@patch("app.tasks.wiki_update.wiki_git.commit_file")
+@patch("app.tasks.wiki_update.wiki_git.read_file", return_value="body")
+@patch("app.tasks.wiki_update.wiki_updater.reconcile_document", return_value=IRRELEVANT_SENTINEL)
+@patch("app.tasks.wiki_update.ingest_search.candidates")
+def test_irrelevant_does_not_commit(mock_search, mock_run, mock_read, mock_commit):
+    mock_search.return_value = [_hit("page.md", "Page", 5.0)]
+    _run(_make_push())
+    mock_commit.assert_not_called()
+
+
+@patch("app.tasks.wiki_update.wiki_git.commit_file")
+@patch("app.tasks.wiki_update.wiki_git.read_file", return_value="body")
+@patch("app.tasks.wiki_update.wiki_updater.reconcile_document")
+@patch("app.tasks.wiki_update.ingest_search.candidates")
+def test_n_consecutive_irrelevant_stops_loop(mock_search, mock_run, mock_read, mock_commit, monkeypatch):
+    monkeypatch.setattr("app.tasks.wiki_update.CONFIG", CONFIG.model_copy(update={"ingest_irrelevant_stop_n": 2}))
+    # 5 candidates — should stop after 2 consecutive IRRELEVANT
+    mock_search.return_value = [_hit(f"p{i}.md", f"P{i}", float(5 - i)) for i in range(5)]
+    mock_run.return_value = IRRELEVANT_SENTINEL
+    _run(_make_push())
+    assert mock_run.call_count == 2
+
+
+@patch("app.tasks.wiki_update.wiki_notify.after_doc_write")
+@patch("app.tasks.wiki_update.wiki_git.commit_file", return_value="sha")
+@patch("app.tasks.wiki_update.wiki_git.read_file", return_value="body")
+@patch("app.tasks.wiki_update.wiki_updater.reconcile_document")
+@patch("app.tasks.wiki_update.ingest_search.candidates")
+def test_no_change_resets_irrelevant_counter(mock_search, mock_run, mock_read, mock_commit, mock_notify, monkeypatch):
+    monkeypatch.setattr("app.tasks.wiki_update.CONFIG", CONFIG.model_copy(update={"ingest_irrelevant_stop_n": 2}))
+    # IRRELEVANT, NO_CHANGE (resets counter), IRRELEVANT — should NOT stop early
+    mock_search.return_value = [_hit(f"p{i}.md", None, float(5 - i)) for i in range(3)]
+    mock_run.side_effect = [IRRELEVANT_SENTINEL, None, IRRELEVANT_SENTINEL]
+    _run(_make_push())
+    assert mock_run.call_count == 3
+
+
+@patch("app.tasks.wiki_update.wiki_notify.after_doc_write")
+@patch("app.tasks.wiki_update.wiki_git.commit_file", return_value="sha")
+@patch("app.tasks.wiki_update.wiki_git.read_file", return_value="body")
+@patch("app.tasks.wiki_update.wiki_updater.reconcile_document")
+@patch("app.tasks.wiki_update.ingest_search.candidates")
+def test_commit_resets_irrelevant_counter(mock_search, mock_run, mock_read, mock_commit, mock_notify, monkeypatch):
+    monkeypatch.setattr("app.tasks.wiki_update.CONFIG", CONFIG.model_copy(update={"ingest_irrelevant_stop_n": 2}))
+    # IRRELEVANT, new body (resets counter), IRRELEVANT — should NOT stop early
+    mock_search.return_value = [_hit(f"p{i}.md", None, float(5 - i)) for i in range(3)]
+    mock_run.side_effect = [IRRELEVANT_SENTINEL, "new body", IRRELEVANT_SENTINEL]
+    _run(_make_push())
+    assert mock_run.call_count == 3
+    mock_commit.assert_called_once()
+
+
+@patch("app.tasks.wiki_update.wiki_git.read_file", side_effect=Exception("file not found"))
+@patch("app.tasks.wiki_update.wiki_updater.reconcile_document")
+@patch("app.tasks.wiki_update.ingest_search.candidates")
+def test_missing_file_skipped(mock_search, mock_run, mock_read):
+    mock_search.return_value = [_hit("missing.md", None, 5.0)]
+    _run(_make_push())
+    mock_run.assert_not_called()

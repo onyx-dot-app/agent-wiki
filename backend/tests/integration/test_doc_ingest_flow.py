@@ -13,7 +13,7 @@ import pytest
 
 @pytest.mark.skip(
     reason="document-updater task not implemented; "
-    "see app/tasks/document_update.py:process_pushed_document"
+    "see app/tasks/wiki_update.py:process_pushed_document"
 )
 def test_ingest_updates_wiki_doc(integration):
     integration.signup_and_signin()
@@ -37,7 +37,7 @@ def test_ingest_updates_wiki_doc(integration):
     )
 
     resp = integration.client.post(
-        "/api/documents/ingest",
+        "/api/wiki/ingest",
         json={"content": "we now use rotating refresh tokens",
               "source_type": "test", "title": "Auth notes"},
     )

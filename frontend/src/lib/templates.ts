@@ -110,7 +110,7 @@ export interface DocumentDraftState {
 
 export function getDraftState(path: string): Promise<DocumentDraftState | null> {
   const qs = new URLSearchParams({ path });
-  return apiFetch<DocumentDraftState | null>(`/documents/file/draft?${qs}`);
+  return apiFetch<DocumentDraftState | null>(`/wiki/file/draft?${qs}`);
 }
 
 /** Record that ``path`` is being drafted from ``templateId`` (or clear
@@ -119,7 +119,7 @@ export function getDraftState(path: string): Promise<DocumentDraftState | null> 
 export function setDraftTemplate(
   path: string, templateId: string | null,
 ): Promise<DocumentDraftState | null> {
-  return apiFetch<DocumentDraftState | null>("/documents/file/draft", {
+  return apiFetch<DocumentDraftState | null>("/wiki/file/draft", {
     method: "POST",
     body: JSON.stringify({ path, template_id: templateId }),
   });

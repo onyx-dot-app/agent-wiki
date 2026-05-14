@@ -109,7 +109,7 @@ class McpToken(Base):
 class McpJob(Base):
     """Async job row backing ``update_doc_nl`` over the inbound MCP
     server. Each call to the tool inserts one row; the worker
-    (``app.tasks.document_update.agent_update_document_nl``) updates
+    (``app.tasks.wiki_update.agent_update_document_nl``) updates
     ``status`` / ``result_json`` / ``error`` / ``finished_at`` as it
     runs.
 

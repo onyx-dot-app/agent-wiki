@@ -1,7 +1,7 @@
 """Pydantic schemas for the permissions API.
 
 Routes in ``app/api/permissions.py`` and the wiki ACL endpoints in
-``app/api/documents.py`` parse requests and serialize responses through
+``app/api/wiki.py`` parse requests and serialize responses through
 these models.
 """
 from __future__ import annotations

@@ -26,6 +26,7 @@ from app.api import (
     auth,
     chat,
     documents,
+    wiki,
     events,
     health,
     llm,
@@ -180,6 +181,7 @@ def create_app() -> FastAPI:
     app.include_router(templates.router, prefix="/api/templates")
     app.include_router(permissions.router, prefix="/api")
     app.include_router(triggers.router, prefix="/api/triggers")
+    app.include_router(wiki.router, prefix="/api/wiki")
     app.include_router(documents.router, prefix="/api/documents")
     app.include_router(chat.router, prefix="/api/chat")
     app.include_router(mcp_server.router, prefix="/api/mcp")

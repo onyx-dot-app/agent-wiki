@@ -110,6 +110,10 @@ def tmp_config(tmp_path, monkeypatch):
         oidc_client_secret="",
         oidc_redirect_uri="",
         secure_cookies=False,
+        ingest_bm25_min_score=1.0,
+        ingest_bm25_title_boost=2.0,
+        ingest_bm25_limit=20,
+        ingest_irrelevant_stop_n=2,
     )
     monkeypatch.setattr("app.config.CONFIG", cfg)
     monkeypatch.setattr("app.db.session.CONFIG", cfg)

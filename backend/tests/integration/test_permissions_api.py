@@ -128,7 +128,7 @@ def test_owner_can_grant_user_access(integration):
 
     # Bob can now read.
     integration.signin(user_id=bob)
-    r = integration.client.get("/api/documents/file?path=docs/shared.md")
+    r = integration.client.get("/api/wiki/file?path=docs/shared.md")
     assert r.status_code == 200
 
 

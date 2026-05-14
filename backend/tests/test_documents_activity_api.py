@@ -1,4 +1,4 @@
-"""Tests for ``GET /api/documents/file/activity``.
+"""Tests for ``GET /api/wiki/file/activity``.
 
 The endpoint lifts ``agent_activity.list_for_doc`` over the same
 read-permission gate the body endpoint uses. Body lives in
@@ -23,7 +23,7 @@ def client(tmp_db, tmp_repo):
 
 
 def test_unauthenticated_is_401(client):
-    assert client.get("/api/documents/file/activity?path=guide.md").status_code == 401
+    assert client.get("/api/wiki/file/activity?path=guide.md").status_code == 401
 
 
 def test_returns_active_rows_for_path(client):
@@ -39,7 +39,7 @@ def test_returns_active_rows_for_path(client):
         activity="wrote", description="touched headings",
     )
 
-    resp = client.get("/api/documents/file/activity?path=guide.md")
+    resp = client.get("/api/wiki/file/activity?path=guide.md")
     assert resp.status_code == 200
     payload = resp.json()
     assert payload["path"] == "guide.md"
@@ -54,7 +54,7 @@ def test_returns_active_rows_for_path(client):
 def test_returns_empty_list_when_no_rows(client):
     uid = users_repo.create(email="solo@x.com", password="hunter2-x", name="Solo")
     login_fastapi(client, uid)
-    resp = client.get("/api/documents/file/activity?path=quiet.md")
+    resp = client.get("/api/wiki/file/activity?path=quiet.md")
     assert resp.status_code == 200
     assert resp.json() == {"path": "quiet.md", "agents": []}
 
@@ -77,12 +77,12 @@ def test_403_when_user_lacks_read_permission(client):
     )
 
     login_fastapi(client, bob)
-    resp = client.get("/api/documents/file/activity?path=private.md")
+    resp = client.get("/api/wiki/file/activity?path=private.md")
     assert resp.status_code == 403
 
 
 def test_400_when_path_missing(client):
     uid = users_repo.create(email="x@x.com", password="hunter2-x", name="X")
     login_fastapi(client, uid)
-    resp = client.get("/api/documents/file/activity")
+    resp = client.get("/api/wiki/file/activity")
     assert resp.status_code == 400

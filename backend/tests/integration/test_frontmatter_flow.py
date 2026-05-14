@@ -5,7 +5,7 @@ The agent-activity registry is DB-only: a ``read_page`` call upserts a
 ``read`` row but does NOT touch the doc body. The body the model sees
 is the raw markdown the page was written with. Co-occupancy
 information rides on a separate channel — the ``agents`` list on the
-tool response, and the ``/api/documents/file/activity`` endpoint that
+tool response, and the ``/api/wiki/file/activity`` endpoint that
 backs the wiki UI panel.
 
 This test drives the real ``read_page`` handler inside a Flask request
@@ -64,8 +64,8 @@ def test_agent_read_surfaces_via_tool_response_and_api(integration, monkeypatch)
     on_disk_after = wiki_git.read_file("guide.md")
     assert on_disk_after == on_disk_before
 
-    # GET /api/documents/file/activity reflects the same row.
-    resp = integration.client.get("/api/documents/file/activity?path=guide.md")
+    # GET /api/wiki/file/activity reflects the same row.
+    resp = integration.client.get("/api/wiki/file/activity?path=guide.md")
     assert resp.status_code == 200, resp.text
     payload = resp.json()
     assert payload["path"] == "guide.md"

@@ -1,7 +1,7 @@
 """End-to-end permission tests through the Flask client.
 
 Exercises the enforcement seam (``require_can``) against real API
-routes: PUT/GET/DELETE on ``/api/documents/file``, search filtering,
+routes: PUT/GET/DELETE on ``/api/wiki/file``, search filtering,
 and admin override. Two users + a private page is enough to surface
 every interesting branch.
 """
@@ -20,7 +20,7 @@ def test_creator_becomes_owner_and_others_can_access_default_public(integration)
     # Bob (different account) can read because the page is default-public.
     integration.signup(email="bob@x.com")
     integration.signin(email="bob@x.com")
-    resp = integration.client.get("/api/documents/file?path=docs/spec.md")
+    resp = integration.client.get("/api/wiki/file?path=docs/spec.md")
     assert resp.status_code == 200
     assert resp.json()["body"] == "# Spec\n\nbody."
 
@@ -38,16 +38,16 @@ def test_revoking_everyone_grant_makes_page_private(integration):
     integration.signup(email="bob@x.com")
     integration.signin(email="bob@x.com")
     # Bob can no longer read or write the page.
-    resp = integration.client.get("/api/documents/file?path=docs/private.md")
+    resp = integration.client.get("/api/wiki/file?path=docs/private.md")
     assert resp.status_code == 403, resp.text
     resp = integration.client.put(
-        "/api/documents/file", json={"path": "docs/private.md", "body": "hijacked"}
+        "/api/wiki/file", json={"path": "docs/private.md", "body": "hijacked"}
     )
     assert resp.status_code == 403
 
     # Alice still has access.
     integration.signin(user_id=alice)
-    resp = integration.client.get("/api/documents/file?path=docs/private.md")
+    resp = integration.client.get("/api/wiki/file?path=docs/private.md")
     assert resp.status_code == 200
 
 
@@ -72,10 +72,10 @@ def test_explicit_user_grant_lets_other_user_in(integration):
 
     integration.signin(user_id=bob)
     # Bob can read but not write.
-    resp = integration.client.get("/api/documents/file?path=docs/shared.md")
+    resp = integration.client.get("/api/wiki/file?path=docs/shared.md")
     assert resp.status_code == 200
     resp = integration.client.put(
-        "/api/documents/file", json={"path": "docs/shared.md", "body": "edited"}
+        "/api/wiki/file", json={"path": "docs/shared.md", "body": "edited"}
     )
     assert resp.status_code == 403
 
@@ -94,11 +94,11 @@ def test_admin_bypasses_per_page_acls(integration):
 
     integration.signin(user_id=admin)
     # Admin can read.
-    resp = integration.client.get("/api/documents/file?path=bob/notes.md")
+    resp = integration.client.get("/api/wiki/file?path=bob/notes.md")
     assert resp.status_code == 200
     # Admin can edit.
     resp = integration.client.put(
-        "/api/documents/file",
+        "/api/wiki/file",
         json={"path": "bob/notes.md", "body": "# Bob's notes\n\nadmin tweaked"},
     )
     assert resp.status_code in (200, 201)
@@ -117,14 +117,14 @@ def test_search_filters_out_unauthorized_hits(integration):
     # New user signed up — can search.
     integration.signup(email="bob@x.com")
     integration.signin(email="bob@x.com")
-    resp = integration.client.get("/api/documents/search?q=findme")
+    resp = integration.client.get("/api/wiki/search?q=findme")
     assert resp.status_code == 200
     paths = {h["path"] for h in resp.json()["hits"]}
     assert paths == {"docs/public.md"}
 
     # Alice (the owner) sees both.
     integration.signin(user_id=alice)
-    resp = integration.client.get("/api/documents/search?q=findme")
+    resp = integration.client.get("/api/wiki/search?q=findme")
     paths = {h["path"] for h in resp.json()["hits"]}
     assert paths == {"docs/public.md", "docs/private.md"}
 
@@ -140,7 +140,7 @@ def test_list_documents_hides_unauthorized_pages(integration):
     # Bob can see a but not b.
     integration.signup(email="bob@x.com")
     integration.signin(email="bob@x.com")
-    resp = integration.client.get("/api/documents")
+    resp = integration.client.get("/api/wiki")
     assert resp.status_code == 200
     md_paths = {e["path"] for e in resp.json()["entries"] if e["path"].endswith(".md")}
     assert "docs/a.md" in md_paths
@@ -148,7 +148,7 @@ def test_list_documents_hides_unauthorized_pages(integration):
 
     # Alice sees both.
     integration.signin(user_id=alice)
-    resp = integration.client.get("/api/documents")
+    resp = integration.client.get("/api/wiki")
     md_paths = {e["path"] for e in resp.json()["entries"] if e["path"].endswith(".md")}
     assert {"docs/a.md", "docs/b.md"} <= md_paths
 
@@ -180,10 +180,10 @@ def test_read_only_grant_denies_write(integration):
     )
 
     integration.signin(user_id=bob)
-    r = integration.client.get("/api/documents/file?path=docs/spec.md")
+    r = integration.client.get("/api/wiki/file?path=docs/spec.md")
     assert r.status_code == 200
     r = integration.client.put(
-        "/api/documents/file", json={"path": "docs/spec.md", "body": "tampered"}
+        "/api/wiki/file", json={"path": "docs/spec.md", "body": "tampered"}
     )
     assert r.status_code == 403
 
@@ -202,10 +202,10 @@ def test_read_public_write_private(integration):
             acl.revoke(g["id"])
 
     integration.signin(user_id=bob)
-    r = integration.client.get("/api/documents/file?path=docs/announce.md")
+    r = integration.client.get("/api/wiki/file?path=docs/announce.md")
     assert r.status_code == 200
     r = integration.client.put(
-        "/api/documents/file",
+        "/api/wiki/file",
         json={"path": "docs/announce.md", "body": "hijacked"},
     )
     assert r.status_code == 403
@@ -213,7 +213,7 @@ def test_read_public_write_private(integration):
     # Alice (owner) can still write.
     integration.signin(user_id=alice)
     r = integration.client.put(
-        "/api/documents/file",
+        "/api/wiki/file",
         json={"path": "docs/announce.md", "body": "# Announce v2"},
     )
     assert r.status_code in (200, 201)
@@ -259,12 +259,12 @@ def test_folder_grant_to_group_lets_members_read_descendants(integration):
     # Bob (group member) can read both descendants.
     integration.signin(user_id=bob)
     for p in ("team/alpha.md", "team/sub/beta.md"):
-        r = integration.client.get(f"/api/documents/file?path={p}")
+        r = integration.client.get(f"/api/wiki/file?path={p}")
         assert r.status_code == 200, p
 
     # Eve (not a member) is denied.
     integration.signin(user_id=eve)
-    r = integration.client.get("/api/documents/file?path=team/alpha.md")
+    r = integration.client.get("/api/wiki/file?path=team/alpha.md")
     assert r.status_code == 403
 
 
@@ -294,7 +294,7 @@ def test_rename_preserves_owner_and_grants(integration):
 
     # Rename via the API.
     r = integration.client.post(
-        "/api/documents/move",
+        "/api/wiki/move",
         json={"old_path": "docs/old.md", "new_path": "docs/new.md"},
     )
     assert r.status_code == 200, r.text
@@ -303,7 +303,7 @@ def test_rename_preserves_owner_and_grants(integration):
     assert acl.get_owner("docs/old.md") is None
     assert acl.get_owner("docs/new.md") == alice
     integration.signin(user_id=bob)
-    r = integration.client.get("/api/documents/file?path=docs/new.md")
+    r = integration.client.get("/api/wiki/file?path=docs/new.md")
     assert r.status_code == 200
 
 
@@ -329,7 +329,7 @@ def test_delete_then_recreate_does_not_inherit_old_grants(integration):
     )
 
     # Delete.
-    r = integration.client.delete("/api/documents/file?path=docs/spec.md")
+    r = integration.client.delete("/api/wiki/file?path=docs/spec.md")
     assert r.status_code == 200
     assert acl.get_owner("docs/spec.md") is None
     assert acl.list_for_path("docs/spec.md") == []
@@ -372,7 +372,7 @@ def test_search_returns_hits_via_group_grant(integration):
     })
 
     integration.signin(user_id=bob)
-    resp = integration.client.get("/api/documents/search?q=findme")
+    resp = integration.client.get("/api/wiki/search?q=findme")
     paths = {h["path"] for h in resp.json()["hits"]}
     assert "private/note.md" in paths
 
@@ -400,7 +400,7 @@ def test_search_returns_hits_via_folder_cascade(integration):
     )
 
     integration.signin(user_id=bob)
-    resp = integration.client.get("/api/documents/search?q=zonekeyword")
+    resp = integration.client.get("/api/wiki/search?q=zonekeyword")
     paths = {h["path"] for h in resp.json()["hits"]}
     assert paths == {"zone/a.md", "zone/sub/b.md"}
 
@@ -456,7 +456,7 @@ def test_writer_can_share_and_change_acl(integration):
 
     # Carol can now actually read the page.
     integration.signin(user_id=carol)
-    r = integration.client.get("/api/documents/file?path=docs/spec.md")
+    r = integration.client.get("/api/wiki/file?path=docs/spec.md")
     assert r.status_code == 200
 
     # Bob can revoke that grant too.
@@ -466,7 +466,7 @@ def test_writer_can_share_and_change_acl(integration):
 
     # Carol is back to no-access.
     integration.signin(user_id=carol)
-    r = integration.client.get("/api/documents/file?path=docs/spec.md")
+    r = integration.client.get("/api/wiki/file?path=docs/spec.md")
     assert r.status_code == 403
 
 
@@ -500,7 +500,7 @@ def test_reader_cannot_share_or_change_acl(integration):
     integration.signin(user_id=bob)
 
     # Bob can read the page.
-    r = integration.client.get("/api/documents/file?path=docs/spec.md")
+    r = integration.client.get("/api/wiki/file?path=docs/spec.md")
     assert r.status_code == 200
 
     # But cannot list its ACL.

@@ -269,12 +269,12 @@ class IntegrationHarness:
     # ----- documents --------------------------------------------------------
 
     def put_doc(self, path: str, body: str) -> dict:
-        resp = self.client.put("/api/documents/file", json={"path": path, "body": body})
+        resp = self.client.put("/api/wiki/file", json={"path": path, "body": body})
         assert resp.status_code in (200, 201), resp.text
         return resp.json()
 
     def delete_doc(self, path: str) -> None:
-        resp = self.client.delete(f"/api/documents/file?path={path}")
+        resp = self.client.delete(f"/api/wiki/file?path={path}")
         assert resp.status_code == 200, resp.text
 
     # ----- triggers ---------------------------------------------------------

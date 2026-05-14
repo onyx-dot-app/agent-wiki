@@ -1,7 +1,7 @@
 """Handler for the `create_directory` tool. Spec lives in `create_directory.json`.
 
 Creates a `.gitkeep`-marked empty folder in the wiki. Mirrors the
-`POST /api/documents/folder` endpoint so agents can create folders the
+`POST /api/wiki/folder` endpoint so agents can create folders the
 same way humans do in the explorer.
 """
 from __future__ import annotations

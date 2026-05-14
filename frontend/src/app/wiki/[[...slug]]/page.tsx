@@ -101,7 +101,7 @@ export default function WikiRoute() {
 function Explorer({ dir }: { dir: string }) {
   const router = useRouter();
   const isMobile = useIsMobile();
-  const { data, error: listError, mutate: mutatePaths } = useSWR<ListResponse>("/documents");
+  const { data, error: listError, mutate: mutatePaths } = useSWR<ListResponse>("/wiki");
   const entries = data?.entries ?? [];
   const [mutationError, setMutationError] = useState<string | null>(null);
   const error = mutationError ?? (listError instanceof Error ? listError.message : null);
@@ -175,7 +175,7 @@ function Explorer({ dir }: { dir: string }) {
     try {
       const folderName = raw.replace(/\/+$/, "");
       const fullPath = (dir ? dir + "/" : "") + folderName;
-      await apiFetch("/documents/folder", {
+      await apiFetch("/wiki/folder", {
         method: "POST",
         body: JSON.stringify({ path: fullPath }),
       });
@@ -195,7 +195,7 @@ function Explorer({ dir }: { dir: string }) {
     setBusyPath(rel);
     setError(null);
     try {
-      await apiFetch(`/documents/file?path=${encodeURIComponent(rel)}`, { method: "DELETE" });
+      await apiFetch(`/wiki/file?path=${encodeURIComponent(rel)}`, { method: "DELETE" });
       refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "delete failed");
@@ -216,7 +216,7 @@ function Explorer({ dir }: { dir: string }) {
     setBusyPath(srcRel);
     setError(null);
     try {
-      await apiFetch("/documents/move", {
+      await apiFetch("/wiki/move", {
         method: "POST",
         body: JSON.stringify({ old_path: srcRel, new_path: newRel }),
       });
@@ -246,7 +246,7 @@ function Explorer({ dir }: { dir: string }) {
     setBusyPath(rel);
     setError(null);
     try {
-      await apiFetch("/documents/move", {
+      await apiFetch("/wiki/move", {
         method: "POST",
         body: JSON.stringify({ old_path: rel, new_path: newRel }),
       });
@@ -536,7 +536,7 @@ function NewDocView({ dir }: { dir: string }) {
     try {
       const name = filenameNoExt + ".md";
       const fullPath = (dir ? dir + "/" : "") + name;
-      await apiFetch("/documents/file", {
+      await apiFetch("/wiki/file", {
         method: "PUT",
         body: JSON.stringify({ path: fullPath, body: draft }),
       });
@@ -1299,7 +1299,7 @@ function FileViewer({ path }: { path: string }) {
     setError(null);
     setEditing(false);
     setViewingSha(null);
-    apiFetch<FileResponse>(`/documents/file?path=${encodeURIComponent(path)}`)
+    apiFetch<FileResponse>(`/wiki/file?path=${encodeURIComponent(path)}`)
       .then((r) => {
         setBody(r.body);
         setDraft(r.body);
@@ -1382,7 +1382,7 @@ function FileViewer({ path }: { path: string }) {
   const refreshAgents = useCallback(() => {
     setAgentsError(null);
     apiFetch<DocumentActivityResponse>(
-      `/documents/file/activity?path=${encodeURIComponent(path)}`,
+      `/wiki/file/activity?path=${encodeURIComponent(path)}`,
     )
       .then((r) => setAgents(r.agents))
       .catch((e) =>
@@ -1404,7 +1404,7 @@ function FileViewer({ path }: { path: string }) {
 
   const refreshHistory = useCallback(() => {
     setHistoryError(null);
-    apiFetch<HistoryResponse>(`/documents/file/history?path=${encodeURIComponent(path)}`)
+    apiFetch<HistoryResponse>(`/wiki/file/history?path=${encodeURIComponent(path)}`)
       .then((r) => {
         setCommits(r.commits);
         setHeadSha(r.head_sha);
@@ -1425,7 +1425,7 @@ function FileViewer({ path }: { path: string }) {
     setEditing(false);
     try {
       const r = await apiFetch<FileResponse>(
-        `/documents/file?path=${encodeURIComponent(path)}&ref=${encodeURIComponent(sha)}`
+        `/wiki/file?path=${encodeURIComponent(path)}&ref=${encodeURIComponent(sha)}`
       );
       setBody(r.body);
       setDraft(r.body);
@@ -1505,7 +1505,7 @@ function FileViewer({ path }: { path: string }) {
     try {
       if (bodyChanged) {
         const baseSha = viewingSha ?? headSha;
-        await apiFetch("/documents/file", {
+        await apiFetch("/wiki/file", {
           method: "PUT",
           body: JSON.stringify({ path, body: draft, ...(baseSha ? { base_sha: baseSha } : {}) }),
         });
@@ -1513,7 +1513,7 @@ function FileViewer({ path }: { path: string }) {
       if (renamed) {
         const finalName = filenameNoExt + ".md";
         const newRel = parentSlug ? `${parentSlug}/${finalName}` : finalName;
-        await apiFetch("/documents/move", {
+        await apiFetch("/wiki/move", {
           method: "POST",
           body: JSON.stringify({ old_path: path, new_path: newRel }),
         });
@@ -1530,7 +1530,7 @@ function FileViewer({ path }: { path: string }) {
       else setCommits(null);
       // Pick up the new head_sha for subsequent edits.
       const fresh = await apiFetch<FileResponse>(
-        `/documents/file?path=${encodeURIComponent(path)}`
+        `/wiki/file?path=${encodeURIComponent(path)}`
       );
       setHeadSha(fresh.head_sha ?? null);
       // The server clears the draft row when the body diverges from

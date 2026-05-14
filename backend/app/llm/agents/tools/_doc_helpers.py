@@ -105,7 +105,7 @@ def author_string() -> str | None:
     a user bound, drops the ``via`` clause; with neither, falls back to
     the legacy bot author so seed scripts and orphaned background paths
     still produce a valid commit. Direct UI/API edits set their own
-    per-user author at the API seam (see ``app/api/documents.py``).
+    per-user author at the API seam (see ``app/api/wiki.py``).
     """
     user = _current_user_or_none()
     if user is None:
