@@ -7,11 +7,17 @@ fix #5).
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.db.models import PageWorkingDir
 from app.db.session import session
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def get_for_page(*, user_id: str, machine_id: str, wiki_path: str) -> str | None:
@@ -33,15 +39,20 @@ def set_for_page(
     wiki_path: str,
     working_dir: str,
 ) -> None:
+    now = _now_iso()
     stmt = pg_insert(PageWorkingDir).values(
         user_id=user_id,
         machine_id=machine_id,
         wiki_path=wiki_path,
         working_dir=working_dir,
+        updated_at=now,
     )
     stmt = stmt.on_conflict_do_update(
         index_elements=["user_id", "machine_id", "wiki_path"],
-        set_={"working_dir": stmt.excluded.working_dir},
+        set_={
+            "working_dir": stmt.excluded.working_dir,
+            "updated_at": stmt.excluded.updated_at,
+        },
     )
     with session() as s:
         s.execute(stmt)

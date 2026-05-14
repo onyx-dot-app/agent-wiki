@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from app.db.session import init_db
+from app.db.models import PageWorkingDir
+from app.db.session import init_db, session
 from app.db import page_dirs
 
 from tests._seed import seed_user
@@ -103,3 +104,33 @@ def test_clear(tmp_config):
     )
     page_dirs.clear(user_id=uid, machine_id="m", wiki_path="x.md")
     assert page_dirs.get_for_page(user_id=uid, machine_id="m", wiki_path="x.md") is None
+
+
+def test_set_updates_updated_at(tmp_config, monkeypatch):
+    init_db()
+    uid = seed_user()
+
+    monkeypatch.setattr(page_dirs, "_now_iso", lambda: "2025-01-01 00:00:00")
+    page_dirs.set_for_page(
+        user_id=uid,
+        machine_id="m",
+        wiki_path="x.md",
+        working_dir="/a",
+    )
+    with session() as s:
+        row = s.get(PageWorkingDir, (uid, "m", "x.md"))
+        assert row is not None
+        assert row.updated_at == "2025-01-01 00:00:00"
+
+    monkeypatch.setattr(page_dirs, "_now_iso", lambda: "2025-01-02 00:00:00")
+    page_dirs.set_for_page(
+        user_id=uid,
+        machine_id="m",
+        wiki_path="x.md",
+        working_dir="/b",
+    )
+    with session() as s:
+        row = s.get(PageWorkingDir, (uid, "m", "x.md"))
+        assert row is not None
+        assert row.working_dir == "/b"
+        assert row.updated_at == "2025-01-02 00:00:00"
