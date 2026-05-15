@@ -1,0 +1,15 @@
+{{- if .Values.monitoring.serviceMonitor.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "agent-workspace.fullname" . }}-grafana-dashboard
+  namespace: {{ .Release.Namespace }}
+  labels:
+    grafana_dashboard: "1"
+    {{- include "agent-workspace.labels" . | nindent 4 }}
+data:
+  wiki-ingest-dashboard.json: |-
+{{ .Files.Get "files/wiki-ingest-dashboard.json" | indent 4 }}
+  wiki-traffic-dashboard.json: |-
+{{ .Files.Get "files/wiki-traffic-dashboard.json" | indent 4 }}
+{{- end }}
