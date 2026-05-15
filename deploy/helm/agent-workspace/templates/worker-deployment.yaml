@@ -49,6 +49,10 @@ spec:
           image: "{{ $.Values.image.backend.repository }}:{{ $.Values.image.backend.tag }}"
           imagePullPolicy: {{ $.Values.image.backend.pullPolicy }}
           command: ["python", "-m", "app.tasks.run_worker", {{ $queue | quote }}]
+          ports:
+            - name: metrics
+              containerPort: 9091
+              protocol: TCP
           {{- with $.Values.securityContext }}
           securityContext:
             {{- toYaml . | nindent 12 }}

@@ -17,6 +17,7 @@ import argparse
 import logging
 import time
 
+from prometheus_client import start_http_server
 from sqlalchemy import text
 
 # Importing modules registers tasks on their respective queues.
@@ -75,6 +76,7 @@ def main() -> None:
     args = parser.parse_args()
 
     setup_logging()
+    start_http_server(9091)
     _wait_for_db()
     queue = QUEUES[args.queue]
     concurrency = _CONCURRENCY[args.queue]
