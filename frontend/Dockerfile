@@ -1,15 +1,15 @@
-FROM node:20-alpine AS deps
+FROM oven/bun:1 AS deps
 WORKDIR /app
-COPY package.json package-lock.json* ./
-RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
+COPY package.json bun.lock ./
+RUN bun install --frozen-lockfile
 
-FROM node:20-alpine AS build
+FROM oven/bun:1 AS build
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-RUN npm run build
+RUN bun run build
 
-FROM node:20-alpine AS run
+FROM oven/bun:1 AS run
 WORKDIR /app
 ENV NODE_ENV=production
 COPY --from=build /app/.next ./.next
@@ -17,4 +17,4 @@ COPY --from=build /app/public ./public
 COPY --from=build /app/package.json ./package.json
 COPY --from=build /app/node_modules ./node_modules
 EXPOSE 3000
-CMD ["npm", "run", "start"]
+CMD ["bun", "run", "start"]
