@@ -251,7 +251,7 @@ def process_pushed_document(push: dict[str, Any]) -> None:
     )
 
     ingest_requests_total.labels(source_type=source_type or "unknown").inc()
-    ingest_queue_depth.set(documents_queue.depth().total)
+    ingest_queue_depth.set(documents_queue.depth().pending)
 
     if is_filtered(source_type):
         log.debug("process_pushed_document: filtered source %s, dropping", source_type)

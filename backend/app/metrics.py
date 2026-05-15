@@ -69,13 +69,21 @@ _LATENCY_BUCKETS = (0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0)
 
 _EXCLUDED_HANDLERS = ["/api/health", "/metrics"]
 
+_prometheus_initialized = False
+
 
 def setup_prometheus(app: FastAPI) -> None:
     """Wire Prometheus HTTP instrumentation into the FastAPI app.
 
     Must be called in ``create_app()`` before the app starts serving.
     Exposes ``GET /metrics`` for Prometheus scraping.
+
+    The guard prevents duplicate metric registration when ``create_app()``
+    is called multiple times in the same process (e.g. per-test fixtures).
     """
+    global _prometheus_initialized
+    if _prometheus_initialized:
+        return
     Instrumentator(
         should_group_status_codes=False,
         should_ignore_untemplated=False,
@@ -83,3 +91,4 @@ def setup_prometheus(app: FastAPI) -> None:
         should_instrument_requests_inprogress=True,
         excluded_handlers=_EXCLUDED_HANDLERS,
     ).instrument(app, latency_lowr_buckets=_LATENCY_BUCKETS).expose(app)
+    _prometheus_initialized = True
