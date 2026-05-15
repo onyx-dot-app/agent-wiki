@@ -23,6 +23,7 @@ import re
 from app.db import fts
 from app.tasks.queue import crontab
 from app.tasks.queues import lightweight_maintenance_queue
+from app.wiki import git as wiki_git
 
 log = logging.getLogger(__name__)
 
@@ -49,8 +50,6 @@ def index_path_inline(path: str) -> None:
     if not path.endswith(".md"):
         return
 
-    from app.wiki import git as wiki_git
-
     try:
         body = wiki_git.read_file(path)
     except Exception:
@@ -75,8 +74,6 @@ def reindex_all_inline() -> None:
 
     Upserts are idempotent — re-indexing an already-indexed page is safe.
     """
-    from app.wiki import git as wiki_git
-
     paths = [p for p in wiki_git.list_paths() if p.endswith(".md")]
     if not paths:
         return
@@ -88,8 +85,6 @@ def reindex_all_inline() -> None:
 @lightweight_maintenance_queue.periodic_task(crontab(minute="0"))
 def reconcile_bm25_index() -> None:
     """Re-index any .md files touched in the last 2 hours."""
-    from app.wiki import git as wiki_git
-
     touched = {p for p in wiki_git.paths_touched_since("2 hours ago") if p.endswith(".md")}
     if not touched:
         return
