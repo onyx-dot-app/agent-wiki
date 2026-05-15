@@ -115,7 +115,6 @@ async def _lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     """
     from app.db.session import init_db
     from app.tasks.agent_activity import schedule_all_pending_cleanups
-    from app.tasks.reindex import reindex_all_inline
     from app.triggers import repo as triggers_repo
     from app.utils.logging import setup_logging
     from app.wiki.git import ensure_wiki_repo
@@ -130,7 +129,6 @@ async def _lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     # through the normal commit + notify path (FTS index, ACLs, MCP
     # fan-out all fire identically to a UI save).
     seed_if_empty(_app_config.CONFIG.wiki_dir)
-    reindex_all_inline()
     # Starter document templates seed once on a brand-new DB; users
     # who delete a starter will not see it re-appear after a reboot.
     seed_starter_templates_if_empty()
