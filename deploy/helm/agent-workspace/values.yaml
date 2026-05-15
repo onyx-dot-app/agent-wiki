@@ -158,3 +158,11 @@ securityContext: {}
 nodeSelector: {}
 tolerations: []
 affinity: {}
+
+monitoring:
+  serviceMonitor:
+    # Set to true when kube-prometheus-stack is installed in the cluster.
+    enabled: false
+    # Extra labels added to the ServiceMonitor — must match the Prometheus
+    # Operator's serviceMonitorSelector (if set). Typically {"release": "<helm-release-name>"}.
+    labels: {}
