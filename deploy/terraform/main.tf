@@ -288,3 +288,34 @@ resource "kubernetes_manifest" "letsencrypt_issuer" {
 
   depends_on = [helm_release.cert_manager]
 }
+
+# ----------------------------------------------------------------------------
+# Monitoring — kube-prometheus-stack (Prometheus + Grafana)
+#
+# Optional. Set monitoring_enabled = true in your tfvars to install.
+# Installs Prometheus Operator, Prometheus, and Grafana into the agent-wiki
+# namespace. Prometheus scrapes the backend via the ServiceMonitor defined in
+# the agent-workspace Helm chart (enable monitoring.serviceMonitor in values).
+#
+# Prerequisites before running `terraform apply` with monitoring_enabled = true:
+#   1. Create the grafana-oauth-secret if using OAuth:
+#      kubectl -n agent-wiki create secret generic grafana-oauth-secret \
+#        --from-literal=GF_AUTH_GOOGLE_CLIENT_ID=<id> \
+#        --from-literal=GF_AUTH_GOOGLE_CLIENT_SECRET=<secret>
+#   2. Set root_url in monitoring-values.yaml to match your domain.
+# ----------------------------------------------------------------------------
+
+resource "helm_release" "monitoring" {
+  count = var.monitoring_enabled ? 1 : 0
+
+  name             = "agent-wiki-monitoring"
+  repository       = "https://prometheus-community.github.io/helm-charts"
+  chart            = "kube-prometheus-stack"
+  version          = "82.10.5"
+  namespace        = "agent-wiki"
+  create_namespace = false
+
+  values = [file("${path.module}/monitoring-values.yaml")]
+
+  depends_on = [module.eks]
+}

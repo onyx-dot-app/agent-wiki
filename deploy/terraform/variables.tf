@@ -55,6 +55,12 @@ variable "cert_manager_email" {
   default     = ""
 }
 
+variable "monitoring_enabled" {
+  type        = bool
+  description = "Install kube-prometheus-stack (Prometheus + Grafana) into the agent-wiki namespace."
+  default     = false
+}
+
 variable "tags" {
   type        = map(string)
   description = "Default tags applied to all AWS resources."
