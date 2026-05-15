@@ -14,8 +14,12 @@ from __future__ import annotations
 
 import re
 
+import logging
+
 from app.config import CONFIG
 from app.db.fts import SearchHit, search as fts_search
+
+log = logging.getLogger(__name__)
 
 _TOKEN_RE = re.compile(r"\w+")
 
@@ -38,18 +42,28 @@ def candidates(content: str, title: str | None) -> list[SearchHit]:
     """
     hits = fts_search(content, limit=CONFIG.ingest_bm25_limit, apply_visibility=False)
     if not hits:
+        log.debug("ingest candidates: no BM25 hits for title=%r", title)
         return []
 
     query_title_tokens: set[str] = _tokens(title) if title else set()
 
     boosted: list[SearchHit] = []
     for hit in hits:
-        score = hit.score
+        raw_score = hit.score
+        score = raw_score
         if query_title_tokens and hit.title:
             sim = _jaccard(query_title_tokens, _tokens(hit.title))
             score += sim * CONFIG.ingest_bm25_title_boost
+        log.debug(
+            "ingest candidate: path=%r raw_bm25=%.3f boosted=%.3f threshold=%.3f pass=%s",
+            hit.path, raw_score, score, CONFIG.ingest_bm25_min_score, score >= CONFIG.ingest_bm25_min_score,
+        )
         if score >= CONFIG.ingest_bm25_min_score:
             boosted.append(hit.model_copy(update={"score": score}))
 
+    log.info(
+        "ingest candidates: title=%r hits=%d passed=%d threshold=%.3f",
+        title, len(hits), len(boosted), CONFIG.ingest_bm25_min_score,
+    )
     boosted.sort(key=lambda h: h.score, reverse=True)
     return boosted
