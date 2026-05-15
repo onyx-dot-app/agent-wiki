@@ -1,0 +1,66 @@
+kubeEtcd:
+  enabled: false
+
+kubeControllerManager:
+  enabled: false
+
+kubeScheduler:
+  enabled: false
+
+alertmanager:
+  enabled: false
+
+grafana:
+  enabled: true
+  service:
+    type: ClusterIP
+    port: 80
+  sidecar:
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+      labelValue: "1"
+      searchNamespace: agent-wiki
+  persistence:
+    enabled: true
+    storageClassName: gp3
+    size: 10Gi
+  # Optional: mount a secret with OAuth credentials.
+  # Create with: kubectl -n agent-wiki create secret generic grafana-oauth-secret \
+  #   --from-literal=GF_AUTH_GOOGLE_CLIENT_ID=<id> \
+  #   --from-literal=GF_AUTH_GOOGLE_CLIENT_SECRET=<secret>
+  # Then uncomment the line below.
+  # envFromSecret: grafana-oauth-secret
+  grafana.ini:
+    server:
+      # Set to the public URL where Grafana will be reachable.
+      # If served from a sub-path (e.g. /monitoring), set serve_from_sub_path: true.
+      root_url: https://example.com/monitoring
+      serve_from_sub_path: true
+    auth:
+      disable_login_form: false
+    # Uncomment to enable Google OAuth:
+    # auth.google:
+    #   enabled: true
+    #   allow_sign_up: true
+    #   scopes: openid email profile
+    #   auth_url: https://accounts.google.com/o/oauth2/v2/auth
+    #   token_url: https://oauth2.googleapis.com/token
+    #   api_url: https://openidconnect.googleapis.com/v1/userinfo
+    #   allowed_domains: example.com
+    #   use_pkce: true
+
+prometheus:
+  prometheusSpec:
+    retention: 7d
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: gp3
+          accessModes:
+            - ReadWriteOnce
+          resources:
+            requests:
+              storage: 30Gi
