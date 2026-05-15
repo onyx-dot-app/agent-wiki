@@ -18,6 +18,7 @@ import logging
 
 from app.config import CONFIG
 from app.db.fts import SearchHit, search as fts_search
+from app.metrics import ingest_bm25_hits, ingest_bm25_passed, ingest_bm25_score
 
 log = logging.getLogger(__name__)
 
@@ -54,6 +55,7 @@ def candidates(content: str, title: str | None) -> list[SearchHit]:
         if query_title_tokens and hit.title:
             sim = _jaccard(query_title_tokens, _tokens(hit.title))
             score += sim * CONFIG.ingest_bm25_title_boost
+        ingest_bm25_score.observe(raw_score)
         log.debug(
             "ingest candidate: path=%r raw_bm25=%.3f boosted=%.3f threshold=%.3f pass=%s",
             hit.path, raw_score, score, CONFIG.ingest_bm25_min_score, score >= CONFIG.ingest_bm25_min_score,
@@ -61,6 +63,8 @@ def candidates(content: str, title: str | None) -> list[SearchHit]:
         if score >= CONFIG.ingest_bm25_min_score:
             boosted.append(hit.model_copy(update={"score": score}))
 
+    ingest_bm25_hits.observe(len(hits))
+    ingest_bm25_passed.observe(len(boosted))
     log.info(
         "ingest candidates: title=%r hits=%d passed=%d threshold=%.3f",
         title, len(hits), len(boosted), CONFIG.ingest_bm25_min_score,
