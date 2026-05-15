@@ -28,6 +28,8 @@ from pathlib import Path
 
 from sqlalchemy import text
 
+from app.tasks.reindex import reindex_all_inline
+
 log = logging.getLogger(__name__)
 
 
@@ -146,4 +148,5 @@ def seed_if_empty(target_dir: str) -> bool:
     written = write_seed_pages(Path(target_dir), overwrite_existing=False)
     if written > 0:
         _stamp_seed_marker()
+        reindex_all_inline()
     return written > 0
