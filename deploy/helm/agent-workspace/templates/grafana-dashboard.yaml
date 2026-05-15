@@ -8,6 +8,8 @@ metadata:
     grafana_dashboard: "1"
     {{- include "agent-workspace.labels" . | nindent 4 }}
 data:
-  agent-wiki.json: |-
+  agent-wiki-ingestion.json: |-
 {{ .Files.Get "files/agent-wiki-dashboard.json" | indent 4 }}
+  agent-wiki-http.json: |-
+{{ .Files.Get "files/agent-wiki-http-dashboard.json" | indent 4 }}
 {{- end }}
