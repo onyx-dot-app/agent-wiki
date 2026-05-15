@@ -11,7 +11,9 @@ Ingest pipeline metrics must be updated manually at each pipeline stage.
 """
 from __future__ import annotations
 
+from fastapi import FastAPI
 from prometheus_client import Counter, Gauge, Histogram
+from prometheus_fastapi_instrumentator import Instrumentator
 
 # --------------------------------------------------------------------------- #
 # Ingest pipeline                                                              #
@@ -68,16 +70,12 @@ _LATENCY_BUCKETS = (0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0)
 _EXCLUDED_HANDLERS = ["/api/health", "/metrics"]
 
 
-def setup_prometheus(app: object) -> None:
+def setup_prometheus(app: FastAPI) -> None:
     """Wire Prometheus HTTP instrumentation into the FastAPI app.
 
     Must be called in ``create_app()`` before the app starts serving.
     Exposes ``GET /metrics`` for Prometheus scraping.
     """
-    from fastapi import FastAPI
-    from prometheus_fastapi_instrumentator import Instrumentator
-
-    assert isinstance(app, FastAPI)
     Instrumentator(
         should_group_status_codes=False,
         should_ignore_untemplated=False,
