@@ -43,6 +43,7 @@ from app.api import (
 from app.auth import PermissionDenied
 from app.auth.deps import CurrentUserMiddleware
 import app.config as _app_config
+from app.metrics import setup_prometheus
 from app.mcp_server import pubsub as mcp_pubsub
 from app.models._helpers import ErrorResponse, QueueFullErrorResponse, RequestError
 from app.tasks.queues import QueueFullError
@@ -186,4 +187,5 @@ def create_app() -> FastAPI:
     app.include_router(chat.router, prefix="/api/chat")
     app.include_router(mcp_server.router, prefix="/api/mcp")
     app.include_router(auth.router, prefix="/api/auth")
+    setup_prometheus(app)
     return app
