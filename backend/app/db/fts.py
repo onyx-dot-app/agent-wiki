@@ -46,16 +46,22 @@ class SearchHit(BaseModel):
 
 
 def _make_client(url: str) -> object:
+    import re
     from opensearchpy import OpenSearch  # type: ignore[import-untyped]
 
-    parsed = urlparse(url)
-    use_ssl = parsed.scheme == "https"
-    try:
-        port = parsed.port or (443 if use_ssl else 9200)
-    except ValueError:
-        # URL has special chars in password that break port parsing; use default
-        port = 443 if use_ssl else 9200
-    host = {"host": parsed.hostname or "localhost", "port": port}
+    # urlparse mishandles passwords with special chars (e.g. '?') — use regex instead.
+    m = re.match(
+        r"(?P<scheme>https?)://"
+        r"(?:(?P<user>[^:@]+):(?P<password>.+)@)?"
+        r"(?P<host>[^:@/?]+)"
+        r"(?::(?P<port>\d+))?",
+        url,
+    )
+    if not m:
+        raise ValueError(f"Cannot parse OpenSearch URL: {url!r}")
+    use_ssl = m.group("scheme") == "https"
+    port = int(m.group("port")) if m.group("port") else (443 if use_ssl else 9200)
+    host = {"host": m.group("host"), "port": port}
 
     kwargs: dict[str, object] = {
         "hosts": [host],
@@ -64,8 +70,8 @@ def _make_client(url: str) -> object:
         "ssl_show_warn": False,
         "http_compress": True,
     }
-    if parsed.username:
-        kwargs["http_auth"] = (parsed.username, parsed.password or "")
+    if m.group("user"):
+        kwargs["http_auth"] = (m.group("user"), m.group("password") or "")
 
     return OpenSearch(**kwargs)  # type: ignore[arg-type]
 
