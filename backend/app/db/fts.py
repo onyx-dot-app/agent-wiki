@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import logging
 import threading
-from urllib.parse import urlparse
 
 from pydantic import BaseModel
 
