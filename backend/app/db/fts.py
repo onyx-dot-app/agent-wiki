@@ -50,7 +50,11 @@ def _make_client(url: str) -> object:
 
     parsed = urlparse(url)
     use_ssl = parsed.scheme == "https"
-    port = parsed.port or (443 if use_ssl else 9200)
+    try:
+        port = parsed.port or (443 if use_ssl else 9200)
+    except ValueError:
+        # URL has special chars in password that break port parsing; use default
+        port = 443 if use_ssl else 9200
     host = {"host": parsed.hostname or "localhost", "port": port}
 
     kwargs: dict[str, object] = {
