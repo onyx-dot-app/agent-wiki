@@ -6,73 +6,6 @@
     {
       "collapsed": false,
       "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0},
-      "id": 100,
-      "title": "HTTP",
-      "type": "row"
-    },
-    {
-      "datasource": {"type": "prometheus", "uid": "${datasource}"},
-      "fieldConfig": {
-        "defaults": {
-          "color": {"mode": "palette-classic"},
-          "custom": {"drawStyle": "line", "fillOpacity": 10, "lineWidth": 2},
-          "unit": "reqps"
-        },
-        "overrides": []
-      },
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 1},
-      "id": 1,
-      "options": {
-        "legend": {"calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom"},
-        "tooltip": {"mode": "multi", "sort": "desc"}
-      },
-      "targets": [
-        {
-          "datasource": {"type": "prometheus", "uid": "${datasource}"},
-          "expr": "sum(rate(http_requests_total[5m])) by (handler)",
-          "legendFormat": "{{handler}}",
-          "refId": "A"
-        }
-      ],
-      "title": "Request Rate",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {"type": "prometheus", "uid": "${datasource}"},
-      "fieldConfig": {
-        "defaults": {
-          "color": {"mode": "palette-classic"},
-          "custom": {"drawStyle": "line", "fillOpacity": 10, "lineWidth": 2},
-          "unit": "s"
-        },
-        "overrides": []
-      },
-      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 1},
-      "id": 2,
-      "options": {
-        "legend": {"calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom"},
-        "tooltip": {"mode": "multi", "sort": "desc"}
-      },
-      "targets": [
-        {
-          "datasource": {"type": "prometheus", "uid": "${datasource}"},
-          "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, handler))",
-          "legendFormat": "p95 {{handler}}",
-          "refId": "A"
-        },
-        {
-          "datasource": {"type": "prometheus", "uid": "${datasource}"},
-          "expr": "histogram_quantile(0.50, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, handler))",
-          "legendFormat": "p50 {{handler}}",
-          "refId": "B"
-        }
-      ],
-      "title": "HTTP Latency (p50 / p95)",
-      "type": "timeseries"
-    },
-    {
-      "collapsed": false,
-      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 9},
       "id": 101,
       "title": "Ingest Pipeline",
       "type": "row"
@@ -93,7 +26,7 @@
           "unit": "short"
         }
       },
-      "gridPos": {"h": 4, "w": 4, "x": 0, "y": 10},
+      "gridPos": {"h": 4, "w": 4, "x": 0, "y": 1},
       "id": 3,
       "options": {
         "colorMode": "background",
@@ -121,7 +54,7 @@
         },
         "overrides": []
       },
-      "gridPos": {"h": 8, "w": 10, "x": 4, "y": 10},
+      "gridPos": {"h": 8, "w": 10, "x": 4, "y": 1},
       "id": 4,
       "options": {
         "legend": {"calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom"},
@@ -153,7 +86,7 @@
         },
         "overrides": []
       },
-      "gridPos": {"h": 8, "w": 10, "x": 14, "y": 10},
+      "gridPos": {"h": 8, "w": 10, "x": 14, "y": 1},
       "id": 5,
       "options": {
         "legend": {"calcs": ["mean"], "displayMode": "table", "placement": "bottom"},
@@ -172,7 +105,7 @@
     },
     {
       "collapsed": false,
-      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 18},
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 9},
       "id": 102,
       "title": "BM25 & LLM",
       "type": "row"
@@ -187,7 +120,7 @@
         },
         "overrides": []
       },
-      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 19},
+      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 10},
       "id": 6,
       "options": {
         "legend": {"calcs": ["mean"], "displayMode": "table", "placement": "bottom"},
@@ -220,7 +153,7 @@
         },
         "overrides": []
       },
-      "gridPos": {"h": 8, "w": 8, "x": 8, "y": 19},
+      "gridPos": {"h": 8, "w": 8, "x": 8, "y": 10},
       "id": 7,
       "options": {
         "legend": {"calcs": ["mean"], "displayMode": "table", "placement": "bottom"},
@@ -253,7 +186,7 @@
         },
         "overrides": []
       },
-      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 19},
+      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 10},
       "id": 8,
       "options": {
         "legend": {"calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom"},
@@ -298,7 +231,7 @@
   "time": {"from": "now-6h", "to": "now"},
   "timepicker": {},
   "timezone": "browser",
-  "title": "Agent Wiki",
-  "uid": "agent-wiki-overview",
+  "title": "Agent Wiki - Ingestion",
+  "uid": "agent-wiki-ingestion",
   "version": 1
 }
