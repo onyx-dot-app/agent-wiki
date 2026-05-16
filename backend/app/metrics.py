@@ -55,6 +55,12 @@ ingest_llm_duration_seconds = Histogram(
     buckets=[0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0],
 )
 
+ingest_llm_calls_per_doc = Histogram(
+    "ingest_llm_calls_per_doc",
+    "Number of LLM calls made per document ingestion",
+    buckets=[0, 1, 2, 3, 5, 8, 10, 15, 20],
+)
+
 ingest_queue_depth = Gauge(
     "ingest_queue_depth",
     "Current number of pending tasks in the documents queue",
