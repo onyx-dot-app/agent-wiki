@@ -32,8 +32,11 @@ def test_base_tools_resolve():
 
 
 def test_load_skill_spec_lists_skills_in_enum():
-    enum = skill_registry.LOAD_SKILL_SPEC["input_schema"]["properties"]["name"]["enum"]
-    assert set(enum) == set(skill_registry.SKILLS.keys())
+    enum = skill_registry.build_load_skill_spec()["input_schema"]["properties"]["name"]["enum"]
+    # Skills with no available tools (e.g. web_search without keys) are
+    # hidden, so the enum is a subset of all registered skills.
+    assert set(enum).issubset(set(skill_registry.SKILLS.keys()))
+    assert set(enum), "at least one skill should always be available"
 
 
 def test_load_skill_handler_returns_instructions():

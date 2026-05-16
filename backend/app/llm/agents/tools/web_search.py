@@ -10,11 +10,20 @@ import logging
 from typing import Any
 
 from app import web
+from app.web import settings as web_settings
 
 log = logging.getLogger(__name__)
 
 DEFAULT_NUM = 10
 MAX_NUM = 20
+
+
+def available() -> bool:
+    """True iff a Serper API key is configured. Without it the tool would
+    surface ``WebProviderNotConfigured`` to the model — better to omit it
+    from the advertised tool list entirely.
+    """
+    return bool(web_settings.get().serper_api_key)
 
 
 def handle(args: dict[str, Any]) -> Any:
