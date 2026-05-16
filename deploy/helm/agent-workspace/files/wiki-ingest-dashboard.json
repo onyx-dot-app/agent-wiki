@@ -36,13 +36,21 @@
       "targets": [
         {
           "datasource": {"type": "prometheus", "uid": "${datasource}"},
-          "expr": "ingest_queue_depth",
+          "expr": "sum(ingest_queue_depth{job=\"agent-wiki-agent-workspace-backend\"})",
           "legendFormat": "Queue Depth",
           "refId": "A"
         }
       ],
       "title": "Ingest Queue Depth",
       "type": "stat"
+    },
+    {
+      "gridPos": {"h": 4, "w": 20, "x": 4, "y": 1},
+      "id": 11,
+      "options": {"content": "", "mode": "markdown"},
+      "title": "",
+      "transparent": true,
+      "type": "text"
     },
     {
       "datasource": {"type": "prometheus", "uid": "${datasource}"},
@@ -54,7 +62,7 @@
         },
         "overrides": []
       },
-      "gridPos": {"h": 8, "w": 10, "x": 4, "y": 1},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 5},
       "id": 4,
       "options": {
         "legend": {"calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom"},
@@ -86,7 +94,7 @@
         },
         "overrides": []
       },
-      "gridPos": {"h": 8, "w": 10, "x": 14, "y": 1},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 5},
       "id": 5,
       "options": {
         "legend": {"calcs": ["mean"], "displayMode": "table", "placement": "bottom"},
@@ -100,12 +108,40 @@
           "refId": "A"
         }
       ],
-      "title": "Ingest Outcomes",
+      "title": "Ingest Outcomes (rate)",
       "type": "timeseries"
     },
     {
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 13},
+      "id": 9,
+      "options": {
+        "displayLabels": ["percent"],
+        "legend": {"displayMode": "table", "placement": "right", "values": ["value", "percent"]},
+        "pieType": "donut",
+        "tooltip": {"mode": "single"}
+      },
+      "targets": [
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "expr": "sum(ingest_outcomes_total) by (outcome)",
+          "legendFormat": "{{outcome}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Ingest Outcomes (total breakdown)",
+      "type": "piechart"
+    },
+    {
       "collapsed": false,
-      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 9},
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 21},
       "id": 102,
       "title": "BM25 & LLM",
       "type": "row"
@@ -114,67 +150,115 @@
       "datasource": {"type": "prometheus", "uid": "${datasource}"},
       "fieldConfig": {
         "defaults": {
-          "color": {"mode": "palette-classic"},
-          "custom": {"drawStyle": "line", "fillOpacity": 10, "lineWidth": 2},
-          "unit": "short"
+          "color": {"mode": "scheme"},
+          "custom": {
+            "fillOpacity": 80,
+            "hideFrom": {"legend": false, "tooltip": false, "viz": false},
+            "scaleDistribution": {"type": "linear"}
+          }
         },
         "overrides": []
       },
-      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 10},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 13},
       "id": 6,
       "options": {
-        "legend": {"calcs": ["mean"], "displayMode": "table", "placement": "bottom"},
-        "tooltip": {"mode": "multi", "sort": "desc"}
+        "calculate": false,
+        "cellGap": 1,
+        "color": {"exponent": 0.5, "fill": "dark-orange", "mode": "scheme", "reverse": false, "scale": "exponential", "scheme": "Oranges", "steps": 64},
+        "exemplars": {"color": "rgba(255,0,255,0.7)"},
+        "filterValues": {"le": 1e-9},
+        "legend": {"show": true},
+        "rowsFrame": {"layout": "auto"},
+        "tooltip": {"mode": "single", "showColorScale": false, "yHistogram": false},
+        "yAxis": {"axisLabel": "BM25 score", "axisPlacement": "left", "unit": "short"}
       },
       "targets": [
         {
           "datasource": {"type": "prometheus", "uid": "${datasource}"},
-          "expr": "histogram_quantile(0.95, sum(rate(ingest_bm25_score_bucket[5m])) by (le))",
-          "legendFormat": "p95",
+          "expr": "sum(rate(ingest_bm25_score_bucket[5m])) by (le)",
+          "format": "heatmap",
+          "legendFormat": "{{le}}",
           "refId": "A"
-        },
-        {
-          "datasource": {"type": "prometheus", "uid": "${datasource}"},
-          "expr": "histogram_quantile(0.50, sum(rate(ingest_bm25_score_bucket[5m])) by (le))",
-          "legendFormat": "p50",
-          "refId": "B"
         }
       ],
-      "title": "BM25 Score (p50 / p95)",
-      "type": "timeseries"
+      "title": "BM25 Score Distribution",
+      "type": "heatmap"
     },
     {
       "datasource": {"type": "prometheus", "uid": "${datasource}"},
       "fieldConfig": {
         "defaults": {
-          "color": {"mode": "palette-classic"},
-          "custom": {"drawStyle": "line", "fillOpacity": 10, "lineWidth": 2},
-          "unit": "short"
+          "color": {"mode": "scheme"},
+          "custom": {
+            "fillOpacity": 80,
+            "hideFrom": {"legend": false, "tooltip": false, "viz": false},
+            "scaleDistribution": {"type": "linear"}
+          }
         },
         "overrides": []
       },
-      "gridPos": {"h": 8, "w": 8, "x": 8, "y": 10},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 22},
       "id": 7,
       "options": {
-        "legend": {"calcs": ["mean"], "displayMode": "table", "placement": "bottom"},
-        "tooltip": {"mode": "multi", "sort": "desc"}
+        "calculate": false,
+        "cellGap": 1,
+        "color": {"exponent": 0.5, "fill": "dark-blue", "mode": "scheme", "reverse": false, "scale": "exponential", "scheme": "Blues", "steps": 64},
+        "exemplars": {"color": "rgba(255,0,255,0.7)"},
+        "filterValues": {"le": 1e-9},
+        "legend": {"show": true},
+        "rowsFrame": {"layout": "auto"},
+        "tooltip": {"mode": "single", "showColorScale": false, "yHistogram": false},
+        "yAxis": {"axisLabel": "# docs hit", "axisPlacement": "left", "unit": "short"}
       },
       "targets": [
         {
           "datasource": {"type": "prometheus", "uid": "${datasource}"},
-          "expr": "rate(ingest_bm25_hits_sum[5m]) / rate(ingest_bm25_hits_count[5m])",
-          "legendFormat": "avg hits",
+          "expr": "sum(rate(ingest_bm25_hits_bucket[5m])) by (le)",
+          "format": "heatmap",
+          "legendFormat": "{{le}}",
           "refId": "A"
-        },
-        {
-          "datasource": {"type": "prometheus", "uid": "${datasource}"},
-          "expr": "rate(ingest_bm25_passed_sum[5m]) / rate(ingest_bm25_passed_count[5m])",
-          "legendFormat": "avg passed",
-          "refId": "B"
         }
       ],
-      "title": "Avg BM25 Hits vs Passed",
-      "type": "timeseries"
+      "title": "BM25 Hits Distribution",
+      "type": "heatmap"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "scheme"},
+          "custom": {
+            "fillOpacity": 80,
+            "hideFrom": {"legend": false, "tooltip": false, "viz": false},
+            "scaleDistribution": {"type": "linear"}
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 22},
+      "id": 10,
+      "options": {
+        "calculate": false,
+        "cellGap": 1,
+        "color": {"exponent": 0.5, "fill": "dark-green", "mode": "scheme", "reverse": false, "scale": "exponential", "scheme": "Greens", "steps": 64},
+        "exemplars": {"color": "rgba(255,0,255,0.7)"},
+        "filterValues": {"le": 1e-9},
+        "legend": {"show": true},
+        "rowsFrame": {"layout": "auto"},
+        "tooltip": {"mode": "single", "showColorScale": false, "yHistogram": false},
+        "yAxis": {"axisLabel": "# docs passed", "axisPlacement": "left", "unit": "short"}
+      },
+      "targets": [
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "expr": "sum(rate(ingest_bm25_passed_bucket[5m])) by (le)",
+          "format": "heatmap",
+          "legendFormat": "{{le}}",
+          "refId": "A"
+        }
+      ],
+      "title": "BM25 Passed Distribution",
+      "type": "heatmap"
     },
     {
       "datasource": {"type": "prometheus", "uid": "${datasource}"},
@@ -186,7 +270,7 @@
         },
         "overrides": []
       },
-      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 10},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 30},
       "id": 8,
       "options": {
         "legend": {"calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom"},
@@ -208,6 +292,73 @@
       ],
       "title": "LLM Duration (p50 / p95)",
       "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": {"drawStyle": "line", "fillOpacity": 10, "lineWidth": 2},
+          "max": 1,
+          "min": 0,
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 30},
+      "id": 12,
+      "options": {
+        "legend": {"calcs": ["mean", "last"], "displayMode": "table", "placement": "bottom"},
+        "tooltip": {"mode": "single"}
+      },
+      "targets": [
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "expr": "sum(rate(ingest_bm25_passed_sum[5m])) / sum(rate(ingest_bm25_hits_sum[5m]))",
+          "legendFormat": "pass rate",
+          "refId": "A"
+        }
+      ],
+      "title": "BM25 Pass Rate (passed / hits)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "scheme"},
+          "custom": {
+            "fillOpacity": 80,
+            "hideFrom": {"legend": false, "tooltip": false, "viz": false},
+            "scaleDistribution": {"type": "linear"}
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 38},
+      "id": 13,
+      "options": {
+        "calculate": false,
+        "cellGap": 1,
+        "color": {"exponent": 0.5, "fill": "dark-purple", "mode": "scheme", "reverse": false, "scale": "exponential", "scheme": "Purples", "steps": 64},
+        "exemplars": {"color": "rgba(255,0,255,0.7)"},
+        "filterValues": {"le": 1e-9},
+        "legend": {"show": true},
+        "rowsFrame": {"layout": "auto"},
+        "tooltip": {"mode": "single", "showColorScale": false, "yHistogram": false},
+        "yAxis": {"axisLabel": "LLM calls", "axisPlacement": "left", "unit": "short"}
+      },
+      "targets": [
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "expr": "sum(rate(ingest_llm_calls_per_doc_bucket[5m])) by (le)",
+          "format": "heatmap",
+          "legendFormat": "{{le}}",
+          "refId": "A"
+        }
+      ],
+      "title": "LLM Calls per Document",
+      "type": "heatmap"
     }
   ],
   "refresh": "30s",

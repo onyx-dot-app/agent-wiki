@@ -31,6 +31,7 @@ from app.llm.agents.wiki_updater import IRRELEVANT_SENTINEL
 from app.llm.agents.tools import _doc_helpers as h
 from app.llm.errors import LLMError
 from app.metrics import (
+    ingest_llm_calls_per_doc,
     ingest_llm_duration_seconds,
     ingest_outcomes_total,
     ingest_queue_depth,
@@ -321,6 +322,7 @@ def process_pushed_document(push: dict[str, Any]) -> None:
             else:
                 ingest_outcomes_total.labels(outcome="no_change").inc()
 
+    ingest_llm_calls_per_doc.observe(llm_calls)
     log.info(
         "process_pushed_document: done doc_id=%s source_type=%s candidates=%d "
         "llm_calls=%d committed=%d irrelevant=%d stopped_early=%s duration_ms=%d",

@@ -146,7 +146,7 @@
   "time": {"from": "now-6h", "to": "now"},
   "timepicker": {},
   "timezone": "browser",
-  "title": "Agent Wiki - HTTP",
+  "title": "Agent Wiki - Traffic",
   "uid": "agent-wiki-http",
   "version": 1
 }

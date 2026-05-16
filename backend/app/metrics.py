@@ -40,7 +40,7 @@ ingest_bm25_passed = Histogram(
 ingest_bm25_score = Histogram(
     "ingest_bm25_score",
     "Raw BM25 score for each candidate before threshold filtering",
-    buckets=[0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 50.0],
+    buckets=[0.5, 1.0, 5.0, 10.0, 20.0, 30.0, 50.0, 75.0, 100.0, 150.0, 200.0],
 )
 
 ingest_outcomes_total = Counter(
@@ -53,6 +53,12 @@ ingest_llm_duration_seconds = Histogram(
     "ingest_llm_duration_seconds",
     "LLM call duration per wiki page reconciliation",
     buckets=[0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0],
+)
+
+ingest_llm_calls_per_doc = Histogram(
+    "ingest_llm_calls_per_doc",
+    "Number of LLM calls made per document ingestion",
+    buckets=[0, 1, 2, 3, 5, 8, 10, 15, 20],
 )
 
 ingest_queue_depth = Gauge(
