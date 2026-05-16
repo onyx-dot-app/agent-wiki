@@ -17,10 +17,22 @@ Agent wiki provides a git backed file system made up of `.md` files that can rec
 ### Automatic Updates
 The wiki is kept up to date via 3 different pathways:
 - Agents can connect via MCP and use information from the wiki and push updates to it as it completes tasks.
-- External systems can push documents (or document updates) to the wiki via API and a built-in agent will find the right pages to update and makes the modifications.
-- Human users can directly edit the pages.
+- External systems can push information/documents to the wiki via API and a built-in agent will find the right pages and make the updates.
+- Human users can directly edit the wiki.
 
 ### Triggers
 The wiki changes constantly, but most updates aren't interesting to most people. Triggers let a user say, in plain English, what they care about — "fire when this project's status flips from green to yellow", "fire when a new design doc lands under `projects/`" — scoped to a specific file or directory. Every commit under the scope is evaluated by an LLM against the description; on a match, a second LLM pass renders the owner's notification template into a concrete message about what actually changed.
 
 Events land in an event log and can also be delivered to third-party systems — the wiki can call an API on fire, apps can poll the log, or a webhook can push events as they happen. The same trigger that surfaces "status flipped to yellow" in your feed can also page an on-call channel or kick off a downstream agent/workflow.
+
+## Deployment
+
+Run Agent Wiki with a single command:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/onyx-dot-app/agent-wiki/main/install.sh | bash
+```
+
+Or clone the repo and run `docker compose up -d` yourself. Either way, open `http://localhost:8090`, sign up to claim admin, and you're in.
+
+Kubernetes (Helm + optional Terraform for EKS) is also supported — see [`deploy/README.md`](deploy/README.md).
