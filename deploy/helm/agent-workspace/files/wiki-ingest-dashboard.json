@@ -26,7 +26,7 @@
           "unit": "short"
         }
       },
-      "gridPos": {"h": 4, "w": 4, "x": 0, "y": 1},
+      "gridPos": {"h": 4, "w": 24, "x": 0, "y": 1},
       "id": 3,
       "options": {
         "colorMode": "background",
@@ -54,7 +54,7 @@
         },
         "overrides": []
       },
-      "gridPos": {"h": 8, "w": 10, "x": 4, "y": 1},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 5},
       "id": 4,
       "options": {
         "legend": {"calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom"},
@@ -86,7 +86,7 @@
         },
         "overrides": []
       },
-      "gridPos": {"h": 8, "w": 10, "x": 14, "y": 1},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 5},
       "id": 5,
       "options": {
         "legend": {"calcs": ["mean"], "displayMode": "table", "placement": "bottom"},
@@ -112,7 +112,7 @@
         },
         "overrides": []
       },
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 9},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 13},
       "id": 9,
       "options": {
         "displayLabels": ["percent"],
@@ -133,7 +133,7 @@
     },
     {
       "collapsed": false,
-      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 17},
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 21},
       "id": 102,
       "title": "BM25 & LLM",
       "type": "row"
@@ -151,7 +151,7 @@
         },
         "overrides": []
       },
-      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 9},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 13},
       "id": 6,
       "options": {
         "calculate": false,
@@ -189,7 +189,7 @@
         },
         "overrides": []
       },
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 18},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 22},
       "id": 7,
       "options": {
         "calculate": false,
@@ -227,7 +227,7 @@
         },
         "overrides": []
       },
-      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 18},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 22},
       "id": 10,
       "options": {
         "calculate": false,
@@ -262,7 +262,7 @@
         },
         "overrides": []
       },
-      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 26},
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 30},
       "id": 8,
       "options": {
         "legend": {"calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom"},
