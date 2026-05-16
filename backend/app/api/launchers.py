@@ -10,8 +10,7 @@ Routes mounted under ``/api`` from ``app.main:create_app``:
 
 All gated by ``CONFIG.launchers_enabled``.
 
-See ``local_data/wiki/Wiki Project/Specific Features/coding_tool_launchers/design.md``
-+ ``implementation_plans/phase_1_backend.md`` (incl. AF / R-audit fix sections).
+See ``local_data/wiki/Wiki Project/Specific Features/coding_tool_launchers/design.md``.
 """
 
 from __future__ import annotations
@@ -116,9 +115,7 @@ def get_catalog(
 # --------------------------------------------------------------------------- #
 
 
-def _maybe_read_page_body(
-    wiki_path: str, user: User
-) -> tuple[str, str | None, list[str]]:
+def _maybe_read_page_body(wiki_path: str, user: User) -> tuple[str, str | None, list[str]]:
     """Read page body + parse linked_repos. ACL-gated and
     traversal-protected . Returns ``(body, repos)`` or
     ``(None, [])`` if the file doesn't exist (acceptable — the wizard
@@ -150,7 +147,7 @@ def post_launch(
     if manifest is None:
         raise HTTPException(status_code=404, detail=f"unknown tool_id {req.tool_id!r}")
     if manifest.kind != "local_cli":
-        # in_app routes through /api/craft/launch ( — not yet shipped).
+        # in_app routes through /api/craft/launch (not yet shipped).
         raise HTTPException(
             status_code=400,
             detail=f"tool {req.tool_id!r} kind={manifest.kind!r} not supported here",

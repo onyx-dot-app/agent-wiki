@@ -6,16 +6,20 @@ for the full spec.
 
 This module defines pydantic models + enforces DSL rules:
 
-- No ``${token}`` in ``launch.argv`` / ``resume.argv`` .
-- No ``${first_turn_prompt}`` anywhere ( / ).
-- No ``${prompt_file_path}`` in ``resume.*`` .
+- No ``${token}`` in ``launch.argv`` / ``resume.argv`` — the token
+  reaches the helper via the ``AGENTWIKI_MCP_TOKEN`` env var, not the
+  command line, so it doesn't surface in ``ps`` output.
+- No ``${first_turn_prompt}`` anywhere — the helper materializes a
+  tmpfile and the manifest references it via ``${prompt_file_path}``.
+- No ``${prompt_file_path}`` in ``resume.*`` — the prompt tmpfile is
+  first-turn only.
 - No unknown ``${var}`` interpolation tokens.
-- Manifest size cap at registry load .
+- Manifest size cap at registry load.
 
-The helper enforces the hardcoded **binary allow-list** (closing the
-RCE hole — ); the backend does NOT enforce it because the
-manifests are git-tracked and reviewed at commit time. The validator
-here ensures the manifests are well-formed.
+The helper enforces the hardcoded **binary allow-list**; the backend
+does NOT enforce it because the manifests are git-tracked and
+reviewed at commit time. The validator here ensures the manifests are
+well-formed.
 """
 
 from __future__ import annotations
@@ -47,7 +51,7 @@ _ALLOWED_VARS = frozenset(
 
 _VAR_RE = re.compile(r"\$\{([a-z_]+)\}")
 
-_MAX_MANIFEST_BYTES = 64 * 1024 # DoS guard at registry load
+_MAX_MANIFEST_BYTES = 64 * 1024  # DoS guard at registry load
 
 
 def _find_vars(s: str) -> set[str]:

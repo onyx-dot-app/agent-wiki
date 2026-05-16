@@ -1,8 +1,7 @@
 """Repo for ``page_working_dirs`` — per-(user, machine, page) working-dir binding.
 
 The composite PK includes ``machine_id`` because the same user has
-different local checkout paths on different laptops/desktops (
-fix #5).
+different local checkout paths on different laptops/desktops.
 """
 
 from __future__ import annotations

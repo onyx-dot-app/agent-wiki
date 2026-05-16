@@ -3,15 +3,15 @@
 Runs on ``lightweight_maintenance_queue`` — sub-second, no LLM, no
 external HTTP, no wiki commits.
 
-Three actions per tick:
+Four actions per tick:
 
 1. Delete expired ``launch_codes`` rows.
 2. Mark ``active`` sessions whose ``last_activity_at`` is older than
    ``CONFIG.agent_session_idle_seconds`` as ``idle``.
 3. Mark ``idle`` sessions older than
    ``CONFIG.agent_session_close_after_idle_seconds`` as ``closed``.
-4. — mark ``active`` sessions that never reported ``spawn_ok``
-   within 30s as ``failed`` (helper crashed mid-spawn).
+4. Mark ``active`` sessions that never reported ``spawn_ok`` within
+   30s as ``failed`` (helper crashed mid-spawn).
 """
 
 from __future__ import annotations

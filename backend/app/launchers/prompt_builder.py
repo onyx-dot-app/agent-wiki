@@ -4,8 +4,8 @@ First-turn only — never replayed on resume (the CLI already has its
 conversation). Persisted to ``agent_sessions.first_turn_prompt`` so
 debug + audit can see exactly what the agent originally saw.
 
-Total prompt capped at ~256KB to stay under ARG_MAX and avoid pathological
-page-body sizes ( audit fix). When the body would push us over the
+Total prompt capped at ~256KB to stay under ARG_MAX and avoid
+pathological page-body sizes. When the body would push us over the
 cap, the body itself is truncated with an explicit ``[truncated]``
 marker so headers + user message survive intact.
 """

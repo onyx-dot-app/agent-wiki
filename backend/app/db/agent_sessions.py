@@ -2,9 +2,8 @@
 
 See ``local_data/wiki/Wiki Project/Specific Features/coding_tool_launchers/design.md``.
 
-Idle / close thresholds read from ``CONFIG.*`` ( audit fix).
-Heartbeat / activity-touch refuses to update closed/failed sessions
-( audit fix).
+Idle / close thresholds read from ``CONFIG.*``. Heartbeat /
+activity-touch refuses to update closed/failed sessions.
 """
 
 from __future__ import annotations
@@ -50,8 +49,8 @@ def _to_dict(row: AgentSession) -> dict[str, Any]:
 
 
 def _to_summary(row: AgentSession) -> dict[str, Any]:
-    """Same shape as ``_to_dict`` minus ``first_turn_prompt`` (
-    defense-in-depth — keep page bodies out of list responses)."""
+    """Same shape as ``_to_dict`` minus ``first_turn_prompt`` —
+    defense-in-depth keeps page bodies out of list responses."""
     d = _to_dict(row)
     d.pop("first_turn_prompt", None)
     return d
@@ -140,7 +139,7 @@ def mark_active(sid: str, *, machine_id: str) -> None:
                 AgentSession.id == sid,
                 AgentSession.status == "pending",
             )
-            .values(status="active", machine_id=machine_id, last_activity_at=now)
+            .values(status="active", machine_id=machine_id, last_activity_at=now),
         )
     if updated == 0:
         log.info("agent_session mark_active ignored id=%s (status not pending)", sid)
@@ -156,8 +155,8 @@ def set_cli_session_id(sid: str, cli_session_id: str) -> None:
 
 
 def mark_spawn_ok(sid: str) -> None:
-    """Helper POSTs immediately after handing the spawn off to Terminal.app
-    (Phase 3 / ). Sweep watches for this — if it never arrives, the
+    """Helper POSTs immediately after handing the spawn off to
+    Terminal.app. Sweep watches for this — if it never arrives, the
     session is marked ``failed`` 30s post-exchange.
     """
     now = _now_iso()
@@ -171,7 +170,7 @@ def mark_spawn_ok(sid: str) -> None:
 
 def touch_activity(sid: str) -> None:
     """Bump ``last_activity_at`` — refuses to resurrect closed/failed
-    sessions ."""
+    sessions."""
     with session() as s:
         s.execute(
             update(AgentSession)

@@ -2,8 +2,9 @@
 
 See ``local_data/wiki/Wiki Project/Specific Features/coding_tool_launchers/design.md``.
 
-TTL is read from ``CONFIG.launch_code_ttl_seconds`` ( audit fix) so
-ops can bump it without code change ( — Windows cold starts).
+TTL is read from ``CONFIG.launch_code_ttl_seconds`` so ops can bump it
+without a code change (Windows cold starts have been the motivating
+case).
 """
 
 from __future__ import annotations
@@ -68,11 +69,7 @@ def consume(
         return None
     now_iso = _iso(datetime.now(timezone.utc))
     with session() as s:
-        row = s.scalar(
-            select(LaunchCode)
-            .where(LaunchCode.id == raw)
-            .with_for_update()
-        )
+        row = s.scalar(select(LaunchCode).where(LaunchCode.id == raw).with_for_update())
         if row is None:
             return None
         if row.consumed_at is not None:
