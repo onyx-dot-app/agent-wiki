@@ -122,6 +122,13 @@ def tmp_config(tmp_path, monkeypatch):
     )
     monkeypatch.setattr("app.config.CONFIG", cfg)
     monkeypatch.setattr("app.db.session.CONFIG", cfg)
+    # Launcher API modules cache `CONFIG` at import time via
+    # `from app.config import CONFIG`, so a setattr on `app.config.CONFIG`
+    # alone doesn't reach them. CI runs without LAUNCHERS_ENABLED in env
+    # (the local .env sets it to true), which is what masked this in
+    # earlier local runs.
+    monkeypatch.setattr("app.api.launchers.CONFIG", cfg)
+    monkeypatch.setattr("app.api.agent_sessions.CONFIG", cfg)
 
     # Reset the lazy OpenSearch client so it re-reads CONFIG on next use.
     from app.db import fts as _fts
