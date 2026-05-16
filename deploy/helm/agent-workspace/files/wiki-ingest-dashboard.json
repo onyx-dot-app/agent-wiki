@@ -270,7 +270,7 @@
         },
         "overrides": []
       },
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 30},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 30},
       "id": 8,
       "options": {
         "legend": {"calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom"},
@@ -305,7 +305,7 @@
         },
         "overrides": []
       },
-      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 30},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 30},
       "id": 12,
       "options": {
         "legend": {"calcs": ["mean", "last"], "displayMode": "table", "placement": "bottom"},
