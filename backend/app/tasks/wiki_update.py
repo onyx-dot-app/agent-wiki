@@ -241,7 +241,7 @@ def process_pushed_document(push: dict[str, Any]) -> None:
          - NO_CHANGE  → skip commit, reset irrelevant counter
          - IRRELEVANT → increment counter; stop when ≥ INGEST_IRRELEVANT_STOP_N
     """
-    source_type = push.get("source_type")
+    source_type = push.get("source_type") or push.get("source")
     title = push.get("title")
     content: str = push.get("content") or ""
     doc_id = push.get("source_document_id") or push.get("title") or "unknown"
