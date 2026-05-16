@@ -112,7 +112,7 @@ def test_file_activity_endpoint_includes_agent_session_id(client):
     )
     assert res.status_code == 200, res.text
 
-    activity = client.get("/api/documents/file/activity", params={"path": "x.md"})
+    activity = client.get("/api/wiki/file/activity", params={"path": "x.md"})
     assert activity.status_code == 200, activity.text
     payload = activity.json()
     assert any(a["agent_session_id"] == agent_sid for a in payload["agents"])
@@ -133,7 +133,7 @@ def test_unknown_session_id_returns_400(client):
 
 
 def test_malformed_session_id_returns_400(client):
-    """ — strict regex rejects header injection / overlong values."""
+    """— strict regex rejects header injection / overlong values."""
     init_db()
     uid = seed_user()
     _, raw = tokens_repo.create(uid, "k")
@@ -164,7 +164,7 @@ def test_session_id_not_starting_with_prefix_returns_400(client):
 
 
 def test_cross_user_session_returns_403(client):
-    """ / audit fix — bearer holder cannot stamp another user's session."""
+    """/ audit fix — bearer holder cannot stamp another user's session."""
     init_db()
     a = seed_user("usr_a", email="a@x.com")
     b = seed_user("usr_b", email="b@x.com")
