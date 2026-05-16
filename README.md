@@ -4,6 +4,8 @@
 
 **The idea: A self updating wiki and a workspace for humans and agents to collaborate efficiently. Keep projects self-consistent and coordinate updates between teams of people and agents.**
 
+![Agent Wiki](docs/images/wiki-screenshot.png)
+
 This project is designed around a few core beliefs:
 - The best document format for agent collaboration is Markdown.
 - The best representation of hierarchy is a file system.

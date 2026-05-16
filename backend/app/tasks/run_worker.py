@@ -69,6 +69,16 @@ _CONCURRENCY = {
     "lightweight_maintenance": 4,
 }
 
+# Per-queue Prometheus port. Distinct ports so all three workers can run on
+# the same host (local dev / launch.json compound) without binding the same
+# socket. In k8s each pod has its own IP, but we keep the mapping consistent
+# so the helm chart's named ``metrics`` containerPort matches the queue.
+_METRICS_PORT = {
+    "documents": 9091,
+    "triggers": 9092,
+    "lightweight_maintenance": 9093,
+}
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run a task-queue consumer for one queue.")
@@ -76,7 +86,7 @@ def main() -> None:
     args = parser.parse_args()
 
     setup_logging()
-    start_http_server(9091)
+    start_http_server(_METRICS_PORT[args.queue])
     _wait_for_db()
     queue = QUEUES[args.queue]
     concurrency = _CONCURRENCY[args.queue]
