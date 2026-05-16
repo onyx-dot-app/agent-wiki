@@ -270,7 +270,7 @@
         },
         "overrides": []
       },
-      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 30},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 30},
       "id": 8,
       "options": {
         "legend": {"calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom"},
@@ -291,6 +291,35 @@
         }
       ],
       "title": "LLM Duration (p50 / p95)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": {"drawStyle": "line", "fillOpacity": 10, "lineWidth": 2},
+          "max": 1,
+          "min": 0,
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 30},
+      "id": 12,
+      "options": {
+        "legend": {"calcs": ["mean", "last"], "displayMode": "table", "placement": "bottom"},
+        "tooltip": {"mode": "single"}
+      },
+      "targets": [
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "expr": "sum(rate(ingest_bm25_passed_sum[5m])) / sum(rate(ingest_bm25_hits_sum[5m]))",
+          "legendFormat": "pass rate",
+          "refId": "A"
+        }
+      ],
+      "title": "BM25 Pass Rate (passed / hits)",
       "type": "timeseries"
     }
   ],
