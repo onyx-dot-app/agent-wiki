@@ -65,14 +65,14 @@ def ingest_update(request: Request, req: IngestRequest) -> IngestResponse | JSON
         raise
     except Exception as exc:
         log.exception(
-            "failed to enqueue process_pushed_document source_type=%s", req.source_type,
+            "failed to enqueue process_pushed_document source=%s", req.source,
         )
         raise HTTPException(
             status_code=503, detail="failed to enqueue background task",
         ) from exc
     task_id = getattr(result, "id", None)
     log.info(
-        "ingest enqueued source_type=%s title=%s len=%d task_id=%s",
-        req.source_type, req.title, total_chars, task_id,
+        "ingest enqueued source=%s title=%s len=%d task_id=%s",
+        req.source, req.title, total_chars, task_id,
     )
     return IngestResponse(queued=True, task_id=task_id)

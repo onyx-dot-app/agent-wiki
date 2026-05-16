@@ -54,7 +54,7 @@ class IngestRequest(BaseModel):
 
     content: str = Field(min_length=1)
     title: str | None = None
-    source_type: str | None = None
+    source: str | None = None
     source_document_id: str | None = Field(default=None, alias="document_id")
     metadata: dict[str, Any] | None = None
     updated_at: str | None = None

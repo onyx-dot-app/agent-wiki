@@ -114,7 +114,7 @@ def _make_push(**kwargs: Any) -> dict[str, Any]:
     base: dict[str, Any] = {
         "content": "some content",
         "title": "Test Doc",
-        "source_type": "confluence",
+        "source": "confluence",
         "source_document_id": "doc-abc",
         "metadata": {},
     }
@@ -133,7 +133,7 @@ def _run(push: dict[str, Any]) -> None:
 @patch("app.tasks.wiki_update.ingest_search.candidates", return_value=[])
 def test_filtered_source_drops_silently(mock_search, monkeypatch):
     monkeypatch.setattr("app.ingest.source_tiers.FILTERED_SOURCES", frozenset({"git_commit"}))
-    _run(_make_push(source_type="git_commit"))
+    _run(_make_push(source="git_commit"))
     mock_search.assert_not_called()
 
 
