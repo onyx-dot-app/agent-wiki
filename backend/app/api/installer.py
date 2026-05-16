@@ -70,9 +70,12 @@ def installer_binary(request: Request, arch: str | None = None) -> Response:
 
 @router.get("/installer/script")
 def installer_script(request: Request) -> Response:
-    """Returns a shell script the user runs once. The script downloads
-    the binary from this same backend, pins the wiki endpoint, and
-    registers the macOS .app for the ``agentwiki://`` URL scheme.
+    """Returns the one-shot installer as a ``.command`` file. macOS
+    auto-runs ``.command`` files in Terminal on double-click — no
+    "right-click → Open With Terminal" needed. The script downloads
+    the binary from this same backend, strips Gatekeeper quarantine,
+    pins the wiki endpoint, and registers the macOS .app for the
+    ``agentwiki://`` URL scheme.
     """
     base = _wiki_base(request)
     # macOS arch detection inside the script — works at install time
@@ -113,12 +116,15 @@ echo "[2/4] Pinning wiki endpoint to $WIKI_URL …"
 echo "[3/4] Registering agentwiki:// URL handler …"
 "$BIN_PATH" install
 
-echo "[4/4] Done. You can close this window and click Run Agent in the wiki."
+echo ""
+echo "Done. You can close this window and click Run Agent in the wiki."
+echo ""
+read -p "Press Enter to close..." _
 """
     return Response(
         content=script,
         media_type="text/x-shellscript",
         headers={
-            "Content-Disposition": 'attachment; filename="agentwiki-installer.sh"',
+            "Content-Disposition": 'attachment; filename="agentwiki-installer.command"',
         },
     )
