@@ -230,7 +230,7 @@ def process_pushed_document(push: dict[str, Any]) -> None:
     """Reconcile a document pushed from an external system into the wiki.
 
     ``push`` is the validated payload from POST /api/wiki/ingest. Shape:
-    ``{content, title?, source_type?, source_document_id?, metadata?,
+    ``{content, title?, source?, source_document_id?, metadata?,
        updated_at?, diff?}``.
 
     Pipeline:
@@ -247,7 +247,7 @@ def process_pushed_document(push: dict[str, Any]) -> None:
     doc_id = push.get("source_document_id") or push.get("title") or "unknown"
 
     log.info(
-        "process_pushed_document source_type=%s title=%s len=%d",
+        "process_pushed_document source=%s title=%s len=%d",
         source_type, title, len(content),
     )
 
@@ -324,7 +324,7 @@ def process_pushed_document(push: dict[str, Any]) -> None:
 
     ingest_llm_calls_per_doc.observe(llm_calls)
     log.info(
-        "process_pushed_document: done doc_id=%s source_type=%s candidates=%d "
+        "process_pushed_document: done doc_id=%s source=%s candidates=%d "
         "llm_calls=%d committed=%d irrelevant=%d stopped_early=%s duration_ms=%d",
         doc_id, source_type, len(hits),
         llm_calls, committed, irrelevant, stopped_early,
