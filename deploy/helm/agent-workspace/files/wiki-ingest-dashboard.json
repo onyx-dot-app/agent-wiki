@@ -335,7 +335,7 @@
         },
         "overrides": []
       },
-      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 38},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 38},
       "id": 13,
       "options": {
         "calculate": false,
@@ -359,6 +359,33 @@
       ],
       "title": "LLM Calls per Document",
       "type": "heatmap"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": {"drawStyle": "line", "fillOpacity": 10, "lineWidth": 2},
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 38},
+      "id": 14,
+      "options": {
+        "legend": {"calcs": ["last", "max"], "displayMode": "table", "placement": "bottom"},
+        "tooltip": {"mode": "single"}
+      },
+      "targets": [
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "expr": "increase(ingest_llm_duration_seconds_count[1h])",
+          "legendFormat": "LLM calls (1h)",
+          "refId": "A"
+        }
+      ],
+      "title": "Total LLM Calls (rolling 1h)",
+      "type": "timeseries"
     }
   ],
   "refresh": "30s",
