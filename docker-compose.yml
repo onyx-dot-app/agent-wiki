@@ -142,7 +142,7 @@ services:
   nginx:
     build: ./nginx
     ports:
-      - "8082:80"
+      - "8090:80"
     depends_on:
       - backend
       - frontend
