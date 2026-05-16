@@ -11,10 +11,16 @@ import logging
 from typing import Any, cast
 
 from app import web
+from app.web import settings as web_settings
 
 log = logging.getLogger(__name__)
 
 MAX_URLS = 10
+
+
+def available() -> bool:
+    """True iff a Firecrawl API key is configured."""
+    return bool(web_settings.get().firecrawl_api_key)
 
 
 def handle(args: dict[str, Any]) -> Any:

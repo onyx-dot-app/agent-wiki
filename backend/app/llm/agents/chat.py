@@ -229,7 +229,7 @@ def _chat_tools_for_turn(messages: list[Message]) -> list[dict[str, Any]]:
     """Per-turn tool list for the chat agent: base + load_skill + active skills."""
     return [
         *skill_registry.base_tool_specs(),
-        skill_registry.LOAD_SKILL_SPEC,
+        skill_registry.build_load_skill_spec(),
         *skill_registry.specs_for_active_skills(skill_registry.active_skills(messages)),
     ]
 

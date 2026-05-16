@@ -83,8 +83,29 @@ SKILLS: dict[str, Skill] = {
 }
 
 
-def _build_load_skill_spec() -> dict[str, Any]:
-    bullets = "\n".join(f"- {s.name}: {s.description}" for s in SKILLS.values())
+def _available_skill_names() -> list[str]:
+    """Skill names that currently have at least one runnable tool.
+
+    A skill whose tools are *all* unavailable (e.g. ``web_search`` with no
+    Serper/Firecrawl key) is hidden from ``load_skill`` so the model can't
+    pick something that would unlock no tools.
+    """
+    out: list[str] = []
+    for skill in SKILLS.values():
+        if any(tool_registry.is_available(t) for t in skill.tool_names):
+            out.append(skill.name)
+    return out
+
+
+def build_load_skill_spec() -> dict[str, Any]:
+    """Build the ``load_skill`` meta-tool spec from currently-available skills.
+
+    Called per turn instead of cached at import — availability can change
+    when the admin updates provider keys at runtime, and we want the next
+    request to reflect that without a process restart.
+    """
+    visible = _available_skill_names()
+    bullets = "\n".join(f"- {SKILLS[n].name}: {SKILLS[n].description}" for n in visible)
     return {
         "name": LOAD_SKILL_TOOL_NAME,
         "description": (
@@ -97,7 +118,7 @@ def _build_load_skill_spec() -> dict[str, Any]:
             "properties": {
                 "name": {
                     "type": "string",
-                    "enum": list(SKILLS.keys()),
+                    "enum": visible,
                 }
             },
             "required": ["name"],
@@ -105,14 +126,12 @@ def _build_load_skill_spec() -> dict[str, Any]:
     }
 
 
-LOAD_SKILL_SPEC: dict[str, Any] = _build_load_skill_spec()
-
-
 def _validate_registry() -> None:
     """Check at import time that every referenced tool exists.
 
     Raising here gives a loud failure on a typo'd tool name instead of a
-    confusing runtime ``unknown tool`` later.
+    confusing runtime ``unknown tool`` later. Availability is not checked
+    here — tools can legitimately be present-but-unconfigured.
     """
     for skill in SKILLS.values():
         for tool_name in skill.tool_names:
@@ -125,19 +144,31 @@ _validate_registry()
 
 
 def base_tool_specs() -> list[dict[str, Any]]:
-    """Tool specs for the always-available base toolset (no `load_skill`)."""
-    return [tool_registry.spec_by_name(n) for n in BASE_TOOL_NAMES]
+    """Tool specs for the always-available base toolset (no `load_skill`).
+
+    Filters out any base tool whose ``available()`` returns False.
+    """
+    return [
+        tool_registry.spec_by_name(n)
+        for n in BASE_TOOL_NAMES
+        if tool_registry.is_available(n)
+    ]
 
 
 def specs_for_active_skills(active: set[str]) -> list[dict[str, Any]]:
-    """Tool specs unlocked by the given set of active skill names."""
+    """Tool specs unlocked by the given set of active skill names.
+
+    Tools whose prerequisites aren't satisfied right now are dropped so
+    the LLM doesn't see options it can't use.
+    """
     out: list[dict[str, Any]] = []
     for skill_name in active:
         skill = SKILLS.get(skill_name)
         if skill is None:
             continue
         for tool_name in skill.tool_names:
-            out.append(tool_registry.spec_by_name(tool_name))
+            if tool_registry.is_available(tool_name):
+                out.append(tool_registry.spec_by_name(tool_name))
     return out
 
 
