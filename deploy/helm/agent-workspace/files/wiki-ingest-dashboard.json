@@ -26,7 +26,7 @@
           "unit": "short"
         }
       },
-      "gridPos": {"h": 4, "w": 6, "x": 0, "y": 1},
+      "gridPos": {"h": 4, "w": 4, "x": 0, "y": 1},
       "id": 3,
       "options": {
         "colorMode": "background",
@@ -43,6 +43,14 @@
       ],
       "title": "Ingest Queue Depth",
       "type": "stat"
+    },
+    {
+      "gridPos": {"h": 4, "w": 20, "x": 4, "y": 1},
+      "id": 11,
+      "options": {"content": "", "mode": "markdown"},
+      "title": "",
+      "transparent": true,
+      "type": "text"
     },
     {
       "datasource": {"type": "prometheus", "uid": "${datasource}"},
