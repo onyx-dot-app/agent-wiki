@@ -104,7 +104,7 @@ def test_full_launch_flow(client):
     assert spawn_ok.status_code == 204
 
     # 7. List sessions for the page — confirm it shows up.
-    sessions_res = client.get(f"/api/agent-sessions?wiki_path=x.md")
+    sessions_res = client.get("/api/agent-sessions?wiki_path=x.md")
     assert sessions_res.status_code == 200
     listed = sessions_res.json()["sessions"]
     assert any(s["id"] == agent_sid for s in listed)
