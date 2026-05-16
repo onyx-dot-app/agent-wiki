@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 
-import { Button } from "@/components/common/Button";
+import { Button } from "@onyx-ai/opal/components";
+
 import { invalidateHelperProbe } from "@/lib/launchers";
 
 import styles from "./InstallHelperPane.module.css";
@@ -69,13 +70,13 @@ export function InstallHelperPane({
       <div className={styles.actions}>
         <Button
           size="sm"
-          variant="ghost"
+          prominence="tertiary"
           onClick={manualTest}
           disabled={manualBusy}
         >
           Test launcher manually
         </Button>
-        <Button size="sm" variant="primary" onClick={reprobe} disabled={busy}>
+        <Button size="sm" variant="action" onClick={reprobe} disabled={busy}>
           {busy ? "Checking..." : "I've installed it"}
         </Button>
       </div>

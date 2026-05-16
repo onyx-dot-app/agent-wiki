@@ -1,6 +1,7 @@
 "use client";
 
-import { Button } from "@/components/common/Button";
+import { Button } from "@onyx-ai/opal/components";
+
 import { closeSession, useAgentSessions } from "@/lib/launchers";
 
 import styles from "./ActiveSessionsList.module.css";
@@ -29,7 +30,11 @@ export function ActiveSessionsList({ wikiPath }: { wikiPath: string }) {
             <span className={styles.detail}>
               {s.tool_id} · {s.status} · started {s.started_at}
             </span>
-            <Button size="sm" variant="ghost" onClick={() => onClose(s.id)}>
+            <Button
+              size="sm"
+              prominence="tertiary"
+              onClick={() => onClose(s.id)}
+            >
               Close
             </Button>
           </li>

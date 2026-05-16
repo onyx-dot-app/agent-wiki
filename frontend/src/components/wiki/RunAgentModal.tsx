@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { SetupWizard } from "@/components/agents/SetupWizard";
 import { ToolCard } from "@/components/agents/ToolCard";
 import { WorkingDirInput } from "@/components/agents/WorkingDirInput";
-import { Button } from "@/components/common/Button";
+import { Button } from "@onyx-ai/opal/components";
 import { ApiError } from "@/lib/api";
 import {
   launch,
@@ -266,7 +266,7 @@ export function RunAgentModal({ open, onClose, wikiPath }: Props) {
                 </Button>
                 <Button
                   type="submit"
-                  variant="primary"
+                  variant="action"
                   disabled={!canRun || busy}
                 >
                   {busy ? "Launching..." : "Run"}

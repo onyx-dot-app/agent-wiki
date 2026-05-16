@@ -1,13 +1,13 @@
 "use client";
 
-import styles from "./ToolStatusBadge.module.css";
+import { Tag } from "@onyx-ai/opal/components";
 
 type Status = "ok" | "warn" | "muted";
 
-const GLYPHS: Record<Status, string> = {
-  ok: "✓",
-  warn: "⚠",
-  muted: "·",
+const COLORS: Record<Status, "green" | "amber" | "gray"> = {
+  ok: "green",
+  warn: "amber",
+  muted: "gray",
 };
 
 export function ToolStatusBadge({
@@ -17,10 +17,5 @@ export function ToolStatusBadge({
   status: Status;
   label: string;
 }) {
-  return (
-    <span className={`${styles.badge} ${styles[status]}`}>
-      <span aria-hidden="true">{GLYPHS[status]}</span>
-      {label}
-    </span>
-  );
+  return <Tag title={label} color={COLORS[status]} size="sm" />;
 }
