@@ -41,16 +41,17 @@ AGENT_SESSION_HEADER = "X-Agentwiki-Session"
 _AGENT_SESSION_RE = re.compile(r"^as_[a-zA-Z0-9-]{1,64}$")  # strict regex
 
 
-def _resolve_agent_session_id(request: Request, user: User) -> str | None:
-    """Validate + bind launcher session id from X-Agentwiki-Session header.
+def _resolve_agent_session(request: Request, user: User) -> tuple[str, str] | tuple[None, None]:
+    """Validate + bind launcher session from X-Agentwiki-Session header.
 
-     — strict regex rejects header injection / overlong values.
-    Cross-user 403 ( fold-in) — bearer holder can't stamp a
-    session that belongs to another user.
+    Returns ``(agent_session_id, tool_id)`` or ``(None, None)`` if the
+    header is absent. Strict regex rejects header injection / overlong
+    values. Cross-user 403 — bearer holder can't stamp a session that
+    belongs to another user.
     """
     header = request.headers.get(AGENT_SESSION_HEADER)
     if not header:
-        return None
+        return None, None
     if not _AGENT_SESSION_RE.match(header):
         raise HTTPException(status_code=400, detail="malformed agent session id")
     row = agent_sessions_repo.get(header)
@@ -62,7 +63,7 @@ def _resolve_agent_session_id(request: Request, user: User) -> str | None:
             detail="agent session does not belong to this user",
         )
     agent_sessions_repo.touch_activity(header)
-    return header
+    return header, row["tool_id"]
 
 
 # Same value the Flask transport uses — kept aligned so observers
@@ -91,14 +92,18 @@ async def transport_post(
     incoming = request.headers.get(SESSION_HEADER)
     user = principal.user
     # Resolve launcher agent_session_id from header BEFORE binding user
-    # so cross-user 403 happens before any tool dispatch.
-    agent_sid = _resolve_agent_session_id(request, user)
+    # so cross-user 403 happens before any tool dispatch. When a launcher
+    # session is present, its tool_id is the attribution label rather
+    # than the bearer token's name (launcher tokens are generic per-user;
+    # the session tells us which tool is actually driving this request).
+    agent_sid, tool_id = _resolve_agent_session(request, user)
+    agent_name = tool_id if tool_id is not None else principal.agent_name
     # Bind the bearer user, agent name, and agent_session_id to
     # ContextVars so downstream tool handlers stamp the right principal,
     # agent label, and session onto activity rows and git commit
     # authors. Bearer auth doesn't go through ``CurrentUserMiddleware``,
     # so we bind it here at the seam.
-    agent_token = agent_activity.agent_name_var.set(principal.agent_name)
+    agent_token = agent_activity.agent_name_var.set(agent_name)
     try:
         with set_current_user(user), set_current_agent_session_id(agent_sid):
             response, outgoing = dispatch(cast("dict[str, Any]", body), incoming, user)
