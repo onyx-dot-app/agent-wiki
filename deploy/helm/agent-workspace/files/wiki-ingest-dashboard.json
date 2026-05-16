@@ -379,7 +379,7 @@
       "targets": [
         {
           "datasource": {"type": "prometheus", "uid": "${datasource}"},
-          "expr": "increase(ingest_llm_duration_seconds_count[1h])",
+          "expr": "sum(increase(ingest_llm_duration_seconds_count[1h]))",
           "legendFormat": "LLM calls (1h)",
           "refId": "A"
         }
