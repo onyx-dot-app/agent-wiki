@@ -40,7 +40,7 @@ ingest_bm25_passed = Histogram(
 ingest_bm25_score = Histogram(
     "ingest_bm25_score",
     "Raw BM25 score for each candidate before threshold filtering",
-    buckets=[1.0, 5.0, 10.0, 20.0, 30.0, 50.0, 75.0, 100.0, 150.0, 200.0],
+    buckets=[0.5, 1.0, 5.0, 10.0, 20.0, 30.0, 50.0, 75.0, 100.0, 150.0, 200.0],
 )
 
 ingest_outcomes_total = Counter(
