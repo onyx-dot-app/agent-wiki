@@ -5,6 +5,8 @@ requires a queue argument (`documents`, `triggers`, or
 process to keep slow LLM doc work from backpressuring fast paths like
 the BM25 reindex or agent-activity expiration cleanup.
 */ -}}
+{{- /* Per-queue Prometheus port — must match _METRICS_PORT in app/tasks/run_worker.py. */ -}}
+{{- $metricsPorts := dict "documents" 9091 "triggers" 9092 "lightweight_maintenance" 9093 -}}
 {{- range $queue := .Values.worker.queues }}
 ---
 apiVersion: apps/v1
@@ -51,7 +53,7 @@ spec:
           command: ["python", "-m", "app.tasks.run_worker", {{ $queue | quote }}]
           ports:
             - name: metrics
-              containerPort: 9091
+              containerPort: {{ index $metricsPorts $queue }}
               protocol: TCP
           {{- with $.Values.securityContext }}
           securityContext:
