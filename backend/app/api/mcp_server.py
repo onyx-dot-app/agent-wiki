@@ -187,8 +187,10 @@ async def transport_sse(
             log.info("mcp sse stream closed session=%s", sess_id)
 
     headers = {
-        "Cache-Control": "no-cache",
-        # nginx hint — flush on every yield.
+        # ``no-transform`` makes the Next.js dev-server compression
+        # middleware skip gzip. nginx in prod honors
+        # ``X-Accel-Buffering: no`` for the same end goal.
+        "Cache-Control": "no-cache, no-transform",
         "X-Accel-Buffering": "no",
     }
     return StreamingResponse(
