@@ -474,7 +474,8 @@
 }
 
 /* Dark Colors */
-.dark {
+.dark,
+:root[data-theme="dark"] {
   /* Shimmer colors for loading animations */
   --shimmer-base: #5c5c5c;
   --shimmer-highlight: #ffffff;
