@@ -317,7 +317,15 @@ def post_probe_ack(req: ProbeAckRequest) -> dict[str, bool]:
 
 
 @router.get("/launch/probe-status", response_model=ProbeStatusResponse)
-def get_probe_status(nonce: str) -> ProbeStatusResponse:
+def get_probe_status(
+    nonce: str,
+    user: User = Depends(require_user),  # noqa: ARG001 — auth gate only
+) -> ProbeStatusResponse:
+    """Frontend polls this after firing an ``agentwiki://probe`` URI.
+    Gated by ``require_user`` because only the user's own browser
+    session should be able to read back the probe state for a nonce
+    it minted. ``probe-ack`` stays unauthenticated by necessity — the
+    helper is bootstrapping and has no token yet."""
     _check_flag()
     _gc_probes()
     with _probe_lock:

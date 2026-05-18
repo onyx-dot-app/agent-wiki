@@ -17,6 +17,7 @@ from tests._seed import seed_user
 
 def _get_session_dict(sid):
     from app.db import agent_sessions as _sr
+
     row = _sr.get(sid)
     assert row is not None
     return row
@@ -65,7 +66,7 @@ def test_setup_status_token_true_after_mint(client):
 
 
 def test_catalog_available_for_launch_flag(client):
-    """ — only local_cli tools are available_for_launch in v1."""
+    """— only local_cli tools are available_for_launch in v1."""
     uid = seed_user()
     login_fastapi(client, uid)
     res = client.get("/api/launchers")
@@ -76,7 +77,7 @@ def test_catalog_available_for_launch_flag(client):
 
 
 def test_catalog_with_machine_id_includes_default_workdir(client):
-    """ — when probe pipeline supplies machine_id + wiki_path, the
+    """— when probe pipeline supplies machine_id + wiki_path, the
     response includes the stored working-dir default."""
     from app.db import page_dirs
 
@@ -169,7 +170,7 @@ def test_post_launch_in_app_kind_returns_400(client):
 
 
 def test_post_launch_rejects_traversal(client):
-    """ — wiki_path traversal rejected at API boundary."""
+    """— wiki_path traversal rejected at API boundary."""
     uid = seed_user()
     login_fastapi(client, uid)
     res = client.post(
@@ -184,7 +185,7 @@ def test_post_launch_rejects_traversal(client):
 
 
 def test_post_launch_message_length_capped(client):
-    """ — message capped at 16KB."""
+    """— message capped at 16KB."""
     uid = seed_user()
     login_fastapi(client, uid)
     huge = "x" * (16 * 1024 + 1)
@@ -213,7 +214,7 @@ def test_post_launch_normalizes_wiki_path(client):
 
 
 def test_post_launch_resume_rejects_active_session(client):
-    """ — concurrent resume race protection."""
+    """— concurrent resume race protection."""
     uid = seed_user()
     login_fastapi(client, uid)
     sid = sessions_repo.create(
@@ -421,7 +422,7 @@ def test_exchange_rejects_when_session_closed_before_exchange(client):
 
 
 def test_exchange_rejects_machine_id_mismatch_on_resume(client):
-    """ — exchange refuses if helper's machine_id differs from session's."""
+    """— exchange refuses if helper's machine_id differs from session's."""
     uid = seed_user()
     login_fastapi(client, uid)
     sid = sessions_repo.create(
@@ -455,6 +456,8 @@ def test_exchange_rejects_machine_id_mismatch_on_resume(client):
 
 
 def test_probe_ack_then_status(client):
+    uid = seed_user()
+    login_fastapi(client, uid)
     nonce = "test_nonce_123"
     client.post(
         "/api/launch/probe-ack",
@@ -469,6 +472,13 @@ def test_probe_ack_then_status(client):
 
 
 def test_probe_status_no_ack_returns_acked_false(client):
+    uid = seed_user()
+    login_fastapi(client, uid)
     res = client.get("/api/launch/probe-status?nonce=never_acked")
     assert res.status_code == 200
     assert res.json()["acked"] is False
+
+
+def test_probe_status_requires_auth(client):
+    res = client.get("/api/launch/probe-status?nonce=anything")
+    assert res.status_code in (401, 403)
