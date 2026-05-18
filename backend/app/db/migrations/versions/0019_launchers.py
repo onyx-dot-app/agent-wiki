@@ -1,7 +1,7 @@
 """coding-tool launchers — agent_sessions + launch_codes + page_working_dirs + launcher_tokens + agent_activity.agent_session_id.
 
-Revision ID: 0014
-Revises: 0013
+Revision ID: 0019
+Revises: 0018
 Create Date: 2026-05-11
 
 Phase 1 backend tables for the Run-Agent launcher. Three new tables for
