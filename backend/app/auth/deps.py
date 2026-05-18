@@ -81,7 +81,11 @@ def require_user_or_bearer(request: Request) -> User:
     """
     try:
         user = current_user(request)
-    except Exception:
+    except HTTPException:
+        # Only swallow auth failures (missing / invalid session). Any
+        # other exception — DB outage, serialization error — must surface
+        # as a 5xx, not get hidden behind a falls-through 401 from the
+        # bearer path.
         user = None
     if user is not None:
         return user
