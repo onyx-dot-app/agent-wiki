@@ -8,7 +8,7 @@ import { invalidateHelperProbe } from "@/lib/launchers";
 
 import styles from "./InstallHelperPane.module.css";
 
-const INSTALL_CMD = "npm install -g @agentwiki/launcher";
+const INSTALL_CMD = "npm install -g @onyx-ai/agentwiki-launcher";
 
 export function InstallHelperPane({
   onReprobe,

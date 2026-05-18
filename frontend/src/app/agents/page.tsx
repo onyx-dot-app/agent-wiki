@@ -603,7 +603,7 @@ function CodingToolsSection() {
         ) : (
           <span style={{ color: color.state.warning.fg }}>
             ⚠ not detected — run{" "}
-            <code style={inlineCode}>npm install -g @agentwiki/launcher</code>
+            <code style={inlineCode}>npm install -g @onyx-ai/agentwiki-launcher</code>
           </span>
         )}
       </div>
