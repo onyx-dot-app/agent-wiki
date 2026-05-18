@@ -43,6 +43,13 @@ ingest_bm25_score = Histogram(
     buckets=[1.0, 5.0, 10.0, 20.0, 50.0, 100.0, 200.0, 300.0, 500.0, 750.0, 1000.0, 1500.0],
 )
 
+ingest_bm25_score_by_outcome = Histogram(
+    "ingest_bm25_score_by_outcome",
+    "BM25 score distribution broken down by ingest outcome",
+    ["outcome"],
+    buckets=[1.0, 5.0, 10.0, 20.0, 50.0, 100.0, 200.0, 300.0, 500.0, 750.0, 1000.0, 1500.0],
+)
+
 ingest_outcomes_total = Counter(
     "ingest_outcomes_total",
     "Ingest pipeline outcomes",

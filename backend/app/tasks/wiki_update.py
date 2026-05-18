@@ -31,6 +31,7 @@ from app.llm.agents.wiki_updater import IRRELEVANT_SENTINEL
 from app.llm.agents.tools import _doc_helpers as h
 from app.llm.errors import LLMError
 from app.metrics import (
+    ingest_bm25_score_by_outcome,
     ingest_llm_calls_per_doc,
     ingest_llm_duration_seconds,
     ingest_outcomes_total,
@@ -303,6 +304,7 @@ def process_pushed_document(push: dict[str, Any]) -> None:
             irrelevant += 1
             consecutive_irrelevant += 1
             ingest_outcomes_total.labels(outcome="irrelevant").inc()
+            ingest_bm25_score_by_outcome.labels(outcome="irrelevant").observe(hit.score)
             log.debug(
                 "process_pushed_document: IRRELEVANT path=%s consecutive=%d",
                 hit.path, consecutive_irrelevant,
@@ -318,9 +320,11 @@ def process_pushed_document(push: dict[str, Any]) -> None:
                 wiki_notify.after_doc_write(hit.path, sha, "edit", _INGEST_AUTHOR)
                 committed += 1
                 ingest_outcomes_total.labels(outcome="committed").inc()
+                ingest_bm25_score_by_outcome.labels(outcome="committed").observe(hit.score)
                 log.info("process_pushed_document: committed %s sha=%s", hit.path, sha)
             else:
                 ingest_outcomes_total.labels(outcome="no_change").inc()
+                ingest_bm25_score_by_outcome.labels(outcome="no_change").observe(hit.score)
 
     ingest_llm_calls_per_doc.observe(llm_calls)
     log.info(
