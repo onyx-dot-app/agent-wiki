@@ -136,7 +136,12 @@ export function RunAgentModal({ open, onClose, wikiPath }: Props) {
   async function onRun(e: FormEvent) {
     e.preventDefault();
     if (!selectedId) return;
-    if (probe?.acked === false) {
+    // Only local_cli tools require the localhost helper. in_app
+    // (e.g. onyx-craft) and web_handoff tools launch through the
+    // backend directly — gating them on the probe result would trap
+    // the user in a wizard loop they can never escape.
+    const selectedTool = launchable.find((c) => c.id === selectedId);
+    if (selectedTool?.kind === "local_cli" && probe?.acked === false) {
       setWizardOpen(true);
       return;
     }
