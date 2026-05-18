@@ -15,8 +15,18 @@ export function ActiveSessionsList({ wikiPath }: { wikiPath: string }) {
 
   async function onClose(id: string) {
     if (!confirm("Close this agent session?")) return;
-    await closeSession(id, "user_clicked");
-    await refresh();
+    try {
+      await closeSession(id, "user_clicked");
+    } catch (err) {
+      // Surface the failure rather than silently leaving the row up —
+      // user thought they closed it but the backend still has it open.
+      alert(err instanceof Error ? err.message : "Failed to close session");
+    } finally {
+      // Refresh either way: a backend-side close that's no longer
+      // visible to us (race) should still drop the row; a real failure
+      // re-renders with whatever the backend currently reports.
+      await refresh();
+    }
   }
 
   return (

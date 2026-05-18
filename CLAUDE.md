@@ -383,18 +383,23 @@ Tokens (whether read via `var(--…)` in CSS or `color.*` in TS) are the
   are the only place raw hex is acceptable — they're illustrations, not UI
   surfaces. Don't extend that exception to anything that paints chrome.
 
-### Buttons — only via `<Button>` from `src/components/common/Button.tsx`
+### Buttons — `<Button>` from `@onyx-ai/opal/components` (new code) or `src/components/common/Button.tsx` (existing surfaces)
 
-There's one button component, four variants, two sizes:
+OPAL's `Button` is the preferred primitive for net-new components.
+Variant / prominence mapping when migrating existing call sites or
+writing new ones:
 
-- `variant="primary"` — accent surface; one per row at most (form submit,
-  primary CTA in a header)
-- `variant="secondary"` (default) — neutral with subtle border; the
-  workhorse
-- `variant="danger"` — destructive (Revoke, Delete); uses `state.danger`
-- `variant="ghost"` — transparent surface for low-emphasis text actions
-- `size="md"` (default) — forms, modal actions, page headers
-- `size="sm"` — dense rows, table cells, inline actions
+- accent CTA (form submit, primary) — `variant="action"`
+- neutral default — no variant (or `variant="default"`)
+- destructive — `variant="danger"`
+- low-emphasis text action — `prominence="tertiary"`
+- size: `"md"` (default) for forms / modal actions / page headers,
+  `"sm"` for dense rows, table cells, inline actions
+
+The legacy `src/components/common/Button.tsx` is kept around as a
+shim for the older app pages so we don't have to migrate everything
+at once; new launcher-area code uses OPAL directly. Either is fine in
+isolation — but don't mix them inside the same component.
 
 Don't write ad-hoc `<button style={{ ... }}>` for primary/secondary/danger
 chrome. If you need an unusual one-off (icon-only toolbar buttons in
@@ -515,7 +520,9 @@ Type-check with `npm run typecheck`. Component tests can be added with Vitest
   React component — import from `src/lib/theme.ts`. If the shade isn't
   there, add it there. (See the design tokens seam above.)
 - Don't roll a new primary/secondary/danger button in a component — use
-  `<Button>` from `src/components/common/Button.tsx`. (See the buttons seam.)
+  the OPAL `Button` (`@onyx-ai/opal/components`) for new code, or
+  `src/components/common/Button.tsx` on legacy surfaces. (See the
+  buttons seam.)
 - Don't use slate-tinted (`rgba(15,23,42,…)`) or pure-black modal scrims —
   use `color.overlay`. Don't invent ad-hoc modal shadows — use
   `shadow.modal`. (See the modals seam.)

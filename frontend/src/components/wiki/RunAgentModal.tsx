@@ -163,6 +163,12 @@ export function RunAgentModal({ open, onClose, wikiPath }: Props) {
         remember_workdir_for_page: rememberWorkdir,
       });
       window.location.href = res.uri;
+      // Clear the stash now that the launch went through — leaving it
+      // would pre-fill the next modal open for this page with the
+      // previous message + workdir.
+      if (wikiPath) {
+        sessionStorage.removeItem(`agentwiki:pending-launch:${wikiPath}`);
+      }
       onClose();
       await refreshSessions();
       await refreshCatalog();
