@@ -20,6 +20,7 @@ export interface LauncherCatalogEntry {
   available_for_launch: boolean;
   setup_status: LauncherSetupStatus;
   default_working_dir: string | null;
+  unscoped_workdir_warning: string | null;
 }
 
 export interface LauncherCatalog {

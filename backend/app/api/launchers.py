@@ -105,9 +105,21 @@ def get_catalog(
                 available_for_launch=_entry_available(m),
                 setup_status={"token": has_token},
                 default_working_dir=default_workdir,
+                unscoped_workdir_warning=_unscoped_warning(m),
             )
         )
     return LauncherCatalog(launchers=entries)
+
+
+def _unscoped_warning(m: Manifest) -> str | None:
+    flags = m.launch.unscoped_workdir_argv if m.launch else []
+    if not flags:
+        return None
+    return (
+        f"No directory set — {m.name} will run in a per-session scratch "
+        f"dir (~/agent-wiki-runs/<id>/) with {' '.join(flags)}. Set a "
+        f"directory to scope it to real code."
+    )
 
 
 # --------------------------------------------------------------------------- #

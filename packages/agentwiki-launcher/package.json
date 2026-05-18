@@ -1,0 +1,30 @@
+{
+  "name": "@onyx-ai/agentwiki-launcher",
+  "version": "0.1.0-alpha.1",
+  "description": "Local helper for the agent-wiki Run Agent button.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "agentwiki-launcher": "./bin/agentwiki-launcher"
+  },
+  "files": [
+    "bin",
+    "dist",
+    "install"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "test": "node --test --import tsx 'test/**/*.test.ts'",
+    "typecheck": "tsc --noEmit",
+    "postinstall": "node ./dist/install/postinstall.js || true"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "20.10.0",
+    "tsx": "4.7.0",
+    "typescript": "5.3.3"
+  }
+}

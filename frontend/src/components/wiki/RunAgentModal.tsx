@@ -234,6 +234,13 @@ export function RunAgentModal({ open, onClose, wikiPath }: Props) {
               }
             />
 
+            {(() => {
+              const sel = launchers.find((c) => c.id === selectedId);
+              const warning = sel?.unscoped_workdir_warning;
+              if (!warning || workingDir.trim().length > 0) return null;
+              return <MessageCard variant="warning" title={warning} />;
+            })()}
+
             <InputVertical title="Message" withLabel="run-agent-message">
               <textarea
                 id="run-agent-message"

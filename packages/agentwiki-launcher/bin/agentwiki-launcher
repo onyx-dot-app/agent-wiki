@@ -1,0 +1,7 @@
+#!/usr/bin/env node
+import("../dist/cli.js")
+  .then((m) => m.main(process.argv.slice(2)))
+  .catch((e) => {
+    console.error("[agentwiki-launcher] unhandled:", e?.stack || e?.message || e);
+    process.exit(1);
+  });
