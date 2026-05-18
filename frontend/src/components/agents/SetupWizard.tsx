@@ -8,6 +8,7 @@ import { Section } from "@onyx-ai/opal/layouts";
 import { probeHelper, type LauncherCatalogEntry } from "@/lib/launchers";
 
 import { InstallHelperPane } from "./InstallHelperPane";
+import { ToolLogo } from "./ToolLogo";
 
 interface Props {
   catalog: LauncherCatalogEntry[];
@@ -42,7 +43,7 @@ export function SetupWizard({ catalog, onDone, onCancel }: Props) {
       flexDirection="column"
       alignItems="start"
       justifyContent="start"
-      gap={4}
+      gap={1}
       width="full"
     >
       {step === 1 && (
@@ -98,7 +99,7 @@ function Step1({
         flexDirection="column"
         alignItems="start"
         justifyContent="start"
-        gap={2}
+        gap={0.5}
         width="full"
       >
         {catalog.map((c) => (
@@ -106,7 +107,7 @@ function Step1({
             key={c.id}
             state={selected.has(c.id) ? "selected" : "empty"}
             onClick={() => onToggle(c.id)}
-            padding="md"
+            padding="sm"
             rounding="md"
             border="solid"
           >
@@ -114,17 +115,17 @@ function Step1({
               flexDirection="row"
               alignItems="center"
               justifyContent="start"
-              gap={2.5}
+              gap={0.625}
               width="full"
             >
-              <img src={c.icon_url} alt="" width={20} height={20} />
+              <ToolLogo toolId={c.id} size={20} />
               <Section
                 flexDirection="column"
                 alignItems="start"
                 justifyContent="center"
                 width="full"
                 height="fit"
-                gap={0.5}
+                gap={0.0625}
               >
                 <Text font="main-ui-body" color="text-04" nowrap>
                   {c.name}
@@ -146,7 +147,7 @@ function Step1({
         flexDirection="row"
         alignItems="center"
         justifyContent="end"
-        gap={2}
+        gap={0.5}
         width="full"
       >
         <Button prominence="secondary" onClick={onCancel}>
@@ -195,7 +196,7 @@ function Step2({
         flexDirection="column"
         alignItems="start"
         justifyContent="start"
-        gap={3}
+        gap={0.75}
         width="full"
       >
         {catalog.map((c) => (
@@ -204,17 +205,17 @@ function Step2({
               flexDirection="row"
               alignItems="center"
               justifyContent="start"
-              gap={2}
+              gap={0.5}
               width="full"
             >
-              <img src={c.icon_url} alt="" width={20} height={20} />
+              <ToolLogo toolId={c.id} size={20} />
               <Text font="main-ui-body" color="text-04">
                 {c.name}
               </Text>
             </Section>
             <Section
               flexDirection="column"
-              gap={1}
+              gap={0.25}
               alignItems="start"
               justifyContent="start"
               width="full"
@@ -257,7 +258,7 @@ function Step2({
         flexDirection="row"
         alignItems="center"
         justifyContent="end"
-        gap={2}
+        gap={0.5}
         width="full"
       >
         <Button prominence="secondary" onClick={onBack}>

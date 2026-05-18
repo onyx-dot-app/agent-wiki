@@ -48,7 +48,7 @@ export function ActiveSessionsList({ wikiPath }: { wikiPath: string }) {
             flexDirection="row"
             alignItems="center"
             justifyContent="between"
-            gap={2}
+            gap={0.5}
             width="full"
           >
             <Text font="secondary-body" color="text-03" nowrap>

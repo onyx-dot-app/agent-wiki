@@ -337,9 +337,9 @@ function ToolList({
         {catalog.map((c) => (
           <ToolCard
             key={c.id}
+            toolId={c.id}
             name={c.name}
             tagline={c.tagline}
-            iconUrl={c.icon_url}
             selected={c.id === selectedId}
             onSelect={() => onSelect(c.id)}
           />

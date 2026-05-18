@@ -63,7 +63,7 @@ export function InstallHelperPane({
         flexDirection="column"
         alignItems="start"
         justifyContent="start"
-        gap={2}
+        gap={0.75}
         width="full"
       >
         <Text font="secondary-body" color="text-04" as="p">
@@ -73,7 +73,7 @@ export function InstallHelperPane({
           flexDirection="row"
           alignItems="center"
           justifyContent="start"
-          gap={2}
+          gap={0.75}
           width="full"
         >
           <code className={styles.cmd}>{INSTALL_CMD}</code>
@@ -89,7 +89,7 @@ export function InstallHelperPane({
           flexDirection="row"
           alignItems="center"
           justifyContent="end"
-          gap={2}
+          gap={0.75}
           width="full"
         >
           <Button
