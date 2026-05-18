@@ -19,8 +19,11 @@ export function WorkingDirInput({
 }: Props) {
   return (
     <div className={styles.wrapper}>
-      <label className={styles.label}>Working directory</label>
+      <label className={styles.label} htmlFor="working-dir-input">
+        Working directory
+      </label>
       <input
+        id="working-dir-input"
         type="text"
         value={value}
         onChange={(e) => onChange(e.target.value)}

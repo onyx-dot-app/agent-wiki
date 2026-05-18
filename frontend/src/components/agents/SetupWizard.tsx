@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 
-import { OnyxButton as Button } from "@/components/common/OnyxButton";
+import { Button } from "@onyx-ai/opal/components";
 import {
   probeCli,
   probeHelper,
@@ -95,7 +95,6 @@ export function SetupWizard({ catalog, onDone, onCancel }: Props) {
         <Step2
           catalog={catalog.filter((c) => selected.has(c.id))}
           helperState={helperState}
-          cliState={cliState}
           probing={probing}
           onReprobe={runProbes}
           onBack={() => setStep(1)}
@@ -150,10 +149,14 @@ function Step1({
         ))}
       </ul>
       <div className={styles.actions}>
-        <Button secondary onClick={onCancel}>
+        <Button prominence="secondary" onClick={onCancel}>
           Cancel
         </Button>
-        <Button action onClick={onNext} disabled={selected.size === 0}>
+        <Button
+          variant="action"
+          onClick={onNext}
+          disabled={selected.size === 0}
+        >
           Next
         </Button>
       </div>
@@ -164,7 +167,6 @@ function Step1({
 function Step2({
   catalog,
   helperState,
-  cliState,
   probing,
   onReprobe,
   onBack,
@@ -172,19 +174,17 @@ function Step2({
 }: {
   catalog: LauncherCatalogEntry[];
   helperState: { acked: boolean; port: number | null } | null;
-  cliState: Record<string, CliStatus> | null;
   probing: boolean;
   onReprobe: () => Promise<void>;
   onBack: () => void;
   onDone: () => void;
 }) {
-  const localCliTools = catalog.filter((c) => c.kind === "local_cli");
-  const needsHelper = localCliTools.length > 0;
-  const helperReady = !needsHelper || helperState?.acked === true;
-  const cliReady =
-    !needsHelper ||
-    localCliTools.every((c) => cliState?.[c.id]?.meets_min === true);
-  const allOk = !probing && helperReady && cliReady;
+  const needsHelper = catalog.some((c) => c.kind === "local_cli");
+  // Done enables on launcher detection alone. CLI-presence probe isn't
+  // shipped in v1 — if claude/codex is missing at spawn time, the
+  // helper exits cli_not_found and the wiki UI flips the session to
+  // failed with a toast.
+  const allOk = !probing && (!needsHelper || !!helperState?.acked);
 
   return (
     <>
@@ -215,16 +215,10 @@ function Step2({
                         : "Launcher not installed"
                     }
                   />
-                  {helperState?.acked && cliState && (
-                    <ToolStatusBadge
-                      status={cliState[c.id]?.meets_min ? "ok" : "warn"}
-                      label={
-                        cliState[c.id]?.meets_min
-                          ? `CLI ${cliState[c.id]?.version ?? ""} ready`
-                          : `${c.id} not in PATH`
-                      }
-                    />
-                  )}
+                  <ToolStatusBadge
+                    status="muted"
+                    label={`Install the ${c.id} CLI before launching`}
+                  />
                 </>
               )}
             </div>
@@ -235,10 +229,10 @@ function Step2({
         )}
       </div>
       <div className={styles.actions}>
-        <Button secondary onClick={onBack}>
+        <Button prominence="secondary" onClick={onBack}>
           Back
         </Button>
-        <Button action onClick={onDone} disabled={!allOk}>
+        <Button variant="action" onClick={onDone} disabled={!allOk}>
           Done
         </Button>
       </div>

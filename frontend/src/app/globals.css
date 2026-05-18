@@ -1,6 +1,6 @@
 @import "./css/colors.css" layer(base);
 @import "./css/opal-styles.css" layer(base);
-@import "./css/button.css" layer(base);
+
 @import "tailwindcss";
 /* @import "tw-animate-css" lives at the app level (not in opal-styles.css)
    because Tailwind v4's PostCSS resolver doesn't walk node_modules from
