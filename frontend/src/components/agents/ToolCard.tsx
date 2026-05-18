@@ -1,6 +1,5 @@
 "use client";
 
-import { ToolStatusBadge } from "./ToolStatusBadge";
 import styles from "./ToolCard.module.css";
 
 interface Props {
@@ -10,9 +9,6 @@ interface Props {
   iconUrl: string;
   selected: boolean;
   onSelect?: () => void;
-  tokenReady: boolean;
-  helperReady: boolean;
-  cliReady: boolean | null;
 }
 
 export function ToolCard({
@@ -22,10 +18,8 @@ export function ToolCard({
   iconUrl,
   selected,
   onSelect,
-  tokenReady,
-  helperReady,
-  cliReady,
 }: Props) {
+  void id;
   const className = [
     styles.card,
     selected ? styles.selected : "",
@@ -46,22 +40,6 @@ export function ToolCard({
           <div className={styles.name}>{name}</div>
           <div className={styles.tagline}>{tagline}</div>
         </div>
-      </div>
-      <div className={styles.badges}>
-        <ToolStatusBadge
-          status={tokenReady ? "ok" : "warn"}
-          label={tokenReady ? "Token" : "Need token"}
-        />
-        <ToolStatusBadge
-          status={helperReady ? "ok" : "warn"}
-          label={helperReady ? "Launcher" : "No launcher"}
-        />
-        <ToolStatusBadge
-          status={cliReady === null ? "muted" : cliReady ? "ok" : "warn"}
-          label={
-            cliReady === null ? "CLI: ?" : cliReady ? "CLI" : `${id} missing`
-          }
-        />
       </div>
     </button>
   );

@@ -626,11 +626,6 @@ function CodingToolsSection() {
               tagline={c.tagline}
               iconUrl={c.icon_url}
               selected={false}
-              tokenReady={c.setup_status.token}
-              helperReady={c.kind === "in_app" || probe?.acked === true}
-              cliReady={
-                c.kind === "in_app" ? true : probe?.acked ? null : false
-              }
             />
           </li>
         ))}

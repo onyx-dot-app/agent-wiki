@@ -215,7 +215,6 @@ export function RunAgentModal({ open, onClose, wikiPath }: Props) {
               catalog={launchable}
               selectedId={selectedId}
               onSelect={setSelectedId}
-              helperAcked={probe?.acked ?? null}
             />
 
             <WorkingDirInput
@@ -241,20 +240,29 @@ export function RunAgentModal({ open, onClose, wikiPath }: Props) {
               />
             </label>
 
-            {sessions.length > 0 && (
-              <div className={styles.sessions}>
-                <div className={styles.sessionsHeader}>
-                  Active sessions on this page
+            {(() => {
+              // Only count sessions actually running (active / idle).
+              // ``pending`` rows linger from launch attempts that never
+              // bounced back — they're noise here, not live sessions.
+              const live = sessions.filter(
+                (s) => s.status === "active" || s.status === "idle",
+              );
+              if (live.length === 0) return null;
+              return (
+                <div className={styles.sessions}>
+                  <div className={styles.sessionsHeader}>
+                    Active sessions on this page
+                  </div>
+                  <ul className={styles.sessionsList}>
+                    {live.map((s) => (
+                      <li key={s.id} className={styles.sessionsRow}>
+                        {s.tool_id} · {s.status} · {s.started_at}
+                      </li>
+                    ))}
+                  </ul>
                 </div>
-                <ul className={styles.sessionsList}>
-                  {sessions.map((s) => (
-                    <li key={s.id} className={styles.sessionsRow}>
-                      {s.tool_id} · {s.status} · {s.started_at}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
+              );
+            })()}
 
             {error && <div className={styles.error}>{error}</div>}
 
@@ -286,12 +294,10 @@ function ToolList({
   catalog,
   selectedId,
   onSelect,
-  helperAcked,
 }: {
   catalog: LauncherCatalogEntry[];
   selectedId: string | null;
   onSelect: (id: string) => void;
-  helperAcked: boolean | null;
 }) {
   if (catalog.length === 0) {
     return (
@@ -313,15 +319,6 @@ function ToolList({
               iconUrl={c.icon_url}
               selected={c.id === selectedId}
               onSelect={() => onSelect(c.id)}
-              tokenReady={c.setup_status.token}
-              helperReady={c.kind === "in_app" || helperAcked === true}
-              cliReady={
-                c.kind === "in_app"
-                  ? true
-                  : helperAcked === false
-                    ? false
-                    : null
-              }
             />
           </li>
         ))}
