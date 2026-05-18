@@ -12,15 +12,23 @@ import {
   streamDraftingInit,
   streamMessage,
   type ChatSession,
+  type PersistedChatMessage,
 } from "@/lib/chat";
 import { useDrafting, type DraftingState } from "@/lib/drafting";
 import { ChatHistoryPanel } from "@/components/chat/ChatHistoryPanel";
 import { color, radius, shadow } from "@/lib/theme";
+import { presentTool } from "@/lib/tools";
 
-interface ChatMessage {
-  role: "user" | "assistant";
-  content: string;
-}
+// Items in the chat transcript. Tool calls are first-class entries
+// (rather than a transient hint) so they stay visible in the scrollback
+// alongside the assistant's text — when the agent runs ``search_wiki``
+// or ``edit_doc`` between two paragraphs, the user can scroll back and
+// see exactly what happened.
+type ToolState = "running" | "done" | "error";
+type ChatItem =
+  | { kind: "user"; content: string }
+  | { kind: "assistant"; content: string }
+  | { kind: "tool"; id: string; name: string; state: ToolState };
 
 type StreamEvent =
   | { type: "text_delta"; text: string }
@@ -44,13 +52,12 @@ export function ChatWidget() {
   const { drafting, expandTick } = useDrafting();
   const [mode, setMode] = useState<Mode>("closed");
   const [expandedWidth, setExpandedWidth] = useState<number>(DEFAULT_EXPANDED_WIDTH);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [items, setItems] = useState<ChatItem[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
-  const [toolHint, setToolHint] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const resizingRef = useRef(false);
@@ -63,7 +70,7 @@ export function ChatWidget() {
   // pre-drafting snapshot is restored when the user leaves drafting so
   // their regular conversation isn't lost.
   const [draftingKey, setDraftingKey] = useState<string | null>(null);
-  const preDraftingRef = useRef<{ sessionId: string | null; messages: ChatMessage[] } | null>(
+  const preDraftingRef = useRef<{ sessionId: string | null; items: ChatItem[] } | null>(
     null,
   );
 
@@ -128,14 +135,12 @@ export function ChatWidget() {
     void (async () => {
       try {
         const detail = await getSession(sessionId);
-        setMessages(
-          detail.messages.map((m) => ({ role: m.role, content: m.content })),
-        );
+        setItems(itemsFromPersisted(detail.messages));
       } catch (e) {
         if (e instanceof ApiError && e.status === 404) {
           // Session was deleted on another device — start fresh.
           setSessionId(null);
-          setMessages([]);
+          setItems([]);
         } else {
           setError(formatError(e));
         }
@@ -146,7 +151,7 @@ export function ChatWidget() {
   useEffect(() => {
     if (mode === "closed") return;
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
-  }, [messages, sending, mode]);
+  }, [items, sending, mode]);
 
   // Resize handling for expanded mode. Panel is anchored to the right edge,
   // so dragging the left handle leftward grows the panel.
@@ -205,14 +210,15 @@ export function ChatWidget() {
       if (desiredKey === draftingKey) return; // already in sync
       if (preDraftingRef.current === null) {
         // First entry into drafting — remember the prior conversation.
-        preDraftingRef.current = { sessionId, messages };
+        preDraftingRef.current = { sessionId, items };
       }
       setDraftingKey(desiredKey);
       setError(null);
-      setToolHint(null);
       setSessionId(null);
-      // Empty assistant bubble; tokens stream into it below.
-      setMessages([{ role: "assistant", content: "" }]);
+      // Start empty; the reducer will push items as events arrive
+      // (text_delta creates an assistant bubble, tool_call pushes a
+      // tool status line, etc.).
+      setItems([]);
       setSending(true);
       const tidForInit =
         drafting.kind === "template" ? drafting.templateId : null;
@@ -220,37 +226,20 @@ export function ChatWidget() {
         try {
           await streamDraftingInit(tidForInit, (raw) => {
             const ev = raw as StreamEvent;
-            switch (ev.type) {
-              case "session_created":
-                setSessionId(ev.session_id);
-                break;
-              case "text_delta":
-                setMessages((prev) => {
-                  const next = [...prev];
-                  const last = next[next.length - 1];
-                  if (!last || last.role !== "assistant") return prev;
-                  next[next.length - 1] = { ...last, content: last.content + ev.text };
-                  return next;
-                });
-                break;
-              case "tool_call":
-                setToolHint(`${humanizeTool(ev.name)}…`);
-                break;
-              case "tool_result":
-              case "iteration_done":
-              case "done":
-                setToolHint(null);
-                break;
-              case "error":
-                setError(ev.message);
-                break;
+            if (ev.type === "session_created") {
+              setSessionId(ev.session_id);
+            } else if (ev.type === "error") {
+              setError(ev.message);
+              setItems((prev) => markRunningToolsAsError(prev));
+            } else {
+              setItems((prev) => reduceEvent(prev, ev));
             }
           });
         } catch (e) {
           setError(formatError(e));
+          setItems((prev) => markRunningToolsAsError(prev));
         } finally {
           setSending(false);
-          setToolHint(null);
         }
       })();
       return;
@@ -266,13 +255,12 @@ export function ChatWidget() {
       setDraftingKey(null);
       if (snapshot) {
         setSessionId(snapshot.sessionId);
-        setMessages(snapshot.messages);
+        setItems(snapshot.items);
       } else {
         setSessionId(null);
-        setMessages([]);
+        setItems([]);
       }
       setError(null);
-      setToolHint(null);
     }, 300);
     return () => window.clearTimeout(handle);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -295,14 +283,11 @@ export function ChatWidget() {
     async (text: string) => {
       setError(null);
       setSending(true);
-      setToolHint(null);
 
-      // Optimistically place the user + empty-assistant pair.
-      setMessages((prev) => [
-        ...prev,
-        { role: "user", content: text },
-        { role: "assistant", content: "" },
-      ]);
+      // Optimistically place the user turn. We don't pre-push an empty
+      // assistant; ``reduceEvent`` opens one when the first text_delta
+      // arrives. Until then, the "…" placeholder below covers the gap.
+      setItems((prev) => [...prev, { kind: "user", content: text }]);
 
       // Lazily create a server-side session on first send so empty
       // sessions don't pile up if the user opens and closes the widget.
@@ -317,7 +302,7 @@ export function ChatWidget() {
           setError(formatError(e));
           setSending(false);
           // Roll back optimistic insert.
-          setMessages((prev) => prev.slice(0, -2));
+          setItems((prev) => prev.slice(0, -1));
           return;
         }
       }
@@ -326,40 +311,28 @@ export function ChatWidget() {
       try {
         await streamMessage(activeId, text, (raw) => {
           const ev = raw as StreamEvent;
-          switch (ev.type) {
-            case "text_delta":
-              setMessages((prev) => {
-                const next = [...prev];
-                const last = next[next.length - 1];
-                if (!last || last.role !== "assistant") return prev;
-                next[next.length - 1] = { ...last, content: last.content + ev.text };
-                return next;
-              });
-              break;
-            case "tool_call":
-              setToolHint(`${humanizeTool(ev.name)}…`);
-              break;
-            case "tool_result":
-            case "iteration_done":
-            case "done":
-              setToolHint(null);
-              break;
-            case "error":
-              streamFailed = true;
-              setError(ev.message);
-              break;
+          if (ev.type === "error") {
+            streamFailed = true;
+            setError(ev.message);
+            setItems((prev) => markRunningToolsAsError(prev));
+            return;
           }
+          setItems((prev) => reduceEvent(prev, ev));
         });
       } catch (err) {
         streamFailed = true;
         setError(formatError(err));
+        setItems((prev) => markRunningToolsAsError(prev));
       } finally {
         setSending(false);
-        setToolHint(null);
         if (streamFailed) {
-          setMessages((prev) => {
+          // Drop a trailing empty assistant the reducer never got to
+          // fill — otherwise the bubble would render as an empty box.
+          setItems((prev) => {
             const last = prev[prev.length - 1];
-            if (last && last.role === "assistant" && last.content === "") return prev.slice(0, -1);
+            if (last && last.kind === "assistant" && last.content === "") {
+              return prev.slice(0, -1);
+            }
             return prev;
           });
         } else {
@@ -384,16 +357,16 @@ export function ChatWidget() {
   );
 
   const onRetry = useCallback(async () => {
-    if (sending || messages.length === 0) return;
-    const last = messages[messages.length - 1];
-    if (last.role !== "user") return;
+    if (sending || items.length === 0) return;
+    const last = items[items.length - 1];
+    if (last.kind !== "user") return;
     // Drop the prior user message and re-send it. The backend already
     // persisted it on the first attempt, so resending would double it;
     // instead we just kick off a retry against the same content with
     // the existing history intact: pop the user msg, then send.
-    setMessages((prev) => prev.slice(0, -1));
+    setItems((prev) => prev.slice(0, -1));
     await sendUserMessage(last.content);
-  }, [sending, messages, sendUserMessage]);
+  }, [sending, items, sendUserMessage]);
 
   const startResize = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -409,9 +382,7 @@ export function ChatWidget() {
     try {
       const detail = await getSession(id);
       setSessionId(id);
-      setMessages(
-        detail.messages.map((m) => ({ role: m.role, content: m.content })),
-      );
+      setItems(itemsFromPersisted(detail.messages));
     } catch (e) {
       setError(formatError(e));
     }
@@ -421,7 +392,7 @@ export function ChatWidget() {
     setHistoryOpen(false);
     setError(null);
     setSessionId(null);
-    setMessages([]);
+    setItems([]);
   }, []);
 
   if (!user) return null;
@@ -516,7 +487,7 @@ export function ChatWidget() {
           <IconButton
             title="New chat"
             onClick={onNewChat}
-            disabled={sending || (sessionId === null && messages.length === 0)}
+            disabled={sending || (sessionId === null && items.length === 0)}
           >
             <NewChatIcon />
           </IconButton>
@@ -551,25 +522,21 @@ export function ChatWidget() {
             minHeight: 0,
           }}
         >
-          {messages.length === 0 && (
+          {items.length === 0 && (
             <p style={{ color: color.text.muted, fontSize: 13, margin: 0 }}>
               Hi, I can help create pages, make changes, explain things, help
               you create triggers, or explain how this wiki works. Ask me
               anything!
             </p>
           )}
-          {messages.map((m, i) => {
+          {items.map((it, i) => {
+            if (it.kind === "tool") return <ToolStatus key={i} item={it} />;
             // Skip the optimistic empty assistant bubble — the "…" placeholder
             // below renders in its place while we wait for the first delta.
-            if (m.role === "assistant" && m.content === "") return null;
-            return <Bubble key={i} role={m.role} content={m.content} />;
+            if (it.kind === "assistant" && it.content === "") return null;
+            return <Bubble key={i} role={it.kind} content={it.content} />;
           })}
-          {sending && toolHint && (
-            <div style={{ paddingLeft: 4, color: color.text.muted, fontStyle: "italic", fontSize: 13 }}>
-              {toolHint}
-            </div>
-          )}
-          {sending && !toolHint && messages[messages.length - 1]?.content === "" && (
+          {sending && shouldShowEllipsis(items) && (
             <Bubble role="assistant" content="…" muted />
           )}
         </div>
@@ -591,7 +558,7 @@ export function ChatWidget() {
             }}
           >
             <div style={{ flex: 1, whiteSpace: "pre-wrap" }}>{error}</div>
-            {messages.length > 0 && messages[messages.length - 1].role === "user" && (
+            {items.length > 0 && items[items.length - 1].kind === "user" && (
               <button
                 onClick={onRetry}
                 disabled={sending}
@@ -706,13 +673,77 @@ function clampWidth(n: number): number {
   return Math.min(max, Math.max(MIN_EXPANDED_WIDTH, n));
 }
 
-function humanizeTool(name: string): string {
-  switch (name) {
-    case "wiki_search":
-      return "Searching the wiki";
-    default:
-      return `Running ${name}`;
+// Apply one streamed event to the chat transcript. ``text_delta`` either
+// extends the trailing assistant bubble or opens a new one (when the
+// previous item was a tool call between iterations). ``tool_call``
+// pushes a status line; ``tool_result`` flips its matching line to
+// ``done``. The ``iteration_done``/``done`` terminators don't need
+// explicit handling — the next ``text_delta`` will naturally start a
+// fresh assistant bubble because the trailing item is a tool, not text.
+function reduceEvent(items: ChatItem[], ev: StreamEvent): ChatItem[] {
+  if (ev.type === "text_delta") {
+    const last = items[items.length - 1];
+    if (last && last.kind === "assistant") {
+      const next = items.slice();
+      next[next.length - 1] = { ...last, content: last.content + ev.text };
+      return next;
+    }
+    return [...items, { kind: "assistant", content: ev.text }];
   }
+  if (ev.type === "tool_call") {
+    // Hidden tools (e.g. ``load_skill`` plumbing) never enter the
+    // transcript. A later ``tool_result`` for the same id will no-op
+    // through the ``map`` below, so we don't need a second guard.
+    if (presentTool(ev.name).hidden) return items;
+    return [...items, { kind: "tool", id: ev.id, name: ev.name, state: "running" }];
+  }
+  if (ev.type === "tool_result") {
+    return items.map((it) =>
+      it.kind === "tool" && it.id === ev.id ? { ...it, state: "done" } : it,
+    );
+  }
+  return items;
+}
+
+// Convert persisted server-side messages back into ChatItems for replay
+// on session load. Assistant rows carry the full event log under
+// ``events``; we replay those so tool calls reappear inline. Legacy
+// rows without an event log fall back to a single content bubble.
+function itemsFromPersisted(messages: PersistedChatMessage[]): ChatItem[] {
+  let out: ChatItem[] = [];
+  for (const m of messages) {
+    if (m.role === "user") {
+      out = [...out, { kind: "user", content: m.content }];
+      continue;
+    }
+    if (!m.events || m.events.length === 0) {
+      out = [...out, { kind: "assistant", content: m.content }];
+      continue;
+    }
+    for (const raw of m.events) {
+      out = reduceEvent(out, raw as StreamEvent);
+    }
+  }
+  return out;
+}
+
+// Show the "…" placeholder only when there's no live signal yet — i.e.
+// no text streaming into an assistant bubble and no tool running.
+function shouldShowEllipsis(items: ChatItem[]): boolean {
+  const last = items[items.length - 1];
+  if (!last) return true;
+  if (last.kind === "assistant" && last.content !== "") return false;
+  if (last.kind === "tool" && last.state === "running") return false;
+  return true;
+}
+
+// When the stream fails mid-flight, any tool whose ``tool_result`` we
+// never received is stuck "running". Flip those to "error" so the
+// transcript doesn't lie about ongoing activity.
+function markRunningToolsAsError(items: ChatItem[]): ChatItem[] {
+  return items.map((it) =>
+    it.kind === "tool" && it.state === "running" ? { ...it, state: "error" } : it,
+  );
 }
 
 function formatError(err: unknown): string {
@@ -824,6 +855,63 @@ function Bubble({
         )}
       </div>
     </div>
+  );
+}
+
+// Inline status line for a tool call. Lowest visual weight by design —
+// tools are ambient activity, not the main content. The state icon
+// (spinner / check / ×) carries the running/done/error semantics, so
+// the label itself stays state-neutral — a gerund phrase like
+// "Searching the wiki" that reads naturally with either a running
+// spinner or a completed check. Labels come from ``presentTool`` so
+// they live in a single registry (``src/lib/tools.ts``) — unknown
+// tools fall back to their raw name.
+function ToolStatus({ item }: { item: Extract<ChatItem, { kind: "tool" }> }) {
+  const { label } = presentTool(item.name);
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        paddingLeft: 4,
+        fontSize: 12,
+        color: color.text.muted,
+        fontStyle: "italic",
+      }}
+    >
+      <ToolStateIcon state={item.state} />
+      <span>{label}</span>
+    </div>
+  );
+}
+
+function ToolStateIcon({ state }: { state: ToolState }) {
+  if (state === "running") {
+    return (
+      <span
+        aria-label="running"
+        style={{
+          display: "inline-block",
+          width: 10,
+          height: 10,
+          borderRadius: "50%",
+          border: `2px solid ${color.border.default}`,
+          borderTopColor: color.text.secondary,
+          animation: "chat-tool-spin 0.7s linear infinite",
+        }}
+      >
+        <style>{`@keyframes chat-tool-spin { to { transform: rotate(360deg); } }`}</style>
+      </span>
+    );
+  }
+  if (state === "error") {
+    return (
+      <span style={{ color: color.state.danger.fg, fontWeight: 700, fontSize: 12 }}>✕</span>
+    );
+  }
+  return (
+    <span style={{ color: color.state.success.fg, fontWeight: 700, fontSize: 12 }}>✓</span>
   );
 }
 

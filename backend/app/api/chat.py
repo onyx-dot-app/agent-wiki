@@ -220,8 +220,13 @@ async def send_message(
                 log.exception("failed to enqueue title task session_id=%s", session_id)
 
     headers = {
-        "Cache-Control": "no-cache",
-        # nginx hint — flush on every yield.
+        # ``no-transform`` tells intermediaries not to recode the body —
+        # in particular it makes Express's ``compression`` middleware
+        # (used by the Next.js dev server) skip gzip. Without it, the
+        # dev proxy gzips the SSE stream and the browser sees one big
+        # decompressed chunk at the end instead of token-by-token
+        # streaming. nginx in prod also honors ``X-Accel-Buffering: no``.
+        "Cache-Control": "no-cache, no-transform",
         "X-Accel-Buffering": "no",
     }
     return StreamingResponse(
@@ -392,7 +397,8 @@ async def drafting_init(
             )
 
     headers = {
-        "Cache-Control": "no-cache",
+        # See ``send_message`` for why ``no-transform`` matters.
+        "Cache-Control": "no-cache, no-transform",
         "X-Accel-Buffering": "no",
     }
     return StreamingResponse(
