@@ -1,29 +1,122 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 
-import { Button } from "@/components/common/Button";
-import { color, radius, shadow } from "@/lib/theme";
+import { SetupWizard } from "@/components/agents/SetupWizard";
+import { ToolCard } from "@/components/agents/ToolCard";
+import { WorkingDirInput } from "@/components/agents/WorkingDirInput";
+import { Button, MessageCard, Text } from "@onyx-ai/opal/components";
+import { InputVertical, Section } from "@onyx-ai/opal/layouts";
+import { ApiError } from "@/lib/api";
+import {
+  launch,
+  probeHelper,
+  useAgentSessions,
+  useLauncherCatalog,
+  type LauncherCatalogEntry,
+} from "@/lib/launchers";
+
+import styles from "./RunAgentModal.module.css";
 
 interface Props {
   open: boolean;
   onClose: () => void;
+  wikiPath: string | null;
 }
 
-const AGENTS: { id: string; name: string; tagline: string }[] = [
-  { id: "onyx-craft", name: "Onyx Craft", tagline: "In-app agent that drafts and edits docs." },
-  { id: "claude-code", name: "Claude Code", tagline: "Coding agent — runs in the user's terminal." },
-];
+interface ProbeState {
+  acked: boolean;
+  machineId: string | null;
+}
 
-export function RunAgentModal({ open, onClose }: Props) {
-  const [selected, setSelected] = useState<string>(AGENTS[0].id);
+export function RunAgentModal({ open, onClose, wikiPath }: Props) {
+  const [probe, setProbe] = useState<ProbeState | null>(null);
+  const { launchers, refresh: refreshCatalog } = useLauncherCatalog({
+    machineId: probe?.machineId ?? null,
+    wikiPath,
+  });
+  const { sessions, refresh: refreshSessions } = useAgentSessions(
+    wikiPath ?? undefined,
+  );
+  const launchable = useMemo(
+    () => launchers.filter((c) => c.available_for_launch),
+    [launchers],
+  );
+
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [workingDir, setWorkingDir] = useState("");
+  const [workdirEdited, setWorkdirEdited] = useState(false);
+  const [rememberWorkdir, setRememberWorkdir] = useState(false);
   const [message, setMessage] = useState("");
+  const [wizardOpen, setWizardOpen] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  function refreshProbe() {
+    void probeHelper().then((r) =>
+      setProbe({ acked: r.acked, machineId: r.machineId }),
+    );
+  }
+
+  // Persist pending-launch state to sessionStorage in case the
+  // browser navigates away to dispatch agentwiki:// and comes back.
+  useEffect(() => {
+    if (!open || !wikiPath) return;
+    const key = `agentwiki:pending-launch:${wikiPath}`;
+    const stashed = sessionStorage.getItem(key);
+    if (stashed) {
+      try {
+        const s = JSON.parse(stashed) as {
+          selectedId: string | null;
+          workingDir: string;
+          message: string;
+        };
+        if (typeof s.selectedId === "string") setSelectedId(s.selectedId);
+        if (typeof s.workingDir === "string") {
+          setWorkingDir(s.workingDir);
+          setWorkdirEdited(true);
+        }
+        if (typeof s.message === "string") setMessage(s.message);
+      } catch {
+        sessionStorage.removeItem(key);
+      }
+    }
+  }, [open, wikiPath]);
 
   useEffect(() => {
     if (!open) return;
-    setSelected(AGENTS[0].id);
-    setMessage("");
+    setError(null);
+    refreshProbe();
   }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    if (launchable.length === 0) {
+      setSelectedId(null);
+      setWorkdirEdited(false);
+      return;
+    }
+    if (selectedId === null) {
+      setSelectedId(launchable[0].id);
+      setWorkdirEdited(false);
+      return;
+    }
+    if (!launchable.some((c) => c.id === selectedId)) {
+      setSelectedId(launchable[0].id);
+      setWorkdirEdited(false);
+    }
+  }, [open, launchable, selectedId]);
+
+  useEffect(() => {
+    if (!open) return;
+    if (workdirEdited) return;
+    const entry = launchers.find((c) => c.id === selectedId);
+    if (!entry) return;
+    const next = entry.default_working_dir ?? "";
+    if (workingDir !== next) {
+      setWorkingDir(next);
+    }
+  }, [open, launchers, selectedId, workdirEdited, workingDir]);
 
   useEffect(() => {
     if (!open) return;
@@ -36,170 +129,222 @@ export function RunAgentModal({ open, onClose }: Props) {
 
   if (!open) return null;
 
-  function onSubmit(e: FormEvent) {
+  const handleWorkdirChange = (next: string) => {
+    setWorkdirEdited(true);
+    setWorkingDir(next);
+  };
+
+  async function onRun(e: FormEvent) {
     e.preventDefault();
-    // No-op for now — wiring the actual agent dispatch is a follow-up.
+    if (!selectedId) return;
+    // Only local_cli tools require the localhost helper. in_app
+    // (e.g. onyx-craft) and web_handoff tools launch through the
+    // backend directly — gating them on the probe result would trap
+    // the user in a wizard loop they can never escape.
+    const selectedTool = launchable.find((c) => c.id === selectedId);
+    if (selectedTool?.kind === "local_cli" && probe?.acked === false) {
+      setWizardOpen(true);
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      // Stash before URI navigation so a bounce-back restores state.
+      if (wikiPath) {
+        sessionStorage.setItem(
+          `agentwiki:pending-launch:${wikiPath}`,
+          JSON.stringify({
+            selectedId,
+            workingDir,
+            message,
+          }),
+        );
+      }
+      const res = await launch({
+        tool_id: selectedId,
+        wiki_path: wikiPath,
+        working_dir: workingDir.trim() || null,
+        message,
+        machine_id: probe?.machineId ?? undefined,
+        remember_workdir_for_page: rememberWorkdir,
+      });
+      window.location.href = res.uri;
+      // Clear the stash now that the launch went through — leaving it
+      // would pre-fill the next modal open for this page with the
+      // previous message + workdir.
+      if (wikiPath) {
+        sessionStorage.removeItem(`agentwiki:pending-launch:${wikiPath}`);
+      }
+      onClose();
+      await refreshSessions();
+      await refreshCatalog();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to launch");
+      setBusy(false);
+    }
   }
 
-  const canRun = message.trim().length > 0;
+  const canRun =
+    message.trim().length > 0 &&
+    selectedId !== null &&
+    launchable.some((c) => c.id === selectedId);
 
   return (
     <div
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: color.overlay,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        zIndex: 100,
-      }}
+      className={styles.scrim}
     >
       <form
-        onSubmit={onSubmit}
+        onSubmit={onRun}
         role="dialog"
         aria-modal="true"
         aria-label="Run agent"
-        style={{
-          background: color.bg.page,
-          borderRadius: radius.lg,
-          width: "min(520px, 92vw)",
-          padding: 22,
-          boxShadow: shadow.modal,
-          display: "flex",
-          flexDirection: "column",
-          gap: 14,
-        }}
+        className={styles.dialog}
       >
-        <h2 style={{ margin: 0, fontSize: 16, fontWeight: 600, color: color.text.primary }}>Run agent</h2>
-        <p style={{ margin: 0, fontSize: 13, color: color.text.muted }}>
-          Pick an agent and write the message to send along with this document.
-        </p>
+        <h2 className={styles.title}>Run agent</h2>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          <span style={labelStyle}>Agent</span>
-          <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 6 }}>
-            {AGENTS.map((a) => (
-              <li key={a.id}>
-                <AgentOption
-                  name={a.name}
-                  tagline={a.tagline}
-                  selected={selected === a.id}
-                  onSelect={() => setSelected(a.id)}
-                />
-              </li>
-            ))}
-          </ul>
-        </div>
-
-        <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          <span style={labelStyle}>Message</span>
-          <textarea
-            autoFocus
-            value={message}
-            onChange={(e) => setMessage(e.target.value)}
-            placeholder="What should the agent do with this doc?"
-            rows={4}
-            style={{
-              padding: 10,
-              border: `1px solid ${color.border.default}`,
-              borderRadius: radius.md,
-              fontFamily: "inherit",
-              fontSize: 14,
-              lineHeight: 1.5,
-              resize: "vertical",
-              minHeight: 96,
-              color: color.text.primary,
-              background: color.bg.page,
+        {wizardOpen ? (
+          <SetupWizard
+            catalog={launchers}
+            onDone={() => {
+              setWizardOpen(false);
+              refreshProbe();
+              void refreshCatalog();
             }}
+            onCancel={() => setWizardOpen(false)}
           />
-        </label>
+        ) : (
+          <>
+            <ToolList
+              catalog={launchable}
+              selectedId={selectedId}
+              onSelect={setSelectedId}
+            />
 
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 4 }}>
-          <Button type="button" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button
-            type="submit"
-            variant="primary"
-            disabled={!canRun}
-            title="Coming Soon!"
-            onMouseDown={(e) => {
-              if (!canRun) return;
-              e.currentTarget.style.transform = "scale(0.97)";
-              e.currentTarget.style.background = color.accent.bgHover;
-            }}
-            onMouseUp={(e) => {
-              if (!canRun) return;
-              e.currentTarget.style.transform = "scale(1)";
-              e.currentTarget.style.background = color.accent.bg;
-            }}
-          >
-            Run
-          </Button>
-        </div>
+            <WorkingDirInput
+              value={workingDir}
+              onChange={handleWorkdirChange}
+              remember={rememberWorkdir}
+              onRememberChange={setRememberWorkdir}
+              pageHasBinding={
+                !!launchers.find((c) => c.id === selectedId)
+                  ?.default_working_dir
+              }
+            />
+
+            <InputVertical title="Message" withLabel="run-agent-message">
+              <textarea
+                id="run-agent-message"
+                value={message}
+                onChange={(e) => setMessage(e.target.value)}
+                placeholder="What should the agent do with this doc?"
+                rows={4}
+                maxLength={16_384}
+                className={styles.textarea}
+              />
+            </InputVertical>
+
+            {(() => {
+              const live = sessions.filter(
+                (s) => s.status === "active" || s.status === "idle",
+              );
+              if (live.length === 0) return null;
+              return (
+                <InputVertical title="Active sessions on this page">
+                  {live.map((s) => (
+                    <Text
+                      key={s.id}
+                      font="secondary-body"
+                      color="text-03"
+                      nowrap
+                    >
+                      {`${s.tool_id} · ${s.status} · ${s.started_at}`}
+                    </Text>
+                  ))}
+                </InputVertical>
+              );
+            })()}
+
+            {error && <MessageCard variant="error" title={error} />}
+
+            <Section
+              flexDirection="row"
+              justifyContent="between"
+              alignItems="center"
+              width="full"
+            >
+              <Button
+                prominence="tertiary"
+                size="sm"
+                onClick={() => setWizardOpen(true)}
+              >
+                Set up another tool →
+              </Button>
+              <Section
+                flexDirection="row"
+                justifyContent="end"
+                alignItems="center"
+                width="fit"
+                gap={1}
+              >
+                <Button type="button" prominence="secondary" onClick={onClose}>
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  variant="action"
+                  disabled={!canRun || busy}
+                >
+                  {busy ? "Launching..." : "Run"}
+                </Button>
+              </Section>
+            </Section>
+          </>
+        )}
       </form>
     </div>
   );
 }
 
-function AgentOption({
-  name,
-  tagline,
-  selected,
+function ToolList({
+  catalog,
+  selectedId,
   onSelect,
 }: {
-  name: string;
-  tagline: string;
-  selected: boolean;
-  onSelect: () => void;
+  catalog: LauncherCatalogEntry[];
+  selectedId: string | null;
+  onSelect: (id: string) => void;
 }) {
+  if (catalog.length === 0) {
+    return (
+      <Text font="secondary-body" color="text-03">
+        No launchable tools available yet.
+      </Text>
+    );
+  }
   return (
-    <button
-      type="button"
-      onClick={onSelect}
-      aria-pressed={selected}
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "flex-start",
-        textAlign: "left",
-        width: "100%",
-        padding: "10px 12px",
-        background: selected ? color.accent.subtleBg : color.bg.page,
-        border: `1px solid ${selected ? color.accent.bg : color.border.default}`,
-        borderRadius: radius.md,
-        cursor: "pointer",
-        transition: "transform 80ms ease, background 80ms ease, border-color 80ms ease",
-      }}
-      onMouseEnter={(e) => {
-        if (!selected) e.currentTarget.style.background = color.bg.sunken;
-      }}
-      onMouseLeave={(e) => {
-        if (!selected) e.currentTarget.style.background = color.bg.page;
-      }}
-      onMouseDown={(e) => {
-        e.currentTarget.style.transform = "scale(0.98)";
-      }}
-      onMouseUp={(e) => {
-        e.currentTarget.style.transform = "scale(1)";
-      }}
-    >
-      <span style={{ fontSize: 14, fontWeight: 600, color: color.text.primary }}>
-        {name}
-      </span>
-      <span style={{ fontSize: 12, color: color.text.muted, marginTop: 2 }}>{tagline}</span>
-    </button>
+    <InputVertical title="Tool">
+      <Section
+        flexDirection="column"
+        alignItems="stretch"
+        justifyContent="start"
+        gap={1}
+        width="full"
+        height="fit"
+      >
+        {catalog.map((c) => (
+          <ToolCard
+            key={c.id}
+            toolId={c.id}
+            name={c.name}
+            tagline={c.tagline}
+            selected={c.id === selectedId}
+            onSelect={() => onSelect(c.id)}
+          />
+        ))}
+      </Section>
+    </InputVertical>
   );
 }
-
-const labelStyle: React.CSSProperties = {
-  fontSize: 12,
-  fontWeight: 600,
-  color: color.text.secondary,
-  textTransform: "uppercase",
-  letterSpacing: "0.04em",
-};

@@ -93,8 +93,8 @@ function returns a typed `User`; bind it on the route signature and
 pass it down (e.g. to `require_can(action, path, user)`). For
 non-HTTP code paths (worker tasks, agent tools), read the active
 user with `app.auth.current_user()` — it reads the ContextVar bound
-by ``app.auth.deps.CurrentUserMiddleware`` for HTTP requests or by
-``set_current_user(user)`` for background tasks. Don't touch
+by `app.auth.deps.CurrentUserMiddleware` for HTTP requests or by
+`set_current_user(user)` for background tasks. Don't touch
 `request.session["user_id"]` outside `app/api/auth.py`.
 
 - Public endpoints (signup, login, `/auth/config`, inbound webhooks)
@@ -103,16 +103,16 @@ by ``app.auth.deps.CurrentUserMiddleware`` for HTTP requests or by
 - The first registered user is auto-admin (`users_repo.create` checks
   `count() == 0`). Admin can't be left at zero (see `app/api/admin.py`
   — demote/delete guard against `admin_count() <= 1`).
-- The session cookie is signed by Starlette's ``SessionMiddleware``
-  (installed in ``app/main.py:create_app``); ``app.auth.deps.current_user``
-  reads ``request.session["user_id"]``.
+- The session cookie is signed by Starlette's `SessionMiddleware`
+  (installed in `app/main.py:create_app`); `app.auth.deps.current_user`
+  reads `request.session["user_id"]`.
 
 ### Wiki page authorization — `require_can` + `app/wiki/acl.py`
 
 Per-page permissions live in Postgres (`acl_entries`, `wiki_owners`,
 `groups`, `group_members`). Routes that read or mutate a wiki page
 must gate via `app.auth.require_can("read"|"write", path, user)`
-where ``user`` is the value resolved by ``Depends(require_user)``.
+where `user` is the value resolved by `Depends(require_user)`.
 Search and listing endpoints filter through
 `app.wiki.acl.visible_paths_filter` (SQL predicate) or
 `acl.filter_paths_in_python` (in-memory).
@@ -148,10 +148,10 @@ session.
 - One repo module per logical aggregate (`users`, `documents`,
   `triggers`, …). New schema = edit `app/db/models.py` and generate a
   migration: `cd backend && alembic revision --autogenerate -m
-  "<short slug>"`. The new file lands in
+"<short slug>"`. The new file lands in
   `app/db/migrations/versions/`; review it (autogenerate doesn't see
   every kind of change) and commit. `init_db()` runs `alembic upgrade
-  head` on every boot so deploys apply pending migrations
+head` on every boot so deploys apply pending migrations
   automatically. The bootstrap migration `0001_initial` materializes
   the entire current schema via `Base.metadata.create_all` and seeds
   the catalog rows the app expects (e.g. `trigger_destinations`).
@@ -282,8 +282,8 @@ and serialize the result. Business logic lives in `app/auth/`,
 doing a multi-step workflow inside a route handler, push it down.
 
 Error responses use `{"error": "<message>"}` with the right status
-code — domain exceptions (``HTTPException``, ``PermissionDenied``,
-``RequestError``, ``QueueFullError``) are translated by the handlers
+code — domain exceptions (`HTTPException`, `PermissionDenied`,
+`RequestError`, `QueueFullError`) are translated by the handlers
 installed in `app/main.py:_install_error_handlers`. The frontend's
 `ApiError` parses this shape.
 
@@ -329,11 +329,28 @@ there.
 Use `react-markdown` + `remark-gfm` (already wired in the wiki page). Don't
 inject HTML from the backend.
 
-### Design tokens — only via `src/lib/theme.ts`
+### Component styling — CSS Modules adjacent, tokens via CSS vars
 
-The frontend has no Tailwind / CSS-in-JS — components style themselves with
-inline `style={{...}}`. Centralized tokens live in `src/lib/theme.ts` and
-are the **only** source of color, radius, and shadow values:
+New components MUST use **CSS Modules**: `Component.module.css` adjacent
+to `Component.tsx`, imported as `import styles from "./Component.module.css"`,
+applied with `className={styles.foo}`. Next.js scopes class names at
+build time so component-local class names (`.card`, `.header`) can stay
+short without collision risk.
+
+Cross-cutting rules (page background, native input themes, markdown
+typography) live in `src/app/globals.css`. CSS variables for theme
+tokens (color, shadow, radius) are defined there and consumed from
+both CSS Modules (`var(--color-text-primary)`) and the TS token
+re-exports in `src/lib/theme.ts` (which point at the same CSS vars).
+
+Existing components written with inline `style={{...}}` and `theme.ts`
+imports are not retroactively migrated — they continue to read tokens
+through `theme.ts`. The token source of truth is the CSS variables in
+`globals.css`; `theme.ts` is a typed wrapper for inline-style callers
+that haven't migrated. Both render to the same value at runtime.
+
+Tokens (whether read via `var(--…)` in CSS or `color.*` in TS) are the
+**only** source of color, radius, and shadow values:
 
 - `color.text` — `primary | secondary | muted | faint | inverse`
 - `color.bg` — `page | panel | sunken | hover | active`
@@ -366,18 +383,23 @@ are the **only** source of color, radius, and shadow values:
   are the only place raw hex is acceptable — they're illustrations, not UI
   surfaces. Don't extend that exception to anything that paints chrome.
 
-### Buttons — only via `<Button>` from `src/components/common/Button.tsx`
+### Buttons — `<Button>` from `@onyx-ai/opal/components` (new code) or `src/components/common/Button.tsx` (existing surfaces)
 
-There's one button component, four variants, two sizes:
+OPAL's `Button` is the preferred primitive for net-new components.
+Variant / prominence mapping when migrating existing call sites or
+writing new ones:
 
-- `variant="primary"` — accent surface; one per row at most (form submit,
-  primary CTA in a header)
-- `variant="secondary"` (default) — neutral with subtle border; the
-  workhorse
-- `variant="danger"` — destructive (Revoke, Delete); uses `state.danger`
-- `variant="ghost"` — transparent surface for low-emphasis text actions
-- `size="md"` (default) — forms, modal actions, page headers
-- `size="sm"` — dense rows, table cells, inline actions
+- accent CTA (form submit, primary) — `variant="action"`
+- neutral default — no variant (or `variant="default"`)
+- destructive — `variant="danger"`
+- low-emphasis text action — `prominence="tertiary"`
+- size: `"md"` (default) for forms / modal actions / page headers,
+  `"sm"` for dense rows, table cells, inline actions
+
+The legacy `src/components/common/Button.tsx` is kept around as a
+shim for the older app pages so we don't have to migrate everything
+at once; new launcher-area code uses OPAL directly. Either is fine in
+isolation — but don't mix them inside the same component.
 
 Don't write ad-hoc `<button style={{ ... }}>` for primary/secondary/danger
 chrome. If you need an unusual one-off (icon-only toolbar buttons in
@@ -408,6 +430,7 @@ Form inputs and `<select>` controls use:
 
 Don't set `appearance: "auto"` on a `<select>` — it bypasses the rest of
 the styling and produces a native control next to custom-looking ones.
+
 - Modal scrims are `rgba(15, 15, 15, 0.45)` (warm-neutral, matches the
   greyscale palette). Don't use slate-tinted scrims (`rgba(15, 23, 42, ...)`).
 
@@ -429,7 +452,7 @@ PR. Don't accumulate parallel ad-hoc colors.
 - `pytest`. The FastAPI app exposes `create_app()` → wrap with
   `fastapi.testclient.TestClient`. Sign in a test client via
   `tests/_auth.py:login_fastapi(client, user_id)` which mints a
-  ``SessionMiddleware``-compatible cookie.
+  `SessionMiddleware`-compatible cookie.
 - Per-test isolation:
   - the conftest creates a unique Postgres schema per test against
     `TEST_DATABASE_URL` (default `postgresql://postgres:postgres@localhost:5432/agent_wiki_test`)
@@ -450,15 +473,16 @@ PR. Don't accumulate parallel ad-hoc colors.
   `queue.immediate = True` directly — the bare assignment will leak
   state across tests if the body raises.
 - Full-stack flow tests live under `tests/integration/`. The
-  `integration` fixture there wires a FastAPI ``TestClient`` + real
+  `integration` fixture there wires a FastAPI `TestClient` + real
   DB + real wiki repo + scripted LLM mock. See
   `local_data/wiki/integration-tests.md`.
 
 ### Frontend
 
 Type-check with `npm run typecheck`. Component tests can be added with Vitest
-+ React Testing Library when needed. Keep components pure functions of props
-so they're trivially testable.
+
+- React Testing Library when needed. Keep components pure functions of props
+  so they're trivially testable.
 
 ## Adding a feature — checklist
 
@@ -478,7 +502,7 @@ so they're trivially testable.
 - Don't import `anthropic`, `openai`, `google.genai`, or `ollama` outside the
   matching `app/llm/providers/<name>.py` module.
 - Don't read `request.session` outside `app/api/auth.py` (where login/logout
-  write it) and `app/auth/deps.py` (where ``current_user`` reads it).
+  write it) and `app/auth/deps.py` (where `current_user` reads it).
 - Don't shell out to `git` outside `app/wiki/git.py`.
 - Don't put business logic inside a FastAPI route handler — push it to a
   domain module.
@@ -496,7 +520,9 @@ so they're trivially testable.
   React component — import from `src/lib/theme.ts`. If the shade isn't
   there, add it there. (See the design tokens seam above.)
 - Don't roll a new primary/secondary/danger button in a component — use
-  `<Button>` from `src/components/common/Button.tsx`. (See the buttons seam.)
+  the OPAL `Button` (`@onyx-ai/opal/components`) for new code, or
+  `src/components/common/Button.tsx` on legacy surfaces. (See the
+  buttons seam.)
 - Don't use slate-tinted (`rgba(15,23,42,…)`) or pure-black modal scrims —
   use `color.overlay`. Don't invent ad-hoc modal shadows — use
   `shadow.modal`. (See the modals seam.)

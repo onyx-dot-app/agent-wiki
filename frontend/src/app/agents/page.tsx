@@ -1,7 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
+import { SetupWizard } from "@/components/agents/SetupWizard";
+import { ToolCard } from "@/components/agents/ToolCard";
 import { AppShell } from "@/components/common/AppShell";
 import { Button } from "@/components/common/Button";
 import { PageHeader } from "@/components/common/PageHeader";
@@ -16,23 +18,32 @@ import {
 } from "@/lib/agents";
 import { apiFetch } from "@/lib/api";
 import { useRequireAuth } from "@/lib/auth";
-import { color, radius } from "@/lib/theme";
+import {
+  probeHelper,
+  useLauncherCatalog,
+  type ProbeResult,
+} from "@/lib/launchers";
+import { color, radius, shadow } from "@/lib/theme";
 import { useIsMobile } from "@/lib/viewport";
 
 export default function AgentsPage() {
   const { user, loading } = useRequireAuth();
   const isMobile = useIsMobile();
 
-  if (loading || !user) return <main style={{ padding: isMobile ? 16 : 32 }}>Loading…</main>;
+  if (loading || !user)
+    return <main style={{ padding: isMobile ? 16 : 32 }}>Loading…</main>;
 
   return (
     <AppShell>
-      <main style={{ padding: isMobile ? "16px 12px" : "24px 32px", maxWidth: 880 }}>
+      <main
+        style={{ padding: isMobile ? "16px 12px" : "24px 32px", maxWidth: 880 }}
+      >
         <PageHeader
           title="Agents"
           description="Give your agents the ability to read and update this wiki. Generate a personal API key below, then drop it into your coding agent's MCP configuration. Each key's name becomes that agent's identity — it shows up next to its activity on wiki pages and in commit history."
         />
 
+        <CodingToolsSection />
         <EndpointBlock />
         <TokenManager />
         <ClientConfigHelp />
@@ -55,14 +66,16 @@ function EndpointBlock() {
 
   return (
     <section style={card}>
-      <div style={{ fontSize: 13, color: color.text.muted, marginBottom: 6 }}>MCP server URL</div>
+      <div style={{ fontSize: 13, color: color.text.muted, marginBottom: 6 }}>
+        MCP server URL
+      </div>
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
         <code style={codeBlock}>{endpoint || "—"}</code>
         <CopyButton text={endpoint} />
       </div>
       <div style={{ fontSize: 12, color: color.text.muted, marginTop: 8 }}>
-        Send the API key in the <code style={inlineCode}>Authorization</code> header as{" "}
-        <code style={inlineCode}>Bearer mcp_…</code>.
+        Send the API key in the <code style={inlineCode}>Authorization</code>{" "}
+        header as <code style={inlineCode}>Bearer mcp_…</code>.
       </div>
     </section>
   );
@@ -98,9 +111,7 @@ function TokenManager() {
       </div>
 
       {error && (
-        <div style={errorBanner}>
-          {error.message || "Failed to load keys."}
-        </div>
+        <div style={errorBanner}>{error.message || "Failed to load keys."}</div>
       )}
 
       {showCreate && (
@@ -114,9 +125,7 @@ function TokenManager() {
         />
       )}
 
-      {reveal && (
-        <RevealOnce token={reveal} onClose={() => setReveal(null)} />
-      )}
+      {reveal && <RevealOnce token={reveal} onClose={() => setReveal(null)} />}
 
       {isLoading && tokens.length === 0 && !error && (
         <p style={{ color: color.text.muted, fontSize: 14 }}>Loading…</p>
@@ -139,11 +148,21 @@ function TokenManager() {
   );
 }
 
-function TokenRow({ token, onRevoked }: { token: TokenSummary; onRevoked: () => void }) {
+function TokenRow({
+  token,
+  onRevoked,
+}: {
+  token: TokenSummary;
+  onRevoked: () => void;
+}) {
   const [busy, setBusy] = useState(false);
 
   async function onRevoke() {
-    if (!confirm(`Revoke "${token.name}"? Any agent using this key will stop working.`)) {
+    if (
+      !confirm(
+        `Revoke "${token.name}"? Any agent using this key will stop working.`,
+      )
+    ) {
       return;
     }
     setBusy(true);
@@ -171,10 +190,16 @@ function TokenRow({ token, onRevoked }: { token: TokenSummary; onRevoked: () => 
       }}
     >
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontWeight: 500, fontSize: 14, color: color.text.primary }}>{token.name}</div>
+        <div
+          style={{ fontWeight: 500, fontSize: 14, color: color.text.primary }}
+        >
+          {token.name}
+        </div>
         <div style={{ fontSize: 12, color: color.text.muted, marginTop: 2 }}>
           Created {token.created_at}
-          {token.last_used_at ? ` · last used ${token.last_used_at}` : " · never used"}
+          {token.last_used_at
+            ? ` · last used ${token.last_used_at}`
+            : " · never used"}
         </div>
       </div>
       <Button size="sm" variant="danger" onClick={onRevoke} disabled={busy}>
@@ -249,7 +274,13 @@ function CreateForm({
   );
 }
 
-function RevealOnce({ token, onClose }: { token: CreatedToken; onClose: () => void }) {
+function RevealOnce({
+  token,
+  onClose,
+}: {
+  token: CreatedToken;
+  onClose: () => void;
+}) {
   return (
     <div
       style={{
@@ -260,14 +291,20 @@ function RevealOnce({ token, onClose }: { token: CreatedToken; onClose: () => vo
         marginBottom: 12,
       }}
     >
-      <div style={{ fontWeight: 600, color: color.state.warning.fg, fontSize: 14 }}>
+      <div
+        style={{ fontWeight: 600, color: color.state.warning.fg, fontSize: 14 }}
+      >
         Copy your key now — this is the only time it&apos;ll be shown.
       </div>
-      <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 10 }}>
+      <div
+        style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 10 }}
+      >
         <code style={codeBlock}>{token.token}</code>
         <CopyButton text={token.token} />
       </div>
-      <div style={{ fontSize: 12, color: color.state.warning.fg, marginTop: 8 }}>
+      <div
+        style={{ fontSize: 12, color: color.state.warning.fg, marginTop: 8 }}
+      >
         If you lose it, revoke this key and generate a new one.
       </div>
       <Button onClick={onClose} style={{ marginTop: 12 }}>
@@ -319,14 +356,22 @@ function ClientConfigHelp() {
           gap: 6,
         }}
       >
-        <span style={{ fontSize: 12, color: color.text.muted }}>{open ? "▾" : "▸"}</span>
+        <span style={{ fontSize: 12, color: color.text.muted }}>
+          {open ? "▾" : "▸"}
+        </span>
         How to wire this into Claude Code, Cursor, or Codex
       </button>
       {open && (
         <div style={{ marginTop: 12 }}>
-          <div style={{ fontSize: 13, color: color.text.secondary, marginBottom: 6 }}>
-            Sample <code style={inlineCode}>mcp_servers.json</code> entry — replace
-            the placeholder with your generated key:
+          <div
+            style={{
+              fontSize: 13,
+              color: color.text.secondary,
+              marginBottom: 6,
+            }}
+          >
+            Sample <code style={inlineCode}>mcp_servers.json</code> entry —
+            replace the placeholder with your generated key:
           </div>
           <pre
             style={{
@@ -365,23 +410,32 @@ function OnyxConnection() {
     setIngestUrl(`${window.location.origin}/api/wiki/ingest`);
     apiFetch<IngestSettings>("/admin/ingest")
       .then(setSettings)
-      .catch((e) => setError(e instanceof Error ? e.message : "failed to load"));
+      .catch((e) =>
+        setError(e instanceof Error ? e.message : "failed to load"),
+      );
   }, []);
 
   async function regenerate() {
     if (
       settings?.api_key &&
-      !confirm("Regenerate the API key? The old key will stop working immediately.")
+      !confirm(
+        "Regenerate the API key? The old key will stop working immediately.",
+      )
     )
       return;
     setBusy(true);
     setError(null);
     setNotice(null);
     try {
-      const r = await apiFetch<{ api_key: string }>("/admin/ingest/regenerate-key", { method: "POST" });
+      const r = await apiFetch<{ api_key: string }>(
+        "/admin/ingest/regenerate-key",
+        { method: "POST" },
+      );
       setSettings((prev) => (prev ? { ...prev, api_key: r.api_key } : prev));
       setKeyVisible(true);
-      setNotice("New key generated. Copy it now — it will be masked after you leave this page.");
+      setNotice(
+        "New key generated. Copy it now — it will be masked after you leave this page.",
+      );
     } catch (e) {
       setError(e instanceof Error ? e.message : "failed to regenerate");
     } finally {
@@ -393,14 +447,18 @@ function OnyxConnection() {
     <section style={card}>
       <h2 style={{ margin: "0 0 12px", fontSize: 16 }}>Onyx connection</h2>
       <div style={{ fontSize: 13, color: color.text.muted, marginBottom: 16 }}>
-        Push indexed documents from Onyx into this wiki automatically. Copy the endpoint and API key
-        into your Onyx environment variables.
+        Push indexed documents from Onyx into this wiki automatically. Copy the
+        endpoint and API key into your Onyx environment variables.
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         {/* Ingest URL */}
         <div>
-          <div style={{ fontSize: 13, color: color.text.muted, marginBottom: 6 }}>Endpoint URL</div>
+          <div
+            style={{ fontSize: 13, color: color.text.muted, marginBottom: 6 }}
+          >
+            Endpoint URL
+          </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <code style={codeBlock}>{ingestUrl || "—"}</code>
             <CopyButton text={ingestUrl} />
@@ -409,27 +467,50 @@ function OnyxConnection() {
 
         {/* API key */}
         <div>
-          <div style={{ fontSize: 13, color: color.text.muted, marginBottom: 6 }}>API key</div>
+          <div
+            style={{ fontSize: 13, color: color.text.muted, marginBottom: 6 }}
+          >
+            API key
+          </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <code style={codeBlock}>
               {settings === null
                 ? "Loading…"
                 : settings.api_key
-                ? keyVisible
-                  ? settings.api_key
-                  : "••••••••••••••••••••••••••••••••"
-                : "No key yet — click Regenerate"}
+                  ? keyVisible
+                    ? settings.api_key
+                    : "••••••••••••••••••••••••••••••••"
+                  : "No key yet — click Regenerate"}
             </code>
-            {settings?.api_key && keyVisible && <CopyButton text={settings.api_key} />}
-            <Button size="sm" variant={settings?.api_key ? "secondary" : "primary"} disabled={busy} onClick={() => void regenerate()}>
+            {settings?.api_key && keyVisible && (
+              <CopyButton text={settings.api_key} />
+            )}
+            <Button
+              size="sm"
+              variant={settings?.api_key ? "secondary" : "primary"}
+              disabled={busy}
+              onClick={() => void regenerate()}
+            >
               {busy ? "…" : "Regenerate"}
             </Button>
           </div>
         </div>
       </div>
 
-      {notice && <div style={{ fontSize: 13, color: color.state.success.fg, marginTop: 10 }}>{notice}</div>}
-      {error && <div style={{ fontSize: 13, color: color.state.danger.fg, marginTop: 10 }}>{error}</div>}
+      {notice && (
+        <div
+          style={{ fontSize: 13, color: color.state.success.fg, marginTop: 10 }}
+        >
+          {notice}
+        </div>
+      )}
+      {error && (
+        <div
+          style={{ fontSize: 13, color: color.state.danger.fg, marginTop: 10 }}
+        >
+          {error}
+        </div>
+      )}
     </section>
   );
 }
@@ -506,3 +587,142 @@ const errorBanner: React.CSSProperties = {
   fontSize: 13,
   marginBottom: 8,
 };
+
+// --------------------------------------------------------------------------- //
+// Coding tools section                          //
+// --------------------------------------------------------------------------- //
+
+function CodingToolsSection() {
+  const [probe, setProbe] = useState<ProbeResult | null>(null);
+  const { launchers } = useLauncherCatalog({
+    machineId: probe?.machineId ?? null,
+  });
+  const [wizardOpen, setWizardOpen] = useState(false);
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (wizardOpen) return;
+    let cancelled = false;
+    void (async () => {
+      const result = await probeHelper();
+      if (!cancelled) setProbe(result);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [wizardOpen]);
+
+  useEffect(() => {
+    if (!wizardOpen) return;
+    const node = dialogRef.current;
+    if (node) {
+      node.focus();
+    }
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setWizardOpen(false);
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [wizardOpen]);
+
+  return (
+    <section style={card}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          marginBottom: 12,
+        }}
+      >
+        <h2 style={{ margin: 0, fontSize: 16 }}>Coding tools</h2>
+        <Button variant="primary" onClick={() => setWizardOpen(true)}>
+          Set up tools
+        </Button>
+      </div>
+
+      {/* Surface helper-install status. */}
+      <div style={{ fontSize: 13, color: color.text.muted, marginBottom: 12 }}>
+        Launcher:{" "}
+        {probe === null ? (
+          "checking…"
+        ) : probe.acked ? (
+          <span style={{ color: color.state.success.fg }}>
+            ✓ detected on this machine
+          </span>
+        ) : (
+          <span style={{ color: color.state.warning.fg }}>
+            ⚠ not detected — run{" "}
+            <code style={inlineCode}>
+              npm install -g @onyx-ai/agentwiki-launcher
+            </code>
+          </span>
+        )}
+      </div>
+
+      <ul
+        style={{
+          listStyle: "none",
+          padding: 0,
+          margin: 0,
+          display: "flex",
+          flexDirection: "column",
+          gap: 8,
+        }}
+      >
+        {launchers.map((c) => (
+          <li key={c.id}>
+            <ToolCard
+              toolId={c.id}
+              name={c.name}
+              tagline={c.tagline}
+              selected={false}
+            />
+          </li>
+        ))}
+      </ul>
+
+      {wizardOpen && (
+        <div
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) setWizardOpen(false);
+          }}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: color.overlay,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 100,
+          }}
+        >
+          <div
+            ref={dialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Set up coding tools"
+            tabIndex={-1}
+            style={{
+              background: color.bg.page,
+              borderRadius: radius.lg,
+              padding: 22,
+              width: "min(560px, 92vw)",
+              boxShadow: shadow.modal,
+              maxHeight: "90vh",
+              overflowY: "auto",
+            }}
+          >
+            <SetupWizard
+              catalog={launchers}
+              onDone={() => setWizardOpen(false)}
+              onCancel={() => setWizardOpen(false)}
+            />
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}

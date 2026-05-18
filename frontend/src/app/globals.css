@@ -1,5 +1,6 @@
 @import "./css/colors.css" layer(base);
 @import "./css/opal-styles.css" layer(base);
+
 @import "tailwindcss";
 /* @import "tw-animate-css" lives at the app level (not in opal-styles.css)
    because Tailwind v4's PostCSS resolver doesn't walk node_modules from
@@ -26,6 +27,17 @@ html {
      this. Without it, native form controls keep their hardcoded white
      surfaces in dark mode and look broken. */
   color-scheme: light;
+
+  /* OPAL tailwind preset references --border-radius-* vars via
+     rounded-08 / rounded-12 / etc. utilities (used by the ported
+     OnyxButton wrapper). Define them at the :root so those classes
+     resolve to actual radii instead of unset / 0. */
+  --border-radius-02: 0.125rem;
+  --border-radius-04: 0.25rem;
+  --border-radius-08: 0.5rem;
+  --border-radius-12: 0.75rem;
+  --border-radius-16: 1rem;
+  --border-radius-full: 64rem;
 
   /* Text */
   --color-text-primary: #37352f;
@@ -83,6 +95,13 @@ html {
   --shadow-fab: 0 6px 20px rgba(15, 15, 15, 0.18);
   --shadow-modal: 0 24px 60px rgba(15, 15, 15, 0.18);
   --shadow-panel: -4px 0 24px rgba(15, 15, 15, 0.08);
+
+  /* Radii — shared with lib/theme.ts. */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-pill: 9999px;
 }
 
 :root[data-theme="dark"] {
@@ -185,16 +204,39 @@ textarea::placeholder {
   font-weight: 600;
   line-height: 1.3;
 }
-.markdown h1 { font-size: 1.875em; margin: 28px 0 10px; }
-.markdown h2 { font-size: 1.5em;   margin: 24px 0 8px; }
-.markdown h3 { font-size: 1.25em;  margin: 20px 0 6px; }
-.markdown h4 { font-size: 1.1em;   margin: 16px 0 4px; }
-.markdown p  { margin: 10px 0; }
+.markdown h1 {
+  font-size: 1.875em;
+  margin: 28px 0 10px;
+}
+.markdown h2 {
+  font-size: 1.5em;
+  margin: 24px 0 8px;
+}
+.markdown h3 {
+  font-size: 1.25em;
+  margin: 20px 0 6px;
+}
+.markdown h4 {
+  font-size: 1.1em;
+  margin: 16px 0 4px;
+}
+.markdown p {
+  margin: 10px 0;
+}
 .markdown ul,
-.markdown ol { margin: 10px 0; padding-left: 24px; }
-.markdown ul { list-style: disc; }
-.markdown ol { list-style: decimal; }
-.markdown li { margin: 4px 0; }
+.markdown ol {
+  margin: 10px 0;
+  padding-left: 24px;
+}
+.markdown ul {
+  list-style: disc;
+}
+.markdown ol {
+  list-style: decimal;
+}
+.markdown li {
+  margin: 4px 0;
+}
 .markdown a {
   color: var(--color-text-primary);
   text-decoration: underline;
