@@ -1,41 +1,75 @@
 {
-  "annotations": {"list": []},
+  "annotations": {
+    "list": []
+  },
   "editable": true,
   "graphTooltip": 1,
   "panels": [
     {
       "collapsed": false,
-      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0},
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
       "id": 101,
       "title": "Ingest Pipeline",
       "type": "row"
     },
     {
-      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
       "fieldConfig": {
         "defaults": {
-          "color": {"fixedColor": "blue", "mode": "fixed"},
+          "color": {
+            "fixedColor": "blue",
+            "mode": "fixed"
+          },
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              {"color": "green", "value": null},
-              {"color": "yellow", "value": 10},
-              {"color": "red", "value": 100}
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 10
+              },
+              {
+                "color": "red",
+                "value": 100
+              }
             ]
           },
           "unit": "short"
         }
       },
-      "gridPos": {"h": 4, "w": 4, "x": 0, "y": 1},
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 1
+      },
       "id": 3,
       "options": {
         "colorMode": "background",
         "graphMode": "area",
-        "reduceOptions": {"calcs": ["lastNotNull"]}
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
       },
       "targets": [
         {
-          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
           "expr": "sum(ingest_queue_depth{job=\"agent-wiki-agent-workspace-backend\"})",
           "legendFormat": "Queue Depth",
           "refId": "A"
@@ -45,32 +79,67 @@
       "type": "stat"
     },
     {
-      "gridPos": {"h": 4, "w": 20, "x": 4, "y": 1},
+      "gridPos": {
+        "h": 4,
+        "w": 20,
+        "x": 4,
+        "y": 1
+      },
       "id": 11,
-      "options": {"content": "", "mode": "markdown"},
+      "options": {
+        "content": "",
+        "mode": "markdown"
+      },
       "title": "",
       "transparent": true,
       "type": "text"
     },
     {
-      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
       "fieldConfig": {
         "defaults": {
-          "color": {"mode": "palette-classic"},
-          "custom": {"drawStyle": "line", "fillOpacity": 10, "lineWidth": 2},
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
           "unit": "reqps"
         },
         "overrides": []
       },
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 5},
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 5
+      },
       "id": 4,
       "options": {
-        "legend": {"calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom"},
-        "tooltip": {"mode": "multi", "sort": "desc"}
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
       },
       "targets": [
         {
-          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
           "expr": "sum(rate(ingest_requests_total[5m])) by (source_type)",
           "legendFormat": "{{source_type}}",
           "refId": "A"
@@ -80,29 +149,54 @@
       "type": "timeseries"
     },
     {
-      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
       "fieldConfig": {
         "defaults": {
-          "color": {"mode": "palette-classic"},
+          "color": {
+            "mode": "palette-classic"
+          },
           "custom": {
             "drawStyle": "bars",
             "fillOpacity": 80,
             "lineWidth": 1,
-            "stacking": {"group": "A", "mode": "normal"}
+            "stacking": {
+              "group": "A",
+              "mode": "normal"
+            }
           },
           "unit": "reqps"
         },
         "overrides": []
       },
-      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 5},
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 5
+      },
       "id": 5,
       "options": {
-        "legend": {"calcs": ["mean"], "displayMode": "table", "placement": "bottom"},
-        "tooltip": {"mode": "multi", "sort": "desc"}
+        "legend": {
+          "calcs": [
+            "mean"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
       },
       "targets": [
         {
-          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
           "expr": "sum(rate(ingest_outcomes_total[5m])) by (outcome)",
           "legendFormat": "{{outcome}}",
           "refId": "A"
@@ -112,25 +206,49 @@
       "type": "timeseries"
     },
     {
-      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
       "fieldConfig": {
         "defaults": {
-          "color": {"mode": "palette-classic"},
+          "color": {
+            "mode": "palette-classic"
+          },
           "unit": "short"
         },
         "overrides": []
       },
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 13},
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 13
+      },
       "id": 9,
       "options": {
-        "displayLabels": ["percent"],
-        "legend": {"displayMode": "table", "placement": "right", "values": ["value", "percent"]},
+        "displayLabels": [
+          "percent"
+        ],
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "values": [
+            "value",
+            "percent"
+          ]
+        },
         "pieType": "donut",
-        "tooltip": {"mode": "single"}
+        "tooltip": {
+          "mode": "single"
+        }
       },
       "targets": [
         {
-          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
           "expr": "sum(ingest_outcomes_total) by (outcome)",
           "legendFormat": "{{outcome}}",
           "refId": "A"
@@ -140,186 +258,401 @@
       "type": "piechart"
     },
     {
-      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
       "fieldConfig": {
         "defaults": {
-          "color": {"mode": "scheme"},
+          "color": {
+            "mode": "scheme"
+          },
           "custom": {
             "fillOpacity": 80,
-            "hideFrom": {"legend": false, "tooltip": false, "viz": false},
-            "scaleDistribution": {"type": "linear"}
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "scaleDistribution": {
+              "type": "linear"
+            }
           }
         },
         "overrides": []
       },
-      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 13},
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 13
+      },
       "id": 17,
       "options": {
         "calculate": false,
         "cellGap": 1,
-        "color": {"exponent": 0.5, "fill": "dark-purple", "mode": "scheme", "reverse": false, "scale": "exponential", "scheme": "Purples", "steps": 64},
-        "exemplars": {"color": "rgba(255,0,255,0.7)"},
-        "filterValues": {"le": 1e-9},
-        "legend": {"show": true},
-        "rowsFrame": {"layout": "auto"},
-        "tooltip": {"mode": "single", "showColorScale": false, "yHistogram": false},
-        "yAxis": {"axisLabel": "BM25 score", "axisPlacement": "left", "unit": "short"}
+        "color": {
+          "exponent": 0.5,
+          "fill": "dark-purple",
+          "mode": "scheme",
+          "reverse": false,
+          "scale": "exponential",
+          "scheme": "Purples",
+          "steps": 64
+        },
+        "exemplars": {
+          "color": "rgba(255,0,255,0.7)"
+        },
+        "filterValues": {
+          "le": 1e-09
+        },
+        "legend": {
+          "show": true
+        },
+        "rowsFrame": {
+          "layout": "auto"
+        },
+        "tooltip": {
+          "mode": "single",
+          "showColorScale": false,
+          "yHistogram": false
+        },
+        "yAxis": {
+          "axisLabel": "BM25 score",
+          "axisPlacement": "left",
+          "unit": "short"
+        }
       },
       "targets": [
         {
-          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
           "expr": "sum(rate(ingest_bm25_score_bucket[5m])) by (le)",
           "format": "heatmap",
           "legendFormat": "{{le}}",
           "refId": "A"
         }
       ],
-      "title": "BM25 Score — All Outcomes",
+      "title": "BM25 Score \u2014 All Outcomes",
       "type": "heatmap"
     },
     {
-      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
       "fieldConfig": {
         "defaults": {
-          "color": {"mode": "scheme"},
+          "color": {
+            "mode": "scheme"
+          },
           "custom": {
             "fillOpacity": 80,
-            "hideFrom": {"legend": false, "tooltip": false, "viz": false},
-            "scaleDistribution": {"type": "linear"}
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "scaleDistribution": {
+              "type": "linear"
+            }
           }
         },
         "overrides": []
       },
-      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 21},
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 21
+      },
       "id": 6,
       "options": {
         "calculate": false,
         "cellGap": 1,
-        "color": {"exponent": 0.5, "fill": "dark-green", "mode": "scheme", "reverse": false, "scale": "exponential", "scheme": "Greens", "steps": 64},
-        "exemplars": {"color": "rgba(255,0,255,0.7)"},
-        "filterValues": {"le": 1e-9},
-        "legend": {"show": true},
-        "rowsFrame": {"layout": "auto"},
-        "tooltip": {"mode": "single", "showColorScale": false, "yHistogram": false},
-        "yAxis": {"axisLabel": "BM25 score", "axisPlacement": "left", "unit": "short"}
+        "color": {
+          "exponent": 0.5,
+          "fill": "dark-green",
+          "mode": "scheme",
+          "reverse": false,
+          "scale": "exponential",
+          "scheme": "Greens",
+          "steps": 64
+        },
+        "exemplars": {
+          "color": "rgba(255,0,255,0.7)"
+        },
+        "filterValues": {
+          "le": 1e-09
+        },
+        "legend": {
+          "show": true
+        },
+        "rowsFrame": {
+          "layout": "auto"
+        },
+        "tooltip": {
+          "mode": "single",
+          "showColorScale": false,
+          "yHistogram": false
+        },
+        "yAxis": {
+          "axisLabel": "BM25 score",
+          "axisPlacement": "left",
+          "unit": "short"
+        }
       },
       "targets": [
         {
-          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
           "expr": "sum(rate(ingest_bm25_score_by_outcome_bucket{outcome=\"committed\"}[5m])) by (le)",
           "format": "heatmap",
           "legendFormat": "{{le}}",
           "refId": "A"
         }
       ],
-      "title": "BM25 Score — Committed",
+      "title": "BM25 Score \u2014 Committed",
       "type": "heatmap"
     },
     {
-      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
       "fieldConfig": {
         "defaults": {
-          "color": {"mode": "scheme"},
+          "color": {
+            "mode": "scheme"
+          },
           "custom": {
             "fillOpacity": 80,
-            "hideFrom": {"legend": false, "tooltip": false, "viz": false},
-            "scaleDistribution": {"type": "linear"}
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "scaleDistribution": {
+              "type": "linear"
+            }
           }
         },
         "overrides": []
       },
-      "gridPos": {"h": 8, "w": 8, "x": 8, "y": 21},
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 21
+      },
       "id": 15,
       "options": {
         "calculate": false,
         "cellGap": 1,
-        "color": {"exponent": 0.5, "fill": "dark-orange", "mode": "scheme", "reverse": false, "scale": "exponential", "scheme": "Oranges", "steps": 64},
-        "exemplars": {"color": "rgba(255,0,255,0.7)"},
-        "filterValues": {"le": 1e-9},
-        "legend": {"show": true},
-        "rowsFrame": {"layout": "auto"},
-        "tooltip": {"mode": "single", "showColorScale": false, "yHistogram": false},
-        "yAxis": {"axisLabel": "BM25 score", "axisPlacement": "left", "unit": "short"}
+        "color": {
+          "exponent": 0.5,
+          "fill": "dark-orange",
+          "mode": "scheme",
+          "reverse": false,
+          "scale": "exponential",
+          "scheme": "Oranges",
+          "steps": 64
+        },
+        "exemplars": {
+          "color": "rgba(255,0,255,0.7)"
+        },
+        "filterValues": {
+          "le": 1e-09
+        },
+        "legend": {
+          "show": true
+        },
+        "rowsFrame": {
+          "layout": "auto"
+        },
+        "tooltip": {
+          "mode": "single",
+          "showColorScale": false,
+          "yHistogram": false
+        },
+        "yAxis": {
+          "axisLabel": "BM25 score",
+          "axisPlacement": "left",
+          "unit": "short"
+        }
       },
       "targets": [
         {
-          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
           "expr": "sum(rate(ingest_bm25_score_by_outcome_bucket{outcome=\"irrelevant\"}[5m])) by (le)",
           "format": "heatmap",
           "legendFormat": "{{le}}",
           "refId": "A"
         }
       ],
-      "title": "BM25 Score — Irrelevant",
+      "title": "BM25 Score \u2014 Irrelevant",
       "type": "heatmap"
     },
     {
-      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
       "fieldConfig": {
         "defaults": {
-          "color": {"mode": "scheme"},
+          "color": {
+            "mode": "scheme"
+          },
           "custom": {
             "fillOpacity": 80,
-            "hideFrom": {"legend": false, "tooltip": false, "viz": false},
-            "scaleDistribution": {"type": "linear"}
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "scaleDistribution": {
+              "type": "linear"
+            }
           }
         },
         "overrides": []
       },
-      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 21},
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 21
+      },
       "id": 16,
       "options": {
         "calculate": false,
         "cellGap": 1,
-        "color": {"exponent": 0.5, "fill": "dark-blue", "mode": "scheme", "reverse": false, "scale": "exponential", "scheme": "Blues", "steps": 64},
-        "exemplars": {"color": "rgba(255,0,255,0.7)"},
-        "filterValues": {"le": 1e-9},
-        "legend": {"show": true},
-        "rowsFrame": {"layout": "auto"},
-        "tooltip": {"mode": "single", "showColorScale": false, "yHistogram": false},
-        "yAxis": {"axisLabel": "BM25 score", "axisPlacement": "left", "unit": "short"}
+        "color": {
+          "exponent": 0.5,
+          "fill": "dark-blue",
+          "mode": "scheme",
+          "reverse": false,
+          "scale": "exponential",
+          "scheme": "Blues",
+          "steps": 64
+        },
+        "exemplars": {
+          "color": "rgba(255,0,255,0.7)"
+        },
+        "filterValues": {
+          "le": 1e-09
+        },
+        "legend": {
+          "show": true
+        },
+        "rowsFrame": {
+          "layout": "auto"
+        },
+        "tooltip": {
+          "mode": "single",
+          "showColorScale": false,
+          "yHistogram": false
+        },
+        "yAxis": {
+          "axisLabel": "BM25 score",
+          "axisPlacement": "left",
+          "unit": "short"
+        }
       },
       "targets": [
         {
-          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
           "expr": "sum(rate(ingest_bm25_score_by_outcome_bucket{outcome=\"no_change\"}[5m])) by (le)",
           "format": "heatmap",
           "legendFormat": "{{le}}",
           "refId": "A"
         }
       ],
-      "title": "BM25 Score — No Change",
+      "title": "BM25 Score \u2014 No Change",
       "type": "heatmap"
     },
     {
-      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
       "fieldConfig": {
         "defaults": {
-          "color": {"mode": "scheme"},
+          "color": {
+            "mode": "scheme"
+          },
           "custom": {
             "fillOpacity": 80,
-            "hideFrom": {"legend": false, "tooltip": false, "viz": false},
-            "scaleDistribution": {"type": "linear"}
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "scaleDistribution": {
+              "type": "linear"
+            }
           }
         },
         "overrides": []
       },
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 30},
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 30
+      },
       "id": 7,
       "options": {
         "calculate": false,
         "cellGap": 1,
-        "color": {"exponent": 0.5, "fill": "dark-blue", "mode": "scheme", "reverse": false, "scale": "exponential", "scheme": "Blues", "steps": 64},
-        "exemplars": {"color": "rgba(255,0,255,0.7)"},
-        "filterValues": {"le": 1e-9},
-        "legend": {"show": true},
-        "rowsFrame": {"layout": "auto"},
-        "tooltip": {"mode": "single", "showColorScale": false, "yHistogram": false},
-        "yAxis": {"axisLabel": "# docs hit", "axisPlacement": "left", "unit": "short"}
+        "color": {
+          "exponent": 0.5,
+          "fill": "dark-blue",
+          "mode": "scheme",
+          "reverse": false,
+          "scale": "exponential",
+          "scheme": "Blues",
+          "steps": 64
+        },
+        "exemplars": {
+          "color": "rgba(255,0,255,0.7)"
+        },
+        "filterValues": {
+          "le": 1e-09
+        },
+        "legend": {
+          "show": true
+        },
+        "rowsFrame": {
+          "layout": "auto"
+        },
+        "tooltip": {
+          "mode": "single",
+          "showColorScale": false,
+          "yHistogram": false
+        },
+        "yAxis": {
+          "axisLabel": "# docs hit",
+          "axisPlacement": "left",
+          "unit": "short"
+        }
       },
       "targets": [
         {
-          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
           "expr": "sum(rate(ingest_bm25_hits_bucket[5m])) by (le)",
           "format": "heatmap",
           "legendFormat": "{{le}}",
@@ -330,34 +663,77 @@
       "type": "heatmap"
     },
     {
-      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
       "fieldConfig": {
         "defaults": {
-          "color": {"mode": "scheme"},
+          "color": {
+            "mode": "scheme"
+          },
           "custom": {
             "fillOpacity": 80,
-            "hideFrom": {"legend": false, "tooltip": false, "viz": false},
-            "scaleDistribution": {"type": "linear"}
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "scaleDistribution": {
+              "type": "linear"
+            }
           }
         },
         "overrides": []
       },
-      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 30},
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 30
+      },
       "id": 10,
       "options": {
         "calculate": false,
         "cellGap": 1,
-        "color": {"exponent": 0.5, "fill": "dark-green", "mode": "scheme", "reverse": false, "scale": "exponential", "scheme": "Greens", "steps": 64},
-        "exemplars": {"color": "rgba(255,0,255,0.7)"},
-        "filterValues": {"le": 1e-9},
-        "legend": {"show": true},
-        "rowsFrame": {"layout": "auto"},
-        "tooltip": {"mode": "single", "showColorScale": false, "yHistogram": false},
-        "yAxis": {"axisLabel": "# docs passed", "axisPlacement": "left", "unit": "short"}
+        "color": {
+          "exponent": 0.5,
+          "fill": "dark-green",
+          "mode": "scheme",
+          "reverse": false,
+          "scale": "exponential",
+          "scheme": "Greens",
+          "steps": 64
+        },
+        "exemplars": {
+          "color": "rgba(255,0,255,0.7)"
+        },
+        "filterValues": {
+          "le": 1e-09
+        },
+        "legend": {
+          "show": true
+        },
+        "rowsFrame": {
+          "layout": "auto"
+        },
+        "tooltip": {
+          "mode": "single",
+          "showColorScale": false,
+          "yHistogram": false
+        },
+        "yAxis": {
+          "axisLabel": "# docs passed",
+          "axisPlacement": "left",
+          "unit": "short"
+        }
       },
       "targets": [
         {
-          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
           "expr": "sum(rate(ingest_bm25_passed_bucket[5m])) by (le)",
           "format": "heatmap",
           "legendFormat": "{{le}}",
@@ -368,26 +744,52 @@
       "type": "heatmap"
     },
     {
-      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
       "fieldConfig": {
         "defaults": {
-          "color": {"mode": "palette-classic"},
-          "custom": {"drawStyle": "line", "fillOpacity": 10, "lineWidth": 2},
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
           "max": 1,
           "min": 0,
           "unit": "percentunit"
         },
         "overrides": []
       },
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 38},
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 38
+      },
       "id": 12,
       "options": {
-        "legend": {"calcs": ["mean", "last"], "displayMode": "table", "placement": "bottom"},
-        "tooltip": {"mode": "single"}
+        "legend": {
+          "calcs": [
+            "mean",
+            "last"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
       },
       "targets": [
         {
-          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
           "expr": "sum(rate(ingest_bm25_passed_sum[5m])) / sum(rate(ingest_bm25_hits_sum[5m]))",
           "legendFormat": "pass rate",
           "refId": "A"
@@ -397,30 +799,60 @@
       "type": "timeseries"
     },
     {
-      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
       "fieldConfig": {
         "defaults": {
-          "color": {"mode": "palette-classic"},
-          "custom": {"drawStyle": "line", "fillOpacity": 10, "lineWidth": 2},
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
           "unit": "s"
         },
         "overrides": []
       },
-      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 38},
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 38
+      },
       "id": 8,
       "options": {
-        "legend": {"calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom"},
-        "tooltip": {"mode": "multi", "sort": "desc"}
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
       },
       "targets": [
         {
-          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
           "expr": "histogram_quantile(0.95, sum(rate(ingest_llm_duration_seconds_bucket[5m])) by (le))",
           "legendFormat": "p95",
           "refId": "A"
         },
         {
-          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
           "expr": "histogram_quantile(0.50, sum(rate(ingest_llm_duration_seconds_bucket[5m])) by (le))",
           "legendFormat": "p50",
           "refId": "B"
@@ -430,34 +862,77 @@
       "type": "timeseries"
     },
     {
-      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
       "fieldConfig": {
         "defaults": {
-          "color": {"mode": "scheme"},
+          "color": {
+            "mode": "scheme"
+          },
           "custom": {
             "fillOpacity": 80,
-            "hideFrom": {"legend": false, "tooltip": false, "viz": false},
-            "scaleDistribution": {"type": "linear"}
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "scaleDistribution": {
+              "type": "linear"
+            }
           }
         },
         "overrides": []
       },
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 46},
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 46
+      },
       "id": 13,
       "options": {
         "calculate": false,
         "cellGap": 1,
-        "color": {"exponent": 0.5, "fill": "dark-purple", "mode": "scheme", "reverse": false, "scale": "exponential", "scheme": "Purples", "steps": 64},
-        "exemplars": {"color": "rgba(255,0,255,0.7)"},
-        "filterValues": {"le": 1e-9},
-        "legend": {"show": true},
-        "rowsFrame": {"layout": "auto"},
-        "tooltip": {"mode": "single", "showColorScale": false, "yHistogram": false},
-        "yAxis": {"axisLabel": "LLM calls", "axisPlacement": "left", "unit": "short"}
+        "color": {
+          "exponent": 0.5,
+          "fill": "dark-purple",
+          "mode": "scheme",
+          "reverse": false,
+          "scale": "exponential",
+          "scheme": "Purples",
+          "steps": 64
+        },
+        "exemplars": {
+          "color": "rgba(255,0,255,0.7)"
+        },
+        "filterValues": {
+          "le": 1e-09
+        },
+        "legend": {
+          "show": true
+        },
+        "rowsFrame": {
+          "layout": "auto"
+        },
+        "tooltip": {
+          "mode": "single",
+          "showColorScale": false,
+          "yHistogram": false
+        },
+        "yAxis": {
+          "axisLabel": "LLM calls",
+          "axisPlacement": "left",
+          "unit": "short"
+        }
       },
       "targets": [
         {
-          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
           "expr": "sum(rate(ingest_llm_calls_per_doc_bucket[5m])) by (le)",
           "format": "heatmap",
           "legendFormat": "{{le}}",
@@ -468,24 +943,50 @@
       "type": "heatmap"
     },
     {
-      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
       "fieldConfig": {
         "defaults": {
-          "color": {"mode": "palette-classic"},
-          "custom": {"drawStyle": "line", "fillOpacity": 10, "lineWidth": 2},
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
           "unit": "short"
         },
         "overrides": []
       },
-      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 46},
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 46
+      },
       "id": 14,
       "options": {
-        "legend": {"calcs": ["last", "max"], "displayMode": "table", "placement": "bottom"},
-        "tooltip": {"mode": "single"}
+        "legend": {
+          "calcs": [
+            "last",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
       },
       "targets": [
         {
-          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
           "expr": "sum(increase(ingest_llm_duration_seconds_count[1h]))",
           "legendFormat": "LLM calls (1h)",
           "refId": "A"
@@ -493,11 +994,286 @@
       ],
       "title": "Total LLM Calls (rolling 1h)",
       "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 56
+      },
+      "id": 102,
+      "title": "Top Wiki Pages by Outcome",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "wiki_path"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Wiki Page"
+              },
+              {
+                "id": "custom.width",
+                "value": 300
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Value"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Commits"
+              },
+              {
+                "id": "custom.width",
+                "value": 80
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 8,
+        "x": 0,
+        "y": 57
+      },
+      "id": 103,
+      "options": {
+        "sortBy": [
+          {
+            "desc": true,
+            "displayName": "Commits"
+          }
+        ]
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "topk(10, sum by (wiki_path) (ingest_outcomes_total{outcome=\"committed\"}))",
+          "instant": true,
+          "legendFormat": "{{wiki_path}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Top Wiki Pages \u2014 Committed",
+      "transformations": [
+        {
+          "id": "sortBy",
+          "options": {
+            "fields": [
+              {
+                "desc": true,
+                "displayName": "Value"
+              }
+            ]
+          }
+        }
+      ],
+      "type": "table"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "wiki_path"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Wiki Page"
+              },
+              {
+                "id": "custom.width",
+                "value": 300
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Value"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Irrelevant"
+              },
+              {
+                "id": "custom.width",
+                "value": 80
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 8,
+        "x": 8,
+        "y": 57
+      },
+      "id": 104,
+      "options": {
+        "sortBy": [
+          {
+            "desc": true,
+            "displayName": "Irrelevant"
+          }
+        ]
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "topk(10, sum by (wiki_path) (ingest_outcomes_total{outcome=\"irrelevant\"}))",
+          "instant": true,
+          "legendFormat": "{{wiki_path}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Top Wiki Pages \u2014 Irrelevant",
+      "transformations": [
+        {
+          "id": "sortBy",
+          "options": {
+            "fields": [
+              {
+                "desc": true,
+                "displayName": "Value"
+              }
+            ]
+          }
+        }
+      ],
+      "type": "table"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "wiki_path"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Wiki Page"
+              },
+              {
+                "id": "custom.width",
+                "value": 300
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Value"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "No Change"
+              },
+              {
+                "id": "custom.width",
+                "value": 80
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 8,
+        "x": 16,
+        "y": 57
+      },
+      "id": 105,
+      "options": {
+        "sortBy": [
+          {
+            "desc": true,
+            "displayName": "No Change"
+          }
+        ]
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "topk(10, sum by (wiki_path) (ingest_outcomes_total{outcome=\"no_change\"}))",
+          "instant": true,
+          "legendFormat": "{{wiki_path}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Top Wiki Pages \u2014 No Change",
+      "transformations": [
+        {
+          "id": "sortBy",
+          "options": {
+            "fields": [
+              {
+                "desc": true,
+                "displayName": "Value"
+              }
+            ]
+          }
+        }
+      ],
+      "type": "table"
     }
   ],
   "refresh": "30s",
   "schemaVersion": 38,
-  "tags": ["agent-wiki"],
+  "tags": [
+    "agent-wiki"
+  ],
   "templating": {
     "list": [
       {
@@ -513,7 +1289,10 @@
       }
     ]
   },
-  "time": {"from": "now-6h", "to": "now"},
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
   "timepicker": {},
   "timezone": "browser",
   "title": "Agent Wiki - Ingestion",
