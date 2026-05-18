@@ -306,6 +306,7 @@ export function RunAgentModal({ open, onClose, wikiPath }: Props) {
                 flexDirection="row"
                 justifyContent="end"
                 alignItems="center"
+                width="fit"
                 gap={1}
               >
                 <Button type="button" prominence="secondary" onClick={onClose}>

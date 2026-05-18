@@ -41,8 +41,9 @@ export function ToolCard({
         <Section
           flexDirection="column"
           alignItems="start"
-          justifyContent="start"
+          justifyContent="center"
           width="full"
+          height="fit"
           gap={0.5}
         >
           <Text font="main-ui-body" color="text-04" nowrap>
