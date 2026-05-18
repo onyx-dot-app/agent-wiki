@@ -304,7 +304,7 @@
           "color": "rgba(255,0,255,0.7)"
         },
         "filterValues": {
-          "le": 1e-09
+          "le": 1E-9
         },
         "legend": {
           "show": true
@@ -335,7 +335,7 @@
           "refId": "A"
         }
       ],
-      "title": "BM25 Score \u2014 All Outcomes",
+      "title": "BM25 Score — All Outcomes",
       "type": "heatmap"
     },
     {
@@ -385,7 +385,7 @@
           "color": "rgba(255,0,255,0.7)"
         },
         "filterValues": {
-          "le": 1e-09
+          "le": 1E-9
         },
         "legend": {
           "show": true
@@ -416,7 +416,7 @@
           "refId": "A"
         }
       ],
-      "title": "BM25 Score \u2014 Committed",
+      "title": "BM25 Score — Committed",
       "type": "heatmap"
     },
     {
@@ -466,7 +466,7 @@
           "color": "rgba(255,0,255,0.7)"
         },
         "filterValues": {
-          "le": 1e-09
+          "le": 1E-9
         },
         "legend": {
           "show": true
@@ -497,7 +497,7 @@
           "refId": "A"
         }
       ],
-      "title": "BM25 Score \u2014 Irrelevant",
+      "title": "BM25 Score — Irrelevant",
       "type": "heatmap"
     },
     {
@@ -547,7 +547,7 @@
           "color": "rgba(255,0,255,0.7)"
         },
         "filterValues": {
-          "le": 1e-09
+          "le": 1E-9
         },
         "legend": {
           "show": true
@@ -578,7 +578,7 @@
           "refId": "A"
         }
       ],
-      "title": "BM25 Score \u2014 No Change",
+      "title": "BM25 Score — No Change",
       "type": "heatmap"
     },
     {
@@ -628,7 +628,7 @@
           "color": "rgba(255,0,255,0.7)"
         },
         "filterValues": {
-          "le": 1e-09
+          "le": 1E-9
         },
         "legend": {
           "show": true
@@ -709,7 +709,7 @@
           "color": "rgba(255,0,255,0.7)"
         },
         "filterValues": {
-          "le": 1e-09
+          "le": 1E-9
         },
         "legend": {
           "show": true
@@ -908,7 +908,7 @@
           "color": "rgba(255,0,255,0.7)"
         },
         "filterValues": {
-          "le": 1e-09
+          "le": 1E-9
         },
         "legend": {
           "show": true
@@ -1058,14 +1058,6 @@
         "y": 57
       },
       "id": 103,
-      "options": {
-        "sortBy": [
-          {
-            "desc": true,
-            "displayName": "Commits"
-          }
-        ]
-      },
       "targets": [
         {
           "datasource": {
@@ -1078,7 +1070,7 @@
           "refId": "A"
         }
       ],
-      "title": "Top Wiki Pages \u2014 Committed",
+      "title": "Top Wiki Pages — Committed",
       "transformations": [
         {
           "id": "sortBy",
@@ -1145,14 +1137,6 @@
         "y": 57
       },
       "id": 104,
-      "options": {
-        "sortBy": [
-          {
-            "desc": true,
-            "displayName": "Irrelevant"
-          }
-        ]
-      },
       "targets": [
         {
           "datasource": {
@@ -1165,7 +1149,7 @@
           "refId": "A"
         }
       ],
-      "title": "Top Wiki Pages \u2014 Irrelevant",
+      "title": "Top Wiki Pages — Irrelevant",
       "transformations": [
         {
           "id": "sortBy",
@@ -1232,14 +1216,6 @@
         "y": 57
       },
       "id": 105,
-      "options": {
-        "sortBy": [
-          {
-            "desc": true,
-            "displayName": "No Change"
-          }
-        ]
-      },
       "targets": [
         {
           "datasource": {
@@ -1252,7 +1228,7 @@
           "refId": "A"
         }
       ],
-      "title": "Top Wiki Pages \u2014 No Change",
+      "title": "Top Wiki Pages — No Change",
       "transformations": [
         {
           "id": "sortBy",
