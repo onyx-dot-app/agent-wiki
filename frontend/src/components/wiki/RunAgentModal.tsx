@@ -57,7 +57,7 @@ export function RunAgentModal({ open, onClose, wikiPath }: Props) {
     );
   }
 
-  // R7#2 — persist pending-launch state to sessionStorage in case the
+  // Persist pending-launch state to sessionStorage in case the
   // browser navigates away to dispatch agentwiki:// and comes back.
   useEffect(() => {
     if (!open || !wikiPath) return;
@@ -143,7 +143,7 @@ export function RunAgentModal({ open, onClose, wikiPath }: Props) {
     setBusy(true);
     setError(null);
     try {
-      // R7#2 — stash before URI navigation so a bounce-back restores state.
+      // Stash before URI navigation so a bounce-back restores state.
       if (wikiPath) {
         sessionStorage.setItem(
           `agentwiki:pending-launch:${wikiPath}`,

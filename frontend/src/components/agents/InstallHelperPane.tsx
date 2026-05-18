@@ -40,7 +40,7 @@ export function InstallHelperPane({
   }
 
   async function manualTest() {
-    // AF#9 — user-gesture top-level navigation works even when iframe
+    // User-gesture top-level navigation works even when iframe
     // probe is blocked. After dispatch the user returns to the page;
     // we kick a fresh probe.
     setManualBusy(true);

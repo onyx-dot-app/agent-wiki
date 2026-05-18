@@ -553,7 +553,7 @@ const errorBanner: React.CSSProperties = {
 };
 
 // --------------------------------------------------------------------------- //
-// Coding tools section (Phase 2 — R8#1 status badge)                          //
+// Coding tools section                          //
 // --------------------------------------------------------------------------- //
 
 function CodingToolsSection() {
@@ -591,7 +591,7 @@ function CodingToolsSection() {
         </Button>
       </div>
 
-      {/* R8#1 — surface helper-install status. */}
+      {/* Surface helper-install status. */}
       <div style={{ fontSize: 13, color: color.text.muted, marginBottom: 12 }}>
         Launcher:{" "}
         {probe === null ? (

@@ -1,11 +1,6 @@
 /** Typed wrappers for the launchers + agent-sessions API surface.
  *
  * See `local_data/wiki/Wiki Project/Specific Features/coding_tool_launchers/`.
- *
- * Audit fixes applied (per Phase 2 plan's "Audit fixes" section):
- *   - AF#9 — 3× retry on `probeHelper`, per-retry iframe cleanup (R7#1)
- *   - AF#14 — probe-ack carries `machine_id`; threaded into catalog query
- *   - R2#6 — `available_for_launch` flag on catalog entries
  */
 import useSWR from "swr";
 
@@ -140,7 +135,8 @@ export function closeSession(id: string, reason: string): Promise<void> {
 
 const PROBE_CACHE_KEY = "agentwiki:helper-probe";
 
-/** AF#9 — 3× retry with 800ms windows. Per-retry iframe cleanup (R7#1). */
+/** Up to 3 retries with 800ms windows, cleaning the probe iframe
+ * between attempts so a stalled OS dispatch doesn't pin layout. */
 export async function probeHelper(
   opts: { retries?: number } = {},
 ): Promise<ProbeResult> {
