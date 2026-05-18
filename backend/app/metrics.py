@@ -53,7 +53,7 @@ ingest_bm25_score_by_outcome = Histogram(
 ingest_outcomes_total = Counter(
     "ingest_outcomes_total",
     "Ingest pipeline outcomes",
-    ["outcome"],  # committed, no_change, irrelevant, filtered, no_candidates
+    ["outcome", "wiki_path"],  # committed, no_change, irrelevant, filtered, no_candidates
 )
 
 ingest_llm_duration_seconds = Histogram(
