@@ -53,7 +53,10 @@ ingest_bm25_score_by_outcome = Histogram(
 ingest_outcomes_total = Counter(
     "ingest_outcomes_total",
     "Ingest pipeline outcomes",
-    ["outcome"],  # committed, no_change, irrelevant, filtered, no_candidates
+    # wiki_path cardinality is bounded by the number of pages in the wiki git repo
+    # (a finite set). Stale series from renamed/deleted pages expire with TSDB retention.
+    # Add a recording rule to cap top-N if the wiki grows beyond ~500 pages.
+    ["outcome", "wiki_path"],  # committed, no_change, irrelevant, filtered, no_candidates
 )
 
 ingest_llm_duration_seconds = Histogram(

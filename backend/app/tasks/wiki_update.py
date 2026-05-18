@@ -257,14 +257,14 @@ def process_pushed_document(push: dict[str, Any]) -> None:
 
     if is_filtered(source_type):
         log.debug("process_pushed_document: filtered source %s, dropping", source_type)
-        ingest_outcomes_total.labels(outcome="filtered").inc()
+        ingest_outcomes_total.labels(outcome="filtered", wiki_path="").inc()
         return
 
     t_start = time.monotonic()
     hits = ingest_search.candidates(content, title)
     if not hits:
         log.info("process_pushed_document: no BM25 candidates above threshold, doc_id=%s", doc_id)
-        ingest_outcomes_total.labels(outcome="no_candidates").inc()
+        ingest_outcomes_total.labels(outcome="no_candidates", wiki_path="").inc()
         return
 
     source_label = source_type or "external"
@@ -303,7 +303,7 @@ def process_pushed_document(push: dict[str, Any]) -> None:
         if result == IRRELEVANT_SENTINEL:
             irrelevant += 1
             consecutive_irrelevant += 1
-            ingest_outcomes_total.labels(outcome="irrelevant").inc()
+            ingest_outcomes_total.labels(outcome="irrelevant", wiki_path=hit.path).inc()
             ingest_bm25_score_by_outcome.labels(outcome="irrelevant").observe(hit.score)
             log.debug(
                 "process_pushed_document: IRRELEVANT path=%s consecutive=%d",
@@ -319,11 +319,11 @@ def process_pushed_document(push: dict[str, Any]) -> None:
                 sha = wiki_git.commit_file(hit.path, result, message, author=_INGEST_AUTHOR)
                 wiki_notify.after_doc_write(hit.path, sha, "edit", _INGEST_AUTHOR)
                 committed += 1
-                ingest_outcomes_total.labels(outcome="committed").inc()
+                ingest_outcomes_total.labels(outcome="committed", wiki_path=hit.path).inc()
                 ingest_bm25_score_by_outcome.labels(outcome="committed").observe(hit.score)
                 log.info("process_pushed_document: committed %s sha=%s", hit.path, sha)
             else:
-                ingest_outcomes_total.labels(outcome="no_change").inc()
+                ingest_outcomes_total.labels(outcome="no_change", wiki_path=hit.path).inc()
                 ingest_bm25_score_by_outcome.labels(outcome="no_change").observe(hit.score)
 
     ingest_llm_calls_per_doc.observe(llm_calls)
