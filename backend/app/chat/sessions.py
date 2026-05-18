@@ -118,7 +118,7 @@ def update_title(session_id: str, title: str) -> None:
 
 def touch(session_id: str) -> None:
     """Bump ``updated_at`` so the session sorts to the top of the list."""
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")
     with session() as s:
         row = s.get(ChatSession, session_id)
         if row is not None:
