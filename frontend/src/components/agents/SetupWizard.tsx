@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 
-import { Button } from "@onyx-ai/opal/components";
+import { OnyxButton as Button } from "@/components/common/OnyxButton";
 import {
   probeCli,
   probeHelper,
@@ -140,12 +140,10 @@ function Step1({
         ))}
       </ul>
       <div className={styles.actions}>
-        <Button onClick={onCancel}>Cancel</Button>
-        <Button
-          variant="action"
-          onClick={onNext}
-          disabled={selected.size === 0}
-        >
+        <Button secondary onClick={onCancel}>
+          Cancel
+        </Button>
+        <Button action onClick={onNext} disabled={selected.size === 0}>
           Next
         </Button>
       </div>
@@ -227,8 +225,10 @@ function Step2({
         )}
       </div>
       <div className={styles.actions}>
-        <Button onClick={onBack}>Back</Button>
-        <Button variant="action" onClick={onDone} disabled={!allOk}>
+        <Button secondary onClick={onBack}>
+          Back
+        </Button>
+        <Button action onClick={onDone} disabled={!allOk}>
           Done
         </Button>
       </div>

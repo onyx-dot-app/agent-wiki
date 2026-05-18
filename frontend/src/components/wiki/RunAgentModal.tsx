@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { SetupWizard } from "@/components/agents/SetupWizard";
 import { ToolCard } from "@/components/agents/ToolCard";
 import { WorkingDirInput } from "@/components/agents/WorkingDirInput";
-import { Button } from "@onyx-ai/opal/components";
+import { OnyxButton as Button } from "@/components/common/OnyxButton";
 import { ApiError } from "@/lib/api";
 import {
   launch,
@@ -267,14 +267,10 @@ export function RunAgentModal({ open, onClose, wikiPath }: Props) {
                 Set up another tool →
               </button>
               <div className={styles.footerActions}>
-                <Button type="button" onClick={onClose}>
+                <Button type="button" secondary onClick={onClose}>
                   Cancel
                 </Button>
-                <Button
-                  type="submit"
-                  variant="action"
-                  disabled={!canRun || busy}
-                >
+                <Button type="submit" action disabled={!canRun || busy}>
                   {busy ? "Launching..." : "Run"}
                 </Button>
               </div>
