@@ -242,9 +242,14 @@ def evict_idle_to_closed() -> int:
 
 
 def evict_spawn_missed() -> int:
-    """Sessions that exchanged but never reported spawn_ok within 30s
-    are marked ``failed`` so the UI stops showing them as live."""
-    cutoff = _iso(datetime.now(timezone.utc) - timedelta(seconds=30))
+    """Sessions that exchanged but never reported spawn_ok within
+    ``CONFIG.agent_session_spawn_ok_seconds`` are marked ``failed`` so
+    the UI stops showing them as live. Windows cold-start spawns can
+    legitimately take longer than the macOS default; bump the env knob
+    instead of patching this constant."""
+    cutoff = _iso(
+        datetime.now(timezone.utc) - timedelta(seconds=CONFIG.agent_session_spawn_ok_seconds)
+    )
     now = _now_iso()
     with session() as s:
         return execute_dml(

@@ -47,6 +47,7 @@ class Config(BaseModel):
     launch_code_ttl_seconds: int
     agent_session_idle_seconds: int
     agent_session_close_after_idle_seconds: int
+    agent_session_spawn_ok_seconds: int
 
 
 def _positive_float(name: str, default: float) -> float:
@@ -115,6 +116,10 @@ def load_config() -> Config:
         agent_session_close_after_idle_seconds=_positive_int(
             "AGENT_SESSION_CLOSE_AFTER_IDLE_SECONDS",
             86400,
+        ),
+        agent_session_spawn_ok_seconds=_positive_int(
+            "AGENT_SESSION_SPAWN_OK_SECONDS",
+            30,
         ),
     )
 

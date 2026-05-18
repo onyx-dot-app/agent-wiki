@@ -119,6 +119,7 @@ def tmp_config(tmp_path, monkeypatch):
         launch_code_ttl_seconds=60,
         agent_session_idle_seconds=300,
         agent_session_close_after_idle_seconds=86400,
+        agent_session_spawn_ok_seconds=30,
     )
     monkeypatch.setattr("app.config.CONFIG", cfg)
     monkeypatch.setattr("app.db.session.CONFIG", cfg)
