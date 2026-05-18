@@ -1,0 +1,32 @@
+[
+  {
+    "scope": [],
+    "path": "CLAUDE.md",
+    "description": "Architectural seams + frontend rules + checklist for adding a feature — single source of truth for code review."
+  },
+  {
+    "scope": [],
+    "path": "README.md",
+    "description": "Repo overview and local-dev setup."
+  },
+  {
+    "scope": [],
+    "path": "docs/architecture.md",
+    "description": "High-level data flow + queue topology."
+  },
+  {
+    "scope": [],
+    "path": "docs/api.md",
+    "description": "HTTP API reference."
+  },
+  {
+    "scope": [],
+    "path": "docs/mcp-server.md",
+    "description": "MCP transport (POST JSON-RPC + GET SSE) — wire format and auth."
+  },
+  {
+    "scope": ["backend/**"],
+    "path": ".greptile/rules.md",
+    "description": "Generic review rules applied repo-wide."
+  }
+]
