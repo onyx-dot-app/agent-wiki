@@ -6,7 +6,7 @@ import { SetupWizard } from "@/components/agents/SetupWizard";
 import { ToolCard } from "@/components/agents/ToolCard";
 import { WorkingDirInput } from "@/components/agents/WorkingDirInput";
 import { Button, MessageCard, Text } from "@onyx-ai/opal/components";
-import { Label, Section } from "@onyx-ai/opal/layouts";
+import { InputVertical, Section } from "@onyx-ai/opal/layouts";
 import { ApiError } from "@/lib/api";
 import {
   launch,
@@ -234,18 +234,7 @@ export function RunAgentModal({ open, onClose, wikiPath }: Props) {
               }
             />
 
-            <Section
-              flexDirection="column"
-              alignItems="start"
-              justifyContent="start"
-              gap={1}
-              width="full"
-            >
-              <Label label="run-agent-message">
-                <Text font="secondary-action" color="text-04">
-                  Message
-                </Text>
-              </Label>
+            <InputVertical title="Message" withLabel="run-agent-message">
               <textarea
                 id="run-agent-message"
                 value={message}
@@ -255,7 +244,7 @@ export function RunAgentModal({ open, onClose, wikiPath }: Props) {
                 maxLength={16_384}
                 className={styles.textarea}
               />
-            </Section>
+            </InputVertical>
 
             {(() => {
               const live = sessions.filter(
@@ -263,16 +252,7 @@ export function RunAgentModal({ open, onClose, wikiPath }: Props) {
               );
               if (live.length === 0) return null;
               return (
-                <Section
-                  flexDirection="column"
-                  alignItems="start"
-                  justifyContent="start"
-                  gap={0.5}
-                  width="full"
-                >
-                  <Text font="secondary-action" color="text-04">
-                    Active sessions on this page
-                  </Text>
+                <InputVertical title="Active sessions on this page">
                   {live.map((s) => (
                     <Text
                       key={s.id}
@@ -283,7 +263,7 @@ export function RunAgentModal({ open, onClose, wikiPath }: Props) {
                       {`${s.tool_id} · ${s.status} · ${s.started_at}`}
                     </Text>
                   ))}
-                </Section>
+                </InputVertical>
               );
             })()}
 
@@ -345,22 +325,14 @@ function ToolList({
     );
   }
   return (
-    <Section
-      flexDirection="column"
-      alignItems="start"
-      justifyContent="start"
-      gap={1}
-      width="full"
-    >
-      <Text font="secondary-action" color="text-04">
-        Tool
-      </Text>
+    <InputVertical title="Tool">
       <Section
         flexDirection="column"
-        alignItems="start"
+        alignItems="stretch"
         justifyContent="start"
         gap={1}
         width="full"
+        height="fit"
       >
         {catalog.map((c) => (
           <ToolCard
@@ -373,6 +345,6 @@ function ToolList({
           />
         ))}
       </Section>
-    </Section>
+    </InputVertical>
   );
 }

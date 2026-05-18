@@ -1,7 +1,7 @@
 "use client";
 
-import { Checkbox, Text } from "@onyx-ai/opal/components";
-import { Label, Section } from "@onyx-ai/opal/layouts";
+import { Checkbox } from "@onyx-ai/opal/components";
+import { InputHorizontal, InputVertical } from "@onyx-ai/opal/layouts";
 
 import styles from "./WorkingDirInput.module.css";
 
@@ -21,43 +21,30 @@ export function WorkingDirInput({
   pageHasBinding,
 }: Props) {
   return (
-    <Section
-      flexDirection="column"
-      alignItems="start"
-      justifyContent="start"
-      gap={1.5}
-      width="full"
-    >
-      <Label label="working-dir-input">
-        <Text font="secondary-action" color="text-04">
-          Working directory
-        </Text>
-      </Label>
-      <input
-        id="working-dir-input"
-        type="text"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder="(leave blank for scratch directory)"
-        autoComplete="off"
-        spellCheck={false}
-        className={styles.input}
-      />
-      <Label>
-        <Section
-          flexDirection="row"
-          alignItems="center"
-          justifyContent="start"
-          gap={1.5}
-        >
-          <Checkbox checked={remember} onCheckedChange={onRememberChange} />
-          <Text font="secondary-body" color="text-03">
-            {pageHasBinding
-              ? "Update default for this page"
-              : "Remember as default for this page"}
-          </Text>
-        </Section>
-      </Label>
-    </Section>
+    <>
+      <InputVertical title="Working directory" withLabel="working-dir-input">
+        <input
+          id="working-dir-input"
+          type="text"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="(leave blank for scratch directory)"
+          autoComplete="off"
+          spellCheck={false}
+          className={styles.input}
+        />
+      </InputVertical>
+      <InputHorizontal
+        title={
+          pageHasBinding
+            ? "Update default for this page"
+            : "Remember as default for this page"
+        }
+        withLabel
+        center
+      >
+        <Checkbox checked={remember} onCheckedChange={onRememberChange} />
+      </InputHorizontal>
+    </>
   );
 }
