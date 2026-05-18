@@ -4,17 +4,6 @@
   gap: 16px;
 }
 
-.heading {
-  font-size: 14px;
-  color: var(--color-text-primary);
-  font-weight: 600;
-}
-
-.subheading {
-  font-size: 12px;
-  color: var(--color-text-muted);
-}
-
 .toolList {
   list-style: none;
   padding: 0;
@@ -24,72 +13,14 @@
   gap: 8px;
 }
 
-.toolOption {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 10px;
-  border: 1px solid var(--color-border-default);
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-}
-
-.toolOption img,
-.toolOption input[type="checkbox"] {
-  flex-shrink: 0;
-  margin-top: 2px;
-}
-
-.toolOptionBody {
-  flex: 1;
-}
-
-.toolOptionName {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--color-text-primary);
-}
-
-.toolOptionTagline {
-  font-size: 12px;
-  color: var(--color-text-muted);
-}
-
-.actions {
-  display: flex;
-  gap: 8px;
-  justify-content: flex-end;
-}
-
 .checklist {
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
 
-.checklistCard {
-  padding: 12px;
-  border: 1px solid var(--color-border-default);
-  border-radius: var(--radius-sm);
-}
-
-.checklistHeader {
+.actions {
   display: flex;
-  align-items: flex-start;
   gap: 8px;
-  margin-bottom: 6px;
-}
-
-.checklistHeader img {
-  flex-shrink: 0;
-}
-
-.checklistName {
-  font-size: 14px;
-}
-
-.checklistBadges {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+  justify-content: flex-end;
 }

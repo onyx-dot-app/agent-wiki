@@ -1,6 +1,6 @@
 "use client";
 
-import { Button } from "@onyx-ai/opal/components";
+import { Button, Card, Text } from "@onyx-ai/opal/components";
 
 import { closeSession, useAgentSessions } from "@/lib/launchers";
 
@@ -30,22 +30,28 @@ export function ActiveSessionsList({ wikiPath }: { wikiPath: string }) {
   }
 
   return (
-    <div className={styles.wrapper}>
-      <div className={styles.heading}>
-        {active.length} agent session{active.length > 1 ? "s" : ""} on this page
-      </div>
+    <Card padding="sm" border="solid" rounding="sm">
+      <Text font="secondary-body" color="text-04" as="p">
+        {`${active.length} external agent session${
+          active.length > 1 ? "s" : ""
+        } on this page`}
+      </Text>
       <ul className={styles.list}>
         {active.map((s) => (
           <li key={s.id} className={styles.row}>
-            <span className={styles.detail}>
-              {s.tool_id} · {s.status} · started {s.started_at}
-            </span>
-            <Button size="md" prominence="tertiary" onClick={() => onClose(s.id)}>
+            <Text font="secondary-body" color="text-03" nowrap>
+              {`${s.tool_id} · ${s.status} · started ${s.started_at}`}
+            </Text>
+            <Button
+              size="md"
+              prominence="tertiary"
+              onClick={() => onClose(s.id)}
+            >
               Close
             </Button>
           </li>
         ))}
       </ul>
-    </div>
+    </Card>
   );
 }

@@ -1,5 +1,7 @@
 "use client";
 
+import { Checkbox, Text } from "@onyx-ai/opal/components";
+
 import styles from "./WorkingDirInput.module.css";
 
 interface Props {
@@ -19,8 +21,10 @@ export function WorkingDirInput({
 }: Props) {
   return (
     <div className={styles.wrapper}>
-      <label className={styles.label} htmlFor="working-dir-input">
-        Working directory
+      <label htmlFor="working-dir-input">
+        <Text font="secondary-action" color="text-04">
+          Working directory
+        </Text>
       </label>
       <input
         id="working-dir-input"
@@ -33,14 +37,12 @@ export function WorkingDirInput({
         className={styles.input}
       />
       <label className={styles.rememberRow}>
-        <input
-          type="checkbox"
-          checked={remember}
-          onChange={(e) => onRememberChange(e.target.checked)}
-        />
-        {pageHasBinding
-          ? "Update default for this page"
-          : "Remember as default for this page"}
+        <Checkbox checked={remember} onCheckedChange={onRememberChange} />
+        <Text font="secondary-body" color="text-03">
+          {pageHasBinding
+            ? "Update default for this page"
+            : "Remember as default for this page"}
+        </Text>
       </label>
     </div>
   );

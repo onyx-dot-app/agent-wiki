@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-import { Button } from "@onyx-ai/opal/components";
+import { Button, Card, Text } from "@onyx-ai/opal/components";
 
 import { invalidateHelperProbe } from "@/lib/launchers";
 
@@ -57,24 +57,33 @@ export function InstallHelperPane({
   }
 
   return (
-    <div className={styles.pane}>
-      <div className={styles.message}>
+    <Card padding="md" border="solid" borderColor="warning" rounding="sm">
+      <Text font="secondary-body" color="text-04" as="p">
         Launcher isn&apos;t installed on this machine. Run:
-      </div>
+      </Text>
       <div className={styles.cmdRow}>
         <code className={styles.cmd}>{INSTALL_CMD}</code>
-        <Button size="md" prominence="secondary" onClick={() => copy(INSTALL_CMD)}>
+        <Button
+          size="md"
+          prominence="secondary"
+          onClick={() => copy(INSTALL_CMD)}
+        >
           {copied ? "Copied" : "Copy"}
         </Button>
       </div>
       <div className={styles.actions}>
-        <Button size="md" prominence="tertiary" onClick={manualTest} disabled={manualBusy}>
+        <Button
+          size="md"
+          prominence="tertiary"
+          onClick={manualTest}
+          disabled={manualBusy}
+        >
           Test launcher manually
         </Button>
         <Button size="md" variant="action" onClick={reprobe} disabled={busy}>
           {busy ? "Checking..." : "I've installed it"}
         </Button>
       </div>
-    </div>
+    </Card>
   );
 }

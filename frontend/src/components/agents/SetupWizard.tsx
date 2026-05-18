@@ -2,15 +2,11 @@
 
 import { useEffect, useState } from "react";
 
-import { Button } from "@onyx-ai/opal/components";
-import {
-  probeCli,
-  probeHelper,
-  type LauncherCatalogEntry,
-} from "@/lib/launchers";
+import { Button, Card, SelectCard, Tag, Text } from "@onyx-ai/opal/components";
+
+import { probeHelper, type LauncherCatalogEntry } from "@/lib/launchers";
 
 import { InstallHelperPane } from "./InstallHelperPane";
-import { ToolStatusBadge } from "./ToolStatusBadge";
 import styles from "./SetupWizard.module.css";
 
 interface Props {
@@ -19,60 +15,26 @@ interface Props {
   onCancel: () => void;
 }
 
-interface CliStatus {
-  present: boolean;
-  version: string | null;
-  meets_min: boolean;
-}
-
 export function SetupWizard({ catalog, onDone, onCancel }: Props) {
   const [step, setStep] = useState<1 | 2>(1);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [helperState, setHelperState] = useState<{
-    acked: boolean;
-    port: number | null;
-  } | null>(null);
-  const [cliState, setCliState] = useState<Record<string, CliStatus> | null>(
+  const [helperState, setHelperState] = useState<{ acked: boolean } | null>(
     null,
   );
   const [probing, setProbing] = useState(false);
 
-  async function runProbes() {
+  async function runProbe() {
     setProbing(true);
     try {
       const h = await probeHelper();
-      setHelperState({ acked: h.acked, port: h.helperPort });
-      if (h.acked && h.helperPort && selected.size > 0) {
-        const ids = Array.from(selected).filter(
-          (id) => catalog.find((c) => c.id === id)?.kind === "local_cli",
-        );
-        if (ids.length > 0) {
-          try {
-            const c = await probeCli(h.helperPort, ids);
-            setCliState(c);
-          } catch {
-            // probeCli can fail if the helper's localhost port closes
-            // or returns garbage — fall back to an empty status map so
-            // the Done gate can still resolve on helper-acked alone
-            // (the spawn-time cli_not_found path catches a missing CLI
-            // after the fact). Better than leaving cliState as null and
-            // wedging the wizard with Done permanently disabled.
-            setCliState({});
-          }
-        } else {
-          setCliState({});
-        }
-      } else {
-        setCliState({});
-      }
+      setHelperState({ acked: h.acked });
     } finally {
       setProbing(false);
     }
   }
 
   useEffect(() => {
-    if (step === 2) void runProbes();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (step === 2) void runProbe();
   }, [step]);
 
   return (
@@ -96,7 +58,7 @@ export function SetupWizard({ catalog, onDone, onCancel }: Props) {
           catalog={catalog.filter((c) => selected.has(c.id))}
           helperState={helperState}
           probing={probing}
-          onReprobe={runProbes}
+          onReprobe={runProbe}
           onBack={() => setStep(1)}
           onDone={onDone}
         />
@@ -120,31 +82,39 @@ function Step1({
 }) {
   return (
     <>
-      <div className={styles.heading}>
+      <Text font="main-ui-body" color="text-04" as="p">
         Pick which tools to set up — step 1 of 2
-      </div>
-      <div className={styles.subheading}>
+      </Text>
+      <Text font="secondary-body" color="text-03" as="p">
         You can add more later from the Agents page.
-      </div>
+      </Text>
       <ul className={styles.toolList}>
         {catalog.map((c) => (
           <li key={c.id}>
-            <label className={styles.toolOption}>
-              <input
-                type="checkbox"
-                checked={selected.has(c.id)}
-                onChange={() => onToggle(c.id)}
-              />
-              <img src={c.icon_url} alt="" width={20} height={20} />
-              <div className={styles.toolOptionBody}>
-                <div className={styles.toolOptionName}>{c.name}</div>
-                <div className={styles.toolOptionTagline}>{c.tagline}</div>
+            <SelectCard
+              state={selected.has(c.id) ? "selected" : "empty"}
+              onClick={() => onToggle(c.id)}
+              padding="md"
+              rounding="md"
+              border="solid"
+            >
+              <div className="flex items-center gap-2.5 w-full">
+                <img src={c.icon_url} alt="" width={20} height={20} />
+                <div className="flex flex-col min-w-0 flex-1">
+                  <Text font="main-ui-body" color="text-04" nowrap>
+                    {c.name}
+                  </Text>
+                  <Text font="secondary-body" color="text-03" nowrap>
+                    {c.tagline}
+                  </Text>
+                </div>
+                <Tag
+                  color="gray"
+                  size="sm"
+                  title={c.kind === "in_app" ? "in-app" : "terminal"}
+                />
               </div>
-              <ToolStatusBadge
-                status="muted"
-                label={c.kind === "in_app" ? "in-app" : "terminal"}
-              />
-            </label>
+            </SelectCard>
           </li>
         ))}
       </ul>
@@ -173,7 +143,7 @@ function Step2({
   onDone,
 }: {
   catalog: LauncherCatalogEntry[];
-  helperState: { acked: boolean; port: number | null } | null;
+  helperState: { acked: boolean } | null;
   probing: boolean;
   onReprobe: () => Promise<void>;
   onBack: () => void;
@@ -188,18 +158,23 @@ function Step2({
 
   return (
     <>
-      <div className={styles.heading}>Setup checklist — step 2 of 2</div>
+      <Text font="main-ui-body" color="text-04" as="p">
+        Setup checklist — step 2 of 2
+      </Text>
       <div className={styles.checklist}>
         {catalog.map((c) => (
-          <div key={c.id} className={styles.checklistCard}>
-            <div className={styles.checklistHeader}>
+          <Card key={c.id} padding="md" border="solid" rounding="sm">
+            <div className="flex items-center gap-2 mb-1.5">
               <img src={c.icon_url} alt="" width={20} height={20} />
-              <strong className={styles.checklistName}>{c.name}</strong>
+              <Text font="main-ui-body" color="text-04">
+                {c.name}
+              </Text>
             </div>
-            <div className={styles.checklistBadges}>
-              <ToolStatusBadge
-                status={c.setup_status.token ? "ok" : "warn"}
-                label={
+            <div className="flex flex-col gap-1 items-start">
+              <Tag
+                color={c.setup_status.token ? "green" : "amber"}
+                size="sm"
+                title={
                   c.setup_status.token
                     ? "Token ready"
                     : "Token will auto-mint on launch"
@@ -207,22 +182,24 @@ function Step2({
               />
               {c.kind === "local_cli" && (
                 <>
-                  <ToolStatusBadge
-                    status={helperState?.acked ? "ok" : "warn"}
-                    label={
+                  <Tag
+                    color={helperState?.acked ? "green" : "amber"}
+                    size="sm"
+                    title={
                       helperState?.acked
                         ? "Launcher detected"
                         : "Launcher not installed"
                     }
                   />
-                  <ToolStatusBadge
-                    status="muted"
-                    label={`Install the ${c.id} CLI before launching`}
+                  <Tag
+                    color="gray"
+                    size="sm"
+                    title={`Install the ${c.id} CLI before launching`}
                   />
                 </>
               )}
             </div>
-          </div>
+          </Card>
         ))}
         {needsHelper && !helperState?.acked && (
           <InstallHelperPane onReprobe={onReprobe} />

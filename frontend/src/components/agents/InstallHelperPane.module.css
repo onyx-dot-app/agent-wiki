@@ -1,20 +1,8 @@
-.pane {
-  padding: 12px;
-  background: var(--color-state-warning-bg);
-  border: 1px solid var(--color-state-warning-border);
-  border-radius: var(--radius-sm);
-}
-
-.message {
-  font-size: 13px;
-  color: var(--color-state-warning-fg);
-  margin-bottom: 8px;
-}
-
 .cmdRow {
   display: flex;
   gap: 8px;
   align-items: center;
+  margin-top: 8px;
 }
 
 .cmd {

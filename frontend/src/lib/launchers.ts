@@ -206,24 +206,6 @@ export function invalidateHelperProbe(): void {
   sessionStorage.removeItem(PROBE_CACHE_KEY);
 }
 
-/** CLI presence probe — talks to the helper's localhost port. Helper
- * returns `{ [tool_id]: { present, version, meets_min } }`. */
-export async function probeCli(
-  port: number,
-  toolIds: string[],
-): Promise<
-  Record<
-    string,
-    { present: boolean; version: string | null; meets_min: boolean }
-  >
-> {
-  return apiFetch(`http://127.0.0.1:${port}/probe-cli`, {
-    method: "POST",
-    body: JSON.stringify({ tool_ids: toolIds }),
-    credentials: "omit",
-  });
-}
-
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }

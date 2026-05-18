@@ -1,6 +1,6 @@
 "use client";
 
-import styles from "./ToolCard.module.css";
+import { SelectCard, Text } from "@onyx-ai/opal/components";
 
 interface Props {
   name: string;
@@ -10,6 +10,11 @@ interface Props {
   onSelect?: () => void;
 }
 
+/**
+ * Thin aggregate over OPAL's SelectCard — same select-card visual the
+ * rest of the app uses, plus the launcher-specific icon + name +
+ * tagline body.
+ */
 export function ToolCard({
   name,
   tagline,
@@ -17,27 +22,25 @@ export function ToolCard({
   selected,
   onSelect,
 }: Props) {
-  const className = [
-    styles.card,
-    selected ? styles.selected : "",
-    onSelect ? styles.clickable : "",
-  ]
-    .filter(Boolean)
-    .join(" ");
   return (
-    <button
-      type="button"
+    <SelectCard
+      state={selected ? "selected" : "empty"}
       onClick={onSelect}
-      aria-pressed={selected}
-      className={className}
+      padding="md"
+      rounding="md"
+      border="solid"
     >
-      <div className={styles.header}>
+      <div className="flex items-center gap-2.5 w-full">
         <img src={iconUrl} alt="" width={24} height={24} />
-        <div className={styles.body}>
-          <div className={styles.name}>{name}</div>
-          <div className={styles.tagline}>{tagline}</div>
+        <div className="flex flex-col min-w-0">
+          <Text font="main-ui-body" color="text-04" nowrap>
+            {name}
+          </Text>
+          <Text font="secondary-body" color="text-03" nowrap>
+            {tagline}
+          </Text>
         </div>
       </div>
-    </button>
+    </SelectCard>
   );
 }
