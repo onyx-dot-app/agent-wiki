@@ -1072,7 +1072,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "topk(10, sum by (wiki_path) (ingest_outcomes_total{outcome=\"committed\"}))",
+          "expr": "topk(10, sum by (wiki_path) (increase(ingest_outcomes_total{outcome=\"committed\"}[$__range])))",
           "instant": true,
           "legendFormat": "{{wiki_path}}",
           "refId": "A"
@@ -1159,7 +1159,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "topk(10, sum by (wiki_path) (ingest_outcomes_total{outcome=\"irrelevant\"}))",
+          "expr": "topk(10, sum by (wiki_path) (increase(ingest_outcomes_total{outcome=\"irrelevant\"}[$__range])))",
           "instant": true,
           "legendFormat": "{{wiki_path}}",
           "refId": "A"
@@ -1246,7 +1246,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "topk(10, sum by (wiki_path) (ingest_outcomes_total{outcome=\"no_change\"}))",
+          "expr": "topk(10, sum by (wiki_path) (increase(ingest_outcomes_total{outcome=\"no_change\"}[$__range])))",
           "instant": true,
           "legendFormat": "{{wiki_path}}",
           "refId": "A"
