@@ -303,3 +303,24 @@ textarea::placeholder {
 .scroll-x-hidden::-webkit-scrollbar {
   display: none;
 }
+
+/* ============================================================================
+   OPAL token overrides — bind OPAL's blue 'action' palette to agent-wiki's
+   warm near-black accent so OPAL Button `variant="action"` matches the
+   rest of the app chrome instead of rendering bright blue.
+   ============================================================================ */
+:root {
+  --action-link-05: #37352f;
+  --action-link-04: #1f1d1a; /* hover — darker */
+  --action-link-06: #1f1d1a; /* active — darker */
+  --action-link-03: #d9d8d6; /* disabled bg */
+  --action-link-02: #e8e7e4; /* disabled bg (lighter) */
+}
+:root[data-theme="dark"] {
+  --action-link-05: #ededec;
+  --action-link-04: #ffffff;
+  --action-link-06: #ffffff;
+  --action-link-03: #36332f;
+  --action-link-02: #2a2826;
+}
+
