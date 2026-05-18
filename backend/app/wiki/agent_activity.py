@@ -29,6 +29,7 @@ Lifecycle:
   deletes the row. Server restart re-schedules cleanups for every
   active row.
 """
+
 from __future__ import annotations
 
 import logging
@@ -84,6 +85,7 @@ class ActivityRow(BaseModel):
     description: str | None
     registered_at: str
     expires_at: str
+    agent_session_id: str | None
 
 
 def _row_to_dict(activity: AgentActivity, owner_display: str) -> ActivityRow:
@@ -97,6 +99,7 @@ def _row_to_dict(activity: AgentActivity, owner_display: str) -> ActivityRow:
         description=activity.description,
         registered_at=activity.registered_at,
         expires_at=activity.expires_at,
+        agent_session_id=activity.agent_session_id,
     )
 
 
@@ -138,9 +141,7 @@ def list_all_expired() -> list[ActivityRow]:
     """Every row whose expiry is already in the past."""
     now = _iso(_now())
     with session() as s:
-        rows = s.execute(
-            _select_with_owner().where(AgentActivity.expires_at <= now)
-        ).all()
+        rows = s.execute(_select_with_owner().where(AgentActivity.expires_at <= now)).all()
         return [_row_to_dict(activity, owner_display) for activity, owner_display in rows]
 
 
@@ -152,6 +153,7 @@ def upsert_activity(
     activity: str,
     description: str | None,
     ttl: timedelta = DEFAULT_TTL,
+    agent_session_id: str | None = None,
 ) -> str:
     """UPSERT a row. Returns the resulting `expires_at` ISO string.
 
@@ -180,6 +182,7 @@ def upsert_activity(
             existing.description = description
             existing.registered_at = registered_at
             existing.expires_at = expires_at
+            existing.agent_session_id = agent_session_id
         else:
             s.add(
                 AgentActivity(
@@ -190,18 +193,21 @@ def upsert_activity(
                     description=description,
                     registered_at=registered_at,
                     expires_at=expires_at,
+                    agent_session_id=agent_session_id,
                 )
             )
     log.debug(
         "agent_activity upsert user=%s agent=%s doc=%s activity=%s expires=%s",
-        user_id, agent_name, doc_path, activity, expires_at,
+        user_id,
+        agent_name,
+        doc_path,
+        activity,
+        expires_at,
     )
     return expires_at
 
 
-def get_by_natural_key(
-    *, user_id: str, agent_name: str | None
-) -> ActivityRow | None:
+def get_by_natural_key(*, user_id: str, agent_name: str | None) -> ActivityRow | None:
     with session() as s:
         row = s.execute(
             _select_with_owner().where(
@@ -215,9 +221,7 @@ def get_by_natural_key(
         return _row_to_dict(a, owner_display)
 
 
-def delete_by_natural_key(
-    *, user_id: str, agent_name: str | None
-) -> None:
+def delete_by_natural_key(*, user_id: str, agent_name: str | None) -> None:
     with session() as s:
         existing = s.scalar(
             select(AgentActivity).where(
@@ -231,17 +235,13 @@ def delete_by_natural_key(
 
 def delete_for_doc(doc_path: str) -> None:
     with session() as s:
-        rows = s.scalars(
-            select(AgentActivity).where(AgentActivity.doc_path == doc_path)
-        ).all()
+        rows = s.scalars(select(AgentActivity).where(AgentActivity.doc_path == doc_path)).all()
         for r in rows:
             s.delete(r)
 
 
 def rename_doc(old_path: str, new_path: str) -> None:
     with session() as s:
-        rows = s.scalars(
-            select(AgentActivity).where(AgentActivity.doc_path == old_path)
-        ).all()
+        rows = s.scalars(select(AgentActivity).where(AgentActivity.doc_path == old_path)).all()
         for r in rows:
             r.doc_path = new_path

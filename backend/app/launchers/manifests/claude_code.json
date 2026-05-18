@@ -1,0 +1,47 @@
+{
+  "manifest_version": 1,
+  "id": "claude-code",
+  "name": "Claude Code",
+  "tagline": "Anthropic's terminal coding agent.",
+  "icon_url": "/icons/claude-code.svg",
+  "kind": "local_cli",
+  "cli_check": {
+    "binary": "claude",
+    "version_flag": "--version",
+    "min_version": "1.0.0",
+    "install_hint_url": "https://docs.claude.com/code/install"
+  },
+  "mcp_config_format": "claude_json",
+  "first_turn_prompt_delivery": {
+    "method": "stdin"
+  },
+  "launch": {
+    "binary": "claude",
+    "argv": ["--mcp-config", "${mcp_config_path}", "--strict-mcp-config"],
+    "env": {
+      "AGENTWIKI_SESSION_ID": "${session_id}",
+      "AGENTWIKI_ENDPOINT": "${endpoint}"
+    },
+    "cwd": "${working_dir}"
+  },
+  "resume": {
+    "binary": "claude",
+    "argv": [
+      "--resume",
+      "${cli_session_id}",
+      "--mcp-config",
+      "${mcp_config_path}",
+      "--strict-mcp-config"
+    ],
+    "env": {
+      "AGENTWIKI_SESSION_ID": "${session_id}"
+    },
+    "cwd": "${working_dir}"
+  },
+  "session_id_capture": {
+    "source": "file_watch",
+    "path": "${home}/.claude/projects/${dirhash}/",
+    "pattern": "*.jsonl",
+    "extract": "filename_basename"
+  }
+}

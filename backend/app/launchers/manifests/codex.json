@@ -1,0 +1,41 @@
+{
+  "manifest_version": 1,
+  "id": "codex",
+  "name": "Codex",
+  "tagline": "OpenAI's terminal coding agent.",
+  "icon_url": "/icons/codex.svg",
+  "kind": "local_cli",
+  "cli_check": {
+    "binary": "codex",
+    "version_flag": "--version",
+    "min_version": "0.10.0",
+    "install_hint_url": "https://github.com/openai/codex#install"
+  },
+  "mcp_config_format": "codex_toml",
+  "first_turn_prompt_delivery": {
+    "method": "stdin"
+  },
+  "launch": {
+    "binary": "codex",
+    "argv": [],
+    "env": {
+      "AGENTWIKI_SESSION_ID": "${session_id}",
+      "AGENTWIKI_ENDPOINT": "${endpoint}"
+    },
+    "cwd": "${working_dir}"
+  },
+  "resume": {
+    "binary": "codex",
+    "argv": ["resume", "${cli_session_id}"],
+    "env": {
+      "AGENTWIKI_SESSION_ID": "${session_id}"
+    },
+    "cwd": "${working_dir}"
+  },
+  "session_id_capture": {
+    "source": "file_watch",
+    "path": "${home}/.codex/sessions/",
+    "pattern": "*.json",
+    "extract": "filename_basename"
+  }
+}

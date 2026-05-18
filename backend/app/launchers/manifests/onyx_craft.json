@@ -1,0 +1,10 @@
+{
+  "manifest_version": 1,
+  "id": "onyx-craft",
+  "name": "Onyx Craft",
+  "tagline": "In-app agent that drafts and edits docs.",
+  "icon_url": "/icons/onyx-craft.svg",
+  "kind": "in_app",
+  "task_kind": "craft_agent",
+  "stream_resource_uri": "job://${session_id}"
+}

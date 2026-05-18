@@ -9,6 +9,7 @@ lifespan only fires when ``TestClient`` is used as a context manager,
 so per-test fixtures (``tmp_db`` / ``tmp_repo``) keep owning DB and
 wiki setup.
 """
+
 from __future__ import annotations
 
 import logging
@@ -23,12 +24,14 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from app.api import (
     admin,
+    agent_sessions,
     auth,
     chat,
     documents,
     wiki,
     events,
     health,
+    launchers,
     llm,
     mcp_connections,
     mcp_server,
@@ -123,7 +126,9 @@ async def _lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     from app.wiki.templates import seed_starter_templates_if_empty
 
     setup_logging()
-    log.info("agent-wiki backend starting (database=%s)", _app_config.CONFIG.database_url.split("@")[-1])
+    log.info(
+        "agent-wiki backend starting (database=%s)", _app_config.CONFIG.database_url.split("@")[-1]
+    )
     init_db()
     ensure_wiki_repo()
     # Seed-on-empty runs after the repo is initialized so writes go
@@ -181,6 +186,8 @@ def create_app() -> FastAPI:
     app.include_router(templates.admin_router, prefix="/api/admin/templates")
     app.include_router(templates.router, prefix="/api/templates")
     app.include_router(permissions.router, prefix="/api")
+    app.include_router(launchers.router, prefix="/api")
+    app.include_router(agent_sessions.router, prefix="/api/agent-sessions")
     app.include_router(triggers.router, prefix="/api/triggers")
     app.include_router(wiki.router, prefix="/api/wiki")
     app.include_router(documents.router, prefix="/api/documents")

@@ -1,4 +1,5 @@
 """FastAPI router for wiki page operations (/api/wiki/*)."""
+
 from __future__ import annotations
 
 import logging
@@ -63,11 +64,13 @@ def _git_author(user: User | None) -> str | None:
 
 @router.get("", response_model=ListDocumentsResponse)
 def list_documents(
-    user: User = Depends(require_user), prefix: str = "",
+    user: User = Depends(require_user),
+    prefix: str = "",
 ) -> ListDocumentsResponse:
     raw = wiki_git.list_paths_with_mtime(prefix)
     if not user.is_admin:
         from app.wiki import acl as _acl
+
         md_paths = [p for p, _ in raw if p.endswith(".md")]
         visible = set(_acl.filter_paths_in_python(user.id, False, md_paths))
         # Keep non-md paths (folders, .gitkeep) so the explorer can render
@@ -108,7 +111,8 @@ def get_document_by_path(
 
 @router.put("/file", response_model=PutDocumentResponse)
 def put_document_by_path(
-    req: PutDocumentRequest, user: User = Depends(require_user),
+    req: PutDocumentRequest,
+    user: User = Depends(require_user),
 ) -> PutDocumentResponse:
     try:
         rel = filesystem.safe_rel_path(req.path)
@@ -135,7 +139,10 @@ def put_document_by_path(
         msg = f"{msg}\n\nDeprecates: {' '.join(deprecated)}"
     sha = wiki_git.commit_file(rel, req.body, msg, author=author)
     wiki_notify.after_doc_write(
-        rel, sha, change_kind, author,
+        rel,
+        sha,
+        change_kind,
+        author,
         owner_user_id=user.id if change_kind == "create" else None,
     )
     # Drafting state: if the saved body diverges from the template
@@ -144,7 +151,10 @@ def put_document_by_path(
     wiki_drafts.clear_if_diverged(rel, req.body)
     log.info("doc %s %s by %s sha=%s", change_kind, rel, author or "?", sha[:8])
     return PutDocumentResponse(
-        path=rel, sha=sha, created=not existed, deprecated=deprecated,
+        path=rel,
+        sha=sha,
+        created=not existed,
+        deprecated=deprecated,
     )
 
 
@@ -154,7 +164,8 @@ def put_document_by_path(
     status_code=status.HTTP_201_CREATED,
 )
 def create_folder(
-    req: CreateFolderRequest, user: User = Depends(require_user),
+    req: CreateFolderRequest,
+    user: User = Depends(require_user),
 ) -> CreateFolderResponse:
     """Create an (empty) wiki folder via a `.gitkeep` marker."""
     path = req.path.strip().strip("/")
@@ -179,7 +190,8 @@ def create_folder(
 
 @router.post("/move", response_model=MovePathResponse)
 def move_document_or_folder(
-    req: MovePathRequest, user: User = Depends(require_user),
+    req: MovePathRequest,
+    user: User = Depends(require_user),
 ) -> MovePathResponse:
     """Rename or relocate a document or folder, single git commit."""
     old_raw = req.old_path.strip().strip("/")
@@ -199,7 +211,8 @@ def move_document_or_folder(
         raise HTTPException(status_code=404, detail="not found")
     if new_abs.exists():
         raise HTTPException(
-            status_code=409, detail="a file or folder with that name already exists",
+            status_code=409,
+            detail="a file or folder with that name already exists",
         )
     if old_abs.is_file() and old_rel.endswith(".md") and not new_rel.endswith(".md"):
         raise HTTPException(
@@ -236,7 +249,9 @@ def move_document_or_folder(
     except Exception:
         log.exception("trigger cache rebuild after move %s -> %s failed", old_rel, new_rel)
 
-    log.info("move %s -> %s by %s sha=%s files=%d", old_rel, new_rel, author or "?", sha[:8], len(moves))
+    log.info(
+        "move %s -> %s by %s sha=%s files=%d", old_rel, new_rel, author or "?", sha[:8], len(moves)
+    )
     return MovePathResponse(
         old_path=old_rel,
         new_path=new_rel,
@@ -247,7 +262,8 @@ def move_document_or_folder(
 
 @router.delete("/file", response_model=DeleteDocumentResponse)
 def delete_document_by_path(
-    user: User = Depends(require_user), path: str = "",
+    user: User = Depends(require_user),
+    path: str = "",
 ) -> DeleteDocumentResponse:
     if not path:
         raise HTTPException(status_code=400, detail="path required")
@@ -274,7 +290,8 @@ def delete_document_by_path(
 
 @router.post("/reindex", response_model=ReindexResponse)
 def reindex_document_by_path(
-    req: ReindexRequest, user: User = Depends(require_user),
+    req: ReindexRequest,
+    user: User = Depends(require_user),
 ) -> ReindexResponse:
     try:
         rel = filesystem.safe_rel_path(req.path)
@@ -325,7 +342,8 @@ def search_documents(
 
 @router.get("/file/history", response_model=FileHistoryResponse)
 def file_history(
-    user: User = Depends(require_user), path: str = "",
+    user: User = Depends(require_user),
+    path: str = "",
 ) -> FileHistoryResponse:
     if not path:
         raise HTTPException(status_code=400, detail="path required")
@@ -351,7 +369,8 @@ def file_history(
 
 @router.get("/file/activity", response_model=DocumentActivityResponse)
 def file_activity(
-    user: User = Depends(require_user), path: str = "",
+    user: User = Depends(require_user),
+    path: str = "",
 ) -> DocumentActivityResponse:
     """Active agent-activity rows for a doc."""
     if not path:
@@ -372,6 +391,7 @@ def file_activity(
                 description=r.description,
                 registered_at=r.registered_at,
                 expires_at=r.expires_at,
+                agent_session_id=r.agent_session_id,
             )
             for r in rows
         ],
@@ -380,7 +400,8 @@ def file_activity(
 
 @router.get("/file/draft", response_model=DocumentDraftView | None)
 def file_draft(
-    user: User = Depends(require_user), path: str = "",
+    user: User = Depends(require_user),
+    path: str = "",
 ) -> DocumentDraftView | None:
     """Return active "drafting from template" state for a doc, or null.
 
@@ -416,7 +437,8 @@ def file_draft(
 
 @router.post("/file/draft", response_model=DocumentDraftView | None)
 def set_file_draft(
-    req: SetDocumentDraftRequest, user: User = Depends(require_user),
+    req: SetDocumentDraftRequest,
+    user: User = Depends(require_user),
 ) -> DocumentDraftView | None:
     """Record that ``path`` is being drafted from ``template_id`` — or
     clear the record when ``template_id`` is null.
@@ -451,7 +473,6 @@ def set_file_draft(
         system_prompt=row["system_prompt"],
         created_at=row["created_at"],
     )
-
 
 
 @router.get("/{doc_id}")
