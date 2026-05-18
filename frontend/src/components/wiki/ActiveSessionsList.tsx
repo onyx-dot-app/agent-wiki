@@ -1,10 +1,9 @@
 "use client";
 
 import { Button, Card, Text } from "@onyx-ai/opal/components";
+import { Section } from "@onyx-ai/opal/layouts";
 
 import { closeSession, useAgentSessions } from "@/lib/launchers";
-
-import styles from "./ActiveSessionsList.module.css";
 
 export function ActiveSessionsList({ wikiPath }: { wikiPath: string }) {
   const { sessions, refresh } = useAgentSessions(wikiPath);
@@ -31,27 +30,40 @@ export function ActiveSessionsList({ wikiPath }: { wikiPath: string }) {
 
   return (
     <Card padding="sm" border="solid" rounding="sm">
-      <Text font="secondary-body" color="text-04" as="p">
-        {`${active.length} external agent session${
-          active.length > 1 ? "s" : ""
-        } on this page`}
-      </Text>
-      <ul className={styles.list}>
+      <Section
+        flexDirection="column"
+        alignItems="start"
+        justifyContent="start"
+        gap={1}
+        width="full"
+      >
+        <Text font="secondary-body" color="text-04" as="p">
+          {`${active.length} external agent session${
+            active.length > 1 ? "s" : ""
+          } on this page`}
+        </Text>
         {active.map((s) => (
-          <li key={s.id} className={styles.row}>
+          <Section
+            key={s.id}
+            flexDirection="row"
+            alignItems="center"
+            justifyContent="between"
+            gap={2}
+            width="full"
+          >
             <Text font="secondary-body" color="text-03" nowrap>
               {`${s.tool_id} · ${s.status} · started ${s.started_at}`}
             </Text>
             <Button
-              size="md"
+              size="sm"
               prominence="tertiary"
               onClick={() => onClose(s.id)}
             >
               Close
             </Button>
-          </li>
+          </Section>
         ))}
-      </ul>
+      </Section>
     </Card>
   );
 }

@@ -5,7 +5,8 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { SetupWizard } from "@/components/agents/SetupWizard";
 import { ToolCard } from "@/components/agents/ToolCard";
 import { WorkingDirInput } from "@/components/agents/WorkingDirInput";
-import { Button } from "@onyx-ai/opal/components";
+import { Button, MessageCard, Text } from "@onyx-ai/opal/components";
+import { Label, Section } from "@onyx-ai/opal/layouts";
 import { ApiError } from "@/lib/api";
 import {
   launch,
@@ -233,9 +234,20 @@ export function RunAgentModal({ open, onClose, wikiPath }: Props) {
               }
             />
 
-            <label className={styles.field}>
-              <span className={styles.fieldLabel}>Message</span>
+            <Section
+              flexDirection="column"
+              alignItems="start"
+              justifyContent="start"
+              gap={1}
+              width="full"
+            >
+              <Label label="run-agent-message">
+                <Text font="secondary-action" color="text-04">
+                  Message
+                </Text>
+              </Label>
               <textarea
+                id="run-agent-message"
                 value={message}
                 onChange={(e) => setMessage(e.target.value)}
                 placeholder="What should the agent do with this doc?"
@@ -243,51 +255,71 @@ export function RunAgentModal({ open, onClose, wikiPath }: Props) {
                 maxLength={16_384}
                 className={styles.textarea}
               />
-            </label>
+            </Section>
 
             {(() => {
-              // Only count sessions actually running (active / idle).
-              // ``pending`` rows linger from launch attempts that never
-              // bounced back — they're noise here, not live sessions.
               const live = sessions.filter(
                 (s) => s.status === "active" || s.status === "idle",
               );
               if (live.length === 0) return null;
               return (
-                <div className={styles.sessions}>
-                  <div className={styles.sessionsHeader}>
+                <Section
+                  flexDirection="column"
+                  alignItems="start"
+                  justifyContent="start"
+                  gap={0.5}
+                  width="full"
+                >
+                  <Text font="secondary-action" color="text-04">
                     Active sessions on this page
-                  </div>
-                  <ul className={styles.sessionsList}>
-                    {live.map((s) => (
-                      <li key={s.id} className={styles.sessionsRow}>
-                        {s.tool_id} · {s.status} · {s.started_at}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
+                  </Text>
+                  {live.map((s) => (
+                    <Text
+                      key={s.id}
+                      font="secondary-body"
+                      color="text-03"
+                      nowrap
+                    >
+                      {`${s.tool_id} · ${s.status} · ${s.started_at}`}
+                    </Text>
+                  ))}
+                </Section>
               );
             })()}
 
-            {error && <div className={styles.error}>{error}</div>}
+            {error && <MessageCard variant="error" title={error} />}
 
-            <div className={styles.footer}>
-              <button
-                type="button"
+            <Section
+              flexDirection="row"
+              justifyContent="between"
+              alignItems="center"
+              width="full"
+            >
+              <Button
+                prominence="tertiary"
+                size="sm"
                 onClick={() => setWizardOpen(true)}
-                className={styles.linkButton}
               >
                 Set up another tool →
-              </button>
-              <div className={styles.footerActions}>
+              </Button>
+              <Section
+                flexDirection="row"
+                justifyContent="end"
+                alignItems="center"
+                gap={1}
+              >
                 <Button type="button" prominence="secondary" onClick={onClose}>
                   Cancel
                 </Button>
-                <Button type="submit" variant="action" disabled={!canRun || busy}>
+                <Button
+                  type="submit"
+                  variant="action"
+                  disabled={!canRun || busy}
+                >
                   {busy ? "Launching..." : "Run"}
                 </Button>
-              </div>
-            </div>
+              </Section>
+            </Section>
           </>
         )}
       </form>
@@ -306,27 +338,40 @@ function ToolList({
 }) {
   if (catalog.length === 0) {
     return (
-      <div className={styles.toolListEmpty}>
+      <Text font="secondary-body" color="text-03">
         No launchable tools available yet.
-      </div>
+      </Text>
     );
   }
   return (
-    <div className={styles.toolList}>
-      <span className={styles.fieldLabel}>Tool</span>
-      <ul className={styles.toolListItems}>
+    <Section
+      flexDirection="column"
+      alignItems="start"
+      justifyContent="start"
+      gap={1}
+      width="full"
+    >
+      <Text font="secondary-action" color="text-04">
+        Tool
+      </Text>
+      <Section
+        flexDirection="column"
+        alignItems="start"
+        justifyContent="start"
+        gap={1}
+        width="full"
+      >
         {catalog.map((c) => (
-          <li key={c.id}>
-            <ToolCard
-              name={c.name}
-              tagline={c.tagline}
-              iconUrl={c.icon_url}
-              selected={c.id === selectedId}
-              onSelect={() => onSelect(c.id)}
-            />
-          </li>
+          <ToolCard
+            key={c.id}
+            name={c.name}
+            tagline={c.tagline}
+            iconUrl={c.icon_url}
+            selected={c.id === selectedId}
+            onSelect={() => onSelect(c.id)}
+          />
         ))}
-      </ul>
-    </div>
+      </Section>
+    </Section>
   );
 }

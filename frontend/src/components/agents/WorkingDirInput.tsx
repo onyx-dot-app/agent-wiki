@@ -1,6 +1,7 @@
 "use client";
 
 import { Checkbox, Text } from "@onyx-ai/opal/components";
+import { Label, Section } from "@onyx-ai/opal/layouts";
 
 import styles from "./WorkingDirInput.module.css";
 
@@ -20,12 +21,18 @@ export function WorkingDirInput({
   pageHasBinding,
 }: Props) {
   return (
-    <div className={styles.wrapper}>
-      <label htmlFor="working-dir-input">
+    <Section
+      flexDirection="column"
+      alignItems="start"
+      justifyContent="start"
+      gap={1.5}
+      width="full"
+    >
+      <Label label="working-dir-input">
         <Text font="secondary-action" color="text-04">
           Working directory
         </Text>
-      </label>
+      </Label>
       <input
         id="working-dir-input"
         type="text"
@@ -36,14 +43,21 @@ export function WorkingDirInput({
         spellCheck={false}
         className={styles.input}
       />
-      <label className={styles.rememberRow}>
-        <Checkbox checked={remember} onCheckedChange={onRememberChange} />
-        <Text font="secondary-body" color="text-03">
-          {pageHasBinding
-            ? "Update default for this page"
-            : "Remember as default for this page"}
-        </Text>
-      </label>
-    </div>
+      <Label>
+        <Section
+          flexDirection="row"
+          alignItems="center"
+          justifyContent="start"
+          gap={1.5}
+        >
+          <Checkbox checked={remember} onCheckedChange={onRememberChange} />
+          <Text font="secondary-body" color="text-03">
+            {pageHasBinding
+              ? "Update default for this page"
+              : "Remember as default for this page"}
+          </Text>
+        </Section>
+      </Label>
+    </Section>
   );
 }

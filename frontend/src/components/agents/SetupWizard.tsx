@@ -3,11 +3,11 @@
 import { useEffect, useState } from "react";
 
 import { Button, Card, SelectCard, Tag, Text } from "@onyx-ai/opal/components";
+import { Section } from "@onyx-ai/opal/layouts";
 
 import { probeHelper, type LauncherCatalogEntry } from "@/lib/launchers";
 
 import { InstallHelperPane } from "./InstallHelperPane";
-import styles from "./SetupWizard.module.css";
 
 interface Props {
   catalog: LauncherCatalogEntry[];
@@ -38,7 +38,13 @@ export function SetupWizard({ catalog, onDone, onCancel }: Props) {
   }, [step]);
 
   return (
-    <div className={styles.wrapper}>
+    <Section
+      flexDirection="column"
+      alignItems="start"
+      justifyContent="start"
+      gap={4}
+      width="full"
+    >
       {step === 1 && (
         <Step1
           catalog={catalog}
@@ -63,7 +69,7 @@ export function SetupWizard({ catalog, onDone, onCancel }: Props) {
           onDone={onDone}
         />
       )}
-    </div>
+    </Section>
   );
 }
 
@@ -88,37 +94,60 @@ function Step1({
       <Text font="secondary-body" color="text-03" as="p">
         You can add more later from the Agents page.
       </Text>
-      <ul className={styles.toolList}>
+      <Section
+        flexDirection="column"
+        alignItems="start"
+        justifyContent="start"
+        gap={2}
+        width="full"
+      >
         {catalog.map((c) => (
-          <li key={c.id}>
-            <SelectCard
-              state={selected.has(c.id) ? "selected" : "empty"}
-              onClick={() => onToggle(c.id)}
-              padding="md"
-              rounding="md"
-              border="solid"
+          <SelectCard
+            key={c.id}
+            state={selected.has(c.id) ? "selected" : "empty"}
+            onClick={() => onToggle(c.id)}
+            padding="md"
+            rounding="md"
+            border="solid"
+          >
+            <Section
+              flexDirection="row"
+              alignItems="center"
+              justifyContent="start"
+              gap={2.5}
+              width="full"
             >
-              <div className="flex items-center gap-2.5 w-full">
-                <img src={c.icon_url} alt="" width={20} height={20} />
-                <div className="flex flex-col min-w-0 flex-1">
-                  <Text font="main-ui-body" color="text-04" nowrap>
-                    {c.name}
-                  </Text>
-                  <Text font="secondary-body" color="text-03" nowrap>
-                    {c.tagline}
-                  </Text>
-                </div>
-                <Tag
-                  color="gray"
-                  size="sm"
-                  title={c.kind === "in_app" ? "in-app" : "terminal"}
-                />
-              </div>
-            </SelectCard>
-          </li>
+              <img src={c.icon_url} alt="" width={20} height={20} />
+              <Section
+                flexDirection="column"
+                alignItems="start"
+                justifyContent="start"
+                width="full"
+                gap={0.5}
+              >
+                <Text font="main-ui-body" color="text-04" nowrap>
+                  {c.name}
+                </Text>
+                <Text font="secondary-body" color="text-03" nowrap>
+                  {c.tagline}
+                </Text>
+              </Section>
+              <Tag
+                color="gray"
+                size="sm"
+                title={c.kind === "in_app" ? "in-app" : "terminal"}
+              />
+            </Section>
+          </SelectCard>
         ))}
-      </ul>
-      <div className={styles.actions}>
+      </Section>
+      <Section
+        flexDirection="row"
+        alignItems="center"
+        justifyContent="end"
+        gap={2}
+        width="full"
+      >
         <Button prominence="secondary" onClick={onCancel}>
           Cancel
         </Button>
@@ -129,7 +158,7 @@ function Step1({
         >
           Next
         </Button>
-      </div>
+      </Section>
     </>
   );
 }
@@ -161,16 +190,34 @@ function Step2({
       <Text font="main-ui-body" color="text-04" as="p">
         Setup checklist — step 2 of 2
       </Text>
-      <div className={styles.checklist}>
+      <Section
+        flexDirection="column"
+        alignItems="start"
+        justifyContent="start"
+        gap={3}
+        width="full"
+      >
         {catalog.map((c) => (
           <Card key={c.id} padding="md" border="solid" rounding="sm">
-            <div className="flex items-center gap-2 mb-1.5">
+            <Section
+              flexDirection="row"
+              alignItems="center"
+              justifyContent="start"
+              gap={2}
+              width="full"
+            >
               <img src={c.icon_url} alt="" width={20} height={20} />
               <Text font="main-ui-body" color="text-04">
                 {c.name}
               </Text>
-            </div>
-            <div className="flex flex-col gap-1 items-start">
+            </Section>
+            <Section
+              flexDirection="column"
+              gap={1}
+              alignItems="start"
+              justifyContent="start"
+              width="full"
+            >
               <Tag
                 color={c.setup_status.token ? "green" : "amber"}
                 size="sm"
@@ -198,21 +245,27 @@ function Step2({
                   />
                 </>
               )}
-            </div>
+            </Section>
           </Card>
         ))}
         {needsHelper && !helperState?.acked && (
           <InstallHelperPane onReprobe={onReprobe} />
         )}
-      </div>
-      <div className={styles.actions}>
+      </Section>
+      <Section
+        flexDirection="row"
+        alignItems="center"
+        justifyContent="end"
+        gap={2}
+        width="full"
+      >
         <Button prominence="secondary" onClick={onBack}>
           Back
         </Button>
         <Button variant="action" onClick={onDone} disabled={!allOk}>
           Done
         </Button>
-      </div>
+      </Section>
     </>
   );
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import { SelectCard, Text } from "@onyx-ai/opal/components";
+import { Section } from "@onyx-ai/opal/layouts";
 
 interface Props {
   name: string;
@@ -11,9 +12,8 @@ interface Props {
 }
 
 /**
- * Thin aggregate over OPAL's SelectCard — same select-card visual the
- * rest of the app uses, plus the launcher-specific icon + name +
- * tagline body.
+ * Aggregate over OPAL's SelectCard + Section + Text. The icon stays a
+ * native <img> because OPAL has no equivalent for branded tool logos.
  */
 export function ToolCard({
   name,
@@ -30,17 +30,29 @@ export function ToolCard({
       rounding="md"
       border="solid"
     >
-      <div className="flex items-center gap-2.5 w-full">
+      <Section
+        flexDirection="row"
+        alignItems="center"
+        justifyContent="start"
+        gap={2.5}
+        width="full"
+      >
         <img src={iconUrl} alt="" width={24} height={24} />
-        <div className="flex flex-col min-w-0">
+        <Section
+          flexDirection="column"
+          alignItems="start"
+          justifyContent="start"
+          width="full"
+          gap={0.5}
+        >
           <Text font="main-ui-body" color="text-04" nowrap>
             {name}
           </Text>
           <Text font="secondary-body" color="text-03" nowrap>
             {tagline}
           </Text>
-        </div>
-      </div>
+        </Section>
+      </Section>
     </SelectCard>
   );
 }

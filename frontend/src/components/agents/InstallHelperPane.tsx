@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import { Button, Card, Text } from "@onyx-ai/opal/components";
+import { Section } from "@onyx-ai/opal/layouts";
 
 import { invalidateHelperProbe } from "@/lib/launchers";
 
@@ -58,32 +59,52 @@ export function InstallHelperPane({
 
   return (
     <Card padding="md" border="solid" borderColor="warning" rounding="sm">
-      <Text font="secondary-body" color="text-04" as="p">
-        Launcher isn&apos;t installed on this machine. Run:
-      </Text>
-      <div className={styles.cmdRow}>
-        <code className={styles.cmd}>{INSTALL_CMD}</code>
-        <Button
-          size="md"
-          prominence="secondary"
-          onClick={() => copy(INSTALL_CMD)}
+      <Section
+        flexDirection="column"
+        alignItems="start"
+        justifyContent="start"
+        gap={2}
+        width="full"
+      >
+        <Text font="secondary-body" color="text-04" as="p">
+          Launcher isn&apos;t installed on this machine. Run:
+        </Text>
+        <Section
+          flexDirection="row"
+          alignItems="center"
+          justifyContent="start"
+          gap={2}
+          width="full"
         >
-          {copied ? "Copied" : "Copy"}
-        </Button>
-      </div>
-      <div className={styles.actions}>
-        <Button
-          size="md"
-          prominence="tertiary"
-          onClick={manualTest}
-          disabled={manualBusy}
+          <code className={styles.cmd}>{INSTALL_CMD}</code>
+          <Button
+            size="md"
+            prominence="secondary"
+            onClick={() => copy(INSTALL_CMD)}
+          >
+            {copied ? "Copied" : "Copy"}
+          </Button>
+        </Section>
+        <Section
+          flexDirection="row"
+          alignItems="center"
+          justifyContent="end"
+          gap={2}
+          width="full"
         >
-          Test launcher manually
-        </Button>
-        <Button size="md" variant="action" onClick={reprobe} disabled={busy}>
-          {busy ? "Checking..." : "I've installed it"}
-        </Button>
-      </div>
+          <Button
+            size="md"
+            prominence="tertiary"
+            onClick={manualTest}
+            disabled={manualBusy}
+          >
+            Test launcher manually
+          </Button>
+          <Button size="md" variant="action" onClick={reprobe} disabled={busy}>
+            {busy ? "Checking..." : "I've installed it"}
+          </Button>
+        </Section>
+      </Section>
     </Card>
   );
 }
