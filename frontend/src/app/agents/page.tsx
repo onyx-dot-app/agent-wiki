@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { SetupWizard } from "@/components/agents/SetupWizard";
 import { ToolCard } from "@/components/agents/ToolCard";
@@ -598,6 +598,7 @@ function CodingToolsSection() {
     machineId: probe?.machineId ?? null,
   });
   const [wizardOpen, setWizardOpen] = useState(false);
+  const dialogRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (wizardOpen) return;
@@ -609,6 +610,21 @@ function CodingToolsSection() {
     return () => {
       cancelled = true;
     };
+  }, [wizardOpen]);
+
+  useEffect(() => {
+    if (!wizardOpen) return;
+    const node = dialogRef.current;
+    if (node) {
+      node.focus();
+    }
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setWizardOpen(false);
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
   }, [wizardOpen]);
 
   return (
@@ -684,6 +700,11 @@ function CodingToolsSection() {
           }}
         >
           <div
+            ref={dialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Set up coding tools"
+            tabIndex={-1}
             style={{
               background: color.bg.page,
               borderRadius: radius.lg,
