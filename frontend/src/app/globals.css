@@ -28,6 +28,17 @@ html {
      surfaces in dark mode and look broken. */
   color-scheme: light;
 
+  /* OPAL tailwind preset references --border-radius-* vars via
+     rounded-08 / rounded-12 / etc. utilities (used by the ported
+     OnyxButton wrapper). Define them at the :root so those classes
+     resolve to actual radii instead of unset / 0. */
+  --border-radius-02: 0.125rem;
+  --border-radius-04: 0.25rem;
+  --border-radius-08: 0.5rem;
+  --border-radius-12: 0.75rem;
+  --border-radius-16: 1rem;
+  --border-radius-full: 64rem;
+
   /* Text */
   --color-text-primary: #37352f;
   --color-text-secondary: #5a5854;
