@@ -16,7 +16,6 @@ export interface LauncherCatalogEntry {
   id: string;
   name: string;
   tagline: string;
-  icon_url: string;
   kind: LauncherKind;
   available_for_launch: boolean;
   setup_status: LauncherSetupStatus;
