@@ -6,7 +6,7 @@ Use explicit type annotations for variables to enhance code clarity, especially 
 
 ## Best Practices
 
-Use the root `CLAUDE.md` "Architectural rules" and "Frontend rules" sections as core review context. Prefer consistency with existing patterns, fix issues in code you touch, avoid tacking new features onto muddy interfaces, fail loudly instead of silently swallowing errors, keep code strictly typed, preserve clear state boundaries, remove duplicate or dead logic, break up overly long functions, avoid hidden import-time side effects, respect module boundaries, and favor correctness-by-construction over relying on callers to use an API correctly.
+Prefer consistency with existing patterns, fix issues in code you touch, avoid tacking new features onto muddy interfaces, fail loudly instead of silently swallowing errors, keep code strictly typed, preserve clear state boundaries, remove duplicate or dead logic, break up overly long functions, avoid hidden import-time side effects, respect module boundaries, and favor correctness-by-construction over relying on callers to use an API correctly.
 
 ## TODOs
 
@@ -22,33 +22,33 @@ When hardcoding a boolean variable to a constant value, remove the variable enti
 
 ## Architectural Seams — Honor the Boundaries
 
-The root `CLAUDE.md` lists the interfaces that must NOT be bypassed:
+Interfaces that must NOT be bypassed:
 
-- LLM calls only through `app/llm/client.py` (no direct `anthropic` / `openai` / `google.genai` imports outside `app/llm/providers/<name>.py`).
-- Auth via `Depends(require_user)` / `current_user()`; no raw `request.session` reads outside `app/api/auth.py`.
-- Wiki ACL via `app/wiki/acl.py` + `require_can`; never read/write `acl_entries` directly.
+- LLM calls only through the central LLM client; no direct provider SDK imports outside the matching provider module.
+- Auth via the dependency-injected `require_user` / `current_user` helpers; no raw session reads in routers.
+- Wiki ACL via the ACL module + `require_can`; never read/write ACL tables directly.
 - DB: SQLAlchemy 2.0 ORM, repos return dicts. Pydantic, NOT `@dataclass`, for structured records.
-- Wiki commits via `app/wiki/git.py`; never shell out to `git` elsewhere.
-- Background work via the `pgmq`-backed queues in `app/tasks/queues.py`; no ad-hoc threading.
-- Logging via `app.utils.logging.setup_logging`; no `print()`, no `logging.basicConfig`.
-- Tracing via `app/tracing/`; never `import braintrust` outside that package.
+- Wiki commits via the git wrapper; never shell out to `git` elsewhere.
+- Background work via the `pgmq`-backed task queues; no ad-hoc threading.
+- Logging via the centralized `setup_logging`; no `print()`, no `logging.basicConfig`.
+- Tracing via the tracing module; never import provider SDKs outside that package.
 
 Flag any new code that bypasses these seams.
 
 ## No Raw SQL Outside the Allowed Sites
 
-Raw SQL is permitted only in `app/db/fts.py` (pg_textsearch operator) and `app/tasks/queue.py` (pgmq functions). Anywhere else, use the ORM session — `session.execute(text(...))` outside those files is a regression to flag.
+Raw SQL is permitted only in narrowly scoped DB-extension wrappers (FTS, task queue). Anywhere else, use the ORM session — `session.execute(text(...))` in business code is a regression to flag.
 
 ## Frontend — Design Tokens + Components
 
-- No raw hex colors, radii, or shadows in React components — they live in `frontend/src/lib/theme.ts`. If a shade isn't there, add it there first.
+- No raw hex colors, radii, or shadows in React components — pull from the centralized theme module. If a shade isn't there, add it there first.
 - No `background: "white"` (or any literal); use `color.bg.page`.
-- One `Button` component per app surface; new launcher-area components prefer `@onyx-ai/opal/components` (`Button`, `Tag`). Don't roll a new bespoke `<button style={{...}}>` for primary/secondary/danger chrome.
+- One `Button` component per app surface; prefer the OPAL primitives (`Button`, `Tag`) for new components. Don't roll a new bespoke `<button style={{...}}>` for primary/secondary/danger chrome.
 - Modal scrims use `color.overlay`; modal shadow uses `shadow.modal`. Don't introduce slate-tinted or pure-black scrims.
 
 ## Network — Only via `apiFetch`
 
-`apiFetch` from `@/lib/api` is the only allowed seam for talking to the backend from the frontend. Raw `fetch(...)` to internal endpoints loses the `credentials: "include"` + JSON parsing + `ApiError` envelope.
+The shared `apiFetch` helper is the only allowed seam for talking to the backend from the frontend. Raw `fetch(...)` to internal endpoints loses the `credentials: "include"` + JSON parsing + `ApiError` envelope.
 
 ## Auth — Only via the Provider
 
