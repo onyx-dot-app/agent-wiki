@@ -22,9 +22,16 @@
 
 .header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 10px;
   width: 100%;
+}
+
+.header img {
+  /* Top-align the icon with the first line of text (the name) so the
+   * tagline isn't pushed off-axis from the icon center. */
+  display: block;
+  flex-shrink: 0;
 }
 
 .body {

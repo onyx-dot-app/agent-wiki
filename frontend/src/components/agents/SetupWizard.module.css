@@ -26,12 +26,18 @@
 
 .toolOption {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 10px;
   padding: 10px;
   border: 1px solid var(--color-border-default);
   border-radius: var(--radius-sm);
   cursor: pointer;
+}
+
+.toolOption img,
+.toolOption input[type="checkbox"] {
+  flex-shrink: 0;
+  margin-top: 2px;
 }
 
 .toolOptionBody {
@@ -69,9 +75,13 @@
 
 .checklistHeader {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
   margin-bottom: 6px;
+}
+
+.checklistHeader img {
+  flex-shrink: 0;
 }
 
 .checklistName {
