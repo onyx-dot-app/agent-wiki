@@ -1,0 +1,17 @@
+[
+  {
+    "scope": [],
+    "path": "CLAUDE.md",
+    "description": "Architectural seams + frontend rules + checklist for adding a feature — single source of truth for code review."
+  },
+  {
+    "scope": [],
+    "path": "README.md",
+    "description": "Repo overview and local-dev setup."
+  },
+  {
+    "scope": [],
+    "path": ".greptile/rules.md",
+    "description": "Generic review rules applied repo-wide (architectural seams, frontend tokens, network/auth seams, comment hygiene, pre-commit discipline)."
+  }
+]
