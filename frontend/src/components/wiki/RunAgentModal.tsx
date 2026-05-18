@@ -318,7 +318,6 @@ function ToolList({
         {catalog.map((c) => (
           <li key={c.id}>
             <ToolCard
-              id={c.id}
               name={c.name}
               tagline={c.tagline}
               iconUrl={c.icon_url}

@@ -47,8 +47,18 @@ export function SetupWizard({ catalog, onDone, onCancel }: Props) {
           (id) => catalog.find((c) => c.id === id)?.kind === "local_cli",
         );
         if (ids.length > 0) {
-          const c = await probeCli(h.helperPort, ids);
-          setCliState(c);
+          try {
+            const c = await probeCli(h.helperPort, ids);
+            setCliState(c);
+          } catch {
+            // probeCli can fail if the helper's localhost port closes
+            // or returns garbage — fall back to an empty status map so
+            // the Done gate can still resolve on helper-acked alone
+            // (the spawn-time cli_not_found path catches a missing CLI
+            // after the fact). Better than leaving cliState as null and
+            // wedging the wizard with Done permanently disabled.
+            setCliState({});
+          }
         } else {
           setCliState({});
         }

@@ -10,12 +10,11 @@ import type { IconProps } from "@onyx-ai/opal/types";
 import { cn } from "@onyx-ai/opal/utils";
 
 /**
- * Onyx-style Button — visually identical to the Button in
- * onyx/web/src/refresh-components/buttons/Button.tsx. Wraps a raw
- * ``<button>`` element with the same variant × prominence class system
- * defined in ``src/app/css/button.css`` and the same size → padding /
- * rounding mapping. The label is rendered through a plain ``<span>``
- * with the matching ``-text`` class.
+ * Onyx-style Button. Wraps a raw ``<button>`` element with the
+ * variant × prominence class system defined in
+ * ``src/app/css/button.css`` and a size → padding / rounding mapping.
+ * The label is rendered through a plain ``<span>`` with the matching
+ * ``-text`` class.
  *
  * Variants (mutually exclusive): ``main`` / ``action`` / ``danger``.
  * Prominence (mutually exclusive): ``primary`` / ``secondary`` /

@@ -3,7 +3,6 @@
 import styles from "./ToolCard.module.css";
 
 interface Props {
-  id: string;
   name: string;
   tagline: string;
   iconUrl: string;
@@ -12,14 +11,12 @@ interface Props {
 }
 
 export function ToolCard({
-  id,
   name,
   tagline,
   iconUrl,
   selected,
   onSelect,
 }: Props) {
-  void id;
   const className = [
     styles.card,
     selected ? styles.selected : "",
