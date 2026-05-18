@@ -140,11 +140,42 @@
       "type": "piechart"
     },
     {
-      "collapsed": false,
-      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 21},
-      "id": 102,
-      "title": "BM25 & LLM",
-      "type": "row"
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "scheme"},
+          "custom": {
+            "fillOpacity": 80,
+            "hideFrom": {"legend": false, "tooltip": false, "viz": false},
+            "scaleDistribution": {"type": "linear"}
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 13},
+      "id": 17,
+      "options": {
+        "calculate": false,
+        "cellGap": 1,
+        "color": {"exponent": 0.5, "fill": "dark-purple", "mode": "scheme", "reverse": false, "scale": "exponential", "scheme": "Purples", "steps": 64},
+        "exemplars": {"color": "rgba(255,0,255,0.7)"},
+        "filterValues": {"le": 1e-9},
+        "legend": {"show": true},
+        "rowsFrame": {"layout": "auto"},
+        "tooltip": {"mode": "single", "showColorScale": false, "yHistogram": false},
+        "yAxis": {"axisLabel": "BM25 score", "axisPlacement": "left", "unit": "short"}
+      },
+      "targets": [
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "expr": "sum(rate(ingest_bm25_score_bucket[5m])) by (le)",
+          "format": "heatmap",
+          "legendFormat": "{{le}}",
+          "refId": "A"
+        }
+      ],
+      "title": "BM25 Score — All Outcomes",
+      "type": "heatmap"
     },
     {
       "datasource": {"type": "prometheus", "uid": "${datasource}"},
@@ -159,7 +190,7 @@
         },
         "overrides": []
       },
-      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 22},
+      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 21},
       "id": 6,
       "options": {
         "calculate": false,
@@ -197,7 +228,7 @@
         },
         "overrides": []
       },
-      "gridPos": {"h": 8, "w": 8, "x": 8, "y": 22},
+      "gridPos": {"h": 8, "w": 8, "x": 8, "y": 21},
       "id": 15,
       "options": {
         "calculate": false,
@@ -235,7 +266,7 @@
         },
         "overrides": []
       },
-      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 22},
+      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 21},
       "id": 16,
       "options": {
         "calculate": false,
@@ -342,6 +373,35 @@
         "defaults": {
           "color": {"mode": "palette-classic"},
           "custom": {"drawStyle": "line", "fillOpacity": 10, "lineWidth": 2},
+          "max": 1,
+          "min": 0,
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 38},
+      "id": 12,
+      "options": {
+        "legend": {"calcs": ["mean", "last"], "displayMode": "table", "placement": "bottom"},
+        "tooltip": {"mode": "single"}
+      },
+      "targets": [
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "expr": "sum(rate(ingest_bm25_passed_sum[5m])) / sum(rate(ingest_bm25_hits_sum[5m]))",
+          "legendFormat": "pass rate",
+          "refId": "A"
+        }
+      ],
+      "title": "BM25 Pass Rate (passed / hits)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": {"drawStyle": "line", "fillOpacity": 10, "lineWidth": 2},
           "unit": "s"
         },
         "overrides": []
@@ -367,35 +427,6 @@
         }
       ],
       "title": "LLM Duration (p50 / p95)",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {"type": "prometheus", "uid": "${datasource}"},
-      "fieldConfig": {
-        "defaults": {
-          "color": {"mode": "palette-classic"},
-          "custom": {"drawStyle": "line", "fillOpacity": 10, "lineWidth": 2},
-          "max": 1,
-          "min": 0,
-          "unit": "percentunit"
-        },
-        "overrides": []
-      },
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 38},
-      "id": 12,
-      "options": {
-        "legend": {"calcs": ["mean", "last"], "displayMode": "table", "placement": "bottom"},
-        "tooltip": {"mode": "single"}
-      },
-      "targets": [
-        {
-          "datasource": {"type": "prometheus", "uid": "${datasource}"},
-          "expr": "sum(rate(ingest_bm25_passed_sum[5m])) / sum(rate(ingest_bm25_hits_sum[5m]))",
-          "legendFormat": "pass rate",
-          "refId": "A"
-        }
-      ],
-      "title": "BM25 Pass Rate (passed / hits)",
       "type": "timeseries"
     },
     {
