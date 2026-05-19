@@ -6,7 +6,7 @@ import { writeSecureTmpfile } from "./tmpfile.js";
 import { renderClaudeJson } from "./mcp_config/claude_json.js";
 import { renderCodexToml } from "./mcp_config/codex_toml.js";
 import { buildSpawnCommand } from "./spawn.js";
-import { openInTerminalApp } from "./terminal/darwin.js";
+import { selectTerminalOpener } from "./terminal/select.js";
 import { markClaudeWorkspaceTrusted } from "./claude_trust.js";
 import { writeCodexAgentWikiMcp } from "./codex_mcp_config.js";
 import { markCodexProjectTrusted } from "./codex_trust.js";
@@ -151,7 +151,8 @@ async function handleRun(uri: string): Promise<void> {
     `/api/agent-sessions/${exchanged.payload.session_id}/close`,
     pinned,
   ).toString();
-  openInTerminalApp({
+  const openInTerminal = await selectTerminalOpener();
+  openInTerminal({
     ...cmd,
     tmpfilesToClean: tmpfiles,
     closeOnExit: { url: closeUrl, token: exchanged.mcp_token },

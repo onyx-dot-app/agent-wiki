@@ -6,9 +6,11 @@ async function main() {
       const m = await import("./darwin.js");
       m.installOnDarwin();
     } else if (platform === "linux") {
-      console.log("[agentwiki-launcher] Linux install — Phase 4.");
+      const m = await import("./linux.js");
+      m.installOnLinux();
     } else if (platform === "win32") {
-      console.log("[agentwiki-launcher] Windows install — Phase 4.");
+      const m = await import("./win32.js");
+      m.installOnWin32();
     }
   } catch (e) {
     console.warn("[agentwiki-launcher] postinstall failed:", e);
