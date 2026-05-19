@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any
+from typing import Any, cast
 
 from app.ingest.models import WikiUpdateCandidate
 from app.llm import client
@@ -117,8 +117,7 @@ def _select_batch(
         raw: Any = json.loads(text)
         if not isinstance(raw, list):
             raise ValueError(f"expected list, got {type(raw)}")
-        items: list[object] = raw
-        valid = {i for i in items if isinstance(i, int) and 1 <= i <= len(batch)}
+        valid = {i for i in cast(list[object], raw) if isinstance(i, int) and 1 <= i <= len(batch)}
         return [batch[i - 1] for i in sorted(valid)]
     except Exception:
         log.warning("ingest_selector: batch failed, passing batch through", exc_info=True)
