@@ -30,7 +30,7 @@ export function openInWindowsTerminal(opts: OpenOpts): void {
   const wrapper = join(dir, "run.cmd");
 
   const logDir = join(homedir(), ".agentwiki");
-  mkdirSync(logDir, { recursive: true });
+  mkdirSync(logDir, { recursive: true, mode: 0o700 });
   const spawnLog = join(logDir, "spawn.log");
   try {
     appendFileSync(
@@ -89,7 +89,7 @@ export function openInWindowsTerminal(opts: OpenOpts): void {
     .filter((line) => line.length > 0)
     .join("\r\n");
 
-  writeFileSync(wrapper, script);
+  writeFileSync(wrapper, script, { mode: 0o600 });
 
   if (hasWt()) {
     spawn("wt", ["new-tab", "cmd", "/c", wrapper], {
@@ -109,7 +109,7 @@ export function openInWindowsTerminal(opts: OpenOpts): void {
 function cmdQuote(s: string): string {
   // Double-quote and escape inner double quotes by doubling them
   // (cmd convention).
-  return `"${s.replace(/"/g, '""')}"`;
+  return `"${s.replace(/"/g, '""').replace(/%/g, "%%").replace(/\^/g, "^^")}"`;
 }
 
 function cmdEscapeValue(s: string): string {
