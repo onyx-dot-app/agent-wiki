@@ -14,9 +14,9 @@
  * lives in the user's own home dir; manifest validation forbids
  * embedding the token in argv, hence the config-file detour.
  */
-import { readFileSync, renameSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 const START_MARKER = "# >>> agentwiki-launcher-managed (do not edit by hand)";
 const END_MARKER = "# <<< agentwiki-launcher-managed";
@@ -37,6 +37,8 @@ export function writeCodexAgentWikiMcp(opts: {
   const next =
     (stripped.endsWith("\n") || stripped === "" ? stripped : stripped + "\n") +
     block;
+  const dir = dirname(configPath);
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
   const tmp = `${configPath}.agw-tmp-${process.pid}`;
   try {
     writeFileSync(tmp, next, { mode: 0o600 });
