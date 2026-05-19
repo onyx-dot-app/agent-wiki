@@ -17,16 +17,18 @@
  * pattern as the darwin opener so a wedged or crashed CLI still closes
  * the backend session row.
  */
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import {
+  accessSync,
   appendFileSync,
   chmodSync,
   mkdirSync,
   mkdtempSync,
   writeFileSync,
+  constants as fsConstants,
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 
 import { assertValidEnvKeys } from "./select.js";
 import type { OpenOpts } from "./select.js";
@@ -44,16 +46,66 @@ interface TerminalLaunch {
   argv: string[]; // argv to pass BEFORE the wrapper path
 }
 
-function which(bin: string): boolean {
-  const r = spawnSync("which", [bin], { stdio: "ignore" });
-  return r.status === 0;
+function expandHome(pathname: string): string {
+  if (pathname.startsWith("~/")) {
+    return join(homedir(), pathname.slice(2));
+  }
+  return pathname;
+}
+
+function isExecutablePath(pathname: string): boolean {
+  const expanded = expandHome(pathname);
+  const full = isAbsolute(expanded) ? expanded : resolve(expanded);
+  try {
+    accessSync(full, fsConstants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function commandExists(bin: string): boolean {
+  if (bin.includes("/")) {
+    return isExecutablePath(bin);
+  }
+  const pathEnv = process.env.PATH;
+  if (!pathEnv) return false;
+  for (const rawDir of pathEnv.split(":")) {
+    const dir = rawDir.length > 0 ? rawDir : process.cwd();
+    const expandedDir = expandHome(dir);
+    const baseDir = isAbsolute(expandedDir)
+      ? expandedDir
+      : resolve(expandedDir);
+    const candidate = join(baseDir, bin);
+    if (isExecutablePath(candidate)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function pickTerminal(): TerminalLaunch {
-  const override =
+  const overrideRaw =
     process.env.AGENTWIKI_TERMINAL?.trim() || process.env.TERMINAL?.trim();
-  const bin = override || CANDIDATES.find(which) || "xterm";
-  return { bin, argv: runFlagFor(bin) };
+  const override = overrideRaw && overrideRaw.length > 0 ? overrideRaw : null;
+  if (override) {
+    const display = override.replace(/\s+/g, " ");
+    if (!commandExists(override)) {
+      throw new Error(
+        `AGENTWIKI_TERMINAL=${display} not found; set it to a terminal binary name (no arguments).`,
+      );
+    }
+    return { bin: override, argv: runFlagFor(override) };
+  }
+  const candidate = CANDIDATES.find(commandExists);
+  if (!candidate) {
+    throw new Error(
+      `no supported terminal found (looked for ${CANDIDATES.join(
+        ", ",
+      )}); install one or set $AGENTWIKI_TERMINAL`,
+    );
+  }
+  return { bin: candidate, argv: runFlagFor(candidate) };
 }
 
 /**
@@ -72,6 +124,7 @@ function runFlagFor(bin: string): string[] {
 
 export function openInLinuxTerminal(opts: OpenOpts): void {
   assertValidEnvKeys(opts.env);
+  const { bin, argv } = pickTerminal();
   const dir = mkdtempSync(join(tmpdir(), "agw-wrap-"));
   const wrapper = join(dir, "run.sh");
   const envExports = Object.entries(opts.env)
@@ -137,7 +190,6 @@ read -r _
   writeFileSync(wrapper, script, { mode: 0o700 });
   chmodSync(wrapper, 0o700);
 
-  const { bin, argv } = pickTerminal();
   spawn(bin, [...argv, "bash", wrapper], {
     stdio: "ignore",
     detached: true,
