@@ -205,13 +205,29 @@ async function handleProbeAck(uri: string): Promise<void> {
     process.exit(2);
   }
 
-  await fetch(new URL("/api/launch/probe-ack", pinned).toString(), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      nonce: parsed.nonce,
-      helper_port: 0,
-      machine_id: getOrCreateMachineId(),
-    }),
-  });
+  const url = new URL("/api/launch/probe-ack", pinned).toString();
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        nonce: parsed.nonce,
+        helper_port: 0,
+        machine_id: getOrCreateMachineId(),
+      }),
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`agentwiki-launcher: probe-ack network error (${msg})`);
+    process.exit(3);
+  }
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    console.error(
+      `agentwiki-launcher: probe-ack ${res.status} from ${url}` +
+        (body ? ` — ${body.slice(0, 200)}` : ""),
+    );
+    process.exit(3);
+  }
 }
