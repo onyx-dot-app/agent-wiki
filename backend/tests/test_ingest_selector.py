@@ -1,10 +1,7 @@
 """Unit tests for app.llm.agents.ingest_selector."""
 from __future__ import annotations
 
-from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
-
-import pytest
 
 from app.db.fts import SearchHit
 from app.ingest.models import WikiUpdateCandidate

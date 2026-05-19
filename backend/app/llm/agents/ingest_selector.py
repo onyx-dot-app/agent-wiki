@@ -22,6 +22,11 @@ log = logging.getLogger(__name__)
 # subtracted first; the remainder is available for wiki candidate bodies.
 _SELECTOR_BUDGET_CHARS = 200_000
 
+# Incoming document is truncated to this length for the selector — enough
+# context to judge relevance without letting a large payload make the cheap
+# call as expensive as the full reconciler.
+_SELECTOR_CONTENT_CHARS = 20_000
+
 
 def select_candidates(
     *,
@@ -39,7 +44,7 @@ def select_candidates(
     if not candidates:
         return candidates
 
-    candidate_budget = max(_SELECTOR_BUDGET_CHARS - len(content), 0)
+    candidate_budget = max(_SELECTOR_BUDGET_CHARS - min(len(content), _SELECTOR_CONTENT_CHARS), 0)
     batches = _batch_by_chars(candidates, candidate_budget)
 
     selected: list[WikiUpdateCandidate] = []
@@ -94,7 +99,7 @@ def _select_batch(
     system = load_prompt("ingest_selector.system")
     user = load_prompt("ingest_selector.input").format(
         title=title or "(no title)",
-        content=content,
+        content=content[:_SELECTOR_CONTENT_CHARS],
         candidates=candidate_text,
     )
 
@@ -108,7 +113,7 @@ def _select_batch(
                 model=model,
             )
         text = result.text.strip()
-        kept_indices: list[int] = json.loads(text)
+        kept_indices = json.loads(text)
         if not isinstance(kept_indices, list):
             raise ValueError(f"expected list, got {type(kept_indices)}")
         valid = {i for i in kept_indices if isinstance(i, int) and 1 <= i <= len(batch)}
