@@ -1,8 +1,8 @@
 """Weak-model pre-filter for the ingest pipeline.
 
-Makes a single cheap LLM call with all BM25 candidates and returns the
-subset worth sending to the full reconciler. Fails open — on any error
-the original candidate list is returned unchanged.
+Screens BM25 candidates with a single cheap LLM call (or batched calls when
+there are many candidates) before handing the survivors to the full reconciler.
+Fails open — on any error the original candidate list is returned unchanged.
 """
 
 from __future__ import annotations
@@ -17,8 +17,8 @@ from app.tracing import trace_flow
 
 log = logging.getLogger(__name__)
 
-# Truncate each candidate body to keep the selector call cheap.
-_BODY_PREVIEW_CHARS = 1500
+# Split into multiple calls when candidate count exceeds this.
+_SELECTOR_BATCH_SIZE = 20
 
 
 def select_candidates(
@@ -37,9 +37,29 @@ def select_candidates(
     if not candidates:
         return candidates
 
+    selected: list[tuple[SearchHit, str]] = []
+    for i in range(0, len(candidates), _SELECTOR_BATCH_SIZE):
+        batch = candidates[i : i + _SELECTOR_BATCH_SIZE]
+        selected.extend(_select_batch(title=title, content=content, batch=batch, model=model))
+
+    log.info(
+        "ingest_selector: kept %d/%d candidates model=%s",
+        len(selected),
+        len(candidates),
+        model,
+    )
+    return selected
+
+
+def _select_batch(
+    *,
+    title: str | None,
+    content: str,
+    batch: list[tuple[SearchHit, str]],
+    model: str,
+) -> list[tuple[SearchHit, str]]:
     candidate_text = "\n\n".join(
-        f"[{i + 1}] {hit.path}\n{body[:_BODY_PREVIEW_CHARS]}"
-        for i, (hit, body) in enumerate(candidates)
+        f"[{i + 1}] {hit.path}\n{body}" for i, (hit, body) in enumerate(batch)
     )
 
     system = load_prompt("ingest_selector.system")
@@ -62,15 +82,8 @@ def select_candidates(
         kept_indices: list[int] = json.loads(text)
         if not isinstance(kept_indices, list):
             raise ValueError(f"expected list, got {type(kept_indices)}")
-        valid = {i for i in kept_indices if isinstance(i, int) and 1 <= i <= len(candidates)}
-        selected = [candidates[i - 1] for i in sorted(valid)]
-        log.info(
-            "ingest_selector: kept %d/%d candidates model=%s",
-            len(selected),
-            len(candidates),
-            model,
-        )
-        return selected
+        valid = {i for i in kept_indices if isinstance(i, int) and 1 <= i <= len(batch)}
+        return [batch[i - 1] for i in sorted(valid)]
     except Exception:
-        log.warning("ingest_selector: failed, passing all candidates through", exc_info=True)
-        return candidates
+        log.warning("ingest_selector: batch failed, passing batch through", exc_info=True)
+        return batch
