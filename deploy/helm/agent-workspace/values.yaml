@@ -50,6 +50,11 @@ allowedEmails: ""
 # reaches this size. Applies to all three queues. Default 1000.
 maxQueueSize: 1000
 
+# Surface the coding-tool launchers API (/api/launchers, /api/launch,
+# /api/agent-sessions). Default off — flip to true once the helper
+# package + wiki UI are ready in your environment.
+launchersEnabled: false
+
 auth:
   # basic | oidc
   mode: basic

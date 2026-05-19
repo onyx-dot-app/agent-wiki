@@ -69,6 +69,8 @@ and wiki path stay in lockstep.
   value: {{ .Values.maxQueueSize | quote }}
 - name: AUTH_MODE
   value: {{ .Values.auth.mode | quote }}
+- name: LAUNCHERS_ENABLED
+  value: {{ .Values.launchersEnabled | default false | quote }}
 - name: SECURE_COOKIES
   value: {{ .Values.secureCookies | quote }}
 {{- if eq .Values.auth.mode "oidc" }}
