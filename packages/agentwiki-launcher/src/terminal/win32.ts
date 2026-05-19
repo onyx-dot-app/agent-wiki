@@ -112,7 +112,7 @@ function cmdQuote(s: string): string {
 
 function cmdEscapeValue(s: string): string {
   // Escape characters cmd reads specially inside ``set "K=V"``.
-  return s.replace(/"/g, "''").replace(/%/g, "%%");
+  return s.replace(/"/g, '""').replace(/%/g, "%%").replace(/\^/g, "^^");
 }
 
 function jsEscape(s: string): string {

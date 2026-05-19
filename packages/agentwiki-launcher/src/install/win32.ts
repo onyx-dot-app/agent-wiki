@@ -12,14 +12,14 @@
  *
  * The launcher path is resolved at install time from
  * ``npm config get prefix`` so the entry survives non-default npm
- * locations (nvm-windows, scoop, volta — R10#2 audit).
+ * locations (nvm-windows, scoop, volta).
  *
  * If a step fails (read-only registry, locked-down policy), we surface
  * the failure via ``postinstall-status.json`` so the wizard can show
  * the manual command.
  */
 import { execSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -31,8 +31,16 @@ interface PostinstallStatus {
 
 function writeStatus(home: string, status: PostinstallStatus): void {
   const dir = join(home, ".agentwiki");
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, "postinstall-status.json"), JSON.stringify(status));
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const statusPath = join(dir, "postinstall-status.json");
+  const tmp = `${statusPath}.agw-tmp-${nextTmpSuffix()}`;
+  try {
+    writeFileSync(tmp, JSON.stringify(status), { mode: 0o600 });
+    renameSync(tmp, statusPath);
+  } catch (e) {
+    rmSync(tmp, { force: true });
+    throw e;
+  }
 }
 
 function resolveLauncherPath(): string {
@@ -75,7 +83,7 @@ export function installOnWin32(): void {
     }
   }
 
-  mkdirSync(join(home, ".agentwiki"), { recursive: true });
+  mkdirSync(join(home, ".agentwiki"), { recursive: true, mode: 0o700 });
 
   if (failures.length === 0) {
     writeStatus(home, { ok: true });
@@ -94,4 +102,8 @@ export function installOnWin32(): void {
     "[agentwiki-launcher] registry edits failed — run manually as the same user:",
     `\n${manual}`,
   );
+}
+
+function nextTmpSuffix(): string {
+  return `${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }

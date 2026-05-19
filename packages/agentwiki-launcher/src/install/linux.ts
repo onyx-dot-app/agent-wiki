@@ -8,10 +8,10 @@
  * agentwiki scheme handler (``xdg-mime default``).
  *
  * If either tool is missing or fails, we drop a postinstall-status
- * record so the wizard can surface the manual command (R8#1 audit).
+ * record so the wizard can surface the manual command.
  */
 import { execSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -35,7 +35,15 @@ interface PostinstallStatus {
 function writeStatus(home: string, status: PostinstallStatus): void {
   const dir = join(home, ".agentwiki");
   mkdirSync(dir, { recursive: true, mode: 0o700 });
-  writeFileSync(join(dir, "postinstall-status.json"), JSON.stringify(status));
+  const statusPath = join(dir, "postinstall-status.json");
+  const tmp = `${statusPath}.agw-tmp-${nextTmpSuffix()}`;
+  try {
+    writeFileSync(tmp, JSON.stringify(status), { mode: 0o600 });
+    renameSync(tmp, statusPath);
+  } catch (e) {
+    rmSync(tmp, { force: true });
+    throw e;
+  }
 }
 
 export function installOnLinux(): void {
@@ -51,12 +59,19 @@ export function installOnLinux(): void {
     "Name=AgentWiki Launcher",
     // ``%u`` expands to the agentwiki:// URI the browser dispatched.
     // The launcher's ``run`` subcommand parses it.
-    `Exec=${launcherPath} dispatch %u`,
+    `Exec=${shellQuote(launcherPath)} dispatch %u`,
     "NoDisplay=true",
     "MimeType=x-scheme-handler/agentwiki;",
     "",
   ].join("\n");
-  writeFileSync(desktopPath, desktopContents);
+  const desktopTmp = `${desktopPath}.agw-tmp-${nextTmpSuffix()}`;
+  try {
+    writeFileSync(desktopTmp, desktopContents, { mode: 0o644 });
+    renameSync(desktopTmp, desktopPath);
+  } catch (e) {
+    rmSync(desktopTmp, { force: true });
+    throw e;
+  }
 
   try {
     execSync(`update-desktop-database ${shellQuote(appsDir)}`, {
@@ -84,4 +99,8 @@ export function installOnLinux(): void {
 
 function shellQuote(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`;
+}
+
+function nextTmpSuffix(): string {
+  return `${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
