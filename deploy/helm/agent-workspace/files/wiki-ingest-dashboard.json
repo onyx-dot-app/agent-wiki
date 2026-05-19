@@ -1154,6 +1154,12 @@
       "title": "Top Wiki Pages \u2014 Committed",
       "transformations": [
         {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns"
+          }
+        },
+        {
           "id": "sortBy",
           "options": {
             "fields": [
@@ -1233,6 +1239,12 @@
       "title": "Top Wiki Pages \u2014 Irrelevant",
       "transformations": [
         {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns"
+          }
+        },
+        {
           "id": "sortBy",
           "options": {
             "fields": [
@@ -1311,6 +1323,12 @@
       ],
       "title": "Top Wiki Pages \u2014 No Change",
       "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns"
+          }
+        },
         {
           "id": "sortBy",
           "options": {
