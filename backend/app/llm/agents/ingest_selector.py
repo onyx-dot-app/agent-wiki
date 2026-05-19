@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+from dataclasses import dataclass
 
 from app.db.fts import SearchHit
 from app.llm import client
@@ -23,13 +24,19 @@ log = logging.getLogger(__name__)
 _SELECTOR_BUDGET_CHARS = 200_000
 
 
+@dataclass
+class Candidate:
+    hit: SearchHit
+    body: str
+
+
 def select_candidates(
     *,
     title: str | None,
     content: str,
-    candidates: list[tuple[SearchHit, str]],
+    candidates: list[Candidate],
     model: str,
-) -> list[tuple[SearchHit, str]]:
+) -> list[Candidate]:
     """Filter BM25 candidates with a cheap model.
 
     Returns the subset of candidates the selector considers relevant.
@@ -42,7 +49,7 @@ def select_candidates(
     candidate_budget = max(_SELECTOR_BUDGET_CHARS - len(content), 0)
     batches = _batch_by_chars(candidates, candidate_budget)
 
-    selected: list[tuple[SearchHit, str]] = []
+    selected: list[Candidate] = []
     for batch in batches:
         selected.extend(_select_batch(title=title, content=content, batch=batch, model=model))
 
@@ -57,25 +64,24 @@ def select_candidates(
 
 
 def _batch_by_chars(
-    candidates: list[tuple[SearchHit, str]],
+    candidates: list[Candidate],
     budget: int,
-) -> list[list[tuple[SearchHit, str]]]:
+) -> list[list[Candidate]]:
     """Return a single batch when all candidates fit; otherwise split greedily."""
-    if sum(len(body) for _, body in candidates) <= budget:
+    if sum(len(c.body) for c in candidates) <= budget:
         return [candidates]
 
-    batches: list[list[tuple[SearchHit, str]]] = []
-    current: list[tuple[SearchHit, str]] = []
+    batches: list[list[Candidate]] = []
+    current: list[Candidate] = []
     current_chars = 0
-    for item in candidates:
-        body_len = len(item[1])
-        if current and current_chars + body_len > budget:
+    for c in candidates:
+        if current and current_chars + len(c.body) > budget:
             batches.append(current)
-            current = [item]
-            current_chars = body_len
+            current = [c]
+            current_chars = len(c.body)
         else:
-            current.append(item)
-            current_chars += body_len
+            current.append(c)
+            current_chars += len(c.body)
     if current:
         batches.append(current)
     return batches
@@ -85,11 +91,11 @@ def _select_batch(
     *,
     title: str | None,
     content: str,
-    batch: list[tuple[SearchHit, str]],
+    batch: list[Candidate],
     model: str,
-) -> list[tuple[SearchHit, str]]:
+) -> list[Candidate]:
     candidate_text = "\n\n".join(
-        f"[{i + 1}] {hit.path}\n{body}" for i, (hit, body) in enumerate(batch)
+        f"[{i + 1}] {c.hit.path}\n{c.body}" for i, c in enumerate(batch)
     )
 
     system = load_prompt("ingest_selector.system")
