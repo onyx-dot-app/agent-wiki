@@ -101,10 +101,13 @@ export function openInLinuxTerminal(opts: OpenOpts): void {
     closeLine = `curl -s -o /dev/null -X POST ${urlQ} -H ${authQ} -H 'Content-Type: application/json' -d '{"reason":"helper_exit"}' || true`;
   }
 
+  const cwdLog = shellQuote(opts.cwd.replace(/\r?\n/g, " "));
+  const binaryLog = shellQuote(opts.binary.replace(/\r?\n/g, " "));
+
   const script = `#!/bin/bash
 LOG="$HOME/.agentwiki/spawn.log"
 mkdir -p "$HOME/.agentwiki"
-echo "[$(date)] wrapper start cwd=${opts.cwd} bin=${opts.binary}" >> "$LOG" 2>&1
+printf '[%s] wrapper start cwd=%s bin=%s\n' "$(date)" ${cwdLog} ${binaryLog} >> "$LOG" 2>&1
 __agentwiki_on_exit() {
   local rc=$?
   echo "[$(date)] wrapper exit code=$rc" >> "$LOG"
@@ -118,10 +121,10 @@ echo "[$(date)] PATH=$PATH" >> "$LOG"
 echo "[$(date)] which: $(command -v ${shellQuote(
     opts.binary,
   )} 2>&1 || echo NOT_FOUND)" >> "$LOG"
-echo "[$(date)] launching ${opts.binary}" >> "$LOG"
+printf '[%s] launching %s\n' "$(date)" ${binaryLog} >> "$LOG"
 ${shellQuote(opts.binary)} ${argvQuoted}
 rc=$?
-echo "[$(date)] ${opts.binary} exited code=$rc" >> "$LOG"
+printf '[%s] %s exited code=%s\n' "$(date)" ${binaryLog} "$rc" >> "$LOG"
 # Keep the window open so the user can read CLI output / error before
 # the emulator closes the tab. Most users expect this; "read -r" is a
 # light touch — they can hit enter to dismiss.

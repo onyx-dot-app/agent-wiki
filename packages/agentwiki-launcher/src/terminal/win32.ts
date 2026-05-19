@@ -52,6 +52,8 @@ export function openInWindowsTerminal(opts: OpenOpts): void {
     .map((p) => `del /q ${cmdQuote(p)} 2>nul`)
     .join("\r\n");
   const rmdirLine = `rmdir /q /s ${cmdQuote(dir)} 2>nul`;
+  const logCwd = cmdEscapeForEcho(opts.cwd);
+  const logBinary = cmdEscapeForEcho(opts.binary);
 
   // Close beacon: ``curl`` ships with Win 10 1803+. Fall back to
   // PowerShell if missing.
@@ -71,12 +73,12 @@ export function openInWindowsTerminal(opts: OpenOpts): void {
     "@echo off",
     `set "LOG=%USERPROFILE%\\.agentwiki\\spawn.log"`,
     `if not exist "%USERPROFILE%\\.agentwiki" mkdir "%USERPROFILE%\\.agentwiki"`,
-    `echo [%DATE% %TIME%] wrapper start cwd=${opts.cwd} bin=${opts.binary} >> "%LOG%"`,
+    `echo [%DATE% %TIME%] wrapper start cwd=${logCwd} bin=${logBinary} >> "%LOG%"`,
     envLines,
     `cd /d ${cmdQuote(opts.cwd)} || (echo cd failed >> "%LOG%" & exit /b 1)`,
-    `echo [%DATE% %TIME%] launching ${opts.binary} >> "%LOG%"`,
+    `echo [%DATE% %TIME%] launching ${logBinary} >> "%LOG%"`,
     `${cmdQuote(opts.binary)} ${argvQuoted}`,
-    `echo [%DATE% %TIME%] ${opts.binary} exited code=%ERRORLEVEL% >> "%LOG%"`,
+    `echo [%DATE% %TIME%] ${logBinary} exited code=%ERRORLEVEL% >> "%LOG%"`,
     closeLine,
     cleanLines,
     rmdirLine,
@@ -117,4 +119,18 @@ function cmdEscapeValue(s: string): string {
 
 function jsEscape(s: string): string {
   return s.replace(/\\/g, "\\\\").replace(/'/g, "''");
+}
+
+function cmdEscapeForEcho(s: string): string {
+  return s
+    .replace(/\r?\n/g, " ")
+    .replace(/%/g, "%%")
+    .replace(/\^/g, "^^")
+    .replace(/&/g, "^&")
+    .replace(/\|/g, "^|")
+    .replace(/</g, "^<")
+    .replace(/>/g, "^>")
+    .replace(/\(/g, "^(")
+    .replace(/\)/g, "^)")
+    .replace(/"/g, '^"');
 }
