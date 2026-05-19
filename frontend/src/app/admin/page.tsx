@@ -78,6 +78,12 @@ export default function AdminPage() {
             description="Reusable starting points for new wiki pages, plus optional chat prompts."
             icon={<TemplateIcon />}
           />
+          <AdminCard
+            href="/admin/ingest"
+            title="Onyx connection"
+            description="Connect your Onyx instance to push indexed documents into this wiki automatically."
+            icon={<IngestIcon />}
+          />
         </div>
       </main>
     </AppShell>
@@ -186,6 +192,16 @@ function TraceIcon() {
       <path d="M6 8.5v7" />
       <path d="M8.5 18h7" />
       <path d="M8 8l8 8" />
+    </svg>
+  );
+}
+
+function IngestIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M12 2v10" />
+      <path d="m8 8 4 4 4-4" />
+      <rect x="3" y="14" width="18" height="7" rx="2" />
     </svg>
   );
 }

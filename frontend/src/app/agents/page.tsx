@@ -47,7 +47,6 @@ export default function AgentsPage() {
         <EndpointBlock />
         <TokenManager />
         <ClientConfigHelp />
-        {user.is_admin && <OnyxConnection />}
       </main>
     </AppShell>
   );
@@ -384,131 +383,6 @@ function ClientConfigHelp() {
           >
             {claudeCodeSnippet}
           </pre>
-        </div>
-      )}
-    </section>
-  );
-}
-
-// --------------------------------------------------------------------------- //
-// Onyx connection (admin only)                                               //
-// --------------------------------------------------------------------------- //
-
-interface IngestSettings {
-  api_key: string | null;
-}
-
-function OnyxConnection() {
-  const [settings, setSettings] = useState<IngestSettings | null>(null);
-  const [ingestUrl, setIngestUrl] = useState("");
-  const [keyVisible, setKeyVisible] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
-
-  useEffect(() => {
-    setIngestUrl(`${window.location.origin}/api/wiki/ingest`);
-    apiFetch<IngestSettings>("/admin/ingest")
-      .then(setSettings)
-      .catch((e) =>
-        setError(e instanceof Error ? e.message : "failed to load"),
-      );
-  }, []);
-
-  async function regenerate() {
-    if (
-      settings?.api_key &&
-      !confirm(
-        "Regenerate the API key? The old key will stop working immediately.",
-      )
-    )
-      return;
-    setBusy(true);
-    setError(null);
-    setNotice(null);
-    try {
-      const r = await apiFetch<{ api_key: string }>(
-        "/admin/ingest/regenerate-key",
-        { method: "POST" },
-      );
-      setSettings((prev) => (prev ? { ...prev, api_key: r.api_key } : prev));
-      setKeyVisible(true);
-      setNotice(
-        "New key generated. Copy it now — it will be masked after you leave this page.",
-      );
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "failed to regenerate");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <section style={card}>
-      <h2 style={{ margin: "0 0 12px", fontSize: 16 }}>Onyx connection</h2>
-      <div style={{ fontSize: 13, color: color.text.muted, marginBottom: 16 }}>
-        Push indexed documents from Onyx into this wiki automatically. Copy the
-        endpoint and API key into your Onyx environment variables.
-      </div>
-
-      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        {/* Ingest URL */}
-        <div>
-          <div
-            style={{ fontSize: 13, color: color.text.muted, marginBottom: 6 }}
-          >
-            Endpoint URL
-          </div>
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <code style={codeBlock}>{ingestUrl || "—"}</code>
-            <CopyButton text={ingestUrl} />
-          </div>
-        </div>
-
-        {/* API key */}
-        <div>
-          <div
-            style={{ fontSize: 13, color: color.text.muted, marginBottom: 6 }}
-          >
-            API key
-          </div>
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <code style={codeBlock}>
-              {settings === null
-                ? "Loading…"
-                : settings.api_key
-                  ? keyVisible
-                    ? settings.api_key
-                    : "••••••••••••••••••••••••••••••••"
-                  : "No key yet — click Regenerate"}
-            </code>
-            {settings?.api_key && keyVisible && (
-              <CopyButton text={settings.api_key} />
-            )}
-            <Button
-              size="sm"
-              variant={settings?.api_key ? "secondary" : "primary"}
-              disabled={busy}
-              onClick={() => void regenerate()}
-            >
-              {busy ? "…" : "Regenerate"}
-            </Button>
-          </div>
-        </div>
-      </div>
-
-      {notice && (
-        <div
-          style={{ fontSize: 13, color: color.state.success.fg, marginTop: 10 }}
-        >
-          {notice}
-        </div>
-      )}
-      {error && (
-        <div
-          style={{ fontSize: 13, color: color.state.danger.fg, marginTop: 10 }}
-        >
-          {error}
         </div>
       )}
     </section>

@@ -27,6 +27,7 @@ class LLMConfigRequest(BaseModel):
     gemini_api_key: str | None = None
     ollama_base_url: str | None = None
     provider_models: dict[str, list[str]] | None = None
+    ingest_selector_model: str | None = None
 
 
 class WebConfigRequest(BaseModel):
@@ -88,6 +89,7 @@ class LLMView(BaseModel):
     # Ollama doesn't have an API key — surface the base URL directly.
     ollama_base_url: str
     provider_models: dict[str, list[str]]
+    ingest_selector_model: str
 
 
 class WebView(BaseModel):

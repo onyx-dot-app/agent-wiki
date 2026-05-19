@@ -41,6 +41,7 @@ const PROVIDER_MODELS: Record<Provider, string[]> = {
   openai: [
     "gpt-5.5",
     "gpt-5.4",
+    "gpt-5.4-mini",
     "gpt-5.2",
   ],
   gemini: [

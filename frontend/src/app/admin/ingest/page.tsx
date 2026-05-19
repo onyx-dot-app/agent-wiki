@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
+import { mutate as globalMutate } from "swr";
 
 import { AppShell } from "@/components/common/AppShell";
 import { Button } from "@/components/common/Button";
@@ -14,6 +15,37 @@ import { useIsMobile } from "@/lib/viewport";
 interface IngestSettings {
   max_doc_chars: number;
   api_key: string | null;
+}
+
+type Provider = "anthropic" | "openai" | "gemini" | "ollama";
+
+interface LLMSettings {
+  provider: Provider;
+  model: string;
+  anthropic_api_key_set: boolean;
+  openai_api_key_set: boolean;
+  gemini_api_key_set: boolean;
+  ollama_base_url: string;
+  provider_models: Record<string, string[]>;
+  ingest_selector_model: string;
+}
+
+const PROVIDER_LABEL: Record<Provider, string> = {
+  anthropic: "Anthropic",
+  openai: "OpenAI",
+  gemini: "Gemini",
+  ollama: "Ollama",
+};
+
+const ALL_PROVIDERS: Provider[] = ["anthropic", "openai", "gemini", "ollama"];
+
+
+function isConfigured(p: Provider, s: LLMSettings): boolean {
+  if (p === "anthropic") return s.anthropic_api_key_set;
+  if (p === "openai") return s.openai_api_key_set;
+  if (p === "gemini") return s.gemini_api_key_set;
+  if (p === "ollama") return !!s.ollama_base_url;
+  return false;
 }
 
 export default function AdminIngestPage() {
@@ -44,6 +76,7 @@ export default function AdminIngestPage() {
 
 function IngestForm() {
   const [settings, setSettings] = useState<IngestSettings | null>(null);
+  const [llmSettings, setLlmSettings] = useState<LLMSettings | null>(null);
   const [maxDocChars, setMaxDocChars] = useState("");
   const [keyVisible, setKeyVisible] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -57,9 +90,13 @@ function IngestForm() {
 
   async function load() {
     try {
-      const r = await apiFetch<IngestSettings>("/admin/ingest");
-      setSettings(r);
-      setMaxDocChars(String(r.max_doc_chars));
+      const [ingest, llm] = await Promise.all([
+        apiFetch<IngestSettings>("/admin/ingest"),
+        apiFetch<LLMSettings>("/admin/llm"),
+      ]);
+      setSettings(ingest);
+      setMaxDocChars(String(ingest.max_doc_chars));
+      setLlmSettings(llm);
     } catch (e) {
       setError(e instanceof Error ? e.message : "failed to load");
     }
@@ -120,7 +157,7 @@ function IngestForm() {
     }
   }
 
-  if (!settings) return <div>Loading…</div>;
+  if (!settings || !llmSettings) return <div>Loading…</div>;
 
   const dirty = maxDocChars !== String(settings.max_doc_chars);
 
@@ -205,7 +242,156 @@ function IngestForm() {
           </Button>
         </div>
       </form>
+
+      <div style={{ borderTop: `1px solid ${color.border.subtle}` }} />
+
+      <SelectorModelSection settings={llmSettings} onSaved={() => void load()} />
     </div>
+  );
+}
+
+function SelectorModelSection({ settings, onSaved }: { settings: LLMSettings; onSaved: () => void }) {
+  const [editing, setEditing] = useState(false);
+  const [selModel, setSelModel] = useState(settings.ingest_selector_model || "");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const availableProviders = ALL_PROVIDERS.filter((p) => isConfigured(p, settings));
+  const options = availableProviders.flatMap((p) =>
+    (settings.provider_models[p] ?? []).map((m) => ({ provider: p, model: m })),
+  );
+  const hasNoModels = availableProviders.length > 0 && options.length === 0;
+
+  useEffect(() => {
+    setSelModel(settings.ingest_selector_model || "");
+  }, [settings]);
+
+  async function onSave() {
+    setSaving(true);
+    setError(null);
+    try {
+      await apiFetch("/admin/llm", {
+        method: "PUT",
+        body: JSON.stringify({ ingest_selector_model: selModel }),
+      });
+      setEditing(false);
+      onSaved();
+      void globalMutate("/llm/status");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "failed to save");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const activeLabel = selModel
+    ? selModel === settings.model
+      ? `${selModel} (same as main model — pre-filter disabled)`
+      : selModel
+    : "None — all documents go to the main model";
+
+  return (
+    <section>
+      <h3 style={{ margin: "0 0 4px", fontSize: 14, fontWeight: 600 }}>Selector model</h3>
+      <div style={{ color: color.text.muted, fontSize: 13, marginBottom: 12 }}>
+        A faster, cheaper model that screens incoming documents before the main model decides what to update.
+        Helps reduce cost when many documents are being pushed. Leave unset to send all documents straight to the main model.
+      </div>
+      {!editing ? (
+        <div style={{
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          padding: "12px 16px", border: `1px solid ${color.border.default}`,
+          borderRadius: radius.md, background: color.bg.panel,
+        }}>
+          <span style={{ fontSize: 14, color: selModel && selModel !== settings.model ? color.text.primary : color.text.muted }}>
+            {activeLabel}
+          </span>
+          <Button size="sm" variant="secondary" onClick={() => setEditing(true)} disabled={availableProviders.length === 0}>Edit</Button>
+        </div>
+      ) : (
+        <div style={{
+          border: `1px solid ${color.border.default}`,
+          borderRadius: radius.md, background: color.bg.panel,
+          display: "flex", flexDirection: "column",
+        }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4, padding: 12 }}>
+            {hasNoModels && (
+              <div style={{ fontSize: 13, color: color.text.muted, padding: "4px 0 8px" }}>
+                No models configured. Add models on the{" "}
+                <a href="/admin/llm" style={{ color: color.accent.fg }}>Language models</a> page first.
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={() => setSelModel("")}
+              style={{
+                display: "flex", alignItems: "center", gap: 12, padding: "10px 12px",
+                border: `1px solid ${selModel === "" ? color.accent.subtleBorder : color.border.default}`,
+                borderRadius: radius.sm,
+                background: selModel === "" ? color.accent.subtleBg : color.bg.page,
+                cursor: "pointer", textAlign: "left",
+              }}
+            >
+              <div style={{
+                width: 16, height: 16, borderRadius: "50%", flexShrink: 0,
+                border: selModel === "" ? "none" : `1.5px solid ${color.border.strong}`,
+                background: selModel === "" ? color.accent.bg : "transparent",
+                display: "flex", alignItems: "center", justifyContent: "center",
+              }}>
+                {selModel === "" && <div style={{ width: 8, height: 8, borderRadius: "50%", background: color.accent.fg }} />}
+              </div>
+              <span style={{ fontSize: 13, color: selModel === "" ? color.accent.subtleFg : color.text.muted, fontStyle: "italic" }}>
+                None — all documents go to the main model
+              </span>
+            </button>
+            {options.map(({ provider: p, model: m }) => {
+              const isSelected = selModel === m;
+              return (
+                <button
+                  key={`${p}:${m}`}
+                  type="button"
+                  onClick={() => setSelModel(m)}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 12, padding: "10px 12px",
+                    border: `1px solid ${isSelected ? color.accent.subtleBorder : color.border.default}`,
+                    borderRadius: radius.sm,
+                    background: isSelected ? color.accent.subtleBg : color.bg.page,
+                    cursor: "pointer", textAlign: "left",
+                  }}
+                >
+                  <div style={{
+                    width: 16, height: 16, borderRadius: "50%", flexShrink: 0,
+                    border: isSelected ? "none" : `1.5px solid ${color.border.strong}`,
+                    background: isSelected ? color.accent.bg : "transparent",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                  }}>
+                    {isSelected && <div style={{ width: 8, height: 8, borderRadius: "50%", background: color.accent.fg }} />}
+                  </div>
+                  <span style={{ fontSize: 13, fontWeight: 500, color: isSelected ? color.accent.subtleFg : color.text.secondary, flexShrink: 0 }}>
+                    {PROVIDER_LABEL[p]}
+                  </span>
+                  <span style={{ fontSize: 13, color: isSelected ? color.accent.subtleFg : color.text.muted, fontFamily: "ui-monospace, monospace" }}>
+                    {m}
+                  </span>
+                  {m === settings.model && (
+                    <span style={{ fontSize: 11, color: color.text.muted, marginLeft: "auto" }}>same as main — pre-filter disabled</span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+          {error && <div style={{ color: color.state.danger.fg, fontSize: 13, padding: "0 12px 8px" }}>{error}</div>}
+          <div style={{ display: "flex", gap: 8, padding: "4px 12px 12px" }}>
+            <Button type="button" variant="primary" size="sm" disabled={saving} onClick={() => void onSave()}>
+              {saving ? "Saving…" : "Save"}
+            </Button>
+            <Button type="button" variant="secondary" size="sm" onClick={() => { setEditing(false); setError(null); setSelModel(settings.ingest_selector_model || ""); }}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
+    </section>
   );
 }
 
