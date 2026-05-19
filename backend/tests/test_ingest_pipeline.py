@@ -15,11 +15,24 @@ from __future__ import annotations
 from typing import Any
 from unittest.mock import patch
 
+import pytest
+
 from app.config import CONFIG
 from app.db.fts import SearchHit
 from app.ingest import search as ingest_search
 from app.ingest.source_tiers import is_filtered
 from app.llm.agents.wiki_updater import IRRELEVANT_SENTINEL
+from app.llm.settings import _EMPTY as _EMPTY_LLM_SETTINGS
+
+
+@pytest.fixture(autouse=True)
+def _stub_llm_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    """process_pushed_document calls get_llm_settings() which hits the DB.
+    Return empty settings so the selector stage is skipped in unit tests."""
+    monkeypatch.setattr(
+        "app.tasks.wiki_update.get_llm_settings",
+        lambda: _EMPTY_LLM_SETTINGS,
+    )
 
 
 # --------------------------------------------------------------------------- #

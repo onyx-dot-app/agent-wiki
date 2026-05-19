@@ -76,6 +76,18 @@ ingest_queue_depth = Gauge(
     "Current number of pending tasks in the documents queue",
 )
 
+ingest_selector_candidates_filtered = Histogram(
+    "ingest_selector_candidates_filtered",
+    "Candidates dropped by the weak-model selector per ingest request",
+    buckets=[0, 1, 2, 3, 5, 8, 10, 15, 20],
+)
+
+ingest_selector_duration_seconds = Histogram(
+    "ingest_selector_duration_seconds",
+    "Total time spent on selector LLM call(s) per ingest request",
+    buckets=[0.5, 1.0, 2.0, 5.0, 10.0, 30.0],
+)
+
 
 # --------------------------------------------------------------------------- #
 # HTTP instrumentation                                                         #

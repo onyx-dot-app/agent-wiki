@@ -16,6 +16,7 @@ update triggering a full LLM pass is expensive.
 
 See ``app/tasks/queues.py`` for the queue rationale.
 """
+
 from __future__ import annotations
 
 import logging
@@ -26,10 +27,12 @@ from typing import Any
 from app.config import CONFIG
 from app.ingest import search as ingest_search
 from app.ingest.source_tiers import is_filtered
-from app.llm.agents import wiki_updater
+from app.ingest.models import WikiUpdateCandidate
+from app.llm.agents import ingest_selector, wiki_updater
 from app.llm.agents.wiki_updater import IRRELEVANT_SENTINEL
 from app.llm.agents.tools import _doc_helpers as h
 from app.llm.errors import LLMError
+from app.llm.settings import get as get_llm_settings
 from app.metrics import (
     ingest_bm25_score_by_outcome,
     ingest_llm_calls_per_doc,
@@ -37,6 +40,8 @@ from app.metrics import (
     ingest_outcomes_total,
     ingest_queue_depth,
     ingest_requests_total,
+    ingest_selector_candidates_filtered,
+    ingest_selector_duration_seconds,
 )
 from app.mcp_server import jobs as mcp_jobs
 from app.mcp_server import pubsub as mcp_pubsub
@@ -237,7 +242,9 @@ def process_pushed_document(push: dict[str, Any]) -> None:
     Pipeline:
       1. Drop filtered sources silently.
       2. BM25 search + title boost + score threshold to find candidates.
-      3. Walk candidates (best score first); call updater LLM on each.
+      3. Weak-model pre-filter (optional): skip if ingest_selector_model unset
+         or same as the main model.
+      4. Walk remaining candidates (best score first); call updater LLM on each.
          - new body   → commit + fan-out, reset irrelevant counter
          - NO_CHANGE  → skip commit, reset irrelevant counter
          - IRRELEVANT → increment counter; stop when ≥ INGEST_IRRELEVANT_STOP_N
@@ -249,7 +256,9 @@ def process_pushed_document(push: dict[str, Any]) -> None:
 
     log.info(
         "process_pushed_document source=%s title=%s len=%d",
-        source_type, title, len(content),
+        source_type,
+        title,
+        len(content),
     )
 
     ingest_requests_total.labels(source_type=source_type or "unknown").inc()
@@ -271,24 +280,56 @@ def process_pushed_document(push: dict[str, Any]) -> None:
     _meta: dict[str, Any] = push.get("metadata") or {}
     url: str = str(_meta.get("url") or "")
 
+    # Read all candidate bodies upfront — needed by both the selector and the
+    # main reconciler loop. Skip unreadable files early so the selector sees
+    # the same set the reconciler will act on.
+    readable: list[WikiUpdateCandidate] = []
+    for hit in hits:
+        try:
+            readable.append(WikiUpdateCandidate(hit=hit, body=wiki_git.read_file(hit.path)))
+        except Exception:
+            log.debug("process_pushed_document: skipping unreadable %s", hit.path)
+
+    if not readable:
+        ingest_outcomes_total.labels(outcome="no_candidates", wiki_path="").inc()
+        return
+
+    # Stage 3: weak-model pre-filter (skipped when selector_model is unset or
+    # matches the main model).
+    llm_s = get_llm_settings()
+    selector_model = llm_s.ingest_selector_model
+    if selector_model and selector_model != llm_s.model:
+        before_filter = readable
+        t_selector = time.monotonic()
+        readable = ingest_selector.select_candidates(
+            title=title,
+            content=content,
+            candidates=before_filter,
+            model=selector_model,
+        )
+        ingest_selector_duration_seconds.observe(time.monotonic() - t_selector)
+        dropped = len(before_filter) - len(readable)
+        ingest_selector_candidates_filtered.observe(dropped)
+        kept_paths = {c.hit.path for c in readable}
+        for c in before_filter:
+            if c.hit.path not in kept_paths:
+                ingest_outcomes_total.labels(
+                    outcome="filtered_by_selector", wiki_path=c.hit.path
+                ).inc()
+                log.debug("process_pushed_document: filtered_by_selector path=%s", c.hit.path)
+
     consecutive_irrelevant = 0
     llm_calls = 0
     irrelevant = 0
     committed = 0
     stopped_early = False
 
-    for hit in hits:
-        try:
-            current_body = wiki_git.read_file(hit.path)
-        except Exception:
-            log.debug("process_pushed_document: skipping unreadable %s", hit.path)
-            continue
-
+    for c in readable:
         try:
             t_llm = time.monotonic()
             result = wiki_updater.reconcile_document(
-                wiki_path=hit.path,
-                current_body=current_body,
+                wiki_path=c.hit.path,
+                current_body=c.body,
                 source=source_label,
                 title=title,
                 url=url,
@@ -297,17 +338,20 @@ def process_pushed_document(push: dict[str, Any]) -> None:
             ingest_llm_duration_seconds.observe(time.monotonic() - t_llm)
             llm_calls += 1
         except LLMError:
-            log.warning("process_pushed_document: LLM error for %s, skipping", hit.path, exc_info=True)
+            log.warning(
+                "process_pushed_document: LLM error for %s, skipping", c.hit.path, exc_info=True
+            )
             continue
 
         if result == IRRELEVANT_SENTINEL:
             irrelevant += 1
             consecutive_irrelevant += 1
-            ingest_outcomes_total.labels(outcome="irrelevant", wiki_path=hit.path).inc()
-            ingest_bm25_score_by_outcome.labels(outcome="irrelevant").observe(hit.score)
+            ingest_outcomes_total.labels(outcome="irrelevant", wiki_path=c.hit.path).inc()
+            ingest_bm25_score_by_outcome.labels(outcome="irrelevant").observe(c.hit.score)
             log.debug(
                 "process_pushed_document: IRRELEVANT path=%s consecutive=%d",
-                hit.path, consecutive_irrelevant,
+                c.hit.path,
+                consecutive_irrelevant,
             )
             if consecutive_irrelevant >= CONFIG.ingest_irrelevant_stop_n:
                 stopped_early = True
@@ -315,22 +359,27 @@ def process_pushed_document(push: dict[str, Any]) -> None:
         else:
             consecutive_irrelevant = 0
             if result is not None:
-                message = f"ingest({source_label}): update {hit.path}"
-                sha = wiki_git.commit_file(hit.path, result, message, author=_INGEST_AUTHOR)
-                wiki_notify.after_doc_write(hit.path, sha, "edit", _INGEST_AUTHOR)
+                message = f"ingest({source_label}): update {c.hit.path}"
+                sha = wiki_git.commit_file(c.hit.path, result, message, author=_INGEST_AUTHOR)
+                wiki_notify.after_doc_write(c.hit.path, sha, "edit", _INGEST_AUTHOR)
                 committed += 1
-                ingest_outcomes_total.labels(outcome="committed", wiki_path=hit.path).inc()
-                ingest_bm25_score_by_outcome.labels(outcome="committed").observe(hit.score)
-                log.info("process_pushed_document: committed %s sha=%s", hit.path, sha)
+                ingest_outcomes_total.labels(outcome="committed", wiki_path=c.hit.path).inc()
+                ingest_bm25_score_by_outcome.labels(outcome="committed").observe(c.hit.score)
+                log.info("process_pushed_document: committed %s sha=%s", c.hit.path, sha)
             else:
-                ingest_outcomes_total.labels(outcome="no_change", wiki_path=hit.path).inc()
-                ingest_bm25_score_by_outcome.labels(outcome="no_change").observe(hit.score)
+                ingest_outcomes_total.labels(outcome="no_change", wiki_path=c.hit.path).inc()
+                ingest_bm25_score_by_outcome.labels(outcome="no_change").observe(c.hit.score)
 
     ingest_llm_calls_per_doc.observe(llm_calls)
     log.info(
         "process_pushed_document: done doc_id=%s source=%s candidates=%d "
         "llm_calls=%d committed=%d irrelevant=%d stopped_early=%s duration_ms=%d",
-        doc_id, source_type, len(hits),
-        llm_calls, committed, irrelevant, stopped_early,
+        doc_id,
+        source_type,
+        len(hits),
+        llm_calls,
+        committed,
+        irrelevant,
+        stopped_early,
         int((time.monotonic() - t_start) * 1000),
     )
