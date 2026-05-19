@@ -110,13 +110,13 @@ function pickTerminal(): TerminalLaunch {
 
 /**
  * Map a terminal binary to the flags that mean "run THIS command".
- * gnome-terminal famously uses ``--`` (everything after is argv);
- * konsole + xfce4-terminal use ``-e``; x-terminal-emulator (the Debian
- * shim) follows gnome-terminal semantics. xterm uses ``-e``.
+ * gnome-terminal uses ``--`` (everything after is argv); konsole,
+ * xfce4-terminal, xterm, and the Debian ``x-terminal-emulator``
+ * alternatives shim (which can resolve to any of them) all use ``-e``.
  */
 function runFlagFor(bin: string): string[] {
   const base = bin.split("/").pop() ?? bin;
-  if (base.includes("gnome-terminal") || base === "x-terminal-emulator") {
+  if (base.includes("gnome-terminal")) {
     return ["--"];
   }
   return ["-e"];
