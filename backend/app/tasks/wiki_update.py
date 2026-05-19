@@ -27,8 +27,8 @@ from typing import Any
 from app.config import CONFIG
 from app.ingest import search as ingest_search
 from app.ingest.source_tiers import is_filtered
+from app.ingest.models import WikiUpdateCandidate
 from app.llm.agents import ingest_selector, wiki_updater
-from app.llm.agents.ingest_selector import Candidate
 from app.llm.agents.wiki_updater import IRRELEVANT_SENTINEL
 from app.llm.agents.tools import _doc_helpers as h
 from app.llm.errors import LLMError
@@ -283,10 +283,10 @@ def process_pushed_document(push: dict[str, Any]) -> None:
     # Read all candidate bodies upfront — needed by both the selector and the
     # main reconciler loop. Skip unreadable files early so the selector sees
     # the same set the reconciler will act on.
-    readable: list[Candidate] = []
+    readable: list[WikiUpdateCandidate] = []
     for hit in hits:
         try:
-            readable.append(Candidate(hit=hit, body=wiki_git.read_file(hit.path)))
+            readable.append(WikiUpdateCandidate(hit=hit, body=wiki_git.read_file(hit.path)))
         except Exception:
             log.debug("process_pushed_document: skipping unreadable %s", hit.path)
 

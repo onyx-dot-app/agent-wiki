@@ -7,15 +7,16 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from app.db.fts import SearchHit
-from app.llm.agents.ingest_selector import Candidate, _batch_by_chars, select_candidates
+from app.ingest.models import WikiUpdateCandidate
+from app.llm.agents.ingest_selector import _batch_by_chars, select_candidates
 
 
 def _hit(path: str, score: float = 1.0) -> SearchHit:
     return SearchHit(doc_id=path, path=path, title=None, snippet="", score=score)
 
 
-def _candidate(path: str, body: str = "body") -> Candidate:
-    return Candidate(hit=_hit(path), body=body)
+def _candidate(path: str, body: str = "body") -> WikiUpdateCandidate:
+    return WikiUpdateCandidate(hit=_hit(path), body=body)
 
 
 def _llm_response(text: str) -> MagicMock:
