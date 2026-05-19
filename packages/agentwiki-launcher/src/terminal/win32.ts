@@ -18,6 +18,7 @@ import {
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { assertValidEnvKeys } from "./select.js";
 import type { OpenOpts } from "./select.js";
 
 function hasWt(): boolean {
@@ -26,6 +27,7 @@ function hasWt(): boolean {
 }
 
 export function openInWindowsTerminal(opts: OpenOpts): void {
+  assertValidEnvKeys(opts.env);
   const dir = mkdtempSync(join(tmpdir(), "agw-wrap-"));
   const scriptPath = join(dir, "run.ps1");
   const payloadPath = join(dir, "payload.json");

@@ -28,6 +28,7 @@ import {
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { assertValidEnvKeys } from "./select.js";
 import type { OpenOpts } from "./select.js";
 
 const CANDIDATES = [
@@ -70,6 +71,7 @@ function runFlagFor(bin: string): string[] {
 }
 
 export function openInLinuxTerminal(opts: OpenOpts): void {
+  assertValidEnvKeys(opts.env);
   const dir = mkdtempSync(join(tmpdir(), "agw-wrap-"));
   const wrapper = join(dir, "run.sh");
   const envExports = Object.entries(opts.env)

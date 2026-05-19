@@ -17,6 +17,18 @@ export interface OpenOpts extends SpawnCommand {
   closeOnExit?: { url: string; token: string };
 }
 
+const ENV_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+export function assertValidEnvKeys(env: Record<string, string>): void {
+  for (const key of Object.keys(env)) {
+    if (!ENV_NAME_RE.test(key)) {
+      throw new Error(
+        `invalid env var name ${key} (expected [A-Za-z_][A-Za-z0-9_]*)`,
+      );
+    }
+  }
+}
+
 export type OpenInTerminal = (opts: OpenOpts) => void;
 
 export async function selectTerminalOpener(): Promise<OpenInTerminal> {
