@@ -114,10 +114,11 @@ def _select_batch(
                 model=model,
             )
         text = result.text.strip()
-        kept_indices: Any = json.loads(text)
-        if not isinstance(kept_indices, list):
-            raise ValueError(f"expected list, got {type(kept_indices)}")
-        valid = {i for i in kept_indices if isinstance(i, int) and 1 <= i <= len(batch)}
+        raw: Any = json.loads(text)
+        if not isinstance(raw, list):
+            raise ValueError(f"expected list, got {type(raw)}")
+        items: list[object] = raw
+        valid = {i for i in items if isinstance(i, int) and 1 <= i <= len(batch)}
         return [batch[i - 1] for i in sorted(valid)]
     except Exception:
         log.warning("ingest_selector: batch failed, passing batch through", exc_info=True)
