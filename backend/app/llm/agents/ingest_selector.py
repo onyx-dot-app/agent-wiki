@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+from typing import Any
 
 from app.ingest.models import WikiUpdateCandidate
 from app.llm import client
@@ -113,7 +114,7 @@ def _select_batch(
                 model=model,
             )
         text = result.text.strip()
-        kept_indices = json.loads(text)
+        kept_indices: Any = json.loads(text)
         if not isinstance(kept_indices, list):
             raise ValueError(f"expected list, got {type(kept_indices)}")
         valid = {i for i in kept_indices if isinstance(i, int) and 1 <= i <= len(batch)}
