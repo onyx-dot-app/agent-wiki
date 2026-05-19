@@ -126,7 +126,19 @@ function validateBlock(b: LaunchBlock, blockName: "launch" | "resume"): void {
       );
     }
   }
-  if (b.cwd) checkString(b.cwd, `${blockName}.cwd`);
+  if (b.cwd) {
+    checkString(b.cwd, `${blockName}.cwd`);
+    if (b.cwd.includes("${first_turn_prompt}")) {
+      throw new ManifestError(
+        `$\{first_turn_prompt\} forbidden in ${blockName}.cwd`,
+      );
+    }
+    if (blockName === "resume" && b.cwd.includes("${prompt_file_path}")) {
+      throw new ManifestError(
+        `$\{prompt_file_path\} forbidden in resume.cwd`,
+      );
+    }
+  }
 }
 
 export function parseManifest(raw: unknown): Manifest {

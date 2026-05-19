@@ -46,9 +46,23 @@ test("first_turn_prompt anywhere rejected", () => {
   assert.throws(() => parseManifest(bad), /first_turn_prompt.*forbidden/);
 });
 
+test("first_turn_prompt in cwd rejected", () => {
+  const bad = valid();
+  bad.launch!.cwd = "/tmp/${first_turn_prompt}";
+  assert.throws(
+    () => parseManifest(bad),
+    /first_turn_prompt.*forbidden in launch\.cwd/,
+  );
+});
+
 test("prompt_file_path in resume rejected", () => {
   const bad = valid() as ReturnType<typeof valid> & {
-    resume: { binary: string; argv: string[]; env: Record<string, string> };
+    resume: {
+      binary: string;
+      argv: string[];
+      env: Record<string, string>;
+      cwd?: string;
+    };
   };
   bad.resume = {
     binary: "claude",
@@ -58,6 +72,27 @@ test("prompt_file_path in resume rejected", () => {
   assert.throws(
     () => parseManifest(bad),
     /prompt_file_path.*forbidden in resume/,
+  );
+});
+
+test("prompt_file_path in resume cwd rejected", () => {
+  const bad = valid() as ReturnType<typeof valid> & {
+    resume: {
+      binary: string;
+      argv: string[];
+      env: Record<string, string>;
+      cwd?: string;
+    };
+  };
+  bad.resume = {
+    binary: "claude",
+    argv: [],
+    env: {},
+    cwd: "/tmp/${prompt_file_path}",
+  };
+  assert.throws(
+    () => parseManifest(bad),
+    /prompt_file_path.*forbidden in resume\.cwd/,
   );
 });
 
