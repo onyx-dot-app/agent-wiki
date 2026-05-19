@@ -132,7 +132,7 @@ echo
 echo "(session ended — press enter to close)"
 read -r _
 `;
-  writeFileSync(wrapper, script);
+  writeFileSync(wrapper, script, { mode: 0o700 });
   chmodSync(wrapper, 0o700);
 
   const { bin, argv } = pickTerminal();

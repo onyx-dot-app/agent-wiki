@@ -102,7 +102,8 @@ function shellQuote(s: string): string {
 }
 
 function desktopExecQuote(s: string): string {
-  return `"${s.replace(/(["\\])/g, "\\$1")}"`;
+  const escaped = s.replace(/(["\\])/g, "\\$1").replace(/%/g, "%%");
+  return `"${escaped}"`;
 }
 
 function nextTmpSuffix(): string {
