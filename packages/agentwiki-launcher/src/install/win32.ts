@@ -18,7 +18,7 @@
  * the failure via ``postinstall-status.json`` so the wizard can show
  * the manual command.
  */
-import { execSync } from "node:child_process";
+import { execSync, spawnSync } from "node:child_process";
 import { mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -68,18 +68,64 @@ export function installOnWin32(): void {
   const launcherRegEscaped = launcherCmd.replace(/"/g, '\\"');
   const cmdValue = `"\\"${launcherRegEscaped}\\" dispatch \\"%1\\""`;
 
-  const regCmds = [
-    `REG ADD "HKCU\\Software\\Classes\\agentwiki" /ve /d "URL:AgentWiki Protocol" /f`,
-    `REG ADD "HKCU\\Software\\Classes\\agentwiki" /v "URL Protocol" /d "" /f`,
-    `REG ADD "HKCU\\Software\\Classes\\agentwiki\\shell\\open\\command" /ve /d ${cmdValue} /f`,
+  const regDispatchValue = `"${launcherCmd.replace(/"/g, '""')}" dispatch "%1"`;
+  const regSteps = [
+    {
+      args: [
+        "ADD",
+        "HKCU\\Software\\Classes\\agentwiki",
+        "/ve",
+        "/d",
+        "URL:AgentWiki Protocol",
+        "/f",
+      ],
+      manual: `REG ADD "HKCU\\Software\\Classes\\agentwiki" /ve /d "URL:AgentWiki Protocol" /f`,
+    },
+    {
+      args: [
+        "ADD",
+        "HKCU\\Software\\Classes\\agentwiki",
+        "/v",
+        "URL Protocol",
+        "/d",
+        "",
+        "/f",
+      ],
+      manual: `REG ADD "HKCU\\Software\\Classes\\agentwiki" /v "URL Protocol" /d "" /f`,
+    },
+    {
+      args: [
+        "ADD",
+        "HKCU\\Software\\Classes\\agentwiki\\shell\\open\\command",
+        "/ve",
+        "/d",
+        regDispatchValue,
+        "/f",
+      ],
+      manual: `REG ADD "HKCU\\Software\\Classes\\agentwiki\\shell\\open\\command" /ve /d ${cmdValue} /f`,
+    },
   ];
 
+  const manualCommands = regSteps.map((step) => step.manual);
   const failures: string[] = [];
-  for (const cmd of regCmds) {
-    try {
-      execSync(cmd, { stdio: "ignore" });
-    } catch (e) {
-      failures.push(`${cmd}\n  ${e instanceof Error ? e.message : String(e)}`);
+  for (const step of regSteps) {
+    const res = spawnSync("reg", step.args, {
+      encoding: "utf-8",
+    });
+    if (res.error) {
+      failures.push(`${step.manual}\n  ${res.error.message}`);
+      continue;
+    }
+    if (res.status !== 0) {
+      const stderr =
+        typeof res.stderr === "string" && res.stderr.trim().length > 0
+          ? res.stderr.trim()
+          : null;
+      failures.push(
+        `${step.manual}\n  exit ${res.status}${
+          stderr ? `: ${stderr}` : ""
+        }`.trim(),
+      );
     }
   }
 
@@ -92,7 +138,7 @@ export function installOnWin32(): void {
     );
     return;
   }
-  const manual = regCmds.join("\n");
+  const manual = manualCommands.join("\n");
   writeStatus(home, {
     ok: false,
     reason: failures.join("\n"),
