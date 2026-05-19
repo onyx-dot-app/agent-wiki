@@ -59,7 +59,7 @@ export function installOnLinux(): void {
     "Name=AgentWiki Launcher",
     // ``%u`` expands to the agentwiki:// URI the browser dispatched.
     // The launcher's ``run`` subcommand parses it.
-    `Exec=${shellQuote(launcherPath)} dispatch %u`,
+    `Exec=${desktopExecQuote(launcherPath)} dispatch %u`,
     "NoDisplay=true",
     "MimeType=x-scheme-handler/agentwiki;",
     "",
@@ -99,6 +99,10 @@ export function installOnLinux(): void {
 
 function shellQuote(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`;
+}
+
+function desktopExecQuote(s: string): string {
+  return `"${s.replace(/(["\\])/g, "\\$1")}"`;
 }
 
 function nextTmpSuffix(): string {
