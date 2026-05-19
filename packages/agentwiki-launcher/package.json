@@ -1,6 +1,6 @@
 {
   "name": "@onyx-ai/agentwiki-launcher",
-  "version": "0.1.0-alpha.2",
+  "version": "0.1.0-alpha.3",
   "description": "Local helper for the agent-wiki Run Agent button.",
   "license": "MIT",
   "type": "module",
