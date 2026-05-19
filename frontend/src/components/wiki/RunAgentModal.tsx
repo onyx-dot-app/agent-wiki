@@ -238,7 +238,16 @@ export function RunAgentModal({ open, onClose, wikiPath }: Props) {
               const sel = launchers.find((c) => c.id === selectedId);
               const warning = sel?.unscoped_workdir_warning;
               if (!warning || workingDir.trim().length > 0) return null;
-              return <MessageCard variant="warning" title={warning} />;
+              // Backend includes a leading "No directory set — " in the
+              // string; drop it so it isn't duplicated under the title.
+              const body = warning.replace(/^No directory set\s*[—-]\s*/, "");
+              return (
+                <MessageCard
+                  variant="warning"
+                  title="No directory set"
+                  description={body}
+                />
+              );
             })()}
 
             <InputVertical title="Message" withLabel="run-agent-message">
