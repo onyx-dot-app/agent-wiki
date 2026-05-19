@@ -21,6 +21,7 @@ from fastapi.exceptions import HTTPException as FastAPIHTTPException
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.middleware.sessions import SessionMiddleware
+from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
 from app.api import (
     admin,
@@ -164,6 +165,11 @@ def create_app() -> FastAPI:
     # last added is the outermost / runs first on inbound. We want
     # ``SessionMiddleware`` to be outermost so ``request.session`` is
     # populated by the time ``CurrentUserMiddleware`` reads from it.
+    # ``ProxyHeadersMiddleware`` must be the OUTERMOST so the scheme +
+    # client IP correction lands before anything downstream reads
+    # ``request.url`` / ``request.client``. Behind the cluster's nginx
+    # ingress, ``X-Forwarded-Proto: https`` is what makes
+    # ``request.base_url`` resolve correctly for the launcher URI.
     app.add_middleware(CurrentUserMiddleware)
     app.add_middleware(
         SessionMiddleware,
@@ -173,6 +179,7 @@ def create_app() -> FastAPI:
         https_only=_app_config.CONFIG.secure_cookies,
         max_age=30 * 24 * 3600,
     )
+    app.add_middleware(ProxyHeadersMiddleware, trusted_hosts="*")
     _install_error_handlers(app)
     app.include_router(health.router, prefix="/api/health")
     app.include_router(llm.router, prefix="/api/llm")
