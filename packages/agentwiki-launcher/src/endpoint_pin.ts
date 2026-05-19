@@ -15,8 +15,15 @@ export function getPinnedEndpoint(): string | null {
 }
 
 export function setPinnedEndpoint(url: string): void {
-  // Validate URL well-formedness.
-  new URL(url);
+  // Validate URL well-formedness AND scheme. Anything other than http/https
+  // would let a future use-of-pin (fetch call, scripted launch) reach an
+  // unintended resolver (file://, javascript:, custom schemes).
+  const parsed = new URL(url);
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error(
+      `set-endpoint: only http/https supported, got ${parsed.protocol}`,
+    );
+  }
   mkdirSync(dirname(PIN_PATH), { recursive: true, mode: 0o700 });
   writeFileSync(PIN_PATH, url, { mode: 0o600 });
 }
