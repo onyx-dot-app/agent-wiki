@@ -120,6 +120,7 @@ def _llm_view(s: LLMSettings) -> LLMView:
         gemini_api_key_hint=_redact(s.gemini_api_key),
         ollama_base_url=s.ollama_base_url,
         provider_models=s.provider_models,
+        ingest_selector_model=s.ingest_selector_model,
     )
 
 
@@ -167,6 +168,11 @@ def put_llm(
 
     new_provider_models = req.provider_models if "provider_models" in sent_fields else None
 
+    if "ingest_selector_model" in sent_fields:
+        ingest_selector_model = (req.ingest_selector_model or "").strip()
+    else:
+        ingest_selector_model = current.ingest_selector_model
+
     llm_settings.upsert(
         provider=provider,
         model=model,
@@ -175,6 +181,7 @@ def put_llm(
         gemini_api_key=gemini_key,
         ollama_base_url=ollama_base_url,
         provider_models=new_provider_models,
+        ingest_selector_model=ingest_selector_model,
     )
     log.info(
         "admin: %s updated llm settings provider=%s model=%s",

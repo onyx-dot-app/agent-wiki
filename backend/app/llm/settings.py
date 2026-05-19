@@ -22,6 +22,7 @@ class LLMSettings(BaseModel):
     gemini_api_key: str
     ollama_base_url: str
     provider_models: dict[str, list[str]]
+    ingest_selector_model: str  # empty or same as model → stage 3 skipped
 
 
 _EMPTY = LLMSettings(
@@ -32,6 +33,7 @@ _EMPTY = LLMSettings(
     gemini_api_key="",
     ollama_base_url="",
     provider_models={},
+    ingest_selector_model="",
 )
 
 
@@ -48,6 +50,7 @@ def get() -> LLMSettings:
             gemini_api_key=row.gemini_api_key,
             ollama_base_url=row.ollama_base_url,
             provider_models=row.provider_models or {},
+            ingest_selector_model=row.ingest_selector_model or "",
         )
 
 
@@ -60,6 +63,7 @@ def upsert(
     gemini_api_key: str,
     ollama_base_url: str,
     provider_models: dict[str, list[str]] | None = None,
+    ingest_selector_model: str | None = None,
 ) -> None:
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     with session() as s:
@@ -75,6 +79,7 @@ def upsert(
                     gemini_api_key=gemini_api_key,
                     ollama_base_url=ollama_base_url,
                     provider_models=provider_models or {},
+                    ingest_selector_model=ingest_selector_model or "",
                     updated_at=now,
                 )
             )
@@ -87,5 +92,7 @@ def upsert(
             row.ollama_base_url = ollama_base_url
             if provider_models is not None:
                 row.provider_models = provider_models
+            if ingest_selector_model is not None:
+                row.ingest_selector_model = ingest_selector_model
             row.updated_at = now
-    log.info("llm_settings upserted provider=%s model=%s", provider, model)
+    log.info("llm_settings upserted provider=%s model=%s ingest_selector_model=%s", provider, model, ingest_selector_model or "none")
