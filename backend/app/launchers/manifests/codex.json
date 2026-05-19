@@ -13,24 +13,28 @@
   },
   "mcp_config_format": "codex_toml",
   "first_turn_prompt_delivery": {
-    "method": "stdin"
+    "method": "positional_arg"
   },
   "launch": {
     "binary": "codex",
     "argv": [],
     "env": {
       "AGENTWIKI_SESSION_ID": "${session_id}",
-      "AGENTWIKI_ENDPOINT": "${endpoint}"
+      "AGENTWIKI_ENDPOINT": "${endpoint}",
+      "AGENTWIKI_MCP_TOKEN": "${token}"
     },
-    "cwd": "${working_dir}"
+    "cwd": "${working_dir}",
+    "unscoped_workdir_argv": ["--dangerously-bypass-approvals-and-sandbox"]
   },
   "resume": {
     "binary": "codex",
     "argv": ["resume", "${cli_session_id}"],
     "env": {
-      "AGENTWIKI_SESSION_ID": "${session_id}"
+      "AGENTWIKI_SESSION_ID": "${session_id}",
+      "AGENTWIKI_MCP_TOKEN": "${token}"
     },
-    "cwd": "${working_dir}"
+    "cwd": "${working_dir}",
+    "unscoped_workdir_argv": ["--dangerously-bypass-approvals-and-sandbox"]
   },
   "session_id_capture": {
     "source": "file_watch",

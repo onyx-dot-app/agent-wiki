@@ -77,7 +77,7 @@ class CliCheck(BaseModel):
 class FirstTurnPromptDelivery(BaseModel):
     model_config = ConfigDict(frozen=True)
 
-    method: Literal["prompt_file_flag", "stdin", "none"]
+    method: Literal["prompt_file_flag", "stdin", "positional_arg", "none"]
     flag: str | None = None
 
 
@@ -88,6 +88,12 @@ class LaunchBlock(BaseModel):
     argv: list[str] = Field(default_factory=list)
     env: dict[str, str] = Field(default_factory=dict)
     cwd: str | None = None
+    # Flags appended ONLY when the user launches without setting a
+    # working directory (helper falls back to $HOME). Each entry must be
+    # a literal CLI flag — no ${var} interpolation. Surfaces to the UI
+    # as a warning so the user is told what's being applied before they
+    # click Run.
+    unscoped_workdir_argv: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _validate_vars(self) -> "LaunchBlock":
@@ -103,6 +109,12 @@ class LaunchBlock(BaseModel):
                     "${first_turn_prompt} forbidden in argv — helper "
                     "materializes a tmpfile; reference ${prompt_file_path} "
                     f"instead. Offending argv[{i}]={a!r}."
+                )
+        for i, a in enumerate(self.unscoped_workdir_argv):
+            if _VAR_RE.search(a):
+                raise ValueError(
+                    "unscoped_workdir_argv entries must be literal flags — "
+                    f"no ${{var}} interpolation allowed. Offending [{i}]={a!r}."
                 )
         for k, v in self.env.items():
             _check_string(v, where=f"env.{k}")

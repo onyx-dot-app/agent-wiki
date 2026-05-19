@@ -30,6 +30,10 @@ class LauncherCatalogEntry(BaseModel):
     # when caller passes ``machine_id`` + ``wiki_path``, this is
     # the resolved working-dir default for this page. Null otherwise.
     default_working_dir: str | None = None
+    # Warning to render in the Run modal when the user leaves working_dir
+    # blank — names the flags that will be applied to the unscoped launch.
+    # Null when the manifest has no ``unscoped_workdir_argv``.
+    unscoped_workdir_warning: str | None = None
 
 
 class LauncherCatalog(BaseModel):
