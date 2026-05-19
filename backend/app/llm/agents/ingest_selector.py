@@ -1,7 +1,8 @@
 """Weak-model pre-filter for the ingest pipeline.
 
-Screens BM25 candidates with a single cheap LLM call (or batched calls when
-there are many candidates) before handing the survivors to the full reconciler.
+Screens BM25 candidates with a single cheap LLM call before handing survivors
+to the full reconciler. When the total wiki content exceeds the character
+budget, candidates are split into multiple batched calls and results merged.
 Fails open — on any error the original candidate list is returned unchanged.
 """
 
@@ -17,8 +18,9 @@ from app.tracing import trace_flow
 
 log = logging.getLogger(__name__)
 
-# Split into multiple calls when candidate count exceeds this.
-_SELECTOR_BATCH_SIZE = 20
+# Total character budget per selector call. Incoming document content is
+# subtracted first; the remainder is available for wiki candidate bodies.
+_SELECTOR_BUDGET_CHARS = 200_000
 
 
 def select_candidates(
@@ -37,18 +39,46 @@ def select_candidates(
     if not candidates:
         return candidates
 
+    candidate_budget = max(_SELECTOR_BUDGET_CHARS - len(content), 0)
+    batches = _batch_by_chars(candidates, candidate_budget)
+
     selected: list[tuple[SearchHit, str]] = []
-    for i in range(0, len(candidates), _SELECTOR_BATCH_SIZE):
-        batch = candidates[i : i + _SELECTOR_BATCH_SIZE]
+    for batch in batches:
         selected.extend(_select_batch(title=title, content=content, batch=batch, model=model))
 
     log.info(
-        "ingest_selector: kept %d/%d candidates model=%s",
+        "ingest_selector: kept %d/%d candidates batches=%d model=%s",
         len(selected),
         len(candidates),
+        len(batches),
         model,
     )
     return selected
+
+
+def _batch_by_chars(
+    candidates: list[tuple[SearchHit, str]],
+    budget: int,
+) -> list[list[tuple[SearchHit, str]]]:
+    """Return a single batch when all candidates fit; otherwise split greedily."""
+    if sum(len(body) for _, body in candidates) <= budget:
+        return [candidates]
+
+    batches: list[list[tuple[SearchHit, str]]] = []
+    current: list[tuple[SearchHit, str]] = []
+    current_chars = 0
+    for item in candidates:
+        body_len = len(item[1])
+        if current and current_chars + body_len > budget:
+            batches.append(current)
+            current = [item]
+            current_chars = body_len
+        else:
+            current.append(item)
+            current_chars += body_len
+    if current:
+        batches.append(current)
+    return batches
 
 
 def _select_batch(
