@@ -64,11 +64,14 @@ function resolveLauncherPath(): string {
 export function installOnWin32(): void {
   const home = homedir();
   const launcherCmd = resolveLauncherPath();
-  // Registry strings need quote-escaping inside REG ADD's /d value.
-  const launcherRegEscaped = launcherCmd.replace(/"/g, '\\"');
-  const cmdValue = `"\\"${launcherRegEscaped}\\" dispatch \\"%1\\""`;
-
+  // spawnSync passes /d via argv, but the manual fallback gets pasted
+  // into cmd.exe. cmd's REG ADD parses the /d argument with "" -doubling
+  // for embedded quotes; \" is treated as literal text and writes a
+  // broken handler. Render BOTH the argv value and the manual command
+  // with the same ""-doubling style so a user pasting the fallback
+  // ends up with the same registry value spawnSync would have written.
   const regDispatchValue = `"${launcherCmd.replace(/"/g, '""')}" dispatch "%1"`;
+  const cmdValue = `"${regDispatchValue.replace(/"/g, '""')}"`;
   const regSteps = [
     {
       args: [

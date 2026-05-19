@@ -9,12 +9,7 @@
  * output before the window closes.
  */
 import { spawn, spawnSync } from "node:child_process";
-import {
-  appendFileSync,
-  mkdirSync,
-  mkdtempSync,
-  writeFileSync,
-} from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -38,9 +33,9 @@ export function openInWindowsTerminal(opts: OpenOpts): void {
   try {
     appendFileSync(
       spawnLog,
-      `[${new Date().toISOString()}] queued ${sanitizeForLog(opts.binary)} cwd=${sanitizeForLog(
-        opts.cwd,
-      )} argc=${opts.argv.length}\r\n`,
+      `[${new Date().toISOString()}] queued ${sanitizeForLog(
+        opts.binary,
+      )} cwd=${sanitizeForLog(opts.cwd)} argc=${opts.argv.length}\r\n`,
     );
   } catch {
     // ignore — wrapper retries
@@ -152,21 +147,21 @@ function renderPowerShellWrapper(): string {
     "",
     "if ($null -ne $envMap) {",
     "  foreach ($entry in $envMap.PSObject.Properties) {",
-    "    $env[$entry.Name] = [string]$entry.Value",
+    '    Set-Item "env:$($entry.Name)" ([string]$entry.Value)',
     "  }",
     "}",
     "",
-    "Write-SpawnLog(\"wrapper start cwd=$cwd bin=$binary\")",
+    'Write-SpawnLog("wrapper start cwd=$cwd bin=$binary")',
     "$exitCode = 0",
     "try {",
     "  Set-Location -LiteralPath $cwd",
-    "  Write-SpawnLog(\"launching $binary\")",
+    '  Write-SpawnLog("launching $binary")',
     "  & $binary @argv",
     "  $exitCode = $LASTEXITCODE",
-    "  Write-SpawnLog(\"$binary exited code=$exitCode\")",
+    '  Write-SpawnLog("$binary exited code=$exitCode")',
     "} catch {",
     "  $exitCode = 1",
-    "  Write-SpawnLog(\"wrapper error: $_\")",
+    '  Write-SpawnLog("wrapper error: $_")',
     "} finally {",
     "  if ($close) {",
     "    try {",
@@ -175,7 +170,7 @@ function renderPowerShellWrapper(): string {
     "      Invoke-RestMethod -Method Post -Uri $closeUrl -Headers @{",
     "        Authorization = 'Bearer ' + $closeToken;",
     "        'Content-Type' = 'application/json'",
-    "      } -Body '{\"reason\":\"helper_exit\"}' | Out-Null",
+    '      } -Body \'{"reason":"helper_exit"}\' | Out-Null',
     "    } catch {}",
     "  }",
     "  foreach ($tmp in $tmpfiles) {",
