@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { Button, Card, Text } from "@onyx-ai/opal/components";
 import { Section } from "@onyx-ai/opal/layouts";
@@ -9,13 +9,25 @@ import { invalidateHelperProbe } from "@/lib/launchers";
 
 import styles from "./InstallHelperPane.module.css";
 
-const INSTALL_CMD = "npm install -g @onyx-ai/agentwiki-launcher";
+function installCmdFor(origin: string): string {
+  // Quote the wiki origin so a stray '&' or shell metachar in the URL
+  // can't split the line; the helper binary itself rejects values with
+  // shell metachars via its own validator.
+  const quoted = `'${origin.replace(/'/g, `'\\''`)}'`;
+  return `npm install -g @onyx-ai/agentwiki-launcher && agentwiki-launcher set-endpoint ${quoted}`;
+}
 
 export function InstallHelperPane({
   onReprobe,
 }: {
   onReprobe: () => Promise<void> | void;
 }) {
+  const [installCmd, setInstallCmd] = useState(
+    "npm install -g @onyx-ai/agentwiki-launcher",
+  );
+  useEffect(() => {
+    setInstallCmd(installCmdFor(window.location.origin));
+  }, []);
   const [copied, setCopied] = useState(false);
   const [busy, setBusy] = useState(false);
   const [manualBusy, setManualBusy] = useState(false);
@@ -76,11 +88,11 @@ export function InstallHelperPane({
           gap={0.75}
           width="full"
         >
-          <code className={styles.cmd}>{INSTALL_CMD}</code>
+          <code className={styles.cmd}>{installCmd}</code>
           <Button
             size="md"
             prominence="secondary"
-            onClick={() => copy(INSTALL_CMD)}
+            onClick={() => copy(installCmd)}
           >
             {copied ? "Copied" : "Copy"}
           </Button>
