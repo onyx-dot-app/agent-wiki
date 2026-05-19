@@ -1,19 +1,11 @@
 /**
  * Open Terminal.app via a `.command` file routed through LaunchServices.
  *
- * Earlier version used ``osascript -e 'tell application "Terminal" to
- * do script "..."'`` (Apple Events automation). TCC refuses to grant
- * the AgentWiki.app stub kTCCServiceAppleEvents because the unsigned
- * osacompile-produced bundle has no stable designated-requirement —
- * the Apple Event is dropped silently. We switched to writing a
- * ``run.command`` file and shelling out to ``open``, which uses
- * LaunchServices (no AppleEvents permission needed) and Terminal.app
- * runs the file because macOS associates the ``.command`` extension
- * with it by default.
- *
- * Wrapper still holds the lifetime of the spawn tmpfiles (audit
- * fix) via ``trap EXIT`` — cleanup fires when the launched binary
- * exits, not when the helper does.
+ * Writes a ``run.command`` wrapper script and shells out to ``open``;
+ * macOS associates ``.command`` with Terminal.app by default, and
+ * LaunchServices needs no AppleEvents permission. The wrapper owns the
+ * lifetime of the spawn tmpfiles via ``trap EXIT`` — cleanup fires
+ * when the launched binary exits, not when this helper process does.
  */
 import { spawn } from "node:child_process";
 import { appendFileSync, chmodSync, mkdtempSync, writeFileSync } from "node:fs";
@@ -41,11 +33,9 @@ export function openInTerminalApp(opts: OpenOpts): void {
     .map(shellQuote)
     .join(" ");
 
-  // Log the full argv from node so the bash script never has to render
-  // user-controlled prompt content. Earlier version did
-  // ``echo "argv: ${argvQuoted}"`` inside double quotes; if the prompt
-  // contained backticks (e.g. markdown code spans like `onyx-cli ask`),
-  // bash treated them as command substitution and hung the wrapper.
+  // Log the full argv from node so the bash script never has to
+  // re-render user-controlled prompt content (backticks in the prompt
+  // would otherwise trigger command substitution inside double quotes).
   const spawnLog = join(homedir(), ".agentwiki", "spawn.log");
   try {
     appendFileSync(
@@ -58,13 +48,9 @@ export function openInTerminalApp(opts: OpenOpts): void {
     // ignore — wrapper will retry the mkdir + log
   }
 
-  // Build close-on-exit + cleanup as a bash *function* (not a single-
-  // quoted trap body). Earlier version put the curl + shellQuote'd
-  // URL/token directly INSIDE the trap's outer single-quoted body —
-  // bash's nested-quote rules made the inner ``'...'`` segments break
-  // out of the outer quoting context, so the curl never actually ran
-  // (or ran malformed) and the session row stayed ``active``. Function
-  // bodies use plain bash quoting, no collision.
+  // Build close-on-exit + cleanup as a bash function (not a single-
+  // quoted trap body) so the inner shellQuote'd URL/token don't have
+  // to nest inside another quoting context.
   const closeLine = opts.closeOnExit
     ? `curl -s -o /dev/null -X POST ${shellQuote(
         opts.closeOnExit.url,
@@ -88,31 +74,24 @@ __agentwiki_on_exit() {
 trap __agentwiki_on_exit EXIT
 cd ${shellQuote(opts.cwd)} 2>>"$LOG" || { echo "cd failed" >> "$LOG"; exit 1; }
 ${envExports}
-# PATH note: 'open -a Terminal.app run.command' invokes the file inside
-# Terminal, which has already started a login shell and sourced the
-# user's zsh init. The bash wrapper inherits that PATH. Earlier versions
-# also did 'source ~/.zshrc' from inside bash, but some zsh init scripts
-# spawn long-running children (e.g. onyx-cli's interactive hook) that
-# hang the wrapper indefinitely — bash sourcing zsh is fragile in
-# general, so we drop it.
+# PATH inherits from Terminal.app's login shell (zsh init has already
+# run); the bash wrapper does not source ~/.zshrc itself.
 echo "[$(date)] PATH=$PATH" >> "$LOG"
 echo "[$(date)] which: $(command -v ${shellQuote(
     opts.binary,
   )} 2>&1 || echo NOT_FOUND)" >> "$LOG"
 echo "[$(date)] launching ${opts.binary}" >> "$LOG"
-# Run binary inheriting stdin/stdout/stderr from Terminal's TTY.
-# Earlier version piped stderr through \`tee\` (process substitution)
-# which can confuse interactive CLIs about TTY state — claude detected
-# non-TTY stderr and exited clean (code=0) without showing UI.
+# Run binary inheriting stdin/stdout/stderr from Terminal's TTY so
+# interactive CLIs (claude/codex) keep TTY semantics.
 ${shellQuote(opts.binary)} ${argvQuoted}
 echo "[$(date)] ${opts.binary} exited code=$?" >> "$LOG"
 `;
   writeFileSync(wrapper, script);
   chmodSync(wrapper, 0o700);
 
-  // ``open -a Terminal.app <wrapper>`` goes through LaunchServices —
-  // no AppleEvents permission required. Terminal.app receives the
-  // ``.command`` file as its open document and runs it in a new tab.
+  // ``open -a Terminal.app <wrapper>`` routes through LaunchServices
+  // (no AppleEvents permission needed); Terminal.app opens the
+  // ``.command`` file in a new tab.
   spawn("open", ["-a", "Terminal.app", wrapper], {
     stdio: "ignore",
     detached: true,

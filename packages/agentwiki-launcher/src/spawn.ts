@@ -30,10 +30,7 @@ export interface SpawnCommand {
   cwd: string;
 }
 
-/**
- * Note: claude's session dir uses cwd-with-slashes-replaced-by-dashes,
- * NOT sha256. Verified by inspecting ~/.claude/projects/ on a real install.
- */
+/** Claude's per-cwd session dir name: slashes become dashes. */
 function claudeDirhash(cwd: string): string {
   return cwd.replace(/\//g, "-");
 }

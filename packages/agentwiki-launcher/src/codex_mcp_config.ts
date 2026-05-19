@@ -2,25 +2,17 @@
  * Inject the agent-wiki MCP server block into ``~/.codex/config.toml``.
  *
  * Codex reads its MCP server list ONLY from ``~/.codex/config.toml`` —
- * there is no ``--mcp-config`` flag and no per-session config-file
- * override. Earlier versions of the helper rendered a ``codex_toml``
- * tmpfile but never wired it; codex launched with zero knowledge of
- * agent-wiki and fell back to local-filesystem edits when asked to
- * touch a wiki page.
+ * no per-session config flag — so the helper edits that file in place:
  *
- * Approach:
- *   1. Read ``~/.codex/config.toml``.
- *   2. Strip any prior agent-wiki block our prior launches wrote (the
- *      marker comments below).
- *   3. Append a fresh marked block with the current session's URL +
- *      bearer token.
- *   4. Atomic write (tmp + rename).
+ *   1. Read ``~/.codex/config.toml`` (treat missing as empty).
+ *   2. Strip any agent-wiki block (marked or unmarked).
+ *   3. Append a fresh marked block with this session's URL + bearer.
+ *   4. Atomic tmp+rename write at mode 0600.
  *
- * Cleanup: we don't strip the block on wrapper exit — the next launch
- * overwrites it. The token is short-lived (rotates per session) and
- * lives in the user's own home dir at 0600. ``token`` validation in the
- * manifest forbids putting it in argv, which is why we go through the
- * config file instead.
+ * The block is intentionally not torn down on wrapper exit — the next
+ * launch overwrites it. The token rotates per session and the file
+ * lives in the user's own home dir; manifest validation forbids
+ * embedding the token in argv, hence the config-file detour.
  */
 import { readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -58,12 +50,10 @@ export function writeCodexAgentWikiMcp(opts: {
 }
 
 function stripManagedBlock(raw: string): string {
-  // Aggressive cleanup: remove ANY ``[mcp_servers.agent-wiki]`` table
-  // (with its keys and sub-tables) AND any orphan sentinel markers.
-  // Earlier versions only paired START_MARKER + END_MARKER but a
-  // partial write or older format could leave behind an unmarked
-  // ``[mcp_servers.agent-wiki]`` block, which TOML rejects as a
-  // duplicate key when we append our marked block at the bottom.
+  // Remove ANY ``[mcp_servers.agent-wiki]`` table (with its keys and
+  // sub-tables) and any orphan START/END markers. Catches unmarked
+  // blocks from partial writes too — TOML would otherwise reject the
+  // appended marked block as a duplicate key.
   const lines = raw.split("\n");
   const out: string[] = [];
   const agentWikiTable = /^\[mcp_servers\.agent-wiki(?:\.[^\]]+)?\]\s*$/;
@@ -90,15 +80,12 @@ function stripManagedBlock(raw: string): string {
 }
 
 function renderBlock(opts: { url: string; token: string }): string {
-  // Codex's HTTP MCP config expects ``bearer_token_env_var = "<NAME>"``
-  // — it reads the actual token from the named env var at handshake
-  // time. The earlier ``[mcp_servers.<name>.headers]`` sub-table was
-  // ignored, so codex sent the initialize request with no bearer and
-  // the backend returned 401. The matching env var name is set on the
+  // Codex's HTTP MCP config authenticates via
+  // ``bearer_token_env_var = "<NAME>"`` — it reads the token from the
+  // named env var at handshake. The matching env var is set on the
   // codex manifest's ``env`` block so the wrapper exports it before
-  // launching codex. ``opts.token`` is unused in the file (env-driven)
-  // but kept in the signature so callers stay symmetric with the
-  // claude path.
+  // launch. ``opts.token`` is unused in the file (env-driven) but kept
+  // in the signature for symmetry with the claude path.
   void opts.token;
   const url = tomlString(opts.url);
   return (

