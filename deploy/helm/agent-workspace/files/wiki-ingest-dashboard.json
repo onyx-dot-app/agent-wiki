@@ -1020,7 +1020,7 @@
           "refId": "A"
         }
       ],
-      "title": "LLM Calls per Document",
+      "title": "LLM (Default Model) Calls per Document",
       "type": "heatmap"
     },
     {
