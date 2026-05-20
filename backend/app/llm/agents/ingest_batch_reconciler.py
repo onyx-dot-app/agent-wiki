@@ -21,7 +21,7 @@ from typing import NamedTuple
 
 from app.ingest.models import WikiUpdateCandidate
 from app.llm import client
-from app.llm.agents.common import IRRELEVANT_SENTINEL, NO_CHANGE_SENTINEL, strip_outer_fence
+from app.llm.agents.common import IRRELEVANT_SENTINEL, NO_CHANGE_SENTINEL, batch_by_chars, strip_outer_fence
 from app.llm.prompts import load_prompt
 from app.tracing import trace_flow
 
@@ -66,7 +66,7 @@ def batch_reconcile(
         return BatchReconcileResult(results=[], llm_calls=0)
 
     candidate_budget = max(_RECONCILER_BUDGET_CHARS - len(content), 0)
-    batches = _batch_by_chars(candidates, candidate_budget)
+    batches = batch_by_chars(candidates, candidate_budget)
 
     results: list[str | None] = []
     for batch in batches:
@@ -91,29 +91,6 @@ def batch_reconcile(
         len(batches),
     )
     return BatchReconcileResult(results=results, llm_calls=len(batches))
-
-
-def _batch_by_chars(
-    candidates: list[WikiUpdateCandidate],
-    budget: int,
-) -> list[list[WikiUpdateCandidate]]:
-    if sum(len(c.body) for c in candidates) <= budget:
-        return [candidates]
-
-    batches: list[list[WikiUpdateCandidate]] = []
-    current: list[WikiUpdateCandidate] = []
-    current_chars = 0
-    for c in candidates:
-        if current and current_chars + len(c.body) > budget:
-            batches.append(current)
-            current = [c]
-            current_chars = len(c.body)
-        else:
-            current.append(c)
-            current_chars += len(c.body)
-    if current:
-        batches.append(current)
-    return batches
 
 
 def _reconcile_batch(

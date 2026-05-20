@@ -7,8 +7,8 @@ import pytest
 
 from app.db.fts import SearchHit
 from app.ingest.models import WikiUpdateCandidate
+from app.llm.agents.common import batch_by_chars
 from app.llm.agents.ingest_batch_reconciler import (
-    _batch_by_chars,
     _parse,
     batch_reconcile,
 )
@@ -34,18 +34,18 @@ def _llm_response(text: str) -> MagicMock:
 
 def test_batch_single_when_all_fit():
     candidates = [_candidate("a", "x" * 100), _candidate("b", "y" * 100)]
-    assert _batch_by_chars(candidates, budget=1000) == [candidates]
+    assert batch_by_chars(candidates, budget=1000) == [candidates]
 
 
 def test_batch_splits_when_budget_exceeded():
     a = _candidate("a", "x" * 600)
     b = _candidate("b", "y" * 600)
-    batches = _batch_by_chars([a, b], budget=1000)
+    batches = batch_by_chars([a, b], budget=1000)
     assert batches == [[a], [b]]
 
 
 def test_batch_empty():
-    assert _batch_by_chars([], budget=1000) == [[]]
+    assert batch_by_chars([], budget=1000) == [[]]
 
 
 # --------------------------------------------------------------------------- #
