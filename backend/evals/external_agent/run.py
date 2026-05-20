@@ -26,6 +26,7 @@ from typing import Any, ContextManager
 from app.llm import client as llm_client
 from app.llm.agents import wiki_updater
 from app.llm.client import CompletionResult
+from app.utils.logging import setup_logging
 
 from evals import reporting, scorers
 from evals._llm_override import configured_models, use_model
@@ -307,9 +308,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv or sys.argv[1:])
-    logging.basicConfig(
-        level=args.log_level, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
-    )
+    setup_logging(args.log_level)
     scenarios = load_scenarios(args.scenarios)
     if args.scenario_id:
         scenarios = [s for s in scenarios if s.id == args.scenario_id]

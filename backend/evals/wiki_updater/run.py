@@ -21,6 +21,7 @@ from typing import ContextManager, Iterator
 
 from app.llm.agents import wiki_updater
 from app.llm.agents.wiki_updater import IRRELEVANT_SENTINEL
+from app.utils.logging import setup_logging
 
 from evals import reporting, scorers
 from evals._dry_run import stub_completions
@@ -203,9 +204,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv or sys.argv[1:])
-    logging.basicConfig(
-        level=args.log_level, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
-    )
+    setup_logging(args.log_level)
     cases = _load_cases(args.cases, case_id=args.case_id, limit=args.limit)
     requested_models = [m.strip() for m in args.models.split(",") if m.strip()]
 
@@ -238,8 +237,7 @@ def main(argv: list[str] | None = None) -> int:
 
     out_path = args.out or Path("runs") / ("wiki_updater_%d.jsonl" % int(time.time()))
     reporting.write_jsonl(out_path, all_results)
-    summary = reporting.summarize(all_results, surface="process_instruction")
-    # Single surface label is a lie when the dataset mixes — print one table per surface.
+    # One table per surface — the dataset mixes process_instruction and reconcile_document.
     for surface in sorted({r.surface for r in all_results}):
         subset = [r for r in all_results if r.surface == surface]
         sub_summary = reporting.summarize(subset, surface=surface)  # type: ignore[arg-type]
@@ -248,7 +246,11 @@ def main(argv: list[str] | None = None) -> int:
         reporting.push_to_braintrust(args.braintrust, all_results)
     print(
         json.dumps(
-            {"out": str(out_path), "skipped_models": skipped, "summary_models": summary.models}
+            {
+                "out": str(out_path),
+                "skipped_models": skipped,
+                "models": sorted({r.model for r in all_results}),
+            }
         )
     )
     return 0
