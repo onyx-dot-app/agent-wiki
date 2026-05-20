@@ -54,51 +54,6 @@ def process_instruction(wiki_path: str, current_body: str, payload: dict[str, An
     return _strip_outer_fence(text)
 
 
-def reconcile_document(
-    wiki_path: str,
-    current_body: str,
-    *,
-    source: str,
-    title: str | None,
-    url: str | None,
-    content: str,
-) -> str | None:
-    """Reconcile a wiki page with an externally pushed document.
-
-    Decides whether the external document contains information that is new or
-    updated relative to the wiki page and, if so, returns the full new page body.
-
-    Returns:
-      ``None``                 — page is already up-to-date (NO_CHANGE)
-      ``IRRELEVANT_SENTINEL``  — external document is unrelated to this page
-      str                      — new page body to commit
-    """
-    system = load_prompt("wiki_updater.ingest.system")
-    input = load_prompt("wiki_updater.ingest.input").format(
-        wiki_path=wiki_path,
-        source=source or "",
-        title=title or "",
-        url=url or "",
-        current_body=current_body,
-        content=content,
-    )
-    with trace_flow("agent.wiki_updater.ingest", wiki_path=wiki_path, source=source):
-        result = client.complete(
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": input},
-            ],
-        )
-    text = result.text.strip()
-    if not text:
-        log.warning("wiki_updater.ingest returned empty text for %s", wiki_path)
-        return None
-    if text == NO_CHANGE_SENTINEL or text.startswith(NO_CHANGE_SENTINEL + "\n"):
-        return None
-    if text == IRRELEVANT_SENTINEL or text.startswith(IRRELEVANT_SENTINEL + "\n"):
-        return IRRELEVANT_SENTINEL
-    return _strip_outer_fence(text)
-
 
 def _strip_outer_fence(text: str) -> str:
     if not text.startswith("```"):
