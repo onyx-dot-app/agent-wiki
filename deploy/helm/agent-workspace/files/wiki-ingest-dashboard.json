@@ -121,7 +121,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "round(sum(increase(ingest_requests_total[24h])) by (source_type))",
+          "expr": "sort_desc(round(sum(increase(ingest_requests_total[24h])) by (source_type)))",
           "legendFormat": "{{source_type}}",
           "instant": true,
           "refId": "A"
@@ -129,19 +129,7 @@
       ],
       "title": "Documents Ingested (24h) by Source Type",
       "type": "stat",
-      "transformations": [
-        {
-          "id": "sortBy",
-          "options": {
-            "fields": [
-              {
-                "desc": true,
-                "displayName": "Value"
-              }
-            ]
-          }
-        }
-      ]
+      "transformations": []
     },
     {
       "datasource": {
