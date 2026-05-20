@@ -2283,6 +2283,7 @@
       "targets": [
         {
           "expr": "sum(rate(ingest_reconciler_output_tokens_bucket[5m])) by (le)",
+          "format": "heatmap",
           "legendFormat": "{{le}}",
           "refId": "A"
         }
