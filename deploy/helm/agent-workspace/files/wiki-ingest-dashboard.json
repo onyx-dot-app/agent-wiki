@@ -109,7 +109,7 @@
             "fillOpacity": 10,
             "lineWidth": 2
           },
-          "unit": "reqps"
+          "unit": "reqpm"
         },
         "overrides": []
       },
@@ -140,7 +140,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(rate(ingest_requests_total[5m])) by (source_type)",
+          "expr": "sum(rate(ingest_requests_total[5m])) by (source_type) * 60",
           "legendFormat": "{{source_type}}",
           "refId": "A"
         }
@@ -167,7 +167,7 @@
               "mode": "normal"
             }
           },
-          "unit": "reqps"
+          "unit": "reqpm"
         },
         "overrides": []
       },
@@ -197,7 +197,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(rate(ingest_outcomes_total[5m])) by (outcome)",
+          "expr": "sum(rate(ingest_outcomes_total[5m])) by (outcome) * 60",
           "legendFormat": "{{outcome}}",
           "refId": "A"
         }
