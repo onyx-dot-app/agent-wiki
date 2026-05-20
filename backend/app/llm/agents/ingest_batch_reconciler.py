@@ -27,7 +27,6 @@ from app.tracing import trace_flow
 log = logging.getLogger(__name__)
 
 _RECONCILER_BUDGET_CHARS = 200_000
-_RECONCILER_CONTENT_CHARS = 40_000
 
 # Sentinel used internally when a batch parse fails — tells the caller to
 # fall back to the per-page reconciler for every candidate in that batch.
@@ -60,8 +59,7 @@ def batch_reconcile(
     if not candidates:
         return [], 0
 
-    content_truncated = content[:_RECONCILER_CONTENT_CHARS]
-    candidate_budget = max(_RECONCILER_BUDGET_CHARS - len(content_truncated), 0)
+    candidate_budget = max(_RECONCILER_BUDGET_CHARS - len(content), 0)
     batches = _batch_by_chars(candidates, candidate_budget)
 
     results: list[str | None] = []
@@ -70,7 +68,7 @@ def batch_reconcile(
             _reconcile_batch(
                 title=title,
                 url=url,
-                content=content_truncated,
+                content=content,
                 source=source,
                 batch=batch,
                 model=model,
