@@ -67,7 +67,7 @@ ORIGINAL_KEYCHAINS="$(security list-keychains -d user | sed -E 's/^[[:space:]]*"
 security list-keychains -d user -s "$KEYCHAIN_PATH" $ORIGINAL_KEYCHAINS
 
 echo "==> Decoding + importing Developer ID certificate"
-printf '%s' "$APPLE_CERT_BASE64" | base64 --decode > "$CERT_PATH"
+printf '%s' "$APPLE_CERT_BASE64" | base64 -D > "$CERT_PATH"
 security import "$CERT_PATH" -k "$KEYCHAIN_PATH" -P "$APPLE_CERT_PASSWORD" \
   -T /usr/bin/codesign -T /usr/bin/security
 security set-key-partition-list -S apple-tool:,apple:,codesign: \
