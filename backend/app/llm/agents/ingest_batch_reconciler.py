@@ -133,7 +133,7 @@ def _reconcile_batch(
             results.append(None)
         elif outcome is IRRELEVANT_SENTINEL:
             results.append(IRRELEVANT_SENTINEL)
-        else:  # list[TextEdit] — apply edits to current body
+        elif isinstance(outcome, list):  # list[TextEdit] — apply edits to current body
             if not outcome:
                 log.warning(
                     "ingest_batch_reconciler: no ===EDIT=== blocks parsed for %s, treating as NO_CHANGE",
@@ -141,6 +141,7 @@ def _reconcile_batch(
                 )
             results.append(apply_edits(c.body, outcome))
     return results
+
 
 
 def _parse(text: str, n: int) -> list[str | None | list[TextEdit]]:
