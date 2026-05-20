@@ -84,7 +84,7 @@ def _invoke_selector(case: IngestSelectorCase, *, model: str) -> list[str]:
 
 
 @contextmanager
-def _stub_selector(case_by_paths: dict[tuple[str, ...], IngestSelectorCase]) -> Generator[None]:
+def _stub_selector(cases: list[IngestSelectorCase]) -> Generator[None]:
     """Patch ``client.complete`` to return the labeled relevant set as a JSON list.
 
     Selector expects a JSON list of 1-indexed batch positions. We match the
@@ -93,6 +93,18 @@ def _stub_selector(case_by_paths: dict[tuple[str, ...], IngestSelectorCase]) -> 
     labeled relevant paths.
     """
     original = llm_client.complete
+    seen_keys: dict[tuple[str, ...], str] = {}
+    case_meta: list[tuple[tuple[str, ...], IngestSelectorCase]] = []
+    for case in cases:
+        paths = tuple(c.path for c in case.candidates)
+        if paths and paths in seen_keys and seen_keys[paths] != case.id:
+            raise ValueError(
+                "selector stub collision: cases %s and %s share the same candidate paths"
+                % (seen_keys[paths], case.id)
+            )
+        if paths:
+            seen_keys[paths] = case.id
+        case_meta.append((paths, case))
 
     def _stub(
         messages: list[dict[str, Any]],
@@ -109,8 +121,8 @@ def _stub_selector(case_by_paths: dict[tuple[str, ...], IngestSelectorCase]) -> 
         # collisions don't route the wrong response.
         matched: IngestSelectorCase | None = None
         best_size = -1
-        for paths, case in case_by_paths.items():
-            if all(p in user_text for p in paths) and len(paths) > best_size:
+        for paths, case in case_meta:
+            if paths and all(p in user_text for p in paths) and len(paths) > best_size:
                 matched = case
                 best_size = len(paths)
         if matched is None:
@@ -122,9 +134,8 @@ def _stub_selector(case_by_paths: dict[tuple[str, ...], IngestSelectorCase]) -> 
             (user_text.index(c.path), c.path) for c in matched.candidates if c.path in user_text
         )
         ordered_paths = [p for _, p in order]
-        indices = [
-            i + 1 for i, p in enumerate(ordered_paths) if p in set(matched.expected_kept_paths)
-        ]
+        expected_set = set(matched.expected_kept_paths)
+        indices = [i + 1 for i, p in enumerate(ordered_paths) if p in expected_set]
         return CompletionResult(text=json.dumps(indices))
 
     llm_client.complete = _stub  # type: ignore[assignment]
@@ -168,8 +179,7 @@ def _resolve_context(
     provider: str, model: str, dry_run: bool, cases: list[IngestSelectorCase]
 ) -> ContextManager[None]:
     if dry_run:
-        by_paths = {tuple(c.path for c in case.candidates): case for case in cases}
-        return _stub_selector(by_paths)
+        return _stub_selector(cases)
     return use_model(provider, model)
 
 

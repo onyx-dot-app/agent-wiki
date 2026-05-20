@@ -145,7 +145,16 @@ def _stub_external_agent(scenarios: list[Scenario]) -> Generator[None]:
     dry-run uses, scoped to the harness so the agent sees correct
     behavior end-to-end.
     """
-    scenario_by_prompt = {s.prompt.strip(): s for s in scenarios}
+    scenario_by_prompt: dict[str, Scenario] = {}
+    for scenario in scenarios:
+        key = scenario.prompt.strip()
+        existing = scenario_by_prompt.get(key)
+        if existing is not None and existing.id != scenario.id:
+            raise ValueError(
+                "external-agent stub collision: scenarios %s and %s share the same prompt"
+                % (existing.id, scenario.id)
+            )
+        scenario_by_prompt[key] = scenario
     original_stream = llm_client.stream
     original_complete = llm_client.complete
 

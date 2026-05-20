@@ -34,7 +34,7 @@ jobs:
       EVAL_GEMINI_API_KEY: ${{ secrets.EVAL_GEMINI_API_KEY }}
       BRAINTRUST_API_KEY: ${{ secrets.BRAINTRUST_API_KEY }}
       BRAINTRUST_PROJECT: ${{ vars.BRAINTRUST_PROJECT || 'agent-wiki' }}
-      EVAL_MODELS: ${{ inputs.models || 'claude-sonnet-4-6,claude-opus-4-7,gpt-5,gemini-2.5-pro' }}
+      EVAL_MODELS: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.models || 'claude-sonnet-4-6,claude-opus-4-7,gpt-5,gemini-2.5-pro' }}
     steps:
       - uses: actions/checkout@v4
 

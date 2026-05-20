@@ -86,7 +86,17 @@ def stub_completions(cases: list[WikiUpdaterCase]) -> Generator[None]:
 
     Doesn't touch ``stream`` — the agents under eval only use ``complete``.
     """
-    case_by_fingerprint = {_case_fingerprint(c): c for c in cases}
+    case_by_fingerprint: dict[str, WikiUpdaterCase] = {}
+    for case in cases:
+        fingerprint = _case_fingerprint(case)
+        existing = case_by_fingerprint.get(fingerprint)
+        if existing is not None and existing.id != case.id:
+            raise ValueError(
+                "stub fingerprint collision between cases %s and %s "
+                "(first %d chars of current_body match)"
+                % (existing.id, case.id, _BODY_FINGERPRINT_LEN)
+            )
+        case_by_fingerprint[fingerprint] = case
     original = llm_client.complete
 
     def _stub(
