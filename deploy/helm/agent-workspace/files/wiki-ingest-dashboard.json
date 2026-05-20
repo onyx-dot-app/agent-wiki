@@ -554,7 +554,7 @@
             "fillOpacity": 10,
             "lineWidth": 2
           },
-          "unit": "reqpm"
+          "unit": "doc/m"
         },
         "overrides": []
       },
@@ -612,7 +612,7 @@
               "mode": "normal"
             }
           },
-          "unit": "reqpm"
+          "unit": "doc/m"
         },
         "overrides": []
       },
