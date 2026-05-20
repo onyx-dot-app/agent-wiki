@@ -28,17 +28,15 @@ from app.config import CONFIG
 from app.ingest import search as ingest_search
 from app.ingest.source_tiers import is_filtered
 from app.ingest.models import WikiUpdateCandidate
-from app.llm.agents import ingest_batch_classifier, ingest_selector, wiki_updater
-from app.llm.agents.ingest_batch_classifier import Verdict
+from app.llm.agents import ingest_batch_reconciler, ingest_selector, wiki_updater
 from app.llm.agents.wiki_updater import IRRELEVANT_SENTINEL
 from app.llm.agents.tools import _doc_helpers as h
 from app.llm.errors import LLMError
 from app.llm.settings import get as get_llm_settings
 from app.metrics import (
-    ingest_batch_classifier_duration_seconds,
+    ingest_batch_reconciler_duration_seconds,
     ingest_bm25_score_by_outcome,
     ingest_llm_calls_per_doc,
-    ingest_llm_duration_seconds,
     ingest_outcomes_total,
     ingest_queue_depth,
     ingest_requests_total,
@@ -246,7 +244,8 @@ def process_pushed_document(push: dict[str, Any]) -> None:
       2. BM25 search + title boost + score threshold to find candidates.
       3. Weak-model pre-filter (optional): skip if ingest_selector_model unset
          or same as the main model.
-      4. Walk remaining candidates (best score first); call updater LLM on each.
+      4. Batch reconcile with the main model — one call decides and produces
+         new bodies for all remaining candidates. Skipped when model is unset.
          - new body   → commit + fan-out, reset irrelevant counter
          - NO_CHANGE  → skip commit, reset irrelevant counter
          - IRRELEVANT → increment counter; stop when ≥ INGEST_IRRELEVANT_STOP_N
@@ -321,11 +320,11 @@ def process_pushed_document(push: dict[str, Any]) -> None:
                 ingest_bm25_score_by_outcome.labels(outcome="filtered_by_selector").observe(c.hit.score)
                 log.debug("process_pushed_document: filtered_by_selector path=%s", c.hit.path)
 
-    # Stage 4: batch classify with the main model (skipped when model is unset).
-    # Returns one verdict per candidate; fails open to NEEDS_UPDATE on any error.
+    # Stage 4: batch reconcile with the main model — one call decides and
+    # produces new bodies for all candidates. Skipped when model is unset.
     if llm_s.model:
-        t_classify = time.monotonic()
-        verdicts = ingest_batch_classifier.classify_candidates(
+        t_batch = time.monotonic()
+        batch_results = ingest_batch_reconciler.batch_reconcile(
             title=title,
             url=url,
             content=content,
@@ -333,64 +332,24 @@ def process_pushed_document(push: dict[str, Any]) -> None:
             candidates=readable,
             model=llm_s.model,
         )
-        ingest_batch_classifier_duration_seconds.observe(time.monotonic() - t_classify)
+        ingest_batch_reconciler_duration_seconds.observe(time.monotonic() - t_batch)
     else:
-        verdicts = [Verdict.NEEDS_UPDATE] * len(readable)
+        batch_results = [IRRELEVANT_SENTINEL] * len(readable)
 
     consecutive_irrelevant = 0
-    llm_calls = 0
+    llm_calls = 1 if llm_s.model else 0
     irrelevant = 0
     committed = 0
     stopped_early = False
 
-    for c, verdict in zip(readable, verdicts):
-        if verdict == Verdict.IRRELEVANT:
-            irrelevant += 1
-            consecutive_irrelevant += 1
-            ingest_outcomes_total.labels(outcome="irrelevant", wiki_path=c.hit.path).inc()
-            ingest_bm25_score_by_outcome.labels(outcome="irrelevant").observe(c.hit.score)
-            log.debug(
-                "process_pushed_document: IRRELEVANT (batch) path=%s consecutive=%d",
-                c.hit.path,
-                consecutive_irrelevant,
-            )
-            if consecutive_irrelevant >= CONFIG.ingest_irrelevant_stop_n:
-                stopped_early = True
-                break
-            continue
-
-        if verdict == Verdict.NO_CHANGE:
-            consecutive_irrelevant = 0
-            ingest_outcomes_total.labels(outcome="no_change", wiki_path=c.hit.path).inc()
-            ingest_bm25_score_by_outcome.labels(outcome="no_change").observe(c.hit.score)
-            continue
-
-        # NEEDS_UPDATE: run the full reconciler to produce the new body.
-        try:
-            t_llm = time.monotonic()
-            result = wiki_updater.reconcile_document(
-                wiki_path=c.hit.path,
-                current_body=c.body,
-                source=source_label,
-                title=title,
-                url=url,
-                content=content,
-            )
-            ingest_llm_duration_seconds.observe(time.monotonic() - t_llm)
-            llm_calls += 1
-        except LLMError:
-            log.warning(
-                "process_pushed_document: LLM error for %s, skipping", c.hit.path, exc_info=True
-            )
-            continue
-
+    for c, result in zip(readable, batch_results):
         if result == IRRELEVANT_SENTINEL:
             irrelevant += 1
             consecutive_irrelevant += 1
             ingest_outcomes_total.labels(outcome="irrelevant", wiki_path=c.hit.path).inc()
             ingest_bm25_score_by_outcome.labels(outcome="irrelevant").observe(c.hit.score)
             log.debug(
-                "process_pushed_document: IRRELEVANT (reconciler) path=%s consecutive=%d",
+                "process_pushed_document: IRRELEVANT path=%s consecutive=%d",
                 c.hit.path,
                 consecutive_irrelevant,
             )
