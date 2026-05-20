@@ -28,15 +28,15 @@ from app.config import CONFIG
 from app.ingest import search as ingest_search
 from app.ingest.source_tiers import is_filtered
 from app.ingest.models import WikiUpdateCandidate
-from app.llm.agents import ingest_selector, wiki_updater
-from app.llm.agents.wiki_updater import IRRELEVANT_SENTINEL
+from app.llm.agents import ingest_batch_reconciler, ingest_selector, nl_updater
+from app.llm.agents.common import IRRELEVANT_SENTINEL
 from app.llm.agents.tools import _doc_helpers as h
 from app.llm.errors import LLMError
 from app.llm.settings import get as get_llm_settings
 from app.metrics import (
+    ingest_batch_reconciler_duration_seconds,
     ingest_bm25_score_by_outcome,
     ingest_llm_calls_per_doc,
-    ingest_llm_duration_seconds,
     ingest_outcomes_total,
     ingest_queue_depth,
     ingest_requests_total,
@@ -69,7 +69,7 @@ def update_document_from_payload(doc_id: str, source: str, payload: dict[str, An
     log.info("update_document_from_payload doc_id=%s source=%s", doc_id, source)
     # TODO:
     #   1. Load current doc body from git (app.wiki.git.read_file).
-    #   2. Call app.llm.agents.wiki_updater.process_instruction(wiki_path, body, payload, source).
+    #   2. Call app.llm.agents.nl_updater.process_instruction(wiki_path, body, payload, source).
     #   3. If the agent produced a new body, commit it (app.wiki.git.commit_file).
     #   4. Enqueue index_path on lightweight_maintenance_queue.
     #   5. Enqueue fan_out_trigger_eval on triggers_queue for doc + parent dirs.
@@ -172,7 +172,7 @@ def _run_inner(job_id: str, rel: str, instruction: str, base_sha: str | None) ->
 
     old_body = h.read_existing(rel)
     try:
-        new_body = wiki_updater.process_instruction(
+        new_body = nl_updater.process_instruction(
             wiki_path=rel,
             current_body=old_body,
             payload={"instruction": instruction},
@@ -244,7 +244,8 @@ def process_pushed_document(push: dict[str, Any]) -> None:
       2. BM25 search + title boost + score threshold to find candidates.
       3. Weak-model pre-filter (optional): skip if ingest_selector_model unset
          or same as the main model.
-      4. Walk remaining candidates (best score first); call updater LLM on each.
+      4. Batch reconcile with the main model — one call decides and produces
+         new bodies for all remaining candidates. Skipped when model is unset.
          - new body   → commit + fan-out, reset irrelevant counter
          - NO_CHANGE  → skip commit, reset irrelevant counter
          - IRRELEVANT → increment counter; stop when ≥ INGEST_IRRELEVANT_STOP_N
@@ -319,31 +320,29 @@ def process_pushed_document(push: dict[str, Any]) -> None:
                 ingest_bm25_score_by_outcome.labels(outcome="filtered_by_selector").observe(c.hit.score)
                 log.debug("process_pushed_document: filtered_by_selector path=%s", c.hit.path)
 
+    # Stage 4: batch reconcile with the main model — one call decides and
+    # produces new bodies for all candidates. Skipped when model is unset.
+    if llm_s.model:
+        t_batch = time.monotonic()
+        batch_results, llm_calls = ingest_batch_reconciler.batch_reconcile(
+            title=title,
+            url=url,
+            content=content,
+            source=source_label,
+            candidates=readable,
+            model=llm_s.model,
+        )
+        ingest_batch_reconciler_duration_seconds.observe(time.monotonic() - t_batch)
+    else:
+        batch_results = [IRRELEVANT_SENTINEL] * len(readable)
+        llm_calls = 0
+
     consecutive_irrelevant = 0
-    llm_calls = 0
     irrelevant = 0
     committed = 0
     stopped_early = False
 
-    for c in readable:
-        try:
-            t_llm = time.monotonic()
-            result = wiki_updater.reconcile_document(
-                wiki_path=c.hit.path,
-                current_body=c.body,
-                source=source_label,
-                title=title,
-                url=url,
-                content=content,
-            )
-            ingest_llm_duration_seconds.observe(time.monotonic() - t_llm)
-            llm_calls += 1
-        except LLMError:
-            log.warning(
-                "process_pushed_document: LLM error for %s, skipping", c.hit.path, exc_info=True
-            )
-            continue
-
+    for c, result in zip(readable, batch_results):
         if result == IRRELEVANT_SENTINEL:
             irrelevant += 1
             consecutive_irrelevant += 1
@@ -357,19 +356,19 @@ def process_pushed_document(push: dict[str, Any]) -> None:
             if consecutive_irrelevant >= CONFIG.ingest_irrelevant_stop_n:
                 stopped_early = True
                 break
+        elif result is not None:
+            consecutive_irrelevant = 0
+            message = f"ingest({source_label}): update {c.hit.path}"
+            sha = wiki_git.commit_file(c.hit.path, result, message, author=_INGEST_AUTHOR)
+            wiki_notify.after_doc_write(c.hit.path, sha, "edit", _INGEST_AUTHOR)
+            committed += 1
+            ingest_outcomes_total.labels(outcome="committed", wiki_path=c.hit.path).inc()
+            ingest_bm25_score_by_outcome.labels(outcome="committed").observe(c.hit.score)
+            log.info("process_pushed_document: committed %s sha=%s", c.hit.path, sha)
         else:
             consecutive_irrelevant = 0
-            if result is not None:
-                message = f"ingest({source_label}): update {c.hit.path}"
-                sha = wiki_git.commit_file(c.hit.path, result, message, author=_INGEST_AUTHOR)
-                wiki_notify.after_doc_write(c.hit.path, sha, "edit", _INGEST_AUTHOR)
-                committed += 1
-                ingest_outcomes_total.labels(outcome="committed", wiki_path=c.hit.path).inc()
-                ingest_bm25_score_by_outcome.labels(outcome="committed").observe(c.hit.score)
-                log.info("process_pushed_document: committed %s sha=%s", c.hit.path, sha)
-            else:
-                ingest_outcomes_total.labels(outcome="no_change", wiki_path=c.hit.path).inc()
-                ingest_bm25_score_by_outcome.labels(outcome="no_change").observe(c.hit.score)
+            ingest_outcomes_total.labels(outcome="no_change", wiki_path=c.hit.path).inc()
+            ingest_bm25_score_by_outcome.labels(outcome="no_change").observe(c.hit.score)
 
     ingest_llm_calls_per_doc.observe(llm_calls)
     log.info(

@@ -21,18 +21,23 @@ from app.config import CONFIG
 from app.db.fts import SearchHit
 from app.ingest import search as ingest_search
 from app.ingest.source_tiers import is_filtered
-from app.llm.agents.wiki_updater import IRRELEVANT_SENTINEL
-from app.llm.settings import _EMPTY as _EMPTY_LLM_SETTINGS
+from app.llm.agents.common import IRRELEVANT_SENTINEL
+from app.llm.settings import _EMPTY as _EMPTY_LLM_SETTINGS, LLMSettings
 
 
 @pytest.fixture(autouse=True)
 def _stub_llm_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     """process_pushed_document calls get_llm_settings() which hits the DB.
-    Return empty settings so the selector stage is skipped in unit tests."""
+    Return empty settings so the selector and batch-reconciler stages are
+    skipped in unit tests that don't need them."""
     monkeypatch.setattr(
         "app.tasks.wiki_update.get_llm_settings",
         lambda: _EMPTY_LLM_SETTINGS,
     )
+
+
+def _settings_with_model(model: str = "test-model") -> LLMSettings:
+    return _EMPTY_LLM_SETTINGS.model_copy(update={"model": model})
 
 
 # --------------------------------------------------------------------------- #
@@ -159,10 +164,12 @@ def test_no_candidates_returns_early(mock_search):
 @patch("app.tasks.wiki_update.wiki_notify.after_doc_write")
 @patch("app.tasks.wiki_update.wiki_git.commit_file", return_value="sha123")
 @patch("app.tasks.wiki_update.wiki_git.read_file", return_value="old body")
-@patch("app.tasks.wiki_update.wiki_updater.reconcile_document", return_value="new body")
+@patch("app.tasks.wiki_update.ingest_batch_reconciler.batch_reconcile")
 @patch("app.tasks.wiki_update.ingest_search.candidates")
-def test_new_body_commits(mock_search, mock_run, mock_read, mock_commit, mock_notify):
+def test_new_body_commits(mock_search, mock_reconcile, mock_read, mock_commit, mock_notify, monkeypatch):
+    monkeypatch.setattr("app.tasks.wiki_update.get_llm_settings", lambda: _settings_with_model())
     mock_search.return_value = [_hit("page.md", "Page", 5.0)]
+    mock_reconcile.return_value = (["new body"], 1)
     _run(_make_push())
     mock_commit.assert_called_once()
     mock_notify.assert_called_once()
@@ -170,70 +177,80 @@ def test_new_body_commits(mock_search, mock_run, mock_read, mock_commit, mock_no
 
 @patch("app.tasks.wiki_update.wiki_git.commit_file")
 @patch("app.tasks.wiki_update.wiki_git.read_file", return_value="body")
-@patch("app.tasks.wiki_update.wiki_updater.reconcile_document", return_value=None)
+@patch("app.tasks.wiki_update.ingest_batch_reconciler.batch_reconcile")
 @patch("app.tasks.wiki_update.ingest_search.candidates")
-def test_no_change_does_not_commit(mock_search, mock_run, mock_read, mock_commit):
+def test_no_change_does_not_commit(mock_search, mock_reconcile, mock_read, mock_commit, monkeypatch):
+    monkeypatch.setattr("app.tasks.wiki_update.get_llm_settings", lambda: _settings_with_model())
     mock_search.return_value = [_hit("page.md", "Page", 5.0)]
+    mock_reconcile.return_value = ([None], 1)
     _run(_make_push())
     mock_commit.assert_not_called()
 
 
 @patch("app.tasks.wiki_update.wiki_git.commit_file")
 @patch("app.tasks.wiki_update.wiki_git.read_file", return_value="body")
-@patch("app.tasks.wiki_update.wiki_updater.reconcile_document", return_value=IRRELEVANT_SENTINEL)
+@patch("app.tasks.wiki_update.ingest_batch_reconciler.batch_reconcile")
 @patch("app.tasks.wiki_update.ingest_search.candidates")
-def test_irrelevant_does_not_commit(mock_search, mock_run, mock_read, mock_commit):
+def test_irrelevant_does_not_commit(mock_search, mock_reconcile, mock_read, mock_commit, monkeypatch):
+    monkeypatch.setattr("app.tasks.wiki_update.get_llm_settings", lambda: _settings_with_model())
     mock_search.return_value = [_hit("page.md", "Page", 5.0)]
+    mock_reconcile.return_value = ([IRRELEVANT_SENTINEL], 1)
     _run(_make_push())
     mock_commit.assert_not_called()
-
-
-@patch("app.tasks.wiki_update.wiki_git.commit_file")
-@patch("app.tasks.wiki_update.wiki_git.read_file", return_value="body")
-@patch("app.tasks.wiki_update.wiki_updater.reconcile_document")
-@patch("app.tasks.wiki_update.ingest_search.candidates")
-def test_n_consecutive_irrelevant_stops_loop(mock_search, mock_run, mock_read, mock_commit, monkeypatch):
-    monkeypatch.setattr("app.tasks.wiki_update.CONFIG", CONFIG.model_copy(update={"ingest_irrelevant_stop_n": 2}))
-    # 5 candidates — should stop after 2 consecutive IRRELEVANT
-    mock_search.return_value = [_hit(f"p{i}.md", f"P{i}", float(5 - i)) for i in range(5)]
-    mock_run.return_value = IRRELEVANT_SENTINEL
-    _run(_make_push())
-    assert mock_run.call_count == 2
 
 
 @patch("app.tasks.wiki_update.wiki_notify.after_doc_write")
 @patch("app.tasks.wiki_update.wiki_git.commit_file", return_value="sha")
 @patch("app.tasks.wiki_update.wiki_git.read_file", return_value="body")
-@patch("app.tasks.wiki_update.wiki_updater.reconcile_document")
+@patch("app.tasks.wiki_update.ingest_batch_reconciler.batch_reconcile")
 @patch("app.tasks.wiki_update.ingest_search.candidates")
-def test_no_change_resets_irrelevant_counter(mock_search, mock_run, mock_read, mock_commit, mock_notify, monkeypatch):
+def test_n_consecutive_irrelevant_stops_loop(mock_search, mock_reconcile, mock_read, mock_commit, mock_notify, monkeypatch):
     monkeypatch.setattr("app.tasks.wiki_update.CONFIG", CONFIG.model_copy(update={"ingest_irrelevant_stop_n": 2}))
+    monkeypatch.setattr("app.tasks.wiki_update.get_llm_settings", lambda: _settings_with_model())
+    # 5 candidates — first two are IRRELEVANT, rest would commit but never reached
+    mock_search.return_value = [_hit(f"p{i}.md", f"P{i}", float(5 - i)) for i in range(5)]
+    mock_reconcile.return_value = ([IRRELEVANT_SENTINEL, IRRELEVANT_SENTINEL, "new", "new", "new"], 1)
+    _run(_make_push())
+    mock_commit.assert_not_called()
+
+
+@patch("app.tasks.wiki_update.wiki_notify.after_doc_write")
+@patch("app.tasks.wiki_update.wiki_git.commit_file", return_value="sha")
+@patch("app.tasks.wiki_update.wiki_git.read_file", return_value="body")
+@patch("app.tasks.wiki_update.ingest_batch_reconciler.batch_reconcile")
+@patch("app.tasks.wiki_update.ingest_search.candidates")
+def test_no_change_resets_irrelevant_counter(mock_search, mock_reconcile, mock_read, mock_commit, mock_notify, monkeypatch):
+    monkeypatch.setattr("app.tasks.wiki_update.CONFIG", CONFIG.model_copy(update={"ingest_irrelevant_stop_n": 2}))
+    monkeypatch.setattr("app.tasks.wiki_update.get_llm_settings", lambda: _settings_with_model())
     # IRRELEVANT, NO_CHANGE (resets counter), IRRELEVANT — should NOT stop early
     mock_search.return_value = [_hit(f"p{i}.md", None, float(5 - i)) for i in range(3)]
-    mock_run.side_effect = [IRRELEVANT_SENTINEL, None, IRRELEVANT_SENTINEL]
+    mock_reconcile.return_value = ([IRRELEVANT_SENTINEL, None, IRRELEVANT_SENTINEL], 1)
     _run(_make_push())
-    assert mock_run.call_count == 3
+    mock_commit.assert_not_called()
 
 
 @patch("app.tasks.wiki_update.wiki_notify.after_doc_write")
 @patch("app.tasks.wiki_update.wiki_git.commit_file", return_value="sha")
 @patch("app.tasks.wiki_update.wiki_git.read_file", return_value="body")
-@patch("app.tasks.wiki_update.wiki_updater.reconcile_document")
+@patch("app.tasks.wiki_update.ingest_batch_reconciler.batch_reconcile")
 @patch("app.tasks.wiki_update.ingest_search.candidates")
-def test_commit_resets_irrelevant_counter(mock_search, mock_run, mock_read, mock_commit, mock_notify, monkeypatch):
+def test_commit_resets_irrelevant_counter(mock_search, mock_reconcile, mock_read, mock_commit, mock_notify, monkeypatch):
     monkeypatch.setattr("app.tasks.wiki_update.CONFIG", CONFIG.model_copy(update={"ingest_irrelevant_stop_n": 2}))
+    monkeypatch.setattr("app.tasks.wiki_update.get_llm_settings", lambda: _settings_with_model())
     # IRRELEVANT, new body (resets counter), IRRELEVANT — should NOT stop early
     mock_search.return_value = [_hit(f"p{i}.md", None, float(5 - i)) for i in range(3)]
-    mock_run.side_effect = [IRRELEVANT_SENTINEL, "new body", IRRELEVANT_SENTINEL]
+    mock_reconcile.return_value = ([IRRELEVANT_SENTINEL, "new body", IRRELEVANT_SENTINEL], 1)
     _run(_make_push())
-    assert mock_run.call_count == 3
     mock_commit.assert_called_once()
 
 
+@patch("app.tasks.wiki_update.wiki_git.commit_file")
 @patch("app.tasks.wiki_update.wiki_git.read_file", side_effect=Exception("file not found"))
-@patch("app.tasks.wiki_update.wiki_updater.reconcile_document")
+@patch("app.tasks.wiki_update.ingest_batch_reconciler.batch_reconcile")
 @patch("app.tasks.wiki_update.ingest_search.candidates")
-def test_missing_file_skipped(mock_search, mock_run, mock_read):
+def test_missing_file_skipped(mock_search, mock_reconcile, mock_read, mock_commit, monkeypatch):
+    monkeypatch.setattr("app.tasks.wiki_update.get_llm_settings", lambda: _settings_with_model())
     mock_search.return_value = [_hit("missing.md", None, 5.0)]
     _run(_make_push())
-    mock_run.assert_not_called()
+    mock_reconcile.assert_not_called()
+    mock_commit.assert_not_called()

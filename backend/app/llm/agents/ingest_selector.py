@@ -14,6 +14,7 @@ from typing import Any, cast
 
 from app.ingest.models import WikiUpdateCandidate
 from app.llm import client
+from app.llm.agents.common import batch_by_chars
 from app.llm.prompts import load_prompt
 from app.metrics import ingest_selector_calls_per_doc
 from app.tracing import trace_flow
@@ -47,7 +48,7 @@ def select_candidates(
         return candidates
 
     candidate_budget = max(_SELECTOR_BUDGET_CHARS - min(len(content), _SELECTOR_CONTENT_CHARS), 0)
-    batches = _batch_by_chars(candidates, candidate_budget)
+    batches = batch_by_chars(candidates, candidate_budget)
 
     selected: list[WikiUpdateCandidate] = []
     for batch in batches:
@@ -63,29 +64,6 @@ def select_candidates(
     )
     return selected
 
-
-def _batch_by_chars(
-    candidates: list[WikiUpdateCandidate],
-    budget: int,
-) -> list[list[WikiUpdateCandidate]]:
-    """Return a single batch when all candidates fit; otherwise split greedily."""
-    if sum(len(c.body) for c in candidates) <= budget:
-        return [candidates]
-
-    batches: list[list[WikiUpdateCandidate]] = []
-    current: list[WikiUpdateCandidate] = []
-    current_chars = 0
-    for c in candidates:
-        if current and current_chars + len(c.body) > budget:
-            batches.append(current)
-            current = [c]
-            current_chars = len(c.body)
-        else:
-            current.append(c)
-            current_chars += len(c.body)
-    if current:
-        batches.append(current)
-    return batches
 
 
 def _select_batch(
