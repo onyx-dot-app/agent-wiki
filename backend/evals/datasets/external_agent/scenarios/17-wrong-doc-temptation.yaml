@@ -1,0 +1,87 @@
+id: ext-17-wrong-doc-temptation
+prompt: |
+  The auth team added a new pager: `auth-key-rotation-stuck` fires when the
+  RS256 signing-key rotation cron fails to advance. The new pager belongs in
+  the auth ONCALL runbook, not the auth overview or the JWT page. Add the
+  pager + its threshold + the recovery command to the right doc only.
+wiki_state:
+  - path: services/auth/overview.md
+    summary: Auth service overview (architectural — not the right place for pagers).
+    body: |
+      # Auth service
+
+      Issues bearer tokens for every other internal service. Built on
+      FastAPI + Postgres + a single signing-key rotation cron that produces
+      a new RS256 keypair every 30 days.
+
+      ## Callers
+
+      Search, Recommendations, Checkout, Notifications, Billing — basically
+      every service that takes our tokens.
+
+      ## Capacity
+
+      Steady 2k token issues/min, burst 20k.
+  - path: services/auth/jwt.md
+    summary: JWT specification page (algorithmic — not for pagers).
+    body: |
+      # JWT issuance
+
+      ## Algorithm
+
+      Tokens are signed RS256. The public key is published at
+      `/.well-known/jwks.json` and rotated every 30 days.
+
+      ## Claims
+
+      - `sub`: user id
+      - `tid`: tenant id
+      - `scp`: space-separated scopes
+      - `exp`: 1-hour validity from issuance
+
+      ## Verification
+
+      Downstream services verify by hitting the JWKS endpoint and caching
+      keys with TTL = 24 hours.
+  - path: services/auth/runbook.md
+    summary: Auth oncall runbook (the correct destination).
+    body: |
+      # Auth runbook
+
+      ## Pages
+
+      | Pager | Threshold | First response |
+      | --    | --        | --             |
+      | `auth-5xx-spike` | 5xx rate > 2% for 2 min | check JWKS endpoint reachability |
+      | `auth-token-issue-latency` | p95 > 200ms for 5 min | check Postgres primary load |
+      | `auth-jwks-publish-fail` | JWKS publish job exit ≠ 0 for 2 consecutive runs | re-run `kubectl create job --from=cronjob/auth-jwks-publish` |
+
+      ## Recovery commands
+
+      - Restart the auth API: `kubectl rollout restart deployment/auth-api`
+      - Re-publish JWKS: `kubectl create job --from=cronjob/auth-jwks-publish auth-jwks-publish-$(date +%s)`
+expected_updates:
+  - path: services/auth/runbook.md
+    facts_present:
+      - id: new-pager-name
+        text: the runbook lists auth-key-rotation-stuck as a pager
+      - id: new-pager-threshold
+        text: the new pager's threshold is described (key-rotation cron failing to advance)
+      - id: new-pager-recovery
+        text: a recovery command is provided for the new pager
+    facts_preserved:
+      - id: pager-5xx
+        text: the auth-5xx-spike pager row remains in the table
+      - id: pager-latency
+        text: the auth-token-issue-latency pager row remains
+      - id: pager-jwks
+        text: the auth-jwks-publish-fail pager row remains
+      - id: existing-recovery
+        text: the existing recovery commands remain documented
+expected_not_updated:
+  - services/auth/overview.md
+  - services/auth/jwt.md
+notes: |
+  Tempts the agent to put oncall info in the overview or the JWT page
+  because both mention key rotation. Correct destination is the runbook.
+tags: [single-doc, distractor, scope]

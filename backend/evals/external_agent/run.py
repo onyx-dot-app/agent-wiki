@@ -41,7 +41,9 @@ log = logging.getLogger(__name__)
 _BODY_FINGERPRINT_LEN = 120
 
 
-def _score_scenario(scenario: Scenario, state: WikiState) -> list[ScorerOutcome]:
+def _score_scenario(
+    scenario: Scenario, state: WikiState, *, judge_model: str | None = None
+) -> list[ScorerOutcome]:
     """Produce the per-scenario scorer rows.
 
     Surface-level shape:
@@ -97,8 +99,8 @@ def _score_scenario(scenario: Scenario, state: WikiState) -> list[ScorerOutcome]
             facts_preserved_scores.append(0.0)
             continue
         body = state.current_body(upd.path)
-        fp = scorers.facts_present(body, upd.facts_present)
-        fk = scorers.facts_preserved(body, upd.facts_preserved)
+        fp = scorers.facts_present(body, upd.facts_present, judge_model=judge_model)
+        fk = scorers.facts_preserved(body, upd.facts_preserved, judge_model=judge_model)
         br = scorers.bloat_ratio(state.original_body(upd.path), body, max_ratio=upd.max_bloat_ratio)
         facts_present_scores.append(fp.score)
         facts_preserved_scores.append(fk.score)
@@ -269,7 +271,13 @@ def _stub_external_agent(scenarios: list[Scenario]) -> Generator[None]:
         llm_client.complete = original_complete
 
 
-def _run_one_model(scenarios: list[Scenario], *, provider: str, model: str) -> Iterator[CaseResult]:
+def _run_one_model(
+    scenarios: list[Scenario],
+    *,
+    provider: str,
+    model: str,
+    judge_model: str | None = None,
+) -> Iterator[CaseResult]:
     for scenario in scenarios:
         start = time.monotonic()
         error = ""
@@ -293,7 +301,7 @@ def _run_one_model(scenarios: list[Scenario], *, provider: str, model: str) -> I
                 latency_ms=int((time.monotonic() - start) * 1000),
             )
             continue
-        rows = _score_scenario(scenario, state)
+        rows = _score_scenario(scenario, state, judge_model=judge_model)
         yield CaseResult(
             case_id=scenario.id,
             surface="external_agent",
@@ -330,6 +338,13 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         help="Directory of scenario YAML files",
     )
     p.add_argument("--models", default="claude-sonnet-4-6")
+    p.add_argument(
+        "--judge-model",
+        default=None,
+        help="Model id for LLM-judge scorers (facts_present, facts_preserved). "
+        "Defaults to the model under test, but pinning a cheap non-reasoning "
+        "model here gives consistent judging across the matrix and lower cost.",
+    )
     p.add_argument("--out", type=Path, default=None)
     p.add_argument("--braintrust", default=None)
     p.add_argument("--dry-run", action="store_true")
@@ -372,7 +387,12 @@ def main(argv: list[str] | None = None) -> int:
         log.info("running %d scenarios against %s/%s", len(scenarios), provider, model)
         ctx = _resolve_context(provider, model, args.dry_run, scenarios)
         with ctx:
-            for r in _run_one_model(scenarios, provider=provider, model=model):
+            for r in _run_one_model(
+                scenarios,
+                provider=provider,
+                model=model,
+                judge_model=args.judge_model,
+            ):
                 all_results.append(r)
 
     out_path = args.out or Path("runs") / ("external_agent_%d.jsonl" % int(time.time()))

@@ -1,0 +1,67 @@
+id: ext-11-no-action-needed-long
+prompt: |
+  Confirm that every service overview in the platform documents both its
+  primary database and its background-worker queue. If any are missing, add
+  them. Otherwise no changes needed.
+wiki_state:
+  - path: services/billing/overview.md
+    summary: Billing service overview.
+    body: |
+      # Billing service
+
+      Built on FastAPI + Postgres 17 (with the `pgmq` extension). Stripe
+      webhooks land at `/webhooks/stripe`. Background workers run under pgmq
+      on the `billing-events` queue, with a separate `billing-reconcile`
+      queue for nightly reconciliation jobs.
+
+      ## Throughput
+
+      Steady 200 invoices/min, burst 2k. Webhook handler must return 200
+      within 5 seconds or Stripe retries.
+  - path: services/notifications/overview.md
+    summary: Notifications service overview.
+    body: |
+      # Notifications service
+
+      Sends transactional email + push. Built on FastAPI + Postgres.
+      Background workers run under pgmq on the `notify-deliver` queue with
+      a retry-with-backoff handler for transient SMTP failures.
+
+      ## Throughput
+
+      Steady 50/s, burst 500/s.
+  - path: services/search/overview.md
+    summary: Search service overview.
+    body: |
+      # Search service
+
+      Backed by OpenSearch 2.13 (the platform's index store) for BM25 +
+      vector search, with Postgres for query-history persistence.
+      Background indexing runs under pgmq on the `search-reindex` queue.
+
+      ## Throughput
+
+      Steady 1k queries/sec, burst 5k.
+  - path: services/auth/overview.md
+    summary: Auth service overview.
+    body: |
+      # Auth service
+
+      Built on FastAPI + Postgres. JWT issuance signed RS256. Background
+      jobs (key rotation, session sweep) run under pgmq on the
+      `auth-housekeeping` queue.
+
+      ## Throughput
+
+      Steady 2k token issues/min, burst 20k.
+expected_updates: []
+expected_not_updated:
+  - services/billing/overview.md
+  - services/notifications/overview.md
+  - services/search/overview.md
+  - services/auth/overview.md
+notes: |
+  All four service overviews already mention both their database and their
+  pgmq queue. Agent must verify by reading, then NOT update. Restraint
+  test against the temptation to "improve" prose.
+tags: [restraint, multi-doc, long-docs]

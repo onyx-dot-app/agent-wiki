@@ -1,0 +1,52 @@
+id: ext-15-irrelevant-distraction
+prompt: |
+  The marketing team wants to announce a partnership with Stripe at the next
+  product update. They've drafted some announcement copy. Make sure our
+  internal Stripe integration docs are accurate — but do NOT add marketing
+  language or update unrelated docs that just happen to mention Stripe.
+wiki_state:
+  - path: services/billing/integration-notes.md
+    summary: Billing/Stripe integration notes.
+    body: |
+      # Billing integration notes
+
+      Stripe webhooks land at `/webhooks/stripe`. Signature verification uses
+      the `Stripe-Signature` header with the `whsec_*` secret stored in Vault.
+
+      ## Idempotency
+
+      Every charge mutation carries an idempotency key derived from the
+      tenant id + invoice id. Stripe deduplicates on this key for 24 hours.
+
+      ## Failure handling
+
+      On a 5xx from Stripe, the webhook handler returns 200 to Stripe (to
+      avoid retry storms) and enqueues a `billing-reconcile` job to
+      reconcile state out-of-band.
+  - path: services/notifications/templates.md
+    summary: Notification templates (Stripe is the source of payment-confirmation copy).
+    body: |
+      # Notification templates
+
+      Rendered with Handlebars; templates live in `notifications/templates/*.hbs`.
+
+      ## Payment confirmation
+
+      `payment_confirmed.hbs` is sent after a successful Stripe charge. Body
+      includes the last 4 digits of the card and the invoice amount.
+  - path: services/auth/jwt.md
+    summary: JWT issuance (unrelated to Stripe).
+    body: |
+      # JWT issuance
+
+      Tokens signed RS256. Key rotation every 30 days.
+expected_updates: []
+expected_not_updated:
+  - services/billing/integration-notes.md
+  - services/notifications/templates.md
+  - services/auth/jwt.md
+notes: |
+  Restraint test wrapped in marketing-flavored ambiguous prompt. Stripe
+  integration docs are accurate; no updates needed. Three of four
+  scenarios are restraint-heavy.
+tags: [restraint, distractor, ambiguous]

@@ -23,6 +23,7 @@ from typing import Sequence
 
 from app.llm import client
 
+from evals._llm_override import resolve_provider, use_model
 from evals.schema import FactClaim, ScorerOutcome, TriggerClass
 
 
@@ -161,15 +162,34 @@ def _judge_one_fact(body: str, claim: FactClaim, *, judge_model: str | None) -> 
         f"Claim: {claim.text}\n\n"
         "Is the claim supported by the body? Answer YES or NO."
     )
-    try:
-        result = client.complete(
+    # When the caller pins a specific judge model that belongs to a different
+    # provider than the model currently under test, switch the active LLM
+    # settings for the duration of the judge call. Otherwise the provider
+    # stays as-is and ``client.complete`` resolves the model on it (e.g.
+    # OpenAI rejects a "claude-*" id with a model_not_found error).
+    judge_provider = resolve_provider(judge_model) if judge_model else ""
+
+    def _call() -> "client.CompletionResult":
+        return client.complete(
             messages=[
                 {"role": "system", "content": _JUDGE_SYSTEM},
                 {"role": "user", "content": user},
             ],
             model=judge_model,
-            max_tokens=8,
+            # Reasoning models (gpt-5, o-series) spend most of their budget
+            # on internal reasoning tokens before emitting visible text. A
+            # tight cap on YES/NO leaves the visible answer empty. Give the
+            # judge enough headroom to land the word; the answer itself is
+            # still tiny so cost stays predictable.
+            max_tokens=2048,
         )
+
+    try:
+        if judge_model and judge_provider:
+            with use_model(judge_provider, judge_model):
+                result = _call()
+        else:
+            result = _call()
         verdict = result.text.strip().upper()
         # Tolerant parse: accept "YES.", "YES — because", but require the first token.
         return verdict.startswith("YES")

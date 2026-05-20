@@ -1,0 +1,174 @@
+id: ext-06-policy-cascade
+prompt: |
+  Legal pushed an updated data-retention policy: customer event logs go from 90
+  days to 180 days, effective 2026-06-01. Backup retention is unchanged at 1
+  year. Update every doc that documents an event-log retention number. Leave
+  backup retention statements alone, and don't touch anything unrelated.
+wiki_state:
+  - path: ops/data-retention.md
+    summary: Top-level retention policy.
+    body: |
+      # Data retention
+
+      This page is the canonical reference for how long Onyx keeps customer
+      and operational data. All service-level retention rules MUST match this
+      page; if a service has a stricter cap, that cap takes precedence and
+      MUST be noted in both this page and the service runbook.
+
+      ## Customer event logs
+
+      Customer-visible events (logins, searches, document accesses, settings
+      changes) are retained for 90 days. After that window, the rows are
+      deleted from the primary store and rolled into anonymized aggregates
+      that retain no per-user identifiers.
+
+      ## Backups
+
+      Database snapshots are retained for 1 year. Snapshots are encrypted at
+      rest with KMS-managed keys; restoration requires a documented incident
+      and oncall sign-off.
+
+      ## Application logs
+
+      Application (stdout / stderr) logs are retained for 30 days in CloudWatch.
+
+      ## Audit logs
+
+      Admin and system audit logs are retained for 7 years per SOC 2 controls.
+  - path: services/events/overview.md
+    summary: Events service overview (writes the event log).
+    body: |
+      # Events service
+
+      Owns the per-customer event log. FastAPI front-end, pgmq writer, Postgres
+      with `pg_textsearch` for downstream search.
+
+      ## Throughput
+
+      Steady 5k events/sec, burst 20k. Backpressure via pgmq backlog depth.
+
+      ## Retention
+
+      Event rows are kept for 90 days (per `ops/data-retention.md`). The
+      `events-pruner` cron clears anything older every night at 02:00 UTC.
+
+      ## Downstream consumers
+
+      - `search`: indexes events for the in-app activity feed
+      - `billing`: aggregates billable-event counts per tenant
+      - `analytics`: anonymized rollup pipeline that survives event-row deletion
+  - path: services/events/runbook.md
+    summary: Events service oncall runbook.
+    body: |
+      # Events service runbook
+
+      ## Pruner failures
+
+      `events-pruner` is the cron that enforces the 90-day retention window.
+      If it skips a night, the events table grows by ~430M rows; two
+      consecutive skips and the search index lag alarm fires.
+
+      ### Recovery
+
+      1. Re-run the pruner: `kubectl create job --from=cronjob/events-pruner events-pruner-$(date +%s)`
+      2. Watch `events_table_row_count` on the Events dashboard.
+      3. If row count stays elevated after 30 min, page the events team.
+
+      ## Pgmq backlog
+
+      Backlog over 5k = page on-call. Check the writer pod's CPU first; the
+      ingest path is single-threaded per connection.
+  - path: services/search/architecture.md
+    summary: Search architecture (consumes events but does not own retention).
+    body: |
+      # Search architecture
+
+      OpenSearch 2.13, 3 data nodes, 2 coordinators. BM25 with a custom
+      tokenizer that lowercases and strips diacritics.
+
+      ## Indexing
+
+      Documents are indexed on every wiki commit. Event-log rows are indexed
+      separately by `events-indexer`; the indexer re-reads from the events
+      table for the last 30 days only (older than that is past the in-app
+      activity-feed cutoff regardless of event retention).
+
+      ## Eviction
+
+      OpenSearch shards rotate weekly. Index size capped at 2 TB per shard.
+  - path: ops/runbooks/db-failover.md
+    summary: DB failover runbook (unrelated to retention).
+    body: |
+      # DB failover runbook
+
+      1. Confirm primary is unreachable (`pg_isready` from two regions).
+      2. Promote the standby with `repmgr standby promote`.
+      3. Update the connection string in HashiCorp Vault under `db/primary`.
+
+      ## Post-failover
+
+      - Watch replication lag for the new standby coming online.
+      - File an incident note in #incidents-db with the timestamp.
+  - path: teams/legal/data-policy.md
+    summary: Legal team's policy page (mirrors ops/data-retention.md).
+    body: |
+      # Legal — data policy reference
+
+      This page summarizes the customer-data retention rules for use in DPAs
+      and customer questionnaires. The authoritative source is
+      `ops/data-retention.md`; this page MUST match.
+
+      - Customer event logs: 90 days
+      - Database backups: 1 year
+      - Application logs: 30 days
+      - Audit logs: 7 years (SOC 2)
+expected_updates:
+  - path: ops/data-retention.md
+    facts_present:
+      - id: new-retention-days
+        text: customer event logs are retained for 180 days
+      - id: effective-date
+        text: the change is effective 2026-06-01
+    facts_preserved:
+      - id: backup-retention
+        text: database snapshots are still retained for 1 year
+      - id: app-log-retention
+        text: application logs are still 30 days
+      - id: audit-retention
+        text: audit logs are still 7 years
+  - path: services/events/overview.md
+    facts_present:
+      - id: new-retention-overview
+        text: event rows are kept for 180 days
+    facts_preserved:
+      - id: throughput
+        text: throughput numbers 5k steady and 20k burst remain
+      - id: downstream
+        text: search, billing, and analytics are still listed as downstream consumers
+  - path: services/events/runbook.md
+    facts_present:
+      - id: new-retention-runbook
+        text: the runbook references 180 days as the retention window
+    facts_preserved:
+      - id: pruner-command
+        text: the kubectl pruner command is still documented
+      - id: pgmq-backlog
+        text: the 5k pgmq backlog page threshold is still documented
+  - path: teams/legal/data-policy.md
+    facts_present:
+      - id: legal-new
+        text: the legal page lists 180 days for customer event logs
+    facts_preserved:
+      - id: legal-backups
+        text: legal page still lists 1 year for backups
+      - id: legal-audit
+        text: legal page still lists 7 years for audit logs
+expected_not_updated:
+  - services/search/architecture.md
+  - ops/runbooks/db-failover.md
+notes: |
+  Four docs need surgical retention-number updates. Two unrelated docs
+  (search architecture mentions a "30-day" cutoff unrelated to retention;
+  db-failover is unrelated) must not be touched. Loss-bait via long
+  bodies that tempt rewrites.
+tags: [multi-doc, long-docs, loss-bait, distractor]

@@ -1,0 +1,94 @@
+id: ext-19-conflicting-source-of-truth
+prompt: |
+  The Notifications service's `notify-deliver` queue has a new max-retry
+  policy: 5 retries with exponential backoff (was 3). The retry policy is
+  documented in TWO places — the notifications overview and the dedicated
+  notifications/retry-policy doc. Both must be updated. The runbook
+  mentions "retry-with-backoff" generically and does not need to change
+  (it doesn't quote the number).
+wiki_state:
+  - path: services/notifications/overview.md
+    summary: Notifications overview (mentions retry count).
+    body: |
+      # Notifications service
+
+      Sends transactional email + push. Built on FastAPI + Postgres.
+      Background workers run under pgmq on the `notify-deliver` queue
+      with a retry-with-backoff handler that gives up after 3 attempts
+      and dead-letters to `notify-deliver-dlq`.
+
+      ## Throughput
+
+      Steady 50/s, burst 500/s.
+
+      ## SLO
+
+      p95 delivery ≤ 5 s for email, ≤ 2 s for push.
+  - path: services/notifications/retry-policy.md
+    summary: Dedicated retry-policy doc (mentions retry count).
+    body: |
+      # Notification retry policy
+
+      Transient delivery failures (SMTP 4xx, push-provider 5xx) are
+      retried with exponential backoff: base 1 s, factor 2, max 60 s.
+      After 3 attempts the message is dead-lettered to
+      `notify-deliver-dlq`.
+
+      ## Permanent failures
+
+      4xx push-provider responses and SMTP 5xx with a permanent code
+      (e.g. mailbox-not-found) skip the retry loop and dead-letter
+      immediately.
+
+      ## DLQ replay
+
+      `kubectl create job --from=cronjob/notify-dlq-replay notify-dlq-replay-$(date +%s)`
+      re-queues everything in the DLQ for one more pass; intended for
+      provider-outage recovery.
+  - path: services/notifications/runbook.md
+    summary: Notifications runbook (generic "retry-with-backoff" reference, no number).
+    body: |
+      # Notifications runbook
+
+      ## Pages
+
+      - `notify-dlq-depth`: DLQ depth > 500 for 5 min
+      - `notify-deliver-lag`: queue depth > 5k for 5 min
+
+      ## Recovery
+
+      For a stuck queue: `kubectl rollout restart deployment/notify-worker`.
+      The worker resumes mid-backoff, so in-flight retries continue from
+      whatever attempt they were on. No retries are lost.
+expected_updates:
+  - path: services/notifications/overview.md
+    facts_present:
+      - id: overview-5-retries
+        text: the overview documents 5 retry attempts before dead-letter
+    facts_preserved:
+      - id: overview-stack
+        text: FastAPI + Postgres + pgmq + notify-deliver queue still documented
+      - id: overview-dlq
+        text: dead-letter queue (notify-deliver-dlq) still mentioned
+      - id: overview-throughput
+        text: 50/s steady, 500/s burst still documented
+      - id: overview-slo
+        text: p95 ≤ 5s email, ≤ 2s push SLOs still documented
+  - path: services/notifications/retry-policy.md
+    facts_present:
+      - id: retry-policy-5
+        text: the policy doc documents 5 retry attempts
+    facts_preserved:
+      - id: backoff
+        text: exponential backoff base 1s, factor 2, max 60s remains
+      - id: permanent
+        text: permanent-failure (4xx push / 5xx SMTP) skip-retry behavior remains
+      - id: dlq-replay
+        text: the DLQ replay kubectl command remains
+expected_not_updated:
+  - services/notifications/runbook.md
+notes: |
+  Two docs need the same numeric update; one sibling does not because
+  it doesn't quote the number. Tests "find every place that quotes X"
+  without over-reach.
+tags: [multi-doc, partial-cascade, restraint]

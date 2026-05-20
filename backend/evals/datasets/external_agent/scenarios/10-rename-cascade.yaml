@@ -1,0 +1,135 @@
+id: ext-10-rename-cascade
+prompt: |
+  We're renaming the "Checkout" service to "OrderFlow" effective immediately.
+  Update every doc that names the service. SLO numbers, downstream
+  integrations, and the manual-review fallback for Fraud-Detection timeouts
+  MUST all carry over verbatim. The auth and payments docs only mention
+  Checkout in passing as one of many callers — leave those alone.
+wiki_state:
+  - path: services/checkout/overview.md
+    summary: Checkout service overview.
+    body: |
+      # Checkout service
+
+      Owns the order-placement flow. Built on FastAPI + Postgres + pgmq.
+
+      ## Downstream
+
+      Talks to: Inventory, Payments, Fraud-Detection.
+
+      ## Failure modes
+
+      On `Fraud-Detection` timeout (>2s), the service falls back to
+      soft-allow with manual review. The manual-review queue is sized to
+      handle 0.5% of order volume; if it exceeds 2%, page the trust team.
+
+      ## SLOs
+
+      - p95 latency under 350ms
+      - availability 99.95% monthly
+      - manual-review SLA: 30 minutes for cards, 4 hours for ACH
+  - path: services/checkout/runbook.md
+    summary: Checkout runbook (oncall).
+    body: |
+      # Checkout runbook
+
+      ## Common pages
+
+      - `checkout-5xx-spike`: 5xx rate > 1% for 2 min. Usually upstream.
+      - `checkout-latency`: p95 > 350ms for 5 min. Usually database or fraud.
+      - `manual-review-backlog`: queue > 2% of order volume. Page trust.
+
+      ## Restart
+
+      `kubectl rollout restart deployment/checkout-api` in `us-east-1` and
+      `us-west-2` simultaneously is the playbook for a stuck deployment.
+  - path: services/checkout/api.md
+    summary: Checkout API reference.
+    body: |
+      # Checkout API
+
+      ## Endpoints
+
+      - `POST /checkout/sessions` — start a session; returns `session_id`
+      - `POST /checkout/sessions/{id}/items` — add an item
+      - `POST /checkout/sessions/{id}/place` — finalize (synchronous; this
+        is the call that pings Fraud-Detection)
+      - `GET /checkout/sessions/{id}` — read
+
+      ## Auth
+
+      Bearer token with `checkout:write`.
+  - path: services/auth/overview.md
+    summary: Auth service overview (mentions Checkout only as a caller).
+    body: |
+      # Auth service
+
+      Issues bearer tokens for every other internal service.
+
+      ## Callers
+
+      Every front-line API takes our tokens; the largest issuers by QPS are
+      Search, Recommendations, Checkout, and Notifications.
+  - path: services/payments/overview.md
+    summary: Payments service overview (mentions Checkout as upstream caller).
+    body: |
+      # Payments service
+
+      Processes card and ACH charges. Talks to Stripe + ACH-vendor.
+
+      ## Upstream
+
+      Called by Checkout and Subscriptions.
+
+      ## SLOs
+
+      - p95 latency under 250ms
+      - availability 99.95% monthly
+expected_updates:
+  - path: services/checkout/overview.md
+    facts_present:
+      - id: renamed-overview
+        text: the service is referred to as OrderFlow
+    facts_preserved:
+      - id: downstream
+        text: Inventory, Payments, and Fraud-Detection are still listed as downstream
+      - id: fraud-fallback
+        text: the Fraud-Detection timeout soft-allow + manual review fallback is preserved
+      - id: review-queue-size
+        text: the 0.5% / 2% manual-review queue thresholds are preserved
+      - id: slo-latency
+        text: p95 under 350ms is still documented
+      - id: slo-availability
+        text: 99.95% monthly availability is still documented
+      - id: slo-manual-review
+        text: the 30-min cards / 4-hour ACH manual-review SLA remains
+  - path: services/checkout/runbook.md
+    facts_present:
+      - id: renamed-runbook
+        text: the runbook refers to the service as OrderFlow
+    facts_preserved:
+      - id: page-5xx
+        text: the 5xx-spike pager threshold remains
+      - id: page-latency
+        text: the p95 latency pager threshold remains
+      - id: page-review
+        text: the manual-review-backlog pager remains
+      - id: restart
+        text: the kubectl rollout restart playbook across both regions remains
+  - path: services/checkout/api.md
+    facts_present:
+      - id: renamed-api
+        text: the API reference page refers to the service as OrderFlow
+    facts_preserved:
+      - id: endpoints
+        text: all four endpoints (sessions, items, place, get) remain documented
+      - id: auth
+        text: the bearer token + checkout:write scope is still documented
+expected_not_updated:
+  - services/auth/overview.md
+  - services/payments/overview.md
+notes: |
+  Rename cascade with strong loss-bait — long bodies tempt rewriting
+  rather than surgical name swap. Auth and Payments mention Checkout only
+  in passing; updating them would be over-reach.
+tags: [multi-doc, long-docs, loss-bait, rename]

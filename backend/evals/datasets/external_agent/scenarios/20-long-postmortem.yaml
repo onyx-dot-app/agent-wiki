@@ -1,0 +1,134 @@
+id: ext-20-long-postmortem
+prompt: |
+  The 2026-05-15 auth outage postmortem is final. Update the incident page
+  with: (1) root cause (key-rotation cron raced with JWKS-publish cron and
+  both wrote conflicting key sets), (2) AI-1 owner Park (due 2026-06-01) to
+  serialize the two crons, (3) AI-2 owner Patel (due 2026-06-15) to add a
+  pre-flight check that the previously published JWKS is reachable before
+  rotation cuts over. The two related runbooks (auth runbook and jwt page)
+  also need a pointer to the postmortem and a one-line note that the
+  cron-race recovery commands are linked from the postmortem. Architectural
+  diagrams and unrelated auth docs must not change.
+wiki_state:
+  - path: ops/incidents/2026-05-15-auth-outage.md
+    summary: Auth outage incident page (skeleton, needs postmortem details).
+    body: |
+      # 2026-05-15 auth outage
+
+      ## Summary
+
+      Token issuance returned 401 for ~12 minutes across all regions
+      starting at 03:14 UTC. Mitigation was a manual re-run of the
+      `auth-jwks-publish` cron, which republished the in-use key set.
+
+      ## Timeline
+
+      - 03:12 — scheduled `auth-key-rotate` cron fires and writes new key set
+      - 03:13 — `auth-jwks-publish` reads the OLD key set from cache and re-publishes it
+      - 03:14 — downstream services hit JWKS, get keys that do not match
+        the active signing key; every token verification fails
+      - 03:18 — pager fires on `auth-token-verify-fail-rate`
+      - 03:21 — oncall identifies the JWKS / signing-key mismatch
+      - 03:24 — oncall re-runs `auth-jwks-publish` manually with cache busted
+      - 03:26 — token verification recovers across all regions
+
+      ## Impact
+
+      ~12 minutes of 100% token verification failure for new tokens.
+      Cached tokens (still inside their 1 h validity) continued to work.
+  - path: services/auth/runbook.md
+    summary: Auth runbook (will get a pointer to the postmortem).
+    body: |
+      # Auth runbook
+
+      Owned by the auth team. Pages route to PagerDuty schedule `auth-primary`.
+
+      ## Pages
+
+      | Pager | Threshold | First response |
+      | --    | --        | --             |
+      | `auth-5xx-spike` | 5xx rate > 2% for 2 min | check JWKS endpoint reachability |
+      | `auth-token-issue-latency` | p95 > 200ms for 5 min | check Postgres primary load |
+      | `auth-jwks-publish-fail` | JWKS publish job exit ≠ 0 for 2 consecutive runs | re-run the publish cron |
+      | `auth-token-verify-fail-rate` | verify-fail-rate > 5% for 2 min | check JWKS / signing-key match |
+
+      ## Recovery commands
+
+      - Restart the auth API: `kubectl rollout restart deployment/auth-api`
+      - Re-publish JWKS: `kubectl create job --from=cronjob/auth-jwks-publish auth-jwks-publish-$(date +%s)`
+  - path: services/auth/jwt.md
+    summary: JWT page (will get a pointer to the postmortem).
+    body: |
+      # JWT issuance
+
+      ## Algorithm
+
+      Tokens are signed RS256. The public key is published at
+      `/.well-known/jwks.json` and rotated every 30 days by the
+      `auth-key-rotate` cron; `auth-jwks-publish` mirrors the active key
+      set to the JWKS endpoint.
+
+      ## Claims
+
+      - `sub`, `tid`, `scp`, `exp`
+
+      ## Verification
+
+      Downstream services verify by hitting the JWKS endpoint and caching
+      keys with TTL = 24 hours.
+  - path: services/auth/overview.md
+    summary: Auth architectural overview (must not change).
+    body: |
+      # Auth service
+
+      Issues bearer tokens for every internal service.
+
+      ## Architecture
+
+      - Stateless API pods (FastAPI)
+      - Postgres for user + session state
+      - RS256 signing keys rotated every 30 days by the `auth-key-rotate` cron
+      - JWKS published by the `auth-jwks-publish` cron
+expected_updates:
+  - path: ops/incidents/2026-05-15-auth-outage.md
+    facts_present:
+      - id: root-cause
+        text: the postmortem identifies the key-rotation cron racing with JWKS-publish as the root cause
+      - id: ai-1
+        text: AI-1 (owner Park, due 2026-06-01, serialize the two crons) is documented
+      - id: ai-2
+        text: AI-2 (owner Patel, due 2026-06-15, pre-flight JWKS reachability check) is documented
+    facts_preserved:
+      - id: timeline-0312
+        text: the 03:12 timeline entry remains
+      - id: timeline-0324
+        text: the 03:24 manual recovery timeline entry remains
+      - id: impact
+        text: the 12-minute 100% token verification failure impact remains
+  - path: services/auth/runbook.md
+    facts_present:
+      - id: runbook-pm-pointer
+        text: the runbook points to the 2026-05-15 auth outage postmortem
+    facts_preserved:
+      - id: runbook-pagers
+        text: all four pager-table rows remain
+      - id: runbook-recovery
+        text: the kubectl restart and JWKS republish commands remain
+  - path: services/auth/jwt.md
+    facts_present:
+      - id: jwt-pm-pointer
+        text: the JWT page points to the 2026-05-15 auth outage postmortem
+    facts_preserved:
+      - id: jwt-rs256
+        text: RS256 + JWKS publication + 30-day rotation remain documented
+      - id: jwt-claims
+        text: the sub/tid/scp/exp claims list remains
+      - id: jwt-verify
+        text: the JWKS cache TTL = 24h verification flow remains
+expected_not_updated:
+  - services/auth/overview.md
+notes: |
+  Long fan-out across three docs with strong loss-bait (long bodies).
+  One related architectural overview must NOT change — the postmortem
+  doesn't reshape the architecture, only the operations.
+tags: [multi-doc, long-docs, loss-bait, fan-out]
