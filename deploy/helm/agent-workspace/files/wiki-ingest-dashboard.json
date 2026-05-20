@@ -1514,7 +1514,7 @@
             "uid": "${datasource}"
           },
           "expr": "sum(increase(ingest_batch_reconciler_duration_seconds_count[1h]))",
-          "legendFormat": "Batch Reconciler calls (1h)",
+          "legendFormat": "LLM calls (1h)",
           "refId": "A"
         }
       ],
