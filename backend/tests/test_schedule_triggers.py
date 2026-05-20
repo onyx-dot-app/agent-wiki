@@ -250,9 +250,11 @@ def test_find_due_skips_when_just_fired(tmp_db):
     from app.triggers.engine import find_due_schedule_triggers
 
     uid = seed_user(is_admin=True)
-    # Cron fires every hour on the hour; last fire was 30s ago, so the
-    # next due time is the next top-of-hour, which is in the future.
-    last = _iso(_now() - timedelta(seconds=30))
+    # Cron fires every hour on the hour; last fire was right now, so the
+    # next due time is the next top-of-hour, which is always in the future.
+    # Using now-30s would fail if the test runs in the first 30s of any hour
+    # (the boundary at HH:00:00 would already be <= now).
+    last = _iso(_now())
     seed_trigger(
         tid="t_recent",
         owner_user_id=uid,
