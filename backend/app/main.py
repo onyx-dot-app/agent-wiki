@@ -151,7 +151,7 @@ async def _lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
 
     async def _refresh_wiki_pages_gauge() -> None:
         while True:
-            await asyncio.sleep(60)
+            await asyncio.sleep(300)
             c = await asyncio.to_thread(fts.count_documents)
             if c is not None:
                 wiki_pages_total.set(c)
