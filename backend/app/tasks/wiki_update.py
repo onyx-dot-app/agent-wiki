@@ -28,8 +28,8 @@ from app.config import CONFIG
 from app.ingest import search as ingest_search
 from app.ingest.source_tiers import is_filtered
 from app.ingest.models import WikiUpdateCandidate
-from app.llm.agents import ingest_batch_reconciler, ingest_selector, wiki_updater
-from app.llm.agents.wiki_updater import IRRELEVANT_SENTINEL
+from app.llm.agents import ingest_batch_reconciler, ingest_selector, nl_updater
+from app.llm.agents.common import IRRELEVANT_SENTINEL
 from app.llm.agents.tools import _doc_helpers as h
 from app.llm.errors import LLMError
 from app.llm.settings import get as get_llm_settings
@@ -69,7 +69,7 @@ def update_document_from_payload(doc_id: str, source: str, payload: dict[str, An
     log.info("update_document_from_payload doc_id=%s source=%s", doc_id, source)
     # TODO:
     #   1. Load current doc body from git (app.wiki.git.read_file).
-    #   2. Call app.llm.agents.wiki_updater.process_instruction(wiki_path, body, payload, source).
+    #   2. Call app.llm.agents.nl_updater.process_instruction(wiki_path, body, payload, source).
     #   3. If the agent produced a new body, commit it (app.wiki.git.commit_file).
     #   4. Enqueue index_path on lightweight_maintenance_queue.
     #   5. Enqueue fan_out_trigger_eval on triggers_queue for doc + parent dirs.
@@ -172,7 +172,7 @@ def _run_inner(job_id: str, rel: str, instruction: str, base_sha: str | None) ->
 
     old_body = h.read_existing(rel)
     try:
-        new_body = wiki_updater.process_instruction(
+        new_body = nl_updater.process_instruction(
             wiki_path=rel,
             current_body=old_body,
             payload={"instruction": instruction},

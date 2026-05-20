@@ -12,7 +12,7 @@ from app.llm.agents.ingest_batch_reconciler import (
     _parse,
     batch_reconcile,
 )
-from app.llm.agents.wiki_updater import IRRELEVANT_SENTINEL
+from app.llm.agents.common import IRRELEVANT_SENTINEL
 
 
 def _hit(path: str, score: float = 1.0) -> SearchHit:

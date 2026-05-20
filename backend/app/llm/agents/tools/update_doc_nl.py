@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from app.llm.agents import wiki_updater
+from app.llm.agents import nl_updater
 from app.llm.agents.tools import _doc_helpers as h
 from app.llm.errors import LLMError
 from app.wiki import git as wiki_git
@@ -47,7 +47,7 @@ def handle(args: dict[str, Any]) -> Any:
 
         old_body = h.read_existing(rel)
         try:
-            new_body = wiki_updater.process_instruction(
+            new_body = nl_updater.process_instruction(
                 wiki_path=rel,
                 current_body=old_body,
                 payload={"instruction": instruction.strip()},
