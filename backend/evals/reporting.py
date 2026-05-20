@@ -15,6 +15,7 @@ import sys
 from pathlib import Path
 from typing import IO, Iterable
 
+from app.tracing import braintrust as bt
 from evals.schema import CaseResult, RunSummary, Surface
 
 
@@ -77,28 +78,18 @@ def push_to_braintrust(
 ) -> None:
     """Upload results as a Braintrust experiment.
 
-    Soft-fails on import / config errors so a missing key doesn't kill a
-    local-only run. Keys come from ``BRAINTRUST_API_KEY`` and
-    ``BRAINTRUST_PROJECT`` env vars by default.
+    Routes through ``app.tracing.braintrust.push_experiment`` so the
+    ``braintrust`` SDK is only imported behind the single allowed seam.
+    Keys come from ``BRAINTRUST_API_KEY`` and ``BRAINTRUST_PROJECT`` env
+    vars by default. Missing config is a no-op with a warning.
     """
     api_key = os.environ.get("BRAINTRUST_API_KEY", "")
     project_name = project or os.environ.get("BRAINTRUST_PROJECT", "")
     if not api_key or not project_name:
         log.warning("braintrust: skip push — no BRAINTRUST_API_KEY or BRAINTRUST_PROJECT")
         return
-    try:
-        import braintrust  # type: ignore[import-untyped]
-    except ImportError:
-        log.warning("braintrust: package not installed; skipping push")
-        return
-
-    bt_experiment = braintrust.init(
-        project=project_name,
-        experiment=experiment,
-        api_key=api_key,
-    )
-    for r in results:
-        bt_experiment.log(
+    rows = [
+        bt.ExperimentRow(
             input={"case_id": r.case_id, "surface": r.surface},
             output={"actual_class": r.actual_class, "raw_output": r.raw_output},
             expected={"expected_class": r.expected_class},
@@ -112,9 +103,17 @@ def push_to_braintrust(
                 "output_tokens": r.output_tokens,
             },
         )
-    bt_experiment.flush()
+        for r in results
+    ]
+    pushed = bt.push_experiment(
+        project=project_name,
+        experiment=experiment,
+        api_key=api_key,
+        rows=rows,
+    )
     log.info(
-        "braintrust: pushed %d results to project=%s experiment=%s",
+        "braintrust: pushed %d/%d results to project=%s experiment=%s",
+        pushed,
         len(results),
         project_name,
         experiment,
