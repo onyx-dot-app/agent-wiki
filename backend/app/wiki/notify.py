@@ -30,17 +30,10 @@ clean (``api/`` → ``wiki/`` ← ``tools/``).
 from __future__ import annotations
 
 from app.db import fts
-from app.metrics import wiki_pages_total
 from app.mcp_server import pubsub as mcp_pubsub
 from app.tasks.reindex import index_path
 from app.tasks.triggers import fan_out_trigger_eval
 from app.wiki import acl
-
-
-def _refresh_wiki_pages_gauge() -> None:
-    count = fts.count_documents()
-    if count is not None:
-        wiki_pages_total.set(count)
 
 
 def after_doc_write(
@@ -76,7 +69,6 @@ def after_doc_write(
     index_path(rel_path)
     fan_out_trigger_eval(rel_path, sha, change_kind, actor)
     mcp_pubsub.publish_doc_update(rel_path, sha, change_kind)
-    _refresh_wiki_pages_gauge()
     if change_kind == "create":
         mcp_pubsub.publish_list_changed()
 
