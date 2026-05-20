@@ -962,7 +962,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "histogram_quantile(0.95, sum(rate(ingest_llm_duration_seconds_bucket[5m])) by (le))",
+          "expr": "histogram_quantile(0.95, sum(rate(ingest_batch_reconciler_duration_seconds_bucket[5m])) by (le))",
           "legendFormat": "p95",
           "refId": "A"
         },
@@ -971,12 +971,12 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "histogram_quantile(0.50, sum(rate(ingest_llm_duration_seconds_bucket[5m])) by (le))",
+          "expr": "histogram_quantile(0.50, sum(rate(ingest_batch_reconciler_duration_seconds_bucket[5m])) by (le))",
           "legendFormat": "p50",
           "refId": "B"
         }
       ],
-      "title": "LLM (Default Model) Duration (p50 / p95)",
+      "title": "Batch Reconciler Duration (p50 / p95)",
       "type": "timeseries"
     },
     {
@@ -1057,7 +1057,7 @@
           "refId": "A"
         }
       ],
-      "title": "LLM (Default Model) Calls per Document",
+      "title": "Batch Reconciler Calls per Document",
       "type": "heatmap"
     },
     {
@@ -1105,12 +1105,12 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(increase(ingest_llm_duration_seconds_count[1h]))",
+          "expr": "sum(increase(ingest_batch_reconciler_duration_seconds_count[1h]))",
           "legendFormat": "LLM calls (1h)",
           "refId": "A"
         }
       ],
-      "title": "Total LLM Calls (Default Model) - rolling 1h",
+      "title": "Total Batch Reconciler Calls - rolling 1h",
       "type": "timeseries"
     },
     {
@@ -1488,7 +1488,7 @@
           "refId": "B"
         }
       ],
-      "title": "LLM (Selector Model) Duration (p50 / p95)",
+      "title": "Selector Duration (p50 / p95)",
       "type": "timeseries"
     },
     {
@@ -1569,7 +1569,7 @@
           "refId": "A"
         }
       ],
-      "title": "LLM (Selector Model) Calls per Document",
+      "title": "Selector Calls per Document",
       "type": "heatmap"
     },
     {
@@ -1622,7 +1622,7 @@
           "refId": "A"
         }
       ],
-      "title": "Total LLM Calls (Selector Model) - rolling 1h",
+      "title": "Total Selector Calls - rolling 1h",
       "type": "timeseries"
     }
   ],
