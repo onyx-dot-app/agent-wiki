@@ -12,6 +12,7 @@ wiki setup.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
@@ -147,6 +148,16 @@ async def _lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     count = fts.count_documents()
     if count is not None:
         wiki_pages_total.set(count)
+
+    async def _refresh_wiki_pages_gauge() -> None:
+        while True:
+            await asyncio.sleep(60)
+            c = fts.count_documents()
+            if c is not None:
+                wiki_pages_total.set(c)
+
+    refresh_task = asyncio.create_task(_refresh_wiki_pages_gauge())
+
     # Cross-process MCP pub-sub bridge: the worker process commits docs,
     # the web process owns the SSE stream — Postgres LISTEN/NOTIFY
     # ferries update events between them.
@@ -154,6 +165,7 @@ async def _lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
 
     yield
 
+    refresh_task.cancel()
     mcp_pubsub.stop_listener()
 
 
