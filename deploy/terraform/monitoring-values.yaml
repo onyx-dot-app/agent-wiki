@@ -23,7 +23,7 @@ grafana:
       labelValue: "1"
       searchNamespace: agent-wiki
       folderAnnotation: grafana_folder
-      skipReload: true
+      # skipReload: true  # Set to true if the sidecar's reload call fails due to admin password mismatch
       provider:
         foldersFromFilesStructure: false
   ingress:
@@ -41,13 +41,13 @@ grafana:
   # Create with: kubectl -n agent-wiki create secret generic grafana-oauth-secret \
   #   --from-literal=GF_AUTH_GOOGLE_CLIENT_ID=<id> \
   #   --from-literal=GF_AUTH_GOOGLE_CLIENT_SECRET=<secret>
-  envFromSecret: grafana-oauth-secret
+  # envFromSecret: grafana-oauth-secret
   grafana.ini:
     server:
       root_url: https://example.com/monitoring  # Set to your public URL
       serve_from_sub_path: true
     auth:
-      disable_login_form: true
+      disable_login_form: false  # Set to true only after Google OAuth is confirmed working
       oauth_auto_login: false
     auth.basic:
       enabled: true
