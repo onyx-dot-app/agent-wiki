@@ -59,6 +59,13 @@ ingest_outcomes_total = Counter(
     ["outcome", "wiki_path"],  # committed, no_change, irrelevant, filtered, no_candidates
 )
 
+ingest_document_chars = Histogram(
+    "ingest_document_chars",
+    "Size of the incoming document in characters, by source type",
+    ["source_type"],
+    buckets=[500, 1_000, 2_000, 5_000, 10_000, 20_000, 50_000, 100_000, 200_000],
+)
+
 ingest_llm_calls_per_doc = Histogram(
     "ingest_llm_calls_per_doc",
     "Number of LLM calls made per document ingestion",
