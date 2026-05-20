@@ -18,7 +18,7 @@ from typing import NamedTuple
 
 from app.ingest.models import WikiUpdateCandidate
 from app.llm import client
-from app.llm.agents.common import IRRELEVANT_SENTINEL, NO_CHANGE_SENTINEL, batch_by_chars
+from app.llm.agents.common import IRRELEVANT_SENTINEL, NO_CHANGE_SENTINEL, apply_edits, batch_by_chars
 from app.llm.prompts import load_prompt
 from app.tracing import trace_flow
 
@@ -134,7 +134,7 @@ def _reconcile_batch(
         elif isinstance(outcome, str):  # IRRELEVANT_SENTINEL
             results.append(IRRELEVANT_SENTINEL)
         else:  # list[tuple[str, str]] — apply edits to current body
-            results.append(_apply_edits(c.body, outcome))
+            results.append(apply_edits(c.body, outcome))
     return results
 
 
@@ -193,15 +193,3 @@ def _parse_edits(text: str) -> list[tuple[str, str]]:
     return edits
 
 
-def _apply_edits(body: str, edits: list[tuple[str, str]]) -> str | None:
-    """Apply (find, replace) pairs to body. Returns new body or None if unchanged."""
-    result = body
-    for find_text, replace_text in edits:
-        if find_text not in result:
-            log.warning(
-                "ingest_batch_reconciler: FIND text not found in body, skipping: %r",
-                find_text[:60],
-            )
-            continue
-        result = result.replace(find_text, replace_text, 1)
-    return result if result != body else None

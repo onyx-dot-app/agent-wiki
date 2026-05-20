@@ -1,7 +1,11 @@
 """Shared constants and utilities for LLM agents."""
 from __future__ import annotations
 
+import logging
+
 from app.ingest.models import WikiUpdateCandidate
+
+log = logging.getLogger(__name__)
 
 NO_CHANGE_SENTINEL = "NO_CHANGE"
 IRRELEVANT_SENTINEL = "IRRELEVANT"
@@ -29,6 +33,20 @@ def batch_by_chars(
     if current:
         batches.append(current)
     return batches
+
+
+def apply_edits(body: str, edits: list[tuple[str, str]]) -> str | None:
+    """Apply (find, replace) pairs to body. Returns new body or None if unchanged."""
+    result = body
+    for find_text, replace_text in edits:
+        if find_text not in result:
+            log.warning(
+                "apply_edits: FIND text not found in body, skipping: %r",
+                find_text[:60],
+            )
+            continue
+        result = result.replace(find_text, replace_text, 1)
+    return result if result != body else None
 
 
 def strip_outer_fence(text: str) -> str:

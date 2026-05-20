@@ -9,7 +9,6 @@ from app.db.fts import SearchHit
 from app.ingest.models import WikiUpdateCandidate
 from app.llm.agents.common import IRRELEVANT_SENTINEL, batch_by_chars
 from app.llm.agents.ingest_batch_reconciler import (
-    _apply_edits,
     _parse,
     _parse_edits,
     batch_reconcile,
@@ -81,37 +80,6 @@ def test_parse_edits_empty_replace():
 
 def test_parse_edits_no_blocks():
     assert _parse_edits("IRRELEVANT") == []
-
-
-# --------------------------------------------------------------------------- #
-# _apply_edits                                                                 #
-# --------------------------------------------------------------------------- #
-
-
-def test_apply_edits_basic():
-    result = _apply_edits("The limit is unknown.", [("unknown", "20")])
-    assert result == "The limit is 20."
-
-
-def test_apply_edits_multiple():
-    body = "foo and bar"
-    result = _apply_edits(body, [("foo", "baz"), ("bar", "qux")])
-    assert result == "baz and qux"
-
-
-def test_apply_edits_no_change_when_find_missing():
-    result = _apply_edits("body text", [("not present", "replacement")])
-    assert result is None
-
-
-def test_apply_edits_returns_none_when_unchanged():
-    result = _apply_edits("body", [])
-    assert result is None
-
-
-def test_apply_edits_replaces_first_occurrence_only():
-    result = _apply_edits("x x x", [("x", "y")])
-    assert result == "y x x"
 
 
 # --------------------------------------------------------------------------- #
