@@ -118,9 +118,7 @@ async def _lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     without entering the context manager, so the lifespan body is
     skipped — fixtures (``tmp_db`` / ``tmp_repo``) own DB/wiki init.
     """
-    from app.db import fts
     from app.db.session import init_db
-    from app.metrics import wiki_pages_total
     from app.tasks.agent_activity import schedule_all_pending_cleanups
     from app.triggers import repo as triggers_repo
     from app.utils.logging import setup_logging
@@ -144,9 +142,6 @@ async def _lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     triggers_repo.purge_invalid_triggers(actor="system <system@agent-wiki>")
     triggers_repo.rebuild_from_filesystem()
     schedule_all_pending_cleanups()
-    count = fts.count_documents()
-    if count is not None:
-        wiki_pages_total.set(count)
     # Cross-process MCP pub-sub bridge: the worker process commits docs,
     # the web process owns the SSE stream — Postgres LISTEN/NOTIFY
     # ferries update events between them.

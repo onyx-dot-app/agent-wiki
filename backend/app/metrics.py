@@ -12,8 +12,11 @@ Ingest pipeline metrics must be updated manually at each pipeline stage.
 from __future__ import annotations
 
 from fastapi import FastAPI
-from prometheus_client import Counter, Gauge, Histogram
+from prometheus_client import Counter, Gauge, Histogram, REGISTRY
+from prometheus_client.core import GaugeMetricFamily  # type: ignore[import-untyped]
 from prometheus_fastapi_instrumentator import Instrumentator
+
+from app.db import fts
 
 # --------------------------------------------------------------------------- #
 # Ingest pipeline                                                              #
@@ -77,10 +80,17 @@ ingest_queue_depth = Gauge(
     "Current number of pending tasks in the documents queue",
 )
 
-wiki_pages_total = Gauge(
-    "wiki_pages_total",
-    "Total number of wiki pages currently in the search index",
-)
+class _WikiPagesCollector:
+    def collect(self):
+        count = fts.count_documents() or 0
+        g = GaugeMetricFamily(
+            "wiki_pages_total",
+            "Total number of wiki pages currently in the search index",
+        )
+        g.add_metric([], count)
+        yield g
+
+REGISTRY.register(_WikiPagesCollector())
 
 ingest_selector_candidates_filtered = Histogram(
     "ingest_selector_candidates_filtered",

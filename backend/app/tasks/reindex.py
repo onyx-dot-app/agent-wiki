@@ -21,7 +21,6 @@ import logging
 import re
 
 from app.db import fts
-from app.metrics import wiki_pages_total
 from app.tasks.queue import crontab
 from app.tasks.queues import lightweight_maintenance_queue
 from app.wiki import git as wiki_git
@@ -59,9 +58,6 @@ def index_path_inline(path: str) -> None:
         return
 
     fts.upsert_document(path, path, _extract_title(body), body)
-    count = fts.count_documents()
-    if count is not None:
-        wiki_pages_total.set(count)
 
 
 # --------------------------------------------------------------------------- #
