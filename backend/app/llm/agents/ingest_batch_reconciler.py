@@ -197,5 +197,3 @@ def _parse_edits(text: str) -> list[TextEdit]:
         if find_text:
             edits.append(TextEdit(find=find_text, replace=replace_text))
     return edits
-
-
