@@ -5,7 +5,8 @@ from unittest.mock import MagicMock, patch
 
 from app.db.fts import SearchHit
 from app.ingest.models import WikiUpdateCandidate
-from app.llm.agents.ingest_selector import _batch_by_chars, select_candidates
+from app.llm.agents.common import batch_by_chars as _batch_by_chars
+from app.llm.agents.ingest_selector import select_candidates
 
 
 def _hit(path: str, score: float = 1.0) -> SearchHit:
