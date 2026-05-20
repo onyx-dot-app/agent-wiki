@@ -121,7 +121,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(increase(ingest_requests_total[24h])) by (source_type)",
+          "expr": "round(sum(increase(ingest_requests_total[24h])) by (source_type))",
           "legendFormat": "{{source_type}}",
           "instant": true,
           "refId": "A"
