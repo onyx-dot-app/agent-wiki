@@ -19,8 +19,11 @@ import time
 from pathlib import Path
 from typing import ContextManager, Iterator
 
-from app.llm.agents import wiki_updater
-from app.llm.agents.wiki_updater import IRRELEVANT_SENTINEL
+from app.llm.agents.wiki_updater import (
+    IRRELEVANT_SENTINEL,
+    process_instruction,
+    reconcile_document,
+)
 from app.utils.logging import setup_logging
 
 from evals import reporting, scorers
@@ -76,14 +79,14 @@ def _invoke_agent(case: WikiUpdaterCase) -> tuple[str | None, str]:
     """
     if case.surface == "process_instruction":
         payload = case.payload or {}
-        raw = wiki_updater.process_instruction(
+        raw = process_instruction(
             wiki_path=case.wiki_path,
             current_body=case.current_body,
             payload=payload,
             source=case.source,
         )
     else:
-        raw = wiki_updater.reconcile_document(
+        raw = reconcile_document(
             wiki_path=case.wiki_path,
             current_body=case.current_body,
             source=case.source,

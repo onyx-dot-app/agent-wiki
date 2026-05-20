@@ -25,7 +25,7 @@ from typing import Any, ContextManager
 from app.db.fts import SearchHit
 from app.ingest.models import WikiUpdateCandidate
 from app.llm import client as llm_client
-from app.llm.agents import ingest_selector
+from app.llm.agents.ingest_selector import select_candidates
 from app.llm.client import CompletionResult
 from app.utils.logging import setup_logging
 
@@ -75,7 +75,7 @@ def _to_wiki_update_candidates(case: IngestSelectorCase) -> list[WikiUpdateCandi
 
 def _invoke_selector(case: IngestSelectorCase, *, model: str) -> list[str]:
     candidates = _to_wiki_update_candidates(case)
-    kept = ingest_selector.select_candidates(
+    kept = select_candidates(
         title=case.doc_title,
         content=case.doc_content,
         candidates=candidates,

@@ -26,7 +26,7 @@ from typing import Any
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.llm.agents import wiki_updater
+from app.llm.agents.wiki_updater import process_instruction
 from app.llm.agents.chat import run_chat_loop
 
 from evals.schema import FactClaim
@@ -118,7 +118,7 @@ class WikiState:
     def apply_update(self, path: str, instruction: str, source: str = "external_agent") -> str:
         if path not in self._bodies:
             raise KeyError("no such doc: %s" % path)
-        new_body = wiki_updater.process_instruction(
+        new_body = process_instruction(
             wiki_path=path,
             current_body=self._bodies[path],
             payload={"instruction": instruction},

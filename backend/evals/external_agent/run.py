@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Any, ContextManager
 
 from app.llm import client as llm_client
-from app.llm.agents import wiki_updater
+from app.llm.agents.wiki_updater import NO_CHANGE_SENTINEL
 from app.llm.client import CompletionResult
 from app.utils.logging import setup_logging
 
@@ -260,7 +260,7 @@ def _stub_external_agent(scenarios: list[Scenario]) -> Generator[None]:
                             return CompletionResult(
                                 text=f"{d.body.rstrip()}\n\n## Updates\n\n{extras}\n"
                             )
-        return CompletionResult(text=wiki_updater.NO_CHANGE_SENTINEL)
+        return CompletionResult(text=NO_CHANGE_SENTINEL)
 
     llm_client.stream = _stream  # type: ignore[assignment]
     llm_client.complete = _complete  # type: ignore[assignment]
