@@ -939,7 +939,7 @@
           "refId": "B"
         }
       ],
-      "title": "LLM Duration (p50 / p95)",
+      "title": "LLM (Default Model) Duration (p50 / p95)",
       "type": "timeseries"
     },
     {
@@ -1073,7 +1073,7 @@
           "refId": "A"
         }
       ],
-      "title": "Total LLM Calls (rolling 1h)",
+      "title": "Total LLM Calls, Default Model (rolling 1h)",
       "type": "timeseries"
     },
     {
