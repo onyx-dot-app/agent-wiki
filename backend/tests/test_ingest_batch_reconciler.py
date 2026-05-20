@@ -210,7 +210,7 @@ def test_reconcile_find_not_in_body_returns_none(mock_client, _mock_prompt):
         "===RESULT [1]===\n===EDIT===\nFIND:\ntext not in body\nREPLACE:\nreplacement"
     )
 
-    results, llm_calls = batch_reconcile(
+    results, _ = batch_reconcile(
         title=None, url="", content="doc", source="s", candidates=candidates, model="m"
     )
 
