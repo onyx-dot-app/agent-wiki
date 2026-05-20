@@ -121,6 +121,7 @@ def tmp_config(tmp_path, monkeypatch):
         agent_session_idle_seconds=300,
         agent_session_close_after_idle_seconds=86400,
         agent_session_spawn_ok_seconds=30,
+        public_base_url="http://testserver",
     )
     monkeypatch.setattr("app.config.CONFIG", cfg)
     monkeypatch.setattr("app.db.session.CONFIG", cfg)

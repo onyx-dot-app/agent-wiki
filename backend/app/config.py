@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 
 from dotenv import load_dotenv
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 
 # Load the repo-root .env so non-Docker launchers (python -m app.main, pytest,
 # task workers) get the same env as `flask run` and docker compose. Search
@@ -43,6 +43,15 @@ class Config(BaseModel):
 
     # Opt-in eval logging — captures reconciler inputs/outputs to ingest_eval_samples
     ingest_eval_logging: bool
+    # Public-facing wiki origin (e.g. "https://dev-wiki.onyx.app" or
+    # "http://localhost:3088"). REQUIRED — set via the PUBLIC_BASE_URL
+    # env var. Single source of truth for the browser-facing URL the
+    # backend advertises in launch URIs, redirect targets, email
+    # links, etc. Never inferred from request headers — header sniffing
+    # behind a proxy is fragile and a spoofing surface; explicit
+    # operator config is the enterprise pattern (cf. GitLab
+    # external_url, Sentry system.url-prefix, Mattermost SiteURL).
+    public_base_url: str
 
     # Coding-tool launchers (Run Agent button) — see
     # local_data/wiki/Wiki Project/Specific Features/coding_tool_launchers/.
@@ -51,6 +60,22 @@ class Config(BaseModel):
     agent_session_idle_seconds: int
     agent_session_close_after_idle_seconds: int
     agent_session_spawn_ok_seconds: int
+
+    @field_validator("public_base_url")
+    @classmethod
+    def _validate_public_base_url(cls, v: str) -> str:
+        if not v:
+            raise ValueError(
+                "PUBLIC_BASE_URL is required (e.g. "
+                "https://wiki.example.com or http://localhost:3088). "
+                "Set it on every deployment — the backend advertises it "
+                "to browsers and the launcher helper."
+            )
+        if not (v.startswith("http://") or v.startswith("https://")):
+            raise ValueError(f"PUBLIC_BASE_URL must start with http:// or https:// (got {v!r})")
+        if v.endswith("/"):
+            raise ValueError(f"PUBLIC_BASE_URL must not have a trailing slash (got {v!r})")
+        return v
 
 
 def _positive_float(name: str, default: float) -> float:
@@ -126,6 +151,7 @@ def load_config() -> Config:
             "AGENT_SESSION_SPAWN_OK_SECONDS",
             30,
         ),
+        public_base_url=os.environ.get("PUBLIC_BASE_URL", ""),  # validated
     )
 
 
