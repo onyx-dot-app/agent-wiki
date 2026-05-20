@@ -1532,7 +1532,7 @@
           "refId": "A"
         }
       ],
-      "title": "LLM (Selector Model) Candidates Filtered",
+      "title": "LLM (Selector Model) Calls per Document",
       "type": "heatmap"
     },
     {
