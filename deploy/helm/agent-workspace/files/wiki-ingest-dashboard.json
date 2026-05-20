@@ -441,10 +441,7 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              {
-                "color": "blue",
-                "value": null
-              }
+              { "color": "blue", "value": null }
             ]
           },
           "unit": "short"
@@ -455,7 +452,7 @@
         "h": 4,
         "w": 4,
         "x": 4,
-        "y": 1
+        "y": 6
       },
       "id": 50,
       "options": {
@@ -506,7 +503,7 @@
         "h": 4,
         "w": 16,
         "x": 8,
-        "y": 1
+        "y": 6
       },
       "id": 11,
       "options": {
