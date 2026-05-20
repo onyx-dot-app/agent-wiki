@@ -198,6 +198,22 @@ def upsert_document(
         log.warning("fts: upsert_document failed for %s", path, exc_info=True)
 
 
+def count_documents() -> int | None:
+    """Return the total number of indexed wiki pages, or None if unavailable."""
+    client = _get_client()
+    if client is None:
+        return None
+    try:
+        from opensearchpy import OpenSearch  # type: ignore[import-untyped]
+
+        c: OpenSearch = client  # type: ignore[assignment]
+        result = c.count(index=_index_name())
+        return int(result["count"])
+    except Exception:
+        log.warning("fts: count_documents failed", exc_info=True)
+        return None
+
+
 def delete_document(doc_id: str) -> None:
     """Remove a page from the index.  ``doc_id`` is the path when called
     from ``app.wiki.notify`` (the only callers)."""

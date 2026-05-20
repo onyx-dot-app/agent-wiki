@@ -70,6 +70,11 @@ ingest_queue_depth = Gauge(
     "Current number of pending tasks in the documents queue",
 )
 
+wiki_pages_total = Gauge(
+    "wiki_pages_total",
+    "Total number of wiki pages currently in the search index",
+)
+
 ingest_selector_candidates_filtered = Histogram(
     "ingest_selector_candidates_filtered",
     "Candidates dropped by the weak-model selector per ingest request",
