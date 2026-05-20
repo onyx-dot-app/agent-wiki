@@ -4,14 +4,11 @@ One strong-model call processes all post-selector candidates and returns
 for each one:
   - IRRELEVANT_SENTINEL  — the external document is unrelated to this page
   - None                 — the page is already up-to-date (NO_CHANGE)
-  - str                  — the new page body to commit
+  - str                  — the new page body produced by applying FIND/REPLACE
+                           edits to the current body
 
-This matches the per-page contract of ``reconcile_document`` but avoids
-N separate LLM calls when most candidates are irrelevant.
-
-Fails open — any error marks all candidates NEEDS_UPDATE (returns the
-original body so the caller falls back to the per-page reconciler).
-When batching is required, each batch fails independently.
+Fails open — any LLM or parse error marks all candidates in that batch as
+IRRELEVANT_SENTINEL. Batches fail independently.
 """
 from __future__ import annotations
 
@@ -21,7 +18,7 @@ from typing import NamedTuple
 
 from app.ingest.models import WikiUpdateCandidate
 from app.llm import client
-from app.llm.agents.common import IRRELEVANT_SENTINEL, NO_CHANGE_SENTINEL, batch_by_chars, strip_outer_fence
+from app.llm.agents.common import IRRELEVANT_SENTINEL, NO_CHANGE_SENTINEL, batch_by_chars
 from app.llm.prompts import load_prompt
 from app.tracing import trace_flow
 
@@ -34,9 +31,6 @@ class BatchReconcileResult(NamedTuple):
     results: list[str | None]
     llm_calls: int
 
-# Sentinel used internally when a batch parse fails — tells the caller to
-# fall back to the per-page reconciler for every candidate in that batch.
-_FALLBACK = object()
 
 _RESULT_RE = re.compile(r"===RESULT \[(\d+)\]===")
 
@@ -125,19 +119,34 @@ def _reconcile_batch(
                 ],
                 model=model,
             )
-        return _parse(result.text, len(batch))
+        parsed = _parse(result.text, len(batch))
     except Exception:
         log.warning(
-            "ingest_batch_reconciler: batch failed, falling back to per-page reconciler",
+            "ingest_batch_reconciler: batch failed, falling back",
             exc_info=True,
         )
         return [IRRELEVANT_SENTINEL] * len(batch)
 
+    results: list[str | None] = []
+    for c, outcome in zip(batch, parsed):
+        if outcome is None:
+            results.append(None)
+        elif isinstance(outcome, str):  # IRRELEVANT_SENTINEL
+            results.append(IRRELEVANT_SENTINEL)
+        else:  # list[tuple[str, str]] — apply edits to current body
+            results.append(_apply_edits(c.body, outcome))
+    return results
 
-def _parse(text: str, n: int) -> list[str | None]:
-    """Parse the structured output into a result per candidate."""
+
+def _parse(text: str, n: int) -> list[str | None | list[tuple[str, str]]]:
+    """Parse the structured LLM output into a per-candidate outcome list.
+
+    Each element is one of:
+      - IRRELEVANT_SENTINEL (str): page is unrelated
+      - None: page is already up-to-date
+      - list[tuple[str, str]]: (find, replace) edit pairs to apply
+    """
     parts = _RESULT_RE.split(text)
-    # parts: [preamble, "1", body1, "2", body2, ...]
     raw: dict[int, str] = {}
     for i in range(1, len(parts), 2):
         idx = int(parts[i])
@@ -147,7 +156,7 @@ def _parse(text: str, n: int) -> list[str | None]:
     if not raw:
         raise ValueError("no ===RESULT [N]=== sections found in response")
 
-    results: list[str | None] = []
+    results: list[str | None | list[tuple[str, str]]] = []
     for i in range(1, n + 1):
         body = raw.get(i, IRRELEVANT_SENTINEL)
         if body == IRRELEVANT_SENTINEL or body.startswith(IRRELEVANT_SENTINEL + "\n"):
@@ -155,6 +164,44 @@ def _parse(text: str, n: int) -> list[str | None]:
         elif body == NO_CHANGE_SENTINEL or body.startswith(NO_CHANGE_SENTINEL + "\n"):
             results.append(None)
         else:
-            results.append(strip_outer_fence(body))
-
+            results.append(_parse_edits(body))
     return results
+
+
+def _parse_edits(text: str) -> list[tuple[str, str]]:
+    """Parse ===EDIT=== blocks from a result section into (find, replace) pairs."""
+    edits: list[tuple[str, str]] = []
+    for block in re.split(r"===EDIT===\n?", text.strip()):
+        block = block.strip()
+        if not block:
+            continue
+        find_pos = block.find("FIND:\n")
+        # Search for "\nREPLACE:" without requiring a trailing newline so that
+        # empty REPLACE sections (where the block ends right after "REPLACE:")
+        # are still matched after strip() removes the trailing newline.
+        replace_pos = block.find("\nREPLACE:")
+        if find_pos == -1 or replace_pos == -1 or replace_pos <= find_pos:
+            continue
+        find_text = block[find_pos + len("FIND:\n"):replace_pos]
+        replace_raw = block[replace_pos + len("\nREPLACE:"):]
+        # Strip the single newline delimiter that normally follows "REPLACE:".
+        replace_text = replace_raw[1:] if replace_raw.startswith("\n") else replace_raw
+        find_text = find_text.strip("\n")
+        replace_text = replace_text.strip("\n")
+        if find_text:
+            edits.append((find_text, replace_text))
+    return edits
+
+
+def _apply_edits(body: str, edits: list[tuple[str, str]]) -> str | None:
+    """Apply (find, replace) pairs to body. Returns new body or None if unchanged."""
+    result = body
+    for find_text, replace_text in edits:
+        if find_text not in result:
+            log.warning(
+                "ingest_batch_reconciler: FIND text not found in body, skipping: %r",
+                find_text[:60],
+            )
+            continue
+        result = result.replace(find_text, replace_text, 1)
+    return result if result != body else None
