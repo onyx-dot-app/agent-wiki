@@ -304,7 +304,7 @@
           "color": "rgba(255,0,255,0.7)"
         },
         "filterValues": {
-          "le": 1E-9
+          "le": 1e-09
         },
         "legend": {
           "show": true
@@ -335,7 +335,7 @@
           "refId": "A"
         }
       ],
-      "title": "BM25 Score — All Outcomes",
+      "title": "BM25 Score \u2014 All Outcomes",
       "type": "heatmap"
     },
     {
@@ -385,7 +385,7 @@
           "color": "rgba(255,0,255,0.7)"
         },
         "filterValues": {
-          "le": 1E-9
+          "le": 1e-09
         },
         "legend": {
           "show": true
@@ -416,7 +416,7 @@
           "refId": "A"
         }
       ],
-      "title": "BM25 Score — Committed",
+      "title": "BM25 Score \u2014 Committed",
       "type": "heatmap"
     },
     {
@@ -466,7 +466,7 @@
           "color": "rgba(255,0,255,0.7)"
         },
         "filterValues": {
-          "le": 1E-9
+          "le": 1e-09
         },
         "legend": {
           "show": true
@@ -497,7 +497,7 @@
           "refId": "A"
         }
       ],
-      "title": "BM25 Score — Irrelevant",
+      "title": "BM25 Score \u2014 Irrelevant",
       "type": "heatmap"
     },
     {
@@ -547,7 +547,7 @@
           "color": "rgba(255,0,255,0.7)"
         },
         "filterValues": {
-          "le": 1E-9
+          "le": 1e-09
         },
         "legend": {
           "show": true
@@ -578,7 +578,7 @@
           "refId": "A"
         }
       ],
-      "title": "BM25 Score — No Change",
+      "title": "BM25 Score \u2014 No Change",
       "type": "heatmap"
     },
     {
@@ -628,7 +628,7 @@
           "color": "rgba(255,0,255,0.7)"
         },
         "filterValues": {
-          "le": 1E-9
+          "le": 1e-09
         },
         "legend": {
           "show": true
@@ -659,7 +659,7 @@
           "refId": "A"
         }
       ],
-      "title": "BM25 Score — Filtered by Selector",
+      "title": "BM25 Score \u2014 Filtered by Selector",
       "type": "heatmap"
     },
     {
@@ -709,7 +709,7 @@
           "color": "rgba(255,0,255,0.7)"
         },
         "filterValues": {
-          "le": 1E-9
+          "le": 1e-09
         },
         "legend": {
           "show": true
@@ -790,7 +790,7 @@
           "color": "rgba(255,0,255,0.7)"
         },
         "filterValues": {
-          "le": 1E-9
+          "le": 1e-09
         },
         "legend": {
           "show": true
@@ -989,7 +989,7 @@
           "color": "rgba(255,0,255,0.7)"
         },
         "filterValues": {
-          "le": 1E-9
+          "le": 1e-09
         },
         "legend": {
           "show": true
@@ -1101,6 +1101,18 @@
           {
             "matcher": {
               "id": "byName",
+              "options": "Time"
+            },
+            "properties": [
+              {
+                "id": "custom.hidden",
+                "value": true
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
               "options": "wiki_path"
             },
             "properties": [
@@ -1145,14 +1157,20 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "topk(10, sum by (wiki_path) (increase(ingest_outcomes_total{outcome=\"committed\"}[$__range])))",
+          "expr": "topk(10, round(sum by (wiki_path) (increase(ingest_outcomes_total{outcome=\"committed\"}[$__range]))))",
           "instant": true,
           "legendFormat": "{{wiki_path}}",
           "refId": "A"
         }
       ],
-      "title": "Top Wiki Pages — Committed",
+      "title": "Top Wiki Pages \u2014 Committed",
       "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns"
+          }
+        },
         {
           "id": "sortBy",
           "options": {
@@ -1177,6 +1195,18 @@
           "unit": "short"
         },
         "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Time"
+            },
+            "properties": [
+              {
+                "id": "custom.hidden",
+                "value": true
+              }
+            ]
+          },
           {
             "matcher": {
               "id": "byName",
@@ -1224,14 +1254,20 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "topk(10, sum by (wiki_path) (increase(ingest_outcomes_total{outcome=\"irrelevant\"}[$__range])))",
+          "expr": "topk(10, round(sum by (wiki_path) (increase(ingest_outcomes_total{outcome=\"irrelevant\"}[$__range]))))",
           "instant": true,
           "legendFormat": "{{wiki_path}}",
           "refId": "A"
         }
       ],
-      "title": "Top Wiki Pages — Irrelevant",
+      "title": "Top Wiki Pages \u2014 Irrelevant",
       "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns"
+          }
+        },
         {
           "id": "sortBy",
           "options": {
@@ -1256,6 +1292,18 @@
           "unit": "short"
         },
         "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Time"
+            },
+            "properties": [
+              {
+                "id": "custom.hidden",
+                "value": true
+              }
+            ]
+          },
           {
             "matcher": {
               "id": "byName",
@@ -1303,14 +1351,20 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "topk(10, sum by (wiki_path) (increase(ingest_outcomes_total{outcome=\"no_change\"}[$__range])))",
+          "expr": "topk(10, round(sum by (wiki_path) (increase(ingest_outcomes_total{outcome=\"no_change\"}[$__range]))))",
           "instant": true,
           "legendFormat": "{{wiki_path}}",
           "refId": "A"
         }
       ],
-      "title": "Top Wiki Pages — No Change",
+      "title": "Top Wiki Pages \u2014 No Change",
       "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns"
+          }
+        },
         {
           "id": "sortBy",
           "options": {
