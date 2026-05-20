@@ -28,4 +28,4 @@ export APPLE_ID APPLE_TEAM_ID APPLE_APP_PASSWORD APPLE_CERT_BASE64 APPLE_CERT_PA
 
 unset -f _aws_secret
 
-echo "Apple signing env populated (apple-id=$APPLE_ID, team-id=$APPLE_TEAM_ID)"
+echo "Apple signing env populated"

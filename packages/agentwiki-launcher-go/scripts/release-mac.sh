@@ -13,6 +13,7 @@
 # notarization ticket online on first launch. The artifacts left in dist/
 # are the already-signed binaries — distribute those directly.
 set -euo pipefail
+umask 077
 
 REQUIRED=(APPLE_ID APPLE_TEAM_ID APPLE_APP_PASSWORD APPLE_CERT_BASE64 APPLE_CERT_PASSWORD)
 for var in "${REQUIRED[@]}"; do
@@ -35,7 +36,7 @@ TMP_ROOT="${RUNNER_TEMP:-${TMPDIR:-/tmp}}"
 KEYCHAIN_PATH="$TMP_ROOT/agentwiki-release-$$.keychain-db"
 KEYCHAIN_PASSWORD="$(openssl rand -hex 16)"
 CERT_PATH="$TMP_ROOT/agentwiki-release-cert-$$.p12"
-STAGE="$(mktemp -d)"
+STAGE=""
 ORIGINAL_KEYCHAINS=""
 
 cleanup() {
@@ -48,9 +49,13 @@ cleanup() {
     security delete-keychain "$KEYCHAIN_PATH" >/dev/null 2>&1
   fi
   rm -f "$CERT_PATH"
-  rm -rf "$STAGE"
+  if [[ -n "$STAGE" && -d "$STAGE" ]]; then
+    rm -rf "$STAGE"
+  fi
 }
 trap cleanup EXIT
+
+STAGE="$(mktemp -d)"
 
 echo "==> Creating temp keychain at $KEYCHAIN_PATH"
 security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
