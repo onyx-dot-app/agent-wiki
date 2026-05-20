@@ -20,7 +20,7 @@ import re
 
 from app.ingest.models import WikiUpdateCandidate
 from app.llm import client
-from app.llm.agents.wiki_updater import IRRELEVANT_SENTINEL, NO_CHANGE_SENTINEL, _strip_outer_fence
+from app.llm.agents.wiki_updater import IRRELEVANT_SENTINEL, NO_CHANGE_SENTINEL
 from app.llm.prompts import load_prompt
 from app.tracing import trace_flow
 
@@ -176,3 +176,17 @@ def _parse(text: str, n: int) -> list[str | None]:
             results.append(_strip_outer_fence(body))
 
     return results
+
+
+def _strip_outer_fence(text: str) -> str:
+    if not text.startswith("```"):
+        return text
+    first_nl = text.find("\n")
+    if first_nl == -1:
+        return text
+    if not text.rstrip().endswith("```"):
+        return text
+    inner = text[first_nl + 1 :].rstrip()
+    if inner.endswith("```"):
+        inner = inner[:-3].rstrip()
+    return inner + "\n" if text.endswith("\n") else inner

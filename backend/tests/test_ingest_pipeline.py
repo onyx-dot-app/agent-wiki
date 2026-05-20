@@ -21,7 +21,6 @@ from app.config import CONFIG
 from app.db.fts import SearchHit
 from app.ingest import search as ingest_search
 from app.ingest.source_tiers import is_filtered
-from app.llm.agents import ingest_batch_reconciler  # noqa: F401 — used in patch paths
 from app.llm.agents.wiki_updater import IRRELEVANT_SENTINEL
 from app.llm.settings import _EMPTY as _EMPTY_LLM_SETTINGS, LLMSettings
 
