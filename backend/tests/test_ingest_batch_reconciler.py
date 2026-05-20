@@ -7,12 +7,12 @@ import pytest
 
 from app.db.fts import SearchHit
 from app.ingest.models import WikiUpdateCandidate
-from app.llm.agents.common import batch_by_chars
+from app.llm.agents.common import IRRELEVANT_SENTINEL, batch_by_chars
 from app.llm.agents.ingest_batch_reconciler import (
     _parse,
+    _parse_edits,
     batch_reconcile,
 )
-from app.llm.agents.common import IRRELEVANT_SENTINEL
 
 
 def _hit(path: str, score: float = 1.0) -> SearchHit:
@@ -28,7 +28,7 @@ def _llm_response(text: str) -> MagicMock:
 
 
 # --------------------------------------------------------------------------- #
-# _batch_by_chars                                                              #
+# batch_by_chars                                                               #
 # --------------------------------------------------------------------------- #
 
 
@@ -49,6 +49,40 @@ def test_batch_empty():
 
 
 # --------------------------------------------------------------------------- #
+# _parse_edits                                                                 #
+# --------------------------------------------------------------------------- #
+
+
+def test_parse_edits_single():
+    text = "===EDIT===\nFIND:\nold text\nREPLACE:\nnew text"
+    assert _parse_edits(text) == [("old text", "new text")]
+
+
+def test_parse_edits_multiple():
+    text = (
+        "===EDIT===\n"
+        "FIND:\nfirst\nREPLACE:\nfirst updated\n"
+        "===EDIT===\n"
+        "FIND:\nsecond\nREPLACE:\nsecond updated"
+    )
+    assert _parse_edits(text) == [("first", "first updated"), ("second", "second updated")]
+
+
+def test_parse_edits_multiline_find():
+    text = "===EDIT===\nFIND:\nline one\nline two\nREPLACE:\nreplacement"
+    assert _parse_edits(text) == [("line one\nline two", "replacement")]
+
+
+def test_parse_edits_empty_replace():
+    text = "===EDIT===\nFIND:\nremove this\nREPLACE:\n"
+    assert _parse_edits(text) == [("remove this", "")]
+
+
+def test_parse_edits_no_blocks():
+    assert _parse_edits("IRRELEVANT") == []
+
+
+# --------------------------------------------------------------------------- #
 # _parse                                                                       #
 # --------------------------------------------------------------------------- #
 
@@ -65,22 +99,28 @@ def test_parse_no_change():
     assert results == [None]
 
 
-def test_parse_new_body():
-    text = "===RESULT [1]===\n# Updated\n\nNew content here."
+def test_parse_edit_block():
+    text = (
+        "===RESULT [1]===\n"
+        "===EDIT===\n"
+        "FIND:\nold line\n"
+        "REPLACE:\nnew line"
+    )
     results = _parse(text, 1)
-    assert results == ["# Updated\n\nNew content here."]
+    assert len(results) == 1
+    assert results[0] == [("old line", "new line")]
 
 
 def test_parse_mixed():
     text = (
         "===RESULT [1]===\nIRRELEVANT\n"
         "===RESULT [2]===\nNO_CHANGE\n"
-        "===RESULT [3]===\n# New body\n\nContent."
+        "===RESULT [3]===\n===EDIT===\nFIND:\nold\nREPLACE:\nnew"
     )
     results = _parse(text, 3)
     assert results[0] == IRRELEVANT_SENTINEL
     assert results[1] is None
-    assert results[2] == "# New body\n\nContent."
+    assert results[2] == [("old", "new")]
 
 
 def test_parse_missing_section_defaults_to_irrelevant():
@@ -103,20 +143,22 @@ def test_parse_no_sections_raises():
 @patch("app.llm.agents.ingest_batch_reconciler.load_prompt", return_value="p")
 @patch("app.llm.agents.ingest_batch_reconciler.client")
 def test_reconcile_returns_results(mock_client, _mock_prompt):
-    candidates = [_candidate("a"), _candidate("b"), _candidate("c")]
+    a = _candidate("a")
+    b = _candidate("b")
+    c = _candidate("c", "current content")
     mock_client.complete.return_value = _llm_response(
         "===RESULT [1]===\nIRRELEVANT\n"
         "===RESULT [2]===\nNO_CHANGE\n"
-        "===RESULT [3]===\n# New\n\nBody."
+        "===RESULT [3]===\n===EDIT===\nFIND:\ncurrent content\nREPLACE:\nupdated content"
     )
 
     results, llm_calls = batch_reconcile(
-        title="T", url="", content="doc", source="s", candidates=candidates, model="m"
+        title="T", url="", content="doc", source="s", candidates=[a, b, c], model="m"
     )
 
     assert results[0] == IRRELEVANT_SENTINEL
     assert results[1] is None
-    assert results[2] == "# New\n\nBody."
+    assert results[2] == "updated content"
     assert llm_calls == 1
 
 
@@ -161,11 +203,46 @@ def test_reconcile_fails_open_on_parse_error(mock_client, _mock_prompt):
 
 @patch("app.llm.agents.ingest_batch_reconciler.load_prompt", return_value="p")
 @patch("app.llm.agents.ingest_batch_reconciler.client")
+def test_reconcile_empty_edit_list_warns_and_returns_none(mock_client, _mock_prompt):
+    # LLM returns a result section that is neither IRRELEVANT/NO_CHANGE nor a
+    # valid ===EDIT=== block — _parse_edits yields [] and a warning should fire.
+    candidates = [_candidate("a", "body text")]
+    mock_client.complete.return_value = _llm_response(
+        "===RESULT [1]===\nmalformed content with no edit blocks"
+    )
+
+    with patch("app.llm.agents.ingest_batch_reconciler.log") as mock_log:
+        results, _ = batch_reconcile(
+            title=None, url="", content="doc", source="s", candidates=candidates, model="m"
+        )
+
+    assert results[0] is None
+    mock_log.warning.assert_called_once()
+
+
+@patch("app.llm.agents.ingest_batch_reconciler.load_prompt", return_value="p")
+@patch("app.llm.agents.ingest_batch_reconciler.client")
+def test_reconcile_find_not_in_body_returns_none(mock_client, _mock_prompt):
+    # FIND text doesn't exist in the candidate body → no edit applied → None
+    candidates = [_candidate("a", "actual body")]
+    mock_client.complete.return_value = _llm_response(
+        "===RESULT [1]===\n===EDIT===\nFIND:\ntext not in body\nREPLACE:\nreplacement"
+    )
+
+    results, _ = batch_reconcile(
+        title=None, url="", content="doc", source="s", candidates=candidates, model="m"
+    )
+
+    assert results[0] is None
+
+
+@patch("app.llm.agents.ingest_batch_reconciler.load_prompt", return_value="p")
+@patch("app.llm.agents.ingest_batch_reconciler.client")
 def test_reconcile_merges_multiple_batches(mock_client, _mock_prompt):
-    a = _candidate("a", "x" * 110_000)
+    a = _candidate("a", "start " + "x" * 110_000)
     b = _candidate("b", "y" * 110_000)
     mock_client.complete.side_effect = [
-        _llm_response("===RESULT [1]===\n# Updated a\n\nBody."),
+        _llm_response("===RESULT [1]===\n===EDIT===\nFIND:\nstart\nREPLACE:\nupdated"),
         _llm_response("===RESULT [1]===\nNO_CHANGE"),
     ]
 
@@ -173,7 +250,7 @@ def test_reconcile_merges_multiple_batches(mock_client, _mock_prompt):
         title=None, url="", content="", source="s", candidates=[a, b], model="m"
     )
 
-    assert results[0] == "# Updated a\n\nBody."
+    assert results[0] == "updated " + "x" * 110_000
     assert results[1] is None
     assert llm_calls == 2
 
