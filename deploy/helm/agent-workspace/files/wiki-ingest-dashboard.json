@@ -79,6 +79,21 @@
       "type": "stat"
     },
     {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "mappings": [],
+          "unit": "short",
+          "custom": {}
+        },
+        "overrides": []
+      },
       "gridPos": {
         "h": 4,
         "w": 20,
@@ -87,12 +102,34 @@
       },
       "id": 11,
       "options": {
-        "content": "",
-        "mode": "markdown"
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "last"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
       },
-      "title": "",
-      "transparent": true,
-      "type": "text"
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sort_desc(round(sum(increase(ingest_requests_total[24h])) by (source_type)))",
+          "legendFormat": "{{source_type}}",
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Documents Ingested (24h) by Source Type",
+      "type": "stat",
+      "transformations": []
     },
     {
       "datasource": {
@@ -109,7 +146,7 @@
             "fillOpacity": 10,
             "lineWidth": 2
           },
-          "unit": "reqps"
+          "unit": "reqpm"
         },
         "overrides": []
       },
@@ -140,7 +177,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(rate(ingest_requests_total[5m])) by (source_type)",
+          "expr": "sum(rate(ingest_requests_total[5m])) by (source_type) * 60",
           "legendFormat": "{{source_type}}",
           "refId": "A"
         }
@@ -167,7 +204,7 @@
               "mode": "normal"
             }
           },
-          "unit": "reqps"
+          "unit": "reqpm"
         },
         "overrides": []
       },
@@ -197,7 +234,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(rate(ingest_outcomes_total[5m])) by (outcome)",
+          "expr": "sum(rate(ingest_outcomes_total[5m])) by (outcome) * 60",
           "legendFormat": "{{outcome}}",
           "refId": "A"
         }
@@ -249,7 +286,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(ingest_outcomes_total) by (outcome)",
+          "expr": "sum(increase(ingest_outcomes_total[$__range])) by (outcome)",
           "legendFormat": "{{outcome}}",
           "refId": "A"
         }
@@ -688,7 +725,7 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 12,
+        "w": 8,
         "x": 0,
         "y": 30
       },
@@ -769,8 +806,8 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 12,
-        "x": 12,
+        "w": 8,
+        "x": 8,
         "y": 30
       },
       "id": 10,
@@ -847,9 +884,9 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 38
+        "w": 8,
+        "x": 16,
+        "y": 30
       },
       "id": 12,
       "options": {
@@ -900,8 +937,8 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 12,
-        "x": 12,
+        "w": 8,
+        "x": 0,
         "y": 38
       },
       "id": 8,
@@ -939,7 +976,7 @@
           "refId": "B"
         }
       ],
-      "title": "LLM Duration (p50 / p95)",
+      "title": "LLM (Default Model) Duration (p50 / p95)",
       "type": "timeseries"
     },
     {
@@ -968,9 +1005,9 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 46
+        "w": 8,
+        "x": 8,
+        "y": 38
       },
       "id": 13,
       "options": {
@@ -1020,7 +1057,7 @@
           "refId": "A"
         }
       ],
-      "title": "LLM Calls per Document",
+      "title": "LLM (Default Model) Calls per Document",
       "type": "heatmap"
     },
     {
@@ -1044,9 +1081,9 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 46
+        "w": 8,
+        "x": 16,
+        "y": 38
       },
       "id": 14,
       "options": {
@@ -1073,7 +1110,7 @@
           "refId": "A"
         }
       ],
-      "title": "Total LLM Calls (rolling 1h)",
+      "title": "Total LLM Calls (Default Model) - rolling 1h",
       "type": "timeseries"
     },
     {
@@ -1082,7 +1119,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 56
+        "y": 54
       },
       "id": 102,
       "title": "Top Wiki Pages by Outcome",
@@ -1148,7 +1185,7 @@
         "h": 10,
         "w": 8,
         "x": 0,
-        "y": 57
+        "y": 55
       },
       "id": 103,
       "targets": [
@@ -1170,6 +1207,10 @@
           "options": {
             "mode": "columns"
           }
+        },
+        {
+          "id": "merge",
+          "options": {}
         },
         {
           "id": "sortBy",
@@ -1245,7 +1286,7 @@
         "h": 10,
         "w": 8,
         "x": 8,
-        "y": 57
+        "y": 55
       },
       "id": 104,
       "targets": [
@@ -1267,6 +1308,10 @@
           "options": {
             "mode": "columns"
           }
+        },
+        {
+          "id": "merge",
+          "options": {}
         },
         {
           "id": "sortBy",
@@ -1342,7 +1387,7 @@
         "h": 10,
         "w": 8,
         "x": 16,
-        "y": 57
+        "y": 55
       },
       "id": 105,
       "targets": [
@@ -1366,6 +1411,10 @@
           }
         },
         {
+          "id": "merge",
+          "options": {}
+        },
+        {
           "id": "sortBy",
           "options": {
             "fields": [
@@ -1378,6 +1427,203 @@
         }
       ],
       "type": "table"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 46
+      },
+      "id": 107,
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "histogram_quantile(0.95, sum(rate(ingest_selector_duration_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p95",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "histogram_quantile(0.50, sum(rate(ingest_selector_duration_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p50",
+          "refId": "B"
+        }
+      ],
+      "title": "LLM (Selector Model) Duration (p50 / p95)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "scheme"
+          },
+          "custom": {
+            "fillOpacity": 80,
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "scaleDistribution": {
+              "type": "linear"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 46
+      },
+      "id": 108,
+      "options": {
+        "calculate": false,
+        "cellGap": 1,
+        "color": {
+          "exponent": 0.5,
+          "fill": "dark-orange",
+          "mode": "scheme",
+          "reverse": false,
+          "scale": "exponential",
+          "scheme": "Oranges",
+          "steps": 64
+        },
+        "exemplars": {
+          "color": "rgba(255,0,255,0.7)"
+        },
+        "filterValues": {
+          "le": 1e-09
+        },
+        "legend": {
+          "show": true
+        },
+        "rowsFrame": {
+          "layout": "auto"
+        },
+        "tooltip": {
+          "mode": "single",
+          "showColorScale": false,
+          "yHistogram": false
+        },
+        "yAxis": {
+          "axisLabel": "selector calls",
+          "axisPlacement": "left",
+          "unit": "short"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum(rate(ingest_selector_calls_per_doc_bucket[5m])) by (le)",
+          "format": "heatmap",
+          "legendFormat": "{{le}}",
+          "refId": "A"
+        }
+      ],
+      "title": "LLM (Selector Model) Calls per Document",
+      "type": "heatmap"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 46
+      },
+      "id": 109,
+      "options": {
+        "legend": {
+          "calcs": [
+            "last",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum(increase(ingest_selector_duration_seconds_count[1h]))",
+          "legendFormat": "calls",
+          "refId": "A"
+        }
+      ],
+      "title": "Total LLM Calls (Selector Model) - rolling 1h",
+      "type": "timeseries"
     }
   ],
   "refresh": "30s",

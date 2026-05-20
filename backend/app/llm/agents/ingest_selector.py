@@ -15,6 +15,7 @@ from typing import Any, cast
 from app.ingest.models import WikiUpdateCandidate
 from app.llm import client
 from app.llm.prompts import load_prompt
+from app.metrics import ingest_selector_calls_per_doc
 from app.tracing import trace_flow
 
 log = logging.getLogger(__name__)
@@ -52,6 +53,7 @@ def select_candidates(
     for batch in batches:
         selected.extend(_select_batch(title=title, content=content, batch=batch, model=model))
 
+    ingest_selector_calls_per_doc.observe(len(batches))
     log.info(
         "ingest_selector: kept %d/%d candidates batches=%d model=%s",
         len(selected),
