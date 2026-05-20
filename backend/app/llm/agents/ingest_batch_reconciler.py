@@ -120,8 +120,6 @@ def _reconcile_batch(
                 ],
                 model=model,
             )
-        ingest_reconciler_input_tokens.observe(result.usage.input_tokens)
-        ingest_reconciler_output_tokens.observe(result.usage.output_tokens)
         parsed = _parse(result.text, len(batch))
     except Exception:
         log.warning(
@@ -129,6 +127,11 @@ def _reconcile_batch(
             exc_info=True,
         )
         return [IRRELEVANT_SENTINEL] * len(batch)
+    try:
+        ingest_reconciler_input_tokens.observe(result.usage.input_tokens)
+        ingest_reconciler_output_tokens.observe(result.usage.output_tokens)
+    except Exception:
+        log.warning("ingest_batch_reconciler: could not observe token usage", exc_info=True)
 
     results: list[str | None] = []
     for c, outcome in zip(batch, parsed):

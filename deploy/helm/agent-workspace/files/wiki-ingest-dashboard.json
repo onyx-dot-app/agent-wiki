@@ -12,7 +12,7 @@
       "collapsed": false,
       "gridPos": {
         "x": 0,
-        "y": 0,
+        "y": 5,
         "w": 24,
         "h": 1
       },
@@ -51,7 +51,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 1,
+        "y": 6,
         "w": 4,
         "h": 4
       },
@@ -67,7 +67,7 @@
       },
       "targets": [
         {
-          "expr": "increase(ingest_selector_input_tokens_count[24h])",
+          "expr": "sum(increase(ingest_selector_input_tokens_count[24h]))",
           "refId": "A"
         }
       ],
@@ -107,7 +107,7 @@
       },
       "gridPos": {
         "x": 4,
-        "y": 1,
+        "y": 6,
         "w": 4,
         "h": 4
       },
@@ -123,7 +123,7 @@
       },
       "targets": [
         {
-          "expr": "increase(ingest_reconciler_input_tokens_count[24h])",
+          "expr": "sum(increase(ingest_reconciler_input_tokens_count[24h]))",
           "refId": "A"
         }
       ],
@@ -163,7 +163,7 @@
       },
       "gridPos": {
         "x": 8,
-        "y": 1,
+        "y": 6,
         "w": 4,
         "h": 4
       },
@@ -179,7 +179,7 @@
       },
       "targets": [
         {
-          "expr": "increase(ingest_selector_input_tokens_sum[24h])",
+          "expr": "sum(increase(ingest_selector_input_tokens_sum[24h]))",
           "refId": "A"
         }
       ],
@@ -219,7 +219,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 1,
+        "y": 6,
         "w": 4,
         "h": 4
       },
@@ -235,7 +235,7 @@
       },
       "targets": [
         {
-          "expr": "increase(ingest_selector_output_tokens_sum[24h])",
+          "expr": "sum(increase(ingest_selector_output_tokens_sum[24h]))",
           "refId": "A"
         }
       ],
@@ -275,7 +275,7 @@
       },
       "gridPos": {
         "x": 16,
-        "y": 1,
+        "y": 6,
         "w": 4,
         "h": 4
       },
@@ -291,7 +291,7 @@
       },
       "targets": [
         {
-          "expr": "increase(ingest_reconciler_input_tokens_sum[24h])",
+          "expr": "sum(increase(ingest_reconciler_input_tokens_sum[24h]))",
           "refId": "A"
         }
       ],
@@ -331,7 +331,7 @@
       },
       "gridPos": {
         "x": 20,
-        "y": 1,
+        "y": 6,
         "w": 4,
         "h": 4
       },
@@ -347,7 +347,7 @@
       },
       "targets": [
         {
-          "expr": "increase(ingest_reconciler_output_tokens_sum[24h])",
+          "expr": "sum(increase(ingest_reconciler_output_tokens_sum[24h]))",
           "refId": "A"
         }
       ],
@@ -360,7 +360,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 5
+        "y": 0
       },
       "id": 101,
       "title": "Ingest Pipeline",
@@ -401,7 +401,7 @@
         "h": 4,
         "w": 4,
         "x": 0,
-        "y": 6
+        "y": 1
       },
       "id": 3,
       "options": {
@@ -435,6 +435,65 @@
       "fieldConfig": {
         "defaults": {
           "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 4,
+        "y": 1
+      },
+      "id": 50,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "wiki_pages_total{job=\"agent-wiki-agent-workspace-backend\"}",
+          "legendFormat": "Wiki Pages",
+          "refId": "A"
+        }
+      ],
+      "title": "Wiki Pages",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
             "mode": "palette-classic"
           },
           "mappings": [],
@@ -445,9 +504,9 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 20,
-        "x": 4,
-        "y": 6
+        "w": 16,
+        "x": 8,
+        "y": 1
       },
       "id": 11,
       "options": {
@@ -2000,7 +2059,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 206,
+        "y": 214,
         "w": 12,
         "h": 8
       },
@@ -2021,12 +2080,12 @@
       },
       "targets": [
         {
-          "expr": "rate(ingest_selector_input_tokens_sum[5m]) / rate(ingest_selector_input_tokens_count[5m])",
-          "legendFormat": "avg input tokens",
+          "expr": "sum(rate(ingest_selector_input_tokens_sum[5m]))",
+          "legendFormat": "input tokens/s",
           "refId": "A"
         }
       ],
-      "title": "Selector Avg Input Tokens",
+      "title": "Selector Input Tokens (rate)",
       "type": "timeseries"
     },
     {
@@ -2042,7 +2101,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 206,
+        "y": 214,
         "w": 12,
         "h": 8
       },
@@ -2063,12 +2122,12 @@
       },
       "targets": [
         {
-          "expr": "rate(ingest_selector_output_tokens_sum[5m]) / rate(ingest_selector_output_tokens_count[5m])",
-          "legendFormat": "avg output tokens",
+          "expr": "sum(rate(ingest_selector_output_tokens_sum[5m]))",
+          "legendFormat": "output tokens/s",
           "refId": "A"
         }
       ],
-      "title": "Selector Avg Output Tokens",
+      "title": "Selector Output Tokens (rate)",
       "type": "timeseries"
     },
     {
@@ -2084,8 +2143,8 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 218,
-        "w": 12,
+        "y": 226,
+        "w": 8,
         "h": 8
       },
       "id": 115,
@@ -2105,12 +2164,12 @@
       },
       "targets": [
         {
-          "expr": "rate(ingest_reconciler_input_tokens_sum[5m]) / rate(ingest_reconciler_input_tokens_count[5m])",
-          "legendFormat": "avg input tokens",
+          "expr": "sum(rate(ingest_reconciler_input_tokens_sum[5m]))",
+          "legendFormat": "input tokens/s",
           "refId": "A"
         }
       ],
-      "title": "Reconciler Avg Input Tokens",
+      "title": "Reconciler Input Tokens (rate)",
       "type": "timeseries"
     },
     {
@@ -2125,9 +2184,9 @@
         "overrides": []
       },
       "gridPos": {
-        "x": 12,
-        "y": 218,
-        "w": 12,
+        "x": 8,
+        "y": 226,
+        "w": 8,
         "h": 8
       },
       "id": 116,
@@ -2147,12 +2206,12 @@
       },
       "targets": [
         {
-          "expr": "rate(ingest_reconciler_output_tokens_sum[5m]) / rate(ingest_reconciler_output_tokens_count[5m])",
-          "legendFormat": "avg output tokens",
+          "expr": "sum(rate(ingest_reconciler_output_tokens_sum[5m]))",
+          "legendFormat": "output tokens/s",
           "refId": "A"
         }
       ],
-      "title": "Reconciler Avg Output Tokens",
+      "title": "Reconciler Output Tokens (rate)",
       "type": "timeseries"
     },
     {
@@ -2180,9 +2239,9 @@
         "overrides": []
       },
       "gridPos": {
-        "x": 0,
+        "x": 16,
         "y": 226,
-        "w": 12,
+        "w": 8,
         "h": 8
       },
       "id": 117,
@@ -2229,6 +2288,132 @@
         }
       ],
       "title": "Reconciler Output Tokens Distribution",
+      "type": "heatmap"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 206
+      },
+      "id": 127,
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum(rate(ingest_document_chars_sum[5m])) by (source_type) / sum(rate(ingest_document_chars_count[5m])) by (source_type)",
+          "legendFormat": "{{source_type}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Avg Document Size by Source (chars)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "scheme",
+            "scheme": "Oranges"
+          },
+          "custom": {
+            "fillOpacity": 80,
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "scaleDistribution": {
+              "type": "linear"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 206
+      },
+      "id": 128,
+      "options": {
+        "calculate": false,
+        "cellGap": 1,
+        "color": {
+          "exponent": 0.5,
+          "fill": "dark-orange",
+          "mode": "scheme",
+          "scale": "exponential",
+          "scheme": "Oranges",
+          "steps": 64
+        },
+        "exemplars": {
+          "color": "rgba(255,0,255,0.7)"
+        },
+        "filterValues": {
+          "le": 1e-09
+        },
+        "legend": {
+          "show": true
+        },
+        "rowsFrame": {
+          "layout": "auto"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "yHistogram": false
+        },
+        "yAxis": {
+          "axisPlacement": "left",
+          "reverse": false,
+          "unit": "short"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum(rate(ingest_document_chars_bucket[5m])) by (le)",
+          "format": "heatmap",
+          "legendFormat": "{{le}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Document Size Distribution",
       "type": "heatmap"
     }
   ],

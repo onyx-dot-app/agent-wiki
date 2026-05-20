@@ -36,6 +36,7 @@ from app.llm.settings import get as get_llm_settings
 from app.metrics import (
     ingest_batch_reconciler_duration_seconds,
     ingest_bm25_score_by_outcome,
+    ingest_document_chars,
     ingest_llm_calls_per_doc,
     ingest_outcomes_total,
     ingest_queue_depth,
@@ -263,6 +264,7 @@ def process_pushed_document(push: dict[str, Any]) -> None:
     )
 
     ingest_requests_total.labels(source_type=source_type or "unknown").inc()
+    ingest_document_chars.labels(source_type=source_type or "unknown").observe(len(content))
     ingest_queue_depth.set(documents_queue.depth().pending)
 
     if is_filtered(source_type):

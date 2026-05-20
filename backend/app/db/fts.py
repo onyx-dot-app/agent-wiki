@@ -22,6 +22,8 @@ from __future__ import annotations
 import logging
 import threading
 
+from opensearchpy import OpenSearch  # type: ignore[import-untyped]
+from opensearchpy.exceptions import NotFoundError  # type: ignore[import-untyped]
 from pydantic import BaseModel
 
 log = logging.getLogger(__name__)
@@ -30,7 +32,6 @@ _client_lock = threading.Lock()
 _client: object | None = None
 _client_ready = False  # True once we've attempted init (even if it failed)
 
-
 class SearchHit(BaseModel):
     doc_id: str
     path: str
@@ -38,15 +39,12 @@ class SearchHit(BaseModel):
     snippet: str
     score: float
 
-
 # --------------------------------------------------------------------------- #
 # Client lifecycle                                                             #
 # --------------------------------------------------------------------------- #
 
-
 def _make_client(url: str) -> object:
     import re
-    from opensearchpy import OpenSearch  # type: ignore[import-untyped]
 
     # urlparse mishandles passwords with special chars (e.g. '?') — use regex instead.
     m = re.match(
@@ -74,7 +72,6 @@ def _make_client(url: str) -> object:
 
     return OpenSearch(**kwargs)  # type: ignore[arg-type]
 
-
 def _get_client() -> object | None:
     global _client, _client_ready
     if _client_ready:
@@ -97,14 +94,12 @@ def _get_client() -> object | None:
         _client_ready = True
     return _client
 
-
 def reset_client_for_tests() -> None:
     """Drop the cached client.  Call between tests that change CONFIG."""
     global _client, _client_ready
     with _client_lock:
         _client = None
         _client_ready = False
-
 
 def drop_index_for_tests() -> None:
     """Delete the entire per-test index.  Each test gets a unique index name
@@ -114,9 +109,6 @@ def drop_index_for_tests() -> None:
     if client is None:
         return
     try:
-        from opensearchpy import OpenSearch  # type: ignore[import-untyped]
-
-        from opensearchpy.exceptions import NotFoundError  # type: ignore[import-untyped]
 
         c: OpenSearch = client  # type: ignore[assignment]
         try:
@@ -125,7 +117,6 @@ def drop_index_for_tests() -> None:
             pass
     except Exception:
         log.warning("fts: drop_index_for_tests failed", exc_info=True)
-
 
 # --------------------------------------------------------------------------- #
 # Index bootstrap                                                              #
@@ -146,14 +137,11 @@ _MAPPING = {
     },
 }
 
-
 def _index_name() -> str:
     from app.config import CONFIG
     return CONFIG.opensearch_index
 
-
 def _ensure_index(client: object) -> None:
-    from opensearchpy import OpenSearch  # type: ignore[import-untyped]
 
     c: OpenSearch = client  # type: ignore[assignment]
     idx = _index_name()
@@ -161,11 +149,9 @@ def _ensure_index(client: object) -> None:
         c.indices.create(index=idx, body=_MAPPING)
         log.info("fts: created index %s", idx)
 
-
 # --------------------------------------------------------------------------- #
 # Write operations                                                             #
 # --------------------------------------------------------------------------- #
-
 
 def upsert_document(
     doc_id: str,
@@ -185,7 +171,6 @@ def upsert_document(
     if client is None:
         return
     try:
-        from opensearchpy import OpenSearch  # type: ignore[import-untyped]
 
         c: OpenSearch = client  # type: ignore[assignment]
         c.index(
@@ -197,6 +182,19 @@ def upsert_document(
     except Exception:
         log.warning("fts: upsert_document failed for %s", path, exc_info=True)
 
+def count_documents() -> int | None:
+    """Return the total number of indexed wiki pages, or None if unavailable."""
+    client = _get_client()
+    if client is None:
+        return None
+    try:
+
+        c: OpenSearch = client  # type: ignore[assignment]
+        result = c.count(index=_index_name())
+        return int(result["count"])
+    except Exception:
+        log.warning("fts: count_documents failed", exc_info=True)
+        return None
 
 def delete_document(doc_id: str) -> None:
     """Remove a page from the index.  ``doc_id`` is the path when called
@@ -205,9 +203,6 @@ def delete_document(doc_id: str) -> None:
     if client is None:
         return
     try:
-        from opensearchpy import OpenSearch  # type: ignore[import-untyped]
-
-        from opensearchpy.exceptions import NotFoundError  # type: ignore[import-untyped]
 
         c: OpenSearch = client  # type: ignore[assignment]
         try:
@@ -217,11 +212,9 @@ def delete_document(doc_id: str) -> None:
     except Exception:
         log.warning("fts: delete_document failed for %s", doc_id, exc_info=True)
 
-
 # --------------------------------------------------------------------------- #
 # Search                                                                       #
 # --------------------------------------------------------------------------- #
-
 
 def search(
     query: str,
@@ -255,7 +248,6 @@ def search(
     }
 
     try:
-        from opensearchpy import OpenSearch  # type: ignore[import-untyped]
 
         c: OpenSearch = client  # type: ignore[assignment]
         resp = c.search(index=_index_name(), body=body)
@@ -288,7 +280,6 @@ def search(
         SearchHit(doc_id=path, path=path, title=title, snippet=snippet, score=score)
         for path, title, snippet, score in candidates[:limit]
     ]
-
 
 def _visible_paths(
     paths: set[str],

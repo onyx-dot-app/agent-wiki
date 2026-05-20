@@ -30,6 +30,7 @@ clean (``api/`` → ``wiki/`` ← ``tools/``).
 from __future__ import annotations
 
 from app.db import fts
+from app.metrics import wiki_pages_total
 from app.mcp_server import pubsub as mcp_pubsub
 from app.tasks.reindex import index_path
 from app.tasks.triggers import fan_out_trigger_eval
@@ -96,6 +97,9 @@ def after_doc_delete(rel_path: str, sha: str, actor: str | None) -> None:
     acl.on_page_deleted(rel_path)
     fan_out_trigger_eval(rel_path, sha, "delete", actor)
     mcp_pubsub.publish_doc_delete(rel_path, sha)
+    count = fts.count_documents()
+    if count is not None:
+        wiki_pages_total.set(count)
     mcp_pubsub.publish_list_changed()
 
 
