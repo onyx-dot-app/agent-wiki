@@ -128,7 +128,20 @@
         }
       ],
       "title": "Documents Ingested (24h) by Source Type",
-      "type": "stat"
+      "type": "stat",
+      "transformations": [
+        {
+          "id": "sortBy",
+          "options": {
+            "fields": [
+              {
+                "desc": true,
+                "displayName": "Value"
+              }
+            ]
+          }
+        }
+      ]
     },
     {
       "datasource": {
