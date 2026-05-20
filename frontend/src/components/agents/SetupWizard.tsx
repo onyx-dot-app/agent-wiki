@@ -16,7 +16,10 @@ interface Props {
   onCancel: () => void;
 }
 
-export function SetupWizard({ catalog, onDone, onCancel }: Props) {
+export function SetupWizard({ catalog: rawCatalog, onDone, onCancel }: Props) {
+  // Hide onyx-craft from setup for now — in-app agent doesn't need
+  // the helper install + endpoint pin flow this wizard walks through.
+  const catalog = rawCatalog.filter((c) => c.id !== "onyx-craft");
   const [step, setStep] = useState<1 | 2>(1);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [helperState, setHelperState] = useState<{ acked: boolean } | null>(

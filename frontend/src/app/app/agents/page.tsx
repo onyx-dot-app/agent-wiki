@@ -552,16 +552,18 @@ function CodingToolsSection() {
           gap: 8,
         }}
       >
-        {launchers.map((c) => (
-          <li key={c.id}>
-            <ToolCard
-              toolId={c.id}
-              name={c.name}
-              tagline={c.tagline}
-              selected={false}
-            />
-          </li>
-        ))}
+        {launchers
+          .filter((c) => c.id !== "onyx-craft")
+          .map((c) => (
+            <li key={c.id}>
+              <ToolCard
+                toolId={c.id}
+                name={c.name}
+                tagline={c.tagline}
+                selected={false}
+              />
+            </li>
+          ))}
       </ul>
 
       {wizardOpen && (
