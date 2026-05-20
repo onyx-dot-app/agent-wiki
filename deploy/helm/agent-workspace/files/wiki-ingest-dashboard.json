@@ -1172,6 +1172,10 @@
           }
         },
         {
+          "id": "merge",
+          "options": {}
+        },
+        {
           "id": "sortBy",
           "options": {
             "fields": [
@@ -1269,6 +1273,10 @@
           }
         },
         {
+          "id": "merge",
+          "options": {}
+        },
+        {
           "id": "sortBy",
           "options": {
             "fields": [
@@ -1364,6 +1372,10 @@
           "options": {
             "mode": "columns"
           }
+        },
+        {
+          "id": "merge",
+          "options": {}
         },
         {
           "id": "sortBy",
