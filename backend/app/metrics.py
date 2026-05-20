@@ -94,6 +94,12 @@ ingest_selector_duration_seconds = Histogram(
     buckets=[0.5, 1.0, 2.0, 5.0, 10.0, 30.0],
 )
 
+ingest_batch_classifier_duration_seconds = Histogram(
+    "ingest_batch_classifier_duration_seconds",
+    "Total time spent on batch classifier LLM call(s) per ingest request",
+    buckets=[0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0],
+)
+
 
 # --------------------------------------------------------------------------- #
 # HTTP instrumentation                                                         #

@@ -28,12 +28,14 @@ from app.config import CONFIG
 from app.ingest import search as ingest_search
 from app.ingest.source_tiers import is_filtered
 from app.ingest.models import WikiUpdateCandidate
-from app.llm.agents import ingest_selector, wiki_updater
+from app.llm.agents import ingest_batch_classifier, ingest_selector, wiki_updater
+from app.llm.agents.ingest_batch_classifier import Verdict
 from app.llm.agents.wiki_updater import IRRELEVANT_SENTINEL
 from app.llm.agents.tools import _doc_helpers as h
 from app.llm.errors import LLMError
 from app.llm.settings import get as get_llm_settings
 from app.metrics import (
+    ingest_batch_classifier_duration_seconds,
     ingest_bm25_score_by_outcome,
     ingest_llm_calls_per_doc,
     ingest_llm_duration_seconds,
@@ -319,13 +321,51 @@ def process_pushed_document(push: dict[str, Any]) -> None:
                 ingest_bm25_score_by_outcome.labels(outcome="filtered_by_selector").observe(c.hit.score)
                 log.debug("process_pushed_document: filtered_by_selector path=%s", c.hit.path)
 
+    # Stage 4: batch classify with the main model (skipped when model is unset).
+    # Returns one verdict per candidate; fails open to NEEDS_UPDATE on any error.
+    if llm_s.model:
+        t_classify = time.monotonic()
+        verdicts = ingest_batch_classifier.classify_candidates(
+            title=title,
+            url=url,
+            content=content,
+            source=source_label,
+            candidates=readable,
+            model=llm_s.model,
+        )
+        ingest_batch_classifier_duration_seconds.observe(time.monotonic() - t_classify)
+    else:
+        verdicts = [Verdict.NEEDS_UPDATE] * len(readable)
+
     consecutive_irrelevant = 0
     llm_calls = 0
     irrelevant = 0
     committed = 0
     stopped_early = False
 
-    for c in readable:
+    for c, verdict in zip(readable, verdicts):
+        if verdict == Verdict.IRRELEVANT:
+            irrelevant += 1
+            consecutive_irrelevant += 1
+            ingest_outcomes_total.labels(outcome="irrelevant", wiki_path=c.hit.path).inc()
+            ingest_bm25_score_by_outcome.labels(outcome="irrelevant").observe(c.hit.score)
+            log.debug(
+                "process_pushed_document: IRRELEVANT (batch) path=%s consecutive=%d",
+                c.hit.path,
+                consecutive_irrelevant,
+            )
+            if consecutive_irrelevant >= CONFIG.ingest_irrelevant_stop_n:
+                stopped_early = True
+                break
+            continue
+
+        if verdict == Verdict.NO_CHANGE:
+            consecutive_irrelevant = 0
+            ingest_outcomes_total.labels(outcome="no_change", wiki_path=c.hit.path).inc()
+            ingest_bm25_score_by_outcome.labels(outcome="no_change").observe(c.hit.score)
+            continue
+
+        # NEEDS_UPDATE: run the full reconciler to produce the new body.
         try:
             t_llm = time.monotonic()
             result = wiki_updater.reconcile_document(
@@ -350,26 +390,26 @@ def process_pushed_document(push: dict[str, Any]) -> None:
             ingest_outcomes_total.labels(outcome="irrelevant", wiki_path=c.hit.path).inc()
             ingest_bm25_score_by_outcome.labels(outcome="irrelevant").observe(c.hit.score)
             log.debug(
-                "process_pushed_document: IRRELEVANT path=%s consecutive=%d",
+                "process_pushed_document: IRRELEVANT (reconciler) path=%s consecutive=%d",
                 c.hit.path,
                 consecutive_irrelevant,
             )
             if consecutive_irrelevant >= CONFIG.ingest_irrelevant_stop_n:
                 stopped_early = True
                 break
+        elif result is not None:
+            consecutive_irrelevant = 0
+            message = f"ingest({source_label}): update {c.hit.path}"
+            sha = wiki_git.commit_file(c.hit.path, result, message, author=_INGEST_AUTHOR)
+            wiki_notify.after_doc_write(c.hit.path, sha, "edit", _INGEST_AUTHOR)
+            committed += 1
+            ingest_outcomes_total.labels(outcome="committed", wiki_path=c.hit.path).inc()
+            ingest_bm25_score_by_outcome.labels(outcome="committed").observe(c.hit.score)
+            log.info("process_pushed_document: committed %s sha=%s", c.hit.path, sha)
         else:
             consecutive_irrelevant = 0
-            if result is not None:
-                message = f"ingest({source_label}): update {c.hit.path}"
-                sha = wiki_git.commit_file(c.hit.path, result, message, author=_INGEST_AUTHOR)
-                wiki_notify.after_doc_write(c.hit.path, sha, "edit", _INGEST_AUTHOR)
-                committed += 1
-                ingest_outcomes_total.labels(outcome="committed", wiki_path=c.hit.path).inc()
-                ingest_bm25_score_by_outcome.labels(outcome="committed").observe(c.hit.score)
-                log.info("process_pushed_document: committed %s sha=%s", c.hit.path, sha)
-            else:
-                ingest_outcomes_total.labels(outcome="no_change", wiki_path=c.hit.path).inc()
-                ingest_bm25_score_by_outcome.labels(outcome="no_change").observe(c.hit.score)
+            ingest_outcomes_total.labels(outcome="no_change", wiki_path=c.hit.path).inc()
+            ingest_bm25_score_by_outcome.labels(outcome="no_change").observe(c.hit.score)
 
     ingest_llm_calls_per_doc.observe(llm_calls)
     log.info(
