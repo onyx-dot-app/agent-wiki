@@ -2,10 +2,17 @@
 from __future__ import annotations
 
 import logging
+from typing import NamedTuple
 
 from app.ingest.models import WikiUpdateCandidate
 
 log = logging.getLogger(__name__)
+
+
+class TextEdit(NamedTuple):
+    find: str
+    replace: str
+
 
 NO_CHANGE_SENTINEL = "NO_CHANGE"
 IRRELEVANT_SENTINEL = "IRRELEVANT"
@@ -35,7 +42,7 @@ def batch_by_chars(
     return batches
 
 
-def apply_edits(body: str, edits: list[tuple[str, str]]) -> str | None:
+def apply_edits(body: str, edits: list[TextEdit]) -> str | None:
     """Apply (find, replace) pairs to body. Returns new body or None if unchanged."""
     result = body
     for find_text, replace_text in edits:

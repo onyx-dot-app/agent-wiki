@@ -18,7 +18,7 @@ from typing import NamedTuple
 
 from app.ingest.models import WikiUpdateCandidate
 from app.llm import client
-from app.llm.agents.common import IRRELEVANT_SENTINEL, NO_CHANGE_SENTINEL, apply_edits, batch_by_chars
+from app.llm.agents.common import IRRELEVANT_SENTINEL, NO_CHANGE_SENTINEL, TextEdit, apply_edits, batch_by_chars
 from app.llm.prompts import load_prompt
 from app.tracing import trace_flow
 
@@ -133,18 +133,18 @@ def _reconcile_batch(
             results.append(None)
         elif isinstance(outcome, str):  # IRRELEVANT_SENTINEL
             results.append(IRRELEVANT_SENTINEL)
-        else:  # list[tuple[str, str]] — apply edits to current body
+        else:  # list[TextEdit] — apply edits to current body
             results.append(apply_edits(c.body, outcome))
     return results
 
 
-def _parse(text: str, n: int) -> list[str | None | list[tuple[str, str]]]:
+def _parse(text: str, n: int) -> list[str | None | list[TextEdit]]:
     """Parse the structured LLM output into a per-candidate outcome list.
 
     Each element is one of:
       - IRRELEVANT_SENTINEL (str): page is unrelated
       - None: page is already up-to-date
-      - list[tuple[str, str]]: (find, replace) edit pairs to apply
+      - list[TextEdit]: (find, replace) edit pairs to apply
     """
     parts = _RESULT_RE.split(text)
     raw: dict[int, str] = {}
@@ -156,7 +156,7 @@ def _parse(text: str, n: int) -> list[str | None | list[tuple[str, str]]]:
     if not raw:
         raise ValueError("no ===RESULT [N]=== sections found in response")
 
-    results: list[str | None | list[tuple[str, str]]] = []
+    results: list[str | None | list[TextEdit]] = []
     for i in range(1, n + 1):
         body = raw.get(i, IRRELEVANT_SENTINEL)
         if body == IRRELEVANT_SENTINEL or body.startswith(IRRELEVANT_SENTINEL + "\n"):
@@ -168,9 +168,9 @@ def _parse(text: str, n: int) -> list[str | None | list[tuple[str, str]]]:
     return results
 
 
-def _parse_edits(text: str) -> list[tuple[str, str]]:
-    """Parse ===EDIT=== blocks from a result section into (find, replace) pairs."""
-    edits: list[tuple[str, str]] = []
+def _parse_edits(text: str) -> list[TextEdit]:
+    """Parse ===EDIT=== blocks from a result section into TextEdit pairs."""
+    edits: list[TextEdit] = []
     for block in re.split(r"===EDIT===\n?", text.strip()):
         block = block.strip()
         if not block:
@@ -189,7 +189,7 @@ def _parse_edits(text: str) -> list[tuple[str, str]]:
         find_text = find_text.strip("\n")
         replace_text = replace_text.strip("\n")
         if find_text:
-            edits.append((find_text, replace_text))
+            edits.append(TextEdit(find=find_text, replace=replace_text))
     return edits
 
 
