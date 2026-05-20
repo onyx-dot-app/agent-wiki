@@ -82,6 +82,12 @@ ingest_selector_candidates_filtered = Histogram(
     buckets=[0, 1, 2, 3, 5, 8, 10, 15, 20],
 )
 
+ingest_selector_calls_per_doc = Histogram(
+    "ingest_selector_calls_per_doc",
+    "Number of selector LLM calls (batches) made per document ingestion",
+    buckets=[0, 1, 2, 3, 5, 8, 10, 15, 20],
+)
+
 ingest_selector_duration_seconds = Histogram(
     "ingest_selector_duration_seconds",
     "Total time spent on selector LLM call(s) per ingest request",

@@ -1515,7 +1515,7 @@
           "yHistogram": false
         },
         "yAxis": {
-          "axisLabel": "candidates filtered",
+          "axisLabel": "selector calls",
           "axisPlacement": "left",
           "unit": "short"
         }
@@ -1526,7 +1526,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(rate(ingest_selector_candidates_filtered_bucket[5m])) by (le)",
+          "expr": "sum(rate(ingest_selector_calls_per_doc_bucket[5m])) by (le)",
           "format": "heatmap",
           "legendFormat": "{{le}}",
           "refId": "A"
