@@ -1073,7 +1073,7 @@
           "refId": "A"
         }
       ],
-      "title": "Total LLM Calls, Default Model (rolling 1h)",
+      "title": "Total LLM Calls (Default Model) - rolling 1h",
       "type": "timeseries"
     },
     {
