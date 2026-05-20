@@ -174,8 +174,8 @@
       "gridPos": {
         "h": 8,
         "w": 12,
-        "x": 0,
-        "y": 13
+        "x": 12,
+        "y": 5
       },
       "id": 5,
       "options": {
@@ -223,7 +223,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 21
+        "y": 13
       },
       "id": 9,
       "options": {
@@ -285,7 +285,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 21
+        "y": 13
       },
       "id": 17,
       "options": {
@@ -366,7 +366,7 @@
         "h": 8,
         "w": 6,
         "x": 0,
-        "y": 29
+        "y": 21
       },
       "id": 6,
       "options": {
@@ -447,7 +447,7 @@
         "h": 8,
         "w": 6,
         "x": 18,
-        "y": 29
+        "y": 21
       },
       "id": 15,
       "options": {
@@ -528,7 +528,7 @@
         "h": 8,
         "w": 6,
         "x": 6,
-        "y": 29
+        "y": 21
       },
       "id": 16,
       "options": {
@@ -609,7 +609,7 @@
         "h": 8,
         "w": 6,
         "x": 12,
-        "y": 29
+        "y": 21
       },
       "id": 106,
       "options": {
@@ -690,7 +690,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 38
+        "y": 30
       },
       "id": 7,
       "options": {
@@ -771,7 +771,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 38
+        "y": 30
       },
       "id": 10,
       "options": {
@@ -849,7 +849,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 38
+        "y": 30
       },
       "id": 12,
       "options": {
@@ -902,7 +902,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 46
+        "y": 38
       },
       "id": 8,
       "options": {
@@ -970,7 +970,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 46
+        "y": 38
       },
       "id": 13,
       "options": {
@@ -1046,7 +1046,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 46
+        "y": 38
       },
       "id": 14,
       "options": {
@@ -1082,7 +1082,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 62
+        "y": 54
       },
       "id": 102,
       "title": "Top Wiki Pages by Outcome",
@@ -1148,7 +1148,7 @@
         "h": 10,
         "w": 8,
         "x": 0,
-        "y": 63
+        "y": 55
       },
       "id": 103,
       "targets": [
@@ -1249,7 +1249,7 @@
         "h": 10,
         "w": 8,
         "x": 8,
-        "y": 63
+        "y": 55
       },
       "id": 104,
       "targets": [
@@ -1350,7 +1350,7 @@
         "h": 10,
         "w": 8,
         "x": 16,
-        "y": 63
+        "y": 55
       },
       "id": 105,
       "targets": [
@@ -1414,7 +1414,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 54
+        "y": 46
       },
       "id": 107,
       "options": {
@@ -1482,7 +1482,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 54
+        "y": 46
       },
       "id": 108,
       "options": {
@@ -1558,7 +1558,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 54
+        "y": 46
       },
       "id": 109,
       "options": {
@@ -1586,122 +1586,6 @@
         }
       ],
       "title": "Total LLM Calls (Selector Model) - rolling 1h",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "drawStyle": "bars",
-            "fillOpacity": 60,
-            "lineWidth": 1,
-            "stacking": {
-              "group": "A",
-              "mode": "normal"
-            }
-          },
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 5
-      },
-      "id": 110,
-      "options": {
-        "legend": {
-          "calcs": [
-            "last",
-            "sum"
-          ],
-          "displayMode": "table",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "sum(increase(ingest_requests_total[1h])) by (source_type)",
-          "legendFormat": "{{source_type}}",
-          "refId": "A"
-        }
-      ],
-      "title": "Ingest Requests by Source (rolling 1h)",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "drawStyle": "bars",
-            "fillOpacity": 60,
-            "lineWidth": 1,
-            "stacking": {
-              "group": "A",
-              "mode": "normal"
-            }
-          },
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 13
-      },
-      "id": 111,
-      "options": {
-        "legend": {
-          "calcs": [
-            "last",
-            "sum"
-          ],
-          "displayMode": "table",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "sum(increase(ingest_outcomes_total[1h])) by (outcome)",
-          "legendFormat": "{{outcome}}",
-          "refId": "A"
-        }
-      ],
-      "title": "Ingest Outcomes (rolling 1h)",
       "type": "timeseries"
     }
   ],
