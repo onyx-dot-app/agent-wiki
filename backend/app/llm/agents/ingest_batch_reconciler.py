@@ -158,5 +158,3 @@ def _parse(text: str, n: int) -> list[str | None]:
             results.append(strip_outer_fence(body))
 
     return results
-
-
