@@ -316,6 +316,7 @@ def process_pushed_document(push: dict[str, Any]) -> None:
                 ingest_outcomes_total.labels(
                     outcome="filtered_by_selector", wiki_path=c.hit.path
                 ).inc()
+                ingest_bm25_score_by_outcome.labels(outcome="filtered_by_selector").observe(c.hit.score)
                 log.debug("process_pushed_document: filtered_by_selector path=%s", c.hit.path)
 
     consecutive_irrelevant = 0
