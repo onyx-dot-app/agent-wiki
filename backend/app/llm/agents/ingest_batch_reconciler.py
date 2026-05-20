@@ -19,6 +19,7 @@ from typing import NamedTuple
 from app.ingest.models import WikiUpdateCandidate
 from app.llm import client
 from app.llm.agents.common import IRRELEVANT_SENTINEL, NO_CHANGE_SENTINEL, TextEdit, apply_edits, batch_by_chars
+from app.metrics import ingest_reconciler_input_tokens, ingest_reconciler_output_tokens
 from app.llm.prompts import load_prompt
 from app.tracing import trace_flow
 
@@ -119,6 +120,8 @@ def _reconcile_batch(
                 ],
                 model=model,
             )
+        ingest_reconciler_input_tokens.observe(result.usage.input_tokens)
+        ingest_reconciler_output_tokens.observe(result.usage.output_tokens)
         parsed = _parse(result.text, len(batch))
     except Exception:
         log.warning(
