@@ -249,7 +249,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(ingest_outcomes_total) by (outcome)",
+          "expr": "sum(increase(ingest_outcomes_total[$__timeRange])) by (outcome)",
           "legendFormat": "{{outcome}}",
           "refId": "A"
         }
