@@ -16,6 +16,8 @@ from prometheus_client import Counter, Gauge, Histogram, REGISTRY
 from prometheus_client.core import GaugeMetricFamily  # type: ignore[import-untyped]
 from prometheus_fastapi_instrumentator import Instrumentator
 
+from app.db import fts
+
 # --------------------------------------------------------------------------- #
 # Ingest pipeline                                                              #
 # --------------------------------------------------------------------------- #
@@ -80,7 +82,6 @@ ingest_queue_depth = Gauge(
 
 class _WikiPagesCollector:
     def collect(self):
-        from app.db import fts
         count = fts.count_documents() or 0
         g = GaugeMetricFamily(
             "wiki_pages_total",
