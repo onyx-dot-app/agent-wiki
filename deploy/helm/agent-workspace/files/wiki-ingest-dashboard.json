@@ -2077,12 +2077,12 @@
       },
       "targets": [
         {
-          "expr": "rate(ingest_selector_input_tokens_sum[5m]) / rate(ingest_selector_input_tokens_count[5m])",
-          "legendFormat": "avg input tokens",
+          "expr": "sum(rate(ingest_selector_input_tokens_sum[5m]))",
+          "legendFormat": "input tokens/s",
           "refId": "A"
         }
       ],
-      "title": "Selector Avg Input Tokens",
+      "title": "Selector Input Tokens (rate)",
       "type": "timeseries"
     },
     {
@@ -2119,12 +2119,12 @@
       },
       "targets": [
         {
-          "expr": "rate(ingest_selector_output_tokens_sum[5m]) / rate(ingest_selector_output_tokens_count[5m])",
-          "legendFormat": "avg output tokens",
+          "expr": "sum(rate(ingest_selector_output_tokens_sum[5m]))",
+          "legendFormat": "output tokens/s",
           "refId": "A"
         }
       ],
-      "title": "Selector Avg Output Tokens",
+      "title": "Selector Output Tokens (rate)",
       "type": "timeseries"
     },
     {
@@ -2161,12 +2161,12 @@
       },
       "targets": [
         {
-          "expr": "rate(ingest_reconciler_input_tokens_sum[5m]) / rate(ingest_reconciler_input_tokens_count[5m])",
-          "legendFormat": "avg input tokens",
+          "expr": "sum(rate(ingest_reconciler_input_tokens_sum[5m]))",
+          "legendFormat": "input tokens/s",
           "refId": "A"
         }
       ],
-      "title": "Reconciler Avg Input Tokens",
+      "title": "Reconciler Input Tokens (rate)",
       "type": "timeseries"
     },
     {
@@ -2203,12 +2203,12 @@
       },
       "targets": [
         {
-          "expr": "rate(ingest_reconciler_output_tokens_sum[5m]) / rate(ingest_reconciler_output_tokens_count[5m])",
-          "legendFormat": "avg output tokens",
+          "expr": "sum(rate(ingest_reconciler_output_tokens_sum[5m]))",
+          "legendFormat": "output tokens/s",
           "refId": "A"
         }
       ],
-      "title": "Reconciler Avg Output Tokens",
+      "title": "Reconciler Output Tokens (rate)",
       "type": "timeseries"
     },
     {
