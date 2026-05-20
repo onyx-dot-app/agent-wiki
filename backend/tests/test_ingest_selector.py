@@ -18,7 +18,10 @@ def _candidate(path: str, body: str = "body") -> WikiUpdateCandidate:
 
 
 def _llm_response(text: str) -> MagicMock:
-    return MagicMock(text=text)
+    m = MagicMock(text=text)
+    m.usage.input_tokens = 100
+    m.usage.output_tokens = 50
+    return m
 
 
 # --------------------------------------------------------------------------- #
