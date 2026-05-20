@@ -36,6 +36,10 @@ from evals.schema import CaseResult, ScorerOutcome
 
 log = logging.getLogger(__name__)
 
+# How many leading chars of a doc body identify it inside the _complete stub.
+# Matches the substring length used in the lookup loop below.
+_BODY_FINGERPRINT_LEN = 120
+
 
 def _score_scenario(scenario: Scenario, state: WikiState) -> list[ScorerOutcome]:
     """Produce the per-scenario scorer rows.
@@ -156,6 +160,35 @@ def _stub_external_agent(scenarios: list[Scenario]) -> Generator[None]:
                 % (existing.id, scenario.id)
             )
         scenario_by_prompt[key] = scenario
+
+    # The _complete stub matches a wiki doc by `path` plus the first
+    # _BODY_FINGERPRINT_LEN chars of its body and returns the body with the
+    # matching scenario's expected_facts_present appended. Two scenarios that
+    # share that key with DIFFERENT expected facts would silently route to
+    # whichever is iterated first, masking real process_instruction behavior.
+    # Sharing the same key with identical facts (or no expected_updates at all)
+    # is fine — the canned response is the same either way.
+    seen_fact_keys: dict[tuple[str, str], tuple[str, tuple[str, ...]]] = {}
+    for scenario in scenarios:
+        update_paths = {u.path for u in scenario.expected_updates}
+        update_facts = {
+            u.path: tuple(c.text for c in u.facts_present) for u in scenario.expected_updates
+        }
+        for d in scenario.wiki_state:
+            if d.path not in update_paths:
+                continue
+            body_key = (d.path, d.body[:_BODY_FINGERPRINT_LEN])
+            facts = update_facts[d.path]
+            existing = seen_fact_keys.get(body_key)
+            if existing is not None and existing[0] != scenario.id and existing[1] != facts:
+                raise ValueError(
+                    "external-agent stub _complete collision: scenarios %s and %s share doc "
+                    "path %r with the same first %d-char body prefix but different "
+                    "expected_facts_present — canned response would be ambiguous"
+                    % (existing[0], scenario.id, d.path, _BODY_FINGERPRINT_LEN)
+                )
+            seen_fact_keys[body_key] = (scenario.id, facts)
+
     original_stream = llm_client.stream
     original_complete = llm_client.complete
 
@@ -219,7 +252,7 @@ def _stub_external_agent(scenarios: list[Scenario]) -> Generator[None]:
         for s in scenarios:
             for upd in s.expected_updates:
                 for d in s.wiki_state:
-                    if d.path == upd.path and d.body[:120] in user_text:
+                    if d.path == upd.path and d.body[:_BODY_FINGERPRINT_LEN] in user_text:
                         extras = "\n".join(f"- {c.text}" for c in upd.facts_present)
                         if extras:
                             return CompletionResult(
