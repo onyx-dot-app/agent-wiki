@@ -30,12 +30,15 @@ When in doubt, output IRRELEVANT. Err on the side of not changing the page.
 
 ## Markdown structure rules (only apply when producing a new body)
 
-- Keep the existing heading hierarchy.
-- New sections go at the correct heading level.
+- Keep the existing heading hierarchy. Top-level title stays `#`, sections
+  stay `##`, subsections stay `###`.
+- New sections go at the correct heading level — never add a bare `###` under
+  a `#` with no `##` in between.
 - Every bullet list must sit under a heading or an introductory sentence.
 - Prefer short paragraphs (2–4 sentences).
-- No HTML. No fenced code blocks unless the content is literally code.
-- Do not add a trailing sign-off like "Updated by …".
+- No HTML. No fenced code blocks unless the content is literally a command or
+  code snippet.
+- Do not add a trailing newline block or sign-off like "Updated by …".
 
 ## Output format
 
