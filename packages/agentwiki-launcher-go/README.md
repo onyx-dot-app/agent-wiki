@@ -54,6 +54,36 @@ internal/
   uri/                         — parse agentwiki:// URIs
 ```
 
-## Distribution (planned)
+## Distribution
 
-Homebrew tap (`onyx-dot-app/homebrew-wiki`) → `brew install onyx/wiki/agentwiki-launcher` → binary lands at `/opt/homebrew/bin/agentwiki-launcher`. Post-install runs `agentwiki-launcher install` to register the URL scheme. Signed with Developer ID + notarized via xcrun notarytool.
+Homebrew tap (`onyx-dot-app/homebrew-wiki`) → `brew install onyx/wiki/agentwiki-launcher` → binary lands at `/opt/homebrew/bin/agentwiki-launcher`. Post-install runs `agentwiki-launcher install` to register the URL scheme.
+
+### Signing + notarization
+
+`make release` cross-compiles both darwin binaries, signs each with the
+Developer ID Application cert under hardened runtime + secure timestamp,
+and submits each via `xcrun notarytool --wait`. Standalone Mach-O
+binaries cannot be stapled — Gatekeeper resolves the notarization ticket
+online on first launch.
+
+Required env (see `scripts/release-mac.sh`):
+
+| Variable              | Purpose                                        |
+| --------------------- | ---------------------------------------------- |
+| `APPLE_ID`            | Apple developer account email                  |
+| `APPLE_TEAM_ID`       | Apple team ID                                  |
+| `APPLE_APP_PASSWORD`  | App-specific password for `notarytool`         |
+| `APPLE_CERT_BASE64`   | Base64-encoded Developer ID Application `.p12` |
+| `APPLE_CERT_PASSWORD` | Password for the `.p12`                        |
+
+Locally:
+
+```
+source scripts/load-secrets-aws.sh   # pulls all five from AWS Secrets Manager
+make release
+```
+
+In CI: secrets live on the GitHub Actions workflow
+(`.github/workflows/release-agentwiki-launcher-go.yml`, manual dispatch
+only — no auto-trigger). Wiring publishing onto a tag push or a Homebrew
+formula bump is a follow-up.

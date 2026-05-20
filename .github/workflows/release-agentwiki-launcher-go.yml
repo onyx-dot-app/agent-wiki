@@ -1,0 +1,43 @@
+name: Release agentwiki-launcher (Go)
+
+# Manual dispatch only — does NOT publish a GitHub release or push to the
+# Homebrew tap. Produces signed + notarized darwin binaries as workflow
+# artifacts so we can verify the pipeline before wiring publishing onto a
+# tag trigger.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  release:
+    runs-on: macos-14
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: packages/agentwiki-launcher-go
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: packages/agentwiki-launcher-go/go.mod
+          cache: false
+
+      - name: Build darwin binaries
+        run: make dist
+
+      - name: Sign + notarize
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_CERT_BASE64: ${{ secrets.APPLE_CERT_BASE64 }}
+          APPLE_CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
+        run: ./scripts/release-mac.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agentwiki-launcher-darwin
+          path: packages/agentwiki-launcher-go/dist/agentwiki-launcher-darwin-*
+          if-no-files-found: error
+          retention-days: 7
