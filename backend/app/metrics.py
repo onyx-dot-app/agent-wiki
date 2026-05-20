@@ -106,7 +106,7 @@ ingest_batch_reconciler_duration_seconds = Histogram(
     buckets=[0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0],
 )
 
-_TOKEN_BUCKETS = [128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072]
+_TOKEN_BUCKETS = [128, 256, 512, 1024, 2048, 4096, 8192, 16384]
 
 ingest_selector_input_tokens = Histogram(
     "ingest_selector_input_tokens",

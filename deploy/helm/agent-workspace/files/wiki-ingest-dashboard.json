@@ -67,11 +67,11 @@
       },
       "targets": [
         {
-          "expr": "sum(increase(ingest_selector_input_tokens_count[24h]))",
+          "expr": "round(sum(increase(ingest_selector_input_tokens_count[24h])))",
           "refId": "A"
         }
       ],
-      "title": "Selector LLM Calls (24h)",
+      "title": "Selector LLM Calls",
       "type": "stat"
     },
     {
@@ -123,11 +123,11 @@
       },
       "targets": [
         {
-          "expr": "sum(increase(ingest_reconciler_input_tokens_count[24h]))",
+          "expr": "round(sum(increase(ingest_reconciler_input_tokens_count[24h])))",
           "refId": "A"
         }
       ],
-      "title": "Reconciler LLM Calls (24h)",
+      "title": "Reconciler LLM Calls",
       "type": "stat"
     },
     {
@@ -183,7 +183,7 @@
           "refId": "A"
         }
       ],
-      "title": "Selector Input Tokens (24h)",
+      "title": "Selector Input Tokens",
       "type": "stat"
     },
     {
@@ -239,7 +239,7 @@
           "refId": "A"
         }
       ],
-      "title": "Selector Output Tokens (24h)",
+      "title": "Selector Output Tokens",
       "type": "stat"
     },
     {
@@ -295,7 +295,7 @@
           "refId": "A"
         }
       ],
-      "title": "Reconciler Input Tokens (24h)",
+      "title": "Reconciler Input Tokens",
       "type": "stat"
     },
     {
@@ -351,7 +351,7 @@
           "refId": "A"
         }
       ],
-      "title": "Reconciler Output Tokens (24h)",
+      "title": "Reconciler Output Tokens",
       "type": "stat"
     },
     {
@@ -554,7 +554,7 @@
             "fillOpacity": 10,
             "lineWidth": 2
           },
-          "unit": "reqpm"
+          "unit": "doc/m"
         },
         "overrides": []
       },
@@ -612,7 +612,7 @@
               "mode": "normal"
             }
           },
-          "unit": "reqpm"
+          "unit": "doc/m"
         },
         "overrides": []
       },
@@ -2275,7 +2275,7 @@
           "yHistogram": false
         },
         "yAxis": {
-          "axisLabel": "BM25 score",
+          "axisLabel": "output tokens",
           "axisPlacement": "left",
           "unit": "short"
         }
@@ -2283,6 +2283,7 @@
       "targets": [
         {
           "expr": "sum(rate(ingest_reconciler_output_tokens_bucket[5m])) by (le)",
+          "format": "heatmap",
           "legendFormat": "{{le}}",
           "refId": "A"
         }
