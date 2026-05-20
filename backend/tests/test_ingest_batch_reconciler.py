@@ -203,6 +203,25 @@ def test_reconcile_fails_open_on_parse_error(mock_client, _mock_prompt):
 
 @patch("app.llm.agents.ingest_batch_reconciler.load_prompt", return_value="p")
 @patch("app.llm.agents.ingest_batch_reconciler.client")
+def test_reconcile_empty_edit_list_warns_and_returns_none(mock_client, _mock_prompt):
+    # LLM returns a result section that is neither IRRELEVANT/NO_CHANGE nor a
+    # valid ===EDIT=== block — _parse_edits yields [] and a warning should fire.
+    candidates = [_candidate("a", "body text")]
+    mock_client.complete.return_value = _llm_response(
+        "===RESULT [1]===\nmalformed content with no edit blocks"
+    )
+
+    with patch("app.llm.agents.ingest_batch_reconciler.log") as mock_log:
+        results, _ = batch_reconcile(
+            title=None, url="", content="doc", source="s", candidates=candidates, model="m"
+        )
+
+    assert results[0] is None
+    mock_log.warning.assert_called_once()
+
+
+@patch("app.llm.agents.ingest_batch_reconciler.load_prompt", return_value="p")
+@patch("app.llm.agents.ingest_batch_reconciler.client")
 def test_reconcile_find_not_in_body_returns_none(mock_client, _mock_prompt):
     # FIND text doesn't exist in the candidate body → no edit applied → None
     candidates = [_candidate("a", "actual body")]

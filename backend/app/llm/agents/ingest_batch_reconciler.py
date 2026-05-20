@@ -131,9 +131,14 @@ def _reconcile_batch(
     for c, outcome in zip(batch, parsed):
         if outcome is None:
             results.append(None)
-        elif isinstance(outcome, str):  # IRRELEVANT_SENTINEL
+        elif outcome is IRRELEVANT_SENTINEL:
             results.append(IRRELEVANT_SENTINEL)
         else:  # list[TextEdit] — apply edits to current body
+            if not outcome:
+                log.warning(
+                    "ingest_batch_reconciler: no ===EDIT=== blocks parsed for %s, treating as NO_CHANGE",
+                    c.hit.path,
+                )
             results.append(apply_edits(c.body, outcome))
     return results
 
