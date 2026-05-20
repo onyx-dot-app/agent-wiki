@@ -67,7 +67,7 @@
       },
       "targets": [
         {
-          "expr": "sum(increase(ingest_selector_input_tokens_count[24h]))",
+          "expr": "round(sum(increase(ingest_selector_input_tokens_count[24h])))",
           "refId": "A"
         }
       ],
@@ -123,7 +123,7 @@
       },
       "targets": [
         {
-          "expr": "sum(increase(ingest_reconciler_input_tokens_count[24h]))",
+          "expr": "round(sum(increase(ingest_reconciler_input_tokens_count[24h])))",
           "refId": "A"
         }
       ],
