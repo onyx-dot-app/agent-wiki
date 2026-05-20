@@ -2277,6 +2277,7 @@
         "yAxis": {
           "axisLabel": "output tokens",
           "axisPlacement": "left",
+          "max": 16384,
           "unit": "short"
         }
       },
