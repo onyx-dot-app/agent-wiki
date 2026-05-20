@@ -1,0 +1,23 @@
+id: ext-03-no-change-needed
+prompt: |
+  Confirm the billing page documents Stripe and the JWT page documents RS256.
+  If either is missing those facts, add them. Otherwise no action needed.
+wiki_state:
+  - path: services/billing/overview.md
+    summary: Billing overview.
+    body: |
+      # Billing service
+
+      Built on FastAPI + Postgres. Stripe webhooks land at `/webhooks/stripe`.
+  - path: services/auth/jwt.md
+    summary: JWT issuance.
+    body: |
+      # JWT issuance
+
+      Tokens signed RS256. Key rotation every 30 days.
+expected_updates: []
+expected_not_updated:
+  - services/billing/overview.md
+  - services/auth/jwt.md
+notes: Restraint test — agent must not update when content is already current.
+tags: [restraint]

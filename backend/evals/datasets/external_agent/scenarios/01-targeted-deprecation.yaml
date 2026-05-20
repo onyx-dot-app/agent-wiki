@@ -1,0 +1,48 @@
+id: ext-01-targeted-deprecation
+prompt: |
+  Users API v1 was deprecated as of 2026-04-01. Clients should migrate to v2.
+  Update the wiki so the v1 docs reflect this. Don't touch unrelated pages.
+wiki_state:
+  - path: api/v1/users.md
+    summary: Users API v1 reference (endpoints, status).
+    body: |
+      # Users API v1
+
+      Status: stable.
+
+      ## Endpoints
+
+      - `GET /v1/users` — list users
+      - `POST /v1/users` — create user
+  - path: api/v2/users.md
+    summary: Users API v2 reference.
+    body: |
+      # Users API v2
+
+      ## Endpoints
+
+      - `GET /v2/users` — list users
+      - `POST /v2/users` — create user
+  - path: services/billing/overview.md
+    summary: Billing service overview.
+    body: |
+      # Billing service
+
+      Built on FastAPI + Postgres. Stripe webhooks land at `/webhooks/stripe`.
+expected_updates:
+  - path: api/v1/users.md
+    facts_present:
+      - id: deprecated-date
+        text: v1 is documented as deprecated as of 2026-04-01
+      - id: migrate-v2
+        text: clients are directed to move to v2
+    facts_preserved:
+      - id: list-v1
+        text: GET /v1/users is still documented
+      - id: create-v1
+        text: POST /v1/users is still documented
+expected_not_updated:
+  - api/v2/users.md
+  - services/billing/overview.md
+notes: One-doc target. Tests focus + restraint.
+tags: [focus]

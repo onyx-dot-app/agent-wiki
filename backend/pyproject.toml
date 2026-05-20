@@ -57,7 +57,7 @@ testpaths = ["tests"]
 addopts = "-q -n auto --dist=loadfile"
 
 [tool.basedpyright]
-include = ["app", "tests"]
+include = ["app", "tests", "evals"]
 exclude = [
     "**/__pycache__",
     "**/.venv",

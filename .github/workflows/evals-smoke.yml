@@ -1,0 +1,79 @@
+name: Evals smoke
+
+# Cheap smoke run for the eval harness — exercises every surface's runner
+# in --dry-run mode (stub LLM, no API keys). Catches harness/scorer/dataset
+# regressions on every PR that touches eval code.
+#
+# The real eval matrix (live LLM, $$) runs on a schedule in
+# evals-nightly.yml — see that file for the nightly job.
+
+concurrency:
+  group: evals-smoke-${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+on:
+  pull_request:
+    paths:
+      - backend/evals/**
+      - backend/app/llm/agents/wiki_updater.py
+      - backend/app/llm/agents/ingest_selector.py
+      - backend/app/llm/prompts/wiki_updater.*
+      - backend/app/llm/prompts/ingest_selector.*
+      - .github/workflows/evals-smoke.yml
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Install backend deps
+        run: uv sync --extra dev
+
+      - name: Rebuild datasets (sanity check builders)
+        run: |
+          uv run python -m evals.datasets.wiki_updater._build_v0
+          uv run python -m evals.datasets.ingest_selector._build_v0
+
+      - name: wiki_updater dry-run
+        run: |
+          uv run python -m evals.wiki_updater.run \
+            --cases evals/datasets/wiki_updater/cases.jsonl \
+            --models claude-sonnet-4-6 \
+            --dry-run \
+            --out runs/ci_wiki_updater.jsonl
+
+      - name: ingest_selector dry-run
+        run: |
+          uv run python -m evals.ingest_selector.run \
+            --cases evals/datasets/ingest_selector/cases.jsonl \
+            --models claude-haiku-4-5 \
+            --dry-run \
+            --out runs/ci_ingest_selector.jsonl
+
+      - name: external_agent dry-run
+        run: |
+          uv run python -m evals.external_agent.run \
+            --scenarios evals/datasets/external_agent/scenarios \
+            --models claude-sonnet-4-6 \
+            --dry-run \
+            --out runs/ci_external_agent.jsonl
+
+      - name: Verify dry-run produces baseline scores
+        run: uv run python -m evals.ci_assert_baseline runs/
+
+      - name: Upload run artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-smoke-runs
+          path: backend/runs/
+          if-no-files-found: ignore

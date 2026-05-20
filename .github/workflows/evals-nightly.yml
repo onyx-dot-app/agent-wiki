@@ -1,0 +1,77 @@
+name: Evals nightly
+
+# Live eval matrix against real LLM providers. Runs on a schedule + on
+# demand. Results push to Braintrust so the model matrix is visible over
+# time. Provider keys come from repo secrets.
+#
+# Cheap smoke checks (no API keys) run on every PR in evals-smoke.yml.
+
+concurrency:
+  group: evals-nightly
+  cancel-in-progress: false
+
+on:
+  schedule:
+    # 04:00 UTC daily — outside US/EU work hours
+    - cron: "0 4 * * *"
+  workflow_dispatch:
+    inputs:
+      models:
+        description: "Comma-separated model ids"
+        required: false
+        default: "claude-sonnet-4-6,claude-opus-4-7,gpt-5,gemini-2.5-pro"
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      EVAL_ANTHROPIC_API_KEY: ${{ secrets.EVAL_ANTHROPIC_API_KEY }}
+      EVAL_OPENAI_API_KEY: ${{ secrets.EVAL_OPENAI_API_KEY }}
+      EVAL_GEMINI_API_KEY: ${{ secrets.EVAL_GEMINI_API_KEY }}
+      BRAINTRUST_API_KEY: ${{ secrets.BRAINTRUST_API_KEY }}
+      BRAINTRUST_PROJECT: ${{ vars.BRAINTRUST_PROJECT || 'agent-wiki' }}
+      EVAL_MODELS: ${{ inputs.models || 'claude-sonnet-4-6,claude-opus-4-7,gpt-5,gemini-2.5-pro' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Install backend deps
+        run: uv sync --extra dev
+
+      - name: wiki_updater live run
+        run: |
+          uv run python -m evals.wiki_updater.run \
+            --cases evals/datasets/wiki_updater/cases.jsonl \
+            --models "$EVAL_MODELS" \
+            --braintrust "nightly-wiki-updater-$(date -u +%Y%m%d)" \
+            --out runs/nightly_wiki_updater.jsonl
+
+      - name: ingest_selector live run
+        run: |
+          uv run python -m evals.ingest_selector.run \
+            --cases evals/datasets/ingest_selector/cases.jsonl \
+            --models "$EVAL_MODELS" \
+            --braintrust "nightly-ingest-selector-$(date -u +%Y%m%d)" \
+            --out runs/nightly_ingest_selector.jsonl
+
+      - name: external_agent live run
+        run: |
+          uv run python -m evals.external_agent.run \
+            --scenarios evals/datasets/external_agent/scenarios \
+            --models "$EVAL_MODELS" \
+            --braintrust "nightly-external-agent-$(date -u +%Y%m%d)" \
+            --out runs/nightly_external_agent.jsonl
+
+      - name: Upload run artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-nightly-runs
+          path: backend/runs/
+          if-no-files-found: ignore

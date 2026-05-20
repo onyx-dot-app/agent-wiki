@@ -1,0 +1,42 @@
+id: ext-04-distractor-keyword
+prompt: |
+  The Search team has a new runbook step: when reindexing, run `flush-cache.sh`
+  beforehand. Update the search runbook to reflect this. Do not touch the
+  general cache documentation — this is search-specific cleanup, not cache policy.
+wiki_state:
+  - path: services/search/runbook.md
+    summary: Search runbook (restart, reindex).
+    body: |
+      # Search runbook
+
+      Restart the OpenSearch coordinator with
+      `kubectl rollout restart statefulset/os-coord`.
+
+      ## Reindex
+
+      Trigger reindex from the admin panel under Search → Reindex.
+  - path: services/cache/policy.md
+    summary: Cache policy (TTLs, eviction).
+    body: |
+      # Cache policy
+
+      TTL 60s by default. Override per-key with the `cache-ttl-override` header.
+  - path: services/cache/runbook.md
+    summary: Cache runbook (restart).
+    body: |
+      # Cache runbook
+
+      Restart with `kubectl rollout restart statefulset/memcached-recs`.
+expected_updates:
+  - path: services/search/runbook.md
+    facts_present:
+      - id: flush-cache-before-reindex
+        text: the runbook says to run flush-cache.sh before reindexing
+    facts_preserved:
+      - id: restart-cmd
+        text: the kubectl restart command is still documented
+expected_not_updated:
+  - services/cache/policy.md
+  - services/cache/runbook.md
+notes: Tests resistance to keyword-driven false positives ("cache" appears in unrelated docs).
+tags: [distractor]
