@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 import re
+from typing import NamedTuple
 
 from app.ingest.models import WikiUpdateCandidate
 from app.llm import client
@@ -27,6 +28,11 @@ from app.tracing import trace_flow
 log = logging.getLogger(__name__)
 
 _RECONCILER_BUDGET_CHARS = 200_000
+
+
+class BatchReconcileResult(NamedTuple):
+    results: list[str | None]
+    llm_calls: int
 
 # Sentinel used internally when a batch parse fails — tells the caller to
 # fall back to the per-page reconciler for every candidate in that batch.
@@ -43,7 +49,7 @@ def batch_reconcile(
     source: str,
     candidates: list[WikiUpdateCandidate],
     model: str,
-) -> tuple[list[str | None], int]:
+) -> BatchReconcileResult:
     """Reconcile all candidates in one or more LLM calls.
 
     Returns ``(results, llm_calls)`` where:
@@ -57,7 +63,7 @@ def batch_reconcile(
     LLM or parse error; batches fail independently.
     """
     if not candidates:
-        return [], 0
+        return BatchReconcileResult(results=[], llm_calls=0)
 
     candidate_budget = max(_RECONCILER_BUDGET_CHARS - len(content), 0)
     batches = _batch_by_chars(candidates, candidate_budget)
@@ -84,7 +90,7 @@ def batch_reconcile(
         len(results),
         len(batches),
     )
-    return results, len(batches)
+    return BatchReconcileResult(results=results, llm_calls=len(batches))
 
 
 def _batch_by_chars(
