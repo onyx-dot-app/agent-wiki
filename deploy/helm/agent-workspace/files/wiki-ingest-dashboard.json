@@ -2275,7 +2275,7 @@
           "yHistogram": false
         },
         "yAxis": {
-          "axisLabel": "BM25 score",
+          "axisLabel": "output tokens",
           "axisPlacement": "left",
           "unit": "short"
         }
