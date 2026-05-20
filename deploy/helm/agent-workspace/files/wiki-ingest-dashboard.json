@@ -478,7 +478,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "wiki_pages_total{job=\"agent-wiki-agent-workspace-backend\"}",
+          "expr": "sum(wiki_pages_total{job=\"agent-wiki-agent-workspace-backend\"})",
           "legendFormat": "Wiki Pages",
           "refId": "A"
         }
