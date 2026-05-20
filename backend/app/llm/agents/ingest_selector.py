@@ -93,14 +93,18 @@ def _select_batch(
                 ],
                 model=model,
             )
-        ingest_selector_input_tokens.observe(result.usage.input_tokens)
-        ingest_selector_output_tokens.observe(result.usage.output_tokens)
         text = result.text.strip()
         raw: Any = json.loads(text)
         if not isinstance(raw, list):
             raise ValueError(f"expected list, got {type(raw)}")
         valid = {i for i in cast(list[object], raw) if isinstance(i, int) and 1 <= i <= len(batch)}
-        return [batch[i - 1] for i in sorted(valid)]
+        kept = [batch[i - 1] for i in sorted(valid)]
     except Exception:
         log.warning("ingest_selector: batch failed, passing batch through", exc_info=True)
         return batch
+    try:
+        ingest_selector_input_tokens.observe(result.usage.input_tokens)
+        ingest_selector_output_tokens.observe(result.usage.output_tokens)
+    except Exception:
+        log.warning("ingest_selector: could not observe token usage", exc_info=True)
+    return kept
