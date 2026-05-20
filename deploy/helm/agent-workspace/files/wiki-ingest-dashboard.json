@@ -71,7 +71,7 @@
           "refId": "A"
         }
       ],
-      "title": "Selector LLM Calls (24h)",
+      "title": "Selector LLM Calls",
       "type": "stat"
     },
     {
@@ -127,7 +127,7 @@
           "refId": "A"
         }
       ],
-      "title": "Reconciler LLM Calls (24h)",
+      "title": "Reconciler LLM Calls",
       "type": "stat"
     },
     {
@@ -183,7 +183,7 @@
           "refId": "A"
         }
       ],
-      "title": "Selector Input Tokens (24h)",
+      "title": "Selector Input Tokens",
       "type": "stat"
     },
     {
@@ -239,7 +239,7 @@
           "refId": "A"
         }
       ],
-      "title": "Selector Output Tokens (24h)",
+      "title": "Selector Output Tokens",
       "type": "stat"
     },
     {
@@ -295,7 +295,7 @@
           "refId": "A"
         }
       ],
-      "title": "Reconciler Input Tokens (24h)",
+      "title": "Reconciler Input Tokens",
       "type": "stat"
     },
     {
@@ -351,7 +351,7 @@
           "refId": "A"
         }
       ],
-      "title": "Reconciler Output Tokens (24h)",
+      "title": "Reconciler Output Tokens",
       "type": "stat"
     },
     {
