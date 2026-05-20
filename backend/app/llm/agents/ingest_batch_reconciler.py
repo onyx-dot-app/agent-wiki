@@ -44,20 +44,21 @@ def batch_reconcile(
     source: str,
     candidates: list[WikiUpdateCandidate],
     model: str,
-) -> list[str | None]:
+) -> tuple[list[str | None], int]:
     """Reconcile all candidates in one or more LLM calls.
 
-    Returns a list parallel to ``candidates`` where each element uses the
-    same semantics as ``reconcile_document``:
-      IRRELEVANT_SENTINEL — page is unrelated
-      None                — page is already up-to-date
-      str                 — new page body to commit
+    Returns ``(results, llm_calls)`` where:
+      - ``results`` is a list parallel to ``candidates``:
+          IRRELEVANT_SENTINEL — page is unrelated
+          None                — page is already up-to-date
+          str                 — new page body to commit
+      - ``llm_calls`` is the number of LLM calls made (one per char-budget batch)
 
-    Falls back to per-page reconciler semantics (IRRELEVANT_SENTINEL for
-    all) on any LLM or parse error, so the caller can decide how to handle.
+    Falls back to IRRELEVANT_SENTINEL for all candidates in a batch on any
+    LLM or parse error; batches fail independently.
     """
     if not candidates:
-        return []
+        return [], 0
 
     content_truncated = content[:_RECONCILER_CONTENT_CHARS]
     candidate_budget = max(_RECONCILER_BUDGET_CHARS - len(content_truncated), 0)
@@ -85,7 +86,7 @@ def batch_reconcile(
         len(results),
         len(batches),
     )
-    return results
+    return results, len(batches)
 
 
 def _batch_by_chars(

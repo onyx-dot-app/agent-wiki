@@ -59,12 +59,6 @@ ingest_outcomes_total = Counter(
     ["outcome", "wiki_path"],  # committed, no_change, irrelevant, filtered, no_candidates
 )
 
-ingest_llm_duration_seconds = Histogram(
-    "ingest_llm_duration_seconds",
-    "LLM call duration per wiki page reconciliation",
-    buckets=[0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0],
-)
-
 ingest_llm_calls_per_doc = Histogram(
     "ingest_llm_calls_per_doc",
     "Number of LLM calls made per document ingestion",

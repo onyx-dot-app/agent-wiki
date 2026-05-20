@@ -324,7 +324,7 @@ def process_pushed_document(push: dict[str, Any]) -> None:
     # produces new bodies for all candidates. Skipped when model is unset.
     if llm_s.model:
         t_batch = time.monotonic()
-        batch_results = ingest_batch_reconciler.batch_reconcile(
+        batch_results, llm_calls = ingest_batch_reconciler.batch_reconcile(
             title=title,
             url=url,
             content=content,
@@ -335,9 +335,9 @@ def process_pushed_document(push: dict[str, Any]) -> None:
         ingest_batch_reconciler_duration_seconds.observe(time.monotonic() - t_batch)
     else:
         batch_results = [IRRELEVANT_SENTINEL] * len(readable)
+        llm_calls = 0
 
     consecutive_irrelevant = 0
-    llm_calls = 1 if llm_s.model else 0
     irrelevant = 0
     committed = 0
     stopped_early = False

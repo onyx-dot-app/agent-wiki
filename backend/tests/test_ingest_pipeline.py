@@ -169,7 +169,7 @@ def test_no_candidates_returns_early(mock_search):
 def test_new_body_commits(mock_search, mock_reconcile, mock_read, mock_commit, mock_notify, monkeypatch):
     monkeypatch.setattr("app.tasks.wiki_update.get_llm_settings", lambda: _settings_with_model())
     mock_search.return_value = [_hit("page.md", "Page", 5.0)]
-    mock_reconcile.return_value = ["new body"]
+    mock_reconcile.return_value = (["new body"], 1)
     _run(_make_push())
     mock_commit.assert_called_once()
     mock_notify.assert_called_once()
@@ -182,7 +182,7 @@ def test_new_body_commits(mock_search, mock_reconcile, mock_read, mock_commit, m
 def test_no_change_does_not_commit(mock_search, mock_reconcile, mock_read, mock_commit, monkeypatch):
     monkeypatch.setattr("app.tasks.wiki_update.get_llm_settings", lambda: _settings_with_model())
     mock_search.return_value = [_hit("page.md", "Page", 5.0)]
-    mock_reconcile.return_value = [None]
+    mock_reconcile.return_value = ([None], 1)
     _run(_make_push())
     mock_commit.assert_not_called()
 
@@ -194,7 +194,7 @@ def test_no_change_does_not_commit(mock_search, mock_reconcile, mock_read, mock_
 def test_irrelevant_does_not_commit(mock_search, mock_reconcile, mock_read, mock_commit, monkeypatch):
     monkeypatch.setattr("app.tasks.wiki_update.get_llm_settings", lambda: _settings_with_model())
     mock_search.return_value = [_hit("page.md", "Page", 5.0)]
-    mock_reconcile.return_value = [IRRELEVANT_SENTINEL]
+    mock_reconcile.return_value = ([IRRELEVANT_SENTINEL], 1)
     _run(_make_push())
     mock_commit.assert_not_called()
 
@@ -209,7 +209,7 @@ def test_n_consecutive_irrelevant_stops_loop(mock_search, mock_reconcile, mock_r
     monkeypatch.setattr("app.tasks.wiki_update.get_llm_settings", lambda: _settings_with_model())
     # 5 candidates — first two are IRRELEVANT, rest would commit but never reached
     mock_search.return_value = [_hit(f"p{i}.md", f"P{i}", float(5 - i)) for i in range(5)]
-    mock_reconcile.return_value = [IRRELEVANT_SENTINEL, IRRELEVANT_SENTINEL, "new", "new", "new"]
+    mock_reconcile.return_value = ([IRRELEVANT_SENTINEL, IRRELEVANT_SENTINEL, "new", "new", "new"], 1)
     _run(_make_push())
     mock_commit.assert_not_called()
 
@@ -224,7 +224,7 @@ def test_no_change_resets_irrelevant_counter(mock_search, mock_reconcile, mock_r
     monkeypatch.setattr("app.tasks.wiki_update.get_llm_settings", lambda: _settings_with_model())
     # IRRELEVANT, NO_CHANGE (resets counter), IRRELEVANT — should NOT stop early
     mock_search.return_value = [_hit(f"p{i}.md", None, float(5 - i)) for i in range(3)]
-    mock_reconcile.return_value = [IRRELEVANT_SENTINEL, None, IRRELEVANT_SENTINEL]
+    mock_reconcile.return_value = ([IRRELEVANT_SENTINEL, None, IRRELEVANT_SENTINEL], 1)
     _run(_make_push())
     mock_commit.assert_not_called()
 
@@ -239,7 +239,7 @@ def test_commit_resets_irrelevant_counter(mock_search, mock_reconcile, mock_read
     monkeypatch.setattr("app.tasks.wiki_update.get_llm_settings", lambda: _settings_with_model())
     # IRRELEVANT, new body (resets counter), IRRELEVANT — should NOT stop early
     mock_search.return_value = [_hit(f"p{i}.md", None, float(5 - i)) for i in range(3)]
-    mock_reconcile.return_value = [IRRELEVANT_SENTINEL, "new body", IRRELEVANT_SENTINEL]
+    mock_reconcile.return_value = ([IRRELEVANT_SENTINEL, "new body", IRRELEVANT_SENTINEL], 1)
     _run(_make_push())
     mock_commit.assert_called_once()
 

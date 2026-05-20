@@ -110,22 +110,24 @@ def test_reconcile_returns_results(mock_client, _mock_prompt):
         "===RESULT [3]===\n# New\n\nBody."
     )
 
-    results = batch_reconcile(
+    results, llm_calls = batch_reconcile(
         title="T", url="", content="doc", source="s", candidates=candidates, model="m"
     )
 
     assert results[0] == IRRELEVANT_SENTINEL
     assert results[1] is None
     assert results[2] == "# New\n\nBody."
+    assert llm_calls == 1
 
 
 @patch("app.llm.agents.ingest_batch_reconciler.load_prompt", return_value="p")
 @patch("app.llm.agents.ingest_batch_reconciler.client")
 def test_reconcile_empty_returns_empty(mock_client, _mock_prompt):
-    results = batch_reconcile(
+    results, llm_calls = batch_reconcile(
         title=None, url="", content="doc", source="s", candidates=[], model="m"
     )
     assert results == []
+    assert llm_calls == 0
     mock_client.complete.assert_not_called()
 
 
@@ -135,11 +137,12 @@ def test_reconcile_fails_open_on_llm_exception(mock_client, _mock_prompt):
     candidates = [_candidate("a"), _candidate("b")]
     mock_client.complete.side_effect = RuntimeError("timeout")
 
-    results = batch_reconcile(
+    results, llm_calls = batch_reconcile(
         title=None, url="", content="doc", source="s", candidates=candidates, model="m"
     )
 
     assert results == [IRRELEVANT_SENTINEL, IRRELEVANT_SENTINEL]
+    assert llm_calls == 1
 
 
 @patch("app.llm.agents.ingest_batch_reconciler.load_prompt", return_value="p")
@@ -148,11 +151,12 @@ def test_reconcile_fails_open_on_parse_error(mock_client, _mock_prompt):
     candidates = [_candidate("a"), _candidate("b")]
     mock_client.complete.return_value = _llm_response("no result sections here")
 
-    results = batch_reconcile(
+    results, llm_calls = batch_reconcile(
         title=None, url="", content="doc", source="s", candidates=candidates, model="m"
     )
 
     assert results == [IRRELEVANT_SENTINEL, IRRELEVANT_SENTINEL]
+    assert llm_calls == 1
 
 
 @patch("app.llm.agents.ingest_batch_reconciler.load_prompt", return_value="p")
@@ -165,13 +169,13 @@ def test_reconcile_merges_multiple_batches(mock_client, _mock_prompt):
         _llm_response("===RESULT [1]===\nNO_CHANGE"),
     ]
 
-    results = batch_reconcile(
+    results, llm_calls = batch_reconcile(
         title=None, url="", content="", source="s", candidates=[a, b], model="m"
     )
 
     assert results[0] == "# Updated a\n\nBody."
     assert results[1] is None
-    assert mock_client.complete.call_count == 2
+    assert llm_calls == 2
 
 
 @patch("app.llm.agents.ingest_batch_reconciler.load_prompt", return_value="p")
@@ -184,8 +188,9 @@ def test_reconcile_one_batch_fails_open_other_succeeds(mock_client, _mock_prompt
         _llm_response("===RESULT [1]===\nNO_CHANGE"),
     ]
 
-    results = batch_reconcile(
+    results, llm_calls = batch_reconcile(
         title=None, url="", content="", source="s", candidates=[a, b], model="m"
     )
 
     assert results == [IRRELEVANT_SENTINEL, None]
+    assert llm_calls == 2
