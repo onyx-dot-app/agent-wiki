@@ -3,8 +3,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from app.db.fts import SearchHit
 from app.ingest.models import WikiUpdateCandidate
 from app.llm.agents.common import IRRELEVANT_SENTINEL, TextEdit, batch_by_chars
