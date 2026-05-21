@@ -58,6 +58,7 @@ interface CommitInfo {
   author: string;
   ts: string;
   message: string;
+  body?: string;
 }
 
 interface HistoryResponse {
@@ -2077,16 +2078,21 @@ function HistoryPanel({
               subtitle={headSha ? headSha.slice(0, 7) : ""}
               meta=""
             />
-            {commits.map((c) => (
-              <CommitRow
-                key={c.sha}
-                active={!latestActive && viewingSha === c.sha}
-                onClick={() => onPick(c.sha)}
-                title={c.message || "(no message)"}
-                subtitle={`${c.sha.slice(0, 7)} · ${c.author}`}
-                meta={formatTs(c.ts)}
-              />
-            ))}
+            {commits.map((c) => {
+              const { url, title: srcTitle } = parseSourceMeta(c.body);
+              return (
+                <CommitRow
+                  key={c.sha}
+                  active={!latestActive && viewingSha === c.sha}
+                  onClick={() => onPick(c.sha)}
+                  title={c.message || "(no message)"}
+                  subtitle={`${c.sha.slice(0, 7)} · ${c.author}`}
+                  meta={formatTs(c.ts)}
+                  sourceUrl={url}
+                  sourceTitle={srcTitle}
+                />
+              );
+            })}
           </ul>
         )}
       </div>
@@ -2100,12 +2106,16 @@ function CommitRow({
   title,
   subtitle,
   meta,
+  sourceUrl,
+  sourceTitle,
 }: {
   active: boolean;
   onClick: () => void;
   title: string;
   subtitle: string;
   meta: string;
+  sourceUrl?: string | null;
+  sourceTitle?: string | null;
 }) {
   return (
     <li>
@@ -2136,9 +2146,46 @@ function CommitRow({
           {subtitle}
           {meta ? ` · ${meta}` : ""}
         </div>
+        {(sourceTitle || sourceUrl) && (
+          <a
+            href={sourceUrl ?? undefined}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              display: "inline-block",
+              marginTop: 4,
+              fontSize: 11,
+              color: color.accent.fg,
+              textDecoration: "none",
+              maxWidth: "100%",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {sourceTitle ?? sourceUrl}
+          </a>
+        )}
       </button>
     </li>
   );
+}
+
+function parseSourceMeta(body?: string): { url: string | null; title: string | null } {
+  let url: string | null = null;
+  let title: string | null = null;
+  for (const line of (body ?? "").split("\n")) {
+    if (!url) {
+      const m = line.match(/^Source:\s*(\S+)/);
+      if (m) url = m[1];
+    }
+    if (!title) {
+      const m = line.match(/^Title:\s*(.+)/);
+      if (m) title = m[1].trim();
+    }
+  }
+  return { url, title };
 }
 
 function formatTs(iso: string): string {

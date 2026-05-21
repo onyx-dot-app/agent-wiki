@@ -133,6 +133,7 @@ class CommitView(BaseModel):
     author: str
     ts: str
     message: str
+    body: str = ""
 
 
 class FileHistoryResponse(BaseModel):

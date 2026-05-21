@@ -361,6 +361,13 @@ def process_pushed_document(push: dict[str, Any]) -> None:
         elif result is not None:
             consecutive_irrelevant = 0
             message = f"ingest({source_label}): update {c.hit.path}"
+            meta_lines = []
+            if title:
+                meta_lines.append(f"Title: {title}")
+            if url:
+                meta_lines.append(f"Source: {url}")
+            if meta_lines:
+                message += "\n\n" + "\n".join(meta_lines)
             sha = wiki_git.commit_file(c.hit.path, result, message, author=_INGEST_AUTHOR)
             wiki_notify.after_doc_write(c.hit.path, sha, "edit", _INGEST_AUTHOR)
             committed += 1

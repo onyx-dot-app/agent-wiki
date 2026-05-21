@@ -360,7 +360,7 @@ def file_history(
                 deprecated.add(token)
     head_sha = rows[0].sha if rows else None
     visible = [
-        CommitView(sha=r.sha, author=r.author, ts=r.ts, message=r.message)
+        CommitView(sha=r.sha, author=r.author, ts=r.ts, message=r.message, body=r.body)
         for r in rows
         if r.sha not in deprecated
     ]
