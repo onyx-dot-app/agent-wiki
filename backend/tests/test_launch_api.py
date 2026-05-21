@@ -482,3 +482,68 @@ def test_probe_status_no_ack_returns_acked_false(client):
 def test_probe_status_requires_auth(client):
     res = client.get("/api/launch/probe-status?nonce=anything")
     assert res.status_code in (401, 403)
+
+
+# --------------------------------------------------------------------------- #
+# Launch URI shape                                                            #
+# --------------------------------------------------------------------------- #
+
+
+def test_launch_uri_endpoint_is_wiki_base(client):
+    """Regression guard: URI's ``endpoint=`` is the wiki base URL, not the
+    MCP server URL. The helper pins this value and POSTs
+    ``<pinned>/api/launch/exchange``; pinning ``<base>/api/mcp`` breaks
+    exchange with a 404.
+    """
+    uid = seed_user()
+    login_fastapi(client, uid)
+    res = client.post(
+        "/api/launch",
+        json={"tool_id": "claude-code", "wiki_path": None, "message": "x"},
+    )
+    assert res.status_code == 200, res.text
+    uri = res.json()["uri"]
+    assert "endpoint=" in uri
+    encoded_endpoint = uri.split("endpoint=", 1)[1].split("&", 1)[0]
+    assert "api/mcp" not in encoded_endpoint, (
+        "URI endpoint must be wiki base, not MCP path: " + encoded_endpoint
+    )
+    assert "api%2Fmcp" not in encoded_endpoint
+
+
+# --------------------------------------------------------------------------- #
+# /api/launchers/helper-installed                                             #
+# --------------------------------------------------------------------------- #
+
+
+def test_helper_installed_false_when_no_sessions(client):
+    uid = seed_user()
+    login_fastapi(client, uid)
+    res = client.get("/api/launchers/helper-installed")
+    assert res.status_code == 200
+    body = res.json()
+    assert body["installed"] is False
+    assert body["machine_id"] is None
+
+
+def test_helper_installed_true_when_session_has_machine_id(client):
+    uid = seed_user()
+    login_fastapi(client, uid)
+    sid = sessions_repo.create(
+        user_id=uid,
+        tool_id="claude-code",
+        wiki_path=None,
+        working_dir=None,
+        first_turn_prompt="x",
+    )
+    sessions_repo.mark_active(sid, machine_id="m_abc123")
+    res = client.get("/api/launchers/helper-installed")
+    assert res.status_code == 200
+    body = res.json()
+    assert body["installed"] is True
+    assert body["machine_id"] == "m_abc123"
+
+
+def test_helper_installed_requires_auth(client):
+    res = client.get("/api/launchers/helper-installed")
+    assert res.status_code in (401, 403)
