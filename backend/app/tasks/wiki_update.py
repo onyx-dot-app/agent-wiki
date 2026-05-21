@@ -361,7 +361,7 @@ def process_pushed_document(push: dict[str, Any]) -> None:
         elif result is not None:
             consecutive_irrelevant = 0
             message = f"ingest({source_label}): update {c.hit.path}"
-            meta_lines = []
+            meta_lines: list[str] = []
             if title:
                 meta_lines.append(f"Title: {title}")
             if url:
