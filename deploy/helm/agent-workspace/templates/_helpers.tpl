@@ -71,6 +71,8 @@ and wiki path stay in lockstep.
   value: {{ .Values.auth.mode | quote }}
 - name: LAUNCHERS_ENABLED
   value: {{ .Values.launchersEnabled | default false | quote }}
+- name: INGEST_EVAL_LOGGING
+  value: {{ .Values.ingestEvalLogging | default false | quote }}
 - name: SECURE_COOKIES
   value: {{ .Values.secureCookies | quote }}
 {{- if eq .Values.auth.mode "oidc" }}
