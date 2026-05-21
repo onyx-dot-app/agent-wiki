@@ -134,11 +134,20 @@ export function closeSession(id: string, reason: string): Promise<void> {
 // --------------------------------------------------------------------------- //
 
 const PROBE_CACHE_KEY = "agentwiki:helper-probe";
+// Persistent across tabs/sessions. Set after a successful iframe probe
+// so subsequent visits can re-probe to verify; cleared when the user
+// hits an install/uninstall flow.
+const EVER_INSTALLED_KEY = "agentwiki:ever-installed";
 
-/** Up to 3 retries with 800ms windows, cleaning the probe iframe
- * between attempts so a stalled OS dispatch doesn't pin layout. */
+/** Probe with retry + iframe-dispatch ONLY if we've previously seen an
+ * ack (i.e. user has installed before). On a first-ever visit with no
+ * record of install, return negative immediately without firing the
+ * iframe — macOS pops a "no app for URL" dialog for unhandled schemes,
+ * spamming the user before they've had a chance to install. The
+ * "I've installed it" CTA passes ``opts.force`` to force a real probe
+ * after the user has actually installed the helper. */
 export async function probeHelper(
-  opts: { retries?: number } = {},
+  opts: { retries?: number; force?: boolean } = {},
 ): Promise<ProbeResult> {
   if (typeof window === "undefined") {
     return { acked: false, helperPort: null, machineId: null };
@@ -151,11 +160,18 @@ export async function probeHelper(
       sessionStorage.removeItem(PROBE_CACHE_KEY);
     }
   }
+  const everInstalled = localStorage.getItem(EVER_INSTALLED_KEY) === "1";
+  if (!opts.force && !everInstalled) {
+    const negative = { acked: false, helperPort: null, machineId: null };
+    sessionStorage.setItem(PROBE_CACHE_KEY, JSON.stringify(negative));
+    return negative;
+  }
   const retries = opts.retries ?? 3;
   for (let i = 0; i < retries; i++) {
     const result = await probeHelperOnce();
     if (result.acked) {
       sessionStorage.setItem(PROBE_CACHE_KEY, JSON.stringify(result));
+      localStorage.setItem(EVER_INSTALLED_KEY, "1");
       return result;
     }
   }

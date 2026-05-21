@@ -234,8 +234,11 @@ def post_launch(
         mcp_token_id=token_id,
     )
 
-    endpoint = str(request.base_url).rstrip("/") + "/api/mcp"
-    uri = f"agentwiki://run?code={code}&tool={req.tool_id}&endpoint={endpoint}"
+    # URI's `endpoint` is the wiki BASE URL — the helper pins it +
+    # POSTs `<base>/api/launch/exchange` against it. The MCP server URL
+    # (`<base>/api/mcp`) is returned by exchange in the response payload.
+    wiki_base = str(request.base_url).rstrip("/")
+    uri = f"agentwiki://run?code={code}&tool={req.tool_id}&endpoint={wiki_base}"
 
     return LaunchResponse(launch_code=code, uri=uri, agent_session_id=sid)
 
@@ -326,6 +329,23 @@ def post_probe_ack(req: ProbeAckRequest) -> dict[str, bool]:
     with _probe_lock:
         _probe_store[req.nonce] = (time(), req.helper_port, req.machine_id)
     return {"ok": True}
+
+
+@router.get("/launchers/helper-installed")
+def get_helper_installed(user: User = Depends(require_user)) -> dict[str, object]:
+    """HTTP signal — true if backend has ever seen the user's helper
+    (any agent session with a machine_id). Lets the FE poll for
+    install state without re-firing the iframe probe loop, which
+    Chrome may silently block or prompt on every poll."""
+    _check_flag()
+    for r in sessions_repo.list_for_user(
+        user.id,
+        statuses=("pending", "active", "idle", "closed", "failed"),
+    ):
+        machine_id = r.get("machine_id")
+        if machine_id:
+            return {"installed": True, "machine_id": machine_id}
+    return {"installed": False, "machine_id": None}
 
 
 @router.get("/launch/probe-status", response_model=ProbeStatusResponse)

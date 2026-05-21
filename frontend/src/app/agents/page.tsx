@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import useSWR from "swr";
 
 import { SetupWizard } from "@/components/agents/SetupWizard";
 import { ToolCard } from "@/components/agents/ToolCard";
@@ -18,11 +19,7 @@ import {
 } from "@/lib/agents";
 import { apiFetch } from "@/lib/api";
 import { useRequireAuth } from "@/lib/auth";
-import {
-  probeHelper,
-  useLauncherCatalog,
-  type ProbeResult,
-} from "@/lib/launchers";
+import { useLauncherCatalog, type ProbeResult } from "@/lib/launchers";
 import { color, radius, shadow } from "@/lib/theme";
 import { useIsMobile } from "@/lib/viewport";
 
@@ -467,24 +464,30 @@ const errorBanner: React.CSSProperties = {
 // --------------------------------------------------------------------------- //
 
 function CodingToolsSection() {
-  const [probe, setProbe] = useState<ProbeResult | null>(null);
+  // SWR-driven install state — HTTP only, no iframe. Backend records
+  // helper presence via agent_session.machine_id; FE just polls the
+  // record. iframe probe stays in InstallHelperPane behind the
+  // "I've installed it" button for the first-launch case where the
+  // user has installed but never run an agent yet.
+  const { data: helperInstalled } = useSWR<{
+    installed: boolean;
+    machine_id: string | null;
+  }>("/launchers/helper-installed", {
+    refreshInterval: 2000,
+    revalidateOnFocus: true,
+  });
+  const probe: ProbeResult | null = helperInstalled
+    ? {
+        acked: helperInstalled.installed,
+        helperPort: null,
+        machineId: helperInstalled.machine_id,
+      }
+    : null;
   const { launchers } = useLauncherCatalog({
     machineId: probe?.machineId ?? null,
   });
   const [wizardOpen, setWizardOpen] = useState(false);
   const dialogRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    if (wizardOpen) return;
-    let cancelled = false;
-    void (async () => {
-      const result = await probeHelper();
-      if (!cancelled) setProbe(result);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [wizardOpen]);
 
   useEffect(() => {
     if (!wizardOpen) return;
@@ -528,10 +531,16 @@ function CodingToolsSection() {
           </span>
         ) : (
           <span style={{ color: color.state.warning.fg }}>
-            ⚠ not detected — run{" "}
-            <code style={inlineCode}>
-              npm install -g @onyx-ai/agentwiki-launcher
-            </code>
+            ⚠ not detected —{" "}
+            <a
+              href="/api/installer/app"
+              style={{
+                color: color.state.warning.fg,
+                textDecoration: "underline",
+              }}
+            >
+              download AgentWikiLauncher.app
+            </a>
           </span>
         )}
       </div>

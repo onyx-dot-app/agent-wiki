@@ -1,0 +1,9 @@
+# Helper binaries are build artifacts — produced by
+# packages/agentwiki-launcher-go/Makefile (`make dist`). Not committed
+# to git; CI build step copies the artifacts here for the backend
+# /api/installer/binary endpoint to serve. For local dev, run:
+#
+#     cd packages/agentwiki-launcher-go && make dist
+#     cp dist/* backend/static/installers/
+agentwiki-launcher-darwin-*
+AgentWikiLauncher.zip

@@ -1,51 +1,27 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import { Button, Card, Text } from "@onyx-ai/opal/components";
 import { Section } from "@onyx-ai/opal/layouts";
 
-import { invalidateHelperProbe } from "@/lib/launchers";
-
-import styles from "./InstallHelperPane.module.css";
-
-function installCmdFor(origin: string): string {
-  // Quote the wiki origin so a stray '&' or shell metachar in the URL
-  // can't split the line; the helper binary itself rejects values with
-  // shell metachars via its own validator.
-  const quoted = `'${origin.replace(/'/g, `'\\''`)}'`;
-  return `npm install -g @onyx-ai/agentwiki-launcher && agentwiki-launcher set-endpoint ${quoted}`;
-}
+import { invalidateHelperProbe, probeHelper } from "@/lib/launchers";
 
 export function InstallHelperPane({
   onReprobe,
 }: {
   onReprobe: () => Promise<void> | void;
 }) {
-  const [installCmd, setInstallCmd] = useState(
-    "npm install -g @onyx-ai/agentwiki-launcher",
-  );
-  useEffect(() => {
-    setInstallCmd(installCmdFor(window.location.origin));
-  }, []);
-  const [copied, setCopied] = useState(false);
   const [busy, setBusy] = useState(false);
   const [manualBusy, setManualBusy] = useState(false);
-
-  async function copy(text: string) {
-    try {
-      await navigator.clipboard.writeText(text);
-    } catch {
-      // Some browsers block clipboard outside HTTPS — show feedback anyway.
-    }
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
-  }
 
   async function reprobe() {
     setBusy(true);
     try {
       invalidateHelperProbe();
+      // Explicit user gesture — force the iframe probe even though
+      // we don't yet have an ever-installed flag.
+      await probeHelper({ force: true });
       await onReprobe();
     } finally {
       setBusy(false);
@@ -53,9 +29,6 @@ export function InstallHelperPane({
   }
 
   async function manualTest() {
-    // User-gesture top-level navigation works even when iframe
-    // probe is blocked. After dispatch the user returns to the page;
-    // we kick a fresh probe.
     setManualBusy(true);
     try {
       invalidateHelperProbe();
@@ -69,6 +42,10 @@ export function InstallHelperPane({
     }
   }
 
+  function download() {
+    window.location.href = "/api/installer/app";
+  }
+
   return (
     <Card padding="md" border="solid" borderColor="warning" rounding="sm">
       <Section
@@ -79,7 +56,7 @@ export function InstallHelperPane({
         width="full"
       >
         <Text font="secondary-body" color="text-04" as="p">
-          Launcher isn&apos;t installed on this machine. Run:
+          Launcher isn&apos;t installed on this machine.
         </Text>
         <Section
           flexDirection="row"
@@ -88,14 +65,13 @@ export function InstallHelperPane({
           gap={0.75}
           width="full"
         >
-          <code className={styles.cmd}>{installCmd}</code>
-          <Button
-            size="md"
-            prominence="secondary"
-            onClick={() => copy(installCmd)}
-          >
-            {copied ? "Copied" : "Copy"}
+          <Button size="md" variant="action" onClick={download}>
+            Download installer
           </Button>
+          <Text font="secondary-body" color="text-04" as="span">
+            Open the downloaded zip, drag AgentWikiLauncher.app to your
+            Applications folder, then click Run Agent.
+          </Text>
         </Section>
         <Section
           flexDirection="row"

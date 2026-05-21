@@ -9,14 +9,36 @@ on:
 env:
   DOCKERHUB_USERNAME: onyxdotapp
 
+permissions:
+  id-token: write
+  contents: read
+
 jobs:
+  build-launcher:
+    name: Build, sign, notarize AgentWikiLauncher.app
+    uses: ./.github/workflows/release-agentwiki-launcher-go.yml
+    secrets: inherit
+
   build-backend:
     name: Build and Push Backend Image
+    needs: build-launcher
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Download notarized launcher artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.build-launcher.outputs.artifact-name }}
+          path: backend/static/installers/
+
+      - name: Verify launcher artifact present
+        run: |
+          set -euo pipefail
+          test -s backend/static/installers/AgentWikiLauncher.zip
+          ls -lh backend/static/installers/
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3

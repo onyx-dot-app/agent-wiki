@@ -479,10 +479,9 @@ PR. Don't accumulate parallel ad-hoc colors.
 
 ### Frontend
 
-Type-check with `npm run typecheck`. Component tests can be added with Vitest
-
-- React Testing Library when needed. Keep components pure functions of props
-  so they're trivially testable.
+Type-check with `npm run typecheck`. Component tests can be added with
+Vitest + React Testing Library when needed. Keep components pure functions
+of props so they're trivially testable.
 
 ## Adding a feature — checklist
 

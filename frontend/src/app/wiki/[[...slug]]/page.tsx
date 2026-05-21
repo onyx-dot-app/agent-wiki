@@ -111,7 +111,11 @@ export default function WikiRoute() {
 function Explorer({ dir }: { dir: string }) {
   const router = useRouter();
   const isMobile = useIsMobile();
-  const { data, error: listError, mutate: mutatePaths } = useSWR<ListResponse>("/wiki");
+  const {
+    data,
+    error: listError,
+    mutate: mutatePaths,
+  } = useSWR<ListResponse>("/wiki");
   const entries = data?.entries ?? [];
   const [mutationError, setMutationError] = useState<string | null>(null);
   const error =
@@ -130,7 +134,9 @@ function Explorer({ dir }: { dir: string }) {
   const [createBusy, setCreateBusy] = useState(false);
   const [triggerModalOpen, setTriggerModalOpen] = useState(false);
   const [triggerStatus, setTriggerStatus] = useState<string | null>(null);
-  const [sort, setSort] = useState<"name-asc" | "name-desc" | "recent">("name-asc");
+  const [sort, setSort] = useState<"name-asc" | "name-desc" | "recent">(
+    "name-asc",
+  );
   const [renaming, setRenaming] = useState<string | null>(null);
   const [dragSource, setDragSource] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
@@ -211,7 +217,9 @@ function Explorer({ dir }: { dir: string }) {
     setBusyPath(rel);
     setError(null);
     try {
-      await apiFetch(`/wiki/file?path=${encodeURIComponent(rel)}`, { method: "DELETE" });
+      await apiFetch(`/wiki/file?path=${encodeURIComponent(rel)}`, {
+        method: "DELETE",
+      });
       refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "delete failed");
@@ -330,7 +338,15 @@ function Explorer({ dir }: { dir: string }) {
       />
 
       {triggerStatus && (
-        <div style={{ fontSize: 12, color: color.text.secondary, marginBottom: 12 }}>{triggerStatus}</div>
+        <div
+          style={{
+            fontSize: 12,
+            color: color.text.secondary,
+            marginBottom: 12,
+          }}
+        >
+          {triggerStatus}
+        </div>
       )}
 
       {creating && (
@@ -474,10 +490,18 @@ function NewDocView({ dir }: { dir: string }) {
   const { setDrafting, requestExpand } = useDrafting();
   const [filename, setFilename] = useState("");
   const [draft, setDraft] = useState("");
-  const [templates, setTemplates] = useState<DocumentTemplateSummary[] | null>(null);
-  const [appliedTemplateId, setAppliedTemplateId] = useState<string | null>(null);
-  const [appliedTemplateBody, setAppliedTemplateBody] = useState<string | null>(null);
-  const [applyingTemplateId, setApplyingTemplateId] = useState<string | null>(null);
+  const [templates, setTemplates] = useState<DocumentTemplateSummary[] | null>(
+    null,
+  );
+  const [appliedTemplateId, setAppliedTemplateId] = useState<string | null>(
+    null,
+  );
+  const [appliedTemplateBody, setAppliedTemplateBody] = useState<string | null>(
+    null,
+  );
+  const [applyingTemplateId, setApplyingTemplateId] = useState<string | null>(
+    null,
+  );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -718,7 +742,9 @@ function TemplateGallery({
       }}
     >
       <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-        <span style={{ fontSize: 13, fontWeight: 600, color: color.text.primary }}>
+        <span
+          style={{ fontSize: 13, fontWeight: 600, color: color.text.primary }}
+        >
           Start from a template
         </span>
         <span style={{ fontSize: 12, color: color.text.muted }}>
@@ -803,7 +829,13 @@ function TemplateStrip({
           paddingBottom: 2, // leave room for focus rings
         }}
       >
-        <div style={{ flex: "0 0 auto", scrollSnapAlign: "start", width: CARD_WIDTH }}>
+        <div
+          style={{
+            flex: "0 0 auto",
+            scrollSnapAlign: "start",
+            width: CARD_WIDTH,
+          }}
+        >
           <TemplateCard
             title="Blank document"
             description="Empty file — just start typing."
@@ -815,7 +847,11 @@ function TemplateStrip({
         {templates.map((t) => (
           <div
             key={t.id}
-            style={{ flex: "0 0 auto", scrollSnapAlign: "start", width: CARD_WIDTH }}
+            style={{
+              flex: "0 0 auto",
+              scrollSnapAlign: "start",
+              width: CARD_WIDTH,
+            }}
           >
             <TemplateCard
               title={t.name}
@@ -868,8 +904,21 @@ function StripArrow({
         padding: 0,
       }}
     >
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-        {direction === "left" ? <path d="M15 18l-6-6 6-6" /> : <path d="M9 6l6 6-6 6" />}
+      <svg
+        width="14"
+        height="14"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        {direction === "left" ? (
+          <path d="M15 18l-6-6 6-6" />
+        ) : (
+          <path d="M9 6l6 6-6 6" />
+        )}
       </svg>
     </button>
   );
@@ -897,7 +946,9 @@ function TemplateCard({
         textAlign: "left",
         padding: "10px 12px",
         background: active ? color.accent.subtleBg : color.bg.page,
-        border: `1px solid ${active ? color.accent.subtleBorder : color.border.default}`,
+        border: `1px solid ${
+          active ? color.accent.subtleBorder : color.border.default
+        }`,
         borderRadius: radius.sm,
         cursor: busy ? "wait" : "pointer",
         color: color.text.primary,
@@ -1354,10 +1405,18 @@ function FileViewer({ path }: { path: string }) {
   // or still matching the body of the template the user just applied
   // (so they can keep swapping without losing work). Once they edit on
   // top of a template, the gallery disappears.
-  const [templates, setTemplates] = useState<DocumentTemplateSummary[] | null>(null);
-  const [appliedTemplateBody, setAppliedTemplateBody] = useState<string | null>(null);
-  const [appliedTemplateId, setAppliedTemplateId] = useState<string | null>(null);
-  const [applyingTemplateId, setApplyingTemplateId] = useState<string | null>(null);
+  const [templates, setTemplates] = useState<DocumentTemplateSummary[] | null>(
+    null,
+  );
+  const [appliedTemplateBody, setAppliedTemplateBody] = useState<string | null>(
+    null,
+  );
+  const [appliedTemplateId, setAppliedTemplateId] = useState<string | null>(
+    null,
+  );
+  const [applyingTemplateId, setApplyingTemplateId] = useState<string | null>(
+    null,
+  );
 
   const loadLatest = useCallback(() => {
     setLoading(true);
@@ -1379,6 +1438,29 @@ function FileViewer({ path }: { path: string }) {
     setHistoryOpen(false);
     setCommits(null);
   }, [loadLatest]);
+
+  // SWR revalidates the doc so MCP-driven edit_doc writes appear
+  // without manual refresh. Skip when the user is editing the
+  // textarea or viewing an old commit — both would get clobbered.
+  const liveKey =
+    !editing && viewingSha === null
+      ? `/wiki/file?path=${encodeURIComponent(path)}`
+      : null;
+  const { data: liveDoc } = useSWR<FileResponse>(liveKey, {
+    refreshInterval: 1500,
+    revalidateOnFocus: true,
+    dedupingInterval: 0,
+  });
+  useEffect(() => {
+    if (!liveDoc) return;
+    // Re-check the gate at apply time — an in-flight fetch from before
+    // the user toggled `editing` can still resolve here and would
+    // otherwise clobber their textarea draft.
+    if (editing || viewingSha !== null) return;
+    setBody((prev) => (prev === liveDoc.body ? prev : liveDoc.body));
+    setDraft((prev) => (prev === liveDoc.body ? prev : liveDoc.body));
+    setHeadSha(liveDoc.head_sha ?? null);
+  }, [liveDoc, editing, viewingSha]);
 
   // Fetch template summaries once; the gallery uses them as its menu
   // and falls back to "no templates configured" when the list is empty.
@@ -1471,7 +1553,9 @@ function FileViewer({ path }: { path: string }) {
 
   const refreshHistory = useCallback(() => {
     setHistoryError(null);
-    apiFetch<HistoryResponse>(`/wiki/file/history?path=${encodeURIComponent(path)}`)
+    apiFetch<HistoryResponse>(
+      `/wiki/file/history?path=${encodeURIComponent(path)}`,
+    )
       .then((r) => {
         setCommits(r.commits);
         setHeadSha(r.head_sha);
@@ -1496,7 +1580,9 @@ function FileViewer({ path }: { path: string }) {
     setEditing(false);
     try {
       const r = await apiFetch<FileResponse>(
-        `/wiki/file?path=${encodeURIComponent(path)}&ref=${encodeURIComponent(sha)}`
+        `/wiki/file?path=${encodeURIComponent(path)}&ref=${encodeURIComponent(
+          sha,
+        )}`,
       );
       setBody(r.body);
       setDraft(r.body);
@@ -1609,7 +1695,7 @@ function FileViewer({ path }: { path: string }) {
       else setCommits(null);
       // Pick up the new head_sha for subsequent edits.
       const fresh = await apiFetch<FileResponse>(
-        `/wiki/file?path=${encodeURIComponent(path)}`
+        `/wiki/file?path=${encodeURIComponent(path)}`,
       );
       setHeadSha(fresh.head_sha ?? null);
       // The server clears the draft row when the body diverges from
@@ -1870,7 +1956,8 @@ function FileViewer({ path }: { path: string }) {
                   // applied (so they can keep swapping templates).
                   const isBlank = draft.trim() === "";
                   const matchesApplied =
-                    appliedTemplateBody !== null && draft === appliedTemplateBody;
+                    appliedTemplateBody !== null &&
+                    draft === appliedTemplateBody;
                   const showGallery =
                     (isBlank || matchesApplied) &&
                     templates !== null &&

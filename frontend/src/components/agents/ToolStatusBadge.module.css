@@ -1,0 +1,28 @@
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  font-size: 12px;
+  font-weight: 500;
+  border: 1px solid;
+  border-radius: var(--radius-pill);
+}
+
+.ok {
+  color: var(--color-state-success-fg);
+  background: var(--color-state-success-bg);
+  border-color: var(--color-state-success-border);
+}
+
+.warn {
+  color: var(--color-state-warning-fg);
+  background: var(--color-state-warning-bg);
+  border-color: var(--color-state-warning-border);
+}
+
+.muted {
+  color: var(--color-text-muted);
+  background: var(--color-bg-sunken);
+  border-color: var(--color-border-subtle);
+}
