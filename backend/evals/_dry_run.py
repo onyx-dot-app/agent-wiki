@@ -138,7 +138,7 @@ def stub_completions(cases: list[WikiUpdaterCase]) -> Generator[None]:
     ) -> CompletionResult:
         del model, max_tokens  # unused in stub
         if _is_judge_call(messages):
-            return CompletionResult(text="YES")
+            return CompletionResult(text="VERDICT: YES | RATIONALE: stub")
         user_text = _user_text(messages)
         matched = next(
             (c for fp, c in case_by_fingerprint.items() if fp and fp in user_text),

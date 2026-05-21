@@ -42,7 +42,7 @@ _BODY_FINGERPRINT_LEN = 120
 
 
 def _score_scenario(
-    scenario: Scenario, state: WikiState, *, judge_model: str | None = None
+    scenario: Scenario, state: WikiState, *, judge_models: tuple[str, ...] | None = None
 ) -> list[ScorerOutcome]:
     """Produce the per-scenario scorer rows.
 
@@ -99,8 +99,8 @@ def _score_scenario(
             facts_preserved_scores.append(0.0)
             continue
         body = state.current_body(upd.path)
-        fp = scorers.facts_present(body, upd.facts_present, judge_model=judge_model)
-        fk = scorers.facts_preserved(body, upd.facts_preserved, judge_model=judge_model)
+        fp = scorers.facts_present(body, upd.facts_present, judge_models=judge_models)
+        fk = scorers.facts_preserved(body, upd.facts_preserved, judge_models=judge_models)
         br = scorers.bloat_ratio(state.original_body(upd.path), body, max_ratio=upd.max_bloat_ratio)
         facts_present_scores.append(fp.score)
         facts_preserved_scores.append(fk.score)
@@ -254,7 +254,7 @@ def _stub_external_agent(scenarios: list[Scenario]) -> Generator[None]:
                 continue
             content = m.get("content", "")
             if isinstance(content, str) and "evaluation judge" in content:
-                return CompletionResult(text="YES")
+                return CompletionResult(text="VERDICT: YES | RATIONALE: stub")
         user_text = "\n".join(m.get("content", "") for m in messages if m.get("role") == "user")
         for s in scenarios:
             for upd in s.expected_updates:
@@ -281,7 +281,7 @@ def _run_one_model(
     *,
     provider: str,
     model: str,
-    judge_model: str | None = None,
+    judge_models: tuple[str, ...] | None = None,
     runs: int,
 ) -> Iterator[CaseResult]:
     for scenario in scenarios:
@@ -315,7 +315,7 @@ def _run_one_model(
                     latency_ms=int((time.monotonic() - start) * 1000),
                 )
                 continue
-            rows = _score_scenario(scenario, state, judge_model=judge_model)
+            rows = _score_scenario(scenario, state, judge_models=judge_models)
             yield CaseResult(
                 case_id=scenario.id,
                 surface="external_agent",
@@ -355,11 +355,9 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     )
     p.add_argument("--models", default="claude-sonnet-4-6")
     p.add_argument(
-        "--judge-model",
-        default=None,
-        help="Model id for LLM-judge scorers (facts_present, facts_preserved). "
-        "Defaults to the model under test, but pinning a cheap non-reasoning "
-        "model here gives consistent judging across the matrix and lower cost.",
+        "--judge-models",
+        default=",".join(scorers.DEFAULT_JUDGE_PANEL),
+        help="Comma-separated judge model panel. Default: three-family panel.",
     )
     p.add_argument("--out", type=Path, default=None)
     p.add_argument("--braintrust", default=None)
@@ -399,6 +397,7 @@ def main(argv: list[str] | None = None) -> int:
         log.error("no runnable models — set EVAL_*_API_KEY or pass --dry-run")
         return 2
 
+    judge_panel = tuple(j.strip() for j in args.judge_models.split(",") if j.strip())
     all_results: list[CaseResult] = []
     for provider, model in runnable:
         log.info("running %d scenarios against %s/%s", len(scenarios), provider, model)
@@ -408,7 +407,7 @@ def main(argv: list[str] | None = None) -> int:
                 scenarios,
                 provider=provider,
                 model=model,
-                judge_model=args.judge_model,
+                judge_models=judge_panel,
                 runs=args.runs,
             ):
                 all_results.append(r)

@@ -120,21 +120,21 @@ def _score_case(
     *,
     raw: str | None,
     actual: TriggerClass,
-    judge_model: str | None,
+    judge_models: tuple[str, ...] | None,
 ) -> list[ScorerOutcome]:
     out: list[ScorerOutcome] = [scorers.trigger_class_match(case.expected_class, actual)]
     if actual is not TriggerClass.CHANGE:
         return out
     if raw is None or raw == IRRELEVANT_SENTINEL:
-        return out  # defensive — shouldn't happen, classify guards
+        return out
     new_body = raw
     out.append(scorers.bloat_ratio(case.current_body, new_body, max_ratio=case.max_bloat_ratio))
     out.append(scorers.markdown_valid(new_body))
     out.append(
-        scorers.facts_present(new_body, case.expected_facts_present, judge_model=judge_model)
+        scorers.facts_present(new_body, case.expected_facts_present, judge_models=judge_models)
     )
     out.append(
-        scorers.facts_preserved(new_body, case.expected_facts_preserved, judge_model=judge_model)
+        scorers.facts_preserved(new_body, case.expected_facts_preserved, judge_models=judge_models)
     )
     return out
 
@@ -144,7 +144,7 @@ def _run_one_model(
     *,
     provider: str,
     model: str,
-    judge_model: str | None,
+    judge_models: tuple[str, ...] | None,
     runs: int,
 ) -> Iterator[CaseResult]:
     for case in cases:
@@ -159,7 +159,7 @@ def _run_one_model(
                 error = repr(exc)
                 log.warning("case %s run %d failed against %s: %s", case.id, run_index, model, exc)
             actual = _classify(case.surface, raw)
-            score_rows = _score_case(case, raw=raw, actual=actual, judge_model=judge_model)
+            score_rows = _score_case(case, raw=raw, actual=actual, judge_models=judge_models)
             yield CaseResult(
                 case_id=case.id,
                 surface=case.surface,  # type: ignore[arg-type]
@@ -198,9 +198,9 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         help="JSONL output path. Default: runs/wiki_updater_<unix>.jsonl",
     )
     p.add_argument(
-        "--judge-model",
-        default=None,
-        help="Model id for LLM-judge scorers. Defaults to the model under test.",
+        "--judge-models",
+        default=",".join(scorers.DEFAULT_JUDGE_PANEL),
+        help="Comma-separated judge model panel. Each fact verdict is majority-voted across panel members; each judge's rationale is captured. Default: three-family panel.",
     )
     p.add_argument(
         "--braintrust",
@@ -248,11 +248,12 @@ def main(argv: list[str] | None = None) -> int:
         log.info("running %d cases against %s/%s", len(cases), provider, model)
         ctx = _resolve_context(provider, model, args.dry_run, cases)
         with ctx:
+            judge_panel = tuple(j.strip() for j in args.judge_models.split(",") if j.strip())
             for r in _run_one_model(
                 cases,
                 provider=provider,
                 model=model,
-                judge_model=args.judge_model or model,
+                judge_models=judge_panel,
                 runs=args.runs,
             ):
                 all_results.append(r)
