@@ -51,8 +51,8 @@ func Install(launcherPath string) error {
 // feedback on install. Failure is swallowed.
 func showInstalledMessage(launcherPath string) {
 	script := fmt.Sprintf(
-		`MsgBox "AgentWikiLauncher installed at " & %q & vbCrLf & vbCrLf & "Click Run Agent in the wiki to continue.", 64, "AgentWikiLauncher"`,
-		launcherPath,
+		`MsgBox "AgentWikiLauncher installed at " & %s & vbCrLf & vbCrLf & "Click Run Agent in the wiki to continue.", 64, "AgentWikiLauncher"`,
+		vbQuoteWin(launcherPath),
 	)
 	_ = exec.Command("mshta", "vbscript:Execute("+vbQuoteWin(script)+":close)").Run()
 }
