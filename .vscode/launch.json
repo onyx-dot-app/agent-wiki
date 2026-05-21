@@ -1,0 +1,188 @@
+{
+  "version": "0.2.0",
+  "compounds": [
+    {
+      "name": "--- Compound ---",
+      "configurations": [
+        "--- Individual ---"
+      ],
+      "presentation": {
+        "group": "1"
+      }
+    },
+    {
+      "name": "Run All Services",
+      "configurations": [
+        "Frontend",
+        "API Server",
+        "Worker: documents",
+        "Worker: triggers",
+        "Worker: lightweight_maintenance"
+      ],
+      "presentation": {
+        "group": "1"
+      }
+    },
+    {
+      "name": "API + Frontend",
+      "configurations": [
+        "Frontend",
+        "API Server"
+      ],
+      "presentation": {
+        "group": "1"
+      }
+    },
+    {
+      "name": "Workers",
+      "configurations": [
+        "Worker: documents",
+        "Worker: triggers",
+        "Worker: lightweight_maintenance"
+      ],
+      "presentation": {
+        "group": "1"
+      },
+      "stopAll": true
+    }
+  ],
+  "configurations": [
+    {
+      "name": "--- Individual ---",
+      "type": "node",
+      "request": "launch",
+      "presentation": {
+        "group": "2",
+        "order": 0
+      }
+    },
+    {
+      "name": "Frontend",
+      "type": "node",
+      "request": "launch",
+      "cwd": "${workspaceFolder}/frontend",
+      "runtimeExecutable": "bun",
+      "runtimeArgs": [
+        "run",
+        "dev"
+      ],
+      "envFile": "${workspaceFolder}/.vscode/.env.frontend",
+      "console": "integratedTerminal",
+      "consoleTitle": "Frontend Console",
+      "presentation": {
+        "group": "2"
+      }
+    },
+    {
+      "name": "API Server",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "cwd": "${workspaceFolder}/backend",
+      "envFile": "${workspaceFolder}/.vscode/.env",
+      "env": {
+        "LOG_LEVEL": "DEBUG",
+        "PYTHONUNBUFFERED": "1"
+      },
+      "args": [
+        "--factory",
+        "app.main:create_app",
+        "--reload",
+        "--port",
+        "8080"
+      ],
+      "console": "integratedTerminal",
+      "consoleTitle": "API Server Console",
+      "justMyCode": false,
+      "presentation": {
+        "group": "2"
+      }
+    },
+    {
+      "name": "Worker: documents",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "app.tasks.run_worker",
+      "cwd": "${workspaceFolder}/backend",
+      "envFile": "${workspaceFolder}/.vscode/.env",
+      "env": {
+        "LOG_LEVEL": "DEBUG",
+        "PYTHONUNBUFFERED": "1"
+      },
+      "args": [
+        "documents"
+      ],
+      "console": "integratedTerminal",
+      "consoleTitle": "Worker: documents Console",
+      "justMyCode": false,
+      "presentation": {
+        "group": "2",
+        "hidden": true
+      }
+    },
+    {
+      "name": "Worker: triggers",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "app.tasks.run_worker",
+      "cwd": "${workspaceFolder}/backend",
+      "envFile": "${workspaceFolder}/.vscode/.env",
+      "env": {
+        "LOG_LEVEL": "DEBUG",
+        "PYTHONUNBUFFERED": "1"
+      },
+      "args": [
+        "triggers"
+      ],
+      "console": "integratedTerminal",
+      "consoleTitle": "Worker: triggers Console",
+      "justMyCode": false,
+      "presentation": {
+        "group": "2",
+        "hidden": true
+      }
+    },
+    {
+      "name": "Worker: lightweight_maintenance",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "app.tasks.run_worker",
+      "cwd": "${workspaceFolder}/backend",
+      "envFile": "${workspaceFolder}/.vscode/.env",
+      "env": {
+        "LOG_LEVEL": "DEBUG",
+        "PYTHONUNBUFFERED": "1"
+      },
+      "args": [
+        "lightweight_maintenance"
+      ],
+      "console": "integratedTerminal",
+      "consoleTitle": "Worker: lightweight_maintenance Console",
+      "justMyCode": false,
+      "presentation": {
+        "group": "2",
+        "hidden": true
+      }
+    },
+    {
+      "name": "Pytest",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "cwd": "${workspaceFolder}/backend",
+      "envFile": "${workspaceFolder}/.vscode/.env",
+      "env": {
+        "LOG_LEVEL": "DEBUG",
+        "PYTHONUNBUFFERED": "1"
+      },
+      "args": [
+        "-v"
+      ],
+      "console": "integratedTerminal",
+      "consoleTitle": "Pytest Console",
+      "presentation": {
+        "group": "2"
+      }
+    }
+  ]
+}
