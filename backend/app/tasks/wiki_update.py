@@ -25,6 +25,7 @@ import time
 from typing import Any
 
 from app.config import CONFIG
+from app.ingest import examples as ingest_examples
 from app.ingest import search as ingest_search
 from app.ingest.source_tiers import is_filtered
 from app.ingest.models import WikiUpdateCandidate
@@ -374,10 +375,40 @@ def process_pushed_document(push: dict[str, Any]) -> None:
             ingest_outcomes_total.labels(outcome="committed", wiki_path=c.hit.path).inc()
             ingest_bm25_score_by_outcome.labels(outcome="committed").observe(c.hit.score)
             log.info("process_pushed_document: committed %s sha=%s", c.hit.path, sha)
+            if CONFIG.ingest_example_logging:
+                try:
+                    ingest_examples.log_example(
+                        source_type=source_type,
+                        source_title=title,
+                        source_url=url or None,
+                        source_content=content,
+                        wiki_path=c.hit.path,
+                        wiki_body_before=c.body,
+                        wiki_body_after=result,
+                        outcome="committed",
+                        commit_sha=sha,
+                    )
+                except Exception:
+                    log.warning("ingest_examples: failed to log committed example", exc_info=True)
         else:
             consecutive_irrelevant = 0
             ingest_outcomes_total.labels(outcome="no_change", wiki_path=c.hit.path).inc()
             ingest_bm25_score_by_outcome.labels(outcome="no_change").observe(c.hit.score)
+            if CONFIG.ingest_example_logging:
+                try:
+                    ingest_examples.log_example(
+                        source_type=source_type,
+                        source_title=title,
+                        source_url=url or None,
+                        source_content=content,
+                        wiki_path=c.hit.path,
+                        wiki_body_before=c.body,
+                        wiki_body_after=None,
+                        outcome="no_change",
+                        commit_sha=None,
+                    )
+                except Exception:
+                    log.warning("ingest_examples: failed to log no_change example", exc_info=True)
 
     ingest_llm_calls_per_doc.observe(llm_calls)
     log.info(

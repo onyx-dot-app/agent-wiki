@@ -711,3 +711,24 @@ class AclEntry(Base):
         Index("idx_acl_resource", "resource_kind", "resource_path"),
         Index("idx_acl_principal", "principal_kind", "principal_id"),
     )
+
+
+# --------------------------------------------------------------------------- #
+# Ingest examples — opt-in eval logging (INGEST_EXAMPLE_LOGGING=true)         #
+# --------------------------------------------------------------------------- #
+
+
+class IngestExample(Base):
+    __tablename__ = "ingest_examples"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    created_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
+    source_type: Mapped[str | None] = mapped_column(Text)
+    source_title: Mapped[str | None] = mapped_column(Text)
+    source_url: Mapped[str | None] = mapped_column(Text)
+    source_content: Mapped[str] = mapped_column(Text, nullable=False)
+    wiki_path: Mapped[str] = mapped_column(Text, nullable=False)
+    wiki_body_before: Mapped[str] = mapped_column(Text, nullable=False)
+    diff: Mapped[str | None] = mapped_column(Text)
+    outcome: Mapped[str] = mapped_column(Text, nullable=False)
+    commit_sha: Mapped[str | None] = mapped_column(Text)

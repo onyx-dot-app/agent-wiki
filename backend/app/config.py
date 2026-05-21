@@ -41,6 +41,9 @@ class Config(BaseModel):
     ingest_bm25_limit: int
     ingest_irrelevant_stop_n: int
 
+    # Opt-in eval logging — captures reconciler inputs/outputs to ingest_examples
+    ingest_example_logging: bool
+
     # Coding-tool launchers (Run Agent button) — see
     # local_data/wiki/Wiki Project/Specific Features/coding_tool_launchers/.
     launchers_enabled: bool
@@ -108,6 +111,8 @@ def load_config() -> Config:
         oidc_client_id=os.environ.get("OIDC_CLIENT_ID", ""),
         oidc_client_secret=os.environ.get("OIDC_CLIENT_SECRET", ""),
         oidc_redirect_uri=os.environ.get("OIDC_REDIRECT_URI", ""),
+        ingest_example_logging=os.environ.get("INGEST_EXAMPLE_LOGGING", "false").lower()
+        in {"1", "true", "yes"},
         secure_cookies=os.environ.get("SECURE_COOKIES", "false").lower() in {"1", "true", "yes"},
         launchers_enabled=os.environ.get("LAUNCHERS_ENABLED", "false").lower()
         in {"1", "true", "yes"},
