@@ -1,7 +1,10 @@
 {
   "version": "0.2.0",
+  // Compounds launch multiple configurations at once (shown in group 1 of the Run panel).
+  // Individual configurations (group 2) can also be started on their own for focused debugging.
   "compounds": [
     {
+      // Section header — gives group 1 a visible label in the Run panel dropdown.
       "name": "--- Compound ---",
       "configurations": [
         "--- Individual ---"
@@ -11,6 +14,8 @@
       }
     },
     {
+      // Starts the full stack: Next.js dev server, FastAPI/uvicorn, and all three workers.
+      // Use this for end-to-end development or when working on features that touch multiple layers.
       "name": "Run All Services",
       "configurations": [
         "Frontend",
@@ -24,6 +29,7 @@
       }
     },
     {
+      // Starts only the frontend and API. Useful when workers aren't needed (e.g. UI-only work).
       "name": "API + Frontend",
       "configurations": [
         "Frontend",
@@ -34,6 +40,8 @@
       }
     },
     {
+      // Starts all three workers without the API or frontend.
+      // stopAll: true means stopping this compound stops every worker it launched.
       "name": "Workers",
       "configurations": [
         "Worker: documents",
@@ -48,6 +56,7 @@
   ],
   "configurations": [
     {
+      // Section header — gives group 2 a visible label in the Run panel dropdown.
       "name": "--- Individual ---",
       "type": "node",
       "request": "launch",
@@ -57,6 +66,7 @@
       }
     },
     {
+      // Next.js dev server with hot reload. Env vars come from the root .env file.
       "name": "Frontend",
       "type": "node",
       "request": "launch",
@@ -74,6 +84,8 @@
       }
     },
     {
+      // FastAPI via uvicorn with --reload (auto-restarts on Python file changes).
+      // justMyCode: false lets the debugger step into library code (e.g. FastAPI internals).
       "name": "API Server",
       "type": "debugpy",
       "request": "launch",
@@ -99,6 +111,7 @@
       }
     },
     {
+      // Handles LLM doc-reconciliation tasks (slow/expensive — runs in its own process).
       "name": "Worker: documents",
       "type": "debugpy",
       "request": "launch",
@@ -120,6 +133,7 @@
       }
     },
     {
+      // Handles NL trigger evaluation (delta + scheduled fan-out).
       "name": "Worker: triggers",
       "type": "debugpy",
       "request": "launch",
@@ -141,6 +155,8 @@
       }
     },
     {
+      // Handles sub-second upkeep tasks (BM25 reindex, activity expiry).
+      // Handlers on this queue must be fast — no LLM, no external HTTP, no wiki commits.
       "name": "Worker: lightweight_maintenance",
       "type": "debugpy",
       "request": "launch",
@@ -162,6 +178,8 @@
       }
     },
     {
+      // Runs the full pytest suite with the debugger attached — breakpoints work inside tests.
+      // Requires the test database to exist; see CLAUDE.md § Testing for setup instructions.
       "name": "Pytest",
       "type": "debugpy",
       "request": "launch",
