@@ -337,13 +337,21 @@ func confirmPinEndpoint(rawURL string) bool {
 // to switch the pinned endpoint from one wiki URL to another. Returns
 // true on Switch. The destructive default (Cancel) keeps a stray
 // agentwiki:// URL from silently moving the pin off a trusted host.
+//
+// Only the variable URL fragments go through appleScriptEscapeLiteral
+// (which scrubs newlines + quotes to keep an attacker from breaking the
+// dialog). The fixed scaffolding's "\n" survives so the message renders
+// across multiple lines.
 func confirmSwitchEndpoint(oldURL, newURL string) bool {
-	escaped := appleScriptEscapeLiteral(
-		fmt.Sprintf("Switch your pinned wiki endpoint?\n\nCurrent: %s\nNew:     %s\n\nOnly do this if you trust the new URL.", oldURL, newURL),
+	oldEscaped := appleScriptEscapeLiteral(oldURL)
+	newEscaped := appleScriptEscapeLiteral(newURL)
+	body := fmt.Sprintf(
+		"Switch your pinned wiki endpoint?\n\nCurrent: %s\nNew:     %s\n\nOnly do this if you trust the new URL.",
+		oldEscaped, newEscaped,
 	)
 	script := fmt.Sprintf(
 		"display dialog \"%s\" buttons {\"Cancel\", \"Switch\"} default button \"Cancel\" with title \"AgentWikiLauncher\" with icon caution",
-		escaped,
+		body,
 	)
 	return exec.Command("osascript", "-e", script).Run() == nil
 }
