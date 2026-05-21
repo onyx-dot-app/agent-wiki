@@ -12,7 +12,7 @@ import (
 const linuxDesktopFile = `[Desktop Entry]
 Name=AgentWikiLauncher
 Comment=Agent Wiki helper — handles agentwiki:// URLs
-Exec="%s" dispatch "%%u"
+Exec=%s dispatch %%u
 Terminal=false
 Type=Application
 NoDisplay=true
@@ -23,6 +23,12 @@ MimeType=x-scheme-handler/agentwiki;
 // the agentwiki:// URL scheme to the given launcher binary. The %u
 // placeholder is freedesktop's "single URL" field code — xdg-open
 // substitutes the agentwiki:// URL at dispatch time.
+//
+// launcherPath and the %u code are left unquoted: freedesktop spec
+// §6.5 says field codes inside quoted arguments are unspecified
+// behavior. install_linux.go writes the launcher into
+// ~/.local/bin/agentwiki-launcher, which won't contain spaces on
+// any sane Linux home directory.
 func RenderLinuxDesktopFile(launcherPath string) string {
 	return fmt.Sprintf(linuxDesktopFile, launcherPath)
 }

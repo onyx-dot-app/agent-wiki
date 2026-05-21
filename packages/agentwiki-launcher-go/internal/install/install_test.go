@@ -10,7 +10,7 @@ func TestRenderLinuxDesktopFile(t *testing.T) {
 	wantSubstrings := []string{
 		"[Desktop Entry]",
 		"Name=AgentWikiLauncher",
-		`Exec="/home/me/.local/bin/agentwiki-launcher" dispatch "%u"`,
+		"Exec=/home/me/.local/bin/agentwiki-launcher dispatch %u",
 		"MimeType=x-scheme-handler/agentwiki;",
 		"NoDisplay=true",
 	}
