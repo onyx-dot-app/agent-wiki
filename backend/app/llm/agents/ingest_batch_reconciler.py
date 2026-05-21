@@ -7,18 +7,21 @@ for each one:
   - str                  — the new page body produced by applying FIND/REPLACE
                            edits to the current body
 
-Fails open — any LLM or parse error marks all candidates in that batch as
-IRRELEVANT_SENTINEL. Batches fail independently.
+The model submits decisions via the ``submit_results`` tool call — typed JSON,
+so formatting deviations cause hard errors instead of silent mis-parses.
+
+Fails open — any error marks all candidates in that batch as IRRELEVANT_SENTINEL.
+Batches fail independently.
 """
 from __future__ import annotations
 
 import logging
-import re
-from typing import NamedTuple
+from typing import Any, NamedTuple, cast
 
 from app.ingest.models import WikiUpdateCandidate
 from app.llm import client
-from app.llm.agents.common import IRRELEVANT_SENTINEL, NO_CHANGE_SENTINEL, TextEdit, apply_edits, batch_by_chars
+from app.llm.client import ToolCall
+from app.llm.agents.common import IRRELEVANT_SENTINEL, TextEdit, apply_edits, batch_by_chars
 from app.metrics import ingest_reconciler_input_tokens, ingest_reconciler_output_tokens
 from app.llm.prompts import load_prompt
 from app.tracing import trace_flow
@@ -26,14 +29,64 @@ from app.tracing import trace_flow
 log = logging.getLogger(__name__)
 
 _RECONCILER_BUDGET_CHARS = 200_000
+_RECONCILER_MAX_TOKENS = 8192
+
+_SUBMIT_TOOL: dict[str, Any] = {
+    "name": "submit_results",
+    "description": "Submit your editing decisions for all candidate wiki pages.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "results": {
+                "type": "array",
+                "description": "One entry per candidate wiki page, in order.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "candidate_index": {
+                            "type": "integer",
+                            "description": "1-based index matching the candidate number.",
+                        },
+                        "action": {
+                            "type": "string",
+                            "enum": ["irrelevant", "no_change", "edit"],
+                            "description": (
+                                "irrelevant: page is unrelated to the external document. "
+                                "no_change: page already reflects everything in the external document. "
+                                "edit: changes are needed — provide edits."
+                            ),
+                        },
+                        "edits": {
+                            "type": "array",
+                            "description": "Required when action is 'edit'. Omit otherwise.",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "find": {
+                                        "type": "string",
+                                        "description": "Exact verbatim text from the wiki page to replace.",
+                                    },
+                                    "replace": {
+                                        "type": "string",
+                                        "description": "The replacement text.",
+                                    },
+                                },
+                                "required": ["find", "replace"],
+                            },
+                        },
+                    },
+                    "required": ["candidate_index", "action"],
+                },
+            }
+        },
+        "required": ["results"],
+    },
+}
 
 
 class BatchReconcileResult(NamedTuple):
     results: list[str | None]
     llm_calls: int
-
-
-_RESULT_RE = re.compile(r"===RESULT \[(\d+)\]===")
 
 
 def batch_reconcile(
@@ -55,7 +108,7 @@ def batch_reconcile(
       - ``llm_calls`` is the number of LLM calls made (one per char-budget batch)
 
     Falls back to IRRELEVANT_SENTINEL for all candidates in a batch on any
-    LLM or parse error; batches fail independently.
+    error; batches fail independently.
     """
     if not candidates:
         return BatchReconcileResult(results=[], llm_calls=0)
@@ -119,14 +172,19 @@ def _reconcile_batch(
                     {"role": "user", "content": user},
                 ],
                 model=model,
+                tools=[_SUBMIT_TOOL],
+                max_tokens=_RECONCILER_MAX_TOKENS,
             )
-        parsed = _parse(result.text, len(batch))
+        if not result.tool_calls:
+            raise ValueError("model returned no tool call")
+        parsed = _parse_tool_results(result.tool_calls[0], batch)
     except Exception:
         log.warning(
             "ingest_batch_reconciler: batch failed, falling back",
             exc_info=True,
         )
         return [IRRELEVANT_SENTINEL] * len(batch)
+
     try:
         ingest_reconciler_input_tokens.observe(result.usage.input_tokens)
         ingest_reconciler_output_tokens.observe(result.usage.output_tokens)
@@ -139,67 +197,73 @@ def _reconcile_batch(
             results.append(None)
         elif outcome is IRRELEVANT_SENTINEL:
             results.append(IRRELEVANT_SENTINEL)
-        elif isinstance(outcome, list):  # list[TextEdit] — apply edits to current body
+        elif isinstance(outcome, list):
             if not outcome:
                 log.warning(
-                    "ingest_batch_reconciler: no ===EDIT=== blocks parsed for %s, treating as NO_CHANGE",
+                    "ingest_batch_reconciler: no edits for %s, treating as NO_CHANGE",
                     c.hit.path,
                 )
             results.append(apply_edits(c.body, outcome))
     return results
 
 
-
-def _parse(text: str, n: int) -> list[str | None | list[TextEdit]]:
-    """Parse the structured LLM output into a per-candidate outcome list.
+def _parse_tool_results(
+    tool_call: ToolCall,
+    batch: list[WikiUpdateCandidate],
+) -> list[str | None | list[TextEdit]]:
+    """Parse a submit_results tool call into per-candidate outcomes.
 
     Each element is one of:
-      - IRRELEVANT_SENTINEL (str): page is unrelated
+      - IRRELEVANT_SENTINEL: page is unrelated
       - None: page is already up-to-date
-      - list[TextEdit]: (find, replace) edit pairs to apply
+      - list[TextEdit]: edits to apply
     """
-    parts = _RESULT_RE.split(text)
-    raw: dict[int, str] = {}
-    for i in range(1, len(parts), 2):
-        idx = int(parts[i])
-        body = parts[i + 1].strip() if i + 1 < len(parts) else ""
-        raw[idx] = body
+    if tool_call.name != "submit_results":
+        log.warning(
+            "ingest_batch_reconciler: unexpected tool call %r, expected submit_results",
+            tool_call.name,
+        )
+        return [IRRELEVANT_SENTINEL] * len(batch)
+    raw: list[Any] = tool_call.arguments.get("results") or []
+    by_index: dict[int, dict[str, Any]] = {}
+    for item in raw:
+        if isinstance(item, dict):
+            r = cast(dict[str, Any], item)
+            idx = r.get("candidate_index")
+            if isinstance(idx, int):
+                by_index[idx] = r
 
-    if not raw:
-        raise ValueError("no ===RESULT [N]=== sections found in response")
-
-    results: list[str | None | list[TextEdit]] = []
-    for i in range(1, n + 1):
-        body = raw.get(i, IRRELEVANT_SENTINEL)
-        if body == IRRELEVANT_SENTINEL or body.startswith(IRRELEVANT_SENTINEL + "\n"):
-            results.append(IRRELEVANT_SENTINEL)
-        elif body == NO_CHANGE_SENTINEL or body.startswith(NO_CHANGE_SENTINEL + "\n"):
-            results.append(None)
+    outcomes: list[str | None | list[TextEdit]] = []
+    for i in range(1, len(batch) + 1):
+        entry = by_index.get(i)
+        if entry is None:
+            outcomes.append(IRRELEVANT_SENTINEL)
+            continue
+        action = entry.get("action", "irrelevant")
+        if action == "no_change":
+            outcomes.append(None)
+        elif action == "edit":
+            raw_edits: list[Any] = entry.get("edits") or []
+            edits: list[TextEdit] = []
+            for edit_item in raw_edits:
+                if isinstance(edit_item, dict):
+                    e = cast(dict[str, Any], edit_item)
+                    find = e.get("find")
+                    replace = e.get("replace")
+                    if isinstance(find, str) and isinstance(replace, str):
+                        edits.append(TextEdit(find=find, replace=replace))
+            if not edits:
+                log.warning(
+                    "ingest_batch_reconciler: action=edit but no valid edits for candidate %d",
+                    i,
+                )
+            outcomes.append(edits)
         else:
-            results.append(_parse_edits(body))
-    return results
-
-
-def _parse_edits(text: str) -> list[TextEdit]:
-    """Parse ===EDIT=== blocks from a result section into TextEdit pairs."""
-    edits: list[TextEdit] = []
-    for block in re.split(r"===EDIT===\n?", text.strip()):
-        block = block.strip()
-        if not block:
-            continue
-        find_pos = block.find("FIND:\n")
-        # Search for "\nREPLACE:" without requiring a trailing newline so that
-        # empty REPLACE sections (where the block ends right after "REPLACE:")
-        # are still matched after strip() removes the trailing newline.
-        replace_pos = block.find("\nREPLACE:")
-        if find_pos == -1 or replace_pos == -1 or replace_pos <= find_pos:
-            continue
-        find_text = block[find_pos + len("FIND:\n"):replace_pos]
-        replace_raw = block[replace_pos + len("\nREPLACE:"):]
-        # Strip the single newline delimiter that normally follows "REPLACE:".
-        replace_text = replace_raw[1:] if replace_raw.startswith("\n") else replace_raw
-        find_text = find_text.strip("\n")
-        replace_text = replace_text.strip("\n")
-        if find_text:
-            edits.append(TextEdit(find=find_text, replace=replace_text))
-    return edits
+            if action != "irrelevant":
+                log.warning(
+                    "ingest_batch_reconciler: unknown action %r for candidate %d, treating as irrelevant",
+                    action,
+                    i,
+                )
+            outcomes.append(IRRELEVANT_SENTINEL)
+    return outcomes
