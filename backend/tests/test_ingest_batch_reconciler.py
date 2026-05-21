@@ -1,6 +1,7 @@
 """Unit tests for app.llm.agents.ingest_batch_reconciler."""
 from __future__ import annotations
 
+import logging
 from unittest.mock import MagicMock, patch
 
 from app.db.fts import SearchHit
@@ -132,7 +133,6 @@ def test_parse_tool_results_empty_results_all_irrelevant():
 
 
 def test_parse_tool_results_edit_with_no_edits_warns(caplog):
-    import logging
     batch = [_candidate("a")]
     tc = _tool_call({"results": [{"candidate_index": 1, "action": "edit", "edits": []}]})
     with caplog.at_level(logging.WARNING, logger="app.llm.agents.ingest_batch_reconciler"):
@@ -142,7 +142,6 @@ def test_parse_tool_results_edit_with_no_edits_warns(caplog):
 
 
 def test_parse_tool_results_wrong_tool_name_returns_all_irrelevant(caplog):
-    import logging
     batch = [_candidate("a"), _candidate("b")]
     tc = ToolCall(id="call_1", name="wrong_tool", arguments={"results": []})
     with caplog.at_level(logging.WARNING, logger="app.llm.agents.ingest_batch_reconciler"):
@@ -152,7 +151,6 @@ def test_parse_tool_results_wrong_tool_name_returns_all_irrelevant(caplog):
 
 
 def test_parse_tool_results_unknown_action_defaults_to_irrelevant(caplog):
-    import logging
     batch = [_candidate("a")]
     tc = _tool_call({"results": [{"candidate_index": 1, "action": "rewrite"}]})
     with caplog.at_level(logging.WARNING, logger="app.llm.agents.ingest_batch_reconciler"):
