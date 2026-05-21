@@ -58,6 +58,7 @@ interface CommitInfo {
   author: string;
   ts: string;
   message: string;
+  body?: string;
 }
 
 interface HistoryResponse {
@@ -2077,16 +2078,21 @@ function HistoryPanel({
               subtitle={headSha ? headSha.slice(0, 7) : ""}
               meta=""
             />
-            {commits.map((c) => (
-              <CommitRow
-                key={c.sha}
-                active={!latestActive && viewingSha === c.sha}
-                onClick={() => onPick(c.sha)}
-                title={c.message || "(no message)"}
-                subtitle={`${c.sha.slice(0, 7)} · ${c.author}`}
-                meta={formatTs(c.ts)}
-              />
-            ))}
+            {commits.map((c) => {
+              const { url, title: srcTitle } = parseSourceMeta(c.body);
+              return (
+                <CommitRow
+                  key={c.sha}
+                  active={!latestActive && viewingSha === c.sha}
+                  onClick={() => onPick(c.sha)}
+                  title={c.message || "(no message)"}
+                  subtitle={`${c.sha.slice(0, 7)} · ${c.author}`}
+                  meta={formatTs(c.ts)}
+                  sourceUrl={url}
+                  sourceTitle={srcTitle}
+                />
+              );
+            })}
           </ul>
         )}
       </div>
@@ -2100,25 +2106,28 @@ function CommitRow({
   title,
   subtitle,
   meta,
+  sourceUrl,
+  sourceTitle,
 }: {
   active: boolean;
   onClick: () => void;
   title: string;
   subtitle: string;
   meta: string;
+  sourceUrl?: string | null;
+  sourceTitle?: string | null;
 }) {
   return (
-    <li>
+    <li style={{ borderBottom: `1px solid ${color.border.subtle}` }}>
       <button
         onClick={onClick}
         style={{
           width: "100%",
           textAlign: "left",
-          padding: "10px 12px",
+          padding: "10px 12px 6px",
           background: active ? color.accent.subtleBg : "transparent",
           color: color.text.primary,
           border: "none",
-          borderBottom: `1px solid ${color.border.subtle}`,
           cursor: "pointer",
           display: "block",
         }}
@@ -2137,8 +2146,67 @@ function CommitRow({
           {meta ? ` · ${meta}` : ""}
         </div>
       </button>
+      {(sourceTitle || sourceUrl) && (
+        <div
+          style={{
+            padding: "0 12px 8px",
+            background: active ? color.accent.subtleBg : "transparent",
+          }}
+        >
+          {sourceUrl ? (
+            <a
+              href={sourceUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                display: "inline-block",
+                fontSize: 11,
+                color: color.accent.subtleFg,
+                textDecoration: "underline",
+                textUnderlineOffset: 2,
+                maxWidth: "100%",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {sourceTitle ?? sourceUrl}
+            </a>
+          ) : (
+            <span
+              style={{
+                display: "inline-block",
+                fontSize: 11,
+                color: color.text.muted,
+                maxWidth: "100%",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {sourceTitle}
+            </span>
+          )}
+        </div>
+      )}
     </li>
   );
+}
+
+function parseSourceMeta(body?: string): { url: string | null; title: string | null } {
+  let url: string | null = null;
+  let title: string | null = null;
+  for (const line of (body ?? "").split("\n")) {
+    if (!url) {
+      const m = line.match(/^Source:\s*(\S+)/);
+      if (m) url = /^https?:\/\//i.test(m[1]) ? m[1] : null;
+    }
+    if (!title) {
+      const m = line.match(/^Title:\s*(.+)/);
+      if (m) title = m[1].trim();
+    }
+  }
+  return { url, title };
 }
 
 function formatTs(iso: string): string {
