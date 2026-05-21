@@ -56,17 +56,29 @@ internal/
 
 ## Distribution
 
-Homebrew tap (`onyx-dot-app/homebrew-wiki`) → `brew install onyx/wiki/agentwiki-launcher` → binary lands at `/opt/homebrew/bin/agentwiki-launcher`. Post-install runs `agentwiki-launcher install` to register the URL scheme.
+Users download `AgentWikiLauncher.zip` from the wiki UI
+(`/api/installer/app`), unzip, and drag `AgentWikiLauncher.app` into
+`/Applications`. The .app is a Developer-ID-signed + notarized + stapled
+bundle so Gatekeeper passes on first open without "Open anyway"
+friction. On the first `agentwiki://run` URI the bundle prompts to pin
+the wiki endpoint, then dispatches every subsequent run silently.
 
 ### Signing + notarization
 
-`make release` cross-compiles both darwin binaries, signs each with the
-Developer ID Application cert under hardened runtime + secure timestamp,
-and submits each via `xcrun notarytool --wait`. Standalone Mach-O
-binaries cannot be stapled — Gatekeeper resolves the notarization ticket
-online on first launch.
+`./scripts/build-app.sh` does the full chain:
 
-Required env (see `scripts/release-mac.sh`):
+1. `make dist` — cross-compile arm64 + amd64 Mach-O binaries.
+2. `lipo -create` — combine into one universal binary.
+3. `osacompile` an AppleScript stub bundle, drop the universal binary in
+   `Contents/Resources/`, patch `Info.plist` with `CFBundleURLTypes`
+   for the `agentwiki://` scheme + `LSUIElement`.
+4. `codesign --options runtime --timestamp` the inner binary, the
+   applet, and the bundle in that order.
+5. `xcrun notarytool submit --wait` against an ad-hoc keychain.
+6. `xcrun stapler staple` the bundle so notarization is offline-checkable.
+7. Re-zip post-staple → `dist/AgentWikiLauncher.zip`.
+
+Required env (read by `scripts/build-app.sh` + `scripts/release-mac.sh`):
 
 | Variable              | Purpose                                        |
 | --------------------- | ---------------------------------------------- |
@@ -76,14 +88,18 @@ Required env (see `scripts/release-mac.sh`):
 | `APPLE_CERT_BASE64`   | Base64-encoded Developer ID Application `.p12` |
 | `APPLE_CERT_PASSWORD` | Password for the `.p12`                        |
 
-Locally:
+Locally (pulls the five values from AWS Secrets Manager `deploy/apple-*`):
 
 ```
-source scripts/load-secrets-aws.sh   # pulls all five from AWS Secrets Manager
-make release
+source scripts/load-secrets-aws.sh
+./scripts/build-app.sh
 ```
 
-In CI: secrets live on the GitHub Actions workflow
-(`.github/workflows/release-agentwiki-launcher-go.yml`, manual dispatch
-only — no auto-trigger). Wiring publishing onto a tag push or a Homebrew
-formula bump is a follow-up.
+In CI, `.github/workflows/release-agentwiki-launcher-go.yml` runs the
+same script. It assumes the `AWS_OIDC_ROLE_ARN` IAM role via OIDC and
+pulls the same secrets from AWS Secrets Manager — secrets never copy
+into GitHub Actions secrets. `docker-build-push.yml` + `nightly-build.yml`
+call this workflow as a reusable sub-workflow, download the
+`AgentWikiLauncher.zip` artifact, and bake it into the backend image at
+`backend/static/installers/` so `/api/installer/app` serves it in
+production.

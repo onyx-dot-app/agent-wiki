@@ -1,15 +1,14 @@
-"""Serves the macOS helper binary + a one-shot install shell script.
+"""Serves the macOS launcher distribution: signed/notarized .app zip,
+raw signed binaries (legacy), and a one-shot install shell script
+(legacy fallback for users who can't drag the .app).
 
-The shell script bakes the calling wiki's URL into a ``set-endpoint``
-call so the user's flow is:
+Primary flow:
 
-  1. Click "Download installer" in the wiki UI.
-  2. Open the downloaded shell script (or curl|sh) — it downloads the
-     binary from this same backend, chmod +x's it, pins the endpoint,
-     and registers the macOS .app + URL handler.
-  3. Click Run Agent — works.
-
-No npm install, no terminal command typing, no homebrew tap (yet).
+  1. Click "Download installer" in the wiki UI → /api/installer/app
+     streams AgentWikiLauncher.zip.
+  2. Unzip, drag AgentWikiLauncher.app to /Applications.
+  3. Click Run Agent → first launch prompts to pin this wiki's URL,
+     then dispatches the run.
 """
 
 from __future__ import annotations
