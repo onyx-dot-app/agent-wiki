@@ -47,6 +47,27 @@ def _wiki_base(request: Request) -> str:
     return str(request.base_url).rstrip("/")
 
 
+@router.get("/installer/app")
+def installer_app() -> Response:
+    """Stream the signed + notarized + stapled AgentWiki.app zip.
+
+    Built by ``packages/agentwiki-launcher-go/scripts/build-app.sh``.
+    Users drag the .app from the unzipped download to /Applications;
+    on first Run Agent the launcher prompts to pin this wiki's URL.
+    """
+    path = _BINARIES_DIR / "AgentWikiLauncher.zip"
+    if not path.exists():
+        raise HTTPException(
+            status_code=503,
+            detail=f"AgentWikiLauncher.zip missing on this server; expected at {path}",
+        )
+    return FileResponse(
+        path,
+        media_type="application/zip",
+        filename="AgentWikiLauncher.zip",
+    )
+
+
 @router.get("/installer/binary")
 def installer_binary(request: Request, arch: str | None = None) -> Response:
     """Returns the macOS helper binary for the requested arch."""

@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"runtime"
 	"strings"
 	"time"
@@ -118,25 +119,24 @@ func doProbeAck(raw string) error {
 	if parsed.Action != uri.ActionProbe {
 		return fmt.Errorf("expected probe URI")
 	}
-	pinned, err := endpoint.Get()
-	if err != nil {
-		return err
-	}
-	if pinned == "" {
-		pinned = parsed.Endpoint
-		if err := endpoint.Set(pinned); err != nil {
-			return err
+	// Probe does NOT pin the endpoint. It posts an ack to whichever
+	// host minted the probe URI (typically the FE origin). The wiki
+	// backend may live on a different host (FE-proxy vs API-direct);
+	// only the first Run Agent URI's user-confirmed Pin dialog
+	// establishes the trusted endpoint.
+	ackBase := parsed.Endpoint
+	if ackBase == "" {
+		if pinned, _ := endpoint.Get(); pinned != "" {
+			ackBase = pinned
+		} else {
+			return fmt.Errorf("probe URI has no endpoint and no pinned endpoint")
 		}
-		fmt.Fprintf(os.Stderr,
-			"agentwiki-launcher auto-paired to %s. Run `agentwiki-launcher set-endpoint <backend-url>` if backend is on a different host.\n",
-			pinned,
-		)
 	}
 	machineID, err := machine.GetOrCreate()
 	if err != nil {
 		return err
 	}
-	u, err := url.JoinPath(pinned, "api", "launch", "probe-ack")
+	u, err := url.JoinPath(ackBase, "api", "launch", "probe-ack")
 	if err != nil {
 		return err
 	}
@@ -172,7 +172,16 @@ func doRun(raw string) error {
 		return err
 	}
 	if pinned == "" {
-		return fmt.Errorf("agentwiki-launcher not configured — run `agentwiki-launcher set-endpoint <wiki-url>` first")
+		if parsed.Endpoint == "" {
+			return fmt.Errorf("agentwiki-launcher not configured — run `agentwiki-launcher set-endpoint <wiki-url>` first")
+		}
+		if !confirmPinEndpoint(parsed.Endpoint) {
+			return fmt.Errorf("user declined to pin endpoint %s", parsed.Endpoint)
+		}
+		if err := endpoint.Set(parsed.Endpoint); err != nil {
+			return err
+		}
+		pinned = parsed.Endpoint
 	}
 	if !endpoint.Matches(pinned, parsed.Endpoint) {
 		return fmt.Errorf("URI endpoint %s does not match pinned %s; refusing", parsed.Endpoint, pinned)
@@ -292,6 +301,26 @@ func doRun(raw string) error {
 	// Best-effort spawn-ok beacon.
 	_ = postSpawnOk(pinned, resp.Payload.SessionID, resp.McpToken)
 	return nil
+}
+
+func appleScriptEscapeLiteral(s string) string {
+	return strings.NewReplacer(
+		`"`, `\"`,
+		`\`, `\\`,
+		"\r", " ",
+		"\n", " ",
+	).Replace(s)
+}
+
+// confirmPinEndpoint asks the user via a native macOS dialog whether to
+// pin the given URL as the trusted wiki endpoint. Returns true on Pin.
+func confirmPinEndpoint(rawURL string) bool {
+	escaped := appleScriptEscapeLiteral(rawURL)
+	script := fmt.Sprintf(
+		"display dialog \"Pin %s as your agent-wiki endpoint?\n\nThis launcher will only accept Run Agent requests from this URL.\" buttons {\"Cancel\", \"Pin\"} default button \"Pin\" with title \"AgentWikiLauncher\" with icon note",
+		escaped,
+	)
+	return exec.Command("osascript", "-e", script).Run() == nil
 }
 
 func postSpawnOk(pinned, sessionID, token string) error {

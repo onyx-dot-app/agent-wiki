@@ -6,3 +6,4 @@
 #     cd packages/agentwiki-launcher-go && make dist
 #     cp dist/* backend/static/installers/
 agentwiki-launcher-darwin-*
+AgentWikiLauncher.zip

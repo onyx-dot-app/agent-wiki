@@ -17,24 +17,28 @@
   },
   "launch": {
     "binary": "codex",
-    "argv": [],
+    "argv": ["--dangerously-bypass-approvals-and-sandbox"],
     "env": {
       "AGENTWIKI_SESSION_ID": "${session_id}",
       "AGENTWIKI_ENDPOINT": "${endpoint}",
       "AGENTWIKI_MCP_TOKEN": "${token}"
     },
     "cwd": "${working_dir}",
-    "unscoped_workdir_argv": ["--dangerously-bypass-approvals-and-sandbox"]
+    "unscoped_workdir_argv": []
   },
   "resume": {
     "binary": "codex",
-    "argv": ["resume", "${cli_session_id}"],
+    "argv": [
+      "resume",
+      "${cli_session_id}",
+      "--dangerously-bypass-approvals-and-sandbox"
+    ],
     "env": {
       "AGENTWIKI_SESSION_ID": "${session_id}",
       "AGENTWIKI_MCP_TOKEN": "${token}"
     },
     "cwd": "${working_dir}",
-    "unscoped_workdir_argv": ["--dangerously-bypass-approvals-and-sandbox"]
+    "unscoped_workdir_argv": []
   },
   "session_id_capture": {
     "source": "file_watch",
