@@ -19,11 +19,11 @@ import time
 from pathlib import Path
 from typing import ContextManager, Iterator
 
-from app.llm.agents.wiki_updater import (
-    IRRELEVANT_SENTINEL,
-    process_instruction,
-    reconcile_document,
-)
+from app.db.fts import SearchHit
+from app.ingest.models import WikiUpdateCandidate
+from app.llm.agents.common import IRRELEVANT_SENTINEL
+from app.llm.agents.ingest_batch_reconciler import batch_reconcile
+from app.llm.agents.nl_updater import process_instruction
 from app.utils.logging import setup_logging
 
 from evals import reporting, scorers
@@ -70,7 +70,7 @@ def _classify(surface: str, raw: str | None) -> TriggerClass:
     return TriggerClass.CHANGE
 
 
-def _invoke_agent(case: WikiUpdaterCase) -> tuple[str | None, str]:
+def _invoke_agent(case: WikiUpdaterCase, *, model: str) -> tuple[str | None, str]:
     """Drive the right agent function for ``case``.
 
     Returns ``(raw_return, normalized_raw_text)``. The second value is what
@@ -86,14 +86,28 @@ def _invoke_agent(case: WikiUpdaterCase) -> tuple[str | None, str]:
             source=case.source,
         )
     else:
-        raw = reconcile_document(
-            wiki_path=case.wiki_path,
-            current_body=case.current_body,
-            source=case.source,
-            title=case.doc_title,
-            url=case.doc_url,
-            content=case.doc_content or "",
+        # The production reconcile path is now batch — pass a 1-candidate batch
+        # and pull the single result back out so this surface still tests one
+        # case per call.
+        candidate = WikiUpdateCandidate(
+            hit=SearchHit(
+                doc_id=case.wiki_path,
+                path=case.wiki_path,
+                title=None,
+                snippet=case.current_body[:120],
+                score=1.0,
+            ),
+            body=case.current_body,
         )
+        batch = batch_reconcile(
+            title=case.doc_title,
+            url=case.doc_url or "",
+            content=case.doc_content or "",
+            source=case.source,
+            candidates=[candidate],
+            model=model,
+        )
+        raw = batch.results[0] if batch.results else None
     if raw is None:
         return raw, "<NO_CHANGE>"
     if raw == IRRELEVANT_SENTINEL:
@@ -138,7 +152,7 @@ def _run_one_model(
         raw: str | None = None
         normalized_raw = ""
         try:
-            raw, normalized_raw = _invoke_agent(case)
+            raw, normalized_raw = _invoke_agent(case, model=model)
         except Exception as exc:
             error = repr(exc)
             log.warning("case %s failed against %s: %s", case.id, model, exc)

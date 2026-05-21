@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Any, ContextManager
 
 from app.llm import client as llm_client
-from app.llm.agents.wiki_updater import NO_CHANGE_SENTINEL
+from app.llm.agents.common import NO_CHANGE_SENTINEL
 from app.llm.client import CompletionResult
 from app.utils.logging import setup_logging
 

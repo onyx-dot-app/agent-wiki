@@ -26,7 +26,7 @@ from typing import Any
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.llm.agents.wiki_updater import process_instruction
+from app.llm.agents.nl_updater import process_instruction
 from app.llm.agents.chat import run_chat_loop
 
 from evals.schema import FactClaim
