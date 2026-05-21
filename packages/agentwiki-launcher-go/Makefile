@@ -2,7 +2,7 @@ BIN := agentwiki-launcher
 PKG := ./cmd/agentwiki-launcher
 DIST := dist
 
-.PHONY: build clean dist test vet release release-linux release-windows
+.PHONY: build clean dist test vet release release-linux release-appimage release-windows
 
 build:
 	go build -o $(BIN) $(PKG)
@@ -34,7 +34,13 @@ release:
 release-linux:
 	./scripts/build-linux.sh
 
-# Windows distributable: amd64 .zip containing the .exe + install.bat
-# that copies it to %LOCALAPPDATA% and registers HKCU URL handler.
+# Linux AppImage (amd64): single executable, double-click to run after
+# chmod +x. Requires appimagetool on PATH.
+release-appimage:
+	./scripts/build-appimage.sh
+
+# Windows distributable: amd64 .exe linked with -H windowsgui. Single
+# self-contained file — user downloads, double-clicks, SmartScreen,
+# "Run anyway", MessageBox confirms install.
 release-windows:
 	./scripts/build-windows.sh

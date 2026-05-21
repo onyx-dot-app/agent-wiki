@@ -33,9 +33,12 @@ _MAC_BINARIES: dict[str, str] = {
 }
 
 # (filename on disk, media type) per platform-shaped bundle.
-# Linux carries an arch slot because we ship amd64 + arm64.
+# Windows is now a single .exe (GUI subsystem, no install.bat wrapper).
+# Linux ships AppImage as the default (single executable, double-click)
+# + tarballs as fallback for distros that prefer extract+install.sh.
 _MAC_BUNDLE = ("AgentWikiLauncher.zip", "application/zip")
-_WINDOWS_BUNDLE = ("agentwiki-launcher-windows-amd64.zip", "application/zip")
+_WINDOWS_BUNDLE = ("agentwiki-launcher-windows-amd64.exe", "application/octet-stream")
+_LINUX_APPIMAGE = ("AgentWikiLauncher-x86_64.AppImage", "application/octet-stream")
 _LINUX_BUNDLES: dict[str, tuple[str, str]] = {
     "amd64": ("agentwiki-launcher-linux-amd64.tar.gz", "application/gzip"),
     "arm64": ("agentwiki-launcher-linux-arm64.tar.gz", "application/gzip"),
@@ -82,25 +85,47 @@ def installer_app() -> Response:
 
 
 @router.get("/installer/linux")
-def installer_linux(arch: str = "amd64") -> Response:
-    """Stream the linux launcher tarball for the requested arch."""
-    bundle = _LINUX_BUNDLES.get(arch)
-    if bundle is None:
-        raise HTTPException(
-            status_code=404,
-            detail="unsupported linux arch %r; expected one of %s"
-            % (arch, sorted(_LINUX_BUNDLES)),
-        )
-    return _stream(*bundle)
+def installer_linux(format: str = "appimage", arch: str = "amd64") -> Response:
+    """Stream the linux launcher.
+
+    Default format is ``appimage`` — single self-contained executable,
+    double-click after ``chmod +x``. ``format=tar.gz`` falls back to the
+    tarball (binary + install.sh) for distros that prefer the manual
+    install path. ``arch`` only applies to tarball (AppImage ships
+    amd64 only for v1).
+    """
+    if format == "appimage":
+        if arch != "amd64":
+            raise HTTPException(
+                status_code=404,
+                detail="appimage is amd64-only; use format=tar.gz for arm64",
+            )
+        return _stream(*_LINUX_APPIMAGE)
+    if format == "tar.gz":
+        bundle = _LINUX_BUNDLES.get(arch)
+        if bundle is None:
+            raise HTTPException(
+                status_code=404,
+                detail="unsupported linux arch %r; expected one of %s"
+                % (arch, sorted(_LINUX_BUNDLES)),
+            )
+        return _stream(*bundle)
+    raise HTTPException(
+        status_code=404,
+        detail="unsupported linux format %r; expected 'appimage' or 'tar.gz'" % (format,),
+    )
 
 
 @router.get("/installer/windows")
 def installer_windows() -> Response:
-    """Stream the windows launcher zip (amd64 only for now).
+    """Stream the windows launcher .exe (amd64 only for now).
 
-    The .exe is unsigned — users will see SmartScreen's "Windows protected
-    your PC" prompt on first run and need to click "More info" → "Run
-    anyway". Authenticode signing is a follow-up.
+    Single self-contained .exe built with -H windowsgui. Unsigned — users
+    will see SmartScreen's "Windows protected your PC" prompt on first
+    run and need to click "More info" → "Run anyway". On run, the .exe
+    auto-installs the URL handler under HKCU\\Software\\Classes\\agentwiki
+    and pops a MessageBox confirming success. Authenticode signing is a
+    follow-up.
     """
     return _stream(*_WINDOWS_BUNDLE)
 

@@ -38,5 +38,33 @@ func Install(launcherPath string) error {
 		return err
 	}
 	fmt.Fprintf(os.Stdout, "[agentwiki-launcher] installed URL handler -> %s\n", abs)
+	// The .exe builds with -H windowsgui so double-click prints nothing
+	// to a console window — the user would see no feedback. Pop a
+	// MessageBox so they know install succeeded. Best-effort; if mshta
+	// isn't available we still return success.
+	showInstalledMessage(abs)
 	return nil
+}
+
+// showInstalledMessage pops a native MessageBox via mshta (ships with
+// every Windows since 2000) so the GUI .exe gives the user some
+// feedback on install. Failure is swallowed.
+func showInstalledMessage(launcherPath string) {
+	script := fmt.Sprintf(
+		`MsgBox "AgentWikiLauncher installed at " & %q & vbCrLf & vbCrLf & "Click Run Agent in the wiki to continue.", 64, "AgentWikiLauncher"`,
+		launcherPath,
+	)
+	_ = exec.Command("mshta", "vbscript:Execute("+vbQuoteWin(script)+":close)").Run()
+}
+
+// vbQuoteWin escapes a string for a VBScript "..." literal — duplicates
+// double quotes and collapses newlines. Local helper so install_windows
+// doesn't depend on the dialog package.
+func vbQuoteWin(s string) string {
+	r := strings.NewReplacer(
+		`"`, `""`,
+		"\r", " ",
+		"\n", " ",
+	)
+	return `"` + r.Replace(s) + `"`
 }

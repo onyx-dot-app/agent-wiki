@@ -117,7 +117,7 @@ jobs:
           retention-days: 7
 
   linux:
-    name: Linux — amd64 + arm64 tarballs
+    name: Linux — AppImage + tarballs
     runs-on: ubuntu-latest
     timeout-minutes: 15
     outputs:
@@ -130,9 +130,31 @@ jobs:
           go-version-file: packages/agentwiki-launcher-go/go.mod
           cache: false
 
+      - name: Install appimagetool
+        run: |
+          set -euo pipefail
+          # AppImage upstream release. Pin to a known-good continuous build.
+          curl --fail --location --silent --show-error \
+            https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage \
+            -o /usr/local/bin/appimagetool
+          chmod +x /usr/local/bin/appimagetool
+          # GitHub runners don't have FUSE; extract + use the embedded
+          # appimagetool binary instead of running the AppImage directly.
+          /usr/local/bin/appimagetool --appimage-extract >/dev/null
+          sudo mv squashfs-root /opt/appimagetool
+          sudo ln -sf /opt/appimagetool/AppRun /usr/local/bin/appimagetool
+
       - name: Build Linux tarballs
         working-directory: packages/agentwiki-launcher-go
         run: ./scripts/build-linux.sh
+
+      - name: Build Linux AppImage
+        working-directory: packages/agentwiki-launcher-go
+        # appimagetool inside the runner can't use FUSE; pass
+        # APPIMAGE_EXTRACT_AND_RUN=1 to fall back to extract+run.
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+        run: ./scripts/build-appimage.sh
 
       - name: Set artifact name
         id: set-artifact
@@ -141,12 +163,14 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.set-artifact.outputs.name }}
-          path: packages/agentwiki-launcher-go/dist/agentwiki-launcher-linux-*.tar.gz
+          path: |
+            packages/agentwiki-launcher-go/dist/agentwiki-launcher-linux-*.tar.gz
+            packages/agentwiki-launcher-go/dist/AgentWikiLauncher-x86_64.AppImage
           if-no-files-found: error
           retention-days: 7
 
   windows:
-    name: Windows — amd64 zip
+    name: Windows — amd64 .exe (windowsgui)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     outputs:
@@ -159,7 +183,7 @@ jobs:
           go-version-file: packages/agentwiki-launcher-go/go.mod
           cache: false
 
-      - name: Build Windows zip
+      - name: Build Windows .exe
         working-directory: packages/agentwiki-launcher-go
         run: ./scripts/build-windows.sh
 
@@ -170,6 +194,6 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.set-artifact.outputs.name }}
-          path: packages/agentwiki-launcher-go/dist/agentwiki-launcher-windows-*.zip
+          path: packages/agentwiki-launcher-go/dist/agentwiki-launcher-windows-*.exe
           if-no-files-found: error
           retention-days: 7

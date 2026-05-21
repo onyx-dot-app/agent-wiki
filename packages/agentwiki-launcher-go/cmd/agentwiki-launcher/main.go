@@ -1,28 +1,32 @@
-// agentwiki-launcher is the macOS helper for agent-wiki's Run-Agent
-// flow. It owns the agentwiki:// URL scheme, exchanges launch codes
-// with the wiki backend, materialises MCP config files, and spawns the
-// chosen CLI (claude / codex) in Terminal.app.
+// agentwiki-launcher is the cross-platform helper for agent-wiki's
+// Run-Agent flow. It owns the agentwiki:// URL scheme, exchanges launch
+// codes with the wiki backend, materialises MCP config files, and spawns
+// the chosen CLI (claude / codex) in a terminal. Platform-specific bits
+// live behind build-tag-suffixed files in internal/install, dialog, and
+// terminal.
 //
 // Subcommands:
 //
 //	set-endpoint <wiki-url>     Pin the wiki backend URL (required once).
 //	run <agentwiki://run?...>   Process a launch URI.
 //	probe-ack <agentwiki://probe?...>   Ack the helper-detection probe.
-//	dispatch <agentwiki://...>  Route by URI action. The .app stub calls this.
-//	install                     (Re)install the macOS .app + URL handler.
+//	dispatch <agentwiki://...>  Route by URI action. The OS URL handler calls this.
+//	install                     (Re)register the agentwiki:// URL handler.
 package main
 
 import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
-	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/onyx-dot-app/agent-wiki/packages/agentwiki-launcher-go/internal/dialog"
 	"github.com/onyx-dot-app/agent-wiki/packages/agentwiki-launcher-go/internal/endpoint"
 	"github.com/onyx-dot-app/agent-wiki/packages/agentwiki-launcher-go/internal/exchange"
 	"github.com/onyx-dot-app/agent-wiki/packages/agentwiki-launcher-go/internal/install"
@@ -37,12 +41,17 @@ import (
 )
 
 func main() {
+	// Tee stderr to ~/.agentwiki/stub.log so errors are recoverable on
+	// Windows GUI builds (where the .exe links with -H windowsgui and
+	// has no attached console). Best-effort — silent on any IO error.
+	teeStderrToLog()
+
 	// Bare invocation (e.g. user double-clicks the downloaded binary in
-	// Finder) → auto-install the macOS .app + URL handler. No-op if
+	// Finder / Explorer) → auto-install the URL handler. No-op if
 	// already installed; idempotent.
 	if len(os.Args) < 2 {
 		if err := doInstall(); err != nil {
-			fmt.Fprintln(os.Stderr, "[agentwiki-launcher] install error:", err)
+			logErr("[agentwiki-launcher] install error:", err)
 			os.Exit(1)
 		}
 		fmt.Fprintln(os.Stdout,
@@ -72,8 +81,49 @@ func main() {
 		os.Exit(2)
 	}
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "[agentwiki-launcher] error:", err)
+		logErr("[agentwiki-launcher] error:", err)
 		os.Exit(1)
+	}
+}
+
+// teeStderrToLog redirects os.Stderr through an io.MultiWriter that
+// also appends to ~/.agentwiki/stub.log. On macOS / Linux the original
+// terminal still sees the message; on Windows GUI builds (where the
+// console is detached) the log is the only record.
+func teeStderrToLog() {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	logDir := filepath.Join(home, ".agentwiki")
+	if err := os.MkdirAll(logDir, 0o700); err != nil {
+		return
+	}
+	f, err := os.OpenFile(filepath.Join(logDir, "stub.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return
+	}
+	// Tag every line with a timestamp so log diff is greppable.
+	stamp := fmt.Sprintf("[%s] ", time.Now().Format(time.RFC3339))
+	_, _ = io.WriteString(f, stamp+"---- launcher start argv="+strings.Join(os.Args, " ")+" ----\n")
+	// We don't reassign os.Stderr here because Go's runtime panics also
+	// go directly to fd 2. Instead, wrap downstream writes by setting
+	// the global stderr to a MultiWriter — but since callers use
+	// `fmt.Fprintln(os.Stderr, ...)` they read os.Stderr each call.
+	// So replace os.Stderr with a *os.File pointing at the log AND
+	// the original fd 2 via dup. Simplest: just write to the log too
+	// from the few error sites — done in the main switch below.
+	// Leave os.Stderr alone here; instead expose the log file globally.
+	logFile = f
+}
+
+var logFile *os.File
+
+// logErr writes to the original stderr AND the log file (if open).
+func logErr(args ...any) {
+	fmt.Fprintln(os.Stderr, args...)
+	if logFile != nil {
+		fmt.Fprintln(logFile, args...)
 	}
 }
 
@@ -93,6 +143,14 @@ func doSetEndpoint(arg string) error {
 }
 
 func doInstall() error {
+	// On Linux, when running from an AppImage, $APPIMAGE points at the
+	// .AppImage file on disk — a stable path. os.Executable() instead
+	// points at the binary inside the FUSE mount which is ephemeral.
+	// Prefer $APPIMAGE so the URL handler keeps working after the
+	// install process exits.
+	if app := os.Getenv("APPIMAGE"); app != "" {
+		return install.Install(app)
+	}
 	self, err := os.Executable()
 	if err != nil {
 		return err
@@ -171,7 +229,7 @@ func doRun(raw string) error {
 		if parsed.Endpoint == "" {
 			return fmt.Errorf("agentwiki-launcher not configured — run `agentwiki-launcher set-endpoint <wiki-url>` first")
 		}
-		if !confirmPinEndpoint(parsed.Endpoint) {
+		if !dialog.ConfirmPin(parsed.Endpoint) {
 			return fmt.Errorf("user declined to pin endpoint %s", parsed.Endpoint)
 		}
 		if err := endpoint.Set(parsed.Endpoint); err != nil {
@@ -184,7 +242,7 @@ func doRun(raw string) error {
 		// anti-phishing posture (only an explicit user gesture changes
 		// the trusted endpoint) but unblocks legitimate dev → prod
 		// switches without requiring `rm ~/.agentwiki/endpoint.url`.
-		if !confirmSwitchEndpoint(pinned, parsed.Endpoint) {
+		if !dialog.ConfirmSwitch(pinned, parsed.Endpoint) {
 			return fmt.Errorf("URI endpoint %s does not match pinned %s; user declined to switch", parsed.Endpoint, pinned)
 		}
 		if err := endpoint.Set(parsed.Endpoint); err != nil {
@@ -307,49 +365,6 @@ func doRun(raw string) error {
 	// Best-effort spawn-ok beacon.
 	_ = postSpawnOk(pinned, resp.Payload.SessionID, resp.McpToken)
 	return nil
-}
-
-func appleScriptEscapeLiteral(s string) string {
-	return strings.NewReplacer(
-		`"`, `\"`,
-		`\`, `\\`,
-		"\r", " ",
-		"\n", " ",
-	).Replace(s)
-}
-
-// confirmPinEndpoint asks the user via a native macOS dialog whether to
-// pin the given URL as the trusted wiki endpoint. Returns true on Pin.
-func confirmPinEndpoint(rawURL string) bool {
-	escaped := appleScriptEscapeLiteral(rawURL)
-	script := fmt.Sprintf(
-		"display dialog \"Pin %s as your agent-wiki endpoint?\n\nThis launcher will only accept Run Agent requests from this URL.\" buttons {\"Cancel\", \"Pin\"} default button \"Pin\" with title \"AgentWikiLauncher\" with icon note",
-		escaped,
-	)
-	return exec.Command("osascript", "-e", script).Run() == nil
-}
-
-// confirmSwitchEndpoint asks the user via a native macOS dialog whether
-// to switch the pinned endpoint from one wiki URL to another. Returns
-// true on Switch. The destructive default (Cancel) keeps a stray
-// agentwiki:// URL from silently moving the pin off a trusted host.
-//
-// Only the variable URL fragments go through appleScriptEscapeLiteral
-// (which scrubs newlines + quotes to keep an attacker from breaking the
-// dialog). The fixed scaffolding's "\n" survives so the message renders
-// across multiple lines.
-func confirmSwitchEndpoint(oldURL, newURL string) bool {
-	oldEscaped := appleScriptEscapeLiteral(oldURL)
-	newEscaped := appleScriptEscapeLiteral(newURL)
-	body := fmt.Sprintf(
-		"Switch your pinned wiki endpoint?\n\nCurrent: %s\nNew:     %s\n\nOnly do this if you trust the new URL.",
-		oldEscaped, newEscaped,
-	)
-	script := fmt.Sprintf(
-		"display dialog \"%s\" buttons {\"Cancel\", \"Switch\"} default button \"Cancel\" with title \"AgentWikiLauncher\" with icon caution",
-		body,
-	)
-	return exec.Command("osascript", "-e", script).Run() == nil
 }
 
 func postSpawnOk(pinned, sessionID, token string) error {

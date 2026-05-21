@@ -1,5 +1,7 @@
-// Package terminal writes a .command wrapper and hands it to Terminal.app
-// via LaunchServices. No AppleEvents, no TCC prompts.
+// macOS branch of the terminal package — write a .command bash wrapper
+// and hand it to Terminal.app via LaunchServices. Selected at build
+// time via the _darwin filename suffix. No AppleEvents, no TCC prompts.
+
 package terminal
 
 import (
@@ -8,23 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"time"
 )
-
-type Opts struct {
-	Binary           string
-	Argv             []string
-	Env              map[string]string
-	Cwd              string
-	TmpfilesToClean  []string
-	CloseOnExitURL   string // POST here on wrapper exit
-	CloseOnExitToken string // Bearer for the close call
-}
-
-// shellQuote wraps a string for safe single-quoted bash interpolation.
-func shellQuote(s string) string {
-	return `'` + strings.ReplaceAll(s, `'`, `'\''`) + `'`
-}
 
 // OpenInTerminalApp writes a run.command wrapper that:
 //   - logs lifecycle to ~/.agentwiki/spawn.log
@@ -66,23 +52,7 @@ func OpenInTerminalApp(opts Opts) error {
 		)
 	}
 
-	// Log the argv from node-side equivalent (here, go-side) so the
-	// bash wrapper never has to render user-controlled prompt content.
-	// Earlier (Node) version echoed argv inline → markdown backticks
-	// in user prompts triggered bash command substitution.
-	logQueued := fmt.Sprintf(
-		"[%s] queued %s cwd=%s argc=%d\n",
-		time.Now().Format(time.RFC1123),
-		opts.Binary, opts.Cwd, len(opts.Argv),
-	)
-	if home, err := os.UserHomeDir(); err == nil {
-		logPath := filepath.Join(home, ".agentwiki", "spawn.log")
-		_ = os.MkdirAll(filepath.Dir(logPath), 0o700)
-		if f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600); err == nil {
-			_, _ = f.WriteString(logQueued)
-			_ = f.Close()
-		}
-	}
+	logQueued(opts)
 
 	script := fmt.Sprintf(`#!/bin/bash
 LOG="$HOME/.agentwiki/spawn.log"

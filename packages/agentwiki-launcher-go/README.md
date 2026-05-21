@@ -73,16 +73,23 @@ internal/
 
 The wiki FE detects the user's OS and links to the matching backend
 route. On first `agentwiki://run` URI the launcher prompts to pin the
-wiki endpoint; every subsequent run dispatches silently.
+wiki endpoint (`osascript` on mac, `zenity`/`kdialog` on Linux, `mshta`
+MessageBox on Windows). Every subsequent run dispatches silently.
 
-| OS      | Backend route                 | Artifact                                 | User action                                                                               |
-| ------- | ----------------------------- | ---------------------------------------- | ----------------------------------------------------------------------------------------- |
-| macOS   | `/api/installer/mac`          | `AgentWikiLauncher.zip`                  | Unzip, drag `AgentWikiLauncher.app` into `/Applications`.                                 |
-| Linux   | `/api/installer/linux?arch=…` | `agentwiki-launcher-linux-<arch>.tar.gz` | Extract, run `./install.sh` (puts the binary in `~/.local/bin` + xdg-mime register).      |
-| Windows | `/api/installer/windows`      | `agentwiki-launcher-windows-amd64.zip`   | Extract, double-click `install.bat`. SmartScreen → "More info" → "Run anyway" (unsigned). |
+| OS      | Backend route                        | Artifact                                 | User action                                                                                          |
+| ------- | ------------------------------------ | ---------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| macOS   | `/api/installer/mac`                 | `AgentWikiLauncher.zip`                  | Unzip, drag `AgentWikiLauncher.app` into `/Applications`. Signed + notarized → Gatekeeper silent.    |
+| Linux   | `/api/installer/linux` (AppImage)    | `AgentWikiLauncher-x86_64.AppImage`      | `chmod +x` once, double-click to register the URL handler.                                           |
+| Linux   | `/api/installer/linux?format=tar.gz` | `agentwiki-launcher-linux-<arch>.tar.gz` | Fallback for arm64 / non-AppImage workflows. Extract, run `./install.sh`.                            |
+| Windows | `/api/installer/windows`             | `agentwiki-launcher-windows-amd64.exe`   | Double-click .exe. SmartScreen → "More info" → "Run anyway" (unsigned). MessageBox confirms install. |
 
 `/api/installer/app` stays as a back-compat alias for the macOS bundle
 so older frontend builds keep working.
+
+The Windows .exe is built with `-ldflags="-H windowsgui"` so URL handler
+dispatches are silent (no console flash on every `agentwiki://` click).
+Errors get teed to `~/.agentwiki/stub.log` so silent failures are
+diagnosable.
 
 ### macOS signing + notarization
 

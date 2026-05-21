@@ -52,7 +52,8 @@ jobs:
           test -s backend/static/installers/AgentWikiLauncher.zip
           test -s backend/static/installers/agentwiki-launcher-linux-amd64.tar.gz
           test -s backend/static/installers/agentwiki-launcher-linux-arm64.tar.gz
-          test -s backend/static/installers/agentwiki-launcher-windows-amd64.zip
+          test -s backend/static/installers/AgentWikiLauncher-x86_64.AppImage
+          test -s backend/static/installers/agentwiki-launcher-windows-amd64.exe
           ls -lh backend/static/installers/
 
       - name: Set up Docker Buildx

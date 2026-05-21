@@ -29,16 +29,16 @@ const PLATFORM_COPY: Record<
       "Open the downloaded zip, drag AgentWikiLauncher.app to your Applications folder, then click Run Agent.",
   },
   linux: {
-    downloadHref: "/api/installer/linux?arch=amd64",
+    downloadHref: "/api/installer/linux?format=appimage",
     downloadLabel: "Download for Linux (amd64)",
     instructions:
-      "Extract the tarball, run ./install.sh, then click Run Agent. For arm64, append ?arch=arm64 to the download URL.",
+      "After download: chmod +x the AppImage, double-click it to register the URL handler, then click Run Agent. For arm64 or tarball: /api/installer/linux?format=tar.gz&arch=arm64.",
   },
   windows: {
     downloadHref: "/api/installer/windows",
     downloadLabel: "Download for Windows",
     instructions:
-      'Extract the zip and double-click install.bat. On the SmartScreen prompt click "More info" → "Run anyway" (the launcher is not yet code-signed). Then click Run Agent.',
+      'Double-click the downloaded .exe. On the SmartScreen prompt click "More info" → "Run anyway" (the launcher is not yet code-signed). A confirmation dialog appears once install finishes; then click Run Agent.',
   },
 };
 
@@ -131,7 +131,7 @@ export function InstallHelperPane({
               <Button
                 size="md"
                 variant="action"
-                onClick={() => download("/api/installer/linux?arch=amd64")}
+                onClick={() => download("/api/installer/linux?format=appimage")}
               >
                 Download for Linux (amd64)
               </Button>

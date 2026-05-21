@@ -57,50 +57,79 @@ def test_installer_app_is_alias_for_mac(client, tmp_path, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# /installer/linux
+# /installer/linux — default = AppImage, fallback = tarball
 # ---------------------------------------------------------------------------
 
 
-def test_installer_linux_503_when_tarball_missing(client, tmp_path, monkeypatch):
+def test_installer_linux_default_is_appimage(client, tmp_path, monkeypatch):
+    payload = b"\x7fELF-test-appimage"
+    (tmp_path / "AgentWikiLauncher-x86_64.AppImage").write_bytes(payload)
     monkeypatch.setattr("app.api.installer._BINARIES_DIR", tmp_path)
-    res = client.get("/api/installer/linux?arch=amd64")
+    res = client.get("/api/installer/linux")
+    assert res.status_code == 200
+    assert "AgentWikiLauncher-x86_64.AppImage" in res.headers["content-disposition"]
+    assert res.content == payload
+
+
+def test_installer_linux_appimage_explicit(client, tmp_path, monkeypatch):
+    payload = b"\x7fELF-appimage-explicit"
+    (tmp_path / "AgentWikiLauncher-x86_64.AppImage").write_bytes(payload)
+    monkeypatch.setattr("app.api.installer._BINARIES_DIR", tmp_path)
+    res = client.get("/api/installer/linux?format=appimage")
+    assert res.status_code == 200
+    assert res.content == payload
+
+
+def test_installer_linux_appimage_503_when_missing(client, tmp_path, monkeypatch):
+    monkeypatch.setattr("app.api.installer._BINARIES_DIR", tmp_path)
+    res = client.get("/api/installer/linux?format=appimage")
     assert res.status_code == 503
-    assert "linux-amd64.tar.gz missing" in res.json()["error"]
+    assert "AppImage missing" in res.json()["error"]
 
 
-def test_installer_linux_streams_amd64_when_present(client, tmp_path, monkeypatch):
+def test_installer_linux_appimage_404_for_non_amd64(client):
+    res = client.get("/api/installer/linux?format=appimage&arch=arm64")
+    assert res.status_code == 404
+    assert "appimage is amd64-only" in res.json()["error"]
+
+
+def test_installer_linux_tarball_amd64(client, tmp_path, monkeypatch):
     payload = b"\x1f\x8b\x08test-linux-tar"
     (tmp_path / "agentwiki-launcher-linux-amd64.tar.gz").write_bytes(payload)
     monkeypatch.setattr("app.api.installer._BINARIES_DIR", tmp_path)
-    res = client.get("/api/installer/linux?arch=amd64")
+    res = client.get("/api/installer/linux?format=tar.gz&arch=amd64")
     assert res.status_code == 200
     assert res.headers["content-type"] == "application/gzip"
     assert "linux-amd64.tar.gz" in res.headers["content-disposition"]
     assert res.content == payload
 
 
-def test_installer_linux_streams_arm64_when_present(client, tmp_path, monkeypatch):
+def test_installer_linux_tarball_arm64(client, tmp_path, monkeypatch):
     payload = b"\x1f\x8b\x08test-linux-arm64"
     (tmp_path / "agentwiki-launcher-linux-arm64.tar.gz").write_bytes(payload)
     monkeypatch.setattr("app.api.installer._BINARIES_DIR", tmp_path)
-    res = client.get("/api/installer/linux?arch=arm64")
+    res = client.get("/api/installer/linux?format=tar.gz&arch=arm64")
     assert res.status_code == 200
     assert res.content == payload
 
 
-def test_installer_linux_default_arch_is_amd64(client, tmp_path, monkeypatch):
-    payload = b"\x1f\x8b\x08test-default-amd64"
-    (tmp_path / "agentwiki-launcher-linux-amd64.tar.gz").write_bytes(payload)
+def test_installer_linux_tarball_503_when_missing(client, tmp_path, monkeypatch):
     monkeypatch.setattr("app.api.installer._BINARIES_DIR", tmp_path)
-    res = client.get("/api/installer/linux")
-    assert res.status_code == 200
-    assert res.content == payload
+    res = client.get("/api/installer/linux?format=tar.gz&arch=amd64")
+    assert res.status_code == 503
+    assert "linux-amd64.tar.gz missing" in res.json()["error"]
 
 
 def test_installer_linux_404_unknown_arch(client):
-    res = client.get("/api/installer/linux?arch=mips")
+    res = client.get("/api/installer/linux?format=tar.gz&arch=mips")
     assert res.status_code == 404
     assert "unsupported linux arch" in res.json()["error"]
+
+
+def test_installer_linux_404_unknown_format(client):
+    res = client.get("/api/installer/linux?format=snap")
+    assert res.status_code == 404
+    assert "unsupported linux format" in res.json()["error"]
 
 
 # ---------------------------------------------------------------------------
@@ -108,21 +137,21 @@ def test_installer_linux_404_unknown_arch(client):
 # ---------------------------------------------------------------------------
 
 
-def test_installer_windows_503_when_zip_missing(client, tmp_path, monkeypatch):
+def test_installer_windows_503_when_exe_missing(client, tmp_path, monkeypatch):
     monkeypatch.setattr("app.api.installer._BINARIES_DIR", tmp_path)
     res = client.get("/api/installer/windows")
     assert res.status_code == 503
-    assert "windows-amd64.zip missing" in res.json()["error"]
+    assert "windows-amd64.exe missing" in res.json()["error"]
 
 
-def test_installer_windows_streams_zip_when_present(client, tmp_path, monkeypatch):
-    payload = b"PK\x03\x04test-windows-zip"
-    (tmp_path / "agentwiki-launcher-windows-amd64.zip").write_bytes(payload)
+def test_installer_windows_streams_exe_when_present(client, tmp_path, monkeypatch):
+    payload = b"MZ\x90\x00test-windows-exe"
+    (tmp_path / "agentwiki-launcher-windows-amd64.exe").write_bytes(payload)
     monkeypatch.setattr("app.api.installer._BINARIES_DIR", tmp_path)
     res = client.get("/api/installer/windows")
     assert res.status_code == 200
-    assert res.headers["content-type"] == "application/zip"
-    assert "windows-amd64.zip" in res.headers["content-disposition"]
+    assert res.headers["content-type"] == "application/octet-stream"
+    assert "windows-amd64.exe" in res.headers["content-disposition"]
     assert res.content == payload
 
 
