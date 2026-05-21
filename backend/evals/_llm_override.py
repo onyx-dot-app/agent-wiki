@@ -1,30 +1,22 @@
-"""Pick the (provider, model, keys) used for a single eval run.
+"""Override the (provider, model, keys) used by `app.llm.client` per run.
 
-Background: ``app.llm.client`` looks up provider + keys via
-``app.llm.settings.get()``, which reads the ``llm_settings`` row from the
-database. That's right for the running app but wrong for an eval — we want
-to drive the same agent code across a matrix of models without touching
-the DB or the admin UI.
-
-This module exposes a context manager that monkey-patches the symbol
-``app.llm.client.get_llm_settings`` for the duration of the block. Keys
-come from env vars (``EVAL_*`` prefer, then plain ``ANTHROPIC_API_KEY``
-etc), so an eval run can be a plain shell command:
-
-    EVAL_ANTHROPIC_API_KEY=sk-... uv run python -m evals.wiki_updater.run ...
-
-Provider for a given model id is resolved by ``resolve_provider``. Add new
-mappings there when adding a new family.
+The override lives in a ``ContextVar`` so it's task-local: nested overrides
+(e.g. a judge call inside a subject run) and concurrent runs cannot leak
+settings into each other the way a module-level monkey-patch would. The
+resolver is installed onto ``app.llm.client.get_llm_settings`` once on
+first use; the install is idempotent and a no-op outside the eval CLI.
 """
 
 from __future__ import annotations
 
+import contextvars
 import os
 from collections.abc import Generator
 from contextlib import contextmanager
 
 from app.llm import client as llm_client
 from app.llm.settings import LLMSettings
+from app.llm.settings import get as _real_get
 
 
 _PROVIDER_PREFIXES: dict[str, tuple[str, ...]] = {
@@ -35,8 +27,25 @@ _PROVIDER_PREFIXES: dict[str, tuple[str, ...]] = {
 }
 
 
+_override_var: contextvars.ContextVar[LLMSettings | None] = contextvars.ContextVar(
+    "eval_llm_settings_override", default=None
+)
+
+
+def _resolve_settings() -> LLMSettings:
+    override = _override_var.get()
+    if override is not None:
+        return override
+    return _real_get()
+
+
+def _install() -> None:
+    if llm_client.get_llm_settings is _resolve_settings:
+        return
+    llm_client.get_llm_settings = _resolve_settings  # type: ignore[assignment]
+
+
 def resolve_provider(model: str) -> str:
-    """Return the provider name for a model id, or empty string if unknown."""
     for provider, prefixes in _PROVIDER_PREFIXES.items():
         if any(model.startswith(p) for p in prefixes):
             return provider
@@ -44,11 +53,6 @@ def resolve_provider(model: str) -> str:
 
 
 def _env_key(provider: str) -> str:
-    """Read the API key for ``provider`` from env, preferring the EVAL_ prefix.
-
-    Returns empty string if no key is configured anywhere — caller should
-    treat that as "skip this model".
-    """
     var_map = {
         "anthropic": ("EVAL_ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY"),
         "openai": ("EVAL_OPENAI_API_KEY", "OPENAI_API_KEY"),
@@ -62,12 +66,6 @@ def _env_key(provider: str) -> str:
 
 
 def build_settings(provider: str, model: str) -> LLMSettings:
-    """Build a frozen ``LLMSettings`` for one (provider, model) pair.
-
-    Reads keys from env. Keys for providers not selected here are left
-    blank; ``check_configured`` on the selected provider only inspects its
-    own slot, so the other empties don't affect behavior.
-    """
     return LLMSettings(
         provider=provider,
         model=model,
@@ -82,37 +80,20 @@ def build_settings(provider: str, model: str) -> LLMSettings:
 
 @contextmanager
 def use_model(provider: str, model: str) -> Generator[None]:
-    """Run the wrapped block with ``client.get_llm_settings`` overridden.
-
-    Restores the original lookup on exit, even on exception.
-    """
-    settings = build_settings(provider, model)
-    original = llm_client.get_llm_settings
-
-    def _override() -> LLMSettings:
-        return settings
-
-    llm_client.get_llm_settings = _override  # type: ignore[assignment]
+    _install()
+    token = _override_var.set(build_settings(provider, model))
     try:
         yield
     finally:
-        llm_client.get_llm_settings = original  # type: ignore[assignment]
+        _override_var.reset(token)
 
 
 def configured_models(models: list[str]) -> list[tuple[str, str]]:
-    """Filter a model list to those whose provider has a key configured.
-
-    Returns ``[(provider, model), ...]``. Models with unknown providers or
-    missing keys are dropped; the caller logs the drop.
-    """
     out: list[tuple[str, str]] = []
     for m in models:
         provider = resolve_provider(m)
         if not provider:
             continue
-        if provider == "ollama":
-            out.append((provider, m))
-            continue
-        if _env_key(provider):
+        if provider == "ollama" or _env_key(provider):
             out.append((provider, m))
     return out
