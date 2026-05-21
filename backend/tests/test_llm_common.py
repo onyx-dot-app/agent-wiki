@@ -51,3 +51,43 @@ def test_apply_edits_multiline():
 def test_apply_edits_empty_replace_deletes_text():
     result = apply_edits("prefix DELETE_ME suffix", [_e("DELETE_ME ", "")])
     assert result == "prefix suffix"
+
+
+# --------------------------------------------------------------------------- #
+# fuzzy (trailing-whitespace-normalized) matching                              #
+# --------------------------------------------------------------------------- #
+
+
+def test_apply_edits_fuzzy_trailing_space_on_find():
+    # Model quoted "old text " with a trailing space; body has "old text"
+    body = "line one\nold text\nline three\n"
+    result = apply_edits(body, [_e("old text ", "new text")])
+    assert result == "line one\nnew text\nline three\n"
+
+
+def test_apply_edits_fuzzy_trailing_spaces_multiline():
+    # Model quoted a multi-line block with trailing spaces on each line
+    body = "## Section\n\nfoo bar\nbaz qux\n\nend\n"
+    find = "foo bar  \nbaz qux  "  # trailing spaces the model added
+    result = apply_edits(body, [_e(find, "updated block")])
+    assert result == "## Section\n\nupdated block\n\nend\n"
+
+
+def test_apply_edits_fuzzy_preserves_body_trailing_newline():
+    body = "alpha\nbeta\n"
+    result = apply_edits(body, [_e("beta  ", "gamma")])
+    assert result == "alpha\ngamma\n"
+
+
+def test_apply_edits_fuzzy_no_match_still_skips():
+    # Text genuinely absent even after normalization — should still be skipped
+    body = "hello world"
+    result = apply_edits(body, [_e("completely different   ", "x")])
+    assert result is None
+
+
+def test_apply_edits_fuzzy_mixed_exact_and_fuzzy():
+    # First edit matches exactly, second matches only after normalization
+    body = "foo\nbar baz\nqux\n"
+    result = apply_edits(body, [_e("foo", "FOO"), _e("bar baz  ", "BAR BAZ")])
+    assert result == "FOO\nBAR BAZ\nqux\n"

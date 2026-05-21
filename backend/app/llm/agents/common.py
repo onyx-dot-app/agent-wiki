@@ -42,17 +42,57 @@ def batch_by_chars(
     return batches
 
 
+def _normalize_for_match(text: str) -> str:
+    """Strip trailing whitespace per line for fuzzy matching. Preserves trailing newline."""
+    lines = text.splitlines()
+    normalized = "\n".join(line.rstrip() for line in lines)
+    if text.endswith("\n"):
+        normalized += "\n"
+    return normalized
+
+
+def _map_norm_pos_to_orig(original: str, normalized: str, norm_pos: int) -> int:
+    """Map a position in a normalized string back to the corresponding position in original.
+
+    Works because normalized is derived from original by only removing characters
+    (trailing whitespace per line), so the mapping is monotone.
+    """
+    o = n = 0
+    while n < norm_pos and o < len(original):
+        if n < len(normalized) and original[o] == normalized[n]:
+            o += 1
+            n += 1
+        else:
+            o += 1  # character was stripped in normalization, skip in original
+    return o
+
+
 def apply_edits(body: str, edits: list[TextEdit]) -> str | None:
-    """Apply (find, replace) pairs to body. Returns new body or None if unchanged."""
+    """Apply (find, replace) pairs to body. Returns new body or None if unchanged.
+
+    Falls back to trailing-whitespace-normalized matching when the exact FIND text
+    is not present — recovers from the common case where the model quotes text with
+    slightly different trailing spaces or line endings.
+    """
     result = body
     for find_text, replace_text in edits:
-        if find_text not in result:
+        if find_text in result:
+            result = result.replace(find_text, replace_text, 1)
+            continue
+        # Fuzzy fallback: match after stripping trailing whitespace per line.
+        norm_result = _normalize_for_match(result)
+        norm_find = _normalize_for_match(find_text)
+        pos = norm_result.find(norm_find)
+        if pos == -1:
             log.warning(
                 "apply_edits: FIND text not found in body, skipping: %r",
                 find_text[:60],
             )
             continue
-        result = result.replace(find_text, replace_text, 1)
+        orig_start = _map_norm_pos_to_orig(result, norm_result, pos)
+        orig_end = _map_norm_pos_to_orig(result, norm_result, pos + len(norm_find))
+        result = result[:orig_start] + replace_text + result[orig_end:]
+        log.debug("apply_edits: used normalized match for FIND: %r", find_text[:60])
     return result if result != body else None
 
 
