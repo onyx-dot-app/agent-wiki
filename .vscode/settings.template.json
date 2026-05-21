@@ -1,0 +1,10 @@
+{
+  // Points VS Code's Python extension to the project's virtual environment.
+  // Without this, the editor won't resolve backend imports, type-checking will
+  // show false errors, and the integrated terminal may use the wrong Python.
+  //
+  // If you followed the setup instructions (uv sync --extra dev inside backend/),
+  // your venv lives at backend/.venv and no change is needed here. If your venv
+  // is elsewhere, update the path below to match.
+  "python.defaultInterpreterPath": "${workspaceFolder}/backend/.venv/bin/python"
+}

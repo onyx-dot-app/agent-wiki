@@ -42,8 +42,8 @@ tmp_workspace/
 # editor / OS
 .DS_Store
 .idea/
-.vscode/
 *.swp
+.vscode/settings.json
 
 # claude code — entire dir is local-only (runtime state + per-user settings).
 .claude/
