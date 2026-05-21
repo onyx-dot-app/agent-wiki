@@ -1,4 +1,4 @@
-"""add ingest_examples table for eval logging
+"""add ingest_eval_samples table for eval logging
 
 Revision ID: 0021
 Revises: 0020
@@ -17,7 +17,7 @@ depends_on = None
 
 def upgrade() -> None:
     op.create_table(
-        "ingest_examples",
+        "ingest_eval_samples",
         sa.Column("id", sa.Integer, primary_key=True, autoincrement=True),
         sa.Column(
             "created_at",
@@ -35,11 +35,11 @@ def upgrade() -> None:
         sa.Column("outcome", sa.Text, nullable=False),
         sa.Column("commit_sha", sa.Text),
     )
-    op.create_index("ix_ingest_examples_created_at", "ingest_examples", ["created_at"])
-    op.create_index("ix_ingest_examples_outcome", "ingest_examples", ["outcome"])
+    op.create_index("ix_ingest_eval_samples_created_at", "ingest_eval_samples", ["created_at"])
+    op.create_index("ix_ingest_eval_samples_outcome", "ingest_eval_samples", ["outcome"])
 
 
 def downgrade() -> None:
-    op.drop_index("ix_ingest_examples_outcome", table_name="ingest_examples")
-    op.drop_index("ix_ingest_examples_created_at", table_name="ingest_examples")
-    op.drop_table("ingest_examples")
+    op.drop_index("ix_ingest_eval_samples_outcome", table_name="ingest_eval_samples")
+    op.drop_index("ix_ingest_eval_samples_created_at", table_name="ingest_eval_samples")
+    op.drop_table("ingest_eval_samples")

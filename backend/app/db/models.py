@@ -714,12 +714,12 @@ class AclEntry(Base):
 
 
 # --------------------------------------------------------------------------- #
-# Ingest examples — opt-in eval logging (INGEST_EXAMPLE_LOGGING=true)         #
+# Ingest eval samples — opt-in eval logging (INGEST_EXAMPLE_LOGGING=true)     #
 # --------------------------------------------------------------------------- #
 
 
-class IngestExample(Base):
-    __tablename__ = "ingest_examples"
+class IngestEvalSample(Base):
+    __tablename__ = "ingest_eval_samples"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     created_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)

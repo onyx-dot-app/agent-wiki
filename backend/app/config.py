@@ -41,7 +41,7 @@ class Config(BaseModel):
     ingest_bm25_limit: int
     ingest_irrelevant_stop_n: int
 
-    # Opt-in eval logging — captures reconciler inputs/outputs to ingest_examples
+    # Opt-in eval logging — captures reconciler inputs/outputs to ingest_eval_samples
     ingest_example_logging: bool
 
     # Coding-tool launchers (Run Agent button) — see
