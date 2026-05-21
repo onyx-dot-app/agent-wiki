@@ -25,12 +25,12 @@ func batQuote(s string) string {
 
 // argQuote wraps a single CLI arg in double quotes, escaping embedded
 // quotes per Windows command-line conventions (a quote inside a quoted
-// arg is `\"`).
+// arg is represented as `""`).
 func argQuote(s string) string {
 	if !strings.ContainsAny(s, ` 	"`) {
 		return s
 	}
-	return `"` + strings.ReplaceAll(s, `"`, `\"`) + `"`
+	return `"` + strings.ReplaceAll(s, `"`, `""`) + `"`
 }
 
 // OpenInTerminalApp writes a run.bat wrapper that mirrors the mac/linux
