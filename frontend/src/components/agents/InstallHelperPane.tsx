@@ -58,21 +58,13 @@ export function InstallHelperPane({
         <Text font="secondary-body" color="text-04" as="p">
           Launcher isn&apos;t installed on this machine.
         </Text>
-        <Section
-          flexDirection="row"
-          alignItems="center"
-          justifyContent="start"
-          gap={0.75}
-          width="full"
-        >
-          <Button size="md" variant="action" onClick={download}>
-            Download installer
-          </Button>
-          <Text font="secondary-body" color="text-04" as="span">
-            Open the downloaded zip, drag AgentWikiLauncher.app to your
-            Applications folder, then click Run Agent.
-          </Text>
-        </Section>
+        <Button size="md" variant="action" onClick={download}>
+          Download installer
+        </Button>
+        <Text font="secondary-body" color="text-04" as="p">
+          Open the downloaded zip, drag AgentWikiLauncher.app to your
+          Applications folder, then click Run Agent.
+        </Text>
         <Section
           flexDirection="row"
           alignItems="center"
