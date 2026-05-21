@@ -77,4 +77,3 @@ func TestParseRejectsUnknownVar(t *testing.T) {
 		t.Error("expected unknown-var rejection")
 	}
 }
-
