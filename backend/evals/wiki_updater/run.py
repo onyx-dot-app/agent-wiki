@@ -145,31 +145,34 @@ def _run_one_model(
     provider: str,
     model: str,
     judge_model: str | None,
+    runs: int,
 ) -> Iterator[CaseResult]:
     for case in cases:
-        start = time.monotonic()
-        error = ""
-        raw: str | None = None
-        normalized_raw = ""
-        try:
-            raw, normalized_raw = _invoke_agent(case, model=model)
-        except Exception as exc:
-            error = repr(exc)
-            log.warning("case %s failed against %s: %s", case.id, model, exc)
-        actual = _classify(case.surface, raw)
-        score_rows = _score_case(case, raw=raw, actual=actual, judge_model=judge_model)
-        yield CaseResult(
-            case_id=case.id,
-            surface=case.surface,  # type: ignore[arg-type]
-            provider=provider,
-            model=model,
-            expected_class=case.expected_class.value,
-            actual_class=actual.value,
-            raw_output=normalized_raw,
-            scorers=score_rows,
-            error=error,
-            latency_ms=int((time.monotonic() - start) * 1000),
-        )
+        for run_index in range(runs):
+            start = time.monotonic()
+            error = ""
+            raw: str | None = None
+            normalized_raw = ""
+            try:
+                raw, normalized_raw = _invoke_agent(case, model=model)
+            except Exception as exc:
+                error = repr(exc)
+                log.warning("case %s run %d failed against %s: %s", case.id, run_index, model, exc)
+            actual = _classify(case.surface, raw)
+            score_rows = _score_case(case, raw=raw, actual=actual, judge_model=judge_model)
+            yield CaseResult(
+                case_id=case.id,
+                surface=case.surface,  # type: ignore[arg-type]
+                provider=provider,
+                model=model,
+                run_index=run_index,
+                expected_class=case.expected_class.value,
+                actual_class=actual.value,
+                raw_output=normalized_raw,
+                scorers=score_rows,
+                error=error,
+                latency_ms=int((time.monotonic() - start) * 1000),
+            )
 
 
 def _resolve_context(
@@ -205,6 +208,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         help="If set, also push results to this Braintrust experiment name.",
     )
     p.add_argument("--dry-run", action="store_true", help="Use the stub LLM (no API keys needed)")
+    p.add_argument("--runs", type=int, default=3, help="Trials per (case, model) for variance")
     p.add_argument("--limit", type=int, default=None, help="Run only the first N cases")
     p.add_argument(
         "--case-id",
@@ -249,6 +253,7 @@ def main(argv: list[str] | None = None) -> int:
                 provider=provider,
                 model=model,
                 judge_model=args.judge_model or model,
+                runs=args.runs,
             ):
                 all_results.append(r)
 

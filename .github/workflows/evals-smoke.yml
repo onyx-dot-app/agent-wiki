@@ -15,10 +15,12 @@ on:
   pull_request:
     paths:
       - backend/evals/**
-      - backend/app/llm/agents/wiki_updater.py
+      - backend/app/llm/agents/nl_updater.py
+      - backend/app/llm/agents/ingest_batch_reconciler.py
       - backend/app/llm/agents/ingest_selector.py
+      - backend/app/llm/agents/common.py
       - backend/app/llm/prompts/wiki_updater.*
-      - backend/app/llm/prompts/ingest_selector.*
+      - backend/app/llm/prompts/ingest_*
       - .github/workflows/evals-smoke.yml
   workflow_dispatch:
 
@@ -49,6 +51,7 @@ jobs:
             --cases evals/datasets/wiki_updater/cases.jsonl \
             --models claude-sonnet-4-6 \
             --dry-run \
+            --runs 1 \
             --out runs/ci_wiki_updater.jsonl
 
       - name: ingest_selector dry-run
@@ -57,6 +60,7 @@ jobs:
             --cases evals/datasets/ingest_selector/cases.jsonl \
             --models claude-haiku-4-5 \
             --dry-run \
+            --runs 1 \
             --out runs/ci_ingest_selector.jsonl
 
       - name: external_agent dry-run
@@ -65,6 +69,7 @@ jobs:
             --scenarios evals/datasets/external_agent/scenarios \
             --models claude-sonnet-4-6 \
             --dry-run \
+            --runs 1 \
             --out runs/ci_external_agent.jsonl
 
       - name: Verify dry-run produces baseline scores

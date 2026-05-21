@@ -103,7 +103,7 @@ class ScorerOutcome(BaseModel):
 
 
 class CaseResult(BaseModel):
-    """One row of a results JSONL — one case, one model."""
+    """One row of a results JSONL — one (case, model, run_index) trial."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -111,6 +111,7 @@ class CaseResult(BaseModel):
     surface: Surface
     provider: str
     model: str
+    run_index: int = 0
     expected_class: str
     actual_class: str
     raw_output: str
@@ -121,6 +122,19 @@ class CaseResult(BaseModel):
     output_tokens: int = 0
 
 
+class ScorerSummary(BaseModel):
+    """Aggregate of one scorer across all cases for one model."""
+
+    model_config = ConfigDict(frozen=True)
+
+    name: str
+    mean: float
+    ci_low: float
+    ci_high: float
+    n_cases: int
+    n_runs_per_case: int
+
+
 class RunSummary(BaseModel):
     """High-level result aggregate. Printed to stdout, written to results."""
 
@@ -129,4 +143,5 @@ class RunSummary(BaseModel):
     surface: Surface
     models: list[str]
     case_count: int
-    per_model: dict[str, dict[str, float]]
+    runs_per_case: int
+    per_model: dict[str, list[ScorerSummary]]

@@ -21,7 +21,7 @@ import time
 from collections.abc import Generator, Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, ContextManager
+from typing import Any, ContextManager, cast
 
 from app.llm import client as llm_client
 from app.llm.agents.common import NO_CHANGE_SENTINEL
@@ -194,9 +194,6 @@ def _stub_external_agent(scenarios: list[Scenario]) -> Generator[None]:
     original_stream = llm_client.stream
     original_complete = llm_client.complete
 
-    # State per-scenario: which expected updates have been emitted so far.
-    cursor: dict[str, int] = {}
-
     def _stream(
         messages: list[dict[str, Any]],
         *,
@@ -206,7 +203,6 @@ def _stub_external_agent(scenarios: list[Scenario]) -> Generator[None]:
         max_tokens: int = llm_client.DEFAULT_MAX_TOKENS,
     ) -> Iterator[dict[str, Any]]:
         del provider, tools, max_tokens
-        # Identify the active scenario from the first user message
         first_user = next((m.get("content", "") for m in messages if m.get("role") == "user"), "")
         if not isinstance(first_user, str):
             first_user = ""
@@ -215,13 +211,22 @@ def _stub_external_agent(scenarios: list[Scenario]) -> Generator[None]:
             yield {"type": "text_delta", "text": "ok"}
             yield {"type": "done", "stop_reason": "end_turn", "usage": {}}
             return
-        i = cursor.setdefault(scenario.id, 0)
+        # Cursor = count of prior update_doc_nl tool_calls in the conversation.
+        # Stateless across runs of the same scenario — each fresh chat starts
+        # over because its messages list has no prior assistant turns yet.
+        i = 0
+        for m in messages:
+            if m.get("role") != "assistant":
+                continue
+            tcs = cast(list[dict[str, Any]], m.get("tool_calls") or [])
+            for tc in tcs:
+                if tc.get("name") == "update_doc_nl":
+                    i += 1
         if i >= len(scenario.expected_updates):
             yield {"type": "text_delta", "text": "All updates applied."}
             yield {"type": "done", "stop_reason": "end_turn", "usage": {}}
             return
         upd = scenario.expected_updates[i]
-        cursor[scenario.id] = i + 1
         instruction = "; ".join(c.text for c in upd.facts_present) or "Apply the documented change."
         yield {
             "type": "tool_call",
@@ -277,48 +282,59 @@ def _run_one_model(
     provider: str,
     model: str,
     judge_model: str | None = None,
+    runs: int,
 ) -> Iterator[CaseResult]:
     for scenario in scenarios:
-        start = time.monotonic()
-        error = ""
-        state: WikiState | None = None
-        try:
-            state = run_scenario(scenario, model=model)
-        except Exception as exc:
-            error = repr(exc)
-            log.warning("scenario %s failed against %s: %s", scenario.id, model, exc)
-        if state is None:
+        for run_index in range(runs):
+            start = time.monotonic()
+            error = ""
+            state: WikiState | None = None
+            try:
+                state = run_scenario(scenario, model=model)
+            except Exception as exc:
+                error = repr(exc)
+                log.warning(
+                    "scenario %s run %d failed against %s: %s",
+                    scenario.id,
+                    run_index,
+                    model,
+                    exc,
+                )
+            if state is None:
+                yield CaseResult(
+                    case_id=scenario.id,
+                    surface="external_agent",
+                    provider=provider,
+                    model=model,
+                    run_index=run_index,
+                    expected_class=",".join(u.path for u in scenario.expected_updates) or "<none>",
+                    actual_class="",
+                    raw_output="",
+                    scorers=[],
+                    error=error,
+                    latency_ms=int((time.monotonic() - start) * 1000),
+                )
+                continue
+            rows = _score_scenario(scenario, state, judge_model=judge_model)
             yield CaseResult(
                 case_id=scenario.id,
                 surface="external_agent",
                 provider=provider,
                 model=model,
-                expected_class=",".join(u.path for u in scenario.expected_updates) or "<none>",
-                actual_class="",
-                raw_output="",
-                scorers=[],
+                run_index=run_index,
+                expected_class=",".join(sorted(u.path for u in scenario.expected_updates))
+                or "<none>",
+                actual_class=",".join(sorted(state.updated_paths())) or "<none>",
+                raw_output=json.dumps(
+                    {
+                        "update_calls": state.update_calls,
+                        "final_bodies": {p: state.current_body(p) for p in state.updated_paths()},
+                    }
+                ),
+                scorers=rows,
                 error=error,
                 latency_ms=int((time.monotonic() - start) * 1000),
             )
-            continue
-        rows = _score_scenario(scenario, state, judge_model=judge_model)
-        yield CaseResult(
-            case_id=scenario.id,
-            surface="external_agent",
-            provider=provider,
-            model=model,
-            expected_class=",".join(sorted(u.path for u in scenario.expected_updates)) or "<none>",
-            actual_class=",".join(sorted(state.updated_paths())) or "<none>",
-            raw_output=json.dumps(
-                {
-                    "update_calls": state.update_calls,
-                    "final_bodies": {p: state.current_body(p) for p in state.updated_paths()},
-                }
-            ),
-            scorers=rows,
-            error=error,
-            latency_ms=int((time.monotonic() - start) * 1000),
-        )
 
 
 def _resolve_context(
@@ -348,6 +364,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--out", type=Path, default=None)
     p.add_argument("--braintrust", default=None)
     p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--runs", type=int, default=3, help="Trials per (case, model) for variance")
     p.add_argument("--scenario-id", default=None)
     p.add_argument("--limit", type=int, default=None)
     p.add_argument("--log-level", default="INFO")
@@ -392,6 +409,7 @@ def main(argv: list[str] | None = None) -> int:
                 provider=provider,
                 model=model,
                 judge_model=args.judge_model,
+                runs=args.runs,
             ):
                 all_results.append(r)
 

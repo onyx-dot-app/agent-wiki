@@ -1,29 +1,24 @@
-"""Result IO and pretty-printing for eval runs.
-
-A run produces one JSONL file with one ``CaseResult`` per line. A summary
-table is printed to stdout in every run. The optional Braintrust push
-uploads the same case results as an experiment so the model matrix is
-visible alongside the live traces that come out of ``app.tracing``.
-"""
+"""Result IO, bootstrap confidence intervals, and pretty-printing for runs."""
 
 from __future__ import annotations
 
 import logging
 import os
+import random
 import statistics
 import sys
+from collections import defaultdict
 from pathlib import Path
 from typing import IO, Iterable
 
 from app.tracing import braintrust as bt
-from evals.schema import CaseResult, RunSummary, Surface
+from evals.schema import CaseResult, RunSummary, ScorerSummary, Surface
 
 
 log = logging.getLogger(__name__)
 
 
 def write_jsonl(path: Path, results: Iterable[CaseResult]) -> int:
-    """Write results to ``path`` (one JSON per line). Returns count written."""
     path.parent.mkdir(parents=True, exist_ok=True)
     count = 0
     with path.open("w") as fh:
@@ -35,37 +30,109 @@ def write_jsonl(path: Path, results: Iterable[CaseResult]) -> int:
     return count
 
 
+def _paired_bootstrap_ci(
+    case_scores: list[float], *, iterations: int = 1000, alpha: float = 0.05, seed: int = 42
+) -> tuple[float, float]:
+    """Resample case-level scores with replacement; return (lo, hi) CI on the mean.
+
+    Case-level (not run-level) resampling so the CI reflects between-case
+    variance — the dominant source of uncertainty at our sample sizes.
+    """
+    if not case_scores:
+        return (0.0, 0.0)
+    rng = random.Random(seed)
+    n = len(case_scores)
+    means: list[float] = []
+    for _ in range(iterations):
+        sample = [case_scores[rng.randrange(n)] for _ in range(n)]
+        means.append(sum(sample) / n)
+    means.sort()
+    lo_idx = max(0, int(iterations * (alpha / 2)))
+    hi_idx = min(iterations - 1, int(iterations * (1 - alpha / 2)))
+    return (means[lo_idx], means[hi_idx])
+
+
+def _case_level_scores(rows: list[CaseResult], scorer_name: str) -> list[float]:
+    """Mean each case's score across its k runs, then return the per-case list."""
+    by_case: dict[str, list[float]] = defaultdict(list)
+    for r in rows:
+        for s in r.scorers:
+            if s.name == scorer_name:
+                by_case[r.case_id].append(s.score)
+    return [statistics.fmean(v) for v in by_case.values() if v]
+
+
 def summarize(results: list[CaseResult], surface: Surface) -> RunSummary:
-    """Reduce per-case results to per-model averages per scorer."""
     models = sorted({r.model for r in results})
-    per_model: dict[str, dict[str, float]] = {}
+    runs_per_case = 0
+    if results:
+        by_case_model: dict[tuple[str, str], int] = defaultdict(int)
+        for r in results:
+            by_case_model[(r.case_id, r.model)] += 1
+        runs_per_case = max(by_case_model.values())
+
+    per_model: dict[str, list[ScorerSummary]] = {}
     for m in models:
         rows = [r for r in results if r.model == m]
         scorer_names = sorted({s.name for r in rows for s in r.scorers})
-        per_model[m] = {}
+        summaries: list[ScorerSummary] = []
         for sn in scorer_names:
-            scores = [s.score for r in rows for s in r.scorers if s.name == sn]
-            per_model[m][sn] = statistics.fmean(scores) if scores else 0.0
-        per_model[m]["error_rate"] = sum(1 for r in rows if r.error) / max(len(rows), 1)
+            case_scores = _case_level_scores(rows, sn)
+            mean = statistics.fmean(case_scores) if case_scores else 0.0
+            lo, hi = _paired_bootstrap_ci(case_scores)
+            summaries.append(
+                ScorerSummary(
+                    name=sn,
+                    mean=mean,
+                    ci_low=lo,
+                    ci_high=hi,
+                    n_cases=len(case_scores),
+                    n_runs_per_case=runs_per_case,
+                )
+            )
+        # error_rate is computed across all rows (not per-case averaged) so we
+        # report it separately.
+        err_cases = {r.case_id for r in rows if r.error}
+        total_cases = {r.case_id for r in rows}
+        err_rate = len(err_cases) / max(len(total_cases), 1)
+        summaries.append(
+            ScorerSummary(
+                name="error_rate",
+                mean=err_rate,
+                ci_low=err_rate,
+                ci_high=err_rate,
+                n_cases=len(total_cases),
+                n_runs_per_case=runs_per_case,
+            )
+        )
+        per_model[m] = summaries
+
     return RunSummary(
         surface=surface,
         models=models,
         case_count=len({r.case_id for r in results}),
+        runs_per_case=runs_per_case,
         per_model=per_model,
     )
 
 
 def print_summary(summary: RunSummary, *, stream: IO[str] = sys.stdout) -> None:
-    """Print a markdown table to stdout. Stable order = easy diff between runs."""
-    scorer_names = sorted({s for m in summary.per_model.values() for s in m.keys()})
-    header = "| model | " + " | ".join(scorer_names) + " |"
-    divider = "| -- | " + " | ".join("--" for _ in scorer_names) + " |"
-    print(f"\nsurface={summary.surface} cases={summary.case_count}\n", file=stream)
-    print(header, file=stream)
-    print(divider, file=stream)
+    scorer_names = sorted({s.name for ss in summary.per_model.values() for s in ss})
+    print(
+        f"\nsurface={summary.surface} cases={summary.case_count} runs/case={summary.runs_per_case}\n",
+        file=stream,
+    )
+    print("| model | " + " | ".join(scorer_names) + " |", file=stream)
+    print("| -- | " + " | ".join("--" for _ in scorer_names) + " |", file=stream)
     for model in summary.models:
-        row = summary.per_model[model]
-        cells = [f"{row.get(sn, 0):.2f}" for sn in scorer_names]
+        by_name = {s.name: s for s in summary.per_model[model]}
+        cells: list[str] = []
+        for sn in scorer_names:
+            s = by_name.get(sn)
+            if s is None:
+                cells.append("-")
+            else:
+                cells.append(f"{s.mean:.2f} [{s.ci_low:.2f}, {s.ci_high:.2f}]")
         print(f"| {model} | " + " | ".join(cells) + " |", file=stream)
     print("", file=stream)
 
@@ -76,13 +143,6 @@ def push_to_braintrust(
     *,
     project: str | None = None,
 ) -> None:
-    """Upload results as a Braintrust experiment.
-
-    Routes through ``app.tracing.braintrust.push_experiment`` so the
-    ``braintrust`` SDK is only imported behind the single allowed seam.
-    Keys come from ``BRAINTRUST_API_KEY`` and ``BRAINTRUST_PROJECT`` env
-    vars by default. Missing config is a no-op with a warning.
-    """
     api_key = os.environ.get("BRAINTRUST_API_KEY", "")
     project_name = project or os.environ.get("BRAINTRUST_PROJECT", "")
     if not api_key or not project_name:
@@ -90,13 +150,14 @@ def push_to_braintrust(
         return
     rows = [
         bt.ExperimentRow(
-            input={"case_id": r.case_id, "surface": r.surface},
+            input={"case_id": r.case_id, "surface": r.surface, "run_index": r.run_index},
             output={"actual_class": r.actual_class, "raw_output": r.raw_output},
             expected={"expected_class": r.expected_class},
             scores={s.name: s.score for s in r.scorers},
             metadata={
                 "provider": r.provider,
                 "model": r.model,
+                "run_index": r.run_index,
                 "error": r.error,
                 "latency_ms": r.latency_ms,
                 "input_tokens": r.input_tokens,

@@ -151,29 +151,40 @@ def _run_one_model(
     *,
     provider: str,
     model: str,
+    runs: int,
 ) -> Iterator[CaseResult]:
     for case in cases:
-        start = time.monotonic()
-        error = ""
-        kept_paths: list[str] = []
-        try:
-            kept_paths = _invoke_selector(case, model=model)
-        except Exception as exc:
-            error = repr(exc)
-            log.warning("selector case %s failed against %s: %s", case.id, model, exc)
-        precision, recall, f1 = scorers.selector_set_metrics(case.expected_kept_paths, kept_paths)
-        yield CaseResult(
-            case_id=case.id,
-            surface="ingest_selector",
-            provider=provider,
-            model=model,
-            expected_class=",".join(sorted(case.expected_kept_paths)) or "<none>",
-            actual_class=",".join(sorted(kept_paths)) or "<none>",
-            raw_output=json.dumps(kept_paths),
-            scorers=[precision, recall, f1],
-            error=error,
-            latency_ms=int((time.monotonic() - start) * 1000),
-        )
+        for run_index in range(runs):
+            start = time.monotonic()
+            error = ""
+            kept_paths: list[str] = []
+            try:
+                kept_paths = _invoke_selector(case, model=model)
+            except Exception as exc:
+                error = repr(exc)
+                log.warning(
+                    "selector case %s run %d failed against %s: %s",
+                    case.id,
+                    run_index,
+                    model,
+                    exc,
+                )
+            precision, recall, f1 = scorers.selector_set_metrics(
+                case.expected_kept_paths, kept_paths
+            )
+            yield CaseResult(
+                case_id=case.id,
+                surface="ingest_selector",
+                provider=provider,
+                model=model,
+                run_index=run_index,
+                expected_class=",".join(sorted(case.expected_kept_paths)) or "<none>",
+                actual_class=",".join(sorted(kept_paths)) or "<none>",
+                raw_output=json.dumps(kept_paths),
+                scorers=[precision, recall, f1],
+                error=error,
+                latency_ms=int((time.monotonic() - start) * 1000),
+            )
 
 
 def _resolve_context(
@@ -191,6 +202,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--out", type=Path, default=None)
     p.add_argument("--braintrust", default=None)
     p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--runs", type=int, default=3, help="Trials per (case, model) for variance")
     p.add_argument("--limit", type=int, default=None)
     p.add_argument("--case-id", default=None)
     p.add_argument("--log-level", default="INFO")
@@ -222,7 +234,7 @@ def main(argv: list[str] | None = None) -> int:
         log.info("running %d selector cases against %s/%s", len(cases), provider, model)
         ctx = _resolve_context(provider, model, args.dry_run, cases)
         with ctx:
-            for r in _run_one_model(cases, provider=provider, model=model):
+            for r in _run_one_model(cases, provider=provider, model=model, runs=args.runs):
                 all_results.append(r)
 
     out_path = args.out or Path("runs") / ("ingest_selector_%d.jsonl" % int(time.time()))
