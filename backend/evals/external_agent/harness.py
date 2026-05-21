@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.llm.agents.chat import run_chat_loop
 from app.llm.agents.nl_updater import process_instruction
@@ -69,6 +69,22 @@ class Scenario(BaseModel):
     expected_not_updated: list[str] = Field(default_factory=list)
     notes: str = ""
     tags: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _expected_paths_in_wiki_state(self) -> Scenario:
+        seeded = {d.path for d in self.wiki_state}
+        missing_updates = [u.path for u in self.expected_updates if u.path not in seeded]
+        missing_not_updated = [p for p in self.expected_not_updated if p not in seeded]
+        problems: list[str] = []
+        if missing_updates:
+            problems.append("expected_updates path(s) not in wiki_state: %s" % missing_updates)
+        if missing_not_updated:
+            problems.append(
+                "expected_not_updated path(s) not in wiki_state: %s" % missing_not_updated
+            )
+        if problems:
+            raise ValueError("scenario %s: %s" % (self.id, "; ".join(problems)))
+        return self
 
 
 def load_scenarios(directory: Path) -> list[Scenario]:

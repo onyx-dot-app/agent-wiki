@@ -315,8 +315,10 @@ def _run_one_model(
             start = time.monotonic()
             error = ""
             state: WikiState | None = None
+            rows: list[ScorerOutcome] = []
             try:
                 state = run_scenario(scenario, model=model)
+                rows = _score_scenario(scenario, state, judge_models=judge_models)
             except Exception as exc:
                 error = repr(exc)
                 log.warning(
@@ -326,7 +328,7 @@ def _run_one_model(
                     model,
                     exc,
                 )
-            if state is None:
+            if state is None or not rows:
                 yield CaseResult(
                     case_id=scenario.id,
                     surface="external_agent",
@@ -346,7 +348,6 @@ def _run_one_model(
                     judge_models=judge_list,
                 )
                 continue
-            rows = _score_scenario(scenario, state, judge_models=judge_models)
             yield CaseResult(
                 case_id=scenario.id,
                 surface="external_agent",
