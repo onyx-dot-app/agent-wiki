@@ -1,6 +1,6 @@
 FROM node:20-alpine AS deps
 WORKDIR /app
-COPY --from=oven/bun:1-alpine /usr/local/bin/bun /usr/local/bin/bun
+COPY --from=oven/bun:1.3-alpine /usr/local/bin/bun /usr/local/bin/bun
 COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile
 
