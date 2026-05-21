@@ -78,7 +78,7 @@ the wiki endpoint, then dispatches every subsequent run silently.
 6. `xcrun stapler staple` the bundle so notarization is offline-checkable.
 7. Re-zip post-staple → `dist/AgentWikiLauncher.zip`.
 
-Required env (read by `scripts/build-app.sh` + `scripts/release-mac.sh`):
+Required env (read by `scripts/build-app.sh`):
 
 | Variable              | Purpose                                        |
 | --------------------- | ---------------------------------------------- |
