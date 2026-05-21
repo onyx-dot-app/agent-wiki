@@ -184,7 +184,17 @@ func doRun(raw string) error {
 		pinned = parsed.Endpoint
 	}
 	if !endpoint.Matches(pinned, parsed.Endpoint) {
-		return fmt.Errorf("URI endpoint %s does not match pinned %s; refusing", parsed.Endpoint, pinned)
+		// Pinned-but-mismatched: ask the user before switching. Keeps
+		// anti-phishing posture (only an explicit user gesture changes
+		// the trusted endpoint) but unblocks legitimate dev → prod
+		// switches without requiring `rm ~/.agentwiki/endpoint.url`.
+		if !confirmSwitchEndpoint(pinned, parsed.Endpoint) {
+			return fmt.Errorf("URI endpoint %s does not match pinned %s; user declined to switch", parsed.Endpoint, pinned)
+		}
+		if err := endpoint.Set(parsed.Endpoint); err != nil {
+			return err
+		}
+		pinned = parsed.Endpoint
 	}
 
 	machineID, err := machine.GetOrCreate()
@@ -319,6 +329,29 @@ func confirmPinEndpoint(rawURL string) bool {
 	script := fmt.Sprintf(
 		"display dialog \"Pin %s as your agent-wiki endpoint?\n\nThis launcher will only accept Run Agent requests from this URL.\" buttons {\"Cancel\", \"Pin\"} default button \"Pin\" with title \"AgentWikiLauncher\" with icon note",
 		escaped,
+	)
+	return exec.Command("osascript", "-e", script).Run() == nil
+}
+
+// confirmSwitchEndpoint asks the user via a native macOS dialog whether
+// to switch the pinned endpoint from one wiki URL to another. Returns
+// true on Switch. The destructive default (Cancel) keeps a stray
+// agentwiki:// URL from silently moving the pin off a trusted host.
+//
+// Only the variable URL fragments go through appleScriptEscapeLiteral
+// (which scrubs newlines + quotes to keep an attacker from breaking the
+// dialog). The fixed scaffolding's "\n" survives so the message renders
+// across multiple lines.
+func confirmSwitchEndpoint(oldURL, newURL string) bool {
+	oldEscaped := appleScriptEscapeLiteral(oldURL)
+	newEscaped := appleScriptEscapeLiteral(newURL)
+	body := fmt.Sprintf(
+		"Switch your pinned wiki endpoint?\n\nCurrent: %s\nNew:     %s\n\nOnly do this if you trust the new URL.",
+		oldEscaped, newEscaped,
+	)
+	script := fmt.Sprintf(
+		"display dialog \"%s\" buttons {\"Cancel\", \"Switch\"} default button \"Cancel\" with title \"AgentWikiLauncher\" with icon caution",
+		body,
 	)
 	return exec.Command("osascript", "-e", script).Run() == nil
 }
