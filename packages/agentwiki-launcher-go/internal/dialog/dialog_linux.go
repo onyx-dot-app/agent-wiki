@@ -67,10 +67,11 @@ func runLinuxPromptDestructive(title, text, okLabel, cancelLabel string) bool {
 		).Run() == nil
 	}
 	if path, err := exec.LookPath("kdialog"); err == nil {
-		// kdialog --warningyesno highlights cancel as the safe default.
+		// kdialog --warningyesno --defaultno highlights cancel as the safe default.
 		return exec.Command(path,
 			"--title", title,
 			"--warningyesno", text,
+			"--defaultno",
 		).Run() == nil
 	}
 	return false
