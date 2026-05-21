@@ -42,8 +42,8 @@ def batch_by_chars(
     return batches
 
 
-def _normalize_for_match(text: str) -> str:
-    """Strip trailing whitespace per line for fuzzy matching. Preserves trailing newline."""
+def rstrip_lines(text: str) -> str:
+    """Strip trailing whitespace from each line. Preserves a trailing newline if present."""
     lines = text.splitlines()
     normalized = "\n".join(line.rstrip() for line in lines)
     if text.endswith("\n"):
@@ -80,8 +80,8 @@ def apply_edits(body: str, edits: list[TextEdit]) -> str | None:
             result = result.replace(find_text, replace_text, 1)
             continue
         # Fuzzy fallback: match after stripping trailing whitespace per line.
-        norm_result = _normalize_for_match(result)
-        norm_find = _normalize_for_match(find_text)
+        norm_result = rstrip_lines(result)
+        norm_find = rstrip_lines(find_text)
         pos = norm_result.find(norm_find)
         if pos == -1:
             log.warning(
