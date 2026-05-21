@@ -356,6 +356,20 @@ def process_pushed_document(push: dict[str, Any]) -> None:
                 c.hit.path,
                 consecutive_irrelevant,
             )
+            if CONFIG.ingest_eval_logging:
+                try:
+                    ingest_eval_sample.log_sample(
+                        source_type=source_type,
+                        source_title=title,
+                        source_url=url if url else None,
+                        source_content=content,
+                        wiki_path=c.hit.path,
+                        wiki_body_before=c.body,
+                        outcome="irrelevant",
+                        commit_sha=None,
+                    )
+                except Exception:
+                    log.warning("ingest_eval_sample: failed to log irrelevant sample", exc_info=True)
             if consecutive_irrelevant >= CONFIG.ingest_irrelevant_stop_n:
                 stopped_early = True
                 break

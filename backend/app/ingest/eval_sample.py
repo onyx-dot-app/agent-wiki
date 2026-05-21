@@ -24,7 +24,7 @@ def log_sample(
     source_content: str,
     wiki_path: str,
     wiki_body_before: str,
-    outcome: Literal["committed", "no_change"],
+    outcome: Literal["committed", "no_change", "irrelevant"],
     commit_sha: str | None,
 ) -> None:
     diff = wiki_git.diff_for_commit(commit_sha, wiki_path) if commit_sha is not None else None
