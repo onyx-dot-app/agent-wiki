@@ -82,12 +82,11 @@ func InstallDarwin(launcherPath string) error {
 	if err != nil {
 		return err
 	}
-	patched := bytes.Replace(
-		plist,
-		[]byte("</dict>\n</plist>"),
-		[]byte(urlTypesXML+"</dict>\n</plist>"),
-		1,
-	)
+	marker := []byte("</dict>\n</plist>")
+	if !bytes.Contains(plist, marker) {
+		return fmt.Errorf("Info.plist trailing marker not found at %s — osacompile format changed?", plistPath)
+	}
+	patched := bytes.Replace(plist, marker, []byte(urlTypesXML+"</dict>\n</plist>"), 1)
 	if err := os.WriteFile(plistPath, patched, 0o644); err != nil {
 		return err
 	}
