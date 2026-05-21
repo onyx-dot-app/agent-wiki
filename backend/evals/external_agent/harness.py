@@ -1,24 +1,15 @@
-"""Drive a real LLM agent through an MCP-shaped tool surface against an
-in-memory wiki, then score which docs it chose to update.
+"""In-memory wiki harness for the external-agent eval.
 
-This is the WHEN-axis eval for an external agent. The model is wrapped in
-``run_chat_loop`` (the same primitive the production chat agent uses) and
-given three tools that mirror the MCP surface external agents see:
-
-* ``list_docs()`` — paths + 1-line summaries of every page in the wiki
-* ``read_doc(path)`` — full body of a page
-* ``update_doc_nl(path, instruction)`` — apply an NL instruction. Drives
-  the same ``wiki_updater.process_instruction`` agent as the real MCP
-  path. The harness applies the returned body to the in-memory wiki.
-
-A scenario specifies (a) the seed wiki state, (b) a task prompt for the
-agent, (c) hidden ground truth of which paths SHOULD be updated and what
-facts must appear/persist. Reusing the Phase 1 quality scorers means the
-HOW axis numbers are directly comparable between internal and external.
+Drives a real LLM through ``run_chat_loop`` with three tools that match
+the production MCP surface: ``list_docs``, ``read_doc``, ``update_doc_nl``.
+``update_doc_nl`` here mirrors the production tool handler's return
+shape — ``{path, committed, sha, reason, error}`` — so an agent that
+branches on those fields behaves the same in eval and in prod.
 """
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from pathlib import Path
 from typing import Any
@@ -26,8 +17,9 @@ from typing import Any
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.llm.agents.nl_updater import process_instruction
 from app.llm.agents.chat import run_chat_loop
+from app.llm.agents.nl_updater import process_instruction
+from app.llm.errors import LLMError
 
 from evals.schema import FactClaim
 
@@ -91,12 +83,21 @@ def load_scenarios(directory: Path) -> list[Scenario]:
     return scenarios
 
 
+def _fake_sha(path: str, body: str) -> str:
+    """Stand-in for a git sha. Deterministic per (path, body) so a re-read
+    of the same body returns the same sha, matching production semantics."""
+    return hashlib.sha1(f"{path}\0{body}".encode()).hexdigest()
+
+
 class WikiState:
     """In-memory wiki for one scenario run.
 
-    Tracks calls so the runner can derive precision/recall after the agent
-    finishes. ``apply_update`` invokes the real ``wiki_updater`` agent —
-    that's the integration point we want under test, not a stub.
+    ``apply_update`` mirrors the production ``update_doc_nl`` tool handler:
+    invokes the real ``nl_updater.process_instruction``, returns the same
+    ``{path, committed, sha, reason, error}`` JSON the production tool
+    returns, and surfaces LLM errors and missing-file errors the same way.
+    Agents that branch on the response shape behave identically here and
+    in prod.
     """
 
     def __init__(self, seed: list[ScenarioDocument]):
@@ -110,34 +111,54 @@ class WikiState:
             {"path": p, "summary": self._summaries.get(p, "")} for p in sorted(self._bodies.keys())
         ]
 
-    def read_doc(self, path: str) -> str:
+    def read_doc(self, path: str) -> dict[str, Any]:
         if path not in self._bodies:
-            raise KeyError("no such doc: %s" % path)
-        return self._bodies[path]
+            return {"error": f"file not found: {path}"}
+        body = self._bodies[path]
+        return {"path": path, "body": body, "sha": _fake_sha(path, body)}
 
-    def apply_update(self, path: str, instruction: str, source: str = "external_agent") -> str:
+    def apply_update(
+        self, path: str, instruction: str, *, base_sha: str | None = None
+    ) -> dict[str, Any]:
         if path not in self._bodies:
-            raise KeyError("no such doc: %s" % path)
-        new_body = process_instruction(
-            wiki_path=path,
-            current_body=self._bodies[path],
-            payload={"instruction": instruction},
-            source=source,
-        )
-        self.update_calls.append(
-            {
-                "path": path,
-                "instruction": instruction,
-                "resulted_in_change": new_body is not None,
+            return {"error": f"file not found: {path}"}
+
+        old_body = self._bodies[path]
+        head_sha = _fake_sha(path, old_body)
+        if base_sha and base_sha != head_sha:
+            return {
+                "error": "stale_base",
+                "base_sha": base_sha,
+                "current_sha": head_sha,
+                "message": (
+                    "the file has changed since base_sha; re-read with "
+                    "read_doc and re-issue the instruction"
+                ),
             }
-        )
-        if new_body is not None:
-            self._bodies[path] = new_body
-            return "Updated %s." % path
-        return "Reviewed %s — no change applied." % path
+
+        try:
+            new_body = process_instruction(
+                wiki_path=path,
+                current_body=old_body,
+                payload={"instruction": instruction},
+                source="external_agent",
+            )
+        except LLMError as exc:
+            self.update_calls.append(
+                {"path": path, "instruction": instruction, "error": f"llm_error: {exc}"}
+            )
+            return {"error": f"llm_error: {exc}"}
+
+        if new_body is None or new_body == old_body:
+            self.update_calls.append({"path": path, "instruction": instruction, "committed": False})
+            return {"path": path, "committed": False, "reason": "no_change", "sha": head_sha}
+
+        self._bodies[path] = new_body
+        new_sha = _fake_sha(path, new_body)
+        self.update_calls.append({"path": path, "instruction": instruction, "committed": True})
+        return {"path": path, "committed": True, "sha": new_sha, "reason": "edit"}
 
     def updated_paths(self) -> list[str]:
-        """Paths whose body actually changed vs the seed."""
         return [p for p, body in self._bodies.items() if body != self._original[p]]
 
     def current_body(self, path: str) -> str:
@@ -156,7 +177,10 @@ def _tools_spec() -> list[dict[str, Any]]:
         },
         {
             "name": "read_doc",
-            "description": "Return the full body of a doc by path.",
+            "description": (
+                "Return {path, body, sha}. Use sha as base_sha on the next update_doc_nl "
+                "to detect concurrent edits."
+            ),
             "input_schema": {
                 "type": "object",
                 "properties": {"path": {"type": "string"}},
@@ -166,14 +190,18 @@ def _tools_spec() -> list[dict[str, Any]]:
         {
             "name": "update_doc_nl",
             "description": (
-                "Apply a natural-language instruction to a wiki doc. Only call this when"
-                " the doc actually needs to change."
+                "Apply a natural-language instruction to a wiki doc. Only call this when "
+                "the doc actually needs to change. Returns {path, committed: bool, sha, "
+                "reason} on success or {error, ...} on failure (file not found, stale_base, "
+                "llm_error). When base_sha is provided, the update is rejected with "
+                "{error: 'stale_base', ...} if the doc has changed since."
             ),
             "input_schema": {
                 "type": "object",
                 "properties": {
                     "path": {"type": "string"},
                     "instruction": {"type": "string"},
+                    "base_sha": {"type": "string"},
                 },
                 "required": ["path", "instruction"],
             },
@@ -188,7 +216,9 @@ def _dispatch_for(state: WikiState):
         if name == "read_doc":
             return state.read_doc(args["path"])
         if name == "update_doc_nl":
-            return state.apply_update(args["path"], args["instruction"])
+            return state.apply_update(
+                args["path"], args["instruction"], base_sha=args.get("base_sha")
+            )
         raise ValueError("unknown tool: %s" % name)
 
     return dispatch
