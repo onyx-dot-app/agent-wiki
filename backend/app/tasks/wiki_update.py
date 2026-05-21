@@ -282,7 +282,7 @@ def process_pushed_document(push: dict[str, Any]) -> None:
 
     source_label = source_type or "external"
     _meta: dict[str, Any] = push.get("metadata") or {}
-    url: str = str(_meta.get("url") or "")
+    url: str = str(push.get("url") or _meta.get("url") or "")
 
     # Read all candidate bodies upfront — needed by both the selector and the
     # main reconciler loop. Skip unreadable files early so the selector sees
