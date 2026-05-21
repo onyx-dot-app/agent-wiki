@@ -66,7 +66,7 @@
         "run",
         "dev"
       ],
-      "envFile": "${workspaceFolder}/.vscode/.env.frontend",
+      "envFile": "${workspaceFolder}/.env",
       "console": "integratedTerminal",
       "consoleTitle": "Frontend Console",
       "presentation": {
@@ -79,7 +79,7 @@
       "request": "launch",
       "module": "uvicorn",
       "cwd": "${workspaceFolder}/backend",
-      "envFile": "${workspaceFolder}/.vscode/.env",
+      "envFile": "${workspaceFolder}/.env",
       "env": {
         "LOG_LEVEL": "DEBUG",
         "PYTHONUNBUFFERED": "1"
@@ -104,7 +104,7 @@
       "request": "launch",
       "module": "app.tasks.run_worker",
       "cwd": "${workspaceFolder}/backend",
-      "envFile": "${workspaceFolder}/.vscode/.env",
+      "envFile": "${workspaceFolder}/.env",
       "env": {
         "LOG_LEVEL": "DEBUG",
         "PYTHONUNBUFFERED": "1"
@@ -125,7 +125,7 @@
       "request": "launch",
       "module": "app.tasks.run_worker",
       "cwd": "${workspaceFolder}/backend",
-      "envFile": "${workspaceFolder}/.vscode/.env",
+      "envFile": "${workspaceFolder}/.env",
       "env": {
         "LOG_LEVEL": "DEBUG",
         "PYTHONUNBUFFERED": "1"
@@ -146,7 +146,7 @@
       "request": "launch",
       "module": "app.tasks.run_worker",
       "cwd": "${workspaceFolder}/backend",
-      "envFile": "${workspaceFolder}/.vscode/.env",
+      "envFile": "${workspaceFolder}/.env",
       "env": {
         "LOG_LEVEL": "DEBUG",
         "PYTHONUNBUFFERED": "1"
@@ -167,7 +167,7 @@
       "request": "launch",
       "module": "pytest",
       "cwd": "${workspaceFolder}/backend",
-      "envFile": "${workspaceFolder}/.vscode/.env",
+      "envFile": "${workspaceFolder}/.env",
       "env": {
         "LOG_LEVEL": "DEBUG",
         "PYTHONUNBUFFERED": "1"
