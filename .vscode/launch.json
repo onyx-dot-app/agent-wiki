@@ -116,8 +116,7 @@
       "consoleTitle": "Worker: documents Console",
       "justMyCode": false,
       "presentation": {
-        "group": "2",
-        "hidden": true
+        "group": "2"
       }
     },
     {
@@ -138,8 +137,7 @@
       "consoleTitle": "Worker: triggers Console",
       "justMyCode": false,
       "presentation": {
-        "group": "2",
-        "hidden": true
+        "group": "2"
       }
     },
     {
@@ -160,8 +158,7 @@
       "consoleTitle": "Worker: lightweight_maintenance Console",
       "justMyCode": false,
       "presentation": {
-        "group": "2",
-        "hidden": true
+        "group": "2"
       }
     },
     {
