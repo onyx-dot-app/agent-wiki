@@ -19,6 +19,12 @@ RUN pip install --upgrade pip && pip install -e .
 
 COPY app ./app
 
+# Bundled launcher binaries + AgentWikiLauncher.zip — populated by CI
+# (docker-build-push.yml + nightly-build.yml) from the
+# release-agentwiki-launcher-go workflow's signed/notarized artifact
+# before docker build. Served by /api/installer/{app,binary,script}.
+COPY static ./static
+
 # Bundled onboarding wiki content. Copied into WIKI_DIR by
 # `app/wiki/seed.py` on first boot when the wiki is empty, so fresh
 # installs land on a populated instance.
