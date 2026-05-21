@@ -292,14 +292,10 @@
 <!-- Load screen -->
 <div id="load-screen">
   <h2 style="font-size:20px;font-weight:600;">Load eval samples</h2>
-  <div id="file-list" style="display:none;"></div>
-  <div style="margin-top:20px;display:flex;gap:8px;min-width:360px;">
-    <input id="path-input" type="text" placeholder="or type a filename…"
-      style="flex:1;border:1px solid #ddd;border-radius:6px;padding:9px 12px;font-size:13px;outline:none;"
-      onkeydown="if(event.key==='Enter') loadPath()">
-    <button class="load-btn" style="padding:9px 18px;margin:0;" onclick="loadPath()">Load</button>
+  <div style="margin-top:20px;display:flex;flex-direction:column;align-items:center;gap:10px;">
+    <button class="load-btn" id="choose-btn">Choose file…</button>
+    <p id="pick-error" style="font-size:12px;color:#c00;display:none;">File picker not supported — use Chrome 86+</p>
   </div>
-  <input type="file" id="file-input" style="display:none" onchange="loadFile(event)">
   <input type="file" id="ckpt-input" style="display:none" onchange="loadCheckpoint(event)">
 </div>
 
@@ -390,31 +386,19 @@ let storageKey = "";
 
 // ── File loading ──────────────────────────────────────────────────────────────
 
-function loadFile(e) {
-  const file = e.target.files[0];
-  if (!file) return;
-  filename = file.name;
-  const reader = new FileReader();
-  reader.onload = ev => initSamples(ev.target.result);
-  reader.readAsText(file);
-}
-
-
-function loadPath() {
-  const val = document.getElementById("path-input").value.trim();
-  if (val) fetchDefault(val);
-}
-
-async function fetchDefault(name) {
-  const trimmed = name.trim();
-  // Absolute path → use /file?path= endpoint; bare filename → fetch directly
-  const url = trimmed.startsWith("/") || trimmed.match(/^[A-Za-z]:\\/)
-    ? "/file?path=" + encodeURIComponent(trimmed)
-    : trimmed;
-  const res = await fetch(url);
-  if (!res.ok) { alert("Could not load " + trimmed + ": " + res.status); return; }
-  filename = trimmed.split("/").pop().split("\\").pop();
-  initSamples(await res.text());
+async function pickFile() {
+  if (!window.showOpenFilePicker) {
+    document.getElementById("pick-error").style.display = "";
+    return;
+  }
+  try {
+    const [handle] = await window.showOpenFilePicker({ multiple: false });
+    const file = await handle.getFile();
+    filename = file.name;
+    initSamples(await file.text());
+  } catch (e) {
+    if (e.name !== "AbortError") alert("Could not open file: " + e.message);
+  }
 }
 
 function initSamples(text) {
@@ -428,33 +412,8 @@ function initSamples(text) {
   render();
 }
 
-// ── File list from server ──────────────────────────────────────────────────────
-
-document.addEventListener("DOMContentLoaded", async () => {
-  // Auto-load from ?file=<name> query param
-  const fileParam = new URLSearchParams(location.search).get("file");
-  if (fileParam) { fetchDefault(fileParam); return; }
-
-  // Fetch directory listing and show .jsonl files as buttons
-  const listEl = document.getElementById("file-list");
-  try {
-    const html = await (await fetch("./")).text();
-    const matches = [...html.matchAll(/href="([^"]+\.jsonl)"/g)].map(m => m[1]);
-    if (matches.length === 0) {
-      listEl.innerHTML = `<p style="color:#888;font-size:13px;">No .jsonl files found in this directory.</p>`;
-    } else {
-      matches.forEach(name => {
-        const btn = document.createElement("button");
-        btn.className = "load-btn";
-        btn.style.cssText = "width:100%;text-align:left;padding:12px 18px;font-size:14px;";
-        btn.textContent = name;
-        btn.onclick = () => fetchDefault(name);
-        listEl.appendChild(btn);
-      });
-    }
-  } catch {
-    listEl.innerHTML = `<p style="color:#888;font-size:13px;">Could not list files — use ?file=filename.jsonl in the URL.</p>`;
-  }
+document.addEventListener("DOMContentLoaded", () => {
+  document.getElementById("choose-btn").addEventListener("click", pickFile);
 });
 
 // ── Navigation ────────────────────────────────────────────────────────────────
