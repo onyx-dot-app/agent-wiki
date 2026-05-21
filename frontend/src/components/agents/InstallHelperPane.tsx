@@ -130,12 +130,14 @@ export function InstallHelperPane({
               </Button>
               <Button
                 size="md"
+                variant="action"
                 onClick={() => download("/api/installer/linux?arch=amd64")}
               >
                 Download for Linux (amd64)
               </Button>
               <Button
                 size="md"
+                variant="action"
                 onClick={() => download("/api/installer/windows")}
               >
                 Download for Windows

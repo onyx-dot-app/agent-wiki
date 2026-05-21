@@ -30,10 +30,12 @@ func Install(launcherPath string) error {
 			return fmt.Errorf("reg add failed (%s): %s: %w", c[2], strings.TrimSpace(string(out)), err)
 		}
 	}
-	if home, err := os.UserHomeDir(); err == nil && home != "" {
-		if err := os.MkdirAll(filepath.Join(home, ".agentwiki"), 0o755); err != nil {
-			return err
-		}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Join(home, ".agentwiki"), 0o755); err != nil {
+		return err
 	}
 	fmt.Fprintf(os.Stdout, "[agentwiki-launcher] installed URL handler -> %s\n", abs)
 	return nil
