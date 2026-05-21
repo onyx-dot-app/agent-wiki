@@ -16,6 +16,11 @@ depends_on = None
 
 
 def upgrade() -> None:
+    # create_all in 0001 already materializes this table on fresh installs;
+    # skip if it exists so upgrading existing DBs and fresh installs both work.
+    bind = op.get_bind()
+    if sa.inspect(bind).has_table("ingest_eval_samples"):
+        return
     op.create_table(
         "ingest_eval_samples",
         sa.Column("id", sa.Integer, primary_key=True, autoincrement=True),
