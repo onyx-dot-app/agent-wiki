@@ -1,6 +1,6 @@
 """Opt-in logging of ingest reconciler decisions to the ingest_eval_samples table.
 
-Enabled via INGEST_EXAMPLE_LOGGING=true. Each row captures the source document,
+Enabled via INGEST_EVAL_LOGGING=true. Each row captures the source document,
 the wiki page before reconciliation, the unified diff of any edit, and the outcome.
 Intended for human review and building a regression test suite.
 """

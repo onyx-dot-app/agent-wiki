@@ -714,7 +714,7 @@ class AclEntry(Base):
 
 
 # --------------------------------------------------------------------------- #
-# Ingest eval samples — opt-in eval logging (INGEST_EXAMPLE_LOGGING=true)     #
+# Ingest eval samples — opt-in eval logging (INGEST_EVAL_LOGGING=true)     #
 # --------------------------------------------------------------------------- #
 
 

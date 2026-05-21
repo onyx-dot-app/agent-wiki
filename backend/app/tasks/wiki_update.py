@@ -375,7 +375,7 @@ def process_pushed_document(push: dict[str, Any]) -> None:
             ingest_outcomes_total.labels(outcome="committed", wiki_path=c.hit.path).inc()
             ingest_bm25_score_by_outcome.labels(outcome="committed").observe(c.hit.score)
             log.info("process_pushed_document: committed %s sha=%s", c.hit.path, sha)
-            if CONFIG.ingest_example_logging:
+            if CONFIG.ingest_eval_logging:
                 try:
                     ingest_eval_sample.log_sample(
                         source_type=source_type,
@@ -393,7 +393,7 @@ def process_pushed_document(push: dict[str, Any]) -> None:
             consecutive_irrelevant = 0
             ingest_outcomes_total.labels(outcome="no_change", wiki_path=c.hit.path).inc()
             ingest_bm25_score_by_outcome.labels(outcome="no_change").observe(c.hit.score)
-            if CONFIG.ingest_example_logging:
+            if CONFIG.ingest_eval_logging:
                 try:
                     ingest_eval_sample.log_sample(
                         source_type=source_type,
