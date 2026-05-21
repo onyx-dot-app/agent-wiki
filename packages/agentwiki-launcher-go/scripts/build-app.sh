@@ -4,7 +4,7 @@
 # Outputs dist/AgentWikiLauncher.zip — stapled + notarized, drag-to-Applications
 # ready. Gatekeeper passes on first open without "Open anyway" friction.
 #
-# Required env (same as release-mac.sh):
+# Required env:
 #   APPLE_ID, APPLE_TEAM_ID, APPLE_APP_PASSWORD,
 #   APPLE_CERT_BASE64, APPLE_CERT_PASSWORD
 #

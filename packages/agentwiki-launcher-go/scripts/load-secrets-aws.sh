@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Source this file (do not exec) to populate Apple signing env vars from
-# AWS Secrets Manager. Local-dev convenience — CI reads GitHub Actions
-# secrets directly and never calls this script.
+# AWS Secrets Manager. Local-dev convenience — CI assumes the
+# `AWS_OIDC_ROLE_ARN` role and pulls the same secrets via
+# aws-actions/aws-secretsmanager-get-secrets.
 #
 #   source scripts/load-secrets-aws.sh
-#   make release
+#   ./scripts/build-app.sh
 #
 # Overrides:
 #   AWS_PROFILE  (default: admin)
