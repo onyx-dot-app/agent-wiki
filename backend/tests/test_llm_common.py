@@ -65,6 +65,14 @@ def test_apply_edits_fuzzy_trailing_space_on_find():
     assert result == "line one\nnew text\nline three\n"
 
 
+def test_apply_edits_fuzzy_trailing_space_on_body():
+    # Body has trailing spaces on lines; model quoted cleanly without them
+    body = "The deploy takes ~5 minutes.   \nRun the script after merging.  \n"
+    find = "The deploy takes ~5 minutes.\nRun the script after merging."
+    result = apply_edits(body, [_e(find, "The deploy takes ~2 minutes.\nRun the script after merging.")])
+    assert result == "The deploy takes ~2 minutes.\nRun the script after merging.\n"
+
+
 def test_apply_edits_fuzzy_trailing_spaces_multiline():
     # Model quoted a multi-line block with trailing spaces on each line
     body = "## Section\n\nfoo bar\nbaz qux\n\nend\n"

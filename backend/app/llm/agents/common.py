@@ -91,6 +91,10 @@ def apply_edits(body: str, edits: list[TextEdit]) -> str | None:
             continue
         orig_start = _map_norm_pos_to_orig(result, norm_result, pos)
         orig_end = _map_norm_pos_to_orig(result, norm_result, pos + len(norm_find))
+        # Consume trailing whitespace on the last matched line that normalization
+        # stripped from the body but the find text didn't include.
+        while orig_end < len(result) and result[orig_end] in " \t\r":
+            orig_end += 1
         result = result[:orig_start] + replace_text + result[orig_end:]
         log.debug("apply_edits: used normalized match for FIND: %r", find_text[:60])
     return result if result != body else None
