@@ -7,9 +7,8 @@ for each one:
   - str                  — the new page body produced by applying FIND/REPLACE
                            edits to the current body
 
-The model submits decisions via the ``submit_results`` tool call — typed JSON
-rather than parsed free text, so formatting deviations cause hard errors
-instead of silent mis-parses.
+The model submits decisions via the ``submit_results`` tool call — typed JSON,
+so formatting deviations cause hard errors instead of silent mis-parses.
 
 Fails open — any error marks all candidates in that batch as IRRELEVANT_SENTINEL.
 Batches fail independently.
@@ -218,6 +217,12 @@ def _parse_tool_results(
       - None: page is already up-to-date
       - list[TextEdit]: edits to apply
     """
+    if tool_call.name != "submit_results":
+        log.warning(
+            "ingest_batch_reconciler: unexpected tool call %r, expected submit_results",
+            tool_call.name,
+        )
+        return [IRRELEVANT_SENTINEL] * len(batch)
     raw: list[Any] = tool_call.arguments.get("results") or []
     by_index: dict[int, dict[str, Any]] = {}
     for item in raw:

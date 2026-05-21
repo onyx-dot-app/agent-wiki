@@ -141,6 +141,16 @@ def test_parse_tool_results_edit_with_no_edits_warns(caplog):
     assert "no valid edits" in caplog.text
 
 
+def test_parse_tool_results_wrong_tool_name_returns_all_irrelevant(caplog):
+    import logging
+    batch = [_candidate("a"), _candidate("b")]
+    tc = ToolCall(id="call_1", name="wrong_tool", arguments={"results": []})
+    with caplog.at_level(logging.WARNING, logger="app.llm.agents.ingest_batch_reconciler"):
+        results = _parse_tool_results(tc, batch)
+    assert results == [IRRELEVANT_SENTINEL, IRRELEVANT_SENTINEL]
+    assert "unexpected tool call" in caplog.text
+
+
 def test_parse_tool_results_unknown_action_defaults_to_irrelevant(caplog):
     import logging
     batch = [_candidate("a")]
