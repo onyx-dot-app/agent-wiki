@@ -25,6 +25,7 @@ from app.llm.agents.common import IRRELEVANT_SENTINEL
 from app.llm.agents.ingest_batch_reconciler import batch_reconcile
 from app.llm.agents.nl_updater import process_instruction
 from app.utils.logging import setup_logging
+from evals._metadata import git_sha_for, new_eval_run_id, utc_iso_now
 
 from evals import reporting, scorers
 from evals._dry_run import stub_completions
@@ -148,7 +149,9 @@ def _run_one_model(
     model: str,
     judge_models: tuple[str, ...] | None,
     runs: int,
+    metadata: dict[str, str],
 ) -> Iterator[CaseResult]:
+    judge_list = list(judge_models) if judge_models else []
     for case in cases:
         for run_index in range(runs):
             start = time.monotonic()
@@ -174,6 +177,11 @@ def _run_one_model(
                 scorers=score_rows,
                 error=error,
                 latency_ms=int((time.monotonic() - start) * 1000),
+                eval_run_id=metadata["eval_run_id"],
+                run_timestamp=metadata["run_timestamp"],
+                harness_git_sha=metadata["harness_git_sha"],
+                dataset_git_sha=metadata["dataset_git_sha"],
+                judge_models=judge_list,
             )
 
 
@@ -245,6 +253,12 @@ def main(argv: list[str] | None = None) -> int:
         log.error("no runnable models — set EVAL_*_API_KEY or pass --dry-run")
         return 2
 
+    metadata = {
+        "eval_run_id": new_eval_run_id(),
+        "run_timestamp": utc_iso_now(),
+        "harness_git_sha": git_sha_for(Path(__file__)),
+        "dataset_git_sha": git_sha_for(args.cases),
+    }
     all_results: list[CaseResult] = []
     for provider, model in runnable:
         log.info("running %d cases against %s/%s", len(cases), provider, model)
@@ -257,6 +271,7 @@ def main(argv: list[str] | None = None) -> int:
                 model=model,
                 judge_models=judge_panel,
                 runs=args.runs,
+                metadata=metadata,
             ):
                 all_results.append(r)
 

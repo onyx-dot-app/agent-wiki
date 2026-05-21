@@ -30,6 +30,7 @@ from app.utils.logging import setup_logging
 
 from evals import reporting, scorers
 from evals._llm_override import configured_models, use_model
+from evals._metadata import git_sha_for, new_eval_run_id, utc_iso_now
 from evals.external_agent.harness import Scenario, WikiState, load_scenarios, run_scenario
 from evals.schema import CaseResult, ScorerOutcome
 
@@ -306,7 +307,9 @@ def _run_one_model(
     model: str,
     judge_models: tuple[str, ...] | None = None,
     runs: int,
+    metadata: dict[str, str],
 ) -> Iterator[CaseResult]:
+    judge_list = list(judge_models) if judge_models else []
     for scenario in scenarios:
         for run_index in range(runs):
             start = time.monotonic()
@@ -336,6 +339,11 @@ def _run_one_model(
                     scorers=[],
                     error=error,
                     latency_ms=int((time.monotonic() - start) * 1000),
+                    eval_run_id=metadata["eval_run_id"],
+                    run_timestamp=metadata["run_timestamp"],
+                    harness_git_sha=metadata["harness_git_sha"],
+                    dataset_git_sha=metadata["dataset_git_sha"],
+                    judge_models=judge_list,
                 )
                 continue
             rows = _score_scenario(scenario, state, judge_models=judge_models)
@@ -357,6 +365,11 @@ def _run_one_model(
                 scorers=rows,
                 error=error,
                 latency_ms=int((time.monotonic() - start) * 1000),
+                eval_run_id=metadata["eval_run_id"],
+                run_timestamp=metadata["run_timestamp"],
+                harness_git_sha=metadata["harness_git_sha"],
+                dataset_git_sha=metadata["dataset_git_sha"],
+                judge_models=judge_list,
             )
 
 
@@ -421,6 +434,12 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     judge_panel = tuple(j.strip() for j in args.judge_models.split(",") if j.strip())
+    metadata = {
+        "eval_run_id": new_eval_run_id(),
+        "run_timestamp": utc_iso_now(),
+        "harness_git_sha": git_sha_for(Path(__file__)),
+        "dataset_git_sha": git_sha_for(args.scenarios),
+    }
     all_results: list[CaseResult] = []
     for provider, model in runnable:
         log.info("running %d scenarios against %s/%s", len(scenarios), provider, model)
@@ -432,6 +451,7 @@ def main(argv: list[str] | None = None) -> int:
                 model=model,
                 judge_models=judge_panel,
                 runs=args.runs,
+                metadata=metadata,
             ):
                 all_results.append(r)
 

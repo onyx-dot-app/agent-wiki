@@ -28,6 +28,7 @@ from app.llm import client as llm_client
 from app.llm.agents.ingest_selector import select_candidates
 from app.llm.client import CompletionResult
 from app.utils.logging import setup_logging
+from evals._metadata import git_sha_for, new_eval_run_id, utc_iso_now
 
 from evals import reporting, scorers
 from evals._llm_override import configured_models, use_model
@@ -152,6 +153,7 @@ def _run_one_model(
     provider: str,
     model: str,
     runs: int,
+    metadata: dict[str, str],
 ) -> Iterator[CaseResult]:
     for case in cases:
         for run_index in range(runs):
@@ -184,6 +186,10 @@ def _run_one_model(
                 scorers=[precision, recall, f1],
                 error=error,
                 latency_ms=int((time.monotonic() - start) * 1000),
+                eval_run_id=metadata["eval_run_id"],
+                run_timestamp=metadata["run_timestamp"],
+                harness_git_sha=metadata["harness_git_sha"],
+                dataset_git_sha=metadata["dataset_git_sha"],
             )
 
 
@@ -229,12 +235,24 @@ def main(argv: list[str] | None = None) -> int:
         log.error("no runnable models — set EVAL_*_API_KEY or pass --dry-run")
         return 2
 
+    metadata = {
+        "eval_run_id": new_eval_run_id(),
+        "run_timestamp": utc_iso_now(),
+        "harness_git_sha": git_sha_for(Path(__file__)),
+        "dataset_git_sha": git_sha_for(args.cases),
+    }
     all_results: list[CaseResult] = []
     for provider, model in runnable:
         log.info("running %d selector cases against %s/%s", len(cases), provider, model)
         ctx = _resolve_context(provider, model, args.dry_run, cases)
         with ctx:
-            for r in _run_one_model(cases, provider=provider, model=model, runs=args.runs):
+            for r in _run_one_model(
+                cases,
+                provider=provider,
+                model=model,
+                runs=args.runs,
+                metadata=metadata,
+            ):
                 all_results.append(r)
 
     out_path = args.out or Path("runs") / ("ingest_selector_%d.jsonl" % int(time.time()))

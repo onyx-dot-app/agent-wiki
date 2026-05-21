@@ -120,6 +120,12 @@ class CaseResult(BaseModel):
     latency_ms: int = 0
     input_tokens: int = 0
     output_tokens: int = 0
+    # Reproducibility metadata — populated by the runner.
+    eval_run_id: str = ""
+    run_timestamp: str = ""
+    harness_git_sha: str = ""
+    dataset_git_sha: str = ""
+    judge_models: list[str] = Field(default_factory=list)
 
 
 class ScorerSummary(BaseModel):
