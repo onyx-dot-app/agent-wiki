@@ -93,18 +93,25 @@ def _score_scenario(
     facts_present_scores: list[float] = []
     facts_preserved_scores: list[float] = []
     bloat_scores: list[float] = []
+    diff_addition_scores: list[float] = []
+    entity_density_scores: list[float] = []
     for upd in scenario.expected_updates:
         if upd.path not in actual_paths:
             facts_present_scores.append(0.0)
             facts_preserved_scores.append(0.0)
             continue
         body = state.current_body(upd.path)
+        original = state.original_body(upd.path)
         fp = scorers.facts_present(body, upd.facts_present, judge_models=judge_models)
         fk = scorers.facts_preserved(body, upd.facts_preserved, judge_models=judge_models)
-        br = scorers.bloat_ratio(state.original_body(upd.path), body, max_ratio=upd.max_bloat_ratio)
+        br = scorers.bloat_ratio(original, body, max_ratio=upd.max_bloat_ratio)
+        da = scorers.diff_addition_ratio(original, body)
+        ed = scorers.entity_density_delta(original, body)
         facts_present_scores.append(fp.score)
         facts_preserved_scores.append(fk.score)
         bloat_scores.append(br.score)
+        diff_addition_scores.append(da.score)
+        entity_density_scores.append(ed.score)
 
     def _avg(xs: list[float]) -> float:
         return sum(xs) / len(xs) if xs else 1.0
@@ -132,6 +139,22 @@ def _score_scenario(
             score=_avg(bloat_scores) if bloat_scores else 1.0,
             passed=_avg(bloat_scores) >= 0.9 if bloat_scores else True,
             detail=f"n={len(bloat_scores)}",
+        )
+    )
+    rows.append(
+        ScorerOutcome(
+            name="diff_addition_ratio_avg",
+            score=_avg(diff_addition_scores) if diff_addition_scores else 1.0,
+            passed=_avg(diff_addition_scores) >= 0.8 if diff_addition_scores else True,
+            detail=f"n={len(diff_addition_scores)}",
+        )
+    )
+    rows.append(
+        ScorerOutcome(
+            name="entity_density_delta_avg",
+            score=_avg(entity_density_scores) if entity_density_scores else 1.0,
+            passed=_avg(entity_density_scores) >= 0.8 if entity_density_scores else True,
+            detail=f"n={len(entity_density_scores)}",
         )
     )
     return rows

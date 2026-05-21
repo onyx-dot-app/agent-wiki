@@ -129,6 +129,8 @@ def _score_case(
         return out
     new_body = raw
     out.append(scorers.bloat_ratio(case.current_body, new_body, max_ratio=case.max_bloat_ratio))
+    out.append(scorers.diff_addition_ratio(case.current_body, new_body))
+    out.append(scorers.entity_density_delta(case.current_body, new_body))
     out.append(scorers.markdown_valid(new_body))
     out.append(
         scorers.facts_present(new_body, case.expected_facts_present, judge_models=judge_models)

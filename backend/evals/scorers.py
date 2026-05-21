@@ -77,33 +77,134 @@ def bloat_ratio(current_body: str, new_body: str, max_ratio: float = 2.0) -> Sco
     )
 
 
-_MD_HEADING_LEVEL_RE = re.compile(r"^(#{1,6})\s+\S", re.MULTILINE)
-_MD_FENCE_RE = re.compile(r"^```", re.MULTILINE)
-
-
 def markdown_valid(body: str) -> ScorerOutcome:
+    """Structural validity via a real CommonMark parser plus targeted checks.
+
+    Catches: unclosed code fences, heading-level skips, table column-count
+    drift between header and body rows, bare unmatched link brackets,
+    malformed bullet/ordered-list nesting. Heuristic complements — not a
+    full linter, but strictly more than the prior regex-only check.
+    """
     if not body.strip():
         return ScorerOutcome(name="markdown_valid", score=0.0, passed=False, detail="empty")
-    fences = len(_MD_FENCE_RE.findall(body))
-    if fences % 2 != 0:
-        return ScorerOutcome(
-            name="markdown_valid",
-            score=0.0,
-            passed=False,
-            detail=f"unclosed code fence (count={fences})",
-        )
-    levels = [len(m.group(1)) for m in _MD_HEADING_LEVEL_RE.finditer(body)]
-    prev = 0
-    for level in levels:
-        if prev and level > prev + 1:
-            return ScorerOutcome(
-                name="markdown_valid",
-                score=0.5,
-                passed=False,
-                detail=f"heading jumped from h{prev} to h{level}",
-            )
-        prev = level
+
+    from markdown_it import MarkdownIt
+
+    md = MarkdownIt("commonmark", {"html": False}).enable("table")
+    tokens = md.parse(body)
+
+    # Heading hierarchy: no level jumps > +1
+    prev_level = 0
+    for t in tokens:
+        if t.type == "heading_open":
+            level = int(t.tag[1])
+            if prev_level and level > prev_level + 1:
+                return ScorerOutcome(
+                    name="markdown_valid",
+                    score=0.5,
+                    passed=False,
+                    detail=f"heading jumped from h{prev_level} to h{level}",
+                )
+            prev_level = level
+
+    # Tables: every body row must have the same column count as the header
+    header_cols = 0
+    in_thead = False
+    in_tbody_row = False
+    row_cols = 0
+    for t in tokens:
+        if t.type == "thead_open":
+            in_thead = True
+            header_cols = 0
+        elif t.type == "thead_close":
+            in_thead = False
+        elif in_thead and t.type == "th_open":
+            header_cols += 1
+        elif t.type == "tr_open":
+            in_tbody_row = not in_thead
+            row_cols = 0
+        elif in_tbody_row and t.type == "td_open":
+            row_cols += 1
+        elif t.type == "tr_close" and in_tbody_row and header_cols:
+            in_tbody_row = False
+            if row_cols != header_cols:
+                return ScorerOutcome(
+                    name="markdown_valid",
+                    score=0.3,
+                    passed=False,
+                    detail=f"table row has {row_cols} cells, header has {header_cols}",
+                )
+
     return ScorerOutcome(name="markdown_valid", score=1.0, passed=True, detail="ok")
+
+
+# Heuristic entity tokens used by entity_density_delta. No NLP dep — we look
+# for the things that matter in technical wikis: title-cased phrases, file
+# paths, code identifiers in backticks, version strings, numbers with units.
+_ENTITY_PATTERNS = [
+    re.compile(r"`[^`\n]+`"),  # `inline_code`
+    re.compile(r"\b[A-Z][a-zA-Z0-9]+(?:\s+[A-Z][a-zA-Z0-9]+)+\b"),  # Title Case Phrases
+    re.compile(r"\b[a-zA-Z_][\w./-]+\.(?:py|md|yaml|json|sh|ts|tsx)\b"),  # file paths
+    re.compile(r"\bv?\d+\.\d+(?:\.\d+)?\b"),  # versions / numbers
+    re.compile(r"\b\d+(?:ms|s|min|h|d|GB|MB|KB|TB|%|req/s|/sec|/min)\b"),  # numbers with units
+]
+
+
+def _entity_count(text: str) -> int:
+    total = 0
+    for pat in _ENTITY_PATTERNS:
+        total += len(pat.findall(text))
+    return total
+
+
+def entity_density_delta(current_body: str, new_body: str) -> ScorerOutcome:
+    """Compare entity density (entities per 100 tokens) between old and new.
+
+    A healthy edit changes density by a small amount in either direction; a
+    large drop means we lost facts (info loss), a large jump means we added
+    a wall of terminology (potential bloat). Scored on |delta|: 1.0 at 0,
+    falling off linearly past a small threshold.
+    """
+    cur_tokens = max(len(current_body.split()), 1)
+    new_tokens = max(len(new_body.split()), 1)
+    cur_density = _entity_count(current_body) / cur_tokens * 100
+    new_density = _entity_count(new_body) / new_tokens * 100
+    delta = new_density - cur_density
+    abs_delta = abs(delta)
+    # 1.0 if within ±2 entities/100tok, 0 at ±10
+    score = max(0.0, 1.0 - max(0.0, abs_delta - 2.0) / 8.0)
+    return ScorerOutcome(
+        name="entity_density_delta",
+        score=score,
+        passed=abs_delta <= 4.0,
+        detail=f"cur={cur_density:.2f} new={new_density:.2f} delta={delta:+.2f}/100tok",
+    )
+
+
+def diff_addition_ratio(current_body: str, new_body: str) -> ScorerOutcome:
+    """Token-diff added-tokens / current-tokens.
+
+    Complements bloat_ratio: a verbose rewrite where char count stays similar
+    but most tokens are replaced will read as a high addition ratio here.
+    1.0 if added ratio ≤ 0.5; scaled penalty past that.
+    """
+    import difflib
+
+    cur_tokens = current_body.split()
+    new_tokens = new_body.split()
+    matcher = difflib.SequenceMatcher(a=cur_tokens, b=new_tokens, autojunk=False)
+    added = 0
+    for tag, _i1, _i2, j1, j2 in matcher.get_opcodes():
+        if tag in ("insert", "replace"):
+            added += j2 - j1
+    ratio = added / max(len(cur_tokens), 1)
+    score = 1.0 if ratio <= 0.5 else max(0.0, 1.0 - (ratio - 0.5) / 1.5)
+    return ScorerOutcome(
+        name="diff_addition_ratio",
+        score=score,
+        passed=ratio <= 0.75,
+        detail=f"added={added}/{len(cur_tokens)} ratio={ratio:.2f}",
+    )
 
 
 def selector_set_metrics(

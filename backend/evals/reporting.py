@@ -62,6 +62,57 @@ def _case_level_scores(rows: list[CaseResult], scorer_name: str) -> list[float]:
     return [statistics.fmean(v) for v in by_case.values() if v]
 
 
+def _trigger_class_metrics(rows: list[CaseResult]) -> list[ScorerSummary]:
+    """Per-class precision/recall + macro-F1 for the trigger trinary.
+
+    Computed across all (case, run) rows for one model. Treats each
+    distinct value of `expected_class` as a class. The per-class
+    precision/recall surfaces the cost asymmetry that a single accuracy
+    number hides — e.g. flipping IRRELEVANT → CHANGE (false action) vs
+    flipping CHANGE → NO_CHANGE (missed update) score the same on
+    accuracy but mean very different things in production.
+    """
+    classes = sorted({r.expected_class for r in rows} | {r.actual_class for r in rows})
+    summaries: list[ScorerSummary] = []
+    f1_per_class: list[float] = []
+    for cls in classes:
+        tp = sum(1 for r in rows if r.expected_class == cls and r.actual_class == cls)
+        fp = sum(1 for r in rows if r.expected_class != cls and r.actual_class == cls)
+        fn = sum(1 for r in rows if r.expected_class == cls and r.actual_class != cls)
+        precision = tp / (tp + fp) if (tp + fp) else 1.0
+        recall = tp / (tp + fn) if (tp + fn) else 1.0
+        f1 = 2 * precision * recall / (precision + recall) if (precision + recall) else 0.0
+        f1_per_class.append(f1)
+        for name, value in (
+            (f"trigger.precision[{cls}]", precision),
+            (f"trigger.recall[{cls}]", recall),
+            (f"trigger.f1[{cls}]", f1),
+        ):
+            summaries.append(
+                ScorerSummary(
+                    name=name,
+                    mean=value,
+                    ci_low=value,
+                    ci_high=value,
+                    n_cases=len({r.case_id for r in rows}),
+                    n_runs_per_case=0,
+                )
+            )
+    if f1_per_class:
+        macro = statistics.fmean(f1_per_class)
+        summaries.append(
+            ScorerSummary(
+                name="trigger.macro_f1",
+                mean=macro,
+                ci_low=macro,
+                ci_high=macro,
+                n_cases=len({r.case_id for r in rows}),
+                n_runs_per_case=0,
+            )
+        )
+    return summaries
+
+
 def summarize(results: list[CaseResult], surface: Surface) -> RunSummary:
     models = sorted({r.model for r in results})
     runs_per_case = 0
@@ -90,8 +141,11 @@ def summarize(results: list[CaseResult], surface: Surface) -> RunSummary:
                     n_runs_per_case=runs_per_case,
                 )
             )
-        # error_rate is computed across all rows (not per-case averaged) so we
-        # report it separately.
+        # Per-class trigger metrics — only meaningful when the surface emits
+        # trigger_class_match. Skip for surfaces that don't (e.g. ingest_selector).
+        if any(s.name == "trigger_class_match" for r in rows for s in r.scorers):
+            summaries.extend(_trigger_class_metrics(rows))
+        # error_rate across all rows (not per-case averaged).
         err_cases = {r.case_id for r in rows if r.error}
         total_cases = {r.case_id for r in rows}
         err_rate = len(err_cases) / max(len(total_cases), 1)
