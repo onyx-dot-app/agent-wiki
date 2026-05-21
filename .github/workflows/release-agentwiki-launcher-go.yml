@@ -35,19 +35,31 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Content-addressable cache: keyed on the launcher source tree. When
-      # backend-only PRs reuse the same launcher source, the build, sign,
-      # notarize, and staple steps are skipped — only the artifact upload
-      # runs (~30s vs ~5min cold). Stapled .app tickets don't expire, so
-      # cached zips are valid until source changes evict them.
+      # Content-addressable cache: keyed on inputs that actually affect
+      # the built+signed bundle (Go source, build config, signing
+      # scripts, AppleScript stub). README and other non-build assets
+      # are intentionally excluded so doc changes don't bust the cache.
+      # Test files (*_test.go) are still hashed under the .go glob
+      # because hashFiles can't negate; small price for the simpler
+      # glob, and test changes are rare.
       - name: Restore launcher cache
         id: cache
         uses: actions/cache@v4
         with:
           path: packages/agentwiki-launcher-go/dist/
-          key: agentwiki-launcher-${{ hashFiles('packages/agentwiki-launcher-go/**') }}
+          key: |
+            agentwiki-launcher-${{ hashFiles(
+              'packages/agentwiki-launcher-go/cmd/**/*.go',
+              'packages/agentwiki-launcher-go/internal/**/*.go',
+              'packages/agentwiki-launcher-go/go.mod',
+              'packages/agentwiki-launcher-go/go.sum',
+              'packages/agentwiki-launcher-go/Makefile',
+              'packages/agentwiki-launcher-go/scripts/build-app.sh',
+              'packages/agentwiki-launcher-go/scripts/stub.applescript'
+            ) }}
 
-      - if: steps.cache.outputs.cache-hit != 'true'
+      - name: Setup Go
+        if: steps.cache.outputs.cache-hit != 'true'
         uses: actions/setup-go@v5
         with:
           go-version-file: packages/agentwiki-launcher-go/go.mod
