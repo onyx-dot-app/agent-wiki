@@ -29,6 +29,7 @@ from app.tracing import trace_flow
 log = logging.getLogger(__name__)
 
 _RECONCILER_BUDGET_CHARS = 200_000
+_RECONCILER_MAX_TOKENS = 8192
 
 _SUBMIT_TOOL: dict[str, Any] = {
     "name": "submit_results",
@@ -172,7 +173,7 @@ def _reconcile_batch(
                 ],
                 model=model,
                 tools=[_SUBMIT_TOOL],
-                max_tokens=8192,
+                max_tokens=_RECONCILER_MAX_TOKENS,
             )
         if not result.tool_calls:
             raise ValueError("model returned no tool call")

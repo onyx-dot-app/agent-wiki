@@ -43,7 +43,13 @@ def batch_by_chars(
 
 
 def rstrip_lines(text: str) -> str:
-    """Strip trailing whitespace from each line. Preserves a trailing newline if present."""
+    """Strip trailing whitespace from each line. Preserves a trailing newline if present.
+
+    Assumes LF or CRLF line endings. Bare CR (``\\r``-only, pre-OS X Mac) is treated
+    as a line separator by ``splitlines()`` and replaced with ``\\n`` on rejoin, which
+    breaks the monotone subsequence property that ``_map_norm_span_to_orig`` relies on.
+    Wiki markdown content never contains bare CR in practice.
+    """
     lines = text.splitlines()
     normalized = "\n".join(line.rstrip() for line in lines)
     if text.endswith("\n"):
