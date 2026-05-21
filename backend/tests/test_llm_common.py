@@ -1,7 +1,7 @@
 """Unit tests for app.llm.agents.common."""
 from __future__ import annotations
 
-from app.llm.agents.common import TextEdit, apply_edits
+from app.llm.agents.common import TextEdit, _fuzzy_replace, apply_edits
 
 
 def _e(find: str, replace: str) -> TextEdit:
@@ -54,7 +54,51 @@ def test_apply_edits_empty_replace_deletes_text():
 
 
 # --------------------------------------------------------------------------- #
-# fuzzy (trailing-whitespace-normalized) matching                              #
+# _fuzzy_replace                                                               #
+# --------------------------------------------------------------------------- #
+
+
+def test_fuzzy_replace_trailing_space_on_find():
+    assert _fuzzy_replace("line\nold text\nend", "old text ", "new text") == "line\nnew text\nend"
+
+
+def test_fuzzy_replace_trailing_space_on_body():
+    body = "foo bar   \nbaz\n"
+    assert _fuzzy_replace(body, "foo bar", "updated") == "updated\nbaz\n"
+
+
+def test_fuzzy_replace_multiline_trailing_spaces():
+    body = "## Title\n\nfoo  \nbar  \n\nend\n"
+    assert _fuzzy_replace(body, "foo\nbar", "replaced") == "## Title\n\nreplaced\n\nend\n"
+
+
+def test_fuzzy_replace_no_match_returns_none():
+    assert _fuzzy_replace("hello world", "not here", "x") is None
+
+
+def test_fuzzy_replace_exact_text_also_works():
+    # _fuzzy_replace handles the case where normalization produces an exact match
+    assert _fuzzy_replace("foo\nbar\n", "foo\nbar", "baz") == "baz\n"
+
+
+def test_fuzzy_replace_preserves_content_outside_match():
+    body = "before\ntarget line  \nafter\n"
+    result = _fuzzy_replace(body, "target line", "replacement")
+    assert result == "before\nreplacement\nafter\n"
+
+
+def test_fuzzy_replace_empty_replace_removes_match():
+    body = "keep\nremove me  \nkeep\n"
+    assert _fuzzy_replace(body, "remove me", "") == "keep\n\nkeep\n"
+
+
+def test_fuzzy_replace_returns_none_when_only_whitespace_differs_midline():
+    # Spaces in the middle of a line are not normalised — not a trailing-space issue
+    assert _fuzzy_replace("foo  bar", "foo bar", "x") is None
+
+
+# --------------------------------------------------------------------------- #
+# fuzzy matching via apply_edits                                               #
 # --------------------------------------------------------------------------- #
 
 
