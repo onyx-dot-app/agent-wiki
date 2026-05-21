@@ -51,20 +51,26 @@ def rstrip_lines(text: str) -> str:
     return normalized
 
 
-def _map_norm_pos_to_orig(original: str, normalized: str, norm_pos: int) -> int:
-    """Map a position in a normalized string back to the corresponding position in original.
+def _map_norm_span_to_orig(
+    original: str, normalized: str, norm_start: int, norm_end: int
+) -> tuple[int, int]:
+    """Map a [norm_start, norm_end) span in a normalized string back to original.
 
+    Single pass — captures both endpoints without restarting the walk.
     Works because normalized is derived from original by only removing characters
     (trailing whitespace per line), so the mapping is monotone.
     """
     o = n = 0
-    while n < norm_pos and o < len(original):
+    orig_start = 0
+    while n < norm_end and o < len(original):
+        if n == norm_start:
+            orig_start = o
         if n < len(normalized) and original[o] == normalized[n]:
             o += 1
             n += 1
         else:
             o += 1  # character was stripped in normalization, skip in original
-    return o
+    return orig_start, o
 
 
 def _fuzzy_replace(body: str, find: str, replace: str) -> str | None:
@@ -77,8 +83,7 @@ def _fuzzy_replace(body: str, find: str, replace: str) -> str | None:
     pos = norm_body.find(norm_find)
     if pos == -1:
         return None
-    orig_start = _map_norm_pos_to_orig(body, norm_body, pos)
-    orig_end = _map_norm_pos_to_orig(body, norm_body, pos + len(norm_find))
+    orig_start, orig_end = _map_norm_span_to_orig(body, norm_body, pos, pos + len(norm_find))
     # Consume trailing whitespace on the last matched line that normalization
     # stripped from the body but the find text didn't include.
     while orig_end < len(body) and body[orig_end] in " \t\r":
