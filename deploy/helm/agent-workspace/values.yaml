@@ -55,6 +55,11 @@ maxQueueSize: 1000
 # package + wiki UI are ready in your environment.
 launchersEnabled: false
 
+# Opt-in eval logging — writes one row to ingest_eval_samples per reconciler
+# decision (committed / no_change / irrelevant). Off by default; enable on
+# environments where you want to collect real traffic for eval review.
+ingestEvalLogging: false
+
 auth:
   # basic | oidc
   mode: basic
