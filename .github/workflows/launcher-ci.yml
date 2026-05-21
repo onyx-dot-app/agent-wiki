@@ -1,0 +1,64 @@
+name: Launcher CI
+
+# Fast Go checks for the agentwiki-launcher on every PR — go test + vet +
+# cross-compile smoke for the three target GOOSes. The full
+# sign/notarize/package pipeline lives in release-agentwiki-launcher-go.yml
+# and only runs on workflow_dispatch / workflow_call (it's expensive).
+#
+# Path-scoped so README/doc-only edits don't trip it.
+
+on:
+  pull_request:
+    paths:
+      - "packages/agentwiki-launcher-go/cmd/**"
+      - "packages/agentwiki-launcher-go/internal/**"
+      - "packages/agentwiki-launcher-go/go.mod"
+      - "packages/agentwiki-launcher-go/go.sum"
+      - "packages/agentwiki-launcher-go/Makefile"
+      - "packages/agentwiki-launcher-go/scripts/**"
+      - ".github/workflows/launcher-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-and-build:
+    name: go test + cross-compile smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: packages/agentwiki-launcher-go
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: packages/agentwiki-launcher-go/go.mod
+          cache: true
+
+      - name: go vet (all GOOSes)
+        run: |
+          GOOS=darwin go vet ./...
+          GOOS=linux go vet ./...
+          GOOS=windows go vet ./...
+
+      - name: go test
+        run: go test ./...
+
+      - name: Cross-compile smoke (darwin/linux/windows)
+        run: |
+          mkdir -p /tmp/smoke
+          GOOS=darwin GOARCH=arm64 go build -o /tmp/smoke/awl-darwin-arm64 ./cmd/agentwiki-launcher
+          GOOS=darwin GOARCH=amd64 go build -o /tmp/smoke/awl-darwin-amd64 ./cmd/agentwiki-launcher
+          GOOS=linux GOARCH=amd64 go build -o /tmp/smoke/awl-linux-amd64 ./cmd/agentwiki-launcher
+          GOOS=linux GOARCH=arm64 go build -o /tmp/smoke/awl-linux-arm64 ./cmd/agentwiki-launcher
+          GOOS=windows GOARCH=amd64 go build -o /tmp/smoke/awl-windows-amd64.exe ./cmd/agentwiki-launcher
+          ls -lh /tmp/smoke
+
+      - name: Build Linux tarballs (validates build-linux.sh end-to-end)
+        run: ./scripts/build-linux.sh
+
+      - name: Build Windows zip (validates build-windows.sh end-to-end)
+        run: ./scripts/build-windows.sh
