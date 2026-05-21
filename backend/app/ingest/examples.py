@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import difflib
 import logging
+from typing import Literal
 
 from app.db.models import IngestExample
 from app.db.session import session
@@ -36,10 +37,10 @@ def log_example(
     wiki_path: str,
     wiki_body_before: str,
     wiki_body_after: str | None,
-    outcome: str,
+    outcome: Literal["committed", "no_change"],
     commit_sha: str | None,
 ) -> None:
-    diff = make_diff(wiki_body_before, wiki_body_after) if wiki_body_after is not None else None
+    diff = (make_diff(wiki_body_before, wiki_body_after) or None) if wiki_body_after is not None else None
     with session() as s:
         s.add(IngestExample(
             source_type=source_type,

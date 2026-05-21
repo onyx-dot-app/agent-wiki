@@ -380,7 +380,7 @@ def process_pushed_document(push: dict[str, Any]) -> None:
                     ingest_examples.log_example(
                         source_type=source_type,
                         source_title=title,
-                        source_url=url or None,
+                        source_url=url if url else None,
                         source_content=content,
                         wiki_path=c.hit.path,
                         wiki_body_before=c.body,
@@ -399,7 +399,7 @@ def process_pushed_document(push: dict[str, Any]) -> None:
                     ingest_examples.log_example(
                         source_type=source_type,
                         source_title=title,
-                        source_url=url or None,
+                        source_url=url if url else None,
                         source_content=content,
                         wiki_path=c.hit.path,
                         wiki_body_before=c.body,

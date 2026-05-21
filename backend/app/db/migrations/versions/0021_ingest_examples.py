@@ -35,7 +35,11 @@ def upgrade() -> None:
         sa.Column("outcome", sa.Text, nullable=False),
         sa.Column("commit_sha", sa.Text),
     )
+    op.create_index("ix_ingest_examples_created_at", "ingest_examples", ["created_at"])
+    op.create_index("ix_ingest_examples_outcome", "ingest_examples", ["outcome"])
 
 
 def downgrade() -> None:
+    op.drop_index("ix_ingest_examples_outcome", table_name="ingest_examples")
+    op.drop_index("ix_ingest_examples_created_at", table_name="ingest_examples")
     op.drop_table("ingest_examples")
