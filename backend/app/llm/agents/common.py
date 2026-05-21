@@ -70,9 +70,18 @@ def _map_norm_pos_to_orig(original: str, normalized: str, norm_pos: int) -> int:
 def apply_edits(body: str, edits: list[TextEdit]) -> str | None:
     """Apply (find, replace) pairs to body. Returns new body or None if unchanged.
 
-    Falls back to trailing-whitespace-normalized matching when the exact FIND text
-    is not present — recovers from the common case where the model quotes text with
-    slightly different trailing spaces or line endings.
+    Falls back to trailing-whitespace-normalized matching (via ``rstrip_lines``)
+    when the exact FIND text is not present — recovers from the common case where
+    the model quotes text with slightly different trailing spaces or line endings.
+
+    We use this targeted normalization rather than a general fuzzy-match library
+    (e.g. diff-match-patch) deliberately: a library with a non-zero match threshold
+    can apply an edit to the wrong location, silently corrupting wiki content.
+    That false-positive failure mode is much worse than a skipped edit, which is
+    recoverable on the next ingest cycle. Trailing-whitespace variance is the
+    dominant real-world deviation; anything further off (wrong words, transposed
+    phrases) most likely indicates the model hallucinated the context, and skipping
+    is the right response.
     """
     result = body
     for find_text, replace_text in edits:
