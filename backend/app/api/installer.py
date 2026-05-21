@@ -1,14 +1,17 @@
-"""Serves the macOS launcher distribution: signed/notarized .app zip,
-raw signed binaries (legacy), and a one-shot install shell script
-(legacy fallback for users who can't drag the .app).
+"""Serves the launcher distributions per platform.
 
-Primary flow:
+Routes:
+  GET /installer/mac           → AgentWikiLauncher.zip (signed/notarized/stapled .app)
+  GET /installer/linux?arch=…  → agentwiki-launcher-linux-<arch>.tar.gz
+  GET /installer/windows       → agentwiki-launcher-windows-amd64.zip
+  GET /installer/app           → mac alias (kept for older FE builds)
+  GET /installer/binary?arch=… → raw mac Mach-O (legacy, used by /installer/script)
+  GET /installer/script        → one-shot .command (legacy mac fallback)
 
-  1. Click "Download installer" in the wiki UI → /api/installer/app
-     streams AgentWikiLauncher.zip.
-  2. Unzip, drag AgentWikiLauncher.app to /Applications.
-  3. Click Run Agent → first launch prompts to pin this wiki's URL,
-     then dispatches the run.
+Frontend detects the user's OS from the User-Agent and links to the
+right route; the FE flow is: download → drag .app into /Applications
+(mac) / extract + run install.sh (linux) / extract + run install.bat
+(windows). On first Run Agent the helper prompts to pin this wiki's URL.
 """
 
 from __future__ import annotations
@@ -22,10 +25,20 @@ router = APIRouter()
 
 _BINARIES_DIR = Path(__file__).resolve().parents[2] / "static" / "installers"
 
-# Map (platform_arch) → on-disk filename. macOS is all we ship today.
-_BINARIES: dict[str, str] = {
+# Legacy: raw mac binaries served by /installer/binary for the one-shot
+# .command installer script. New code goes through /installer/{platform}.
+_MAC_BINARIES: dict[str, str] = {
     "darwin-arm64": "agentwiki-launcher-darwin-arm64",
     "darwin-amd64": "agentwiki-launcher-darwin-amd64",
+}
+
+# (filename on disk, media type) per platform-shaped bundle.
+# Linux carries an arch slot because we ship amd64 + arm64.
+_MAC_BUNDLE = ("AgentWikiLauncher.zip", "application/zip")
+_WINDOWS_BUNDLE = ("agentwiki-launcher-windows-amd64.zip", "application/zip")
+_LINUX_BUNDLES: dict[str, tuple[str, str]] = {
+    "amd64": ("agentwiki-launcher-linux-amd64.tar.gz", "application/gzip"),
+    "arm64": ("agentwiki-launcher-linux-arm64.tar.gz", "application/gzip"),
 }
 
 
@@ -38,7 +51,7 @@ def _detect_arch(user_agent: str) -> str:
     """
     ua = user_agent.lower()
     if "mac" not in ua and "darwin" not in ua:
-        return "darwin-arm64"  # graceful fallback; non-mac not supported yet
+        return "darwin-arm64"  # graceful fallback; non-mac not supported here
     return "darwin-arm64"
 
 
@@ -46,46 +59,67 @@ def _wiki_base(request: Request) -> str:
     return str(request.base_url).rstrip("/")
 
 
-@router.get("/installer/app")
-def installer_app() -> Response:
-    """Stream the signed + notarized + stapled AgentWiki.app zip.
-
-    Built by ``packages/agentwiki-launcher-go/scripts/build-app.sh``.
-    Users drag the .app from the unzipped download to /Applications;
-    on first Run Agent the launcher prompts to pin this wiki's URL.
-    """
-    path = _BINARIES_DIR / "AgentWikiLauncher.zip"
-    if not path.exists():
-        raise HTTPException(
-            status_code=503,
-            detail=f"AgentWikiLauncher.zip missing on this server; expected at {path}",
-        )
-    return FileResponse(
-        path,
-        media_type="application/zip",
-        filename="AgentWikiLauncher.zip",
-    )
-
-
-@router.get("/installer/binary")
-def installer_binary(request: Request, arch: str | None = None) -> Response:
-    """Returns the macOS helper binary for the requested arch."""
-    if arch is None:
-        arch = _detect_arch(request.headers.get("user-agent", ""))
-    fname = _BINARIES.get(arch)
-    if fname is None:
-        raise HTTPException(status_code=404, detail=f"unsupported arch {arch!r}")
+def _stream(fname: str, media_type: str) -> Response:
     path = _BINARIES_DIR / fname
     if not path.exists():
         raise HTTPException(
             status_code=503,
-            detail=f"installer binary missing on this server; expected at {path}",
+            detail="%s missing on this server; expected at %s" % (fname, path),
         )
-    return FileResponse(
-        path,
-        media_type="application/octet-stream",
-        filename=fname,
-    )
+    return FileResponse(path, media_type=media_type, filename=fname)
+
+
+@router.get("/installer/mac")
+def installer_mac() -> Response:
+    """Stream the signed + notarized + stapled AgentWikiLauncher.app zip."""
+    return _stream(*_MAC_BUNDLE)
+
+
+@router.get("/installer/app")
+def installer_app() -> Response:
+    """Back-compat alias for older frontend builds — same as /installer/mac."""
+    return _stream(*_MAC_BUNDLE)
+
+
+@router.get("/installer/linux")
+def installer_linux(arch: str = "amd64") -> Response:
+    """Stream the linux launcher tarball for the requested arch."""
+    bundle = _LINUX_BUNDLES.get(arch)
+    if bundle is None:
+        raise HTTPException(
+            status_code=404,
+            detail="unsupported linux arch %r; expected one of %s"
+            % (arch, sorted(_LINUX_BUNDLES)),
+        )
+    return _stream(*bundle)
+
+
+@router.get("/installer/windows")
+def installer_windows() -> Response:
+    """Stream the windows launcher zip (amd64 only for now).
+
+    The .exe is unsigned — users will see SmartScreen's "Windows protected
+    your PC" prompt on first run and need to click "More info" → "Run
+    anyway". Authenticode signing is a follow-up.
+    """
+    return _stream(*_WINDOWS_BUNDLE)
+
+
+@router.get("/installer/binary")
+def installer_binary(request: Request, arch: str | None = None) -> Response:
+    """Returns the macOS helper binary for the requested arch.
+
+    Legacy — used by the one-shot .command installer at /installer/script.
+    """
+    if arch is None:
+        arch = _detect_arch(request.headers.get("user-agent", ""))
+    fname = _MAC_BINARIES.get(arch)
+    if fname is None:
+        raise HTTPException(
+            status_code=404,
+            detail="unsupported arch %r" % (arch,),
+        )
+    return _stream(fname, "application/octet-stream")
 
 
 @router.get("/installer/script")
@@ -101,14 +135,14 @@ def installer_script(request: Request) -> Response:
     # macOS arch detection inside the script — works at install time
     # rather than relying on the browser's User-Agent which lies about
     # arm64 vs amd64.
-    script = f"""#!/bin/bash
+    script = """#!/bin/bash
 # agentwiki-launcher one-shot installer (macOS).
-# Downloads the helper binary from {base}, pins the wiki endpoint, and
+# Downloads the helper binary from %s, pins the wiki endpoint, and
 # registers the agentwiki:// URL handler with LaunchServices.
 
 set -euo pipefail
 
-WIKI_URL="{base}"
+WIKI_URL="%s"
 INSTALL_DIR="$HOME/.agentwiki/bin"
 BIN_PATH="$INSTALL_DIR/agentwiki-launcher"
 
@@ -140,7 +174,7 @@ echo ""
 echo "Done. You can close this window and click Run Agent in the wiki."
 echo ""
 read -p "Press Enter to close..." _
-"""
+""" % (base, base)
     return Response(
         content=script,
         media_type="text/x-shellscript",

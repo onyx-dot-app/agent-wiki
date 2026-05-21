@@ -1,6 +1,8 @@
-// Package install handles macOS first-time setup: compile the AppleScript
-// .app that owns the agentwiki:// URL scheme, patch its Info.plist, and
-// register it with LaunchServices.
+// macOS branch of the install package — compile the AppleScript .app that
+// owns the agentwiki:// URL scheme, patch its Info.plist, and register
+// it with LaunchServices. Selected at build time via the _darwin
+// filename suffix.
+
 package install
 
 import (
@@ -45,9 +47,9 @@ end run
 `, launcherPath)
 }
 
-// InstallDarwin idempotently installs ~/Applications/AgentWiki.app
-// pointing at the given absolute path to this binary.
-func InstallDarwin(launcherPath string) error {
+// Install idempotently installs ~/Applications/AgentWiki.app pointing
+// at the given absolute path to this binary.
+func Install(launcherPath string) error {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return err

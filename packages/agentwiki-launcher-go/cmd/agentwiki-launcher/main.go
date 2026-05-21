@@ -20,7 +20,6 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
-	"runtime"
 	"strings"
 	"time"
 
@@ -94,14 +93,11 @@ func doSetEndpoint(arg string) error {
 }
 
 func doInstall() error {
-	if runtime.GOOS != "darwin" {
-		return fmt.Errorf("install: only macOS supported")
-	}
 	self, err := os.Executable()
 	if err != nil {
 		return err
 	}
-	return install.InstallDarwin(self)
+	return install.Install(self)
 }
 
 func doDispatch(raw string) error {

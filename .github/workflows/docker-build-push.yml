@@ -14,30 +14,45 @@ permissions:
   contents: read
 
 jobs:
-  build-launcher:
-    name: Build, sign, notarize AgentWikiLauncher.app
+  build-launchers:
+    name: Build launchers (mac + linux + windows)
     uses: ./.github/workflows/release-agentwiki-launcher-go.yml
     secrets: inherit
 
   build-backend:
     name: Build and Push Backend Image
-    needs: build-launcher
+    needs: build-launchers
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Download notarized launcher artifact
+      - name: Download macOS launcher
         uses: actions/download-artifact@v4
         with:
-          name: ${{ needs.build-launcher.outputs.artifact-name }}
+          name: ${{ needs.build-launchers.outputs.darwin-artifact-name }}
           path: backend/static/installers/
 
-      - name: Verify launcher artifact present
+      - name: Download Linux launcher
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.build-launchers.outputs.linux-artifact-name }}
+          path: backend/static/installers/
+
+      - name: Download Windows launcher
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.build-launchers.outputs.windows-artifact-name }}
+          path: backend/static/installers/
+
+      - name: Verify launcher artifacts present
         run: |
           set -euo pipefail
           test -s backend/static/installers/AgentWikiLauncher.zip
+          test -s backend/static/installers/agentwiki-launcher-linux-amd64.tar.gz
+          test -s backend/static/installers/agentwiki-launcher-linux-arm64.tar.gz
+          test -s backend/static/installers/agentwiki-launcher-windows-amd64.zip
           ls -lh backend/static/installers/
 
       - name: Set up Docker Buildx

@@ -1,11 +1,46 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { Button, Card, Text } from "@onyx-ai/opal/components";
 import { Section } from "@onyx-ai/opal/layouts";
 
 import { invalidateHelperProbe, probeHelper } from "@/lib/launchers";
+
+type Platform = "mac" | "linux" | "windows" | "unknown";
+
+function detectPlatform(): Platform {
+  if (typeof navigator === "undefined") return "unknown";
+  const ua = navigator.userAgent.toLowerCase();
+  if (ua.includes("mac")) return "mac";
+  if (ua.includes("win")) return "windows";
+  if (ua.includes("linux")) return "linux";
+  return "unknown";
+}
+
+const PLATFORM_COPY: Record<
+  Exclude<Platform, "unknown">,
+  { downloadHref: string; downloadLabel: string; instructions: string }
+> = {
+  mac: {
+    downloadHref: "/api/installer/mac",
+    downloadLabel: "Download for macOS",
+    instructions:
+      "Open the downloaded zip, drag AgentWikiLauncher.app to your Applications folder, then click Run Agent.",
+  },
+  linux: {
+    downloadHref: "/api/installer/linux?arch=amd64",
+    downloadLabel: "Download for Linux (amd64)",
+    instructions:
+      "Extract the tarball, run ./install.sh, then click Run Agent. For arm64, append ?arch=arm64 to the download URL.",
+  },
+  windows: {
+    downloadHref: "/api/installer/windows",
+    downloadLabel: "Download for Windows",
+    instructions:
+      'Extract the zip and double-click install.bat. On the SmartScreen prompt click "More info" → "Run anyway" (the launcher is not yet code-signed). Then click Run Agent.',
+  },
+};
 
 export function InstallHelperPane({
   onReprobe,
@@ -14,6 +49,11 @@ export function InstallHelperPane({
 }) {
   const [busy, setBusy] = useState(false);
   const [manualBusy, setManualBusy] = useState(false);
+  const [platform, setPlatform] = useState<Platform>("unknown");
+
+  useEffect(() => {
+    setPlatform(detectPlatform());
+  }, []);
 
   async function reprobe() {
     setBusy(true);
@@ -42,9 +82,11 @@ export function InstallHelperPane({
     }
   }
 
-  function download() {
-    window.location.href = "/api/installer/app";
+  function download(href: string) {
+    window.location.href = href;
   }
+
+  const copy = platform === "unknown" ? null : PLATFORM_COPY[platform];
 
   return (
     <Card padding="md" border="solid" borderColor="warning" rounding="sm">
@@ -58,13 +100,53 @@ export function InstallHelperPane({
         <Text font="secondary-body" color="text-04" as="p">
           Launcher isn&apos;t installed on this machine.
         </Text>
-        <Button size="md" variant="action" onClick={download}>
-          Download installer
-        </Button>
-        <Text font="secondary-body" color="text-04" as="p">
-          Open the downloaded zip, drag AgentWikiLauncher.app to your
-          Applications folder, then click Run Agent.
-        </Text>
+        {copy ? (
+          <>
+            <Button
+              size="md"
+              variant="action"
+              onClick={() => download(copy.downloadHref)}
+            >
+              {copy.downloadLabel}
+            </Button>
+            <Text font="secondary-body" color="text-04" as="p">
+              {copy.instructions}
+            </Text>
+          </>
+        ) : (
+          <>
+            <Section
+              flexDirection="column"
+              alignItems="start"
+              gap={0.5}
+              width="full"
+            >
+              <Button
+                size="md"
+                variant="action"
+                onClick={() => download("/api/installer/mac")}
+              >
+                Download for macOS
+              </Button>
+              <Button
+                size="md"
+                onClick={() => download("/api/installer/linux?arch=amd64")}
+              >
+                Download for Linux (amd64)
+              </Button>
+              <Button
+                size="md"
+                onClick={() => download("/api/installer/windows")}
+              >
+                Download for Windows
+              </Button>
+            </Section>
+            <Text font="secondary-body" color="text-04" as="p">
+              Pick the build for your OS, run the installer it ships with, then
+              click Run Agent.
+            </Text>
+          </>
+        )}
         <Section
           flexDirection="row"
           alignItems="center"

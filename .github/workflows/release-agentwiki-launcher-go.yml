@@ -1,33 +1,46 @@
 name: Release agentwiki-launcher (Go)
 
-# Builds, signs (Developer ID Application), notarizes, and staples
-# AgentWikiLauncher.app. Secrets live in AWS Secrets Manager
-# (`deploy/apple-*`); the workflow assumes an OIDC role and pulls them at
-# build time — same pattern as onyx-dot-app/onyx desktop deployment.
+# Builds the AgentWikiLauncher for macOS (signed + notarized + stapled
+# .app), Linux (amd64 + arm64 tarballs), and Windows (amd64 zip).
+#
+# macOS-only steps pull Apple signing secrets from AWS Secrets Manager
+# via OIDC; Linux + Windows builds need no secrets and run on
+# ubuntu-latest using Go's cross-compiler. The macOS job is cached on
+# inputs so doc-only or unrelated changes don't pay the notarization
+# cost; Linux + Windows are fast enough that caching isn't worth the
+# complexity yet.
 #
 # Triggers:
 #   - workflow_dispatch: manual run from the Actions tab
 #   - workflow_call:     invoked by docker-build-push.yml + nightly-build.yml
-#                        so the freshly notarized .zip lands in the backend
+#                        so the launcher artifacts land in the backend
 #                        image at `backend/static/installers/`.
 #
 # Outputs:
-#   artifact-name: the upload-artifact name for callers to download.
+#   darwin-artifact-name, linux-artifact-name, windows-artifact-name —
+#   upload-artifact names for callers to download with download-artifact.
 
 on:
   workflow_dispatch:
   workflow_call:
     outputs:
-      artifact-name:
+      darwin-artifact-name:
         description: "Artifact name containing AgentWikiLauncher.zip + darwin binaries"
-        value: ${{ jobs.release.outputs.artifact-name }}
+        value: ${{ jobs.darwin.outputs.artifact-name }}
+      linux-artifact-name:
+        description: "Artifact name containing linux-amd64 + linux-arm64 tarballs"
+        value: ${{ jobs.linux.outputs.artifact-name }}
+      windows-artifact-name:
+        description: "Artifact name containing windows-amd64 zip"
+        value: ${{ jobs.windows.outputs.artifact-name }}
 
 permissions:
   id-token: write
   contents: read
 
 jobs:
-  release:
+  darwin:
+    name: macOS — sign, notarize, staple
     runs-on: macos-14
     timeout-minutes: 60
     outputs:
@@ -48,7 +61,7 @@ jobs:
         with:
           path: packages/agentwiki-launcher-go/dist/
           key: |
-            agentwiki-launcher-${{ hashFiles(
+            agentwiki-launcher-darwin-${{ hashFiles(
               'packages/agentwiki-launcher-go/cmd/**/*.go',
               'packages/agentwiki-launcher-go/internal/**/*.go',
               'packages/agentwiki-launcher-go/go.mod',
@@ -100,5 +113,63 @@ jobs:
           path: |
             packages/agentwiki-launcher-go/dist/AgentWikiLauncher.zip
             packages/agentwiki-launcher-go/dist/agentwiki-launcher-darwin-*
+          if-no-files-found: error
+          retention-days: 7
+
+  linux:
+    name: Linux — amd64 + arm64 tarballs
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      artifact-name: ${{ steps.set-artifact.outputs.name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: packages/agentwiki-launcher-go/go.mod
+          cache: false
+
+      - name: Build Linux tarballs
+        working-directory: packages/agentwiki-launcher-go
+        run: ./scripts/build-linux.sh
+
+      - name: Set artifact name
+        id: set-artifact
+        run: echo "name=agentwiki-launcher-linux-${{ github.sha }}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.set-artifact.outputs.name }}
+          path: packages/agentwiki-launcher-go/dist/agentwiki-launcher-linux-*.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
+  windows:
+    name: Windows — amd64 zip
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      artifact-name: ${{ steps.set-artifact.outputs.name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: packages/agentwiki-launcher-go/go.mod
+          cache: false
+
+      - name: Build Windows zip
+        working-directory: packages/agentwiki-launcher-go
+        run: ./scripts/build-windows.sh
+
+      - name: Set artifact name
+        id: set-artifact
+        run: echo "name=agentwiki-launcher-windows-${{ github.sha }}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.set-artifact.outputs.name }}
+          path: packages/agentwiki-launcher-go/dist/agentwiki-launcher-windows-*.zip
           if-no-files-found: error
           retention-days: 7

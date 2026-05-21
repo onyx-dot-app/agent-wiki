@@ -20,14 +20,14 @@ permissions:
   contents: read
 
 jobs:
-  build-launcher:
-    name: Build, sign, notarize AgentWikiLauncher.app
+  build-launchers:
+    name: Build launchers (mac + linux + windows)
     uses: ./.github/workflows/release-agentwiki-launcher-go.yml
     secrets: inherit
 
   build:
     runs-on: ubuntu-latest
-    needs: build-launcher
+    needs: build-launchers
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -42,18 +42,35 @@ jobs:
         id: tag
         run: echo "tag=nightly-latest-$(date -u +'%Y%m%d')" >> "$GITHUB_OUTPUT"
 
-      - name: Download notarized launcher artifact
+      - name: Download macOS launcher
         if: matrix.component == 'backend'
         uses: actions/download-artifact@v4
         with:
-          name: ${{ needs.build-launcher.outputs.artifact-name }}
+          name: ${{ needs.build-launchers.outputs.darwin-artifact-name }}
           path: backend/static/installers/
 
-      - name: Verify launcher artifact present
+      - name: Download Linux launcher
+        if: matrix.component == 'backend'
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.build-launchers.outputs.linux-artifact-name }}
+          path: backend/static/installers/
+
+      - name: Download Windows launcher
+        if: matrix.component == 'backend'
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.build-launchers.outputs.windows-artifact-name }}
+          path: backend/static/installers/
+
+      - name: Verify launcher artifacts present
         if: matrix.component == 'backend'
         run: |
           set -euo pipefail
           test -s backend/static/installers/AgentWikiLauncher.zip
+          test -s backend/static/installers/agentwiki-launcher-linux-amd64.tar.gz
+          test -s backend/static/installers/agentwiki-launcher-linux-arm64.tar.gz
+          test -s backend/static/installers/agentwiki-launcher-windows-amd64.zip
           ls -lh backend/static/installers/
 
       - name: Set up Docker Buildx
