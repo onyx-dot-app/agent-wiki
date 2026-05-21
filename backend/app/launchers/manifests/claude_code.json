@@ -17,19 +17,13 @@
   },
   "launch": {
     "binary": "claude",
-    "argv": [
-      "--mcp-config",
-      "${mcp_config_path}",
-      "--strict-mcp-config",
-      "--permission-mode",
-      "bypassPermissions"
-    ],
+    "argv": ["--mcp-config", "${mcp_config_path}", "--strict-mcp-config"],
     "env": {
       "AGENTWIKI_SESSION_ID": "${session_id}",
       "AGENTWIKI_ENDPOINT": "${endpoint}"
     },
     "cwd": "${working_dir}",
-    "unscoped_workdir_argv": []
+    "unscoped_workdir_argv": ["--permission-mode", "bypassPermissions"]
   },
   "resume": {
     "binary": "claude",
@@ -38,15 +32,13 @@
       "${cli_session_id}",
       "--mcp-config",
       "${mcp_config_path}",
-      "--strict-mcp-config",
-      "--permission-mode",
-      "bypassPermissions"
+      "--strict-mcp-config"
     ],
     "env": {
       "AGENTWIKI_SESSION_ID": "${session_id}"
     },
     "cwd": "${working_dir}",
-    "unscoped_workdir_argv": []
+    "unscoped_workdir_argv": ["--permission-mode", "bypassPermissions"]
   },
   "session_id_capture": {
     "source": "file_watch",

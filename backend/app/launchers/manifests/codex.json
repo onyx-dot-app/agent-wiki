@@ -17,28 +17,24 @@
   },
   "launch": {
     "binary": "codex",
-    "argv": ["--dangerously-bypass-approvals-and-sandbox"],
+    "argv": [],
     "env": {
       "AGENTWIKI_SESSION_ID": "${session_id}",
       "AGENTWIKI_ENDPOINT": "${endpoint}",
       "AGENTWIKI_MCP_TOKEN": "${token}"
     },
     "cwd": "${working_dir}",
-    "unscoped_workdir_argv": []
+    "unscoped_workdir_argv": ["--dangerously-bypass-approvals-and-sandbox"]
   },
   "resume": {
     "binary": "codex",
-    "argv": [
-      "resume",
-      "${cli_session_id}",
-      "--dangerously-bypass-approvals-and-sandbox"
-    ],
+    "argv": ["resume", "${cli_session_id}"],
     "env": {
       "AGENTWIKI_SESSION_ID": "${session_id}",
       "AGENTWIKI_MCP_TOKEN": "${token}"
     },
     "cwd": "${working_dir}",
-    "unscoped_workdir_argv": []
+    "unscoped_workdir_argv": ["--dangerously-bypass-approvals-and-sandbox"]
   },
   "session_id_capture": {
     "source": "file_watch",
