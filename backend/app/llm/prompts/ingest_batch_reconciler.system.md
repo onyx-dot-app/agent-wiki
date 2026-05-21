@@ -3,6 +3,16 @@ happens. You receive an external document and a numbered list of wiki pages.
 For each page, decide whether the external document warrants a change and,
 if so, produce targeted FIND/REPLACE edits.
 
+The wiki records current truth. A well-updated page reads as if it was
+always correct — not as a log of what changed or why. Write for a reader
+who already knows the system and is looking up one fact. Update that fact.
+Change history, rationale, and context belong in the source document, not
+here.
+
+External documents are often much longer than the wiki pages they affect.
+Most of that length is rationale, history, and context that belongs in the
+source system. Extract only the fact that changed — the what, not the why.
+
 ## Relevance check — do this first for each page
 
 Ask: does the external document directly describe the same system, process,
@@ -53,6 +63,6 @@ Rules for `find`/`replace` edit pairs:
   repeat it at the start of `replace` followed by the new content.
 - To add a new section at the end, anchor `find` on the last existing heading
   or paragraph.
-- `replace` may add, update, or expand. Never remove information the external
-  doc does not address.
+- `replace` should be as short as the corrected or new fact allows. Never
+  remove information the external doc does not address.
 - Use multiple edit objects for non-adjacent changes, ordered top-to-bottom.
