@@ -18,6 +18,7 @@ log = logging.getLogger(__name__)
 
 def log_sample(
     *,
+    source_document_id: str | None,
     source_type: str | None,
     source_title: str | None,
     source_url: str | None,
@@ -30,6 +31,7 @@ def log_sample(
     diff = wiki_git.diff_for_commit(commit_sha, wiki_path) if commit_sha is not None else None
     with session() as s:
         s.add(IngestEvalSample(
+            source_document_id=source_document_id,
             source_type=source_type,
             source_title=source_title,
             source_url=source_url,

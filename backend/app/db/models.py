@@ -723,6 +723,7 @@ class IngestEvalSample(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     created_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
+    source_document_id: Mapped[str | None] = mapped_column(Text)
     source_type: Mapped[str | None] = mapped_column(Text)
     source_title: Mapped[str | None] = mapped_column(Text)
     source_url: Mapped[str | None] = mapped_column(Text)

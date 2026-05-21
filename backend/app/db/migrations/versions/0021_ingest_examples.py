@@ -30,6 +30,7 @@ def upgrade() -> None:
             nullable=False,
             server_default=sa.text("to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')"),
         ),
+        sa.Column("source_document_id", sa.Text),
         sa.Column("source_type", sa.Text),
         sa.Column("source_title", sa.Text),
         sa.Column("source_url", sa.Text),

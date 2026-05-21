@@ -359,6 +359,7 @@ def process_pushed_document(push: dict[str, Any]) -> None:
             if CONFIG.ingest_eval_logging:
                 try:
                     ingest_eval_sample.log_sample(
+                        source_document_id=push.get("source_document_id"),
                         source_type=source_type,
                         source_title=title,
                         source_url=url if url else None,
@@ -392,6 +393,7 @@ def process_pushed_document(push: dict[str, Any]) -> None:
             if CONFIG.ingest_eval_logging:
                 try:
                     ingest_eval_sample.log_sample(
+                        source_document_id=push.get("source_document_id"),
                         source_type=source_type,
                         source_title=title,
                         source_url=url if url else None,
@@ -410,6 +412,7 @@ def process_pushed_document(push: dict[str, Any]) -> None:
             if CONFIG.ingest_eval_logging:
                 try:
                     ingest_eval_sample.log_sample(
+                        source_document_id=push.get("source_document_id"),
                         source_type=source_type,
                         source_title=title,
                         source_url=url if url else None,
