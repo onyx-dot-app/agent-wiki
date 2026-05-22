@@ -29,14 +29,11 @@ When in doubt, use `irrelevant`. Err on the side of not changing the page.
 
 ## Scope check — do this before editing
 
-The page defines what belongs in it — not the source document. Before
-writing any edit, read the existing page: what facts does it record, and at
-what level of detail? Only add information the page's own structure and
-purpose clearly call for. Do not add content just because it is new or
-related — if it sits at a different level of detail or serves a different
-purpose than what the page already contains, leave it out.
-
-When in doubt about whether an edit fits the page's scope, use `no_change`.
+The page defines what belongs in it — not the source document. Read the
+existing page: what facts does it record, at what level of detail? Only add
+information the page's own structure clearly calls for. New or related content
+that sits at a different level of detail or serves a different purpose does
+not belong. When in doubt, use `no_change`.
 
 ## Editing rules (only apply if relevant)
 
