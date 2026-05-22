@@ -2,7 +2,7 @@ BIN := agentwiki-launcher
 PKG := ./cmd/agentwiki-launcher
 DIST := dist
 
-.PHONY: build clean dist test vet release release-linux release-appimage release-windows
+.PHONY: build clean dist test vet release release-linux release-appimage release-deb release-rpm release-windows
 
 build:
 	go build -o $(BIN) $(PKG)
@@ -38,6 +38,16 @@ release-linux:
 # chmod +x. Requires appimagetool on PATH.
 release-appimage:
 	./scripts/build-appimage.sh
+
+# Linux .deb (amd64): Software Center / `dpkg -i` install. No chmod, no
+# terminal. Covers Debian / Ubuntu / Mint / Pop!_OS. Requires dpkg-deb.
+release-deb:
+	./scripts/build-deb.sh
+
+# Linux .rpm (amd64): GNOME Software / KDE Discover / `rpm -i` install.
+# Covers Fedora / RHEL / Rocky / openSUSE. Requires rpmbuild (Linux only).
+release-rpm:
+	./scripts/build-rpm.sh
 
 # Windows distributable: amd64 .exe linked with -H windowsgui. Single
 # self-contained file — user downloads, double-clicks, SmartScreen,

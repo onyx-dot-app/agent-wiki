@@ -130,7 +130,7 @@ jobs:
           go-version-file: packages/agentwiki-launcher-go/go.mod
           cache: false
 
-      - name: Install appimagetool
+      - name: Install appimagetool + rpm
         run: |
           set -euo pipefail
           # AppImage upstream release. Pin to a known-good continuous build.
@@ -143,6 +143,9 @@ jobs:
           /usr/local/bin/appimagetool --appimage-extract >/dev/null
           sudo mv squashfs-root /opt/appimagetool
           sudo ln -sf /opt/appimagetool/AppRun /usr/local/bin/appimagetool
+          # rpm-build for build-rpm.sh
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends rpm
 
       - name: Build Linux tarballs
         working-directory: packages/agentwiki-launcher-go
@@ -156,6 +159,14 @@ jobs:
           APPIMAGE_EXTRACT_AND_RUN: "1"
         run: ./scripts/build-appimage.sh
 
+      - name: Build Linux .deb
+        working-directory: packages/agentwiki-launcher-go
+        run: ./scripts/build-deb.sh
+
+      - name: Build Linux .rpm
+        working-directory: packages/agentwiki-launcher-go
+        run: ./scripts/build-rpm.sh
+
       - name: Set artifact name
         id: set-artifact
         run: echo "name=agentwiki-launcher-linux-${{ github.sha }}" >> "$GITHUB_OUTPUT"
@@ -166,6 +177,8 @@ jobs:
           path: |
             packages/agentwiki-launcher-go/dist/agentwiki-launcher-linux-*.tar.gz
             packages/agentwiki-launcher-go/dist/AgentWikiLauncher-x86_64.AppImage
+            packages/agentwiki-launcher-go/dist/agentwiki-launcher_*_amd64.deb
+            packages/agentwiki-launcher-go/dist/agentwiki-launcher-*-1.x86_64.rpm
           if-no-files-found: error
           retention-days: 7
 

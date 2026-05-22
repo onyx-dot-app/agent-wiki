@@ -29,10 +29,10 @@ const PLATFORM_COPY: Record<
       "Open the downloaded zip, drag AgentWikiLauncher.app to your Applications folder, then click Run Agent.",
   },
   linux: {
-    downloadHref: "/api/installer/linux?format=appimage",
-    downloadLabel: "Download for Linux (amd64)",
+    downloadHref: "/api/installer/linux?format=deb",
+    downloadLabel: "Download for Linux (.deb)",
     instructions:
-      "After download: chmod +x the AppImage, double-click it to register the URL handler, then click Run Agent. For arm64 or tarball: /api/installer/linux?format=tar.gz&arch=arm64.",
+      "Default is .deb (Debian / Ubuntu / Mint) — double-click to install via Software Center, then click Run Agent. Other formats: /api/installer/linux?format=rpm (Fedora / RHEL), ?format=appimage (single-file), ?format=tar.gz&arch=arm64 (manual).",
   },
   windows: {
     downloadHref: "/api/installer/windows",
@@ -131,9 +131,9 @@ export function InstallHelperPane({
               <Button
                 size="md"
                 variant="action"
-                onClick={() => download("/api/installer/linux?format=appimage")}
+                onClick={() => download("/api/installer/linux?format=deb")}
               >
-                Download for Linux (amd64)
+                Download for Linux (.deb)
               </Button>
               <Button
                 size="md"

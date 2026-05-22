@@ -76,12 +76,14 @@ route. On first `agentwiki://run` URI the launcher prompts to pin the
 wiki endpoint (`osascript` on mac, `zenity`/`kdialog` on Linux, `mshta`
 MessageBox on Windows). Every subsequent run dispatches silently.
 
-| OS      | Backend route                        | Artifact                                 | User action                                                                                          |
-| ------- | ------------------------------------ | ---------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| macOS   | `/api/installer/mac`                 | `AgentWikiLauncher.zip`                  | Unzip, drag `AgentWikiLauncher.app` into `/Applications`. Signed + notarized → Gatekeeper silent.    |
-| Linux   | `/api/installer/linux` (AppImage)    | `AgentWikiLauncher-x86_64.AppImage`      | `chmod +x` once, double-click to register the URL handler.                                           |
-| Linux   | `/api/installer/linux?format=tar.gz` | `agentwiki-launcher-linux-<arch>.tar.gz` | Fallback for arm64 / non-AppImage workflows. Extract, run `./install.sh`.                            |
-| Windows | `/api/installer/windows`             | `agentwiki-launcher-windows-amd64.exe`   | Double-click .exe. SmartScreen → "More info" → "Run anyway" (unsigned). MessageBox confirms install. |
+| OS      | Backend route                          | Artifact                                 | User action                                                                                          |
+| ------- | -------------------------------------- | ---------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| macOS   | `/api/installer/mac`                   | `AgentWikiLauncher.zip`                  | Unzip, drag `AgentWikiLauncher.app` into `/Applications`. Signed + notarized → Gatekeeper silent.    |
+| Linux   | `/api/installer/linux` (default `deb`) | `agentwiki-launcher_<v>_amd64.deb`       | Double-click → Software Center installs. URL handler registered via postinst. No chmod, no terminal. |
+| Linux   | `/api/installer/linux?format=rpm`      | `agentwiki-launcher-<v>-1.x86_64.rpm`    | Double-click → GNOME Software / KDE Discover installs. Same postinst flow.                           |
+| Linux   | `/api/installer/linux?format=appimage` | `AgentWikiLauncher-x86_64.AppImage`      | Single file. `chmod +x` once, double-click.                                                          |
+| Linux   | `/api/installer/linux?format=tar.gz`   | `agentwiki-launcher-linux-<arch>.tar.gz` | Manual fallback (covers arm64). Extract, run `./install.sh`.                                         |
+| Windows | `/api/installer/windows`               | `agentwiki-launcher-windows-amd64.exe`   | Double-click .exe. SmartScreen → "More info" → "Run anyway" (unsigned). MessageBox confirms install. |
 
 `/api/installer/app` stays as a back-compat alias for the macOS bundle
 so older frontend builds keep working.

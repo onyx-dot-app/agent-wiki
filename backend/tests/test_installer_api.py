@@ -61,22 +61,60 @@ def test_installer_app_is_alias_for_mac(client, tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_installer_linux_default_is_appimage(client, tmp_path, monkeypatch):
-    payload = b"\x7fELF-test-appimage"
-    (tmp_path / "AgentWikiLauncher-x86_64.AppImage").write_bytes(payload)
+def test_installer_linux_default_is_deb(client, tmp_path, monkeypatch):
+    payload = b"!<arch>\ntest-deb"
+    (tmp_path / "agentwiki-launcher_0.1.0_amd64.deb").write_bytes(payload)
     monkeypatch.setattr("app.api.installer._BINARIES_DIR", tmp_path)
     res = client.get("/api/installer/linux")
     assert res.status_code == 200
-    assert "AgentWikiLauncher-x86_64.AppImage" in res.headers["content-disposition"]
+    assert res.headers["content-type"] == "application/vnd.debian.binary-package"
+    assert "agentwiki-launcher_0.1.0_amd64.deb" in res.headers["content-disposition"]
     assert res.content == payload
 
 
-def test_installer_linux_appimage_explicit(client, tmp_path, monkeypatch):
-    payload = b"\x7fELF-appimage-explicit"
+def test_installer_linux_deb_picks_newest_version(client, tmp_path, monkeypatch):
+    """When multiple .deb files exist (after a version bump), serve the
+    lexicographically last — versions are sortable in their canonical form."""
+    (tmp_path / "agentwiki-launcher_0.1.0_amd64.deb").write_bytes(b"old")
+    (tmp_path / "agentwiki-launcher_0.2.0_amd64.deb").write_bytes(b"new")
+    monkeypatch.setattr("app.api.installer._BINARIES_DIR", tmp_path)
+    res = client.get("/api/installer/linux?format=deb")
+    assert res.status_code == 200
+    assert "0.2.0" in res.headers["content-disposition"]
+    assert res.content == b"new"
+
+
+def test_installer_linux_deb_503_when_missing(client, tmp_path, monkeypatch):
+    monkeypatch.setattr("app.api.installer._BINARIES_DIR", tmp_path)
+    res = client.get("/api/installer/linux?format=deb")
+    assert res.status_code == 503
+    assert ".deb missing" in res.json()["error"]
+
+
+def test_installer_linux_rpm_streams_when_present(client, tmp_path, monkeypatch):
+    payload = b"\xed\xab\xee\xdbtest-rpm"
+    (tmp_path / "agentwiki-launcher-0.1.0-1.x86_64.rpm").write_bytes(payload)
+    monkeypatch.setattr("app.api.installer._BINARIES_DIR", tmp_path)
+    res = client.get("/api/installer/linux?format=rpm")
+    assert res.status_code == 200
+    assert res.headers["content-type"] == "application/x-rpm"
+    assert res.content == payload
+
+
+def test_installer_linux_rpm_503_when_missing(client, tmp_path, monkeypatch):
+    monkeypatch.setattr("app.api.installer._BINARIES_DIR", tmp_path)
+    res = client.get("/api/installer/linux?format=rpm")
+    assert res.status_code == 503
+    assert ".rpm missing" in res.json()["error"]
+
+
+def test_installer_linux_appimage(client, tmp_path, monkeypatch):
+    payload = b"\x7fELF-test-appimage"
     (tmp_path / "AgentWikiLauncher-x86_64.AppImage").write_bytes(payload)
     monkeypatch.setattr("app.api.installer._BINARIES_DIR", tmp_path)
     res = client.get("/api/installer/linux?format=appimage")
     assert res.status_code == 200
+    assert "AgentWikiLauncher-x86_64.AppImage" in res.headers["content-disposition"]
     assert res.content == payload
 
 
@@ -130,6 +168,10 @@ def test_installer_linux_404_unknown_format(client):
     res = client.get("/api/installer/linux?format=snap")
     assert res.status_code == 404
     assert "unsupported linux format" in res.json()["error"]
+    # Error message lists all supported formats so the operator knows
+    # what's valid without grepping the source.
+    for fmt in ("deb", "rpm", "appimage", "tar.gz"):
+        assert fmt in res.json()["error"]
 
 
 # ---------------------------------------------------------------------------

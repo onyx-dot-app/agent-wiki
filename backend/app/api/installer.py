@@ -33,9 +33,14 @@ _MAC_BINARIES: dict[str, str] = {
 }
 
 # (filename on disk, media type) per platform-shaped bundle.
-# Windows is now a single .exe (GUI subsystem, no install.bat wrapper).
-# Linux ships AppImage as the default (single executable, double-click)
-# + tarballs as fallback for distros that prefer extract+install.sh.
+# Windows is a single .exe (GUI subsystem, no install.bat wrapper).
+# Linux ships .deb / .rpm as the zero-friction defaults (double-click →
+# Software Center install, URL handler registered via postinst). AppImage
+# is the single-file fallback for distros without a package manager;
+# tarballs cover arm64 + manual install workflows.
+#
+# .deb / .rpm filenames embed the version — discovered at request time so
+# we don't have to rebuild the backend image on every launcher bump.
 _MAC_BUNDLE = ("AgentWikiLauncher.zip", "application/zip")
 _WINDOWS_BUNDLE = ("agentwiki-launcher-windows-amd64.exe", "application/octet-stream")
 _LINUX_APPIMAGE = ("AgentWikiLauncher-x86_64.AppImage", "application/octet-stream")
@@ -43,6 +48,8 @@ _LINUX_BUNDLES: dict[str, tuple[str, str]] = {
     "amd64": ("agentwiki-launcher-linux-amd64.tar.gz", "application/gzip"),
     "arm64": ("agentwiki-launcher-linux-arm64.tar.gz", "application/gzip"),
 }
+_LINUX_DEB_GLOB = "agentwiki-launcher_*_amd64.deb"
+_LINUX_RPM_GLOB = "agentwiki-launcher-*-1.x86_64.rpm"
 
 
 def _detect_arch(user_agent: str) -> str:
@@ -84,16 +91,46 @@ def installer_app() -> Response:
     return _stream(*_MAC_BUNDLE)
 
 
+def _resolve_glob(glob: str) -> Path | None:
+    """Find the (single) artifact matching glob in the installers dir.
+
+    Versioned filenames (deb / rpm) embed the version in the basename,
+    so the backend can't hardcode the exact filename — it picks the
+    newest match at request time. Returns None when nothing matches.
+    """
+    matches = sorted(_BINARIES_DIR.glob(glob))
+    return matches[-1] if matches else None
+
+
 @router.get("/installer/linux")
-def installer_linux(format: str = "appimage", arch: str = "amd64") -> Response:
+def installer_linux(format: str = "deb", arch: str = "amd64") -> Response:
     """Stream the linux launcher.
 
-    Default format is ``appimage`` — single self-contained executable,
-    double-click after ``chmod +x``. ``format=tar.gz`` falls back to the
-    tarball (binary + install.sh) for distros that prefer the manual
-    install path. ``arch`` only applies to tarball (AppImage ships
-    amd64 only for v1).
+    Default format is ``deb`` — covers Debian / Ubuntu / Mint / Pop!_OS.
+    Double-click opens Software Center, install registers the URL
+    handler via postinst. No chmod, no terminal. ``format=rpm`` covers
+    Fedora / RHEL / openSUSE. ``format=appimage`` ships a single
+    executable (chmod +x then double-click). ``format=tar.gz`` is the
+    manual fallback that supports arm64 as well.
     """
+    if format == "deb":
+        path = _resolve_glob(_LINUX_DEB_GLOB)
+        if path is None:
+            raise HTTPException(
+                status_code=503,
+                detail="agentwiki-launcher .deb missing on this server",
+            )
+        return FileResponse(
+            path, media_type="application/vnd.debian.binary-package", filename=path.name
+        )
+    if format == "rpm":
+        path = _resolve_glob(_LINUX_RPM_GLOB)
+        if path is None:
+            raise HTTPException(
+                status_code=503,
+                detail="agentwiki-launcher .rpm missing on this server",
+            )
+        return FileResponse(path, media_type="application/x-rpm", filename=path.name)
     if format == "appimage":
         if arch != "amd64":
             raise HTTPException(
@@ -112,7 +149,8 @@ def installer_linux(format: str = "appimage", arch: str = "amd64") -> Response:
         return _stream(*bundle)
     raise HTTPException(
         status_code=404,
-        detail="unsupported linux format %r; expected 'appimage' or 'tar.gz'" % (format,),
+        detail="unsupported linux format %r; expected 'deb', 'rpm', 'appimage' or 'tar.gz'"
+        % (format,),
     )
 
 
