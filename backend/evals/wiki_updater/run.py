@@ -277,19 +277,28 @@ def main(argv: list[str] | None = None) -> int:
 
     out_path = args.out or Path("runs") / ("wiki_updater_%d.jsonl" % int(time.time()))
     reporting.write_jsonl(out_path, all_results)
-    # One table per surface — the dataset mixes process_instruction and reconcile_document.
+    # One table + one BT experiment per surface — the dataset mixes
+    # process_instruction and reconcile_document and they have different
+    # trigger classes, so per-surface aggregation keeps the scorer table
+    # comparable across nightly runs.
+    surface_urls: dict[str, str] = {}
     for surface in sorted({r.surface for r in all_results}):
         subset = [r for r in all_results if r.surface == surface]
         sub_summary = reporting.summarize(subset, surface=surface)  # type: ignore[arg-type]
         reporting.print_summary(sub_summary)
-    if args.braintrust:
-        reporting.push_to_braintrust(args.braintrust, all_results)
+        bt_url = ""
+        if args.braintrust:
+            experiment = "%s-%s" % (args.braintrust, surface.replace("_", "-"))
+            bt_url = reporting.push_to_braintrust(experiment, subset)
+            surface_urls[surface] = bt_url
+        reporting.write_github_summary(sub_summary, braintrust_url=bt_url)
     print(
         json.dumps(
             {
                 "out": str(out_path),
                 "skipped_models": skipped,
                 "models": sorted({r.model for r in all_results}),
+                "braintrust_urls": surface_urls,
             }
         )
     )

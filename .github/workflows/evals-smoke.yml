@@ -31,6 +31,8 @@ jobs:
     defaults:
       run:
         working-directory: backend
+    env:
+      OPENSEARCH_URL: ""
     steps:
       - uses: actions/checkout@v4
 

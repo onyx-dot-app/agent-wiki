@@ -259,9 +259,11 @@ def main(argv: list[str] | None = None) -> int:
     reporting.write_jsonl(out_path, all_results)
     summary = reporting.summarize(all_results, surface="ingest_selector")
     reporting.print_summary(summary)
+    bt_url = ""
     if args.braintrust:
-        reporting.push_to_braintrust(args.braintrust, all_results)
-    print(json.dumps({"out": str(out_path), "skipped_models": skipped}))
+        bt_url = reporting.push_to_braintrust(args.braintrust, all_results)
+    reporting.write_github_summary(summary, braintrust_url=bt_url)
+    print(json.dumps({"out": str(out_path), "skipped_models": skipped, "braintrust_url": bt_url}))
     return 0
 
 

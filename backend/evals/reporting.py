@@ -196,12 +196,13 @@ def push_to_braintrust(
     results: list[CaseResult],
     *,
     project: str | None = None,
-) -> None:
+) -> str:
+    """Push results, return the experiment URL (or "" if push was skipped)."""
     api_key = os.environ.get("BRAINTRUST_API_KEY", "")
     project_name = project or os.environ.get("BRAINTRUST_PROJECT", "")
     if not api_key or not project_name:
         log.warning("braintrust: skip push — no BRAINTRUST_API_KEY or BRAINTRUST_PROJECT")
-        return
+        return ""
     rows = [
         bt.ExperimentRow(
             input={"case_id": r.case_id, "surface": r.surface, "run_index": r.run_index},
@@ -226,10 +227,60 @@ def push_to_braintrust(
         api_key=api_key,
         rows=rows,
     )
+    org = os.environ.get("BRAINTRUST_ORG", "Onyx 2")
+    url = "https://www.braintrust.dev/app/%s/p/%s/experiments/%s" % (
+        org.replace(" ", "%20"),
+        project_name,
+        experiment,
+    )
     log.info(
-        "braintrust: pushed %d/%d results to project=%s experiment=%s",
+        "braintrust: pushed %d/%d results to project=%s experiment=%s url=%s",
         pushed,
         len(results),
         project_name,
         experiment,
+        url,
     )
+    return url
+
+
+def write_github_summary(
+    summary: RunSummary,
+    *,
+    braintrust_url: str = "",
+    title: str | None = None,
+) -> None:
+    """Append a markdown section to ``$GITHUB_STEP_SUMMARY`` if it's set.
+
+    No-op outside GitHub Actions (env var absent). Renders the same scorer
+    table as ``print_summary`` so CI viewers see eval results inline.
+    """
+    path = os.environ.get("GITHUB_STEP_SUMMARY", "")
+    if not path:
+        return
+    heading = title or "Eval: %s" % summary.surface
+    lines: list[str] = ["## %s" % heading, ""]
+    lines.append(
+        "_cases=%d, runs/case=%d, models=%s_"
+        % (summary.case_count, summary.runs_per_case, ", ".join(summary.models))
+    )
+    if braintrust_url:
+        lines.append("")
+        lines.append("[Braintrust experiment ↗](%s)" % braintrust_url)
+    lines.append("")
+    scorer_names = sorted({s.name for ss in summary.per_model.values() for s in ss})
+    lines.append("| model | " + " | ".join(scorer_names) + " |")
+    lines.append("| -- | " + " | ".join("--" for _ in scorer_names) + " |")
+    for model in summary.models:
+        by_name = {s.name: s for s in summary.per_model[model]}
+        cells: list[str] = []
+        for sn in scorer_names:
+            s = by_name.get(sn)
+            if s is None:
+                cells.append("-")
+            else:
+                cells.append("%.2f [%.2f, %.2f]" % (s.mean, s.ci_low, s.ci_high))
+        lines.append("| %s | " % model + " | ".join(cells) + " |")
+    lines.append("")
+    with open(path, "a", encoding="utf-8") as fh:
+        fh.write("\n".join(lines) + "\n")
