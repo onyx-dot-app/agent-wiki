@@ -339,6 +339,7 @@ if(__exports != exports)module.exports = exports;return module.exports}));
 <div class="topbar">
   <h1>Ingest Eval Labeler</h1>
   <span class="progress-text" id="progress-summary"></span>
+  <button id="api-key-btn" onclick="promptApiKey()" style="display:none;">⚙ Set API key</button>
   <button onclick="saveCheckpoint()">Save checkpoint</button>
 </div>
 
@@ -363,6 +364,7 @@ if(__exports != exports)module.exports = exports;return module.exports}));
       Jump to <input type="number" id="jump-input" min="1" onchange="jumpTo(this.value)">
     </div>
     <div style="display:flex;gap:6px;">
+      <button id="btn-summarize" onclick="summarizeCurrent()" style="display:none;">✦ Summarize</button>
       <button id="btn-prev" onclick="navigate(-1)">← Prev</button>
       <button id="btn-next" onclick="navigate(1)">Next →</button>
     </div>
@@ -435,8 +437,12 @@ const LABELS = [
 let samples = [];   // original rows — never mutated on disk
 let current = 0;
 let filename = "eval_samples.json";
-let labels = {};    // id → { label, reason } — checkpoint state
+let labels = {};       // id → { label, coverage } — checkpoint state
 let storageKey = "";
+let summaries = {};    // id → { source_summary, wiki_summary, diff_summary }
+let summaryKey = "";
+let enriching = new Set();  // ids currently in-flight
+let anthropicKey = localStorage.getItem("eval_anthropic_key") || "";
 
 // ── File loading ──────────────────────────────────────────────────────────────
 
@@ -459,7 +465,11 @@ function initSamples(text) {
   const lines = text.trim().split("\n").filter(l => l.trim());
   samples = lines.map(l => JSON.parse(l));
   storageKey = "eval_ckpt_" + filename;
-  labels = JSON.parse(localStorage.getItem(storageKey) || "{}");
+  summaryKey = "eval_summaries_" + filename;
+  labels    = JSON.parse(localStorage.getItem(storageKey)  || "{}");
+  summaries = JSON.parse(localStorage.getItem(summaryKey)  || "{}");
+
+  document.getElementById("api-key-btn").style.display = anthropicKey ? "none" : "";
   current = 0;
   document.getElementById("load-screen").style.display = "none";
   document.getElementById("labeler").style.display = "flex";
@@ -468,6 +478,7 @@ function initSamples(text) {
 
 document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("choose-btn").addEventListener("click", pickFile);
+  if (!anthropicKey) promptApiKey();
 });
 
 // ── Navigation ────────────────────────────────────────────────────────────────
@@ -517,8 +528,16 @@ function render() {
 
   renderContent(document.getElementById("source-view"), s.source_content || "");
   renderWikiBefore(document.getElementById("wiki-before-view"), s.wiki_body_before || "", s.diff || null);
-  renderSummary("source-summary", "Summary", s.source_summary);
-  renderSummary("wiki-summary", s.diff_summary ? `Summary · <span style="color:#1a6e1a;">Edit: ${esc(s.diff_summary)}</span>` : "Summary", s.wiki_summary);
+
+  const sm = summaries[s.id] || {};
+  const loading = enriching.has(s.id);
+  renderSummary("source-summary", "Summary", sm.source_summary, loading);
+  renderSummary("wiki-summary",
+    sm.diff_summary ? `Summary · <span style="color:#1a6e1a;">Edit: ${esc(sm.diff_summary)}</span>` : "Summary",
+    sm.wiki_summary, loading);
+
+  const canSummarize = anthropicKey && !sm.source_summary && !loading;
+  document.getElementById("btn-summarize").style.display = canSummarize ? "" : "none";
 
   const btnsEl = document.getElementById("label-buttons");
   btnsEl.innerHTML = "";
@@ -592,11 +611,74 @@ function loadCheckpoint(e) {
 
 // ── Summary callout ───────────────────────────────────────────────────────────
 
-function renderSummary(id, label, text) {
+function renderSummary(id, label, text, loading) {
   const el = document.getElementById(id);
+  if (loading && !text) {
+    el.style.display = "";
+    el.innerHTML = `<strong>${label}</strong><span style="color:#999;font-style:italic;">Generating…</span>`;
+    return;
+  }
   if (!text) { el.style.display = "none"; return; }
   el.style.display = "";
   el.innerHTML = `<strong>${label}</strong>${esc(text)}`;
+}
+
+// ── LLM enrichment ────────────────────────────────────────────────────────────
+
+function summarizeCurrent() {
+  const s = samples[current];
+  if (!anthropicKey || summaries[s.id]?.source_summary || enriching.has(s.id)) return;
+  document.getElementById("btn-summarize").style.display = "none";
+  enrichSample(s);
+}
+
+async function enrichSample(sample) {
+  enriching.add(sample.id);
+  render();  // show "Generating…"
+
+  const SOURCE_MAX = 6000, WIKI_MAX = 6000, DIFF_MAX = 3000;
+  const src  = (sample.source_content   || "").slice(0, SOURCE_MAX);
+  const wiki = (sample.wiki_body_before || "").slice(0, WIKI_MAX);
+  const diff = (sample.diff             || "").slice(0, DIFF_MAX) || null;
+
+  const fields = diff
+    ? '"source_summary":"...","wiki_summary":"...","diff_summary":"..."'
+    : '"source_summary":"...","wiki_summary":"..."';
+  const diffLine = diff ? "diff_summary: 1-2 sentences on what the committed edit adds or changes." : "";
+  const userMsg = [
+    `<source_document>\n${src}\n</source_document>`,
+    `<wiki_page_before>\n${wiki}\n</wiki_page_before>`,
+    diff ? `<diff>\n${diff}\n</diff>` : "",
+  ].filter(Boolean).join("\n\n")
+    + `\n\nRespond with JSON only: {${fields}}\nsource_summary: 2-3 sentences on what the source document is about.\nwiki_summary: 2-3 sentences on what the wiki page currently covers.\n${diffLine}`.trimEnd();
+
+  try {
+    const resp = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "x-api-key": anthropicKey,
+        "anthropic-version": "2023-06-01",
+        "anthropic-dangerous-direct-browser-access": "true",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 512,
+        system: "You are a concise technical summarizer. Reply only with the requested JSON object.",
+        messages: [{ role: "user", content: userMsg }],
+      }),
+    });
+    const data = await resp.json();
+    let text = data.content?.[0]?.text?.trim() || "";
+    if (text.startsWith("```")) text = text.split("\n", 2)[1].replace(/```$/, "").trim();
+    summaries[sample.id] = JSON.parse(text);
+    localStorage.setItem(summaryKey, JSON.stringify(summaries));
+  } catch (e) {
+    console.warn("enrich failed for id", sample.id, e);
+  } finally {
+    enriching.delete(sample.id);
+    if (samples[current]?.id === sample.id) render();
+  }
 }
 
 // ── Wiki before with inline diff highlights ───────────────────────────────────
@@ -661,6 +743,18 @@ function renderContent(el, text) {
     el.className = "source-text";
     el.textContent = text;
   }
+}
+
+// ── API key management ────────────────────────────────────────────────────────
+
+function promptApiKey() {
+  const key = prompt("Anthropic API key (stored in localStorage):", anthropicKey);
+  if (key === null) return;
+  anthropicKey = key.trim();
+  if (anthropicKey) localStorage.setItem("eval_anthropic_key", anthropicKey);
+  else localStorage.removeItem("eval_anthropic_key");
+  document.getElementById("api-key-btn").style.display = anthropicKey ? "none" : "";
+  if (samples.length) render();  // refresh to show/hide Summarize button
 }
 
 // ── Util ──────────────────────────────────────────────────────────────────────
