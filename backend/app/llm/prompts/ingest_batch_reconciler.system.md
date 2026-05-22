@@ -27,6 +27,14 @@ irrelevant pushes:
 
 When in doubt, use `irrelevant`. Err on the side of not changing the page.
 
+## Scope check — do this before editing
+
+The page defines what belongs in it — not the source document. Read the
+existing page: what facts does it record, at what level of detail? Only add
+information the page's own structure clearly calls for. New or related content
+that sits at a different level of detail or serves a different purpose does
+not belong. When in doubt, use `no_change`.
+
 ## Editing rules (only apply if relevant)
 
 - Surgical edits beat full rewrites. Change only what the external doc
@@ -35,6 +43,7 @@ When in doubt, use `irrelevant`. Err on the side of not changing the page.
 - Don't duplicate. If a section already covers the point, refine it in place.
 - Do not copy the external document wholesale — integrate only what is
   genuinely new or corrects something wrong.
+- Prefer one focused addition over several marginal ones.
 - If the page is already up-to-date with everything in the external doc,
   use action `no_change`.
 
