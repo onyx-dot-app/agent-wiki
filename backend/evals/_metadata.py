@@ -16,7 +16,7 @@ def utc_iso_now() -> str:
 
 
 def _resolve_git_dir(start: Path) -> Path | None:
-    cur = start
+    cur = start if start.is_absolute() else start.resolve()
     while True:
         git_path = cur / ".git"
         if git_path.is_dir():
@@ -37,24 +37,41 @@ def _resolve_git_dir(start: Path) -> Path | None:
         cur = cur.parent
 
 
-def _read_ref(git_dir: Path, ref: str) -> str:
-    ref_path = git_dir / ref
+def _resolve_commondir(git_dir: Path) -> Path:
+    """Return the dir holding shared refs for this gitdir (worktree-aware)."""
+    commondir_path = git_dir / "commondir"
+    if not commondir_path.is_file():
+        return git_dir
     try:
-        return ref_path.read_text().strip()
+        text = commondir_path.read_text().strip()
     except OSError:
-        pass
-    packed = git_dir / "packed-refs"
-    try:
-        with packed.open() as fh:
-            for line in fh:
-                line = line.strip()
-                if not line or line.startswith("#") or line.startswith("^"):
-                    continue
-                parts = line.split(" ", 1)
-                if len(parts) == 2 and parts[1] == ref:
-                    return parts[0]
-    except OSError:
-        return ""
+        return git_dir
+    common = Path(text)
+    if not common.is_absolute():
+        common = (git_dir / common).resolve()
+    return common
+
+
+def _read_ref(git_dir: Path, commondir: Path, ref: str) -> str:
+    for base in (git_dir, commondir):
+        ref_path = base / ref
+        try:
+            return ref_path.read_text().strip()
+        except OSError:
+            continue
+    for base in (git_dir, commondir):
+        packed = base / "packed-refs"
+        try:
+            with packed.open() as fh:
+                for line in fh:
+                    line = line.strip()
+                    if not line or line.startswith("#") or line.startswith("^"):
+                        continue
+                    parts = line.split(" ", 1)
+                    if len(parts) == 2 and parts[1] == ref:
+                        return parts[0]
+        except OSError:
+            continue
     return ""
 
 
@@ -64,11 +81,12 @@ def git_sha_for(path: Path) -> str:
     git_dir = _resolve_git_dir(start)
     if git_dir is None:
         return ""
+    commondir = _resolve_commondir(git_dir)
     try:
         head = (git_dir / "HEAD").read_text().strip()
     except OSError:
         return ""
     if head.startswith("ref:"):
         ref = head.split(":", 1)[1].strip()
-        return _read_ref(git_dir, ref)
+        return _read_ref(git_dir, commondir, ref)
     return head.strip()
