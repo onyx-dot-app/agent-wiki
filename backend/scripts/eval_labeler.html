@@ -175,6 +175,28 @@
   }
   .summary-box strong { font-weight: 600; display: block; margin-bottom: 3px; font-size: 11px; color: #4a6090; }
 
+  /* ── Judge suggestion ── */
+  .judge-box {
+    background: #fffbf0;
+    border: 1px solid #f0d080;
+    border-radius: 7px;
+    padding: 10px 14px;
+    font-size: 12px;
+    line-height: 1.6;
+    color: #5a4a00;
+  }
+  .judge-box strong { font-weight: 600; display: block; margin-bottom: 4px; font-size: 11px; color: #8a6a00; }
+  .judge-badge {
+    display: inline-block;
+    background: #f0d080;
+    color: #5a4a00;
+    border-radius: 4px;
+    padding: 1px 7px;
+    font-size: 11px;
+    font-weight: 600;
+    margin-bottom: 5px;
+  }
+
   /* ── Source content ── */
   .source-text {
     font-size: 13px;
@@ -376,7 +398,14 @@ if(__exports != exports)module.exports = exports;return module.exports}));
     <div class="jump-wrap">
       Jump to <input type="number" id="jump-input" min="1" onchange="jumpTo(this.value)">
     </div>
+    <div style="display:flex;gap:6px;align-items:center;">
+      <span style="font-size:11px;color:#999;">Jump to unlabeled:</span>
+      <button onclick="jumpToUnlabeled('committed')">committed</button>
+      <button onclick="jumpToUnlabeled('no_change')">no_change</button>
+      <button onclick="jumpToUnlabeled('irrelevant')">irrelevant</button>
+    </div>
     <div style="display:flex;gap:6px;">
+      <button id="btn-judge" onclick="judgeCurrent()" style="display:none;">⚖ Judge</button>
       <button id="btn-summarize" onclick="summarizeCurrent()" style="display:none;">✦ Summarize</button>
       <button id="btn-prev" onclick="navigate(-1)">← Prev</button>
       <button id="btn-next" onclick="navigate(1)">Next →</button>
@@ -397,6 +426,7 @@ if(__exports != exports)module.exports = exports;return module.exports}));
       <div class="card">
         <div class="card-header">Label</div>
         <div class="card-body" style="display:flex;flex-direction:column;gap:14px;">
+          <div class="judge-box" id="judge-box" style="display:none;"></div>
           <div class="label-buttons" id="label-buttons"></div>
           <div class="coverage-area" id="coverage-area" style="display:none;">
             <label>What should this update cover?</label>
@@ -442,16 +472,22 @@ if(__exports != exports)module.exports = exports;return module.exports}));
 
 <script>
 const LABELS = [
-  { value: "committed",  icon: "✅", text: "Should commit" },
-  { value: "no_change",  icon: "✓",  text: "Should no-change" },
-  { value: "irrelevant", icon: "⊘",  text: "Should be irrelevant — wrong selection" },
+  { value: "committed_critical",  icon: "🔴", text: "Should commit — critical" },
+  { value: "committed_moderate",  icon: "🟡", text: "Should commit — moderate" },
+  { value: "committed_nit",       icon: "🟢", text: "Should commit — nit" },
+  { value: "no_change_covered",   icon: "✓",  text: "Should no-change — already covered" },
+  { value: "no_change_extra",     icon: "↩",  text: "Should no-change — extra info, not worth inclusion" },
+  { value: "irrelevant",          icon: "⊘",  text: "Should be irrelevant — wrong selection" },
 ];
+
+const isCommit = v => v && (v.startsWith("committed_") || v === "committed");
 
 let samples = [];   // original rows
 let current = 0;
 let filename = "eval_samples.jsonl";
 let fileHandle = null;  // FileSystemFileHandle — used to write back
 let enriching = new Set();
+let judging   = new Set();
 let anthropicKey = "";
 
 // ── File loading ──────────────────────────────────────────────────────────────
@@ -491,7 +527,7 @@ document.addEventListener("DOMContentLoaded", () => {
 function flushCoverage() {
   if (!samples.length) return;
   const s = samples[current];
-  if (s.label === "committed") {
+  if (isCommit(s.label)) {
     const v = document.getElementById("coverage-input").value.trim();
     if (v) s.coverage = v; else delete s.coverage;
     writeBack();
@@ -512,6 +548,19 @@ function jumpTo(val) {
   if (isNaN(idx) || idx < 0 || idx >= samples.length) return;
   current = idx;
   render();
+}
+
+function jumpToUnlabeled(outcome) {
+  flushCoverage();
+  // Search from current+1, wrap around
+  for (let i = 1; i <= samples.length; i++) {
+    const idx = (current + i) % samples.length;
+    if (samples[idx].outcome === outcome && !samples[idx].label) {
+      current = idx;
+      render();
+      return;
+    }
+  }
 }
 
 // ── Render ────────────────────────────────────────────────────────────────────
@@ -554,6 +603,21 @@ function render() {
 
   document.getElementById("btn-summarize").style.display = loading ? "none" : "";
 
+  // Judge suggestion box
+  const isJudging = judging.has(s.id);
+  document.getElementById("btn-judge").style.display = isJudging ? "none" : "";
+  const judgeEl = document.getElementById("judge-box");
+  if (isJudging && !s.judge_label) {
+    judgeEl.style.display = "";
+    judgeEl.innerHTML = `<strong>⚖ Judge</strong><span style="color:#999;font-style:italic;">Judging…</span>`;
+  } else if (s.judge_label) {
+    const jl = LABELS.find(l => l.value === s.judge_label);
+    judgeEl.style.display = "";
+    judgeEl.innerHTML = `<strong>⚖ Judge suggestion</strong><span class="judge-badge">${jl ? jl.icon + " " + jl.text : esc(s.judge_label)}</span><div style="color:#6a5800;margin-top:2px;">${esc(s.judge_reasoning || "")}</div>`;
+  } else {
+    judgeEl.style.display = "none";
+  }
+
   const btnsEl = document.getElementById("label-buttons");
   btnsEl.innerHTML = "";
   LABELS.forEach(l => {
@@ -565,7 +629,7 @@ function render() {
   });
 
   document.getElementById("coverage-input").value = s.coverage || "";
-  document.getElementById("coverage-area").style.display = s.label === "committed" ? "" : "none";
+  document.getElementById("coverage-area").style.display = isCommit(s.label) ? "" : "none";
   document.getElementById("saved-indicator").textContent = s.label ? "✓ Labeled" : "";
   document.getElementById("save-btn").textContent =
     current < samples.length - 1 ? "Save & Next →" : "Save";
@@ -574,8 +638,8 @@ function render() {
 function selectLabel(value) {
   const s = samples[current];
   s.label = value;
-  document.getElementById("coverage-area").style.display = value === "committed" ? "" : "none";
-  if (value !== "committed") {
+  document.getElementById("coverage-area").style.display = isCommit(value) ? "" : "none";
+  if (!isCommit(value)) {
     delete s.coverage;
     document.getElementById("coverage-input").value = "";
   }
@@ -586,7 +650,7 @@ function selectLabel(value) {
 function saveLabel() {
   const s = samples[current];
   const coverage = document.getElementById("coverage-input").value.trim();
-  if (s.label === "committed") {
+  if (isCommit(s.label)) {
     if (coverage) s.coverage = coverage; else delete s.coverage;
   } else {
     delete s.coverage;
@@ -719,6 +783,92 @@ async function enrichSample(sample) {
   }
 }
 
+// ── LLM judge ────────────────────────────────────────────────────────────────
+// Judge sees only source + wiki (no diff/outcome) to make an independent call.
+
+function judgeCurrent() {
+  const s = samples[current];
+  if (judging.has(s.id)) return;
+  if (!anthropicKey) { promptApiKey(); return; }
+  judgeSample(s);
+}
+
+async function judgeSample(sample) {
+  judging.add(sample.id);
+  render();
+
+  const labelList = LABELS.map(l => `"${l.value}"`).join(", ");
+  const userMsg = [
+    `<source_document>\n${(sample.source_content || "").slice(0, 6000)}\n</source_document>`,
+    `<wiki_page>\n${(sample.wiki_body_before || "").slice(0, 6000)}\n</wiki_page>`,
+    `\nGiven the source document and the wiki page above, decide what the correct reconciler action should be.\n\n` +
+    `Wiki pages are intentionally scoped and concise. An update is only justified when the source contains information ` +
+    `that clearly fits within the wiki page's existing purpose and level of detail — not simply because the source is ` +
+    `topically related or contains more detail on something the wiki already covers. Avoid committing updates that would ` +
+    `add excessive detail, transform the character of the page, or duplicate content the wiki already addresses adequately.\n\n` +
+    `Labels: ${labelList}\n\n` +
+    `- committed_critical: source contains a key fact, correction, or addition that clearly belongs in this wiki page and is missing\n` +
+    `- committed_moderate: source adds a concrete, focused piece of information that fits the page's scope\n` +
+    `- committed_nit: source only justifies a very minor or cosmetic touch\n` +
+    `- no_change_covered: wiki already covers the topic adequately — no new information in the source\n` +
+    `- no_change_extra: source has additional detail but it exceeds the page's intended scope or level of detail\n` +
+    `- irrelevant: the source document is not relevant to this wiki page\n\n` +
+    `When in doubt between committing and no_change, prefer no_change_extra.\n\n` +
+    `Respond with JSON only: {"label":"<one of the labels>","reasoning":"<1-2 sentences>"}`,
+  ].join("\n\n");
+
+  let errorMsg = null;
+  try {
+    const resp = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "x-api-key": anthropicKey,
+        "anthropic-version": "2023-06-01",
+        "anthropic-dangerous-direct-browser-access": "true",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "claude-opus-4-7",
+        max_tokens: 256,
+        system: "You are an expert technical editor evaluating whether a wiki page should be updated based on a source document. Wiki pages are scoped and concise — more detail is not always better. Reply only with the requested JSON.",
+        messages: [{ role: "user", content: userMsg }],
+      }),
+    });
+    const data = await resp.json();
+    if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
+    let text = data.content?.[0]?.text?.trim() || "";
+    if (text.startsWith("```")) text = text.replace(/^```[^\n]*\n/, "").replace(/\n```[\s\S]*$/, "").trim();
+    const parsed = JSON.parse(text);
+    if (!LABELS.find(l => l.value === parsed.label))
+      throw new Error(`Unknown label from judge: "${parsed.label}"`);
+    const idx = samples.findIndex(s => s.id === sample.id);
+    if (idx !== -1) {
+      samples[idx].judge_label     = parsed.label;
+      samples[idx].judge_reasoning = parsed.reasoning;
+      // Propagate to samples with same source + wiki (don't overwrite existing)
+      samples.forEach((s, i) => {
+        if (i === idx || s.judge_label) return;
+        if (s.source_content === sample.source_content && s.wiki_body_before === sample.wiki_body_before)
+          Object.assign(s, { judge_label: parsed.label, judge_reasoning: parsed.reasoning });
+      });
+    }
+    await writeBack();
+  } catch (e) {
+    errorMsg = e.message || String(e);
+  } finally {
+    judging.delete(sample.id);
+    if (samples[current]?.id === sample.id) {
+      if (errorMsg) {
+        const box = document.getElementById("judge-box");
+        box.style.display = "";
+        box.innerHTML = `<strong style="color:#c00;">Judge error</strong>${esc(errorMsg)}`;
+      } else {
+        render();
+      }
+    }
+  }
+}
+
 // ── Wiki before with inline diff highlights ───────────────────────────────────
 
 function renderWikiBefore(el, wikiBody, diff) {
@@ -814,9 +964,13 @@ document.addEventListener("keydown", e => {
   if (e.target.tagName === "TEXTAREA" || e.target.tagName === "INPUT") return;
   if (e.key === "ArrowLeft")  navigate(-1);
   if (e.key === "ArrowRight") navigate(1);
-  if (e.key === "1") selectLabel("committed");
-  if (e.key === "2") selectLabel("no_change");
-  if (e.key === "3") selectLabel("irrelevant");
+  if (e.key === "j") judgeCurrent();
+  if (e.key === "1") selectLabel("committed_critical");
+  if (e.key === "2") selectLabel("committed_moderate");
+  if (e.key === "3") selectLabel("committed_nit");
+  if (e.key === "4") selectLabel("no_change_covered");
+  if (e.key === "5") selectLabel("no_change_extra");
+  if (e.key === "6") selectLabel("irrelevant");
   if (e.key === "Enter") saveLabel();
 });
 </script>
