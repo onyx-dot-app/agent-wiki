@@ -343,7 +343,7 @@ if(__exports != exports)module.exports = exports;return module.exports}));
 </div>
 
 <!-- API key modal -->
-<div id="api-modal" style="display:none;position:fixed;inset:0;background:rgba(15,15,15,0.45);z-index:100;display:none;align-items:center;justify-content:center;">
+<div id="api-modal" style="display:none;position:fixed;inset:0;background:rgba(15,15,15,0.45);z-index:100;align-items:center;justify-content:center;">
   <div style="background:#fff;border-radius:12px;padding:28px;width:360px;box-shadow:0 8px 40px rgba(0,0,0,0.18);">
     <h3 style="font-size:15px;font-weight:600;margin-bottom:8px;">Anthropic API key</h3>
     <p style="font-size:12px;color:#888;margin-bottom:16px;">Used for AI summaries. Kept in memory only — cleared when you close the tab.</p>
@@ -475,7 +475,7 @@ async function pickFile() {
 function initSamples(text) {
   const lines = text.trim().split("\n").filter(l => l.trim());
   samples = lines.map(l => JSON.parse(l));
-  document.getElementById("api-key-btn").style.display = anthropicKey ? "none" : "";
+  document.getElementById("api-key-btn").style.display = "";
   current = 0;
   document.getElementById("load-screen").style.display = "none";
   document.getElementById("labeler").style.display = "flex";
@@ -630,7 +630,10 @@ function renderSummary(id, label, text, loading) {
   el.innerHTML = `<strong>${label}</strong>${esc(text)}`;
 }
 
-// ── LLM enrichment ────────────────────────────────────────────────────────────
+// ── LLM enrichment ───────────────────────────────────────────────────────────
+// This file runs entirely in the browser (file:// or static serve), so it
+// cannot go through the backend LLM client. The direct Anthropic fetch here
+// is intentional and scoped to this offline eval tool only.
 
 function summarizeCurrent() {
   const s = samples[current];
@@ -792,7 +795,7 @@ function closeApiModal(save) {
   document.getElementById("api-modal").style.display = "none";
   if (!save) return;
   anthropicKey = document.getElementById("api-modal-input").value.trim();
-  document.getElementById("api-key-btn").style.display = anthropicKey ? "none" : "";
+  document.getElementById("api-key-btn").textContent = anthropicKey ? "⚙ Change API key" : "⚙ Set API key";
   if (samples.length) render();
 }
 
