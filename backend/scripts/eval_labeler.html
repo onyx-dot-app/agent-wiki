@@ -627,9 +627,8 @@ function render() {
     `${labeled} / ${samples.length} labeled  |  ${outcomeStats}`;
 
   const mismatches = samples.filter(x => x.judge_label && x.label && x.judge_label !== x.label).length;
-  const judged     = samples.filter(x => x.judge_label && x.label).length;
   document.getElementById("mismatch-count").textContent =
-    judged ? `${mismatches} / ${judged} mismatch` : "";
+    labeled ? `${mismatches} / ${labeled} mismatch` : "";
 
   const outcome = s.outcome || "";
   document.getElementById("source-title").textContent = s.source_title || "";
