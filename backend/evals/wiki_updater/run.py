@@ -3,10 +3,13 @@
     cd backend
     uv run python -m evals.wiki_updater.run \\
         --cases evals/datasets/wiki_updater/cases.jsonl \\
-        --models claude-sonnet-4-6,claude-opus-4-7,gpt-5,gemini-2.5-pro
+        --models claude-sonnet-4-6,gpt-5
 
-See ``backend/evals/README.md`` for the full flag set and how the
-provider/model selection works.
+The dataset is mixed: each case is either ``process_instruction``
+(MCP write path) or ``reconcile_document`` (ingest write path via
+``batch_reconcile``). The runner produces one summary table + one
+Braintrust experiment per surface so trigger trinaries stay comparable
+across nightly runs.
 """
 
 from __future__ import annotations
@@ -17,7 +20,6 @@ import logging
 import sys
 import time
 from pathlib import Path
-from typing import ContextManager, Iterator
 
 from app.db.fts import SearchHit
 from app.ingest.models import WikiUpdateCandidate
@@ -25,12 +27,10 @@ from app.llm.agents.common import IRRELEVANT_SENTINEL
 from app.llm.agents.ingest_batch_reconciler import batch_reconcile
 from app.llm.agents.nl_updater import process_instruction
 from app.utils.logging import setup_logging
-from evals._metadata import git_sha_for, new_eval_run_id, utc_iso_now
 
-from evals import reporting, scorers
+from evals import _cli, reporting, scorers
 from evals._dry_run import stub_completions
-from evals._llm_override import configured_models, use_model
-from evals.schema import CaseResult, ScorerOutcome, TriggerClass, WikiUpdaterCase
+from evals.schema import ScorerOutcome, Surface, TriggerClass, WikiUpdaterCase
 
 
 log = logging.getLogger(__name__)
@@ -59,10 +59,10 @@ def _load_cases(path: Path, *, case_id: str | None, limit: int | None) -> list[W
 def _classify(surface: str, raw: str | None) -> TriggerClass:
     """Map an agent return value to a trigger class.
 
-    Both ``process_instruction`` and ``reconcile_document`` return ``None``
-    for NO_CHANGE. Only ``reconcile_document`` can return the IRRELEVANT
-    sentinel — for the MCP surface, an IRRELEVANT-looking response is
-    actually a CHANGE because the agent doesn't model that decision.
+    Both surfaces return ``None`` for NO_CHANGE; only ``reconcile_document``
+    can return the IRRELEVANT sentinel — for MCP, an IRRELEVANT-looking
+    return is actually CHANGE because the agent doesn't model that
+    decision.
     """
     if raw is None:
         return TriggerClass.NO_CHANGE
@@ -72,12 +72,7 @@ def _classify(surface: str, raw: str | None) -> TriggerClass:
 
 
 def _invoke_agent(case: WikiUpdaterCase, *, model: str) -> tuple[str | None, str]:
-    """Drive the right agent function for ``case``.
-
-    Returns ``(raw_return, normalized_raw_text)``. The second value is what
-    gets stored in ``CaseResult.raw_output`` — same content but always a
-    string (None → "<NO_CHANGE>", IRRELEVANT sentinel → "<IRRELEVANT>").
-    """
+    """Drive the right agent function. Returns ``(raw, normalized_raw_text)``."""
     if case.surface == "process_instruction":
         payload = case.payload or {}
         raw = process_instruction(
@@ -87,9 +82,6 @@ def _invoke_agent(case: WikiUpdaterCase, *, model: str) -> tuple[str | None, str
             source=case.source,
         )
     else:
-        # The production reconcile path is now batch — pass a 1-candidate batch
-        # and pull the single result back out so this surface still tests one
-        # case per call.
         candidate = WikiUpdateCandidate(
             hit=SearchHit(
                 doc_id=case.wiki_path,
@@ -142,94 +134,36 @@ def _score_case(
     return out
 
 
-def _run_one_model(
-    cases: list[WikiUpdaterCase],
-    *,
-    provider: str,
-    model: str,
+def _make_run_one(
     judge_models: tuple[str, ...] | None,
-    runs: int,
-    metadata: dict[str, str],
-) -> Iterator[CaseResult]:
-    judge_list = list(judge_models) if judge_models else []
-    for case in cases:
-        for run_index in range(runs):
-            start = time.monotonic()
-            error = ""
-            raw: str | None = None
-            normalized_raw = ""
-            try:
-                raw, normalized_raw = _invoke_agent(case, model=model)
-            except Exception as exc:
-                error = repr(exc)
-                log.warning("case %s run %d failed against %s: %s", case.id, run_index, model, exc)
-            actual = _classify(case.surface, raw)
-            score_rows = _score_case(case, raw=raw, actual=actual, judge_models=judge_models)
-            yield CaseResult(
-                case_id=case.id,
-                surface=case.surface,  # type: ignore[arg-type]
-                provider=provider,
-                model=model,
-                run_index=run_index,
-                expected_class=case.expected_class.value,
-                actual_class=actual.value,
-                raw_output=normalized_raw,
-                scorers=score_rows,
-                error=error,
-                latency_ms=int((time.monotonic() - start) * 1000),
-                eval_run_id=metadata["eval_run_id"],
-                run_timestamp=metadata["run_timestamp"],
-                harness_git_sha=metadata["harness_git_sha"],
-                dataset_git_sha=metadata["dataset_git_sha"],
-                judge_models=judge_list,
-            )
+) -> _cli.RunOne[WikiUpdaterCase]:
+    def _run_one(
+        case: WikiUpdaterCase, provider: str, model: str, run_index: int
+    ) -> tuple[Surface, str, str, str, list[ScorerOutcome]]:
+        del provider, run_index
+        raw, normalized = _invoke_agent(case, model=model)
+        actual = _classify(case.surface, raw)
+        rows = _score_case(case, raw=raw, actual=actual, judge_models=judge_models)
+        return (
+            case.surface,
+            case.expected_class.value,
+            actual.value,
+            normalized,
+            rows,
+        )
 
-
-def _resolve_context(
-    provider: str, model: str, dry_run: bool, cases: list[WikiUpdaterCase]
-) -> ContextManager[None]:
-    if dry_run:
-        return stub_completions(cases)
-    return use_model(provider, model)
+    return _run_one
 
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Run the wiki_updater eval.")
     p.add_argument("--cases", type=Path, required=True, help="Path to cases.jsonl")
     p.add_argument(
-        "--models",
-        default="claude-sonnet-4-6",
-        help="Comma-separated model ids (provider is inferred from prefix)",
-    )
-    p.add_argument(
-        "--out",
-        type=Path,
-        default=None,
-        help="JSONL output path. Default: runs/wiki_updater_<unix>.jsonl",
-    )
-    p.add_argument(
         "--judge-models",
         default=",".join(scorers.DEFAULT_JUDGE_PANEL),
-        help="Comma-separated judge model panel. Each fact verdict is majority-voted across panel members; each judge's rationale is captured. Default: three-family panel.",
+        help="Comma-separated judge model panel for facts_present/preserved.",
     )
-    p.add_argument(
-        "--braintrust",
-        default=None,
-        help="If set, also push results to this Braintrust experiment name.",
-    )
-    p.add_argument("--dry-run", action="store_true", help="Use the stub LLM (no API keys needed)")
-    p.add_argument("--runs", type=int, default=3, help="Trials per (case, model) for variance")
-    p.add_argument("--limit", type=int, default=None, help="Run only the first N cases")
-    p.add_argument(
-        "--case-id",
-        default=None,
-        help="Run only the case with this id (for debugging a single row)",
-    )
-    p.add_argument(
-        "--log-level",
-        default="INFO",
-        help="Logging level (DEBUG/INFO/WARNING)",
-    )
+    _cli.add_common_args(p, default_models="claude-sonnet-4-6")
     return p.parse_args(argv)
 
 
@@ -237,53 +171,37 @@ def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv or sys.argv[1:])
     setup_logging(args.log_level)
     cases = _load_cases(args.cases, case_id=args.case_id, limit=args.limit)
-    requested_models = [m.strip() for m in args.models.split(",") if m.strip()]
-
-    if args.dry_run:
-        runnable = [("stub", m) for m in requested_models]
-        skipped: list[str] = []
-    else:
-        runnable = configured_models(requested_models)
-        runnable_set = {m for _, m in runnable}
-        skipped = [m for m in requested_models if m not in runnable_set]
-        for s in skipped:
-            log.warning("skipping model %s — no provider/key configured", s)
-
+    runnable, skipped = _cli.resolve_runnable(args.models, dry_run=args.dry_run)
     if not runnable:
         log.error("no runnable models — set EVAL_*_API_KEY or pass --dry-run")
         return 2
+    metadata = _cli.build_metadata(Path(__file__), args.cases)
+    judge_panel = tuple(j.strip() for j in args.judge_models.split(",") if j.strip())
 
-    metadata = {
-        "eval_run_id": new_eval_run_id(),
-        "run_timestamp": utc_iso_now(),
-        "harness_git_sha": git_sha_for(Path(__file__)),
-        "dataset_git_sha": git_sha_for(args.cases),
-    }
-    all_results: list[CaseResult] = []
-    for provider, model in runnable:
-        log.info("running %d cases against %s/%s", len(cases), provider, model)
-        ctx = _resolve_context(provider, model, args.dry_run, cases)
-        with ctx:
-            judge_panel = tuple(j.strip() for j in args.judge_models.split(",") if j.strip())
-            for r in _run_one_model(
-                cases,
-                provider=provider,
-                model=model,
-                judge_models=judge_panel,
-                runs=args.runs,
-                metadata=metadata,
-            ):
-                all_results.append(r)
+    log.info(
+        "running %d cases × %d models × %d runs (concurrency=%d)",
+        len(cases),
+        len(runnable),
+        args.runs,
+        args.concurrency,
+    )
+    results = _cli.run_concurrent(
+        cases,
+        runnable=runnable,
+        runs=args.runs,
+        run_one=_make_run_one(judge_panel),
+        case_id=lambda c: c.id,
+        metadata=metadata,
+        judge_models=list(judge_panel),
+        concurrency=args.concurrency,
+        dry_run_ctx=stub_completions(cases) if args.dry_run else None,
+    )
 
     out_path = args.out or Path("runs") / ("wiki_updater_%d.jsonl" % int(time.time()))
-    reporting.write_jsonl(out_path, all_results)
-    # One table + one BT experiment per surface — the dataset mixes
-    # process_instruction and reconcile_document and they have different
-    # trigger classes, so per-surface aggregation keeps the scorer table
-    # comparable across nightly runs.
+    reporting.write_jsonl(out_path, results)
     surface_urls: dict[str, str] = {}
-    for surface in sorted({r.surface for r in all_results}):
-        subset = [r for r in all_results if r.surface == surface]
+    for surface in sorted({r.surface for r in results}):
+        subset = [r for r in results if r.surface == surface]
         sub_summary = reporting.summarize(subset, surface=surface)  # type: ignore[arg-type]
         reporting.print_summary(sub_summary)
         bt_url = ""
@@ -297,7 +215,7 @@ def main(argv: list[str] | None = None) -> int:
             {
                 "out": str(out_path),
                 "skipped_models": skipped,
-                "models": sorted({r.model for r in all_results}),
+                "models": sorted({r.model for r in results}),
                 "braintrust_urls": surface_urls,
             }
         )

@@ -17,10 +17,10 @@ import json
 import logging
 import sys
 import time
-from collections.abc import Generator, Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, ContextManager
+from typing import Any
 
 from app.db.fts import SearchHit
 from app.ingest.models import WikiUpdateCandidate
@@ -28,11 +28,9 @@ from app.llm import client as llm_client
 from app.llm.agents.ingest_selector import select_candidates
 from app.llm.client import CompletionResult
 from app.utils.logging import setup_logging
-from evals._metadata import git_sha_for, new_eval_run_id, utc_iso_now
 
-from evals import reporting, scorers
-from evals._llm_override import configured_models, use_model
-from evals.schema import CaseResult, IngestSelectorCase
+from evals import _cli, reporting, scorers
+from evals.schema import IngestSelectorCase, ScorerOutcome, Surface
 
 
 log = logging.getLogger(__name__)
@@ -74,17 +72,6 @@ def _to_wiki_update_candidates(case: IngestSelectorCase) -> list[WikiUpdateCandi
     ]
 
 
-def _invoke_selector(case: IngestSelectorCase, *, model: str) -> list[str]:
-    candidates = _to_wiki_update_candidates(case)
-    kept = select_candidates(
-        title=case.doc_title,
-        content=case.doc_content,
-        candidates=candidates,
-        model=model,
-    )
-    return [k.hit.path for k in kept]
-
-
 @contextmanager
 def _stub_selector(cases: list[IngestSelectorCase]) -> Generator[None]:
     """Patch ``client.complete`` to return the labeled relevant set as a JSON list.
@@ -117,10 +104,8 @@ def _stub_selector(cases: list[IngestSelectorCase]) -> Generator[None]:
     ) -> CompletionResult:
         del model, tools, max_tokens
         user_text = "\n".join(m.get("content", "") for m in messages if m.get("role") == "user")
-        # Find the case whose candidate paths all appear in the prompt. When
-        # multiple cases qualify (sel-03's paths are a subset of sel-05's,
-        # for example), prefer the one with the most candidates so subset
-        # collisions don't route the wrong response.
+        # Multi-match: pick the case with the most candidate paths in the
+        # prompt so subset-overlaps (sel-03 paths ⊂ sel-05) route correctly.
         matched: IngestSelectorCase | None = None
         best_size = -1
         for paths, case in case_meta:
@@ -129,9 +114,6 @@ def _stub_selector(cases: list[IngestSelectorCase]) -> Generator[None]:
                 best_size = len(paths)
         if matched is None:
             return CompletionResult(text="[]")
-        # Reconstruct batch order from the prompt text — find paths in
-        # the order they appear, then emit 1-indexed positions of those
-        # that are in expected_kept_paths.
         order = sorted(
             (user_text.index(c.path), c.path) for c in matched.candidates if c.path in user_text
         )
@@ -147,71 +129,32 @@ def _stub_selector(cases: list[IngestSelectorCase]) -> Generator[None]:
         llm_client.complete = original  # type: ignore[assignment]
 
 
-def _run_one_model(
-    cases: list[IngestSelectorCase],
-    *,
-    provider: str,
-    model: str,
-    runs: int,
-    metadata: dict[str, str],
-) -> Iterator[CaseResult]:
-    for case in cases:
-        for run_index in range(runs):
-            start = time.monotonic()
-            error = ""
-            kept_paths: list[str] = []
-            try:
-                kept_paths = _invoke_selector(case, model=model)
-            except Exception as exc:
-                error = repr(exc)
-                log.warning(
-                    "selector case %s run %d failed against %s: %s",
-                    case.id,
-                    run_index,
-                    model,
-                    exc,
-                )
-            precision, recall, f1 = scorers.selector_set_metrics(
-                case.expected_kept_paths, kept_paths
-            )
-            yield CaseResult(
-                case_id=case.id,
-                surface="ingest_selector",
-                provider=provider,
-                model=model,
-                run_index=run_index,
-                expected_class=",".join(sorted(case.expected_kept_paths)) or "<none>",
-                actual_class=",".join(sorted(kept_paths)) or "<none>",
-                raw_output=json.dumps(kept_paths),
-                scorers=[precision, recall, f1],
-                error=error,
-                latency_ms=int((time.monotonic() - start) * 1000),
-                eval_run_id=metadata["eval_run_id"],
-                run_timestamp=metadata["run_timestamp"],
-                harness_git_sha=metadata["harness_git_sha"],
-                dataset_git_sha=metadata["dataset_git_sha"],
-            )
-
-
-def _resolve_context(
-    provider: str, model: str, dry_run: bool, cases: list[IngestSelectorCase]
-) -> ContextManager[None]:
-    if dry_run:
-        return _stub_selector(cases)
-    return use_model(provider, model)
+def _run_one(
+    case: IngestSelectorCase, provider: str, model: str, run_index: int
+) -> tuple[Surface, str, str, str, list[ScorerOutcome]]:
+    del provider, run_index
+    candidates = _to_wiki_update_candidates(case)
+    kept = select_candidates(
+        title=case.doc_title,
+        content=case.doc_content,
+        candidates=candidates,
+        model=model,
+    )
+    kept_paths = [k.hit.path for k in kept]
+    p, r, f1 = scorers.selector_set_metrics(case.expected_kept_paths, kept_paths)
+    return (
+        "ingest_selector",
+        ",".join(sorted(case.expected_kept_paths)) or "<none>",
+        ",".join(sorted(kept_paths)) or "<none>",
+        json.dumps(kept_paths),
+        [p, r, f1],
+    )
 
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Run the ingest_selector eval.")
     p.add_argument("--cases", type=Path, required=True)
-    p.add_argument("--models", default="claude-haiku-4-5")
-    p.add_argument("--out", type=Path, default=None)
-    p.add_argument("--braintrust", default=None)
-    p.add_argument("--dry-run", action="store_true")
-    p.add_argument("--runs", type=int, default=3, help="Trials per (case, model) for variance")
-    p.add_argument("--limit", type=int, default=None)
-    p.add_argument("--case-id", default=None)
-    p.add_argument("--log-level", default="INFO")
+    _cli.add_common_args(p, default_models="claude-haiku-4-5,gpt-5-mini")
     return p.parse_args(argv)
 
 
@@ -219,49 +162,38 @@ def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv or sys.argv[1:])
     setup_logging(args.log_level)
     cases = _load_cases(args.cases, case_id=args.case_id, limit=args.limit)
-    requested_models = [m.strip() for m in args.models.split(",") if m.strip()]
-
-    if args.dry_run:
-        runnable = [("stub", m) for m in requested_models]
-        skipped: list[str] = []
-    else:
-        runnable = configured_models(requested_models)
-        runnable_set = {m for _, m in runnable}
-        skipped = [m for m in requested_models if m not in runnable_set]
-        for s in skipped:
-            log.warning("skipping model %s — no provider/key configured", s)
-
+    runnable, skipped = _cli.resolve_runnable(args.models, dry_run=args.dry_run)
     if not runnable:
         log.error("no runnable models — set EVAL_*_API_KEY or pass --dry-run")
         return 2
+    metadata = _cli.build_metadata(Path(__file__), args.cases)
 
-    metadata = {
-        "eval_run_id": new_eval_run_id(),
-        "run_timestamp": utc_iso_now(),
-        "harness_git_sha": git_sha_for(Path(__file__)),
-        "dataset_git_sha": git_sha_for(args.cases),
-    }
-    all_results: list[CaseResult] = []
-    for provider, model in runnable:
-        log.info("running %d selector cases against %s/%s", len(cases), provider, model)
-        ctx = _resolve_context(provider, model, args.dry_run, cases)
-        with ctx:
-            for r in _run_one_model(
-                cases,
-                provider=provider,
-                model=model,
-                runs=args.runs,
-                metadata=metadata,
-            ):
-                all_results.append(r)
+    log.info(
+        "running %d cases × %d models × %d runs (concurrency=%d)",
+        len(cases),
+        len(runnable),
+        args.runs,
+        args.concurrency,
+    )
+    results = _cli.run_concurrent(
+        cases,
+        runnable=runnable,
+        runs=args.runs,
+        run_one=_run_one,
+        case_id=lambda c: c.id,
+        metadata=metadata,
+        judge_models=[],
+        concurrency=args.concurrency,
+        dry_run_ctx=_stub_selector(cases) if args.dry_run else None,
+    )
 
     out_path = args.out or Path("runs") / ("ingest_selector_%d.jsonl" % int(time.time()))
-    reporting.write_jsonl(out_path, all_results)
-    summary = reporting.summarize(all_results, surface="ingest_selector")
+    reporting.write_jsonl(out_path, results)
+    summary = reporting.summarize(results, surface="ingest_selector")
     reporting.print_summary(summary)
     bt_url = ""
     if args.braintrust:
-        bt_url = reporting.push_to_braintrust(args.braintrust, all_results)
+        bt_url = reporting.push_to_braintrust(args.braintrust, results)
     reporting.write_github_summary(summary, braintrust_url=bt_url)
     print(json.dumps({"out": str(out_path), "skipped_models": skipped, "braintrust_url": bt_url}))
     return 0

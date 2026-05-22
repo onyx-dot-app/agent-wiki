@@ -170,14 +170,16 @@ def summarize(results: list[CaseResult], surface: Surface) -> RunSummary:
     )
 
 
-def print_summary(summary: RunSummary, *, stream: IO[str] = sys.stdout) -> None:
+def _render_markdown_table(summary: RunSummary) -> list[str]:
+    """Render a per-model scorer table as a list of markdown lines.
+
+    Shared between stdout printing and the GitHub-step-summary writer so
+    one truth shapes the row formatting (mean + bootstrap CI).
+    """
     scorer_names = sorted({s.name for ss in summary.per_model.values() for s in ss})
-    print(
-        f"\nsurface={summary.surface} cases={summary.case_count} runs/case={summary.runs_per_case}\n",
-        file=stream,
-    )
-    print("| model | " + " | ".join(scorer_names) + " |", file=stream)
-    print("| -- | " + " | ".join("--" for _ in scorer_names) + " |", file=stream)
+    lines: list[str] = []
+    lines.append("| model | " + " | ".join(scorer_names) + " |")
+    lines.append("| -- | " + " | ".join("--" for _ in scorer_names) + " |")
     for model in summary.models:
         by_name = {s.name: s for s in summary.per_model[model]}
         cells: list[str] = []
@@ -186,8 +188,19 @@ def print_summary(summary: RunSummary, *, stream: IO[str] = sys.stdout) -> None:
             if s is None:
                 cells.append("-")
             else:
-                cells.append(f"{s.mean:.2f} [{s.ci_low:.2f}, {s.ci_high:.2f}]")
-        print(f"| {model} | " + " | ".join(cells) + " |", file=stream)
+                cells.append("%.2f [%.2f, %.2f]" % (s.mean, s.ci_low, s.ci_high))
+        lines.append("| %s | %s |" % (model, " | ".join(cells)))
+    return lines
+
+
+def print_summary(summary: RunSummary, *, stream: IO[str] = sys.stdout) -> None:
+    print(
+        "\nsurface=%s cases=%d runs/case=%d\n"
+        % (summary.surface, summary.case_count, summary.runs_per_case),
+        file=stream,
+    )
+    for line in _render_markdown_table(summary):
+        print(line, file=stream)
     print("", file=stream)
 
 
@@ -227,12 +240,15 @@ def push_to_braintrust(
         api_key=api_key,
         rows=rows,
     )
-    org = os.environ.get("BRAINTRUST_ORG", "Onyx 2")
-    url = "https://www.braintrust.dev/app/%s/p/%s/experiments/%s" % (
-        org.replace(" ", "%20"),
-        project_name,
-        experiment,
-    )
+    org = os.environ.get("BRAINTRUST_ORG", "")
+    if org:
+        url = "https://www.braintrust.dev/app/%s/p/%s/experiments/%s" % (
+            org.replace(" ", "%20"),
+            project_name,
+            experiment,
+        )
+    else:
+        url = ""
     log.info(
         "braintrust: pushed %d/%d results to project=%s experiment=%s url=%s",
         pushed,
@@ -268,19 +284,7 @@ def write_github_summary(
         lines.append("")
         lines.append("[Braintrust experiment ↗](%s)" % braintrust_url)
     lines.append("")
-    scorer_names = sorted({s.name for ss in summary.per_model.values() for s in ss})
-    lines.append("| model | " + " | ".join(scorer_names) + " |")
-    lines.append("| -- | " + " | ".join("--" for _ in scorer_names) + " |")
-    for model in summary.models:
-        by_name = {s.name: s for s in summary.per_model[model]}
-        cells: list[str] = []
-        for sn in scorer_names:
-            s = by_name.get(sn)
-            if s is None:
-                cells.append("-")
-            else:
-                cells.append("%.2f [%.2f, %.2f]" % (s.mean, s.ci_low, s.ci_high))
-        lines.append("| %s | " % model + " | ".join(cells) + " |")
+    lines.extend(_render_markdown_table(summary))
     lines.append("")
     with open(path, "a", encoding="utf-8") as fh:
         fh.write("\n".join(lines) + "\n")

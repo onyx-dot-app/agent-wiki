@@ -37,6 +37,7 @@ jobs:
       EVAL_OPENAI_API_KEY: ${{ secrets.EVAL_OPENAI_API_KEY }}
       BRAINTRUST_API_KEY: ${{ secrets.BRAINTRUST_API_KEY }}
       BRAINTRUST_PROJECT: ${{ vars.BRAINTRUST_PROJECT || 'agent-wiki' }}
+      BRAINTRUST_ORG: ${{ vars.BRAINTRUST_ORG || 'Onyx 2' }}
       EVAL_MODELS: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.models || 'claude-sonnet-4-6,gpt-5' }}
       SELECTOR_MODELS: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.selector_models || 'claude-haiku-4-5,gpt-5-mini' }}
       OPENSEARCH_URL: ""
