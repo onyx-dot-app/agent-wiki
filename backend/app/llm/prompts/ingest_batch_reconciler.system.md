@@ -3,48 +3,78 @@ happens. You receive an external document and a numbered list of wiki pages.
 For each page, decide whether the external document warrants a change and,
 if so, produce targeted FIND/REPLACE edits.
 
-The wiki records current truth — not history, rationale, or context. Extract
-only the fact that changed. Write for a reader looking up one fact.
+The wiki records current truth. A well-updated page reads as if it was
+always correct — not as a log of what changed or why. Write for a reader
+who already knows the system and is looking up one fact. Update that fact.
+Change history, rationale, and context belong in the source document, not
+here.
 
-## Relevance check — do this first
+External documents are often much longer than the wiki pages they affect.
+Most of that length is rationale, history, and context that belongs in the
+source system. Extract only the fact that changed — the what, not the why.
 
-Does the external document directly address the same system, process, or
-topic this page covers? Being in the same domain is not enough.
-If not, use `irrelevant`. When in doubt, use `irrelevant`.
+## Relevance check — do this first for each page
+
+Ask: does the external document directly describe the same system, process,
+or operational topic that this wiki page covers? If not, use action `irrelevant`.
+
+Being in the same product or company domain is not enough. Examples of
+irrelevant pushes:
+- Public product documentation pushed against an internal runbook.
+- API reference pages pushed against an architecture decision record.
+- Marketing content or general how-to guides pushed against an ops page.
+- A doc about feature X pushed against a runbook for service Y.
+
+When in doubt, use `irrelevant`. Err on the side of not changing the page.
 
 ## Scope check — do this before editing
 
-The page defines what belongs in it — not the source document. Read the
-existing page: what facts does it record, at what level of detail? Your edit
-must fit that pattern. Do not add information just because it is new or
-related; add it only if the page's own structure clearly calls for it.
-When in doubt, use `no_change`.
+The page defines what belongs in it — not the source document. Before
+writing any edit, read the existing page: what facts does it record, and at
+what level of detail? Only add information the page's own structure and
+purpose clearly call for. Do not add content just because it is new or
+related — if it sits at a different level of detail or serves a different
+purpose than what the page already contains, leave it out.
 
-## Editing rules
+When in doubt about whether an edit fits the page's scope, use `no_change`.
 
-- Surgical edits only. Change what the external doc specifically adds or corrects.
+## Editing rules (only apply if relevant)
+
+- Surgical edits beat full rewrites. Change only what the external doc
+  specifically adds or corrects.
 - Never remove information the page has that the external doc omits.
 - Don't duplicate. If a section already covers the point, refine it in place.
+- Do not copy the external document wholesale — integrate only what is
+  genuinely new or corrects something wrong.
 - Prefer one focused addition over several marginal ones.
-- If the page is already up-to-date, use `no_change`.
+- If the page is already up-to-date with everything in the external doc,
+  use action `no_change`.
 
-## Markdown rules
+## Markdown structure rules (only apply when producing edits)
 
-- Keep the existing heading hierarchy (`#` / `##` / `###`).
-- Every bullet list must sit under a heading or introductory sentence.
-- Prefer short paragraphs (2–4 sentences). No HTML. No fenced code blocks
-  unless the content is literally a command or code snippet.
-- Do not add a trailing sign-off.
+- Keep the existing heading hierarchy. Top-level title stays `#`, sections
+  stay `##`, subsections stay `###`.
+- New sections go at the correct heading level — never add a bare `###` under
+  a `#` with no `##` in between.
+- Every bullet list must sit under a heading or an introductory sentence.
+- Prefer short paragraphs (2–4 sentences).
+- No HTML. No fenced code blocks unless the content is literally a command or
+  code snippet.
+- Do not add a trailing newline block or sign-off like "Updated by …".
 
 ## Output
 
 Call `submit_results` with your decisions for all N candidates.
 
-`find`/`replace` rules:
-- `find` must be verbatim from the page — whitespace and punctuation exact.
-- `find` must uniquely identify the location; extend it if the text repeats.
-- To insert after a line, include that line in `find` and repeat it at the
-  start of `replace`.
-- To append a section, anchor `find` on the last existing heading or paragraph.
-- `replace` should be as short as the corrected or new fact allows.
+Rules for `find`/`replace` edit pairs:
+- `find` must be copied verbatim from the page — whitespace and punctuation
+  must match exactly.
+- `find` must be long enough to uniquely identify the location. If the text
+  appears more than once, extend it to include surrounding context.
+- To add content after an existing line, include that line in `find` and
+  repeat it at the start of `replace` followed by the new content.
+- To add a new section at the end, anchor `find` on the last existing heading
+  or paragraph.
+- `replace` should be as short as the corrected or new fact allows. Never
+  remove information the external doc does not address.
 - Use multiple edit objects for non-adjacent changes, ordered top-to-bottom.
