@@ -17,9 +17,13 @@ on:
   workflow_dispatch:
     inputs:
       models:
-        description: "Comma-separated model ids"
+        description: "Comma-separated model ids (wiki_updater + external_agent surfaces)"
         required: false
-        default: "claude-sonnet-4-6,claude-opus-4-7,gpt-5,gemini-2.5-pro"
+        default: "claude-sonnet-4-6,gpt-5"
+      selector_models:
+        description: "Comma-separated model ids (cheap pre-filter surface)"
+        required: false
+        default: "claude-haiku-4-5,gpt-5-mini"
 
 jobs:
   live:
@@ -31,10 +35,10 @@ jobs:
     env:
       EVAL_ANTHROPIC_API_KEY: ${{ secrets.EVAL_ANTHROPIC_API_KEY }}
       EVAL_OPENAI_API_KEY: ${{ secrets.EVAL_OPENAI_API_KEY }}
-      EVAL_GEMINI_API_KEY: ${{ secrets.EVAL_GEMINI_API_KEY }}
       BRAINTRUST_API_KEY: ${{ secrets.BRAINTRUST_API_KEY }}
       BRAINTRUST_PROJECT: ${{ vars.BRAINTRUST_PROJECT || 'agent-wiki' }}
-      EVAL_MODELS: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.models || 'claude-sonnet-4-6,claude-opus-4-7,gpt-5,gemini-2.5-pro' }}
+      EVAL_MODELS: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.models || 'claude-sonnet-4-6,gpt-5' }}
+      SELECTOR_MODELS: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.selector_models || 'claude-haiku-4-5,gpt-5-mini' }}
       OPENSEARCH_URL: ""
     steps:
       - uses: actions/checkout@v4
@@ -57,7 +61,7 @@ jobs:
         run: |
           uv run python -m evals.ingest_selector.run \
             --cases evals/datasets/ingest_selector/cases.jsonl \
-            --models "$EVAL_MODELS" \
+            --models "$SELECTOR_MODELS" \
             --braintrust "nightly-ingest-selector-$(date -u +%Y%m%d)" \
             --out runs/nightly_ingest_selector.jsonl
 
