@@ -28,8 +28,13 @@ DEFAULT_JUDGE_PANEL: tuple[str, ...] = (
 )
 
 
+# Substring stubs match against to recognize a judge prompt without
+# string-duplicating the full system prompt. If you rename or rephrase
+# the opening of `_JUDGE_SYSTEM`, update this too.
+JUDGE_SYSTEM_MARKER = "evaluation judge"
+
 _JUDGE_SYSTEM = (
-    "You are an evaluation judge. The user gives you a wiki page body and one "
+    "You are an " + JUDGE_SYSTEM_MARKER + ". The user gives you a wiki page body and one "
     "factual claim. Decide whether the claim is supported by the body. Reason "
     "in one short sentence first, then emit the structured verdict.\n\n"
     "Strictness: a claim that is only partially present or that requires "

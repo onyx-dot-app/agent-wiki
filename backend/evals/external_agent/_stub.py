@@ -19,6 +19,7 @@ from app.llm.agents.common import NO_CHANGE_SENTINEL
 from app.llm.client import CompletionResult
 
 from evals.external_agent.harness import Scenario
+from evals.scorers import JUDGE_SYSTEM_MARKER
 
 
 # How many leading chars of a doc body identify it inside the _complete
@@ -129,7 +130,7 @@ def stub_external_agent(scenarios: list[Scenario]) -> Generator[None]:
             if m.get("role") != "system":
                 continue
             content = m.get("content", "")
-            if isinstance(content, str) and "evaluation judge" in content:
+            if isinstance(content, str) and JUDGE_SYSTEM_MARKER in content:
                 return CompletionResult(text="VERDICT: YES | RATIONALE: stub")
         user_text = "\n".join(m.get("content", "") for m in messages if m.get("role") == "user")
         for s in scenarios:

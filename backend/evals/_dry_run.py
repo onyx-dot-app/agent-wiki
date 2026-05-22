@@ -31,9 +31,9 @@ from app.llm import client as llm_client
 from app.llm.client import CompletionResult, ToolCall
 
 from evals.schema import TriggerClass, WikiUpdaterCase
+from evals.scorers import JUDGE_SYSTEM_MARKER as _JUDGE_MARKER
 
 
-_JUDGE_MARKER = "evaluation judge"  # appears in scorers._JUDGE_SYSTEM
 # Substring length used as a fingerprint of ``current_body``. Long enough to
 # uniquely identify a case across the dataset, short enough that minor prompt
 # template changes don't break matching.
