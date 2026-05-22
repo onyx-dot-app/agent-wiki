@@ -72,7 +72,7 @@ jobs:
           test -s backend/static/installers/agentwiki-launcher-linux-arm64.tar.gz
           test -s backend/static/installers/AgentWikiLauncher-x86_64.AppImage
           ls backend/static/installers/agentwiki-launcher_*_amd64.deb
-          ls backend/static/installers/agentwiki-launcher-*-1.x86_64.rpm
+          ls backend/static/installers/agentwiki-launcher-*-1*.x86_64.rpm
           test -s backend/static/installers/agentwiki-launcher-windows-amd64.exe
           ls -lh backend/static/installers/
 

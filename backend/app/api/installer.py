@@ -50,7 +50,7 @@ _LINUX_BUNDLES: dict[str, tuple[str, str]] = {
     "arm64": ("agentwiki-launcher-linux-arm64.tar.gz", "application/gzip"),
 }
 _LINUX_DEB_GLOB = "agentwiki-launcher_*_amd64.deb"
-_LINUX_RPM_GLOB = "agentwiki-launcher-*-1.x86_64.rpm"
+_LINUX_RPM_GLOB = "agentwiki-launcher-*-1*.x86_64.rpm"
 
 _VERSION_PATTERN = re.compile(r"agentwiki-launcher[_-](?P<version>\d+\.\d+\.\d+)")
 

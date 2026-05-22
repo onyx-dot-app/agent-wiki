@@ -178,7 +178,7 @@ jobs:
             packages/agentwiki-launcher-go/dist/agentwiki-launcher-linux-*.tar.gz
             packages/agentwiki-launcher-go/dist/AgentWikiLauncher-x86_64.AppImage
             packages/agentwiki-launcher-go/dist/agentwiki-launcher_*_amd64.deb
-            packages/agentwiki-launcher-go/dist/agentwiki-launcher-*-1.x86_64.rpm
+            packages/agentwiki-launcher-go/dist/agentwiki-launcher-*-1*.x86_64.rpm
           if-no-files-found: error
           retention-days: 7
 
