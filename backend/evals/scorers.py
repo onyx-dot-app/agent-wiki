@@ -51,7 +51,7 @@ def trigger_class_match(expected: TriggerClass, actual: TriggerClass) -> ScorerO
         name="trigger_class_match",
         score=1.0 if ok else 0.0,
         passed=ok,
-        detail=f"expected={expected.value} actual={actual.value}",
+        detail="expected=%s actual=%s" % (expected.value, actual.value),
     )
 
 
@@ -64,7 +64,7 @@ def bloat_ratio(current_body: str, new_body: str, max_ratio: float = 2.0) -> Sco
             name="bloat_ratio",
             score=1.0,
             passed=True,
-            detail=f"ratio={ratio:.2f} max={max_ratio:.2f}",
+            detail="ratio=%.2f max=%.2f" % (ratio, max_ratio),
         )
     overshoot = ratio - max_ratio
     score = max(0.0, 1.0 - overshoot / (max_ratio * 2))
@@ -72,7 +72,7 @@ def bloat_ratio(current_body: str, new_body: str, max_ratio: float = 2.0) -> Sco
         name="bloat_ratio",
         score=score,
         passed=False,
-        detail=f"ratio={ratio:.2f} max={max_ratio:.2f} overshoot={overshoot:.2f}",
+        detail="ratio=%.2f max=%.2f overshoot=%.2f" % (ratio, max_ratio, overshoot),
     )
 
 
@@ -102,7 +102,7 @@ def markdown_valid(body: str) -> ScorerOutcome:
                     name="markdown_valid",
                     score=0.5,
                     passed=False,
-                    detail=f"heading jumped from h{prev_level} to h{level}",
+                    detail="heading jumped from h%d to h%d" % (prev_level, level),
                 )
             prev_level = level
 
@@ -131,7 +131,7 @@ def markdown_valid(body: str) -> ScorerOutcome:
                     name="markdown_valid",
                     score=0.3,
                     passed=False,
-                    detail=f"table row has {row_cols} cells, header has {header_cols}",
+                    detail="table row has %d cells, header has %d" % (row_cols, header_cols),
                 )
 
     return ScorerOutcome(name="markdown_valid", score=1.0, passed=True, detail="ok")
@@ -176,7 +176,7 @@ def entity_density_delta(current_body: str, new_body: str) -> ScorerOutcome:
         name="entity_density_delta",
         score=score,
         passed=abs_delta <= 4.0,
-        detail=f"cur={cur_density:.2f} new={new_density:.2f} delta={delta:+.2f}/100tok",
+        detail="cur=%.2f new=%.2f delta=%+.2f/100tok" % (cur_density, new_density, delta),
     )
 
 
@@ -202,7 +202,7 @@ def diff_addition_ratio(current_body: str, new_body: str) -> ScorerOutcome:
         name="diff_addition_ratio",
         score=score,
         passed=ratio <= 0.75,
-        detail=f"added={added}/{len(cur_tokens)} ratio={ratio:.2f}",
+        detail="added=%d/%d ratio=%.2f" % (added, len(cur_tokens), ratio),
     )
 
 
@@ -218,7 +218,7 @@ def selector_set_metrics(
     precision = tp / (tp + fp) if (tp + fp) else 1.0
     recall = tp / (tp + fn) if (tp + fn) else 1.0
     f1 = 2 * precision * recall / (precision + recall) if (precision + recall) else 0.0
-    detail = f"tp={tp} fp={fp} fn={fn}"
+    detail = "tp=%d fp=%d fn=%d" % (tp, fp, fn)
     return (
         ScorerOutcome(name="precision", score=precision, passed=precision >= 0.8, detail=detail),
         ScorerOutcome(name="recall", score=recall, passed=recall >= 0.8, detail=detail),
@@ -228,7 +228,7 @@ def selector_set_metrics(
 
 def _judge_one(body: str, claim: FactClaim, *, judge_model: str) -> tuple[str, str]:
     """Single judge vote. Returns (verdict, rationale). Verdict ∈ {yes,no,unknown,error}."""
-    user = f"Wiki page body:\n---\n{body}\n---\n\nClaim: {claim.text}"
+    user = "Wiki page body:\n---\n%s\n---\n\nClaim: %s" % (body, claim.text)
     judge_provider = resolve_provider(judge_model)
 
     def _call() -> "client.CompletionResult":

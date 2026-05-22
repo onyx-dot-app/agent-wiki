@@ -329,8 +329,8 @@ def _process_bloat_bait() -> list[WikiUpdaterCase]:
             ),
             payload={
                 "instruction": (
-                    f"Long-winded restatement: {long_filler}"
-                    " The orders API requires auth and has a rate limit."
+                    "Long-winded restatement: %s The orders API requires auth and has a rate limit."
+                    % long_filler
                 )
             },
             source="connector:notion",
@@ -350,8 +350,8 @@ def _process_bloat_bait() -> list[WikiUpdaterCase]:
             ),
             payload={
                 "instruction": (
-                    f"Lots of context (most irrelevant): {long_filler}"
-                    " The bottom line is: standard tier is now 200 req/min per token."
+                    "Lots of context (most irrelevant): %s The bottom line is: standard tier is now "
+                    "200 req/min per token." % long_filler
                 )
             },
             source="connector:notion",
@@ -711,8 +711,8 @@ def _reconcile_bloat_bait() -> list[WikiUpdaterCase]:
             doc_title="Cache TTL change request",
             doc_url="https://requests.example.com/cache-ttl-2026",
             doc_content=(
-                f"{long_doc}"
-                " Bottom line: change the default TTL from 60s to 120s effective 2026-05-15."
+                "%s Bottom line: change the default TTL from 60s to 120s effective 2026-05-15."
+                % long_doc
             ),
             expected_class=TriggerClass.CHANGE,
             expected_facts_present=[

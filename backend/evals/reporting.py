@@ -84,9 +84,9 @@ def _trigger_class_metrics(rows: list[CaseResult]) -> list[ScorerSummary]:
         f1 = 2 * precision * recall / (precision + recall) if (precision + recall) else 0.0
         f1_per_class.append(f1)
         for name, value in (
-            (f"trigger.precision[{cls}]", precision),
-            (f"trigger.recall[{cls}]", recall),
-            (f"trigger.f1[{cls}]", f1),
+            ("trigger.precision[%s]" % cls, precision),
+            ("trigger.recall[%s]" % cls, recall),
+            ("trigger.f1[%s]" % cls, f1),
         ):
             summaries.append(
                 ScorerSummary(

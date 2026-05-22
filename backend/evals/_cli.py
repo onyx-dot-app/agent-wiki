@@ -203,5 +203,5 @@ def run_concurrent(
         for fut in concurrent.futures.as_completed(futures):
             results.append(fut.result())
 
-    results.sort(key=lambda r: (r.case_id, r.model, r.run_index))
+    results.sort(key=lambda r: (r.case_id, r.provider, r.model, r.run_index))
     return results
