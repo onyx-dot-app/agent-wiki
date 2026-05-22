@@ -398,6 +398,12 @@ if(__exports != exports)module.exports = exports;return module.exports}));
     <div class="jump-wrap">
       Jump to <input type="number" id="jump-input" min="1" onchange="jumpTo(this.value)">
     </div>
+    <div style="display:flex;gap:6px;align-items:center;">
+      <span style="font-size:11px;color:#999;">Jump to unlabeled:</span>
+      <button onclick="jumpToUnlabeled('committed')">committed</button>
+      <button onclick="jumpToUnlabeled('no_change')">no_change</button>
+      <button onclick="jumpToUnlabeled('irrelevant')">irrelevant</button>
+    </div>
     <div style="display:flex;gap:6px;">
       <button id="btn-judge" onclick="judgeCurrent()" style="display:none;">⚖ Judge</button>
       <button id="btn-summarize" onclick="summarizeCurrent()" style="display:none;">✦ Summarize</button>
@@ -542,6 +548,19 @@ function jumpTo(val) {
   if (isNaN(idx) || idx < 0 || idx >= samples.length) return;
   current = idx;
   render();
+}
+
+function jumpToUnlabeled(outcome) {
+  flushCoverage();
+  // Search from current+1, wrap around
+  for (let i = 1; i <= samples.length; i++) {
+    const idx = (current + i) % samples.length;
+    if (samples[idx].outcome === outcome && !samples[idx].label) {
+      current = idx;
+      render();
+      return;
+    }
+  }
 }
 
 // ── Render ────────────────────────────────────────────────────────────────────
