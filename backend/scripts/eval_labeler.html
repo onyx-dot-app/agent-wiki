@@ -133,8 +133,7 @@
     font-size: 12px;
     font-weight: 600;
     color: #666;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
+    letter-spacing: 0;
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -161,6 +160,20 @@
   .outcome-committed { background: #d4f0d4; color: #1a6e1a; }
   .outcome-no_change { background: #e8e8e8; color: #555; }
   .outcome-irrelevant { background: #fde8d0; color: #8b4000; }
+
+  /* ── Summary callout ── */
+  .summary-box {
+    background: #f0f4ff;
+    border: 1px solid #c8d8f8;
+    border-radius: 7px;
+    padding: 10px 14px;
+    font-size: 12px;
+    line-height: 1.6;
+    color: #2a3a5a;
+    flex-shrink: 0;
+    margin-bottom: 12px;
+  }
+  .summary-box strong { font-weight: 600; display: block; margin-bottom: 3px; font-size: 11px; color: #4a6090; }
 
   /* ── Source content ── */
   .source-text {
@@ -325,7 +338,23 @@ if(__exports != exports)module.exports = exports;return module.exports}));
 <div class="topbar">
   <h1>Ingest Eval Labeler</h1>
   <span class="progress-text" id="progress-summary"></span>
-  <button onclick="saveCheckpoint()">Save checkpoint</button>
+  <button id="api-key-btn" onclick="promptApiKey()" style="display:none;">⚙ Set API key</button>
+  <span id="save-status" style="font-size:12px;color:#aaa;"></span>
+</div>
+
+<!-- API key modal -->
+<div id="api-modal" style="display:none;position:fixed;inset:0;background:rgba(15,15,15,0.45);z-index:100;align-items:center;justify-content:center;">
+  <div style="background:#fff;border-radius:12px;padding:28px;width:360px;box-shadow:0 8px 40px rgba(0,0,0,0.18);">
+    <h3 style="font-size:15px;font-weight:600;margin-bottom:8px;">Anthropic API key</h3>
+    <p style="font-size:12px;color:#888;margin-bottom:16px;">Used for AI summaries. Kept in memory only — cleared when you close the tab.</p>
+    <input type="password" id="api-modal-input" placeholder="sk-ant-…"
+      onkeydown="if(event.key==='Enter')closeApiModal(true);if(event.key==='Escape')closeApiModal(false);"
+      style="width:100%;border:1px solid #ddd;border-radius:6px;padding:9px 11px;font-size:13px;font-family:inherit;outline:none;margin-bottom:16px;">
+    <div style="display:flex;justify-content:flex-end;gap:8px;">
+      <button onclick="closeApiModal(false)" style="background:#f0f0ee;border:1px solid #ddd;border-radius:6px;padding:7px 16px;font-size:13px;cursor:pointer;">Cancel</button>
+      <button onclick="closeApiModal(true)" style="background:#1a1a1a;color:#fff;border:none;border-radius:6px;padding:7px 16px;font-size:13px;cursor:pointer;">Save</button>
+    </div>
+  </div>
 </div>
 
 <!-- Load screen -->
@@ -335,7 +364,6 @@ if(__exports != exports)module.exports = exports;return module.exports}));
     <button class="load-btn" id="choose-btn">Choose file…</button>
     <p id="pick-error" style="font-size:12px;color:#c00;display:none;">File picker not supported — use Chrome 86+</p>
   </div>
-  <input type="file" id="ckpt-input" style="display:none" onchange="loadCheckpoint(event)">
 </div>
 
 <!-- Main labeler -->
@@ -349,6 +377,7 @@ if(__exports != exports)module.exports = exports;return module.exports}));
       Jump to <input type="number" id="jump-input" min="1" onchange="jumpTo(this.value)">
     </div>
     <div style="display:flex;gap:6px;">
+      <button id="btn-summarize" onclick="summarizeCurrent()" style="display:none;">✦ Summarize</button>
       <button id="btn-prev" onclick="navigate(-1)">← Prev</button>
       <button id="btn-next" onclick="navigate(1)">Next →</button>
     </div>
@@ -387,7 +416,8 @@ if(__exports != exports)module.exports = exports;return module.exports}));
           <div id="source-title" style="font-size:13px;font-weight:600;color:#1a1a1a;"></div>
           <div id="source-meta" style="font-size:12px;color:#666;padding-bottom:8px;"></div>
         </div>
-        <div class="card-body" style="flex:1;overflow-y:auto;">
+        <div class="card-body" style="flex:1;overflow-y:auto;display:flex;flex-direction:column;">
+          <div class="summary-box" id="source-summary" style="display:none;"></div>
           <div class="source-text" id="source-view"></div>
         </div>
       </div>
@@ -400,7 +430,8 @@ if(__exports != exports)module.exports = exports;return module.exports}));
         <div style="padding:10px 16px 8px;border-bottom:1px solid #e0e0e0;background:#f7f7f5;">
           <div id="wiki-path" style="font-size:12px;font-weight:500;color:#555;"></div>
         </div>
-        <div class="card-body" style="flex:1;overflow-y:auto;">
+        <div class="card-body" style="flex:1;overflow-y:auto;display:flex;flex-direction:column;">
+          <div class="summary-box" id="wiki-summary" style="display:none;"></div>
           <div class="md-body" id="wiki-before-view"></div>
         </div>
       </div>
@@ -416,11 +447,12 @@ const LABELS = [
   { value: "irrelevant", icon: "⊘",  text: "Should be irrelevant — wrong selection" },
 ];
 
-let samples = [];   // original rows — never mutated on disk
+let samples = [];   // original rows
 let current = 0;
-let filename = "eval_samples.json";
-let labels = {};    // id → { label, reason } — checkpoint state
-let storageKey = "";
+let filename = "eval_samples.jsonl";
+let fileHandle = null;  // FileSystemFileHandle — used to write back
+let enriching = new Set();
+let anthropicKey = "";
 
 // ── File loading ──────────────────────────────────────────────────────────────
 
@@ -431,6 +463,7 @@ async function pickFile() {
   }
   try {
     const [handle] = await window.showOpenFilePicker({ multiple: false });
+    fileHandle = handle;
     const file = await handle.getFile();
     filename = file.name;
     initSamples(await file.text());
@@ -442,8 +475,7 @@ async function pickFile() {
 function initSamples(text) {
   const lines = text.trim().split("\n").filter(l => l.trim());
   samples = lines.map(l => JSON.parse(l));
-  storageKey = "eval_ckpt_" + filename;
-  labels = JSON.parse(localStorage.getItem(storageKey) || "{}");
+  document.getElementById("api-key-btn").style.display = "";
   current = 0;
   document.getElementById("load-screen").style.display = "none";
   document.getElementById("labeler").style.display = "flex";
@@ -456,7 +488,18 @@ document.addEventListener("DOMContentLoaded", () => {
 
 // ── Navigation ────────────────────────────────────────────────────────────────
 
+function flushCoverage() {
+  if (!samples.length) return;
+  const s = samples[current];
+  if (s.label === "committed") {
+    const v = document.getElementById("coverage-input").value.trim();
+    if (v) s.coverage = v; else delete s.coverage;
+    writeBack();
+  }
+}
+
 function navigate(delta) {
+  flushCoverage();
   const next = current + delta;
   if (next < 0 || next >= samples.length) return;
   current = next;
@@ -464,6 +507,7 @@ function navigate(delta) {
 }
 
 function jumpTo(val) {
+  flushCoverage();
   const idx = parseInt(val) - 1;
   if (isNaN(idx) || idx < 0 || idx >= samples.length) return;
   current = idx;
@@ -480,7 +524,7 @@ function render() {
   document.getElementById("btn-next").disabled = current === samples.length - 1;
   document.getElementById("jump-input").value = current + 1;
 
-  const labeled = Object.keys(labels).length;
+  const labeled = samples.filter(x => x.label).length;
   document.getElementById("progress-bar").style.width = (labeled / samples.length * 100) + "%";
   document.getElementById("progress-summary").textContent = `${labeled} / ${samples.length} labeled`;
 
@@ -502,74 +546,177 @@ function render() {
   renderContent(document.getElementById("source-view"), s.source_content || "");
   renderWikiBefore(document.getElementById("wiki-before-view"), s.wiki_body_before || "", s.diff || null);
 
+  const loading = enriching.has(s.id);
+  renderSummary("source-summary", "Summary", s.source_summary, loading);
+  renderSummary("wiki-summary",
+    s.diff_summary ? `Summary · <span style="color:#1a6e1a;">Edit: ${esc(s.diff_summary)}</span>` : "Summary",
+    s.wiki_summary, loading);
+
+  document.getElementById("btn-summarize").style.display = loading ? "none" : "";
+
   const btnsEl = document.getElementById("label-buttons");
   btnsEl.innerHTML = "";
-  const saved = labels[s.id] || {};
   LABELS.forEach(l => {
     const btn = document.createElement("button");
-    btn.className = "label-btn" + (saved.label === l.value ? " selected" : "");
+    btn.className = "label-btn" + (s.label === l.value ? " selected" : "");
     btn.innerHTML = `<span class="icon">${l.icon}</span>${l.text}`;
     btn.onclick = () => selectLabel(l.value);
     btnsEl.appendChild(btn);
   });
 
-  document.getElementById("coverage-input").value = saved.coverage || "";
-  document.getElementById("coverage-area").style.display = saved.label === "committed" ? "" : "none";
-  document.getElementById("saved-indicator").textContent = saved.label ? "✓ Labeled" : "";
+  document.getElementById("coverage-input").value = s.coverage || "";
+  document.getElementById("coverage-area").style.display = s.label === "committed" ? "" : "none";
+  document.getElementById("saved-indicator").textContent = s.label ? "✓ Labeled" : "";
   document.getElementById("save-btn").textContent =
     current < samples.length - 1 ? "Save & Next →" : "Save";
 }
 
 function selectLabel(value) {
-  const id = samples[current].id;
-  labels[id] = { ...(labels[id] || {}), label: value };
+  const s = samples[current];
+  s.label = value;
   document.getElementById("coverage-area").style.display = value === "committed" ? "" : "none";
   if (value !== "committed") {
-    labels[id].coverage = undefined;
+    delete s.coverage;
     document.getElementById("coverage-input").value = "";
   }
-  persistCheckpoint();
+  writeBack();
   render();
 }
 
 function saveLabel() {
-  const id = samples[current].id;
+  const s = samples[current];
   const coverage = document.getElementById("coverage-input").value.trim();
-  labels[id] = {
-    ...(labels[id] || {}),
-    coverage: labels[id]?.label === "committed" ? (coverage || undefined) : undefined,
-  };
-  persistCheckpoint();
+  if (s.label === "committed") {
+    if (coverage) s.coverage = coverage; else delete s.coverage;
+  } else {
+    delete s.coverage;
+  }
+  writeBack();
   document.getElementById("saved-indicator").textContent = "✓ Saved";
   setTimeout(() => {
     if (current < samples.length - 1) navigate(1);
   }, 200);
 }
 
-// ── Checkpoint ────────────────────────────────────────────────────────────────
+// ── File write-back ───────────────────────────────────────────────────────────
 
-function persistCheckpoint() {
-  if (storageKey) localStorage.setItem(storageKey, JSON.stringify(labels));
+async function writeBack() {
+  if (!fileHandle) return;
+  const statusEl = document.getElementById("save-status");
+  statusEl.textContent = "Saving…";
+  try {
+    const writable = await fileHandle.createWritable();
+    await writable.write(samples.map(s => JSON.stringify(s)).join("\n") + "\n");
+    await writable.close();
+    statusEl.textContent = "Saved ✓";
+    setTimeout(() => { if (statusEl.textContent === "Saved ✓") statusEl.textContent = ""; }, 2000);
+  } catch (e) {
+    statusEl.textContent = "Save failed: " + e.message;
+    console.error("writeBack failed:", e);
+  }
 }
 
-function saveCheckpoint() {
-  const blob = new Blob([JSON.stringify(labels, null, 2)], { type: "application/json" });
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = filename.replace(/\.[^.]+$/, "") + "_labels.json";
-  a.click();
+// ── Summary callout ───────────────────────────────────────────────────────────
+
+function renderSummary(id, label, text, loading) {
+  const el = document.getElementById(id);
+  if (loading && !text) {
+    el.style.display = "";
+    el.innerHTML = `<strong>${label}</strong><span style="color:#999;font-style:italic;">Generating…</span>`;
+    return;
+  }
+  if (!text) { el.style.display = "none"; return; }
+  el.style.display = "";
+  el.innerHTML = `<strong>${label}</strong>${esc(text)}`;
 }
 
-function loadCheckpoint(e) {
-  const file = e.target.files[0];
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = ev => {
-    labels = JSON.parse(ev.target.result);
-    persistCheckpoint();
-    if (samples.length) render();
-  };
-  reader.readAsText(file);
+// ── LLM enrichment ───────────────────────────────────────────────────────────
+// This file runs entirely in the browser (file:// or static serve), so it
+// cannot go through the backend LLM client. The direct Anthropic fetch here
+// is intentional and scoped to this offline eval tool only.
+
+function summarizeCurrent() {
+  const s = samples[current];
+  if (enriching.has(s.id)) return;
+  if (!anthropicKey) { promptApiKey(); return; }
+  enrichSample(s);
+}
+
+async function enrichSample(sample) {
+  enriching.add(sample.id);
+  render();  // show "Generating…"
+
+  const SOURCE_MAX = 6000, WIKI_MAX = 6000, DIFF_MAX = 3000;
+  const src  = (sample.source_content   || "").slice(0, SOURCE_MAX);
+  const wiki = (sample.wiki_body_before || "").slice(0, WIKI_MAX);
+  const diff = (sample.diff             || "").slice(0, DIFF_MAX) || null;
+
+  const fields = diff
+    ? '"source_summary":"...","wiki_summary":"...","diff_summary":"..."'
+    : '"source_summary":"...","wiki_summary":"..."';
+  const diffLine = diff ? "diff_summary: 1-2 sentences on what the committed edit adds or changes." : "";
+  const userMsg = [
+    `<source_document>\n${src}\n</source_document>`,
+    `<wiki_page_before>\n${wiki}\n</wiki_page_before>`,
+    diff ? `<diff>\n${diff}\n</diff>` : "",
+  ].filter(Boolean).join("\n\n")
+    + `\n\nRespond with JSON only: {${fields}}\nsource_summary: 2-3 sentences on what the source document is about.\nwiki_summary: 2-3 sentences on what the wiki page currently covers.\n${diffLine}`.trimEnd();
+
+  let errorMsg = null;
+  try {
+    const resp = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "x-api-key": anthropicKey,
+        "anthropic-version": "2023-06-01",
+        "anthropic-dangerous-direct-browser-access": "true",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 512,
+        system: "You are a concise technical summarizer. Reply only with the requested JSON object.",
+        messages: [{ role: "user", content: userMsg }],
+      }),
+    });
+    const data = await resp.json();
+    if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
+    let text = data.content?.[0]?.text?.trim() || "";
+    if (text.startsWith("```")) text = text.replace(/^```[^\n]*\n/, "").replace(/\n```[\s\S]*$/, "").trim();
+    const parsed = JSON.parse(text);
+    const idx = samples.findIndex(s => s.id === sample.id);
+    if (idx !== -1) {
+      samples[idx].source_summary = parsed.source_summary || null;
+      samples[idx].wiki_summary   = parsed.wiki_summary   || null;
+      if (parsed.diff_summary) samples[idx].diff_summary = parsed.diff_summary;
+
+      // Propagate to other samples with identical content (don't overwrite existing)
+      samples.forEach((s, i) => {
+        if (i === idx) return;
+        if (!s.source_summary && s.source_content === sample.source_content)
+          s.source_summary = parsed.source_summary || null;
+        if (!s.wiki_summary && s.wiki_path === sample.wiki_path && s.wiki_body_before === sample.wiki_body_before)
+          s.wiki_summary = parsed.wiki_summary || null;
+      });
+    }
+    await writeBack();
+  } catch (e) {
+    console.error("enrich failed for id", sample.id, e);
+    errorMsg = e.message || String(e);
+  } finally {
+    enriching.delete(sample.id);
+    if (samples[current]?.id === sample.id) {
+      if (errorMsg) {
+        const box = document.getElementById("source-summary");
+        box.style.display = "";
+        box.style.background = "#fff0f0";
+        box.style.borderColor = "#fcc";
+        box.innerHTML = `<strong style="color:#c00;">Summary error</strong>${esc(errorMsg)}`;
+      } else {
+        render();
+      }
+    }
+  }
 }
 
 // ── Wiki before with inline diff highlights ───────────────────────────────────
@@ -634,6 +781,22 @@ function renderContent(el, text) {
     el.className = "source-text";
     el.textContent = text;
   }
+}
+
+// ── API key management ────────────────────────────────────────────────────────
+
+function promptApiKey() {
+  document.getElementById("api-modal-input").value = anthropicKey;
+  document.getElementById("api-modal").style.display = "flex";
+  setTimeout(() => document.getElementById("api-modal-input").focus(), 50);
+}
+
+function closeApiModal(save) {
+  document.getElementById("api-modal").style.display = "none";
+  if (!save) return;
+  anthropicKey = document.getElementById("api-modal-input").value.trim();
+  document.getElementById("api-key-btn").textContent = anthropicKey ? "⚙ Change API key" : "⚙ Set API key";
+  if (samples.length) render();
 }
 
 // ── Util ──────────────────────────────────────────────────────────────────────
