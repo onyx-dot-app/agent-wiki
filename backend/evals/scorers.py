@@ -25,7 +25,6 @@ log = logging.getLogger(__name__)
 DEFAULT_JUDGE_PANEL: tuple[str, ...] = (
     "claude-haiku-4-5",
     "gpt-5-mini",
-    "gemini-2.5-flash",
 )
 
 
