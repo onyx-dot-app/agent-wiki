@@ -6,9 +6,12 @@ diff-addition / selector-set scorers. The judge panel uses the same
 module-level callable to return canned ``CompletionResult``s.
 """
 
+# pyright: reportPrivateUsage=false
+
 from __future__ import annotations
 
 from collections.abc import Generator
+from typing import Any
 
 import pytest
 
@@ -127,6 +130,7 @@ def test_selector_set_metrics_both_empty() -> None:
     # No expected, no actual = perfect on both axes by convention.
     assert p.score == 1.0
     assert r.score == 1.0
+    assert f1.score == 1.0
 
 
 # --------------------------------------------------------------------------- #
@@ -144,7 +148,13 @@ def stub_judge() -> Generator[dict[str, list[str]], None, None]:
     queues: dict[str, list[str]] = {}
     original = llm_client.complete
 
-    def _stub(messages, *, model=None, tools=None, max_tokens=llm_client.DEFAULT_MAX_TOKENS):  # type: ignore[no-untyped-def]
+    def _stub(
+        messages: list[dict[str, Any]],
+        *,
+        model: str | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        max_tokens: int = llm_client.DEFAULT_MAX_TOKENS,
+    ) -> CompletionResult:
         del messages, tools, max_tokens
         q = queues.get(model or "")
         if not q:
