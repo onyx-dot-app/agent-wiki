@@ -124,7 +124,7 @@ the GitHub repo `vars.BRAINTRUST_ORG`).
 
 ## Scorer reference
 
-Every scorer returns a value in `[0.0, 1.0]` where **higher = better**. The summary table prints `mean [ci_low, ci_high]` per scorer per model. Bootstrap CI = 1000 case-level resamples.
+Every scorer returns a value in `[0.0, 1.0]` where **higher = better** — except `error_rate`, where **0 = clean** (lower is better). The summary table prints `mean [ci_low, ci_high]` per scorer per model. Bootstrap CI = 1000 case-level resamples.
 
 | scorer                                             | what it measures                                                                                                 | direction             | default threshold                        | what failure looks like                                                                                |
 | -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- | --------------------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------ |
@@ -133,7 +133,7 @@ Every scorer returns a value in `[0.0, 1.0]` where **higher = better**. The summ
 | `trigger.recall[<cls>]`                            | of trials that should have been `<cls>`, fraction caught                                                         | per-class             | n/a                                      | recall << precision → misses that class                                                                |
 | `trigger.macro_f1`                                 | mean of per-class F1 (handles class imbalance)                                                                   | 1 = perfect           | n/a                                      | < 0.85 = real routing problem                                                                          |
 | `bloat_ratio`                                      | 1.0 if `len(new)/len(current) ≤ max_ratio` (default 2.0), scaled penalty past that                               | 1 = within budget     | per-case `max_bloat_ratio` (default 2.0) | < 1.0 = body more than doubled                                                                         |
-| `diff_addition_ratio`                              | tokens added vs current via `difflib.SequenceMatcher`; 1.0 if added ≤ 50%, scaled past that                      | 1 = surgical edit     | 0.5 added ratio                          | < 0.7 = verbose rewrite where most tokens are replaced (catches "looks edited but actually rewritten") |
+| `diff_addition_ratio`                              | tokens added vs current via `difflib.SequenceMatcher`; 1.0 if added ≤ 50%, scaled past that                      | 1 = surgical edit     | `passed` when ratio ≤ 0.75               | < 0.7 = verbose rewrite where most tokens are replaced (catches "looks edited but actually rewritten") |
 | `entity_density_delta`                             | per-100-token delta in entity count (paths, code idents, Title Case, versions, units); 1 if delta ≤ ±2, 0 at ±10 | 1 = stable density    | ±4 density delta                         | < 0.6 = big density swing → info loss (drop) or wall of jargon (jump)                                  |
 | `markdown_valid`                                   | real CommonMark parse via `markdown-it-py`; catches heading-level jumps + structural drift                       | 1 = valid             | n/a                                      | < 1.0 = heading skipped a level or table malformed                                                     |
 | `selector_set_metrics` (`precision`/`recall`/`f1`) | set-overlap over labeled kept paths                                                                              | 1 = perfect           | 0.8 pass                                 | precision << recall = over-keeps (fires too many downstream calls); inverse = misses relevant docs     |
@@ -166,7 +166,7 @@ What to scan in order:
 Comparing across runs:
 
 - BT diffs experiments by their **shared `case_id`** values. The framework guarantees stable `case_id` across runs, so opening two experiments side-by-side gives a true regression view.
-- Use the `metadata.eval_run_id` field on a row to trace it back to a specific JSONL file in CI artifacts.
+- `eval_run_id` is NOT pushed to Braintrust metadata — only `provider`, `model`, `run_index`, `error`, `latency_ms`, and token counts make it onto a BT row (see `reporting.push_to_braintrust`). To trace a BT row back to a CI run, match on `case_id` + `model` + `run_index` against the JSONL artifact uploaded by the workflow; the JSONL carries the full `eval_run_id` / `harness_git_sha` / `dataset_git_sha`.
 
 ## Contributing
 
