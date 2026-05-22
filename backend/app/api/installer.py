@@ -16,6 +16,7 @@ right route; the FE flow is: download → drag .app into /Applications
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request, Response
@@ -50,6 +51,8 @@ _LINUX_BUNDLES: dict[str, tuple[str, str]] = {
 }
 _LINUX_DEB_GLOB = "agentwiki-launcher_*_amd64.deb"
 _LINUX_RPM_GLOB = "agentwiki-launcher-*-1.x86_64.rpm"
+
+_VERSION_PATTERN = re.compile(r"agentwiki-launcher[_-](?P<version>\d+\.\d+\.\d+)")
 
 
 def _detect_arch(user_agent: str) -> str:
@@ -91,6 +94,14 @@ def installer_app() -> Response:
     return _stream(*_MAC_BUNDLE)
 
 
+def _version_key(path: Path) -> tuple[int, ...]:
+    match = _VERSION_PATTERN.search(path.name)
+    if match is None:
+        return (-1,)
+    parts = match.group("version").split(".")
+    return tuple(int(part) for part in parts)
+
+
 def _resolve_glob(glob: str) -> Path | None:
     """Find the (single) artifact matching glob in the installers dir.
 
@@ -98,8 +109,10 @@ def _resolve_glob(glob: str) -> Path | None:
     so the backend can't hardcode the exact filename — it picks the
     newest match at request time. Returns None when nothing matches.
     """
-    matches = sorted(_BINARIES_DIR.glob(glob))
-    return matches[-1] if matches else None
+    matches = list(_BINARIES_DIR.glob(glob))
+    if not matches:
+        return None
+    return max(matches, key=lambda path: (_version_key(path), path.name))
 
 
 @router.get("/installer/linux")

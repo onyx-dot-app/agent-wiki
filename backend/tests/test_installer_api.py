@@ -73,14 +73,13 @@ def test_installer_linux_default_is_deb(client, tmp_path, monkeypatch):
 
 
 def test_installer_linux_deb_picks_newest_version(client, tmp_path, monkeypatch):
-    """When multiple .deb files exist (after a version bump), serve the
-    lexicographically last — versions are sortable in their canonical form."""
-    (tmp_path / "agentwiki-launcher_0.1.0_amd64.deb").write_bytes(b"old")
-    (tmp_path / "agentwiki-launcher_0.2.0_amd64.deb").write_bytes(b"new")
+    """When multiple .deb files exist (after a version bump), serve the highest version."""
+    (tmp_path / "agentwiki-launcher_0.9.0_amd64.deb").write_bytes(b"old")
+    (tmp_path / "agentwiki-launcher_0.10.0_amd64.deb").write_bytes(b"new")
     monkeypatch.setattr("app.api.installer._BINARIES_DIR", tmp_path)
     res = client.get("/api/installer/linux?format=deb")
     assert res.status_code == 200
-    assert "0.2.0" in res.headers["content-disposition"]
+    assert "0.10.0" in res.headers["content-disposition"]
     assert res.content == b"new"
 
 
@@ -99,6 +98,16 @@ def test_installer_linux_rpm_streams_when_present(client, tmp_path, monkeypatch)
     assert res.status_code == 200
     assert res.headers["content-type"] == "application/x-rpm"
     assert res.content == payload
+
+
+def test_installer_linux_rpm_picks_newest_version(client, tmp_path, monkeypatch):
+    (tmp_path / "agentwiki-launcher-0.9.0-1.el9.x86_64.rpm").write_bytes(b"old")
+    (tmp_path / "agentwiki-launcher-0.10.0-1.fc40.x86_64.rpm").write_bytes(b"new")
+    monkeypatch.setattr("app.api.installer._BINARIES_DIR", tmp_path)
+    res = client.get("/api/installer/linux?format=rpm")
+    assert res.status_code == 200
+    assert "0.10.0" in res.headers["content-disposition"]
+    assert res.content == b"new"
 
 
 def test_installer_linux_rpm_503_when_missing(client, tmp_path, monkeypatch):
