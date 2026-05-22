@@ -19,20 +19,28 @@ Two axes per surface: **WHEN** (trigger decision) and **HOW** (output quality).
 
 ```
 backend/evals/
-  _llm_override.py            ContextVar-scoped provider/model override
+  _cli.py                     shared runner skeleton + ThreadPoolExecutor fan-out
+  _llm_override.py            ContextVar-scoped (provider, model) override
   _metadata.py                eval_run_id / git_sha / utc_iso_now
+  _dry_run.py                 wiki_updater dry-run stub (patches client.complete)
   scorers.py                  trigger_class_match, facts_present/preserved,
                               bloat_ratio, entity_density_delta, etc.
-  reporting.py                JSONL writer + bootstrap CI summary + Braintrust
+                              Exports JUDGE_SYSTEM_MARKER (shared with stubs).
+  reporting.py                JSONL writer + bootstrap CI summary +
+                              Braintrust push + GitHub-step-summary writer
   schema.py                   pydantic Case + Result types
   ci_assert_baseline.py       structural validator (used in CI)
+  tests/                      unit tests for scorers + reporting (no DB needed)
   datasets/
     wiki_updater/cases.jsonl
     ingest_selector/cases.jsonl
     external_agent/scenarios/
   wiki_updater/run.py         python -m evals.wiki_updater.run
   ingest_selector/run.py      python -m evals.ingest_selector.run
-  external_agent/run.py       python -m evals.external_agent.run
+  external_agent/
+    run.py                    python -m evals.external_agent.run
+    _stub.py                  external-agent dry-run stub
+    harness.py                in-memory wiki + tool dispatch
 ```
 
 ## How to run
@@ -41,22 +49,63 @@ backend/evals/
 cd backend
 uv run python -m evals.wiki_updater.run \
   --cases evals/datasets/wiki_updater/cases.jsonl \
-  --models claude-sonnet-4-6,gpt-5,gemini-2.5-pro \
+  --models claude-sonnet-4-6,gpt-5 \
   --runs 3 \
+  --concurrency 8 \
   --out runs/wiki_updater_$(date +%Y%m%d).jsonl
 ```
 
-Flags:
+Flags (all surfaces):
 
-- `--cases PATH` — JSONL dataset (one case per line)
+- `--cases PATH` (or `--scenarios DIR` for external_agent) — dataset
 - `--models LIST` — comma-separated model ids; provider inferred from prefix
-- `--runs N` — trials per (case, model) for variance / bootstrap CI (default 3)
-- `--case-id ID` — run only one case (debugging)
-- `--limit N` — only run the first N cases (smoke)
-- `--judge-models LIST` — judge panel for `facts_present` / `facts_preserved` (default: three-family panel — `claude-haiku-4-5`, `gpt-5-mini`, `gemini-2.5-flash`)
+- `--runs N` — trials per (case, model) for variance + bootstrap CI (default 3)
+- `--concurrency N` — max in-flight LLM calls (default 8). Lower if you hit
+  provider rate limits.
+- `--case-id ID` — run only one case (debugging). External_agent also accepts
+  `--scenario-id` as an alias.
+- `--limit N` — only run the first N cases
 - `--out PATH` — JSONL result sink; summary always prints
-- `--braintrust EXPERIMENT` — also push as a Braintrust experiment
-- `--dry-run` — deterministic stub LLM (no keys needed); validates wiring
+- `--braintrust BASE` — push to a Braintrust experiment of this base name.
+  `wiki_updater` produces two experiments — `<base>-process-instruction` and
+  `<base>-reconcile-document` — so scorer columns stay comparable per surface.
+- `--dry-run` — deterministic stub LLM (no API keys needed); validates wiring
+- `wiki_updater` / `external_agent` also accept `--judge-models LIST` — judge
+  panel for `facts_present` / `facts_preserved`. Default panel:
+  `claude-haiku-4-5, gpt-5-mini` (two judges, majority + tie→False).
+
+Runners exit with `{"out": ..., "skipped_models": [...], "braintrust_url(s)": ...}`
+to stdout so the CI workflow can capture the artifact path and experiment URL.
+
+## GitHub Actions integration
+
+When `$GITHUB_STEP_SUMMARY` is set (every Actions run), runners append a
+markdown section per surface with the same scorer table that prints to the
+terminal, plus a clickable Braintrust experiment link. Open the job summary
+page on a CI run to see eval results inline without leaving GitHub.
+
+Workflows:
+
+- `.github/workflows/evals-smoke.yml` — PR-time dry-run smoke + unit tests.
+  Triggers only when files under `backend/evals/` or the agents it exercises
+  change.
+- `.github/workflows/evals-nightly.yml` — schedule + `workflow_dispatch` for
+  live model-matrix runs. Reads `EVAL_ANTHROPIC_API_KEY` /
+  `EVAL_OPENAI_API_KEY` / `BRAINTRUST_API_KEY` from secrets. Defaults to
+  `claude-sonnet-4-6,gpt-5` for wiki_updater + external_agent and
+  `claude-haiku-4-5,gpt-5-mini` for ingest_selector.
+
+## Concurrency model
+
+`evals._cli.run_concurrent` fans every `(case, provider/model, run_index)`
+trial out across a `ThreadPoolExecutor`. Each worker gets its own
+`contextvars.copy_context()` copy so the per-(provider, model) override
+installed by `use_model` is thread-local. Dry-run stubs patch the
+module-global `app.llm.client.complete`/`.stream` and are entered ONCE
+around the whole pool, so per-worker entry/exit can't race.
+
+Output JSONL is sorted on `(case_id, provider, model, run_index)` so the
+file is byte-stable across runs regardless of executor scheduling.
 
 ## Configuration
 
@@ -68,5 +117,7 @@ Provider keys are read in order:
 
 Models without a configured provider are reported as `skipped` and the rest run.
 
-Braintrust (`--braintrust`) reads `BRAINTRUST_API_KEY` / `BRAINTRUST_PROJECT` or
-`braintrust_settings` in the DB.
+Braintrust (`--braintrust`) reads `BRAINTRUST_API_KEY` + `BRAINTRUST_PROJECT`
+from env (or `braintrust_settings` in the DB). `BRAINTRUST_ORG` controls the
+URL emitted in stdout / GHA summary (defaults to empty — set the env var or
+the GitHub repo `vars.BRAINTRUST_ORG`).
