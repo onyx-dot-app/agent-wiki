@@ -615,7 +615,13 @@ function render() {
 
   const labeled = samples.filter(x => x.label).length;
   document.getElementById("progress-bar").style.width = (labeled / samples.length * 100) + "%";
-  document.getElementById("progress-summary").textContent = `${labeled} / ${samples.length} labeled`;
+  const outcomeStats = ["committed", "no_change", "irrelevant"].map(o => {
+    const total = samples.filter(x => x.outcome === o).length;
+    const done  = samples.filter(x => x.outcome === o && x.label).length;
+    return `${o}: ${done}/${total}`;
+  }).join(" · ");
+  document.getElementById("progress-summary").textContent =
+    `${labeled} / ${samples.length} labeled  |  ${outcomeStats}`;
 
   const outcome = s.outcome || "";
   document.getElementById("source-title").textContent = s.source_title || "";
