@@ -403,7 +403,10 @@ if(__exports != exports)module.exports = exports;return module.exports}));
       <button onclick="jumpToUnlabeled('committed')">committed</button>
       <button onclick="jumpToUnlabeled('no_change')">no_change</button>
       <button onclick="jumpToUnlabeled('irrelevant')">irrelevant</button>
+    </div>
+    <div style="display:flex;gap:6px;align-items:center;border-left:1px solid #e0e0e0;padding-left:10px;">
       <button onclick="jumpToMismatch()">⚡ mismatch</button>
+      <span id="mismatch-count" style="font-size:11px;color:#999;"></span>
     </div>
     <div style="display:flex;gap:6px;align-items:center;">
       <span style="font-size:11px;color:#999;">Judge all:</span>
@@ -622,6 +625,11 @@ function render() {
   }).join(" · ");
   document.getElementById("progress-summary").textContent =
     `${labeled} / ${samples.length} labeled  |  ${outcomeStats}`;
+
+  const mismatches = samples.filter(x => x.judge_label && x.label && x.judge_label !== x.label).length;
+  const judged     = samples.filter(x => x.judge_label && x.label).length;
+  document.getElementById("mismatch-count").textContent =
+    judged ? `${mismatches} / ${judged} mismatch` : "";
 
   const outcome = s.outcome || "";
   document.getElementById("source-title").textContent = s.source_title || "";
