@@ -194,9 +194,9 @@
   .label-btn.selected { border-color: #1a1a1a; background: #1a1a1a; color: #fff; }
   .label-btn .icon { font-size: 13px; }
 
-  .reason-area { margin-top: 4px; }
-  .reason-area label { font-size: 12px; color: #888; display: block; margin-bottom: 6px; }
-  .reason-area textarea {
+  .coverage-area { margin-top: 4px; }
+  .coverage-area label { font-size: 12px; color: #888; display: block; margin-bottom: 6px; }
+  .coverage-area textarea {
     width: 100%;
     border: 1px solid #e0e0e0;
     border-radius: 6px;
@@ -207,7 +207,7 @@
     min-height: 80px;
     outline: none;
   }
-  .reason-area textarea:focus { border-color: #aaa; }
+  .coverage-area textarea:focus { border-color: #aaa; }
 
   .save-btn {
     width: 100%;
@@ -369,9 +369,9 @@ if(__exports != exports)module.exports = exports;return module.exports}));
         <div class="card-header">Label</div>
         <div class="card-body" style="display:flex;flex-direction:column;gap:14px;">
           <div class="label-buttons" id="label-buttons"></div>
-          <div class="reason-area">
-            <label>Reason / notes (optional)</label>
-            <textarea id="reason-input" placeholder="Why is this good or bad?"></textarea>
+          <div class="coverage-area" id="coverage-area" style="display:none;">
+            <label>What should this update cover?</label>
+            <textarea id="coverage-input" placeholder="Describe the information that should be written to the wiki page…"></textarea>
           </div>
           <button class="save-btn" id="save-btn" onclick="saveLabel()">Save &amp; Next →</button>
           <div class="saved-indicator" id="saved-indicator"></div>
@@ -411,10 +411,9 @@ if(__exports != exports)module.exports = exports;return module.exports}));
 
 <script>
 const LABELS = [
-  { value: "committed",     icon: "✅", text: "Should commit — edit is correct" },
-  { value: "bad_commit",    icon: "⚠️", text: "Should commit — but diff is wrong" },
-  { value: "no_change",     icon: "✓",  text: "Should no-change — already up to date" },
-  { value: "irrelevant",    icon: "⊘",  text: "Should be irrelevant — wrong page" },
+  { value: "committed",  icon: "✅", text: "Should commit" },
+  { value: "no_change",  icon: "✓",  text: "Should no-change" },
+  { value: "irrelevant", icon: "⊘",  text: "Should be irrelevant — wrong selection" },
 ];
 
 let samples = [];   // original rows — never mutated on disk
@@ -514,7 +513,8 @@ function render() {
     btnsEl.appendChild(btn);
   });
 
-  document.getElementById("reason-input").value = saved.reason || "";
+  document.getElementById("coverage-input").value = saved.coverage || "";
+  document.getElementById("coverage-area").style.display = saved.label === "committed" ? "" : "none";
   document.getElementById("saved-indicator").textContent = saved.label ? "✓ Labeled" : "";
   document.getElementById("save-btn").textContent =
     current < samples.length - 1 ? "Save & Next →" : "Save";
@@ -523,14 +523,22 @@ function render() {
 function selectLabel(value) {
   const id = samples[current].id;
   labels[id] = { ...(labels[id] || {}), label: value };
+  document.getElementById("coverage-area").style.display = value === "committed" ? "" : "none";
+  if (value !== "committed") {
+    labels[id].coverage = undefined;
+    document.getElementById("coverage-input").value = "";
+  }
   persistCheckpoint();
   render();
 }
 
 function saveLabel() {
   const id = samples[current].id;
-  const reason = document.getElementById("reason-input").value.trim();
-  labels[id] = { ...(labels[id] || {}), reason: reason || undefined };
+  const coverage = document.getElementById("coverage-input").value.trim();
+  labels[id] = {
+    ...(labels[id] || {}),
+    coverage: labels[id]?.label === "committed" ? (coverage || undefined) : undefined,
+  };
   persistCheckpoint();
   document.getElementById("saved-indicator").textContent = "✓ Saved";
   setTimeout(() => {
@@ -644,9 +652,8 @@ document.addEventListener("keydown", e => {
   if (e.key === "ArrowLeft")  navigate(-1);
   if (e.key === "ArrowRight") navigate(1);
   if (e.key === "1") selectLabel("committed");
-  if (e.key === "2") selectLabel("bad_commit");
-  if (e.key === "3") selectLabel("no_change");
-  if (e.key === "4") selectLabel("irrelevant");
+  if (e.key === "2") selectLabel("no_change");
+  if (e.key === "3") selectLabel("irrelevant");
   if (e.key === "Enter") saveLabel();
 });
 </script>
