@@ -480,7 +480,7 @@ const LABELS = [
   { value: "irrelevant",          icon: "⊘",  text: "Should be irrelevant — wrong selection" },
 ];
 
-const isCommit = v => v && v.startsWith("committed_");
+const isCommit = v => v && (v.startsWith("committed_") || v === "committed");
 
 let samples = [];   // original rows
 let current = 0;
@@ -613,7 +613,7 @@ function render() {
   } else if (s.judge_label) {
     const jl = LABELS.find(l => l.value === s.judge_label);
     judgeEl.style.display = "";
-    judgeEl.innerHTML = `<strong>⚖ Judge suggestion</strong><span class="judge-badge">${jl ? jl.icon + " " + jl.text : s.judge_label}</span><div style="color:#6a5800;margin-top:2px;">${esc(s.judge_reasoning || "")}</div>`;
+    judgeEl.innerHTML = `<strong>⚖ Judge suggestion</strong><span class="judge-badge">${jl ? jl.icon + " " + jl.text : esc(s.judge_label)}</span><div style="color:#6a5800;margin-top:2px;">${esc(s.judge_reasoning || "")}</div>`;
   } else {
     judgeEl.style.display = "none";
   }
@@ -839,6 +839,8 @@ async function judgeSample(sample) {
     let text = data.content?.[0]?.text?.trim() || "";
     if (text.startsWith("```")) text = text.replace(/^```[^\n]*\n/, "").replace(/\n```[\s\S]*$/, "").trim();
     const parsed = JSON.parse(text);
+    if (!LABELS.find(l => l.value === parsed.label))
+      throw new Error(`Unknown label from judge: "${parsed.label}"`);
     const idx = samples.findIndex(s => s.id === sample.id);
     if (idx !== -1) {
       samples[idx].judge_label     = parsed.label;
