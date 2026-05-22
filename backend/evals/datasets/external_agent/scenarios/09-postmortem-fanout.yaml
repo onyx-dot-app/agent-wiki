@@ -1,0 +1,134 @@
+id: ext-09-postmortem-fanout
+prompt: |
+  Postmortem for the 2026-04-12 cache stampede is final. Add the postmortem
+  link and the two action items to the incident page. The cache policy doc
+  needs a new section on request-coalescing per AI-2. The recs service
+  overview needs to note that the cache is now request-coalesced. Do not
+  touch unrelated cache/recs docs that have no action item attached.
+wiki_state:
+  - path: ops/incidents/2026-04-12-cache-stampede.md
+    summary: Incident page for the 2026-04-12 cache stampede.
+    body: |
+      # 2026-04-12 cache stampede
+
+      ## Summary
+
+      Recommendations API saw 5x normal origin load when a cache flush hit
+      during peak. Mitigation was a manual scale-out of the recs cluster
+      from 8 to 24 pods at 14:22 UTC. Recovery was complete by 14:41 UTC.
+
+      ## Timeline
+
+      - 14:10 — engineer runs `redis-cli FLUSHDB` against the recs cache to
+        clear a corrupted key
+      - 14:11 — recs origin QPS rises from 4k to 22k as cache misses fan out
+      - 14:13 — recs origin pods saturate; p95 latency climbs from 80ms to 2.4s
+      - 14:18 — pager fires on `recs-origin-5xx-spike`
+      - 14:22 — engineer scales the recs cluster to 24 pods
+      - 14:35 — p95 returns under SLO
+      - 14:41 — incident closed
+  - path: services/cache/policy.md
+    summary: Cache policy (TTLs, eviction, headers).
+    body: |
+      # Cache policy
+
+      The platform's caching tier is shared across recs, search-suggest, and
+      home-page personalization. Operating principles:
+
+      ## TTLs
+
+      - Default: 60 seconds
+      - Override per-key with the `cache-ttl-override` header (max 24 h)
+      - Long-tail keys (cardinality > 10M) MUST use a TTL ≤ 30 seconds to
+        bound the memory footprint.
+
+      ## Eviction
+
+      LRU. Hot tier is 32 GB. Cold tier (S3-backed) is unbounded but slow.
+
+      ## Cache-control headers
+
+      Origin responses are stored with `Cache-Control: max-age=N` honored as
+      the TTL. `no-store` is respected and bypasses the cache entirely.
+  - path: services/recommendations/overview.md
+    summary: Recommendations service overview.
+    body: |
+      # Recommendations service
+
+      Serves the home-page recs grid. Backed by a Redis cache (32 GB, 4 nodes).
+
+      ## Pipeline
+
+      1. Request hits the recs API
+      2. Tenant + user id → cache key
+      3. On hit: return cached payload
+      4. On miss: query the model serving layer, populate the cache
+
+      ## SLO
+
+      p95 < 100ms, availability 99.95% monthly.
+  - path: services/cache/runbook.md
+    summary: Cache runbook (restart, capacity, eviction — unrelated to this incident's AI list).
+    body: |
+      # Cache runbook
+
+      Restart with `kubectl rollout restart statefulset/recs-cache`. Watch
+      the connection-count metric on the Cache dashboard.
+
+      ## Eviction storms
+
+      An eviction storm shows up as the `cache_evictions_per_sec` graph
+      spiking above 50k for more than 30 seconds. Mitigation: reduce TTLs
+      on offending keys or scale the cluster.
+  - path: services/recommendations/runbook.md
+    summary: Recs runbook (unrelated to this incident's AI list).
+    body: |
+      # Recs runbook
+
+      Restart with `kubectl rollout restart deployment/recs-api`. Pager
+      `recs-origin-5xx-spike` fires when 5xx rate exceeds 5% for 60 seconds.
+
+      ## Capacity
+
+      Steady 12 pods; HPA scales to 32 on CPU > 70%.
+expected_updates:
+  - path: ops/incidents/2026-04-12-cache-stampede.md
+    facts_present:
+      - id: ai-1
+        text: action item AI-1 (two-person approval for FLUSHDB) is listed
+      - id: ai-2
+        text: action item AI-2 (request-coalescing in front of the recs cache) is listed
+    facts_preserved:
+      - id: timeline-1410
+        text: the 14:10 timeline entry about FLUSHDB is preserved
+      - id: timeline-1422
+        text: the 14:22 scale-out timeline entry is preserved
+      - id: summary
+        text: the original summary line about 5x origin load is preserved
+  - path: services/cache/policy.md
+    facts_present:
+      - id: coalescing-doc
+        text: a section about request-coalescing in front of the recs cache is documented
+    facts_preserved:
+      - id: default-ttl
+        text: the 60-second default TTL is still documented
+      - id: long-tail-ttl
+        text: the long-tail-key 30-second TTL cap is still documented
+      - id: eviction
+        text: the LRU + 32 GB hot tier is still documented
+  - path: services/recommendations/overview.md
+    facts_present:
+      - id: coalescing-recs
+        text: the recs overview notes the cache is request-coalesced
+    facts_preserved:
+      - id: slo
+        text: the p95 < 100ms / 99.95% SLO is still documented
+      - id: pipeline
+        text: the 4-step request pipeline is still documented
+expected_not_updated:
+  - services/cache/runbook.md
+  - services/recommendations/runbook.md
+notes: |
+  Three docs get changes; two related but action-item-free runbooks must
+  not be touched. Tests fan-out + scope discipline + long-doc preservation.
+tags: [multi-doc, long-docs, distractor]

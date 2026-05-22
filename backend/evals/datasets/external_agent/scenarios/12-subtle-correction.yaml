@@ -1,0 +1,91 @@
+id: ext-12-subtle-correction
+prompt: |
+  The Payments SLA page has a wrong number: the availability target is 99.95%
+  monthly per the contract, not 99.9%. Also, "Avilability" is misspelled.
+  Fix the Payments SLA page. The Orders SLA page has a real 99.9% target and
+  must not change; the Subscriptions SLA page also has a real 99.9% target
+  and must not change.
+wiki_state:
+  - path: services/payments/sla.md
+    summary: Payments SLA (typo + wrong number).
+    body: |
+      # Payments SLA
+
+      ## Availability
+
+      Avilability target 99.9% monthly. Measurement window starts at the
+      first of each month at 00:00 UTC. Planned maintenance windows
+      announced ≥ 7 days in advance are excluded from the calculation.
+
+      ## Latency
+
+      - p50: 80 ms
+      - p95: 200 ms
+      - p99: 450 ms
+
+      ## Error budget
+
+      Per-month error budget = 1 - availability_target. Burn rate alerts
+      fire when 14-day burn exceeds 2x.
+
+      ## Penalties
+
+      Tier-A customers receive service credits per the contract's exhibit B
+      when monthly availability dips below the target.
+  - path: services/orders/sla.md
+    summary: Orders SLA (legitimately 99.9%).
+    body: |
+      # Orders SLA
+
+      ## Availability
+
+      Availability target 99.9% monthly. Same measurement methodology as
+      every other tier-1 service SLA — calendar-month windows, excluding
+      announced maintenance.
+
+      ## Latency
+
+      - p95: 350 ms
+      - p99: 700 ms
+  - path: services/subscriptions/sla.md
+    summary: Subscriptions SLA (legitimately 99.9%).
+    body: |
+      # Subscriptions SLA
+
+      ## Availability
+
+      99.9% monthly. Subscriptions is tier-2 in our SLA matrix, hence the
+      one-9-less target than Payments.
+
+      ## Latency
+
+      - p95: 500 ms
+
+      ## Notes
+
+      Subscriptions runs as a thin layer over Billing and Payments; outages
+      cascade. Calculation excludes downtime attributable to Billing /
+      Payments outages already declared as their own incidents.
+expected_updates:
+  - path: services/payments/sla.md
+    facts_present:
+      - id: fixed-spelling
+        text: the page spells the word as "Availability" (not "Avilability")
+      - id: corrected-target
+        text: the availability target is documented as 99.95% monthly
+    facts_preserved:
+      - id: methodology
+        text: the calendar-month measurement methodology + maintenance exclusion remains
+      - id: latency
+        text: the p50, p95, and p99 latency targets remain
+      - id: budget
+        text: the error-budget burn-rate alert at 2x remains
+      - id: penalties
+        text: the tier-A service-credit penalty clause remains
+expected_not_updated:
+  - services/orders/sla.md
+  - services/subscriptions/sla.md
+notes: |
+  Targeted typo + factual correction. Two sibling docs ALSO say "99.9%"
+  but legitimately so — over-reach risk is high.
+tags: [correction, distractor, loss-bait]

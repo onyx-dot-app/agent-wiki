@@ -1,0 +1,88 @@
+id: ext-07-version-bump-with-known-issue
+prompt: |
+  The platform is upgrading from Python 3.12 to Python 3.13 next sprint.
+  Update the python-runtime doc to reflect the new version. The known-issues
+  section about the libpq KEEPALIVE_INTERVAL bug must NOT be dropped — that
+  bug is still present in 3.13 and the workaround still applies.
+wiki_state:
+  - path: services/python-runtime/notes.md
+    summary: Python runtime notes (version, workers, known issues).
+    body: |
+      # Python runtime
+
+      Canonical reference for the Python runtime configuration used across
+      every backend service in the platform. Changes here must be coordinated
+      with the platform team and require an ADR for any major-version bump.
+
+      ## Version
+
+      Production runs Python 3.12 on Linux (Debian-slim base image). CPython
+      build is the upstream `python:3.12-slim-bookworm` image, no patches.
+
+      ## Worker configuration
+
+      - CPU-bound workers use `uvloop` for the asyncio event loop. This buys
+        us roughly 30% throughput at the cost of slightly less helpful
+        stacktraces in `asyncio.gather` exceptions — accepted trade-off.
+      - Memory budget is 2 GB per worker process. The orchestrator OOM-kills
+        anything that exceeds it; on a worker eviction, an audit event is
+        emitted to the `worker_lifecycle` topic.
+      - Restart policy: rolling, one pod at a time. A pod restart takes
+        roughly 45 seconds from terminate to ready. The platform autoscaler
+        accounts for this by maintaining a +1 buffer over target.
+
+      ## Build pipeline
+
+      Images are built nightly. The pipeline:
+
+      1. Pulls the latest `python:3.12-slim-bookworm`.
+      2. Installs system deps via apt (`libpq5`, `tini`, `ca-certificates`).
+      3. Installs Python deps via `uv sync --no-dev --frozen`.
+      4. Runs the smoke entrypoint to validate the image boots.
+      5. Pushes to the internal registry tagged `:nightly` and `:<sha>`.
+
+      ## Known issues
+
+      - **libpq segfault on shutdown when `KEEPALIVE_INTERVAL < 5`** (see
+        bug-431). The workaround is to set `KEEPALIVE_INTERVAL=10` in the
+        connection options. This is enforced by the connection-string
+        validator in `app.db.session`; do not lower this value without
+        coordinating with the platform team.
+      - **`asyncio.TimeoutError` swallowing in `aiohttp.ClientSession.get`**
+        when the cancellation race fires inside a `with` block. Workaround:
+        use a dedicated `asyncio.wait_for` wrapper around every external
+        HTTP call; the `app.http.client` helper does this for you.
+
+      ## Upgrade history
+
+      | Version | Date       | Notes |
+      | --      | --         | --    |
+      | 3.10    | 2023-04    | initial production deploy |
+      | 3.11    | 2024-08    | adopted exception groups |
+      | 3.12    | 2025-09    | current; PEP 692 TypedDict kwargs unblocked the trigger evaluator |
+expected_updates:
+  - path: services/python-runtime/notes.md
+    facts_present:
+      - id: py313-now
+        text: Python 3.13 is documented as the current production version
+    facts_preserved:
+      - id: uvloop
+        text: uvloop is still documented for CPU-bound workers
+      - id: mem-budget
+        text: the 2 GB per-worker memory budget is still documented
+      - id: restart-policy
+        text: the rolling restart policy with +1 buffer is still documented
+      - id: build-pipeline
+        text: the nightly build pipeline steps remain
+      - id: libpq-bug
+        text: the libpq KEEPALIVE_INTERVAL bug and workaround remain
+      - id: aiohttp-bug
+        text: the aiohttp TimeoutError known issue remains
+      - id: upgrade-history-3-12
+        text: the 3.12 row in the upgrade-history table remains
+expected_not_updated: []
+notes: |
+  Long single-doc body, multiple sections, two known-issue subsections
+  and a history table. The temptation is to "modernize" the version bump
+  by trimming. All structure must persist.
+tags: [single-doc, long-docs, loss-bait]

@@ -16,12 +16,15 @@ resolution, so spans started inside an active ``with trace_flow(...)``
 or ``with start_llm_span(...)`` block automatically nest. Callers don't
 need to thread parents.
 """
+
 from __future__ import annotations
 
 import json
 import logging
 from contextlib import contextmanager
 from typing import Any, Generator
+
+from pydantic import BaseModel, ConfigDict
 
 from app.tracing import settings as tracing_settings
 
@@ -59,6 +62,7 @@ def _get_logger() -> Any | None:
         return _logger_cache[1]
     try:
         import braintrust
+
         logger = braintrust.init_logger(project=s.project, api_key=s.api_key)
     except Exception:
         log.exception("braintrust init_logger failed; disabling tracing for this call")
@@ -158,6 +162,7 @@ def start_llm_span(
     try:
         import braintrust
         from braintrust.span_types import SpanTypeAttribute
+
         span_cm: Any = braintrust.start_span(
             name=f"llm:{provider}",
             type=SpanTypeAttribute.LLM,
@@ -191,6 +196,7 @@ def start_tool_span(
     try:
         import braintrust
         from braintrust.span_types import SpanTypeAttribute
+
         span_cm: Any = braintrust.start_span(
             name=f"tool:{name}",
             type=SpanTypeAttribute.TOOL,
@@ -202,6 +208,71 @@ def start_tool_span(
         return
     with span_cm as span:
         yield span
+
+
+class ExperimentRow(BaseModel):
+    """One row pushed to a Braintrust experiment.
+
+    Eval surfaces (``backend/evals``) build these rows from per-case
+    results. Keeping the shape here (rather than in evals) means callers
+    can't reach for the ``braintrust`` SDK directly — they go through
+    ``push_experiment``, which is the only allowed entry point.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    input: dict[str, Any]
+    output: dict[str, Any]
+    expected: dict[str, Any]
+    scores: dict[str, float]
+    metadata: dict[str, Any]
+
+
+def push_experiment(
+    *,
+    project: str,
+    experiment: str,
+    api_key: str,
+    rows: list[ExperimentRow],
+) -> int:
+    """Upload ``rows`` to a Braintrust experiment. Returns count uploaded.
+
+    Soft-fails on SDK or network errors with a warning so an unreachable
+    Braintrust never breaks an eval run. Returns 0 if the SDK isn't
+    installed or any error occurs after init.
+
+    The eval surfaces are the only callers. Live-tracing
+    (``trace_flow`` / ``start_llm_span`` / ``start_tool_span``) uses the
+    DB-backed admin settings and a separate logger; this helper takes
+    explicit args because eval runs configure their own credentials via
+    env vars and don't share the admin row.
+    """
+    if not rows:
+        return 0
+    try:
+        import braintrust
+    except ImportError:
+        log.warning("braintrust SDK not installed; skipping experiment push")
+        return 0
+    try:
+        bt_experiment: Any = braintrust.init(
+            project=project,
+            experiment=experiment,
+            api_key=api_key,
+        )
+        for row in rows:
+            bt_experiment.log(
+                input=row.input,
+                output=row.output,
+                expected=row.expected,
+                scores=row.scores,
+                metadata=row.metadata,
+            )
+        bt_experiment.flush()
+    except Exception:
+        log.exception("braintrust experiment push failed; results not uploaded")
+        return 0
+    return len(rows)
 
 
 def _reset_cache_for_tests() -> None:  # pyright: ignore[reportUnusedFunction]

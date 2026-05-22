@@ -1,0 +1,170 @@
+id: ext-08-deprecation-cascade
+prompt: |
+  Users API v1 is deprecated as of 2026-04-01 with a hard sunset on 2026-10-01.
+  Every doc that references the v1 endpoints needs a deprecation banner and a
+  pointer to the v2 migration guide at `migrations/users-v1-to-v2.md`. The
+  migration guide itself already exists and does not need to change. The v2
+  reference also does not need to change.
+wiki_state:
+  - path: api/v1/users.md
+    summary: Users API v1 reference.
+    body: |
+      # Users API v1
+
+      Status: stable.
+
+      ## Endpoints
+
+      ### `GET /v1/users`
+
+      List users in the calling tenant. Supports `?cursor=` for pagination and
+      `?limit=` (max 200, default 50). Returns `{users: [...], next_cursor: str | null}`.
+
+      ### `POST /v1/users`
+
+      Create a user. Body: `{email: str, role: "member"|"admin", display_name: str | null}`.
+      Returns the full user record. Idempotent on `email`.
+
+      ### `GET /v1/users/{id}`
+
+      Fetch a single user by id. 404 if the user does not exist or is in a
+      different tenant.
+
+      ### `DELETE /v1/users/{id}`
+
+      Hard-delete a user. Cascades to remove ACL entries and chat history.
+      Audit row emitted.
+
+      ## Authentication
+
+      Bearer token with the `users:read` or `users:write` scope.
+
+      ## Rate limits
+
+      - 100 req/min per token (standard tier)
+      - 1000 req/min per token (enterprise tier)
+  - path: integrations/auth0/setup.md
+    summary: Auth0 integration setup guide (mentions v1 user-sync).
+    body: |
+      # Auth0 integration
+
+      Set up Auth0 as the upstream identity provider. After the OIDC dance,
+      the platform syncs the user into our local user table via the Users API.
+
+      ## Initial sync
+
+      Run the bootstrap job:
+
+      ```
+      onyx-cli integrations auth0 bootstrap --tenant <id>
+      ```
+
+      The job iterates Auth0 users and calls `POST /v1/users` for each one.
+      Idempotency is on `email`, so the job is safe to re-run.
+
+      ## Incremental sync
+
+      An hourly cron calls `GET /v1/users?cursor=...` paginated over the
+      Auth0 user list and reconciles deltas.
+  - path: sdks/python/users.md
+    summary: Python SDK users module (wraps v1 endpoints).
+    body: |
+      # Python SDK — `onyx.users`
+
+      Wraps the Users API. Returns typed `User` and `UserList` models.
+
+      ## Listing users
+
+      ```python
+      from onyx import Client
+
+      client = Client(api_key=...)
+      for user in client.users.iter():  # paginates GET /v1/users
+          print(user.email)
+      ```
+
+      ## Creating
+
+      ```python
+      client.users.create(email="...", role="member")  # POST /v1/users
+      ```
+  - path: api/v2/users.md
+    summary: Users API v2 reference (unchanged).
+    body: |
+      # Users API v2
+
+      Status: stable.
+
+      ## Endpoints
+
+      - `GET /v2/users` — list users (offset+limit, no cursor)
+      - `POST /v2/users` — create user
+      - `PATCH /v2/users/{id}` — partial update (new in v2)
+      - `DELETE /v2/users/{id}` — soft-delete, 30-day restore window (changed from v1)
+
+      ## Authentication
+
+      Bearer token + tenant header (`X-Onyx-Tenant`).
+  - path: migrations/users-v1-to-v2.md
+    summary: v1-to-v2 migration guide (exists already, do not modify).
+    body: |
+      # Migrating from Users API v1 to v2
+
+      ## Pagination
+
+      v1 uses opaque cursors, v2 uses offset+limit. Recompute pagination state.
+
+      ## Soft-delete
+
+      v1's DELETE was hard. v2's DELETE is soft with a 30-day restore window.
+      Clients that relied on hard-delete must call `DELETE
+      /v2/users/{id}?hard=true` or wait the 30 days.
+
+      ## PATCH
+
+      v2 adds PATCH for partial updates; v1 required full PUT semantics.
+expected_updates:
+  - path: api/v1/users.md
+    facts_present:
+      - id: deprecated-date
+        text: v1 is documented as deprecated as of 2026-04-01
+      - id: sunset-date
+        text: v1 has a hard sunset on 2026-10-01
+      - id: migration-pointer
+        text: the page points readers to migrations/users-v1-to-v2.md
+    facts_preserved:
+      - id: get-endpoint
+        text: GET /v1/users with cursor pagination is still documented
+      - id: post-endpoint
+        text: POST /v1/users with email-idempotency is still documented
+      - id: get-by-id
+        text: GET /v1/users/{id} is still documented
+      - id: delete-endpoint
+        text: DELETE /v1/users/{id} hard-delete cascade is still documented
+      - id: rate-limits
+        text: the standard and enterprise rate-limit numbers are still documented
+  - path: integrations/auth0/setup.md
+    facts_present:
+      - id: auth0-banner
+        text: the auth0 page notes the v1 deprecation and points to the v2 migration
+    facts_preserved:
+      - id: bootstrap
+        text: the onyx-cli bootstrap command is still documented
+      - id: incremental-sync
+        text: the hourly incremental sync via GET /v1/users is still described
+  - path: sdks/python/users.md
+    facts_present:
+      - id: sdk-banner
+        text: the SDK doc notes v1 deprecation and points to the v2 migration
+    facts_preserved:
+      - id: iter-example
+        text: the client.users.iter() code example is still present
+      - id: create-example
+        text: the client.users.create() code example is still present
+expected_not_updated:
+  - api/v2/users.md
+  - migrations/users-v1-to-v2.md
+notes: |
+  Three docs need a banner; two unrelated docs (v2 ref + migration guide)
+  must not be touched. Tests scoped fan-out + restraint.
+tags: [multi-doc, long-docs, distractor, banner]

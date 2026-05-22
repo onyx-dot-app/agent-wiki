@@ -1,0 +1,277 @@
+id: ext-24-engineering-rfc-fanout
+prompt: |
+  RFC-0027 (the indexing pipeline rewrite) has shipped phase 1. Update the
+  RFC with: (1) the phase 1 ship date (2026-05-19), (2) actual metrics
+  observed in phase 1 vs the targets (we hit 320 docs/min vs 250 target;
+  permission-fetch latency p95 dropped from 1.4s to 380ms; pgmq queue
+  depth peak dropped from 12k to 2.1k), (3) the lessons-learned section
+  with three findings (rolled-out behind a per-tenant flag was the right
+  call because of one tenant's edge case; the Redis Streams ack model
+  needed a backoff jitter we hadn't planned; the OpenSearch reindex
+  during cutover was longer than expected). The phase 2 plan section
+  must NOT change — it's still pending the platform team's review next
+  week.
+
+  The OpenSearch architecture doc references this RFC tangentially —
+  leave it alone. The on-call rotation page mentions phase 1 as a
+  recent incident-adjacent change — leave it alone too.
+wiki_state:
+  - path: rfcs/0027-indexing-pipeline-rewrite.md
+    summary: RFC-0027 indexing pipeline rewrite (phased plan; phase 1 just shipped).
+    body: |
+      # RFC-0027: Indexing pipeline rewrite
+
+      - **Status:** Phase 1 shipping. Phase 2 pending review.
+      - **Author:** Park
+      - **Reviewers:** Patel, Khan, Yuhong, Justin
+      - **Created:** 2026-03-04
+      - **Last revised:** 2026-04-22
+
+      ## Problem statement
+
+      The current indexing pipeline serializes per-tenant. A single
+      large-customer connector run can starve every other tenant's
+      indexing for hours. The 2026-04-12 cache stampede and the
+      2026-04-28 engineering performance analysis both surfaced this as
+      the binding constraint on cross-tenant indexing latency. We've
+      hit the ceiling on what tuning can buy us; we need to change the
+      architecture.
+
+      Specific issues observed today:
+
+      1. **Per-tenant head-of-line blocking.** One tenant's slow
+         SharePoint walk holds the docfetching worker for the entire
+         duration. Other tenants queue behind it.
+      2. **Permission-fetch latency dominates.** Per-doc permission
+         fetch via Microsoft Graph + SharePoint REST is the largest
+         single contributor to wall time. p95 is currently 1.4s; we
+         have no batching today.
+      3. **Pgmq queue depth visibility is poor.** Operators can see
+         that the queue is long but not which tenant is contributing
+         the most depth. This makes targeted intervention impossible
+         during an incident.
+      4. **No backpressure between phases.** Indexing has no signal
+         that the document index is rejecting writes; it just keeps
+         pushing.
+
+      ## Goals
+
+      - Eliminate per-tenant head-of-line blocking. No tenant should be
+        able to stall another tenant's indexing for more than 60
+        seconds.
+      - Reduce permission-fetch latency p95 to under 500ms via
+        batching.
+      - Introduce per-tenant queue-depth metrics so operators can
+        identify the contributing tenant in under 60 seconds.
+      - Add backpressure: when the document index reports write
+        failures, indexing pauses for that workload until the index
+        recovers.
+
+      ## Non-goals
+
+      - We are not changing the document index itself (OpenSearch
+        stays).
+      - We are not changing the embedding model or its serving
+        infrastructure.
+      - We are not removing the per-doc permission-aware index. The
+        permission-preserving requirement is a customer constraint
+        that we will not relax.
+
+      ## Proposed design
+
+      The pipeline becomes three independent phases connected by Redis
+      Streams: enumerate, hydrate, index. Each phase has its own
+      worker pool, its own scaling profile, and its own retry budget.
+
+      ### Phase A: Enumerate
+
+      A single worker per connector walks the source (SharePoint,
+      GitHub, Slack, etc.) and emits a Redis Stream entry per
+      discovered document. The entry contains the document id,
+      source, and a "fetch hint" (URL or whatever the hydrate phase
+      needs to retrieve the document). No content is fetched here —
+      this phase is bound by the source API's enumeration speed.
+
+      ### Phase B: Hydrate
+
+      A worker pool reads from the enumerate Stream and fetches
+      content + permissions for each document. This phase is
+      parallel across workers within a tenant and across tenants.
+      Permission fetching is batched: a worker collects up to 50
+      doc-ids over a 200ms window and issues a single batched
+      permission query per source.
+
+      ### Phase C: Index
+
+      A worker pool reads from the hydrate Stream and writes to the
+      document index (chunking + embedding + index write). This
+      phase is the existing logic, lightly adapted to read from
+      Streams instead of pgmq.
+
+      ## Implementation phases
+
+      | Phase | Scope | Target ship | Risk |
+      | -- | -- | -- | -- |
+      | 1 | New Redis Streams pipeline running in shadow alongside pgmq; per-tenant queue-depth metrics | 2026-05-15 | Low — shadow-only |
+      | 2 | Cutover for one workload (search-reindex) behind a per-tenant flag | 2026-06-15 | Medium — first production traffic |
+      | 3 | Cutover for SharePoint connectors | 2026-07-31 | High — largest workload, permission-heavy |
+      | 4 | Cutover for remaining connectors + deprecate pgmq codepath | 2026-09-15 | Medium — bulk migration |
+
+      ## Phase 1 metrics targets
+
+      | Metric | Today | Target |
+      | -- | -- | -- |
+      | Throughput (docs/min, per connector) | 180 | 250 |
+      | Permission-fetch latency p95 | 1.4s | 500ms |
+      | Pgmq queue depth peak (per workload) | 12k | 4k |
+      | Per-tenant queue-depth visibility | None | Per-workload + per-tenant |
+
+      ## Phase 2 plan
+
+      The phase 2 plan is still under review by the platform team and
+      will be confirmed in the 2026-05-27 review. Current draft:
+
+      1. Enable per-tenant flag on the `search-reindex` workload for
+         the three smallest production tenants first.
+      2. Watch the new per-tenant queue-depth metrics for 48 hours.
+      3. Expand to 10% of tenants by traffic.
+      4. Expand to 50%, then 100%, with 24h soak between each step.
+      5. After 100% is stable for one week, deprecate the pgmq
+         codepath for `search-reindex`.
+
+      Open questions for the phase 2 review:
+
+      - Should the flag be per-tenant or per-workload? Per-tenant
+        gives finer-grained rollback but means we have to maintain
+        the flip-flop machinery longer.
+      - What's the rollback signal? Manual or automatic on a
+        threshold breach?
+      - Do we need a synthetic-traffic load test in stage before
+        production traffic flips?
+
+      ## Operational implications
+
+      - SRE needs a new dashboard for the Streams pipeline (per-phase
+        queue depth, per-tenant breakdown).
+      - On-call playbook update: how to drain a stuck Stream, how to
+        replay from a backup point, how to force a tenant onto the
+        pgmq fallback during the migration.
+      - Cost: Redis Streams adds ~$8k/month in cluster cost. Lower
+        than the SharePoint API cost we expect to save via batching
+        (estimated ~$12k/month at current Acme traffic alone).
+
+      ## Risks and mitigations
+
+      | Risk | Mitigation |
+      | -- | -- |
+      | Streams data loss during a cluster failover | Acked-only consumer semantics; pgmq runs in shadow until phase 4 |
+      | Cutover causes regression for a specific tenant | Per-tenant flag (phase 2+) lets us roll back one tenant without affecting others |
+      | Permission-batch query rejected by SharePoint API | Fall back to per-doc fetch on batch failure with backoff |
+      | OpenSearch reindex during cutover takes longer than expected | Cutover happens during the weekly low-traffic window |
+
+      ## Decision log
+
+      | Date | Reviewer | Note |
+      | -- | -- | -- |
+      | 2026-03-04 | Park | Initial draft submitted. |
+      | 2026-03-12 | Patel | Pushed back on the 4-phase timeline — phase 3 too aggressive for SharePoint complexity. Compromise: phase 3 moves to 2026-07-31 (was 2026-07-15). |
+      | 2026-03-19 | Khan | Added the per-tenant queue-depth metrics requirement to the goals. |
+      | 2026-04-02 | Yuhong | Approved phase 1 design; deferred phase 2 approval pending dashboard mockup. |
+      | 2026-04-22 | Justin | Added cost/savings estimate to operational implications. Approved phase 1 to ship. |
+  - path: services/search/architecture.md
+    summary: OpenSearch architecture (references RFC-0027 tangentially).
+    body: |
+      # Search architecture
+
+      OpenSearch 2.13, 4 data nodes (after the 2026-05-19 conflict-resolved bump), 2 coordinator nodes.
+
+      ## Indexing
+
+      Documents are indexed on every wiki commit. The indexing pipeline
+      is described in RFC-0027 (link: `rfcs/0027-indexing-pipeline-rewrite.md`).
+      Phase 1 is the shadow Streams pipeline that runs alongside pgmq;
+      the active indexing path through the OpenSearch cluster is
+      unchanged in phase 1.
+
+      ## Sharding
+
+      6 primary shards per index, 1 replica each. Shard placement is
+      rebalanced on node add/remove.
+
+      ## Hot tier
+
+      Last 30 days of indexed content lives on the hot tier (NVMe).
+      Older content moves to S3-backed cold storage on a weekly
+      schedule.
+  - path: ops/oncall/rotation.md
+    summary: Oncall rotation page (mentions phase 1 in passing).
+    body: |
+      # SRE on-call rotation
+
+      Weekly rotation Mon 09:00 PT. Handoff in `#oncall-handoff` with a
+      brief of any open incidents and pending toil.
+
+      ## Recent changes that may affect oncall surface
+
+      - 2026-05-19 — RFC-0027 phase 1 shipped (shadow Streams pipeline
+        added). Should be silent from an oncall perspective unless the
+        new dashboard alarms fire. See `rfcs/0027-indexing-pipeline-rewrite.md`.
+      - 2026-05-15 — `auth-key-rotation-stuck` pager added to the auth
+        runbook.
+      - 2026-04-12 — recs cache stampede (resolved with request
+        coalescing).
+
+      ## Current schedule
+
+      See the PagerDuty schedule `eng-primary`.
+expected_updates:
+  - path: rfcs/0027-indexing-pipeline-rewrite.md
+    facts_present:
+      - id: phase-1-shipped-date
+        text: phase 1 is documented as shipped 2026-05-19
+      - id: actual-throughput
+        text: actual phase 1 throughput is recorded as 320 docs/min (vs 250 target)
+      - id: actual-permission-latency
+        text: actual permission-fetch latency p95 is recorded as 380ms (vs 500ms target, down from 1.4s)
+      - id: actual-queue-depth
+        text: actual pgmq queue depth peak is recorded as 2.1k (vs 4k target, down from 12k)
+      - id: lesson-per-tenant-flag
+        text: lessons-learned section notes per-tenant flag rollout was the right call due to one tenant's edge case
+      - id: lesson-streams-backoff
+        text: lessons-learned section notes the Redis Streams ack model needed an unplanned backoff jitter
+      - id: lesson-os-reindex
+        text: lessons-learned section notes the OpenSearch reindex during cutover was longer than expected
+    facts_preserved:
+      - id: problem-statement
+        text: the Problem statement section with the 4 specific issues remains
+      - id: goals
+        text: the Goals list with the 60-second head-of-line target and 500ms permission target remains
+      - id: non-goals
+        text: the Non-goals list (OpenSearch unchanged, embedding unchanged, permission-aware indexing preserved) remains
+      - id: phase-a-design
+        text: the Phase A enumerate design section remains
+      - id: phase-b-design
+        text: the Phase B hydrate design section with 50-doc/200ms batching remains
+      - id: phase-c-design
+        text: the Phase C index design section remains
+      - id: phase-table
+        text: the implementation phases table with all 4 phase rows remains
+      - id: phase-2-plan
+        text: the Phase 2 plan section with the 5-step rollout draft remains UNCHANGED
+      - id: phase-2-open-questions
+        text: the Phase 2 open questions list remains
+      - id: operational-implications
+        text: the operational implications section (SRE dashboard, oncall playbook, cost) remains
+      - id: risk-table
+        text: the risks and mitigations table with all 4 rows remains
+      - id: decision-log
+        text: all 5 rows of the decision log table remain
+expected_not_updated:
+  - services/search/architecture.md
+  - ops/oncall/rotation.md
+notes: |
+  Tests edit of a long technical RFC (4KB+ body, multiple tables,
+  multi-section design + phase plan + decision log) while preserving an
+  explicitly-frozen section (Phase 2 plan still under review). Two
+  related docs mention the RFC tangentially and must not change.
+tags: [long-docs, single-doc-edit, loss-bait, rfc, frozen-section]

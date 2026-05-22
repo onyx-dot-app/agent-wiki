@@ -39,6 +39,9 @@ data/
 local_data/
 tmp_workspace/
 
+# eval run outputs — generated, never committed
+backend/runs/
+
 # editor / OS
 .DS_Store
 .idea/

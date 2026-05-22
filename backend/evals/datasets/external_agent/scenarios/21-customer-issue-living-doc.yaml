@@ -1,0 +1,448 @@
+id: ext-21-customer-issue-living-doc
+prompt: |
+  New escalation thread from #customer-support: on 2026-05-19 the Acme SharePoint
+  connector failed with a fresh Graph 404 on `/teams/RegionalSalesEU`, throughput
+  dropped from ~180 to ~12 docs/min, and Pia confirmed Acme is now on v3.3.1.
+  Update the Acme living document with: (1) a new "May 19" entry in the
+  incidents section, (2) the new version row in the version timeline, (3) the
+  new `/teams/RegionalSalesEU` row in the identifiers table, (4) a status flip
+  for `/teams/RegionalSalesEU` in the "Open issues" section. Do NOT lose any
+  prior incident, identifier, or open-issue entry. The source-reference index
+  must be extended with the new Slack thread URL, not rewritten.
+
+  Also: the engineering performance doc references Acme tangentially — leave it
+  alone. The customer-onboarding doc lists Acme as a logo — leave it alone.
+wiki_state:
+  - path: customers/acme/sharepoint-issues.md
+    summary: Acme SharePoint Connector Issues — Living Document (canonical incident reference).
+    body: |
+      # Acme SharePoint Connector Issues — Living Document
+
+      Last updated: 2026-05-18
+
+      This is a living document describing the issues Acme has run into with
+      the SharePoint connector. All Onyx-indexed communication about Acme in
+      the #customer-support Slack channel that involves SharePoint is cited
+      here.
+
+      Citation note: The references below are Slack / meeting links surfaced
+      from Onyx search. In several cases Onyx exposed the indexed Slack
+      result link and thread context, but not all original attachments or
+      complete thread metadata.
+
+      ## Table of contents
+
+      1. Overview and useful context
+      2. Acme identifiers found
+      3. Version / deployment timeline
+      4. Specific incidents and resolutions
+      5. Recurring patterns and likely root causes
+      6. Resolved or mitigated items
+      7. Open issues / unresolved questions
+      8. Recommendations / action items
+      9. Operational follow-up tracker
+      10. Source reference index
+
+      ## Overview and useful context
+
+      As of the latest #customer-support evidence, Acme was on Onyx v3.3.0,
+      had one active SharePoint connector, and was still experiencing
+      indexing throughput / connector reliability issues. Justin noted that
+      this active connector "keeps hitting issues," that Acme likely runs on
+      Kubernetes, and that Onyx needed to provide an upgrade strategy. A
+      suspected deployment anomaly was also noted: the OpenSearch migration
+      page was missing, raising concern that Acme might be on v3.3.0 without
+      an OpenSearch container. Evan was assigned to continue looking through
+      logs and SharePoint issue details. [5]
+
+      The prior May 11 update showed meaningful progress: Acme devtest had
+      been upgraded to v3.3.0; Vespa memory had been increased from 32Gi to
+      48Gi; old Vespa 507 Insufficient Storage / feed-blocking had stopped
+      being the active blocker; docfetching workers were stable after a
+      probe-timeout change; and a local SharePoint hotfix changed
+      unauthorized .aspx page handling from "abort the whole connector run"
+      to "record as per-document failure." However, the connector named
+      "SharePoint all ASPX sites since first of March" was still failing on
+      Microsoft Graph 404 itemNotFound for `/teams/Almedalentrip`,
+      interpreted as a missing or invalid SharePoint site in the crawl
+      scope. [2]
+
+      There is an apparent but explainable tension between the May 11 and
+      May 13 updates: on May 11, Lindsey relayed that Jim said they seemed
+      to be "up and running" at 180–200 docs/minute, while the same May 11
+      update still listed the Almedalentrip Graph 404 as the active
+      run-level blocker for a specific connector. [2] By May 13, Justin
+      again said Acme still had throughput issues and only one active
+      SharePoint connector that kept hitting issues. [5] This likely means
+      Acme saw partial throughput improvement but had not reached a stable,
+      fully resolved state.
+
+      ## Acme identifiers found
+
+      | Identifier | Context |
+      | -- | -- |
+      | `tenant_14119003-03f5-4f4c-b64d-9ae3ffae5a2e` | Mentioned in the Feb. 17 "Acme Call" thread when Justin could not find @acme.com emails in cloud. [9] |
+      | `tenant_aaf981ad-fc1c-42eb-9e2b-cbddd8f0c312` | License/workspace block in the Mar. 25 "Acme report": Org Acme, 50 seats, monthly plan, expires 2026-04-24T00:00:00+00:00. [8] |
+      | `acmeazureservices.sharepoint.com` | SharePoint tenant/domain in multiple connector errors. [1], [2], [3] |
+      | `/teams/AIatAcme` | Apr. 20 401 Unauthorized while fetching role assignments for a site page. [1] |
+      | `/teams/Plymothepsvnner` | Apr. 20 Microsoft Graph 404 itemNotFound; likely invalid/misspelled/inaccessible. [1] |
+      | `/teams/SJPIndependentDealers` | Apr. 30 .aspx site-page 401 Unauthorized; later described as resolved by local hotfix behavior change. [3], [2] |
+      | `/teams/Almedalentrip` | May 11 Microsoft Graph 404 itemNotFound; current blocker for "SharePoint all ASPX sites since first of March". [2] |
+      | R&D hub | SharePoint scope/site involved in Apr. 22 sync issue and Apr. 30 group/member permission traversal failure. [11], [3] |
+
+      ## Version / deployment timeline
+
+      | Date | Version / deployment state | Notes |
+      | -- | -- | -- |
+      | Apr. 20 | v2.12.6 | SharePoint 401 and 404 errors reported; embedding swap/OpenAI embedding config not available in Acme's version. [1] |
+      | Apr. 30 | v3.2.1 | Still "a bit behind"; needed a tag with all fixes; permission sync not running; GitHub commit proposed for backport. [3] |
+      | May 11 | Devtest on v3.3.0 | Vespa memory increased; SharePoint .aspx hotfix applied; worker/probe timeout improved; remaining blocker was Graph 404 for `/teams/Almedalentrip`. [2] |
+      | May 13 | v3.3.0 | Still having throughput issues; one active SharePoint connector kept hitting issues; suspected missing OpenSearch container/migration page; possible move toward v4.0.X for metrics work. [5] |
+
+      ## Specific incidents and resolutions
+
+      ### 1. Feb. 17 — Initial Acme call: user/log confusion, validation failure, possible firewall issue
+
+      Slack conversation: "Acme Call" in #customer-support. [9]
+
+      Justin reported that he did not see any @acme.com emails in Onyx cloud
+      and could not find the user whose logs he wanted to pull. He suspected
+      the user might be using a personal gmail and recorded tenant ID
+      `tenant_14119003-03f5-4f4c-b64d-9ae3ffae5a2e`. The thread framed the
+      situation as likely an "us issue" and emphasized that Acme seemed
+      ready to proceed, but Onyx needed to deliver a smooth connector
+      experience and high-quality search. A validation failure was
+      discussed; Justin was "reasonably confident" it was a firewall issue,
+      and a clearer error message was called out as a takeaway. [9]
+
+      Category: Initial setup / validation; possible firewall / customer
+      environment; logging / supportability gap.
+
+      Resolution status: No confirmed resolution in retrieved Slack content;
+      next step was more logs and continued discussion.
+
+      ### 2. Feb. 19 — Early SharePoint ingestion-speed concern tied to Acme
+
+      Slack conversation: Playlist/Acme SharePoint ingestion-speed thread. [10]
+
+      Justin asked Evan whether a fix from the previous day would help
+      SharePoint ingestion speed, saying this would likely become more
+      important "especially with the Acme deal." The discussion questioned
+      whether indexing 3TB of SharePoint data made sense and suggested
+      pushing back on scope. [10]
+
+      Category: Sync throughput / ingestion speed; connector scope design;
+      customer data scale.
+
+      Resolution status: No Acme-specific resolution; suggested mitigation
+      was narrower scoping and benchmarking.
+
+      ### 3. Mar. 3 — Security rejects broad SharePoint read all; asks for site select
+
+      Slack conversation: "Acme security ?s". [6]
+
+      Lindsey reported Acme IT Security declined to allow the connector to
+      have `read all` access and wanted `site select` instead. Acme also
+      asked whether OpenAI embedding models would cause Acme information to
+      leave Acme's control. [6]
+
+      Category: Security / governance; SharePoint permission model;
+      connector configuration; customer environment constraints.
+
+      Resolution status: No final answer or resolution appears in retrieved
+      Slack content.
+
+      ### 4. Mar. 11 — Security asks about OneDrive, DLP, sensitivity labels, and permission-change lag
+
+      Slack conversation: "Latest Acme Security Questions to be answered". [7]
+
+      Lindsey posted additional Acme Security questions about OneDrive
+      content, Data Loss Prevention rules, sensitivity labels including
+      confidential/secret and encrypted files, and permission-change
+      propagation latency. [7]
+
+      Category: Security / governance; permissions sync latency; DLP /
+      labels / encryption.
+
+      Resolution status: No confirmed answers appear in retrieved Slack
+      content.
+
+      ### 5. Mar. 25 — Trial/license escalation and 403 forbidden on permission change
+
+      Slack conversation: "Acme report". [8]
+
+      Lindsey reported trial/license details and noted Acme now had a weekly
+      escalation call because security colleagues were delaying rollout.
+      SharePoint-specific issue: Jim tried to change permissions to open up
+      a private document but got 403 forbidden. [8]
+
+      Category: Permission propagation / authorization; rollout delay.
+
+      Resolution status: No confirmed resolution.
+
+      ### 6. Apr. 20 — v2.12.6: 401 on AIatAcme; Graph 404 on /teams/Plymothepsvnner
+
+      Slack conversation: "Acme Followup Issues". [1]
+
+      Justin posted that Acme was using Onyx v2.12.6. One stack trace failed
+      during SharePoint site-page conversion and external permission
+      fetching with `401 Client Error: Unauthorized`. The affected URL
+      targeted `/teams/AIatAcme/SitePages/...`. A second trace showed Graph
+      404 itemNotFound for `/teams/Plymothepsvnner`. A reply characterized
+      the problems as likely a permission issue and a site-name spelling
+      issue. [1]
+
+      Category: Authentication / permissions; missing or invalid site;
+      connector runtime failure; deployment/version gap.
+
+      Resolution status: No direct resolution; Subash and Evan were tagged
+      to investigate.
+
+      ### 7. Apr. 30 — v3.2.1: chunked response failure, .aspx 401, R&D hub traversal, permission sync not running
+
+      Slack conversation: "Acme Sharepoint Issues". [3]
+
+      Justin posted Acme was on v3.2.1, "a bit behind," and that Onyx needed
+      to give them a tag containing all fixes. Issues observed:
+
+      - `ChunkedEncodingError: Response ended prematurely` during permission-aware drive item processing
+      - `401 Unauthorized` for `/teams/SJPIndependentDealers/_api/Web/...` site page role assignments
+      - R&D hub group/member traversal failure (truncated in indexed slack content)
+      - Permission sync not running; commit `667db2e8f573f015d9030e634c0bd1d8bbc0685b` proposed for backport
+
+      Category: Permission/external access failures; connector runtime
+      failure; group/member resolution; permission sync scheduling/version
+      issue.
+
+      Resolution status: No customer-confirmed resolution. May 11 later
+      confirms `.aspx` page-failure behavior was mitigated with a local
+      hotfix. [2]
+
+      ### 8. May 11 — v3.3.0: Vespa 507 resolved, .aspx behavior hotfixed, active blocker is Graph 404
+
+      Slack conversation: "Acme Update - New thread". [2]
+
+      Acme devtest had been upgraded to v3.3.0. Vespa memory was increased
+      from `32Gi -> 48Gi` and the old 507 Insufficient Storage / feed
+      blocking stopped being the active blocker. A local hotfix changed
+      behavior so a single unauthorized `.aspx` page is recorded as a
+      per-document failure instead of aborting the entire run. Docfetching
+      workers were stable after a probe-timeout change. The current blocker
+      was Microsoft Graph 404 itemNotFound for `/teams/Almedalentrip`
+      against the `SharePoint all ASPX sites since first of March`
+      connector. Jim reported throughput of 180–200 docs/minute. [2]
+
+      Resolution status: Partially resolved / partially open.
+
+      ### 9. May 13 — Upgrade path: still throughput issues, one active connector, missing OpenSearch concern
+
+      Slack conversation: "Acme Upgrade path". [5]
+
+      Justin posted Acme was on v3.3.0 and still having indexing throughput
+      issues. Confirmed state:
+
+      - Acme had only one active SharePoint connector running.
+      - That connector kept hitting issues.
+      - The OpenSearch migration page was missing, suggesting there might
+        not be an OpenSearch container running.
+      - Acme likely used Kubernetes, so Onyx needed to send upgrade
+        strategy information.
+      - v4.0.X was discussed because Evan's metrics work should be part of
+        that release.
+      - Evan was assigned to continue reviewing logs and information to
+        figure out the SharePoint issues.
+
+      Resolution status: Open as of latest retrieved #customer-support
+      evidence.
+
+      ## Recurring patterns and likely root causes
+
+      1. Permission-aware SharePoint indexing is the central systemic issue
+      2. Unauthorized `.aspx` pages used to abort connector runs (mitigated)
+      3. Invalid/missing sites in broad crawl scope cause Graph 404s
+      4. Throughput bottleneck is mostly SharePoint fetch/permissions, not general compute
+      5. SharePoint API rate limiting is suspected but not proven
+      6. Deployment/version gaps delayed fixes
+      7. Acme's security model and data scale make this a difficult customer environment
+
+      ## Resolved or mitigated items
+
+      - Vespa 507 Insufficient Storage / feed blocking — resolved by increasing Vespa memory from `32Gi` to `48Gi`. [2]
+      - Unauthorized `.aspx` page aborting whole connector run — mitigated in Acme devtest by local hotfix. [2]
+      - SJPIndependentDealers earlier 401 failure pattern — May 11 update says the `.aspx` hotfix resolved it. [2]
+      - Docfetching worker timeout / probe instability — May 11 update says workers were stable. [2]
+      - Throughput improved from 4–6 docs/min to 180–200 docs/min, then regressed (see May 13). [2], [5]
+
+      ## Open issues / unresolved questions
+
+      - Active Graph 404 for `/teams/Almedalentrip` — validate whether the site exists, was renamed/deleted, requires different permissions, or should be removed from crawl scope. [2]
+      - Ongoing throughput instability — deploy indexing phase metrics to isolate SharePoint fetch, permission lookup, queueing, doc processing, embedding, and Vespa/indexing time. [5]
+      - Missing OpenSearch migration page / possible missing OpenSearch container — confirm deployment topology and provide Kubernetes upgrade guidance. [5]
+      - Permission sync / group sync visibility and scheduler behavior — verify scheduler jobs are running and confirm commit `667db2e8f573f015d9030e634c0bd1d8bbc0685b` or equivalent is deployed. [3]
+      - R&D hub final root cause — Apr. 22 screenshot/error details are missing; Apr. 30 trace is truncated before final exception. [11], [3]
+      - 403 forbidden on opening private doc — confirm whether user error, SharePoint propagation delay, missing permission, or expected behavior. [8]
+      - Security/governance answers incomplete. [6], [7]
+
+      ## Recommendations / action items
+
+      1. Validate and clean crawl scope — remove invalid sites such as `/teams/Almedalentrip` and `/teams/Plymothepsvnner` unless Acme confirms they exist. [1], [2]
+      2. Keep per-document failure behavior for inaccessible `.aspx` pages in Acme's durable release/tag. [2]
+      3. Verify permission sync / group sync scheduling and commit `667db2e8f573f015d9030e634c0bd1d8bbc0685b` is deployed. [3]
+      4. Deploy per-phase indexing metrics (connector fetch, SharePoint permission fetch, queue wait, doc processing, embedding, Vespa). [5]
+      5. Split large SharePoint scope into multiple connectors. [13]
+      6. Treat SharePoint API rate limits as a hypothesis to test, not a proven root cause. [13], [14]
+      7. Confirm OpenSearch / upgrade path and provide Kubernetes-specific upgrade instructions. [5]
+
+      ## Operational follow-up tracker
+
+      - [ ] Confirm `/teams/Almedalentrip` status with Acme SharePoint admins.
+      - [ ] Confirm `/teams/Plymothepsvnner` was typo/deleted/inaccessible and remove if invalid.
+      - [ ] Confirm Acme deployment includes `.aspx` per-document failure hotfix.
+      - [ ] Confirm permission-sync and group-sync scheduler jobs are running.
+      - [ ] Confirm GitHub commit `667db2e8f573f015d9030e634c0bd1d8bbc0685b` or equivalent is in Acme tag.
+      - [ ] Confirm OpenSearch deployment/migration state on Acme `v3.3.0`.
+      - [ ] Provide Kubernetes upgrade guide and target release/tag.
+      - [ ] Deploy indexing phase metrics build.
+      - [ ] Split broad SharePoint crawl into multiple scoped connectors.
+      - [ ] Produce Acme security FAQ covering site-select, DLP, labels, OneDrive, embeddings, permission lag, and audit logs.
+
+      ## Source reference index
+
+      [1] "Acme Followup Issues" — https://onyx-company.slack.com/archives/C09B4PBPFN2/p1776696156151729?thread_ts=1776696156.151729
+      [2] "Acme Update - New thread" — https://onyx-company.slack.com/archives/C09B4PBPFN2/p1778522482318179?thread_ts=1778522442.236789
+      [3] "Acme Sharepoint Issues" — https://onyx-company.slack.com/archives/C09B4PBPFN2/p1777566141560249?thread_ts=1777564268.604939
+      [4] "Good Morning - Acme update" — https://onyx-company.slack.com/archives/C09B4PBPFN2/p1777126273710889?thread_ts=1777126273.710889
+      [5] "Acme Upgrade path" — https://onyx-company.slack.com/archives/C09B4PBPFN2/p1778686355854159?thread_ts=1778686355.854159
+      [6] "Acme security ?s" — https://onyx-company.slack.com/archives/C09B4PBPFN2/p1772552968781719
+      [7] "Latest Acme Security Questions to be answered" — https://onyx-company.slack.com/archives/C09B4PBPFN2/p1773250716080289
+      [8] "Acme report" — https://onyx-company.slack.com/archives/C09B4PBPFN2/p1774464168940859?thread_ts=1774464168.940859
+      [9] "Acme Call" — https://onyx-company.slack.com/archives/C09B4PBPFN2/p1771342450172499?thread_ts=1771342450.172499
+      [10] Playlist/Acme SharePoint ingestion-speed discussion — https://onyx-company.slack.com/archives/C09B4PBPFN2/p1771522020591469?thread_ts=1771522020.591469
+      [11] "Got a Acme issue" / R&D hub — https://onyx-company.slack.com/archives/C09B4PBPFN2/p1776877022194649?thread_ts=1776877022.194649
+      [13] Apr. 28 engineering performance analysis — https://onyx-company.slack.com/archives/C097NBWMY8Y/p1777395633493289?thread_ts=1777395633.493289
+      [14] Apr. 30 Acme / Onyx Questions Sync meeting — https://app.fireflies.ai/view/01KQATHEAM3DR2AHS5VKRGAMHF?t=2048.29
+  - path: engineering/sharepoint-connector-performance.md
+    summary: Engineering performance overview for the SharePoint connector (tangentially mentions Acme).
+    body: |
+      # SharePoint connector — performance overview
+
+      Onyx's SharePoint connector retrieves documents via the Microsoft
+      Graph + SharePoint REST APIs with permission-aware indexing. This
+      document is the engineering reference for performance behavior; for
+      customer-specific tuning, see the customer page (e.g. Acme is on
+      `customers/acme/sharepoint-issues.md`).
+
+      ## Phases per connector run
+
+      1. **Site enumeration** — Graph `/sites` walk, scoped to the connector's site list.
+      2. **Drive enumeration** — per-site drive list.
+      3. **Item iteration** — paginated drive-item iteration, including pages, files, and lists.
+      4. **Permission fetch** — per-item role-assignment fetch via Graph + REST endpoints.
+      5. **Group expansion** — recursive resolution of Azure AD groups to user/email lists.
+      6. **Chunking + embedding + index write** — parallel across docfetching workers.
+
+      Phases 1–5 are serialized per connector. Phase 6 parallelizes across
+      replicas. A common misdiagnosis is to add more docfetching pods to
+      speed up phase 4; that does not help because the SharePoint fetch
+      stage is a single long-lived task.
+
+      ## Known throughput ranges
+
+      | Connector type | Typical | Best observed |
+      | -- | -- | -- |
+      | Organization-public (no permission fetch) | 80–120 docs/min | 220 docs/min |
+      | Permission-synced, narrow scope | 30–60 docs/min | 120 docs/min |
+      | Permission-synced, broad scope (1000+ sites) | 5–15 docs/min | 40 docs/min |
+
+      ## Common slowdowns
+
+      - Permission fetching dominates wall time for permission-synced runs.
+      - Graph + REST API latency varies 200ms–2s; tail latency on
+        permission endpoints is much worse than item-list endpoints.
+      - Broad crawl scopes that include invalid/inaccessible sites cause
+        repeated 404 / 401 / 403 responses that consume retry budget.
+      - Group expansion can be exponential when groups are deeply nested.
+
+      ## Mitigations
+
+      - Split broad scopes into multiple connectors by business area or
+        site list.
+      - Prefer organization-public connectors for content that does not
+        need permission preservation.
+      - Use indexing phase metrics (added in v4.0.X) to isolate the actual
+        bottleneck rather than guessing.
+      - Validate crawl scope against Graph before run; invalid sites
+        should be quarantined, not blockers.
+
+      ## Observability
+
+      Per-phase timing metrics ship in v4.0.X. Until then, the most useful
+      signal is the worker log line:
+
+      ```
+      [INFO] docfetching: site=<site> phase=<phase> elapsed_ms=<n> items=<n>
+      ```
+
+      Filter by `site=` to identify which sites in a broad crawl are
+      monopolizing the run.
+  - path: customers/onboarding/active-customers.md
+    summary: Active-customers logo wall (lists Acme tangentially).
+    body: |
+      # Active customers
+
+      | Logo | Tier | Onboarded | Notes |
+      | -- | -- | -- | -- |
+      | Acme | Enterprise | 2026-02 | SharePoint-heavy; see customer page for issues |
+      | Initech | Mid-market | 2025-11 | Slack + Confluence; smooth |
+      | Globex | Enterprise | 2025-09 | Multi-region; permissioning solid |
+      | Hooli | Mid-market | 2025-12 | SSO via Okta; no major issues |
+      | Pied Piper | Enterprise | 2026-01 | GitHub-heavy; trial converted |
+
+      Use this page when introducing a new account-manager to the active
+      portfolio. Customer-specific operational details live under
+      `customers/<name>/`; this page is intentionally a logo wall.
+expected_updates:
+  - path: customers/acme/sharepoint-issues.md
+    facts_present:
+      - id: may19-incident
+        text: a May 19 incident entry documents the new Graph 404 on /teams/RegionalSalesEU and the throughput drop from 180 to 12 docs/min
+      - id: new-version-row
+        text: the version timeline includes a v3.3.1 row dated May 19
+      - id: new-identifier-row
+        text: the identifiers table includes a /teams/RegionalSalesEU row
+      - id: new-open-issue
+        text: the open issues section lists /teams/RegionalSalesEU as a blocker
+      - id: new-source-ref
+        text: the source reference index includes the new Slack thread for the May 19 escalation
+    facts_preserved:
+      - id: feb17-incident
+        text: the Feb 17 "Acme Call" incident entry is still present
+      - id: apr20-incident
+        text: the Apr 20 v2.12.6 incident entry with AIatAcme 401 and Plymothepsvnner 404 is still present
+      - id: apr30-incident
+        text: the Apr 30 v3.2.1 incident entry with ChunkedEncodingError and SJPIndependentDealers 401 is still present
+      - id: may11-incident
+        text: the May 11 v3.3.0 incident entry with Vespa memory bump and .aspx hotfix is still present
+      - id: may13-incident
+        text: the May 13 upgrade-path incident entry is still present
+      - id: vespa-resolved
+        text: the resolved-items list still notes the Vespa 507 resolution via memory bump
+      - id: aspx-hotfix-resolved
+        text: the resolved-items list still notes the .aspx page per-document failure hotfix
+      - id: almedalentrip-open
+        text: /teams/Almedalentrip is still listed in open issues
+      - id: opensearch-open
+        text: the missing OpenSearch migration page is still listed in open issues
+      - id: ai-followup-tracker
+        text: the operational follow-up tracker checkboxes (Almedalentrip, OpenSearch, metrics build, etc.) are preserved
+      - id: source-index-original
+        text: every original source-reference entry [1]-[14] is still in the source reference index
+expected_not_updated:
+  - engineering/sharepoint-connector-performance.md
+  - customers/onboarding/active-customers.md
+notes: |
+  Tests long-doc surgical editing — the agent must extend ~5 sections of
+  a multi-thousand-word living document without dropping any prior entry.
+  Two related docs (engineering reference + onboarding logo wall) name
+  Acme but should not change.
+tags: [long-docs, single-doc-edit, loss-bait, living-document]

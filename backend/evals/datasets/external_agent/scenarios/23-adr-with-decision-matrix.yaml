@@ -1,0 +1,240 @@
+id: ext-23-adr-with-decision-matrix
+prompt: |
+  We're changing the ADR-0014 decision on the cache backend. The original
+  decision adopted Redis (option B) over Memcached (option A) and DynamoDB
+  (option C). We're now adding an exception: for the recommendations
+  workload specifically, we're moving to a per-tenant in-process LRU cache
+  (option D, "tenant-local LRU") because the post-stampede analysis showed
+  the network round-trip to Redis is the dominant latency contributor for
+  hot keys.
+
+  Update ADR-0014 to: (1) record the exception in a new "Exceptions"
+  section, (2) add option D to the alternatives-considered matrix with the
+  pros/cons, (3) add an entry to the decision-log table at the bottom
+  noting the 2026-05-20 amendment with a link to the post-stampede
+  postmortem at `ops/incidents/2026-04-12-cache-stampede.md`, and (4)
+  update the "Consequences" section to note that the recs workload no
+  longer fits the original decision and the operational implications
+  (no shared cache state across recs pods, per-pod warmup cost, no
+  cross-tenant blast radius).
+
+  The original "Decision" statement (Redis over Memcached / DynamoDB)
+  remains the default for everything except recs and must not be changed.
+  All discussion of why Memcached and DynamoDB were rejected must persist
+  verbatim — those analyses still apply.
+
+  The Redis runbook is unrelated to this ADR — leave it alone.
+wiki_state:
+  - path: adr/0014-cache-backend.md
+    summary: ADR-0014 cache backend decision (Redis over Memcached + DynamoDB).
+    body: |
+      # ADR-0014: Cache backend
+
+      - **Status:** Accepted (2025-09-04). Amend with care.
+      - **Deciders:** Platform team, Data team, SRE team.
+      - **Date:** 2025-09-04
+      - **Supersedes:** None.
+      - **Superseded by:** None.
+
+      ## Context
+
+      The platform's caching tier sits in front of the recommendations API,
+      the search-suggest service, the home-page personalization layer, and
+      the per-tenant feature-flag cache. Total cache hit rate across these
+      workloads is the dominant lever on origin-API load: a 1-point drop in
+      hit rate translates to roughly 8000 additional QPS on the origin
+      services in aggregate.
+
+      Until this ADR, the platform ran a Memcached cluster as the default
+      cache. Memcached was originally chosen in 2022 because it was the
+      operationally simplest option at our scale, and the team that owned
+      it had deep experience operating it from a prior employer. The
+      Memcached deployment grew with the product and ran cleanly for two
+      years.
+
+      Three things have changed since then:
+
+      1. **Cardinality**. The per-tenant feature-flag cache pushed the
+         total key count past 1 billion. Memcached's slab-based memory
+         allocator started showing pathological behavior at this scale,
+         with effective memory utilization dropping below 60% on the
+         largest pods. We tried multiple slab tuning approaches without
+         lasting improvement.
+      2. **Persistence requirements**. The recommendations team asked for
+         a "warm" cache after deploys — when a recs pod restarts, it
+         takes ~800ms to repopulate the hot key set from the model
+         serving layer, and that first request lands above the SLO.
+         Memcached has no persistence story; a pod restart is a cold
+         start.
+      3. **Cross-DC replication**. We're moving toward an active-active
+         multi-region setup. Memcached's lack of native cross-DC
+         replication would require us to build our own, which is a
+         significant project we don't want to take on.
+
+      ## Decision
+
+      Adopt **Redis** (option B in the matrix below) as the default cache
+      backend across all platform workloads, replacing Memcached over a
+      two-quarter migration. Redis is operated as a clustered deployment
+      (Redis Cluster mode) with 4 nodes initially, sized for 32 GB of hot
+      data plus 50% headroom for cardinality growth.
+
+      ## Alternatives considered
+
+      | Option | Pros | Cons | Operational complexity |
+      | -- | -- | -- | -- |
+      | A: Memcached (status quo) | Simple, well-understood; team has deep experience; very low operational overhead | Slab fragmentation at >1B keys; no persistence; no cross-DC replication; we'd have to build everything missing | Low |
+      | **B: Redis (chosen)** | Persistence via AOF/RDB; native cross-DC replication via Redis Cluster + active-active; rich data structures; large ecosystem; per-key TTL with expire-on-access; LRU and LFU eviction modes | More moving parts; cluster topology is non-trivial to operate; persistence has its own failure modes (AOF corruption, full-sync stalls) | Medium |
+      | C: DynamoDB | Fully managed; cross-region built in; no operational toil; integrated IAM; pay-per-request mode bounds cost | Latency higher than in-DC cache (10ms+ p50 vs sub-ms for Memcached/Redis); throughput-throttling on hot keys; cost scales steeply with request volume at our QPS; vendor lock-in concern | Very low (managed) |
+
+      ### Why not A (Memcached)
+
+      The three triggers in the Context section above (cardinality,
+      persistence, cross-DC) all point in the same direction: continuing
+      to operate Memcached would require us to either accept ongoing
+      degradation or build significant new functionality on top. The
+      team's experience operating Memcached is real but it's the answer
+      to "how do we run what we have" not "how do we run what we need."
+
+      ### Why not C (DynamoDB)
+
+      The latency floor of DynamoDB (10ms+ p50, 25ms+ p99) is the
+      blocker. The recommendations API has a 100ms p95 SLO and roughly
+      40% of that budget is already consumed by upstream lookups and
+      response serialization. A cache that adds 10ms to every hit would
+      eat the remaining 60ms in a single hop and leave nothing for the
+      origin path on miss. We need a cache that's measured in sub-ms.
+
+      Cost was a secondary but real concern: at our cache QPS, DynamoDB's
+      pay-per-request mode would run ~$180k/month vs ~$40k/month for a
+      self-operated Redis cluster.
+
+      ## Consequences
+
+      ### Operational
+
+      - On-call adds Redis to its surface area. We'll add Redis-specific
+        runbooks (`services/cache/runbook.md`) and SLOs.
+      - Persistence (AOF) adds a new failure mode: AOF corruption on
+        ungraceful shutdown. Mitigation: AOF rewrites on a schedule,
+        snapshot backup to S3 hourly.
+      - Cluster topology changes (re-sharding, node add/remove) require
+        a documented playbook.
+
+      ### Performance
+
+      - Sub-ms hit latency (p99 < 0.5ms in our benchmarks) — comparable
+        to Memcached.
+      - Cold-start cost on a pod restart is unchanged from Memcached
+        unless we enable persistence (see Decision).
+      - With AOF persistence enabled, a cluster restart re-loads the hot
+        set in roughly 90 seconds vs cold-start with Memcached.
+
+      ### Migration
+
+      - Two-quarter dual-write phase during which both Memcached and
+        Redis are written on every cache update; reads are still served
+        from Memcached.
+      - After dual-write is healthy for a full quarter, flip reads to
+        Redis behind a per-workload flag.
+      - After all workloads are on Redis reads, deprecate Memcached.
+
+      ### Risk
+
+      - Operational unfamiliarity with Redis at our scale. Mitigation:
+        partner with the on-call team on the runbook + game day before
+        flipping the first workload.
+      - Persistence-related failures are new to us. Mitigation: scheduled
+        chaos test that corrupts AOF and forces recovery.
+      - Cost: Redis cluster ops + storage cost is ~$40k/month vs ~$25k
+        for the current Memcached deployment. The latency + persistence
+        + replication wins justify the delta.
+
+      ## Decision log
+
+      | Date | Author | Change |
+      | -- | -- | -- |
+      | 2025-09-04 | Platform team | Initial decision: Redis over Memcached + DynamoDB. |
+      | 2025-09-18 | Platform team | Clarified migration phasing — added the per-workload read-flip flag requirement. |
+      | 2025-10-02 | Data team | Added the cardinality detail to the Context section. |
+      | 2025-11-14 | SRE team | Added the chaos-test risk mitigation. |
+      | 2026-01-08 | Platform team | Migration off Memcached complete for everything except `recommendations`; recs flip held pending stampede analysis. |
+  - path: services/cache/runbook.md
+    summary: Cache runbook (Redis ops — unrelated to ADR amendment).
+    body: |
+      # Cache runbook
+
+      ## Restart
+
+      `kubectl rollout restart statefulset/redis-recs` for the recs cache
+      cluster. Other clusters follow the same pattern: `redis-<workload>`.
+
+      ## Watch
+
+      - `redis_connection_count` on the Cache dashboard.
+      - `redis_evictions_per_sec` — eviction storms above 50k/sec for
+        more than 30 sec page on-call.
+
+      ## AOF corruption
+
+      If a node fails to start after an ungraceful shutdown, check for
+      AOF corruption with `redis-check-aof`. Repair in place with
+      `--fix` if the corruption is at the tail; otherwise restore from
+      the hourly S3 snapshot.
+
+      ## Re-sharding
+
+      Use `redis-cli --cluster reshard` with the `--cluster-from` and
+      `--cluster-to` flags. Watch shard size in the dashboard during the
+      move.
+expected_updates:
+  - path: adr/0014-cache-backend.md
+    facts_present:
+      - id: exceptions-section
+        text: a new Exceptions section documents the recs workload moving to tenant-local LRU
+      - id: option-d-in-matrix
+        text: option D (tenant-local LRU) appears in the alternatives-considered matrix with pros and cons
+      - id: decision-log-amendment
+        text: the decision-log table has a 2026-05-20 amendment row noting the recs exception
+      - id: post-stampede-link
+        text: the amendment references the post-stampede postmortem at ops/incidents/2026-04-12-cache-stampede.md
+      - id: consequences-recs-note
+        text: the Consequences section notes that the recs workload no longer fits the original decision and lists per-pod warmup cost and no-cross-tenant-blast-radius implications
+    facts_preserved:
+      - id: original-decision
+        text: the original Decision (Redis over Memcached/DynamoDB as the default) remains as stated
+      - id: option-a-row
+        text: option A (Memcached) row in the matrix remains with its pros and cons
+      - id: option-b-row
+        text: option B (Redis) row in the matrix remains marked as chosen
+      - id: option-c-row
+        text: option C (DynamoDB) row in the matrix remains
+      - id: why-not-memcached
+        text: the "Why not A (Memcached)" subsection remains verbatim
+      - id: why-not-dynamodb
+        text: the "Why not C (DynamoDB)" subsection remains verbatim
+      - id: cardinality-trigger
+        text: the cardinality > 1B keys trigger in Context remains
+      - id: persistence-trigger
+        text: the persistence requirement trigger in Context remains
+      - id: cross-dc-trigger
+        text: the cross-DC replication trigger in Context remains
+      - id: operational-consequences
+        text: the operational consequences subsection (AOF, runbooks, cluster ops) remains
+      - id: performance-consequences
+        text: the performance consequences subsection (sub-ms latency, 90s warm reload) remains
+      - id: migration-plan
+        text: the migration consequences subsection (two-quarter dual-write, per-workload read-flip) remains
+      - id: risk-section
+        text: the risk subsection (operational unfamiliarity, persistence failure modes, cost delta) remains
+      - id: decision-log-original
+        text: all 5 original rows of the decision log table remain
+expected_not_updated:
+  - services/cache/runbook.md
+notes: |
+  Tests deep edit of a long ADR with a decision matrix, decision log,
+  and multi-section consequences analysis. The amendment must be
+  surgical — adding without replacing the original decision, and every
+  rejected-alternative analysis must persist verbatim because those
+  analyses still apply to non-recs workloads.
+tags: [long-docs, single-doc-edit, loss-bait, adr]

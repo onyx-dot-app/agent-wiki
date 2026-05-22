@@ -1,0 +1,107 @@
+id: ext-18-region-migration
+prompt: |
+  We've added a third region: us-west-2 is now live alongside us-east-1 and
+  eu-west-1. Update the deployment topology doc to list the new region, and
+  update the auth and billing service overviews to note that they now serve
+  from all three. The payments doc still serves from only us-east-1 and
+  eu-west-1 (no us-west-2 yet) — do not change it.
+wiki_state:
+  - path: ops/deployment/topology.md
+    summary: Deployment topology (regions, services, traffic).
+    body: |
+      # Deployment topology
+
+      ## Regions
+
+      - `us-east-1`: primary US region
+      - `eu-west-1`: EU region for data-residency requirements
+
+      ## Per-service residency
+
+      | Service | Regions |
+      | --      | --      |
+      | auth    | us-east-1, eu-west-1 |
+      | billing | us-east-1, eu-west-1 |
+      | payments | us-east-1, eu-west-1 |
+      | search  | us-east-1, eu-west-1 |
+
+      ## Traffic routing
+
+      Customer traffic is routed via GeoDNS to the nearest region with their
+      tenant's primary residency. Failover to a non-residency region requires
+      explicit customer consent and a documented incident.
+  - path: services/auth/overview.md
+    summary: Auth service overview.
+    body: |
+      # Auth service
+
+      Issues bearer tokens. Serves from us-east-1 and eu-west-1.
+
+      ## Capacity
+
+      Steady 2k token issues/min, burst 20k. Per-region capacity sized for
+      full failover of the other.
+  - path: services/billing/overview.md
+    summary: Billing service overview.
+    body: |
+      # Billing service
+
+      Built on FastAPI + Postgres + pgmq. Serves from us-east-1 and
+      eu-west-1. Stripe webhooks land at `/webhooks/stripe`.
+
+      ## Throughput
+
+      Steady 200 invoices/min, burst 2k. Webhook handler must return 200
+      within 5 seconds.
+  - path: services/payments/overview.md
+    summary: Payments service overview (only 2 regions — do not change).
+    body: |
+      # Payments service
+
+      Processes card and ACH charges. Talks to Stripe + ACH-vendor. Serves
+      from us-east-1 and eu-west-1.
+
+      ## SLOs
+
+      - p95 latency under 250ms
+      - availability 99.95% monthly
+expected_updates:
+  - path: ops/deployment/topology.md
+    facts_present:
+      - id: new-region-listed
+        text: us-west-2 is listed in the Regions section
+      - id: auth-three-regions
+        text: the per-service table shows auth in all three regions
+      - id: billing-three-regions
+        text: the per-service table shows billing in all three regions
+    facts_preserved:
+      - id: payments-two-regions
+        text: the per-service table still shows payments in only us-east-1 and eu-west-1
+      - id: search-two-regions
+        text: the per-service table still shows search in only us-east-1 and eu-west-1
+      - id: geodns
+        text: the GeoDNS routing + failover-with-consent description remains
+  - path: services/auth/overview.md
+    facts_present:
+      - id: auth-overview-three
+        text: the auth overview notes serving from us-east-1, eu-west-1, and us-west-2
+    facts_preserved:
+      - id: auth-capacity
+        text: the 2k steady / 20k burst capacity numbers remain
+      - id: auth-failover
+        text: the per-region failover-sizing note remains
+  - path: services/billing/overview.md
+    facts_present:
+      - id: billing-overview-three
+        text: the billing overview notes serving from us-east-1, eu-west-1, and us-west-2
+    facts_preserved:
+      - id: billing-stack
+        text: FastAPI + Postgres + pgmq + Stripe-webhook endpoint remain documented
+      - id: billing-throughput
+        text: the 200/min steady, 2k burst throughput, and 5-second webhook deadline remain
+expected_not_updated:
+  - services/payments/overview.md
+notes: |
+  Three docs get the new region; one sibling service overview legitimately
+  does not (payments hasn't migrated yet). Tests partial-cascade scope.
+tags: [multi-doc, long-docs, partial-cascade]

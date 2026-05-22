@@ -1,0 +1,71 @@
+id: ext-13-additive-link-only
+prompt: |
+  The Search team built a new dashboard at `https://grafana.example.com/d/os-coord`.
+  Add a link to it from the Search runbook in the Restart section. Do not
+  touch other Search docs that don't have a Restart section.
+wiki_state:
+  - path: services/search/runbook.md
+    summary: Search runbook with a Restart section.
+    body: |
+      # Search runbook
+
+      ## Pages
+
+      - `search-coord-5xx`: coordinator 5xx rate > 0.5% for 2 min
+      - `search-reindex-lag`: reindex backlog > 10k docs for 5 min
+      - `search-data-disk-full`: data node disk > 90% for any duration
+
+      ## Restart
+
+      Restart the OpenSearch coordinator with
+      `kubectl rollout restart statefulset/os-coord`.
+
+      Restart a data node with
+      `kubectl rollout restart statefulset/os-data-N`
+      and watch shard reallocation in the cluster dashboard before moving
+      to the next node.
+
+      ## Reindex
+
+      Trigger reindex from the admin panel: Search → Reindex.
+  - path: services/search/architecture.md
+    summary: Search architecture (no Restart section).
+    body: |
+      # Search architecture
+
+      OpenSearch 2.13, 3 data nodes, 2 coordinator nodes. BM25 with a custom
+      tokenizer that lowercases and strips diacritics.
+
+      ## Indexing
+
+      Documents are indexed on every wiki commit. Event-log rows are indexed
+      separately by `events-indexer`.
+  - path: services/search/overview.md
+    summary: Search overview (no Restart section).
+    body: |
+      # Search service
+
+      BM25 over the wiki corpus. Backed by OpenSearch 2.13 and Postgres for
+      query history. Background indexing runs under pgmq on the
+      `search-reindex` queue.
+expected_updates:
+  - path: services/search/runbook.md
+    facts_present:
+      - id: dashboard-link
+        text: the Restart section links to grafana.example.com/d/os-coord
+    facts_preserved:
+      - id: coord-restart
+        text: the coordinator kubectl rollout restart command remains
+      - id: data-restart
+        text: the data-node kubectl rollout restart command remains
+      - id: reindex
+        text: the Reindex admin-panel instruction remains
+      - id: pages
+        text: the three Pages threshold rows remain
+expected_not_updated:
+  - services/search/architecture.md
+  - services/search/overview.md
+notes: |
+  Additive link in one section. Two related docs lack a Restart section
+  and must not be invented. Restraint + targeted edit.
+tags: [single-doc, distractor]

@@ -1,0 +1,54 @@
+id: ext-02-multi-doc-cache-migration
+prompt: |
+  We migrated the recommendations cache from Memcached to Redis last sprint.
+  Same 32 GB across 4 nodes, same LRU eviction. Reflect this in the wiki
+  wherever the cache is documented.
+wiki_state:
+  - path: services/cache/overview.md
+    summary: Cache service overview.
+    body: |
+      # Cache service
+
+      Memcached cluster fronts the recommendations API. Eviction is LRU.
+      Capacity 32 GB across 4 nodes.
+  - path: services/cache/runbook.md
+    summary: Cache runbook (restart, capacity, eviction).
+    body: |
+      # Cache runbook
+
+      Restart with `kubectl rollout restart statefulset/memcached-recs`.
+      Watch the Memcached connection-count metric.
+  - path: services/recommendations/overview.md
+    summary: Recommendations service overview.
+    body: |
+      # Recommendations service
+
+      Serves the home-page recs grid. Backed by a Memcached cache for hot keys.
+  - path: services/auth/jwt.md
+    summary: JWT issuance.
+    body: |
+      # JWT issuance
+
+      Tokens signed RS256. Key rotation every 30 days.
+expected_updates:
+  - path: services/cache/overview.md
+    facts_present:
+      - id: redis-overview
+        text: Redis is documented as the cache backend
+    facts_preserved:
+      - id: lru-eviction
+        text: LRU eviction is still documented
+      - id: capacity
+        text: 32 GB across 4 nodes is still documented
+  - path: services/cache/runbook.md
+    facts_present:
+      - id: redis-runbook
+        text: the runbook references Redis (not Memcached)
+  - path: services/recommendations/overview.md
+    facts_present:
+      - id: redis-recs
+        text: the recs page references Redis as the cache
+expected_not_updated:
+  - services/auth/jwt.md
+notes: Multiple docs need touching but auth is unrelated.
+tags: [multi-doc]

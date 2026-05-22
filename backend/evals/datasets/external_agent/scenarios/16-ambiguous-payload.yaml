@@ -1,0 +1,91 @@
+id: ext-16-ambiguous-payload
+prompt: |
+  Slack DM from the recs PM: "Make sure the cache TTL change is reflected
+  in the right docs." That's all I got — figure out from the wiki what
+  change they mean and update the right docs. (Hint: someone shipped a TTL
+  bump for the recommendations cache last week. Look for the discrepancy.)
+wiki_state:
+  - path: services/cache/policy.md
+    summary: Cache policy (updated last week — TTL changed for recs).
+    body: |
+      # Cache policy
+
+      ## Default TTL
+
+      The default cache TTL is 60 seconds. Per-key overrides via the
+      `cache-ttl-override` header are permitted up to a 24-hour ceiling.
+
+      ## Per-tenant override
+
+      Recs cache uses a 120-second TTL for the home-page payload. This was
+      bumped from 60s on 2026-05-12 after the cache stampede postmortem
+      identified hot-key churn as a contributor.
+
+      ## Eviction
+
+      LRU. 32 GB hot tier.
+  - path: services/recommendations/overview.md
+    summary: Recs service overview (still says 60s — STALE).
+    body: |
+      # Recommendations service
+
+      Status: production, owned by the Recs team. Serves home-page recs.
+      Backed by a Redis cache (32 GB across 4 nodes, LRU eviction).
+
+      ## Pipeline
+
+      1. Request hits the recs API
+      2. Tenant + user id → cache key
+      3. Cache hit (TTL 60 s) → return payload
+      4. Cache miss → query the model serving layer, populate the cache
+
+      ## SLO
+
+      p95 < 100ms, availability 99.95% monthly.
+  - path: services/recommendations/runbook.md
+    summary: Recs runbook (still says 60s — STALE).
+    body: |
+      # Recs runbook
+
+      Restart with `kubectl rollout restart deployment/recs-api`.
+
+      ## Cache behavior
+
+      Hot-page recs are cached for 60 seconds. If the cache is cold, the
+      first request after a deploy takes ~800ms; subsequent requests fall
+      under the 100ms SLO.
+  - path: services/search/overview.md
+    summary: Search overview (unrelated cache mention).
+    body: |
+      # Search service
+
+      Backed by OpenSearch. Internal LRU caches at the query-planner layer
+      operate independently from the platform's recs cache.
+expected_updates:
+  - path: services/recommendations/overview.md
+    facts_present:
+      - id: overview-ttl-120
+        text: the recs overview documents a 120-second cache TTL
+    facts_preserved:
+      - id: overview-pipeline
+        text: the four-step request pipeline is still documented
+      - id: overview-slo
+        text: the p95 < 100ms / 99.95% SLO remains
+  - path: services/recommendations/runbook.md
+    facts_present:
+      - id: runbook-ttl-120
+        text: the runbook documents 120-second cache TTL for hot-page recs
+    facts_preserved:
+      - id: runbook-restart
+        text: the kubectl restart command remains
+      - id: runbook-cold-cache
+        text: the cold-cache 800ms first-request behavior remains
+expected_not_updated:
+  - services/cache/policy.md
+  - services/search/overview.md
+notes: |
+  Ambiguous payload — agent must read multiple docs to find the
+  discrepancy (cache policy says 120s for recs, recs docs still say 60s)
+  and update the two stale recs docs. Cache policy is the source of
+  truth and must not change. Search has an unrelated cache mention.
+tags: [ambiguous, multi-doc, requires-investigation]

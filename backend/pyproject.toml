@@ -35,7 +35,8 @@ dev = [
     "pytest-xdist>=3.5",
     "ruff>=0.4",
     "basedpyright>=1.18",
-    "httpx>=0.27",       # fastapi.testclient.TestClient transport
+    "httpx>=0.27",            # fastapi.testclient.TestClient transport
+    "markdown-it-py>=3.0",    # eval scorer: structural markdown validity
 ]
 
 [tool.setuptools.packages.find]
@@ -57,7 +58,7 @@ testpaths = ["tests"]
 addopts = "-q -n auto --dist=loadfile"
 
 [tool.basedpyright]
-include = ["app", "tests"]
+include = ["app", "tests", "evals"]
 exclude = [
     "**/__pycache__",
     "**/.venv",

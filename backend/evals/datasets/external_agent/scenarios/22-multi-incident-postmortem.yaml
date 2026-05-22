@@ -1,0 +1,236 @@
+id: ext-22-multi-incident-postmortem
+prompt: |
+  Final postmortem from the 2026-05-18 multi-service outage just landed. Update
+  the canonical incident page with the root-cause finding (the JWKS publisher
+  pod was OOM-killed by the new sidecar's memory budget and silently fell
+  behind for 47 minutes before the alarm fired), the three action items
+  (AI-1 owner Park due 2026-06-01 — tighten the JWKS-publisher OOM alarm
+  threshold from "missed runs > 2" to "missed runs > 0 in 5 min"; AI-2 owner
+  Patel due 2026-06-15 — separate the sidecar's memory budget from the
+  publisher pod; AI-3 owner Khan due 2026-07-01 — add a SLO-burn alert on
+  JWKS reachability), and the impact-by-region table now that we have
+  per-region 401-rate numbers. The post-incident review notes from the call
+  are linked at https://onyx-company.notion.site/pir-2026-05-18 and should
+  be referenced in the postmortem.
+
+  Also: the auth-service runbook and the SRE on-call rotation page reference
+  this incident only in passing. Do not edit those.
+wiki_state:
+  - path: ops/incidents/2026-05-18-multi-service-401-storm.md
+    summary: Incident page for the 2026-05-18 multi-service 401 storm (skeleton, awaits postmortem details).
+    body: |
+      # 2026-05-18 multi-service 401 storm
+
+      ## Status
+
+      Mitigated 2026-05-18 04:11 UTC. Awaiting final postmortem.
+
+      ## Summary
+
+      Starting 2026-05-18 03:24 UTC, every internal service that verified
+      Onyx-issued tokens began returning 401 Unauthorized to its callers.
+      The blast radius hit `auth`, `billing`, `notifications`, `search`,
+      `recommendations`, and `checkout`. Verification failure rate climbed
+      from baseline 0.02% to ~47% across the affected services within 9
+      minutes and stayed elevated until the JWKS-publisher pod was
+      restarted at 04:11 UTC.
+
+      Cached tokens (still inside their 1-hour validity) continued to work,
+      so the impact was bounded to newly-issued tokens during the window.
+      Approximately 38% of active user sessions experienced at least one
+      401 during the outage.
+
+      ## Timeline
+
+      All times UTC.
+
+      - 03:14 — scheduled `auth-key-rotate` cron fires and writes a new
+        RS256 signing key set to Vault under `auth/signing/keys`.
+      - 03:15 — `auth-jwks-publish` cron runs as scheduled but exits 0
+        without publishing (silent failure investigated below).
+      - 03:24 — downstream services begin failing token verification at
+        elevated rate; the JWKS endpoint still serves the previous key set
+        because the publisher did not roll forward.
+      - 03:28 — pager fires on `auth-token-verify-fail-rate` after the
+        2-minute sustained-threshold window.
+      - 03:31 — primary oncall (Yuhong) acks and begins investigation.
+      - 03:35 — secondary oncall (Park) joins; first hypothesis is a
+        Postgres replication issue based on the auth-pod logs showing
+        elevated DB latency.
+      - 03:41 — DB hypothesis ruled out; Postgres primary metrics nominal.
+      - 03:47 — Park identifies the JWKS / signing-key mismatch by
+        comparing the in-use signing key id against the JWKS endpoint
+        response.
+      - 03:52 — Yuhong attempts to manually re-run the `auth-jwks-publish`
+        cron. The job exits 0 again without publishing. Suspicion shifts
+        to the publisher pod itself.
+      - 03:58 — Park finds the publisher pod was OOM-killed at 03:14:47
+        UTC, ~30 seconds after the rotate cron fired, but the pod
+        restarted and the next scheduled run "succeeded" without actually
+        publishing because the in-memory key cache had been cleared.
+      - 04:04 — Park kills the pod manually with `kubectl delete pod` to
+        force a fresh start that re-reads the key set from Vault.
+      - 04:08 — fresh publisher pod runs and republishes the active key
+        set to the JWKS endpoint.
+      - 04:11 — token verification rate recovers across all regions.
+      - 04:14 — incident declared mitigated.
+
+      ## Impact
+
+      | Service | Peak 401 rate | Duration above SLO (min) |
+      | -- | -- | -- |
+      | auth | 47% | 47 |
+      | billing | 41% | 44 |
+      | notifications | 39% | 42 |
+      | search | 44% | 45 |
+      | recommendations | 36% | 41 |
+      | checkout | 45% | 46 |
+
+      Customer-visible impact:
+
+      - ~38% of active user sessions saw at least one 401 during the window.
+      - Checkout flows that started before 03:24 and tried to submit during
+        the window failed with a generic error. Cart state was preserved.
+      - Tier-1 enterprise customers (Acme, Globex, Pied Piper) were
+        notified via incident-comms email at 03:47 UTC with a follow-up at
+        04:14 UTC.
+
+      ## Mitigation
+
+      Manual restart of the `auth-jwks-publish` pod via `kubectl delete pod`.
+      Once restarted, the publisher re-read the active key set from Vault
+      and republished it to the JWKS endpoint, which downstream services
+      then picked up within their 24-hour JWKS cache (most refreshed
+      immediately because the cache eviction was triggered by repeated
+      verify failures).
+
+      ## Investigation findings (preliminary)
+
+      The proximate cause is clear: the JWKS endpoint served stale keys
+      for 47 minutes. Two questions remain for the final postmortem:
+
+      1. Why did the publisher pod OOM at 03:14:47?
+      2. Why did subsequent scheduled runs exit 0 without actually
+         publishing? The expected behavior is to re-read from Vault on
+         every run; instead the publisher returned early when the
+         in-memory key cache was empty.
+
+      The investigation team (Park, Patel, Khan) is finalizing the root
+      cause and action items. This page will be updated once the
+      postmortem is complete.
+
+      ## Related runbooks
+
+      - `services/auth/runbook.md` — auth oncall runbook (touched May 15 to
+        add the `auth-key-rotation-stuck` pager).
+      - `ops/oncall/rotation.md` — SRE on-call rotation.
+
+      ## Open questions
+
+      - Why was the publisher pod sized so close to its memory budget?
+      - Why did the OOM not page on its own?
+      - Should the publisher fail loudly when it cannot re-read keys from
+        Vault rather than exiting 0?
+  - path: services/auth/runbook.md
+    summary: Auth oncall runbook (mentions the 2026-05-18 incident in passing).
+    body: |
+      # Auth oncall runbook
+
+      Owned by the auth team. Pages route to PagerDuty schedule `auth-primary`.
+
+      ## Pages
+
+      | Pager | Threshold | First response |
+      | -- | -- | -- |
+      | `auth-5xx-spike` | 5xx rate > 2% for 2 min | check JWKS endpoint reachability |
+      | `auth-token-issue-latency` | p95 > 200ms for 5 min | check Postgres primary load |
+      | `auth-jwks-publish-fail` | JWKS publish job exit ≠ 0 for 2 consecutive runs | re-run the publish cron |
+      | `auth-token-verify-fail-rate` | verify-fail-rate > 5% for 2 min | check JWKS / signing-key match |
+      | `auth-key-rotation-stuck` | key-rotation cron fails to advance for 2 consecutive runs | follow `ops/runbooks/auth-key-rotation-stuck.md` |
+
+      ## Recovery commands
+
+      - Restart the auth API: `kubectl rollout restart deployment/auth-api`
+      - Re-publish JWKS: `kubectl create job --from=cronjob/auth-jwks-publish auth-jwks-publish-$(date +%s)`
+      - Force-restart JWKS publisher pod (when the pod is wedged but
+        exiting 0): `kubectl delete pod -l app=auth-jwks-publish`. This
+        is what mitigated the 2026-05-18 incident; see
+        `ops/incidents/2026-05-18-multi-service-401-storm.md` for the
+        full timeline.
+
+      ## When to escalate
+
+      - Token verification fails across multiple services simultaneously
+        (cross-service 401 storm) → page secondary oncall immediately;
+        this matches the 2026-05-18 pattern.
+      - Postgres primary is unreachable for more than 30 seconds →
+        DB-oncall + auth-oncall both.
+  - path: ops/oncall/rotation.md
+    summary: SRE on-call rotation page (mentions the 2026-05-18 incident in passing).
+    body: |
+      # SRE on-call rotation
+
+      Weekly rotation Mon 09:00 PT. Handoff in `#oncall-handoff` with a
+      brief of any open incidents and pending toil.
+
+      ## Current schedule
+
+      See the PagerDuty schedule `eng-primary`.
+
+      ## Recent incidents (rolling 30 days)
+
+      - 2026-05-18 — multi-service 401 storm (47 min above SLO; mitigated by manual JWKS publisher restart). See `ops/incidents/2026-05-18-multi-service-401-storm.md` for details.
+      - 2026-04-12 — cache stampede on recs (5x origin load, 19 min above SLO).
+      - 2026-04-03 — search reindex backlog (no customer impact).
+
+      ## On-call expectations
+
+      - Acknowledge pages within 5 minutes (after-hours: 10 min).
+      - Open an incident in `#incidents` with `/incident` if the issue
+        will exceed 30 minutes.
+      - Hand off with a written summary at the end of your rotation.
+expected_updates:
+  - path: ops/incidents/2026-05-18-multi-service-401-storm.md
+    facts_present:
+      - id: root-cause-oom-sidecar
+        text: the root cause is documented as the JWKS publisher pod being OOM-killed by the new sidecar's memory budget
+      - id: root-cause-47-min
+        text: the postmortem notes the publisher silently fell behind for 47 minutes before the alarm fired
+      - id: ai-1
+        text: AI-1 (owner Park, due 2026-06-01, tighten OOM alarm threshold from missed-runs>2 to missed-runs>0 in 5 min) is listed
+      - id: ai-2
+        text: AI-2 (owner Patel, due 2026-06-15, separate sidecar memory budget from publisher pod) is listed
+      - id: ai-3
+        text: AI-3 (owner Khan, due 2026-07-01, add SLO-burn alert on JWKS reachability) is listed
+      - id: pir-link
+        text: the post-incident review notes link to onyx-company.notion.site/pir-2026-05-18 appears in the postmortem
+    facts_preserved:
+      - id: mitigated-time
+        text: the mitigated time 2026-05-18 04:11 UTC remains in the status section
+      - id: timeline-0314
+        text: the 03:14 timeline entry about the rotate cron remains
+      - id: timeline-0331
+        text: the 03:31 oncall ack timeline entry remains
+      - id: timeline-0358
+        text: the 03:58 OOM discovery timeline entry remains
+      - id: timeline-0408
+        text: the 04:08 republish timeline entry remains
+      - id: impact-table
+        text: the per-service peak 401 rate table remains, with all six service rows intact
+      - id: tier1-notification
+        text: the tier-1 customer notification times 03:47 and 04:14 remain
+      - id: mitigation-paragraph
+        text: the mitigation paragraph describing the manual kubectl delete pod remains
+      - id: open-questions
+        text: the open-questions list remains
+      - id: related-runbooks
+        text: the related-runbooks section linking to services/auth/runbook.md and ops/oncall/rotation.md remains
+expected_not_updated:
+  - services/auth/runbook.md
+  - ops/oncall/rotation.md
+notes: |
+  Tests deep edit of a long incident page (3KB+ body, 6+ sections,
+  multiple tables) while preserving every existing structural element.
+  Two related docs reference this incident in passing and must not be
+  touched.
+tags: [long-docs, single-doc-edit, loss-bait, incident]

@@ -1,0 +1,67 @@
+id: ext-14-conflicting-payloads
+prompt: |
+  We have two conflicting notes on the search service: the morning email
+  from infra says we're scaling to 5 data nodes, but the afternoon Slack
+  from the search team says it's actually 4 data nodes (they reverted the
+  plan). Update the search architecture doc to reflect 4 data nodes. Do
+  not touch the runbook (the data-node restart command is unrelated).
+wiki_state:
+  - path: services/search/architecture.md
+    summary: Search architecture (current state).
+    body: |
+      # Search architecture
+
+      OpenSearch 2.13, 3 data nodes, 2 coordinator nodes. BM25 with a custom
+      tokenizer that lowercases and strips diacritics.
+
+      ## Capacity
+
+      Each data node has 2 TB of NVMe + 64 GB RAM. Hot tier holds the last
+      30 days of indexed content; older shards move to cold storage in S3
+      via the snapshot lifecycle policy.
+
+      ## Sharding
+
+      6 primary shards per index, 1 replica each. Shard placement is
+      rebalanced on node add/remove with `cluster.routing.allocation.enable=all`.
+
+      ## Indexing
+
+      Documents are indexed on every wiki commit. Event-log rows are indexed
+      separately by `events-indexer`.
+  - path: services/search/runbook.md
+    summary: Search runbook (data-node restart playbook).
+    body: |
+      # Search runbook
+
+      ## Restart
+
+      Restart a data node with
+      `kubectl rollout restart statefulset/os-data-N`
+      where N is the zero-indexed node. Watch shard reallocation in the
+      cluster dashboard before moving to the next node.
+
+      ## Reindex
+
+      Trigger reindex from the admin panel.
+expected_updates:
+  - path: services/search/architecture.md
+    facts_present:
+      - id: four-nodes
+        text: the architecture page documents 4 data nodes
+    facts_preserved:
+      - id: coord-count
+        text: the 2 coordinator-node count remains
+      - id: capacity
+        text: 2 TB NVMe + 64 GB RAM per data node remains
+      - id: sharding
+        text: the 6 primary shards / 1 replica sharding spec remains
+      - id: hot-tier
+        text: the 30-day hot tier with S3 cold storage remains
+expected_not_updated:
+  - services/search/runbook.md
+notes: |
+  Tests handling of conflicting payloads (most recent / most authoritative
+  source wins) and scope discipline against an obviously-related doc that
+  shouldn't change.
+tags: [single-doc, conflicting-payload]
