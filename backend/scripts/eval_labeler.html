@@ -407,6 +407,8 @@ if(__exports != exports)module.exports = exports;return module.exports}));
     <div style="display:flex;gap:6px;align-items:center;border-left:1px solid #e0e0e0;padding-left:10px;">
       <button onclick="jumpToMismatch()">⚡ mismatch</button>
       <span id="mismatch-count" style="font-size:11px;color:#999;"></span>
+      <span style="color:#e0e0e0;">|</span>
+      <span id="wrong-judge-count" style="font-size:11px;color:#999;"></span>
     </div>
     <div style="display:flex;gap:6px;align-items:center;">
       <span style="font-size:11px;color:#999;">Judge all:</span>
@@ -574,6 +576,8 @@ function jumpToUnlabeled(outcome) {
   }
 }
 
+const judgeMatchesLabel = (judgeLabel, humanLabel) => judgeLabel === humanLabel;
+
 const outcomeMatchesLabel = (outcome, label) => {
   if (!outcome || !label) return true;
   if (outcome === "committed")  return isCommit(label);
@@ -634,9 +638,13 @@ function render() {
   document.getElementById("progress-summary").textContent =
     `${labeled} / ${samples.length} labeled  |  ${outcomeStats}`;
 
-  const mismatches = samples.filter(x => x.label && !outcomeMatchesLabel(x.outcome, x.label)).length;
+  const mismatches  = samples.filter(x => x.label && !outcomeMatchesLabel(x.outcome, x.label)).length;
+  const wrongJudged = samples.filter(x => x.judge_label && x.label).length;
+  const wrongJudge  = samples.filter(x => x.judge_label && x.label && !judgeMatchesLabel(x.judge_label, x.label)).length;
   document.getElementById("mismatch-count").textContent =
     labeled ? `${mismatches} / ${labeled} mismatch` : "";
+  document.getElementById("wrong-judge-count").textContent =
+    wrongJudged ? `${wrongJudge} / ${wrongJudged} wrong judge` : "";
 
   const outcome = s.outcome || "";
   document.getElementById("source-title").textContent = s.source_title || "";
