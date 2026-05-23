@@ -404,6 +404,19 @@ if(__exports != exports)module.exports = exports;return module.exports}));
       <button onclick="jumpToUnlabeled('no_change')">no_change</button>
       <button onclick="jumpToUnlabeled('irrelevant')">irrelevant</button>
     </div>
+    <div style="display:flex;gap:6px;align-items:center;border-left:1px solid #e0e0e0;padding-left:10px;">
+      <button onclick="jumpToMismatch()">⚡ mismatch</button>
+      <span id="mismatch-count" style="font-size:11px;color:#999;"></span>
+      <span style="color:#e0e0e0;">|</span>
+      <span id="wrong-judge-count" style="font-size:11px;color:#999;"></span>
+    </div>
+    <div style="display:flex;gap:6px;align-items:center;">
+      <span style="font-size:11px;color:#999;">Judge all:</span>
+      <button onclick="judgeAll('committed')">committed</button>
+      <button onclick="judgeAll('no_change')">no_change</button>
+      <button onclick="judgeAll('irrelevant')">irrelevant</button>
+      <span id="judge-queue-status" style="font-size:11px;color:#999;"></span>
+    </div>
     <div style="display:flex;gap:6px;">
       <button id="btn-judge" onclick="judgeCurrent()" style="display:none;">⚖ Judge</button>
       <button id="btn-summarize" onclick="summarizeCurrent()" style="display:none;">✦ Summarize</button>
@@ -482,6 +495,9 @@ const LABELS = [
 
 const isCommit = v => v && (v.startsWith("committed_") || v === "committed");
 
+let judgeQueue = [];
+let judgeQueueRunning = false;
+
 let samples = [];   // original rows
 let current = 0;
 let filename = "eval_samples.jsonl";
@@ -552,15 +568,69 @@ function jumpTo(val) {
 
 function jumpToUnlabeled(outcome) {
   flushCoverage();
-  // Search from current+1, wrap around
   for (let i = 1; i <= samples.length; i++) {
     const idx = (current + i) % samples.length;
     if (samples[idx].outcome === outcome && !samples[idx].label) {
-      current = idx;
-      render();
-      return;
+      current = idx; render(); return;
     }
   }
+}
+
+const toCategory = v => isCommit(v) ? "committed" : v?.startsWith("no_change") ? "no_change" : v;
+const judgeMatchesLabel = (judgeLabel, humanLabel) => toCategory(judgeLabel) === toCategory(humanLabel);
+
+const outcomeMatchesLabel = (outcome, label) => {
+  if (!outcome || !label) return true;
+  if (outcome === "committed")  return isCommit(label);
+  if (outcome === "no_change")  return label.startsWith("no_change");
+  if (outcome === "irrelevant") return label === "irrelevant";
+  return true;
+};
+
+function jumpToMismatch() {
+  flushCoverage();
+  for (let i = 1; i <= samples.length; i++) {
+    const idx = (current + i) % samples.length;
+    const s = samples[idx];
+    if (s.label && !outcomeMatchesLabel(s.outcome, s.label)) {
+      current = idx; render(); return;
+    }
+  }
+}
+
+function judgeAll(outcome) {
+  if (!anthropicKey) { promptApiKey(); return; }
+  const pending = samples.filter(s => s.outcome === outcome && !s.judge_label && !judging.has(s.id));
+  if (!pending.length) {
+    const statusEl = document.getElementById("judge-queue-status");
+    statusEl.textContent = `All ${outcome} already judged`;
+    setTimeout(() => { statusEl.textContent = ""; }, 3000);
+    return;
+  }
+  pending.forEach(s => { if (!judgeQueue.includes(s.id)) judgeQueue.push(s.id); });
+  document.getElementById("judge-queue-status").textContent = `${judgeQueue.length} queued…`;
+  if (!judgeQueueRunning) processJudgeQueue();
+}
+
+async function processJudgeQueue() {
+  judgeQueueRunning = true;
+  let errors = 0;
+  while (judgeQueue.length) {
+    const statusEl = document.getElementById("judge-queue-status");
+    const actual = judgeQueue.filter(id => { const s = samples.find(x => x.id === id); return s && !s.judge_label; }).length;
+    statusEl.textContent = `${actual} remaining…` + (errors ? ` (${errors} errors)` : "");
+    const id = judgeQueue.shift();
+    const sample = samples.find(s => s.id === id);
+    if (sample && !sample.judge_label) {
+      await judgeSample(sample);
+      if (!sample.judge_label) errors++;  // judgeSample failed if label still unset
+    }
+    await new Promise(r => setTimeout(r, 300));  // avoid rate limiting
+  }
+  judgeQueueRunning = false;
+  const statusEl = document.getElementById("judge-queue-status");
+  statusEl.textContent = errors ? `Done — ${errors} errors (check console)` : "";
+  if (errors) setTimeout(() => { statusEl.textContent = ""; }, 5000);
 }
 
 // ── Render ────────────────────────────────────────────────────────────────────
@@ -575,7 +645,21 @@ function render() {
 
   const labeled = samples.filter(x => x.label).length;
   document.getElementById("progress-bar").style.width = (labeled / samples.length * 100) + "%";
-  document.getElementById("progress-summary").textContent = `${labeled} / ${samples.length} labeled`;
+  const outcomeStats = ["committed", "no_change", "irrelevant"].map(o => {
+    const total = samples.filter(x => x.outcome === o).length;
+    const done  = samples.filter(x => x.outcome === o && x.label).length;
+    return `${o}: ${done}/${total}`;
+  }).join(" · ");
+  document.getElementById("progress-summary").textContent =
+    `${labeled} / ${samples.length} labeled  |  ${outcomeStats}`;
+
+  const mismatches  = samples.filter(x => x.label && !outcomeMatchesLabel(x.outcome, x.label)).length;
+  const wrongJudged = samples.filter(x => x.judge_label && x.label).length;
+  const wrongJudge  = samples.filter(x => x.judge_label && x.label && !judgeMatchesLabel(x.judge_label, x.label)).length;
+  document.getElementById("mismatch-count").textContent =
+    labeled ? `${mismatches} / ${labeled} mismatch` : "";
+  document.getElementById("wrong-judge-count").textContent =
+    wrongJudged ? `${wrongJudge} / ${wrongJudged} wrong judge` : "";
 
   const outcome = s.outcome || "";
   document.getElementById("source-title").textContent = s.source_title || "";
@@ -855,6 +939,7 @@ async function judgeSample(sample) {
     await writeBack();
   } catch (e) {
     errorMsg = e.message || String(e);
+    console.error(`judgeSample failed for id=${sample.id}:`, errorMsg);
   } finally {
     judging.delete(sample.id);
     if (samples[current]?.id === sample.id) {
