@@ -22,6 +22,7 @@ from __future__ import annotations
 import argparse
 import json
 import random
+import re
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -54,7 +55,54 @@ def load(path: Path) -> list[dict[str, Any]]:
     return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
 
 
-def stratified_sample(rows: list[dict[str, Any]], seed: int = 42) -> list[dict[str, Any]]:
+# --------------------------------------------------------------------------- #
+# PII redaction                                                                #
+# --------------------------------------------------------------------------- #
+#
+# Production `ingest_eval_samples.source_content` includes raw HubSpot
+# contacts (real customer emails, deal sizes), Slack messages, GitHub PRs,
+# etc. None of that may enter a version-controlled JSONL. `redact_pii`
+# regex-scrubs the obvious leaks: emails, dollar amounts, URLs, phone
+# numbers, long digit strings (stage / pipeline ids), and any token that
+# looks like a `*.com` / `*.io` / `*.net` domain.
+#
+# This is a defense-in-depth pass — high-precision regexes only. Anything
+# subtle (free-form prose mentioning a customer name without an email
+# anchor) should be caught by a labeling pass before committing, not by
+# regex. The `prod-mined` tag exists so reviewers can spot-check.
+
+_EMAIL_RE = re.compile(r"\b[\w.+-]+@[\w-]+(?:\.[\w-]+)+\b")
+_URL_RE = re.compile(r"https?://\S+", re.IGNORECASE)
+_DOMAIN_RE = re.compile(r"\b[a-z0-9-]+\.(?:com|io|net|org|co|app|ai|dev)\b", re.IGNORECASE)
+_AMOUNT_RE = re.compile(r"\$\s?\d[\d,]*(?:\.\d+)?(?:\s?[kKmMbB])?\b")
+_PHONE_RE = re.compile(r"\+?\d[\d\s().-]{7,}\d")
+_LONG_DIGITS_RE = re.compile(r"\b\d{6,}\b")
+
+
+def _identity(text: str) -> str:
+    return text
+
+
+def redact_pii(text: str) -> str:
+    """Replace high-precision PII patterns with stable placeholders.
+
+    Order matters: URLs first (which contain `.com`s), then emails (which
+    also contain `.com`s), then bare domains, then numerics. Each
+    placeholder is unambiguous so a reviewer can grep for `<EMAIL>` /
+    `<AMOUNT>` to confirm nothing real slipped through.
+    """
+    text = _URL_RE.sub("<URL>", text)
+    text = _EMAIL_RE.sub("<EMAIL>", text)
+    text = _DOMAIN_RE.sub("<DOMAIN>", text)
+    text = _AMOUNT_RE.sub("<AMOUNT>", text)
+    text = _PHONE_RE.sub("<PHONE>", text)
+    text = _LONG_DIGITS_RE.sub("<ID>", text)
+    return text
+
+
+def stratified_sample(
+    rows: list[dict[str, Any]], seed: int = 42, *, redact: bool = True
+) -> list[dict[str, Any]]:
     rng = random.Random(seed)
     by_outcome: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for r in rows:
@@ -68,11 +116,11 @@ def stratified_sample(rows: list[dict[str, Any]], seed: int = 42) -> list[dict[s
             continue
         by_outcome[out].append(r)
 
-    # Dedup by (wiki_body_before[:_BODY_FINGERPRINT_LEN]) across the WHOLE
-    # picked set so the dry-run stub's fingerprint guard doesn't fire — many
-    # prod rows share the same wiki body (same page reconciled vs many sources).
-    # Empty bodies dedup the same way: two cases with empty current_body would
-    # collide in the stub just as cleanly as two with the same first 200 chars.
+    # Dedup by the POST-redaction fingerprint so the dry-run stub's match
+    # works on the same string the case carries. Pre-redaction bodies that
+    # differ only by an email or dollar amount collapse to the same redacted
+    # prefix; the stub can't tell them apart, so we must drop the dup here.
+    scrub = redact_pii if redact else _identity
     seen_fingerprints: set[str] = set()
     picked: list[dict[str, Any]] = []
     for outcome, target in TARGET_PER_OUTCOME.items():
@@ -84,7 +132,8 @@ def stratified_sample(rows: list[dict[str, Any]], seed: int = 42) -> list[dict[s
             src = r.get("source_type") or "unknown"
             if per_src[src] >= PER_SOURCE_CAP:
                 continue
-            fp = (r.get("wiki_body_before") or "")[:_BODY_FINGERPRINT_LEN]
+            raw_body = r.get("wiki_body_before") or ""
+            fp = scrub(raw_body)[:_BODY_FINGERPRINT_LEN]
             if fp in seen_fingerprints:
                 continue
             seen_fingerprints.add(fp)
@@ -100,22 +149,28 @@ def stratified_sample(rows: list[dict[str, Any]], seed: int = 42) -> list[dict[s
     return picked
 
 
-def to_wiki_updater_case(row: dict[str, Any]) -> dict[str, Any]:
+def to_wiki_updater_case(row: dict[str, Any], *, redact: bool = True) -> dict[str, Any]:
     """Build a schema-valid WikiUpdaterCase dict.
 
     Round-trips through the pydantic model so schema drift (renamed field,
     new required field, narrower type) raises at generation time instead
     of silently producing JSONL the eval runner rejects later.
+
+    ``redact`` (default True) scrubs PII from doc_title / doc_content /
+    current_body before the case is built. Always leave it on for any
+    output destined for version control.
     """
+
+    scrub = redact_pii if redact else _identity
     case = WikiUpdaterCase(
         id="prod-recon-%05d" % row["id"],
         surface="reconcile_document",
         wiki_path=row["wiki_path"],
-        current_body=row.get("wiki_body_before") or "",
+        current_body=scrub(row.get("wiki_body_before") or ""),
         expected_class=OUTCOME_TO_CLASS[row["outcome"]],
-        doc_title=row.get("source_title") or "",
-        doc_url=row.get("source_url") or "",
-        doc_content=row.get("source_content") or "",
+        doc_title=scrub(row.get("source_title") or ""),
+        doc_url="" if redact else (row.get("source_url") or ""),
+        doc_content=scrub(row.get("source_content") or ""),
         source="connector:%s" % (row.get("source_type") or "unknown"),
         # facts_* deferred to v1 (labeling pass)
         expected_facts_present=[],
@@ -127,6 +182,7 @@ def to_wiki_updater_case(row: dict[str, Any]) -> dict[str, Any]:
             "prod-mined",
             "prod-v0",
             "source:%s" % (row.get("source_type") or "unknown"),
+            "redacted" if redact else "raw",
         ],
     )
     return case.model_dump(mode="json")
@@ -147,6 +203,13 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         help="Output WikiUpdaterCase JSONL",
     )
     p.add_argument("--seed", type=int, default=42)
+    p.add_argument(
+        "--no-redact",
+        dest="redact",
+        action="store_false",
+        help="Skip PII redaction (raw passthrough). NEVER use for output destined for git.",
+    )
+    p.set_defaults(redact=True)
     return p.parse_args(argv)
 
 
@@ -155,8 +218,9 @@ def main(argv: list[str] | None = None) -> int:
     rows = load(args.src)
     print("loaded %d rows from %s" % (len(rows), args.src))
     print("sampling:")
-    picked = stratified_sample(rows, seed=args.seed)
-    cases = [to_wiki_updater_case(r) for r in picked]
+    picked = stratified_sample(rows, seed=args.seed, redact=args.redact)
+    cases = [to_wiki_updater_case(r, redact=args.redact) for r in picked]
+    print("redact=%s" % args.redact)
     print("\nwriting %d cases to %s" % (len(cases), args.dst))
     args.dst.parent.mkdir(parents=True, exist_ok=True)
     with args.dst.open("w") as fh:
