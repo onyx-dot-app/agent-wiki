@@ -574,12 +574,20 @@ function jumpToUnlabeled(outcome) {
   }
 }
 
+const outcomeMatchesLabel = (outcome, label) => {
+  if (!outcome || !label) return true;
+  if (outcome === "committed")  return isCommit(label);
+  if (outcome === "no_change")  return label.startsWith("no_change");
+  if (outcome === "irrelevant") return label === "irrelevant";
+  return true;
+};
+
 function jumpToMismatch() {
   flushCoverage();
   for (let i = 1; i <= samples.length; i++) {
     const idx = (current + i) % samples.length;
     const s = samples[idx];
-    if (s.judge_label && s.label && s.judge_label !== s.label) {
+    if (s.label && !outcomeMatchesLabel(s.outcome, s.label)) {
       current = idx; render(); return;
     }
   }
@@ -626,7 +634,7 @@ function render() {
   document.getElementById("progress-summary").textContent =
     `${labeled} / ${samples.length} labeled  |  ${outcomeStats}`;
 
-  const mismatches = samples.filter(x => x.judge_label && x.label && x.judge_label !== x.label).length;
+  const mismatches = samples.filter(x => x.label && !outcomeMatchesLabel(x.outcome, x.label)).length;
   document.getElementById("mismatch-count").textContent =
     labeled ? `${mismatches} / ${labeled} mismatch` : "";
 
