@@ -1,4 +1,3 @@
-# pyright: reportUnknownVariableType=false, reportUnknownArgumentType=false, reportUnknownMemberType=false, reportUnknownParameterType=false, reportMissingTypeArgument=false
 """Convert ingest_eval_samples export → WikiUpdaterCase JSONL.
 
 Strategy: stratified sample across outcomes (committed / no_change /
@@ -26,11 +25,14 @@ import random
 import sys
 from collections import defaultdict
 from pathlib import Path
+from typing import Any
 
-OUTCOME_TO_CLASS = {
-    "committed": "CHANGE",
-    "no_change": "NO_CHANGE",
-    "irrelevant": "IRRELEVANT",
+from evals.schema import TriggerClass, WikiUpdaterCase
+
+OUTCOME_TO_CLASS: dict[str, TriggerClass] = {
+    "committed": TriggerClass.CHANGE,
+    "no_change": TriggerClass.NO_CHANGE,
+    "irrelevant": TriggerClass.IRRELEVANT,
 }
 
 # Per-outcome target — balanced rather than proportional.
@@ -48,13 +50,13 @@ PER_SOURCE_CAP = 12
 _BODY_FINGERPRINT_LEN = 200
 
 
-def load(path: Path) -> list[dict]:
+def load(path: Path) -> list[dict[str, Any]]:
     return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
 
 
-def stratified_sample(rows: list[dict], seed: int = 42) -> list[dict]:
+def stratified_sample(rows: list[dict[str, Any]], seed: int = 42) -> list[dict[str, Any]]:
     rng = random.Random(seed)
-    by_outcome: dict[str, list[dict]] = defaultdict(list)
+    by_outcome: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for r in rows:
         out = r.get("outcome")
         if out not in OUTCOME_TO_CLASS:
@@ -69,19 +71,21 @@ def stratified_sample(rows: list[dict], seed: int = 42) -> list[dict]:
     # Dedup by (wiki_body_before[:_BODY_FINGERPRINT_LEN]) across the WHOLE
     # picked set so the dry-run stub's fingerprint guard doesn't fire — many
     # prod rows share the same wiki body (same page reconciled vs many sources).
+    # Empty bodies dedup the same way: two cases with empty current_body would
+    # collide in the stub just as cleanly as two with the same first 200 chars.
     seen_fingerprints: set[str] = set()
-    picked: list[dict] = []
+    picked: list[dict[str, Any]] = []
     for outcome, target in TARGET_PER_OUTCOME.items():
         pool = by_outcome[outcome]
         rng.shuffle(pool)
         per_src: dict[str, int] = defaultdict(int)
-        chosen: list[dict] = []
+        chosen: list[dict[str, Any]] = []
         for r in pool:
             src = r.get("source_type") or "unknown"
             if per_src[src] >= PER_SOURCE_CAP:
                 continue
             fp = (r.get("wiki_body_before") or "")[:_BODY_FINGERPRINT_LEN]
-            if fp and fp in seen_fingerprints:
+            if fp in seen_fingerprints:
                 continue
             seen_fingerprints.add(fp)
             chosen.append(r)
@@ -96,29 +100,36 @@ def stratified_sample(rows: list[dict], seed: int = 42) -> list[dict]:
     return picked
 
 
-def to_wiki_updater_case(row: dict) -> dict:
-    return {
-        "id": f"prod-recon-{row['id']:05d}",
-        "surface": "reconcile_document",
-        "wiki_path": row["wiki_path"],
-        "current_body": row.get("wiki_body_before") or "",
-        "expected_class": OUTCOME_TO_CLASS[row["outcome"]],
-        "doc_title": row.get("source_title") or "",
-        "doc_url": row.get("source_url") or "",
-        "doc_content": row.get("source_content") or "",
-        "source": "connector:%s" % (row.get("source_type") or "unknown"),
+def to_wiki_updater_case(row: dict[str, Any]) -> dict[str, Any]:
+    """Build a schema-valid WikiUpdaterCase dict.
+
+    Round-trips through the pydantic model so schema drift (renamed field,
+    new required field, narrower type) raises at generation time instead
+    of silently producing JSONL the eval runner rejects later.
+    """
+    case = WikiUpdaterCase(
+        id="prod-recon-%05d" % row["id"],
+        surface="reconcile_document",
+        wiki_path=row["wiki_path"],
+        current_body=row.get("wiki_body_before") or "",
+        expected_class=OUTCOME_TO_CLASS[row["outcome"]],
+        doc_title=row.get("source_title") or "",
+        doc_url=row.get("source_url") or "",
+        doc_content=row.get("source_content") or "",
+        source="connector:%s" % (row.get("source_type") or "unknown"),
         # facts_* deferred to v1 (labeling pass)
-        "expected_facts_present": [],
-        "expected_facts_preserved": [],
-        "max_bloat_ratio": 2.0,
-        "notes": "Mined from production ingest_eval_samples row %s (%s). v0 — no fact labels yet."
+        expected_facts_present=[],
+        expected_facts_preserved=[],
+        max_bloat_ratio=2.0,
+        notes="Mined from production ingest_eval_samples row %s (%s). v0 — no fact labels yet."
         % (row["id"], row.get("created_at") or ""),
-        "tags": [
+        tags=[
             "prod-mined",
             "prod-v0",
             "source:%s" % (row.get("source_type") or "unknown"),
         ],
-    }
+    )
+    return case.model_dump(mode="json")
 
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
