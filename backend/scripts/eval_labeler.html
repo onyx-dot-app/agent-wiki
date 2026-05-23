@@ -608,14 +608,22 @@ function judgeAll(outcome) {
 
 async function processJudgeQueue() {
   judgeQueueRunning = true;
+  let errors = 0;
   while (judgeQueue.length) {
-    document.getElementById("judge-queue-status").textContent = `${judgeQueue.length} remaining…`;
+    const statusEl = document.getElementById("judge-queue-status");
+    statusEl.textContent = `${judgeQueue.length} remaining…` + (errors ? ` (${errors} errors)` : "");
     const id = judgeQueue.shift();
     const sample = samples.find(s => s.id === id);
-    if (sample && !sample.judge_label) await judgeSample(sample);
+    if (sample && !sample.judge_label) {
+      await judgeSample(sample);
+      if (!sample.judge_label) errors++;  // judgeSample failed if label still unset
+    }
+    await new Promise(r => setTimeout(r, 300));  // avoid rate limiting
   }
   judgeQueueRunning = false;
-  document.getElementById("judge-queue-status").textContent = "";
+  const statusEl = document.getElementById("judge-queue-status");
+  statusEl.textContent = errors ? `Done — ${errors} errors (check console)` : "";
+  if (errors) setTimeout(() => { statusEl.textContent = ""; }, 5000);
 }
 
 // ── Render ────────────────────────────────────────────────────────────────────
@@ -924,6 +932,7 @@ async function judgeSample(sample) {
     await writeBack();
   } catch (e) {
     errorMsg = e.message || String(e);
+    console.error(`judgeSample failed for id=${sample.id}:`, errorMsg);
   } finally {
     judging.delete(sample.id);
     if (samples[current]?.id === sample.id) {
