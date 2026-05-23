@@ -576,7 +576,8 @@ function jumpToUnlabeled(outcome) {
   }
 }
 
-const judgeMatchesLabel = (judgeLabel, humanLabel) => judgeLabel === humanLabel;
+const toCategory = v => isCommit(v) ? "committed" : v?.startsWith("no_change") ? "no_change" : v;
+const judgeMatchesLabel = (judgeLabel, humanLabel) => toCategory(judgeLabel) === toCategory(humanLabel);
 
 const outcomeMatchesLabel = (outcome, label) => {
   if (!outcome || !label) return true;
@@ -616,7 +617,8 @@ async function processJudgeQueue() {
   let errors = 0;
   while (judgeQueue.length) {
     const statusEl = document.getElementById("judge-queue-status");
-    statusEl.textContent = `${judgeQueue.length} remaining…` + (errors ? ` (${errors} errors)` : "");
+    const actual = judgeQueue.filter(id => { const s = samples.find(x => x.id === id); return s && !s.judge_label; }).length;
+    statusEl.textContent = `${actual} remaining…` + (errors ? ` (${errors} errors)` : "");
     const id = judgeQueue.shift();
     const sample = samples.find(s => s.id === id);
     if (sample && !sample.judge_label) {
