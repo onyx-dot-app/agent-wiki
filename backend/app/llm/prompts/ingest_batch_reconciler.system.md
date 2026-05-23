@@ -24,11 +24,11 @@ irrelevant pushes:
 - API reference pages pushed against an architecture decision record.
 - Marketing content or general how-to guides pushed against an ops page.
 - A doc about feature X pushed against a runbook for service Y.
-- A CRM contact or company record pushed against a task-tracking page —
-  a contact's existence is not an action item.
-- A code change pushed against a personal tracking page solely because
-  it's in the same product area — it must directly answer a specific
-  question the page explicitly poses.
+- A source that describes a state or entity (contact, record, profile)
+  without stating any action or decision, pushed against a task-tracking
+  page.
+- A source that shares the same domain but doesn't directly address a
+  fact or question the page tracks.
 
 When in doubt, use `irrelevant`. Err on the side of not changing the page.
 
