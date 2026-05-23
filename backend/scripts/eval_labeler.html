@@ -600,9 +600,14 @@ function jumpToMismatch() {
 function judgeAll(outcome) {
   if (!anthropicKey) { promptApiKey(); return; }
   const pending = samples.filter(s => s.outcome === outcome && !s.judge_label && !judging.has(s.id));
+  if (!pending.length) {
+    const statusEl = document.getElementById("judge-queue-status");
+    statusEl.textContent = `All ${outcome} already judged`;
+    setTimeout(() => { statusEl.textContent = ""; }, 3000);
+    return;
+  }
   pending.forEach(s => { if (!judgeQueue.includes(s.id)) judgeQueue.push(s.id); });
-  document.getElementById("judge-queue-status").textContent =
-    judgeQueue.length ? `${judgeQueue.length} queued…` : "";
+  document.getElementById("judge-queue-status").textContent = `${judgeQueue.length} queued…`;
   if (!judgeQueueRunning) processJudgeQueue();
 }
 
