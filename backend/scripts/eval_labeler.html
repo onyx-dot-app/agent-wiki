@@ -905,7 +905,11 @@ async function judgeSample(sample) {
     `- Use no_change_covered or no_change_extra when the source is topically related but adds nothing useful. ` +
     `Reserve irrelevant for sources with no connection to the page's topic whatsoever.\n` +
     `- A source about a different product or service that happens to use the same protocol or technology ` +
-    `is not relevant — the page must cover the same specific system.\n\n` +
+    `is not relevant — the page must cover the same specific system.\n` +
+    `- If a source is primarily about another topic but contains a specific fact directly relevant to ` +
+    `this page's subject, judge based on that fact — not the overall topic of the source.\n` +
+    `- A brief conversational source (Slack, chat) that identifies a concrete action assigned to a ` +
+    `named person already tracked on the page can qualify as committed_moderate.\n\n` +
     `When in doubt between committing and no_change, prefer no_change_extra.\n\n` +
     `Respond with JSON only: {"label":"<one of the labels>","reasoning":"<1-2 sentences>"}`,
   ].join("\n\n");
