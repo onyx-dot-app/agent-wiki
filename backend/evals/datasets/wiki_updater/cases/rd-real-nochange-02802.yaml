@@ -1,0 +1,247 @@
+id: rd-real-nochange-02802
+surface: reconcile_document
+wiki_path: team-todos.md
+current_body: |-
+  # Team Todos (by owner)
+
+  > Purpose: Single place to track current work, unblockers, and ownership.
+  > Suggested cadence: quick async update daily; deeper review in weekly planning.
+
+  ## How to use this page
+  - Add new work under the person who will **drive it to completion**.
+  - Prefer small, outcome-oriented items.
+  - Each todo should include (when possible):
+    - **Outcome / Definition of done**
+    - **Priority**: P0 (urgent), P1 (this week), P2 (later)
+    - **Due**: date or “TBD”
+    - **Status**: Not started / In progress / Blocked / In review / Done
+    - **Links**: ticket, doc, PR, dashboard, etc.
+  - When something is blocked, write the **specific blocker** and who/what can unblock it.
+
+  ---
+
+  ## Yuhong
+  ### Current
+  - Keep this user's TODOs empty but add in all relevant blockers that this user has for other people's projects
+
+  ### Unblockers / Needs help
+  - [ ] amiconsult Enterprise self-hosted evaluation: confirm feasibility/process for granting Enterprise features on their self-hosted Community instance so engineering can schedule an unlock-script call.
+    - Context: HubSpot lists two default-pipeline deals named `amiconsult`: one at stage `closedlost` for <AMOUNT> with close date <PHONE>, and one at stage `<PHONE>` for <AMOUNT> with close date <PHONE>. Contact is Vincenzo Pace, Associate IAM Consultant, at amiconsult.de.
+    - Scope notes: amiconsult self-hosts Community today and wanted to evaluate Enterprise for strict privacy and access-control requirements, including RBAC, permission inheritance, SSO, and local/self-hosted deployment. Connectors discussed were Confluence, Slack, and SharePoint.
+    - Scope notes: They were exploring a reseller motion, with current internal evaluation around 50–60 users and a potential downstream customer around 4,000 seats. No formal quote was provided; Business plan pricing around <AMOUNT> and possible volume discount around <AMOUNT> were discussed, with Enterprise minimum around 200 users.
+    - Next steps from sales call: Matthew to sync with Yuhong on feasibility/process, coordinate an engineering call to run the unlock script, and consider bringing the interested end-customer into a follow-up evaluation call.
+
+  ---
+
+  ## Nik
+  ### Current
+  - [ ] **(P0)** Control plane deploy v0.0.129 after Alembic revision-id fix — *Status:* In progress — *Due:* TBD
+    - Outcome: Control plane is redeployed via Argo on `v0.0.129` after rolling back the failed `v0.0.128` deploy and fixing the duplicate Alembic migration revision id.
+    - Links: PR #149: <URL> PR #150: <URL> PR #151: <URL> images: <URL>
+    - Blockers: Confirm PR approval and Argo sync completion.
+  - [ ] **(P2)** Agent Wiki dev-work behavior tuning — *Status:* Not started — *Due:* TBD
+    - Outcome: Agent behavior is tuned so it can reliably pull from and update wiki pages for day-to-day dev work.
+    - Links: <URL>
+    - Blockers: Bandwidth; joint with Bo.
+
+  ### Unblockers / Needs help
+  - [ ] Evan approval for the control-plane migration fix / `v0.0.129` bump if still pending.
+  - [ ] Enterprise upgrade without key: Matthew needs Nik to confirm whether the latest version can be upgraded to Enterprise without a license key and whether there is a licensing loophole to close; the Enterprise-enable path was expected to be removed in 2.12+. Link: <URL>
+
+  ---
+
+  ## Dane
+  ### Current
+  - [ ] **(P1)** <todo title> — *Status:* Not started — *Due:* TBD
+    - Outcome: <what “done” means>
+    - Links: <url(s)>
+    - Blockers: <none / describe>
+
+  ### Unblockers / Needs help
+  - [ ] <question / decision / dependency>
+
+  ---
+
+  ## Dan / Galen
+  ### Current
+  - [ ] **(P1)** Virtual Tutor summer-session faculty recruiting — *Status:* Not started — *Due:* Jun 29, 2026
+    - Outcome: 1–2 additional faculty are lined up to use Virtual Tutor for summer session.
+    - Links: <URL>
+    - Blockers: None listed
+
+  ### Unblockers / Needs help
+  - [ ] None listed
+
+  ---
+
+  ## Bo
+  ### Current
+  - [ ] **(P1)** Wiki reconciler cleanup monitoring — *Status:* In progress — *Due:* TBD
+    - Outcome: The reconciler stops adding unnecessary content to wiki pages after the latest prompt tuning, especially fabricated `team-todos.md` entries from bare CRM/contact records and loose same-product-area additions to notes pages.
+    - Links: <URL> PR #113: <URL>
+    - Blockers: None
+  - [ ] **(P2)** Agent Wiki dev-work behavior tuning — *Status:* Not started — *Due:* TBD
+    - Outcome: Agent behavior is tuned so it can reliably pull from and update wiki pages for day-to-day dev work.
+    - Links: <URL>
+    - Blockers: Bandwidth; joint with Nik.
+
+  ---
+
+  ## Lindsey
+  ### Current
+  - [ ] **(P1)** Nutanix reference customer follow-up — *Status:* In progress — *Due:* TBD
+    - Outcome: Nutanix has a 1000+ employee reference customer option for a reference call.
+    - Links: <URL>
+    - Blockers: Helsing confirmation; if Helsing cannot serve as the reference, identify another 1000+ employee customer.
+
+  ### Unblockers / Needs help
+  - [ ] None listed
+
+  ## Matthew
+  ### Current
+  - [ ] **(P1)** Relativity retrieval follow-up — *Status:* In progress — *Due:* TBD
+    - Outcome: Relativity retrieval work is resolved or clearly handed off while Matthew, Justin, Evan, and Ronald stay aligned.
+    - Links: <URL>
+    - Blockers: None listed
+  - [ ] **(P1)** Softchoice / QuikTrip self-hosted pilot follow-up — *Status:* Not started — *Due:* TBD
+    - Outcome: Andrew Campbell receives the Enterprise feature flag for the self-hosted trial; WWT/Softchoice deploy Onyx in the customer's Azure environment; and Onyx maintains a tight Slack/email feedback loop through the six-week, ~40–50 user pilot.
+    - Links: HubSpot deal <URL>
+    - Blockers: WWT/Softchoice deployment in customer Azure and pilot feedback.
+  - [ ] **(P1)** Oman Broadband enterprise self-hosted follow-up — *Status:* Not started — *Due:* TBD
+    - Outcome: Duaa Hilal receives competitive comparisons; Oman Broadband completes evaluation/due diligence; if they proceed to commercials/procurement, the self-hosted deployment is running smoothly before Onyx issues an enterprise license key for the upgrade.
+    - Links: HubSpot company/deal <URL> Fireflies transcript <URL>
+    - Blockers: Oman Broadband vendor evaluation, due diligence, and procurement decision.
+  - [ ] **(P1)** Enertrag enterprise pilot follow-up — *Status:* Not started — *Due:* week of Mar 30, 2026
+    - Outcome: Enertrag receives pricing ranges for 100, 500, 1,000, and 1,500 users; confirms the number of enterprise test accounts needed for 14-day testing; and aligns with Onyx on POC scope for a self-hosted, permission-aware pilot.
+    - Links: HubSpot deal <URL>
+    - Blockers: Enertrag stakeholder alignment and test-account count confirmation.
+  - [ ] **(P1)** Spencer Adler / AttorneyConfidential.ai Enterprise follow-up — *Status:* Not started — *Due:* TBD
+    - Outcome: Spencer receives SOC 2 guidance for self-hosted evaluation and a clear path for white-labeled Onyx Cloud vs self-hosted deployment, including whether a paid multi-tenancy beta is viable around a ~<AMOUNT>k annual commitment.
+    - Links: HubSpot company/deal <URL> Fireflies transcript <URL>
+    - Blockers: Compliance input on SOC 2/self-hosting; multi-tenancy roadmap/beta decision.
+  - [ ] **(P1)** Casualty Actuarial Society website-search feasibility follow-up — *Status:* Not started — *Due:* TBD
+    - Outcome: CAS receives confirmation on whether Onyx can index their Drupal main site and WordPress subsites, or an alternative approach, plus the Fireflies transcript link.
+    - Links: HubSpot company/deal <URL>
+    - Blockers: Team/co-founder feasibility input on website indexing; CAS details on the membership portal technology.
+  - [ ] **(P1)** European Spallation Source evaluation follow-up — *Status:* Not started — *Due:* TBD
+    - Outcome: ESS receives technical documentation on permission handling, a comparison against Open Web UI, and trial options for Onyx Cloud vs enterprise self-hosted deployment.
+    - Links: HubSpot deal <URL>
+    - Blockers: ESS internal alignment before starting a trial.
+  - [ ] **(P1)** Hult International Business School follow-up — *Status:* Not started — *Due:* Apr 20, 2026
+    - Outcome: James Warner receives the follow-up email and a 15-minute Monday 11:00 AM Eastern calendar invite.
+    - Links: HubSpot contact <URL>
+    - Blockers: Hult internal review of options and requirements.
+  - [ ] **(P1)** George Brown College campus AI follow-up — *Status:* Not started — *Due:* TBD
+    - Outcome: George Brown receives self-hosting/data-processing docs, Kubernetes/OpenShift deployment guidance, RBAC/permission-sync details, connector list/roadmap, pricing scenarios for ~3,800 staff/faculty and a 25–30k full-campus rollout with optional Continuing Ed, confirmation on D2L Brightspace LMS support, infra sizing/architecture review coordination, and Gartner/security documentation as needed.
+    - Links: HubSpot deal <URL>
+    - Blockers: George Brown evaluation against LibreChat, Cohere, and Invoke; self-hosting, SSO, governance, pricing, and infra-sizing alignment.
+  - [ ] **(P1)** Insud Pharma Enterprise follow-up — *Status:* Not started — *Due:* TBD
+    - Outcome: Alejandro Villalón receives detailed tiered Enterprise pricing, cloud/on-prem deployment notes, timelines for skills and multi-agent orchestration, and user-support/platform data; Onyx coordinates with engineering on Insud's priority feature requests.
+    - Links: HubSpot deal <URL>
+    - Blockers: Skills and multi-agent orchestration timelines; engineering prioritization for Insud feature requests.
+  - [ ] **(P1)** Douglas Pharmaceuticals Enterprise follow-up — *Status:* Not started — *Due:* Mar 31, 2026
+    - Outcome: Douglas receives formal Enterprise pricing (<AMOUNT>/month Enterprise, with possible volume discount around <AMOUNT>/month at higher seat counts) and follow-up information; the tentative Tuesday 3:00 PM NZT next call is scheduled with the Douglas head of digital included; and a Slack/Teams support channel is set up if they proceed.
+    - Scope notes: Douglas is piloting self-hosted MIT Onyx and is evaluating Enterprise for SSO, RBAC/permission inheritance, white labeling, enterprise support, and on-prem pharma-compliance requirements. They have ~50 pilot users and may start around 100 seats, with possible expansion across a 400–500 person company.
+    - Links: HubSpot deal <URL>
+    - Blockers: Douglas post-pilot enterprise evaluation, budget/seat-count alignment, and next-call confirmation.
+  - [ ] **(P1)** SecureCloud Enterprise/reseller evaluation follow-up — *Status:* Not started — *Due:* TBD
+    - Outcome: Marcus Müller receives Onyx resources; SecureCloud validates fit and seat count with its public-sector customer; and Onyx is ready to support the customer call or a 30-day Enterprise Cloud evaluation while the self-hosted Enterprise commercial path is established.
+    - Links: HubSpot deal <URL> Fireflies transcript <URL>
+    - Blockers: SecureCloud customer validation, seat-count confirmation, and commercial establishment before a self-hosted Enterprise key.
+  - [ ] **(P1)** Hillside Enterprise on-prem follow-up — *Status:* Not started — *Due:* TBD
+    - Outcome: Ömer Demir receives pricing details and next steps for a <AMOUNT> initial 50-user Enterprise plan; Hillside shares its integration diagram and desired deployment/integration scope; and Onyx stays aligned on the June OSS production deployment followed by a later Enterprise upgrade for RBAC, SSO, and white labeling.
+    - Links: HubSpot deal <URL> Fireflies transcript <URL>
+    - Blockers: Hillside integration diagram, deployment scope confirmation, and June OSS rollout timing.
+  - [ ] **(P1)** Neural Edge Enterprise self-hosted pilot follow-up — *Status:* Not started — *Due:* TBD
+    - Outcome: Mitch Pippard receives Enterprise self-hosted trial documentation and a post-pilot order form; Neural Edge launches a three-user 14-day Enterprise pilot with Office 365 SSO and document ingestion; and Onyx stays aligned on direct per-customer licensing with white labeling if the pilot expands to roughly 15–20 users.
+    - Links: HubSpot deal <URL> Fireflies transcript <URL>
+    - Blockers: Neural Edge pilot launch, Office 365 SSO/document ingestion setup, and post-pilot expansion decision.
+  - [ ] **(P1)** Power Distribution Maintenance SharePoint trial follow-up — *Status:* Not started — *Due:* TBD
+    - Outcome: PDM validates Cloud Business in a 1–2 week self-serve trial, tests SharePoint indexing and citation-backed QA accuracy at scale, and receives follow-up after they share trial feedback/questions.
+    - Links: HubSpot company/deal <URL>
+    - Blockers: Thomas Reid and Adam Brinkley opening the trial, confirming seat count, and testing SharePoint indexing quality.
+  - [ ] **(P1)** Virtual Tutor separate environment deployment — *Status:* Not started — *Due:* Jun 1, 2026
+    - Outcome: A separate environment for Virtual Tutor is deployed.
+    - Links: <URL>
+    - Blockers: Joint with Adam; no other blockers listed.
+
+  ---
+
+  ## Adam
+  ### Current
+  - [ ] **(P1)** Virtual Tutor separate environment deployment — *Status:* Not started — *Due:* Jun 1, 2026
+    - Outcome: A separate environment for Virtual Tutor is deployed.
+    - Links: <URL>
+    - Blockers: Joint with Matthew; no other blockers listed.
+
+  ### Unblockers / Needs help
+  - [ ] None listed
+
+  ---
+
+  ## Chris
+  ### Current
+  - [ ] **(P1)** Hult collaboration options write-up — *Status:* Not started — *Due:* Apr 17, 2026
+    - Outcome: Hult receives a write-up outlining hybrid open-source plus paid engagement options, contribution pathways, and customization/hosting models.
+    - Links: HubSpot contact <URL>
+    - Blockers: None
+  - [ ] **(P1)** Virtual Tutor June 1 readiness — *Status:* Not started — *Due:* Jun 1, 2026
+    - Outcome: Virtual Tutor is ready to go with the current requested items addressed: website additions, possible Google Drive support, UX cleanup, group auto-sync, and query-history export.
+    - Links: <URL>
+    - Blockers: None listed
+
+  ---
+
+  ## Evan
+  ### Current
+  - [ ] **(P0)** perm sync fixes — *Status:* implementing fixes — *Due:* May 11
+    - Outcome: All perm sync related issues that occur at reasonably high frequency (>10 in the last week) are resolved (fixed in code or determined to be user error)
+    - Scope update: PR #11284 fixes Confluence Server/DC space pagination by following `_links.next` instead of stopping when the result count is below the requested limit, preventing missed spaces and downstream permission-sync failures. PR #11291 fixes Confluence Server/DC pagination during permission sync and CQL retrieval when `_paginate_url` runs without a callback, so capped or misreported pages do not miss results. PR #11299 cherry-picks the #11291 fix to `release/v4.0`.
+    - Links: <URL> PR #11284: <URL> PR #11291: <URL> PR #11299: <URL>
+    - Blockers: None
+  - [ ] **(P1)** BYOK LLM Key — *Status:* planning phase — *Due:* May 12
+    - Outcome: Admins can configure LLM providers to be "BYOK" i.e. users have to provide their own key. BYOK should let customers bypass Onyx-managed weekly limits, including the shared per-tenant LLM cost cap, API call caps, non-streaming API call caps, and chunks-indexed caps; customers then pay OpenAI/Anthropic directly and are subject to their provider/account limits instead. Customers using Onyx's own API keys are intentionally covered by their plan and remain subject to weekly usage limits.
+    - Scope notes: Onyx Cloud defaults to Onyx-managed OpenAI and Anthropic API keys as a convenience. Customer-facing guidance says users add their own OpenAI or Anthropic API key via Admin Panel → Configuration → LLM.
+    - Links: <URL> <URL> <URL> <URL> Discord thread: OnyxBot <> anjeriko
+    - Blockers: UI/UX design
+
+  ### Unblockers / Needs help
+  - [ ] HRT MCP issue: Justin needs Evan’s context from the prior thread before spending time investigating, to confirm whether it appears to be an Onyx-owned issue.
+  - [ ] what UI components should BYOK llm key use? Customer-facing guidance points to Admin Panel → Configuration → LLM.
+
+  ---
+
+  ## Ronnie
+  ### Current
+  - [ ] **(P1)** <todo title> — *Status:* Not started — *Due:* TBD
+    - Outcome: <what “done” means>
+    - Links: <url(s)>
+    - Blockers: <none / describe>
+
+  ### Unblockers / Needs help
+  - [ ] <question / decision / dependency>
+
+  ---
+
+  ## Duo
+  ### Current
+  - [ ] **(P1)** mockups
+expected_class: NO_CHANGE
+doc_title: Jimi Rockley
+doc_url: <URL>
+doc_content: |-
+  Contact: Jimi Rockley
+  Email: <EMAIL> Company: George Brown College
+  Domain: georgebrown.ca Deal: George Brown College
+  Amount: <AMOUNT>
+  Stage: presentationscheduled
+  Close Date: <PHONE>T17:07:11.978Z
+  Pipeline: default Note: Sales Call Summary Meeting Date: <PHONE> Attendees: Shehroze Saharan (<EMAIL>), Julio Ayala (<EMAIL>), Jimi Rockley (<EMAIL>) Internal: Matthew Veber (<EMAIL>) Pricing Discussion &#x1f; Requested pricing scenarios for two tiers: (1) ~3,800 staff/faculty; (2) full campus rollout for ~25&#x12;30k students (Continuing Ed potentially +~20k). Base pricing per seat; tokens are BYO via their own LLMs (Azure OpenAI, etc.). Flat rate year-over-year (no % increase). No formal quote provided on the call. Key Points George Brown Polytechnic is evaluating campus-wide AI enablement with Onyx vs. other tools. Clear requirement for self-hosting, SSO (Microsoft Entra ID/Okta), and governance. Interest in connectors (SharePoint, GitHub, Salesforce) and usage analytics. They requested docs, deployment guidance, and pricing for both tiers. Technical Requirements Connectors Mentioned: SharePoint, GitHub, Salesforce. Issues/Concerns: LibreChat instability on latest OpenAI models (5.x), OpenAI education license cost, lower Copilot adoption vs. ChatGPT UI; need RBAC/permission-sync and strong data governance. Next Steps Follow-up email with self-hosting/data processing docs, Kubernetes/OpenShift guidance, RBAC details, connector list/roadmap; pricing scenarios for 3,800 staff/faculty and 25&#x12;30k full-campus (+ optional ConEd); confirm D2L Brightspace LMS support; coordinate infra sizing/architecture review; provide Gartner/security documentation as needed. Participants External: Shehroze Saharan (<EMAIL>), Julio Ayala (<EMAIL>), Jimi Rockley (<EMAIL>) --- Internal: Matthew Veber (<EMAIL>) Source: Fireflies Transcript Sales Call Summary &#x12; <PHONE> How They Found Us: Referral via University of Toronto (Susan); evaluating LibreChat, Cohere, Invoke alongside Onyx. Seats Discussed: Company size: ~25&#x12;30k students + ~3.8k staff/faculty; Continuing Ed ~+20k possible. Interested Connectors: SharePoint, GitHub, Salesforce; avoid non-institutional Google tools for students. Timeline: Goal to enable campus-wide AI by end of 2026; separate ~<AMOUNT> grant for on-campus AI infrastructure (independent of IT budget for Onyx). Competitor Consideration: LibreChat (stability issues), Cohere, Invoke; OpenAI education license costs/adoption patterns. Security Considerations: Self-hosting is mandatory; SSO (Entra/Okta); privacy/compliance reviews (potential Gartner assessment). Self-Hosting or Cloud: Self-hosted only. Quote Provided: No quote provided on call; pricing scenarios requested. Overview of Use-Case: Teaching & learning, student support (e.g., registrar triage), IT/operations efficiency, institutional research with private partners (IP retained), developer support via GitHub integration. Full Transcript: Fireflies Share Link
+  Created: <PHONE>T16:30:00Z
+notes: Human-verified label (`no_change_extra`) from Bo's eval_labeler batch.
+tags:
+- real-world
+- real-prod-decision
+- human-verified
+- source:hubspot
+- bo-label:no_change_extra

@@ -1,0 +1,34 @@
+id: rd-real-irrelevant-02181
+surface: reconcile_document
+wiki_path: individual_notes/Things Yuhong cares about.md
+current_body: |-
+  # Tracking of all of the things that Yuhong would like updates on:
+
+  ## Tracking evals
+  How are the evaluations going for updating documents to the wiki? Place updates as bullet points below
+
+  How is the evaluation for agents updating the documents going? I want updates as bullet points below
+
+  - In the latest production ingest eval analysis, 226 of 1,092 samples had committed outcomes the judge marked wrong. Most were loose relevance failures: HubSpot contact/company records became fabricated `team-todos.md` tasks, GitHub PRs were added to personal notes based only on product-area overlap, and Slack announcements/support threads became task entries. PR #113 tightened the reconciler prompt to reject CRM records as action items, require direct relevance to the page's question, and avoid creating checklist items unless the source explicitly describes work to be done; monitor follow-up runs for improvement.
+
+  ## Tracking UX
+  How is progress on the deploying Agents via the UI? I want to know when it can support claude code, craft, etc.
+
+  - Claude Code support is documented through the Onyx MCP Server path. Craft custom external app support lets admins upload a bundle and gateway config, and users connect by entering their own credentials without OAuth.
+
+  ## Tracking OpenAI API spend
+  Yuhong is looking for an explanation of OpenAI API account funding notifications and an apparent ~<AMOUNT>/day OpenAI API burn. Chris Weaver, Wenxi Huang, or Justin may have context on what is driving the usage.
+expected_class: IRRELEVANT
+doc_title: Tradefeedr
+doc_url: <URL>
+doc_content: |-
+  Company: Tradefeedr
+  Domain: tradefeedr.com Contact: <EMAIL>
+  Email: <EMAIL>
+notes: Human-verified label (`irrelevant`) from Bo's eval_labeler batch.
+tags:
+- real-world
+- real-prod-decision
+- human-verified
+- source:hubspot
+- bo-label:irrelevant

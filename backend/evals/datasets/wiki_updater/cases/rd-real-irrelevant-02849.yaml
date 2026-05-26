@@ -1,0 +1,65 @@
+id: rd-real-irrelevant-02849
+surface: reconcile_document
+wiki_path: engineering/Reindexing/Reindexing Problem Statement.md
+current_body: |-
+  # Reindexing
+
+  ## Problem Statement
+  - Currently customers that want to turn on advanced features like contextual retrieval or updating to a new embedding model do not have a good time.
+  - Switching an index currently means running a bunch of connectors in the background and if they fail or credentials have expired, we just cannot recover those docs.
+  - A better solution would be to port documents directly from the existing (primary) index into the new one
+
+  ## Requirements
+  - Pull docs from primary index to a secondary unused index until the secondary is fully populated.
+  - Instant switchover to avoid downtime
+  - If we need to include additional information in the primary index for this, we need to make sure we're able to still port from existing indices (or at least have a warning)
+    - Can discuss the missing items and workarounds
+
+  ## Complications
+  - Some existing representations in the index are not intended for this, some things may need modifications
+  - OpenSearch index names derived from embedding model names are lowercased after replacing `/`, `-`, and `.` with `_`, so custom model names with uppercase characters can create indexes.
+  - There's the issue of the primary index still receiving updates from connectors as we do this so we need to ensure the switchover can happen
+  - Probably the way to handle it is to mark documents with a "ported" flag or something
+  - But also if the reindexing fails or something, we maybe don't want to touch every ported doc again to unmark the flag
+
+  There's probably a reasonably in depth design session to have for this first
+expected_class: IRRELEVANT
+doc_title: '112: feat(evals): mine production reconciler decisions into wiki_updater
+  cases'
+doc_url: <URL>
+doc_content: |-
+  ## Description
+
+  Lands the **scripts** for mining production reconciler decisions into eval cases. Actual dataset growth was reverted in this PR's final commit — see "Dataset deferred" below.
+
+  **Scripts (this is what merges):**
+  - `backend/scripts/export_ingest_eval_samples.sh` — `kubectl exec` wrapper that exports the `ingest_eval_samples` table to JSONL. Uses SQLAlchemy `MetaData` reflection + `Session.execute(...).mappings()` to honor the repo's "no raw SQL outside `app/db/fts.py` + `app/tasks/queue.py`" rule. Prints the active kubectl context and asks for a confirmation prompt before running, so you can't accidentally export from the wrong cluster.
+  - `backend/scripts/convert_ingest_eval_samples.py` — stratified-sample converter. Outcome-balanced (not proportional → bootstrap CI has a fighting chance on every class), per-source cap (12), wiki-body-prefix dedup with no empty-string short-circuit. Round-trips every row through `WikiUpdaterCase.model_dump(mode="json")` so schema drift fails at generation time, not at eval-load time.
+
+  **Dataset deferred: 0 cases added in this PR.**
+
+  The first iteration of this PR appended 16 prod-mined cases to `cases.jsonl`. Codex review caught a P1 PII leak — the rows pulled real customer names, contact emails, deal sizes, and meeting summaries straight out of HubSpot/Slack `source_content`. Committing that JSONL into a tracked repo is a hard stop. Reverted in `87f2fa0`.
+
+  The scripts themselves are PII-safe — they read into local-only paths under `/tmp/` by default and never auto-commit. Dataset growth lands in a follow-up PR once one of these is decided:
+
+  1. **Sanitize at generation time** — extend the converter with a `--redact` flag that replaces emails, dollar amounts, company names, URLs with `<EMAIL>`/`<AMOUNT>`/`<COMPANY>`/`<URL>` placeholders before the case is built.
+  2. **Out-of-repo dataset** — keep the prod-mined slice in `local_data/` (gitignored), reference via a `--cases` path in nightly CI. Eval still runs, JSONL never enters version control.
+  3. **Synthesize from schema only** — use the prod row's `outcome` + `wiki_path` + bucket as a seed, then have an LLM generate plausible-but-fictional `source_content` + `wiki_body_before`. Loses some realism but eliminates the leak vector entirely.
+
+  I'd lean **(1) or (2)**. Open to discussion.
+
+  ## How Has This Been Tested?
+
+  - `uv run --extra dev basedpyright` whole-project — 0 errors, 0 warnings, 0 notes
+  - `pytest evals/tests` — 37/37 passing
+  - `pre-commit run` on every changed file — every hook Passed
+  - `bash -n scripts/export_ingest_eval_samples.sh` — syntax clean
+  - Live export against `agent-wiki-dev-wiki` cluster — 1,385 rows extracted cleanly via ORM (matches the previous raw-SQL exporter row-for-row)
+  - Live convert end-to-end on the exported JSONL — 16 cases generated, all round-tripped through `WikiUpdaterCase.model_validate_json` cleanly (NOT committed — see "Dataset deferred")
+notes: Human-verified label (`irrelevant`) from Bo's eval_labeler batch.
+tags:
+- real-world
+- real-prod-decision
+- human-verified
+- source:github
+- bo-label:irrelevant

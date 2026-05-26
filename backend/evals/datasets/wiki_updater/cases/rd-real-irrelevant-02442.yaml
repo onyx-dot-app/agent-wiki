@@ -1,0 +1,325 @@
+id: rd-real-irrelevant-02442
+surface: reconcile_document
+wiki_path: individual_notes/Things Yuhong cares about.md
+current_body: |-
+  # Tracking of all of the things that Yuhong would like updates on:
+
+  ## Tracking evals
+  How are the evaluations going for updating documents to the wiki? Place updates as bullet points below
+
+  How is the evaluation for agents updating the documents going? I want updates as bullet points below
+
+  - In the latest production ingest eval analysis, 226 of 1,092 samples had committed outcomes the judge marked wrong. Most were loose relevance failures: HubSpot contact/company records became fabricated `team-todos.md` tasks, GitHub PRs were added to personal notes based only on product-area overlap, and Slack announcements/support threads became task entries. PR #113 tightened the reconciler prompt to reject CRM records as action items, require direct relevance to the page's question, and avoid creating checklist items unless the source explicitly describes work to be done; monitor follow-up runs for improvement.
+
+  ## Tracking UX
+  How is progress on the deploying Agents via the UI? I want to know when it can support claude code, craft, etc.
+
+  - Claude Code support is documented through the Onyx MCP Server path. Craft custom external app support lets admins upload a bundle and gateway config, and users connect by entering their own credentials without OAuth.
+
+  ## Tracking OpenAI API spend
+  Yuhong is looking for an explanation of OpenAI API account funding notifications and an apparent ~<AMOUNT>/day OpenAI API burn. Chris Weaver, Wenxi Huang, or Justin may have context on what is driving the usage.
+expected_class: IRRELEVANT
+doc_title: Virtual Tutor
+doc_url: <URL>
+doc_content: |-
+  05/26
+  Quick demo!
+
+  Things to add:
+
+  Adding websites to the tutor
+
+  UX cleanup
+
+  Group auto-sync 04/27
+  Quick demo!
+
+  Things to add:
+
+  Flow for instructor to create connector?
+
+  Could also be admin
+
+  On-demand sync
+
+  Oauth-based over access tokens
+
+  Access token fine for now
+
+  Refresh freq = ?
+
+  ~30mins?
+
+  4.294 GB limit per course
+
+  Auto sync students + groups
+
+  Canvas based
+
+  Search over released materials only
+
+  Agent can restrict to certain subset of material
+
+  Anonymized query history for instructor + trends/summaries
+
+  Future:
+
+  Adding websites to the tutor
+
+  Tutor skills
+
+  Full screen width
+
+  Kaltura
+
+  UCSD feedback:
+
+  Terms of use (instructor crafted)
+
+  Standard tutors
+
+  Time when they were using the tutor
+
+  Usage over time graph
+
+  Potentially guide instructor’s prompts
+
+  Instructors carry over the course in canvas
+
+  Copy over tutors from another course they are an instructor for
+
+  Next steps:
+
+  Dan/Galen: Find a few faculty for tutor for summer session (June 29th)
+
+  Chris: June 1st, ready to go with all the above addressed
+
+  Matthew / Adam: get 3.2 ready to go by June 1st, upgrade to special tutor tag 04/08
+   What it’s for (students):
+
+  Use cases
+
+  Struggling with a concept presented in lecture
+
+  How to approach a HW question
+
+  Why did I get this problem wrong (HW or quiz or exam)
+
+  Generating example problems or flashcards
+
+  Admin questions —
+
+  “what’s the late assignment policy”
+
+  “can I use X tool”
+
+  “When’s the next exam”
+
+  Socratic prompting can mess with admin questions
+
+  New:
+
+  Feedback on student videos
+
+  Structural advantages
+
+  Available 24/7
+
+  Cheaper than human tutor
+
+  No embarrassment factor
+
+  100%-integrated with course structure/content
+
+  What it’s for (professors):
+
+  Understanding areas where students are struggling
+
+  Reduced ’simple’ tutoring load / more bandwidth for in-depth discussions
+
+  Assisted question-generation
+
+  New (professor facing):
+
+  (new) Rubric development
+
+  (new) evaluate lecture notes / course structure and give feedback
+
+  More control (socratic-level slider)
+
+  Exam generation
+
+  Have AI generate them feedback
+
+  Abides by best practices
+
+  Speedgrader?
+
+  AI assisted grading
+
+  Gradescope
+
+  High level implementation goals:
+
+  Simple, more flexible professor-facing configuration
+
+  Select specific parts of Canvas to pull-in
+
+  Individual items OR sections (e.g. all files, all assignments, recordings, slides, etc.)
+
+  Automatically updates as new files are added
+
+  Timing releases of materials
+
+  Release week by week
+
+  Onyx can check “is released” to determine whether or not it should be in the index
+
+  Releases happen on an individual student level
+
+  Past assignments for the course (on the student level)?
+
+  Configuration screens in Canvas
+
+  Make sure the professor opt-in
+
+  Some professors want to have students be able to click into the course materials, others do not
+
+  More sources:
+
+  Websites
+
+  Kaltura
+
+  Canvas
+
+  (pre-defined data sets?)
+
+  Anonymized display of interactions to give prof insight into areas of confusion
+
+  (future) automatic background insights like “lots of people seem to be struggling with Monads as supported by <ex1> and <ex2>”
+
+  Word cloud?
+
+  Interrogate the data via natural language
+
+  (future) a set of selectable “skills” to make available to the tutor
+
+  practice question generation
+
+  diagram creation
+
+  asking questions + asking for the students work to verify understanding
+
+  …
+
+  (future) each LLM is a distinct “tutor”, giving a different approach to explaining the concept
+
+  (future) a tutor for certain assignments
+
+  Simpler interface for students that meets them in Canvas
+
+  Organize conversations by class + tutor
+
+  Single tutor
+
+  Remove extraneous options (deep research, model selector, projects, etc.)
+
+  Embed within course in canvas
+
+  (future) referencing / displaying relevant:
+
+  exact slide in lecture notes
+
+  timestamp in lecture recording
+
+  page in PDF textbook
+
+  (future) learning from feedback (thumbs up/thumbs down/too complicated)
+
+  Fine-tuned prompts/behavior
+
+  Socratic
+
+  When to reference source material. Make sure to teach in the same way as the professor.
+
+  (maybe) Interface for professors to actually use the assistant in canvas
+
+  Questions:
+
+  Feature alignment
+
+  Is the above aligned with what you’re looking for?
+
+  Are there other enhancements that would provide a better experience for students/professors that aren’t included?
+
+  Focus on students who are struggling? Or should it be built equally for everyone?
+
+  Dashboards?
+
+  Rollout plan confirmation
+
+  Which and how many classes are we in / planning to go live to?
+
+  ~10 for spring
+
+  ~3-5 for summer
+
+  How can we get access to the course materials ahead of time to test questions out?
+
+  Need instructors permission
+
+  How can we get anonymized access to live questions to improve the system throughout the quarter?
+
+  Instructor approval
+
+  Temporary
+
+  How can we get access to Canvas?
+
+  Walled garden
+
+  What would we want to see to do an even broader rollout?
+
+  Is there room for collaboration with other groups @ UCSD working on this?
+
+  Success criteria alignment
+
+  What success metrics have we tracked? What can we track going forward?
+
+  Student survey
+
+  Professor survey
+
+  Questions asked
+
+  Thumbs up / down on conversations
+
+  High level:
+
+  Students:
+
+  Students get better grades
+
+  Usage
+
+  Accuracy (how to measure?)
+
+  Instructors:
+
+  Reduced overhead time
+
+  Instructor satisfaction
+
+  Time saved by instructor
+
+  How instructors feel about student outcomes
+
+  Instructor isn’t asked the same question 20 times
+notes: Human-verified label (`irrelevant`) from Bo's eval_labeler batch.
+tags:
+- real-world
+- real-prod-decision
+- human-verified
+- source:google_drive
+- bo-label:irrelevant

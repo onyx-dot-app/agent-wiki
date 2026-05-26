@@ -1,0 +1,37 @@
+id: rd-real-nochange-02684
+surface: reconcile_document
+wiki_path: customer_notes/scania/current_state.md
+current_body: |-
+  This document will keep track of the overall status of Scania's Onyx instance (version, high level issues, etc).
+
+  Onyx version: 3.2.1 (as of Apr 30: <URL>
+
+  most recent sharepoint issue (May 18): <URL>
+
+  As of May 26, Scania is implementing an update intended to unblock the current error cluster. No urgent escalation is reported.
+
+  Evaluation / POC context from the Feb. 4 sales call: Scania wants an enterprise-wide knowledge base and AI-powered search across SharePoint, Teams, Jira, Confluence, SAP, ServiceNow, and related systems, plus a RAG/MCP foundation for agents used by R&D and other teams. Microsoft Copilot / SharePoint-native options were described as insufficient at scale.
+
+  Technical requirements captured before the POC included self-hosted deployment, SSO/SCIM, granular permissions/groups, frequent sync and permission mirroring, bring-your-own LLM options such as Azure OpenAI/OpenAI or Bedrock, and APIs/embeddable widgets for intranet search.
+
+  HubSpot lists Jim Tolman, Technology Strategy Manager (<EMAIL>), as the primary contact. Additional Scania contacts in the HubSpot record include <EMAIL>, <EMAIL>, <EMAIL>, <EMAIL>, <EMAIL>, <EMAIL>, <EMAIL>, <EMAIL>, <EMAIL>, <EMAIL>, <EMAIL>, and <EMAIL>. It lists two Scania deals in stage `decisionmakerboughtin`, both with close date <PHONE>: `Scania - Enterprise Platform - 3k seats` for <AMOUNT> (<URL>) and `Scania - Simple Search - 50k seats` for <AMOUNT> (<URL>). The Feb. 4 call notes say exact seat count was not established on that call; pricing discussion was framework-only, including possible basic vs. power-user tiers, with no specific pricing numbers quoted.
+expected_class: NO_CHANGE
+doc_title: Scania - Enterprise Platform - 3k seats
+doc_url: <URL>
+doc_content: |-
+  Deal: Scania - Enterprise Platform - 3k seats
+  Amount: <AMOUNT>
+  Stage: decisionmakerboughtin
+  Close Date: <PHONE>T00:44:38.847Z
+  Pipeline: default Contact: Jim Tolman
+  Email: <EMAIL>
+  Job Title: Technology Strategy Manager Company: Scania
+  Domain: scania.com Note: Sales Call Summary Meeting Date: <PHONE> Attendees: Jim Tolman (<EMAIL>); Jo&#x1a;o Ferreira; Thomas D; Yasmeen Mohammed; Andrew Jackson Pricing Discussion - Discussed enterprise vs. open-source model and per-license pricing, with potential two-tier (basic vs. power user) structure to accommodate a broad workforce (e.g., forklift/assembly workers vs. knowledge workers). - No specific pricing numbers quoted on this call. Key Points - Scania seeks an enterprise-wide knowledge base and AI-powered search across SharePoint, Teams, Jira, Confluence, SAP, ServiceNow, etc., plus a RAG foundation for agents (MCP) used by R&D and other teams. - Microsoft Copilot/SharePoint-native options are insufficient at scale; desire to consolidate multiple &#x1c;search boxes&#x1d; and enable hybrid semantic/keyword search with permissions-aware results and APIs/embeddable widgets. - Onyx can support both use cases: enterprise search (answers + links) and platform capabilities (connectors, APIs, agents, bring-your-own-LLM). Technical Requirements Connectors Mentioned: SharePoint, Microsoft Teams, Jira, Confluence, ServiceNow (requested), SAP; others possible. Issues/Concerns: Need self-hosted deployment for proper POC; SSO/SCIM and granular permissions/groups; bring-your-own LLM (e.g., Azure/OpenAI, Bedrock); APIs for intranet top-bar search; frequent sync and permission mirroring. Next Steps - Set up a shared Teams channel for technical collaboration. - Schedule a follow-up session (deeper technical + evaluation planning). - Provide enterprise features for a self-hosted POC and assist with connectors (including ServiceNow) and SSO/SCIM setup. Participants External: Jim Tolman (<EMAIL>); Jo&#x1a;o Ferreira; Thomas D; Yasmeen Mohammed; Andrew Jackson --- Internal: Lindsey Milberg (<EMAIL>); Chris (<EMAIL>); Justin Tahara (<EMAIL>) Source: Fireflies Transcript Sales Call Summary &#x13; <PHONE> How They Found Us: - Internal champion(s) in R&D and IT; colleagues named Onyx among top options; Copilot trials insufficient. Seats Discussed: - Company size large; exact seat count not established on call (evaluation users vs. broad enterprise rollout TBD). Interested Connectors: - SharePoint, Teams, Jira, Confluence, ServiceNow, SAP; APIs/embeddables for intranet; MCP actions for agents. Timeline: - Near-term evaluation with self-hosted POC; follow-up meeting to align scope and responsibilities. Competitor Consideration: - Microsoft Copilot (not meeting needs); another small vendor noted; Onyx evaluated alongside others. Security Considerations: - Self-hosted deployment preferred; SSO/SCIM, permissions mirroring; bring-your-own LLM keys/models. Self-Hosting or Cloud: - Preference for self-hosted for proper testing; cloud trial mentioned but not primary path. Quote Provided: - No quote provided on this call (pricing framework only). Overview of Use-Case: - Consolidate enterprise knowledge into a single search/answer experience and provide a RAG platform for agents across R&D, sales, production, and IT. - Enable APIs/widgets for intranet search and control access by group with SCIM/SSO. - Provide connectors and rapid addition (e.g., ServiceNow within ~1 week) for POC. Full Transcript: - <URL> Participants External: Jim Tolman (<EMAIL>); Jo&#x1a;o Ferreira; Thomas D; Yasmeen Mohammed; Andrew Jackson --- Internal: Lindsey Milberg (<EMAIL>); Chris (<EMAIL>); Justin Tahara (<EMAIL>)
+  Created: <PHONE>T15:00:00Z
+notes: Human-verified label (`no_change_covered`) from Bo's eval_labeler batch.
+tags:
+- real-world
+- real-prod-decision
+- human-verified
+- source:hubspot
+- bo-label:no_change_covered

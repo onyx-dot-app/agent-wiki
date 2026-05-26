@@ -1,0 +1,70 @@
+id: rd-real-nochange-01841
+surface: reconcile_document
+wiki_path: individual_notes/Things Yuhong cares about.md
+current_body: |-
+  # Tracking of all of the things that Yuhong would like updates on:
+
+  ## Tracking evals
+  How are the evaluations going for updating documents to the wiki? Place updates as bullet points below
+
+  How is the evaluation for agents updating the documents going? I want updates as bullet points below
+
+  - In the latest production ingest eval analysis, 226 of 1,092 samples had committed outcomes the judge marked wrong. Most were loose relevance failures: HubSpot contact/company records became fabricated `team-todos.md` tasks, GitHub PRs were added to personal notes based only on product-area overlap, and Slack announcements/support threads became task entries. PR #113 tightened the reconciler prompt to reject CRM records as action items, require direct relevance to the page's question, and avoid creating checklist items unless the source explicitly describes work to be done; monitor follow-up runs for improvement.
+
+  ## Tracking UX
+  How is progress on the deploying Agents via the UI? I want to know when it can support claude code, craft, etc.
+
+  - Claude Code support is documented through the Onyx MCP Server path. Craft custom external app support lets admins upload a bundle and gateway config, and users connect by entering their own credentials without OAuth.
+
+  ## Tracking OpenAI API spend
+  Yuhong is looking for an explanation of OpenAI API account funding notifications and an apparent ~<AMOUNT>/day OpenAI API burn. Chris Weaver, Wenxi Huang, or Justin may have context on what is driving the usage.
+expected_class: NO_CHANGE
+doc_title: '11347: feat(craft): Custom External Apps'
+doc_url: <URL>
+doc_content: |+
+  ## Description
+  Allows admins to add custom external apps
+
+  UI nits will be fixed on final pass-over. Mainly focussing on functionality for now
+
+  <img width="1452" height="878" alt="Screenshot <PHONE> at 9 07 13 PM" src="<URL> />
+  <img width="959" height="965" alt="Screenshot <PHONE> at 9 07 17 PM" src="<URL> />
+
+
+  ## How Has This Been Tested?
+  Manual
+
+  ## Additional Options
+
+  - [ ] [Optional] Please cherry-pick this PR to the latest release version.
+  - [x] [Optional] Override Linear Check
+
+
+  <!-- This is an auto-generated description by cubic. -->
+  ---
+  ## Summary by cubic
+  Adds end-to-end support for Custom External Apps. Admins upload a bundle and gateway config; users connect by entering their own credentials (no OAuth).
+
+  - **New Features**
+    - API: multipart `POST /admin/apps/custom` to create/edit custom apps (bundle upload, URL patterns, header template, org creds). JSON `POST /admin/apps` now rejects `CUSTOM`.
+    - Validation: `parse_json_form_field` parses JSON form fields; `validate_auth_template` enforces non-empty string keys/values and allows empty templates/credentials; name and at least one URL pattern are required.
+    - Bundles: shared `ingest_skill_bundle` validates `SKILL.md`, derives slug from filename on create, keeps slug on replace, stores blobs, and uses `delete_bundle_blob` for cleanup on failure and after swaps; description falls back to the bundle’s when the form description is blank; pushes updated skills to affected sandboxes.
+    - DB: `create_external_app` accepts a slug for custom apps; `update_external_app` can swap bundles and returns the old blob id for deletion; app type is immutable and validated on update.
+    - UI: Admin Create/Edit modal and “Custom app” card; users connect via a credentials modal (no OAuth); enable/disable uses the correct endpoint for custom apps.
+    - Services/Tests: `upsertCustomExternalApp` (multipart) added; integration manager posts to the custom endpoint for `CUSTOM`; tests cover create/edit, allowlist-only apps, missing `SKILL.md`, auth-template validation, blob cleanup, and rejecting `CUSTOM` on the JSON admin endpoint.
+
+  - **Migration**
+    - Manage custom apps via `POST /admin/apps/custom`. The JSON `POST /admin/apps` rejects `CUSTOM`.
+
+  <sup>Written for commit 9562f6173ac73546a09d89e5b279da650db1656b. Summary will update on new commits. <a href="<URL>>Review in cubic</a></sup>
+
+  <!-- End of auto-generated description by cubic. -->
+
+
+notes: Human-verified label (`no_change_covered`) from Bo's eval_labeler batch.
+tags:
+- real-world
+- real-prod-decision
+- human-verified
+- source:github
+- bo-label:no_change_covered

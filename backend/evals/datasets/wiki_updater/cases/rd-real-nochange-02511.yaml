@@ -1,0 +1,63 @@
+id: rd-real-nochange-02511
+surface: reconcile_document
+wiki_path: engineering/Agent Wiki Project/TODO Items for the team.md
+current_body: |-
+  # Agent Wiki TODOs
+
+  ## Deployment work
+  - [ ] Have images pre-built and automatically built and hosted on Dockerhub (maybe nightly?)
+  - [x] Serve Run-Agent launcher installer downloads from the backend for macOS, Linux, and Windows (`/installer/{mac,linux,windows}`, with `/installer/app` as the macOS alias)
+  - [ ] Update the Kubernetes Deployment README
+
+  ## Feature work
+  - [ ] Folders need sharing capabilities
+  - [ ] Need to handle locking or drafts, ideally a UX where pages can still receive updates while it's locked but the user has to approve or reject them when they save their draft
+    - [ ] Need to handle cases where a user leaves their page on edit mode on a tab somewhere and forgets about it basically forever
+    - [ ] I think Confluence uses a shared draft approach or something like that but probably not that ideal
+    - [ ] Live collaboration seems overkill and possibly quite complex, especially with Git, probably not the approach
+  - [ ] Need to look into handling high volume updates, looks like we're hitting this earlier than anticipated?
+  - [ ] Breakdown on estimated cost for different anticipated volumes of usage
+
+  ## Quality checks
+  - [x] Initial eval harness for agents updating the wiki (@Nikolas Garza)
+    - PR 79 adds `backend/evals/` with `wiki_updater.process_instruction` coverage for NO_CHANGE vs new-body behavior.
+  - [x] Initial eval harness for connectors / ingest updating the wiki
+    - The same suite covers `wiki_updater.reconcile_document` for ingest, including IRRELEVANT cases, and `ingest_selector.select_candidates` precision/recall over a labeled set.
+  - [ ] Eval for triggers firing
+    - External-agent scenarios now cover WHEN routing for `update_doc_nl`, but trigger firing itself is not covered by the PR.
+  - [ ] Evals at scale for the above ^
+    - Current coverage has 30 `wiki_updater` cases, 5 `ingest_selector` cases, and 24 external-agent scenarios. A 1,092-sample production analysis found 226 judge-marked wrong committed outcomes, dominated by CRM-to-todos, same-product-area PR-to-notes, and Slack-to-todos false positives; PR 113 tuned the reconciler prompt for those cases. PR 112 added the production export/convert scripts but 0 committed dataset cases; further scale depends on a PII-safe path for prod-mined rows, weekly exports, more dev-wiki page diversity, and labeling `expected_facts_present` / `expected_facts_preserved`.
+  - [x] Live LLM baseline and nightly tracking
+    - `evals-smoke.yml` dry-runs on PRs and `evals-nightly.yml` runs the live matrix to Braintrust. The <PHONE> live baseline covered `ingest_selector` (30 trials), `wiki_updater.process_instruction` (102 trials), `wiki_updater.reconcile_document` (78 trials), and `external_agent` (144 trials).
+  - [x] Evals scorer, Braintrust, and contributor docs
+    - `backend/evals/README.md` includes the scorer reference, Braintrust scan order, shared-`case_id` diffing guidance, and how-tos for adding cases, adding surfaces, and debugging failed trials.
+
+  ## Integration work
+  - [ ] Launch tasks in Craft
+  - [ ] Have a way for Craft to listen to and use the triggers from here
+  - [ ] On the Onyx side, need to pass over diffs instead of just the full doc each time
+
+  ## Demo work
+  The idea is that we want to have a link for a post on HN or other sites where users can click and test this out without needing to deploy it themselves. We also don't want to allow for any exploits, abuse, etc.
+  - [ ] We need a way for a shared instance for users with many features disabled for demo
+    - [ ] Let users play around, create docs for themselves, connect agents, have triggers
+    - [ ] Need to set a limit on the LLM usage
+    - [ ] Need to avoid letting them read/modify the admin stuff
+
+  ## Backlog
+  - [ ] agents.md files for customizing behavior in different directories/files
+expected_class: NO_CHANGE
+doc_title: 'Yuhong in #agent-wiki: @Nik @Bo When bandwidth opens up, we should look
+  a...'
+doc_url: <URL>
+doc_content: '@Nik @Bo When bandwidth opens up, we should look at tuning agent behavior
+  so it can correctly pull from and update the wikis. We should aim to get to a point
+  where we''re all using it for our dev work and it''s genuinely helping us keep our
+  internal docs up to date'
+notes: Human-verified label (`no_change_extra`) from Bo's eval_labeler batch.
+tags:
+- real-world
+- real-prod-decision
+- human-verified
+- source:slack
+- bo-label:no_change_extra

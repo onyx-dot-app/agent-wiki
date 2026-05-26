@@ -1,0 +1,153 @@
+id: rd-real-nochange-02889
+surface: reconcile_document
+wiki_path: engineering/Agent Wiki Project/Architecture.md
+current_body: |-
+  # Architecture
+
+  ## Containers
+
+  | Container | Role |
+  |---|---|
+  | `postgres` | Postgres 17. Stores users, sessions, ACL, trigger config, events, ingest settings. Schema managed by Alembic — `init_db()` runs `alembic upgrade head` on every boot. |
+  | `redis` | Redis 7. Backs the three Redis Streams task queues (`documents`, `triggers`, `lightweight_maintenance`). |
+  | `opensearch` | OpenSearch 2.x. BM25 full-text search index (`wiki-docs`). One document per `.md` file; fields: `path` (keyword), `title` (text, boost 3×), `body` (text). |
+  | `backend` | FastAPI app on :8080 (uvicorn, 2 workers). Hosts the REST API and MCP server. |
+  | `worker-documents` | Same image as backend. Runs `app.tasks.run_worker documents` — LLM-bound doc-update tasks. |
+  | `worker-triggers` | Same image as backend. Runs `app.tasks.run_worker triggers` — trigger evaluation and fan-out. |
+  | `worker-lightweight-maintenance` | Same image as backend. Runs `app.tasks.run_worker lightweight_maintenance` — BM25 reindex, agent-activity cleanup, hourly reconcile sweep. |
+  | `frontend` | Next.js + TypeScript UI on :3000. |
+  | `nginx` | Reverse proxy on :80 — `/api/*` → backend, everything else → frontend. |
+
+  ## Volumes
+
+  | Volume | Mount | Purpose |
+  |---|---|---|
+  | `wiki-data` | `/data/wiki` | Git-backed wiki working tree. Backend shells out to `git`. Backend + all workers share an RWO mount and must co-schedule. |
+
+  ## Storage
+
+  - **Wiki content** — files in `wiki-data`, committed to git on every write via `app.wiki.git`. Every write is a real git commit; history is always consistent with the working tree.
+  - **App state** — Postgres: users, MCP sessions/tokens, ACL entries, trigger definitions, trigger events, ingest settings, agent-activity log. Schema in `backend/app/db/models.py`; migrations in `backend/app/db/migrations/versions/`.
+  - **Search index** — OpenSearch `wiki-docs` index. Populated by `app.tasks.reindex.index_path` after every doc commit and by an hourly reconcile sweep (`reconcile_bm25_index`). Visibility filtering applied post-query in Python via `acl.filter_paths_in_python`.
+  - **Task queues** — Redis Streams. Three queues: `documents` (LLM-bound, slow), `triggers` (fast fan-out), `lightweight_maintenance` (sub-second upkeep). Each queue has its own dedicated worker container.
+
+  ## Evaluation harness
+
+  Offline evals for wiki-reading and wiki-writing agents live under `backend/evals/`, outside `tests/` because live runs hit real LLMs and are parameterized by `(provider, model)`. The harness covers `wiki_updater.process_instruction`, `wiki_updater.reconcile_document`, `ingest_selector.select_candidates`, and the external agent path that drives `update_doc_nl`.
+
+  The evals split each surface into **WHEN** decisions, such as `NO_CHANGE`, change, or `IRRELEVANT`, and **HOW** quality, such as preserving facts and avoiding bloat. The scorer reference covers `trigger.*`, `bloat_ratio`, `diff_addition_ratio`, `entity_density_delta`, `markdown_valid`, `selector_set_metrics`, `facts_present`, `facts_preserved`, `no_touch_compliance`, `update_*`, and `error_rate`; LLM-judge scorers use `app.llm.client.complete` with verdicts, abstention, majority vote, and tie-to-false behavior.
+
+  The shared runner in `evals/_cli.py` fans `(case × model × run)` trials across a `ThreadPoolExecutor` with a copied `contextvars.Context` per worker, so `use_model` overrides are thread-local and agent code does not change between models. Dry-run stubs patch module-global `client.complete` / `.stream` once around the pool, and JSONL output is sorted by `(case_id, provider, model, run_index)` for stable runs. `evals-smoke.yml` runs `--dry-run` on PRs without API keys, while `evals-nightly.yml` runs the live matrix with `EVAL_*_API_KEY` secrets and pushes results through `app.tracing.braintrust.push_experiment`. The eval README documents a Braintrust scan order of `error_rate`, then `trigger.macro_f1`, then `facts_preserved < 0.9`; nightly runs cost roughly <AMOUNT>–25.
+
+  Real-traffic ingest samples are exported with `backend/scripts/export_ingest_eval_samples.sh` and converted into stratified `WikiUpdaterCase` JSONL slices with `backend/scripts/convert_ingest_eval_samples.py`. The exporter runs through `kubectl exec`, prints the active kubectl context, requires confirmation before running, and uses SQLAlchemy reflection and ORM mappings instead of raw SQL. The converter uses outcome-balanced sampling, a per-source-type cap, wiki-body-prefix deduplication, and schema round-tripping for each generated case. PR 112 added these scripts only and added 0 committed dataset cases; committed `wiki_updater` coverage remains 30 cases total, including 13 `reconcile_document` cases, until prod-mined rows are redacted, kept out of repo, or synthesized without customer PII. Future prod-mined slices can be labeled with `backend/scripts/eval_labeler.html`. The browser labeler supports six granular labels: three should-commit severities, two should-no-change reasons, and irrelevant/wrong-selection. It tracks per-outcome progress for `committed`, `no_change`, and `irrelevant` samples alongside the total labeled count. Batch Judge controls enqueue all unjudged samples for a selected reconciler outcome, process them sequentially, and show queue progress; the mismatch shortcut jumps to the next sample where the reconciler outcome disagrees with the human label. Mismatch counts reconciler-outcome vs human-label disagreements, while the wrong-judge counter separately tracks judge-label vs human-label disagreements. The labeler writes labels, coverage notes, source/wiki/diff summaries, and `judge_label` / `judge_reasoning` back into the original `.jsonl` rows via the File System Access API; summaries and judge results are deduplicated across rows with identical source or wiki content. The optional Judge action, available from the Judge button or `j` key, asks `claude-opus-4-7` for an independent suggestion using only the source document and wiki page, not the diff or reconciler outcome; the suggestion is shown for human confirmation or override.
+
+  ## Data flow: Onyx pushes a document
+
+  ```
+  ONYX                                       AGENT WIKI
+  ────────────────────────────────────────────────────────────────────
+
+                                             Admin UI
+                                               └─ POST /admin/ingest/regenerate-key
+                                                       │
+                                                  ingest_settings (Postgres)
+                                                  api_key = secrets.token_urlsafe(32)
+                                                       │
+                                                       │ admin copies base URL + key
+                                                       ▼
+  env vars:
+  AGENT_WIKI_ENABLED=true      ◀────────────  AGENT_WIKI_BASE_URL
+  AGENT_WIKI_BASE_URL                          AGENT_WIKI_API_KEY
+  AGENT_WIKI_API_KEY
+
+  ┌─────────────────────────┐
+  │  Onyx indexer           │
+  │  (Celery task, fires    │  POST /api/documents/ingest
+  │   after each indexing   │  Authorization: Bearer <api_key>
+  │   batch)                │─────────────────────────────────▶  FastAPI backend
+  │                         │  {content, title, source_type,        │
+  │  skips if:              │   metadata, updated_at}               │ validate bearer token
+  │  - multi-tenant         │                                       │ check max_doc_chars
+  │  - non-public connector │◀─────────────────────────────────────  202 Accepted
+  │  - doc too large        │                                       │
+  └─────────────────────────┘                                       │ enqueue
+                                                                    ▼
+                                                         documents_queue (Redis Streams)
+                                                                    │
+                                                                    ▼
+                                                         worker-documents
+                                                         process_pushed_document()
+                                                                    │
+                                                         resolve page + LLM update
+                                                                    │
+                                                             git commit
+                                                                    │
+                                                       ┌────────────┴────────────┐
+                                                       ▼                         ▼
+                                            lightweight_maintenance_queue    triggers_queue
+                                            index_path()                fan_out_trigger_eval()
+                                                    │
+                                                    ▼
+                                               OpenSearch
+  ```
+
+  The ingest reconciliation step uses a typed `submit_results` tool call for per-candidate actions rather than parsing free-text result blocks. Its system prompt explicitly rejects loose product-area relevance and fabricated tasks: CRM/contact records are not action items, code changes must directly answer a question the candidate page poses, and checklist items are only created when the source explicitly describes work to be done. Edit application still uses targeted FIND/REPLACE blocks, with a trailing-whitespace-normalized fallback so minor spacing differences do not cause an otherwise valid edit to miss.
+
+  ## Data flow: user edits a doc
+
+  1. UI saves via `PUT /api/documents/<path>` or agent tool calls `commit_file`.
+  2. Backend commits to git via `app.wiki.git.commit_file`.
+  3. `notify.after_doc_write` fires: enqueues `index_path` on `lightweight_maintenance_queue` + `fan_out_trigger_eval` on `triggers_queue` + publishes MCP pub-sub event.
+  4. `worker-lightweight-maintenance` picks up `index_path`, reads body from git, upserts into OpenSearch.
+  5. `worker-triggers` picks up `fan_out_trigger_eval`, evaluates delta triggers scoped to the doc and parent dirs, records `trigger.fire` events.
+
+  ## Data flow: scheduled trigger
+
+  1. In-process periodic scheduler on `worker-triggers` fires `evaluate_scheduled_triggers` at minute 0 (hourly). Running more than one replica per queue would double-fire it.
+  2. Handler loads enabled `kind=schedule` triggers due now, runs the configured action, records `trigger.fire`.
+
+  ## Open questions
+
+  - **Cost** — every Onyx connector update will trigger an LLM pass on the relevant wiki page. Need batching / debounce to avoid runaway cost at high connector volume.
+  - **Doc bloat / loss** — the document-updater agent must not grow docs unboundedly or drop important context. System prompt enforces this, and the offline eval harness includes bloat-bait and loss-bait cases with `bloat_ratio`, `facts_present`, and `facts_preserved` scorers. The current datasets include 30 `wiki_updater` cases, 5 `ingest_selector` cases, and 24 external-agent scenarios; `reconcile_document` has 13 committed cases. Production-mined growth is deferred until exported rows can be used through a PII-safe redaction, out-of-repo, or synthesis path.
+  - **`process_pushed_document` routing** — how the agent picks which wiki page(s) to update from a raw Onyx document push is not yet implemented. LLM-routed via the document-updater agent.
+expected_class: NO_CHANGE
+doc_title: '112: feat(evals): mine production reconciler decisions into wiki_updater
+  cases'
+doc_url: <URL>
+doc_content: |-
+  ## Description
+
+  Lands the **scripts** for mining production reconciler decisions into eval cases. Actual dataset growth was reverted in this PR's final commit — see "Dataset deferred" below.
+
+  **Scripts (this is what merges):**
+  - `backend/scripts/export_ingest_eval_samples.sh` — `kubectl exec` wrapper that exports the `ingest_eval_samples` table to JSONL. Uses SQLAlchemy `MetaData` reflection + `Session.execute(...).mappings()` to honor the repo's "no raw SQL outside `app/db/fts.py` + `app/tasks/queue.py`" rule. Prints the active kubectl context and asks for a confirmation prompt before running, so you can't accidentally export from the wrong cluster.
+  - `backend/scripts/convert_ingest_eval_samples.py` — stratified-sample converter. Outcome-balanced (not proportional → bootstrap CI has a fighting chance on every class), per-source cap (12), wiki-body-prefix dedup with no empty-string short-circuit. Round-trips every row through `WikiUpdaterCase.model_dump(mode="json")` so schema drift fails at generation time, not at eval-load time.
+
+  **Dataset deferred: 0 cases added in this PR.**
+
+  The first iteration of this PR appended 16 prod-mined cases to `cases.jsonl`. Codex review caught a P1 PII leak — the rows pulled real customer names, contact emails, deal sizes, and meeting summaries straight out of HubSpot/Slack `source_content`. Committing that JSONL into a tracked repo is a hard stop. Reverted in `87f2fa0`.
+
+  The scripts themselves are PII-safe — they read into local-only paths under `/tmp/` by default and never auto-commit. Dataset growth lands in a follow-up PR once one of these is decided:
+
+  1. **Sanitize at generation time** — extend the converter with a `--redact` flag that replaces emails, dollar amounts, company names, URLs with `<EMAIL>`/`<AMOUNT>`/`<COMPANY>`/`<URL>` placeholders before the case is built.
+  2. **Out-of-repo dataset** — keep the prod-mined slice in `local_data/` (gitignored), reference via a `--cases` path in nightly CI. Eval still runs, JSONL never enters version control.
+  3. **Synthesize from schema only** — use the prod row's `outcome` + `wiki_path` + bucket as a seed, then have an LLM generate plausible-but-fictional `source_content` + `wiki_body_before`. Loses some realism but eliminates the leak vector entirely.
+
+  I'd lean **(1) or (2)**. Open to discussion.
+
+  ## How Has This Been Tested?
+
+  - `uv run --extra dev basedpyright` whole-project — 0 errors, 0 warnings, 0 notes
+  - `pytest evals/tests` — 37/37 passing
+  - `pre-commit run` on every changed file — every hook Passed
+  - `bash -n scripts/export_ingest_eval_samples.sh` — syntax clean
+  - Live export against `agent-wiki-dev-wiki` cluster — 1,385 rows extracted cleanly via ORM (matches the previous raw-SQL exporter row-for-row)
+  - Live convert end-to-end on the exported JSONL — 16 cases generated, all round-tripped through `WikiUpdaterCase.model_validate_json` cleanly (NOT committed — see "Dataset deferred")
+notes: Human-verified label (`no_change_covered`) from Bo's eval_labeler batch.
+tags:
+- real-world
+- real-prod-decision
+- human-verified
+- source:github
+- bo-label:no_change_covered

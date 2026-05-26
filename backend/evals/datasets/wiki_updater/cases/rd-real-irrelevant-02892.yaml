@@ -1,0 +1,114 @@
+id: rd-real-irrelevant-02892
+surface: reconcile_document
+wiki_path: engineering/Agent Wiki Project/UX Requirements.md
+current_body: |-
+  # UX Requirements
+
+  ## Reference materials
+
+  - Agent Wiki README: <<URL>>
+  - Seeded docs: <<URL>>
+  - Recommended background post: <<URL>>
+
+  ## Core principles
+
+  - The wiki must use plain Markdown.
+  - Git should be the backing system.
+  - The file system should be the hierarchy.
+  - Prefer explicit UI over hidden controls, so users do not need to hover over many buttons or guess what is happening.
+  - Between polishing existing functionality and adding new functionality, prioritize making the existing experience good.
+
+  ## Triggers
+
+  - Use the term **Trigger** instead of **Automation**.
+    - The wiki does not perform automation itself; it only provides triggers.
+    - This terminology is clearer for users familiar with platforms like Zapier and n8n.
+    - Those users are expected to be the primary users of triggers.
+
+  ## Permissions, scope, and history
+
+  - Docs cannot be sectioned for edit, scope, or permissions.
+  - A line-by-line Git Blame view can be provided instead.
+  - Permission grants should continue to work as they do currently: easy to understand and interpret.
+
+  ## Chat widget
+
+  - The chat widget should be located somewhere users are already familiar with and can recognize easily.
+  - A widget is preferred because it acts as a “global helper,” which aligns with user expectations for what it does.
+  - AI-aided page writing with templates should happen in the expanded chat view.
+    - The chat currently auto-expands.
+    - From a UX perspective, it may make sense for it to auto-collapse after the user leaves that page.
+  - Tool calls in the widget should be shown simply rather than with full detail.
+
+  ## Relationship to Onyx
+
+  - Include as little direct integration with Onyx as possible in the basic user UX.
+  - The wiki does not need an Onyx connector.
+    - A possible stretch goal is keeping an audit log of pages or updates being sent to the wiki.
+    - This is not necessary for the initial experience.
+  - The sidebar should not be integrated into Onyx for now.
+    - A long-term mock is okay.
+    - For the current product, the wiki should remain completely separate.
+  - Some separation of style may be best so users are not confused about which app they are in.
+    - Jira and Confluence are a useful comparison: they are visually different enough that users do not confuse them.
+
+  ## Active agents
+
+  Active agent display should include:
+
+  - Read/write activity
+  - User name
+  - Agent name
+  - Time of activity
+
+  ## Existing UX that is already working well
+
+  These areas are already in a good state and may only need small touchups:
+
+  - Search bar and dropdowns
+  - Active agent listings on wiki pages
+  - File system view for navigating the wiki
+
+  ## Open considerations
+
+  - It may be significant work to track users who are live on a doc.
+expected_class: IRRELEVANT
+doc_title: '112: feat(evals): mine production reconciler decisions into wiki_updater
+  cases'
+doc_url: <URL>
+doc_content: |-
+  ## Description
+
+  Lands the **scripts** for mining production reconciler decisions into eval cases. Actual dataset growth was reverted in this PR's final commit — see "Dataset deferred" below.
+
+  **Scripts (this is what merges):**
+  - `backend/scripts/export_ingest_eval_samples.sh` — `kubectl exec` wrapper that exports the `ingest_eval_samples` table to JSONL. Uses SQLAlchemy `MetaData` reflection + `Session.execute(...).mappings()` to honor the repo's "no raw SQL outside `app/db/fts.py` + `app/tasks/queue.py`" rule. Prints the active kubectl context and asks for a confirmation prompt before running, so you can't accidentally export from the wrong cluster.
+  - `backend/scripts/convert_ingest_eval_samples.py` — stratified-sample converter. Outcome-balanced (not proportional → bootstrap CI has a fighting chance on every class), per-source cap (12), wiki-body-prefix dedup with no empty-string short-circuit. Round-trips every row through `WikiUpdaterCase.model_dump(mode="json")` so schema drift fails at generation time, not at eval-load time.
+
+  **Dataset deferred: 0 cases added in this PR.**
+
+  The first iteration of this PR appended 16 prod-mined cases to `cases.jsonl`. Codex review caught a P1 PII leak — the rows pulled real customer names, contact emails, deal sizes, and meeting summaries straight out of HubSpot/Slack `source_content`. Committing that JSONL into a tracked repo is a hard stop. Reverted in `87f2fa0`.
+
+  The scripts themselves are PII-safe — they read into local-only paths under `/tmp/` by default and never auto-commit. Dataset growth lands in a follow-up PR once one of these is decided:
+
+  1. **Sanitize at generation time** — extend the converter with a `--redact` flag that replaces emails, dollar amounts, company names, URLs with `<EMAIL>`/`<AMOUNT>`/`<COMPANY>`/`<URL>` placeholders before the case is built.
+  2. **Out-of-repo dataset** — keep the prod-mined slice in `local_data/` (gitignored), reference via a `--cases` path in nightly CI. Eval still runs, JSONL never enters version control.
+  3. **Synthesize from schema only** — use the prod row's `outcome` + `wiki_path` + bucket as a seed, then have an LLM generate plausible-but-fictional `source_content` + `wiki_body_before`. Loses some realism but eliminates the leak vector entirely.
+
+  I'd lean **(1) or (2)**. Open to discussion.
+
+  ## How Has This Been Tested?
+
+  - `uv run --extra dev basedpyright` whole-project — 0 errors, 0 warnings, 0 notes
+  - `pytest evals/tests` — 37/37 passing
+  - `pre-commit run` on every changed file — every hook Passed
+  - `bash -n scripts/export_ingest_eval_samples.sh` — syntax clean
+  - Live export against `agent-wiki-dev-wiki` cluster — 1,385 rows extracted cleanly via ORM (matches the previous raw-SQL exporter row-for-row)
+  - Live convert end-to-end on the exported JSONL — 16 cases generated, all round-tripped through `WikiUpdaterCase.model_validate_json` cleanly (NOT committed — see "Dataset deferred")
+notes: Human-verified label (`irrelevant`) from Bo's eval_labeler batch.
+tags:
+- real-world
+- real-prod-decision
+- human-verified
+- source:github
+- bo-label:irrelevant
