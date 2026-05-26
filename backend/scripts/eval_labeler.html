@@ -274,7 +274,7 @@
   /* ── Jump to ── */
   .jump-wrap { display: flex; align-items: center; gap: 6px; font-size: 13px; color: #666; }
   .jump-wrap input {
-    width: 52px;
+    width: 72px;
     border: 1px solid #ddd;
     border-radius: 4px;
     padding: 4px 6px;
@@ -396,7 +396,7 @@ if(__exports != exports)module.exports = exports;return module.exports}));
   <div class="nav-bar">
     <div class="nav-counter" id="nav-counter"></div>
     <div class="jump-wrap">
-      Jump to <input type="number" id="jump-input" min="1" onchange="jumpTo(this.value)">
+      Jump to <input type="number" id="jump-input" min="1" onkeydown="if(event.key==='Enter')jumpTo(this.value)"><button onclick="jumpTo(document.getElementById('jump-input').value)" style="padding:4px 8px;font-size:12px;">Go</button>
     </div>
     <div style="display:flex;gap:6px;align-items:center;">
       <span style="font-size:11px;color:#999;">Jump to unlabeled:</span>
@@ -560,8 +560,12 @@ function navigate(delta) {
 
 function jumpTo(val) {
   flushCoverage();
-  const idx = parseInt(val) - 1;
-  if (isNaN(idx) || idx < 0 || idx >= samples.length) return;
+  const n = parseInt(val);
+  if (isNaN(n)) return;
+  // try by sample ID first, then by 1-based position
+  let idx = samples.findIndex(s => s.id === n);
+  if (idx === -1) idx = n - 1;
+  if (idx < 0 || idx >= samples.length) return;
   current = idx;
   render();
 }
@@ -600,13 +604,8 @@ function jumpToMismatch() {
 
 function judgeAll(outcome) {
   if (!anthropicKey) { promptApiKey(); return; }
-  const pending = samples.filter(s => s.outcome === outcome && !s.judge_label && !judging.has(s.id));
-  if (!pending.length) {
-    const statusEl = document.getElementById("judge-queue-status");
-    statusEl.textContent = `All ${outcome} already judged`;
-    setTimeout(() => { statusEl.textContent = ""; }, 3000);
-    return;
-  }
+  const pending = samples.filter(s => s.outcome === outcome && !judging.has(s.id));
+  if (!pending.length) return;
   pending.forEach(s => { if (!judgeQueue.includes(s.id)) judgeQueue.push(s.id); });
   document.getElementById("judge-queue-status").textContent = `${judgeQueue.length} queued…`;
   if (!judgeQueueRunning) processJudgeQueue();
@@ -617,13 +616,12 @@ async function processJudgeQueue() {
   let errors = 0;
   while (judgeQueue.length) {
     const statusEl = document.getElementById("judge-queue-status");
-    const actual = judgeQueue.filter(id => { const s = samples.find(x => x.id === id); return s && !s.judge_label; }).length;
-    statusEl.textContent = `${actual} remaining…` + (errors ? ` (${errors} errors)` : "");
+    statusEl.textContent = `${judgeQueue.length} remaining…` + (errors ? ` (${errors} errors)` : "");
     const id = judgeQueue.shift();
     const sample = samples.find(s => s.id === id);
-    if (sample && !sample.judge_label) {
+    if (sample) {
       await judgeSample(sample);
-      if (!sample.judge_label) errors++;  // judgeSample failed if label still unset
+      if (!sample.judge_label) errors++;
     }
     await new Promise(r => setTimeout(r, 300));  // avoid rate limiting
   }
@@ -641,7 +639,7 @@ function render() {
   document.getElementById("nav-counter").textContent = `${current + 1} of ${samples.length}`;
   document.getElementById("btn-prev").disabled = current === 0;
   document.getElementById("btn-next").disabled = current === samples.length - 1;
-  document.getElementById("jump-input").value = current + 1;
+  document.getElementById("jump-input").value = s.id;
 
   const labeled = samples.filter(x => x.label).length;
   document.getElementById("progress-bar").style.width = (labeled / samples.length * 100) + "%";
@@ -884,19 +882,37 @@ async function judgeSample(sample) {
   const labelList = LABELS.map(l => `"${l.value}"`).join(", ");
   const userMsg = [
     `<source_document>\n${(sample.source_content || "").slice(0, 6000)}\n</source_document>`,
-    `<wiki_page>\n${(sample.wiki_body_before || "").slice(0, 6000)}\n</wiki_page>`,
+    `<wiki_page>\n${(sample.wiki_body_before || "").slice(0, 30000)}\n</wiki_page>`,
     `\nGiven the source document and the wiki page above, decide what the correct reconciler action should be.\n\n` +
+    `First: scan the source for any specific fact, status update, or implicit action item that applies to this page's ` +
+    `exact subject — even if the source is primarily about something else. A source that is mostly off-topic but ` +
+    `contains one directly relevant fact should be judged on that fact alone.\n\n` +
     `Wiki pages are intentionally scoped and concise. An update is only justified when the source contains information ` +
-    `that clearly fits within the wiki page's existing purpose and level of detail — not simply because the source is ` +
-    `topically related or contains more detail on something the wiki already covers. Avoid committing updates that would ` +
-    `add excessive detail, transform the character of the page, or duplicate content the wiki already addresses adequately.\n\n` +
+    `that clearly fits within the wiki page's existing purpose and level of detail. Avoid committing updates that would ` +
+    `add excessive detail, transform the character of the page, or duplicate content the page already covers.\n\n` +
     `Labels: ${labelList}\n\n` +
     `- committed_critical: source contains a key fact, correction, or addition that clearly belongs in this wiki page and is missing\n` +
     `- committed_moderate: source adds a concrete, focused piece of information that fits the page's scope\n` +
     `- committed_nit: source only justifies a very minor or cosmetic touch\n` +
     `- no_change_covered: wiki already covers the topic adequately — no new information in the source\n` +
-    `- no_change_extra: source has additional detail but it exceeds the page's intended scope or level of detail\n` +
-    `- irrelevant: the source document is not relevant to this wiki page\n\n` +
+    `- no_change_extra: source is on-topic but the detail it adds exceeds the page's scope or level of detail\n` +
+    `- irrelevant: the source contains nothing — even in passing — that applies to this page\n\n` +
+    `Important distinctions:\n` +
+    `- Use no_change_covered or no_change_extra when the source is topically related but adds nothing useful. ` +
+    `Reserve irrelevant for sources with no connection to the page's topic whatsoever.\n` +
+    `- A source about a different product that uses the same technology is not relevant — the page must cover the same specific system.\n` +
+    `- A conversational source (Slack, chat) that surfaces a potential issue or cc's team members tracked on the page ` +
+    `implies a follow-up action and can qualify as committed_moderate.\n` +
+    `- A call or meeting summary where a person tracked on the page appears in the attendee list with concrete next steps ` +
+    `explicitly assigned to them is committed_moderate — not irrelevant. Check the attendee list, not just the deal name.\n` +
+    `- Before labeling committed, check whether the wiki already has an entry for the specific deal, contact, or task ` +
+    `the source describes. If it does and the source adds no materially new facts, use no_change_covered.\n` +
+    `- "Tracked on the page" means the person has their own dedicated section as a primary subject. Being listed as ` +
+    `an internal call attendee does not qualify.\n` +
+    `- If the source contains a Stage or Status field set to a terminal value (closedlost, closed, expired, cancelled, ` +
+    `resolved, churned), the work is over — do not commit action items from it even if the document also contains call notes with next steps.\n` +
+    `- A short or minimal section is not a reason to refuse a new concrete entry. Scope concerns apply when a section ` +
+    `already has many similar items — not when it has room for a genuinely new one.\n\n` +
     `When in doubt between committing and no_change, prefer no_change_extra.\n\n` +
     `Respond with JSON only: {"label":"<one of the labels>","reasoning":"<1-2 sentences>"}`,
   ].join("\n\n");
