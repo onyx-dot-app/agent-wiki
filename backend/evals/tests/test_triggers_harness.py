@@ -16,7 +16,7 @@ import pytest
 
 from evals.schema import FactClaim, TriggerCase, TriggerFlavor, TriggerWikiDoc
 from evals.triggers._stub import stub_triggers
-from evals.triggers.harness import build_payload, load_cases, run_case
+from evals.triggers.harness import TriggerRunResult, build_payload, load_cases, run_case
 from evals.triggers.run import _score_case  # pyright: ignore[reportPrivateUsage]
 
 
@@ -159,16 +159,27 @@ def test_score_case_decision_only_when_no_judge_facts() -> None:
     assert {r.name for r in rows if r.name.startswith("reason_")} == {"reason_facts_present"}
 
 
+def test_build_payload_fails_loudly_on_missing_required_field() -> None:
+    """A delta case with no change_path must raise, not silently emit Path: ''."""
+    case = TriggerCase(
+        id="t-bad-delta",
+        flavor=TriggerFlavor.DELTA,
+        nl_description="whatever",
+        wiki_state=[TriggerWikiDoc(path="x.md", body="hi")],
+        change_path=None,
+        change_kind="edit",
+        after="hi there",
+        expected_matched=True,
+    )
+    with pytest.raises(ValueError, match="change_path"):
+        build_payload(case)
+
+
 def test_score_case_match_axis_records_false_fire() -> None:
     """When ground truth says no_fire but model fired, no_false_fire = 0.0."""
     case = _make_delta_case(matched=False)
-
-    class _FakeOut:
-        matched = True
-        reason = "stub said yes anyway"
-        message = "STUB"
-
-    rows = _score_case(case, _FakeOut(), judge_models=None)  # type: ignore[arg-type]
+    fake = TriggerRunResult(matched=True, reason="stub said yes anyway", message="STUB")
+    rows = _score_case(case, fake, judge_models=None)
     by_name = {r.name: r for r in rows}
     assert by_name["trigger_match_decision"].score == 0.0
     assert by_name["no_false_fire_compliance"].score == 0.0

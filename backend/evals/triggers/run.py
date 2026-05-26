@@ -28,10 +28,9 @@ from pathlib import Path
 from app.utils.logging import setup_logging
 
 from evals import _cli, reporting, scorers
-from evals.schema import ScorerOutcome, Surface
+from evals.schema import ScorerOutcome, Surface, TriggerCase
 from evals.triggers._stub import stub_triggers
 from evals.triggers.harness import TriggerRunResult, load_cases, run_case
-from evals.schema import TriggerCase
 
 
 log = logging.getLogger(__name__)

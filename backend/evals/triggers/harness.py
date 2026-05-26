@@ -18,6 +18,8 @@ from pathlib import Path
 
 import yaml
 
+from pydantic import BaseModel, ConfigDict
+
 from app.triggers import natural_language as nl
 from evals.schema import TriggerCase, TriggerFlavor, TriggerWikiDoc
 
@@ -44,12 +46,30 @@ def _build_wiki_snapshot(docs: list[TriggerWikiDoc]) -> str:
     return "\n".join(chunks)
 
 
+def _require(case: TriggerCase, field: str, value: object) -> str:
+    """Fail loudly when a flavor-required field is missing.
+
+    The repo convention is "fail loudly, not silent fallbacks" — a
+    malformed YAML case must blow up at payload-build time so the
+    eval doesn't quietly run on garbage and produce a confident-looking
+    bogus score.
+    """
+    if value is None or value == "":
+        raise ValueError(
+            "trigger case %s (flavor=%s) missing required field %r"
+            % (case.id, case.flavor.value, field)
+        )
+    return str(value)
+
+
 def _build_change_view(case: TriggerCase) -> str:
     """Mirror ``app.triggers.diff.build_change_view`` for the harness."""
-    path = case.change_path or ""
-    kind = case.change_kind or "edit"
+    path = _require(case, "change_path", case.change_path)
+    kind = _require(case, "change_kind", case.change_kind)
+    after = _require(case, "after", case.after)
+    # ``before`` is allowed to be empty for ``create`` kind — that's how the
+    # production builder distinguishes a create from an edit.
     before = case.before or ""
-    after = case.after or ""
     header = "=== CHANGE ===\nPath: %s\nKind: %s\n" % (path, kind)
     if kind == "create" or not before:
         return "%s\n(new file — full body)\n%s\n" % (header, after.rstrip())
@@ -66,14 +86,14 @@ def _build_change_view(case: TriggerCase) -> str:
 
 
 def _build_schedule_block(case: TriggerCase) -> str:
-    scope = case.scope_path or "(whole wiki)"
-    when = case.when_iso or ""
+    scope = _require(case, "scope_path", case.scope_path)
+    when = _require(case, "when_iso", case.when_iso)
     return "=== SCHEDULED CHECK ===\nScope: %s\nTime: %s\n" % (scope, when)
 
 
 def _build_new_file_block(case: TriggerCase) -> str:
-    path = case.new_file_path or ""
-    body = case.new_file_body or ""
+    path = _require(case, "new_file_path", case.new_file_path)
+    body = _require(case, "new_file_body", case.new_file_body)
     return "=== NEW FILE ===\nPath: %s\n\n%s\n" % (path, body.rstrip())
 
 
@@ -87,7 +107,7 @@ def build_payload(case: TriggerCase) -> str:
     return "%s\n\n%s" % (snapshot, _build_new_file_block(case))
 
 
-class TriggerRunResult:
+class TriggerRunResult(BaseModel):
     """Outcome of running one case through the harness.
 
     Holds the actual matched bool, the rendered message (empty when not
@@ -95,12 +115,11 @@ class TriggerRunResult:
     reason from phase 1 — all three are inputs to the scorer pass.
     """
 
-    __slots__ = ("matched", "reason", "message")
+    model_config = ConfigDict(frozen=True)
 
-    def __init__(self, *, matched: bool, reason: str, message: str) -> None:
-        self.matched = matched
-        self.reason = reason
-        self.message = message
+    matched: bool
+    reason: str
+    message: str
 
 
 def run_case(case: TriggerCase) -> TriggerRunResult:
