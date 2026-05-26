@@ -560,8 +560,12 @@ function navigate(delta) {
 
 function jumpTo(val) {
   flushCoverage();
-  const idx = parseInt(val) - 1;
-  if (isNaN(idx) || idx < 0 || idx >= samples.length) return;
+  const n = parseInt(val);
+  if (isNaN(n)) return;
+  // try by sample ID first, then by 1-based position
+  let idx = samples.findIndex(s => s.id === n);
+  if (idx === -1) idx = n - 1;
+  if (idx < 0 || idx >= samples.length) return;
   current = idx;
   render();
 }
