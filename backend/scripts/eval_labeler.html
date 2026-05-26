@@ -905,6 +905,12 @@ async function judgeSample(sample) {
     `implies a follow-up action and can qualify as committed_moderate.\n` +
     `- A CRM call summary where a person tracked on the page appears in the attendee list with concrete next steps ` +
     `explicitly assigned to them is committed_moderate — not irrelevant. Check the attendee list, not just the deal name.\n` +
+    `- Before labeling committed, check whether the wiki already has an entry for the specific deal, contact, or task ` +
+    `the source describes. If it does and the source adds no materially new facts, use no_change_covered.\n` +
+    `- "Tracked on the page" means the person has their own dedicated section as a primary subject. Being listed as ` +
+    `an internal call attendee does not qualify.\n` +
+    `- If the source contains a Stage or Status field set to a terminal value (closedlost, closed, expired, cancelled, ` +
+    `resolved, churned), the work is over — do not commit action items from it even if the document also contains call notes with next steps.\n` +
     `- A short or minimal section is not a reason to refuse a new concrete entry. Scope concerns apply when a section ` +
     `already has many similar items — not when it has room for a genuinely new one.\n\n` +
     `When in doubt between committing and no_change, prefer no_change_extra.\n\n` +
