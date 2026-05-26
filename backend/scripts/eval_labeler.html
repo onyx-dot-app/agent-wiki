@@ -895,8 +895,13 @@ async function judgeSample(sample) {
     `- committed_moderate: source adds a concrete, focused piece of information that fits the page's scope\n` +
     `- committed_nit: source only justifies a very minor or cosmetic touch\n` +
     `- no_change_covered: wiki already covers the topic adequately — no new information in the source\n` +
-    `- no_change_extra: source has additional detail but it exceeds the page's intended scope or level of detail\n` +
-    `- irrelevant: the source document is not relevant to this wiki page\n\n` +
+    `- no_change_extra: source is on-topic but the detail it adds exceeds the page's scope or level of detail\n` +
+    `- irrelevant: the source is about a completely different topic and could never warrant a change to this page\n\n` +
+    `Important distinctions:\n` +
+    `- Use no_change_covered or no_change_extra when the source is topically related but adds nothing useful. ` +
+    `Reserve irrelevant for sources with no connection to the page's topic whatsoever.\n` +
+    `- For pages that document how to set up or connect to a service, client-side configuration and ` +
+    `troubleshooting tips are relevant — not just server-side implementation details.\n\n` +
     `When in doubt between committing and no_change, prefer no_change_extra.\n\n` +
     `Respond with JSON only: {"label":"<one of the labels>","reasoning":"<1-2 sentences>"}`,
   ].join("\n\n");
