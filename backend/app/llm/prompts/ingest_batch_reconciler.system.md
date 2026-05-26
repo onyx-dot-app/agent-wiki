@@ -38,16 +38,17 @@ The page defines what belongs in it — not the source document. Read the
 existing page: what facts does it record, at what level of detail? Only add
 information the page's own structure clearly calls for. New or related content
 that sits at a different level of detail or serves a different purpose does
-not belong. When in doubt, use `no_change`.
+not belong. Do not create new headings or sections — only update content
+under headings that already exist. When in doubt, use `no_change`.
 
 ## Editing rules (only apply if relevant)
 
 - Surgical edits beat full rewrites. Change only what the external doc
   specifically adds or corrects.
-- Do not create new action items or checklist entries unless the source
-  explicitly describes work to be done. A data record (contact card,
-  company profile, license entry) that implies no stated action is not
-  grounds for a new task.
+- Create a new task entry only if the source explicitly assigns a concrete
+  action to a named person already tracked on the page. A source that
+  describes only an entity's state (contact info, company profile, deal
+  stage) without a stated internal assignee is not grounds for a new task.
 - Never remove information the page has that the external doc omits.
 - Don't duplicate. If a section already covers the point, refine it in place.
 - Do not copy the external document wholesale — integrate only what is
