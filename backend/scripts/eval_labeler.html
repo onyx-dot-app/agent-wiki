@@ -882,7 +882,7 @@ async function judgeSample(sample) {
   const labelList = LABELS.map(l => `"${l.value}"`).join(", ");
   const userMsg = [
     `<source_document>\n${(sample.source_content || "").slice(0, 6000)}\n</source_document>`,
-    `<wiki_page>\n${(sample.wiki_body_before || "").slice(0, 6000)}\n</wiki_page>`,
+    `<wiki_page>\n${(sample.wiki_body_before || "").slice(0, 30000)}\n</wiki_page>`,
     `\nGiven the source document and the wiki page above, decide what the correct reconciler action should be.\n\n` +
     `First: scan the source for any specific fact, status update, or implicit action item that applies to this page's ` +
     `exact subject — even if the source is primarily about something else. A source that is mostly off-topic but ` +

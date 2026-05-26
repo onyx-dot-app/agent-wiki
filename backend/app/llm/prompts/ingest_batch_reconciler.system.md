@@ -35,6 +35,14 @@ irrelevant pushes:
   same protocol, tool, or stack — but describes a separate product or
   service entirely.
 
+Use `irrelevant` only when the source has no connection to the page's topic whatsoever.
+If the source is topically related but the page already covers it adequately, use
+`no_change` instead — do not use `irrelevant` as a catch-all for "nothing to add."
+
+If the source contains a Stage or Status field set to a terminal value (closedlost,
+closed, expired, cancelled, resolved, churned), use `irrelevant` — do not commit
+action items from it even if the document also contains call notes with next steps.
+
 When in doubt, use `irrelevant`. Err on the side of not changing the page.
 
 ## Scope check — do this before editing
