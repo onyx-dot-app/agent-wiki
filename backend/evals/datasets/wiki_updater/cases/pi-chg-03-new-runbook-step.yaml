@@ -1,0 +1,29 @@
+id: pi-chg-03-new-runbook-step
+surface: process_instruction
+wiki_path: ops/runbooks/db-failover.md
+current_body: |
+  # DB failover runbook
+
+  1. Confirm primary is unreachable (`pg_isready` from two regions).
+  2. Promote the standby with `repmgr standby promote`.
+  3. Update the connection string in HashiCorp Vault under `db/primary`.
+expected_class: CHANGE
+payload:
+  instruction: Before promoting, also drain the connection pool by setting PGBOUNCER_PAUSE=1 in the pool config and reloading.
+source: slack
+doc_title: null
+doc_url: null
+doc_content: null
+expected_facts_present:
+- id: pgbouncer-pause
+  text: PGBOUNCER_PAUSE=1 must be set before promotion
+expected_facts_preserved:
+- id: pg-isready
+  text: the runbook still requires pg_isready from two regions
+- id: repmgr
+  text: the runbook still uses repmgr standby promote
+- id: vault-update
+  text: the runbook still updates Vault db/primary
+max_bloat_ratio: 2.0
+notes: Inserts a step at the right position; rest of the steps must persist.
+tags: []

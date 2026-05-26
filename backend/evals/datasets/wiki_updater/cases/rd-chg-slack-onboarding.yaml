@@ -1,0 +1,36 @@
+id: rd-chg-slack-onboarding
+surface: reconcile_document
+wiki_path: team/onboarding.md
+current_body: |
+  # Engineering onboarding
+
+  ## Week 1
+
+  - Get laptop, accounts, badge.
+  - Read the architecture doc.
+  - Pair with onboarding buddy.
+
+  ## Tooling
+
+  - Slack, GitHub, Linear, 1Password.
+expected_class: CHANGE
+doc_title: FYI for new hires
+doc_url: <URL>
+doc_content: 'For new hires: we now require everyone to install the agent-wiki MCP server on day 1. Helper script at install/wiki-mcp.sh.
+  Add to the onboarding doc.'
+source: connector:slack
+expected_facts_present:
+- id: mcp-install
+  text: new hires install the agent-wiki MCP server on day 1
+- id: helper-script
+  text: helper script location install/wiki-mcp.sh is documented
+expected_facts_preserved:
+- id: buddy
+  text: pair-with-onboarding-buddy guidance still present
+- id: tooling-list
+  text: existing tooling list (Slack, GitHub, Linear, 1Password) preserved
+max_bloat_ratio: 2.0
+notes: Slack FYI that should land cleanly in the onboarding doc.
+tags:
+- realistic-shape
+- source:slack

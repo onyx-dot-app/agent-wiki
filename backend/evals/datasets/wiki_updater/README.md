@@ -37,7 +37,7 @@ One JSONL row per case. Schema is `backend.evals.schema.WikiUpdaterCase`.
 ## Adding a case
 
 1. Write the row as a single JSON line at the bottom of `cases.jsonl`.
-2. Run `uv run python -m evals.wiki_updater.run --dry-run --limit 1 --cases evals/datasets/wiki_updater/cases.jsonl --case-id <new-id>` to validate parse.
+2. Run `uv run python -m evals.wiki_updater.run --dry-run --limit 1 --cases evals/datasets/wiki_updater/cases --case-id <new-id>` to validate parse.
 3. For `CHANGE` rows: include at least one `expected_facts_present` claim and at least one `expected_facts_preserved` claim. Otherwise the quality scorers can't catch regressions.
 
 ## Growth plan

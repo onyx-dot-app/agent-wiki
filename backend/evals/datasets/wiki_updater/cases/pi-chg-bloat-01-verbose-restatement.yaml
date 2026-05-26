@@ -1,0 +1,42 @@
+id: pi-chg-bloat-01-verbose-restatement
+surface: process_instruction
+wiki_path: services/orders/api.md
+current_body: |
+  # Orders API
+
+  Auth required (Bearer). Rate limit 100 req/min per token.
+expected_class: NO_CHANGE
+payload:
+  instruction: 'Long-winded restatement: Some additional context, written verbosely. Some additional context, written verbosely.
+    Some additional context, written verbosely. Some additional context, written verbosely. Some additional context, written
+    verbosely. Some additional context, written verbosely. Some additional context, written verbosely. Some additional context,
+    written verbosely. Some additional context, written verbosely. Some additional context, written verbosely. Some additional
+    context, written verbosely. Some additional context, written verbosely. Some additional context, written verbosely. Some
+    additional context, written verbosely. Some additional context, written verbosely. Some additional context, written verbosely.
+    Some additional context, written verbosely. Some additional context, written verbosely. Some additional context, written
+    verbosely. Some additional context, written verbosely. Some additional context, written verbosely. Some additional context,
+    written verbosely. Some additional context, written verbosely. Some additional context, written verbosely. Some additional
+    context, written verbosely. Some additional context, written verbosely. Some additional context, written verbosely. Some
+    additional context, written verbosely. Some additional context, written verbosely. Some additional context, written verbosely.
+    Some additional context, written verbosely. Some additional context, written verbosely. Some additional context, written
+    verbosely. Some additional context, written verbosely. Some additional context, written verbosely. Some additional context,
+    written verbosely. Some additional context, written verbosely. Some additional context, written verbosely. Some additional
+    context, written verbosely. Some additional context, written verbosely. Some additional context, written verbosely. Some
+    additional context, written verbosely. Some additional context, written verbosely. Some additional context, written verbosely.
+    Some additional context, written verbosely. Some additional context, written verbosely. Some additional context, written
+    verbosely. Some additional context, written verbosely. Some additional context, written verbosely. Some additional context,
+    written verbosely. Some additional context, written verbosely. Some additional context, written verbosely. Some additional
+    context, written verbosely. Some additional context, written verbosely. Some additional context, written verbosely. Some
+    additional context, written verbosely. Some additional context, written verbosely. Some additional context, written verbosely.
+    Some additional context, written verbosely. Some additional context, written verbosely.  The orders API requires auth
+    and has a rate limit.'
+source: connector:notion
+doc_title: null
+doc_url: null
+doc_content: null
+expected_facts_present: []
+expected_facts_preserved: []
+max_bloat_ratio: 1.2
+notes: Tests bloat resistance — payload is huge but info-free.
+tags:
+- bloat-bait

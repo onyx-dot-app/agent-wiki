@@ -1,0 +1,18 @@
+id: rd-noc-02-stale-doc-newer-wiki
+surface: reconcile_document
+wiki_path: services/auth/jwt.md
+current_body: |
+  # JWT issuance
+
+  Tokens signed RS256. Key rotation every 30 days via `key-rotator` cron.
+expected_class: NO_CHANGE
+payload: null
+source: ''
+doc_title: Auth runbook (legacy)
+doc_url: https://legacy.example.com/auth
+doc_content: Auth tokens are signed with HS256. (This doc has not been updated since 2023.)
+expected_facts_present: []
+expected_facts_preserved: []
+max_bloat_ratio: 2.0
+notes: External doc is older — wiki should not regress.
+tags: []

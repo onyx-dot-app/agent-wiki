@@ -1,0 +1,32 @@
+id: rd-chg-03-api-reference
+surface: reconcile_document
+wiki_path: api/v2/users.md
+current_body: |
+  # Users API v2
+
+  ## Endpoints
+
+  - `GET /v2/users` — list users
+  - `POST /v2/users` — create user
+expected_class: CHANGE
+payload: null
+source: ''
+doc_title: Users API v2 reference
+doc_url: https://api-docs.example.com/v2/users
+doc_content: v2 also supports DELETE /v2/users/{id} (soft-delete; restorable for 30 days) and PATCH /v2/users/{id} for partial
+  updates.
+expected_facts_present:
+- id: delete-endpoint
+  text: DELETE /v2/users/{id} is documented
+- id: delete-soft
+  text: soft-delete with 30-day restore window is documented
+- id: patch-endpoint
+  text: PATCH /v2/users/{id} is documented for partial updates
+expected_facts_preserved:
+- id: list-endpoint
+  text: GET /v2/users is still documented
+- id: create-endpoint
+  text: POST /v2/users is still documented
+max_bloat_ratio: 2.0
+notes: Two endpoints added; existing ones must persist.
+tags: []

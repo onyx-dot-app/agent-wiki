@@ -1,0 +1,23 @@
+id: pi-noc-05-already-fresh-after-recent-edit
+surface: process_instruction
+wiki_path: oncall/rotation.md
+current_body: |
+  # Oncall rotation
+
+  Weekly rotation Mon 09:00 PT. Handoff in #oncall-handoff with a brief of any open incidents and pending toil.
+
+  ## Current schedule
+
+  See the PagerDuty schedule `eng-primary`.
+expected_class: NO_CHANGE
+payload:
+  instruction: Rotation handoff happens Mondays — make sure that's documented.
+source: slack
+doc_title: null
+doc_url: null
+doc_content: null
+expected_facts_present: []
+expected_facts_preserved: []
+max_bloat_ratio: 2.0
+notes: Handoff timing already present.
+tags: []

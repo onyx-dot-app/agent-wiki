@@ -1,0 +1,20 @@
+id: pi-noc-02-stack-already-listed
+surface: process_instruction
+wiki_path: services/billing/overview.md
+current_body: |
+  # Billing service
+
+  Built on FastAPI + Postgres. Stripe webhooks land at `/webhooks/stripe`.
+  Background workers run under pgmq.
+expected_class: NO_CHANGE
+payload:
+  instruction: We use Stripe for payments — add that to the billing page.
+source: manual
+doc_title: null
+doc_url: null
+doc_content: null
+expected_facts_present: []
+expected_facts_preserved: []
+max_bloat_ratio: 2.0
+notes: Stripe is already mentioned; nothing new to add.
+tags: []

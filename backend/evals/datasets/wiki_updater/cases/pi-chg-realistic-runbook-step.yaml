@@ -1,0 +1,37 @@
+id: pi-chg-realistic-runbook-step
+surface: process_instruction
+wiki_path: ops/runbooks/db-failover.md
+current_body: |
+  # Postgres failover runbook
+
+  ## When
+
+  Primary unreachable for > 60s.
+
+  ## Steps
+
+  1. Confirm primary is actually down (not network blip) via DataDog.
+  2. Promote replica via `patroni failover`.
+  3. Update `DATABASE_URL` in Helm values + roll backend.
+expected_class: CHANGE
+payload:
+  instruction: 'Add a pre-step: we now require running `pg_dump` of the last 24h of the audit_log table before promoting,
+    in case the replica is behind. Add as step 0.'
+source: manual
+expected_facts_present:
+- id: pg-dump
+  text: 'new step 0: pg_dump of last 24h audit_log table before promotion'
+expected_facts_preserved:
+- id: trigger
+  text: 'trigger: primary unreachable for > 60s'
+- id: datadog-check
+  text: DataDog confirmation step preserved
+- id: patroni
+  text: patroni failover step preserved
+- id: helm-roll
+  text: DATABASE_URL update + Helm roll preserved
+max_bloat_ratio: 2.0
+notes: Surgical runbook insertion at a specific position. Loss-bait — must not drop the existing 3 steps.
+tags:
+- realistic-shape
+- loss-bait

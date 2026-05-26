@@ -1,0 +1,20 @@
+id: rd-irr-github-pr-unrelated-repo
+surface: reconcile_document
+wiki_path: services/search/architecture.md
+current_body: |
+  # Search service
+
+  Documents flow: Connector → Embedding → Vespa.
+expected_class: IRRELEVANT
+doc_title: 'chore(launchers): bump @onyx-ai/agentwiki-launcher to 0.1.0-alpha.3'
+doc_url: <URL>
+doc_content: Bumps the launcher to alpha.3. CI passes. No behavior change for end users.
+source: connector:github
+expected_facts_present: []
+expected_facts_preserved: []
+max_bloat_ratio: 2.0
+notes: Real PR but completely unrelated to search architecture. Must reject.
+tags:
+- realistic-shape
+- source:github
+- irrelevant-bait

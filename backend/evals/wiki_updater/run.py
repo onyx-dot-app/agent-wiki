@@ -21,6 +21,8 @@ import sys
 import time
 from pathlib import Path
 
+import yaml
+
 from app.db.fts import SearchHit
 from app.ingest.models import WikiUpdateCandidate
 from app.llm.agents.common import IRRELEVANT_SENTINEL
@@ -37,16 +39,30 @@ log = logging.getLogger(__name__)
 
 
 def _load_cases(path: Path, *, case_id: str | None, limit: int | None) -> list[WikiUpdaterCase]:
+    """Load cases from either a directory of YAML files (one per case) or a JSONL file.
+
+    Per-case YAML matches the layout external_agent uses for scenarios:
+    each file at ``evals/datasets/wiki_updater/cases/<id>.yaml`` is
+    independently editable and diff-friendly. JSONL is still accepted for
+    backward compatibility and ad-hoc machine-generated slices.
+    """
     rows: list[WikiUpdaterCase] = []
-    with path.open() as fh:
-        for line_num, line in enumerate(fh, start=1):
-            line = line.strip()
-            if not line:
-                continue
+    if path.is_dir():
+        for yaml_path in sorted(path.glob("*.yaml")):
             try:
-                rows.append(WikiUpdaterCase.model_validate_json(line))
+                rows.append(WikiUpdaterCase.model_validate(yaml.safe_load(yaml_path.read_text())))
             except Exception as exc:
-                raise ValueError("invalid case on line %d: %s" % (line_num, exc)) from exc
+                raise ValueError("invalid case in %s: %s" % (yaml_path, exc)) from exc
+    else:
+        with path.open() as fh:
+            for line_num, line in enumerate(fh, start=1):
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rows.append(WikiUpdaterCase.model_validate_json(line))
+                except Exception as exc:
+                    raise ValueError("invalid case on line %d: %s" % (line_num, exc)) from exc
     if case_id:
         rows = [c for c in rows if c.id == case_id]
     if limit is not None:

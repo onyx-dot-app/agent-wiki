@@ -1,0 +1,31 @@
+id: rd-chg-02-incident-postmortem
+surface: reconcile_document
+wiki_path: ops/incidents/2026-04-12-cache-stampede.md
+current_body: |
+  # 2026-04-12 cache stampede
+
+  ## Summary
+
+  Recommendations API saw 5x normal origin load when a cache flush hit during peak.
+expected_class: CHANGE
+payload: null
+source: ''
+doc_title: 'Postmortem: 2026-04-12 cache stampede'
+doc_url: https://postmortems.example.com/2026-04-12
+doc_content: 'Root cause: a manual `redis-cli FLUSHDB` invoked during a Memcached → Redis migration. Action items: (1) require
+  two-person approval for FLUSHDB, (2) add request-coalescing in front of the recs cache, owner: Wong (due 2026-05-01).'
+expected_facts_present:
+- id: root-cause
+  text: manual redis-cli FLUSHDB during migration is named as root cause
+- id: action-1
+  text: two-person approval requirement for FLUSHDB is listed as an action item
+- id: action-2
+  text: request-coalescing in front of the recs cache is listed as an action item
+- id: action-owner
+  text: Wong is named as owner with due date 2026-05-01
+expected_facts_preserved:
+- id: summary
+  text: the original summary line remains
+max_bloat_ratio: 2.0
+notes: Postmortem brings root cause + action items into the incident page.
+tags: []

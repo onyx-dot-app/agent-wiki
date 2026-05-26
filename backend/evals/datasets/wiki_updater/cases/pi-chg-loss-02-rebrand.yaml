@@ -1,0 +1,35 @@
+id: pi-chg-loss-02-rebrand
+surface: process_instruction
+wiki_path: services/checkout/overview.md
+current_body: |
+  # Checkout service
+
+  Owns the order placement flow. Talks to: Inventory, Payments, Fraud-Detection. On Fraud-Detection timeout (>2s), falls back to soft-allow with manual review.
+
+  ## SLOs
+
+  - p95 latency under 350ms
+  - availability 99.95% monthly
+expected_class: CHANGE
+payload:
+  instruction: Service is being renamed from 'Checkout' to 'OrderFlow' — update the name.
+source: manual
+doc_title: null
+doc_url: null
+doc_content: null
+expected_facts_present:
+- id: renamed
+  text: the service is now called OrderFlow
+expected_facts_preserved:
+- id: downstream-services
+  text: Inventory, Payments, and Fraud-Detection are still listed
+- id: fraud-fallback
+  text: the soft-allow + manual-review fallback for Fraud-Detection timeout is still documented
+- id: slo-latency
+  text: p95 under 350ms is still documented
+- id: slo-availability
+  text: 99.95% monthly availability is still documented
+max_bloat_ratio: 2.0
+notes: A rename tempts a from-scratch rewrite that loses SLOs and fallback details.
+tags:
+- loss-bait

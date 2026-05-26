@@ -53,7 +53,7 @@ jobs:
       - name: wiki_updater dry-run
         run: |
           uv run python -m evals.wiki_updater.run \
-            --cases evals/datasets/wiki_updater/cases.jsonl \
+            --cases evals/datasets/wiki_updater/cases \
             --models claude-sonnet-4-6 \
             --dry-run \
             --runs 1 \

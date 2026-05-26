@@ -1,0 +1,25 @@
+id: pi-chg-04-replace-tool
+surface: process_instruction
+wiki_path: services/cache/overview.md
+current_body: |
+  # Cache service
+
+  Memcached cluster fronts the recommendations API. Eviction is LRU. Capacity 32 GB across 4 nodes.
+expected_class: CHANGE
+payload:
+  instruction: We migrated off Memcached to Redis last sprint. Same 32 GB across 4 nodes, same LRU eviction.
+source: manual
+doc_title: null
+doc_url: null
+doc_content: null
+expected_facts_present:
+- id: redis-now
+  text: the cache service now runs on Redis
+expected_facts_preserved:
+- id: lru-eviction
+  text: eviction is LRU
+- id: capacity
+  text: capacity is 32 GB across 4 nodes
+max_bloat_ratio: 2.0
+notes: Replacement with carry-over of operational facts.
+tags: []

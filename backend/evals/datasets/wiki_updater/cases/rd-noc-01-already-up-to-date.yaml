@@ -1,0 +1,18 @@
+id: rd-noc-01-already-up-to-date
+surface: reconcile_document
+wiki_path: services/billing/integration-notes.md
+current_body: |
+  # Billing integration notes
+
+  Stripe webhooks land at `/webhooks/stripe`. Signature verification uses `Stripe-Signature` header with the `whsec_*` secret stored in Vault.
+expected_class: NO_CHANGE
+payload: null
+source: ''
+doc_title: Stripe webhook integration
+doc_url: https://stripe.com/docs/webhooks/signatures
+doc_content: Stripe sends webhooks to your endpoint. Verify the Stripe-Signature header with your whsec_* secret.
+expected_facts_present: []
+expected_facts_preserved: []
+max_bloat_ratio: 2.0
+notes: Wiki already documents the signature flow.
+tags: []

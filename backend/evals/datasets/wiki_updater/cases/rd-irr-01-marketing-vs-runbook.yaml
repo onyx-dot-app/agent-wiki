@@ -1,0 +1,20 @@
+id: rd-irr-01-marketing-vs-runbook
+surface: reconcile_document
+wiki_path: ops/runbooks/db-failover.md
+current_body: |
+  # DB failover runbook
+
+  Promote standby with `repmgr standby promote`. Update Vault `db/primary`.
+expected_class: IRRELEVANT
+payload: null
+source: ''
+doc_title: 2026 product roadmap announcement
+doc_url: https://marketing.example.com/roadmap-2026
+doc_content: We're excited to announce our 2026 roadmap, focused on AI-powered productivity for the modern team. Look out
+  for new launches every quarter.
+expected_facts_present: []
+expected_facts_preserved: []
+max_bloat_ratio: 2.0
+notes: Marketing announcement has nothing to do with the DB runbook.
+tags:
+- irrelevant-bait

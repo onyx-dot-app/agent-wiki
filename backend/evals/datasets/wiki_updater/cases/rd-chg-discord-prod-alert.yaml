@@ -1,0 +1,35 @@
+id: rd-chg-discord-prod-alert
+surface: reconcile_document
+wiki_path: ops/runbooks/queue-backlog.md
+current_body: |
+  # Queue backlog runbook
+
+  ## Symptom
+
+  PagerDuty fires `pgmq-queue-depth-high`. Backend response latency climbs.
+
+  ## First response
+
+  1. Check `documents_queue` depth via Grafana.
+  2. Restart workers if depth > 1000.
+expected_class: CHANGE
+doc_title: prod alert — runbook miss
+doc_url: <URL>
+doc_content: 'Q backlog alert fired tonight at 03:14 UTC. Runbook step 2 (restart workers) didn''t drain — root cause was
+  a stuck task holding the connection. Need to add: `kill -9` the worker python process directly if the SIGTERM restart doesn''t
+  drain within 5 min.'
+source: connector:discord
+expected_facts_present:
+- id: kill-9-step
+  text: 'new step: kill -9 the worker if SIGTERM restart doesn''t drain within 5 min'
+expected_facts_preserved:
+- id: pagerduty
+  text: PagerDuty alert pgmq-queue-depth-high still listed as the trigger
+- id: grafana-step
+  text: Grafana check via documents_queue step still present
+max_bloat_ratio: 2.0
+notes: Discord prod-alert message that augments a runbook. Should append, not rewrite.
+tags:
+- realistic-shape
+- source:discord
+- loss-bait

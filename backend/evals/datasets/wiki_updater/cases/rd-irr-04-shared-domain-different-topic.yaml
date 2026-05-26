@@ -1,0 +1,19 @@
+id: rd-irr-04-shared-domain-different-topic
+surface: reconcile_document
+wiki_path: ops/runbooks/auth-outage.md
+current_body: |
+  # Auth outage runbook
+
+  Page on-call. Check the auth-api dashboard. Fail over to standby if needed.
+expected_class: IRRELEVANT
+payload: null
+source: ''
+doc_title: Auth team onboarding guide
+doc_url: https://hr.example.com/auth-onboarding
+doc_content: 'Welcome to the auth team! Day 1: get your laptop, set up Okta, join #auth-team Slack. Day 2: shadow oncall.'
+expected_facts_present: []
+expected_facts_preserved: []
+max_bloat_ratio: 2.0
+notes: Both about auth, but onboarding is not a runbook update.
+tags:
+- irrelevant-bait

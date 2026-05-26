@@ -1,0 +1,25 @@
+id: pi-noc-realistic-trivial-followup
+surface: process_instruction
+wiki_path: customers/globex/notes.md
+current_body: |
+  # Globex Inc
+
+  ## Status
+
+  - Tier: Enterprise (signed 2026-Q1)
+  - Primary use case: knowledge search
+
+  ## Open asks
+
+  - SSO via Okta
+  - Slack connector
+expected_class: NO_CHANGE
+payload:
+  instruction: Just a reminder that Globex wants a Slack connector.
+source: manual
+expected_facts_present: []
+expected_facts_preserved: []
+max_bloat_ratio: 2.0
+notes: Trivial restatement of info already on page. NO_CHANGE.
+tags:
+- realistic-shape

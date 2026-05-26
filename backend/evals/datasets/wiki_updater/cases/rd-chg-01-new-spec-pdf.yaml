@@ -1,0 +1,27 @@
+id: rd-chg-01-new-spec-pdf
+surface: reconcile_document
+wiki_path: services/notifications/templates.md
+current_body: |
+  # Notification templates
+
+  Render with Handlebars. Templates live in `notifications/templates/*.hbs`.
+expected_class: CHANGE
+payload: null
+source: ''
+doc_title: Notification template authoring guide
+doc_url: https://docs.example.com/templates
+doc_content: Every template must include a plaintext fallback. The plaintext fallback goes in a sibling `.txt` file with the
+  same basename.
+expected_facts_present:
+- id: plaintext-fallback
+  text: each template requires a plaintext fallback
+- id: txt-sibling
+  text: the plaintext goes in a sibling .txt file with the same basename
+expected_facts_preserved:
+- id: handlebars
+  text: Handlebars rendering is still documented
+- id: templates-path
+  text: templates live in notifications/templates/*.hbs
+max_bloat_ratio: 2.0
+notes: External spec adds a new rule — wiki must absorb it.
+tags: []
