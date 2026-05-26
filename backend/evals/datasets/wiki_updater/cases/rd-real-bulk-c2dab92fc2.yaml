@@ -1,0 +1,128 @@
+id: rd-real-bulk-c2dab92fc2
+surface: reconcile_document
+wiki_path: engineering/Agent Wiki Project/Architecture.md
+current_body: |
+  # Architecture
+
+  ## Containers
+
+  | Container | Role |
+  |---|---|
+  | `postgres` | Postgres 17. Stores users, sessions, ACL, trigger config, events, ingest settings. Schema managed by Alembic — `init_db()` runs `alembic upgrade head` on every boot. |
+  | `redis` | Redis 7. Backs the three Redis Streams task queues (`documents`, `triggers`, `lightweight_maintenance`). |
+  | `opensearch` | OpenSearch 2.x. BM25 full-text search index (`wiki-docs`). One document per `.md` file; fields: `path` (keyword), `title` (text, boost 3×), `body` (text). |
+  | `backend` | FastAPI app on :8080 (uvicorn, 2 workers). Hosts the REST API and MCP server. |
+  | `worker-documents` | Same image as backend. Runs `app.tasks.run_worker documents` — LLM-bound doc-update tasks. |
+  | `worker-triggers` | Same image as backend. Runs `app.tasks.run_worker triggers` — trigger evaluation and fan-out. |
+  | `worker-lightweight-maintenance` | Same image as backend. Runs `app.tasks.run_worker lightweight_maintenance` — BM25 reindex, agent-activity cleanup, hourly reconcile sweep. |
+  | `frontend` | Next.js + TypeScript UI on :3000. |
+  | `nginx` | Reverse proxy on :80 — `/api/*` → backend, everything else → frontend. |
+
+  ## Volumes
+
+  | Volume | Mount | Purpose |
+  |---|---|---|
+  | `wiki-data` | `/data/wiki` | Git-backed wiki working tree. Backend shells out to `git`. Backend + all workers share an RWO mount and must co-schedule. |
+
+  ## Storage
+
+  - **Wiki content** — files in `wiki-data`, committed to git on every write via `app.wiki.git`. Every write is a real git commit; history is always consistent with the working tree.
+  - **App state** — Postgres: users, MCP sessions/tokens, ACL entries, trigger definitions, trigger events, ingest settings, agent-activity log. Schema in `backend/app/db/models.py`; migrations in `backend/app/db/migrations/versions/`.
+  - **Search index** — OpenSearch `wiki-docs` index. Populated by `app.tasks.reindex.index_path` after every doc commit and by an hourly reconcile sweep (`reconcile_bm25_index`). Visibility filtering applied post-query in Python via `acl.filter_paths_in_python`.
+  - **Task queues** — Redis Streams. Three queues: `documents` (LLM-bound, slow), `triggers` (fast fan-out), `lightweight_maintenance` (sub-second upkeep). Each queue has its own dedicated worker container.
+
+  ## Evaluation harness
+
+  Offline evals for wiki-reading and wiki-writing agents live under `backend/evals/`, outside `tests/` because live runs hit real LLMs and are parameterized by `(provider, model)`. The harness covers `wiki_updater.process_instruction`, `wiki_updater.reconcile_document`, `ingest_selector.select_candidates`, and the external agent path that drives `update_doc_nl`.
+
+  The evals split each surface into **WHEN** decisions, such as `NO_CHANGE`, change, or `IRRELEVANT`, and **HOW** quality, such as preserving facts and avoiding bloat. The scorer reference covers `trigger.*`, `bloat_ratio`, `diff_addition_ratio`, `entity_density_delta`, `markdown_valid`, `selector_set_metrics`, `facts_present`, `facts_preserved`, `no_touch_compliance`, `update_*`, and `error_rate`; LLM-judge scorers use `app.llm.client.complete` with verdicts, abstention, majority vote, and tie-to-false behavior.
+
+  The shared runner in `evals/_cli.py` fans `(case × model × run)` trials across a `ThreadPoolExecutor` with a copied `contextvars.Context` per worker, so `use_model` overrides are thread-local and agent code does not change between models. Dry-run stubs patch module-global `client.complete` / `.stream` once around the pool, and JSONL output is sorted by `(case_id, provider, model, run_index)` for stable runs. `evals-smoke.yml` runs `--dry-run` on PRs without API keys, while `evals-nightly.yml` runs the live matrix with `EVAL_*_API_KEY` secrets and pushes results through `app.tracing.braintrust.push_experiment`. The eval README documents a Braintrust scan order of `error_rate`, then `trigger.macro_f1`, then `facts_preserved < 0.9`; nightly runs cost roughly <AMOUNT>–25.
+
+  Real-traffic ingest samples can be labeled with `backend/scripts/eval_labeler.html`. The browser labeler supports six granular labels: three should-commit severities, two should-no-change reasons, and irrelevant/wrong-selection. It writes labels, coverage notes, source/wiki/diff summaries, and `judge_label` / `judge_reasoning` back into the original `.jsonl` rows via the File System Access API; summaries and judge results are deduplicated across rows with identical source or wiki content. The optional Judge action, available from the Judge button or `j` key, asks `claude-opus-4-7` for an independent suggestion using only the source document and wiki page, not the diff or reconciler outcome; the suggestion is shown for human confirmation or override.
+
+  ## Data flow: Onyx pushes a document
+
+  ```
+  ONYX                                       AGENT WIKI
+  ────────────────────────────────────────────────────────────────────
+
+                                             Admin UI
+                                               └─ POST /admin/ingest/regenerate-key
+                                                       │
+                                                  ingest_settings (Postgres)
+                                                  api_key = secrets.token_urlsafe(32)
+                                                       │
+                                                       │ admin copies base URL + key
+                                                       ▼
+  env vars:
+  AGENT_WIKI_ENABLED=true      ◀────────────  AGENT_WIKI_BASE_URL
+  AGENT_WIKI_BASE_URL                          AGENT_WIKI_API_KEY
+  AGENT_WIKI_API_KEY
+
+  ┌─────────────────────────┐
+  │  Onyx indexer           │
+  │  (Celery task, fires    │  POST /api/documents/ingest
+  │   after each indexing   │  Authorization: Bearer <api_key>
+  │   batch)                │─────────────────────────────────▶  FastAPI backend
+  │                         │  {content, title, source_type,        │
+  │  skips if:              │   metadata, updated_at}               │ validate bearer token
+  │  - multi-tenant         │                                       │ check max_doc_chars
+  │  - non-public connector │◀─────────────────────────────────────  202 Accepted
+  │  - doc too large        │                                       │
+  └─────────────────────────┘                                       │ enqueue
+                                                                    ▼
+                                                         documents_queue (Redis Streams)
+                                                                    │
+                                                                    ▼
+                                                         worker-documents
+                                                         process_pushed_document()
+                                                                    │
+                                                         resolve page + LLM update
+                                                                    │
+                                                             git commit
+                                                                    │
+                                                       ┌────────────┴────────────┐
+                                                       ▼                         ▼
+                                            lightweight_maintenance_queue    triggers_queue
+                                            index_path()                fan_out_trigger_eval()
+                                                    │
+                                                    ▼
+                                               OpenSearch
+  ```
+
+  The ingest reconciliation step uses a typed `submit_results` tool call for per-candidate actions rather than parsing free-text result blocks. Edit application still uses targeted FIND/REPLACE blocks, with a trailing-whitespace-normalized fallback so minor spacing differences do not cause an otherwise valid edit to miss.
+
+  ## Data flow: user edits a doc
+
+  1. UI saves via `PUT /api/documents/<path>` or agent tool calls `commit_file`.
+  2. Backend commits to git via `app.wiki.git.commit_file`.
+  3. `notify.after_doc_write` fires: enqueues `index_path` on `lightweight_maintenance_queue` + `fan_out_trigger_eval` on `triggers_queue` + publishes MCP pub-sub event.
+  4. `worker-lightweight-maintenance` picks up `index_path`, reads body from git, upserts into OpenSearch.
+  5. `worker-triggers` picks up `fan_out_trigger_eval`, evaluates delta triggers scoped to the doc and parent dirs, records `trigger.fire` events.
+
+  ## Data flow: scheduled trigger
+
+  1. In-process periodic scheduler on `worker-triggers` fires `evaluate_scheduled_triggers` at minute 0 (hourly). Running more than one replica per queue would double-fire it.
+  2. Handler loads enabled `kind=schedule` triggers due now, runs the configured action, records `trigger.fire`.
+
+  ## Open questions
+
+  - **Cost** — every Onyx connector update will trigger an LLM pass on the relevant wiki page. Need batching / debounce to avoid runaway cost at high connector volume.
+  - **Doc bloat / loss** — the document-updater agent must not grow docs unboundedly or drop important context. System prompt enforces this, and the new offline eval harness now includes bloat-bait and loss-bait cases with `bloat_ratio`, `facts_present`, and `facts_preserved` scorers. The current v0 datasets include 30 `wiki_updater` cases, 5 `ingest_selector` cases, and 24 external-agent scenarios, and should grow to roughly 200 cases once the `INGEST_EVAL_LOGGING` sample flow is available.
+  - **`process_pushed_document` routing** — how the agent picks which wiki page(s) to update from a raw Onyx document push is not yet implemented. LLM-routed via the document-updater agent.
+expected_class: CHANGE
+doc_title: '111: feat(eval): batch judge, mismatch tracking, and per-outcome progress'
+doc_url: <URL>
+doc_content: '111: feat(eval): batch judge, mismatch tracking, and per-outcome progress'
+source: connector:github
+expected_facts_present: []
+expected_facts_preserved: []
+max_bloat_ratio: 2.0
+notes: Real production reconciler CHANGE event from /wiki/.git commit c2dab92fc2 (2026-05-23). facts_present/preserved empty
+  for bulk-generated cases; trigger + bloat + entity-density axes still score.
+tags:
+- real-world
+- real-prod-commit
+- source:github
+- sha:c2dab92fc2

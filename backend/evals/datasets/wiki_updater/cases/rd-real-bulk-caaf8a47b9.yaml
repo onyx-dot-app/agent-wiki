@@ -1,0 +1,565 @@
+id: rd-real-bulk-caaf8a47b9
+surface: reconcile_document
+wiki_path: team-todos.md
+current_body: "# Team Todos (by owner)\n\n> Purpose: Single place to track current work, unblockers, and ownership.\n> Suggested\
+  \ cadence: quick async update daily; deeper review in weekly planning.\n\n## How to use this page\n- Add new work under\
+  \ the person who will **drive it to completion**.\n- Prefer small, outcome-oriented items.\n- Each todo should include (when\
+  \ possible):\n  - **Outcome / Definition of done**\n  - **Priority**: P0 (urgent), P1 (this week), P2 (later)\n  - **Due**:\
+  \ date or “TBD”\n  - **Status**: Not started / In progress / Blocked / In review / Done\n  - **Links**: ticket, doc, PR,\
+  \ dashboard, etc.\n- When something is blocked, write the **specific blocker** and who/what can unblock it.\n\n---\n\n##\
+  \ Yuhong\n### Current\n- Keep this user's TODOs empty but add in all relevant blockers that this user has for other people's\
+  \ projects\n\n### Unblockers / Needs help\n- [ ] amiconsult Enterprise self-hosted evaluation: confirm feasibility/process\
+  \ for granting Enterprise features on their self-hosted Community instance so engineering can schedule an unlock-script\
+  \ call.\n  - Context: HubSpot deal `amiconsult` is in the default pipeline at stage `closedlost`; amount is <AMOUNT>; close\
+  \ date is <PHONE>. Contact is Vincenzo Pace, Associate IAM Consultant, at amiconsult.de.\n  - Scope notes: amiconsult self-hosts\
+  \ Community today and wanted to evaluate Enterprise for strict privacy and access-control requirements, including RBAC,\
+  \ permission inheritance, SSO, and local/self-hosted deployment. Connectors discussed were Confluence, Slack, and SharePoint.\n\
+  \  - Scope notes: They were exploring a reseller motion, with current internal evaluation around 50–60 users and a potential\
+  \ downstream customer around 4,000 seats. No formal quote was provided; Business plan pricing around <AMOUNT>/user and possible\
+  \ volume discount around <AMOUNT>/user were discussed, with Enterprise minimum around 200 users.\n  - Next steps from sales\
+  \ call: Matthew to sync with Yuhong on feasibility/process, coordinate an engineering call to run the unlock script, and\
+  \ consider bringing the interested end-customer into a follow-up evaluation call.\n\n---\n\n## Nik\n### Current\n- [ ] **(P0)**\
+  \ Control plane deploy v0.0.129 after Alembic revision-id fix — *Status:* In progress — *Due:* TBD  \n  - Outcome: Control\
+  \ plane is redeployed via Argo on `v0.0.129` after rolling back the failed `v0.0.128` deploy and fixing the duplicate Alembic\
+  \ migration revision id.\n  - Links: PR #149: <URL> PR #150: <URL> PR #151: <URL> images: <URL>\n  - Blockers: Confirm PR\
+  \ approval and Argo sync completion.\n\n### Unblockers / Needs help\n- [ ] Evan approval for the control-plane migration\
+  \ fix / `v0.0.129` bump if still pending.\n\n---\n\n## Dane\n### Current\n- [ ] **(P1)** <todo title> — *Status:* Not started\
+  \ — *Due:* TBD  \n  - Outcome: <what “done” means>  \n  - Links: <url(s)>  \n  - Blockers: <none / describe>\n\n### Unblockers\
+  \ / Needs help\n- [ ] <question / decision / dependency>\n\n---\n\n## Bo\n### Current\n- [ ] **(P1)** <todo title> — *Status:*\
+  \ Not started — *Due:* TBD  \n  - Outcome: <what “done” means>  \n  - Links: <url(s)>  \n  - Blockers: <none / describe>\n\
+  \n---\n\n## Evan\n### Current\n- [ ] **(P0)** perm sync fixes — *Status:* implementing fixes — *Due:* May 11 \n  - Outcome:\
+  \ All perm sync related issues that occur at reasonably high frequency (>10 in the last week) are resolved (fixed in code\
+  \ or determined to be user error)\n  - Scope update: PR #11284 fixes Confluence Server/DC space pagination by following\
+  \ `_links.next` instead of stopping when the result count is below the requested limit, preventing missed spaces and downstream\
+  \ permission-sync failures. PR #11291 fixes Confluence Server/DC pagination during permission sync and CQL retrieval when\
+  \ `_paginate_url` runs without a callback, so capped or misreported pages do not miss results. PR #11299 cherry-picks the\
+  \ #11291 fix to `release/v4.0`.\n  - Links: <URL> PR #11284: <URL> PR #11291: <URL> PR #11299: <URL>  \n  - Blockers: None\n\
+  - [ ] **(P1)** BYOK LLM Key — *Status:* planning phase — *Due:* May 12 \n  - Outcome: Admins can configure LLM providers\
+  \ to be \"BYOK\" i.e. users have to provide their own key. BYOK should let customers bypass Onyx-managed weekly limits,\
+  \ including the shared per-tenant LLM cost cap, API call caps, non-streaming API call caps, and chunks-indexed caps; customers\
+  \ then pay OpenAI/Anthropic directly and are subject to their provider/account limits instead. Customers using Onyx's own\
+  \ API keys are intentionally covered by their plan and remain subject to weekly usage limits.\n  - Scope notes: Onyx Cloud\
+  \ defaults to Onyx-managed OpenAI and Anthropic API keys as a convenience. Customer-facing guidance says users add their\
+  \ own OpenAI or Anthropic API key via Admin Panel → Configuration → LLM.\n  - Links: <URL> <URL> <URL> <URL> Discord thread:\
+  \ OnyxBot <> anjeriko\n  - Blockers: UI/UX design\n\n### Unblockers / Needs help\n- [ ] HRT MCP issue: Justin needs Evan’s\
+  \ context from the prior thread before spending time investigating, to confirm whether it appears to be an Onyx-owned issue.\n\
+  - [ ] what UI components should BYOK llm key use? Customer-facing guidance points to Admin Panel → Configuration → LLM.\n\
+  \n---\n\n## Ronnie\n### Current\n- [ ] **(P1)** <todo title> — *Status:* Not started — *Due:* TBD  \n  - Outcome: <what\
+  \ “done” means>  \n  - Links: <url(s)>  \n  - Blockers: <none / describe>\n\n### Unblockers / Needs help\n- [ ] <question\
+  \ / decision / dependency>\n\n---\n\n## Duo\n### Current\n- [ ] **(P1)** mockups\n\n---\n\n## Unassigned / Intake\n### Current\n\
+  - [ ] **(P1)** Confirm DTE Consult closed-won onboarding / invoice flow — *Status:* Not started — *Due:* verify after <PHONE>\
+  \ close date\n  - Outcome: DTE Consult’s post-close owner is assigned, Business plan provisioning is confirmed for 15 licenses,\
+  \ and order-form/DPA plus invoice-flow status is documented.\n  - Scope notes: HubSpot company is DTE Consult (dte-consult.de),\
+  \ a management consulting firm focused on change management, corporate finance, and interim management. Contacts include\
+  \ Leona Moj at <EMAIL>, <EMAIL>, <EMAIL>, <EMAIL>, and <EMAIL>.\n  - Scope notes: HubSpot deal `DTE Consult GmbH` is in\
+  \ the default pipeline at stage `closedwon`; amount is <AMOUNT>; close date is <PHONE>.\n  - Scope notes: DTE Consult plans\
+  \ to use Onyx Cloud Business for project-specific AI chat over SharePoint document folders, with strict project-level permissions,\
+  \ GDPR/SOC 2 requirements, no model training on customer data, and automatic sync/re-indexing after updates.\n  - Scope\
+  \ notes: Pricing discussed was 15 seats at <AMOUNT>/user/month, or <AMOUNT>/month and about <AMOUNT>/year. The purchase\
+  \ path should use the agreement and invoice flow, not website checkout.\n  - Links: HubSpot: DTE Consult — <URL>\n  - Blockers:\
+  \ Needs owner assignment, confirmation that order form and DPA are complete, license provisioning status, and SharePoint\
+  \ connector setup plan.\n- [ ] **(P1)** Confirm BlackRock HubSpot next steps — *Status:* Not started — *Due:* TBD\n  - Outcome:\
+  \ BlackRock's owner and next follow-up are confirmed, and any discovery/evaluation notes are captured.\n  - Scope notes:\
+  \ HubSpot company is BlackRock (<DOMAIN>), based in New York, New York; HubSpot industry is `CAPITAL_MARKETS`. BlackRock\
+  \ provides comprehensive investment management services and is one of the world's leading asset management firms.\n  - Scope\
+  \ notes: Contacts are Melissa Barnett at <EMAIL>, Alan Shaikh at <EMAIL>, Abhijit Chakraborty at <EMAIL>, Abhijit Singh\
+  \ at <EMAIL>, Bharat Saraswat at <EMAIL>, Akshata Shirwaikar at <EMAIL>, Akshay Arora at <EMAIL>, Akash G at <EMAIL>, and\
+  \ Kelly Volkmar at <EMAIL>.\n  - Links: HubSpot: BlackRock — <URL>\n  - Blockers: Needs owner assignment and confirmation\
+  \ of next steps.\n- [ ] **(P1)** Confirm Booking Holdings HubSpot next steps — *Status:* Not started — *Due:* TBD\n  - Outcome:\
+  \ Booking Holdings' owner and next follow-up are confirmed, and any discovery/evaluation notes are captured.\n  - Scope\
+  \ notes: HubSpot company is Booking Holdings (<DOMAIN>), based in Norwalk, Connecticut; HubSpot industry is `INTERNET`.\
+  \ Booking Holdings operates a global platform for booking flights, hotels, and other travel-related services.\n  - Scope\
+  \ notes: Contacts are Vardan Vohra at <EMAIL> and <EMAIL>.\n  - Links: HubSpot: Booking Holdings — <URL>\n  - Blockers:\
+  \ Needs owner assignment and confirmation of next steps.\n- [ ] **(P1)** Confirm Lyft HubSpot next steps — *Status:* Not\
+  \ started — *Due:* TBD\n  - Outcome: Lyft's owner and next follow-up are confirmed, and any discovery/evaluation notes are\
+  \ captured.\n  - Scope notes: HubSpot company is Lyft (<DOMAIN>), based in San Francisco, California; HubSpot industry is\
+  \ `TRANSPORTATION_TRUCKING_RAILROAD`. Lyft connects riders with drivers to provide ride-sharing services in urban and suburban\
+  \ areas.\n  - Scope notes: Contacts are <EMAIL> and <EMAIL>.\n  - Links: HubSpot: Lyft — <URL>\n  - Blockers: Needs owner\
+  \ assignment and confirmation of next steps.\n- [ ] **(P1)** Confirm Huntington Ingalls Industries HubSpot next steps —\
+  \ *Status:* Not started — *Due:* TBD\n  - Outcome: Huntington Ingalls Industries' owner and next follow-up are confirmed,\
+  \ and any discovery/evaluation notes are captured.\n  - Scope notes: HubSpot company is Huntington Ingalls Industries (<DOMAIN>),\
+  \ based in Newport News, Virginia; HubSpot industry is `DEFENSE_SPACE`. Huntington Ingalls Industries delivers advanced\
+  \ warships, submarines, and mission technology solutions in service of the nation.\n  - Scope notes: Contacts are <EMAIL>\
+  \ and <EMAIL>.\n  - Links: HubSpot: Huntington Ingalls Industries — <URL>\n  - Blockers: Needs owner assignment and confirmation\
+  \ of next steps.\n- [ ] **(P1)** Confirm Onsoft HubSpot next steps — *Status:* Not started — *Due:* before <PHONE> close\
+  \ date\n  - Outcome: Onsoft's owner and next follow-up are confirmed, and any discovery/evaluation notes are captured.\n\
+  \  - Scope notes: HubSpot company is Onsoft (onsoft.cy). Contact is Yulia at <EMAIL>.\n  - Scope notes: HubSpot deal `Onsoft`\
+  \ is in the default pipeline at stage `<PHONE>`; amount is <AMOUNT>; close date is <PHONE>.\n  - Links: HubSpot: Onsoft\
+  \ — <URL> Yulia contact — <URL>\n  - Blockers: Needs owner assignment and confirmation of next steps.\n- [ ] **(P1)** Confirm\
+  \ Paylocity HubSpot next steps — *Status:* Not started — *Due:* TBD\n  - Outcome: Paylocity's owner and next follow-up are\
+  \ confirmed, and any discovery/evaluation notes are captured.\n  - Scope notes: HubSpot company is Paylocity (<DOMAIN>),\
+  \ based in Schaumburg, Illinois; HubSpot industry is `COMPUTER_SOFTWARE`. Paylocity provides unified cloud-based HR, payroll,\
+  \ finance, and IT solutions, including payroll, human resources, time and labor, talent management, benefits administration,\
+  \ employee experience, and spend management for businesses of all sizes.\n  - Scope notes: Contact email is <EMAIL>.\n \
+  \ - Links: HubSpot: Paylocity — <URL>\n  - Blockers: Needs owner assignment and confirmation of next steps.\n- [ ] **(P1)**\
+  \ Confirm Verizon HubSpot next steps — *Status:* Not started — *Due:* TBD\n  - Outcome: Verizon's owner and next follow-up\
+  \ are confirmed, and any discovery/evaluation notes are captured.\n  - Scope notes: HubSpot company is Verizon (<DOMAIN>),\
+  \ based in New York, New York; HubSpot industry is `WIRELESS`. Verizon provides wireless, internet, and television services\
+  \ through its 4G LTE network and Fios offerings.\n  - Scope notes: Contact email is <EMAIL>.\n  - Links: HubSpot: Verizon\
+  \ — <URL>\n  - Blockers: Needs owner assignment and confirmation of next steps.\n- [ ] **(P1)** Confirm Company <PHONE>\
+  \ HubSpot next steps — *Status:* Not started — *Due:* TBD\n  - Outcome: Company <PHONE>'s owner and next follow-up are confirmed,\
+  \ and any discovery/evaluation notes are captured.\n  - Scope notes: HubSpot company/intake record is Company <PHONE> (corporationpartner.<DOMAIN>).\
+  \ The contact record has no company listed. Contact email is <EMAIL>.\n  - Links: HubSpot: Company <PHONE> — <URL> contact:\
+  \ <EMAIL> — <URL>\n  - Blockers: Needs owner assignment and confirmation of next steps.\n- [ ] **(P1)** Confirm Manychat\
+  \ HubSpot next steps — *Status:* Not started — *Due:* before <PHONE> close date\n  - Outcome: Manychat's owner and next\
+  \ follow-up are confirmed, and any discovery/evaluation notes are captured.\n  - Scope notes: HubSpot company is Manychat\
+  \ (<DOMAIN>). Contact is Ivan Toropitsin at <EMAIL>.\n  - Scope notes: HubSpot deal `Manychat` is in the default pipeline\
+  \ at stage `<PHONE>`; amount is <AMOUNT>; close date is <PHONE>.\n  - Links: HubSpot: Manychat company — <URL> deal — <URL>\n\
+  \  - Blockers: Needs owner assignment and confirmation of next steps.\n- [ ] **(P1)** Confirm Stef qualified-to-buy next\
+  \ steps — *Status:* Not started — *Due:* before <PHONE> close date\n  - Outcome: Stef's owner and next follow-up are confirmed,\
+  \ and any discovery/evaluation notes are captured.\n  - Scope notes: HubSpot company is Stef (<DOMAIN>).\n  - Scope notes:\
+  \ HubSpot deal `Stef` is in the default pipeline at stage `qualifiedtobuy`; amount is <AMOUNT>; close date is <PHONE>.\n\
+  \  - Links: HubSpot: Stef deal — <URL>\n  - Blockers: Needs owner assignment and confirmation of next steps.\n- [ ] **(P1)**\
+  \ Confirm Onyx Generate HubSpot next steps — *Status:* Not started — *Due:* TBD\n  - Outcome: Onyx Generate's owner and\
+  \ next follow-up are confirmed, and any discovery/evaluation notes are captured.\n  - Scope notes: HubSpot company is Onyx\
+  \ Generate Inc (<DOMAIN>). Contact is Mia Mahnoor at <EMAIL>.\n  - Links: HubSpot: Onyx Generate Inc — <URL>\n  - Blockers:\
+  \ Needs owner assignment and confirmation of next steps.\n- [ ] **(P1)** Confirm Legora HubSpot next steps — *Status:* Not\
+  \ started — *Due:* TBD\n  - Outcome: Legora's owner and next follow-up are confirmed, and any discovery/evaluation notes\
+  \ are captured.\n  - Scope notes: HubSpot contact email is <EMAIL>. Company is Legora (<DOMAIN>).\n  - Links: HubSpot: <EMAIL>\
+  \ — <URL>\n  - Blockers: Needs owner assignment and confirmation of next steps.\n- [ ] **(P1)** Confirm Polestar Global\
+  \ HubSpot next steps — *Status:* Not started — *Due:* TBD\n  - Outcome: Polestar Global's owner and next follow-up are confirmed,\
+  \ and any discovery/evaluation notes are captured.\n  - Scope notes: HubSpot contacts are <EMAIL> and Anuj Singhal at <EMAIL>.\
+  \ Company is Polestar Global (<DOMAIN>).\n  - Links: HubSpot: Polestar Global — <URL> <EMAIL> — <URL> Anuj Singhal — <URL>\n\
+  \  - Blockers: Needs owner assignment and confirmation of next steps.\n- [ ] **(P1)** Confirm Substain HubSpot next steps\
+  \ — *Status:* Not started — *Due:* TBD\n  - Outcome: Substain's owner and next follow-up are confirmed, and any discovery/evaluation\
+  \ notes are captured.\n  - Scope notes: HubSpot company is Substain (<DOMAIN>), based in Munchen, Bavaria; HubSpot industry\
+  \ is `COMPUTER_SOFTWARE`. Substain provides software solutions for digital sustainability management and ESG reporting.\n\
+  \  - Scope notes: Contact email is <EMAIL>.\n  - Links: HubSpot: Substain — <URL>\n  - Blockers: Needs owner assignment\
+  \ and confirmation of next steps.\n- [ ] **(P1)** Confirm Ecochain qualified-to-buy next steps — *Status:* Not started —\
+  \ *Due:* before <PHONE> close date\n  - Outcome: Ecochain's owner and next follow-up are confirmed, and any discovery/evaluation\
+  \ notes are captured.\n  - Scope notes: Company is Ecochain (<DOMAIN>). HubSpot contacts are <EMAIL> and Irfaan Imamdin,\
+  \ Chief of Staff, at <EMAIL> / <PHONE>.\n  - Scope notes: HubSpot deal `Ecochain` is in the default pipeline at stage `qualifiedtobuy`;\
+  \ amount is <AMOUNT>; close date is <PHONE>.\n  - Links: HubSpot: <EMAIL> — <URL> Irfaan Imamdin — <URL> Ecochain company/deal\
+  \ source — <URL>\n  - Blockers: Needs owner assignment and confirmation of next steps.\n- [ ] **(P1)** Confirm <EMAIL> HubSpot\
+  \ next steps — *Status:* Not started — *Due:* TBD\n  - Outcome: Contact owner and next follow-up are confirmed, and any\
+  \ discovery/evaluation notes are captured.\n  - Scope notes: HubSpot contact email is <EMAIL>.\n  - Links: HubSpot: <EMAIL>\
+  \ — <URL>\n  - Blockers: Needs owner assignment and confirmation of next steps.\n- [ ] **(P1)** Confirm <EMAIL> HubSpot\
+  \ next steps — *Status:* Not started — *Due:* TBD\n  - Outcome: Contact owner and next follow-up are confirmed, and any\
+  \ discovery/evaluation notes are captured.\n  - Scope notes: HubSpot contact email is <EMAIL>.\n  - Links: HubSpot: <EMAIL>\
+  \ — <URL>\n  - Blockers: Needs owner assignment and confirmation of next steps.\n- [ ] **(P1)** Confirm <EMAIL> HubSpot\
+  \ next steps — *Status:* Not started — *Due:* TBD\n  - Outcome: Contact owner and next follow-up are confirmed, and any\
+  \ discovery/evaluation notes are captured.\n  - Scope notes: HubSpot contact email is <EMAIL>.\n  - Links: HubSpot: <EMAIL>\
+  \ — <URL>\n  - Blockers: Needs owner assignment and confirmation of next steps.\n- [ ] **(P1)** Confirm <EMAIL> HubSpot\
+  \ next steps — *Status:* Not started — *Due:* TBD\n  - Outcome: Contact owner and next follow-up are confirmed, and any\
+  \ discovery/evaluation notes are captured.\n  - Scope notes: HubSpot contact email is <EMAIL>.\n  - Links: HubSpot: <EMAIL>\
+  \ — <URL>\n  - Blockers: Needs owner assignment and confirmation of next steps.\n- [ ] **(P1)** Confirm <EMAIL> HubSpot\
+  \ next steps — *Status:* Not started — *Due:* TBD\n  - Outcome: Contact owner and next follow-up are confirmed, and any\
+  \ discovery/evaluation notes are captured.\n  - Scope notes: HubSpot contact email is <EMAIL>.\n  - Links: HubSpot: <EMAIL>\
+  \ — <URL>\n  - Blockers: Needs owner assignment and confirmation of next steps.\n- [ ] **(P1)** Confirm dandelion.family\
+  \ HubSpot next steps — *Status:* Not started — *Due:* TBD\n  - Outcome: dandelion.family's owner and next follow-up are\
+  \ confirmed, and any discovery/evaluation notes are captured.\n  - Scope notes: HubSpot company is Company <PHONE> (dandelion.family).\
+  \ Contact is Nikolay Ananiev at <EMAIL>; the <EMAIL> contact record has no company listed and has domain dandelion.family.\n\
+  \  - Links: HubSpot: Company <PHONE> — <URL> <EMAIL> — <URL>\n  - Blockers: Needs owner assignment and confirmation of next\
+  \ steps.\n- [ ] **(P1)** Confirm <EMAIL> HubSpot next steps — *Status:* Not started — *Due:* TBD\n  - Outcome: Contact owner\
+  \ and next follow-up are confirmed, and any discovery/evaluation notes are captured.\n  - Scope notes: HubSpot contact email\
+  \ is <EMAIL>.\n  - Links: HubSpot: <EMAIL> — <URL>\n  - Blockers: Needs owner assignment and confirmation of next steps.\n\
+  - [ ] **(P1)** Confirm <EMAIL> HubSpot next steps — *Status:* Not started — *Due:* TBD\n  - Outcome: Contact owner and next\
+  \ follow-up are confirmed, and any discovery/evaluation notes are captured.\n  - Scope notes: HubSpot contact email is <EMAIL>.\n\
+  \  - Links: HubSpot: <EMAIL> — <URL>\n  - Blockers: Needs owner assignment and confirmation of next steps.\n- [ ] **(P1)**\
+  \ Confirm FrontierCo HubSpot next steps — *Status:* Not started — *Due:* TBD\n  - Outcome: FrontierCo's owner and next follow-up\
+  \ are confirmed, and any discovery/evaluation notes are captured.\n  - Scope notes: HubSpot company is FrontierCo (<DOMAIN>.za).\
+  \ Contact is Hugo Venter at <EMAIL>.\n  - Links: HubSpot: FrontierCo — <URL> Hugo Venter contact — <URL>\n  - Blockers:\
+  \ Needs owner assignment and confirmation of next steps.\n- [ ] **(P1)** Confirm Company <PHONE> HubSpot next steps — *Status:*\
+  \ Not started — *Due:* TBD\n  - Outcome: Company <PHONE>'s owner and next follow-up are confirmed, and any discovery/evaluation\
+  \ notes are captured.\n  - Scope notes: HubSpot company is Company <PHONE> (<DOMAIN>). Contacts include <EMAIL>, xavier\
+  \ at <EMAIL>, and <EMAIL>; the <EMAIL> contact record has no company listed and has domain <DOMAIN>.\n  - Links: HubSpot:\
+  \ Company <PHONE> — <URL> <EMAIL> — <URL>\n  - Blockers: Needs owner assignment and confirmation of next steps.\n- [ ] **(P1)**\
+  \ Confirm <EMAIL> HubSpot next steps — *Status:* Not started — *Due:* TBD\n  - Outcome: Contact owner and next follow-up\
+  \ are confirmed, and any discovery/evaluation notes are captured.\n  - Scope notes: HubSpot contact email is <EMAIL>.\n\
+  \  - Links: HubSpot: <EMAIL> — <URL>\n  - Blockers: Needs owner assignment and confirmation of next steps.\n- [ ] **(P1)**\
+  \ Confirm <EMAIL> HubSpot next steps — *Status:* Not started — *Due:* TBD\n  - Outcome: Contact owner and next follow-up\
+  \ are confirmed, and any discovery/evaluation notes are captured.\n  - Scope notes: HubSpot contact email is <EMAIL>.\n\
+  \  - Links: HubSpot: <EMAIL> — <URL>\n  - Blockers: Needs owner assignment and confirmation of next steps.\n- [ ] **(P1)**\
+  \ Confirm <EMAIL> HubSpot next steps — *Status:* Not started — *Due:* TBD\n  - Outcome: Contact owner and next follow-up\
+  \ are confirmed, and any discovery/evaluation notes are captured.\n  - Scope notes: HubSpot contact email is <EMAIL>.\n\
+  \  - Links: HubSpot: <EMAIL> — <URL>\n  - Blockers: Needs owner assignment and confirmation of next steps.\n- [ ] **(P1)**\
+  \ Confirm <EMAIL> HubSpot next steps — *Status:* Not started — *Due:* TBD\n  - Outcome: Contact owner and next follow-up\
+  \ are confirmed, and any discovery/evaluation notes are captured.\n  - Scope notes: HubSpot contact email is <EMAIL>.\n\
+  \  - Links: HubSpot: <EMAIL> — <URL>\n  - Blockers: Needs owner assignment and confirmation of next steps.\n- [ ] **(P1)**\
+  \ Confirm <EMAIL> HubSpot next steps — *Status:* Not started — *Due:* TBD\n  - Outcome: Contact owner and next follow-up\
+  \ are confirmed, and any discovery/evaluation notes are captured.\n  - Scope notes: HubSpot contact email is <EMAIL>.\n\
+  \  - Links: HubSpot: <EMAIL> — <URL>\n  - Blockers: Needs owner assignment and confirmation of next steps.\n- [ ] **(P1)**\
+  \ Confirm Enertrag enterprise pilot / pricing next steps — *Status:* Not started — *Due:* before <PHONE> close date\n  -\
+  \ Outcome: Enertrag’s owner and next follow-up are confirmed, enterprise test-account count and POC scope are defined, and\
+  \ pricing ranges for 100, 500, 1,000, and 1,500 users are sent.\n  - Scope notes: HubSpot deal `Enertrag` is in the default\
+  \ pipeline at stage `<PHONE>`; amount is <AMOUNT>; close date is <PHONE>. Contacts include <EMAIL>, <EMAIL>, <EMAIL>, and\
+  \ Ares Ibrahim at <EMAIL> / <PHONE>; company domain is <DOMAIN>.\n  - Scope notes: Enertrag is evaluating Onyx for scalable\
+  \ AI agents connected to internal systems, starting with an approximately 100-user AI-community pilot and possible rollout\
+  \ to about 1,500 employees. Requirements include a European-safe compliant setup, likely self-hosting, RBAC, and permission\
+  \ inheritance.\n  - Scope notes: Connectors discussed include Jara, Kunchan, developer tooling context noted as \"githack\"\
+  , Atlassian Bitbucket, and Azure DevOps via MCP. Pricing discussed was Enterprise starting at <AMOUNT>/user/month with volume\
+  \ breaks at 200, 500, and 1,000+ users; no final quote was provided.\n  - Next steps from sales call: Prospect to confirm\
+  \ number of 14-day enterprise test accounts needed; Matthew to send pricing tiers/ranges; align with stakeholders and define\
+  \ POC scope for target kickoff next week.\n  - Links: HubSpot: Enertrag deal — <URL> Ares Ibrahim contact — <URL> company/source\
+  \ record — <URL>\n  - Blockers: Needs owner assignment, pricing follow-up, enterprise test-account confirmation, POC scope,\
+  \ and self-hosted/security review path.\n- [ ] **(P1)** Confirm <EMAIL> HubSpot next steps — *Status:* Not started — *Due:*\
+  \ TBD\n  - Outcome: Contact owner and next follow-up are confirmed, and any discovery/evaluation notes are captured.\n \
+  \ - Scope notes: HubSpot contact email is <EMAIL>.\n  - Links: HubSpot: <EMAIL> — <URL>\n  - Blockers: Needs owner assignment\
+  \ and confirmation of next steps.\n- [ ] **(P1)** Confirm Therapylog HubSpot next steps — *Status:* Not started — *Due:*\
+  \ TBD\n  - Outcome: Therapylog’s owner and next follow-up are confirmed, and any discovery/evaluation notes are captured.\n\
+  \  - Scope notes: HubSpot company is Therapylog (<DOMAIN>). Contacts are Alyssa Vizitei at <EMAIL> and Cam Swearingen, Developer,\
+  \ at <EMAIL>.\n  - Scope notes: Cam Swearingen hit an Onyx Cloud free-trial invite email-verification error when adding\
+  \ a new org user. PR #10868 fixes `POST /auth/verify` in multi-tenant cloud by resolving the tenant from the verification\
+  \ JWT email before updating the user.\n  - Links: HubSpot: Therapylog — <URL> Cam Swearingen contact — <URL> PR #10868:\
+  \ <URL>\n  - Blockers: Needs owner assignment, confirmation of next steps, and confirmation that PR #10868 has been deployed\
+  \ or cherry-picked before support follow-up closes the Cloud invite verification issue.\n- [ ] **(P1)** Confirm Onyx Cloud\
+  \ HubSpot next steps — *Status:* Not started — *Due:* TBD\n  - Outcome: Onyx Cloud's owner and next follow-up are confirmed,\
+  \ and any discovery/evaluation notes are captured.\n  - Scope notes: HubSpot contact is Justin Tahara at <EMAIL>. Company\
+  \ is Onyx Cloud (<DOMAIN>).\n  - Links: HubSpot: Justin Tahara — <URL>\n  - Blockers: Needs owner assignment and confirmation\
+  \ of next steps.\n- [ ] **(P1)** Confirm Human Delta HubSpot next steps — *Status:* Not started — *Due:* TBD\n  - Outcome:\
+  \ Human Delta’s owner and next follow-up are confirmed, and any discovery/evaluation notes are captured.\n  - Scope notes:\
+  \ HubSpot company is Human Delta (<DOMAIN>), based in San Francisco, CA; HubSpot industry is `COMPUTER_SOFTWARE`. Human\
+  \ Delta provides a knowledge infrastructure layer for safe AI deployment at enterprise scale by making existing systems\
+  \ of record work with AI.\n  - Scope notes: Contact email is <EMAIL>.\n  - Links: HubSpot: Human Delta — <URL>\n  - Blockers:\
+  \ Needs owner assignment and confirmation of next steps.\n- [ ] **(P1)** Confirm Hartlepool College of Further Education\
+  \ HubSpot next steps — *Status:* Not started — *Due:* TBD\n  - Outcome: Hartlepool College of Further Education’s owner\
+  \ and next follow-up are confirmed, and any discovery/evaluation notes are captured.\n  - Scope notes: HubSpot company is\
+  \ Hartlepool College of Further Education (hartlepoolfe.ac.uk), based in Hartlepool, England; HubSpot industry is `CONSUMER_SERVICES`.\
+  \ It provides education, training, and development services in the Tees Valley.\n  - Scope notes: Contact email is <EMAIL>.\n\
+  \  - Links: HubSpot: Hartlepool College of Further Education — <URL>\n  - Blockers: Needs owner assignment and confirmation\
+  \ of next steps.\n- [ ] **(P1)** Confirm Hymson HubSpot next steps — *Status:* Not started — *Due:* TBD\n  - Outcome: Hymson’s\
+  \ owner and next follow-up are confirmed, and any discovery/evaluation notes are captured.\n  - Scope notes: HubSpot company\
+  \ is Hymson (<DOMAIN>). Contact email is <EMAIL>.\n  - Links: HubSpot: Hymson — <URL> contact: <EMAIL> — <URL>\n  - Blockers:\
+  \ Needs owner assignment and confirmation of next steps.\n- [ ] **(P1)** Confirm Onmates HubSpot next steps — *Status:*\
+  \ Not started — *Due:* TBD\n  - Outcome: Onmates’ owner and next follow-up are confirmed, and any discovery/evaluation notes\
+  \ are captured.\n  - Scope notes: HubSpot company is Onmates (<DOMAIN>). Contact is Melvin at <EMAIL>.\n  - Links: HubSpot:\
+  \ Onmates — <URL> Melvin contact — <URL>\n  - Blockers: Needs owner assignment and confirmation of next steps.\n- [ ] **(P1)**\
+  \ Confirm Paythen HubSpot next steps — *Status:* Not started — *Due:* TBD\n  - Outcome: Paythen's owner and next follow-up\
+  \ are confirmed, and any discovery/evaluation notes are captured.\n  - Scope notes: HubSpot company is Paythen (<DOMAIN>).\
+  \ Contact email is <EMAIL>.\n  - Links: HubSpot: Paythen — <URL>\n  - Blockers: Needs owner assignment and confirmation\
+  \ of next steps.\n- [ ] **(P1)** Confirm Civic Innovation HubSpot next steps — *Status:* Not started — *Due:* before <PHONE>\
+  \ close date\n  - Outcome: Civic Innovation’s owner and next follow-up are confirmed, and any discovery/evaluation notes\
+  \ are captured.\n  - Scope notes: HubSpot contact is Markus Blomqvist, founder and director at Civic Innovation (civicinnovation.se),\
+  \ at <EMAIL>.\n  - Scope notes: HubSpot deal `Civic Innovation` is in the default pipeline at stage `qualifiedtobuy`; amount\
+  \ is <AMOUNT>; close date is <PHONE>.\n  - Links: HubSpot: Markus Blomqvist — <URL> deal — <URL>\n  - Blockers: Needs owner\
+  \ assignment and confirmation of next steps.\n- [ ] **(P1)** Confirm Bitwarden closed-won onboarding / upgrade next steps\
+  \ — *Status:* Not started — *Due:* TBD / verify post-close status\n  - Outcome: Bitwarden’s post-close owner is assigned,\
+  \ onboarding or upgrade next steps are confirmed, and any support needs from the closed-won deals are documented.\n  - Scope\
+  \ notes: HubSpot contacts are <EMAIL>, <EMAIL>, <EMAIL>, and <EMAIL>. Company is Bitwarden Inc (<DOMAIN>); HubSpot industry\
+  \ is `COMPUTER_SOFTWARE`; location is Santa Barbara, TX.\n  - Scope notes: HubSpot deal `Bitwarden Inc - 30 Seats <AMOUNT>/seat\
+  \ Monthly (Onyx Cloud)` is in the default pipeline at stage `closedwon`; amount is <AMOUNT>; close date is <PHONE>.\n  -\
+  \ Scope notes: HubSpot deal `Bitwarden Inc - Upgrade` is in the default pipeline at stage `closedwon`; amount is <AMOUNT>;\
+  \ close date is <PHONE>.\n  - Links: HubSpot: <EMAIL> — <URL> <EMAIL> — <URL> Bitwarden Inc — <URL>\n  - Blockers: Needs\
+  \ owner assignment and confirmation of post-close onboarding / upgrade next steps.\n- [ ] **(P1)** Confirm RM Equity Partners\
+  \ HubSpot next steps — *Status:* Not started — *Due:* TBD\n  - Outcome: RM Equity Partners’ owner and next follow-up are\
+  \ confirmed, and any discovery/evaluation notes are captured.\n  - Scope notes: HubSpot contact is <EMAIL>. Company is RM\
+  \ Equity Partners (<DOMAIN>).\n  - Links: HubSpot: RM Equity Partners — <URL> <EMAIL> — <URL>\n  - Blockers: Needs owner\
+  \ assignment and confirmation of next steps.\n- [ ] **(P1)** Confirm RCGT Consulting HubSpot next steps — *Status:* Not\
+  \ started — *Due:* TBD\n  - Outcome: RCGT Consulting’s owner and next follow-up are confirmed, and any discovery/evaluation\
+  \ notes are captured.\n  - Scope notes: HubSpot company is RCGT Consulting (<DOMAIN>). Contact is Kumanan Yogaratnam, Chief\
+  \ Technology Officer / Chef de la Direction Technique, at <EMAIL>.\n  - Links: HubSpot: RCGT Consulting — <URL>\n  - Blockers:\
+  \ Needs owner assignment and confirmation of next steps.\n- [ ] **(P1)** Confirm HRT Order Form #03 seat expansion and billing\
+  \ — *Status:* Not started — *Due:* May 22, 2026 effective date\n  - Outcome: Hudson River Trading LLC’s existing Onyx self-hosted\
+  \ subscription is updated to 600 total seats, Order Form #03 is confirmed signed/effective, and the <AMOUNT> annual fee\
+  \ is invoiced/collected per the order terms.\n  - Scope notes: Order Form #03 adds 200 users for the self-hosted Onyx AI\
+  \ Chat + Search subscription. The effective date is May 22, 2026, and the term is co-terminous with Orders #1 and #2, commencing\
+  \ May 22, 2026 through February 9, 2027, with unified renewal on February 9, 2027.\n  - Scope notes: Pricing is Tier 2 volume\
+  \ pricing at <AMOUNT>/seat/month for the added 200 seats.\n  - Scope notes: Customer contact on the order form is Nick Smetana;\
+  \ billing/procurement email is <EMAIL>.\n  - Links: Google Drive: HRT_Onyx_Order-Form #03_For-Signature_<PHONE>.docx\n \
+  \ - Blockers: Needs owner assignment, confirmation of signature status, seat entitlement update, and billing follow-through.\n\
+  - [ ] **(P1)** Confirm Company <PHONE> HubSpot next steps — *Status:* Not started — *Due:* TBD\n  - Outcome: Company <PHONE>’s\
+  \ owner and next follow-up are confirmed, and any discovery/evaluation notes are captured.\n  - Scope notes: HubSpot company\
+  \ is Company <PHONE> (mail.sysu.edu.cn). Contacts are <EMAIL> and <EMAIL>; the <EMAIL> contact record has no company listed.\n\
+  \  - Links: HubSpot: Company <PHONE> — <URL> <EMAIL> — <URL>\n  - Blockers: Needs owner assignment and confirmation of next\
+  \ steps.\n- [ ] **(P1)** Confirm Company <PHONE> HubSpot next steps — *Status:* Not started — *Due:* TBD\n  - Outcome: Company\
+  \ <PHONE>’s owner and next follow-up are confirmed, and any discovery/evaluation notes are captured.\n  - Scope notes: HubSpot\
+  \ company is Company <PHONE> (<DOMAIN>). Contact email is <EMAIL>.\n  - Links: HubSpot: Company <PHONE>\n  - Blockers: Needs\
+  \ owner assignment and confirmation of next steps.\n- [ ] **(P1)** Confirm Company <PHONE> HubSpot next steps — *Status:*\
+  \ Not started — *Due:* TBD\n  - Outcome: Company <PHONE>’s owner and next follow-up are confirmed, and any discovery/evaluation\
+  \ notes are captured.\n  - Scope notes: HubSpot company/intake record is Company <PHONE> (<DOMAIN>). The contact record\
+  \ has no company name listed. Contact is جح0 at <EMAIL>.\n  - Links: HubSpot: Company <PHONE> — <URL> contact جح0 — <URL>\n\
+  \  - Blockers: Needs owner assignment and confirmation of next steps.\n- [ ] **(P1)** Confirm Company <PHONE> HubSpot next\
+  \ steps — *Status:* Not started — *Due:* TBD\n  - Outcome: Company <PHONE>’s owner and next follow-up are confirmed, and\
+  \ any discovery/evaluation notes are captured.\n  - Scope notes: HubSpot company/intake record is Company <PHONE> (<DOMAIN>).\
+  \ The Adrien Rosier contact record has no company listed. Contact is Adrien Rosier at <EMAIL>.\n  - Links: HubSpot: Company\
+  \ <PHONE> — <URL> Adrien Rosier — <URL>\n  - Blockers: Needs owner assignment and confirmation of next steps.\n- [ ] **(P1)**\
+  \ Confirm Company <PHONE> HubSpot next steps — *Status:* Not started — *Due:* TBD\n  - Outcome: Company <PHONE>’s owner\
+  \ and next follow-up are confirmed, and any discovery/evaluation notes are captured.\n  - Scope notes: HubSpot company/intake\
+  \ record is Company <PHONE> (<DOMAIN>). The <EMAIL> contact record has no company listed; contacts include <EMAIL> and <EMAIL>.\n\
+  \  - Links: HubSpot: Company <PHONE> — <URL> <EMAIL> — <URL>\n  - Blockers: Needs owner assignment and confirmation of next\
+  \ steps.\n- [ ] **(P1)** Confirm Naturaldevs HubSpot next steps — *Status:* Not started — *Due:* TBD\n  - Outcome: Naturaldevs’\
+  \ owner and next follow-up are confirmed, and any discovery/evaluation notes are captured.\n  - Scope notes: HubSpot company\
+  \ is Naturaldevs (<DOMAIN>). Contact email is <EMAIL>.\n  - Links: HubSpot: Naturaldevs\n  - Blockers: Needs owner assignment\
+  \ and confirmation of next steps.\n- [ ] **(P1)** Confirm Nous Group HubSpot next steps — *Status:* Not started — *Due:*\
+  \ TBD\n  - Outcome: Nous Group’s owner and next follow-up are confirmed, and any discovery/evaluation notes are captured.\n\
+  \  - Scope notes: HubSpot company is Nous Group (<DOMAIN>). Contact email is <EMAIL>.\n  - Links: HubSpot: Nous Group —\
+  \ <URL> contact: <EMAIL> — <URL>\n  - Blockers: Needs owner assignment and confirmation of next steps.\n- [ ] **(P1)** Confirm\
+  \ Versaria HubSpot next steps — *Status:* Not started — *Due:* TBD\n  - Outcome: Versaria’s owner and next follow-up are\
+  \ confirmed, and any discovery/evaluation notes are captured.\n  - Scope notes: HubSpot company is Versaria (<DOMAIN>.mx).\
+  \ Contacts are <EMAIL> and <EMAIL>.\n  - Links: HubSpot: Versaria\n  - Blockers: Needs owner assignment and confirmation\
+  \ of next steps.\n- [ ] **(P1)** Confirm WisdomAI HubSpot next steps — *Status:* Not started — *Due:* TBD\n  - Outcome:\
+  \ WisdomAI’s owner and next follow-up are confirmed, and any discovery/evaluation notes are captured.\n  - Scope notes:\
+  \ HubSpot company is WisdomAI (<DOMAIN>). Contact is Aaron Trockman at <EMAIL>.\n  - Links: HubSpot: Aaron Trockman — <URL>\n\
+  \  - Blockers: Needs owner assignment and confirmation of next steps.\n- [ ] **(P1)** Confirm Zadara HubSpot next steps\
+  \ — *Status:* Not started — *Due:* TBD\n  - Outcome: Zadara’s owner and next follow-up are confirmed, and any discovery/evaluation\
+  \ notes are captured.\n  - Scope notes: HubSpot company is Zadara (HubSpot domain <DOMAIN>; existing records also reference\
+  \ <DOMAIN>), a managed cloud services provider for compute, networking, and storage for service providers and enterprises,\
+  \ available on premises, hybrid, multi-cloud, and at the edge; headquarters is Irvine, CA; HubSpot industry is `COMPUTER_SOFTWARE`.\
+  \ Contacts are Vladimir Popovski (<EMAIL>), Clesio Takahashi (<EMAIL>), and Julio Dantas, Solution Architect, Tech Lead,\
+  \ at <EMAIL>; phone <PHONE>.\n  - Scope notes: Zadara has Onyx tenant `tenant_66c8a8cd-1876-4d0c-b297-3088bc6a52ea` on a\
+  \ monthly 2-seat plan expiring <PHONE>; license contact is <EMAIL>.\n  - Links: HubSpot: Zadara — <URL> Clesio Takahashi\
+  \ contact — <URL> Julio Dantas contact — <URL>\n  - Blockers: Needs owner assignment and confirmation of next steps.\n-\
+  \ [ ] **(P1)** Confirm L&T Technology Services HubSpot next steps — *Status:* Not started — *Due:* TBD\n  - Outcome: L&T\
+  \ Technology Services’ owner and next follow-up are confirmed, and any discovery/evaluation notes are captured.\n  - Scope\
+  \ notes: HubSpot contacts are <EMAIL> and <EMAIL>. Company is L&T Technology Services (<DOMAIN>).\n  - Links: HubSpot: L&T\
+  \ Technology Services — <URL> <EMAIL> — <URL>\n  - Blockers: Needs owner assignment and confirmation of next steps.\n- [\
+  \ ] **(P1)** Confirm QUT HubSpot next steps — *Status:* Not started — *Due:* TBD\n  - Outcome: QUT’s owner and next follow-up\
+  \ are confirmed, and any discovery/evaluation notes are captured.\n  - Scope notes: HubSpot company is QUT (qut.edu.au).\
+  \ Contact is Mike Lees, Senior Business Analyst, at <EMAIL>.\n  - Links: HubSpot: QUT — <URL> Mike Lees — <URL>\n  - Blockers:\
+  \ Needs owner assignment and confirmation of next steps.\n- [ ] **(P1)** Confirm Gallup HubSpot next steps — *Status:* Not\
+  \ started — *Due:* TBD\n  - Outcome: Gallup’s owner and next follow-up are confirmed, and any discovery/evaluation notes\
+  \ are captured.\n  - Scope notes: HubSpot company is Gallup (www.<DOMAIN>). Contacts are <EMAIL>, Meredith Kuczora, Senior\
+  \ Business Analyst, at <EMAIL> (Omaha, NE), and <EMAIL>.\n  - Links: HubSpot: Gallup — <URL> <EMAIL> — <URL> Meredith Kuczora\
+  \ — <URL> <EMAIL> — <URL>\n  - Blockers: Needs owner assignment and confirmation of next steps.\n- [ ] **(P1)** Confirm\
+  \ Radisson Hotels deal next steps — *Status:* Not started — *Due:* before <PHONE> close date\n  - Outcome: Radisson Hotels’\
+  \ deal owner and next follow-up are confirmed, discovery or evaluation notes are captured, and any implementation/security\
+  \ needs are documented before close.\n  - Scope notes: HubSpot company is Radisson Hotels (<DOMAIN>). Contact is Teddy Strand,\
+  \ Senior Manager for Digital Identity & Access Management, at <EMAIL>.\n  - Scope notes: HubSpot deal `Radisson Hotels`\
+  \ is in the default pipeline at stage `<PHONE>`; amount is <AMOUNT>; close date is <PHONE>.\n  - Links: HubSpot: Radisson\
+  \ Hotels\n  - Blockers: Needs owner assignment and confirmation of deal stage meaning, follow-up/discovery next steps, and\
+  \ any identity/access-management requirements.\n- [ ] **(P1)** Confirm Oman Broadband enterprise self-hosted evaluation\
+  \ next steps — *Status:* Not started — *Due:* before <PHONE> close date\n  - Outcome: Oman Broadband’s deal owner and next\
+  \ follow-up are confirmed, competitive-comparison follow-up is sent, due-diligence status is tracked, and deployment/licensing\
+  \ next steps are ready if they proceed to commercials or procurement.\n  - Scope notes: HubSpot company is Oman Broadband\
+  \ (omanbroadband.om). Contacts are Duaa Al Hashmi at <EMAIL> and <EMAIL>.\n  - Scope notes: HubSpot deal `Oman Broadband`\
+  \ is in the default pipeline at stage `<PHONE>`; amount is <AMOUNT>; close date is <PHONE>.\n  - Scope notes: Oman Broadband\
+  \ is evaluating a secure self-hosted internal AI knowledge/QA solution to consolidate AI usage and keep data entirely in\
+  \ their infrastructure. They have already stood up a local Docker test of Onyx and are targeting implementation in under\
+  \ three months.\n  - Scope notes: Requirements include SSO, RBAC, permission-respecting retrieval, white labeling, strong\
+  \ support, zero external Onyx visibility into their data, and bring-your-own LLM support. Onyx does not build custom models.\n\
+  \  - Scope notes: Interested connectors are SharePoint, Google Drive, Gmail, and Microsoft Teams. Pricing discussed was\
+  \ Enterprise at <AMOUNT>/user/month for about 100 users, approximately <AMOUNT>/year; company size is about 200 employees.\n\
+  \  - Next steps from sales call: Matthew to send competitive comparisons; prospect to complete evaluation/due diligence\
+  \ and reply if they want to proceed to commercials/procurement; if proceeding, confirm deployment is running smoothly before\
+  \ issuing an enterprise license key.\n  - Links: HubSpot: Oman Broadband — <URL> Duaa Al Hashmi — <URL> Fireflies Sales\
+  \ Call Summary — <PHONE> — <URL>\n  - Blockers: Needs owner assignment, competitive-comparison follow-up, due-diligence/procurement\
+  \ status, self-hosted/security review path, and enterprise license-key handoff plan.\n- [ ] **(P1)** Prepare Irvine's Group\
+  \ trial follow-up for finance/legal automation — *Status:* Not started — *Due:* before <PHONE> close date\n  - Outcome:\
+  \ Irvine's Group receives setup materials, starts the 14-day trial, tests finance reporting and legal-document workflows,\
+  \ and seat count plus hosting path are confirmed if moving forward.\n  - Scope notes: HubSpot deal `Irvine's Group` is in\
+  \ the default pipeline at stage `<PHONE>`; amount is <AMOUNT>; close date is <PHONE>. Contacts include Daron Sadler (<EMAIL>,\
+  \ <PHONE>), Jan van den Berg (<EMAIL>), Craig Irvine (<EMAIL>), and <EMAIL>; company domain is <DOMAIN>.za.\n  - Scope notes:\
+  \ Initial evaluation focused on automating repetitive finance reporting, legal document drafting/search over SharePoint\
+  \ repositories, and configuring agents against constrained knowledge sets with governance controls.\n  - Scope notes: Interested\
+  \ connectors and access requirements include SharePoint, file uploads, possible ERP access via MCP, SSO, RBAC, permission\
+  \ inheritance, ring-fenced data access, token/cost controls, and no training on customer data. There is no native Microsoft\
+  \ Fabric connector.\n  - Scope notes: Irvine's Group is considering Onyx Cloud versus self-hosting in Azure and is evaluating\
+  \ Onyx as a simpler alternative or complement to Power BI for monthly reporting automation. No quote was provided; exact\
+  \ seat count is unknown.\n  - Next steps from sales call: Matthew to send follow-up email with setup materials; prospect\
+  \ to sign up for a 14-day trial, test finance/legal workflows, continue Q&A over email, and determine seat count if moving\
+  \ forward.\n  - Links: HubSpot: Irvine's Group; Fireflies Sales Call Summary — <PHONE>\n  - Blockers: Needs owner assignment,\
+  \ follow-up email/setup materials, trial support path, and confirmation of hosting model, access-control/security requirements,\
+  \ ERP-via-MCP feasibility, token/cost-control expectations, and seat count.\n- [ ] **(P1)** Confirm University of Minnesota\
+  \ appointment-scheduled next steps — *Status:* Not started — *Due:* before <PHONE> close date\n  - Outcome: University of\
+  \ Minnesota’s deal owner and next meeting/follow-up are confirmed, discovery notes are captured, and any evaluation or implementation\
+  \ needs are documented.\n  - Scope notes: HubSpot company is University of Minnesota (umn.edu), described as a top public\
+  \ research university offering undergraduate and graduate programs, research opportunities, and outreach.\n  - Scope notes:\
+  \ HubSpot deal `University of Minnesota - New Deal` is in the default pipeline at stage `appointmentscheduled`; amount is\
+  \ <AMOUNT>; close date is <PHONE>.\n  - Scope notes: Contacts include <EMAIL>, <EMAIL>, Colby Reese (<EMAIL>), and <EMAIL>.\n\
+  \  - Links: HubSpot: University of Minnesota - New Deal\n  - Blockers: Needs owner assignment and confirmation of appointment/discovery\
+  \ next steps.\n- [ ] **(P1)** Follow up on Onyx Cloud shared document search permission-sync strategy — *Status:* Not started\
+  \ — *Due:* TBD / follow-up from <PHONE> call\n  - Outcome: Permission-sync strategy and multi-system integration approach\
+  \ are documented for a shared document search solution, including indexing-performance considerations.\n  - Scope notes:\
+  \ Call covered syncing and permission handling across Google Drive, Confluence, and Salesforce, with concerns around different\
+  \ permission models and fast indexing.\n  - Scope notes: No direct prices were mentioned.\n  - Next steps from call: Follow\
+  \ up on strategy for permission sync and possible approach for multi-system integration.\n  - Links: HubSpot/Fireflies sales\
+  \ call summary — <PHONE>; contact: <EMAIL>\n  - Blockers: Needs owner assignment and technical follow-up on permission-sync\
+  \ design across the listed connectors.\n- [ ] **(P1)** Follow up on <DOMAIN> GCP Kubernetes connection timeout / search\
+  \ tuning call — *Status:* Not started — *Due:* TBD\n  - Outcome: GCP ingress timeout hypothesis is confirmed or ruled out,\
+  \ any Onyx-side workaround/fix is documented, and search-accuracy guidance from the call is captured for the customer.\n\
+  \  - Scope notes: <PHONE> call focused on debugging connection drops on slower models in GCP Kubernetes, with possible GCP\
+  \ ingress timeout as the suspected cause.\n  - Scope notes: Search-accuracy discussion covered connector and model-tuning\
+  \ best practices; connectors mentioned were Asana, Notion, Google Drive, Slack, and GitHub.\n  - Scope notes: External participants\
+  \ were Shankar (<EMAIL>) and Chris (<EMAIL>); Onyx participants were Chris, Evan, and Joachim.\n  - Next steps from call:\
+  \ Shankar to investigate GCP ingress settings; Chris to update documentation if a fix is found.\n  - Links: HubSpot/Fireflies\
+  \ sales call summary — <PHONE>\n  - Blockers: Needs owner assignment and confirmation from Shankar on GCP ingress findings.\n\
+  - [ ] **(P1)** Prepare Scania self-hosted enterprise POC / technical evaluation plan — *Status:* Not started — *Due:* before\
+  \ <PHONE> close date\n  - Outcome: Scania has a technical evaluation plan, shared collaboration channel, self-hosted POC\
+  \ path, and clear owners for Enterprise feature enablement, connectors, SSO/SCIM, permissions mirroring, and BYO LLM setup.\n\
+  \  - Scope notes: HubSpot deal `Scania - Enterprise Platform - 3k seats` is in the default pipeline at stage `decisionmakerboughtin`;\
+  \ amount is <AMOUNT>; close date is <PHONE>. Contact is Jim Tolman, Technology Strategy Manager, at <EMAIL>.\n  - Scope\
+  \ notes: HubSpot also lists `Scania - Simple Search - 50k seats` in the default pipeline at stage `decisionmakerboughtin`;\
+  \ amount is <AMOUNT>; close date is <PHONE>.\n  - Scope notes: Pricing discussion was framework-only; Scania discussed possible\
+  \ enterprise vs. open-source / per-license structure with basic vs. power-user tiers for broad workforce coverage, and no\
+  \ specific pricing numbers were quoted on the call.\n  - Scope notes: Scania wants enterprise-wide knowledge base / AI search\
+  \ across SharePoint, Teams, Jira, Confluence, SAP, ServiceNow, and other systems, plus a RAG/MCP foundation for agents used\
+  \ by R&D and other teams.\n  - Scope notes: Requirements include self-hosted deployment for the POC, SSO/SCIM, granular\
+  \ permissions/groups, frequent sync and permission mirroring, bring-your-own LLM options such as Azure OpenAI/OpenAI or\
+  \ Bedrock, and APIs/embeddable widgets for intranet top-bar search.\n  - Next steps from sales call: set up a shared Teams\
+  \ channel, schedule deeper technical/evaluation planning, provide Enterprise features for the self-hosted POC, and assist\
+  \ with connectors including ServiceNow plus SSO/SCIM setup.\n  - Links: HubSpot: Scania - Enterprise Platform - 3k seats;\
+  \ Fireflies transcript: <URL>\n  - Blockers: Needs owner assignment, Enterprise self-hosted POC enablement plan, connector/SSO/SCIM\
+  \ technical owners, and confirmation of POC scope and seat assumptions.\n- [ ] **(P1)** Confirm Scribd enterprise AI search\
+  \ evaluation next steps — *Status:* Not started — *Due:* before <PHONE> close date\n  - Outcome: Scribd’s deal owner is\
+  \ confirmed, demo/trial or POC path is scheduled, pricing discussion is prepared, and security/self-hosting follow-up materials\
+  \ are sent before close.\n  - Scope notes: HubSpot deal `Scribd - New Deal` is in the default pipeline at stage `<PHONE>`;\
+  \ amount is <AMOUNT>; close date is <PHONE>. Company is Scribd (<DOMAIN>). Contact is Phil Blanchard (<EMAIL>).\n  - Scope\
+  \ notes: Scribd’s IT team is evaluating an enterprise AI search tool for org-wide knowledge discovery across internal systems.\
+  \ Org-wide deployment was estimated at roughly 300–400 seats, but exact seat count is not finalized.\n  - Scope notes: Interested\
+  \ connectors include Google Workspace (Drive, Gmail), Slack, Atlassian Suite (Confluence, Jira), GitHub, Zendesk, Databricks,\
+  \ Looker, BigQuery, Figma, LucidChart / LucidSpark, and Miro.\n  - Scope notes: Key requirements include high-quality search,\
+  \ limited but critical connectors, strong security controls, ability to choose LLM models, and cost effectiveness. They\
+  \ are exploring both Onyx Cloud and self-hosted/private-cloud options; no prior installation yet.\n  - Scope notes: Competitors\
+  \ under evaluation include Glean, Google Gemini, OpenAI ChatGPT team/enterprise, and Guru. Security asks include SOC 2 Type\
+  \ 1 and upcoming Type 2 details, GDPR compliance details, penetration-test reports, and an NDA-backed security package.\n\
+  \  - Scope notes: Phil discovered Onyx while searching online for enterprise search solutions and through Reddit and Slack\
+  \ community discussions. No pricing quote was provided on the June 9, 2025 call.\n  - Next steps from sales call: Run a\
+  \ demo, discuss a potential trial/POC, provide security package under NDA as needed, and prepare pricing for the next call.\
+  \ Scribd is targeting an internal decision by the end of June 2025 with rollout immediately thereafter.\n  - Links: HubSpot:\
+  \ Scribd - New Deal; Fireflies Sales Call Summary — <PHONE>\n  - Blockers: Needs owner assignment, demo/trial or POC scheduling,\
+  \ pricing discussion owner, and security/self-hosting materials follow-up.\n- [ ] **(P1)** Roll out optional External Secrets\
+  \ Operator support for Helm deployments — *Status:* In progress — *Due:* TBD\n  - Outcome: Onyx Helm chart users can optionally\
+  \ use External Secrets Operator so cloud-deployment-yamls customer values can move plaintext secret material out of git\
+  \ and into AWS Secrets Manager.\n  - Scope notes: PR #11237 adds `templates/external-secret.yaml`, rendering a single `ExternalSecret`\
+  \ CR gated on `externalSecret.enabled`.\n  - Scope notes: PR #11237 adds a top-level `extraEnvFromSecret` value to add `envFrom:\
+  \ secretRef` to backend deployments, excluding model servers.\n  - Scope notes: The chart includes fail guards for misconfigured\
+  \ `refPath` / `secretStoreRef`; the feature is off by default and default render is unchanged.\n  - Follow-on work: Add\
+  \ ESO + `ClusterSecretStore` install + IRSA Terraform module in `cloud-deployment-yamls`; add `seed-secrets-manager.py`\
+  \ to migrate per-customer `values.yaml` into AWS Secrets Manager; cut over `st-dev` and `craft-dev`; then write a runbook\
+  \ for the remaining ~46 customers.\n  - Links: PR #11237\n  - Blockers: Needs owner assignment and completion of cloud-deployment-yamls\
+  \ Terraform/module work, migration script, dev cutovers, and customer runbook.\n- [ ] **(P1)** Build Security and Hardening\
+  \ admin page — *Status:* Not started — *Due:* TBD\n  - Outcome: Admins can view and configure security-hardening settings\
+  \ from an in-app `Security and Hardening` admin page, with security-related changes auditable instead of requiring shell\
+  \ access, deployment env edits, and API server restarts.\n  - Scope notes: Current hardening settings live in `app_configs.py`\
+  \ / `env.template`, are hard to discover, cannot be viewed by admins in-app, and require editing deployment env plus restarting\
+  \ the API server to change.\n  - Scope notes: Multi-tenant mode should hide operator-locked fields so tenant admins on Onyx\
+  \ Cloud can only view/configure the allowed subset and cannot weaken operator-controlled floors. Operator-locked examples\
+  \ include password policy, allowed domains, and credential masking.\n  - Scope notes: Existing account/access settings to\
+  \ migrate include `USER_DIRECTORY_ADMIN_ONLY` for restricting the user directory to admins only, `TRACK_EXTERNAL_IDP_EXPIRY`\
+  \ for syncing session expiry from the upstream OAuth/OIDC provider, `VALID_EMAIL_DOMAINS` for allowed registration domains\
+  \ in single-tenant mode, and `MASK_CREDENTIAL_PREFIX` for hiding leading credential characters in the UI in single-tenant\
+  \ mode.\n  - Scope notes: Existing password policy settings to migrate include `PASSWORD_MIN_LENGTH`, `PASSWORD_MAX_LENGTH`,\
+  \ `PASSWORD_REQUIRE_UPPERCASE`, `PASSWORD_REQUIRE_LOWERCASE`, `PASSWORD_REQUIRE_DIGIT`, and `PASSWORD_REQUIRE_SPECIAL_CHAR`;\
+  \ these are single-tenant-only/operator-locked in multi-tenant mode.\n  - Scope notes: Existing API rate limiting settings\
+  \ to migrate include `RATE_LIMIT_WINDOW_SECONDS` and `RATE_LIMIT_MAX_REQUESTS`.\n  - Scope notes: Existing connector network\
+  \ safety / SSRF settings to migrate include `OPEN_URL_VALIDATE_SSRF` and `WEB_CONNECTOR_VALIDATE_URLS`.\n  - Scope notes:\
+  \ Proposed new settings include `DISABLE_IMPERSONATE_ENDPOINT` and `VALIDATE_SSRF`. `VALIDATE_SSRF` may supersede `OPEN_URL_VALIDATE_SSRF`\
+  \ and `WEB_CONNECTOR_VALIDATE_URLS`, covering all network requests but potentially breaking connections to local LLM backends\
+  \ in exchange for SSRF protections.\n  - Scope notes: The page likely needs inline descriptions, tooltips, and/or a complementary\
+  \ Onyx docs resource because several setting names are not self-explanatory. For example, `MASK_CREDENTIAL_PREFIX` may need\
+  \ explicit examples such as showing `Abcd****` versus `********`.\n  - Scope notes: `REQUIRE_EMAIL_VERIFICATION` was considered\
+  \ and rejected for this page because enabling it from an admin account with an unverified email can lock the admin out.\
+  \ Anti-abuse/signup hardening settings can be added later but are not part of the core proposal; examples include `DISPOSABLE_EMAIL_DOMAINS_URL`,\
+  \ `SIGNUP_RATE_LIMIT_ENABLED`, `CAPTCHA_ENABLED`, `RECAPTCHA_SCORE_THRESHOLD`, and `CAPTCHA_HOSTNAME_ALLOWLIST`.\n  - Links:\
+  \ ENG-4089: <URL> GHSA-386q-m74r-x6jr: <URL> GHSA-55v7-rhr4-4g95: <URL>\n  - Blockers: Needs owner assignment, final implementation\
+  \ decision for `DISABLE_IMPERSONATE_ENDPOINT`, decision on whether `VALIDATE_SSRF` supersedes existing SSRF toggles, and\
+  \ UI decision on switches vs dropdowns for settings where on/off is not self-evident.\n- [ ] **(P1)** Confirm Dalberg closed-won\
+  \ rollout and support cadence — *Status:* Not started — *Due:* TBD / verify post-close status\n  - Outcome: Dalberg’s attachment/search\
+  \ issue is confirmed resolved or assigned, support/SLA expectations are documented, and weekly issue-tracking plus monthly\
+  \ roadmap/product meeting cadence is scheduled if still needed.\n  - Scope notes: HubSpot deal is in the default pipeline\
+  \ at stage `closedwon`; amount is <AMOUNT>; close date is <PHONE>. Company is Dalberg (<DOMAIN>), with contacts Manisha\
+  \ Pandita, Lucie Gareton, Sanchi Shanker, Salif Ouedraogo (<EMAIL>), Naman Gupta (<EMAIL>), and Edward Kamuhanda (<EMAIL>).\n\
+  \  - Scope notes: Main pre-signing blocker was attachment functionality for attaching documents and search, classified as\
+  \ a Sev 2 defect targeted for resolution by <PHONE> before expected contract signing on <PHONE>.\n  - Scope notes: Prior\
+  \ commercial discussion was 250 seats at <AMOUNT>/user/month, no overage fees up to 500 total seats, six-month terms with\
+  \ month-to-month flexibility, standard SLA, advance maintenance notice, and clear support timelines.\n  - Links: HubSpot:\
+  \ Dalberg - New Deal; Fireflies Sales Call Summaries — <PHONE> and <PHONE>\n  - Blockers: Needs owner assignment, confirmation\
+  \ of attachment-functionality closure, and confirmation that SLA/support process plus issue-tracking and roadmap meetings\
+  \ are in place.\n- [ ] **(P1)** Confirm Ninety closed-won onboarding / next steps — *Status:* Not started — *Due:* TBD /\
+  \ verify post-close status\n  - Outcome: Ninety’s post-close owner is assigned, onboarding or implementation next steps\
+  \ are confirmed, and any support needs from the closed-won deal are documented.\n  - Scope notes: HubSpot company is Ninety\
+  \ (<DOMAIN>). Contacts are Scott Paige, Principal Engineer (<EMAIL>), and Ben Edmunds, Staff Engineer (<EMAIL>; <PHONE>).\n\
+  \  - Scope notes: HubSpot deal `Ninety` is in the default pipeline at stage `closedwon`; amount is <AMOUNT>; close date\
+  \ is <PHONE>.\n  - Links: HubSpot: Ninety — <URL>\n  - Blockers: Needs owner assignment and confirmation of post-close onboarding\
+  \ / support next steps.\n- [ ] **(P1)** Confirm University of Notre Dame closed-won onboarding / RAG assistants next steps\
+  \ — *Status:* Not started — *Due:* TBD / verify post-close status\n  - Outcome: Notre Dame’s post-close owner is assigned,\
+  \ onboarding or implementation next steps are confirmed, and RAG assistant requirements plus support needs are documented.\n\
+  \  - Scope notes: HubSpot company is University of Notre Dame (nd.edu), an independent national Catholic private research\
+  \ university founded in 1842 and located in Notre Dame, IN.\n  - Scope notes: HubSpot deal `Notre Dame` is in the default\
+  \ pipeline at stage `closedwon`; amount is <AMOUNT>; close date is <PHONE>. HubSpot also lists `University of Notre Dame\
+  \ - New Deal` as `closedlost`; amount is <AMOUNT>; close date is <PHONE>.\n  - Scope notes: Note says “Small university\
+  \ package < 5000 seats for 60K” and that they want to do RAG assistants.\n  - Scope notes: Contacts include Brandon Rich\
+  \ (<EMAIL>), Caela Kleber (<EMAIL>; (<PHONE>), Heather Marshall, Accounting Coordinator (<EMAIL>; <PHONE>), Shannon Root,\
+  \ Contracts Specialist (<EMAIL>; <PHONE>), Leigh Cornish (<EMAIL>), <EMAIL>, and <EMAIL>.\n  - Links: HubSpot: Notre Dame\n\
+  \  - Blockers: Needs owner assignment, confirmation of post-close onboarding / support next steps, and clarification of\
+  \ RAG assistant scope.\n- [ ] **(P2)** Confirm DeepL closed-lost self-hosted Slack bot pilot wrap-up — *Status:* Not started\
+  \ — *Due:* TBD / verify whether any support remains after <PHONE> closed-lost\n  - Outcome: Deal owner confirms whether\
+  \ DeepL needs any final async troubleshooting or analytics follow-up, or whether the self-hosted POC can be closed with\
+  \ no engineering action.\n  - Scope notes: HubSpot deal `DeepL` is in the default pipeline at stage `closedlost`; amount\
+  \ is <AMOUNT>; close date is <PHONE>. Main external contact was Sven Ladovic, Technical Product Manager, at <EMAIL>.\n \
+  \ - Scope notes: DeepL self-hosted Onyx and piloted Slack bots in 3–4 channels to deflect HR/IT questions and surface docs\
+  \ from Confluence/Backstage. They needed usage, query-history, auto-resolve/fallback, and channel-level analytics to justify\
+  \ budget.\n  - Scope notes: Technical/security asks included permission inheritance, RBAC/user-group scoping, SSO via Okta/Entra/Google,\
+  \ GDPR/SOC/ISO posture, BYO LLM/internal OpenAI, and guardrails to prevent cross-channel leakage.\n  - Scope notes: A Feb.\
+  \ 19 sync flagged Postgres connection error `255` / connection limits causing indexing issues and requiring SRE assistance.\
+  \ No formal quote was provided; typical Enterprise pricing of <AMOUNT>/user/month was referenced, with <AMOUNT>–<AMOUNT>/user/month\
+  \ discussed for roughly 1,200–1,300 employees and BYO LLM keys/internal OpenAI expected to reduce costs. Competitor Kappa\
+  \ pricing was referenced.\n  - Scope notes: POC timeline discussed was roughly 2–3 weeks. Competitors/tools referenced included\
+  \ Kappa AI and Flag/Flank; Kappa pricing was described as a €40k platform fee plus variable usage, with an approximate €30k/month\
+  \ level mentioned contextually, but no formal Onyx quote was provided.\n  - Next steps from sales calls: DeepL to set up\
+  \ Slack Connect if approved and email with SRE contact; Onyx to share an example usage/analytics report, add Chris to the\
+  \ thread, refine pricing, confirm analytics/reporting details, and coordinate async troubleshooting.\n  - Links: HubSpot:\
+  \ DeepL; Fireflies Sales Call Summaries — <PHONE> and <PHONE>\n  - Blockers: Needs owner assignment only if support remains;\
+  \ otherwise mark closed/no action.\n- [ ] **(P1)** Prepare George Brown College self-hosted campus rollout follow-up — *Status:*\
+  \ Not started — *Due:* TBD / follow-up from <PHONE> call\n  - Outcome: George Brown College receives requested self-hosting,\
+  \ data-processing, deployment, RBAC, connector, and security materials; pricing scenarios are prepared for both requested\
+  \ rollout tiers; and an infra sizing / architecture review is scheduled.\n  - Scope notes: HubSpot deal `George Brown College`\
+  \ is in the default pipeline at stage `presentationscheduled`; amount is <AMOUNT>; close date is <PHONE>. Company domain\
+  \ is georgebrown.ca.\n  - Scope notes: Contacts include Shahin Javanshiri (<EMAIL>), Julio Ayala / <EMAIL>, Yuri Callirgos\
+  \ (<EMAIL>), Jimi Rockley (<EMAIL>), Shehroze Saharan (Senior Manager, Institutional AI Strategy Development and Support;\
+  \ <EMAIL>), <EMAIL>, and <EMAIL>.\n  - Scope notes: George Brown Polytechnic is evaluating campus-wide AI enablement with\
+  \ Onyx against LibreChat, Cohere, and Invoke. They found Onyx through a University of Toronto referral.\n  - Scope notes:\
+  \ Self-hosting is mandatory. Requirements include SSO via Microsoft Entra ID / Okta, RBAC and permission-sync, strong data\
+  \ governance, usage analytics, and connectors for SharePoint, GitHub, and Salesforce.\n  - Scope notes: Pricing scenarios\
+  \ requested were for approximately 3,800 staff/faculty and for a full-campus rollout of roughly 25–30k students, with Continuing\
+  \ Education potentially adding about 20k more users. Tokens are BYO via their own LLMs such as Azure OpenAI, and they requested\
+  \ flat year-over-year pricing with no percentage increase. No formal quote was provided on the call.\n  - Scope notes: Use\
+  \ cases include teaching and learning, student support such as registrar triage, IT/operations efficiency, institutional\
+  \ research with private partners where IP is retained, and developer support through GitHub integration.\n  - Scope notes:\
+  \ Concerns and context include LibreChat instability on newer OpenAI models, OpenAI education license cost, lower Copilot\
+  \ adoption compared with the ChatGPT UI, privacy/compliance reviews, a possible Gartner assessment, and a desire to avoid\
+  \ non-institutional Google tools for students. They also have a separate roughly <AMOUNT> grant for on-campus AI infrastructure\
+  \ independent of the IT budget for Onyx, and their goal is to enable campus-wide AI by the end of 2026.\n  - Links: HubSpot:\
+  \ George Brown College; Fireflies Sales Call Summary — <PHONE>\n  - Blockers: Needs owner assignment, pricing scenarios\
+  \ for both tiers, self-hosting/data-processing docs, Kubernetes/OpenShift deployment guidance, RBAC details, connector list/roadmap,\
+  \ D2L Brightspace LMS support confirmation, infra sizing / architecture review coordination, and Gartner/security documentation\
+  \ if needed.\n- [ ] **(P1)** Prepare Softchoice / QuikTrip self-hosted Azure pilot follow-up — *Status:* Not started — *Due:*\
+  \ before six-week pilot kickoff / <PHONE> close date\n  - Outcome: Andrew Campbell receives the Enterprise self-hosted trial\
+  \ feature flag, pilot support path is confirmed, and technical owners are assigned for SharePoint, Entra ID SSO, Azure deployment,\
+  \ and Kubernetes scale planning.\n  - Scope notes: HubSpot deal `Softchoice - QuikTrip` is in the default pipeline at stage\
+  \ `<PHONE>`; amount is <AMOUNT>; close date is <PHONE>. HubSpot contacts include Andrew Campbell (<EMAIL>), Henry Kwan,\
+  \ Architect at Softchoice (<EMAIL>, <PHONE>), and <EMAIL>.\n  - Scope notes: Softchoice / World Wide Technology is evaluating\
+  \ a self-hosted Onyx deployment for an oil & gas customer in Azure. The planned pilot is six weeks with roughly 40–50 users,\
+  \ intended to assess adoption and reduce “shadow AI.”\n  - Scope notes: HubSpot also lists Megan Huneke, Sr Project Manager\
+  \ at World Wide Technology (domain `<DOMAIN>`), as a contact: <EMAIL>, (<PHONE>; location listed as Louis, MO. HubSpot also\
+  \ lists Jim English, Sr. Client Solutions Director at World Wide Technology, as a contact: <EMAIL>.\n  - Scope notes: Technical\
+  \ requirements include SharePoint connector support, Microsoft Entra ID (Azure AD) SSO, Microsoft Foundry-hosted LLMs, and\
+  \ restricting responses to SharePoint libraries the user can access.\n  - Scope notes: Trial path discussed: standard cloud\
+  \ trial is 30 days but does not include SSO; for the self-hosted trial, an Enterprise feature flag can be provided on an\
+  \ honor-system basis.\n  - Scope notes: Support expectations discussed were email/Slack Connect with quick response times\
+  \ during the pilot; more formal SLAs are available for paid Enterprise.\n  - Scope notes: Initial deployment is expected\
+  \ to use Docker Compose in the customer’s Azure environment, with Kubernetes likely needed for scale beyond roughly 50 users\
+  \ or broader rollout.\n  - Scope notes: Pricing discussed was indicative only: Enterprise at <AMOUNT>/user/month with volume\
+  \ discounts for larger tiers such as 200/500/1,000 users. No formal quote was provided.\n  - Next steps from sales call:\
+  \ Matthew to email Andrew an Enterprise feature flag for the self-hosted trial; WWT to deploy Onyx in the customer’s Azure\
+  \ environment; keep a tight feedback loop through Slack/email during the pilot.\n  - Links: HubSpot: Softchoice - QuikTrip;\
+  \ Fireflies Sales Call Summary — <PHONE>\n  - Blockers: Needs owner assignment, Enterprise trial feature-flag delivery,\
+  \ pilot support channel/cadence, and technical confirmation on SharePoint ACL behavior, Entra ID SSO, Azure Foundry LLM\
+  \ setup, and Kubernetes scale plan.\n- [ ] **(P1)** Confirm Oxaro qualified-to-buy next steps — *Status:* Not started —\
+  \ *Due:* TBD / before <PHONE> close date\n  - Outcome: Oxaro’s deal owner and next steps are confirmed, and any discovery/evaluation\
+  \ notes are captured.\n  - Scope notes: HubSpot company is Oxaro (<DOMAIN>). Contacts are Matthew Casey, IT and Security\
+  \ Advisor / Conseiller, at <EMAIL>; Justin Mangat at <EMAIL>; <EMAIL>; and Nicholas Newberry, Senior Director of Engineering,\
+  \ at <EMAIL>.\n  - Scope notes: HubSpot deal `Oxaro` is in the default pipeline at stage `qualifiedtobuy`; amount is <AMOUNT>;\
+  \ close date is <PHONE>.\n  - Links: HubSpot: Oxaro — <URL> Kareem Habboub contact — <URL>\n  - Blockers: Needs owner assignment\
+  \ and confirmation of next steps.\n- [ ] **(P1)** Confirm D. E. Shaw Group HubSpot next steps — *Status:* Not started —\
+  \ *Due:* TBD\n  - Outcome: D. E. Shaw Group's owner and next follow-up are confirmed, and any discovery/evaluation notes\
+  \ are captured.\n  - Scope notes: HubSpot company is The D. E. Shaw Group (<DOMAIN>), based in New York, New York; HubSpot\
+  \ industry is `CAPITAL_MARKETS`. The D. E. Shaw Group is a global investment and technology development firm focused on\
+  \ innovation, careful risk management, and the quality and depth of its staff.\n  - Scope notes: Contacts are <EMAIL>, <EMAIL>,\
+  \ <EMAIL>, <EMAIL>, <EMAIL>, <EMAIL>, <EMAIL>, and <EMAIL>.\n  - Links: HubSpot: The D. E. Shaw Group — <URL>\n  - Blockers:\
+  \ Needs owner assignment and confirmation of next steps."
+expected_class: CHANGE
+doc_title: Nicholas Newberry
+doc_url: <URL>
+doc_content: Nicholas Newberry
+source: connector:hubspot
+expected_facts_present: []
+expected_facts_preserved: []
+max_bloat_ratio: 2.0
+notes: Real production reconciler CHANGE event from /wiki/.git commit caaf8a47b9 (2026-05-22). facts_present/preserved empty
+  for bulk-generated cases; trigger + bloat + entity-density axes still score.
+tags:
+- real-world
+- real-prod-commit
+- source:hubspot
+- sha:caaf8a47b9

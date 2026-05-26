@@ -1,0 +1,21 @@
+id: rd-irr-03-doc-for-wrong-service
+surface: reconcile_document
+wiki_path: services/notifications/templates-overview.md
+current_body: |
+  # Notification template overview
+
+  Handlebars-rendered. Stored under `notifications/templates/*.hbs`.
+  Reviewed quarterly by the messaging-platform team for compliance.
+expected_class: IRRELEVANT
+payload: null
+source: ''
+doc_title: Search reranker tuning guide
+doc_url: https://docs.example.com/search/rerank
+doc_content: The search reranker is a cross-encoder fine-tuned on click data. Tune the temperature parameter to balance precision
+  and diversity.
+expected_facts_present: []
+expected_facts_preserved: []
+max_bloat_ratio: 2.0
+notes: Doc is for search; page is for notifications.
+tags:
+- irrelevant-bait

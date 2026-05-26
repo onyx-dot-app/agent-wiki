@@ -1,0 +1,19 @@
+id: pi-noc-03-trivial-restatement
+surface: process_instruction
+wiki_path: teams/platform/charter.md
+current_body: |
+  # Platform team charter
+
+  We own the build, deploy, observability, and developer experience surfaces. Our quarterly OKRs prioritize p95 deploy latency under 8 minutes.
+expected_class: NO_CHANGE
+payload:
+  instruction: Platform team owns developer experience.
+source: connector:notion
+doc_title: null
+doc_url: null
+doc_content: null
+expected_facts_present: []
+expected_facts_preserved: []
+max_bloat_ratio: 2.0
+notes: Restates ownership already in the charter.
+tags: []

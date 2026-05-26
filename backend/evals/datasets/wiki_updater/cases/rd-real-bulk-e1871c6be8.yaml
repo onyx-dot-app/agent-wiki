@@ -1,0 +1,21 @@
+id: rd-real-bulk-e1871c6be8
+surface: reconcile_document
+wiki_path: engineering/Agent Wiki Project/Deployment Guide.md
+current_body: |-
+  # Deployments of Agent Wiki
+  This doc provides an overview of how to deploy Agent Wiki locally and on cloud.
+expected_class: CHANGE
+doc_title: '80: feat(launchers/helper-go): codesign + notarize release pipeline'
+doc_url: <URL>
+doc_content: '80: feat(launchers/helper-go): codesign + notarize release pipeline'
+source: connector:github
+expected_facts_present: []
+expected_facts_preserved: []
+max_bloat_ratio: 2.0
+notes: Real production reconciler CHANGE event from /wiki/.git commit e1871c6be8 (2026-05-21). facts_present/preserved left
+  empty for bulk generation; trigger + bloat + entity-density axes still score.
+tags:
+- real-world
+- real-prod-commit
+- source:github
+- sha:e1871c6be8

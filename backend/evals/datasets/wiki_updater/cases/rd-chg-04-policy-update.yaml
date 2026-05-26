@@ -1,0 +1,24 @@
+id: rd-chg-04-policy-update
+surface: reconcile_document
+wiki_path: ops/data-retention.md
+current_body: |
+  # Data retention
+
+  Customer event logs retained for 90 days. Backups retained for 1 year.
+expected_class: CHANGE
+payload: null
+source: ''
+doc_title: Updated retention policy
+doc_url: https://legal.example.com/retention-2026
+doc_content: Effective 2026-06-01, event log retention extends to 180 days. Backup retention unchanged.
+expected_facts_present:
+- id: new-retention
+  text: event logs are retained for 180 days
+- id: effective-date
+  text: the change is effective 2026-06-01
+expected_facts_preserved:
+- id: backup-retention
+  text: backups remain at 1 year
+max_bloat_ratio: 2.0
+notes: Compliance update; backup retention must persist.
+tags: []

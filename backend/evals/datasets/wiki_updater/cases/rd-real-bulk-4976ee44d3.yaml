@@ -1,0 +1,106 @@
+id: rd-real-bulk-4976ee44d3
+surface: reconcile_document
+wiki_path: team-todos.md
+current_body: "# Team Todos (by owner)\n\n> Purpose: Single place to track current work, unblockers, and ownership.\n> Suggested\
+  \ cadence: quick async update daily; deeper review in weekly planning.\n\n## How to use this page\n- Add new work under\
+  \ the person who will **drive it to completion**.\n- Prefer small, outcome-oriented items.\n- Each todo should include (when\
+  \ possible):\n  - **Outcome / Definition of done**\n  - **Priority**: P0 (urgent), P1 (this week), P2 (later)\n  - **Due**:\
+  \ date or “TBD”\n  - **Status**: Not started / In progress / Blocked / In review / Done\n  - **Links**: ticket, doc, PR,\
+  \ dashboard, etc.\n- When something is blocked, write the **specific blocker** and who/what can unblock it.\n\n---\n\n##\
+  \ Yuhong\n### Current\n- Keep this user's TODOs empty but add in all relevant blockers that this user has for other people's\
+  \ projects\n\n### Unblockers / Needs help\n- [ ] amiconsult Enterprise self-hosted evaluation: confirm feasibility/process\
+  \ for granting Enterprise features on their self-hosted Community instance so engineering can schedule an unlock-script\
+  \ call.\n  - Context: HubSpot deal `amiconsult` is in the default pipeline at stage `closedlost`; amount is <AMOUNT>; close\
+  \ date is <PHONE>. Contact is Vincenzo Pace, Associate IAM Consultant, at amiconsult.de.\n  - Scope notes: amiconsult self-hosts\
+  \ Community today and wanted to evaluate Enterprise for strict privacy and access-control requirements, including RBAC,\
+  \ permission inheritance, SSO, and local/self-hosted deployment. Connectors discussed were Confluence, Slack, and SharePoint.\n\
+  \  - Scope notes: They were exploring a reseller motion, with current internal evaluation around 50–60 users and a potential\
+  \ downstream customer around 4,000 seats. No formal quote was provided; Business plan pricing around <AMOUNT>/user and possible\
+  \ volume discount around <AMOUNT>/user were discussed, with Enterprise minimum around 200 users.\n  - Next steps from sales\
+  \ call: Matthew to sync with Yuhong on feasibility/process, coordinate an engineering call to run the unlock script, and\
+  \ consider bringing the interested end-customer into a follow-up evaluation call.\n\n---\n\n## Nik\n### Current\n- [ ] **(P0)**\
+  \ Control plane deploy v0.0.129 after Alembic revision-id fix — *Status:* In progress — *Due:* TBD  \n  - Outcome: Control\
+  \ plane is redeployed via Argo on `v0.0.129` after rolling back the failed `v0.0.128` deploy and fixing the duplicate Alembic\
+  \ migration revision id.\n  - Links: PR #149: <URL> PR #150: <URL> PR #151: <URL> images: <URL>\n  - Blockers: Confirm PR\
+  \ approval and Argo sync completion.\n\n### Unblockers / Needs help\n- [ ] Evan approval for the control-plane migration\
+  \ fix / `v0.0.129` bump if still pending.\n- [ ] Enterprise upgrade without key: Matthew needs Nik to confirm whether the\
+  \ latest version can be upgraded to Enterprise without a license key and whether there is a licensing loophole to close;\
+  \ the Enterprise-enable path was expected to be removed in 2.12+. Link: <URL>\n\n---\n\n## Dane\n### Current\n- [ ] **(P1)**\
+  \ <todo title> — *Status:* Not started — *Due:* TBD  \n  - Outcome: <what “done” means>  \n  - Links: <url(s)>  \n  - Blockers:\
+  \ <none / describe>\n\n### Unblockers / Needs help\n- [ ] <question / decision / dependency>\n\n---\n\n## Dan / Galen\n\
+  ### Current\n- [ ] **(P1)** Virtual Tutor summer-session faculty recruiting — *Status:* Not started — *Due:* Jun 29, 2026\
+  \  \n  - Outcome: A few faculty are lined up to use Virtual Tutor for summer session.  \n  - Links: <URL>  \n  - Blockers:\
+  \ None listed\n\n### Unblockers / Needs help\n- [ ] None listed\n\n---\n\n## Bo\n### Current\n- [ ] **(P1)** Wiki reconciler\
+  \ cleanup monitoring — *Status:* In progress — *Due:* TBD  \n  - Outcome: The reconciler stops adding unnecessary content\
+  \ to wiki pages after the latest prompt tuning, especially fabricated `team-todos.md` entries from bare CRM/contact records\
+  \ and loose same-product-area additions to notes pages.  \n  - Links: <URL> PR #113: <URL>  \n  - Blockers: None\n\n---\n\
+  \n## Matthew\n### Current\n- [ ] **(P1)** Softchoice / QuikTrip self-hosted pilot follow-up — *Status:* Not started — *Due:*\
+  \ TBD  \n  - Outcome: Andrew Campbell receives the Enterprise feature flag for the self-hosted trial; WWT/Softchoice deploy\
+  \ Onyx in the customer's Azure environment; and Onyx maintains a tight Slack/email feedback loop through the six-week, ~40–50\
+  \ user pilot.  \n  - Links: HubSpot deal <URL>  \n  - Blockers: WWT/Softchoice deployment in customer Azure and pilot feedback.\n\
+  - [ ] **(P1)** Oman Broadband enterprise self-hosted follow-up — *Status:* Not started — *Due:* TBD  \n  - Outcome: Duaa\
+  \ Hilal receives competitive comparisons; Oman Broadband completes evaluation/due diligence; if they proceed to commercials/procurement,\
+  \ the self-hosted deployment is running smoothly before Onyx issues an enterprise license key for the upgrade.  \n  - Links:\
+  \ HubSpot company/deal <URL> Fireflies transcript <URL>  \n  - Blockers: Oman Broadband vendor evaluation, due diligence,\
+  \ and procurement decision.\n- [ ] **(P1)** Enertrag enterprise pilot follow-up — *Status:* Not started — *Due:* week of\
+  \ Mar 30, 2026  \n  - Outcome: Enertrag receives pricing ranges for 100, 500, 1,000, and 1,500 users; confirms the number\
+  \ of enterprise test accounts needed for 14-day testing; and aligns with Onyx on POC scope for a self-hosted, permission-aware\
+  \ pilot.  \n  - Links: HubSpot deal <URL>  \n  - Blockers: Enertrag stakeholder alignment and test-account count confirmation.\n\
+  - [ ] **(P1)** Spencer Adler / <DOMAIN> Enterprise follow-up — *Status:* Not started — *Due:* TBD  \n  - Outcome: Spencer\
+  \ receives SOC 2 guidance for self-hosted evaluation and a clear path for white-labeled Onyx Cloud vs self-hosted deployment,\
+  \ including whether a paid multi-tenancy beta is viable around a ~<AMOUNT> annual commitment.  \n  - Links: HubSpot company/deal\
+  \ <URL> Fireflies transcript <URL>  \n  - Blockers: Compliance input on SOC 2/self-hosting; multi-tenancy roadmap/beta decision.\n\
+  - [ ] **(P1)** Casualty Actuarial Society website-search feasibility follow-up — *Status:* Not started — *Due:* TBD  \n\
+  \  - Outcome: CAS receives confirmation on whether Onyx can index their Drupal main site and WordPress subsites, or an alternative\
+  \ approach, plus the Fireflies transcript link.  \n  - Links: HubSpot company/deal <URL>  \n  - Blockers: Team/co-founder\
+  \ feasibility input on website indexing; CAS details on the membership portal technology.\n- [ ] **(P1)** European Spallation\
+  \ Source evaluation follow-up — *Status:* Not started — *Due:* TBD  \n  - Outcome: ESS receives technical documentation\
+  \ on permission handling, a comparison against Open Web UI, and trial options for Onyx Cloud vs enterprise self-hosted deployment.\
+  \  \n  - Links: HubSpot deal <URL>  \n  - Blockers: ESS internal alignment before starting a trial.\n- [ ] **(P1)** Hult\
+  \ International Business School follow-up — *Status:* Not started — *Due:* Apr 20, 2026  \n  - Outcome: James Warner receives\
+  \ the follow-up email and a 15-minute Monday 11:00 AM Eastern calendar invite.  \n  - Links: HubSpot contact <URL>  \n \
+  \ - Blockers: Hult internal review of options and requirements.\n- [ ] **(P1)** Virtual Tutor 3.2 readiness / special tutor\
+  \ tag — *Status:* Not started — *Due:* Jun 1, 2026  \n  - Outcome: Virtual Tutor 3.2 is ready to go and upgraded to the\
+  \ special tutor tag.  \n  - Links: <URL>  \n  - Blockers: Joint with Adam; no other blockers listed.\n\n---\n\n## Adam\n\
+  ### Current\n- [ ] **(P1)** Virtual Tutor 3.2 readiness / special tutor tag — *Status:* Not started — *Due:* Jun 1, 2026\
+  \  \n  - Outcome: Virtual Tutor 3.2 is ready to go and upgraded to the special tutor tag.  \n  - Links: <URL>  \n  - Blockers:\
+  \ Joint with Matthew; no other blockers listed.\n\n### Unblockers / Needs help\n- [ ] None listed\n\n---\n\n## Chris\n###\
+  \ Current\n- [ ] **(P1)** Hult collaboration options write-up — *Status:* Not started — *Due:* Apr 17, 2026  \n  - Outcome:\
+  \ Hult receives a write-up outlining hybrid open-source plus paid engagement options, contribution pathways, and customization/hosting\
+  \ models.  \n  - Links: HubSpot contact <URL>  \n  - Blockers: None\n- [ ] **(P1)** Virtual Tutor June 1 readiness — *Status:*\
+  \ Not started — *Due:* Jun 1, 2026  \n  - Outcome: Virtual Tutor is ready to go with the requested feature list addressed.\
+  \  \n  - Links: <URL>  \n  - Blockers: None listed\n\n---\n\n## Evan\n### Current\n- [ ] **(P0)** perm sync fixes — *Status:*\
+  \ implementing fixes — *Due:* May 11 \n  - Outcome: All perm sync related issues that occur at reasonably high frequency\
+  \ (>10 in the last week) are resolved (fixed in code or determined to be user error)\n  - Scope update: PR #11284 fixes\
+  \ Confluence Server/DC space pagination by following `_links.next` instead of stopping when the result count is below the\
+  \ requested limit, preventing missed spaces and downstream permission-sync failures. PR #11291 fixes Confluence Server/DC\
+  \ pagination during permission sync and CQL retrieval when `_paginate_url` runs without a callback, so capped or misreported\
+  \ pages do not miss results. PR #11299 cherry-picks the #11291 fix to `release/v4.0`.\n  - Links: <URL> PR #11284: <URL>\
+  \ PR #11291: <URL> PR #11299: <URL>  \n  - Blockers: None\n- [ ] **(P1)** BYOK LLM Key — *Status:* planning phase — *Due:*\
+  \ May 12 \n  - Outcome: Admins can configure LLM providers to be \"BYOK\" i.e. users have to provide their own key. BYOK\
+  \ should let customers bypass Onyx-managed weekly limits, including the shared per-tenant LLM cost cap, API call caps, non-streaming\
+  \ API call caps, and chunks-indexed caps; customers then pay OpenAI/Anthropic directly and are subject to their provider/account\
+  \ limits instead. Customers using Onyx's own API keys are intentionally covered by their plan and remain subject to weekly\
+  \ usage limits.\n  - Scope notes: Onyx Cloud defaults to Onyx-managed OpenAI and Anthropic API keys as a convenience. Customer-facing\
+  \ guidance says users add their own OpenAI or Anthropic API key via Admin Panel → Configuration → LLM.\n  - Links: <URL>\
+  \ <URL> <URL> <URL> Discord thread: OnyxBot <> anjeriko\n  - Blockers: UI/UX design\n\n### Unblockers / Needs help\n- [\
+  \ ] HRT MCP issue: Justin needs Evan’s context from the prior thread before spending time investigating, to confirm whether\
+  \ it appears to be an Onyx-owned issue.\n- [ ] what UI components should BYOK llm key use? Customer-facing guidance points\
+  \ to Admin Panel → Configuration → LLM.\n\n---\n\n## Ronnie\n### Current\n- [ ] **(P1)** <todo title> — *Status:* Not started\
+  \ — *Due:* TBD  \n  - Outcome: <what “done” means>  \n  - Links: <url(s)>  \n  - Blockers: <none / describe>\n\n### Unblockers\
+  \ / Needs help\n- [ ] <question / decision / dependency>\n\n---\n\n## Duo\n### Current\n- [ ] **(P1)** mockups"
+expected_class: CHANGE
+doc_title: Virtual Tutor
+doc_url: <URL>
+doc_content: Virtual Tutor
+source: connector:google_drive
+expected_facts_present: []
+expected_facts_preserved: []
+max_bloat_ratio: 2.0
+notes: Real production reconciler CHANGE event from /wiki/.git commit 4976ee44d3 (2026-05-26). facts_present/preserved empty
+  for bulk-generated cases; trigger + bloat + entity-density axes still score.
+tags:
+- real-world
+- real-prod-commit
+- source:google_drive
+- sha:4976ee44d3

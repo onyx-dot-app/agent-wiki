@@ -1,0 +1,32 @@
+id: pi-chg-02-deprecation-notice
+surface: process_instruction
+wiki_path: api/v1/users.md
+current_body: |
+  # Users API v1
+
+  Status: stable.
+
+  ## Endpoints
+
+  - `GET /v1/users` — list users
+  - `POST /v1/users` — create user
+expected_class: CHANGE
+payload:
+  instruction: v1 is deprecated as of 2026-04-01; clients should move to v2.
+source: connector:github
+doc_title: null
+doc_url: null
+doc_content: null
+expected_facts_present:
+- id: deprecated-date
+  text: v1 is deprecated as of 2026-04-01
+- id: migrate-v2
+  text: clients should move to v2
+expected_facts_preserved:
+- id: list-endpoint
+  text: GET /v1/users lists users
+- id: create-endpoint
+  text: POST /v1/users creates a user
+max_bloat_ratio: 2.0
+notes: Deprecation banner + endpoint list must persist.
+tags: []

@@ -1,0 +1,55 @@
+id: rd-real-bulk-fffacb57b9
+surface: reconcile_document
+wiki_path: team-todos.md
+current_body: "# Team Todos (by owner)\n\n> Purpose: Single place to track current work, unblockers, and ownership.\n> Suggested\
+  \ cadence: quick async update daily; deeper review in weekly planning.\n\n## How to use this page\n- Add new work under\
+  \ the person who will **drive it to completion**.\n- Prefer small, outcome-oriented items.\n- Each todo should include (when\
+  \ possible):\n  - **Outcome / Definition of done**\n  - **Priority**: P0 (urgent), P1 (this week), P2 (later)\n  - **Due**:\
+  \ date or “TBD”\n  - **Status**: Not started / In progress / Blocked / In review / Done\n  - **Links**: ticket, doc, PR,\
+  \ dashboard, etc.\n- When something is blocked, write the **specific blocker** and who/what can unblock it.\n\n---\n\n##\
+  \ Yuhong\n### Current\n- Keep this user's TODOs empty but add in all relevant blockers that this user has for other people's\
+  \ projects\n\n---\n\n## Nik\n### Current\n- [ ] **(P1)** <todo title> — *Status:* Not started — *Due:* TBD  \n  - Outcome:\
+  \ <what “done” means>  \n  - Links: <url(s)>  \n  - Blockers: <none / describe>\n\n### Unblockers / Needs help\n- [ ] <question\
+  \ / decision / dependency>\n\n---\n\n## Dane\n### Current\n- [ ] **(P1)** <todo title> — *Status:* Not started — *Due:*\
+  \ TBD  \n  - Outcome: <what “done” means>  \n  - Links: <url(s)>  \n  - Blockers: <none / describe>\n\n### Unblockers /\
+  \ Needs help\n- [ ] <question / decision / dependency>\n\n---\n\n## Bo\n### Current\n- [ ] **(P1)** <todo title> — *Status:*\
+  \ Not started — *Due:* TBD  \n  - Outcome: <what “done” means>  \n  - Links: <url(s)>  \n  - Blockers: <none / describe>\n\
+  \n---\n\n## Evan\n### Current\n- [ ] **(P0)** perm sync fixes — *Status:* implementing fixes — *Due:* May 11 \n  - Outcome:\
+  \ All perm sync related issues that occur at reasonably high frequency (>10 in the last week) are resolved (fixed in code\
+  \ or determined to be user error)\n  - Links: <URL>  \n  - Blockers: None\n- [ ] **(P1)** BYOK LLM Key — *Status:* planning\
+  \ phase — *Due:* May 12 \n  - Outcome: Admins can configure LLM providers to be \"BYOK\" i.e. users have to provide their\
+  \ own key. BYOK should let customers bypass Onyx-managed weekly limits, including the shared per-tenant LLM cost cap, API\
+  \ call caps, non-streaming API call caps, and chunks-indexed caps; customers are then subject to their provider/account\
+  \ limits instead.\n  - Links: <URL> <URL> <URL>  \n  - Blockers: UI/UX design\n\n### Unblockers / Needs help\n- [ ] what\
+  \ UI components should BYOK llm key use? Candidate location from customer-facing guidance: Admin Panel → LLM Configuration.\n\
+  \n---\n\n## Ronnie\n### Current\n- [ ] **(P1)** <todo title> — *Status:* Not started — *Due:* TBD  \n  - Outcome: <what\
+  \ “done” means>  \n  - Links: <url(s)>  \n  - Blockers: <none / describe>\n\n### Unblockers / Needs help\n- [ ] <question\
+  \ / decision / dependency>\n\n---\n\n## Duo\n### Current\n- [ ] **(P1)** mockups\n\n---\n\n## Unassigned / Intake\n### Current\n\
+  - [ ] **(P2)** Push Onyx-derived summaries into Confluence or other user tools — *Status:* Not started — *Due:* TBD\n  -\
+  \ Outcome: Discord and WhatsApp content can be ingested, summarized by Onyx, and pushed into Confluence or other tools where\
+  \ users work.\n  - Scope notes: No native \"push to Confluence\" path exists today; expected approach is source ingest/index\
+  \ via Onyx connectors → scheduled or triggered Onyx Developer API call to generate summaries via Chat/Agents → custom glue\
+  \ code such as script/cron/n8n/Zapier → destination API such as Confluence, Slack, email, or other user tools. Upcoming\
+  \ Onyx Workflows may support scheduled/event-triggered agents natively.\n  - API / pricing notes: Onyx Cloud automated summary\
+  \ workflows require API access, which means Service Account API Keys are available on Business or Enterprise plans, not\
+  \ the free Cloud tier. Key options include Admin API Key for full-access system automation, Basic API Key for Chat/Search/Agents/Actions\
+  \ app or integration development, and Limited API Key for read-only agent/chat use. Personal Access Tokens are also available\
+  \ and inherit the creating user's permissions.\n  - Links: Discord request from martincleaver; <URL> <URL> <URL>\n  - Blockers:\
+  \ Needs owner assignment and scope clarification.\n\n---\n\n## Shared / Rotations\n- **On-call / triage:** TBD\n- **Release\
+  \ captain:** TBD\n- **Meeting notes owner:** TBD\n- **Quality / bug bash coordinator:** TBD\n\n---\n\n## ✅ Done (archive)\n\
+  > Move items here once complete; prune monthly.\n\n- (example) Shipped <feature> — Owner: <name> — Date: YYYY-MM-DD"
+expected_class: CHANGE
+doc_title: ingest from discord
+doc_url: <URL>
+doc_content: ''
+source: connector:discord
+expected_facts_present: []
+expected_facts_preserved: []
+max_bloat_ratio: 2.0
+notes: Real production reconciler CHANGE event from /wiki/.git commit fffacb57b9 (2026-05-19). facts_present/preserved left
+  empty for bulk generation; trigger + bloat + entity-density axes still score.
+tags:
+- real-world
+- real-prod-commit
+- source:discord
+- sha:fffacb57b9

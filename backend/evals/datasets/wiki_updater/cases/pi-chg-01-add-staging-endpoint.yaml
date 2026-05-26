@@ -1,0 +1,28 @@
+id: pi-chg-01-add-staging-endpoint
+surface: process_instruction
+wiki_path: services/auth/endpoints.md
+current_body: |
+  # Auth endpoints
+
+  ## Production
+
+  - `https://auth.example.com/login`
+  - `https://auth.example.com/logout`
+expected_class: CHANGE
+payload:
+  instruction: We have a staging environment at https://auth.staging.example.com — add a Staging section.
+source: manual
+doc_title: null
+doc_url: null
+doc_content: null
+expected_facts_present:
+- id: staging-host
+  text: the page documents the staging host https://auth.staging.example.com
+expected_facts_preserved:
+- id: prod-login
+  text: the production login endpoint is documented
+- id: prod-logout
+  text: the production logout endpoint is documented
+max_bloat_ratio: 2.0
+notes: Pure additive — staging section appears, prod stays.
+tags: []

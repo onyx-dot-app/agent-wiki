@@ -1,0 +1,25 @@
+id: pi-chg-08-cron-schedule
+surface: process_instruction
+wiki_path: jobs/nightly-reindex.md
+current_body: |
+  # Nightly reindex
+
+  Reindex job runs at 02:00 UTC on weekdays. Owner: search team.
+expected_class: CHANGE
+payload:
+  instruction: Schedule changed to 03:00 UTC daily (including weekends) starting this Monday.
+source: manual
+doc_title: null
+doc_url: null
+doc_content: null
+expected_facts_present:
+- id: new-time
+  text: the job runs at 03:00 UTC
+- id: daily
+  text: the job runs daily, not weekdays-only
+expected_facts_preserved:
+- id: owner
+  text: the search team is still listed as owner
+max_bloat_ratio: 2.0
+notes: Time + cadence change. Owner must persist.
+tags: []

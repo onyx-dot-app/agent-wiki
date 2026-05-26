@@ -1,0 +1,42 @@
+id: rd-real-pr113-block-fabricated-tasks
+surface: reconcile_document
+wiki_path: engineering/Agent Wiki Project/Bloat and Drift Handling.md
+current_body: |
+  # Bloat Handling
+
+  ## Current implementation
+  - BM25 candidates with a cutoff
+  - Per candidate page:
+    - There are classifications like NO_CHANGE, IRRELEVANT, or applying a new body. The batch reconciler now collects these decisions through a typed `submit_results` tool call.
+    - Edit application uses targeted FIND/REPLACE blocks.
+  - Offline evals live under `backend/evals/` and test both **WHEN** to update and **HOW** good the update is.
+expected_class: CHANGE
+doc_title: 'prompt(reconciler): block fabricated tasks and loose product-area relevance'
+doc_url: https://github.com/onyx-dot-app/agent-wiki/pull/113
+doc_content: 'Analysis of 1,092 production eval samples found 226 cases where the judge marked a committed outcome as wrong.
+  Three patterns: 178 cases of HubSpot contact/company records becoming fabricated team-todos.md tasks; 24 cases of GitHub
+  PRs added to personal notes based only on product-area overlap; remaining cases of Slack announcements becoming task entries.
+  The reconciler prompt was tightened to reject CRM records as action items, require direct relevance to the page''s question,
+  and forbid creating checklist entries unless the source explicitly describes work to be done.'
+source: connector:github
+expected_facts_present:
+- id: scope-policy
+  text: the reconciler prompt was tightened to treat CRM records as non-actionable for todo pages
+- id: checklist-rule
+  text: checklist/action entries are forbidden unless the source explicitly describes work to be done
+expected_facts_preserved:
+- id: bm25
+  text: BM25 candidate cutoff still described
+- id: submit-results
+  text: submit_results tool-call collection still described
+- id: find-replace
+  text: targeted FIND/REPLACE edit application still described
+- id: evals-location
+  text: offline evals under backend/evals/ still mentioned
+max_bloat_ratio: 2.0
+notes: Real GitHub PR description (#113) against a real wiki snapshot taken before the policy was documented. CHANGE — new
+  prompt policy is net-new to the page.
+tags:
+- real-world
+- source:github
+- pr:113

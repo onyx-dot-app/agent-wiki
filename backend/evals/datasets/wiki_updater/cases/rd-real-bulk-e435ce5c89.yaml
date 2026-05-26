@@ -1,0 +1,32 @@
+id: rd-real-bulk-e435ce5c89
+surface: reconcile_document
+wiki_path: customer_notes/scania/current_state.md
+current_body: |-
+  This document will keep track of the overall status of Scania's Onyx instance (version, high level issues, etc).
+
+  Onyx version: 3.2.1 (as of Apr 30: <URL>
+
+  most recent sharepoint issue (May 18): <URL>
+
+  As of May 26, Scania is implementing an update intended to unblock the current error cluster. No urgent escalation is reported.
+
+  Evaluation / POC context from the Feb. 4 sales call: Scania wants an enterprise-wide knowledge base and AI-powered search across SharePoint, Teams, Jira, Confluence, SAP, ServiceNow, and related systems, plus a RAG/MCP foundation for agents used by R&D and other teams. Microsoft Copilot / SharePoint-native options were described as insufficient at scale.
+
+  Technical requirements captured before the POC included self-hosted deployment, SSO/SCIM, granular permissions/groups, frequent sync and permission mirroring, bring-your-own LLM options such as Azure OpenAI/OpenAI or Bedrock, and APIs/embeddable widgets for intranet search.
+
+  HubSpot lists Jim Tolman, Technology Strategy Manager (<EMAIL>), as the primary contact. Additional Scania contacts in the HubSpot record include <EMAIL>, <EMAIL>, <EMAIL>, <EMAIL>, <EMAIL>, <EMAIL>, <EMAIL>, <EMAIL>, <EMAIL>, <EMAIL>, <EMAIL>, and <EMAIL>. It lists two Scania deals in stage `decisionmakerboughtin`, both with close date <PHONE>: `Scania - Enterprise Platform - 3k seats` for <AMOUNT> (<URL> and `Scania - Simple Search - 50k seats` for <AMOUNT> (<URL> The Feb. 4 call notes say exact seat count was not established on that call; pricing discussion was framework-only, including possible basic vs. power-user tiers, with no specific pricing numbers quoted.
+expected_class: CHANGE
+doc_title: Jim Tolman
+doc_url: <URL>
+doc_content: Jim Tolman
+source: connector:hubspot
+expected_facts_present: []
+expected_facts_preserved: []
+max_bloat_ratio: 2.0
+notes: Real production reconciler CHANGE event from /wiki/.git commit e435ce5c89 (2026-05-26). facts_present/preserved left
+  empty for bulk generation; trigger + bloat + entity-density axes still score.
+tags:
+- real-world
+- real-prod-commit
+- source:hubspot
+- sha:e435ce5c89

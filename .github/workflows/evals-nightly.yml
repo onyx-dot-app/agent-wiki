@@ -53,7 +53,7 @@ jobs:
       - name: wiki_updater live run
         run: |
           uv run python -m evals.wiki_updater.run \
-            --cases evals/datasets/wiki_updater/cases.jsonl \
+            --cases evals/datasets/wiki_updater/cases \
             --models "$EVAL_MODELS" \
             --braintrust "nightly-wiki-updater-$(date -u +%Y%m%d)" \
             --out runs/nightly_wiki_updater.jsonl

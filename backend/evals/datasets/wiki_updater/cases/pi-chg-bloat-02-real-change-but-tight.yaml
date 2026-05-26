@@ -1,0 +1,47 @@
+id: pi-chg-bloat-02-real-change-but-tight
+surface: process_instruction
+wiki_path: services/orders/rate-limits.md
+current_body: |
+  # Orders rate limits
+
+  - Standard: 100 req/min per token
+  - Enterprise: 1000 req/min per token
+expected_class: CHANGE
+payload:
+  instruction: 'Lots of context (most irrelevant): Some additional context, written verbosely. Some additional context, written
+    verbosely. Some additional context, written verbosely. Some additional context, written verbosely. Some additional context,
+    written verbosely. Some additional context, written verbosely. Some additional context, written verbosely. Some additional
+    context, written verbosely. Some additional context, written verbosely. Some additional context, written verbosely. Some
+    additional context, written verbosely. Some additional context, written verbosely. Some additional context, written verbosely.
+    Some additional context, written verbosely. Some additional context, written verbosely. Some additional context, written
+    verbosely. Some additional context, written verbosely. Some additional context, written verbosely. Some additional context,
+    written verbosely. Some additional context, written verbosely. Some additional context, written verbosely. Some additional
+    context, written verbosely. Some additional context, written verbosely. Some additional context, written verbosely. Some
+    additional context, written verbosely. Some additional context, written verbosely. Some additional context, written verbosely.
+    Some additional context, written verbosely. Some additional context, written verbosely. Some additional context, written
+    verbosely. Some additional context, written verbosely. Some additional context, written verbosely. Some additional context,
+    written verbosely. Some additional context, written verbosely. Some additional context, written verbosely. Some additional
+    context, written verbosely. Some additional context, written verbosely. Some additional context, written verbosely. Some
+    additional context, written verbosely. Some additional context, written verbosely. Some additional context, written verbosely.
+    Some additional context, written verbosely. Some additional context, written verbosely. Some additional context, written
+    verbosely. Some additional context, written verbosely. Some additional context, written verbosely. Some additional context,
+    written verbosely. Some additional context, written verbosely. Some additional context, written verbosely. Some additional
+    context, written verbosely. Some additional context, written verbosely. Some additional context, written verbosely. Some
+    additional context, written verbosely. Some additional context, written verbosely. Some additional context, written verbosely.
+    Some additional context, written verbosely. Some additional context, written verbosely. Some additional context, written
+    verbosely. Some additional context, written verbosely. Some additional context, written verbosely.  The bottom line is:
+    standard tier is now 200 req/min per token.'
+source: connector:notion
+doc_title: null
+doc_url: null
+doc_content: null
+expected_facts_present:
+- id: standard-200
+  text: standard tier rate limit is 200 req/min per token
+expected_facts_preserved:
+- id: enterprise-1000
+  text: enterprise tier rate limit is 1000 req/min per token
+max_bloat_ratio: 1.5
+notes: Real one-line change buried in noise. Must not balloon the page.
+tags:
+- bloat-bait

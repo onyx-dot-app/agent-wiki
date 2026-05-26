@@ -1,0 +1,23 @@
+id: pi-chg-07-add-link
+surface: process_instruction
+wiki_path: services/search/runbook.md
+current_body: |
+  # Search runbook
+
+  Restart the OpenSearch coordinator with `kubectl rollout restart statefulset/os-coord`.
+expected_class: CHANGE
+payload:
+  instruction: Link to the OpenSearch dashboard at https://grafana.example.com/d/os-coord in the runbook.
+source: manual
+doc_title: null
+doc_url: null
+doc_content: null
+expected_facts_present:
+- id: dashboard-url
+  text: the dashboard URL grafana.example.com/d/os-coord appears
+expected_facts_preserved:
+- id: restart-cmd
+  text: the kubectl rollout restart command remains
+max_bloat_ratio: 2.0
+notes: Simple link addition.
+tags: []

@@ -1,0 +1,32 @@
+id: rd-real-bulk-1c96253c25
+surface: reconcile_document
+wiki_path: individual_notes/Things Yuhong cares about.md
+current_body: |-
+  # Tracking of all of the things that Yuhong would like updates on:
+
+  ## Tracking evals
+  How are the evaluations going for updating documents to the wiki? Place updates as bullet points below
+
+  How is the evaluation for agents updating the documents going? I want updates as bullet points below
+
+  - In the latest production ingest eval analysis, 226 of 1,092 samples had committed outcomes the judge marked wrong. Most were loose relevance failures: HubSpot contact/company records became fabricated `team-todos.md` tasks, GitHub PRs were added to personal notes based only on product-area overlap, and Slack announcements/support threads became task entries. PR #113 tightened the reconciler prompt to reject CRM records as action items, require direct relevance to the page's question, and avoid creating checklist items unless the source explicitly describes work to be done; monitor follow-up runs for improvement.
+
+  ## Tracking UX
+  How is progress on the deploying Agents via the UI? I want to know when it can support claude code, craft, etc.
+
+  - Claude Code support is documented through the Onyx MCP Server path. Craft support is not documented yet.
+expected_class: CHANGE
+doc_title: 'Yuhong in #eng-infra: I keep getting these openai api account has been f...'
+doc_url: <URL>
+doc_content: 'Yuhong in #eng-infra: I keep getting these openai api account has been f...'
+source: connector:slack
+expected_facts_present: []
+expected_facts_preserved: []
+max_bloat_ratio: 2.0
+notes: Real production reconciler CHANGE event from /wiki/.git commit 1c96253c25 (2026-05-24). facts_present/preserved empty
+  for bulk-generated cases; trigger + bloat + entity-density axes still score.
+tags:
+- real-world
+- real-prod-commit
+- source:slack
+- sha:1c96253c25

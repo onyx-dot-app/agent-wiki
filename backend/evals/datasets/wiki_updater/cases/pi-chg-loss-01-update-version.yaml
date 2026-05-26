@@ -1,0 +1,34 @@
+id: pi-chg-loss-01-update-version
+surface: process_instruction
+wiki_path: services/python-runtime/notes.md
+current_body: |
+  # Python runtime
+
+  Production runs Python 3.12 on Linux. CPU-bound workers use uvloop. Memory budget 2 GB per worker. Restart policy: rolling, 1 at a time.
+
+  ## Known issues
+
+  - libpq segfault on shutdown when KEEPALIVE_INTERVAL < 5 (see bug-431)
+expected_class: CHANGE
+payload:
+  instruction: Upgrade to Python 3.13 next sprint.
+source: slack
+doc_title: null
+doc_url: null
+doc_content: null
+expected_facts_present:
+- id: py313
+  text: Python 3.13 is mentioned as the upcoming/current version
+expected_facts_preserved:
+- id: uvloop
+  text: uvloop is still documented for CPU-bound workers
+- id: mem-budget
+  text: the 2 GB memory budget per worker is still documented
+- id: restart-policy
+  text: the rolling restart policy is still documented
+- id: libpq-bug
+  text: the libpq segfault known issue is still documented
+max_bloat_ratio: 2.0
+notes: One-line update tempts the model to drop the known-issues section.
+tags:
+- loss-bait

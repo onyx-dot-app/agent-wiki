@@ -1,0 +1,22 @@
+id: rd-irr-02-api-doc-vs-arch-decision
+surface: reconcile_document
+wiki_path: adr/0007-event-bus-choice.md
+current_body: |
+  # ADR-0007: choosing an event bus
+
+  ## Decision
+
+  We adopt Kafka over Kinesis for the central event bus. Trade-offs and constraints in the discussion below.
+expected_class: IRRELEVANT
+payload: null
+source: ''
+doc_title: Kafka REST proxy API reference
+doc_url: https://docs.confluent.io/rest-proxy
+doc_content: The Kafka REST proxy exposes HTTP endpoints to produce and consume from a Kafka cluster. GET /topics, POST /topics/{name},
+  etc.
+expected_facts_present: []
+expected_facts_preserved: []
+max_bloat_ratio: 2.0
+notes: API reference is not an architecture decision update.
+tags:
+- irrelevant-bait

@@ -1,0 +1,23 @@
+id: pi-chg-05-add-owner
+surface: process_instruction
+wiki_path: services/notifications/overview.md
+current_body: |
+  # Notifications service
+
+  Sends transactional email + push. Throughput 50/s steady, 500/s burst.
+expected_class: CHANGE
+payload:
+  instruction: Pia Lopez owns this service as of this week. Add an Owner section.
+source: manual
+doc_title: null
+doc_url: null
+doc_content: null
+expected_facts_present:
+- id: owner-name
+  text: Pia Lopez is named as the owner
+expected_facts_preserved:
+- id: throughput
+  text: throughput numbers 50/s steady and 500/s burst remain
+max_bloat_ratio: 2.0
+notes: Personnel addition without removing operational facts.
+tags: []

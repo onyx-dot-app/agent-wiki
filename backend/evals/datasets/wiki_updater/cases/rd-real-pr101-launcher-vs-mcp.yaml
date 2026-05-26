@@ -1,0 +1,31 @@
+id: rd-real-pr101-launcher-vs-mcp
+surface: reconcile_document
+wiki_path: engineering/Agent Wiki Project/MCP Server.md
+current_body: |
+  # MCP server
+
+  The wiki exposes itself as a Model Context Protocol server so external coding agents can read, search, edit, and subscribe to wiki docs as a first-class workspace.
+
+  ## Surface
+
+  Single endpoint at `/api/mcp`, both methods bearer-authed:
+
+  - `POST /api/mcp` — JSON-RPC 2.0 request/response.
+  - `GET /api/mcp` — long-lived SSE stream for server-initiated frames.
+expected_class: IRRELEVANT
+doc_title: 'feat(launchers/helper-go): prompt to switch endpoint on mismatch'
+doc_url: https://github.com/onyx-dot-app/agent-wiki/pull/101
+doc_content: Launcher pinned to wiki A refuses any `agentwiki://` URI minted by wiki B with a terminal error — only escape
+  today is `rm ~/.agentwiki/endpoint.url` from a shell. On mismatch, now show a native macOS dialog asking to switch the pinned
+  wiki endpoint.
+source: connector:github
+expected_facts_present: []
+expected_facts_preserved: []
+max_bloat_ratio: 2.0
+notes: 'Real PR #101. About the local Run-Agent launcher app, not about the MCP server itself. Topical overlap (both touch
+  ''wiki endpoints'') but the MCP page documents the server-side surface, not the client launcher.'
+tags:
+- real-world
+- source:github
+- pr:101
+- irrelevant-bait

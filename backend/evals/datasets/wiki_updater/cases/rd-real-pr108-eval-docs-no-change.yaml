@@ -1,0 +1,24 @@
+id: rd-real-pr108-eval-docs-no-change
+surface: reconcile_document
+wiki_path: engineering/Agent Wiki Project/Bloat and Drift Handling.md
+current_body: |
+  # Bloat Handling
+
+  ## Current implementation
+  - Offline evals live under `backend/evals/` and test both WHEN to update and HOW good the update is.
+  - Current scorers relevant to bloat and drift include `bloat_ratio`, `markdown_valid`, `facts_present`, and `facts_preserved`; the full scorer reference also covers `trigger.*`, `diff_addition_ratio`, `entity_density_delta`, `selector_set_metrics`, `no_touch_compliance`, `update_*`, and `error_rate`.
+expected_class: NO_CHANGE
+doc_title: 'docs(evals): scorer reference + Braintrust guide + contributing'
+doc_url: https://github.com/onyx-dot-app/agent-wiki/pull/108
+doc_content: 'Follow-up to #79. Extends `backend/evals/README.md` with three sections: scorer reference (table for all 13
+  scorers with formula, direction, default threshold, what failure looks like), reading a Braintrust experiment (priority
+  scan order, wide-CI rule), and contributing (adding case / surface / debugging trial).'
+source: connector:github
+expected_facts_present: []
+expected_facts_preserved: []
+max_bloat_ratio: 2.0
+notes: 'Real PR #108. README-only PR; the wiki page already enumerates the same scorer list. NO_CHANGE.'
+tags:
+- real-world
+- source:github
+- pr:108

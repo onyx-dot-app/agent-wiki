@@ -32,7 +32,7 @@ backend/evals/
   ci_assert_baseline.py       structural validator (used in CI)
   tests/                      unit tests for scorers + reporting (no DB needed)
   datasets/
-    wiki_updater/cases.jsonl
+    wiki_updater/cases
     ingest_selector/cases.jsonl
     external_agent/scenarios/
   wiki_updater/run.py         python -m evals.wiki_updater.run
@@ -48,7 +48,7 @@ backend/evals/
 ```bash
 cd backend
 uv run python -m evals.wiki_updater.run \
-  --cases evals/datasets/wiki_updater/cases.jsonl \
+  --cases evals/datasets/wiki_updater/cases \
   --models claude-sonnet-4-6,gpt-5 \
   --runs 3 \
   --concurrency 8 \
@@ -172,7 +172,7 @@ Comparing across runs:
 
 ### Adding a new case to an existing surface
 
-1. **wiki_updater**: append a JSON line to `evals/datasets/wiki_updater/cases.jsonl`. Schema is `WikiUpdaterCase` in `evals/schema.py` — minimum: `id`, `surface` (`process_instruction` | `reconcile_document`), `wiki_path`, `current_body`, `expected_class` (NO_CHANGE | CHANGE | IRRELEVANT). For CHANGE cases also fill `expected_facts_present` + `expected_facts_preserved` (each `{id, text}`).
+1. **wiki_updater**: append a JSON line to `evals/datasets/wiki_updater/cases`. Schema is `WikiUpdaterCase` in `evals/schema.py` — minimum: `id`, `surface` (`process_instruction` | `reconcile_document`), `wiki_path`, `current_body`, `expected_class` (NO_CHANGE | CHANGE | IRRELEVANT). For CHANGE cases also fill `expected_facts_present` + `expected_facts_preserved` (each `{id, text}`).
 2. **ingest_selector**: append to `evals/datasets/ingest_selector/cases.jsonl`. `IngestSelectorCase` — `id`, `doc_title`, `doc_content`, `candidates` (each `{path, body}`), `expected_kept_paths`.
 3. **external_agent**: drop a YAML file in `evals/datasets/external_agent/scenarios/`. `Scenario` shape: `id`, `prompt`, `wiki_state` (list of `{path, body, summary}`), `expected_updates` (each `{path, facts_present, facts_preserved, max_bloat_ratio}`), `expected_not_updated` (list of paths).
 4. Run the runner with `--dry-run --case-id <id>` to verify the stub handles the case before spending API tokens.

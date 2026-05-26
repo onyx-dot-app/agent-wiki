@@ -1,0 +1,18 @@
+id: rd-noc-03-tangential-mention
+surface: reconcile_document
+wiki_path: services/search/architecture.md
+current_body: |
+  # Search architecture
+
+  OpenSearch 2.13 cluster, 3 data nodes, 2 coordinator nodes. BM25 over a custom tokenizer that lower-cases and strips diacritics.
+expected_class: NO_CHANGE
+payload: null
+source: ''
+doc_title: Q4 engineering update
+doc_url: https://docs.example.com/q4
+doc_content: 'Among other things this quarter: the search team continued running OpenSearch and shipped two reliability fixes.'
+expected_facts_present: []
+expected_facts_preserved: []
+max_bloat_ratio: 2.0
+notes: External doc mentions search tangentially with no new operational fact.
+tags: []

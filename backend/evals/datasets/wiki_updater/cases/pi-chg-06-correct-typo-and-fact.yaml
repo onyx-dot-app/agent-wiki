@@ -1,0 +1,25 @@
+id: pi-chg-06-correct-typo-and-fact
+surface: process_instruction
+wiki_path: services/payments/sla.md
+current_body: |
+  # Payments SLA
+
+  Avilability target 99.9% monthly. Latency p95 < 200ms.
+expected_class: CHANGE
+payload:
+  instruction: Fix the typo 'Avilability' → 'Availability', and the target is actually 99.95% per the contract.
+source: manual
+doc_title: null
+doc_url: null
+doc_content: null
+expected_facts_present:
+- id: availability-fixed
+  text: the spelling is 'Availability'
+- id: target-995
+  text: the availability target is 99.95% monthly
+expected_facts_preserved:
+- id: latency-target
+  text: p95 latency target under 200ms remains
+max_bloat_ratio: 2.0
+notes: Two corrections, one of them factual. Watches for silent loss of latency line.
+tags: []

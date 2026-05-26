@@ -1,0 +1,27 @@
+id: pi-noc-01-runbook-already-current
+surface: process_instruction
+wiki_path: ops/runbooks/auth-outage.md
+current_body: |
+  # Auth outage runbook
+
+  ## Symptom
+
+  Users see 500s on /login. PagerDuty fires `auth-5xx-spike`.
+
+  ## First response
+
+  1. Page the auth on-call.
+  2. Check the `auth-api` dashboard for elevated 5xx.
+  3. If error rate is over 5%, fail over to `auth-api-standby`.
+expected_class: NO_CHANGE
+payload:
+  instruction: Make sure the runbook notes the PagerDuty alert name.
+source: slack
+doc_title: null
+doc_url: null
+doc_content: null
+expected_facts_present: []
+expected_facts_preserved: []
+max_bloat_ratio: 2.0
+notes: Alert name already present — no update needed.
+tags: []

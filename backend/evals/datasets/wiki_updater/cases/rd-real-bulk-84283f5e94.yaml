@@ -1,0 +1,63 @@
+id: rd-real-bulk-84283f5e94
+surface: reconcile_document
+wiki_path: engineering/Agent Wiki Project/Bloat and Drift Handling.md
+current_body: |-
+  # Bloat Handling
+
+  ## First some stats
+  - What is the amount of document updates we get from st-dev per day
+  - What are the volumes for the top source types
+  - For the documents that get bloated, how many updates are they getting per day?
+
+  ## Some random notes
+  - Logic to determine what to pass over should live on the Onyx side
+  - It will be a better update on average if we can pass diffs along with the docs. Ideally a section above/below the area with the diff and handling merges where multiple parts are edited.
+    - Something like up to 2000 subword tokens above and below the diff might be good
+
+  ## Current implementation
+  - BM25 candidates with a cutoff
+    - This is probably reasonable however BM25 was built for queries, not documents. Something should maybe be done here.
+  - Per candidate page:
+    - There are classifications like NO_CHANGE, IRRELEVANT, or applying a new body. The batch reconciler now collects these decisions through a typed `submit_results` tool call instead of parsing fragile free-text result blocks.
+    - Edit application still uses targeted FIND/REPLACE blocks, with a trailing-whitespace-normalized fallback so minor spacing differences do not cause an otherwise valid edit to miss.
+  - Offline evals now live under `backend/evals/` and explicitly test both **WHEN** to update and **HOW** good the update is.
+    - Current scorers relevant to bloat and drift include `bloat_ratio`, `markdown_valid`, `facts_present`, and `facts_preserved`.
+    - The v0 `wiki_updater` dataset includes 30 cases across NO_CHANGE / CHANGE / IRRELEVANT, including bloat-bait and loss-bait examples.
+    - CI runs a dry-run smoke eval on PRs and nightly live matrix runs to Braintrust. The <PHONE> live baseline recorded mean bloat scores of 0.99 for Sonnet and 1.00 for GPT-5 on `process_instruction`, and 0.99 for Sonnet and 0.95 for GPT-5 on `reconcile_document`.
+  - `backend/scripts/eval_labeler.html` labels exported real-traffic JSONL samples in the browser. It writes labels, coverage notes, and source/wiki/diff summaries back to the original `.jsonl` rows, with manual per-sample Anthropic summarization and deduplication for identical source/wiki content. Exporting `ingest_eval_samples` JSONL rows is handled by `ods` operational tooling.
+
+  ## Proposed approach
+  - Agent loop shoud only have tool calls to do single or multi-edit, it should have looping behavior until it outputs finish or hits a max
+  - I would look pretty heavily into prompt tuning, likely this can prevent the bloat pretty strongly.
+    - Some other things to include in the prompt:
+      - Is this doc close to max length
+      - What is the scope of topics allowed for this doc
+      - Instructions to not scope-creep the document
+  - There should be some heuristics of max page length, if it's longer, we should queue up a compression task
+  - I think there should be an advanced page for the doc which is initially LLM generated including the scope of the page. This page can also have user changeable default for max chars of page.
+  - We can have a separate loop to prune the doc back to the length and set topics.
+  - Can freeze the doc after like some small number of commits (max 10), max time delay from creation (1 week).
+
+  ### Tools
+  - edit
+  - multi_edit
+  - mark_irrelevant
+  - finish
+
+  ## Extensions
+  - If a doc gets too many updates, it should get flagged to the owner.
+expected_class: CHANGE
+doc_title: '108: docs(evals): scorer reference + Braintrust guide + contributing'
+doc_url: <URL>
+doc_content: '108: docs(evals): scorer reference + Braintrust guide + contributing'
+source: connector:github
+expected_facts_present: []
+expected_facts_preserved: []
+max_bloat_ratio: 2.0
+notes: Real production reconciler CHANGE event from /wiki/.git commit 84283f5e94 (2026-05-22). facts_present/preserved empty
+  for bulk-generated cases; trigger + bloat + entity-density axes still score.
+tags:
+- real-world
+- real-prod-commit
+- source:github
+- sha:84283f5e94

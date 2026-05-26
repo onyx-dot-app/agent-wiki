@@ -23,6 +23,7 @@ a relevant one).
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Generator
 from contextlib import contextmanager
 from typing import Any
@@ -32,6 +33,9 @@ from app.llm.client import CompletionResult, ToolCall
 
 from evals.schema import TriggerClass, WikiUpdaterCase
 from evals.scorers import JUDGE_SYSTEM_MARKER as _JUDGE_MARKER
+
+
+log = logging.getLogger(__name__)
 
 
 # Substring length used as a fingerprint of ``current_body``. Long enough to
@@ -116,17 +120,29 @@ def stub_completions(cases: list[WikiUpdaterCase]) -> Generator[None]:
 
     Doesn't touch ``stream`` — the agents under eval only use ``complete``.
     """
+    # Many production-mined cases share the same wiki page (the dev wiki
+    # has a small page set, but each commit changes the body slightly), so
+    # multiple cases legitimately collide on a 200-char prefix. On collision
+    # we log and keep the FIRST case the fingerprint points to — the stub
+    # will reply with that case's canned response for any colliding row.
+    # Scoring on colliding rows in dry-run is therefore approximate, which
+    # is fine: dry-run validates wiring, not numeric correctness.
     case_by_fingerprint: dict[str, WikiUpdaterCase] = {}
+    collisions: list[tuple[str, str]] = []
     for case in cases:
         fingerprint = _case_fingerprint(case)
         existing = case_by_fingerprint.get(fingerprint)
         if existing is not None and existing.id != case.id:
-            raise ValueError(
-                "stub fingerprint collision between cases %s and %s "
-                "(first %d chars of current_body match)"
-                % (existing.id, case.id, _BODY_FINGERPRINT_LEN)
-            )
+            collisions.append((existing.id, case.id))
+            continue
         case_by_fingerprint[fingerprint] = case
+    if collisions:
+        log.info(
+            "dry-run stub: %d fingerprint collisions (first 5: %s) — "
+            "first case for each prefix wins; live runs are unaffected",
+            len(collisions),
+            collisions[:5],
+        )
     original = llm_client.complete
 
     def _stub(

@@ -1,0 +1,19 @@
+id: pi-noc-04-empty-payload
+surface: process_instruction
+wiki_path: services/search/index.md
+current_body: |
+  # Search
+
+  OpenSearch-backed BM25 over the wiki corpus. Reindex runs on every doc commit.
+expected_class: NO_CHANGE
+payload:
+  instruction: ''
+source: webhook
+doc_title: null
+doc_url: null
+doc_content: null
+expected_facts_present: []
+expected_facts_preserved: []
+max_bloat_ratio: 2.0
+notes: Empty instruction — must not invent updates.
+tags: []

@@ -1,0 +1,43 @@
+id: rd-chg-loss-01-rewrite-temptation
+surface: reconcile_document
+wiki_path: services/billing/architecture.md
+current_body: |
+  # Billing architecture
+
+  ## Components
+
+  - `billing-api` — FastAPI app, owns invoice creation and Stripe webhook handling.
+  - `billing-worker` — pgmq consumer, processes invoice events.
+  - `billing-db` — Postgres 17 with the `pgmq` extension.
+
+  ## Constraints
+
+  - Idempotency keys on every invoice mutation.
+  - Webhook handler returns 200 within 5s or Stripe retries.
+expected_class: CHANGE
+payload: null
+source: ''
+doc_title: 'Billing service: new BigQuery sink'
+doc_url: https://docs.example.com/billing-bigquery
+doc_content: We added a BigQuery sink that streams invoice events from billing-worker for analytics. The sink is fire-and-forget;
+  failures only emit a log line.
+expected_facts_present:
+- id: bq-sink
+  text: the BigQuery sink streaming invoice events is documented
+- id: fire-and-forget
+  text: the sink is fire-and-forget with log-only failure handling
+expected_facts_preserved:
+- id: billing-api
+  text: billing-api is still documented
+- id: billing-worker
+  text: billing-worker is still documented
+- id: billing-db
+  text: billing-db is still documented
+- id: idempotency
+  text: the idempotency-key constraint is still documented
+- id: webhook-5s
+  text: the 5-second Stripe webhook constraint is still documented
+max_bloat_ratio: 2.0
+notes: External doc adds a component; existing architecture must persist.
+tags:
+- loss-bait
