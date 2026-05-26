@@ -24,7 +24,14 @@ Surface = Literal[
     "reconcile_document",
     "ingest_selector",
     "external_agent",
+    "triggers",
 ]
+
+
+class TriggerFlavor(str, Enum):
+    DELTA = "delta"
+    SCHEDULE = "schedule"
+    NEW_FILE = "new_file"
 
 
 class FactClaim(BaseModel):
@@ -87,6 +94,66 @@ class IngestSelectorCase(BaseModel):
     doc_content: str
     candidates: list[IngestSelectorCandidate]
     expected_kept_paths: list[str]
+    notes: str = ""
+    tags: list[str] = Field(default_factory=list)
+
+
+class TriggerWikiDoc(BaseModel):
+    """One seed doc in the synthetic wiki snapshot a trigger sees."""
+
+    model_config = ConfigDict(frozen=True)
+
+    path: str
+    body: str
+
+
+class TriggerCase(BaseModel):
+    """One trigger-firing eval case.
+
+    Covers three flavors of the natural-language trigger eval pipeline:
+
+    * ``delta`` — doc edit; runs ``matches`` (phase 1) then, when the case
+      expects a match, ``render_message`` (phase 2).
+    * ``schedule`` — snapshot tick; runs ``matches_snapshot`` + optional
+      ``render_snapshot_message``.
+    * ``new_file`` — directory-scoped new file; runs the combined
+      ``evaluate_new_file_in_dir`` (single call returns triggered + message).
+
+    Quality scoring of the rendered message reuses ``facts_present`` /
+    ``facts_preserved`` from the shared judge panel — same scorer used
+    by the wiki_updater + external_agent surfaces.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    id: str
+    flavor: TriggerFlavor
+    nl_description: str
+    message_instruction: str = ""
+
+    wiki_state: list[TriggerWikiDoc] = Field(default_factory=list)
+
+    # delta-only
+    change_path: str | None = None
+    change_kind: str | None = None
+    before: str | None = None
+    after: str | None = None
+
+    # schedule-only
+    scope_path: str | None = None
+    when_iso: str | None = None
+
+    # new_file-only
+    new_file_path: str | None = None
+    new_file_body: str | None = None
+
+    # Ground truth
+    expected_matched: bool
+    expected_reason_facts: list[FactClaim] = Field(default_factory=list)
+    expected_message_facts_present: list[FactClaim] = Field(default_factory=list)
+    expected_message_facts_excluded: list[FactClaim] = Field(default_factory=list)
+    max_message_bloat_ratio: float = 8.0
+
     notes: str = ""
     tags: list[str] = Field(default_factory=list)
 

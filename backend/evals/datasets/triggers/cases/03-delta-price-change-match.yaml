@@ -1,0 +1,36 @@
+id: trig-03-delta-price-change-match
+flavor: delta
+nl_description: when a customer-facing pricing page changes a dollar amount
+message_instruction: |
+  Call out the page, the affected tier, and the old vs new dollar amount.
+wiki_state:
+  - path: marketing/pricing.md
+    body: |
+      # Pricing
+      Pro: $20/seat/month
+      Team: $40/seat/month
+change_path: marketing/pricing.md
+change_kind: edit
+before: |
+  # Pricing
+  Pro: $20/seat/month
+  Team: $40/seat/month
+after: |
+  # Pricing
+  Pro: $25/seat/month
+  Team: $40/seat/month
+expected_matched: true
+expected_reason_facts:
+  - id: r-pro-change
+    text: The reason mentions the Pro tier price change from $20 to $25.
+expected_message_facts_present:
+  - id: m-pro
+    text: The message mentions the Pro tier.
+  - id: m-old
+    text: The message mentions the old price $20.
+  - id: m-new
+    text: The message mentions the new price $25.
+expected_message_facts_excluded:
+  - id: x-team
+    text: The message mentions a change to the Team tier price.
+tags: [delta, fire, price]

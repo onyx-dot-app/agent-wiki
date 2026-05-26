@@ -1,0 +1,38 @@
+id: trig-10-delta-distractor-no-fire
+flavor: delta
+nl_description: |
+  when a runbook adds a new postgres restart step
+message_instruction: |
+  Tell oncall a postgres restart step was added and link the page.
+wiki_state:
+  - path: ops/postgres-backups-runbook.md
+    body: |
+      # Postgres Runbook
+      ## Failover
+      1. Promote the standby.
+      2. Reroute the api to the new primary.
+      ## Backups
+      Snapshots run nightly at 02:00 UTC.
+change_path: ops/postgres-backups-runbook.md
+change_kind: edit
+before: |
+  # Postgres Runbook
+  ## Failover
+  1. Promote the standby.
+  2. Reroute the api to the new primary.
+  ## Backups
+  Snapshots run nightly at 02:00 UTC.
+after: |
+  # Postgres Runbook
+  ## Failover
+  1. Promote the standby.
+  2. Reroute the api to the new primary.
+  ## Backups
+  Snapshots run nightly at 02:00 UTC.
+  Verify by restoring last week's snapshot to a sandbox cluster.
+expected_matched: false
+notes: |
+  Diff is on the Backups section (restore verification), not a restart
+  step. Description mentions "restart" — distractor keyword "restore"
+  must not pull a false fire.
+tags: [delta, no-fire, restraint, distractor]

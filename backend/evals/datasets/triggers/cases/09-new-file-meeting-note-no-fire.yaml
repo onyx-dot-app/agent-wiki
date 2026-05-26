@@ -1,0 +1,21 @@
+id: trig-09-new-file-meeting-note-no-fire
+flavor: new_file
+nl_description: |
+  when a new postmortem is added for a customer-impacting incident
+message_instruction: |
+  Note the incident title, the date, and link the postmortem path.
+wiki_state:
+  - path: incidents/index.md
+    body: |
+      # Incidents
+      Index of recent postmortems.
+new_file_path: incidents/2026-05-26-quarterly-review-notes.md
+new_file_body: |
+  # 2026-05-26 Quarterly Review Notes
+  Internal-only summary of this quarter's incident trends and team
+  retrospective discussion. No specific incident covered here.
+expected_matched: false
+notes: |
+  Restraint test — the new file is filed under incidents/ but it's a
+  retrospective notes doc, not a postmortem for a specific incident.
+tags: [new_file, no-fire, restraint]

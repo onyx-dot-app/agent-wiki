@@ -1,0 +1,18 @@
+id: trig-07-schedule-state-no-fire
+flavor: schedule
+nl_description: |
+  when there is any service whose status is currently yellow or red
+message_instruction: |
+  List the non-green services and link the status page.
+wiki_state:
+  - path: ops/status-allgreen.md
+    body: |
+      # Service Status
+      - api: green
+      - worker: green
+      - billing: green
+scope_path: ops/status-allgreen.md
+when_iso: "2026-05-26T15:00:00Z"
+expected_matched: false
+notes: All green on a state-style schedule check — must not fire.
+tags: [schedule, no-fire, restraint]

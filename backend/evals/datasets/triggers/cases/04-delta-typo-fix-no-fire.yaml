@@ -1,0 +1,29 @@
+id: trig-04-delta-typo-fix-no-fire
+flavor: delta
+nl_description: when a runbook adds a new postgres restart step
+message_instruction: |
+  Tell oncall a postgres restart step was added and link the page.
+wiki_state:
+  - path: ops/postgres-runbook.md
+    body: |
+      # Postgres Runbook
+      ## Failover
+      1. Promote the standby.
+      2. Reroute the api to the new primary.
+change_path: ops/postgres-runbook.md
+change_kind: edit
+before: |
+  # Postgres Runbook
+  ## Failover
+  1. Promote the standby.
+  2. Reroute the api to the new primary.
+after: |
+  # Postgres Runbook
+  ## Failover
+  1. Promote the standby.
+  2. Reroute the API to the new primary.
+expected_matched: false
+notes: |
+  Diff is a cosmetic capitalization fix. Trigger description is specific
+  to NEW restart steps — must not fire on a typo cleanup.
+tags: [delta, no-fire, restraint, cosmetic]

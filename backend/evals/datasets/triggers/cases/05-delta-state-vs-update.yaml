@@ -1,0 +1,45 @@
+id: trig-05-delta-state-vs-update
+flavor: delta
+nl_description: |
+  when the on-call rotation lists more than 3 people for a single week
+message_instruction: |
+  Note the week and the people on rotation.
+wiki_state:
+  - path: ops/oncall.md
+    body: |
+      # On-Call Rotation
+      ## Week of 2026-04-01
+      - alice
+      - bob
+      - carol
+change_path: ops/oncall.md
+change_kind: edit
+before: |
+  # On-Call Rotation
+  ## Week of 2026-04-01
+  - alice
+  - bob
+  - carol
+after: |
+  # On-Call Rotation
+  ## Week of 2026-04-01
+  - alice
+  - bob
+  - carol
+  - dave
+  - eve
+expected_matched: true
+expected_reason_facts:
+  - id: r-week-overload
+    text: The reason mentions the week of 2026-04-01 having more than 3 people.
+expected_message_facts_present:
+  - id: m-week
+    text: The message names the week of 2026-04-01.
+  - id: m-alice
+    text: The message names alice as on rotation.
+  - id: m-dave
+    text: The message names dave as on rotation.
+notes: |
+  State-style trigger ("when X is more than N") on an edit. The model
+  must evaluate the post-edit state against the rule, not just the diff.
+tags: [delta, fire, state]

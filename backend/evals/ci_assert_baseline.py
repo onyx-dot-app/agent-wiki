@@ -46,6 +46,14 @@ def check_run_file(path: Path) -> list[str]:
                 "%s case %s trigger_class_match=%.2f (expected 1.0 in dry-run)"
                 % (path, r.case_id, trigger.score)
             )
+        # Trigger eval surface uses a different scorer name for the WHEN
+        # axis; same oracle invariant applies.
+        match_decision = next((s for s in r.scorers if s.name == "trigger_match_decision"), None)
+        if match_decision is not None and match_decision.score < 1.0:
+            errs.append(
+                "%s case %s trigger_match_decision=%.2f (expected 1.0 in dry-run)"
+                % (path, r.case_id, match_decision.score)
+            )
     return errs
 
 
