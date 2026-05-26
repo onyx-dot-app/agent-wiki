@@ -231,6 +231,15 @@ def main(argv: list[str] | None = None) -> int:
 
     out_path = args.out or Path("runs") / ("wiki_updater_%d.jsonl" % int(time.time()))
     reporting.write_jsonl(out_path, results)
+    # Push the case set as a BT dataset once (per surface) before experiments,
+    # so experiments can link results to dataset rows for per-row regression view.
+    dataset_name_by_surface: dict[str, str] = {}
+    if args.dataset:
+        for surface in sorted({c.surface for c in cases}):
+            ds = "%s-%s" % (args.dataset, surface.replace("_", "-"))
+            subset_cases = [c for c in cases if c.surface == surface]
+            reporting.push_wiki_updater_dataset(ds, subset_cases)
+            dataset_name_by_surface[surface] = ds
     surface_urls: dict[str, str] = {}
     for surface in sorted({r.surface for r in results}):
         subset = [r for r in results if r.surface == surface]
@@ -239,7 +248,9 @@ def main(argv: list[str] | None = None) -> int:
         bt_url = ""
         if args.braintrust:
             experiment = "%s-%s" % (args.braintrust, surface.replace("_", "-"))
-            bt_url = reporting.push_to_braintrust(experiment, subset)
+            bt_url = reporting.push_to_braintrust(
+                experiment, subset, dataset=dataset_name_by_surface.get(surface)
+            )
             surface_urls[surface] = bt_url
         reporting.write_github_summary(sub_summary, braintrust_url=bt_url)
     print(

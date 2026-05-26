@@ -12,7 +12,14 @@ from pathlib import Path
 from typing import IO, Iterable
 
 from app.tracing import braintrust as bt
-from evals.schema import CaseResult, RunSummary, ScorerSummary, Surface
+from evals.schema import (
+    CaseResult,
+    IngestSelectorCase,
+    RunSummary,
+    ScorerSummary,
+    Surface,
+    WikiUpdaterCase,
+)
 
 
 log = logging.getLogger(__name__)
@@ -204,13 +211,102 @@ def print_summary(summary: RunSummary, *, stream: IO[str] = sys.stdout) -> None:
     print("", file=stream)
 
 
+def push_wiki_updater_dataset(dataset: str, cases: list[WikiUpdaterCase]) -> int:
+    """Push the wiki_updater case set as a Braintrust dataset.
+
+    Each case becomes one BT dataset row keyed by ``case.id`` so re-running
+    on the same case set upserts rather than appending. Subsequent
+    experiments call ``push_to_braintrust(..., dataset=<dataset>)`` to link
+    per-case results back to the dataset row for cross-run regression view.
+    """
+    api_key = os.environ.get("BRAINTRUST_API_KEY", "")
+    project = os.environ.get("BRAINTRUST_PROJECT", "")
+    if not api_key or not project:
+        log.warning("braintrust: skip dataset push — no BRAINTRUST_API_KEY or BRAINTRUST_PROJECT")
+        return 0
+    rows = [
+        bt.DatasetRow(
+            id=c.id,
+            input={
+                "surface": c.surface,
+                "wiki_path": c.wiki_path,
+                "current_body": c.current_body,
+                "doc_title": c.doc_title,
+                "doc_url": c.doc_url,
+                "doc_content": c.doc_content,
+                "source": c.source,
+                "payload": c.payload,
+            },
+            expected={
+                "expected_class": c.expected_class.value,
+                "expected_facts_present": [f.model_dump() for f in c.expected_facts_present],
+                "expected_facts_preserved": [f.model_dump() for f in c.expected_facts_preserved],
+            },
+            metadata={
+                "surface": c.surface,
+                "wiki_path": c.wiki_path,
+                "tags": list(c.tags or []),
+                "max_bloat_ratio": c.max_bloat_ratio,
+            },
+        )
+        for c in cases
+    ]
+    pushed = bt.push_dataset(project=project, dataset=dataset, api_key=api_key, rows=rows)
+    log.info(
+        "braintrust: pushed %d/%d dataset rows to project=%s dataset=%s",
+        pushed,
+        len(cases),
+        project,
+        dataset,
+    )
+    return pushed
+
+
+def push_ingest_selector_dataset(dataset: str, cases: list[IngestSelectorCase]) -> int:
+    """Push the ingest_selector case set as a Braintrust dataset."""
+    api_key = os.environ.get("BRAINTRUST_API_KEY", "")
+    project = os.environ.get("BRAINTRUST_PROJECT", "")
+    if not api_key or not project:
+        log.warning("braintrust: skip dataset push — no BRAINTRUST_API_KEY or BRAINTRUST_PROJECT")
+        return 0
+    rows = [
+        bt.DatasetRow(
+            id=c.id,
+            input={
+                "doc_title": c.doc_title,
+                "doc_content": c.doc_content,
+                "candidates": [{"path": x.path, "body": x.body} for x in c.candidates],
+            },
+            expected={"expected_kept_paths": list(c.expected_kept_paths)},
+            metadata={"tags": list(c.tags or [])},
+        )
+        for c in cases
+    ]
+    pushed = bt.push_dataset(project=project, dataset=dataset, api_key=api_key, rows=rows)
+    log.info(
+        "braintrust: pushed %d/%d dataset rows to project=%s dataset=%s",
+        pushed,
+        len(cases),
+        project,
+        dataset,
+    )
+    return pushed
+
+
 def push_to_braintrust(
     experiment: str,
     results: list[CaseResult],
     *,
     project: str | None = None,
+    dataset: str | None = None,
 ) -> str:
-    """Push results, return the experiment URL (or "" if push was skipped)."""
+    """Push results, return the experiment URL (or "" if push was skipped).
+
+    When ``dataset`` is set, the experiment is linked to that BT dataset
+    so the UI can show per-row regression vs prior experiments using the
+    same dataset. Each result row's ``case_id`` is matched to a dataset
+    row id.
+    """
     api_key = os.environ.get("BRAINTRUST_API_KEY", "")
     project_name = project or os.environ.get("BRAINTRUST_PROJECT", "")
     if not api_key or not project_name:
@@ -223,6 +319,7 @@ def push_to_braintrust(
             expected={"expected_class": r.expected_class},
             scores={s.name: s.score for s in r.scorers},
             metadata={
+                "case_id": r.case_id,
                 "provider": r.provider,
                 "model": r.model,
                 "run_index": r.run_index,
@@ -239,6 +336,7 @@ def push_to_braintrust(
         experiment=experiment,
         api_key=api_key,
         rows=rows,
+        dataset=dataset,
     )
     org = os.environ.get("BRAINTRUST_ORG", "")
     if org:
