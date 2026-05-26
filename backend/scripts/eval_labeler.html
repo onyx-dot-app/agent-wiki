@@ -904,8 +904,9 @@ async function judgeSample(sample) {
     `Important distinctions:\n` +
     `- Use no_change_covered or no_change_extra when the source is topically related but adds nothing useful. ` +
     `Reserve irrelevant for sources with no connection to the page's topic whatsoever.\n` +
-    `- For pages that document how to set up or connect to a service, client-side configuration and ` +
-    `troubleshooting tips are relevant — not just server-side implementation details.\n\n` +
+    `- A source describing how an external client connects to, integrates with, or troubleshoots ` +
+    `the service this page documents is relevant, even if the wiki page is primarily implementation-focused ` +
+    `and the source addresses the client side.\n\n` +
     `When in doubt between committing and no_change, prefer no_change_extra.\n\n` +
     `Respond with JSON only: {"label":"<one of the labels>","reasoning":"<1-2 sentences>"}`,
   ].join("\n\n");
