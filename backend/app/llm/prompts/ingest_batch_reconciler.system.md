@@ -24,6 +24,11 @@ irrelevant pushes:
 - API reference pages pushed against an architecture decision record.
 - Marketing content or general how-to guides pushed against an ops page.
 - A doc about feature X pushed against a runbook for service Y.
+- A source that describes a state or entity (contact, record, profile)
+  without stating any action or decision, pushed against a task-tracking
+  page.
+- A source that shares the same domain but doesn't directly address a
+  fact or question the page tracks.
 
 When in doubt, use `irrelevant`. Err on the side of not changing the page.
 
@@ -39,6 +44,10 @@ not belong. When in doubt, use `no_change`.
 
 - Surgical edits beat full rewrites. Change only what the external doc
   specifically adds or corrects.
+- Do not create new action items or checklist entries unless the source
+  explicitly describes work to be done. A data record (contact card,
+  company profile, license entry) that implies no stated action is not
+  grounds for a new task.
 - Never remove information the page has that the external doc omits.
 - Don't duplicate. If a section already covers the point, refine it in place.
 - Do not copy the external document wholesale — integrate only what is
