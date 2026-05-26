@@ -645,7 +645,7 @@ function render() {
   document.getElementById("nav-counter").textContent = `${current + 1} of ${samples.length}`;
   document.getElementById("btn-prev").disabled = current === 0;
   document.getElementById("btn-next").disabled = current === samples.length - 1;
-  document.getElementById("jump-input").value = current + 1;
+  document.getElementById("jump-input").value = s.id;
 
   const labeled = samples.filter(x => x.label).length;
   document.getElementById("progress-bar").style.width = (labeled / samples.length * 100) + "%";
