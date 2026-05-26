@@ -890,26 +890,25 @@ async function judgeSample(sample) {
     `<source_document>\n${(sample.source_content || "").slice(0, 6000)}\n</source_document>`,
     `<wiki_page>\n${(sample.wiki_body_before || "").slice(0, 6000)}\n</wiki_page>`,
     `\nGiven the source document and the wiki page above, decide what the correct reconciler action should be.\n\n` +
+    `First: scan the source for any specific fact, status update, or implicit action item that applies to this page's ` +
+    `exact subject — even if the source is primarily about something else. A source that is mostly off-topic but ` +
+    `contains one directly relevant fact should be judged on that fact alone.\n\n` +
     `Wiki pages are intentionally scoped and concise. An update is only justified when the source contains information ` +
-    `that clearly fits within the wiki page's existing purpose and level of detail — not simply because the source is ` +
-    `topically related or contains more detail on something the wiki already covers. Avoid committing updates that would ` +
-    `add excessive detail, transform the character of the page, or duplicate content the wiki already addresses adequately.\n\n` +
+    `that clearly fits within the wiki page's existing purpose and level of detail. Avoid committing updates that would ` +
+    `add excessive detail, transform the character of the page, or duplicate content the page already covers.\n\n` +
     `Labels: ${labelList}\n\n` +
     `- committed_critical: source contains a key fact, correction, or addition that clearly belongs in this wiki page and is missing\n` +
     `- committed_moderate: source adds a concrete, focused piece of information that fits the page's scope\n` +
     `- committed_nit: source only justifies a very minor or cosmetic touch\n` +
     `- no_change_covered: wiki already covers the topic adequately — no new information in the source\n` +
     `- no_change_extra: source is on-topic but the detail it adds exceeds the page's scope or level of detail\n` +
-    `- irrelevant: the source is about a completely different topic and could never warrant a change to this page\n\n` +
+    `- irrelevant: the source contains nothing — even in passing — that applies to this page\n\n` +
     `Important distinctions:\n` +
     `- Use no_change_covered or no_change_extra when the source is topically related but adds nothing useful. ` +
     `Reserve irrelevant for sources with no connection to the page's topic whatsoever.\n` +
-    `- A source about a different product or service that happens to use the same protocol or technology ` +
-    `is not relevant — the page must cover the same specific system.\n` +
-    `- If a source is primarily about another topic but contains a specific fact directly relevant to ` +
-    `this page's subject, judge based on that fact — not the overall topic of the source.\n` +
-    `- A brief conversational source (Slack, chat) that identifies a concrete action assigned to a ` +
-    `named person already tracked on the page can qualify as committed_moderate.\n\n` +
+    `- A source about a different product that uses the same technology is not relevant — the page must cover the same specific system.\n` +
+    `- A conversational source (Slack, chat) that surfaces a potential issue or cc's team members tracked on the page ` +
+    `implies a follow-up action and can qualify as committed_moderate.\n\n` +
     `When in doubt between committing and no_change, prefer no_change_extra.\n\n` +
     `Respond with JSON only: {"label":"<one of the labels>","reasoning":"<1-2 sentences>"}`,
   ].join("\n\n");
