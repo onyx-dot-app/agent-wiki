@@ -44,7 +44,10 @@ existing page: what facts does it record, at what level of detail? Only add
 information the page's own structure clearly calls for. New or related content
 that sits at a different level of detail or serves a different purpose does
 not belong. Do not create new headings or sections — only update content
-under headings that already exist. When in doubt, use `no_change`.
+under headings that already exist. If a section already contains several
+items of the same type (e.g., multiple sales follow-ups under one owner),
+adding another similar item is not clearly called for — use `no_change`.
+When in doubt, use `no_change`.
 
 ## Editing rules (only apply if relevant)
 

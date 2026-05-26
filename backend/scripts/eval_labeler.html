@@ -902,7 +902,9 @@ async function judgeSample(sample) {
     `Reserve irrelevant for sources with no connection to the page's topic whatsoever.\n` +
     `- A source about a different product that uses the same technology is not relevant — the page must cover the same specific system.\n` +
     `- A conversational source (Slack, chat) that surfaces a potential issue or cc's team members tracked on the page ` +
-    `implies a follow-up action and can qualify as committed_moderate.\n\n` +
+    `implies a follow-up action and can qualify as committed_moderate.\n` +
+    `- A CRM call summary where a person tracked on the page appears in the attendee list with concrete next steps ` +
+    `explicitly assigned to them is committed_moderate — not irrelevant. Check the attendee list, not just the deal name.\n\n` +
     `When in doubt between committing and no_change, prefer no_change_extra.\n\n` +
     `Respond with JSON only: {"label":"<one of the labels>","reasoning":"<1-2 sentences>"}`,
   ].join("\n\n");
