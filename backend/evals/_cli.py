@@ -57,6 +57,15 @@ def add_common_args(parser: argparse.ArgumentParser, *, default_models: str = ""
         help="Push to a Braintrust experiment of this base name",
     )
     parser.add_argument(
+        "--dataset",
+        default=None,
+        help=(
+            "Name of a Braintrust dataset to push the case set to (and link the experiment to). "
+            "If unset, the experiment is pushed standalone. Set to enable per-row regression view "
+            "across runs in the BT UI."
+        ),
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Use the surface's stub LLM (no API keys needed)",

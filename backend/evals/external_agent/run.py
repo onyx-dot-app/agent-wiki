@@ -236,7 +236,7 @@ def main(argv: list[str] | None = None) -> int:
     reporting.print_summary(summary)
     bt_url = ""
     if args.braintrust:
-        bt_url = reporting.push_to_braintrust(args.braintrust, results)
+        bt_url = reporting.push_to_braintrust(args.braintrust, results, dataset=args.dataset)
     reporting.write_github_summary(summary, braintrust_url=bt_url)
     print(json.dumps({"out": str(out_path), "skipped_models": skipped, "braintrust_url": bt_url}))
     return 0

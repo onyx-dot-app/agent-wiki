@@ -228,12 +228,75 @@ class ExperimentRow(BaseModel):
     metadata: dict[str, Any]
 
 
+class DatasetRow(BaseModel):
+    """One row pushed to a Braintrust dataset.
+
+    Mirrors the BT dataset row shape: ``input`` is what the model sees,
+    ``expected`` is the ground-truth answer, ``metadata`` carries dataset-
+    level tags. The optional ``id`` lets callers anchor a row to a stable
+    identifier (e.g. a case_id) so subsequent dataset versions can update
+    the same row instead of appending a duplicate.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    input: dict[str, Any]
+    expected: dict[str, Any]
+    metadata: dict[str, Any]
+    id: str | None = None
+
+
+def push_dataset(
+    *,
+    project: str,
+    dataset: str,
+    api_key: str,
+    rows: list[DatasetRow],
+) -> int:
+    """Upload ``rows`` to a Braintrust dataset (versioned, idempotent).
+
+    Each call creates or updates the named dataset. Rows with a stable
+    ``id`` are upserted — re-running with the same cases produces a new
+    dataset version rather than appending duplicates. Experiments can
+    then link results to dataset row ids for cross-run regression
+    comparison in the BT UI.
+    """
+    if not rows:
+        return 0
+    try:
+        import braintrust
+    except ImportError:
+        log.warning("braintrust SDK not installed; skipping dataset push")
+        return 0
+    try:
+        bt_dataset: Any = braintrust.init_dataset(
+            project=project,
+            name=dataset,
+            api_key=api_key,
+        )
+        for row in rows:
+            insert_kwargs: dict[str, Any] = {
+                "input": row.input,
+                "expected": row.expected,
+                "metadata": row.metadata,
+            }
+            if row.id is not None:
+                insert_kwargs["id"] = row.id
+            bt_dataset.insert(**insert_kwargs)
+        bt_dataset.flush()
+    except Exception:
+        log.exception("braintrust dataset push failed; rows not uploaded")
+        return 0
+    return len(rows)
+
+
 def push_experiment(
     *,
     project: str,
     experiment: str,
     api_key: str,
     rows: list[ExperimentRow],
+    dataset: str | None = None,
 ) -> int:
     """Upload ``rows`` to a Braintrust experiment. Returns count uploaded.
 
@@ -255,19 +318,35 @@ def push_experiment(
         log.warning("braintrust SDK not installed; skipping experiment push")
         return 0
     try:
+        # When ``dataset`` is set, link the experiment to that BT dataset so
+        # the UI can show per-row regression vs prior experiments using the
+        # same dataset. ``case_id`` in each row's metadata is also used as
+        # the dataset record id at log time.
+        bt_dataset: Any = None
+        if dataset is not None:
+            bt_dataset = braintrust.init_dataset(
+                project=project,
+                name=dataset,
+                api_key=api_key,
+            )
         bt_experiment: Any = braintrust.init(
             project=project,
             experiment=experiment,
             api_key=api_key,
+            dataset=bt_dataset,
         )
         for row in rows:
-            bt_experiment.log(
-                input=row.input,
-                output=row.output,
-                expected=row.expected,
-                scores=row.scores,
-                metadata=row.metadata,
-            )
+            log_kwargs: dict[str, Any] = {
+                "input": row.input,
+                "output": row.output,
+                "expected": row.expected,
+                "scores": row.scores,
+                "metadata": row.metadata,
+            }
+            case_id = row.metadata.get("case_id") or row.input.get("case_id")
+            if dataset is not None and case_id:
+                log_kwargs["dataset_record_id"] = case_id
+            bt_experiment.log(**log_kwargs)
         bt_experiment.flush()
     except Exception:
         log.exception("braintrust experiment push failed; results not uploaded")
