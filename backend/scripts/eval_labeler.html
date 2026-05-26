@@ -604,13 +604,8 @@ function jumpToMismatch() {
 
 function judgeAll(outcome) {
   if (!anthropicKey) { promptApiKey(); return; }
-  const pending = samples.filter(s => s.outcome === outcome && !s.judge_label && !judging.has(s.id));
-  if (!pending.length) {
-    const statusEl = document.getElementById("judge-queue-status");
-    statusEl.textContent = `All ${outcome} already judged`;
-    setTimeout(() => { statusEl.textContent = ""; }, 3000);
-    return;
-  }
+  const pending = samples.filter(s => s.outcome === outcome && !judging.has(s.id));
+  if (!pending.length) return;
   pending.forEach(s => { if (!judgeQueue.includes(s.id)) judgeQueue.push(s.id); });
   document.getElementById("judge-queue-status").textContent = `${judgeQueue.length} queued…`;
   if (!judgeQueueRunning) processJudgeQueue();
@@ -621,13 +616,12 @@ async function processJudgeQueue() {
   let errors = 0;
   while (judgeQueue.length) {
     const statusEl = document.getElementById("judge-queue-status");
-    const actual = judgeQueue.filter(id => { const s = samples.find(x => x.id === id); return s && !s.judge_label; }).length;
-    statusEl.textContent = `${actual} remaining…` + (errors ? ` (${errors} errors)` : "");
+    statusEl.textContent = `${judgeQueue.length} remaining…` + (errors ? ` (${errors} errors)` : "");
     const id = judgeQueue.shift();
     const sample = samples.find(s => s.id === id);
-    if (sample && !sample.judge_label) {
+    if (sample) {
       await judgeSample(sample);
-      if (!sample.judge_label) errors++;  // judgeSample failed if label still unset
+      if (!sample.judge_label) errors++;
     }
     await new Promise(r => setTimeout(r, 300));  // avoid rate limiting
   }
