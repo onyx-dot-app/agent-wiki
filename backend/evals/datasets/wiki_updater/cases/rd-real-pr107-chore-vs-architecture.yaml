@@ -1,0 +1,26 @@
+id: rd-real-pr107-chore-vs-architecture
+surface: reconcile_document
+wiki_path: engineering/Agent Wiki Project/Architecture.md
+current_body: |
+  # Architecture
+
+  ## Stack
+  - Backend: FastAPI + Postgres (with `pg_textsearch` for BM25, `pgmq` for the task queue).
+  - Frontend: Next.js 14 (App Router).
+  - Nginx reverse-proxies `/api/*` to the backend.
+  - Wiki working tree on volume `wiki-data`. Git shelled out to.
+expected_class: IRRELEVANT
+doc_title: 'chore: remove top-level scripts/ dir'
+doc_url: https://github.com/onyx-dot-app/agent-wiki/pull/107
+doc_content: Removes `scripts/export_eval_samples.sh` — the export script was moved to the `ods` repo where it better fits
+  alongside other operational tooling.
+source: connector:github
+expected_facts_present: []
+expected_facts_preserved: []
+max_bloat_ratio: 2.0
+notes: 'Real PR #107. Removing a top-level script doesn''t change any architectural fact. Must reject.'
+tags:
+- real-world
+- source:github
+- pr:107
+- irrelevant-bait

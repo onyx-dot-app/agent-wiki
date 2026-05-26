@@ -1,0 +1,28 @@
+id: rd-real-pr102-ux-fix-vs-bloat-page
+surface: reconcile_document
+wiki_path: engineering/Agent Wiki Project/Bloat and Drift Handling.md
+current_body: |
+  # Bloat Handling
+
+  ## Current implementation
+  - BM25 candidates with a cutoff
+  - Per candidate page: NO_CHANGE / IRRELEVANT / new body classifications via submit_results tool call.
+  - Edit application uses targeted FIND/REPLACE blocks.
+  - Offline evals live under `backend/evals/`.
+expected_class: IRRELEVANT
+doc_title: 'fix(launchers/fe): unstack Install Helper pane CTA + helper text'
+doc_url: https://github.com/onyx-dot-app/agent-wiki/pull/102
+doc_content: OPAL `Section flexDirection="row"` squeezed the Download installer button — label rendered as "vnload insta"
+  and the helper paragraph overflowed across it. Dropped the inner horizontal Section; button + helper text are now direct
+  children of the outer column Section. Helper text is a `<p>` that wraps cleanly under the button at any container width.
+source: connector:github
+expected_facts_present: []
+expected_facts_preserved: []
+max_bloat_ratio: 2.0
+notes: 'Real PR #102. Frontend UX bug on Install Helper pane — has nothing to do with bloat/drift on the reconciler. Must
+  reject.'
+tags:
+- real-world
+- source:github
+- pr:102
+- irrelevant-bait

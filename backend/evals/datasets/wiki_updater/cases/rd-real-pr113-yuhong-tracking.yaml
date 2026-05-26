@@ -1,0 +1,35 @@
+id: rd-real-pr113-yuhong-tracking
+surface: reconcile_document
+wiki_path: individual_notes/Things Yuhong cares about.md
+current_body: |
+  # Tracking of all of the things that Yuhong would like updates on:
+
+  ## Tracking evals
+  How are the evaluations going for updating documents to the wiki?
+
+  - Production-mined eval expansion has export and conversion scripts in place but no committed cases yet (PR #112).
+expected_class: CHANGE
+doc_title: 'prompt(reconciler): block fabricated tasks and loose product-area relevance'
+doc_url: https://github.com/onyx-dot-app/agent-wiki/pull/113
+doc_content: 'Analysis of 1,092 production eval samples found 226 cases where the judge marked a committed outcome as wrong.
+  PR #113 tightened the reconciler prompt to reject CRM records as action items, require direct relevance to the page''s question,
+  and avoid creating checklist items unless the source explicitly describes work to be done.'
+source: connector:github
+expected_facts_present:
+- id: pr113-tightening
+  text: 'PR #113 tightened the reconciler prompt to reject CRM records as action items and avoid creating checklist items
+    unless the source describes work to be done'
+- id: 226-of-1092
+  text: 226 of 1,092 production samples were marked wrong-committed by the judge
+expected_facts_preserved:
+- id: tracking-section
+  text: tracking-evals section still present
+- id: pr112-status
+  text: 'PR #112 status (export/convert scripts in place, no committed cases yet) still present'
+max_bloat_ratio: 2.0
+notes: 'Real PR #113 against Yuhong''s tracking page. Adds a substantive eval update bullet — the page''s whole purpose is
+  collecting these.'
+tags:
+- real-world
+- source:github
+- pr:113

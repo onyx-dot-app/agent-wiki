@@ -1,0 +1,24 @@
+id: rd-real-pr100-helm-already-current
+surface: reconcile_document
+wiki_path: engineering/Agent Wiki Project/Deployment Guide.md
+current_body: |
+  # Deployments of Agent Wiki
+
+  ## Helm chart
+
+  The Agent Wiki Helm chart version is `0.3.18`. This chart package includes the `INGEST_EVAL_LOGGING` environment variable in the worker pod templates; dev-wiki sets it to `true` so ingest reconciler examples are logged.
+expected_class: NO_CHANGE
+doc_title: 'chore(helm): bump chart to 0.3.18 to publish INGEST_EVAL_LOGGING env var'
+doc_url: https://github.com/onyx-dot-app/agent-wiki/pull/100
+doc_content: 'Bumps the Helm chart version from 0.3.17 → 0.3.18 so chart-releaser publishes a new package to gh-pages. The
+  `_helpers.tpl` change adding `INGEST_EVAL_LOGGING` was merged in #93 but chart-releaser doesn''t overwrite existing versions,
+  so the 0.3.17 package in gh-pages still has the old template without that env var.'
+source: connector:github
+expected_facts_present: []
+expected_facts_preserved: []
+max_bloat_ratio: 2.0
+notes: 'Real PR #100. Page already states version 0.3.18 + INGEST_EVAL_LOGGING. NO_CHANGE — net-new info is zero.'
+tags:
+- real-world
+- source:github
+- pr:100

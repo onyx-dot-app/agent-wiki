@@ -1,0 +1,35 @@
+id: rd-real-pr111-batch-judge
+surface: reconcile_document
+wiki_path: engineering/Agent Wiki Project/Bloat and Drift Handling.md
+current_body: |
+  # Bloat Handling
+
+  ## Current implementation
+  - `backend/scripts/eval_labeler.html` labels exported real-traffic JSONL samples in the browser with six granular labels: should-commit critical/moderate/nit, should-no-change already-covered/extra-info, and irrelevant wrong-selection. The Judge button (also `j` key) asks `claude-opus-4-7` for an independent source-doc/wiki-page-only suggestion for human confirmation or override.
+expected_class: CHANGE
+doc_title: 'feat(eval): batch judge, mismatch tracking, and per-outcome progress'
+doc_url: https://github.com/onyx-dot-app/agent-wiki/pull/111
+doc_content: 'Judge all committed / no_change / irrelevant outcomes: enqueues all unjudged samples with that outcome and processes
+  them sequentially. Queue counter shows progress. Mismatch button jumps to the next sample where the reconciler''s outcome
+  disagrees with the human label. Wrong-judge counter shows judge vs human label disagreements alongside the mismatch count,
+  for calibrating the judge. Per-outcome progress: progress bar area now shows committed: X/225 · no_change: X/120 · irrelevant:
+  X/747 alongside total labeled.'
+source: connector:github
+expected_facts_present:
+- id: batch-judge
+  text: labeler can batch-judge all unjudged samples for a selected outcome with queue progress
+- id: mismatch-button
+  text: mismatch button jumps to the next reconciler-vs-human-label disagreement
+- id: per-outcome-progress
+  text: per-outcome progress (committed / no_change / irrelevant counts) is shown alongside total
+expected_facts_preserved:
+- id: six-labels
+  text: six granular labels still listed
+- id: judge-button
+  text: Judge button + j key still mentioned
+max_bloat_ratio: 2.0
+notes: 'Real PR #111. Adds labeler features that the snapshot doesn''t yet document.'
+tags:
+- real-world
+- source:github
+- pr:111
