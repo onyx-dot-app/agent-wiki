@@ -183,10 +183,26 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     return p.parse_args(argv)
 
 
+_PROD_TAGS = {"real-prod-commit", "real-prod-decision"}
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv or sys.argv[1:])
     setup_logging(args.log_level)
     cases = _load_cases(args.cases, case_id=args.case_id, limit=args.limit)
+    if args.dry_run:
+        # Prod-mined cases share wiki bodies across many revisions; the
+        # dry-run stub can't tell them apart by 200-char prefix, so
+        # ci_assert_baseline would flag the resulting wrong-class trials.
+        # Live runs are unaffected (each case carries a unique full body).
+        before = len(cases)
+        cases = [c for c in cases if not _PROD_TAGS.intersection(c.tags or [])]
+        dropped = before - len(cases)
+        if dropped:
+            log.info(
+                "dry-run: skipping %d prod-mined cases (curated cases provide the smoke signal)",
+                dropped,
+            )
     runnable, skipped = _cli.resolve_runnable(args.models, dry_run=args.dry_run)
     if not runnable:
         log.error("no runnable models — set EVAL_*_API_KEY or pass --dry-run")
