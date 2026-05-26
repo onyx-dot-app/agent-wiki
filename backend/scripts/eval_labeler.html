@@ -274,7 +274,7 @@
   /* ── Jump to ── */
   .jump-wrap { display: flex; align-items: center; gap: 6px; font-size: 13px; color: #666; }
   .jump-wrap input {
-    width: 52px;
+    width: 72px;
     border: 1px solid #ddd;
     border-radius: 4px;
     padding: 4px 6px;
@@ -396,7 +396,7 @@ if(__exports != exports)module.exports = exports;return module.exports}));
   <div class="nav-bar">
     <div class="nav-counter" id="nav-counter"></div>
     <div class="jump-wrap">
-      Jump to <input type="number" id="jump-input" min="1" onchange="jumpTo(this.value)">
+      Jump to <input type="number" id="jump-input" min="1" onchange="jumpTo(this.value)" onkeydown="if(event.key==='Enter')jumpTo(this.value)">
     </div>
     <div style="display:flex;gap:6px;align-items:center;">
       <span style="font-size:11px;color:#999;">Jump to unlabeled:</span>
