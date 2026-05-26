@@ -1,0 +1,350 @@
+id: rd-real-irrelevant-00664
+surface: reconcile_document
+wiki_path: customer_notes/scania/sharepoint_issues_history.md
+current_body: "# Scania SharePoint Connector Issues — Living Document\n\n_Last updated: <PHONE>_\n\nThis is a living document\
+  \ describing the issues Scania has run into with the SharePoint connector. All Onyx-indexed communication about Scania in\
+  \ the `#customer-support` Slack channel that involves SharePoint is cited here.\n\n> **Citation note:** The references below\
+  \ are Slack / meeting links surfaced from Onyx search. In several cases Onyx exposed the indexed Slack result link and thread\
+  \ context, but not all original attachments/screenshots or complete thread metadata.\n\n---\n\n## Table of contents\n\n\
+  - [Overview and useful context](#overview-and-useful-context)\n- [Complete `#customer-support` Slack conversation inventory](#complete-customer-support-slack-conversation-inventory)\n\
+  - [Specific incidents and resolutions](#specific-incidents-and-resolutions)\n- [Related non-`#customer-support` context](#related-non-customer-support-context)\n\
+  - [Recurring patterns and likely root causes](#recurring-patterns-and-likely-root-causes)\n- [Resolved or mitigated items](#resolved-or-mitigated-items)\n\
+  - [Open issues / unresolved questions](#open-issues--unresolved-questions)\n- [Recommendations / action items](#recommendations--action-items)\n\
+  - [One-off vs systemic classification](#one-off-vs-systemic-classification)\n- [Operational follow-up tracker](#operational-follow-up-tracker)\n\
+  - [Source reference index](#source-reference-index)\n\n---\n\n# Overview and useful context\n\nAs of the latest retrieved\
+  \ `#customer-support` evidence, Scania was on **Onyx `v3.3.0`**, had **one active SharePoint connector**, and was still\
+  \ experiencing **indexing throughput / connector reliability issues**. Justin noted that this active connector “keeps hitting\
+  \ issues,” that Scania likely runs on Kubernetes, and that Onyx needed to provide an upgrade strategy. A suspected deployment\
+  \ anomaly was also noted: the **OpenSearch migration page was missing**, raising concern that Scania might be on `v3.3.0`\
+  \ without an OpenSearch container. Evan was assigned to continue looking through logs and SharePoint issue details. [[5]](<URL>\n\
+  \nThe prior May 11 update showed meaningful progress: Scania devtest had been upgraded to `v3.3.0`; Vespa memory had been\
+  \ increased from `32Gi` to `48Gi`; old Vespa `507 Insufficient Storage` / feed-blocking had stopped being the active blocker;\
+  \ docfetching workers were stable after a probe-timeout change; and a local SharePoint hotfix changed unauthorized `.aspx`\
+  \ page handling from “abort the whole connector run” to “record as per-document failure.” However, the connector named **`SharePoint\
+  \ all ASPX sites since first of March`** was still failing on Microsoft Graph `404 itemNotFound` for `/teams/Almedalentrip`,\
+  \ interpreted as a missing or invalid SharePoint site in the crawl scope. [[2]](<URL>\n\nSubsequent SharePoint connector\
+  \ work in PR #11266 adds another relevant failure-handling improvement: Graph `HTTP 423 notAllowed` for admin-locked or\
+  \ M365-archived sites is now treated as a per-site failure, so tenant indexing continues to the next site. This is not evidence\
+  \ that Scania hit a 423, but it is relevant to Scania's broad tenant crawl risk because `getAllSites` can surface sites\
+  \ the app cannot read.\n\nSeparate docfetching observability work in PR #11294, cherry-picked to `release/v4.0` by PR #11296,\
+  \ fixes `document_count` so it increments for each queued batch. Builds with this fix should have docfetching logs and metrics\
+  \ that reflect the real number of documents processed.\n\nPersistent indexing work in PR #11301 adds `PERSISTENT_INDEXING=true`,\
+  \ which records connector/pipeline errors and keeps indexing running for application-level failures, including when normal\
+  \ failure-volume thresholds would otherwise abort the attempt. Infra, heartbeat, and usage-limit failures still fail the\
+  \ attempt. Deployment and enabling for Scania should be confirmed before relying on it as a mitigation. [[17]](<URL>\n\n\
+  There is an apparent but explainable tension between the May 11 and May 13 updates: on May 11, Lindsey relayed that Jim\
+  \ said they seemed to be “up and running” at **180–200 docs/minute**, while the same May 11 update still listed the `Almedalentrip`\
+  \ Graph `404` as the active run-level blocker for a specific connector. [[2]](<URL> By May 13, Justin again said Scania\
+  \ still had throughput issues and only one active SharePoint connector that kept hitting issues. [[5]](<URL> This likely\
+  \ means Scania saw partial throughput improvement but had not reached a stable, fully resolved state.\n\n## Scania identifiers\
+  \ found\n\n| Identifier | Context |\n|---|---|\n| `tenant_<PHONE>f5-4f4c-b64d-9ae3ffae5a2e` | Mentioned in the Feb. 17 “Scania\
+  \ Call” thread when Justin could not find `@<DOMAIN>` emails in cloud and thought the user might be using `<EMAIL>`. [[9]](<URL>\
+  \ |\n| `tenant_aaf981ad-fc1c-42eb-9e2b-cbddd8f0c312` | License/workspace block in the Mar. 25 “Scania report”: Org `Scania`,\
+  \ 50 seats, monthly plan, expires `<PHONE>T00:00:00+00:00`. [[8]](<URL> |\n| `scaniaazureservices.<DOMAIN>` | SharePoint\
+  \ tenant/domain in multiple connector errors. [[1]](<URL> [[2]](<URL> [[3]](<URL> |\n| `/teams/AIatScania` | Apr. 20 `401\
+  \ Unauthorized` while fetching role assignments for a site page. [[1]](<URL> |\n| `/teams/Plymothepsvnner` | Apr. 20 Microsoft\
+  \ Graph `404 itemNotFound`; likely invalid/misspelled/inaccessible. [[1]](<URL> |\n| `/teams/SJPIndependentDealers` | Apr.\
+  \ 30 `.aspx` site-page `401 Unauthorized`; later described as resolved by local hotfix behavior change. [[3]](<URL> [[2]](<URL>\
+  \ |\n| `/teams/Almedalentrip` | May 11 Microsoft Graph `404 itemNotFound`; current blocker for `SharePoint all ASPX sites\
+  \ since first of March`. [[2]](<URL> |\n| `SharePoint all ASPX sites since first of March` | Connector still failing on\
+  \ May 11 due to Graph `404 itemNotFound` for `/teams/Almedalentrip`. [[2]](<URL> |\n| R&D hub | SharePoint scope/site involved\
+  \ in Apr. 22 sync issue and Apr. 30 group/member permission traversal failure. [[11]](<URL> [[3]](<URL> |\n\n## Version\
+  \ / deployment timeline\n\n| Date | Version / deployment state | Notes |\n|---|---:|---|\n| Apr. 20 | `v2.12.6` | SharePoint\
+  \ `401` and `404` errors reported; embedding swap/OpenAI embedding config not available in Scania’s version. [[1]](<URL>\
+  \ |\n| Apr. 30 | `v3.2.1` | Still “a bit behind”; needed a tag with all fixes; permission sync not running; GitHub commit\
+  \ proposed for backport. [[3]](<URL> |\n| May 11 | Devtest on `v3.3.0` | Vespa memory increased; SharePoint `.aspx` hotfix\
+  \ applied; worker/probe timeout improved; remaining blocker was Graph `404` for `/teams/Almedalentrip`. [[2]](<URL> |\n\
+  | May 13 | `v3.3.0` | Still having throughput issues; one active SharePoint connector kept hitting issues; suspected missing\
+  \ OpenSearch container/migration page; possible move toward `v4.0.X` for metrics work. [[5]](<URL> |\n\n---\n\n# Complete\
+  \ `#customer-support` Slack conversation inventory\n\n| Date | Conversation | Why it matters |\n|---|---|---|\n| <PHONE>\
+  \ | “Scania Call” | Initial Scania setup/call; no `@<DOMAIN>` users found in cloud; possible Gmail user; tenant ID; validation\
+  \ failure suspected to be firewall-related; need to deliver SharePoint connector + search. [[9]](<URL> |\n| <PHONE> | Playlist/Scania\
+  \ SharePoint ingestion-speed discussion | SharePoint ingestion speed discussed as increasingly important for Scania; 3TB\
+  \ scope questioned; advice to scope to specific drives/content. [[10]](<URL> |\n| <PHONE> | “Scania security ?s” | Scania\
+  \ Security declined SharePoint `read all` and wanted `site select`; OpenAI embedding data egress concern; governance concern\
+  \ that Onyx makes public SharePoint data easier to find. [[6]](<URL> |\n| <PHONE> | “Latest Scania Security Questions to\
+  \ be answered” | OneDrive exclusion, DLP, sensitivity labels/encryption, and permission-change propagation questions. [[7]](<URL>\
+  \ |\n| <PHONE> | “Scania report” | Trial license / tenant details; IT Security delays; Jim got `403 forbidden` when trying\
+  \ to open up a private doc via permission change. [[8]](<URL> |\n| <PHONE> | “Scania Followup Issues” | `v2.12.6`; SharePoint\
+  \ `401 Unauthorized` for `AIatScania`; Graph `404 itemNotFound` for `/teams/Plymothepsvnner`; embedding swap/version question.\
+  \ [[1]](<URL> |\n| <PHONE> | “Got a Scania issue” / R&D hub | R&D hub sync failed, but screenshot/error body was not indexed;\
+  \ later likely related to R&D hub group/member permission traversal issue. [[11]](<URL> [[3]](<URL> |\n| <PHONE> | “Good\
+  \ Morning - Scania update” | SharePoint sync started then failed; 4–6 docs/min throughput; embedding config could not be\
+  \ changed; Lindsey says questions 1–3 were solved but details not present. [[4]](<URL> |\n| <PHONE> | “Scania Sharepoint\
+  \ Issues” | `v3.2.1`; `ChunkedEncodingError`; `SJPIndependentDealers` `.aspx` `401`; R&D hub group/member traversal; permission\
+  \ sync not running; commit proposed for backport. [[3]](<URL> |\n| <PHONE> | “Scania Update - New thread” | Devtest `v3.3.0`;\
+  \ Vespa `507` addressed by memory increase; `.aspx` page-level hotfix; current blocker Graph `404` for `/teams/Almedalentrip`;\
+  \ 180–200 docs/min reported by Jim. [[2]](<URL> |\n| <PHONE> | “Scania Upgrade path” | `v3.3.0`; still throughput issues;\
+  \ only one active SharePoint connector; suspected missing OpenSearch; need Kubernetes upgrade strategy and likely v4 metrics\
+  \ path. [[5]](<URL> |\n\n---\n\n# Specific incidents and resolutions\n\n## 1. Feb. 17 — Initial Scania call: user/log confusion,\
+  \ validation failure, possible firewall issue\n\n**Slack conversation:** “Scania Call” in `#customer-support`. [[9]](<URL>\n\
+  \nJustin reported that he did not see any `@<DOMAIN>` emails in Onyx cloud and could not find the user whose logs he wanted\
+  \ to pull. He suspected the user might be using `<EMAIL>` and recorded tenant ID `tenant_<PHONE>f5-4f4c-b64d-9ae3ffae5a2e`.\
+  \ The thread framed the situation as likely an “us issue” and emphasized that Scania seemed ready to proceed, but Onyx needed\
+  \ to deliver a smooth connector experience and high-quality search. A validation failure was discussed; Justin was “reasonably\
+  \ confident” it was a firewall issue, and a clearer error message was called out as a takeaway. [[9]](<URL>\n\n**Category:**\
+  \ Initial setup / validation; possible firewall / customer environment; logging / supportability gap.  \n**Resolution status:**\
+  \ No confirmed resolution in retrieved Slack content; next step was more logs and continued discussion.\n\n## 2. Feb. 19\
+  \ — Early SharePoint ingestion-speed concern tied to Scania\n\n**Slack conversation:** Playlist/Scania SharePoint ingestion-speed\
+  \ thread. [[10]](<URL>\n\nDirect Slack links surfaced in the thread:\n\n- <URL>\n- <URL>\n- <URL>\n\nJustin asked Evan whether\
+  \ a fix from the previous day would help SharePoint ingestion speed, saying this would likely become more important “especially\
+  \ with the Scania deal.” The discussion questioned whether indexing **3TB** of SharePoint data made sense and suggested\
+  \ pushing back on scope, e.g. asking the customer to select specific drives/content instead of indexing everything. [[10]](<URL>\n\
+  \n**Category:** Sync throughput / ingestion speed; connector scope design; customer data scale.  \n**Resolution status:**\
+  \ No Scania-specific resolution; suggested mitigation was narrower scoping and benchmarking.\n\n## 3. Mar. 3 — Security\
+  \ rejects broad SharePoint `read all`; asks for `site select`\n\n**Slack conversation:** “Scania security ?s”. [[6]](<URL>\n\
+  \nLindsey reported Scania IT Security declined to allow the connector to have **`read all` access** and wanted **`site select`**\
+  \ instead. Scania also asked whether OpenAI embedding models would cause Scania information to leave Scania’s control and\
+  \ go to OpenAI servers. A broader governance concern was that because anyone at Scania can create a SharePoint site, Onyx\
+  \ could make information in that “swamp” easy to find, including sensitive information accidentally posted with public access.\
+  \ [[6]](<URL>\n\n**Category:** Security / governance; SharePoint permission model; connector configuration; customer environment\
+  \ constraints.  \n**Resolution status:** No final answer or resolution appears in retrieved Slack content.\n\n## 4. Mar.\
+  \ 11 — Security asks about OneDrive, DLP, sensitivity labels, and permission-change lag\n\n**Slack conversation:** “Latest\
+  \ Scania Security Questions to be answered”. [[7]](<URL>\n\nLindsey posted additional Scania Security questions:\n\n- Whether\
+  \ Onyx would search only SharePoint or also index OneDrive content.\n- How Onyx interacts with Microsoft Data Loss Prevention\
+  \ rules.\n- How Onyx handles SharePoint sensitivity labels, including confidential/secret labels and encrypted files.\n\
+  - How quickly permission changes are reflected in the index.\n\n**Category:** Security / governance; permissions sync latency;\
+  \ DLP / labels / encryption.  \n**Resolution status:** No confirmed answers appear in retrieved Slack content; Lindsey’s\
+  \ notes are draft/confirmation questions, not final commitments.\n\n## 5. Mar. 25 — Trial/license escalation and `403 forbidden`\
+  \ on permission change\n\n**Slack conversation:** “Scania report”. [[8]](<URL>\n\nLindsey reported trial/license details\
+  \ and noted Scania now had a weekly escalation call because security colleagues were delaying rollout. SharePoint-specific\
+  \ issue: Jim tried to change permissions to open up a private document but got **`403 forbidden`**. Lindsey connected this\
+  \ to prior guidance that permission changes take time to propagate, but suspected Jim might also be doing something incorrectly.\
+  \ [[8]](<URL>\n\n**Category:** Permission propagation / authorization; rollout delay.  \n**Resolution status:** No confirmed\
+  \ resolution.\n\n## 6. Apr. 20 — `v2.12.6`: `401` on `AIatScania`; Graph `404` on `/teams/Plymothepsvnner`\n\n**Slack conversation:**\
+  \ “Scania Followup Issues”. [[1]](<URL>\n\nJustin posted that Scania was using **Onyx `v2.12.6`**. One stack trace failed\
+  \ during SharePoint site-page conversion and external permission fetching with:\n\n```text\n401 Client Error: Unauthorized\n\
+  ```\n\nThe affected URL was under:\n\n```text\n<URL>\n```\n\nand targeted:\n\n```text\n/teams/AIatScania/SitePages/Mini-Conference-on-Digitalization-%26-AI/listItemAllFields/RoleAssignments?$expand=Member,RoleDefinitionBindings\n\
+  ```\n\nA second trace showed Graph `404 itemNotFound` for:\n\n```text\n<URL>\n```\n\nA reply characterized the problems\
+  \ as likely a permission issue and a site-name spelling issue. Justin also asked what version added back embedding swap\
+  \ because Scania did not have it in `v2.12`. [[1]](<URL>\n\n**Category:** Authentication / permissions; missing or invalid\
+  \ site; connector runtime failure; deployment/version gap.  \n**Resolution status:** No direct resolution; Subash and Evan\
+  \ were tagged to investigate.\n\n## 7. Apr. 22 — R&D hub sync failure\n\n**Slack conversation:** “Got a Scania issue” /\
+  \ R&D hub. [[11]](<URL>\n\nLindsey posted that Scania tried to sync the **R&D hub** and “got this,” tagging Subash, Evan,\
+  \ Andrei, and Justin. The indexed Slack result did **not** include the screenshot or error text after “got this.” [[11]](<URL>\n\
+  \n**Category:** R&D hub connector failure; likely permission / site-page / group resolution, based on later Apr. 30 details.\
+  \  \n**Resolution status:** No resolution in this message; Apr. 30 contains a more detailed related trace. [[3]](<URL>\n\
+  \n## 8. Apr. 25 — Sync starts then fails; very slow indexing; embedding config blocked\n\n**Slack conversation:** “Good\
+  \ Morning - Scania update”. [[4]](<URL>\n\nLindsey collected Jim’s questions. SharePoint-relevant items:\n\n1. **“The SharePoint\
+  \ sync started, indexed some files, and then failed. Why did it fail?”**\n2. **Indexing speed was only 4–6 docs/files per\
+  \ minute.**\n3. **Embedding configuration could not be changed**, including switching to OpenAI embeddings.\n\nLindsey noted\
+  \ Gadhe Bhavesh was looking into docs and Pandiyan Silambarasan had been asked to look at AWS configurations. [[4]](<URL>\n\
+  \n**Category:** Indexing failure; slow throughput; embedding configuration; AWS/deployment tuning.  \n**Resolution status:**\
+  \ Lindsey said questions 1–3 were solved, but retrieved Slack content does not specify fixes or customer confirmation. The\
+  \ same categories recur later. [[4]](<URL> [[3]](<URL> [[2]](<URL> [[5]](<URL>\n\n## 9. Apr. 30 — `v3.2.1`: chunked response\
+  \ failure, `.aspx` `401`, R&D hub traversal, permission sync not running\n\n**Slack conversation:** “Scania Sharepoint Issues”.\
+  \ [[3]](<URL>\n\nJustin posted Scania was on **`v3.2.1`**, “a bit behind,” and that Onyx needed to give them a tag containing\
+  \ all fixes. [[3]](<URL>\n\n### Issue 1: `ChunkedEncodingError: Response ended prematurely`\n\nThe trace failed during SharePoint\
+  \ drive-item conversion with permissions. The final error was:\n\n```text\nrequests.exceptions.ChunkedEncodingError: Response\
+  \ ended prematurely\n```\n\nThis appears to have happened while reading a SharePoint response stream during permission-aware\
+  \ drive item processing. [[3]](<URL>\n\n### Issue 2: `401 Unauthorized` for `SJPIndependentDealers` site page\n\nThe trace\
+  \ was labeled “For Sites Only (excluding docs)” and failed with:\n\n```text\n401 Client Error: Unauthorized\n```\n\nagainst:\n\
+  \n```text\n<URL>\n```\n\nThis was another failure while fetching SharePoint role assignments / permissions for a site page.\
+  \ [[3]](<URL>\n\n### Issue 3: R&D hub group/member traversal failure\n\nThe R&D hub trace passed through SharePoint site-page\
+  \ conversion and external permission fetching, then into `_get_groups_and_members_recursively` and `_get_azuread_groups`.\
+  \ The retrieved content truncated before the final exception, but it clearly involved failure while resolving SharePoint/Azure\
+  \ AD group membership for permissions. [[3]](<URL>\n\n### Permission sync not running\n\nJustin added that Scania’s **permission\
+  \ sync was also not running** and said, “I think we should move this fix to their version.” He linked GitHub commit:\n\n\
+  ```text\n<URL>\n```\n\n[[3]](<URL>\n\n**Category:** Permission/external access failures; connector runtime failure; group/member\
+  \ resolution; permission sync scheduling/version issue.  \n**Resolution status:** No customer-confirmed resolution in this\
+  \ thread. May 11 later confirms `.aspx` page-failure behavior was mitigated with a local hotfix. [[2]](<URL>\n\n## 10. May\
+  \ 11 — `v3.3.0`: Vespa `507` resolved, `.aspx` behavior hotfixed, active blocker is Graph `404`\n\n**Slack conversation:**\
+  \ “Scania Update - New thread”. [[2]](<URL>\n\nScania devtest had been upgraded to **`v3.3.0`**.\n\n### Vespa `507 Insufficient\
+  \ Storage` / feed blocking\n\nScania had been hitting Vespa feed blocking and:\n\n```text\n507 Insufficient Storage\n```\n\
+  \nThey increased Vespa memory:\n\n```text\n32Gi -> 48Gi\n```\n\nAfter that, the old Vespa `507` issue stopped being the\
+  \ active blocker. [[2]](<URL>\n\n### `.aspx` page-level permission failure hotfix\n\nA local hotfix changed behavior so\
+  \ a single unauthorized `.aspx` page is recorded as a **per-document failure** instead of aborting the entire indexing attempt.\
+  \ This resolved the earlier `401` failure pattern for the `SJPIndependentDealers` site page path. [[2]](<URL>\n\n### Worker/probe\
+  \ timeout stabilized\n\nDocfetching workers were stable after a probe-timeout change. [[2]](<URL>\n\n### Current blocker:\
+  \ Graph `404 itemNotFound` for `/teams/Almedalentrip`\n\nThe connector:\n\n```text\nSharePoint all ASPX sites since first\
+  \ of March\n```\n\nwas still failing with:\n\n```text\nMicrosoft Graph 404 itemNotFound\nRequested site could not be found\n\
+  ```\n\nfor:\n\n```text\n<URL>\n```\n\nThe update says the active run-level blocker appeared to be a **missing or invalid\
+  \ SharePoint site in the crawl scope**, not the old site-page `401` or Vespa capacity issue. Jim also reported throughput\
+  \ of **180–200 docs/minute**. [[2]](<URL>\n\n**Resolution status:** Partially resolved / partially open.\n\nResolved or\
+  \ mitigated:\n\n- Vespa `507` after memory increase.\n- `.aspx` page-level `401` abort behavior via local hotfix.\n- `SJPIndependentDealers`\
+  \ `401` pattern.\n- Docfetching worker instability.\n\nStill open:\n\n- Graph `404` on `/teams/Almedalentrip`.\n- Historical\
+  \ unresolved item errors from earlier failed runs.\n- No full customer-confirmed final resolution.\n\n## 11. May 13 — Upgrade\
+  \ path: still throughput issues, one active connector, missing OpenSearch concern\n\n**Slack conversation:** “Scania Upgrade\
+  \ path”. [[5]](<URL>\n\nJustin posted Scania was on **`v3.3.0`** and still having indexing throughput issues. Confirmed\
+  \ state:\n\n- Scania had only **one active SharePoint connector** running.\n- That connector **kept hitting issues**.\n\
+  - The OpenSearch migration page was missing, suggesting there might not be an OpenSearch container running.\n- Scania likely\
+  \ used Kubernetes, so Onyx needed to send upgrade strategy information.\n- `v4.0.X` was discussed because Evan’s metrics\
+  \ work should be part of that release.\n- Evan was assigned to continue reviewing logs and information to figure out the\
+  \ SharePoint issues.\n\n[[5]](<URL>\n\n**Category:** Ongoing throughput / connector reliability; deployment/version state;\
+  \ missing OpenSearch; observability gap; upgrade strategy.  \n**Resolution status:** Open as of latest retrieved `#customer-support`\
+  \ evidence.\n\n---\n\n# Related non-`#customer-support` context\n\n## Feb. 4 sales discovery / enterprise platform POC requirements\n\
+  \nA HubSpot/Fireflies sales call summary before technical rollout framed Scania's target as an enterprise-wide knowledge\
+  \ base and AI-powered search across SharePoint, Teams, Jira, Confluence, SAP, ServiceNow, and other systems, plus a RAG/MCP\
+  \ foundation for R&D and other agents. Scania considered Microsoft Copilot / SharePoint-native options insufficient at scale\
+  \ and wanted to consolidate multiple search boxes into permission-aware hybrid semantic/keyword search with APIs and embeddable\
+  \ intranet widgets.\n\nThe same call captured early technical requirements that later show up in the SharePoint issue history:\
+  \ self-hosted POC, SSO/SCIM, granular permission and group mirroring, frequent sync, bring-your-own LLM options such as\
+  \ Azure OpenAI/OpenAI or Bedrock, and connector assistance including ServiceNow. Next steps were a shared Teams channel,\
+  \ a deeper technical/evaluation planning session, and enterprise features for the self-hosted POC. [[16]](<URL>\n\n## Apr.\
+  \ 20 Scania / Onyx Sync meeting\n\nA Fireflies transcript captured Scania showing multiple SharePoint connector attempts:\
+  \ broad “all SharePoint” attempts and selected-site attempts. A connector like **“SharePoint all from 1st of March”** produced\
+  \ both “file not found” and permission-related errors, while a connector for “only one site” successfully indexed. Justin\
+  \ noted Scania appeared to be on `v2.12.6`, suspected `404` errors could be due to non-existent team/site names, and asked\
+  \ for tracebacks rather than screenshots. [[12]](<URL>\n\nThe same meeting discussed severe throughput concerns and an early\
+  \ hypothesis that CPU-based local embeddings might be a bottleneck. Justin suggested OpenAI or another API-based embedding\
+  \ provider could dramatically improve indexing speed. Jim said he had tried switching to OpenAI embeddings but the platform\
+  \ did not allow it reliably. [[12]](<URL>\n\n## Apr. 28 engineering performance analysis\n\nIn `eng-infra`, Scania reported\
+  \ about **14 docs/minute** on `v3.2.1`, despite multiple docfetching replicas. Only one docfetching pod was materially busy,\
+  \ and logs showed repeated SharePoint permission/external-access work such as “Getting external access for ...” and `permission_utils.py\
+  \ ... Processing group ...`. [[13]](<URL>\n\nEngineering explained that SharePoint data retrieval is serialized per connector:\
+  \ `connector_doc_fetching_task` is expected to run as one long-lived task on a single worker. Chunking, embedding, and indexing\
+  \ can parallelize later, but the SharePoint fetch/permission stage for a single connector does not fan out across all docfetching\
+  \ replicas. Recommended workaround: split SharePoint into multiple connectors by site/drive/scope. [[13]](<URL>\n\n## Apr.\
+  \ 30 Scania / Onyx Questions Sync meeting\n\nA Fireflies transcript captured Scania discussing extreme SharePoint scale\
+  \ — potentially **150 million documents**. Evan said typical connector throughput was around 60 docs/minute, and he had\
+  \ seen around 200–220 docs/minute in favorable cases, but Scania’s hoped-for 1,000 docs/minute had not been tested at that\
+  \ scale. [[14]](<URL>\n\nThe meeting clarified that organization-public connectors are faster because Onyx does not need\
+  \ to fetch permissions. Scania had one organization-public connector running around 112 docs/minute, supporting the hypothesis\
+  \ that permission fetching / SharePoint API calls were the main slowdown for permission-synced connectors. Evan also discussed\
+  \ potential SharePoint API optimizations, including replacing some REST calls with Graph calls and sending API-identifying\
+  \ headers. Explicit throttling errors were not shown; SharePoint rate limiting remains a hypothesis, not a proven root cause.\
+  \ [[14]](<URL>\n\n## May 13 Scania / Onyx Update meeting\n\nA Fireflies transcript adds nuance to the May 13 support thread.\
+  \ Jim said Scania had reached about **200 files/minute** after settings changes, but later the connector crashed a couple\
+  \ of times and dropped back to about **19 docs/minute**. Evan wanted Scania on a version with indexing metrics so Onyx could\
+  \ see time spent in connector fetch, queue wait, doc processing, embedding, etc. Justin noted the metrics PR had likely\
+  \ not been cherry-picked, and Onyx might need to create a build for Scania. [[15]](<URL>\n\n---\n\n# Recurring patterns\
+  \ and likely root causes\n\n## 1. Permission-aware SharePoint indexing is the central systemic issue\n\nScania requires\
+  \ permission-preserving SharePoint indexing across a very large and messy SharePoint estate. This forces Onyx to fetch SharePoint\
+  \ permissions, role assignments, external access, and group membership information. These operations repeatedly appear in\
+  \ stack traces and performance logs. [[1]](<URL> [[3]](<URL> [[13]](<URL> [[14]](<URL>\n\nEvidence includes `AIatScania`\
+  \ and `SJPIndependentDealers` `401`s while fetching role assignments, R&D hub group/member traversal failures, logs dominated\
+  \ by permission work, and faster organization-public connector performance because it skipped permission fetching.\n\n##\
+  \ 2. Unauthorized `.aspx` pages used to abort connector runs\n\nA single unauthorized `.aspx` page could fail the entire\
+  \ connector run. This showed up in `AIatScania` and `SJPIndependentDealers` incidents. The May 11 hotfix changed behavior\
+  \ so page-level permission failures become per-document failures instead of run-level aborts. [[1]](<URL> [[3]](<URL> [[2]](<URL>\n\
+  \n## 3. Invalid, missing, locked, or inaccessible sites in broad crawl scope can cause Graph site-level failures\n\nBroad\
+  \ crawl scope included paths Graph could not resolve, e.g. `/teams/Plymothepsvnner` and `/teams/Almedalentrip`. These appear\
+  \ to be deleted, renamed, inaccessible, misspelled, or otherwise invalid sites. [[1]](<URL> [[2]](<URL>\n\nA later SharePoint\
+  \ connector fix, PR #11266, specifically handles Graph `HTTP 423 notAllowed` for admin-locked or M365-archived sites as\
+  \ per-site failures instead of tenant-run aborts. The same PR notes that `getAllSites` can surface sites the app cannot\
+  \ read; in builds with this fix, those 423 sites should be recorded and skipped rather than blocking the rest of the tenant\
+  \ crawl.\n\n## 4. Throughput bottleneck is mostly SharePoint fetch/permissions, not general compute\n\nEarlier suspicion\
+  \ included CPU embeddings and AWS sizing, but later evidence points strongly to SharePoint retrieval and permission sync.\
+  \ On Apr. 28, only one docfetching pod was busy despite multiple replicas, and engineering explained that one connector’s\
+  \ SharePoint fetch stage runs as a single long-lived task. [[13]](<URL>\n\n## 5. SharePoint API rate limiting is suspected\
+  \ but not proven\n\nThere is circumstantial evidence that SharePoint API latency/rate-limit pressure matters, especially\
+  \ given permission-heavy REST/Graph calls, but retrieved records do not show explicit `429 Too Many Requests` errors. Treat\
+  \ as a high-priority hypothesis requiring metrics, not as a proven root cause. [[13]](<URL> [[14]](<URL>\n\n## 6. Deployment/version\
+  \ gaps delayed fixes\n\nScania moved from `v2.12.6` to `v3.2.1` to `v3.3.0`, while fixes and diagnostics were being identified.\
+  \ Old versions lacked embedding swap, permission sync was not running in `v3.2.1`, local hotfixes were applied in `v3.3.0`,\
+  \ and missing OpenSearch/migration state may block moving to versions with better metrics. [[1]](<URL> [[3]](<URL> [[2]](<URL>\
+  \ [[5]](<URL>\n\n## 7. Scania’s security model and data scale make this a difficult customer environment\n\nScania’s security\
+  \ model rejects broad `read all`, asks for `site select`, and raises concerns about OneDrive, DLP, sensitivity labels, encrypted\
+  \ files, permission-change lag, and data egress. Scania’s SharePoint estate may be extremely large and decentralized, with\
+  \ related meeting context discussing up to 150 million documents. [[6]](<URL> [[7]](<URL> [[14]](<URL>\n\n---\n\n# Resolved\
+  \ or mitigated items\n\n- **Vespa `507 Insufficient Storage` / feed blocking** — resolved as active blocker by increasing\
+  \ Vespa memory from `32Gi` to `48Gi`. [[2]](<URL>\n- **Unauthorized `.aspx` page aborting whole connector run** — mitigated\
+  \ in Scania devtest by local hotfix; page-level permission failures become per-document failures. [[2]](<URL>\n- **Graph\
+  \ `HTTP 423 notAllowed` for admin-locked or M365-archived sites** — mitigated upstream by PR #11266; 423 now joins `403/404/410`\
+  \ as a per-site Graph failure status so tenant indexing continues to the next site. Deployment to Scania should still be\
+  \ confirmed before treating this as resolved in their environment.\n- **`SJPIndependentDealers` earlier `401` failure pattern**\
+  \ — May 11 update says the `.aspx` hotfix resolved it. [[2]](<URL>\n- **Docfetching worker timeout / probe instability**\
+  \ — May 11 update says docfetching workers were stable after a probe-timeout change. [[2]](<URL>\n- **Very low throughput\
+  \ improved at least temporarily** — throughput improved from 4–6 docs/min and ~14 docs/min to 180–200 docs/min, but later\
+  \ regressed/unstabilized per May 13 evidence. [[4]](<URL> [[13]](<URL> [[2]](<URL> [[15]](<URL>\n\n---\n\n# Open issues\
+  \ / unresolved questions\n\n1. **Active Graph `404` for `/teams/Almedalentrip`** — validate whether the site exists, was\
+  \ renamed/deleted, requires different permissions, or should be removed from crawl scope. [[2]](<URL>\n2. **Ongoing throughput\
+  \ instability** — deploy indexing phase metrics to isolate SharePoint fetch, permission lookup, queueing, doc processing,\
+  \ embedding, and Vespa/indexing time. [[5]](<URL> [[15]](<URL>\n3. **Missing OpenSearch migration page / possible missing\
+  \ OpenSearch container** — confirm deployment topology and provide Kubernetes upgrade guidance. [[5]](<URL>\n4. **Permission\
+  \ sync / group sync visibility and scheduler behavior** — verify scheduler jobs are running and confirm commit `667db2e8f573f015d9030e634c0bd1d8bbc0685b`\
+  \ or equivalent is deployed. [[3]](<URL> [[14]](<URL>\n5. **R&D hub final root cause** — Apr. 22 screenshot/error details\
+  \ are missing; Apr. 30 trace is truncated before final exception. [[11]](<URL> [[3]](<URL>\n6. **`403 forbidden` on opening\
+  \ private doc** — confirm whether user error, SharePoint propagation delay, missing permission, or expected behavior. [[8]](<URL>\n\
+  7. **Security/governance answers incomplete** — final approved answers around `site select`, DLP, labels, encrypted files,\
+  \ OneDrive, OpenAI embeddings, and permission-change lag were not present in retrieved Slack results. [[6]](<URL> [[7]](<URL>\n\
+  \n---\n\n# Recommendations / action items\n\n## Technical actions\n\n1. **Validate and clean crawl scope**\n   - Remove/quarantine\
+  \ invalid or missing sites such as `/teams/Almedalentrip` and `/teams/Plymothepsvnner` unless Scania confirms they exist\
+  \ and are accessible. [[1]](<URL> [[2]](<URL>\n   - Add preflight validation for broad SharePoint site lists so invalid\
+  \ sites do not become run-level blockers.\n   - Include PR #11266 or equivalent behavior in the target release/tag so admin-locked\
+  \ or archived sites are recorded and skipped instead of blocking tenant crawls.\n   - If Scania uses a build with PR #11301,\
+  \ consider enabling `PERSISTENT_INDEXING=true` so application-level connector/pipeline failures are recorded, failure-volume\
+  \ abort thresholds are bypassed, and indexing continues; infra, heartbeat, and usage-limit failures still fail the attempt.\n\
+  \n2. **Keep per-document failure behavior for inaccessible `.aspx` pages**\n   - Ensure the local hotfix that converts unauthorized\
+  \ page-level permission failures into per-document failures is included in Scania’s durable release/tag. [[2]](<URL>\n\n\
+  3. **Verify permission sync and group sync**\n   - Confirm scheduler tasks are present and running.\n   - Confirm group-to-email\
+  \ mapping jobs run successfully.\n   - Confirm commit `667db2e8f573f015d9030e634c0bd1d8bbc0685b` or equivalent is present\
+  \ in Scania’s deployed version. [[3]](<URL>\n   - Improve UI/logging so Scania can distinguish initial indexing, permission\
+  \ sync, and group sync states. [[14]](<URL>\n\n4. **Deploy observability / timing metrics**\n   - Add per-phase indexing\
+  \ metrics: connector fetch, SharePoint permission fetch, queue wait, doc processing, embedding, Vespa/indexing.\n   - Use\
+  \ `release/v4.0` or another target release that includes PR #11294/PR #11296 so docfetching `document_count` reflects the\
+  \ real number of documents processed in queued batches.\n   - Without this, Onyx cannot prove whether the bottleneck is\
+  \ SharePoint API latency/rate limits, permission traversal, embeddings, Vespa, or worker scheduling. [[5]](<URL> [[15]](<URL>\n\
+  \n5. **Split large SharePoint scope into multiple connectors**\n   - A single SharePoint connector’s fetch stage is serialized\
+  \ through one long-lived docfetching task. Multiple docfetching replicas do not parallelize a single connector. [[13]](<URL>\n\
+  \   - Split Scania’s SharePoint estate by site, drive, business area, or time window to utilize multiple workers. [[13]](<URL>\n\
+  \n6. **Treat SharePoint API rate limits as a hypothesis to test**\n   - Add timing/response telemetry.\n   - Consider moving\
+  \ eligible REST calls to Graph.\n   - Add Microsoft-recommended API headers if not already present.\n   - Do not present\
+  \ throttling as proven unless logs show explicit rate-limit evidence. [[13]](<URL> [[14]](<URL>\n\n7. **Confirm OpenSearch\
+  \ / upgrade path**\n   - Determine whether Scania’s `v3.3.0` deployment should have OpenSearch and why the migration page\
+  \ is missing. [[5]](<URL>\n   - Provide Kubernetes-specific upgrade instructions and a target version/tag.\n   - Decide\
+  \ whether Scania should move to `v4.0.X` for metrics once OpenSearch/migration blockers are cleared.\n\n## Customer-facing\
+  \ actions\n\n1. **Set expectations on full-estate indexing** — Scania’s SharePoint estate is large and decentralized; broad\
+  \ sweeps will hit invalid sites, permission edge cases, and latency/rate-limit bottlenecks.\n2. **Explain permission-preserving\
+  \ tradeoffs** — organization-public connectors are faster because they skip document-level permission fetching; permission-synced\
+  \ connectors are safer but slower. [[14]](<URL>\n3. **Document security answers** — provide clear responses on `read all`\
+  \ vs `site select`, OneDrive, OpenAI embeddings, DLP, sensitivity labels/encryption, permission-change lag, and audit logging.\
+  \ [[6]](<URL> [[7]](<URL> [[4]](<URL>\n4. **Explain partial failure semantics** — after the `.aspx` hotfix, inaccessible\
+  \ pages should become per-document failures, not full-run failures. [[2]](<URL>\n\n---\n\n# One-off vs systemic classification\n\
+  \n| Issue | One-off or systemic? | Reason |\n|---|---|---|\n| Feb. 17 validation/firewall suspicion | Likely one-off setup/environment\
+  \ issue | Early onboarding issue; no later direct recurrence in same form. [[9]](<URL> |\n| 3TB / huge SharePoint scope\
+  \ concern | Systemic | Large SharePoint scale drives throughput, scope, and invalid-site issues. [[10]](<URL> [[13]](<URL>\
+  \ [[14]](<URL> |\n| Security rejecting `read all` and preferring `site select` | Systemic customer constraint | Shapes connector\
+  \ permissions and coverage. [[6]](<URL> |\n| Embedding config blocked on old version | Version/config issue, partially systemic\
+  \ | Started on `v2.12.6`; upgrade/config management remained recurring. [[1]](<URL> [[4]](<URL> [[5]](<URL> |\n| `403 forbidden`\
+  \ on opening private doc | Unresolved one-off unless repeated | Only directly captured once. [[8]](<URL> |\n| `AIatScania`\
+  \ `.aspx` `401` | Specific instance of systemic `.aspx` permission failure | Same pattern later seen with `SJPIndependentDealers`.\
+  \ [[1]](<URL> [[3]](<URL> [[2]](<URL> |\n| Unauthorized `.aspx` page aborting connector run | Systemic connector behavior,\
+  \ mitigated | May 11 update explicitly describes old behavior and hotfix. [[2]](<URL> |\n| `/teams/Plymothepsvnner` Graph\
+  \ `404` | Specific invalid-site incident | Likely spelling/missing site. [[1]](<URL> |\n| `/teams/Almedalentrip` Graph `404`\
+  \ | Specific invalid-site incident and latest active blocker | May 11 active blocker. [[2]](<URL> |\n| Invalid/missing sites\
+  \ in broad crawl scope | Systemic | Multiple `404`s across broad sweeps. [[1]](<URL> [[2]](<URL> [[12]](<URL> |\n| `ChunkedEncodingError`\
+  \ | Probably one-off / unresolved | No clear recurrence; exact root cause not proven. [[3]](<URL> |\n| R&D hub group/member\
+  \ traversal failure | Recurring within R&D hub / permission-sync area | Apr. 22 R&D issue plus Apr. 30 detailed trace. [[11]](<URL>\
+  \ [[3]](<URL> |\n| Permission sync not running | Systemic deployment/version issue | Needed fix/backport; related scheduler\
+  \ discussion. [[3]](<URL> [[14]](<URL> |\n| Vespa `507` | Systemic capacity issue, resolved as active blocker | Fixed by\
+  \ memory increase from `32Gi` to `48Gi`. [[2]](<URL> |\n| Throughput 4–14 docs/min | Systemic at Scania scale | Caused by\
+  \ serialized SharePoint fetch/permission work and possibly API latency/rate limits. [[4]](<URL> [[13]](<URL> [[14]](<URL>\
+  \ |\n| Throughput instability after reaching 180–200 docs/min | Open systemic issue | Still discussed May 13. [[2]](<URL>\
+  \ [[5]](<URL> [[15]](<URL> |\n| Missing OpenSearch migration page/container | Open deployment anomaly | Latest upgrade-path\
+  \ thread flags it as concerning. [[5]](<URL> |\n\n---\n\n# Operational follow-up tracker\n\n```markdown\n- [ ] Confirm `/teams/Almedalentrip`\
+  \ status with Scania SharePoint admins.\n- [ ] Confirm `/teams/Plymothepsvnner` was typo/deleted/inaccessible and remove\
+  \ if invalid.\n- [ ] Confirm Scania deployment includes `.aspx` per-document failure hotfix.\n- [ ] Confirm permission-sync\
+  \ and group-sync scheduler jobs are running.\n- [ ] Confirm GitHub commit `667db2e8f573f015d9030e634c0bd1d8bbc0685b` or\
+  \ equivalent is in Scania tag.\n- [ ] Confirm OpenSearch deployment/migration state on Scania `v3.3.0`.\n- [ ] Provide Kubernetes\
+  \ upgrade guide and target release/tag.\n- [ ] Deploy indexing phase metrics build.\n- [ ] Split broad SharePoint crawl\
+  \ into multiple scoped connectors.\n- [ ] Produce Scania security FAQ covering site-select, DLP, labels, OneDrive, embeddings,\
+  \ permission lag, and audit logs.\n```\n\n---\n\n# Source reference index\n\n1. “Scania Followup Issues” — <URL>\n2. “Scania\
+  \ Update - New thread” — <URL>\n3. “Scania Sharepoint Issues” — <URL>\n4. “Good Morning - Scania update” — <URL>\n5. “Scania\
+  \ Upgrade path” — <URL>\n6. “Scania security ?s” — <URL>\n7. “Latest Scania Security Questions to be answered” — <URL>\n\
+  8. “Scania report” — <URL>\n9. “Scania Call” — <URL>\n10. Playlist/Scania SharePoint ingestion-speed discussion — <URL>\n\
+  11. “Got a Scania issue” / R&D hub — <URL>\n12. Apr. 20 Scania / Onyx Sync meeting — <URL>\n13. Apr. 28 engineering performance\
+  \ analysis — <URL>\n14. Apr. 30 Scania / Onyx Questions Sync meeting — <URL>\n15. May 13 Scania / Onyx Update meeting —\
+  \ <URL>\n16. Feb. 4 HubSpot / Fireflies Sales Call Summary — <URL>\n17. PR #11301 persistent indexing — <URL>\n\n---\n\n\
+  The overall readout is that Scania’s SharePoint issues are not a single bug. They are a cluster of interacting problems:\
+  \ very large SharePoint scale, strict security constraints, broad crawl scopes containing invalid sites, permission-preserving\
+  \ indexing overhead, connector failure-handling gaps for unauthorized `.aspx` pages, deployment/version gaps, and insufficient\
+  \ observability. The May 11 fixes show the system can improve substantially, but the May 13 upgrade-path thread shows Scania\
+  \ was not yet in a stable final state. [[2]](<URL> [[5]](<URL>\n"
+expected_class: IRRELEVANT
+doc_title: "mpyatishev said in Channel: #ask-onyxbot: <@<PHONE>> \n\nWhy I..."
+doc_url: <URL>
+doc_content: "<@<PHONE>> \n\nWhy I am getting a 500 Internal Server Error when trying to swap credentials via the API?.\n\
+  It looks like a database foreign key constraint violation during an UPDATE query.\n\nEndpoint: PUT /manage/admin/credential/swap\n\
+  Error: psycopg2.errors.ForeignKeyViolation\nDetails: Key (connector_id, credential_id)=(3, 3) is still referenced from table\
+  \ hierarchy_node_by_connector_credential_pair."
+source: connector:discord
+expected_facts_present: []
+expected_facts_preserved: []
+max_bloat_ratio: 2.0
+notes: 'Real ingest_eval_samples row 664 (2026-05-22 14:09:42). Production reconciler outcome: irrelevant.'
+tags:
+- real-world
+- real-prod-decision
+- source:discord
+- outcome:irrelevant

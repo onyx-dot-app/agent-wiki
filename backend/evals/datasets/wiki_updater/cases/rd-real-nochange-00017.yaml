@@ -1,0 +1,42 @@
+id: rd-real-nochange-00017
+surface: reconcile_document
+wiki_path: engineering/Agent Wiki Project/Deployment Guide.md
+current_body: |-
+  # Deployments of Agent Wiki
+  This doc provides an overview of how to deploy Agent Wiki locally and on cloud.
+
+  ## macOS Run-Agent launcher release
+
+  Agent Wiki ships a signed, notarized, and stapled macOS launcher app, `<DOMAIN>`, for the Run-Agent flow. The build script `scripts/build-app.sh` creates a universal binary, builds the app bundle with `osacompile`, signs the inner Mach-O, applet, and bundle, submits it with `notarytool submit --wait`, staples it, and writes `dist/AgentWikiLauncher.zip`. `scripts/build-app.sh` is the only supported signing path; `scripts/release-mac.sh` has been removed and should not be referenced by release docs or commands.
+
+  The reusable workflow `.github/workflows/release-agentwiki-launcher-go.yml` handles launcher signing and notarization. It assumes the AWS signing role via OIDC and reads the Apple signing secrets from AWS Secrets Manager under `deploy/apple-*`. It can be run manually with `workflow_dispatch` or called by other workflows with `workflow_call`.
+
+  The launcher workflow uses `actions/cache@v4` as a content-addressed cache for `dist/`, keyed by `hashFiles('packages/agentwiki-launcher-go/**')`. When the launcher source is unchanged, setup-go, AWS OIDC, Apple secret retrieval, and `scripts/build-app.sh` are skipped; the cached notarized artifact is uploaded for downstream backend image builds. A cold launcher build still takes about 5 minutes, while a warm cache hit is about 30 seconds. Stapled `.app` notarization tickets do not expire, and the GitHub Actions cache can evict entries after 7 days.
+
+  `docker-build-push.yml` and `nightly-build.yml` call the launcher release workflow, download the notarized artifact, and place it under `backend/static/installers/`. The backend image includes this directory via `backend/Dockerfile`'s `COPY static ./static`, and production serves the zip from `GET /api/installer/app`.
+
+  ## Launcher deployment go-live checklist
+
+  Before cutting a release that includes the macOS launcher:
+
+  1. Merge `onyx-dot-app/cloud-deployment-yamls#349` and run `terraform apply` so the least-privilege `agent-wiki-signing` role exists.
+  2. Set the `AWS_OIDC_ROLE_ARN` repo secret on `onyx-dot-app/agent-wiki` to the Terraform `signing_role_arn` output.
+  3. Merge the Agent Wiki launcher PR.
+  4. Cut a `v*` tag so `docker-build-push.yml` runs and bakes `AgentWikiLauncher.zip` into the backend image.
+  5. Users can then visit `/agents`, download the installer, drag the app to Applications, accept the first-run Pin dialog, and use Run Agent.
+
+  `LAUNCHERS_ENABLED=true` is already set in `cloud-deployment-yamls/global-terraform/agent-wiki-infra/app/dev-wiki-values.yaml`; no extra dev-wiki toggle is required.
+expected_class: NO_CHANGE
+doc_title: 'Unknown in #monitor-deployments: 🚀 Ad-hoc Dev Wiki Deploy Started'
+doc_url: <URL>
+doc_content: 🚀 Ad-hoc Dev Wiki Deploy Started
+source: connector:slack
+expected_facts_present: []
+expected_facts_preserved: []
+max_bloat_ratio: 2.0
+notes: 'Real ingest_eval_samples row 17 (2026-05-21 22:18:49). Production reconciler outcome: no_change.'
+tags:
+- real-world
+- real-prod-decision
+- source:slack
+- outcome:no_change

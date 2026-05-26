@@ -1,0 +1,36 @@
+id: rd-real-bulk-6c2b1e1a5f
+surface: reconcile_document
+wiki_path: individual_notes/Things Yuhong cares about.md
+current_body: |
+  # Tracking of all of the things that Yuhong would like updates on:
+
+  ## Tracking evals
+  How are the evaluations going for updating documents to the wiki? Place updates as bullet points below
+
+  How is the evaluation for agents updating the documents going? I want updates as bullet points below
+
+  - In the latest production ingest eval analysis, 226 of 1,092 samples had committed outcomes the judge marked wrong. Most were loose relevance failures: HubSpot contact/company records became fabricated `team-todos.md` tasks, GitHub PRs were added to personal notes based only on product-area overlap, and Slack announcements/support threads became task entries. PR #113 tightened the reconciler prompt to reject CRM records as action items, require direct relevance to the page's question, and avoid creating checklist items unless the source explicitly describes work to be done; monitor follow-up runs for improvement.
+  - PR #114 refined the task rule after 1,268 post-prompt-change eval samples: a task is valid when the source explicitly assigns a concrete action to a named internal person already tracked on the page, while entity-state records without a named internal assignee are still not tasks. It also blocks the reconciler from creating new headings or sections from loosely related sources.
+  - PR #115 refined the eval labeler's judge prompt so topical sources that add nothing are judged as `no_change_covered` / `no_change_extra` rather than `irrelevant`, and setup/connectivity pages treat client-side configuration and troubleshooting as relevant. This should reduce false mismatch signal from the 39 no-change samples and the Discord → MCP Server setup cases.
+  - Production-mined eval expansion has export and conversion scripts in place, but no committed cases yet. PR #112 added `export_ingest_eval_samples.sh` and `convert_ingest_eval_samples.py` for ORM-based export and outcome-balanced conversion, then deferred the initial 16-row dataset after review found customer PII in source content; the next dataset growth path needs generation-time redaction, an out-of-repo JSONL path, or synthetic cases.
+
+  ## Tracking UX
+  How is progress on the deploying Agents via the UI? I want to know when it can support claude code, craft, etc.
+
+  - Claude Code support is documented through the Onyx MCP Server path. Craft custom external app support lets admins upload a bundle and gateway config, and users connect by entering their own credentials without OAuth.
+  - External app approvals are scoped around the sidecar interception layer: OpenCode sessions stream through the sidecar proxy instead of being created directly by the API server, and external network requests are held while the API server matcher decides whether to request user approval, auto-deny, or auto-approve. Approved requests can be released with injected credentials; denied requests return 401/403 to OpenCode. Scheduled tasks can also surface approval UI in chat.
+expected_class: CHANGE
+doc_title: Approvals
+doc_url: <URL>
+doc_content: Approvals
+source: connector:google_drive
+expected_facts_present: []
+expected_facts_preserved: []
+max_bloat_ratio: 2.0
+notes: Real production reconciler CHANGE event from /wiki/.git commit 6c2b1e1a5f (2026-05-26). facts_present/preserved empty
+  for bulk-generated cases; trigger + bloat + entity-density axes still score.
+tags:
+- real-world
+- real-prod-commit
+- source:google_drive
+- sha:6c2b1e1a5f
