@@ -29,6 +29,9 @@ irrelevant pushes:
   page.
 - A source that shares the same domain but doesn't directly address a
   fact or question the page tracks.
+- A source about a different system that uses the same technology —
+  same protocol, tool, or stack — but describes a separate product or
+  service entirely.
 
 When in doubt, use `irrelevant`. Err on the side of not changing the page.
 
