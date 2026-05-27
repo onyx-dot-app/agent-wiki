@@ -1,7 +1,8 @@
 """HTTP shapes for /api/wiki."""
+
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -143,6 +144,43 @@ class FileHistoryResponse(BaseModel):
     commits: list[CommitView]
 
 
+class WordDiff(BaseModel):
+    """A 1-remove/1-add line collapsed into one rendered row.
+
+    Common leading + trailing word tokens become `prefix`/`suffix`;
+    the middle is split into struck-through `removed` and green `added`.
+    """
+
+    prefix: str
+    removed: str
+    added: str
+    suffix: str
+
+
+class DiffLine(BaseModel):
+    kind: Literal["context", "add", "remove", "word"]
+    text: str | None = None
+    word_diff: WordDiff | None = None
+    old_lineno: int | None = None
+    new_lineno: int | None = None
+
+
+class DiffHunk(BaseModel):
+    old_start: int
+    old_count: int
+    new_start: int
+    new_count: int
+    lines: list[DiffLine]
+
+
+class FileDiffResponse(BaseModel):
+    path: str
+    sha: str
+    parent_sha: str | None
+    hunks: list[DiffHunk]
+    is_creation: bool
+
+
 class SearchHitView(BaseModel):
     doc_id: str
     path: str
@@ -177,7 +215,7 @@ class ActivityRowView(BaseModel):
 
     owner_display: str
     agent_name: str | None
-    activity: str           # "read" | "wrote"
+    activity: str  # "read" | "wrote"
     description: str | None
     registered_at: str
     expires_at: str
