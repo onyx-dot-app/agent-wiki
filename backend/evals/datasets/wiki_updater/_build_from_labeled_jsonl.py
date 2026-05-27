@@ -214,7 +214,11 @@ def _case_to_yaml(case: WikiUpdaterCase) -> str:
 
 
 def _scan_pii(text: str) -> list[str]:
-    """Return labels for any PII patterns that survived the scrub."""
+    """Return labels for any PII patterns that survived the scrub.
+
+    Must cover every pattern ``_redact`` applies — otherwise a leak in a
+    single category passes the "0 alarms" gate undetected.
+    """
     findings: list[str] = []
     if _EMAIL_RE.search(text):
         findings.append("EMAIL")
@@ -222,6 +226,8 @@ def _scan_pii(text: str) -> list[str]:
         findings.append("URL")
     if _AMOUNT_RE.search(text):
         findings.append("AMOUNT")
+    if _PHONE_RE.search(text):
+        findings.append("PHONE")
     if _LONG_DIGITS_RE.search(text):
         findings.append("LONG_DIGITS")
     return findings
