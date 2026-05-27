@@ -1,5 +1,8 @@
+import pytest
+
 from app.models.file_system import DiffHunk, DiffLine
-from app.wiki.diff import _parse_unified, _promote_word_diff, _word_diff
+from app.wiki import git as wiki_git
+from app.wiki.diff import _parse_unified, _promote_word_diff, _word_diff, parse_commit_diff
 
 
 def test_word_diff_identical_strings() -> None:
@@ -168,3 +171,36 @@ def test_promote_word_diff_remove_not_adjacent_to_add_no_promote() -> None:
     out = _promote_word_diff(hunk)
     kinds = [line.kind for line in out.lines]
     assert kinds == ["remove", "context", "add"]
+
+
+@pytest.fixture
+def doc_with_two_commits(tmp_repo: None) -> tuple[str, str, str]:
+    """Two commits on the same path. Returns (path, first_sha, second_sha)."""
+    rel = "notes/page.md"
+    first = wiki_git.commit_file(rel, "line one\nline two\nline three\n", "create", author=None)
+    second = wiki_git.commit_file(rel, "line one\nline TWO\nline three\n", "edit", author=None)
+    return rel, first, second
+
+
+def test_parse_commit_diff_modify(doc_with_two_commits: tuple[str, str, str]) -> None:
+    rel, _first, second = doc_with_two_commits
+    out = parse_commit_diff(second, rel)
+    assert out.path == rel
+    assert out.sha == second
+    assert out.parent_sha is not None
+    assert out.is_creation is False
+    assert len(out.hunks) >= 1
+    word_lines = [line for hunk in out.hunks for line in hunk.lines if line.kind == "word"]
+    assert len(word_lines) == 1
+    assert word_lines[0].word_diff is not None
+    assert word_lines[0].word_diff.removed == "two"
+    assert word_lines[0].word_diff.added == "TWO"
+
+
+def test_parse_commit_diff_creation(doc_with_two_commits: tuple[str, str, str]) -> None:
+    rel, first, _second = doc_with_two_commits
+    out = parse_commit_diff(first, rel)
+    assert out.parent_sha is None
+    assert out.is_creation is True
+    assert out.hunks  # at least one
+    assert all(line.kind == "add" for hunk in out.hunks for line in hunk.lines)

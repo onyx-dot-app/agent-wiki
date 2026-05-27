@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import re
 
-from app.models.file_system import DiffHunk, DiffLine, WordDiff
+from app.models.file_system import DiffHunk, DiffLine, FileDiffResponse, WordDiff
+from app.wiki import git as wiki_git
 
 _WORD_SPLIT_RE = re.compile(r"(\s+)")
 
@@ -25,7 +26,7 @@ def _split_words(s: str) -> list[str]:
     return [tok for tok in _WORD_SPLIT_RE.split(s) if tok != ""]
 
 
-def _parse_unified(text: str) -> list[DiffHunk]:  # pyright: ignore[reportUnusedFunction]
+def _parse_unified(text: str) -> list[DiffHunk]:
     """Parse ``git show`` style unified diff text into structured hunks.
 
     File-header lines (``diff --git``, ``index``, ``new file mode``,
@@ -171,7 +172,7 @@ def _word_diff(removed: str, added: str) -> WordDiff:
     )
 
 
-def _promote_word_diff(hunk: DiffHunk) -> DiffHunk:  # pyright: ignore[reportUnusedFunction]
+def _promote_word_diff(hunk: DiffHunk) -> DiffHunk:
     """Collapse a hunk with exactly one ``remove`` directly followed by
     exactly one ``add`` (and no other adds/removes) into a single
     ``kind="word"`` line. Returns the hunk unchanged otherwise.
@@ -198,3 +199,24 @@ def _promote_word_diff(hunk: DiffHunk) -> DiffHunk:  # pyright: ignore[reportUnu
     )
     new_lines = hunk.lines[:remove_idx] + [merged] + hunk.lines[add_idx + 1 :]
     return hunk.model_copy(update={"lines": new_lines})
+
+
+def parse_commit_diff(sha: str, rel: str) -> FileDiffResponse:
+    """Build a structured diff for ``sha`` vs its parent, scoped to ``rel``.
+
+    First-commit (no parent) → ``parent_sha`` is None, ``is_creation`` is
+    True, every line is an ``add``. ``rel`` not touched by ``sha`` → returns
+    an empty-hunks response; callers (the API route) should translate that
+    into 404 for end users.
+    """
+    parent = wiki_git.parent_sha(sha)
+    raw = wiki_git.diff_for_commit(sha, rel)
+    hunks = _parse_unified(raw)
+    hunks = [_promote_word_diff(h) for h in hunks]
+    return FileDiffResponse(
+        path=rel,
+        sha=sha,
+        parent_sha=parent,
+        hunks=hunks,
+        is_creation=parent is None,
+    )

@@ -4,6 +4,7 @@ The backend keeps the wiki as a real git repository on disk and shells out to
 git via subprocess — no library dependency. All writes commit immediately so
 history is always consistent with the working tree.
 """
+
 from __future__ import annotations
 
 import logging
@@ -25,9 +26,9 @@ class CommitInfo(BaseModel):
 
     sha: str
     author: str
-    ts: str          # ISO-8601 author date
-    message: str     # commit subject
-    body: str        # commit body (may be empty)
+    ts: str  # ISO-8601 author date
+    message: str  # commit subject
+    body: str  # commit body (may be empty)
 
 
 def _run(
@@ -138,7 +139,7 @@ def move_path(
         if old_p == old_rel_path:
             moves.append((old_p, new_rel_path))
         else:
-            rest = old_p[len(old_rel_path):].lstrip("/")
+            rest = old_p[len(old_rel_path) :].lstrip("/")
             moves.append((old_p, f"{new_rel_path}/{rest}"))
     full_new = Path(CONFIG.wiki_dir) / new_rel_path
     full_new.parent.mkdir(parents=True, exist_ok=True)
@@ -224,9 +225,7 @@ def history(rel_path: str, limit: int = 100) -> list[CommitInfo]:
     sep_field = "\x1f"
     sep_record = "\x1e"
     fmt = f"%H{sep_field}%an{sep_field}%aI{sep_field}%s{sep_field}%b{sep_record}"
-    out = _run(
-        ["log", f"-n{limit}", "--follow", f"--pretty=format:{fmt}", "--", rel_path]
-    ).stdout
+    out = _run(["log", f"-n{limit}", "--follow", f"--pretty=format:{fmt}", "--", rel_path]).stdout
     rows: list[CommitInfo] = []
     for record in out.split(sep_record):
         record = record.strip("\n")
@@ -242,9 +241,13 @@ def history(rel_path: str, limit: int = 100) -> list[CommitInfo]:
 
 def head_sha_for_path(rel_path: str) -> str | None:
     """SHA of the most recent commit that touched ``rel_path``, or None."""
-    out = _run(
-        ["log", "-n1", "--pretty=format:%H", "--", rel_path], check=False
-    ).stdout.strip()
+    out = _run(["log", "-n1", "--pretty=format:%H", "--", rel_path], check=False).stdout.strip()
+    return out or None
+
+
+def parent_sha(sha: str) -> str | None:
+    """First parent of ``sha`` or None if it's a root commit."""
+    out = _run(["rev-parse", "--verify", f"{sha}^"], check=False).stdout.strip()
     return out or None
 
 
@@ -296,16 +299,14 @@ def list_paths_with_head_sha(prefix: str = "") -> list[tuple[str, str]]:
     than ``head_sha_for_path`` per file.
     """
     sep = "\x1f"
-    res = _run(
-        ["log", "--name-only", f"--pretty=format:{sep}%H"], check=False
-    )
+    res = _run(["log", "--name-only", f"--pretty=format:{sep}%H"], check=False)
     if res.returncode != 0:
         return []
     head: dict[str, str] = {}
     current_sha: str | None = None
     for line in res.stdout.splitlines():
         if line.startswith(sep):
-            current_sha = line[len(sep):]
+            current_sha = line[len(sep) :]
             continue
         if not line or current_sha is None:
             continue
@@ -328,7 +329,7 @@ def list_paths_with_mtime(prefix: str = "") -> list[tuple[str, str]]:
     current_ts: str | None = None
     for line in out.splitlines():
         if line.startswith(sep):
-            current_ts = line[len(sep):]
+            current_ts = line[len(sep) :]
             continue
         if not line or current_ts is None:
             continue
@@ -340,9 +341,7 @@ def list_paths_with_mtime(prefix: str = "") -> list[tuple[str, str]]:
 
 def paths_changed_in(sha: str) -> list[str]:
     """File paths touched by a single commit. Empty list if sha is unknown."""
-    out = _run(
-        ["diff-tree", "--no-commit-id", "--name-only", "-r", sha], check=False
-    ).stdout
+    out = _run(["diff-tree", "--no-commit-id", "--name-only", "-r", sha], check=False).stdout
     return [line for line in out.splitlines() if line]
 
 
