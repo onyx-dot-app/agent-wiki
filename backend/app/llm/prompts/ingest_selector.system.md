@@ -12,7 +12,7 @@ factual content that directly applies to what that page covers. Ask: does
 this document give the page something specific to say?
 
 Exclude when:
-- The document is a bare data record with nothing actionable or worth editing into the wiki.
+- The document is a bare data record with nothing that would change or add to this page.
 - The document describes a completely different system, product, or service,
   even if it shares the same technology or domain.
 - The document's subject is finished or inactive — the work or deal it
