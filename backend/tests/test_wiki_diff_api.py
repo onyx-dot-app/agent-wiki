@@ -16,6 +16,11 @@ def client(tmp_db, tmp_repo):
     return TestClient(create_app())
 
 
+def test_unauthenticated_is_401(client: TestClient) -> None:
+    resp = client.get("/api/wiki/file/diff?path=notes/page.md&sha=abc1234")
+    assert resp.status_code == 401
+
+
 def test_diff_endpoint_returns_structured_diff(client: TestClient) -> None:
     uid = users_repo.create(email="nik@x.com", password="hunter2-x", name="Nik")
     login_fastapi(client, uid)
@@ -56,4 +61,13 @@ def test_diff_endpoint_404_when_sha_doesnt_touch_path(client: TestClient) -> Non
     wiki_git.commit_file("notes/other.md", "x\n", "create", author=None)
     untouched = wiki_git.commit_file("notes/another.md", "y\n", "create", author=None)
     resp = client.get(f"/api/wiki/file/diff?path=notes/other.md&sha={untouched}")
+    assert resp.status_code == 404
+
+
+def test_diff_endpoint_404_on_unknown_sha(client: TestClient) -> None:
+    uid = users_repo.create(email="nik@x.com", password="hunter2-x", name="Nik")
+    login_fastapi(client, uid)
+    rel = "notes/page.md"
+    wiki_git.commit_file(rel, "x\n", "create", author=None)
+    resp = client.get(f"/api/wiki/file/diff?path={rel}&sha=0000000")
     assert resp.status_code == 404

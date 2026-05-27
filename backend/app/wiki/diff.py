@@ -8,6 +8,7 @@ for the FastAPI response model in ``app.models.file_system``.
 from __future__ import annotations
 
 import re
+import subprocess
 
 from app.models.file_system import DiffHunk, DiffLine, FileDiffResponse, WordDiff
 from app.wiki import git as wiki_git
@@ -207,10 +208,20 @@ def parse_commit_diff(sha: str, rel: str) -> FileDiffResponse:
     First-commit (no parent) → ``parent_sha`` is None, ``is_creation`` is
     True, every line is an ``add``. ``rel`` not touched by ``sha`` → returns
     an empty-hunks response; callers (the API route) should translate that
-    into 404 for end users.
+    into 404 for end users. Unknown SHA (passes hex regex but doesn't
+    resolve in the repo) → same empty-hunks response, same 404 at the route.
     """
-    parent = wiki_git.parent_sha(sha)
-    raw = wiki_git.diff_for_commit(sha, rel)
+    try:
+        parent = wiki_git.parent_sha(sha)
+        raw = wiki_git.diff_for_commit(sha, rel)
+    except subprocess.CalledProcessError:
+        return FileDiffResponse(
+            path=rel,
+            sha=sha,
+            parent_sha=None,
+            hunks=[],
+            is_creation=False,
+        )
     hunks = _parse_unified(raw)
     hunks = [_promote_word_diff(h) for h in hunks]
     return FileDiffResponse(
