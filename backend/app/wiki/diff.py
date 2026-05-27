@@ -62,6 +62,18 @@ def _word_diff(removed: str, added: str) -> WordDiff:  # pyright: ignore[reportU
         suffix = removed_mid[len(trimmed) :] + suffix
         removed_mid = trimmed
 
+    # Symmetric leading-whitespace handler: when one side has no middle,
+    # a leading whitespace token on the other side belongs in the common
+    # prefix, not in the added/removed span.
+    if not removed_mid and added_mid and added_mid[:1].isspace():
+        trimmed = added_mid.lstrip()
+        prefix = prefix + added_mid[: len(added_mid) - len(trimmed)]
+        added_mid = trimmed
+    elif not added_mid and removed_mid and removed_mid[:1].isspace():
+        trimmed = removed_mid.lstrip()
+        prefix = prefix + removed_mid[: len(removed_mid) - len(trimmed)]
+        removed_mid = trimmed
+
     return WordDiff(
         prefix=prefix,
         removed=removed_mid,

@@ -47,3 +47,19 @@ def test_word_diff_multi_word_added() -> None:
     assert out.suffix == " world"
     assert out.removed == ""
     assert out.added == "brave new"
+
+
+def test_word_diff_leading_whitespace_in_added() -> None:
+    out = _word_diff("world", " brave new world")
+    assert out.prefix == " "
+    assert out.removed == ""
+    assert out.added == "brave new"
+    assert out.suffix == " world"
+
+
+def test_word_diff_leading_whitespace_in_removed() -> None:
+    out = _word_diff(" brave new world", "world")
+    assert out.prefix == " "
+    assert out.removed == "brave new"
+    assert out.added == ""
+    assert out.suffix == " world"
