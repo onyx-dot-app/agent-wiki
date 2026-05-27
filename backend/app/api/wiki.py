@@ -510,12 +510,12 @@ def get_edit_draft(
     )
 
 
-@router.put("/file/edit-draft", status_code=status.HTTP_204_NO_CONTENT)
+@router.put("/file/edit-draft", response_model=EditDraftResponse)
 def upsert_edit_draft(
     req: EditDraftRequest,
     user: User = Depends(require_user),
-) -> None:
-    """Auto-save the user's in-progress edit draft."""
+) -> EditDraftResponse:
+    """Auto-save the user's in-progress edit draft. Returns the saved draft."""
     try:
         rel = filesystem.safe_rel_path(req.path)
     except ValueError as e:
@@ -526,6 +526,14 @@ def upsert_edit_draft(
         user_id=user.id,
         base_sha=req.base_sha,
         content=req.content,
+    )
+    row = wiki_edit_drafts.get(rel, user.id)
+    assert row is not None
+    return EditDraftResponse(
+        path=row["path"],
+        base_sha=row["base_sha"],
+        content=row["content"],
+        updated_at=row["updated_at"],
     )
 
 
