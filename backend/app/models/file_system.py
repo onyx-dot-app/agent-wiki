@@ -158,11 +158,20 @@ class WordDiff(BaseModel):
 
 
 class DiffLine(BaseModel):
+    """One rendered row in a diff hunk.
+
+    Field population by `kind`:
+    - `context` / `add` / `remove`: `text` set, `word_diff` None.
+    - `word`: `word_diff` set, `text` None.
+    - `context` and `word`: both `old_lineno` and `new_lineno` set.
+    - `add`: only `new_lineno` set. `remove`: only `old_lineno` set.
+    """
+
     kind: Literal["context", "add", "remove", "word"]
-    text: str | None = None
-    word_diff: WordDiff | None = None
-    old_lineno: int | None = None
-    new_lineno: int | None = None
+    text: str | None
+    word_diff: WordDiff | None
+    old_lineno: int | None
+    new_lineno: int | None
 
 
 class DiffHunk(BaseModel):
