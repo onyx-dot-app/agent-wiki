@@ -521,7 +521,7 @@ def upsert_edit_draft(
         rel = filesystem.safe_rel_path(req.path)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-    require_can("read", rel, user)
+    require_can("write", rel, user)
     wiki_edit_drafts.upsert(
         path=rel,
         user_id=user.id,

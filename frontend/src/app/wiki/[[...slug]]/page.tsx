@@ -1839,6 +1839,49 @@ function FileViewer({ path }: { path: string }) {
     if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
   }
 
+  async function onKeepMine() {
+    if (!conflict) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await apiFetch("/wiki/file", {
+        method: "PUT",
+        body: JSON.stringify({
+          path,
+          body: conflict.draftBody,
+          base_sha: conflict.currentSha,
+        }),
+      });
+      setDraft(conflict.draftBody);
+      setBody(conflict.draftBody);
+      setConflict(null);
+      setEditing(false);
+      if (historyOpen) refreshHistory();
+      else setCommits(null);
+      const fresh = await apiFetch<FileResponse>(
+        `/wiki/file?path=${encodeURIComponent(path)}`,
+      );
+      setHeadSha(fresh.head_sha ?? null);
+      await refreshDraftState();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "save failed");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function onUseCurrent() {
+    if (!conflict) return;
+    setDraft(conflict.currentBody);
+    setBody(conflict.currentBody);
+    setHeadSha(conflict.currentSha);
+    setConflict(null);
+    void apiFetch(
+      `/wiki/file/edit-draft?path=${encodeURIComponent(path)}`,
+      { method: "DELETE" },
+    ).catch(() => {});
+  }
+
   return (
     <main
       style={{
@@ -2017,7 +2060,7 @@ function FileViewer({ path }: { path: string }) {
         </div>
       )}
 
-      {pendingResumeDraft && (
+      {editing && pendingResumeDraft && (
         <div
           style={{
             display: "flex",
@@ -2058,7 +2101,7 @@ function FileViewer({ path }: { path: string }) {
         </div>
       )}
 
-      {conflict && (
+      {editing && conflict && (
         <div
           style={{
             marginBottom: 12,
@@ -2082,53 +2125,14 @@ function FileViewer({ path }: { path: string }) {
             <div style={{ flex: 1 }} />
             <Button
               size="sm"
-              onClick={async () => {
-                // Keep mine: force-save the draft over the current HEAD.
-                setSaving(true);
-                setError(null);
-                try {
-                  await apiFetch("/wiki/file", {
-                    method: "PUT",
-                    body: JSON.stringify({
-                      path,
-                      body: conflict.draftBody,
-                      base_sha: conflict.currentSha,
-                    }),
-                  });
-                  setDraft(conflict.draftBody);
-                  setBody(conflict.draftBody);
-                  setHeadSha(conflict.currentSha);
-                  setConflict(null);
-                  setEditing(false);
-                  if (historyOpen) refreshHistory();
-                  else setCommits(null);
-                  const fresh = await apiFetch<FileResponse>(
-                    `/wiki/file?path=${encodeURIComponent(path)}`,
-                  );
-                  setHeadSha(fresh.head_sha ?? null);
-                  await refreshDraftState();
-                } catch (e) {
-                  setError(e instanceof Error ? e.message : "save failed");
-                } finally {
-                  setSaving(false);
-                }
-              }}
+              onClick={() => void onKeepMine()}
               disabled={saving}
             >
               Keep mine
             </Button>
             <Button
               size="sm"
-              onClick={() => {
-                setDraft(conflict.currentBody);
-                setBody(conflict.currentBody);
-                setHeadSha(conflict.currentSha);
-                setConflict(null);
-                void apiFetch(
-                  `/wiki/file/edit-draft?path=${encodeURIComponent(path)}`,
-                  { method: "DELETE" },
-                ).catch(() => {});
-              }}
+              onClick={onUseCurrent}
             >
               Use current
             </Button>

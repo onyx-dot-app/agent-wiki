@@ -6,7 +6,6 @@ Allows the server to detect stale drafts when a user reopens a page.
 
 from __future__ import annotations
 
-import logging
 from typing import Any
 
 from sqlalchemy import delete, text
@@ -14,8 +13,6 @@ from sqlalchemy.dialects.postgresql import insert
 
 from app.db.models import WikiEditDraft
 from app.db.session import session
-
-log = logging.getLogger(__name__)
 
 
 def _to_dict(row: WikiEditDraft) -> dict[str, Any]:
