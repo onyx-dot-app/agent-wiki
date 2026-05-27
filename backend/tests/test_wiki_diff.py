@@ -1,4 +1,5 @@
-from app.wiki.diff import _parse_unified, _word_diff
+from app.models.file_system import DiffHunk, DiffLine
+from app.wiki.diff import _parse_unified, _promote_word_diff, _word_diff
 
 
 def test_word_diff_identical_strings() -> None:
@@ -124,3 +125,46 @@ def test_parse_unified_creation_only_adds() -> None:
 
 def test_parse_unified_empty_returns_no_hunks() -> None:
     assert _parse_unified("") == []
+
+
+def _make_hunk(*lines: DiffLine) -> DiffHunk:
+    return DiffHunk(old_start=1, old_count=1, new_start=1, new_count=1, lines=list(lines))
+
+
+def test_promote_word_diff_one_remove_one_add() -> None:
+    hunk = _make_hunk(
+        DiffLine(kind="context", text="ctx", word_diff=None, old_lineno=1, new_lineno=1),
+        DiffLine(
+            kind="remove", text="hello old world", word_diff=None, old_lineno=2, new_lineno=None
+        ),
+        DiffLine(kind="add", text="hello new world", word_diff=None, old_lineno=None, new_lineno=2),
+        DiffLine(kind="context", text="tail", word_diff=None, old_lineno=3, new_lineno=3),
+    )
+    out = _promote_word_diff(hunk)
+    kinds = [line.kind for line in out.lines]
+    assert kinds == ["context", "word", "context"]
+    assert out.lines[1].word_diff is not None
+    assert out.lines[1].word_diff.removed == "old"
+    assert out.lines[1].word_diff.added == "new"
+
+
+def test_promote_word_diff_two_removes_no_promote() -> None:
+    hunk = _make_hunk(
+        DiffLine(kind="remove", text="one", word_diff=None, old_lineno=1, new_lineno=None),
+        DiffLine(kind="remove", text="two", word_diff=None, old_lineno=2, new_lineno=None),
+        DiffLine(kind="add", text="three", word_diff=None, old_lineno=None, new_lineno=1),
+    )
+    out = _promote_word_diff(hunk)
+    kinds = [line.kind for line in out.lines]
+    assert kinds == ["remove", "remove", "add"]
+
+
+def test_promote_word_diff_remove_not_adjacent_to_add_no_promote() -> None:
+    hunk = _make_hunk(
+        DiffLine(kind="remove", text="x", word_diff=None, old_lineno=1, new_lineno=None),
+        DiffLine(kind="context", text="y", word_diff=None, old_lineno=2, new_lineno=1),
+        DiffLine(kind="add", text="z", word_diff=None, old_lineno=None, new_lineno=2),
+    )
+    out = _promote_word_diff(hunk)
+    kinds = [line.kind for line in out.lines]
+    assert kinds == ["remove", "context", "add"]

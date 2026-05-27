@@ -109,7 +109,7 @@ def _parse_unified(text: str) -> list[DiffHunk]:  # pyright: ignore[reportUnused
     return hunks
 
 
-def _word_diff(removed: str, added: str) -> WordDiff:  # pyright: ignore[reportUnusedFunction]
+def _word_diff(removed: str, added: str) -> WordDiff:
     """Diff two strings at word granularity.
 
     Counts the longest leading + trailing word runs that match between
@@ -169,3 +169,32 @@ def _word_diff(removed: str, added: str) -> WordDiff:  # pyright: ignore[reportU
         added=added_mid,
         suffix=suffix,
     )
+
+
+def _promote_word_diff(hunk: DiffHunk) -> DiffHunk:  # pyright: ignore[reportUnusedFunction]
+    """Collapse a hunk with exactly one ``remove`` directly followed by
+    exactly one ``add`` (and no other adds/removes) into a single
+    ``kind="word"`` line. Returns the hunk unchanged otherwise.
+    """
+    removes = [i for i, line in enumerate(hunk.lines) if line.kind == "remove"]
+    adds = [i for i, line in enumerate(hunk.lines) if line.kind == "add"]
+    if len(removes) != 1 or len(adds) != 1:
+        return hunk
+    remove_idx = removes[0]
+    add_idx = adds[0]
+    if add_idx != remove_idx + 1:
+        return hunk
+
+    removed_text = hunk.lines[remove_idx].text or ""
+    added_text = hunk.lines[add_idx].text or ""
+    word = _word_diff(removed_text, added_text)
+
+    merged = DiffLine(
+        kind="word",
+        text=None,
+        word_diff=word,
+        old_lineno=hunk.lines[remove_idx].old_lineno,
+        new_lineno=hunk.lines[add_idx].new_lineno,
+    )
+    new_lines = hunk.lines[:remove_idx] + [merged] + hunk.lines[add_idx + 1 :]
+    return hunk.model_copy(update={"lines": new_lines})
