@@ -28,7 +28,11 @@ on:
 jobs:
   live:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # Bumped 45 → 120. wiki_updater alone now runs ~268 cases × 2 models
+    # × 3 runs + judge panel and burned ~24 min on 2026-05-27, which
+    # cancelled external_agent mid-step at the prior 45m cap. Triggers
+    # eval adds a fourth step; 120 leaves headroom for dataset growth.
+    timeout-minutes: 120
     defaults:
       run:
         working-directory: backend
@@ -55,6 +59,7 @@ jobs:
           uv run python -m evals.wiki_updater.run \
             --cases evals/datasets/wiki_updater/cases \
             --models "$EVAL_MODELS" \
+            --concurrency 16 \
             --braintrust "nightly-wiki-updater-$(date -u +%Y%m%d)" \
             --dataset "wiki-updater" \
             --out runs/nightly_wiki_updater.jsonl
@@ -64,6 +69,7 @@ jobs:
           uv run python -m evals.ingest_selector.run \
             --cases evals/datasets/ingest_selector/cases.jsonl \
             --models "$SELECTOR_MODELS" \
+            --concurrency 16 \
             --braintrust "nightly-ingest-selector-$(date -u +%Y%m%d)" \
             --dataset "ingest-selector" \
             --out runs/nightly_ingest_selector.jsonl
@@ -73,6 +79,7 @@ jobs:
           uv run python -m evals.external_agent.run \
             --scenarios evals/datasets/external_agent/scenarios \
             --models "$EVAL_MODELS" \
+            --concurrency 16 \
             --braintrust "nightly-external-agent-$(date -u +%Y%m%d)" \
             --out runs/nightly_external_agent.jsonl
 
@@ -81,6 +88,7 @@ jobs:
           uv run python -m evals.triggers.run \
             --cases evals/datasets/triggers/cases \
             --models "$EVAL_MODELS" \
+            --concurrency 16 \
             --braintrust "nightly-triggers-$(date -u +%Y%m%d)" \
             --dataset "triggers" \
             --out runs/nightly_triggers.jsonl
