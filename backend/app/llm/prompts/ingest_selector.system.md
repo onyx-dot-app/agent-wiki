@@ -17,8 +17,6 @@ Exclude when:
   even if it shares the same technology or domain.
 - The document's subject is finished or inactive — the work or deal it
   describes is closed, cancelled, or otherwise over.
-- The document is broadly related to the topic but adds nothing the page
-  would actually record.
 
 ## Output format
 
