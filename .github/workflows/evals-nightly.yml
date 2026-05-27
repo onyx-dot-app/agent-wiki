@@ -76,6 +76,15 @@ jobs:
             --braintrust "nightly-external-agent-$(date -u +%Y%m%d)" \
             --out runs/nightly_external_agent.jsonl
 
+      - name: triggers live run
+        run: |
+          uv run python -m evals.triggers.run \
+            --cases evals/datasets/triggers/cases \
+            --models "$EVAL_MODELS" \
+            --braintrust "nightly-triggers-$(date -u +%Y%m%d)" \
+            --dataset "triggers" \
+            --out runs/nightly_triggers.jsonl
+
       - name: Upload run artifacts
         if: always()
         uses: actions/upload-artifact@v4

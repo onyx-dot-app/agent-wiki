@@ -21,6 +21,7 @@ on:
       - backend/app/llm/agents/common.py
       - backend/app/llm/prompts/wiki_updater.*
       - backend/app/llm/prompts/ingest_*
+      - backend/app/triggers/natural_language.py
       - .github/workflows/evals-smoke.yml
   workflow_dispatch:
 
@@ -76,6 +77,15 @@ jobs:
             --dry-run \
             --runs 1 \
             --out runs/ci_external_agent.jsonl
+
+      - name: triggers dry-run
+        run: |
+          uv run python -m evals.triggers.run \
+            --cases evals/datasets/triggers/cases \
+            --models claude-sonnet-4-6 \
+            --dry-run \
+            --runs 1 \
+            --out runs/ci_triggers.jsonl
 
       - name: Verify dry-run produces baseline scores
         run: uv run python -m evals.ci_assert_baseline runs/

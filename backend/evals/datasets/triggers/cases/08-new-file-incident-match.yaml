@@ -1,0 +1,34 @@
+id: trig-08-new-file-incident-match
+flavor: new_file
+nl_description: |
+  when a new postmortem is added for a customer-impacting incident
+message_instruction: |
+  Note the incident title, the date, and link the postmortem path.
+wiki_state:
+  - path: incidents/index.md
+    body: |
+      # Incidents
+      Index of recent postmortems.
+  - path: incidents/2026-04-02-billing-outage.md
+    body: |
+      # 2026-04-02 Billing outage
+      Customer impact: billing webhooks delayed 30 min.
+new_file_path: incidents/2026-05-26-api-degradation.md
+new_file_body: |
+  # 2026-05-26 API degradation
+  Customer impact: API p95 latency exceeded 5s for 25 minutes affecting
+  external customers in the us-west region.
+
+  Root cause: connection pool exhaustion after a deploy.
+expected_matched: true
+expected_message_facts_present:
+  - id: m-title
+    text: The message mentions the API degradation incident title or summary.
+  - id: m-date
+    text: The message references the 2026-05-26 date.
+  - id: m-path
+    text: The message references incidents/2026-05-26-api-degradation.md.
+expected_message_facts_excluded:
+  - id: x-old-incident
+    text: The message mentions the 2026-04-02 billing outage.
+tags: [new_file, fire]

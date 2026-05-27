@@ -6,12 +6,13 @@ outside `tests/` because runs hit real LLMs and are parameterized by
 
 ## Surfaces
 
-| Module                                                   | Decides                                          | Eval target                                         |
-| -------------------------------------------------------- | ------------------------------------------------ | --------------------------------------------------- |
-| `app.llm.agents.nl_updater.process_instruction`          | MCP path: NO_CHANGE vs new body                  | trigger class + content quality                     |
-| `app.llm.agents.ingest_batch_reconciler.batch_reconcile` | Ingest: NO_CHANGE / IRRELEVANT / new body        | trigger class + content quality                     |
-| `app.llm.agents.ingest_selector.select_candidates`       | Ingest pre-filter: which BM25 candidates survive | precision / recall / F1                             |
-| External agent (Claude Code via MCP)                     | When to call `update_doc_nl(path, instruction)`  | per-doc precision / recall + reused content scorers |
+| Module                                                        | Decides                                                                                           | Eval target                                                               |
+| ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| `app.llm.agents.nl_updater.process_instruction`               | MCP path: NO_CHANGE vs new body                                                                   | trigger class + content quality                                           |
+| `app.llm.agents.ingest_batch_reconciler.batch_reconcile`      | Ingest: NO_CHANGE / IRRELEVANT / new body                                                         | trigger class + content quality                                           |
+| `app.llm.agents.ingest_selector.select_candidates`            | Ingest pre-filter: which BM25 candidates survive                                                  | precision / recall / F1                                                   |
+| External agent (Claude Code via MCP)                          | When to call `update_doc_nl(path, instruction)`                                                   | per-doc precision / recall + reused content scorers                       |
+| `app.triggers.natural_language` (delta / schedule / new-file) | Whether a wiki change/snapshot/new-file satisfies a trigger's NL "if", and what message to render | per-case match decision + no-false-fire + judge-scored reason and message |
 
 Two axes per surface: **WHEN** (trigger decision) and **HOW** (output quality).
 
@@ -35,12 +36,17 @@ backend/evals/
     wiki_updater/cases
     ingest_selector/cases.jsonl
     external_agent/scenarios/
+    triggers/cases
   wiki_updater/run.py         python -m evals.wiki_updater.run
   ingest_selector/run.py      python -m evals.ingest_selector.run
   external_agent/
     run.py                    python -m evals.external_agent.run
     _stub.py                  external-agent dry-run stub
     harness.py                in-memory wiki + tool dispatch
+  triggers/
+    run.py                    python -m evals.triggers.run
+    _stub.py                  triggers dry-run stub (payload-fingerprint routing)
+    harness.py                payload builder + per-flavor driver
 ```
 
 ## How to run

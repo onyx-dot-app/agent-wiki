@@ -1,0 +1,42 @@
+id: trig-01-delta-status-flip-match
+flavor: delta
+nl_description: when the status of any service flips to yellow or red
+message_instruction: |
+  Post a short alert naming the service and the new status, and link the page.
+wiki_state:
+  - path: ops/status.md
+    body: |
+      # Service Status
+      - api: green
+      - worker: green
+      - billing: green
+change_path: ops/status.md
+change_kind: edit
+before: |
+  # Service Status
+  - api: green
+  - worker: green
+  - billing: green
+after: |
+  # Service Status
+  - api: yellow
+  - worker: green
+  - billing: green
+expected_matched: true
+expected_reason_facts:
+  - id: r-api-yellow
+    text: The reason mentions that the api service flipped to yellow.
+expected_message_facts_present:
+  - id: m-api
+    text: The message mentions the api service.
+  - id: m-yellow
+    text: The message indicates the service is now yellow.
+  - id: m-path
+    text: The message references ops/status.md.
+expected_message_facts_excluded:
+  - id: x-worker
+    text: The message mentions the worker service.
+  - id: x-billing
+    text: The message mentions the billing service.
+notes: Classic delta fire — clear status flip on diff.
+tags: [delta, fire, status]

@@ -1,0 +1,34 @@
+id: trig-06-schedule-state-match
+flavor: schedule
+nl_description: |
+  when there is any service whose status is currently yellow or red
+message_instruction: |
+  List the non-green services and link the status page.
+wiki_state:
+  - path: ops/status.md
+    body: |
+      # Service Status
+      - api: yellow
+      - worker: green
+      - billing: red
+  - path: marketing/index.md
+    body: |
+      # Marketing
+      Brand and launch notes.
+scope_path: ops/status.md
+when_iso: "2026-05-26T15:00:00Z"
+expected_matched: true
+expected_reason_facts:
+  - id: r-yellow-or-red
+    text: |
+      The reason notes that at least one service (api or billing) is yellow
+      or red.
+expected_message_facts_present:
+  - id: m-api-yellow
+    text: The message mentions api as yellow.
+  - id: m-billing-red
+    text: The message mentions billing as red.
+expected_message_facts_excluded:
+  - id: x-worker
+    text: The message names the worker service.
+tags: [schedule, fire, state]

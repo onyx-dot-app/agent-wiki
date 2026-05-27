@@ -1,0 +1,29 @@
+id: trig-02-delta-unrelated-edit-no-fire
+flavor: delta
+nl_description: when a customer-facing pricing page changes its dollar amount
+message_instruction: |
+  Note the page and the new price.
+wiki_state:
+  - path: marketing/pricing.md
+    body: |
+      # Pricing
+      Pro: $20/seat/month
+      Team: $40/seat/month
+  - path: engineering/runbook.md
+    body: |
+      # Runbook
+      Restart steps for the api service.
+change_path: engineering/runbook.md
+change_kind: edit
+before: |
+  # Runbook
+  Restart steps for the api service.
+after: |
+  # Runbook
+  Restart steps for the api service.
+  Add a sleep 10 between worker restart and health probe.
+expected_matched: false
+notes: |
+  Restraint test — diff is on the runbook, not pricing. Trigger watches a
+  different topic. Must not fire even though the diff is real.
+tags: [delta, no-fire, restraint]
