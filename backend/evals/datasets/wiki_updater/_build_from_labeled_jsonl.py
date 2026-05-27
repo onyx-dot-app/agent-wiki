@@ -41,6 +41,8 @@ from typing import Any
 
 import yaml
 
+from app.utils.logging import setup_logging
+
 from evals.schema import TriggerClass, WikiUpdaterCase
 
 log = logging.getLogger(__name__)
@@ -129,7 +131,13 @@ def _row_to_case(row: dict[str, Any]) -> WikiUpdaterCase | None:
 
     expected_class = _BO_LABEL_TO_CLASS[label]
     bucket = _BO_LABEL_TO_BUCKET[label]
-    case_id = "rd-real-%s-%05d" % (bucket, int(row["id"]))
+    raw_id = row.get("id")
+    if raw_id is None:
+        return None
+    try:
+        case_id = "rd-real-%s-%05d" % (bucket, int(raw_id))
+    except (TypeError, ValueError):
+        return None
 
     source_type = row.get("source_type") or "unknown"
     tags = [
@@ -247,7 +255,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--log-level", default="INFO")
     args = parser.parse_args(argv or sys.argv[1:])
-    logging.basicConfig(level=args.log_level, format="%(levelname)s %(message)s")
+    setup_logging(args.log_level)
 
     if not args.input.exists():
         log.error("input file not found: %s", args.input)
