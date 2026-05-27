@@ -9,10 +9,10 @@ export interface WordDiff {
 
 export interface DiffLine {
   kind: "context" | "add" | "remove" | "word";
-  text?: string;
-  word_diff?: WordDiff;
-  old_lineno?: number;
-  new_lineno?: number;
+  text: string | null;
+  word_diff: WordDiff | null;
+  old_lineno: number | null;
+  new_lineno: number | null;
 }
 
 export interface DiffHunk {
