@@ -15,8 +15,8 @@ Exclude when:
 - The document is a bare data record with nothing that would change or add to this page.
 - The document describes a completely different system, product, or service,
   even if it shares the same technology or domain.
-- The document's subject is finished or inactive — the work or deal it
-  describes is closed, cancelled, or otherwise over.
+- The document's subject is finished or inactive and the page does not
+  exist to track that kind of closed or historical content.
 
 ## Output format
 
