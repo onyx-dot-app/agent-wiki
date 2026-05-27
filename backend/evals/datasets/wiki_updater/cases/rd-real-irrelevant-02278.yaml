@@ -1,0 +1,47 @@
+id: rd-real-irrelevant-02278
+surface: reconcile_document
+wiki_path: engineering/Agent Wiki Project/Deployment Guide.md
+current_body: |-
+  # Deployments of Agent Wiki
+  This doc provides an overview of how to deploy Agent Wiki locally and on cloud.
+
+  ## Helm chart
+
+  The Agent Wiki Helm chart version is `0.3.18`. This chart package includes the `INGEST_EVAL_LOGGING` environment variable in the worker pod templates; dev-wiki sets it to `true` so ingest reconciler examples are logged.
+
+  ## Run-Agent launcher release
+
+  Agent Wiki ships Run-Agent launcher installers for macOS, Linux, and Windows. The macOS artifact remains a signed, notarized, and stapled `AgentWikiLauncher.app`; `scripts/build-app.sh` creates the universal binary, builds the app bundle with `osacompile`, signs the inner Mach-O, applet, and bundle, submits it with `notarytool submit --wait`, staples it, and writes `dist/AgentWikiLauncher.zip`. `scripts/build-app.sh` is the only supported macOS signing path; `scripts/release-mac.sh` has been removed and should not be referenced by release docs or commands.
+
+  Linux builds use `scripts/build-linux.sh` to produce amd64 and arm64 tarballs containing the launcher binary and `install.sh`. The Linux installer writes `~/.local/share/applications/agentwiki-launcher.desktop` and registers the `agentwiki` handler with `xdg-mime` and `update-desktop-database`.
+
+  Windows builds use `scripts/build-windows.sh` to produce an amd64 zip containing the `.exe` and `install.bat`, installed under `%LOCALAPPDATA%`. The Windows installer registers `HKCU\Software\Classes\agentwiki` with `reg.exe`; the Windows v1 artifact is unsigned, so users may see a SmartScreen warning.
+
+  The reusable workflow `.github/workflows/release-agentwiki-launcher-go.yml` builds the launcher artifacts in three parallel jobs. The macOS job handles signing and notarization, assumes the AWS signing role via OIDC, and reads the Apple signing secrets from AWS Secrets Manager under `deploy/apple-*`; the Linux and Windows jobs cross-compile on `ubuntu-latest`. It can be run manually with `workflow_dispatch` or called by other workflows with `workflow_call`.
+
+  The macOS launcher job uses `actions/cache@v4` as a content-addressed cache for `dist/`, keyed by `hashFiles('packages/agentwiki-launcher-go/**')`. When the launcher source is unchanged, setup-go, AWS OIDC, Apple secret retrieval, and `scripts/build-app.sh` are skipped; the cached notarized artifact is uploaded for downstream backend image builds. A cold launcher build still takes about 5 minutes, while a warm cache hit is about 30 seconds. Stapled `.app` notarization tickets do not expire, and the GitHub Actions cache can evict entries after 7 days.
+
+  `docker-build-push.yml` and `nightly-build.yml` call the launcher release workflow, download all three launcher artifacts, verify each artifact, and place them under `backend/static/installers/` before the Docker build. The backend image includes this directory via `backend/Dockerfile`'s `COPY static ./static`, and production serves installers from `GET /api/installer/{mac,linux,windows}`; `GET /api/installer/app` remains a macOS alias.
+
+  ## Launcher deployment go-live checklist
+
+  Before cutting a release that includes launcher installer changes:
+
+  1. Merge `onyx-dot-app/cloud-deployment-yamls#349` and run `terraform apply` so the least-privilege `agent-wiki-signing` role exists for the macOS signing path.
+  2. Set the `AWS_OIDC_ROLE_ARN` repo secret on `onyx-dot-app/agent-wiki` to the Terraform `signing_role_arn` output.
+  3. Merge the Agent Wiki launcher PR.
+  4. Cut a `v*` tag so `docker-build-push.yml` runs and bakes the macOS, Linux, and Windows launcher artifacts into the backend image.
+  5. Users can then visit `/agents`; `InstallHelperPane` detects their platform and shows the matching installer and install instructions.
+
+  `LAUNCHERS_ENABLED=true` is already set in `cloud-deployment-yamls/global-terraform/agent-wiki-infra/app/dev-wiki-values.yaml`; no extra dev-wiki toggle is required.
+expected_class: IRRELEVANT
+doc_title: OnyxBot <> Tobi4s1337
+doc_url: <URL>
+doc_content: How can I install mcp-remote on my mac?
+notes: Human-verified label (`irrelevant`) from Bo's eval_labeler batch.
+tags:
+- real-world
+- real-prod-decision
+- human-verified
+- source:discord
+- bo-label:irrelevant

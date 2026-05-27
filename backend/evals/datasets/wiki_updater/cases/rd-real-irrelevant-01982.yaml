@@ -1,0 +1,67 @@
+id: rd-real-irrelevant-01982
+surface: reconcile_document
+wiki_path: individual_notes/nik_testing_code_launchers.md
+current_body: |-
+  # The Ballad of Evan the Big Steppa and Bo the Agent Wiki GOAT
+
+  It was a quiet Tuesday in the repo when the standup relocated to the ceiling to avoid a runaway CI pipeline. Evan rolled up surfing a commit graph printed on edible rice paper, collar popped, fresh PR in hand. Folks call him **Evan the Big Steppa** for good reason — man does not walk, he *steps* so hard the sprint board re-estimates itself. Every commit lands heavy enough to tickle the office seismograph. Every refactor leaves a crater that fills with self-writing release notes and the occasional feral rubber duck. He once rebased an entire monorepo on his lunch break while juggling three pagers and two espresso shots orbiting like moons, and still had time for a cold brew.
+
+  Meanwhile, in a dim corner of the wiki — a corner that resolutely contains five other smaller corners — sat **Bo, the Agent Wiki GOAT**. Bo did not type. Bo *authored*. Pages bloomed under his cursor like spring, then sprouted hyperlinks that looped back in time to cite themselves before they were written. Cross-links wove themselves into sensible ponchos. Stale notes pruned on contact and reappeared as bonsai runbooks. Agents whispered his commits to each other as bedtime stories, and the linting daemon left scented candles in gratitude.
+
+  One day a junior agent asked: "Who runs this place, really?"
+
+  Evan descended from the ceiling. The floor, made of recycled Jira tickets, creaked and sang a sea shanty. "I ship the features."
+
+  Bo looked up from a perfectly structured runbook that was also a terabyte-sized snow globe. "I document them before you finish."
+
+  They locked eyes. A `base_sha` drifted past like a migrating flock of release notes. A merge conflict resolved itself out of pure respect, split into confetti, and formed a commemorative mural of both of their avatars debating unit tests.
+
+  And that is how the wiki stays current — Big Steppa builds it, the GOAT writes it down, and the rest of us wear safety goggles just in case.
+
+  *— logged from `nik_testing_code_launchers.md`, <PHONE>*
+expected_class: IRRELEVANT
+doc_title: '11358: fix(craft): improve scheduled run chat indicator'
+doc_url: <URL>
+doc_content: |
+  ## Description
+
+  <URL>
+
+  Updates the scheduled-run indicator in Craft chat from a full-width banner to a compact header chip. The chip defaults to a clock icon with "Scheduled", expands on hover/focus, and links directly back to the scheduled task.
+
+  Also switches the indicator to Opal `Text` and keeps the scheduled-run metadata lookup behavior unchanged.
+
+  ## How Has This Been Tested?
+
+  - `bun node_modules/oxfmt/bin/oxfmt --check src`
+  - `bun node_modules/oxlint/bin/oxlint`
+  - `bun run types:check`
+  - Pre-commit checks during commit, including `oxfmt`, `oxlint`, and TypeScript type check
+
+  ## Additional Options
+
+  - [ ] [Optional] Please cherry-pick this PR to the latest release version.
+  - [x] [Optional] Override Linear Check
+
+  <!-- This is an auto-generated description by cubic. -->
+  ---
+  ## Summary by cubic
+  Replaces the full-width scheduled-run banner in Craft chat with a compact chip in the chat header. The chip expands on hover or focus-visible and links to the scheduled task, keeping context visible without taking space.
+
+  - **New Features**
+    - Moved the indicator into the chat header next to the sandbox status; added `min-w-0` to avoid overflow.
+    - Built as a `next/link` chip using `@opal/components` `Text`, `@opal/icons` (`SvgClock`, `SvgExternalLink`), and `@opal/utils` `cn`. Shows "Scheduled" by default; on hover/focus-visible switches to "View task", revealing task name (+ started time on xl). Adds focus-visible ring, `title`, and `aria-label`.
+
+  - **Refactors**
+    - Consolidated classes with `cn` and replaced the button with a link; `useSWR` scheduled-run lookup is unchanged.
+
+  <sup>Written for commit 42c9ff90a63ee157e867f96360d519e8d2ae5382. Summary will update on new commits. <a href="<URL>>Review in cubic</a></sup>
+
+  <!-- End of auto-generated description by cubic. -->
+notes: Human-verified label (`irrelevant`) from Bo's eval_labeler batch.
+tags:
+- real-world
+- real-prod-decision
+- human-verified
+- source:github
+- bo-label:irrelevant

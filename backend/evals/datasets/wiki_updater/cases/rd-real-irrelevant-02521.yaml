@@ -1,0 +1,36 @@
+id: rd-real-irrelevant-02521
+surface: reconcile_document
+wiki_path: customer_notes/scania/current_state.md
+current_body: |-
+  This document will keep track of the overall status of Scania's Onyx instance (version, high level issues, etc).
+
+  Onyx version: 3.2.1 (as of Apr 30: <URL>
+
+  most recent sharepoint issue (May 18): <URL>
+
+  Evaluation / POC context from the Feb. 4 sales call: Scania wants an enterprise-wide knowledge base and AI-powered search across SharePoint, Teams, Jira, Confluence, SAP, ServiceNow, and related systems, plus a RAG/MCP foundation for agents used by R&D and other teams. Microsoft Copilot / SharePoint-native options were described as insufficient at scale.
+
+  Technical requirements captured before the POC included self-hosted deployment, SSO/SCIM, granular permissions/groups, frequent sync and permission mirroring, bring-your-own LLM options such as Azure OpenAI/OpenAI or Bedrock, and APIs/embeddable widgets for intranet search.
+
+  HubSpot lists Jim Tolman, Technology Strategy Manager (<EMAIL>), as the primary contact. Additional Scania contacts in the HubSpot record include <EMAIL>, <EMAIL>, <EMAIL>, <EMAIL>, <EMAIL>, <EMAIL>, <EMAIL>, <EMAIL>, <EMAIL>, <EMAIL>, <EMAIL>, and <EMAIL>. It lists two Scania deals in stage `decisionmakerboughtin`, both with close date <PHONE>: `Scania - Enterprise Platform - 3k seats` for <AMOUNT> (<URL>) and `Scania - Simple Search - 50k seats` for <AMOUNT> (<URL>). The Feb. 4 call notes say exact seat count was not established on that call; pricing discussion was framework-only, including possible basic vs. power-user tiers, with no specific pricing numbers quoted.
+expected_class: IRRELEVANT
+doc_title: Douglas Pharmaceuticals
+doc_url: <URL>
+doc_content: |-
+  Deal: Douglas Pharmaceuticals
+  Amount: <AMOUNT>
+  Stage: <PHONE>
+  Close Date: <PHONE>T18:53:41.386Z
+  Pipeline: default Contact: Karl Saggese
+  Email: <EMAIL> Company: Douglas
+  Domain: douglas.co.nz
+  Industry: PHARMACEUTICALS
+  Location: Te Atatu South, Auckland Note: Sales Call SummaryMeeting Date: <PHONE>:00 UTCAttendees: Matthew Veber (<EMAIL>); Karl Saggese (<EMAIL>); Larry Li (<EMAIL>)Pricing Discussion<AMOUNT>/month Enterprise; volume-based discount discussed (potentially ~<AMOUNT>/month at higher seat counts, e.g., 100–200+). Flexible to accommodate budget.Key PointsDouglas is piloting self-hosted Onyx (MIT version) and is exploring Onyx Enterprise to gain SSO, RBAC/permission inheritance, white-labeling, and enterprise support. They aim to standardize an internal AI platform and reduce duplicate spend on multiple LLM tools.Technical RequirementsConnectors Mentioned: File upload; Box (tested); Microsoft SharePoint (requested); broader Microsoft stack.Issues/Concerns: Need RBAC/permission inheritance (not in community edition); on‑prem preference (pharma compliance); cost sensitivity (seat + API usage).Next Steps• Onyx to send formal pricing and follow-up information.• Tentatively schedule next call: Tuesday next week at 3pm NZT (Auckland); invite to include Douglas head of digital.• Set up Slack/Teams channel for ongoing support if proceeding.ParticipantsExternal: Karl Saggese (<EMAIL>); Larry Li (<EMAIL>)---Internal: Matthew Veber (<EMAIL>)Source: Fireflies TranscriptSales Call Summary – <PHONE>How They Found Us:Newsletters (e.g., self-hosted newsletter), Reddit/Hacker News; independently discovered Onyx and aligned on needs.Seats Discussed:~50 current users in pilot; likely start ~100 seats, with company size ~400–500; possibility to expand over time.Interested Connectors:Box (trialed); SharePoint (requested); file uploads; Microsoft ecosystem; SSO.Timeline:Tentative next call next Tuesday 3pm NZT; moving toward enterprise evaluation post‑pilot.Competitor Consideration:ChatGPT, Claude (team licenses today); desire to consolidate onto one platform via Onyx and use any LLM via APIs.Security Considerations:On‑prem preferred (pharma); permission inheritance/RBAC; avoid cloud auto‑updates; data governance concerns; API usage not used for training.Self-Hosting or Cloud:Self‑hosted preference; Enterprise adds SSO, RBAC, and support; white‑labeling/branding requested.Quote Provided:<AMOUNT>/month Enterprise; potential volume discount (~<AMOUNT>/month at higher tiers); API costs additional; flexible terms discussed.Overview of Use-Case:Internal standardized AI platform with RAG over tens of thousands of documents; reduce duplicate LLM seat spend; enable secure connectors and access control; support for multiple LLMs and on‑prem deployment.Full Transcript:<URL>
+  Created: <PHONE>T02:00:00Z
+notes: Human-verified label (`irrelevant`) from Bo's eval_labeler batch.
+tags:
+- real-world
+- real-prod-decision
+- human-verified
+- source:hubspot
+- bo-label:irrelevant

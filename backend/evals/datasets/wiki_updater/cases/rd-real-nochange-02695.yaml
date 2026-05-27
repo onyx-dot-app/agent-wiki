@@ -1,0 +1,36 @@
+id: rd-real-nochange-02695
+surface: reconcile_document
+wiki_path: customer_notes/scania/current_state.md
+current_body: |-
+  This document will keep track of the overall status of Scania's Onyx instance (version, high level issues, etc).
+
+  Onyx version: 3.2.1 (as of Apr 30: <URL>
+
+  most recent sharepoint issue (May 18): <URL>
+
+  As of May 26, Scania is implementing an update intended to unblock the current error cluster. No urgent escalation is reported.
+
+  Evaluation / POC context from the Feb. 4 sales call: Scania wants an enterprise-wide knowledge base and AI-powered search across SharePoint, Teams, Jira, Confluence, SAP, ServiceNow, and related systems, plus a RAG/MCP foundation for agents used by R&D and other teams. Microsoft Copilot / SharePoint-native options were described as insufficient at scale.
+
+  Technical requirements captured before the POC included self-hosted deployment, SSO/SCIM, granular permissions/groups, frequent sync and permission mirroring, bring-your-own LLM options such as Azure OpenAI/OpenAI or Bedrock, and APIs/embeddable widgets for intranet search.
+
+  HubSpot lists Jim Tolman, Technology Strategy Manager (<EMAIL>), as the primary contact. Additional Scania contacts in the HubSpot record include <EMAIL>, <EMAIL>, <EMAIL>, <EMAIL>, <EMAIL>, <EMAIL>, <EMAIL>, <EMAIL>, <EMAIL>, <EMAIL>, <EMAIL>, and <EMAIL>. It lists two Scania deals in stage `decisionmakerboughtin`, both with close date <PHONE>: `Scania - Enterprise Platform - 3k seats` for <AMOUNT> (<URL>) and `Scania - Simple Search - 50k seats` for <AMOUNT> (<URL>). The Feb. 4 call notes say exact seat count was not established on that call; pricing discussion was framework-only, including possible basic vs. power-user tiers, with no specific pricing numbers quoted.
+expected_class: NO_CHANGE
+doc_title: 'Scania - Simple Search - 50k seats '
+doc_url: <URL>
+doc_content: |-
+  Deal: Scania - Simple Search - 50k seats
+  Amount: <AMOUNT>
+  Stage: decisionmakerboughtin
+  Close Date: <PHONE>T00:44:38.847Z
+  Pipeline: default Contact: Jim Tolman
+  Email: <EMAIL>
+  Job Title: Technology Strategy Manager Company: Scania
+  Domain: scania.com
+notes: Human-verified label (`no_change_covered`) from Bo's eval_labeler batch.
+tags:
+- real-world
+- real-prod-decision
+- human-verified
+- source:hubspot
+- bo-label:no_change_covered

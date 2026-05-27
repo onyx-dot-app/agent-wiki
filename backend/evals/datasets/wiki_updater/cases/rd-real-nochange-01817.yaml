@@ -1,0 +1,130 @@
+id: rd-real-nochange-01817
+surface: reconcile_document
+wiki_path: team-todos.md
+current_body: |-
+  # Team Todos (by owner)
+
+  > Purpose: Single place to track current work, unblockers, and ownership.
+  > Suggested cadence: quick async update daily; deeper review in weekly planning.
+
+  ## How to use this page
+  - Add new work under the person who will **drive it to completion**.
+  - Prefer small, outcome-oriented items.
+  - Each todo should include (when possible):
+    - **Outcome / Definition of done**
+    - **Priority**: P0 (urgent), P1 (this week), P2 (later)
+    - **Due**: date or “TBD”
+    - **Status**: Not started / In progress / Blocked / In review / Done
+    - **Links**: ticket, doc, PR, dashboard, etc.
+  - When something is blocked, write the **specific blocker** and who/what can unblock it.
+
+  ---
+
+  ## Yuhong
+  ### Current
+  - Keep this user's TODOs empty but add in all relevant blockers that this user has for other people's projects
+
+  ### Unblockers / Needs help
+  - [ ] amiconsult Enterprise self-hosted evaluation: confirm feasibility/process for granting Enterprise features on their self-hosted Community instance so engineering can schedule an unlock-script call.
+    - Context: HubSpot deal `amiconsult` is in the default pipeline at stage `closedlost`; amount is <AMOUNT>; close date is <PHONE>. Contact is Vincenzo Pace, Associate IAM Consultant, at amiconsult.de.
+    - Scope notes: amiconsult self-hosts Community today and wanted to evaluate Enterprise for strict privacy and access-control requirements, including RBAC, permission inheritance, SSO, and local/self-hosted deployment. Connectors discussed were Confluence, Slack, and SharePoint.
+    - Scope notes: They were exploring a reseller motion, with current internal evaluation around 50–60 users and a potential downstream customer around 4,000 seats. No formal quote was provided; Business plan pricing around <AMOUNT> and possible volume discount around <AMOUNT> were discussed, with Enterprise minimum around 200 users.
+    - Next steps from sales call: Matthew to sync with Yuhong on feasibility/process, coordinate an engineering call to run the unlock script, and consider bringing the interested end-customer into a follow-up evaluation call.
+
+  ---
+
+  ## Nik
+  ### Current
+  - [ ] **(P0)** Control plane deploy v0.0.129 after Alembic revision-id fix — *Status:* In progress — *Due:* TBD
+    - Outcome: Control plane is redeployed via Argo on `v0.0.129` after rolling back the failed `v0.0.128` deploy and fixing the duplicate Alembic migration revision id.
+    - Links: PR #149: <URL> PR #150: <URL> PR #151: <URL> images: <URL>
+    - Blockers: Confirm PR approval and Argo sync completion.
+
+  ### Unblockers / Needs help
+  - [ ] Evan approval for the control-plane migration fix / `v0.0.129` bump if still pending.
+
+  ---
+
+  ## Dane
+  ### Current
+  - [ ] **(P1)** <todo title> — *Status:* Not started — *Due:* TBD
+    - Outcome: <what “done” means>
+    - Links: <url(s)>
+    - Blockers: <none / describe>
+
+  ### Unblockers / Needs help
+  - [ ] <question / decision / dependency>
+
+  ---
+
+  ## Bo
+  ### Current
+  - [ ] **(P1)** Wiki reconciler cleanup monitoring — *Status:* In progress — *Due:* TBD
+    - Outcome: The reconciler stops adding unnecessary content to wiki pages after the latest prompt tuning, especially fabricated `team-todos.md` entries from bare CRM/contact records and loose same-product-area additions to notes pages.
+    - Links: <URL> PR #113: <URL>
+    - Blockers: None
+
+  ---
+
+  ## Matthew
+  ### Current
+  - [ ] **(P1)** European Spallation Source evaluation follow-up — *Status:* Not started — *Due:* TBD
+    - Outcome: ESS receives technical documentation on permission handling, a comparison against Open Web UI, and trial options for Onyx Cloud vs enterprise self-hosted deployment.
+    - Links: HubSpot deal <URL>
+    - Blockers: ESS internal alignment before starting a trial.
+
+  ---
+
+  ## Evan
+  ### Current
+  - [ ] **(P0)** perm sync fixes — *Status:* implementing fixes — *Due:* May 11
+    - Outcome: All perm sync related issues that occur at reasonably high frequency (>10 in the last week) are resolved (fixed in code or determined to be user error)
+    - Scope update: PR #11284 fixes Confluence Server/DC space pagination by following `_links.next` instead of stopping when the result count is below the requested limit, preventing missed spaces and downstream permission-sync failures. PR #11291 fixes Confluence Server/DC pagination during permission sync and CQL retrieval when `_paginate_url` runs without a callback, so capped or misreported pages do not miss results. PR #11299 cherry-picks the #11291 fix to `release/v4.0`.
+    - Links: <URL> PR #11284: <URL> PR #11291: <URL> PR #11299: <URL>
+    - Blockers: None
+  - [ ] **(P1)** BYOK LLM Key — *Status:* planning phase — *Due:* May 12
+    - Outcome: Admins can configure LLM providers to be "BYOK" i.e. users have to provide their own key. BYOK should let customers bypass Onyx-managed weekly limits, including the shared per-tenant LLM cost cap, API call caps, non-streaming API call caps, and chunks-indexed caps; customers then pay OpenAI/Anthropic directly and are subject to their provider/account limits instead. Customers using Onyx's own API keys are intentionally covered by their plan and remain subject to weekly usage limits.
+    - Scope notes: Onyx Cloud defaults to Onyx-managed OpenAI and Anthropic API keys as a convenience. Customer-facing guidance says users add their own OpenAI or Anthropic API key via Admin Panel → Configuration → LLM.
+    - Links: <URL> <URL> <URL> <URL> Discord thread: OnyxBot <> anjeriko
+    - Blockers: UI/UX design
+
+  ### Unblockers / Needs help
+  - [ ] HRT MCP issue: Justin needs Evan’s context from the prior thread before spending time investigating, to confirm whether it appears to be an Onyx-owned issue.
+  - [ ] what UI components should BYOK llm key use? Customer-facing guidance points to Admin Panel → Configuration → LLM.
+
+  ---
+
+  ## Ronnie
+  ### Current
+  - [ ] **(P1)** <todo title> — *Status:* Not started — *Due:* TBD
+    - Outcome: <what “done” means>
+    - Links: <url(s)>
+    - Blockers: <none / describe>
+
+  ### Unblockers / Needs help
+  - [ ] <question / decision / dependency>
+
+  ---
+
+  ## Duo
+  ### Current
+  - [ ] **(P1)** mockups
+expected_class: NO_CHANGE
+doc_title: Gediminas Rapalis
+doc_url: <URL>
+doc_content: |-
+  Contact: Gediminas Rapalis
+  Email: <EMAIL> Company: European Spallation Source (ESS)
+  Domain: ess.eu Deal: European Spallation Source (ESS)
+  Amount: <AMOUNT>
+  Stage: qualifiedtobuy
+  Close Date: <PHONE>T16:58:25Z
+  Pipeline: default Note: Sales Call SummaryMeeting Date: <PHONE>:30 UTCAttendees: Matthew Veber (<EMAIL>); Gediminas Rapalis (<EMAIL>); János Babik; Daniel RipollPricing DiscussionNo quote provided (no seats or pricing discussed).Key PointsExploratory demo with European Spallation Source (ESS) evaluating Onyx for enterprise search/agents. Discussed connectors (Confluence on‑prem supported; no native Anovia connector yet), MCP integration as a workaround, and permission handling (RBAC, permission inheritance). Compared self‑hosted vs Onyx Cloud deployment and next steps for a trial and technical documentation.Technical RequirementsConnectors Mentioned: Confluence (on‑prem), "Anovia" document management via MCP, Open Web UI (current), Azure OpenAI LLM; Slack/Jira mentioned by Onyx for context.Issues/Concerns: Security and permission sync; ability to scope agents to specific Confluence pages/spaces; group-based access; maintenance effort for self-hosted deployments.Next StepsOnyx (Matt) to send technical documentation on permissions and comparison vs Open Web UI; share details on trial (cloud or enterprise self‑host). ESS to align internally on evaluation plan before starting a trial.ParticipantsExternal: Gediminas Rapalis (<EMAIL>); János Babik; Daniel Ripoll---Internal: Matthew Veber (<EMAIL>)Source: Fireflies TranscriptSales Call Summary – <PHONE>How They Found Us:Discovered via AI tool search/Open Web UI; also saw Onyx on GitHub when exploring Confluence connectors.Seats Discussed:No seat count discussed.Interested Connectors:Confluence (on‑prem), "Anovia" via MCP; Azure OpenAI LLM; potential Slack/Jira in future.Timeline:Early exploration; review docs now; consider a trial after internal alignment.Competitor Consideration:Open Web UI considered (capability comparison requested).Security Considerations:RBAC and permission inheritance; ensure permission-respecting retrieval and scoped knowledge sets.Self-Hosting or Cloud:Leaning self‑host; open to either depending on maintenance/support tradeoffs.Quote Provided:No quote provided.Overview of Use-Case:Enterprise search and agent workflows across Confluence and Anovia-like DMS, with permission-aware retrieval and potential action execution via MCP.Full Transcript:Fireflies transcript linkParticipantsExternal: Gediminas Rapalis (<EMAIL>); János Babik; Daniel Ripoll---Internal: Matthew Veber (<EMAIL>)
+  Created: <PHONE>T13:30:00Z
+notes: Human-verified label (`no_change_covered`) from Bo's eval_labeler batch.
+tags:
+- real-world
+- real-prod-decision
+- human-verified
+- source:hubspot
+- bo-label:no_change_covered

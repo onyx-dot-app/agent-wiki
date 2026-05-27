@@ -1,0 +1,38 @@
+id: rd-real-irrelevant-02551
+surface: reconcile_document
+wiki_path: customer_notes/scania/current_state.md
+current_body: |-
+  This document will keep track of the overall status of Scania's Onyx instance (version, high level issues, etc).
+
+  Onyx version: 3.2.1 (as of Apr 30: <URL>
+
+  most recent sharepoint issue (May 18): <URL>
+
+  Evaluation / POC context from the Feb. 4 sales call: Scania wants an enterprise-wide knowledge base and AI-powered search across SharePoint, Teams, Jira, Confluence, SAP, ServiceNow, and related systems, plus a RAG/MCP foundation for agents used by R&D and other teams. Microsoft Copilot / SharePoint-native options were described as insufficient at scale.
+
+  Technical requirements captured before the POC included self-hosted deployment, SSO/SCIM, granular permissions/groups, frequent sync and permission mirroring, bring-your-own LLM options such as Azure OpenAI/OpenAI or Bedrock, and APIs/embeddable widgets for intranet search.
+
+  HubSpot lists Jim Tolman, Technology Strategy Manager (<EMAIL>), as the primary contact. Additional Scania contacts in the HubSpot record include <EMAIL>, <EMAIL>, <EMAIL>, <EMAIL>, <EMAIL>, <EMAIL>, <EMAIL>, <EMAIL>, <EMAIL>, <EMAIL>, <EMAIL>, and <EMAIL>. It lists two Scania deals in stage `decisionmakerboughtin`, both with close date <PHONE>: `Scania - Enterprise Platform - 3k seats` for <AMOUNT> (<URL>) and `Scania - Simple Search - 50k seats` for <AMOUNT> (<URL>). The Feb. 4 call notes say exact seat count was not established on that call; pricing discussion was framework-only, including possible basic vs. power-user tiers, with no specific pricing numbers quoted.
+expected_class: IRRELEVANT
+doc_title: SecureCloud
+doc_url: <URL>
+doc_content: |-
+  Company: SecureCloud
+  Domain: securecloud.de
+  Description: SecureCloud provides GDPR-compliant, encrypted cloud storage and data exchange solutions for companies, enabling secure collaboration and eSign capabilities. Contact: Marcus Müller
+  Email: <EMAIL>
+  Job Title: Geschäftsführer / CEO Contact: Kai Perich
+  Email: <EMAIL>
+  Job Title: Software Developer Deal: SecureCloud
+  Amount: <AMOUNT>
+  Stage: appointmentscheduled
+  Close Date: <PHONE>T20:55:08.008Z
+  Pipeline: default Note: Sales Call Summary Meeting Date: <PHONE>:30 UTC Attendees: Marcus Müller (<EMAIL>); Kai Perich (no email provided); Matthew Veber (<EMAIL>) Pricing Discussion • Onyx Business: <AMOUNT>/month (cloud) • Onyx Enterprise (self-hosted only): <AMOUNT>/month list; tiered pricing discussed — 0–300 users: <AMOUNT>; 300–500: <AMOUNT>; 500–1000: ~<AMOUNT> average; minimum annual contract value: ~<AMOUNT>. Partner/reseller flexibility and potential discounts noted. Key Points SecureCloud is evaluating Onyx as a ChatGPT alternative for public sector customers with strict data privacy requirements. They prefer self-hosted Enterprise due to compliance and data residency. Reseller/partner motion is desired (ad hoc today), with interest in white labeling and role-based access. Pricing and flexibility were discussed; next step is a customer meeting next week. Technical Requirements Connectors Mentioned: SecureCloud’s own storage platform (Dropbox-like) via a custom connector; rule-based access control; common enterprise sources (e.g., Google Drive, Confluence) referenced as examples. Issues/Concerns: Public sector data privacy (no training on uploaded data); need SSO and permission inheritance; noted formatting/tool-use issues with some Ollama models; potential multi-tool activation quirks to be reviewed. Next Steps • SecureCloud to meet with their public sector customer next week to validate fit and potential seat count. • Option to start 30-day Enterprise trial on Onyx Cloud (for evaluation); self-hosted Enterprise key to be provided after commercial establishment. • Follow-up email from Onyx with resources; coordinate support for the customer call if desired. Participants External: Marcus Müller (<EMAIL>); Kai Perich (no email provided) --- Internal: Matthew Veber (<EMAIL>) Source: Fireflies Transcript Sales Call Summary – <PHONE> How They Found Us: SecureCloud developer discovered Onyx while comparing open-source alternatives (Open Web UI, librechat); they prefer Onyx’s features. Seats Discussed: Company size noted ~1,000 users (public sector); exact seat count unknown. Interested Connectors: SecureCloud’s platform (custom connector); rule-based access control; enterprise sources as needed (e.g., GDrive/Confluence). Timeline: Customer validation meeting next week; partner program potentially later this year; evaluation can begin immediately with 30-day Enterprise trial (cloud) while self-host planning proceeds. Competitor Consideration: Open Web UI, librechat reviewed; Onyx preferred; cannot use OpenAI cloud due to data privacy requirements. Security Considerations: Public sector data privacy, GDPR/ISO-style compliance; self-hosting required; no model training on uploaded data. Self-Hosting or Cloud: Self-hosted Enterprise required for the customer; Onyx Cloud unsuitable for public sector deployment; Business plan only viable internally, not for the customer. Quote Provided: No formal quote provided; pricing tiers discussed (Enterprise <AMOUNT>/month, tiered down to ~<AMOUNT>/month at 500–1000 seats); minimum annual contract ~ <AMOUNT>k; reseller/discount flexibility noted. Overview of Use-Case: SecureCloud aims to offer a white-labeled AI assistant/search product to its customers, with role-based access and custom connectors into their secure storage. They may resell Onyx and provide hosting/services on their infrastructure. Full Transcript: <URL>
+  Created: <PHONE>T15:30:00Z
+notes: Human-verified label (`irrelevant`) from Bo's eval_labeler batch.
+tags:
+- real-world
+- real-prod-decision
+- human-verified
+- source:hubspot
+- bo-label:irrelevant

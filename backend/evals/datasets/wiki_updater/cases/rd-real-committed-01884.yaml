@@ -1,0 +1,131 @@
+id: rd-real-committed-01884
+surface: reconcile_document
+wiki_path: team-todos.md
+current_body: |-
+  # Team Todos (by owner)
+
+  > Purpose: Single place to track current work, unblockers, and ownership.
+  > Suggested cadence: quick async update daily; deeper review in weekly planning.
+
+  ## How to use this page
+  - Add new work under the person who will **drive it to completion**.
+  - Prefer small, outcome-oriented items.
+  - Each todo should include (when possible):
+    - **Outcome / Definition of done**
+    - **Priority**: P0 (urgent), P1 (this week), P2 (later)
+    - **Due**: date or “TBD”
+    - **Status**: Not started / In progress / Blocked / In review / Done
+    - **Links**: ticket, doc, PR, dashboard, etc.
+  - When something is blocked, write the **specific blocker** and who/what can unblock it.
+
+  ---
+
+  ## Yuhong
+  ### Current
+  - Keep this user's TODOs empty but add in all relevant blockers that this user has for other people's projects
+
+  ### Unblockers / Needs help
+  - [ ] amiconsult Enterprise self-hosted evaluation: confirm feasibility/process for granting Enterprise features on their self-hosted Community instance so engineering can schedule an unlock-script call.
+    - Context: HubSpot deal `amiconsult` is in the default pipeline at stage `closedlost`; amount is <AMOUNT>; close date is <PHONE>. Contact is Vincenzo Pace, Associate IAM Consultant, at amiconsult.de.
+    - Scope notes: amiconsult self-hosts Community today and wanted to evaluate Enterprise for strict privacy and access-control requirements, including RBAC, permission inheritance, SSO, and local/self-hosted deployment. Connectors discussed were Confluence, Slack, and SharePoint.
+    - Scope notes: They were exploring a reseller motion, with current internal evaluation around 50–60 users and a potential downstream customer around 4,000 seats. No formal quote was provided; Business plan pricing around <AMOUNT> and possible volume discount around <AMOUNT> were discussed, with Enterprise minimum around 200 users.
+    - Next steps from sales call: Matthew to sync with Yuhong on feasibility/process, coordinate an engineering call to run the unlock script, and consider bringing the interested end-customer into a follow-up evaluation call.
+
+  ---
+
+  ## Nik
+  ### Current
+  - [ ] **(P0)** Control plane deploy v0.0.129 after Alembic revision-id fix — *Status:* In progress — *Due:* TBD
+    - Outcome: Control plane is redeployed via Argo on `v0.0.129` after rolling back the failed `v0.0.128` deploy and fixing the duplicate Alembic migration revision id.
+    - Links: PR #149: <URL> PR #150: <URL> PR #151: <URL> images: <URL>
+    - Blockers: Confirm PR approval and Argo sync completion.
+
+  ### Unblockers / Needs help
+  - [ ] Evan approval for the control-plane migration fix / `v0.0.129` bump if still pending.
+
+  ---
+
+  ## Dane
+  ### Current
+  - [ ] **(P1)** <todo title> — *Status:* Not started — *Due:* TBD
+    - Outcome: <what “done” means>
+    - Links: <url(s)>
+    - Blockers: <none / describe>
+
+  ### Unblockers / Needs help
+  - [ ] <question / decision / dependency>
+
+  ---
+
+  ## Bo
+  ### Current
+  - [ ] **(P1)** Wiki reconciler cleanup monitoring — *Status:* In progress — *Due:* TBD
+    - Outcome: The reconciler stops adding unnecessary content to wiki pages after the latest prompt tuning, especially fabricated `team-todos.md` entries from bare CRM/contact records and loose same-product-area additions to notes pages.
+    - Links: <URL> PR #113: <URL>
+    - Blockers: None
+
+  ---
+
+  ## Matthew
+  ### Current
+  - [ ] **(P1)** European Spallation Source evaluation follow-up — *Status:* Not started — *Due:* TBD
+    - Outcome: ESS receives technical documentation on permission handling, a comparison against Open Web UI, and trial options for Onyx Cloud vs enterprise self-hosted deployment.
+    - Links: HubSpot deal <URL>
+    - Blockers: ESS internal alignment before starting a trial.
+
+  ---
+
+  ## Evan
+  ### Current
+  - [ ] **(P0)** perm sync fixes — *Status:* implementing fixes — *Due:* May 11
+    - Outcome: All perm sync related issues that occur at reasonably high frequency (>10 in the last week) are resolved (fixed in code or determined to be user error)
+    - Scope update: PR #11284 fixes Confluence Server/DC space pagination by following `_links.next` instead of stopping when the result count is below the requested limit, preventing missed spaces and downstream permission-sync failures. PR #11291 fixes Confluence Server/DC pagination during permission sync and CQL retrieval when `_paginate_url` runs without a callback, so capped or misreported pages do not miss results. PR #11299 cherry-picks the #11291 fix to `release/v4.0`.
+    - Links: <URL> PR #11284: <URL> PR #11291: <URL> PR #11299: <URL>
+    - Blockers: None
+  - [ ] **(P1)** BYOK LLM Key — *Status:* planning phase — *Due:* May 12
+    - Outcome: Admins can configure LLM providers to be "BYOK" i.e. users have to provide their own key. BYOK should let customers bypass Onyx-managed weekly limits, including the shared per-tenant LLM cost cap, API call caps, non-streaming API call caps, and chunks-indexed caps; customers then pay OpenAI/Anthropic directly and are subject to their provider/account limits instead. Customers using Onyx's own API keys are intentionally covered by their plan and remain subject to weekly usage limits.
+    - Scope notes: Onyx Cloud defaults to Onyx-managed OpenAI and Anthropic API keys as a convenience. Customer-facing guidance says users add their own OpenAI or Anthropic API key via Admin Panel → Configuration → LLM.
+    - Links: <URL> <URL> <URL> <URL> Discord thread: OnyxBot <> anjeriko
+    - Blockers: UI/UX design
+
+  ### Unblockers / Needs help
+  - [ ] HRT MCP issue: Justin needs Evan’s context from the prior thread before spending time investigating, to confirm whether it appears to be an Onyx-owned issue.
+  - [ ] what UI components should BYOK llm key use? Customer-facing guidance points to Admin Panel → Configuration → LLM.
+
+  ---
+
+  ## Ronnie
+  ### Current
+  - [ ] **(P1)** <todo title> — *Status:* Not started — *Due:* TBD
+    - Outcome: <what “done” means>
+    - Links: <url(s)>
+    - Blockers: <none / describe>
+
+  ### Unblockers / Needs help
+  - [ ] <question / decision / dependency>
+
+  ---
+
+  ## Duo
+  ### Current
+  - [ ] **(P1)** mockups
+expected_class: CHANGE
+doc_title: Matthew Veber
+doc_url: <URL>
+doc_content: |-
+  Contact: Matthew Veber
+  Email: <EMAIL> Company: Onyx Cloud
+  Domain: onyx.app Deal: DeepL
+  Amount: <AMOUNT>
+  Stage: closedlost
+  Close Date: <PHONE>T17:28:34.149Z
+  Pipeline: default Note: Sales Call Summary Meeting Date: <PHONE> Attendees: Tia Puckett (<EMAIL>); Matthew Veber (<EMAIL>) Pricing Discussion No quote provided; no seats or pricing discussed. Key Points CAS is evaluating search across their main Drupal site and multiple WordPress subsites, ideally spanning related sites. Onyx primarily delivers internal search across connected applications and may not directly index standalone websites; AE will confirm feasibility (e.g., via potential MCP approach). CAS is a Microsoft shop and uses SharePoint; membership portal is behind login and may be Microsoft-based. Technical Requirements Connectors Mentioned: SharePoint; discussion referenced common connectors (Google Drive, Gmail, Teams, Salesforce). CMS noted: Drupal (main), WordPress (subsites). Issues/Concerns: Accurate search across all “family of sites”; website-first data source (Drupal/WordPress) may not map to existing Onyx connectors; feasibility to index websites is unknown. Next Steps - AE (Matthew) to consult team/co-founder on whether Onyx can index websites or provide an alternative approach. - CAS to email details about the membership portal technology (likely Microsoft-based). - AE to share Fireflies transcript link with CAS. Participants External: Tia Puckett (<EMAIL>) --- Internal: Matthew Veber (<EMAIL>) Source: Fireflies Transcript Sales Call Summary – <PHONE> How They Found Us: Recommended by another vendor/product; exploring AI-enabled search capabilities. Seats Discussed: Company size ~150 (estimated via enrichment); exact seat count not discussed. Interested Connectors: SharePoint; potential consideration of membership portal (Microsoft-based). Timeline: Main site migration targeted in 2026; search pain is ongoing; internal search not an immediate priority but of interest. Competitor Consideration: Another vendor recommended Onyx; specific competitor name not provided. Security Considerations: Membership content behind login; no detailed security questions discussed. Self-Hosting or Cloud: Not discussed. Quote Provided: No quote provided. Overview of Use-Case: Unify search across main Drupal site and WordPress subsites, potentially extending to related partner sites; assess if Onyx can support website indexing or if data needs to live in supported connectors. Full Transcript: Fireflies Share Link Participants External: Tia Puckett (<EMAIL>) --- Internal: Matthew Veber (<EMAIL>)
+  Created: <PHONE>T19:00:00Z Note: Sales Call SummaryMeeting Date: <PHONE>Attendees: Matthew Veber (<EMAIL>); Chris Weaver (<EMAIL>; <EMAIL>); Sven Ladovic (<EMAIL>)Pricing Discussion- Competitor proposal (Kappa): €40k platform fee + variable usage (tokens/queries).- Approximate level referenced: ~€30k/month (contextual, not a formal quote).- ROI example used for illustration: <AMOUNT> annual contract (illustrative only).Key Points- DeepL is self-hosting Onyx and piloting Slack bots in 3–4 channels; success metrics are critical for internal justification.- Preference for BYO LLM (their own OpenAI instance), strong emphasis on GDPR/SSO and preventing cross-channel leakage.- Indexing error “255” linked to Postgres connection limits; requires SRE assistance.Technical RequirementsConnectors Mentioned: SlackIssues/Concerns: Postgres connection error 255; need usage/resolution/fallback metrics; channel-level analytics; SSO; permission guardrails; data residency/complianceNext Steps- DeepL to set up Slack Connect (may need admin approval) and email next week with SRE contact.- Onyx to share example usage/analytics report; add Chris to ongoing thread; coordinate async troubleshooting.ParticipantsExternal: Sven Ladovic — <EMAIL>; <EMAIL>---Internal: Matthew Veber — <EMAIL>; Chris Weaver — <EMAIL>: Fireflies Transcript5:44Sales Call Summary – <PHONE>How They Found Us:Already self-hosting/testing Onyx; internal initiative.Seats Discussed:Company size: ~1,200–1,300 (exact seat count unknown).Interested Connectors:Slack (focus on channel-level analytics/guardrails).Timeline:2–3 week POC; SRE back next week; ongoing testing in 3–4 channels.Competitor Consideration:Kappa proposal; currently using “Flank” (limited features).Security Considerations:GDPR emphasis; SSO; permission scoping; avoid cross-channel leakage.Self-Hosting or Cloud:Self-hosting; using internal OpenAI instance (BYO LLM).Quote Provided:No formal quote provided.Overview of Use-Case:Slack bot to deflect HR/IT/internal FAQs; need reliable indexing and analytics to show ROI.Full Transcript:Fireflies Share LinkParticipantsExternal: Sven Ladovic — <EMAIL>; <EMAIL>---Internal: Matthew Veber — <EMAIL>; Chris Weaver — <EMAIL>
+  Created: <PHONE>T17:00:00Z
+notes: Human-verified label (`committed_moderate`) from Bo's eval_labeler batch.
+tags:
+- real-world
+- real-prod-decision
+- human-verified
+- source:hubspot
+- bo-label:committed_moderate

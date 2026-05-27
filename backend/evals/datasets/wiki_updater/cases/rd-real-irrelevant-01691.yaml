@@ -1,0 +1,119 @@
+id: rd-real-irrelevant-01691
+surface: reconcile_document
+wiki_path: individual_notes/Things Yuhong cares about.md
+current_body: |-
+  # Tracking of all of the things that Yuhong would like updates on:
+
+  ## Tracking evals
+  How are the evaluations going for updating documents to the wiki? Place updates as bullet points below
+
+  How is the evaluation for agents updating the documents going? I want updates as bullet points below
+
+  - In the latest production ingest eval analysis, 226 of 1,092 samples had committed outcomes the judge marked wrong. Most were loose relevance failures: HubSpot contact/company records became fabricated `team-todos.md` tasks, GitHub PRs were added to personal notes based only on product-area overlap, and Slack announcements/support threads became task entries. PR #113 tightened the reconciler prompt to reject CRM records as action items, require direct relevance to the page's question, and avoid creating checklist items unless the source explicitly describes work to be done; monitor follow-up runs for improvement.
+
+  ## Tracking UX
+  How is progress on the deploying Agents via the UI? I want to know when it can support claude code, craft, etc.
+
+  - Claude Code support is documented through the Onyx MCP Server path. Craft support is not documented yet.
+
+  ## Tracking OpenAI API spend
+  Yuhong is looking for an explanation of OpenAI API account funding notifications and an apparent ~<AMOUNT>/day OpenAI API burn. Chris Weaver, Wenxi Huang, or Justin may have context on what is driving the usage.
+expected_class: IRRELEVANT
+doc_title: '8911: feat: add Freshdesk Solutions connector'
+doc_url: <URL>
+doc_content: |
+  ### Summary
+  This PR adds a new **Freshdesk Solutions (Knowledge Base)** connector to Onyx, enabling teams to index and search Freshdesk “Solutions” articles (categories → folders → articles), including optional embedded image extraction.
+
+  Freshdesk’s Knowledge Base is often the single source of truth for **customer-facing and internal support content** (article management, approval workflows, multilingual KB, analytics, and self-service) - making it a high-impact source for enterprise search and RAG. See Freshdesk’s KB overview for context: [Knowledge Base Management: Freshdesk Support](<URL>).
+
+  ---
+
+  ### Why this matters
+  - **Unlocks self-serve knowledge in Onyx**: Freshdesk Solutions articles commonly contain “how-to”, troubleshooting, and policy content that users search for repeatedly.
+  - **Reduces repetitive support load**: Indexing KB content improves findability for agents and end-users, helping deflect tickets and speed up resolutions.
+  - **Better retrieval quality**: KB articles are structured, curated, and frequently updated - ideal for high-signal embeddings and reliable citations.
+
+  ---
+
+  ### What’s included
+  - **Backend**
+    - New `DocumentSource`: `freshdesk_solutions`
+    - New connector: `FreshdeskSolutionsConnector` (`LoadConnector` + `PollConnector`)
+    - Connector registration in the backend registry
+    - Image handling for inline Freshdesk attachments (when image extraction is enabled)
+
+  - **Frontend**
+    - New selectable source `freshdesk_solutions` in the UI
+    - Credential schema + template + labels
+    - Connector config entry
+    - **Custom icon** wired for this source (`web/public/FreshdeskSolutions.png`)
+
+  - **Tests**
+    - Added deterministic unit tests for credential normalization, doc creation, and retry behavior
+    - Added a daily connector test scaffold (marked `xfail` until CI secrets + sandbox are set up)
+
+  ---
+
+  ### Configuration / credentials
+  - **Required credential fields (UI)**
+    - `freshdesk_solution_domain` (e.g. `acme` or `acme.freshdesk.com`)
+    - `freshdesk_solution_api_key`
+    - `freshdesk_solution_password`
+
+  - **Optional environment tuning**
+    - Connector runtime knobs (retry intervals, rate-limit waits, image thresholds, attachment URL patterns, etc.) follow the repo pattern and live in `backend/onyx/configs/app_configs.py`.
+
+  ---
+
+  ### Test plan
+  - **Unit tests**
+    - `pytest backend/tests/unit/onyx/connectors/freshdesk_solutions/test_freshdesk_solutions_connector.py`
+
+  - **Mapping validation**
+    - `pytest backend/tests/unit/onyx/connectors/test_connector_factory.py -k "all_document_sources_mapped or all_connector_mappings_exist"`
+
+  - **Manual (recommended)**
+    - Create a `Freshdesk Solutions` connector via Admin UI
+    - Run indexing and confirm:
+      - articles appear with correct title + category/folder context
+      - links open the Freshdesk article
+      - embedded images are ingested when enabled
+
+  ---
+
+  ### Notes for reviewers
+  - **Non-breaking**: adds a new source + connector without altering existing sources.
+  - **Follows Onyx connector conventions**: registry wiring, source metadata, and env config placement align with existing connectors.
+
+  <img width="1919" height="809" alt="image" src="<URL> />
+
+  <img width="959" height="422" alt="image" src="<URL> />
+
+  <img width="1919" height="861" alt="image" src="<URL> />
+
+
+  <!-- This is an auto-generated description by cubic. -->
+  ---
+  ## Summary by cubic
+  Adds a Freshdesk Solutions (Knowledge Base) connector to index categories → folders → articles, with optional embedded image ingestion. This enables fast search over Freshdesk KB content and supports polling with rate‑limit aware, bounded‑retry fetching.
+
+  - **New Features**
+    - Backend: new DocumentSource freshdesk_solutions and FreshdeskSolutionsConnector (Load + Poll) with retries, rate‑limit handling, and optional image extraction; registry wiring and env knobs added.
+    - Frontend: new “Freshdesk Solutions” source, credential template, config entry, and icon.
+    - Tests: unit tests for credentials, doc creation, and retry behavior; daily test scaffold (xfail).
+
+  - **Bug Fixes**
+    - Sanitized error logs to prevent leaking tokenized Freshdesk attachment URLs; added tests to ensure tokens never appear in logs.
+    - Bounded article fetch retries to prevent runaway loops; verified via unit test.
+
+  <sup>Written for commit 1878e53438ef479c0b7a8b4a5ec00ecf4eb3ea9f. Summary will update on new commits.</sup>
+
+  <!-- End of auto-generated description by cubic. -->
+notes: Human-verified label (`irrelevant`) from Bo's eval_labeler batch.
+tags:
+- real-world
+- real-prod-decision
+- human-verified
+- source:github
+- bo-label:irrelevant

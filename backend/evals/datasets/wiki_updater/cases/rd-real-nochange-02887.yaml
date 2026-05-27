@@ -1,0 +1,61 @@
+id: rd-real-nochange-02887
+surface: reconcile_document
+wiki_path: individual_notes/Things Yuhong cares about.md
+current_body: |-
+  # Tracking of all of the things that Yuhong would like updates on:
+
+  ## Tracking evals
+  How are the evaluations going for updating documents to the wiki? Place updates as bullet points below
+
+  How is the evaluation for agents updating the documents going? I want updates as bullet points below
+
+  - In the latest production ingest eval analysis, 226 of 1,092 samples had committed outcomes the judge marked wrong. Most were loose relevance failures: HubSpot contact/company records became fabricated `team-todos.md` tasks, GitHub PRs were added to personal notes based only on product-area overlap, and Slack announcements/support threads became task entries. PR #113 tightened the reconciler prompt to reject CRM records as action items, require direct relevance to the page's question, and avoid creating checklist items unless the source explicitly describes work to be done; monitor follow-up runs for improvement.
+  - Production-mined eval expansion has export and conversion scripts in place, but no committed cases yet. PR #112 added `export_ingest_eval_samples.sh` and `convert_ingest_eval_samples.py` for ORM-based export and outcome-balanced conversion, then deferred the initial 16-row dataset after review found customer PII in source content; the next dataset growth path needs generation-time redaction, an out-of-repo JSONL path, or synthetic cases.
+
+  ## Tracking UX
+  How is progress on the deploying Agents via the UI? I want to know when it can support claude code, craft, etc.
+
+  - Claude Code support is documented through the Onyx MCP Server path. Craft custom external app support lets admins upload a bundle and gateway config, and users connect by entering their own credentials without OAuth.
+
+  ## Tracking OpenAI API spend
+  Yuhong is looking for an explanation of OpenAI API account funding notifications and an apparent ~<AMOUNT>/day OpenAI API burn. Chris Weaver, Wenxi Huang, or Justin may have context on what is driving the usage.
+expected_class: NO_CHANGE
+doc_title: '112: feat(evals): mine production reconciler decisions into wiki_updater
+  cases'
+doc_url: <URL>
+doc_content: |-
+  ## Description
+
+  Lands the **scripts** for mining production reconciler decisions into eval cases. Actual dataset growth was reverted in this PR's final commit — see "Dataset deferred" below.
+
+  **Scripts (this is what merges):**
+  - `backend/scripts/export_ingest_eval_samples.sh` — `kubectl exec` wrapper that exports the `ingest_eval_samples` table to JSONL. Uses SQLAlchemy `MetaData` reflection + `Session.execute(...).mappings()` to honor the repo's "no raw SQL outside `app/db/fts.py` + `app/tasks/queue.py`" rule. Prints the active kubectl context and asks for a confirmation prompt before running, so you can't accidentally export from the wrong cluster.
+  - `backend/scripts/convert_ingest_eval_samples.py` — stratified-sample converter. Outcome-balanced (not proportional → bootstrap CI has a fighting chance on every class), per-source cap (12), wiki-body-prefix dedup with no empty-string short-circuit. Round-trips every row through `WikiUpdaterCase.model_dump(mode="json")` so schema drift fails at generation time, not at eval-load time.
+
+  **Dataset deferred: 0 cases added in this PR.**
+
+  The first iteration of this PR appended 16 prod-mined cases to `cases.jsonl`. Codex review caught a P1 PII leak — the rows pulled real customer names, contact emails, deal sizes, and meeting summaries straight out of HubSpot/Slack `source_content`. Committing that JSONL into a tracked repo is a hard stop. Reverted in `87f2fa0`.
+
+  The scripts themselves are PII-safe — they read into local-only paths under `/tmp/` by default and never auto-commit. Dataset growth lands in a follow-up PR once one of these is decided:
+
+  1. **Sanitize at generation time** — extend the converter with a `--redact` flag that replaces emails, dollar amounts, company names, URLs with `<EMAIL>`/`<AMOUNT>`/`<COMPANY>`/`<URL>` placeholders before the case is built.
+  2. **Out-of-repo dataset** — keep the prod-mined slice in `local_data/` (gitignored), reference via a `--cases` path in nightly CI. Eval still runs, JSONL never enters version control.
+  3. **Synthesize from schema only** — use the prod row's `outcome` + `wiki_path` + bucket as a seed, then have an LLM generate plausible-but-fictional `source_content` + `wiki_body_before`. Loses some realism but eliminates the leak vector entirely.
+
+  I'd lean **(1) or (2)**. Open to discussion.
+
+  ## How Has This Been Tested?
+
+  - `uv run --extra dev basedpyright` whole-project — 0 errors, 0 warnings, 0 notes
+  - `pytest evals/tests` — 37/37 passing
+  - `pre-commit run` on every changed file — every hook Passed
+  - `bash -n scripts/export_ingest_eval_samples.sh` — syntax clean
+  - Live export against `agent-wiki-dev-wiki` cluster — 1,385 rows extracted cleanly via ORM (matches the previous raw-SQL exporter row-for-row)
+  - Live convert end-to-end on the exported JSONL — 16 cases generated, all round-tripped through `WikiUpdaterCase.model_validate_json` cleanly (NOT committed — see "Dataset deferred")
+notes: Human-verified label (`no_change_covered`) from Bo's eval_labeler batch.
+tags:
+- real-world
+- real-prod-decision
+- human-verified
+- source:github
+- bo-label:no_change_covered
