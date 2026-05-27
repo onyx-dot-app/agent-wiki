@@ -506,7 +506,6 @@ def get_edit_draft(
         path=row["path"],
         base_sha=row["base_sha"],
         content=row["content"],
-        created_at=row["created_at"],
         updated_at=row["updated_at"],
     )
 
