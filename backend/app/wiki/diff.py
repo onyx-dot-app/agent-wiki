@@ -9,15 +9,104 @@ from __future__ import annotations
 
 import re
 
-from app.models.file_system import WordDiff
+from app.models.file_system import DiffHunk, DiffLine, WordDiff
 
 _WORD_SPLIT_RE = re.compile(r"(\s+)")
+
+_HUNK_HEADER_RE = re.compile(
+    r"^@@ -(?P<old_start>\d+)(?:,(?P<old_count>\d+))? "
+    r"\+(?P<new_start>\d+)(?:,(?P<new_count>\d+))? @@"
+)
 
 
 def _split_words(s: str) -> list[str]:
     """Split on whitespace runs, keeping the whitespace tokens as
     elements so a round-trip ``"".join(...)`` reproduces the input."""
     return [tok for tok in _WORD_SPLIT_RE.split(s) if tok != ""]
+
+
+def _parse_unified(text: str) -> list[DiffHunk]:  # pyright: ignore[reportUnusedFunction]
+    """Parse ``git show`` style unified diff text into structured hunks.
+
+    File-header lines (``diff --git``, ``index``, ``new file mode``,
+    ``deleted file mode``, ``---``, ``+++``) are skipped. The parser
+    is lenient — anything that doesn't match a hunk header outside a
+    hunk is ignored so it survives the small differences between
+    ``git diff`` and ``git show`` envelopes.
+    """
+    hunks: list[DiffHunk] = []
+    current: DiffHunk | None = None
+    old_lineno = 0
+    new_lineno = 0
+
+    for raw in text.splitlines():
+        header = _HUNK_HEADER_RE.match(raw)
+        if header is not None:
+            old_start = int(header.group("old_start"))
+            old_count_str = header.group("old_count")
+            old_count = int(old_count_str) if old_count_str is not None else 1
+            new_start = int(header.group("new_start"))
+            new_count_str = header.group("new_count")
+            new_count = int(new_count_str) if new_count_str is not None else 1
+            current = DiffHunk(
+                old_start=old_start,
+                old_count=old_count,
+                new_start=new_start,
+                new_count=new_count,
+                lines=[],
+            )
+            hunks.append(current)
+            old_lineno = old_start
+            new_lineno = new_start
+            continue
+
+        if current is None:
+            continue  # still inside the file-header preamble
+
+        if raw.startswith("+++") or raw.startswith("---"):
+            # Defensive: per-file headers inside a multi-file diff would
+            # land here; they don't belong to any hunk.
+            continue
+
+        if raw.startswith("+"):
+            current.lines.append(
+                DiffLine(
+                    kind="add",
+                    text=raw[1:],
+                    word_diff=None,
+                    old_lineno=None,
+                    new_lineno=new_lineno,
+                ),
+            )
+            new_lineno += 1
+        elif raw.startswith("-"):
+            current.lines.append(
+                DiffLine(
+                    kind="remove",
+                    text=raw[1:],
+                    word_diff=None,
+                    old_lineno=old_lineno,
+                    new_lineno=None,
+                ),
+            )
+            old_lineno += 1
+        elif raw.startswith(" "):
+            current.lines.append(
+                DiffLine(
+                    kind="context",
+                    text=raw[1:],
+                    word_diff=None,
+                    old_lineno=old_lineno,
+                    new_lineno=new_lineno,
+                ),
+            )
+            old_lineno += 1
+            new_lineno += 1
+        elif raw.startswith("\\"):
+            # `\ No newline at end of file` — record nothing.
+            continue
+
+    return hunks
 
 
 def _word_diff(removed: str, added: str) -> WordDiff:  # pyright: ignore[reportUnusedFunction]
