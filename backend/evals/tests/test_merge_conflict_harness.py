@@ -77,6 +77,28 @@ def test_score_case_records_conflict_annotation_when_expected() -> None:
     assert annotation_row.score == 1.0
 
 
+def test_stub_emits_annotation_without_commit_message() -> None:
+    """expects_conflict_annotation=True + no commit message must still mark.
+
+    Mirrors case 03-direct-conflict-no-msg: the stub used to gate the
+    marker on commit_message presence, which scored that case 0.0 on
+    conflict_annotation_present and tainted the smoke baseline.
+    """
+    case = _make_case(
+        case_id="mc-no-msg",
+        base="# Page\n\nUNIQUE-NOMSG base line",
+        current="# Page\n\nCurrent 300ms",
+        draft="# Page\n\nDraft 250ms",
+        commit_msg=None,
+        expects_annotation=True,
+    )
+    with stub_merge_conflict([case]):
+        merged = run_case(case)
+    rows = _score_case(case, merged, judge_models=None)
+    annotation_row = next(r for r in rows if r.name == "conflict_annotation_present")
+    assert annotation_row.score == 1.0
+
+
 def test_score_case_skips_annotation_when_not_expected() -> None:
     case = _make_case(
         base="# Page\n\nBase ABC unique",

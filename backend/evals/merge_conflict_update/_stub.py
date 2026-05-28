@@ -79,12 +79,15 @@ def stub_merge_conflict(cases: list[MergeConflictCase]) -> Generator[None]:
         case = _route(user_text)
         if case is None:
             return CompletionResult(text="")
-        # Concatenate draft + a "merged from current:" tail so both
-        # sides' facts appear in the body. The conflict-annotation
-        # scorer reads the literal "from:" marker.
+        # Concatenate draft + a "merged from current" tail so both sides'
+        # facts appear in the body. When the case expects a conflict
+        # annotation, emit the marker the scorer recognises — mirroring
+        # the production agent, which uses the commit message when present
+        # and falls back to "another update" otherwise.
         annotation = ""
-        if case.expects_conflict_annotation and case.current_commit_message:
-            annotation = "\n\n<!-- conflict from: %s -->" % case.current_commit_message
+        if case.expects_conflict_annotation:
+            source = case.current_commit_message or "another update"
+            annotation = "\n\n<!-- conflict from: %s -->" % source
         merged = "%s%s\n\n%s" % (case.draft_body.rstrip(), annotation, case.current_body)
         return CompletionResult(text=merged)
 
