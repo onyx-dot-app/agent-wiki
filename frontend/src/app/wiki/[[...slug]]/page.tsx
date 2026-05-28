@@ -1548,8 +1548,10 @@ function FileViewer({ path }: { path: string }) {
 
   // Auto-save the draft to the server while the user is editing.
   // Debounced 5s so we don't hammer the API on every keystroke.
+  // Only fires when the draft differs from the saved body.
   useEffect(() => {
     if (!editing) return;
+    if (draft === body) return;
     const baseSha = viewingSha ?? headSha;
     if (!baseSha) return;
     if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
