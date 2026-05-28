@@ -31,7 +31,7 @@ from app.ingest.source_tiers import is_filtered
 from app.ingest.models import WikiUpdateCandidate
 from app.llm.agents import ingest_batch_reconciler, ingest_selector, nl_updater
 from app.llm.agents.common import IRRELEVANT_SENTINEL
-from app.wiki import utils as h
+from app.wiki import utils as wiki_utils
 from app.llm.errors import LLMError
 from app.llm.settings import get as get_llm_settings
 from app.metrics import (
@@ -139,7 +139,7 @@ def _run_inner(job_id: str, rel: str, instruction: str, base_sha: str | None) ->
         mcp_pubsub.publish_job_update(job_id, "failed")
         return
 
-    if not h.file_exists(rel):
+    if not wiki_utils.file_exists(rel):
         mcp_jobs.mark_failed(job_id, error=f"file not found: {rel}")
         mcp_pubsub.publish_job_update(job_id, "failed")
         return
@@ -168,7 +168,7 @@ def _run_inner(job_id: str, rel: str, instruction: str, base_sha: str | None) ->
         mcp_pubsub.publish_job_update(job_id, "succeeded")
         return
 
-    old_body = h.read_existing(rel)
+    old_body = wiki_utils.read_existing(rel)
     try:
         new_body = nl_updater.process_instruction(
             wiki_path=rel,
@@ -190,7 +190,7 @@ def _run_inner(job_id: str, rel: str, instruction: str, base_sha: str | None) ->
         return
 
     try:
-        result = h.commit_with_ai_rebase(
+        result = wiki_utils.commit_with_ai_rebase(
             rel,
             f"Doc update: {instruction[:_COMMIT_MESSAGE_MAX]}",
             base_body=old_body,
@@ -200,7 +200,7 @@ def _run_inner(job_id: str, rel: str, instruction: str, base_sha: str | None) ->
         mcp_jobs.mark_failed(job_id, error=f"llm_error: {exc}")
         mcp_pubsub.publish_job_update(job_id, "failed")
         return
-    except h.AiRebaseMaxRetriesException as exc:
+    except wiki_utils.AiRebaseMaxRetriesException as exc:
         mcp_jobs.mark_failed(
             job_id,
             error="max_retries_exceeded",
@@ -208,7 +208,7 @@ def _run_inner(job_id: str, rel: str, instruction: str, base_sha: str | None) ->
         )
         mcp_pubsub.publish_job_update(job_id, "failed")
         return
-    except h.ToolError as exc:
+    except wiki_utils.ToolError as exc:
         mcp_jobs.mark_failed(job_id, error=str(exc))
         mcp_pubsub.publish_job_update(job_id, "failed")
         return
@@ -226,8 +226,8 @@ def _run_inner(job_id: str, rel: str, instruction: str, base_sha: str | None) ->
         result={
             "committed": True,
             "sha": result.sha,
-            "diff": h.unified_diff(result.old_body, result.new_body, rel),
-            "broken_links": h.broken_links(rel, result.new_body),
+            "diff": wiki_utils.unified_diff(result.old_body, result.new_body, rel),
+            "broken_links": wiki_utils.broken_links(rel, result.new_body),
         },
     )
     mcp_pubsub.publish_job_update(job_id, "succeeded")

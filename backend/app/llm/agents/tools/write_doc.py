@@ -7,26 +7,26 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.wiki import utils as h
+from app.wiki import utils as wiki_utils
 from app.wiki import git as wiki_git
 from app.models.wiki import ChangeKind
 
 
 def handle(args: dict[str, Any]) -> Any:
     try:
-        rel = h.validate_doc_path(args.get("path"))
+        rel = wiki_utils.validate_doc_path(args.get("path"))
         body = args.get("body")
         commit_message = args.get("commit_message")
         base_sha = args.get("base_sha")
-        activity_ttl = h.parse_expires_in_seconds(args.get("expires_in_seconds"))
+        activity_ttl = wiki_utils.parse_expires_in_seconds(args.get("expires_in_seconds"))
         if not isinstance(body, str):
-            raise h.ToolError("body is required (string)")
+            raise wiki_utils.ToolError("body is required (string)")
         if not isinstance(commit_message, str) or not commit_message.strip():
-            raise h.ToolError("commit_message is required")
+            raise wiki_utils.ToolError("commit_message is required")
         if base_sha is not None and not isinstance(base_sha, str):
-            raise h.ToolError("base_sha must be a string when provided")
+            raise wiki_utils.ToolError("base_sha must be a string when provided")
 
-        existed = h.file_exists(rel)
+        existed = wiki_utils.file_exists(rel)
         if existed:
             # Full-body overwrite requires base_sha so we can 3-way merge
             # if a concurrent commit landed between when the agent read the
@@ -42,13 +42,13 @@ def handle(args: dict[str, Any]) -> Any:
                 }
             base_body = wiki_git.read_file(rel, ref=base_sha)
             try:
-                result = h.commit_with_ai_rebase(
+                result = wiki_utils.commit_with_ai_rebase(
                     rel, commit_message.strip(),
                     base_body=base_body,
                     new_body=body,
                     activity_ttl=activity_ttl,
                 )  # always ChangeKind.EDIT — new files take the else branch below
-            except h.AiRebaseMaxRetriesException as exc:
+            except wiki_utils.AiRebaseMaxRetriesException as exc:
                 return {
                     "error": "stale_base",
                     "message": "concurrent edits kept landing; max retries exceeded",
@@ -60,11 +60,11 @@ def handle(args: dict[str, Any]) -> Any:
                 "path": rel,
                 "sha": result.sha,
                 "created": False,
-                "diff": h.unified_diff(result.old_body, result.new_body, rel),
-                "broken_links": h.broken_links(rel, result.new_body),
+                "diff": wiki_utils.unified_diff(result.old_body, result.new_body, rel),
+                "broken_links": wiki_utils.broken_links(rel, result.new_body),
             }
         else:
-            sha = h.commit_and_fan_out(
+            sha = wiki_utils.commit_and_fan_out(
                 rel, body, commit_message.strip(),
                 change_kind=ChangeKind.CREATE, activity_ttl=activity_ttl,
             )
@@ -72,8 +72,8 @@ def handle(args: dict[str, Any]) -> Any:
                 "path": rel,
                 "sha": sha,
                 "created": True,
-                "diff": h.unified_diff("", body, rel),
-                "broken_links": h.broken_links(rel, body),
+                "diff": wiki_utils.unified_diff("", body, rel),
+                "broken_links": wiki_utils.broken_links(rel, body),
             }
-    except h.ToolError as exc:
+    except wiki_utils.ToolError as exc:
         return {"error": str(exc)}

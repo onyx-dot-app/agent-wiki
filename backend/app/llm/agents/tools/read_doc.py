@@ -8,14 +8,14 @@ from __future__ import annotations
 import subprocess
 from typing import Any
 
-from app.wiki import utils as h
+from app.wiki import utils as wiki_utils
 from app.wiki import agent_activity, git as wiki_git
 
 
 def handle(args: dict[str, Any]) -> Any:
     try:
-        rel = h.validate_doc_path(args.get("path"))
-    except h.ToolError as exc:
+        rel = wiki_utils.validate_doc_path(args.get("path"))
+    except wiki_utils.ToolError as exc:
         return {"error": str(exc)}
 
     raw_sha = args.get("sha")
@@ -24,7 +24,7 @@ def handle(args: dict[str, Any]) -> Any:
     sha = raw_sha.strip() if isinstance(raw_sha, str) and raw_sha.strip() else None
 
     head_sha = wiki_git.head_sha_for_path(rel)
-    if sha is None and not h.file_exists(rel):
+    if sha is None and not wiki_utils.file_exists(rel):
         return {"error": f"file not found: {rel}"}
 
     from app.auth import PermissionDenied, require_can
@@ -51,7 +51,7 @@ def handle(args: dict[str, Any]) -> Any:
     is_head = sha is None or sha == head_sha
     agents: list[dict[str, Any]] = []
     if is_head:
-        h.mark_doc_read(rel)
+        wiki_utils.mark_doc_read(rel)
         agents = [r.model_dump() for r in agent_activity.list_for_doc(rel)]
 
     return {

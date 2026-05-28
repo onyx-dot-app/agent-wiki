@@ -8,7 +8,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.auth import current_user
-from app.wiki import utils as h
+from app.wiki import utils as wiki_utils
 from app.triggers import repo as triggers_repo
 from app.triggers import storage as triggers_storage
 from app.wiki import acl as wiki_acl
@@ -80,7 +80,7 @@ def handle(args: dict[str, Any]) -> Any:
         }
 
     try:
-        updated = triggers_repo.update(trigger_id, actor=h.author_string(), **kwargs)
+        updated = triggers_repo.update(trigger_id, actor=wiki_utils.author_string(), **kwargs)
     except ValueError as exc:
         return {"error": str(exc)}
     return {"trigger": updated}

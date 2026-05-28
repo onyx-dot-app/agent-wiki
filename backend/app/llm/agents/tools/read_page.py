@@ -9,17 +9,17 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from app.wiki import utils as h
+from app.wiki import utils as wiki_utils
 from app.wiki import agent_activity, git as wiki_git
 
 
 def handle(args: dict[str, Any]) -> Any:
     try:
-        rel = h.validate_doc_path(args.get("path"))
-    except h.ToolError as exc:
+        rel = wiki_utils.validate_doc_path(args.get("path"))
+    except wiki_utils.ToolError as exc:
         return {"error": str(exc)}
 
-    if not h.file_exists(rel):
+    if not wiki_utils.file_exists(rel):
         return {"error": f"file not found: {rel}"}
 
     from app.auth import PermissionDenied, require_can
@@ -34,7 +34,7 @@ def handle(args: dict[str, Any]) -> Any:
     except Exception as exc:
         return {"error": f"could not read {rel}: {exc}"}
 
-    h.mark_doc_read(rel)
+    wiki_utils.mark_doc_read(rel)
 
     return {
         "path": rel,

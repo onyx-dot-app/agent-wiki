@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.wiki import utils as h
+from app.wiki import utils as wiki_utils
 from app.wiki import git as wiki_git
 
 DEFAULT_LIMIT = 20
@@ -16,8 +16,8 @@ MAX_LIMIT = 100
 
 def handle(args: dict[str, Any]) -> Any:
     try:
-        rel = h.validate_doc_path(args.get("path"))
-    except h.ToolError as exc:
+        rel = wiki_utils.validate_doc_path(args.get("path"))
+    except wiki_utils.ToolError as exc:
         return {"error": str(exc)}
 
     raw_limit = args.get("limit")

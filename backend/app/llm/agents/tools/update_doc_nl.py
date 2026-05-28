@@ -12,7 +12,7 @@ import logging
 from typing import Any
 
 from app.llm.agents import nl_updater
-from app.wiki import utils as h
+from app.wiki import utils as wiki_utils
 from app.llm.errors import LLMError
 from app.wiki import git as wiki_git
 from app.models.wiki import ChangeKind
@@ -22,17 +22,17 @@ log = logging.getLogger(__name__)
 
 def handle(args: dict[str, Any]) -> Any:
     try:
-        rel = h.validate_doc_path(args.get("path"))
+        rel = wiki_utils.validate_doc_path(args.get("path"))
         instruction = args.get("instruction")
         base_sha = args.get("base_sha")
-        activity_ttl = h.parse_expires_in_seconds(args.get("expires_in_seconds"))
+        activity_ttl = wiki_utils.parse_expires_in_seconds(args.get("expires_in_seconds"))
         if not isinstance(instruction, str) or not instruction.strip():
-            raise h.ToolError("instruction is required (non-empty string)")
+            raise wiki_utils.ToolError("instruction is required (non-empty string)")
         if base_sha is not None and not isinstance(base_sha, str):
-            raise h.ToolError("base_sha must be a string when provided")
+            raise wiki_utils.ToolError("base_sha must be a string when provided")
 
-        if not h.file_exists(rel):
-            raise h.ToolError(f"file not found: {rel}")
+        if not wiki_utils.file_exists(rel):
+            raise wiki_utils.ToolError(f"file not found: {rel}")
 
         head_sha = wiki_git.head_sha_for_path(rel)
         if base_sha and base_sha != head_sha:
@@ -46,7 +46,7 @@ def handle(args: dict[str, Any]) -> Any:
                 ),
             }
 
-        old_body = h.read_existing(rel)
+        old_body = wiki_utils.read_existing(rel)
         try:
             new_body = nl_updater.process_instruction(
                 wiki_path=rel,
@@ -66,7 +66,7 @@ def handle(args: dict[str, Any]) -> Any:
                 "sha": head_sha,
             }
 
-        sha = h.commit_and_fan_out(
+        sha = wiki_utils.commit_and_fan_out(
             rel,
             new_body,
             f"Doc update: {instruction.strip()[:80]}",
@@ -77,8 +77,8 @@ def handle(args: dict[str, Any]) -> Any:
             "path": rel,
             "committed": True,
             "sha": sha,
-            "diff": h.unified_diff(old_body, new_body, rel),
-            "broken_links": h.broken_links(rel, new_body),
+            "diff": wiki_utils.unified_diff(old_body, new_body, rel),
+            "broken_links": wiki_utils.broken_links(rel, new_body),
         }
-    except h.ToolError as exc:
+    except wiki_utils.ToolError as exc:
         return {"error": str(exc)}

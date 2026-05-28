@@ -349,19 +349,19 @@ def _current_user_or_none():
         return None
 
 
-def read_existing(rel: str) -> str:
-    """Read the current body of ``rel`` from the wiki working tree."""
-    return Path(filesystem.absolute(rel)).read_text()
+def read_existing(wiki_path: str) -> str:
+    """Read the current body of ``wiki_path`` from the wiki working tree."""
+    return Path(filesystem.absolute(wiki_path)).read_text()
 
 
-def read_existing_or_empty(rel: str) -> str:
+def read_existing_or_empty(wiki_path: str) -> str:
     """Like ``read_existing`` but returns ``""`` when the file doesn't yet exist."""
-    p = Path(filesystem.absolute(rel))
+    p = Path(filesystem.absolute(wiki_path))
     return p.read_text() if p.is_file() else ""
 
 
-def file_exists(rel: str) -> bool:
-    return Path(filesystem.absolute(rel)).is_file()
+def file_exists(wiki_path: str) -> bool:
+    return Path(filesystem.absolute(wiki_path)).is_file()
 
 
 # --------------------------------------------------------------------------- #
