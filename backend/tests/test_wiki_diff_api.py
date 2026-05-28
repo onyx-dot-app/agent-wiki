@@ -12,7 +12,7 @@ from tests._auth import login_fastapi
 
 
 @pytest.fixture
-def client(tmp_db, tmp_repo):
+def client(tmp_db: None, tmp_repo: None) -> TestClient:
     return TestClient(create_app())
 
 

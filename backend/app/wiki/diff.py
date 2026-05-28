@@ -8,10 +8,10 @@ for the FastAPI response model in ``app.models.file_system``.
 from __future__ import annotations
 
 import re
-import subprocess
 
 from app.models.file_system import DiffHunk, DiffLine, FileDiffResponse, WordDiff
 from app.wiki import git as wiki_git
+from app.wiki.git import UnknownSha
 
 _WORD_SPLIT_RE = re.compile(r"(\s+)")
 
@@ -217,7 +217,7 @@ def parse_commit_diff(sha: str, rel: str) -> FileDiffResponse:
         # lines around the hunks; the FE renders the whole file with
         # +/- highlights on changed lines instead of just hunk windows.
         raw = wiki_git.diff_for_commit(sha, rel, unified=99_999)
-    except subprocess.CalledProcessError:
+    except UnknownSha:
         return FileDiffResponse(
             path=rel,
             sha=sha,

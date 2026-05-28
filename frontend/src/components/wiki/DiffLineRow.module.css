@@ -56,12 +56,12 @@
   color: var(--color-state-danger-fg);
   text-decoration: line-through;
   padding: 0 2px;
-  border-radius: 2px;
+  border-radius: var(--radius-xs);
 }
 
 .wordAdded {
   background: var(--color-state-success-bg);
   color: var(--color-state-success-fg);
   padding: 0 2px;
-  border-radius: 2px;
+  border-radius: var(--radius-xs);
 }

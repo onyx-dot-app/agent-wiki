@@ -351,11 +351,22 @@ def tree_paths_at(sha: str) -> list[str]:
     return [line for line in out.splitlines() if line]
 
 
+class UnknownSha(Exception):
+    """Raised when a SHA can't be resolved against the wiki repo.
+
+    Lets callers translate "this commit/ref doesn't exist" without leaking
+    ``subprocess.CalledProcessError`` outside the git seam.
+    """
+
+
 def diff_for_commit(sha: str, rel_path: str | None = None, *, unified: int = 3) -> str:
     args = ["show", "--no-color", f"--unified={unified}", sha]
     if rel_path:
         args += ["--", rel_path]
-    return _run(args).stdout
+    try:
+        return _run(args).stdout
+    except subprocess.CalledProcessError as e:
+        raise UnknownSha(sha) from e
 
 
 # --------------------------------------------------------------------------- #
@@ -430,7 +441,9 @@ def delete_draft(rel_path: str, user_id: str) -> None:
 
 def delete_drafts_for_path(rel_path: str) -> None:
     """Delete all draft branches for a page — called when the page is deleted."""
-    out = _run(["for-each-ref", "--format=%(refname:short)", "refs/heads/drafts/"], check=False).stdout
+    out = _run(
+        ["for-each-ref", "--format=%(refname:short)", "refs/heads/drafts/"], check=False
+    ).stdout
     for branch in out.splitlines():
         # branch = "drafts/<user_id>/<rel_path>" — split into at most 3 parts
         parts = branch.split("/", 2)
@@ -441,18 +454,18 @@ def delete_drafts_for_path(rel_path: str) -> None:
 class RebaseResult(BaseModel):
     """Result of a draft rebase attempt."""
 
-    merged: str           # merged content (clean) or content with conflict markers
-    base_sha: str         # new base SHA (current HEAD)
-    clean: bool           # True = no conflicts, False = conflict markers present
-    current_body: str     # current HEAD content (for conflict UI)
-    draft_body: str       # original draft content (for conflict UI)
+    merged: str  # merged content (clean) or content with conflict markers
+    base_sha: str  # new base SHA (current HEAD)
+    clean: bool  # True = no conflicts, False = conflict markers present
+    current_body: str  # current HEAD content (for conflict UI)
+    draft_body: str  # original draft content (for conflict UI)
 
 
 class MergeResult(BaseModel):
     """Result of a ``merge_content`` call."""
 
-    merged: str   # merged text (clean) or text with conflict markers
-    clean: bool   # True = no conflicts, False = conflict markers present
+    merged: str  # merged text (clean) or text with conflict markers
+    clean: bool  # True = no conflicts, False = conflict markers present
 
 
 def merge_content(base_body: str, current_body: str, incoming_body: str) -> MergeResult:
@@ -472,8 +485,19 @@ def merge_content(base_body: str, current_body: str, incoming_body: str) -> Merg
                 os.close(fd)
         # git merge-file -p writes result to stdout; exit 0 = clean, >0 = conflicts.
         result = _run(
-            ["merge-file", "-p", "-L", "current", "-L", "base", "-L", "incoming",
-             paths[0], paths[1], paths[2]],
+            [
+                "merge-file",
+                "-p",
+                "-L",
+                "current",
+                "-L",
+                "base",
+                "-L",
+                "incoming",
+                paths[0],
+                paths[1],
+                paths[2],
+            ],
             check=False,
         )
         if result.returncode < 0:
