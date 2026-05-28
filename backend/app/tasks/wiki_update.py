@@ -65,6 +65,10 @@ _DEBOUNCE_SECONDS = int(os.environ.get("MCP_NL_DEBOUNCE_SECONDS", "30"))
 # instruction may be long, but we only want a quick handle.
 _COMMIT_MESSAGE_MAX = 80
 
+# Maximum recursive retries when HEAD moves during the LLM call.
+# Each retry is a full LLM round-trip, so keep this small.
+_MAX_RETRIES = 3
+
 
 @documents_queue.task()
 def update_document_from_payload(doc_id: str, source: str, payload: dict[str, Any]) -> None:
@@ -129,24 +133,33 @@ def agent_update_document_nl(job_id: str) -> None:
         mcp_pubsub.publish_job_update(job_id, "failed")
 
 
-def _run_inner(job_id: str, rel: str, instruction: str, base_sha: str | None) -> None:
+def _run_inner(
+    job_id: str,
+    rel: str,
+    instruction: str,
+    base_sha: str | None,
+    _retries: int = 0,
+) -> None:
     """Inside the worker's user context. Splits out so the outer
-    function can wrap exceptions uniformly."""
-    if not rel:
-        mcp_jobs.mark_failed(job_id, error="invalid_path")
-        mcp_pubsub.publish_job_update(job_id, "failed")
-        return
+    function can wrap exceptions uniformly.
 
-    if not h.file_exists(rel):
-        mcp_jobs.mark_failed(job_id, error=f"file not found: {rel}")
-        mcp_pubsub.publish_job_update(job_id, "failed")
-        return
+    Retries recursively (up to ``_MAX_RETRIES``) when HEAD moves during
+    the LLM call — each retry reads the latest content and re-applies the
+    instruction, so the result is always grounded in the current state.
+    """
+    if _retries == 0:
+        if not rel:
+            mcp_jobs.mark_failed(job_id, error="invalid_path")
+            mcp_pubsub.publish_job_update(job_id, "failed")
+            return
+
+        if not h.file_exists(rel):
+            mcp_jobs.mark_failed(job_id, error=f"file not found: {rel}")
+            mcp_pubsub.publish_job_update(job_id, "failed")
+            return
 
     head_sha = wiki_git.head_sha_for_path(rel)
     if base_sha and base_sha != head_sha:
-        # HEAD moved since the job was enqueued. Run on current content
-        # instead of failing silently — the instruction is still valid,
-        # it just needs to apply to a newer base.
         log.info(
             "wiki_update: stale_base %s (base=%s head=%s), running on current HEAD",
             rel, base_sha[:8], (head_sha or "")[:8],
@@ -190,40 +203,32 @@ def _run_inner(job_id: str, rel: str, instruction: str, base_sha: str | None) ->
         mcp_pubsub.publish_job_update(job_id, "succeeded")
         return
 
-    # Re-check HEAD: it may have moved during the LLM call. Merge rather
-    # than clobber the concurrent change.
+    # Re-check HEAD: it may have moved during the LLM call. Re-run the
+    # whole instruction on the new HEAD rather than merging two intermediate
+    # results — the LLM sees the latest content and produces a clean edit.
     post_llm_sha = wiki_git.head_sha_for_path(rel)
-    body_to_commit = new_body
     if post_llm_sha != head_sha:
-        current_body = h.read_existing(rel)
-        try:
-            mr = wiki_git.merge_content(old_body, current_body, new_body)
-            if mr.clean:
-                body_to_commit = mr.merged
-                log.info("wiki_update: auto-merged %s after concurrent commit", rel)
-            else:
-                from app.llm.agents import merge_conflict_update
-                body_to_commit = merge_conflict_update.merge(
-                    wiki_path=rel,
-                    base_body=old_body,
-                    current_body=current_body,
-                    draft_body=new_body,
-                )
-                log.info("wiki_update: llm-merged %s after concurrent conflict", rel)
-        except Exception:
-            log.exception("wiki_update: merge failed for %s, dropping update", rel)
+        if _retries >= _MAX_RETRIES:
+            log.warning(
+                "wiki_update: %s hit max retries (%d), giving up", rel, _MAX_RETRIES
+            )
             mcp_jobs.mark_failed(
                 job_id,
-                error="merge_failed",
-                result={"base_sha": head_sha or "", "current_sha": post_llm_sha or ""},
+                error="max_retries_exceeded",
+                result={"retries": _retries, "current_sha": post_llm_sha or ""},
             )
             mcp_pubsub.publish_job_update(job_id, "failed")
             return
+        log.info(
+            "wiki_update: HEAD moved during LLM call for %s, retrying (attempt %d/%d)",
+            rel, _retries + 1, _MAX_RETRIES,
+        )
+        return _run_inner(job_id, rel, instruction, post_llm_sha, _retries + 1)
 
     try:
         sha = h.commit_and_fan_out(
             rel,
-            body_to_commit,
+            new_body,
             f"Doc update: {instruction[:_COMMIT_MESSAGE_MAX]}",
             change_kind="edit",
         )
