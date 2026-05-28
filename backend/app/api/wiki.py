@@ -546,7 +546,7 @@ def delete_draft(
     wiki_git.delete_draft(rel, user.id)
 
 
-@router.post("/file/autosave/rebase")
+@router.post("/file/autosave/rebase", response_model=DraftResponse)
 def rebase_draft(
     req: RebaseRequest,
     user: User = Depends(require_user),
