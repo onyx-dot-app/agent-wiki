@@ -1881,6 +1881,7 @@ function FileViewer({ path }: { path: string }) {
     setHeadSha(conflict.currentSha);
     setViewingSha(null);
     setConflict(null);
+    setEditing(false);
     void apiFetch(
       `/wiki/file/autosave?path=${encodeURIComponent(path)}`,
       { method: "DELETE" },
