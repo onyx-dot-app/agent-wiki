@@ -1749,19 +1749,33 @@ function FileViewer({ path }: { path: string }) {
         router.push(`/wiki/${newRel}`);
         return;
       }
-      setBody(draft);
       setEditing(false);
       setViewingSha(null);
       setConflict(null);
       setPendingResumeDraft(null);
+      // Optimistically show what the user submitted. The fetch below may
+      // overwrite with the auto-merged body, but if it fails the viewer
+      // still shows the content that was just committed rather than the
+      // stale pre-edit body.
+      setBody(draft);
+      setDraft(draft);
       // History changed (new commit + possible deprecations) — refetch.
       if (historyOpen) refreshHistory();
       else setCommits(null);
-      // Pick up the new head_sha for subsequent edits.
-      const fresh = await apiFetch<FileResponse>(
-        `/wiki/file?path=${encodeURIComponent(path)}`,
-      );
-      setHeadSha(fresh.head_sha ?? null);
+      // Pick up the committed body and head_sha. Overwrite the optimistic
+      // draft above with the actual merged result when the server auto-merged
+      // concurrent edits. Failures are silent — the optimistic value is a
+      // correct fallback since the PUT already succeeded.
+      try {
+        const fresh = await apiFetch<FileResponse>(
+          `/wiki/file?path=${encodeURIComponent(path)}`,
+        );
+        setHeadSha(fresh.head_sha ?? null);
+        setBody(fresh.body);
+        setDraft(fresh.body);
+      } catch {
+        // fresh fetch failed — body already shows the local draft
+      }
       // The server clears the draft row when the body diverges from
       // the template snapshot — re-sync our context so the chat
       // banner disappears at the same moment.
