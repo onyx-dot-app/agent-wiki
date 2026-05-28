@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
-import { AppShell } from "@/components/common/AppShell";
 import { Button } from "@/components/common/Button";
 import { BackLink, PageHeader } from "@/components/common/PageHeader";
 import { apiFetch } from "@/lib/api";
@@ -32,16 +31,14 @@ export default function AdminUsersPage() {
   if (!user.is_admin) return null;
 
   return (
-    <AppShell>
-      <main style={{ padding: isMobile ? "16px 12px" : "24px 32px", maxWidth: 960 }}>
+    <main style={{ padding: isMobile ? "16px 12px" : "24px 32px", maxWidth: 960 }}>
         <BackLink />
         <PageHeader
           title="Users"
           description="Promote or demote admins, or remove accounts. The last admin cannot be demoted or deleted."
         />
         <UsersTable currentUserId={user.id} />
-      </main>
-    </AppShell>
+    </main>
   );
 }
 

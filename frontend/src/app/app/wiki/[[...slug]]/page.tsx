@@ -15,7 +15,6 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import useSWR from "swr";
 
-import { AppShell } from "@/components/common/AppShell";
 import { Button } from "@/components/common/Button";
 import { PageHeader } from "@/components/common/PageHeader";
 import { TriggerModal } from "@/components/triggers/TriggerModal";
@@ -104,22 +103,18 @@ export default function WikiRoute() {
   // Remember the most recent wiki path so the "Last viewed" landing
   // setting has something to fall back to.
   useEffect(() => {
-    rememberWikiPath("/wiki" + (slugPath ? "/" + slugPath : ""));
+    rememberWikiPath("/app/wiki" + (slugPath ? "/" + slugPath : ""));
   }, [slugPath]);
 
   if (loading || !user)
     return <main style={{ padding: isMobile ? 16 : 32 }}>Loading…</main>;
 
-  return (
-    <AppShell>
-      {isFile ? (
-        <FileViewer path={slugPath} />
-      ) : isNewMode ? (
-        <NewDocView dir={slugPath} />
-      ) : (
-        <Explorer dir={slugPath} />
-      )}
-    </AppShell>
+  return isFile ? (
+    <FileViewer path={slugPath} />
+  ) : isNewMode ? (
+    <NewDocView dir={slugPath} />
+  ) : (
+    <Explorer dir={slugPath} />
   );
 }
 
@@ -1310,7 +1305,7 @@ function Breadcrumbs({
   // Use a sentinel for the root crumb so we can track its drop state without
   // collision with a real path of "".
   const ROOT = "__root__";
-  const crumbs = [{ label: "Wiki", href: "/wiki", path: "" }];
+  const crumbs = [{ label: "Wiki", href: "/app/wiki", path: "" }];
   segments.forEach((seg, i) => {
     const path = segments.slice(0, i + 1).join("/");
     crumbs.push({ label: seg, href: `/wiki/${path}`, path });
@@ -1646,7 +1641,7 @@ function FileViewer({ path }: { path: string }) {
 
   const segments = path.split("/");
   const parentSlug = segments.slice(0, -1).join("/");
-  const backHref = parentSlug ? `/wiki/${parentSlug}` : "/wiki";
+  const backHref = parentSlug ? `/app/wiki/${parentSlug}` : "/app/wiki";
   const currentBasename = segments[segments.length - 1] ?? path;
   const currentBasenameNoExt = currentBasename.replace(/\.md$/i, "");
   const trimmedFilename = filenameDraft.trim().replace(/^\/+|\/+$/g, "");

@@ -24,7 +24,7 @@ export default function HomePage() {
 }
 
 function resolveLanding(setting: string): string {
-  if (setting === "recent") return "/events";
+  if (setting === "recent") return "/app/events";
   if (setting === "last_viewed") {
     if (typeof window !== "undefined") {
       try {
@@ -34,7 +34,7 @@ function resolveLanding(setting: string): string {
         /* ignore */
       }
     }
-    return "/wiki";
+    return "/app/wiki";
   }
-  return "/wiki";
+  return "/app/wiki";
 }

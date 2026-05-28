@@ -2,7 +2,6 @@
 
 import { useState, type CSSProperties } from "react";
 
-import { AppShell } from "@/components/common/AppShell";
 import { Button } from "@/components/common/Button";
 import { PageHeader } from "@/components/common/PageHeader";
 import { TriggerHistoryModal } from "@/components/triggers/TriggerHistoryModal";
@@ -105,8 +104,7 @@ export default function TriggersPage() {
   }
 
   return (
-    <AppShell>
-      <main style={{ padding: isMobile ? "16px 12px" : "24px 32px" }}>
+    <main style={{ padding: isMobile ? "16px 12px" : "24px 32px" }}>
         <PageHeader
           title="Triggers"
           description="Triggers watch a document (or folder) and notice when something specific changes, or check on a recurring schedule. When the trigger fires, the message you wrote shows up on the Events tab so you can review it."
@@ -351,7 +349,6 @@ export default function TriggersPage() {
             }
           }}
         />
-      </main>
-    </AppShell>
+    </main>
   );
 }

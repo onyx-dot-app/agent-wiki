@@ -3,7 +3,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 
-import { AppShell } from "@/components/common/AppShell";
 import { Button } from "@/components/common/Button";
 import { BackLink, PageHeader } from "@/components/common/PageHeader";
 import { apiFetch } from "@/lib/api";
@@ -33,8 +32,7 @@ export default function AdminWebPage() {
   if (!user.is_admin) return null;
 
   return (
-    <AppShell>
-      <main style={{ padding: isMobile ? "16px 12px" : "24px 32px", maxWidth: 720 }}>
+    <main style={{ padding: isMobile ? "16px 12px" : "24px 32px", maxWidth: 720 }}>
         <BackLink />
         <PageHeader
           title="Web search & crawl"
@@ -47,8 +45,7 @@ export default function AdminWebPage() {
           }
         />
         <WebForm />
-      </main>
-    </AppShell>
+    </main>
   );
 }
 

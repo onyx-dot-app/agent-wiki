@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
-import { AppShell } from "@/components/common/AppShell";
 import { BackLink, PageHeader } from "@/components/common/PageHeader";
 import { useRequireAuth } from "@/lib/auth";
 import { useHealth } from "@/lib/health";
@@ -55,8 +54,7 @@ export default function AdminHealthPage() {
       : "Backend degraded";
 
   return (
-    <AppShell>
-      <main style={{ padding: isMobile ? "16px 12px" : "24px 32px", height: "100vh", overflowY: "auto" }}>
+    <main style={{ padding: isMobile ? "16px 12px" : "24px 32px", height: "100vh", overflowY: "auto" }}>
         <BackLink />
         <PageHeader
           title="Health"
@@ -194,7 +192,6 @@ export default function AdminHealthPage() {
             })}
           </ul>
         )}
-      </main>
-    </AppShell>
+    </main>
   );
 }
