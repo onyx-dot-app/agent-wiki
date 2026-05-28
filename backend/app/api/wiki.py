@@ -622,12 +622,17 @@ def merge_draft(
         base_body = wiki_git.read_file(rel, ref=req.base_sha)
     except subprocess.CalledProcessError as exc:
         raise HTTPException(status_code=404, detail="base revision not found") from exc
+    # Fetch the most recent commit message so the LLM can reference it when
+    # annotating conflicting facts (e.g. "12k from fix: update connection limit").
+    current_commits = wiki_git.history(rel, limit=1)
+    current_commit_message = current_commits[0].message if current_commits else None
     try:
         merged = merge_conflict_update.merge(
             wiki_path=rel,
             base_body=base_body,
             current_body=req.current_body,
             draft_body=req.draft_body,
+            current_commit_message=current_commit_message,
         )
     except RuntimeError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
