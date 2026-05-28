@@ -16,7 +16,6 @@ import remarkGfm from "remark-gfm";
 import useSWR from "swr";
 
 import { SelectCard, Tag, Text } from "@onyx-ai/opal/components";
-import { Section } from "@onyx-ai/opal/layouts";
 
 import { AppShell } from "@/components/common/AppShell";
 import { Button } from "@/components/common/Button";
@@ -2655,13 +2654,24 @@ function ActivityRow({
       rounding="md"
       border="none"
     >
-      <Section flexDirection="column" alignItems="start" gap={0.5} width="full">
-        <Section
-          flexDirection="row"
-          alignItems="center"
-          gap={1}
-          padding={0.5}
-          width="full"
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          gap: 4,
+          width: "100%",
+          minWidth: 0,
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 8,
+            width: "100%",
+            minWidth: 0,
+          }}
         >
           <div
             aria-hidden
@@ -2682,31 +2692,37 @@ function ActivityRow({
           >
             {initial}
           </div>
-          <Section flexDirection="row" alignItems="center" width="full">
+          <div style={{ flex: 1, minWidth: 0 }}>
             <Text font="main-ui-action" color="text-04" nowrap maxLines={1}>
               {title}
             </Text>
-          </Section>
+          </div>
           {isLatest ? (
             <Tag color="blue" size="sm" title="Current Version" />
           ) : (
-            <Text font="secondary-body" color="text-03" nowrap>
-              {ts}
-            </Text>
+            <div style={{ flexShrink: 0 }}>
+              <Text font="secondary-body" color="text-03" nowrap>
+                {ts}
+              </Text>
+            </div>
           )}
-        </Section>
-        <Section
-          flexDirection="row"
-          alignItems="center"
-          gap={0.5}
-          padding={0.5}
-          width="full"
+        </div>
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 4,
+            width: "100%",
+            minWidth: 0,
+            paddingLeft: 28,
+          }}
         >
-          <Section flexDirection="row" alignItems="center" width="full">
+          <div style={{ flex: 1, minWidth: 0 }}>
             <Text font="secondary-body" color="text-03" nowrap maxLines={1}>
               {description}
             </Text>
-          </Section>
+          </div>
           {sourceUrl ? (
             <a
               href={sourceUrl}
@@ -2721,6 +2737,7 @@ function ActivityRow({
                 borderRadius: 4,
                 color: "inherit",
                 textDecoration: "none",
+                flexShrink: 0,
               }}
             >
               <Text font="secondary-body" color="text-03">
@@ -2728,20 +2745,15 @@ function ActivityRow({
               </Text>
             </a>
           ) : null}
-        </Section>
+        </div>
         {sourceTitle && !sourceUrl ? (
-          <Section
-            flexDirection="row"
-            alignItems="center"
-            padding={0.5}
-            width="full"
-          >
+          <div style={{ paddingLeft: 28, width: "100%", minWidth: 0 }}>
             <Text font="secondary-body" color="text-03" nowrap maxLines={1}>
               {sourceTitle}
             </Text>
-          </Section>
+          </div>
         ) : null}
-      </Section>
+      </div>
     </SelectCard>
   );
 }
