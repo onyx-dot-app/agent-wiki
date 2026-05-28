@@ -4,7 +4,7 @@
 
 Eval samples are written to `ingest_eval_samples` when `INGEST_EVAL_LOGGING=true` is set in the backend environment. Each row captures the source document, the wiki page before reconciliation, the outcome (`committed` / `no_change` / `irrelevant`), and a unified diff for committed edits.
 
-Export to JSONL with `psql`:
+**Option A — psql** (if available locally):
 
 ```bash
 psql $DATABASE_URL -c "\copy (
@@ -32,9 +32,32 @@ for row in csv.reader(sys.stdin):
 " > eval_samples.jsonl
 ```
 
-Or filter by outcome and ID range:
+**Option B — Python** (psql not required, needs `psycopg` v3):
+
+```bash
+python3 -c "
+import os, json, psycopg
+conn = psycopg.connect(os.environ['DATABASE_URL'])
+cur = conn.cursor()
+cur.execute('''
+  SELECT id, source_type, source_title, source_url, source_content,
+         wiki_path, wiki_body_before, diff, outcome, commit_sha, created_at
+  FROM ingest_eval_samples
+  ORDER BY id
+''')
+cols = ['id','source_type','source_title','source_url','source_content',
+        'wiki_path','wiki_body_before','diff','outcome','commit_sha','created_at']
+for row in cur:
+    print(json.dumps(dict(zip(cols, [str(v) if v is not None else None for v in row]))))
+conn.close()
+" > eval_samples.jsonl
+```
+
+Filter by outcome and/or ID range by adding a `WHERE` clause to either query:
 
 ```sql
+WHERE id >= 2894
+-- or:
 WHERE outcome = 'committed' AND id > 1000
 ```
 
