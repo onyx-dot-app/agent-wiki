@@ -42,26 +42,6 @@
   color: #f23a36;
 }
 
-/* Quote-indent column for `.add` blocks (28px wide with a 4px bar). */
-.quoteIndent {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  width: 28px;
-  padding: 4px;
-  align-self: stretch;
-}
-.quoteBar {
-  width: 4px;
-  height: 100%;
-  border-radius: 2px;
-  background: #e6e6e9;
-}
-:global([data-theme="dark"]) .quoteBar {
-  background: #323239;
-}
-
 .blockContent {
   flex: 1 1 0;
   min-width: 0;

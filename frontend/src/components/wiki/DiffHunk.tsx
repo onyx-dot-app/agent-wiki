@@ -142,9 +142,6 @@ export function DiffHunk({ hunk }: { hunk: DiffHunkData }) {
         if (entry.kind === "word") {
           return (
             <div key={idx} className={styles.add}>
-              <div className={styles.quoteIndent}>
-                <div className={styles.quoteBar} />
-              </div>
               <div className={`${styles.blockContent} markdown`}>
                 <WordLine w={entry.line.word_diff} />
               </div>
@@ -163,11 +160,6 @@ export function DiffHunk({ hunk }: { hunk: DiffHunkData }) {
         const cls = entry.kind === "add" ? styles.add : styles.remove;
         return (
           <div key={idx} className={cls}>
-            {entry.kind === "add" ? (
-              <div className={styles.quoteIndent}>
-                <div className={styles.quoteBar} />
-              </div>
-            ) : null}
             <div className={`${styles.blockContent} markdown`}>
               <ReactMarkdown remarkPlugins={[remarkGfm]}>
                 {entry.text}
