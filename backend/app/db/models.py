@@ -426,29 +426,6 @@ class DocumentDraft(Base):
     created_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
 
 
-class WikiEditDraft(Base):
-    """In-progress human edit draft for a wiki page.
-
-    One row per (page, user). Auto-saved while editing; deleted on successful
-    commit. Persisted server-side so the reopen flow can detect stale drafts
-    from any device.
-    """
-
-    __tablename__ = "wiki_edit_drafts"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    path: Mapped[str] = mapped_column(Text, nullable=False)
-    user_id: Mapped[str] = mapped_column(
-        Text, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
-    )
-    base_sha: Mapped[str] = mapped_column(Text, nullable=False)
-    content: Mapped[str] = mapped_column(Text, nullable=False)
-    created_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
-    updated_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
-
-    __table_args__ = (UniqueConstraint("path", "user_id"),)
-
-
 # --------------------------------------------------------------------------- #
 # Audit log                                                                   #
 # --------------------------------------------------------------------------- #

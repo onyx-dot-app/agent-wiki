@@ -348,3 +348,82 @@ def diff_for_commit(sha: str, rel_path: str | None = None) -> str:
     if rel_path:
         args += ["--", rel_path]
     return _run(args).stdout
+
+
+# --------------------------------------------------------------------------- #
+# Human edit drafts — git branch + worktree per (user, page)                 #
+# --------------------------------------------------------------------------- #
+
+def _draft_branch(rel_path: str, user_id: str) -> str:
+    return f"drafts/{user_id}/{rel_path}"
+
+
+def _draft_worktree_path(rel_path: str, user_id: str) -> Path:
+    safe = rel_path.replace("/", "__")
+    return Path(CONFIG.wiki_dir + "-drafts") / user_id / safe
+
+
+def save_edit_draft(rel_path: str, user_id: str, content: str, base_sha: str) -> None:
+    """Write ``content`` to the draft branch for ``(rel_path, user_id)``.
+
+    First call creates the branch from ``base_sha`` and makes an initial
+    commit. Subsequent calls amend that commit in place — the branch always
+    has exactly one commit on top of the fork point so ``base_sha`` is
+    always the parent of HEAD.
+    """
+    branch = _draft_branch(rel_path, user_id)
+    wt_path = _draft_worktree_path(rel_path, user_id)
+
+    if not wt_path.exists():
+        wt_path.mkdir(parents=True, exist_ok=True)
+        _run(["worktree", "add", str(wt_path), "-b", branch, base_sha])
+        (wt_path / rel_path).parent.mkdir(parents=True, exist_ok=True)
+        (wt_path / rel_path).write_text(content)
+        _run(["add", rel_path], cwd=str(wt_path))
+        _run(["commit", "--allow-empty", "--date=now", "-m", f"draft: {rel_path}"], cwd=str(wt_path))
+    else:
+        (wt_path / rel_path).parent.mkdir(parents=True, exist_ok=True)
+        (wt_path / rel_path).write_text(content)
+        _run(["add", rel_path], cwd=str(wt_path))
+        _run(["commit", "--amend", "--no-edit", "--allow-empty", "--date=now"], cwd=str(wt_path))
+
+    log.debug("save_edit_draft %s user=%s", rel_path, user_id)
+
+
+def get_edit_draft(rel_path: str, user_id: str) -> dict[str, str] | None:
+    """Return ``{path, base_sha, content, updated_at}`` or None if no draft."""
+    wt_path = _draft_worktree_path(rel_path, user_id)
+    file_path = wt_path / rel_path
+    if not file_path.exists():
+        return None
+    content = file_path.read_text()
+    # The branch has exactly one commit on top of base_sha; its parent = base_sha.
+    base_sha = _run(["log", "--format=%P", "-1"], cwd=str(wt_path)).stdout.strip()
+    updated_at = _run(["log", "--format=%aI", "-1"], cwd=str(wt_path)).stdout.strip()
+    return {"path": rel_path, "base_sha": base_sha, "content": content, "updated_at": updated_at}
+
+
+def delete_edit_draft(rel_path: str, user_id: str) -> None:
+    """Remove the draft worktree and branch for ``(rel_path, user_id)``."""
+    branch = _draft_branch(rel_path, user_id)
+    wt_path = _draft_worktree_path(rel_path, user_id)
+    if wt_path.exists():
+        _run(["worktree", "remove", str(wt_path), "--force"])
+    _run(["branch", "-D", branch], check=False)
+    log.debug("delete_edit_draft %s user=%s", rel_path, user_id)
+
+
+def delete_edit_drafts_for_path(rel_path: str) -> None:
+    """Remove all draft branches for a page — called when the page is deleted."""
+    out = _run(["branch", "--list", f"drafts/*/{rel_path}"], check=False).stdout
+    for raw in out.splitlines():
+        branch = raw.strip().lstrip("* ")
+        if not branch:
+            continue
+        parts = branch.split("/", 2)
+        if len(parts) >= 2:
+            user_id = parts[1]
+            wt_path = _draft_worktree_path(rel_path, user_id)
+            if wt_path.exists():
+                _run(["worktree", "remove", str(wt_path), "--force"])
+        _run(["branch", "-D", branch], check=False)

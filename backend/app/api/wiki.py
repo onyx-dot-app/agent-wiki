@@ -42,7 +42,6 @@ from app.triggers import repo as triggers_repo
 from app.wiki import (
     agent_activity,
     drafts as wiki_drafts,
-    edit_drafts as wiki_edit_drafts,
     filesystem,
     git as wiki_git,
     notify as wiki_notify,
@@ -158,7 +157,7 @@ def put_document_by_path(
     # chat banner drops and the template's system prompt stops applying.
     wiki_drafts.clear_if_diverged(rel, req.body)
     # Edit draft is no longer needed after a successful commit.
-    wiki_edit_drafts.delete_draft(rel, user.id)
+    wiki_git.delete_edit_draft(rel, user.id)
     log.info("doc %s %s by %s sha=%s", change_kind, rel, author or "?", sha[:8])
     return PutDocumentResponse(
         path=rel,
@@ -294,7 +293,7 @@ def delete_document_by_path(
     sha = wiki_git.delete_path(rel, f"delete {rel}", author=author)
     wiki_notify.after_doc_delete(rel, sha, author)
     wiki_drafts.delete(rel)
-    wiki_edit_drafts.delete_for_path(rel)
+    wiki_git.delete_edit_drafts_for_path(rel)
     log.info("doc deleted %s by %s sha=%s", rel, author or "?", sha[:8])
     return DeleteDocumentResponse(sha=sha)
 
@@ -499,7 +498,7 @@ def get_edit_draft(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     require_can("read", rel, user)
-    row = wiki_edit_drafts.get(rel, user.id)
+    row = wiki_git.get_edit_draft(rel, user.id)
     if row is None:
         return None
     return EditDraftResponse(
@@ -521,13 +520,8 @@ def upsert_edit_draft(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     require_can("write", rel, user)
-    wiki_edit_drafts.upsert(
-        path=rel,
-        user_id=user.id,
-        base_sha=req.base_sha,
-        content=req.content,
-    )
-    row = wiki_edit_drafts.get(rel, user.id)
+    wiki_git.save_edit_draft(rel, user.id, req.content, req.base_sha)
+    row = wiki_git.get_edit_draft(rel, user.id)
     assert row is not None
     return EditDraftResponse(
         path=row["path"],
@@ -549,7 +543,7 @@ def delete_edit_draft(
         rel = filesystem.safe_rel_path(path)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-    wiki_edit_drafts.delete_draft(rel, user.id)
+    wiki_git.delete_edit_draft(rel, user.id)
 
 
 @router.get("/{doc_id}")

@@ -2135,6 +2135,12 @@ function FileViewer({ path }: { path: string }) {
             >
               Use current
             </Button>
+            <Button
+              size="sm"
+              onClick={() => setConflict(null)}
+            >
+              Edit manually
+            </Button>
           </div>
           <div
             style={{
