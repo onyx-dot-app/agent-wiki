@@ -5,7 +5,7 @@ run without a real repo or database.
 """
 from __future__ import annotations
 
-from unittest.mock import MagicMock, call
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -157,7 +157,7 @@ def test_llm_fallback_on_conflict(monkeypatch):
     mcu = MagicMock()
     mcu.merge.return_value = llm_result
 
-    wiki_git_mock = _patch(
+    _patch(
         monkeypatch,
         head_shas=[_SHA_A, _SHA_A],
         current_bodies=[concurrent_body],

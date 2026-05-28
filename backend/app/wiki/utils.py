@@ -14,10 +14,9 @@ from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
-log = logging.getLogger(__name__)
-
 from app.auth import current_user
 from app.llm.agents import merge_conflict_update
+from app.llm.agents.tools.errors import ToolError
 from app.models.wiki import AiRebaseMaxRetriesError, ChangeKind, CommitResult
 from app.wiki import (
     agent_activity,
@@ -27,7 +26,7 @@ from app.wiki import (
     notify as wiki_notify,
 )
 
-from app.llm.agents.tools.errors import ToolError
+log = logging.getLogger(__name__)
 
 # --------------------------------------------------------------------------- #
 # Path validation                                                             #

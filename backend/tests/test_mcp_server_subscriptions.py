@@ -17,6 +17,7 @@ from fastapi.testclient import TestClient
 from app.auth import mcp_tokens as tokens_repo
 from app.main import create_app
 from app.mcp_server import pubsub as mcp_pubsub
+from app.models.wiki import ChangeKind
 from app.mcp_server import session as mcp_session
 from app.wiki import acl as wiki_acl
 from app.wiki import git as wiki_git
@@ -172,7 +173,7 @@ def test_explicit_subscribe_then_publish_lands_in_session_queue(client):
     assert body["result"] == {}
 
     # Direct publish — the wiki/notify hook will call this in production.
-    mcp_pubsub.publish_doc_update("page.md", "abc123", "edit")
+    mcp_pubsub.publish_doc_update("page.md", "abc123", ChangeKind.EDIT)
 
     notif = mcp_pubsub.queue_for(sess_id).get(timeout=2.0)
     assert notif.method == "notifications/resources/updated"
@@ -239,7 +240,7 @@ def test_unsubscribe_stops_delivery(client):
     _rpc(client, headers, "resources/subscribe", {"uri": "wiki:///page.md"})
     _rpc(client, headers, "resources/unsubscribe", {"uri": "wiki:///page.md"})
 
-    mcp_pubsub.publish_doc_update("page.md", "x", "edit")
+    mcp_pubsub.publish_doc_update("page.md", "x", ChangeKind.EDIT)
     # Queue is empty — drain timeout returns None.
     assert mcp_pubsub.drain_blocking(sess_id, timeout=0.1) is None
 
@@ -275,7 +276,7 @@ def test_publish_drops_subscriber_who_lost_acl(client):
 
     # A subsequent publish should NOT be delivered — the per-subscriber
     # ACL recheck drops the notification AND the subscription.
-    mcp_pubsub.publish_doc_update("doc.md", "abc", "edit")
+    mcp_pubsub.publish_doc_update("doc.md", "abc", ChangeKind.EDIT)
     assert mcp_pubsub.drain_blocking(sess_id, timeout=0.1) is None
     assert not mcp_pubsub.is_subscribed(sess_id, "doc.md")
 
@@ -370,7 +371,7 @@ def test_stale_paths_lists_paths_with_pending_pushes(client):
     _rpc(client, headers, "resources/subscribe", {"uri": "wiki:///b.md"})
 
     # Simulate a remote commit on `a.md`.
-    mcp_pubsub.publish_doc_update("a.md", "abc", "edit")
+    mcp_pubsub.publish_doc_update("a.md", "abc", ChangeKind.EDIT)
 
     # Any tool call returns stale_paths surfacing the pending update.
     payload, _ = _tool(client, headers, "search_wiki", {"query": "a"})
