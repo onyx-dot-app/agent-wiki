@@ -1633,20 +1633,9 @@ function FileViewer({ path }: { path: string }) {
     setError(null);
     setEditing(false);
     try {
-      if (sha === headSha) {
-        const r = await apiFetch<FileResponse>(
-          `/wiki/file?path=${encodeURIComponent(path)}`,
-        );
-        setBody(r.body);
-        setDraft(r.body);
-        setHeadSha(r.head_sha ?? headSha);
-        setViewingSha(sha);
-        setDiffData(null);
-      } else {
-        const r = await fetchFileDiff(path, sha);
-        setDiffData(r);
-        setViewingSha(sha);
-      }
+      const r = await fetchFileDiff(path, sha);
+      setDiffData(r);
+      setViewingSha(sha);
     } catch (e) {
       setError(e instanceof Error ? e.message : "failed to load version");
     } finally {
@@ -1666,7 +1655,7 @@ function FileViewer({ path }: { path: string }) {
     editing && filenameValid && filenameNoExt !== currentBasenameNoExt;
   const bodyChanged = editing && draft !== body;
   const dirty = editing && (bodyChanged || renamed);
-  const viewingOld = viewingSha !== null && viewingSha !== headSha;
+  const viewingOld = viewingSha !== null;
 
   // Guard against losing unsaved edits when the user navigates away.
   // - beforeunload: tab close, refresh, typing a URL — browser shows a

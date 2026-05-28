@@ -213,7 +213,10 @@ def parse_commit_diff(sha: str, rel: str) -> FileDiffResponse:
     """
     try:
         parent = wiki_git.parent_sha(sha)
-        raw = wiki_git.diff_for_commit(sha, rel)
+        # Pass unified=99_999 so the full doc body lands in `context`
+        # lines around the hunks; the FE renders the whole file with
+        # +/- highlights on changed lines instead of just hunk windows.
+        raw = wiki_git.diff_for_commit(sha, rel, unified=99_999)
     except subprocess.CalledProcessError:
         return FileDiffResponse(
             path=rel,

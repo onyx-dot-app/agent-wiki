@@ -351,8 +351,8 @@ def tree_paths_at(sha: str) -> list[str]:
     return [line for line in out.splitlines() if line]
 
 
-def diff_for_commit(sha: str, rel_path: str | None = None) -> str:
-    args = ["show", "--no-color", sha]
+def diff_for_commit(sha: str, rel_path: str | None = None, *, unified: int = 3) -> str:
+    args = ["show", "--no-color", f"--unified={unified}", sha]
     if rel_path:
         args += ["--", rel_path]
     return _run(args).stdout
