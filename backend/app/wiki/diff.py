@@ -15,6 +15,13 @@ from app.wiki.git import UnknownSha
 
 _WORD_SPLIT_RE = re.compile(r"(\s+)")
 
+# Lines that start with markdown block syntax can't be safely promoted to
+# inline word-diff — the word-line renderer doesn't run them through a
+# markdown parser, so the leading ``##`` / ``- `` would show literally
+# instead of rendering as a heading / list item. Leave them as a block
+# remove + block add pair so they pass through the markdown renderer.
+_MARKDOWN_BLOCK_PREFIX_RE = re.compile(r"^\s{0,3}(?:#{1,6}\s|[-*+]\s|\d+\.\s|>\s|```|---|___)")
+
 _HUNK_HEADER_RE = re.compile(
     r"^@@ -(?P<old_start>\d+)(?:,(?P<old_count>\d+))? "
     r"\+(?P<new_start>\d+)(?:,(?P<new_count>\d+))? @@"
@@ -202,7 +209,14 @@ def _promote_word_diff(hunk: DiffHunk) -> DiffHunk:
         if rem_end - rem_start == 1 and add_end - add_start == 1:
             rem = hunk.lines[rem_start]
             add = hunk.lines[add_start]
-            word = _word_diff(rem.text or "", add.text or "")
+            rem_text = rem.text or ""
+            add_text = add.text or ""
+            if _MARKDOWN_BLOCK_PREFIX_RE.match(rem_text) or _MARKDOWN_BLOCK_PREFIX_RE.match(
+                add_text
+            ):
+                new_lines.extend(hunk.lines[rem_start:add_end])
+                continue
+            word = _word_diff(rem_text, add_text)
             new_lines.append(
                 DiffLine(
                     kind="word",

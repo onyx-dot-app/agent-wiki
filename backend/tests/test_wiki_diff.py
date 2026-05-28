@@ -173,6 +173,37 @@ def test_promote_word_diff_remove_not_adjacent_to_add_no_promote() -> None:
     assert kinds == ["remove", "context", "add"]
 
 
+def test_promote_word_diff_skips_markdown_heading_lines() -> None:
+    # Headings/lists/code-fences must stay as block remove+add so the
+    # markdown renderer sees them — word-line render is plain text and
+    # would surface a literal `##` / `- `.
+    hunk = _make_hunk(
+        DiffLine(
+            kind="remove",
+            text="## Week of 2026-05-18",
+            word_diff=None,
+            old_lineno=1,
+            new_lineno=None,
+        ),
+        DiffLine(
+            kind="add", text="## Week of 2026-05-19", word_diff=None, old_lineno=None, new_lineno=1
+        ),
+    )
+    out = _promote_word_diff(hunk)
+    kinds = [line.kind for line in out.lines]
+    assert kinds == ["remove", "add"]
+
+
+def test_promote_word_diff_skips_list_item_lines() -> None:
+    hunk = _make_hunk(
+        DiffLine(kind="remove", text="- one item", word_diff=None, old_lineno=1, new_lineno=None),
+        DiffLine(kind="add", text="- another item", word_diff=None, old_lineno=None, new_lineno=1),
+    )
+    out = _promote_word_diff(hunk)
+    kinds = [line.kind for line in out.lines]
+    assert kinds == ["remove", "add"]
+
+
 def test_promote_word_diff_two_independent_edit_blocks_both_promote() -> None:
     hunk = _make_hunk(
         DiffLine(kind="context", text="ctx1", word_diff=None, old_lineno=1, new_lineno=1),
