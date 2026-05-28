@@ -102,6 +102,12 @@ def commit_with_ai_rebase(
             return None
         post_sha = wiki_git.head_sha_for_path(path)
         if post_sha == head_sha:
+            # TOCTOU: HEAD could advance again between this check and
+            # commit_file. Git's index.lock prevents corruption, but a
+            # concurrent commit would surface as a RuntimeError rather than
+            # being caught here. The window is tiny; a real fix would need
+            # a repo-scoped advisory lock around the read-merge-commit
+            # section. Deferred — narrowing the window is sufficient for now.
             sha = commit_and_fan_out(
                 path, merged, message,
                 change_kind=ChangeKind.EDIT, activity_ttl=activity_ttl,
