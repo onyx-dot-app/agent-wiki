@@ -10,6 +10,7 @@ import {
   useState,
   type FormEvent,
 } from "react";
+import { diffLines } from "diff";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import useSWR from "swr";
@@ -22,7 +23,7 @@ import { ActiveSessionsList } from "@/components/wiki/ActiveSessionsList";
 import { RunAgentModal } from "@/components/wiki/RunAgentModal";
 import { ShareDialog } from "@/components/wiki/ShareDialog";
 import { FolderIcon, FileIcon } from "@/components/wiki/WikiIcons";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, ApiError } from "@/lib/api";
 import { useRequireAuth } from "@/lib/auth";
 import { useDrafting } from "@/lib/drafting";
 import { rememberWikiPath } from "@/lib/lastViewed";
@@ -65,6 +66,20 @@ interface HistoryResponse {
   path: string;
   head_sha: string | null;
   commits: CommitInfo[];
+}
+
+interface DraftResponse {
+  path: string;
+  base_sha: string;
+  content: string;
+  updated_at: string;
+}
+
+interface ConflictState {
+  draftBody: string;
+  currentBody: string;
+  currentSha: string;
+  baseSha: string;
 }
 
 export default function WikiRoute() {
@@ -1417,6 +1432,15 @@ function FileViewer({ path }: { path: string }) {
   const [applyingTemplateId, setApplyingTemplateId] = useState<string | null>(
     null,
   );
+  // Conflict resolution: set when a save returns 409.
+  const [conflict, setConflict] = useState<ConflictState | null>(null);
+  // Resume banner: set when entering edit mode and a matching draft exists.
+  const [pendingResumeDraft, setPendingResumeDraft] = useState<DraftResponse | null>(null);
+  // Debounce timer ref for auto-saving the draft to the server.
+  const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Incremented on each startEdit() call and on cancel; lets async
+  // continuations inside startEdit bail out if editing was cancelled first.
+  const editSessionRef = useRef(0);
 
   const loadLatest = useCallback(() => {
     setLoading(true);
@@ -1525,6 +1549,29 @@ function FileViewer({ path }: { path: string }) {
   useEffect(() => {
     return () => setDrafting(null);
   }, [setDrafting]);
+
+  // Auto-save the draft to the server while the user is editing.
+  // Debounced 5s so we don't hammer the API on every keystroke.
+  // Only fires when the draft differs from the saved body.
+  useEffect(() => {
+    if (!editing) return;
+    if (draft === body) return;
+    const baseSha = viewingSha ?? headSha;
+    if (!baseSha) return;
+    if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
+    autoSaveTimer.current = setTimeout(() => {
+      void apiFetch("/wiki/file/autosave", {
+        method: "PUT",
+        body: JSON.stringify({ path, base_sha: baseSha, content: draft }),
+      }).catch(() => {
+        // Auto-save failures are silent — the user still has the draft
+        // locally and can save manually.
+      });
+    }, 5000);
+    return () => {
+      if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
+    };
+  }, [draft, editing, path, headSha, viewingSha]);
 
   const refreshAgents = useCallback(() => {
     setAgentsError(null);
@@ -1650,10 +1697,37 @@ function FileViewer({ path }: { path: string }) {
     };
   }, [dirty]);
 
-  function startEdit() {
+  async function startEdit() {
     setFilenameDraft(currentBasenameNoExt);
     setError(null);
     setEditing(true);
+    const session = ++editSessionRef.current;
+    // Check for an existing in-progress draft from a previous session.
+    try {
+      const saved = await apiFetch<DraftResponse | null>(
+        `/wiki/file/autosave?path=${encodeURIComponent(path)}`,
+      );
+      if (editSessionRef.current !== session) return;
+      if (!saved) return;
+      if (saved.base_sha === headSha) {
+        // Draft is current — offer to restore.
+        setPendingResumeDraft(saved);
+      } else {
+        // Draft is stale — fetch current HEAD and enter conflict flow.
+        const current = await apiFetch<FileResponse>(
+          `/wiki/file?path=${encodeURIComponent(path)}`,
+        );
+        if (editSessionRef.current !== session) return;
+        setConflict({
+          draftBody: saved.content,
+          currentBody: current.body,
+          currentSha: current.head_sha ?? headSha ?? "",
+          baseSha: saved.base_sha,
+        });
+      }
+    } catch {
+      // Draft fetch failure is non-fatal — user just starts fresh.
+    }
   }
 
   async function onSave() {
@@ -1690,6 +1764,8 @@ function FileViewer({ path }: { path: string }) {
       setBody(draft);
       setEditing(false);
       setViewingSha(null);
+      setConflict(null);
+      setPendingResumeDraft(null);
       // History changed (new commit + possible deprecations) — refetch.
       if (historyOpen) refreshHistory();
       else setCommits(null);
@@ -1703,7 +1779,25 @@ function FileViewer({ path }: { path: string }) {
       // banner disappears at the same moment.
       await refreshDraftState();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "save failed");
+      if (e instanceof ApiError && e.status === 409) {
+        // Conflict: page changed since we opened it. Fetch current HEAD
+        // and show the conflict resolution panel.
+        try {
+          const current = await apiFetch<FileResponse>(
+            `/wiki/file?path=${encodeURIComponent(path)}`,
+          );
+          setConflict({
+            draftBody: draft,
+            currentBody: current.body,
+            currentSha: current.head_sha ?? headSha ?? "",
+            baseSha: viewingSha ?? headSha ?? "",
+          });
+        } catch {
+          setError("Save conflict — could not load current version.");
+        }
+      } else {
+        setError(e instanceof Error ? e.message : "save failed");
+      }
     } finally {
       setSaving(false);
     }
@@ -1744,10 +1838,61 @@ function FileViewer({ path }: { path: string }) {
   }
 
   function onCancel() {
+    editSessionRef.current++;
     setDraft(body);
     setFilenameDraft(currentBasenameNoExt);
     setEditing(false);
     setError(null);
+    setConflict(null);
+    setPendingResumeDraft(null);
+    if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
+    // Server-side draft is intentionally kept on cancel so the user can
+    // resume from the same point next time they enter edit mode.
+  }
+
+  async function onKeepMine() {
+    if (!conflict) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await apiFetch("/wiki/file", {
+        method: "PUT",
+        body: JSON.stringify({
+          path,
+          body: conflict.draftBody,
+          base_sha: conflict.currentSha,
+        }),
+      });
+      setDraft(conflict.draftBody);
+      setBody(conflict.draftBody);
+      setConflict(null);
+      setEditing(false);
+      if (historyOpen) refreshHistory();
+      else setCommits(null);
+      const fresh = await apiFetch<FileResponse>(
+        `/wiki/file?path=${encodeURIComponent(path)}`,
+      );
+      setHeadSha(fresh.head_sha ?? null);
+      await refreshDraftState();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "save failed");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function onUseCurrent() {
+    if (!conflict) return;
+    setDraft(conflict.currentBody);
+    setBody(conflict.currentBody);
+    setHeadSha(conflict.currentSha);
+    setViewingSha(null);
+    setConflict(null);
+    setEditing(false);
+    void apiFetch(
+      `/wiki/file/autosave?path=${encodeURIComponent(path)}`,
+      { method: "DELETE" },
+    ).catch(() => {});
   }
 
   return (
@@ -1925,6 +2070,168 @@ function FileViewer({ path }: { path: string }) {
           <Button size="sm" onClick={loadLatest}>
             Back to latest
           </Button>
+        </div>
+      )}
+
+      {editing && pendingResumeDraft && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 12,
+            padding: "8px 12px",
+            marginBottom: 12,
+            background: color.state.info.bg,
+            border: `1px solid ${color.state.info.border}`,
+            borderRadius: radius.md,
+            fontSize: 13,
+            color: color.state.info.fg,
+          }}
+        >
+          <span>You have unsaved changes from a previous session.</span>
+          <div style={{ flex: 1 }} />
+          <Button
+            size="sm"
+            onClick={() => {
+              setDraft(pendingResumeDraft.content);
+              setPendingResumeDraft(null);
+            }}
+          >
+            Resume
+          </Button>
+          <Button
+            size="sm"
+            onClick={() => {
+              setPendingResumeDraft(null);
+              void apiFetch(
+                `/wiki/file/autosave?path=${encodeURIComponent(path)}`,
+                { method: "DELETE" },
+              ).catch(() => {});
+            }}
+          >
+            Discard
+          </Button>
+        </div>
+      )}
+
+      {editing && conflict && (
+        <div
+          style={{
+            marginBottom: 12,
+            border: `1px solid ${color.state.warning.border}`,
+            borderRadius: radius.md,
+            overflow: "hidden",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+              padding: "8px 12px",
+              background: color.state.warning.bg,
+              color: color.state.warning.fg,
+              fontSize: 13,
+            }}
+          >
+            <span>This page was updated while you were editing.</span>
+            <div style={{ flex: 1 }} />
+            <Button
+              size="sm"
+              onClick={() => void onKeepMine()}
+              disabled={saving}
+            >
+              Keep mine
+            </Button>
+            <Button
+              size="sm"
+              onClick={onUseCurrent}
+            >
+              Use current
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => setConflict(null)}
+            >
+              Edit manually
+            </Button>
+          </div>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr",
+              gap: 0,
+            }}
+          >
+            {(() => {
+              const currentHunks = diffLines(conflict.draftBody, conflict.currentBody);
+              const draftHunks = diffLines(conflict.currentBody, conflict.draftBody);
+              const preStyle: React.CSSProperties = {
+                margin: 0,
+                fontSize: 12,
+                lineHeight: 1.5,
+                fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+                whiteSpace: "pre-wrap",
+                wordBreak: "break-word",
+                maxHeight: 240,
+                overflowY: "auto",
+              };
+              const labelStyle: React.CSSProperties = {
+                fontSize: 11,
+                fontWeight: 600,
+                color: color.text.muted,
+                marginBottom: 6,
+                textTransform: "uppercase",
+                letterSpacing: "0.05em",
+              };
+              return (
+                <>
+                  <div style={{ padding: 12, borderRight: `1px solid ${color.border.subtle}` }}>
+                    <div style={labelStyle}>Current version</div>
+                    <pre style={preStyle}>
+                      {currentHunks.map((part, i) => (
+                        <span
+                          key={i}
+                          style={{
+                            background: part.added
+                              ? color.state.success.bg
+                              : part.removed
+                              ? "transparent"
+                              : undefined,
+                            color: part.removed ? "transparent" : color.text.secondary,
+                            userSelect: part.removed ? "none" : undefined,
+                          }}
+                        >
+                          {part.value}
+                        </span>
+                      ))}
+                    </pre>
+                  </div>
+                  <div style={{ padding: 12 }}>
+                    <div style={labelStyle}>Your draft</div>
+                    <pre style={preStyle}>
+                      {draftHunks.map((part, i) => (
+                        <span
+                          key={i}
+                          style={{
+                            background: part.added
+                              ? color.state.warning.bg
+                              : part.removed
+                              ? "transparent"
+                              : undefined,
+                            color: part.removed ? "transparent" : color.text.secondary,
+                            userSelect: part.removed ? "none" : undefined,
+                          }}
+                        >
+                          {part.value}
+                        </span>
+                      ))}
+                    </pre>
+                  </div>
+                </>
+              );
+            })()}
+          </div>
         </div>
       )}
 

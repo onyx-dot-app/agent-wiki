@@ -19,6 +19,8 @@ from app.models.file_system import (
     DocumentActivityResponse,
     DocumentDraftView,
     DocumentEntry,
+    DraftRequest,
+    DraftResponse,
     FileHistoryResponse,
     FolderHitView,
     GetDocumentResponse,
@@ -130,13 +132,13 @@ def put_document_by_path(
     author = _git_author(user)
     change_kind = "edit" if existed else "create"
     msg = f"{change_kind} {rel}"
-    deprecated: list[str] = []
     if req.base_sha:
         head = wiki_git.head_sha_for_path(rel)
         if head and head != req.base_sha:
-            deprecated = wiki_git.commits_between(req.base_sha, head, rel)
-    if deprecated:
-        msg = f"{msg}\n\nDeprecates: {' '.join(deprecated)}"
+            # Conflict: the page changed since the client opened it.
+            # Return 409 so the frontend can surface the conflict UI
+            # rather than silently overwriting.
+            raise HTTPException(status_code=409, detail="conflict detected")
     sha = wiki_git.commit_file(rel, req.body, msg, author=author)
     wiki_notify.after_doc_write(
         rel,
@@ -149,12 +151,14 @@ def put_document_by_path(
     # snapshot, the user has made it their own — clear the row so the
     # chat banner drops and the template's system prompt stops applying.
     wiki_drafts.clear_if_diverged(rel, req.body)
+    # Edit draft is no longer needed after a successful commit.
+    wiki_git.delete_draft(rel, user.id)
     log.info("doc %s %s by %s sha=%s", change_kind, rel, author or "?", sha[:8])
     return PutDocumentResponse(
         path=rel,
         sha=sha,
         created=not existed,
-        deprecated=deprecated,
+        deprecated=[],
     )
 
 
@@ -284,6 +288,7 @@ def delete_document_by_path(
     sha = wiki_git.delete_path(rel, f"delete {rel}", author=author)
     wiki_notify.after_doc_delete(rel, sha, author)
     wiki_drafts.delete(rel)
+    wiki_git.delete_drafts_for_path(rel)
     log.info("doc deleted %s by %s sha=%s", rel, author or "?", sha[:8])
     return DeleteDocumentResponse(sha=sha)
 
@@ -473,6 +478,69 @@ def set_file_draft(
         system_prompt=row["system_prompt"],
         created_at=row["created_at"],
     )
+
+
+@router.get("/file/autosave", response_model=DraftResponse | None)
+def get_draft(
+    user: User = Depends(require_user),
+    path: str = "",
+) -> DraftResponse | None:
+    """Return the user's in-progress draft for a page, or null."""
+    if not path:
+        raise HTTPException(status_code=400, detail="path required")
+    try:
+        rel = filesystem.safe_rel_path(path)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    require_can("read", rel, user)
+    row = wiki_git.get_draft(rel, user.id)
+    if row is None:
+        return None
+    return DraftResponse(
+        path=row["path"],
+        base_sha=row["base_sha"],
+        content=row["content"],
+        updated_at=row["updated_at"],
+    )
+
+
+@router.put("/file/autosave", response_model=DraftResponse)
+def upsert_draft(
+    req: DraftRequest,
+    user: User = Depends(require_user),
+) -> DraftResponse:
+    """Auto-save the user's in-progress draft. Returns the saved draft."""
+    try:
+        rel = filesystem.safe_rel_path(req.path)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    if not filesystem.absolute(rel).is_file():
+        raise HTTPException(status_code=404, detail="not found")
+    require_can("write", rel, user)
+    wiki_git.save_draft(rel, user.id, req.content, req.base_sha)
+    row = wiki_git.get_draft(rel, user.id)
+    assert row is not None
+    return DraftResponse(
+        path=row["path"],
+        base_sha=row["base_sha"],
+        content=row["content"],
+        updated_at=row["updated_at"],
+    )
+
+
+@router.delete("/file/autosave", status_code=status.HTTP_204_NO_CONTENT)
+def delete_draft(
+    user: User = Depends(require_user),
+    path: str = "",
+) -> None:
+    """Clear the user's in-progress draft for a page."""
+    if not path:
+        raise HTTPException(status_code=400, detail="path required")
+    try:
+        rel = filesystem.safe_rel_path(path)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    wiki_git.delete_draft(rel, user.id)
 
 
 @router.get("/{doc_id}")

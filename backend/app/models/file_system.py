@@ -213,3 +213,23 @@ class SetDocumentDraftRequest(BaseModel):
 
     path: str = Field(min_length=1)
     template_id: str | None = None
+
+
+# --------------------------------------------------------------------------- #
+# Human drafts                                                                #
+# --------------------------------------------------------------------------- #
+
+
+class DraftRequest(BaseModel):
+    """Body for ``PUT /api/wiki/file/autosave`` (auto-save from the editor)."""
+
+    path: str = Field(min_length=1)
+    base_sha: str
+    content: str
+
+
+class DraftResponse(BaseModel):
+    path: str
+    base_sha: str
+    content: str
+    updated_at: str
