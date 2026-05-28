@@ -2505,29 +2505,26 @@ function HistoryPanel({
   return (
     <aside
       style={{
-        width: fullHeight ? "100%" : 320,
+        width: fullHeight ? "100%" : 400,
         height: fullHeight ? "100%" : undefined,
         flexShrink: 0,
-        border: fullHeight ? "none" : `1px solid ${color.border.default}`,
-        borderLeft: fullHeight
-          ? `1px solid ${color.border.default}`
-          : undefined,
-        borderRadius: fullHeight ? 0 : radius.md,
         background: color.bg.panel,
+        borderRadius: fullHeight ? 0 : 12,
         display: "flex",
         flexDirection: "column",
         minHeight: 0,
+        padding: 8,
+        gap: 8,
       }}
     >
       <div
         style={{
           display: "flex",
           alignItems: "center",
-          padding: "10px 12px",
-          borderBottom: `1px solid ${color.border.subtle}`,
-          fontSize: 13,
+          paddingLeft: 4,
+          fontSize: 14,
           fontWeight: 600,
-          color: color.text.secondary,
+          color: color.text.primary,
         }}
       >
         <span>History</span>
@@ -2543,12 +2540,21 @@ function HistoryPanel({
             fontSize: 16,
             lineHeight: 1,
             padding: 4,
+            borderRadius: 4,
           }}
         >
           ×
         </button>
       </div>
-      <div style={{ overflowY: "auto", flex: 1 }}>
+      <div
+        style={{
+          overflowY: "auto",
+          flex: 1,
+          display: "flex",
+          flexDirection: "column",
+          gap: 4,
+        }}
+      >
         {error && (
           <div
             style={{ padding: 12, fontSize: 12, color: color.state.danger.fg }}
@@ -2567,126 +2573,240 @@ function HistoryPanel({
           </div>
         )}
         {!error && commits && commits.length > 0 && (
-          <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
-            <CommitRow
+          <>
+            <ActivityRow
               active={latestActive}
+              isLatest
               onClick={onPickLatest}
               title="Latest (working tree)"
-              subtitle={headSha ? headSha.slice(0, 7) : ""}
-              meta=""
+              author=""
+              sha={headSha ?? ""}
+              ts=""
+              description={
+                headSha ? `Current HEAD · ${headSha.slice(0, 7)}` : "—"
+              }
             />
             {commits.map((c) => {
               const { url, title: srcTitle } = parseSourceMeta(c.body);
               return (
-                <CommitRow
+                <ActivityRow
                   key={c.sha}
                   active={!latestActive && viewingSha === c.sha}
+                  isLatest={false}
                   onClick={() => onPick(c.sha)}
                   title={c.message || "(no message)"}
-                  subtitle={`${c.sha.slice(0, 7)} · ${c.author}`}
-                  meta={formatTs(c.ts)}
+                  author={c.author}
+                  sha={c.sha}
+                  ts={formatTs(c.ts)}
+                  description={`${c.author || "?"} · ${c.sha.slice(0, 7)}`}
                   sourceUrl={url}
                   sourceTitle={srcTitle}
                 />
               );
             })}
-          </ul>
+          </>
         )}
       </div>
     </aside>
   );
 }
 
-function CommitRow({
+function ActivityRow({
   active,
+  isLatest,
   onClick,
   title,
-  subtitle,
-  meta,
+  author,
+  sha,
+  ts,
+  description,
   sourceUrl,
   sourceTitle,
 }: {
   active: boolean;
+  isLatest: boolean;
   onClick: () => void;
   title: string;
-  subtitle: string;
-  meta: string;
+  author: string;
+  sha: string;
+  ts: string;
+  description: string;
   sourceUrl?: string | null;
   sourceTitle?: string | null;
 }) {
+  const initial = (author || title || "?").charAt(0).toUpperCase();
   return (
-    <li style={{ borderBottom: `1px solid ${color.border.subtle}` }}>
-      <button
-        onClick={onClick}
+    <button
+      onClick={onClick}
+      style={{
+        appearance: "none",
+        textAlign: "left",
+        width: "100%",
+        padding: 4,
+        background: active ? color.bg.page : "transparent",
+        border: "none",
+        borderRadius: 8,
+        cursor: "pointer",
+        boxShadow: active ? "0 0 2px 1px rgba(0, 0, 0, 0.05)" : "none",
+        display: "flex",
+        flexDirection: "column",
+        gap: 4,
+      }}
+      onMouseEnter={(e) => {
+        if (!active) e.currentTarget.style.background = color.bg.hover;
+      }}
+      onMouseLeave={(e) => {
+        if (!active) e.currentTarget.style.background = "transparent";
+      }}
+    >
+      <div
         style={{
-          width: "100%",
-          textAlign: "left",
-          padding: "10px 12px 6px",
-          background: active ? color.accent.subtleBg : "transparent",
-          color: color.text.primary,
-          border: "none",
-          cursor: "pointer",
-          display: "block",
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          padding: 2,
         }}
       >
         <div
+          aria-hidden
           style={{
-            fontSize: 13,
-            fontWeight: active ? 600 : 500,
-            lineHeight: 1.35,
+            width: 20,
+            height: 20,
+            borderRadius: 9999,
+            background: color.accent.bg,
+            color: color.accent.fg,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontSize: 12,
+            fontWeight: 600,
+            flexShrink: 0,
+          }}
+        >
+          {initial}
+        </div>
+        <div
+          style={{
+            flex: 1,
+            minWidth: 0,
+            fontSize: 14,
+            fontWeight: 600,
+            lineHeight: "20px",
+            color: color.text.primary,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
           }}
         >
           {title}
         </div>
-        <div style={{ fontSize: 11, color: color.text.muted, marginTop: 4 }}>
-          {subtitle}
-          {meta ? ` · ${meta}` : ""}
-        </div>
-      </button>
-      {(sourceTitle || sourceUrl) && (
-        <div
-          style={{
-            padding: "0 12px 8px",
-            background: active ? color.accent.subtleBg : "transparent",
-          }}
-        >
-          {sourceUrl ? (
-            <a
-              href={sourceUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              style={{
-                display: "inline-block",
-                fontSize: 11,
-                color: color.accent.subtleFg,
-                textDecoration: "underline",
-                textUnderlineOffset: 2,
-                maxWidth: "100%",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
-              }}
-            >
-              {sourceTitle ?? sourceUrl}
-            </a>
-          ) : (
+        {isLatest ? (
+          <>
             <span
               style={{
-                display: "inline-block",
-                fontSize: 11,
-                color: color.text.muted,
-                maxWidth: "100%",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
+                fontSize: 12,
+                fontWeight: 500,
+                color: color.state.info.fg,
+                lineHeight: "16px",
               }}
             >
-              {sourceTitle}
+              Current Version
             </span>
-          )}
+            <span
+              aria-hidden
+              style={{
+                width: 8,
+                height: 8,
+                borderRadius: 9999,
+                background: color.state.info.fg,
+                flexShrink: 0,
+              }}
+            />
+          </>
+        ) : (
+          <span
+            style={{
+              fontSize: 12,
+              color: color.text.muted,
+              lineHeight: "16px",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {ts}
+          </span>
+        )}
+      </div>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 4,
+          padding: "0 2px 2px",
+        }}
+      >
+        <span
+          style={{
+            flex: 1,
+            minWidth: 0,
+            fontSize: 12,
+            lineHeight: "16px",
+            color: color.text.muted,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {description}
+        </span>
+        {sourceUrl ? (
+          <a
+            href={sourceUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              fontSize: 12,
+              color: color.text.muted,
+              textDecoration: "none",
+              padding: 2,
+              borderRadius: 4,
+              display: "inline-flex",
+              alignItems: "center",
+            }}
+            aria-label={sourceTitle ?? "Open source"}
+          >
+            ↗
+          </a>
+        ) : (
+          <span
+            aria-hidden
+            style={{
+              width: 16,
+              fontSize: 12,
+              color: color.text.faint,
+              textAlign: "center",
+              lineHeight: "16px",
+            }}
+          >
+            ↗
+          </span>
+        )}
+      </div>
+      {sourceTitle && !sourceUrl ? (
+        <div
+          style={{
+            fontSize: 11,
+            color: color.text.muted,
+            padding: "0 2px",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {sourceTitle}
         </div>
-      )}
-    </li>
+      ) : null}
+    </button>
   );
 }
 
