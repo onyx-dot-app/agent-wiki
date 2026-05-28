@@ -74,6 +74,17 @@
   padding: 12px;
 }
 
+/* Both modes (Diff bands, Doc markdown render) drop the top margin on
+   their first rendered child so toggling between them doesn't shift
+   the content down. The wiki .markdown h1/p/section all carry their
+   own top margin — that's correct in a full-page render, but jumps
+   the layout when swapped with a diff band that starts at margin-top:
+   4px. */
+.body > * > :first-child,
+.body > :first-child {
+  margin-top: 0;
+}
+
 .empty {
   padding: 24px;
   text-align: center;
