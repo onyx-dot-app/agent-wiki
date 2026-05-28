@@ -1438,6 +1438,9 @@ function FileViewer({ path }: { path: string }) {
   const [pendingResumeDraft, setPendingResumeDraft] = useState<DraftResponse | null>(null);
   // Debounce timer ref for auto-saving the draft to the server.
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Incremented on each startEdit() call and on cancel; lets async
+  // continuations inside startEdit bail out if editing was cancelled first.
+  const editSessionRef = useRef(0);
 
   const loadLatest = useCallback(() => {
     setLoading(true);
@@ -1698,11 +1701,13 @@ function FileViewer({ path }: { path: string }) {
     setFilenameDraft(currentBasenameNoExt);
     setError(null);
     setEditing(true);
+    const session = ++editSessionRef.current;
     // Check for an existing in-progress draft from a previous session.
     try {
       const saved = await apiFetch<DraftResponse | null>(
         `/wiki/file/autosave?path=${encodeURIComponent(path)}`,
       );
+      if (editSessionRef.current !== session) return;
       if (!saved) return;
       if (saved.base_sha === headSha) {
         // Draft is current — offer to restore.
@@ -1712,6 +1717,7 @@ function FileViewer({ path }: { path: string }) {
         const current = await apiFetch<FileResponse>(
           `/wiki/file?path=${encodeURIComponent(path)}`,
         );
+        if (editSessionRef.current !== session) return;
         setConflict({
           draftBody: saved.content,
           currentBody: current.body,
@@ -1832,6 +1838,7 @@ function FileViewer({ path }: { path: string }) {
   }
 
   function onCancel() {
+    editSessionRef.current++;
     setDraft(body);
     setFilenameDraft(currentBasenameNoExt);
     setEditing(false);
