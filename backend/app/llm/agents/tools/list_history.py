@@ -7,7 +7,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.llm.agents.tools import _doc_helpers as h
+from app.wiki import utils as wiki_utils
+from app.llm.agents.tools.errors import ToolError
 from app.wiki import git as wiki_git
 
 DEFAULT_LIMIT = 20
@@ -16,8 +17,8 @@ MAX_LIMIT = 100
 
 def handle(args: dict[str, Any]) -> Any:
     try:
-        rel = h.validate_doc_path(args.get("path"))
-    except h.ToolError as exc:
+        path = wiki_utils.validate_doc_path(args.get("path"))
+    except ToolError as exc:
         return {"error": str(exc)}
 
     raw_limit = args.get("limit")
@@ -30,15 +31,15 @@ def handle(args: dict[str, Any]) -> Any:
     from app.auth import PermissionDenied, require_can
 
     try:
-        require_can("read", rel)
+        require_can("read", path)
     except PermissionDenied as exc:
         return {"error": str(exc)}
 
-    rows = wiki_git.history(rel, limit=limit)
+    rows = wiki_git.history(path, limit=limit)
     if not rows:
-        return {"path": rel, "history": [], "note": "no history"}
+        return {"path": path, "history": [], "note": "no history"}
     return {
-        "path": rel,
+        "path": path,
         "history": [
             {"sha": r.sha, "author": r.author, "ts": r.ts, "message": r.message}
             for r in rows

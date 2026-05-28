@@ -71,6 +71,7 @@ def write_seed_pages(
     # want SEED_SOURCE_DIR.
     from app.wiki.git import commit_file
     from app.wiki.notify import after_doc_write
+    from app.models.wiki import ChangeKind
 
     processed = 0
     for rel, body in iter_seed_pages():
@@ -79,7 +80,7 @@ def write_seed_pages(
         if already_exists and not overwrite_existing:
             log.info("seed skip %s (already exists)", rel)
             continue
-        change_kind = "edit" if already_exists else "create"
+        change_kind = ChangeKind.EDIT if already_exists else ChangeKind.CREATE
         verb = "update" if already_exists else "add"
         sha = commit_file(rel, body, f"seed onboarding: {verb} {rel}", author=SEED_AUTHOR)
         after_doc_write(rel, sha, change_kind, actor=SEED_AUTHOR)

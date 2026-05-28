@@ -31,7 +31,8 @@ from app.ingest.source_tiers import is_filtered
 from app.ingest.models import WikiUpdateCandidate
 from app.llm.agents import ingest_batch_reconciler, ingest_selector, nl_updater
 from app.llm.agents.common import IRRELEVANT_SENTINEL
-from app.llm.agents.tools import _doc_helpers as h
+from app.wiki import utils as wiki_utils
+from app.llm.agents.tools.errors import ToolError
 from app.llm.errors import LLMError
 from app.llm.settings import get as get_llm_settings
 from app.metrics import (
@@ -50,6 +51,7 @@ from app.mcp_server import pubsub as mcp_pubsub
 from app.auth import UserMissingError, load_user, set_current_user
 from app.tasks.queues import documents_queue
 from app.wiki import agent_activity, git as wiki_git, notify as wiki_notify
+from app.models.wiki import AiRebaseMaxRetriesError, ChangeKind
 
 _INGEST_AUTHOR = "Onyx Ingest <ingest@agent-wiki>"
 
@@ -64,6 +66,7 @@ _DEBOUNCE_SECONDS = int(os.environ.get("MCP_NL_DEBOUNCE_SECONDS", "30"))
 # Hard cap on the commit-message length we record on disk; the
 # instruction may be long, but we only want a quick handle.
 _COMMIT_MESSAGE_MAX = 80
+
 
 
 @documents_queue.task()
@@ -137,20 +140,21 @@ def _run_inner(job_id: str, rel: str, instruction: str, base_sha: str | None) ->
         mcp_pubsub.publish_job_update(job_id, "failed")
         return
 
-    if not h.file_exists(rel):
+    if not wiki_utils.file_exists(rel):
         mcp_jobs.mark_failed(job_id, error=f"file not found: {rel}")
         mcp_pubsub.publish_job_update(job_id, "failed")
         return
 
     head_sha = wiki_git.head_sha_for_path(rel)
     if base_sha and base_sha != head_sha:
+        log.info(
+            "wiki_update: stale_base %s (base=%s head=%s)",
+            rel, base_sha[:8], (head_sha or "")[:8],
+        )
         mcp_jobs.mark_failed(
             job_id,
             error="stale_base",
-            result={
-                "base_sha": base_sha,
-                "current_sha": head_sha or "",
-            },
+            result={"base_sha": base_sha, "current_sha": head_sha or ""},
         )
         mcp_pubsub.publish_job_update(job_id, "failed")
         return
@@ -172,7 +176,7 @@ def _run_inner(job_id: str, rel: str, instruction: str, base_sha: str | None) ->
         mcp_pubsub.publish_job_update(job_id, "succeeded")
         return
 
-    old_body = h.read_existing(rel)
+    old_body = wiki_utils.read_existing(rel)
     try:
         new_body = nl_updater.process_instruction(
             wiki_path=rel,
@@ -185,7 +189,7 @@ def _run_inner(job_id: str, rel: str, instruction: str, base_sha: str | None) ->
         mcp_pubsub.publish_job_update(job_id, "failed")
         return
 
-    if new_body is None or new_body == old_body:
+    if new_body is None:
         mcp_jobs.mark_succeeded(
             job_id,
             result={"committed": False, "reason": "no_change", "sha": head_sha},
@@ -194,24 +198,44 @@ def _run_inner(job_id: str, rel: str, instruction: str, base_sha: str | None) ->
         return
 
     try:
-        sha = h.commit_and_fan_out(
+        result = wiki_utils.commit_with_ai_rebase(
             rel,
-            new_body,
             f"Doc update: {instruction[:_COMMIT_MESSAGE_MAX]}",
-            change_kind="edit",
+            base_body=old_body,
+            new_body=new_body,
         )
-    except h.ToolError as exc:
+    except LLMError as exc:
+        mcp_jobs.mark_failed(job_id, error=f"llm_error: {exc}")
+        mcp_pubsub.publish_job_update(job_id, "failed")
+        return
+    except AiRebaseMaxRetriesError as exc:
+        mcp_jobs.mark_failed(
+            job_id,
+            error="max_retries_exceeded",
+            result={"retries": exc.retries, "current_sha": exc.current_sha},
+        )
+        mcp_pubsub.publish_job_update(job_id, "failed")
+        return
+    except ToolError as exc:
         mcp_jobs.mark_failed(job_id, error=str(exc))
         mcp_pubsub.publish_job_update(job_id, "failed")
+        return
+
+    if result is None:
+        mcp_jobs.mark_succeeded(
+            job_id,
+            result={"committed": False, "reason": "no_change", "sha": head_sha},
+        )
+        mcp_pubsub.publish_job_update(job_id, "succeeded")
         return
 
     mcp_jobs.mark_succeeded(
         job_id,
         result={
             "committed": True,
-            "sha": sha,
-            "diff": h.unified_diff(old_body, new_body, rel),
-            "broken_links": h.broken_links(rel, new_body),
+            "sha": result.sha,
+            "diff": wiki_utils.unified_diff(result.old_body, result.new_body, rel),
+            "broken_links": wiki_utils.broken_links(rel, result.new_body),
         },
     )
     mcp_pubsub.publish_job_update(job_id, "succeeded")
@@ -385,7 +409,7 @@ def process_pushed_document(push: dict[str, Any]) -> None:
             if meta_lines:
                 message += "\n\n" + "\n".join(meta_lines)
             sha = wiki_git.commit_file(c.hit.path, result, message, author=_INGEST_AUTHOR)
-            wiki_notify.after_doc_write(c.hit.path, sha, "edit", _INGEST_AUTHOR)
+            wiki_notify.after_doc_write(c.hit.path, sha, ChangeKind.EDIT, _INGEST_AUTHOR)
             committed += 1
             ingest_outcomes_total.labels(outcome="committed", wiki_path=c.hit.path).inc()
             ingest_bm25_score_by_outcome.labels(outcome="committed").observe(c.hit.score)

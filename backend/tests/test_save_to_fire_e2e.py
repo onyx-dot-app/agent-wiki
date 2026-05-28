@@ -264,7 +264,7 @@ def test_save_with_no_triggers_writes_no_events(signed_in):
 
 
 def test_chat_agent_edit_fires_through_same_seam(signed_in, monkeypatch):
-    """Chat-agent edits go through ``_doc_helpers.commit_and_fan_out``,
+    """Chat-agent edits go through ``wiki_utils.commit_and_fan_out``,
     which now routes through ``wiki.notify.after_doc_write`` — so the
     same trigger fan-out should fire when the agent edits a doc."""
     _, uid = signed_in

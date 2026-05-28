@@ -9,38 +9,39 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from app.llm.agents.tools import _doc_helpers as h
+from app.wiki import utils as wiki_utils
+from app.llm.agents.tools.errors import ToolError
 from app.wiki import agent_activity, git as wiki_git
 
 
 def handle(args: dict[str, Any]) -> Any:
     try:
-        rel = h.validate_doc_path(args.get("path"))
-    except h.ToolError as exc:
+        path = wiki_utils.validate_doc_path(args.get("path"))
+    except ToolError as exc:
         return {"error": str(exc)}
 
-    if not h.file_exists(rel):
-        return {"error": f"file not found: {rel}"}
+    if not wiki_utils.file_exists(path):
+        return {"error": f"file not found: {path}"}
 
     from app.auth import PermissionDenied, require_can
 
     try:
-        require_can("read", rel)
+        require_can("read", path)
     except PermissionDenied as exc:
         return {"error": str(exc)}
 
     try:
-        body = wiki_git.read_file(rel)
+        body = wiki_git.read_file(path)
     except Exception as exc:
-        return {"error": f"could not read {rel}: {exc}"}
+        return {"error": f"could not read {path}: {exc}"}
 
-    h.mark_doc_read(rel)
+    wiki_utils.mark_doc_read(path)
 
     return {
-        "path": rel,
-        "title": _derive_title(rel, body),
+        "path": path,
+        "title": _derive_title(path, body),
         "body": body,
-        "agents": [r.model_dump() for r in agent_activity.list_for_doc(rel)],
+        "agents": [r.model_dump() for r in agent_activity.list_for_doc(path)],
     }
 
 

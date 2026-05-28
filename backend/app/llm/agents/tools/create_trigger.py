@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.auth import current_user
-from app.llm.agents.tools import _doc_helpers as h
+from app.wiki import utils as wiki_utils
 from app.triggers import repo as triggers_repo
 from app.triggers import storage as triggers_storage
 from app.wiki import acl as wiki_acl
@@ -42,7 +42,7 @@ def handle(args: dict[str, Any]) -> Any:
             nl_description=nl.strip(),
             message=message.strip(),
             destination=destination,
-            actor=h.author_string(),
+            actor=wiki_utils.author_string(),
         )
     except ValueError as exc:
         return {"error": str(exc)}

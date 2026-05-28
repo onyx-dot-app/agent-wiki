@@ -31,7 +31,7 @@ def _stub_side_effects(monkeypatch):
     ``test_save_to_fire_e2e.py`` and ``test_triggers_fanout.py``.
     """
     monkeypatch.setattr(
-        "app.llm.agents.tools._doc_helpers.wiki_notify.after_doc_write",
+        "app.wiki.utils.wiki_notify.after_doc_write",
         lambda *a, **kw: None,
     )
 

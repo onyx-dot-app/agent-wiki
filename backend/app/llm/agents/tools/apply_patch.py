@@ -9,61 +9,57 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.llm.agents.tools import _doc_helpers as h
-from app.wiki import git as wiki_git
+from app.wiki import utils as wiki_utils
+from app.llm.agents.tools.errors import ToolError
 from app.wiki import patch as wiki_patch
+from app.models.wiki import ChangeKind
 
 
 def handle(args: dict[str, Any]) -> Any:
     try:
-        rel = h.validate_doc_path(args.get("path"))
+        path = wiki_utils.validate_doc_path(args.get("path"))
         patch = args.get("patch")
         commit_message = args.get("commit_message")
         base_sha = args.get("base_sha")
-        activity_ttl = h.parse_expires_in_seconds(args.get("expires_in_seconds"))
+        activity_ttl = wiki_utils.parse_expires_in_seconds(args.get("expires_in_seconds"))
         if not isinstance(patch, str) or not patch.strip():
-            raise h.ToolError("patch is required (non-empty string)")
+            raise ToolError("patch is required (non-empty string)")
         if not isinstance(commit_message, str) or not commit_message.strip():
-            raise h.ToolError("commit_message is required")
+            raise ToolError("commit_message is required")
         if base_sha is not None and not isinstance(base_sha, str):
-            raise h.ToolError("base_sha must be a string when provided")
+            raise ToolError("base_sha must be a string when provided")
 
-        if not h.file_exists(rel):
-            raise h.ToolError(f"file not found: {rel}")
+        if not wiki_utils.file_exists(path):
+            raise ToolError(f"file not found: {path}")
 
-        head_sha = wiki_git.head_sha_for_path(rel)
-        if base_sha and base_sha != head_sha:
-            return {
-                "error": "stale_base",
-                "base_sha": base_sha,
-                "current_sha": head_sha,
-                "message": (
-                    "the file has changed since base_sha; re-read with "
-                    "read_doc and rebase your patch"
-                ),
-            }
+        stale = wiki_utils.assert_base_sha(path, base_sha)
+        if stale is not None:
+            return stale
 
-        old_body = h.read_existing(rel)
+        old_body = wiki_utils.read_existing(path)
         try:
             new_body = wiki_patch.apply(old_body, patch)
         except wiki_patch.PatchError as exc:
-            raise h.ToolError(str(exc))
+            raise ToolError(str(exc))
 
         if new_body == old_body:
-            raise h.ToolError(
+            raise ToolError(
                 "patch produced no change (every hunk was a no-op)"
             )
 
-        sha = h.commit_and_fan_out(
-            rel, new_body, commit_message.strip(),
-            change_kind="edit", activity_ttl=activity_ttl,
+        # Intentionally no commit_with_ai_rebase here: unified diff hunks are
+        # line-anchored, so a 3-way merge after a concurrent edit would produce
+        # wrong offsets. Callers should pass base_sha and retry on stale_base.
+        sha = wiki_utils.commit_and_fan_out(
+            path, new_body, commit_message.strip(),
+            change_kind=ChangeKind.EDIT, activity_ttl=activity_ttl,
         )
 
         return {
-            "path": rel,
+            "path": path,
             "sha": sha,
-            "diff": h.unified_diff(old_body, new_body, rel),
-            "broken_links": h.broken_links(rel, new_body),
+            "diff": wiki_utils.unified_diff(old_body, new_body, path),
+            "broken_links": wiki_utils.broken_links(path, new_body),
         }
-    except h.ToolError as exc:
+    except ToolError as exc:
         return {"error": str(exc)}

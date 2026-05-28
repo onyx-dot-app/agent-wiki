@@ -9,11 +9,15 @@ reindex + trigger fan-out, and assembling the result dict the model sees.
 from __future__ import annotations
 
 import difflib
+import logging
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
 from app.auth import current_user
+from app.llm.agents import merge_conflict_update
+from app.llm.agents.tools.errors import ToolError
+from app.models.wiki import AiRebaseMaxRetriesError, ChangeKind, CommitResult
 from app.wiki import (
     agent_activity,
     filesystem,
@@ -22,15 +26,7 @@ from app.wiki import (
     notify as wiki_notify,
 )
 
-
-class ToolError(Exception):
-    """Tool input was invalid or a precondition failed.
-
-    The handler catches this and returns ``{"error": str(exc)}`` to the
-    model instead of raising. Use for user-facing error messages — the
-    string is shown to the LLM verbatim.
-    """
-
+log = logging.getLogger(__name__)
 
 # --------------------------------------------------------------------------- #
 # Path validation                                                             #
@@ -58,13 +54,77 @@ def validate_doc_path(raw_path: Any) -> str:
 # --------------------------------------------------------------------------- #
 
 
-def assert_base_sha(rel: str, base_sha: str | None) -> dict[str, str] | None:
+# Maximum retry attempts inside ``commit_with_ai_rebase`` — each attempt may
+# invoke the LLM merge fallback, so keep this small to bound LLM spend.
+_AI_REBASE_MAX_RETRIES = 3
+
+
+def commit_with_ai_rebase(
+    path: str,
+    message: str,
+    *,
+    base_body: str,
+    new_body: str,
+    max_retries: int = _AI_REBASE_MAX_RETRIES,
+    activity_ttl: timedelta | None = None,
+) -> CommitResult | None:
+    """Commit with 3-way merge retry when HEAD moves between read and commit.
+
+    Caller provides ``base_body`` (the content the edit was derived from)
+    and ``new_body`` (the desired result). If HEAD has advanced since
+    ``base_body`` was read, a 3-way merge reconciles the two change sets
+    (git merge-file first, LLM fallback on conflict). The loop retries up
+    to ``max_retries`` times when HEAD keeps moving during the merge step.
+
+    Returns ``None`` when the merged result equals the current content.
+    Raises ``AiRebaseMaxRetriesError`` when the retry limit is hit.
+    Any ``LLMError`` raised by the merge fallback propagates immediately.
+    """
+    _base = base_body
+    _new = new_body
+    for attempt in range(max_retries + 1):
+        head_sha = wiki_git.head_sha_for_path(path)
+        current = read_existing_or_empty(path)
+        if current != _base:
+            mr = wiki_git.merge_content(_base, current, _new)
+            if mr.clean:
+                merged = mr.merged
+            else:
+                merged = merge_conflict_update.merge(
+                    wiki_path=path,
+                    base_body=_base,
+                    current_body=current,
+                    draft_body=_new,
+                )
+        else:
+            merged = _new
+        if merged == current:
+            return None
+        post_sha = wiki_git.head_sha_for_path(path)
+        if post_sha == head_sha:
+            sha = commit_and_fan_out(
+                path, merged, message,
+                change_kind=ChangeKind.EDIT, activity_ttl=activity_ttl,
+            )
+            return CommitResult(sha=sha, old_body=current, new_body=merged)
+        if attempt >= max_retries:
+            raise AiRebaseMaxRetriesError(attempt, post_sha or "")
+        log.info(
+            "commit_with_ai_rebase: HEAD moved for %s, retrying (%d/%d)",
+            path, attempt + 1, max_retries,
+        )
+        _base = current
+        _new = merged
+    raise AiRebaseMaxRetriesError(max_retries, "")  # unreachable
+
+
+def assert_base_sha(path: str, base_sha: str | None) -> dict[str, str] | None:
     """Optimistic-concurrency check shared by every write tool.
 
     Returns ``None`` when the check passes or is opted out of (no
     ``base_sha`` provided). Returns the ``stale_base`` error dict — the
     same shape every write tool returns — when ``base_sha`` no longer
-    matches HEAD for ``rel``.
+    matches HEAD for ``path``.
 
     Used by both the chat agent and the MCP write surface so external
     agents can rebase against drift instead of clobbering. The check
@@ -72,9 +132,8 @@ def assert_base_sha(rel: str, base_sha: str | None) -> dict[str, str] | None:
     """
     if base_sha is None:
         return None
-    from app.wiki import git as wiki_git
 
-    head_sha = wiki_git.head_sha_for_path(rel)
+    head_sha = wiki_git.head_sha_for_path(path)
     if base_sha == head_sha:
         return None
     return {
@@ -124,16 +183,16 @@ def author_string() -> str | None:
 
 
 def commit_and_fan_out(
-    rel: str,
+    path: str,
     body: str,
     message: str,
     *,
-    change_kind: str,
+    change_kind: ChangeKind,
     activity_ttl: timedelta | None = None,
 ) -> str:
-    """Commit ``body`` to ``rel``, queue reindex, fan out to triggers.
+    """Commit ``body`` to ``path``, queue reindex, fan out to triggers.
 
-    Returns the commit SHA. ``change_kind`` is ``"create"`` or ``"edit"``.
+    Returns the commit SHA.
 
     ``activity_ttl`` overrides the default 24h TTL on the resulting
     Active-agents row — write tools surface this through their
@@ -150,11 +209,11 @@ def commit_and_fan_out(
     # Permission gate: editing requires write on the existing page.
     # Creating a new page is always allowed for the calling user — they
     # become the owner via the seeding hook in ``after_doc_write``.
-    if change_kind == "edit":
+    if change_kind == ChangeKind.EDIT:
         from app.auth import PermissionDenied, require_can
 
         try:
-            require_can("write", rel)
+            require_can("write", path)
         except PermissionDenied as exc:
             raise ToolError(str(exc))
 
@@ -176,7 +235,7 @@ def commit_and_fan_out(
         upsert_kwargs: dict[str, Any] = dict(
             user_id=user.id,
             agent_name=agent_name,
-            doc_path=rel,
+            doc_path=path,
             activity="wrote",
             description=message,
             agent_session_id=launcher_sid,
@@ -194,18 +253,18 @@ def commit_and_fan_out(
         )
 
     author = author_string()
-    sha = wiki_git.commit_file(rel, body, message, author=author)
+    sha = wiki_git.commit_file(path, body, message, author=author)
     wiki_notify.after_doc_write(
-        rel,
+        path,
         sha,
         change_kind,
         author,
-        owner_user_id=user.id if (user is not None and change_kind == "create") else None,
+        owner_user_id=user.id if (user is not None and change_kind == ChangeKind.CREATE) else None,
     )
     return sha
 
 
-def mark_doc_read(rel: str) -> None:
+def mark_doc_read(path: str) -> None:
     """Register a ``read`` activity row for the current user.
 
     No-op outside a request context (no current user). DB-only — the
@@ -228,7 +287,7 @@ def mark_doc_read(rel: str) -> None:
     expires_at = agent_activity.upsert_activity(
         user_id=user.id,
         agent_name=agent_name,
-        doc_path=rel,
+        doc_path=path,
         activity="read",
         description=None,
         agent_session_id=launcher_sid,
@@ -281,13 +340,19 @@ def _current_user_or_none():
         return None
 
 
-def read_existing(rel: str) -> str:
-    """Read the current body of ``rel`` from the wiki working tree."""
-    return Path(filesystem.absolute(rel)).read_text()
+def read_existing(path: str) -> str:
+    """Read the current body of ``path`` from the wiki working tree."""
+    return Path(filesystem.absolute(path)).read_text()
 
 
-def file_exists(rel: str) -> bool:
-    return Path(filesystem.absolute(rel)).is_file()
+def read_existing_or_empty(path: str) -> str:
+    """Like ``read_existing`` but returns ``""`` when the file doesn't yet exist."""
+    p = Path(filesystem.absolute(path))
+    return p.read_text() if p.is_file() else ""
+
+
+def file_exists(path: str) -> bool:
+    return Path(filesystem.absolute(path)).is_file()
 
 
 # --------------------------------------------------------------------------- #
@@ -295,17 +360,17 @@ def file_exists(rel: str) -> bool:
 # --------------------------------------------------------------------------- #
 
 
-def unified_diff(old: str, new: str, rel: str) -> str:
+def unified_diff(old: str, new: str, path: str) -> str:
     diff_lines = difflib.unified_diff(
         old.splitlines(keepends=True),
         new.splitlines(keepends=True),
-        fromfile=rel,
-        tofile=rel,
+        fromfile=path,
+        tofile=path,
     )
     return "".join(diff_lines)
 
 
-def broken_links(rel: str, body: str) -> list[dict[str, str]]:
+def broken_links(path: str, body: str) -> list[dict[str, str]]:
     return [
-        {"target": b.target, "resolved": b.resolved} for b in links.find_broken_links(body, rel)
+        {"target": b.target, "resolved": b.resolved} for b in links.find_broken_links(body, path)
     ]

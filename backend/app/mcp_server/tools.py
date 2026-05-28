@@ -169,7 +169,8 @@ def _call_async_nl_update(
     import hashlib
 
     from app.auth import PermissionDenied, require_can
-    from app.llm.agents.tools import _doc_helpers as h
+    from app.llm.agents.tools.errors import ToolError
+    from app.wiki import utils as wiki_utils
     from app.mcp_server import jobs as mcp_jobs
     from app.mcp_server import pubsub as mcp_pubsub
     from app.tasks.wiki_update import agent_update_document_nl
@@ -182,8 +183,8 @@ def _call_async_nl_update(
     idempotency_key = arguments.get("idempotency_key")
 
     try:
-        rel = h.validate_doc_path(raw_path)
-    except h.ToolError as exc:
+        rel = wiki_utils.validate_doc_path(raw_path)
+    except ToolError as exc:
         return {"error": str(exc), "stale_paths": _compute_stale_paths(sess)}, True
     if not isinstance(instruction, str) or not instruction.strip():
         return (
@@ -204,7 +205,7 @@ def _call_async_nl_update(
             True,
         )
 
-    if not h.file_exists(rel):
+    if not wiki_utils.file_exists(rel):
         return (
             {"error": f"file not found: {rel}",
              "stale_paths": _compute_stale_paths(sess)},

@@ -7,28 +7,32 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.llm.agents.tools import _doc_helpers as h
+from app.wiki import utils as wiki_utils
+from app.wiki import git as wiki_git
+from app.llm.agents.tools.errors import ToolError
+from app.llm.errors import LLMError
+from app.models.wiki import AiRebaseMaxRetriesError, ChangeKind
 
 
 def handle(args: dict[str, Any]) -> Any:
     try:
-        rel = h.validate_doc_path(args.get("path"))
+        path = wiki_utils.validate_doc_path(args.get("path"))
         body = args.get("body")
         commit_message = args.get("commit_message")
         base_sha = args.get("base_sha")
-        activity_ttl = h.parse_expires_in_seconds(args.get("expires_in_seconds"))
+        activity_ttl = wiki_utils.parse_expires_in_seconds(args.get("expires_in_seconds"))
         if not isinstance(body, str):
-            raise h.ToolError("body is required (string)")
+            raise ToolError("body is required (string)")
         if not isinstance(commit_message, str) or not commit_message.strip():
-            raise h.ToolError("commit_message is required")
+            raise ToolError("commit_message is required")
         if base_sha is not None and not isinstance(base_sha, str):
-            raise h.ToolError("base_sha must be a string when provided")
+            raise ToolError("base_sha must be a string when provided")
 
-        existed = h.file_exists(rel)
+        existed = wiki_utils.file_exists(path)
         if existed:
-            # Full-body overwrite has no fuzzy `old_string` chain to fall
-            # back on if HEAD drifted, so every overwrite must opt in via
-            # ``base_sha`` (the sha the agent last read).
+            # Full-body overwrite requires base_sha so we can 3-way merge
+            # if a concurrent commit landed between when the agent read the
+            # doc and when it calls write_doc.
             if base_sha is None:
                 return {
                     "error": "base_sha_required_for_overwrite",
@@ -38,25 +42,45 @@ def handle(args: dict[str, Any]) -> Any:
                         "pass its sha as base_sha."
                     ),
                 }
-            stale = h.assert_base_sha(rel, base_sha)
+            stale = wiki_utils.assert_base_sha(path, base_sha)
             if stale is not None:
                 return stale
-            old = h.read_existing(rel)
+            base_body = wiki_git.read_file(path, ref=base_sha)
+            try:
+                result = wiki_utils.commit_with_ai_rebase(
+                    path, commit_message.strip(),
+                    base_body=base_body,
+                    new_body=body,
+                    activity_ttl=activity_ttl,
+                )  # always ChangeKind.EDIT — new files take the else branch below
+            except AiRebaseMaxRetriesError as exc:
+                return {
+                    "error": "stale_base",
+                    "message": "concurrent edits kept landing; max retries exceeded",
+                    "current_sha": exc.current_sha,
+                }
+            except LLMError as exc:
+                return {"error": f"llm_error: {exc}"}
+            if result is None:
+                return {"path": path, "sha": wiki_git.head_sha_for_path(path), "no_change": True}
+            return {
+                "path": path,
+                "sha": result.sha,
+                "created": False,
+                "diff": wiki_utils.unified_diff(result.old_body, result.new_body, path),
+                "broken_links": wiki_utils.broken_links(path, result.new_body),
+            }
         else:
-            old = ""
-
-        change_kind = "edit" if existed else "create"
-        sha = h.commit_and_fan_out(
-            rel, body, commit_message.strip(),
-            change_kind=change_kind, activity_ttl=activity_ttl,
-        )
-
-        return {
-            "path": rel,
-            "sha": sha,
-            "created": not existed,
-            "diff": h.unified_diff(old, body, rel),
-            "broken_links": h.broken_links(rel, body),
-        }
-    except h.ToolError as exc:
+            sha = wiki_utils.commit_and_fan_out(
+                path, body, commit_message.strip(),
+                change_kind=ChangeKind.CREATE, activity_ttl=activity_ttl,
+            )
+            return {
+                "path": path,
+                "sha": sha,
+                "created": True,
+                "diff": wiki_utils.unified_diff("", body, path),
+                "broken_links": wiki_utils.broken_links(path, body),
+            }
+    except ToolError as exc:
         return {"error": str(exc)}

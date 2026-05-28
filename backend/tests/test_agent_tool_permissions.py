@@ -46,7 +46,7 @@ def repo_with_private_page(tmp_repo):
 def _stub_side_effects(monkeypatch):
     """Skip reindex / trigger fan-out so these tests focus on ACL logic."""
     monkeypatch.setattr(
-        "app.llm.agents.tools._doc_helpers.wiki_notify.after_doc_write",
+        "app.wiki.utils.wiki_notify.after_doc_write",
         lambda *a, **kw: None,
     )
 
