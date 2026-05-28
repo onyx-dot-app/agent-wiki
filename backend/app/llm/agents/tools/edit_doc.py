@@ -31,33 +31,39 @@ def handle(args: dict[str, Any]) -> Any:
         if not h.file_exists(rel):
             raise h.ToolError(f"file not found: {rel}")
 
-        stale = h.assert_base_sha(rel, base_sha)
-        old_body = h.read_existing(rel)
-        if stale is not None:
-            # HEAD moved. Try to apply the patch to the current content —
-            # if old_string is still present the concurrent change didn't
-            # touch this spot, so the edit is safe. If it's gone, surface
-            # the stale error so the LLM can re-read and retry.
-            try:
-                new_body = wiki_edit.replace(old_body, old_string, new_string, replace_all)
-            except wiki_edit.ReplaceError:
-                return stale
-        else:
-            try:
-                new_body = wiki_edit.replace(old_body, old_string, new_string, replace_all)
-            except wiki_edit.ReplaceError as exc:
-                raise h.ToolError(str(exc))
+        # generate_body applies the patch to whatever content is current at
+        # retry time. If old_string is gone (concurrent change removed it)
+        # ReplaceError propagates and the LLM gets a clear error to retry.
+        def generate_body(current: str) -> str | None:
+            return wiki_edit.replace(current, old_string, new_string, replace_all)
 
-        sha = h.commit_and_fan_out(
-            rel, new_body, commit_message.strip(),
-            change_kind="edit", activity_ttl=activity_ttl,
-        )
+        try:
+            result = h.commit_with_retry(
+                rel, commit_message.strip(),
+                change_kind="edit",
+                generate_body=generate_body,
+                activity_ttl=activity_ttl,
+            )
+        except wiki_edit.ReplaceError as exc:
+            stale = h.assert_base_sha(rel, base_sha)
+            if stale is not None:
+                return stale
+            raise h.ToolError(str(exc))
+        except h.MaxRetriesError as exc:
+            return {
+                "error": "stale_base",
+                "message": "concurrent edits kept landing; max retries exceeded",
+                "current_sha": exc.current_sha,
+            }
+
+        if result is None:
+            raise h.ToolError("edit produced no change")
 
         return {
             "path": rel,
-            "sha": sha,
-            "diff": h.unified_diff(old_body, new_body, rel),
-            "broken_links": h.broken_links(rel, new_body),
+            "sha": result.sha,
+            "diff": h.unified_diff(result.old_body, result.new_body, rel),
+            "broken_links": h.broken_links(rel, result.new_body),
         }
     except h.ToolError as exc:
         return {"error": str(exc)}

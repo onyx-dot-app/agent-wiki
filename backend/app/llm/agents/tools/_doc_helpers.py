@@ -9,9 +9,13 @@ reindex + trigger fan-out, and assembling the result dict the model sees.
 from __future__ import annotations
 
 import difflib
+import logging
+from collections.abc import Callable
 from datetime import timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
+
+log = logging.getLogger(__name__)
 
 from app.auth import current_user
 from app.wiki import (
@@ -58,6 +62,74 @@ def validate_doc_path(raw_path: Any) -> str:
 # --------------------------------------------------------------------------- #
 
 
+class CommitResult(NamedTuple):
+    sha: str
+    old_body: str
+    new_body: str
+
+
+class MaxRetriesError(Exception):
+    """Raised by ``commit_with_retry`` when HEAD keeps moving."""
+
+    def __init__(self, retries: int, current_sha: str) -> None:
+        self.retries = retries
+        self.current_sha = current_sha
+        super().__init__(f"max retries ({retries}) exceeded, current_sha={current_sha}")
+
+
+# Maximum retry attempts inside ``commit_with_retry`` — each attempt is a
+# full ``generate_body`` call, so keep this small to bound LLM spend.
+_COMMIT_MAX_RETRIES = 3
+
+
+def commit_with_retry(
+    rel: str,
+    message: str,
+    *,
+    change_kind: str,
+    generate_body: Callable[[str], str | None],
+    max_retries: int = _COMMIT_MAX_RETRIES,
+    activity_ttl: timedelta | None = None,
+) -> CommitResult | None:
+    """Commit with automatic retry when HEAD moves during body generation.
+
+    The caller supplies ``generate_body(current_body) -> new_body | None``.
+    The infrastructure handles the rest:
+
+    1. Read the current content and HEAD SHA.
+    2. Call ``generate_body(current_body)`` to produce the new content.
+    3. Re-check HEAD. If it moved during generation, retry from step 1
+       (up to ``max_retries`` times) so the next attempt works from the
+       latest content.
+    4. Commit when HEAD is stable.
+
+    Returns ``None`` when ``generate_body`` returns ``None`` or unchanged
+    content (no-op). Raises ``MaxRetriesError`` when the retry limit is hit.
+    Any exception raised by ``generate_body`` propagates immediately without
+    consuming a retry.
+    """
+    for attempt in range(max_retries + 1):
+        head_sha = wiki_git.head_sha_for_path(rel)
+        old_body = read_existing(rel)
+        new_body = generate_body(old_body)
+        if new_body is None or new_body == old_body:
+            return None
+        post_sha = wiki_git.head_sha_for_path(rel)
+        if post_sha == head_sha:
+            sha = commit_and_fan_out(
+                rel, new_body, message,
+                change_kind=change_kind, activity_ttl=activity_ttl,
+            )
+            return CommitResult(sha=sha, old_body=old_body, new_body=new_body)
+        if attempt >= max_retries:
+            raise MaxRetriesError(attempt, post_sha or "")
+        log.info(
+            "commit_with_retry: HEAD moved for %s, retrying (%d/%d)",
+            rel, attempt + 1, max_retries,
+        )
+    raise MaxRetriesError(max_retries, "")  # unreachable
+
+
 def assert_base_sha(rel: str, base_sha: str | None) -> dict[str, str] | None:
     """Optimistic-concurrency check shared by every write tool.
 
@@ -85,35 +157,6 @@ def assert_base_sha(rel: str, base_sha: str | None) -> dict[str, str] | None:
             "read_doc, re-derive the edit, and retry"
         ),
     }
-
-
-def try_merge_stale(rel: str, base_sha: str, new_body: str) -> str | None:
-    """Attempt a 3-way merge when a full-body write conflicts with a concurrent commit.
-
-    Returns the merged body on success, or ``None`` if both git and LLM
-    merge fail (caller should surface the original ``stale_base`` error).
-    """
-    import logging as _logging
-    _log = _logging.getLogger(__name__)
-    try:
-        base_body = wiki_git.read_file(rel, ref=base_sha)
-        current_body = read_existing(rel)
-        mr = wiki_git.merge_content(base_body, current_body, new_body)
-        if mr.clean:
-            _log.info("try_merge_stale: auto-merged %s", rel)
-            return mr.merged
-        from app.llm.agents import merge_conflict_update
-        merged = merge_conflict_update.merge(
-            wiki_path=rel,
-            base_body=base_body,
-            current_body=current_body,
-            draft_body=new_body,
-        )
-        _log.info("try_merge_stale: llm-merged %s", rel)
-        return merged
-    except Exception:
-        _log.exception("try_merge_stale: failed for %s", rel)
-        return None
 
 
 # --------------------------------------------------------------------------- #

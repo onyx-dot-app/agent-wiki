@@ -26,12 +26,8 @@ def handle(args: dict[str, Any]) -> Any:
             raise h.ToolError("base_sha must be a string when provided")
         edits = cast(list[Any], edits_raw)
 
-        if not h.file_exists(rel):
-            raise h.ToolError(f"file not found: {rel}")
-
-        stale = h.assert_base_sha(rel, base_sha)
-        old_body = h.read_existing(rel)
-        body = old_body
+        # Validate edit shapes up front before touching disk.
+        parsed: list[tuple[str, str, bool]] = []
         for i, edit in enumerate(edits):
             if not isinstance(edit, dict):
                 raise h.ToolError(f"edit #{i + 1}: must be an object")
@@ -42,30 +38,50 @@ def handle(args: dict[str, Any]) -> Any:
                 raise h.ToolError(f"edit #{i + 1}: old_string is required and non-empty")
             if not isinstance(new_string, str):
                 raise h.ToolError(f"edit #{i + 1}: new_string is required (string)")
-            replace_all = bool(edit_dict.get("replace_all", False))
-            try:
-                body = wiki_edit.replace(body, old_string, new_string, replace_all)
-            except wiki_edit.ReplaceError as exc:
-                # If stale, the concurrent change may have removed old_string —
-                # surface the stale error so the LLM can re-read and retry.
-                if stale is not None:
-                    return stale
-                raise h.ToolError(f"edit #{i + 1}: {exc}")
+            parsed.append((old_string, new_string, bool(edit_dict.get("replace_all", False))))
 
-        if body == old_body:
+        if not h.file_exists(rel):
+            raise h.ToolError(f"file not found: {rel}")
+
+        # generate_body applies all patches atomically to whatever content
+        # is current at retry time. ReplaceError propagates immediately.
+        def generate_body(current: str) -> str | None:
+            body = current
+            for i, (old_string, new_string, replace_all) in enumerate(parsed):
+                try:
+                    body = wiki_edit.replace(body, old_string, new_string, replace_all)
+                except wiki_edit.ReplaceError as exc:
+                    raise wiki_edit.ReplaceError(f"edit #{i + 1}: {exc}") from exc
+            return body if body != current else None
+
+        try:
+            result = h.commit_with_retry(
+                rel, commit_message.strip(),
+                change_kind="edit",
+                generate_body=generate_body,
+                activity_ttl=activity_ttl,
+            )
+        except wiki_edit.ReplaceError as exc:
+            stale = h.assert_base_sha(rel, base_sha)
+            if stale is not None:
+                return stale
+            raise h.ToolError(str(exc))
+        except h.MaxRetriesError as exc:
+            return {
+                "error": "stale_base",
+                "message": "concurrent edits kept landing; max retries exceeded",
+                "current_sha": exc.current_sha,
+            }
+
+        if result is None:
             raise h.ToolError("edits produced no change")
-
-        sha = h.commit_and_fan_out(
-            rel, body, commit_message.strip(),
-            change_kind="edit", activity_ttl=activity_ttl,
-        )
 
         return {
             "path": rel,
-            "sha": sha,
-            "applied_count": len(edits),
-            "diff": h.unified_diff(old_body, body, rel),
-            "broken_links": h.broken_links(rel, body),
+            "sha": result.sha,
+            "applied_count": len(parsed),
+            "diff": h.unified_diff(result.old_body, result.new_body, rel),
+            "broken_links": h.broken_links(rel, result.new_body),
         }
     except h.ToolError as exc:
         return {"error": str(exc)}

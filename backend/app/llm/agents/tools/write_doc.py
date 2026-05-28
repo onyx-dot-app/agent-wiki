@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.llm.agents.tools import _doc_helpers as h
+from app.wiki import git as wiki_git
 
 
 def handle(args: dict[str, Any]) -> Any:
@@ -26,9 +27,9 @@ def handle(args: dict[str, Any]) -> Any:
 
         existed = h.file_exists(rel)
         if existed:
-            # Full-body overwrite has no fuzzy `old_string` chain to fall
-            # back on if HEAD drifted, so every overwrite must opt in via
-            # ``base_sha`` (the sha the agent last read).
+            # Full-body overwrite requires base_sha so we can 3-way merge
+            # if a concurrent commit landed between when the agent read the
+            # doc and when it calls write_doc.
             if base_sha is None:
                 return {
                     "error": "base_sha_required_for_overwrite",
@@ -38,28 +39,51 @@ def handle(args: dict[str, Any]) -> Any:
                         "pass its sha as base_sha."
                     ),
                 }
-            stale = h.assert_base_sha(rel, base_sha)
-            if stale is not None:
-                merged = h.try_merge_stale(rel, base_sha, body)
-                if merged is None:
-                    return stale
-                body = merged
-            old = h.read_existing(rel)
-        else:
-            old = ""
+            # generate_body merges the agent's rewrite with whatever is
+            # currently on HEAD. When HEAD == base_sha (no concurrent
+            # change) merge_content trivially returns ``body`` unchanged.
+            base_body = wiki_git.read_file(rel, ref=base_sha)
 
-        change_kind = "edit" if existed else "create"
-        sha = h.commit_and_fan_out(
-            rel, body, commit_message.strip(),
-            change_kind=change_kind, activity_ttl=activity_ttl,
-        )
+            def generate_body(current: str) -> str | None:
+                mr = wiki_git.merge_content(base_body, current, body)
+                if mr.clean:
+                    return mr.merged
+                from app.llm.agents import merge_conflict_update
+                return merge_conflict_update.merge(
+                    wiki_path=rel,
+                    base_body=base_body,
+                    current_body=current,
+                    draft_body=body,
+                )
+
+            change_kind = "edit"
+        else:
+            generate_body = lambda current: body
+            change_kind = "create"
+
+        try:
+            result = h.commit_with_retry(
+                rel, commit_message.strip(),
+                change_kind=change_kind,
+                generate_body=generate_body,
+                activity_ttl=activity_ttl,
+            )
+        except h.MaxRetriesError as exc:
+            return {
+                "error": "stale_base",
+                "message": "concurrent edits kept landing; max retries exceeded",
+                "current_sha": exc.current_sha,
+            }
+
+        if result is None:
+            return {"path": rel, "sha": wiki_git.head_sha_for_path(rel), "no_change": True}
 
         return {
             "path": rel,
-            "sha": sha,
+            "sha": result.sha,
             "created": not existed,
-            "diff": h.unified_diff(old, body, rel),
-            "broken_links": h.broken_links(rel, body),
+            "diff": h.unified_diff(result.old_body, result.new_body, rel),
+            "broken_links": h.broken_links(rel, result.new_body),
         }
     except h.ToolError as exc:
         return {"error": str(exc)}

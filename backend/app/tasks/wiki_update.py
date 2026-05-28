@@ -65,9 +65,6 @@ _DEBOUNCE_SECONDS = int(os.environ.get("MCP_NL_DEBOUNCE_SECONDS", "30"))
 # instruction may be long, but we only want a quick handle.
 _COMMIT_MESSAGE_MAX = 80
 
-# Maximum recursive retries when HEAD moves during the LLM call.
-# Each retry is a full LLM round-trip, so keep this small.
-_MAX_RETRIES = 3
 
 
 @documents_queue.task()
@@ -133,30 +130,18 @@ def agent_update_document_nl(job_id: str) -> None:
         mcp_pubsub.publish_job_update(job_id, "failed")
 
 
-def _run_inner(
-    job_id: str,
-    rel: str,
-    instruction: str,
-    base_sha: str | None,
-    _retries: int = 0,
-) -> None:
+def _run_inner(job_id: str, rel: str, instruction: str, base_sha: str | None) -> None:
     """Inside the worker's user context. Splits out so the outer
-    function can wrap exceptions uniformly.
+    function can wrap exceptions uniformly."""
+    if not rel:
+        mcp_jobs.mark_failed(job_id, error="invalid_path")
+        mcp_pubsub.publish_job_update(job_id, "failed")
+        return
 
-    Retries recursively (up to ``_MAX_RETRIES``) when HEAD moves during
-    the LLM call — each retry reads the latest content and re-applies the
-    instruction, so the result is always grounded in the current state.
-    """
-    if _retries == 0:
-        if not rel:
-            mcp_jobs.mark_failed(job_id, error="invalid_path")
-            mcp_pubsub.publish_job_update(job_id, "failed")
-            return
-
-        if not h.file_exists(rel):
-            mcp_jobs.mark_failed(job_id, error=f"file not found: {rel}")
-            mcp_pubsub.publish_job_update(job_id, "failed")
-            return
+    if not h.file_exists(rel):
+        mcp_jobs.mark_failed(job_id, error=f"file not found: {rel}")
+        mcp_pubsub.publish_job_update(job_id, "failed")
+        return
 
     head_sha = wiki_git.head_sha_for_path(rel)
     if base_sha and base_sha != head_sha:
@@ -182,20 +167,46 @@ def _run_inner(
         mcp_pubsub.publish_job_update(job_id, "succeeded")
         return
 
-    old_body = h.read_existing(rel)
+    # commit_with_retry owns the "read → generate → check HEAD → retry"
+    # loop. generate_body re-runs the LLM instruction on whatever content
+    # is current at each attempt, so the result is always grounded in the
+    # latest state of the document.
+    def generate_body(current_body: str) -> str | None:
+        try:
+            return nl_updater.process_instruction(
+                wiki_path=rel,
+                current_body=current_body,
+                payload={"instruction": instruction},
+                source="update_doc_nl",
+            )
+        except LLMError as exc:
+            raise _LLMErrorWrapper(exc) from exc
+
     try:
-        new_body = nl_updater.process_instruction(
-            wiki_path=rel,
-            current_body=old_body,
-            payload={"instruction": instruction},
-            source="update_doc_nl",
+        result = h.commit_with_retry(
+            rel,
+            f"Doc update: {instruction[:_COMMIT_MESSAGE_MAX]}",
+            change_kind="edit",
+            generate_body=generate_body,
         )
-    except LLMError as exc:
-        mcp_jobs.mark_failed(job_id, error=f"llm_error: {exc}")
+    except _LLMErrorWrapper as exc:
+        mcp_jobs.mark_failed(job_id, error=f"llm_error: {exc.inner}")
+        mcp_pubsub.publish_job_update(job_id, "failed")
+        return
+    except h.MaxRetriesError as exc:
+        mcp_jobs.mark_failed(
+            job_id,
+            error="max_retries_exceeded",
+            result={"retries": exc.retries, "current_sha": exc.current_sha},
+        )
+        mcp_pubsub.publish_job_update(job_id, "failed")
+        return
+    except h.ToolError as exc:
+        mcp_jobs.mark_failed(job_id, error=str(exc))
         mcp_pubsub.publish_job_update(job_id, "failed")
         return
 
-    if new_body is None or new_body == old_body:
+    if result is None:
         mcp_jobs.mark_succeeded(
             job_id,
             result={"committed": False, "reason": "no_change", "sha": head_sha},
@@ -203,50 +214,23 @@ def _run_inner(
         mcp_pubsub.publish_job_update(job_id, "succeeded")
         return
 
-    # Re-check HEAD: it may have moved during the LLM call. Re-run the
-    # whole instruction on the new HEAD rather than merging two intermediate
-    # results — the LLM sees the latest content and produces a clean edit.
-    post_llm_sha = wiki_git.head_sha_for_path(rel)
-    if post_llm_sha != head_sha:
-        if _retries >= _MAX_RETRIES:
-            log.warning(
-                "wiki_update: %s hit max retries (%d), giving up", rel, _MAX_RETRIES
-            )
-            mcp_jobs.mark_failed(
-                job_id,
-                error="max_retries_exceeded",
-                result={"retries": _retries, "current_sha": post_llm_sha or ""},
-            )
-            mcp_pubsub.publish_job_update(job_id, "failed")
-            return
-        log.info(
-            "wiki_update: HEAD moved during LLM call for %s, retrying (attempt %d/%d)",
-            rel, _retries + 1, _MAX_RETRIES,
-        )
-        return _run_inner(job_id, rel, instruction, post_llm_sha, _retries + 1)
-
-    try:
-        sha = h.commit_and_fan_out(
-            rel,
-            new_body,
-            f"Doc update: {instruction[:_COMMIT_MESSAGE_MAX]}",
-            change_kind="edit",
-        )
-    except h.ToolError as exc:
-        mcp_jobs.mark_failed(job_id, error=str(exc))
-        mcp_pubsub.publish_job_update(job_id, "failed")
-        return
-
     mcp_jobs.mark_succeeded(
         job_id,
         result={
             "committed": True,
-            "sha": sha,
-            "diff": h.unified_diff(old_body, new_body, rel),
-            "broken_links": h.broken_links(rel, new_body),
+            "sha": result.sha,
+            "diff": h.unified_diff(result.old_body, result.new_body, rel),
+            "broken_links": h.broken_links(rel, result.new_body),
         },
     )
     mcp_pubsub.publish_job_update(job_id, "succeeded")
+
+
+class _LLMErrorWrapper(Exception):
+    """Wraps LLMError so it can escape commit_with_retry without being swallowed."""
+
+    def __init__(self, inner: LLMError) -> None:
+        self.inner = inner
 
 
 def _current_user_id() -> str:
