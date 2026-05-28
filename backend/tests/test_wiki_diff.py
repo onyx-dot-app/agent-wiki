@@ -269,11 +269,17 @@ def test_parse_commit_diff_modify(doc_with_two_commits: tuple[str, str, str]) ->
     assert out.parent_sha is not None
     assert out.is_creation is False
     assert len(out.hunks) >= 1
-    word_lines = [line for hunk in out.hunks for line in hunk.lines if line.kind == "word"]
-    assert len(word_lines) == 1
-    assert word_lines[0].word_diff is not None
-    assert word_lines[0].word_diff.removed == "two"
-    assert word_lines[0].word_diff.added == "TWO"
+    # Word-diff promotion is intentionally disabled in parse_commit_diff
+    # for visual consistency — every change renders as a block
+    # remove + block add pair. Confirm both kinds appear and "word" doesn't.
+    kinds = {line.kind for hunk in out.hunks for line in hunk.lines}
+    assert "remove" in kinds
+    assert "add" in kinds
+    assert "word" not in kinds
+    remove_texts = [line.text for hunk in out.hunks for line in hunk.lines if line.kind == "remove"]
+    add_texts = [line.text for hunk in out.hunks for line in hunk.lines if line.kind == "add"]
+    assert "line two" in remove_texts
+    assert "line TWO" in add_texts
 
 
 def test_parse_commit_diff_creation(doc_with_two_commits: tuple[str, str, str]) -> None:
