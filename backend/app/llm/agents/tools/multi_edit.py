@@ -43,29 +43,31 @@ def handle(args: dict[str, Any]) -> Any:
         if not h.file_exists(rel):
             raise h.ToolError(f"file not found: {rel}")
 
-        # generate_body applies all patches atomically to whatever content
-        # is current at retry time. ReplaceError propagates immediately.
-        def generate_body(current: str) -> str | None:
-            body = current
+        base_body = h.read_existing(rel)
+        new_body = base_body
+        try:
             for i, (old_string, new_string, replace_all) in enumerate(parsed):
                 try:
-                    body = wiki_edit.replace(body, old_string, new_string, replace_all)
+                    new_body = wiki_edit.replace(new_body, old_string, new_string, replace_all)
                 except wiki_edit.ReplaceError as exc:
                     raise wiki_edit.ReplaceError(f"edit #{i + 1}: {exc}") from exc
-            return body if body != current else None
-
-        try:
-            result = h.commit_with_ai_rebase(
-                rel, commit_message.strip(),
-                change_kind="edit",
-                generate_body=generate_body,
-                activity_ttl=activity_ttl,
-            )
         except wiki_edit.ReplaceError as exc:
             stale = h.assert_base_sha(rel, base_sha)
             if stale is not None:
                 return stale
             raise h.ToolError(str(exc))
+
+        if new_body == base_body:
+            raise h.ToolError("edits produced no change")
+
+        try:
+            result = h.commit_with_ai_rebase(
+                rel, commit_message.strip(),
+                change_kind="edit",
+                base_body=base_body,
+                new_body=new_body,
+                activity_ttl=activity_ttl,
+            )
         except h.AiRebaseMaxRetriesError as exc:
             return {
                 "error": "stale_base",

@@ -39,33 +39,18 @@ def handle(args: dict[str, Any]) -> Any:
                         "pass its sha as base_sha."
                     ),
                 }
-            # generate_body merges the agent's rewrite with whatever is
-            # currently on HEAD. When HEAD == base_sha (no concurrent
-            # change) merge_content trivially returns ``body`` unchanged.
             base_body = wiki_git.read_file(rel, ref=base_sha)
-
-            def generate_body(current: str) -> str | None:
-                mr = wiki_git.merge_content(base_body, current, body)
-                if mr.clean:
-                    return mr.merged
-                from app.llm.agents import merge_conflict_update
-                return merge_conflict_update.merge(
-                    wiki_path=rel,
-                    base_body=base_body,
-                    current_body=current,
-                    draft_body=body,
-                )
-
             change_kind = "edit"
         else:
-            generate_body = lambda current: body
+            base_body = ""
             change_kind = "create"
 
         try:
             result = h.commit_with_ai_rebase(
                 rel, commit_message.strip(),
                 change_kind=change_kind,
-                generate_body=generate_body,
+                base_body=base_body,
+                new_body=body,
                 activity_ttl=activity_ttl,
             )
         except h.AiRebaseMaxRetriesError as exc:

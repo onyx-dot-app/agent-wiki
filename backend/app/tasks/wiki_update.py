@@ -167,30 +167,37 @@ def _run_inner(job_id: str, rel: str, instruction: str, base_sha: str | None) ->
         mcp_pubsub.publish_job_update(job_id, "succeeded")
         return
 
-    # commit_with_ai_rebase owns the "read → generate → check HEAD → retry"
-    # loop. generate_body re-runs the LLM instruction on whatever content
-    # is current at each attempt, so the result is always grounded in the
-    # latest state of the document.
-    def generate_body(current_body: str) -> str | None:
-        try:
-            return nl_updater.process_instruction(
-                wiki_path=rel,
-                current_body=current_body,
-                payload={"instruction": instruction},
-                source="update_doc_nl",
-            )
-        except LLMError as exc:
-            raise _LLMErrorWrapper(exc) from exc
+    old_body = h.read_existing(rel)
+    try:
+        new_body = nl_updater.process_instruction(
+            wiki_path=rel,
+            current_body=old_body,
+            payload={"instruction": instruction},
+            source="update_doc_nl",
+        )
+    except LLMError as exc:
+        mcp_jobs.mark_failed(job_id, error=f"llm_error: {exc}")
+        mcp_pubsub.publish_job_update(job_id, "failed")
+        return
+
+    if new_body is None:
+        mcp_jobs.mark_succeeded(
+            job_id,
+            result={"committed": False, "reason": "no_change", "sha": head_sha},
+        )
+        mcp_pubsub.publish_job_update(job_id, "succeeded")
+        return
 
     try:
         result = h.commit_with_ai_rebase(
             rel,
             f"Doc update: {instruction[:_COMMIT_MESSAGE_MAX]}",
             change_kind="edit",
-            generate_body=generate_body,
+            base_body=old_body,
+            new_body=new_body,
         )
-    except _LLMErrorWrapper as exc:
-        mcp_jobs.mark_failed(job_id, error=f"llm_error: {exc.inner}")
+    except LLMError as exc:
+        mcp_jobs.mark_failed(job_id, error=f"llm_error: {exc}")
         mcp_pubsub.publish_job_update(job_id, "failed")
         return
     except h.AiRebaseMaxRetriesError as exc:
@@ -224,13 +231,6 @@ def _run_inner(job_id: str, rel: str, instruction: str, base_sha: str | None) ->
         },
     )
     mcp_pubsub.publish_job_update(job_id, "succeeded")
-
-
-class _LLMErrorWrapper(Exception):
-    """Wraps LLMError so it can escape commit_with_ai_rebase without being swallowed."""
-
-    def __init__(self, inner: LLMError) -> None:
-        self.inner = inner
 
 
 def _current_user_id() -> str:

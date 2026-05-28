@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import difflib
 import logging
-from collections.abc import Callable
 from datetime import timedelta
 from pathlib import Path
 from typing import Any, NamedTuple
@@ -83,50 +82,63 @@ _AI_REBASE_MAX_RETRIES = 3
 
 
 def commit_with_ai_rebase(
-    rel: str,
+    wiki_path: str,
     message: str,
     *,
     change_kind: str,
-    generate_body: Callable[[str], str | None],
+    base_body: str,
+    new_body: str,
     max_retries: int = _AI_REBASE_MAX_RETRIES,
     activity_ttl: timedelta | None = None,
 ) -> CommitResult | None:
-    """Commit with automatic retry when HEAD moves during body generation.
+    """Commit with 3-way merge retry when HEAD moves between read and commit.
 
-    The caller supplies ``generate_body(current_body) -> new_body | None``.
-    The infrastructure handles the rest:
+    Caller provides ``base_body`` (the content the edit was derived from)
+    and ``new_body`` (the desired result). If HEAD has advanced since
+    ``base_body`` was read, a 3-way merge reconciles the two change sets
+    (git merge-file first, LLM fallback on conflict). The loop retries up
+    to ``max_retries`` times when HEAD keeps moving during the merge step.
 
-    1. Read the current content and HEAD SHA.
-    2. Call ``generate_body(current_body)`` to produce the new content.
-    3. Re-check HEAD. If it moved during generation, retry from step 1
-       (up to ``max_retries`` times) so the next attempt works from the
-       latest content.
-    4. Commit when HEAD is stable.
-
-    Returns ``None`` when ``generate_body`` returns ``None`` or unchanged
-    content (no-op). Raises ``AiRebaseMaxRetriesError`` when the retry limit is hit.
-    Any exception raised by ``generate_body`` propagates immediately without
-    consuming a retry.
+    Returns ``None`` when the merged result equals the current content.
+    Raises ``AiRebaseMaxRetriesError`` when the retry limit is hit.
+    Any ``LLMError`` raised by the merge fallback propagates immediately.
     """
+    _base = base_body
+    _new = new_body
     for attempt in range(max_retries + 1):
-        head_sha = wiki_git.head_sha_for_path(rel)
-        old_body = read_existing(rel)
-        new_body = generate_body(old_body)
-        if new_body is None or new_body == old_body:
+        head_sha = wiki_git.head_sha_for_path(wiki_path)
+        current = read_existing_or_empty(wiki_path)
+        if current != _base:
+            mr = wiki_git.merge_content(_base, current, _new)
+            if mr.clean:
+                merged = mr.merged
+            else:
+                from app.llm.agents import merge_conflict_update
+                merged = merge_conflict_update.merge(
+                    wiki_path=wiki_path,
+                    base_body=_base,
+                    current_body=current,
+                    draft_body=_new,
+                )
+        else:
+            merged = _new
+        if merged == current:
             return None
-        post_sha = wiki_git.head_sha_for_path(rel)
+        post_sha = wiki_git.head_sha_for_path(wiki_path)
         if post_sha == head_sha:
             sha = commit_and_fan_out(
-                rel, new_body, message,
+                wiki_path, merged, message,
                 change_kind=change_kind, activity_ttl=activity_ttl,
             )
-            return CommitResult(sha=sha, old_body=old_body, new_body=new_body)
+            return CommitResult(sha=sha, old_body=current, new_body=merged)
         if attempt >= max_retries:
             raise AiRebaseMaxRetriesError(attempt, post_sha or "")
         log.info(
             "commit_with_ai_rebase: HEAD moved for %s, retrying (%d/%d)",
-            rel, attempt + 1, max_retries,
+            wiki_path, attempt + 1, max_retries,
         )
+        _base = current
+        _new = merged
     raise AiRebaseMaxRetriesError(max_retries, "")  # unreachable
 
 
@@ -355,6 +367,12 @@ def _current_user_or_none():
 def read_existing(rel: str) -> str:
     """Read the current body of ``rel`` from the wiki working tree."""
     return Path(filesystem.absolute(rel)).read_text()
+
+
+def read_existing_or_empty(rel: str) -> str:
+    """Like ``read_existing`` but returns ``""`` when the file doesn't yet exist."""
+    p = Path(filesystem.absolute(rel))
+    return p.read_text() if p.is_file() else ""
 
 
 def file_exists(rel: str) -> bool:

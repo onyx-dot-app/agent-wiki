@@ -31,24 +31,23 @@ def handle(args: dict[str, Any]) -> Any:
         if not h.file_exists(rel):
             raise h.ToolError(f"file not found: {rel}")
 
-        # generate_body applies the patch to whatever content is current at
-        # retry time. If old_string is gone (concurrent change removed it)
-        # ReplaceError propagates and the LLM gets a clear error to retry.
-        def generate_body(current: str) -> str | None:
-            return wiki_edit.replace(current, old_string, new_string, replace_all)
-
+        base_body = h.read_existing(rel)
         try:
-            result = h.commit_with_ai_rebase(
-                rel, commit_message.strip(),
-                change_kind="edit",
-                generate_body=generate_body,
-                activity_ttl=activity_ttl,
-            )
+            new_body = wiki_edit.replace(base_body, old_string, new_string, replace_all)
         except wiki_edit.ReplaceError as exc:
             stale = h.assert_base_sha(rel, base_sha)
             if stale is not None:
                 return stale
             raise h.ToolError(str(exc))
+
+        try:
+            result = h.commit_with_ai_rebase(
+                rel, commit_message.strip(),
+                change_kind="edit",
+                base_body=base_body,
+                new_body=new_body,
+                activity_ttl=activity_ttl,
+            )
         except h.AiRebaseMaxRetriesError as exc:
             return {
                 "error": "stale_base",
