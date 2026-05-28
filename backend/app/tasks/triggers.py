@@ -69,6 +69,8 @@ def fan_out_trigger_eval(
     change_kind: ChangeKind,
     actor: str | None = None,
 ) -> None:
+    # Queue round-trip serializes enums to their string values; coerce back.
+    change_kind = ChangeKind(change_kind)
     triggers = find_matching_triggers(doc_path)
     if not triggers:
         log.debug("fan_out_trigger_eval %s: no matching triggers", doc_path)

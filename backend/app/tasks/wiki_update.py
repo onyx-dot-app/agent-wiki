@@ -151,7 +151,11 @@ def _run_inner(job_id: str, rel: str, instruction: str, base_sha: str | None) ->
             "wiki_update: stale_base %s (base=%s head=%s)",
             rel, base_sha[:8], (head_sha or "")[:8],
         )
-        mcp_jobs.mark_failed(job_id, error="stale_base")
+        mcp_jobs.mark_failed(
+            job_id,
+            error="stale_base",
+            result={"base_sha": base_sha, "current_sha": head_sha or ""},
+        )
         mcp_pubsub.publish_job_update(job_id, "failed")
         return
 
