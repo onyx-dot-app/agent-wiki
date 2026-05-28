@@ -1598,24 +1598,32 @@ function FileViewer({ path }: { path: string }) {
     return () => window.removeEventListener("focus", onFocus);
   }, [refreshAgents]);
 
-  const refreshHistory = useCallback(() => {
+  const refreshHistory = useCallback(async () => {
     setHistoryError(null);
-    fetchFileHistory(path)
-      .then((r) => {
-        setCommits(r.commits);
-        setHeadSha(r.head_sha);
-      })
-      .catch((e) =>
-        setHistoryError(
-          e instanceof Error ? e.message : "failed to load history",
-        ),
+    try {
+      const r = await fetchFileHistory(path);
+      setCommits(r.commits);
+      setHeadSha(r.head_sha);
+      return r;
+    } catch (e) {
+      setHistoryError(
+        e instanceof Error ? e.message : "failed to load history",
       );
+      return null;
+    }
   }, [path]);
 
-  function toggleHistory() {
+  async function toggleHistory() {
     const next = !historyOpen;
     setHistoryOpen(next);
-    if (next && commits === null) refreshHistory();
+    if (!next) return;
+    // Opening history: show the newest commit's diff immediately rather
+    // than leaving the rendered body up until the user clicks a row.
+    const loaded = commits ?? (await refreshHistory())?.commits ?? null;
+    const newest = loaded?.[0];
+    if (newest && viewingSha === null) {
+      void onPickCommit(newest.sha);
+    }
   }
 
   async function onPickCommit(sha: string) {
