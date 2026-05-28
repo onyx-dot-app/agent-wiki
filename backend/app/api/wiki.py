@@ -7,7 +7,6 @@ import re
 import subprocess
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from fastapi.responses import JSONResponse
 
 from app.auth import User, require_can
 from app.auth.deps import require_user
@@ -116,7 +115,7 @@ def get_document_by_path(
 def put_document_by_path(
     req: PutDocumentRequest,
     user: User = Depends(require_user),
-) -> PutDocumentResponse | JSONResponse:
+) -> PutDocumentResponse:
     try:
         rel = filesystem.safe_rel_path(req.path)
     except ValueError as e:
@@ -140,10 +139,7 @@ def put_document_by_path(
             # Conflict: the page changed since the client opened it.
             # Return 409 so the frontend can surface the conflict UI
             # rather than silently overwriting.
-            return JSONResponse(
-                status_code=409,
-                content={"error": "conflict detected"},
-            )
+            raise HTTPException(status_code=409, detail="conflict detected")
     sha = wiki_git.commit_file(rel, req.body, msg, author=author)
     wiki_notify.after_doc_write(
         rel,
