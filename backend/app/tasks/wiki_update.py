@@ -167,7 +167,7 @@ def _run_inner(job_id: str, rel: str, instruction: str, base_sha: str | None) ->
         mcp_pubsub.publish_job_update(job_id, "succeeded")
         return
 
-    # commit_with_retry owns the "read → generate → check HEAD → retry"
+    # commit_with_ai_rebase owns the "read → generate → check HEAD → retry"
     # loop. generate_body re-runs the LLM instruction on whatever content
     # is current at each attempt, so the result is always grounded in the
     # latest state of the document.
@@ -183,7 +183,7 @@ def _run_inner(job_id: str, rel: str, instruction: str, base_sha: str | None) ->
             raise _LLMErrorWrapper(exc) from exc
 
     try:
-        result = h.commit_with_retry(
+        result = h.commit_with_ai_rebase(
             rel,
             f"Doc update: {instruction[:_COMMIT_MESSAGE_MAX]}",
             change_kind="edit",
@@ -193,7 +193,7 @@ def _run_inner(job_id: str, rel: str, instruction: str, base_sha: str | None) ->
         mcp_jobs.mark_failed(job_id, error=f"llm_error: {exc.inner}")
         mcp_pubsub.publish_job_update(job_id, "failed")
         return
-    except h.MaxRetriesError as exc:
+    except h.AiRebaseMaxRetriesError as exc:
         mcp_jobs.mark_failed(
             job_id,
             error="max_retries_exceeded",
@@ -227,7 +227,7 @@ def _run_inner(job_id: str, rel: str, instruction: str, base_sha: str | None) ->
 
 
 class _LLMErrorWrapper(Exception):
-    """Wraps LLMError so it can escape commit_with_retry without being swallowed."""
+    """Wraps LLMError so it can escape commit_with_ai_rebase without being swallowed."""
 
     def __init__(self, inner: LLMError) -> None:
         self.inner = inner

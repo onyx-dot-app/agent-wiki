@@ -38,7 +38,7 @@ def handle(args: dict[str, Any]) -> Any:
             return wiki_edit.replace(current, old_string, new_string, replace_all)
 
         try:
-            result = h.commit_with_retry(
+            result = h.commit_with_ai_rebase(
                 rel, commit_message.strip(),
                 change_kind="edit",
                 generate_body=generate_body,
@@ -49,7 +49,7 @@ def handle(args: dict[str, Any]) -> Any:
             if stale is not None:
                 return stale
             raise h.ToolError(str(exc))
-        except h.MaxRetriesError as exc:
+        except h.AiRebaseMaxRetriesError as exc:
             return {
                 "error": "stale_base",
                 "message": "concurrent edits kept landing; max retries exceeded",

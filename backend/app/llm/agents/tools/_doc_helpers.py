@@ -68,8 +68,8 @@ class CommitResult(NamedTuple):
     new_body: str
 
 
-class MaxRetriesError(Exception):
-    """Raised by ``commit_with_retry`` when HEAD keeps moving."""
+class AiRebaseMaxRetriesError(Exception):
+    """Raised by ``commit_with_ai_rebase`` when HEAD keeps moving."""
 
     def __init__(self, retries: int, current_sha: str) -> None:
         self.retries = retries
@@ -77,18 +77,18 @@ class MaxRetriesError(Exception):
         super().__init__(f"max retries ({retries}) exceeded, current_sha={current_sha}")
 
 
-# Maximum retry attempts inside ``commit_with_retry`` — each attempt is a
+# Maximum retry attempts inside ``commit_with_ai_rebase`` — each attempt is a
 # full ``generate_body`` call, so keep this small to bound LLM spend.
-_COMMIT_MAX_RETRIES = 3
+_AI_REBASE_MAX_RETRIES = 3
 
 
-def commit_with_retry(
+def commit_with_ai_rebase(
     rel: str,
     message: str,
     *,
     change_kind: str,
     generate_body: Callable[[str], str | None],
-    max_retries: int = _COMMIT_MAX_RETRIES,
+    max_retries: int = _AI_REBASE_MAX_RETRIES,
     activity_ttl: timedelta | None = None,
 ) -> CommitResult | None:
     """Commit with automatic retry when HEAD moves during body generation.
@@ -104,7 +104,7 @@ def commit_with_retry(
     4. Commit when HEAD is stable.
 
     Returns ``None`` when ``generate_body`` returns ``None`` or unchanged
-    content (no-op). Raises ``MaxRetriesError`` when the retry limit is hit.
+    content (no-op). Raises ``AiRebaseMaxRetriesError`` when the retry limit is hit.
     Any exception raised by ``generate_body`` propagates immediately without
     consuming a retry.
     """
@@ -122,12 +122,12 @@ def commit_with_retry(
             )
             return CommitResult(sha=sha, old_body=old_body, new_body=new_body)
         if attempt >= max_retries:
-            raise MaxRetriesError(attempt, post_sha or "")
+            raise AiRebaseMaxRetriesError(attempt, post_sha or "")
         log.info(
-            "commit_with_retry: HEAD moved for %s, retrying (%d/%d)",
+            "commit_with_ai_rebase: HEAD moved for %s, retrying (%d/%d)",
             rel, attempt + 1, max_retries,
         )
-    raise MaxRetriesError(max_retries, "")  # unreachable
+    raise AiRebaseMaxRetriesError(max_retries, "")  # unreachable
 
 
 def assert_base_sha(rel: str, base_sha: str | None) -> dict[str, str] | None:

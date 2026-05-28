@@ -62,13 +62,13 @@ def handle(args: dict[str, Any]) -> Any:
             change_kind = "create"
 
         try:
-            result = h.commit_with_retry(
+            result = h.commit_with_ai_rebase(
                 rel, commit_message.strip(),
                 change_kind=change_kind,
                 generate_body=generate_body,
                 activity_ttl=activity_ttl,
             )
-        except h.MaxRetriesError as exc:
+        except h.AiRebaseMaxRetriesError as exc:
             return {
                 "error": "stale_base",
                 "message": "concurrent edits kept landing; max retries exceeded",
