@@ -1,7 +1,13 @@
 .hunk {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+}
+
+.context,
+.add,
+.remove,
+.wordLine {
+  padding: 0 12px;
 }
 
 .context {
@@ -10,26 +16,29 @@
 
 .add {
   background: var(--color-state-success-bg);
-  color: var(--color-state-success-fg);
-  padding: 4px 12px;
   border-radius: var(--radius-xs);
-  margin: 2px 0;
 }
 
 .remove {
   background: var(--color-state-danger-bg);
-  color: var(--color-state-danger-fg);
   text-decoration: line-through;
-  padding: 4px 12px;
   border-radius: var(--radius-xs);
-  margin: 2px 0;
 }
 
-.wordLine {
-  color: var(--color-text-primary);
-  padding: 2px 0;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
+/* Collapse the wiki markdown's outer paragraph/heading margins inside a
+   diff block so the colored band hugs the rendered content instead of
+   stacking the .markdown rules' top/bottom space. */
+.context > :first-child,
+.add > :first-child,
+.remove > :first-child,
+.wordLine > :first-child {
+  margin-top: 0;
+}
+.context > :last-child,
+.add > :last-child,
+.remove > :last-child,
+.wordLine > :last-child {
+  margin-bottom: 0;
 }
 
 .wordRemoved {

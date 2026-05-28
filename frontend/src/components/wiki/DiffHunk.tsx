@@ -54,15 +54,17 @@ export function DiffHunk({ hunk }: { hunk: DiffHunkData }) {
         if (entry.kind === "word") {
           const w = entry.line.word_diff;
           return (
-            <div key={idx} className={styles.wordLine}>
-              {w?.prefix ?? ""}
-              {w?.removed ? (
-                <del className={styles.wordRemoved}>{w.removed}</del>
-              ) : null}
-              {w?.added ? (
-                <ins className={styles.wordAdded}>{w.added}</ins>
-              ) : null}
-              {w?.suffix ?? ""}
+            <div key={idx} className={`${styles.wordLine} markdown`}>
+              <p>
+                {w?.prefix ?? ""}
+                {w?.removed ? (
+                  <del className={styles.wordRemoved}>{w.removed}</del>
+                ) : null}
+                {w?.added ? (
+                  <ins className={styles.wordAdded}>{w.added}</ins>
+                ) : null}
+                {w?.suffix ?? ""}
+              </p>
             </div>
           );
         }
@@ -73,7 +75,7 @@ export function DiffHunk({ hunk }: { hunk: DiffHunkData }) {
               ? styles.remove
               : styles.context;
         return (
-          <div key={idx} className={cls}>
+          <div key={idx} className={`${cls} markdown`}>
             <ReactMarkdown remarkPlugins={[remarkGfm]}>
               {entry.text}
             </ReactMarkdown>
