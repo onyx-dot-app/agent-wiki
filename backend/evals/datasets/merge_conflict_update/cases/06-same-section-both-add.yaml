@@ -1,0 +1,36 @@
+id: mc-06-same-section-both-add
+wiki_path: engineering/oncall.md
+base_body: |
+  # On-Call Rotation
+  ## This week
+  - alice
+  - bob
+current_body: |
+  # On-Call Rotation
+  ## This week
+  - alice
+  - bob
+  - carol
+draft_body: |
+  # On-Call Rotation
+  ## This week
+  - alice
+  - bob
+  - dave
+current_commit_message: "add carol to on-call rotation"
+facts_from_current_present:
+  - id: carol-added
+    text: carol is included on the this-week on-call list
+facts_from_draft_present:
+  - id: dave-added
+    text: dave is included on the this-week on-call list
+facts_must_not_appear:
+  - id: invented-eve
+    text: eve is listed on the on-call rotation
+expects_conflict_annotation: false
+notes: |
+  Both sides appended to the same list — these are not conflicting
+  values, they are independent additions. Output should contain alice,
+  bob, carol, AND dave. Conflict annotation is NOT expected (no
+  conflicting fact).
+tags: [merge, same-section, both-add, list-merge]

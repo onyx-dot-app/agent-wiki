@@ -93,6 +93,16 @@ jobs:
             --dataset "triggers" \
             --out runs/nightly_triggers.jsonl
 
+      - name: merge_conflict_update live run
+        run: |
+          uv run python -m evals.merge_conflict_update.run \
+            --cases evals/datasets/merge_conflict_update/cases \
+            --models "$EVAL_MODELS" \
+            --concurrency 16 \
+            --braintrust "nightly-merge-conflict-$(date -u +%Y%m%d)" \
+            --dataset "merge-conflict-update" \
+            --out runs/nightly_merge_conflict.jsonl
+
       - name: Upload run artifacts
         if: always()
         uses: actions/upload-artifact@v4
