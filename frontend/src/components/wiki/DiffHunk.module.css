@@ -1,15 +1,48 @@
 .hunk {
-  border: 1px solid var(--color-border-subtle);
-  border-radius: var(--radius-xs);
-  margin-bottom: 12px;
-  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
-.header {
-  background: var(--color-bg-sunken);
-  color: var(--color-text-muted);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 12px;
-  padding: 4px 8px;
-  border-bottom: 1px solid var(--color-border-subtle);
+.context {
+  color: var(--color-text-primary);
+}
+
+.add {
+  background: var(--color-state-success-bg);
+  color: var(--color-state-success-fg);
+  padding: 4px 12px;
+  border-radius: var(--radius-xs);
+  margin: 2px 0;
+}
+
+.remove {
+  background: var(--color-state-danger-bg);
+  color: var(--color-state-danger-fg);
+  text-decoration: line-through;
+  padding: 4px 12px;
+  border-radius: var(--radius-xs);
+  margin: 2px 0;
+}
+
+.wordLine {
+  color: var(--color-text-primary);
+  padding: 2px 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.wordRemoved {
+  background: var(--color-state-danger-bg);
+  color: var(--color-state-danger-fg);
+  text-decoration: line-through;
+  padding: 0 2px;
+  border-radius: var(--radius-xs);
+}
+
+.wordAdded {
+  background: var(--color-state-success-bg);
+  color: var(--color-state-success-fg);
+  padding: 0 2px;
+  border-radius: var(--radius-xs);
 }
