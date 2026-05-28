@@ -1,9 +1,10 @@
 """CRUD tests for ``app/triggers/repo.py``."""
+
 from __future__ import annotations
 
 import pytest
 
-from tests._seed import seed_user
+from tests._seed import insert_event, seed_user
 
 
 def _create(repo, *, owner_user_id, scope_path, nl_description, **kw):
@@ -151,3 +152,26 @@ def test_update_rejects_empty_message(tmp_repo):
     t = _create(repo, owner_user_id=uid, scope_path="a.md", nl_description="x")
     with pytest.raises(ValueError, match="message"):
         repo.update(t["id"], message="")
+
+
+def test_fire_counts_by_sha_tallies_only_matching_fires(tmp_repo):
+    from app.triggers import repo
+
+    sha_a = "a" * 40
+    sha_b = "b" * 40
+    sha_unfired = "c" * 40
+    insert_event("trigger.fire", "trg_1", {"sha": sha_a, "doc_path": "x.md"})
+    insert_event("trigger.fire", "trg_2", {"sha": sha_a, "doc_path": "y.md"})
+    insert_event("trigger.fire", "trg_3", {"sha": sha_b, "doc_path": "z.md"})
+    # Wrong kind — must not count even though the sha matches.
+    insert_event("trigger.eval", "trg_4", {"sha": sha_a})
+
+    counts = repo.fire_counts_by_sha({sha_a, sha_b, sha_unfired})
+
+    assert counts == {sha_a: 2, sha_b: 1}
+
+
+def test_fire_counts_by_sha_empty_input(tmp_repo):
+    from app.triggers import repo
+
+    assert repo.fire_counts_by_sha(set()) == {}

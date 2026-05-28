@@ -31,7 +31,7 @@ from typing import Any, cast
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from croniter import croniter
-from sqlalchemy import delete as sa_delete, select
+from sqlalchemy import delete as sa_delete, or_, select
 
 from app.db.models import Event, Trigger
 from app.db.session import session
@@ -524,17 +524,23 @@ def fire_counts_by_sha(shas: set[str]) -> dict[str, int]:
 
     Counts ``trigger.fire`` audit events whose payload records the source
     commit sha that fired them. ``payload_json`` is plain text (not JSONB),
-    so we load the trigger-fire rows and tally in Python rather than pushing
-    a JSON predicate into SQL.
+    so we coarse-filter on the sha substring in SQL, then confirm the exact
+    ``sha`` field in Python (the substring match is serialization-agnostic;
+    the Python check is what guarantees correctness).
     """
     if not shas:
         return {}
     counts: dict[str, int] = {}
     with session() as s:
-        rows = s.scalars(select(Event).where(Event.kind == "trigger.fire")).all()
-    for row in rows:
+        stmt = select(Event.payload_json).where(
+            Event.kind == "trigger.fire",
+            Event.payload_json.isnot(None),
+            or_(*(Event.payload_json.contains(sha) for sha in shas)),
+        )
+        payloads = s.execute(stmt).scalars().all()
+    for payload_json in payloads:
         try:
-            parsed: Any = json.loads(row.payload_json) if row.payload_json else {}
+            parsed: Any = json.loads(payload_json) if payload_json else {}
         except json.JSONDecodeError:
             continue
         if not isinstance(parsed, dict):
