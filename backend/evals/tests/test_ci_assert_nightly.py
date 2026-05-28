@@ -155,27 +155,81 @@ def test_missing_or_empty_file_fails(tmp_path: Path) -> None:
     assert any("missing or empty" in e or "zero rows" in e for e in check_run_file(empty))
 
 
+def test_surface_absent_from_file_fails(tmp_path: Path) -> None:
+    """A mapped surface with zero matching rows must fail, not silently skip.
+
+    nightly_wiki_updater maps to process_instruction + reconcile_document;
+    a file whose rows all carry some other surface tag means the run
+    produced no data for the mapped surfaces.
+    """
+    p = _write_run(
+        tmp_path,
+        "nightly_wiki_updater.jsonl",
+        [
+            _row(
+                surface="external_agent",  # wrong tag for this file
+                model="claude-sonnet-4-6",
+                case_id="x1",
+                scorer="facts_preserved_avg",
+                score=0.95,
+            )
+        ],
+    )
+    errs = check_run_file(p)
+    assert any("expected surface=process_instruction" in e for e in errs)
+    assert any("expected surface=reconcile_document" in e for e in errs)
+
+
 def test_main_fails_when_expected_file_missing(tmp_path: Path) -> None:
     """A nightly step that exits 0 but never writes its file must trip the gate."""
-    # Write the other expected files so only one is missing.
-    for name in (
+    # Write the other expected files with correct-surface rows so the ONLY
+    # error source is the missing triggers file.
+    _write_run(
+        tmp_path,
         "nightly_wiki_updater.jsonl",
+        [
+            _row(
+                surface="process_instruction",
+                model="claude-sonnet-4-6",
+                case_id="pi1",
+                scorer="trigger_class_match",
+                score=1.0,
+            ),
+            _row(
+                surface="reconcile_document",
+                model="claude-sonnet-4-6",
+                case_id="rd1",
+                scorer="trigger_class_match",
+                score=0.9,
+            ),
+        ],
+    )
+    _write_run(
+        tmp_path,
         "nightly_ingest_selector.jsonl",
+        [
+            _row(
+                surface="ingest_selector",
+                model="gpt-5-mini",
+                case_id="s1",
+                scorer="f1",
+                score=0.9,
+            )
+        ],
+    )
+    _write_run(
+        tmp_path,
         "nightly_external_agent.jsonl",
-    ):
-        _write_run(
-            tmp_path,
-            name,
-            [
-                _row(
-                    surface="external_agent",
-                    model="claude-sonnet-4-6",
-                    case_id="c1",
-                    scorer="facts_preserved_avg",
-                    score=0.95,
-                )
-            ],
-        )
+        [
+            _row(
+                surface="external_agent",
+                model="claude-sonnet-4-6",
+                case_id="c1",
+                scorer="facts_preserved_avg",
+                score=0.95,
+            )
+        ],
+    )
     # nightly_triggers.jsonl intentionally not written
     rc = main(["ci_assert_nightly", str(tmp_path)])
     assert rc == 1, "expected non-zero exit when an expected file is missing"

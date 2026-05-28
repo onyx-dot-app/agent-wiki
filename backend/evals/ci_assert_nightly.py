@@ -130,6 +130,14 @@ def check_run_file(path: Path) -> list[str]:
         thresholds = SURFACE_THRESHOLDS.get(surface)
         if not thresholds:
             continue
+        # A mapped surface with zero rows in a non-empty file means the
+        # run step silently produced no data for it (wrong surface tag, a
+        # harness bug mislabelling rows). Fail loudly rather than skip
+        # every scorer for the surface — this is the gap that would
+        # otherwise let a whole surface's regression pass unnoticed.
+        if not any(r.surface == surface for r in rows):
+            errs.append("%s expected surface=%s but no rows carry it" % (path.name, surface))
+            continue
         for scorer, floor in thresholds.items():
             means = _means_per_model(rows, scorer, surface)
             if not means:
