@@ -96,7 +96,13 @@ def commit_file(rel_path: str, body: str, message: str, author: str | None = Non
         log.debug("commit_file no-op (no diff) %s sha=%s", rel_path, sha[:8])
         return sha
     env_args = ["--author", author] if author else []
-    _run(["commit", "-m", message, *env_args])
+    try:
+        _run(["commit", "-m", message, *env_args])
+    except subprocess.CalledProcessError as e:
+        stderr = (e.stderr or "").lower()
+        if "cannot lock ref" in stderr or ("unable to create" in stderr and ".lock" in stderr):
+            raise GitCommitLockError(rel_path) from e
+        raise
     sha = _run(["rev-parse", "HEAD"]).stdout.strip()
     log.debug("commit_file %s sha=%s author=%s", rel_path, sha[:8], author or "default")
     return sha
@@ -407,6 +413,16 @@ class UnknownSha(Exception):
 
     Lets callers translate "this commit/ref doesn't exist" without leaking
     ``subprocess.CalledProcessError`` outside the git seam.
+    """
+
+
+class GitCommitLockError(Exception):
+    """Raised when ``git commit`` fails to acquire the ref lock.
+
+    This is a transient race: two workers passed the pre-commit SHA check at
+    the same time and both tried to commit. One wins; the other gets this
+    error. ``commit_with_ai_rebase`` catches it and re-enters the merge loop
+    so the losing worker re-reads HEAD and re-merges before retrying.
     """
 
 

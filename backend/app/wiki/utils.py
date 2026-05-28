@@ -18,6 +18,7 @@ from app.auth import current_user
 from app.llm.agents import merge_conflict_update
 from app.llm.agents.tools.errors import ToolError
 from app.models.wiki import AiRebaseMaxRetriesError, ChangeKind, CommitResult
+from app.wiki.git import GitCommitLockError
 from app.wiki import (
     agent_activity,
     filesystem,
@@ -76,6 +77,11 @@ def commit_with_ai_rebase(
     (git merge-file first, LLM fallback on conflict). The loop retries up
     to ``max_retries`` times when HEAD keeps moving during the merge step.
 
+    A ``GitCommitLockError`` (two workers pass the SHA check simultaneously
+    and one loses the ref-lock race) is also treated as a retry trigger: the
+    losing worker re-reads HEAD, re-merges, and retries rather than clobbering
+    the winner's commit.
+
     Returns ``None`` when the merged result equals the current content.
     Raises ``AiRebaseMaxRetriesError`` when the retry limit is hit.
     Any ``LLMError`` raised by the merge fallback propagates immediately.
@@ -102,17 +108,27 @@ def commit_with_ai_rebase(
             return None
         post_sha = wiki_git.head_sha_for_path(path)
         if post_sha == head_sha:
-            sha = commit_and_fan_out(
-                path, merged, message,
-                change_kind=ChangeKind.EDIT, activity_ttl=activity_ttl,
-            )
-            return CommitResult(sha=sha, old_body=current, new_body=merged)
+            try:
+                sha = commit_and_fan_out(
+                    path, merged, message,
+                    change_kind=ChangeKind.EDIT, activity_ttl=activity_ttl,
+                )
+                return CommitResult(sha=sha, old_body=current, new_body=merged)
+            except GitCommitLockError:
+                log.info(
+                    "commit_with_ai_rebase: git lock race for %s, retrying (%d/%d)",
+                    path, attempt + 1, max_retries,
+                )
+                # Fall through to retry: another worker committed between the
+                # post-SHA check and our commit. Re-enter the loop to re-read
+                # HEAD and re-merge so we don't clobber their write.
         if attempt >= max_retries:
             raise AiRebaseMaxRetriesError(attempt, post_sha or "")
-        log.info(
-            "commit_with_ai_rebase: HEAD moved for %s, retrying (%d/%d)",
-            path, attempt + 1, max_retries,
-        )
+        if post_sha != head_sha:
+            log.info(
+                "commit_with_ai_rebase: HEAD moved for %s, retrying (%d/%d)",
+                path, attempt + 1, max_retries,
+            )
         _base = current
         _new = merged
     raise AiRebaseMaxRetriesError(max_retries, "")  # unreachable

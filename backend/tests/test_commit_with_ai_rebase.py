@@ -11,7 +11,7 @@ import pytest
 
 from app.wiki.utils import commit_with_ai_rebase
 from app.models.wiki import AiRebaseMaxRetriesError, CommitResult
-from app.wiki.git import MergeResult
+from app.wiki.git import GitCommitLockError, MergeResult
 
 _PATH = "docs/page.md"
 _MSG = "update page"
@@ -226,6 +226,92 @@ def test_retries_when_head_moves_mid_merge(monkeypatch):
     assert isinstance(result, CommitResult)
     assert result.sha == _SHA_C
     assert wiki_git_mock.merge_content.call_count == 2
+
+
+# ---------------------------------------------------------------------------
+# Max retries exceeded
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Git lock race — retry and merge
+# ---------------------------------------------------------------------------
+
+
+def test_git_lock_race_retries_and_merges(monkeypatch):
+    """GitCommitLockError triggers a retry: re-reads HEAD and re-merges."""
+    concurrent_body = "concurrent edit\n"
+    merged_body = "merged after lock race\n"
+
+    # Attempt 0: SHA check passes (A == A), commit raises GitCommitLockError.
+    # Attempt 1: re-read gives SHA_B (winner committed), merge again, commit ok.
+    head_shas = [_SHA_A, _SHA_A, _SHA_B, _SHA_B]
+    # First read: same as base (no prior concurrent change), so merged = _NEW.
+    # Second read (retry): concurrent_body (the winner's commit).
+    current_bodies = [_BASE, concurrent_body]
+    merge_results = [MergeResult(merged=merged_body, clean=True)]
+
+    merge_iter = iter(merge_results)
+    body_iter = iter(current_bodies)
+    head_iter = iter(head_shas)
+
+    wiki_git_mock = MagicMock()
+    wiki_git_mock.head_sha_for_path.side_effect = lambda _p: next(head_iter)
+    wiki_git_mock.merge_content.side_effect = lambda *_: next(merge_iter)
+    monkeypatch.setattr("app.wiki.utils.wiki_git", wiki_git_mock)
+    monkeypatch.setattr(
+        "app.wiki.utils.read_existing_or_empty",
+        lambda _p: next(body_iter),
+    )
+
+    call_count = 0
+
+    def _fan_out_with_lock(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            raise GitCommitLockError(_PATH)
+        return _SHA_C
+
+    monkeypatch.setattr("app.wiki.utils.commit_and_fan_out", _fan_out_with_lock)
+
+    result = commit_with_ai_rebase(
+        _PATH, _MSG, base_body=_BASE, new_body=_NEW, max_retries=1
+    )
+
+    assert isinstance(result, CommitResult)
+    assert result.sha == _SHA_C
+    assert result.new_body == merged_body
+    assert result.old_body == concurrent_body
+    # merge_content called once (on retry when current != _base)
+    wiki_git_mock.merge_content.assert_called_once_with(_BASE, concurrent_body, _NEW)
+    assert call_count == 2
+
+
+def test_git_lock_race_raises_when_max_retries_exceeded(monkeypatch):
+    """GitCommitLockError on every attempt eventually raises AiRebaseMaxRetriesError."""
+    head_shas = [_SHA_A, _SHA_A, _SHA_A, _SHA_A]
+    body_iter = iter([_BASE] * 10)
+    head_iter = iter(head_shas)
+
+    wiki_git_mock = MagicMock()
+    wiki_git_mock.head_sha_for_path.side_effect = lambda _p: next(head_iter)
+    monkeypatch.setattr("app.wiki.utils.wiki_git", wiki_git_mock)
+    monkeypatch.setattr(
+        "app.wiki.utils.read_existing_or_empty",
+        lambda _p: next(body_iter),
+    )
+    monkeypatch.setattr(
+        "app.wiki.utils.commit_and_fan_out",
+        MagicMock(side_effect=GitCommitLockError(_PATH)),
+    )
+
+    with pytest.raises(AiRebaseMaxRetriesError) as exc_info:
+        commit_with_ai_rebase(
+            _PATH, _MSG, base_body=_BASE, new_body=_NEW, max_retries=1
+        )
+
+    assert exc_info.value.retries == 1
 
 
 # ---------------------------------------------------------------------------
