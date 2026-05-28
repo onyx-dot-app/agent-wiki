@@ -1,7 +1,11 @@
 const BASE = process.env.NEXT_PUBLIC_API_BASE ?? "/api";
 
 export class ApiError extends Error {
-  constructor(public status: number, message: string) {
+  constructor(
+    public status: number,
+    message: string,
+    public data?: unknown,
+  ) {
     super(message);
   }
 }
@@ -22,13 +26,15 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
   });
   if (!res.ok) {
     let message = `${res.status} ${res.statusText}`;
+    let data: unknown;
     try {
-      const body = (await res.json()) as { error?: string };
+      data = await res.json();
+      const body = data as { error?: string };
       if (body?.error) message = body.error;
     } catch {
       // ignore
     }
-    throw new ApiError(res.status, message);
+    throw new ApiError(res.status, message, data);
   }
   if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;

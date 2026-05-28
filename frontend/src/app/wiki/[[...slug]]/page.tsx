@@ -1436,6 +1436,7 @@ function FileViewer({ path }: { path: string }) {
   const [conflict, setConflict] = useState<ConflictState | null>(null);
   // Resume banner: set when entering edit mode and a matching draft exists.
   const [pendingResumeDraft, setPendingResumeDraft] = useState<DraftResponse | null>(null);
+  const [resuming, setResuming] = useState(false);
   // Debounce timer ref for auto-saving the draft to the server.
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Incremented on each startEdit() call and on cancel; lets async
@@ -1709,22 +1710,9 @@ function FileViewer({ path }: { path: string }) {
       );
       if (editSessionRef.current !== session) return;
       if (!saved) return;
-      if (saved.base_sha === headSha) {
-        // Draft is current — offer to restore.
-        setPendingResumeDraft(saved);
-      } else {
-        // Draft is stale — fetch current HEAD and enter conflict flow.
-        const current = await apiFetch<FileResponse>(
-          `/wiki/file?path=${encodeURIComponent(path)}`,
-        );
-        if (editSessionRef.current !== session) return;
-        setConflict({
-          draftBody: saved.content,
-          currentBody: current.body,
-          currentSha: current.head_sha ?? headSha ?? "",
-          baseSha: saved.base_sha,
-        });
-      }
+      // Show the Resume banner regardless of whether the draft is stale.
+      // Rebase (if needed) runs when the user clicks Resume.
+      setPendingResumeDraft(saved);
     } catch {
       // Draft fetch failure is non-fatal — user just starts fresh.
     }
@@ -1845,6 +1833,7 @@ function FileViewer({ path }: { path: string }) {
     setError(null);
     setConflict(null);
     setPendingResumeDraft(null);
+    setResuming(false);
     if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
     // Server-side draft is intentionally kept on cancel so the user can
     // resume from the same point next time they enter edit mode.
@@ -2092,12 +2081,44 @@ function FileViewer({ path }: { path: string }) {
           <div style={{ flex: 1 }} />
           <Button
             size="sm"
+            disabled={resuming}
             onClick={() => {
-              setDraft(pendingResumeDraft.content);
-              setPendingResumeDraft(null);
+              if (pendingResumeDraft.base_sha === headSha) {
+                // Fresh draft — restore directly.
+                setDraft(pendingResumeDraft.content);
+                setPendingResumeDraft(null);
+                return;
+              }
+              // Stale draft — attempt 3-way rebase first.
+              setResuming(true);
+              void apiFetch<DraftResponse>("/wiki/file/autosave/rebase", {
+                method: "POST",
+                body: JSON.stringify({ path }),
+              })
+                .then((rebased) => {
+                  setDraft(rebased.content);
+                  setPendingResumeDraft(null);
+                })
+                .catch((e: unknown) => {
+                  if (e instanceof ApiError && e.status === 409) {
+                    const detail = e.data as {
+                      current_body: string;
+                      draft_body: string;
+                      current_sha: string;
+                    };
+                    setConflict({
+                      draftBody: detail.draft_body,
+                      currentBody: detail.current_body,
+                      currentSha: detail.current_sha,
+                      baseSha: pendingResumeDraft.base_sha,
+                    });
+                    setPendingResumeDraft(null);
+                  }
+                })
+                .finally(() => setResuming(false));
             }}
           >
-            Resume
+            {resuming ? "Rebasing…" : "Resume"}
           </Button>
           <Button
             size="sm"

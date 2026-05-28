@@ -265,3 +265,98 @@ def test_put_file_deletes_draft_on_successful_save(client, user, seeded_page):
 
     get_resp = client.get("/api/wiki/file/autosave?path=notes.md")
     assert get_resp.json() is None
+
+
+# --------------------------------------------------------------------------- #
+# POST /api/wiki/file/autosave/rebase                                         #
+# --------------------------------------------------------------------------- #
+
+
+def test_rebase_returns_404_when_no_draft(client, user, seeded_page):
+    login_fastapi(client, user)
+    resp = client.post(
+        "/api/wiki/file/autosave/rebase",
+        json={"path": "notes.md"},
+    )
+    assert resp.status_code == 404
+
+
+def test_rebase_returns_404_when_draft_is_current(client, user, seeded_page):
+    """No divergence — rebase_draft returns None → 404."""
+    login_fastapi(client, user)
+    client.put(
+        "/api/wiki/file/autosave",
+        json={"path": "notes.md", "base_sha": seeded_page, "content": "draft\n"},
+    )
+    # Draft base_sha == HEAD — nothing to rebase.
+    resp = client.post(
+        "/api/wiki/file/autosave/rebase",
+        json={"path": "notes.md"},
+    )
+    assert resp.status_code == 404
+
+
+def test_rebase_clean_merge_returns_200_and_updates_draft(client, user, seeded_page):
+    """Changes on different lines → clean 3-way merge, draft rebased onto HEAD."""
+    login_fastapi(client, user)
+
+    # Save a draft that adds a line at the bottom.
+    client.put(
+        "/api/wiki/file/autosave",
+        json={
+            "path": "notes.md",
+            "base_sha": seeded_page,
+            "content": "# Notes\n\nOriginal.\n\nMy addition.\n",
+        },
+    )
+
+    # Advance HEAD with a non-overlapping change at the top.
+    new_sha = wiki_git.commit_file(
+        "notes.md", "# Notes — Updated\n\nOriginal.\n", "concurrent edit", author=None
+    )
+
+    resp = client.post(
+        "/api/wiki/file/autosave/rebase",
+        json={"path": "notes.md"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["base_sha"] == new_sha
+    # Merged result should contain both edits.
+    assert "Updated" in body["content"]
+    assert "My addition" in body["content"]
+
+    # Draft on server is now rebased onto the new HEAD.
+    draft = wiki_git.get_draft("notes.md", user)
+    assert draft is not None
+    assert draft["base_sha"] == new_sha
+
+
+def test_rebase_conflict_returns_409_with_conflict_details(client, user, seeded_page):
+    """Overlapping edits → conflict markers, 409 with current/draft bodies."""
+    login_fastapi(client, user)
+
+    # Draft changes the same line as the concurrent commit.
+    client.put(
+        "/api/wiki/file/autosave",
+        json={
+            "path": "notes.md",
+            "base_sha": seeded_page,
+            "content": "# Notes\n\nDraft version.\n",
+        },
+    )
+    wiki_git.commit_file(
+        "notes.md", "# Notes\n\nConcurrent version.\n", "concurrent", author=None
+    )
+
+    resp = client.post(
+        "/api/wiki/file/autosave/rebase",
+        json={"path": "notes.md"},
+    )
+    assert resp.status_code == 409
+    body = resp.json()
+    assert "current_body" in body
+    assert "draft_body" in body
+    assert "current_sha" in body
+    assert "Draft version" in body["draft_body"]
+    assert "Concurrent version" in body["current_body"]
