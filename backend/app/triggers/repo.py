@@ -20,6 +20,7 @@ them as flat dict keys for callers. Legacy rows where ``destination`` is
 ``None`` (predating the destinations catalog) are read as ``"event_log"``
 so callers don't need to special-case the migration boundary.
 """
+
 from __future__ import annotations
 
 import json
@@ -32,7 +33,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from croniter import croniter
 from sqlalchemy import delete as sa_delete, select
 
-from app.db.models import Trigger
+from app.db.models import Event, Trigger
 from app.db.session import session
 from app.triggers import destinations as destinations_repo
 from app.triggers import storage
@@ -54,14 +55,11 @@ def _validate_destination(destination: object) -> str:
     if destination is None:
         return destinations_repo.EVENT_LOG_ID
     if not isinstance(destination, str) or not destination.strip():
-        raise ValueError(
-            f"destination must be a destination id string; got {destination!r}"
-        )
+        raise ValueError(f"destination must be a destination id string; got {destination!r}")
     slug = destination.strip()
     if not destinations_repo.exists(slug):
         raise ValueError(
-            f"destination {slug!r} not found — call get_trigger_destinations "
-            "to list available ids"
+            f"destination {slug!r} not found — call get_trigger_destinations to list available ids"
         )
     return slug
 
@@ -170,13 +168,10 @@ def create(
         raise ValueError(f"unsupported kind: {kind!r}")
     if not nl_description.strip():
         raise ValueError(
-            "nl_description (the firing condition) is required and must be a "
-            "non-empty string"
+            "nl_description (the firing condition) is required and must be a non-empty string"
         )
     if not message.strip():
-        raise ValueError(
-            "message (the fire message) is required and must be a non-empty string"
-        )
+        raise ValueError("message (the fire message) is required and must be a non-empty string")
     destination_id = _validate_destination(destination)
     cron_value, tz_value, start_at_value = _validate_schedule_fields(
         kind=kind,
@@ -212,9 +207,7 @@ def create(
                 scope_path=scope_path,
                 kind=kind,
                 nl_description=nl_description,
-                action_json=_action_payload(
-                    message=message.strip(), destination=destination_id
-                ),
+                action_json=_action_payload(message=message.strip(), destination=destination_id),
                 enabled=enabled,
                 file_path=file_path,
                 created_at=created_at,
@@ -297,13 +290,10 @@ def update(
     # and a fire message.
     if not (isinstance(new.get("nl_description"), str) and new["nl_description"].strip()):
         raise ValueError(
-            "nl_description (the firing condition) is required and must be a "
-            "non-empty string"
+            "nl_description (the firing condition) is required and must be a non-empty string"
         )
     if not (isinstance(new.get("message"), str) and new["message"].strip()):
-        raise ValueError(
-            "message (the fire message) is required and must be a non-empty string"
-        )
+        raise ValueError("message (the fire message) is required and must be a non-empty string")
 
     cron_value, tz_value, start_at_value = _validate_schedule_fields(
         kind=new.get("kind", "delta"),
@@ -327,9 +317,7 @@ def update(
     ):
         return existing
 
-    new_file_path = storage.compute_path(
-        scope_path=new["scope_path"], trigger_id=trigger_id
-    )
+    new_file_path = storage.compute_path(scope_path=new["scope_path"], trigger_id=trigger_id)
     old_file_path = existing.get("file_path")
     if old_file_path and new_file_path != old_file_path:
         storage.move_trigger(
@@ -399,9 +387,7 @@ def purge_invalid_triggers(*, actor: str | None = None) -> int:
         try:
             data = storage.read_trigger(file_path)
         except Exception:
-            log.warning(
-                "purge_invalid_triggers: skip unreadable %s", file_path, exc_info=True
-            )
+            log.warning("purge_invalid_triggers: skip unreadable %s", file_path, exc_info=True)
             continue
         if _is_nonempty_string(data.get("nl_description")) and _is_nonempty_string(
             data.get("message")
@@ -468,22 +454,23 @@ def rebuild_from_filesystem() -> int:
                     disabled = dict(data)
                     disabled["enabled"] = False
                     try:
-                        storage.write_trigger(
-                            disabled, file_path=file_path, actor=None
-                        )
+                        storage.write_trigger(disabled, file_path=file_path, actor=None)
                         log.warning(
                             "rebuild_from_filesystem: disabled %s (owner_user_id=%s not in users)",
-                            file_path, owner_id,
+                            file_path,
+                            owner_id,
                         )
                     except Exception:
                         log.exception(
                             "rebuild_from_filesystem: failed to disable %s (owner_user_id=%s)",
-                            file_path, owner_id,
+                            file_path,
+                            owner_id,
                         )
                 else:
                     log.warning(
                         "rebuild_from_filesystem: skip %s (owner_user_id=%s not in users; already disabled)",
-                        file_path, owner_id,
+                        file_path,
+                        owner_id,
                     )
                 skipped += 1
                 continue
@@ -504,7 +491,8 @@ def rebuild_from_filesystem() -> int:
             except ValueError:
                 log.warning(
                     "rebuild_from_filesystem: skip %s (invalid schedule fields)",
-                    file_path, exc_info=True,
+                    file_path,
+                    exc_info=True,
                 )
                 skipped += 1
                 continue
@@ -529,3 +517,30 @@ def rebuild_from_filesystem() -> int:
             loaded += 1
     log.info("rebuild_from_filesystem loaded=%d skipped=%d", loaded, skipped)
     return loaded
+
+
+def fire_counts_by_sha(shas: set[str]) -> dict[str, int]:
+    """``{sha: number_of_trigger_fires}`` for the given commit shas.
+
+    Counts ``trigger.fire`` audit events whose payload records the source
+    commit sha that fired them. ``payload_json`` is plain text (not JSONB),
+    so we load the trigger-fire rows and tally in Python rather than pushing
+    a JSON predicate into SQL.
+    """
+    if not shas:
+        return {}
+    counts: dict[str, int] = {}
+    with session() as s:
+        rows = s.scalars(select(Event).where(Event.kind == "trigger.fire")).all()
+    for row in rows:
+        try:
+            parsed: Any = json.loads(row.payload_json) if row.payload_json else {}
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(parsed, dict):
+            continue
+        payload = cast("dict[str, Any]", parsed)
+        sha = payload.get("sha")
+        if isinstance(sha, str) and sha in shas:
+            counts[sha] = counts.get(sha, 0) + 1
+    return counts

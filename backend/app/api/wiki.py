@@ -382,6 +382,7 @@ def file_history(
             for token in m.group(1).split():
                 deprecated.add(token)
     head_sha = rows[0].sha if rows else None
+    fires = triggers_repo.fire_counts_by_sha({r.sha for r in rows})
     visible = [
         CommitView(
             sha=r.sha,
@@ -391,6 +392,7 @@ def file_history(
             body=r.body,
             added=r.added,
             removed=r.removed,
+            triggered=fires.get(r.sha, 0),
         )
         for r in rows
         if r.sha not in deprecated

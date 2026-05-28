@@ -228,6 +228,13 @@ function CommitRow({
           sourceUrl={url}
           sourceTitle={srcTitle}
         />
+        {commit.triggered > 0 ? (
+          <ActionLine
+            label={`⚡ Triggered ${commit.triggered} automation${
+              commit.triggered === 1 ? "" : "s"
+            }`}
+          />
+        ) : null}
       </Row>
     </SelectCard>
   );

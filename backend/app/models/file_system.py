@@ -138,6 +138,7 @@ class CommitView(BaseModel):
     body: str = ""
     added: int = 0
     removed: int = 0
+    triggered: int = 0  # number of automations this commit fired
 
 
 class FileHistoryResponse(BaseModel):

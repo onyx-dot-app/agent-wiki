@@ -50,6 +50,7 @@ export interface CommitInfo {
   body?: string;
   added: number;
   removed: number;
+  triggered: number;
 }
 
 export type CommitAgent = "claude-code" | "codex" | "onyx" | null;
