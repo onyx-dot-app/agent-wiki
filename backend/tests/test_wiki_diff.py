@@ -173,6 +173,29 @@ def test_promote_word_diff_remove_not_adjacent_to_add_no_promote() -> None:
     assert kinds == ["remove", "context", "add"]
 
 
+def test_promote_word_diff_two_independent_edit_blocks_both_promote() -> None:
+    hunk = _make_hunk(
+        DiffLine(kind="context", text="ctx1", word_diff=None, old_lineno=1, new_lineno=1),
+        DiffLine(
+            kind="remove", text="hello old world", word_diff=None, old_lineno=2, new_lineno=None
+        ),
+        DiffLine(kind="add", text="hello new world", word_diff=None, old_lineno=None, new_lineno=2),
+        DiffLine(kind="context", text="ctx2", word_diff=None, old_lineno=3, new_lineno=3),
+        DiffLine(kind="remove", text="foo bar", word_diff=None, old_lineno=4, new_lineno=None),
+        DiffLine(kind="add", text="foo qux", word_diff=None, old_lineno=None, new_lineno=4),
+        DiffLine(kind="context", text="ctx3", word_diff=None, old_lineno=5, new_lineno=5),
+    )
+    out = _promote_word_diff(hunk)
+    kinds = [line.kind for line in out.lines]
+    assert kinds == ["context", "word", "context", "word", "context"]
+    assert out.lines[1].word_diff is not None
+    assert out.lines[1].word_diff.removed == "old"
+    assert out.lines[1].word_diff.added == "new"
+    assert out.lines[3].word_diff is not None
+    assert out.lines[3].word_diff.removed == "bar"
+    assert out.lines[3].word_diff.added == "qux"
+
+
 @pytest.fixture
 def doc_with_two_commits(tmp_repo: None) -> tuple[str, str, str]:
     """Two commits on the same path. Returns (path, first_sha, second_sha)."""

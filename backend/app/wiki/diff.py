@@ -174,31 +174,47 @@ def _word_diff(removed: str, added: str) -> WordDiff:
 
 
 def _promote_word_diff(hunk: DiffHunk) -> DiffHunk:
-    """Collapse a hunk with exactly one ``remove`` directly followed by
-    exactly one ``add`` (and no other adds/removes) into a single
-    ``kind="word"`` line. Returns the hunk unchanged otherwise.
+    """Collapse every adjacent 1×remove + 1×add edit block into a single
+    ``kind="word"`` line. Blocks with multiple removes or adds stay as-is.
+
+    Walks the hunk so multiple independent single-line replacements in
+    the same hunk each get the inline strikethrough treatment, rather
+    than only the case where the hunk consists solely of one pair.
     """
-    removes = [i for i, line in enumerate(hunk.lines) if line.kind == "remove"]
-    adds = [i for i, line in enumerate(hunk.lines) if line.kind == "add"]
-    if len(removes) != 1 or len(adds) != 1:
-        return hunk
-    remove_idx = removes[0]
-    add_idx = adds[0]
-    if add_idx != remove_idx + 1:
-        return hunk
+    new_lines: list[DiffLine] = []
+    i = 0
+    while i < len(hunk.lines):
+        line = hunk.lines[i]
+        if line.kind != "remove":
+            new_lines.append(line)
+            i += 1
+            continue
 
-    removed_text = hunk.lines[remove_idx].text or ""
-    added_text = hunk.lines[add_idx].text or ""
-    word = _word_diff(removed_text, added_text)
+        rem_start = i
+        while i < len(hunk.lines) and hunk.lines[i].kind == "remove":
+            i += 1
+        rem_end = i
+        add_start = i
+        while i < len(hunk.lines) and hunk.lines[i].kind == "add":
+            i += 1
+        add_end = i
 
-    merged = DiffLine(
-        kind="word",
-        text=None,
-        word_diff=word,
-        old_lineno=hunk.lines[remove_idx].old_lineno,
-        new_lineno=hunk.lines[add_idx].new_lineno,
-    )
-    new_lines = hunk.lines[:remove_idx] + [merged] + hunk.lines[add_idx + 1 :]
+        if rem_end - rem_start == 1 and add_end - add_start == 1:
+            rem = hunk.lines[rem_start]
+            add = hunk.lines[add_start]
+            word = _word_diff(rem.text or "", add.text or "")
+            new_lines.append(
+                DiffLine(
+                    kind="word",
+                    text=None,
+                    word_diff=word,
+                    old_lineno=rem.old_lineno,
+                    new_lineno=add.new_lineno,
+                ),
+            )
+        else:
+            new_lines.extend(hunk.lines[rem_start:add_end])
+
     return hunk.model_copy(update={"lines": new_lines})
 
 

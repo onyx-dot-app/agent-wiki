@@ -1,6 +1,13 @@
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+
 import type { DiffLine } from "@/lib/wiki";
 
 import styles from "./DiffLineRow.module.css";
+
+const MD_COMPONENTS = {
+  p: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
+};
 
 export function DiffLineRow({ line }: { line: DiffLine }) {
   if (line.kind === "word") {
@@ -11,12 +18,26 @@ export function DiffLineRow({ line }: { line: DiffLine }) {
         <span className={styles.gutterLineno}>{line.old_lineno ?? ""}</span>
         <span className={styles.gutterLineno}>{line.new_lineno ?? ""}</span>
         <span className={styles.content}>
-          {w?.prefix}
+          {w?.prefix ? (
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm]}
+              components={MD_COMPONENTS}
+            >
+              {w.prefix}
+            </ReactMarkdown>
+          ) : null}
           {w?.removed ? (
             <del className={styles.wordRemoved}>{w.removed}</del>
           ) : null}
           {w?.added ? <ins className={styles.wordAdded}>{w.added}</ins> : null}
-          {w?.suffix}
+          {w?.suffix ? (
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm]}
+              components={MD_COMPONENTS}
+            >
+              {w.suffix}
+            </ReactMarkdown>
+          ) : null}
         </span>
       </div>
     );
@@ -29,13 +50,20 @@ export function DiffLineRow({ line }: { line: DiffLine }) {
       : line.kind === "remove"
         ? styles.remove
         : styles.context;
+  const text = line.text ?? "";
 
   return (
     <div className={`${styles.row} ${rowClass}`}>
       <span className={styles.gutterSign}>{sign}</span>
       <span className={styles.gutterLineno}>{line.old_lineno ?? ""}</span>
       <span className={styles.gutterLineno}>{line.new_lineno ?? ""}</span>
-      <span className={styles.content}>{line.text ?? ""}</span>
+      <span className={styles.content}>
+        {text ? (
+          <ReactMarkdown remarkPlugins={[remarkGfm]} components={MD_COMPONENTS}>
+            {text}
+          </ReactMarkdown>
+        ) : null}
+      </span>
     </div>
   );
 }
