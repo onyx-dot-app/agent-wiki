@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from evals.ci_assert_nightly import check_run_file
+from evals.ci_assert_nightly import check_run_file, main
 from evals.schema import CaseResult, ScorerOutcome
 
 
@@ -153,6 +153,32 @@ def test_missing_or_empty_file_fails(tmp_path: Path) -> None:
     empty = tmp_path / "nightly_triggers.jsonl"
     empty.write_text("")
     assert any("missing or empty" in e or "zero rows" in e for e in check_run_file(empty))
+
+
+def test_main_fails_when_expected_file_missing(tmp_path: Path) -> None:
+    """A nightly step that exits 0 but never writes its file must trip the gate."""
+    # Write the other expected files so only one is missing.
+    for name in (
+        "nightly_wiki_updater.jsonl",
+        "nightly_ingest_selector.jsonl",
+        "nightly_external_agent.jsonl",
+    ):
+        _write_run(
+            tmp_path,
+            name,
+            [
+                _row(
+                    surface="external_agent",
+                    model="claude-sonnet-4-6",
+                    case_id="c1",
+                    scorer="facts_preserved_avg",
+                    score=0.95,
+                )
+            ],
+        )
+    # nightly_triggers.jsonl intentionally not written
+    rc = main(["ci_assert_nightly", str(tmp_path)])
+    assert rc == 1, "expected non-zero exit when an expected file is missing"
 
 
 @pytest.mark.parametrize(

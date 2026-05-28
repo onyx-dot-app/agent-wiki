@@ -7,20 +7,15 @@ someone notices the BT chart trending down.
 
 Thresholds are deliberate floor values, not aspirations. They sit one
 broad bucket below the current baseline so they catch real regressions
-without flapping on per-run noise. Update them upward when a sustained
-improvement lands; keep the comment trail (`baseline @ <date>`) so the
-reasoning isn't lost.
+without flapping on per-run noise.
 
-Run-file → surface inference is filename-based to match the writer
-convention in `evals-nightly.yml`:
+Run-file → surface inference is filename-based. Every entry in
+``_FILENAME_TO_SURFACES`` is required: the asserter fails if an
+expected file is missing from the runs directory, which catches the
+case where a nightly eval step exits 0 but never writes its output
+(wrong ``--out`` path, partial failure, etc.).
 
-    runs/nightly_wiki_updater.jsonl   → wiki_updater (both sub-surfaces)
-    runs/nightly_ingest_selector.jsonl → ingest_selector
-    runs/nightly_external_agent.jsonl  → external_agent
-    runs/nightly_triggers.jsonl        → triggers
-
-Per-model aggregation: arithmetic mean of per-case means. Skipped if the
-file is empty or the surface has no threshold entry.
+Per-model aggregation: arithmetic mean of per-case means.
 """
 
 from __future__ import annotations
@@ -39,47 +34,33 @@ log = logging.getLogger(__name__)
 
 
 # floor scores per surface per scorer. fail the run if mean dips below.
-# Anchored to the 2026-05-28 nightly baseline minus one bucket of slack.
-# When you improve a score sustainedly, raise the floor in the same PR.
+# Each floor sits one bucket below the most recent observed baseline.
+# Raise the floor in the PR that lands a sustained improvement.
 SURFACE_THRESHOLDS: dict[str, dict[str, float]] = {
     "external_agent": {
-        # baseline @ 2026-05-28: claude=0.889, gpt-5=0.859
         "facts_preserved_avg": 0.80,
-        # baseline @ 2026-05-28: claude=0.913, gpt-5=0.904
         "facts_present_avg": 0.85,
-        # baseline @ 2026-05-28: ≥ 0.98 both models
         "update_f1": 0.95,
-        # baseline @ 2026-05-28: 0.99 both models
         "no_touch_compliance": 0.90,
     },
     "process_instruction": {
-        # baseline @ 2026-05-28: claude=1.00, gpt-5=0.882
         "trigger_class_match": 0.80,
-        # baseline @ 2026-05-28: claude=0.939, gpt-5=0.923
         "facts_present": 0.85,
-        # baseline @ 2026-05-28: claude=0.970, gpt-5=0.949
         "facts_preserved": 0.85,
     },
     "reconcile_document": {
-        # baseline @ 2026-05-28: claude=0.527, gpt-5=0.580 — known broken,
-        # tracked in eval-findings doc. Floor sits below both so further
-        # collapse is still caught.
+        # Known degraded — see the eval-findings doc. Floor sits below
+        # the observed range so further collapse still trips.
         "trigger_class_match": 0.45,
-        # baseline @ 2026-05-28: claude=0.917, gpt-5=0.946
         "facts_present": 0.80,
-        # baseline @ 2026-05-28: claude=0.993, gpt-5=0.974
         "facts_preserved": 0.85,
     },
     "ingest_selector": {
-        # baseline @ 2026-05-28: haiku=0.534, gpt-5-mini=0.867 — wide
-        # spread. Floor sits below haiku so the matrix passes; the haiku
-        # gap is tracked separately (move to gpt-5-mini, or tune the
-        # selector prompt for haiku).
+        # Wide spread between models — floor below the weaker tail.
         "f1": 0.45,
         "recall": 0.80,
     },
     "triggers": {
-        # baseline @ 2026-05-28: 0.97–1.00 across all scorers, both models
         "trigger_match_decision": 0.85,
         "no_false_fire_compliance": 0.90,
     },
@@ -171,18 +152,27 @@ def main(argv: list[str]) -> int:
         print("not a directory: %s" % runs_dir, file=sys.stderr)
         return 2
     setup_logging("INFO")
-    files = sorted(runs_dir.glob("nightly_*.jsonl"))
-    if not files:
-        print("no nightly_*.jsonl run files in %s" % runs_dir, file=sys.stderr)
-        return 2
     all_errs: list[str] = []
-    for f in files:
+    # Every expected file in the mapping must exist — a missing file means
+    # a nightly step silently dropped its output, not "nothing to check".
+    for expected in sorted(_FILENAME_TO_SURFACES):
+        all_errs.extend(check_run_file(runs_dir / expected))
+    # Surface ad-hoc nightly_*.jsonl files (not in the expected set) for
+    # diagnostics, but only if mapped — unmapped files are skipped via the
+    # ``_FILENAME_TO_SURFACES.get`` check inside ``check_run_file``.
+    extra_files = [
+        p for p in sorted(runs_dir.glob("nightly_*.jsonl")) if p.name not in _FILENAME_TO_SURFACES
+    ]
+    for f in extra_files:
         all_errs.extend(check_run_file(f))
     if all_errs:
         for e in all_errs:
             print("FAIL: %s" % e, file=sys.stderr)
         return 1
-    print("ok: %d nightly run file(s) above all thresholds" % len(files))
+    print(
+        "ok: %d nightly run file(s) above all thresholds"
+        % (len(_FILENAME_TO_SURFACES) + len(extra_files))
+    )
     return 0
 
 
