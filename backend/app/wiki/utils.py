@@ -54,13 +54,13 @@ def validate_doc_path(raw_path: Any) -> str:
 # --------------------------------------------------------------------------- #
 
 
-# Maximum retry attempts inside ``commit_with_ai_rebase`` — each attempt is a
-# full ``generate_body`` call, so keep this small to bound LLM spend.
+# Maximum retry attempts inside ``commit_with_ai_rebase`` — each attempt may
+# invoke the LLM merge fallback, so keep this small to bound LLM spend.
 _AI_REBASE_MAX_RETRIES = 3
 
 
 def commit_with_ai_rebase(
-    wiki_path: str,
+    path: str,
     message: str,
     *,
     base_body: str,
@@ -83,15 +83,15 @@ def commit_with_ai_rebase(
     _base = base_body
     _new = new_body
     for attempt in range(max_retries + 1):
-        head_sha = wiki_git.head_sha_for_path(wiki_path)
-        current = read_existing_or_empty(wiki_path)
+        head_sha = wiki_git.head_sha_for_path(path)
+        current = read_existing_or_empty(path)
         if current != _base:
             mr = wiki_git.merge_content(_base, current, _new)
             if mr.clean:
                 merged = mr.merged
             else:
                 merged = merge_conflict_update.merge(
-                    wiki_path=wiki_path,
+                    wiki_path=path,
                     base_body=_base,
                     current_body=current,
                     draft_body=_new,
@@ -100,10 +100,10 @@ def commit_with_ai_rebase(
             merged = _new
         if merged == current:
             return None
-        post_sha = wiki_git.head_sha_for_path(wiki_path)
+        post_sha = wiki_git.head_sha_for_path(path)
         if post_sha == head_sha:
             sha = commit_and_fan_out(
-                wiki_path, merged, message,
+                path, merged, message,
                 change_kind=ChangeKind.EDIT, activity_ttl=activity_ttl,
             )
             return CommitResult(sha=sha, old_body=current, new_body=merged)
@@ -111,20 +111,20 @@ def commit_with_ai_rebase(
             raise AiRebaseMaxRetriesError(attempt, post_sha or "")
         log.info(
             "commit_with_ai_rebase: HEAD moved for %s, retrying (%d/%d)",
-            wiki_path, attempt + 1, max_retries,
+            path, attempt + 1, max_retries,
         )
         _base = current
         _new = merged
     raise AiRebaseMaxRetriesError(max_retries, "")  # unreachable
 
 
-def assert_base_sha(rel: str, base_sha: str | None) -> dict[str, str] | None:
+def assert_base_sha(path: str, base_sha: str | None) -> dict[str, str] | None:
     """Optimistic-concurrency check shared by every write tool.
 
     Returns ``None`` when the check passes or is opted out of (no
     ``base_sha`` provided). Returns the ``stale_base`` error dict — the
     same shape every write tool returns — when ``base_sha`` no longer
-    matches HEAD for ``rel``.
+    matches HEAD for ``path``.
 
     Used by both the chat agent and the MCP write surface so external
     agents can rebase against drift instead of clobbering. The check
@@ -133,7 +133,7 @@ def assert_base_sha(rel: str, base_sha: str | None) -> dict[str, str] | None:
     if base_sha is None:
         return None
 
-    head_sha = wiki_git.head_sha_for_path(rel)
+    head_sha = wiki_git.head_sha_for_path(path)
     if base_sha == head_sha:
         return None
     return {
@@ -183,14 +183,14 @@ def author_string() -> str | None:
 
 
 def commit_and_fan_out(
-    rel: str,
+    path: str,
     body: str,
     message: str,
     *,
     change_kind: ChangeKind,
     activity_ttl: timedelta | None = None,
 ) -> str:
-    """Commit ``body`` to ``rel``, queue reindex, fan out to triggers.
+    """Commit ``body`` to ``path``, queue reindex, fan out to triggers.
 
     Returns the commit SHA.
 
@@ -213,7 +213,7 @@ def commit_and_fan_out(
         from app.auth import PermissionDenied, require_can
 
         try:
-            require_can("write", rel)
+            require_can("write", path)
         except PermissionDenied as exc:
             raise ToolError(str(exc))
 
@@ -235,7 +235,7 @@ def commit_and_fan_out(
         upsert_kwargs: dict[str, Any] = dict(
             user_id=user.id,
             agent_name=agent_name,
-            doc_path=rel,
+            doc_path=path,
             activity="wrote",
             description=message,
             agent_session_id=launcher_sid,
@@ -253,9 +253,9 @@ def commit_and_fan_out(
         )
 
     author = author_string()
-    sha = wiki_git.commit_file(rel, body, message, author=author)
+    sha = wiki_git.commit_file(path, body, message, author=author)
     wiki_notify.after_doc_write(
-        rel,
+        path,
         sha,
         change_kind,
         author,
@@ -264,7 +264,7 @@ def commit_and_fan_out(
     return sha
 
 
-def mark_doc_read(rel: str) -> None:
+def mark_doc_read(path: str) -> None:
     """Register a ``read`` activity row for the current user.
 
     No-op outside a request context (no current user). DB-only — the
@@ -287,7 +287,7 @@ def mark_doc_read(rel: str) -> None:
     expires_at = agent_activity.upsert_activity(
         user_id=user.id,
         agent_name=agent_name,
-        doc_path=rel,
+        doc_path=path,
         activity="read",
         description=None,
         agent_session_id=launcher_sid,
@@ -340,19 +340,19 @@ def _current_user_or_none():
         return None
 
 
-def read_existing(wiki_path: str) -> str:
-    """Read the current body of ``wiki_path`` from the wiki working tree."""
-    return Path(filesystem.absolute(wiki_path)).read_text()
+def read_existing(path: str) -> str:
+    """Read the current body of ``path`` from the wiki working tree."""
+    return Path(filesystem.absolute(path)).read_text()
 
 
-def read_existing_or_empty(wiki_path: str) -> str:
+def read_existing_or_empty(path: str) -> str:
     """Like ``read_existing`` but returns ``""`` when the file doesn't yet exist."""
-    p = Path(filesystem.absolute(wiki_path))
+    p = Path(filesystem.absolute(path))
     return p.read_text() if p.is_file() else ""
 
 
-def file_exists(wiki_path: str) -> bool:
-    return Path(filesystem.absolute(wiki_path)).is_file()
+def file_exists(path: str) -> bool:
+    return Path(filesystem.absolute(path)).is_file()
 
 
 # --------------------------------------------------------------------------- #

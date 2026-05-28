@@ -82,7 +82,7 @@ def build_change_view(
     *, doc_path: str, change_kind: ChangeKind, before: str, after: str
 ) -> str:
     """The "what changed" block: a unified diff for edits, full body for creates."""
-    header = f"=== CHANGE ===\nPath: {doc_path}\nKind: {change_kind}\n"
+    header = f"=== CHANGE ===\nPath: {doc_path}\nKind: {change_kind.value}\n"
 
     if change_kind == ChangeKind.CREATE or not before:
         body = _truncate(after, _CHANGE_BODY_BUDGET)

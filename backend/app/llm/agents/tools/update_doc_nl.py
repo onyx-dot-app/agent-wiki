@@ -35,17 +35,11 @@ def handle(args: dict[str, Any]) -> Any:
         if not wiki_utils.file_exists(path):
             raise ToolError(f"file not found: {path}")
 
+        stale = wiki_utils.assert_base_sha(path, base_sha)
+        if stale is not None:
+            return stale
+
         head_sha = wiki_git.head_sha_for_path(path)
-        if base_sha and base_sha != head_sha:
-            return {
-                "error": "stale_base",
-                "base_sha": base_sha,
-                "current_sha": head_sha,
-                "message": (
-                    "the file has changed since base_sha; re-read with "
-                    "read_doc and re-issue the instruction"
-                ),
-            }
 
         old_body = wiki_utils.read_existing(path)
         try:

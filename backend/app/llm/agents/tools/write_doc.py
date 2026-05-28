@@ -41,6 +41,9 @@ def handle(args: dict[str, Any]) -> Any:
                         "pass its sha as base_sha."
                     ),
                 }
+            stale = wiki_utils.assert_base_sha(path, base_sha)
+            if stale is not None:
+                return stale
             base_body = wiki_git.read_file(path, ref=base_sha)
             try:
                 result = wiki_utils.commit_with_ai_rebase(

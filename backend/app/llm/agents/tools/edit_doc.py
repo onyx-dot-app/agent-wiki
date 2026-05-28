@@ -33,13 +33,14 @@ def handle(args: dict[str, Any]) -> Any:
         if not wiki_utils.file_exists(path):
             raise ToolError(f"file not found: {path}")
 
+        stale = wiki_utils.assert_base_sha(path, base_sha)
+        if stale is not None:
+            return stale
+
         base_body = wiki_utils.read_existing(path)
         try:
             new_body = wiki_edit.replace(base_body, old_string, new_string, replace_all)
         except wiki_edit.ReplaceError as exc:
-            stale = wiki_utils.assert_base_sha(path, base_sha)
-            if stale is not None:
-                return stale
             raise ToolError(str(exc))
 
         try:

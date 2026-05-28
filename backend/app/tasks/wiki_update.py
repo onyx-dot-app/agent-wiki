@@ -148,9 +148,12 @@ def _run_inner(job_id: str, rel: str, instruction: str, base_sha: str | None) ->
     head_sha = wiki_git.head_sha_for_path(rel)
     if base_sha and base_sha != head_sha:
         log.info(
-            "wiki_update: stale_base %s (base=%s head=%s), running on current HEAD",
+            "wiki_update: stale_base %s (base=%s head=%s)",
             rel, base_sha[:8], (head_sha or "")[:8],
         )
+        mcp_jobs.mark_failed(job_id, error="stale_base")
+        mcp_pubsub.publish_job_update(job_id, "failed")
+        return
 
     debounced = mcp_jobs.find_recent_succeeded_for_user_path(
         user_id=_current_user_id(), path=rel, within_seconds=_DEBOUNCE_SECONDS

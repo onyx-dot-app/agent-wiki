@@ -51,6 +51,10 @@ def handle(args: dict[str, Any]) -> Any:
         if not wiki_utils.file_exists(path):
             raise ToolError(f"file not found: {path}")
 
+        stale = wiki_utils.assert_base_sha(path, base_sha)
+        if stale is not None:
+            return stale
+
         base_body = wiki_utils.read_existing(path)
         new_body = base_body
         try:
@@ -60,9 +64,6 @@ def handle(args: dict[str, Any]) -> Any:
                 except wiki_edit.ReplaceError as exc:
                     raise wiki_edit.ReplaceError(f"edit #{i + 1}: {exc}") from exc
         except wiki_edit.ReplaceError as exc:
-            stale = wiki_utils.assert_base_sha(path, base_sha)
-            if stale is not None:
-                return stale
             raise ToolError(str(exc))
 
         if new_body == base_body:
