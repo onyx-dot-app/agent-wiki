@@ -29,14 +29,20 @@
   margin: 4px 0;
 }
 
+/* Fixed rgba tints — independent of the theme's dim state-bg tokens.
+   The dark-mode danger/success bg tokens are too dim against a black
+   canvas; one block looks visible, an adjacent block (same class!)
+   looks invisible depending on surrounding text-color contrast. Using
+   a known-bright hue at 15% alpha makes the band readable in both
+   light and dark modes with the same CSS rule. */
 .add {
-  background: var(--color-state-success-bg);
-  border-left-color: var(--color-state-success-border);
+  background: rgba(46, 160, 67, 0.15);
+  border-left-color: rgb(46, 160, 67);
 }
 
 .remove {
-  background: var(--color-state-danger-bg);
-  border-left-color: var(--color-state-danger-border);
+  background: rgba(248, 81, 73, 0.15);
+  border-left-color: rgb(248, 81, 73);
 }
 
 /* Collapse vertical gap + share corner radius for consecutive blocks
