@@ -2415,7 +2415,6 @@ function FileViewer({ path }: { path: string }) {
               headSha={headSha}
               viewingSha={viewingSha}
               onPick={onPickCommit}
-              onPickLatest={loadLatest}
               onClose={() => setHistoryOpen(false)}
             />
           )}
@@ -2455,10 +2454,6 @@ function FileViewer({ path }: { path: string }) {
               viewingSha={viewingSha}
               onPick={(sha) => {
                 onPickCommit(sha);
-                setHistoryOpen(false);
-              }}
-              onPickLatest={() => {
-                loadLatest();
                 setHistoryOpen(false);
               }}
               onClose={() => setHistoryOpen(false)}

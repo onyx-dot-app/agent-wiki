@@ -18,7 +18,6 @@ export interface HistoryPanelProps {
   headSha: string | null;
   viewingSha: string | null;
   onPick: (sha: string) => void;
-  onPickLatest: () => void;
   onClose: () => void;
   /** When true (mobile sheet mode), fill the entire host container
    *  edge-to-edge instead of rendering as a fixed-width rounded card. */
@@ -48,7 +47,6 @@ export function HistoryPanel({
   headSha,
   viewingSha,
   onPick,
-  onPickLatest,
   onClose,
   fullHeight = false,
 }: HistoryPanelProps) {
@@ -118,19 +116,18 @@ export function HistoryPanel({
         )}
         {!error && commits && commits.length > 0 && (
           <>
-            <LatestRow
-              active={latestActive}
-              headSha={headSha}
-              onClick={onPickLatest}
-            />
-            {commits.map((c) => (
-              <CommitRow
-                key={c.sha}
-                commit={c}
-                active={!latestActive && viewingSha === c.sha}
-                onClick={() => onPick(c.sha)}
-              />
-            ))}
+            {commits.map((c) => {
+              const isHead = c.sha === headSha;
+              return (
+                <CommitRow
+                  key={c.sha}
+                  commit={c}
+                  isHead={isHead}
+                  active={viewingSha === c.sha || (latestActive && isHead)}
+                  onClick={() => onPick(c.sha)}
+                />
+              );
+            })}
           </>
         )}
       </div>
@@ -148,43 +145,14 @@ function PanelMessage({ children }: { children: string }) {
   );
 }
 
-function LatestRow({
-  active,
-  headSha,
-  onClick,
-}: {
-  active: boolean;
-  headSha: string | null;
-  onClick: () => void;
-}) {
-  return (
-    <SelectCard
-      state={active ? "selected" : "empty"}
-      onClick={onClick}
-      padding="xs"
-      rounding="md"
-      border="none"
-    >
-      <Row>
-        <HeaderLine
-          avatars={<Avatar initial="·" />}
-          title="Latest (working tree)"
-          right={<Tag color="blue" size="sm" title="Current Version" />}
-        />
-        <ActionLine
-          label={headSha ? `Current HEAD · ${headSha.slice(0, 7)}` : "—"}
-        />
-      </Row>
-    </SelectCard>
-  );
-}
-
 function CommitRow({
   commit,
+  isHead,
   active,
   onClick,
 }: {
   commit: CommitInfo;
+  isHead: boolean;
   active: boolean;
   onClick: () => void;
 }) {
@@ -213,9 +181,13 @@ function CommitRow({
           }
           title={person}
           right={
-            <Text font="secondary-body" color="text-03" nowrap>
-              {relativeTime(commit.ts, "long")}
-            </Text>
+            isHead ? (
+              <Tag color="blue" size="sm" title="Current Version" />
+            ) : (
+              <Text font="secondary-body" color="text-03" nowrap>
+                {relativeTime(commit.ts, "long")}
+              </Text>
+            )
           }
         />
         <ActionLine
@@ -367,6 +339,22 @@ function ActionLine({
   );
 }
 
+// Shared circle geometry so the person initial and the agent logo chip
+// render at identical size. box-sizing: border-box keeps the 1px border
+// inside the 20px box (otherwise content-box would inflate one of them).
+const AVATAR_SIZE = 20;
+const avatarBase = {
+  boxSizing: "border-box" as const,
+  width: AVATAR_SIZE,
+  height: AVATAR_SIZE,
+  borderRadius: 9999,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  flexShrink: 0,
+  overflow: "hidden" as const,
+};
+
 /** Single-initial avatar. Inverts per theme via the --diff-avatar-*
  *  CSS vars defined in globals.css. */
 function Avatar({ initial }: { initial: string }) {
@@ -374,18 +362,12 @@ function Avatar({ initial }: { initial: string }) {
     <div
       aria-hidden
       style={{
-        width: 20,
-        height: 20,
-        borderRadius: 9999,
+        ...avatarBase,
         background: "var(--diff-avatar-bg, #000000)",
         color: "var(--diff-avatar-fg, #ffffff)",
         border: "1px solid var(--diff-avatar-border, #e6e6e6)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
         fontSize: 12,
         fontWeight: 600,
-        flexShrink: 0,
       }}
     >
       {initial}
@@ -393,23 +375,16 @@ function Avatar({ initial }: { initial: string }) {
   );
 }
 
-/** Agent logo chip in the avatar stack — overlaps the person avatar
- *  slightly, matching the Figma stacked-avatar treatment. */
+/** Agent logo chip in the avatar stack — same circle as Avatar,
+ *  overlapping it slightly per the Figma stacked-avatar treatment. */
 function LogoAvatar({ Logo }: { Logo: ComponentType<IconProps> }) {
   return (
     <div
       style={{
-        width: 20,
-        height: 20,
+        ...avatarBase,
         marginLeft: -6,
-        borderRadius: 9999,
         background: color.bg.page,
         border: `1px solid ${color.border.subtle}`,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        flexShrink: 0,
-        overflow: "hidden",
       }}
     >
       <Logo style={{ width: 12, height: 12 }} />
