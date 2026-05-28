@@ -20,6 +20,7 @@ import { Button } from "@/components/common/Button";
 import { PageHeader } from "@/components/common/PageHeader";
 import { TriggerModal } from "@/components/triggers/TriggerModal";
 import { ActiveSessionsList } from "@/components/wiki/ActiveSessionsList";
+import { DiffView } from "@/components/wiki/DiffView";
 import { RunAgentModal } from "@/components/wiki/RunAgentModal";
 import { ShareDialog } from "@/components/wiki/ShareDialog";
 import { FolderIcon, FileIcon } from "@/components/wiki/WikiIcons";
@@ -36,6 +37,7 @@ import {
 } from "@/lib/templates";
 import { color, radius, shadow } from "@/lib/theme";
 import { useIsMobile } from "@/lib/viewport";
+import { fetchFileDiff, type FileDiffResponse } from "@/lib/wiki";
 import type { DocumentActivity, DocumentActivityResponse } from "@/types";
 
 interface DocEntry {
@@ -1408,6 +1410,7 @@ function FileViewer({ path }: { path: string }) {
   const [viewingSha, setViewingSha] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [commits, setCommits] = useState<CommitInfo[] | null>(null);
+  const [diffData, setDiffData] = useState<FileDiffResponse | null>(null);
   const [historyError, setHistoryError] = useState<string | null>(null);
   // Active-agents panel (collapsible chip near the top of the doc).
   // We always know the count (so the chip can label "Active agents (N)"),
@@ -1449,6 +1452,7 @@ function FileViewer({ path }: { path: string }) {
     setError(null);
     setEditing(false);
     setViewingSha(null);
+    setDiffData(null);
     apiFetch<FileResponse>(`/wiki/file?path=${encodeURIComponent(path)}`)
       .then((r) => {
         setBody(r.body);
@@ -1628,15 +1632,20 @@ function FileViewer({ path }: { path: string }) {
     setError(null);
     setEditing(false);
     try {
-      const r = await apiFetch<FileResponse>(
-        `/wiki/file?path=${encodeURIComponent(path)}&ref=${encodeURIComponent(
-          sha,
-        )}`,
-      );
-      setBody(r.body);
-      setDraft(r.body);
-      setHeadSha(r.head_sha ?? headSha);
-      setViewingSha(sha);
+      if (sha === headSha) {
+        const r = await apiFetch<FileResponse>(
+          `/wiki/file?path=${encodeURIComponent(path)}`,
+        );
+        setBody(r.body);
+        setDraft(r.body);
+        setHeadSha(r.head_sha ?? headSha);
+        setViewingSha(sha);
+        setDiffData(null);
+      } else {
+        const r = await fetchFileDiff(path, sha);
+        setDiffData(r);
+        setViewingSha(sha);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "failed to load version");
     } finally {
@@ -2372,6 +2381,22 @@ function FileViewer({ path }: { path: string }) {
                   }}
                 />
               </>
+            ) : viewingOld && diffData ? (
+              <div
+                style={{
+                  flex: 1,
+                  minHeight: 0,
+                  overflow: "hidden",
+                  display: "flex",
+                }}
+              >
+                <DiffView
+                  data={diffData}
+                  commit={
+                    commits?.find((c) => c.sha === viewingSha) ?? undefined
+                  }
+                />
+              </div>
             ) : (
               <article
                 className="markdown"
@@ -2656,7 +2681,10 @@ function CommitRow({
   );
 }
 
-function parseSourceMeta(body?: string): { url: string | null; title: string | null } {
+function parseSourceMeta(body?: string): {
+  url: string | null;
+  title: string | null;
+} {
   let url: string | null = null;
   let title: string | null = null;
   for (const line of (body ?? "").split("\n")) {
