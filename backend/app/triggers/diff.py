@@ -30,7 +30,7 @@ import difflib
 import logging
 
 from app.wiki import git as wiki_git
-from app.wiki.types import ChangeKind
+from app.wiki.models import ChangeKind
 
 log = logging.getLogger(__name__)
 

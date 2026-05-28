@@ -15,7 +15,7 @@ from app.llm.agents import nl_updater
 from app.llm.agents.tools import _doc_helpers as h
 from app.llm.errors import LLMError
 from app.wiki import git as wiki_git
-from app.wiki.types import ChangeKind
+from app.wiki.models import ChangeKind
 
 log = logging.getLogger(__name__)
 

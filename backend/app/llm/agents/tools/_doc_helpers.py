@@ -17,6 +17,8 @@ from typing import Any
 log = logging.getLogger(__name__)
 
 from app.auth import current_user
+from app.llm.agents import merge_conflict_update
+from app.wiki.models import AiRebaseMaxRetriesError, ChangeKind, CommitResult
 from app.wiki import (
     agent_activity,
     filesystem,
@@ -24,7 +26,6 @@ from app.wiki import (
     links,
     notify as wiki_notify,
 )
-from app.wiki.types import AiRebaseMaxRetriesError, ChangeKind, CommitResult
 
 
 class ToolError(Exception):
@@ -98,7 +99,6 @@ def commit_with_ai_rebase(
             if mr.clean:
                 merged = mr.merged
             else:
-                from app.llm.agents import merge_conflict_update
                 merged = merge_conflict_update.merge(
                     wiki_path=wiki_path,
                     base_body=_base,

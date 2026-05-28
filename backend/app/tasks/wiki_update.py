@@ -50,7 +50,7 @@ from app.mcp_server import pubsub as mcp_pubsub
 from app.auth import UserMissingError, load_user, set_current_user
 from app.tasks.queues import documents_queue
 from app.wiki import agent_activity, git as wiki_git, notify as wiki_notify
-from app.wiki.types import ChangeKind
+from app.wiki.models import ChangeKind
 
 _INGEST_AUTHOR = "Onyx Ingest <ingest@agent-wiki>"
 

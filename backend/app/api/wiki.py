@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.auth import User, require_can
 from app.auth.deps import require_user
+from app.llm.agents import merge_conflict_update
 from app.models.file_system import (
     ActivityRowView,
     CommitView,
@@ -40,7 +41,6 @@ from app.models.file_system import (
     SearchResponse,
     SetDocumentDraftRequest,
 )
-from app.llm.agents import merge_conflict_update
 from app.tasks.reindex import index_path
 from app.triggers import repo as triggers_repo
 from app.wiki import (
@@ -52,7 +52,7 @@ from app.wiki import (
     search as wiki_search,
     templates as templates_repo,
 )
-from app.wiki.types import ChangeKind
+from app.wiki.models import ChangeKind
 
 router = APIRouter()
 log = logging.getLogger(__name__)

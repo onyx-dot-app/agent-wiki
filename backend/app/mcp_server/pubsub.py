@@ -39,7 +39,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from app.wiki.types import ChangeKind
+from app.wiki.models import ChangeKind
 
 log = logging.getLogger(__name__)
 

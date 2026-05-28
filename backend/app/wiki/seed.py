@@ -71,7 +71,7 @@ def write_seed_pages(
     # want SEED_SOURCE_DIR.
     from app.wiki.git import commit_file
     from app.wiki.notify import after_doc_write
-    from app.wiki.types import ChangeKind
+    from app.wiki.models import ChangeKind
 
     processed = 0
     for rel, body in iter_seed_pages():
