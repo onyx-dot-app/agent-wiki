@@ -102,12 +102,6 @@ def commit_with_ai_rebase(
             return None
         post_sha = wiki_git.head_sha_for_path(path)
         if post_sha == head_sha:
-            # Race: two workers can both pass this check before either
-            # commits. Git serialises via its ref lock — the loser gets
-            # a CalledProcessError ("cannot lock ref") that propagates
-            # unhandled. A repo-scoped advisory lock (e.g. pg_advisory_lock)
-            # around the read-merge-commit section would close the window;
-            # deferred for now since the race is extremely narrow in practice.
             sha = commit_and_fan_out(
                 path, merged, message,
                 change_kind=ChangeKind.EDIT, activity_ttl=activity_ttl,
