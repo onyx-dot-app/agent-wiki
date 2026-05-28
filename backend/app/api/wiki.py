@@ -584,7 +584,6 @@ def rebase_draft(
     raise HTTPException(
         status_code=409,
         detail=RebaseConflictResponse(
-            error="conflict detected",
             current_body=result.current_body,
             draft_body=result.draft_body,
             current_sha=result.base_sha,
