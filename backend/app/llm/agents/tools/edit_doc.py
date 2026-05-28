@@ -43,7 +43,6 @@ def handle(args: dict[str, Any]) -> Any:
         try:
             result = h.commit_with_ai_rebase(
                 rel, commit_message.strip(),
-                change_kind="edit",
                 base_body=base_body,
                 new_body=new_body,
                 activity_ttl=activity_ttl,

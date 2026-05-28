@@ -85,7 +85,6 @@ def commit_with_ai_rebase(
     wiki_path: str,
     message: str,
     *,
-    change_kind: str,
     base_body: str,
     new_body: str,
     max_retries: int = _AI_REBASE_MAX_RETRIES,
@@ -128,7 +127,7 @@ def commit_with_ai_rebase(
         if post_sha == head_sha:
             sha = commit_and_fan_out(
                 wiki_path, merged, message,
-                change_kind=change_kind, activity_ttl=activity_ttl,
+                change_kind="edit", activity_ttl=activity_ttl,
             )
             return CommitResult(sha=sha, old_body=current, new_body=merged)
         if attempt >= max_retries:

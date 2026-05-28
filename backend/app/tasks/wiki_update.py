@@ -192,7 +192,6 @@ def _run_inner(job_id: str, rel: str, instruction: str, base_sha: str | None) ->
         result = h.commit_with_ai_rebase(
             rel,
             f"Doc update: {instruction[:_COMMIT_MESSAGE_MAX]}",
-            change_kind="edit",
             base_body=old_body,
             new_body=new_body,
         )
