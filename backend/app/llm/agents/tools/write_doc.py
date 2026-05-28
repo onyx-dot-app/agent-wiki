@@ -48,7 +48,7 @@ def handle(args: dict[str, Any]) -> Any:
                     new_body=body,
                     activity_ttl=activity_ttl,
                 )  # always ChangeKind.EDIT — new files take the else branch below
-            except h.AiRebaseMaxRetriesError as exc:
+            except h.AiRebaseMaxRetriesException as exc:
                 return {
                     "error": "stale_base",
                     "message": "concurrent edits kept landing; max retries exceeded",

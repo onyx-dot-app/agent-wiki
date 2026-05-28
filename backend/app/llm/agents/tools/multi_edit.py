@@ -67,7 +67,7 @@ def handle(args: dict[str, Any]) -> Any:
                 new_body=new_body,
                 activity_ttl=activity_ttl,
             )
-        except h.AiRebaseMaxRetriesError as exc:
+        except h.AiRebaseMaxRetriesException as exc:
             return {
                 "error": "stale_base",
                 "message": "concurrent edits kept landing; max retries exceeded",
