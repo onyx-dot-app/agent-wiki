@@ -515,6 +515,8 @@ def upsert_draft(
         rel = filesystem.safe_rel_path(req.path)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+    if not filesystem.absolute(rel).is_file():
+        raise HTTPException(status_code=404, detail="not found")
     require_can("write", rel, user)
     wiki_git.save_draft(rel, user.id, req.content, req.base_sha)
     row = wiki_git.get_draft(rel, user.id)
