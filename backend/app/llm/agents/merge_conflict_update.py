@@ -30,14 +30,15 @@ def merge(
     ``current_commit_message``— commit message for the current HEAD (optional metadata)
     """
     system = load_prompt("merge_conflict_update.system")
-    current_meta = (
-        f"## Current\n\nCommit: {current_commit_message}\n\n{current_body}"
+    commit_section = (
+        f"## Current Commit\n\n{current_commit_message}\n\n"
         if current_commit_message
-        else f"## Current\n\n{current_body}"
+        else ""
     )
     user_msg = (
         f"## Base\n\n{base_body}\n\n"
-        f"{current_meta}\n\n"
+        f"## Current\n\n{current_body}\n\n"
+        f"{commit_section}"
         f"## Draft\n\n{draft_body}"
     )
     with trace_flow("agent.merge_conflict_update", wiki_path=wiki_path):
