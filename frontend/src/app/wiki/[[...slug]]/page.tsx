@@ -10,6 +10,7 @@ import {
   useState,
   type FormEvent,
 } from "react";
+import { diffLines } from "diff";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import useSWR from "swr";
@@ -2154,46 +2155,74 @@ function FileViewer({ path }: { path: string }) {
               gap: 0,
             }}
           >
-            <div style={{ padding: 12, borderRight: `1px solid ${color.border.subtle}` }}>
-              <div style={{ fontSize: 11, fontWeight: 600, color: color.text.muted, marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.05em" }}>
-                Current version
-              </div>
-              <pre
-                style={{
-                  margin: 0,
-                  fontSize: 12,
-                  lineHeight: 1.5,
-                  fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-                  whiteSpace: "pre-wrap",
-                  wordBreak: "break-word",
-                  maxHeight: 200,
-                  overflowY: "auto",
-                  color: color.text.secondary,
-                }}
-              >
-                {conflict.currentBody}
-              </pre>
-            </div>
-            <div style={{ padding: 12 }}>
-              <div style={{ fontSize: 11, fontWeight: 600, color: color.text.muted, marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.05em" }}>
-                Your draft
-              </div>
-              <pre
-                style={{
-                  margin: 0,
-                  fontSize: 12,
-                  lineHeight: 1.5,
-                  fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-                  whiteSpace: "pre-wrap",
-                  wordBreak: "break-word",
-                  maxHeight: 200,
-                  overflowY: "auto",
-                  color: color.text.secondary,
-                }}
-              >
-                {conflict.draftBody}
-              </pre>
-            </div>
+            {(() => {
+              const currentHunks = diffLines(conflict.draftBody, conflict.currentBody);
+              const draftHunks = diffLines(conflict.currentBody, conflict.draftBody);
+              const preStyle: React.CSSProperties = {
+                margin: 0,
+                fontSize: 12,
+                lineHeight: 1.5,
+                fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+                whiteSpace: "pre-wrap",
+                wordBreak: "break-word",
+                maxHeight: 240,
+                overflowY: "auto",
+              };
+              const labelStyle: React.CSSProperties = {
+                fontSize: 11,
+                fontWeight: 600,
+                color: color.text.muted,
+                marginBottom: 6,
+                textTransform: "uppercase",
+                letterSpacing: "0.05em",
+              };
+              return (
+                <>
+                  <div style={{ padding: 12, borderRight: `1px solid ${color.border.subtle}` }}>
+                    <div style={labelStyle}>Current version</div>
+                    <pre style={preStyle}>
+                      {currentHunks.map((part, i) => (
+                        <span
+                          key={i}
+                          style={{
+                            background: part.added
+                              ? color.state.success.bg
+                              : part.removed
+                              ? "transparent"
+                              : undefined,
+                            color: part.removed ? "transparent" : color.text.secondary,
+                            userSelect: part.removed ? "none" : undefined,
+                          }}
+                        >
+                          {part.value}
+                        </span>
+                      ))}
+                    </pre>
+                  </div>
+                  <div style={{ padding: 12 }}>
+                    <div style={labelStyle}>Your draft</div>
+                    <pre style={preStyle}>
+                      {draftHunks.map((part, i) => (
+                        <span
+                          key={i}
+                          style={{
+                            background: part.added
+                              ? color.state.warning.bg
+                              : part.removed
+                              ? "transparent"
+                              : undefined,
+                            color: part.removed ? "transparent" : color.text.secondary,
+                            userSelect: part.removed ? "none" : undefined,
+                          }}
+                        >
+                          {part.value}
+                        </span>
+                      ))}
+                    </pre>
+                  </div>
+                </>
+              );
+            })()}
           </div>
         </div>
       )}
