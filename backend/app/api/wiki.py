@@ -481,7 +481,7 @@ def set_file_draft(
     )
 
 
-@router.get("/file/draft", response_model=DraftResponse | None)
+@router.get("/file/autosave", response_model=DraftResponse | None)
 def get_draft(
     user: User = Depends(require_user),
     path: str = "",
@@ -505,7 +505,7 @@ def get_draft(
     )
 
 
-@router.put("/file/draft", response_model=DraftResponse)
+@router.put("/file/autosave", response_model=DraftResponse)
 def upsert_draft(
     req: DraftRequest,
     user: User = Depends(require_user),
@@ -529,7 +529,7 @@ def upsert_draft(
     )
 
 
-@router.delete("/file/draft", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/file/autosave", status_code=status.HTTP_204_NO_CONTENT)
 def delete_draft(
     user: User = Depends(require_user),
     path: str = "",

@@ -1554,7 +1554,7 @@ function FileViewer({ path }: { path: string }) {
     if (!baseSha) return;
     if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
     autoSaveTimer.current = setTimeout(() => {
-      void apiFetch("/wiki/file/draft", {
+      void apiFetch("/wiki/file/autosave", {
         method: "PUT",
         body: JSON.stringify({ path, base_sha: baseSha, content: draft }),
       }).catch(() => {
@@ -1698,7 +1698,7 @@ function FileViewer({ path }: { path: string }) {
     // Check for an existing in-progress draft from a previous session.
     try {
       const saved = await apiFetch<DraftResponse | null>(
-        `/wiki/file/draft?path=${encodeURIComponent(path)}`,
+        `/wiki/file/autosave?path=${encodeURIComponent(path)}`,
       );
       if (!saved) return;
       if (saved.base_sha === headSha) {
@@ -1876,7 +1876,7 @@ function FileViewer({ path }: { path: string }) {
     setHeadSha(conflict.currentSha);
     setConflict(null);
     void apiFetch(
-      `/wiki/file/draft?path=${encodeURIComponent(path)}`,
+      `/wiki/file/autosave?path=${encodeURIComponent(path)}`,
       { method: "DELETE" },
     ).catch(() => {});
   }
@@ -2090,7 +2090,7 @@ function FileViewer({ path }: { path: string }) {
             onClick={() => {
               setPendingResumeDraft(null);
               void apiFetch(
-                `/wiki/file/draft?path=${encodeURIComponent(path)}`,
+                `/wiki/file/autosave?path=${encodeURIComponent(path)}`,
                 { method: "DELETE" },
               ).catch(() => {});
             }}

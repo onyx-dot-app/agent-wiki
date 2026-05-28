@@ -221,7 +221,7 @@ class SetDocumentDraftRequest(BaseModel):
 
 
 class DraftRequest(BaseModel):
-    """Body for ``PUT /api/wiki/file/draft`` (auto-save from the editor)."""
+    """Body for ``PUT /api/wiki/file/autosave`` (auto-save from the editor)."""
 
     path: str = Field(min_length=1)
     base_sha: str
