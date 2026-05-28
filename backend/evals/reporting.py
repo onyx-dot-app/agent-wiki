@@ -299,8 +299,7 @@ def push_triggers_dataset(dataset: str, cases: list[TriggerCase]) -> int:
 
     Mirrors ``push_wiki_updater_dataset`` / ``push_ingest_selector_dataset``
     so the runner can link experiment results back to per-case dataset
-    rows. Without this, ``--dataset triggers`` was silently a no-op on
-    the dataset side (the experiment got pushed but the case rows didn't).
+    rows.
     """
     api_key = os.environ.get("BRAINTRUST_API_KEY", "")
     project = os.environ.get("BRAINTRUST_PROJECT", "")
