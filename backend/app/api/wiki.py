@@ -7,6 +7,7 @@ import re
 import subprocess
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import JSONResponse
 
 from app.auth import User, require_can
 from app.auth.deps import require_user
@@ -22,6 +23,7 @@ from app.models.file_system import (
     DraftRequest,
     DraftResponse,
     FileHistoryResponse,
+    RebaseConflictResponse,
     FolderHitView,
     GetDocumentResponse,
     ListDocumentsResponse,
@@ -541,6 +543,52 @@ def delete_draft(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     wiki_git.delete_draft(rel, user.id)
+
+
+@router.post("/file/autosave/rebase")
+def rebase_draft(
+    req: DraftRequest,
+    user: User = Depends(require_user),
+) -> DraftResponse | JSONResponse:
+    """3-way merge the user's draft onto the current HEAD.
+
+    Returns the merged draft (200) when git merge-file produces no conflict
+    markers, saving the rebased draft automatically.  Returns 409 with
+    ``RebaseConflictResponse`` when conflicts need human resolution.
+    Returns 404 when the page or draft does not exist.
+    """
+    try:
+        rel = filesystem.safe_rel_path(req.path)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    if not filesystem.absolute(rel).is_file():
+        raise HTTPException(status_code=404, detail="not found")
+    require_can("write", rel, user)
+
+    result = wiki_git.rebase_draft(rel, user.id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="no draft found")
+
+    if result.clean:
+        wiki_git.save_draft(rel, user.id, result.merged, result.base_sha)
+        row = wiki_git.get_draft(rel, user.id)
+        assert row is not None
+        return DraftResponse(
+            path=row["path"],
+            base_sha=row["base_sha"],
+            content=row["content"],
+            updated_at=row["updated_at"],
+        )
+
+    return JSONResponse(
+        status_code=409,
+        content=RebaseConflictResponse(
+            error="conflict detected",
+            current_body=result.current_body,
+            draft_body=result.draft_body,
+            current_sha=result.base_sha,
+        ).model_dump(),
+    )
 
 
 @router.get("/{doc_id}")

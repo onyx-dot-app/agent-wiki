@@ -233,3 +233,12 @@ class DraftResponse(BaseModel):
     base_sha: str
     content: str
     updated_at: str
+
+
+class RebaseConflictResponse(BaseModel):
+    """409 body from ``POST /api/wiki/file/autosave/rebase`` when merge has conflicts."""
+
+    error: str
+    current_body: str
+    draft_body: str
+    current_sha: str

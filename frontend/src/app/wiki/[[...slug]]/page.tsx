@@ -1713,17 +1713,40 @@ function FileViewer({ path }: { path: string }) {
         // Draft is current — offer to restore.
         setPendingResumeDraft(saved);
       } else {
-        // Draft is stale — fetch current HEAD and enter conflict flow.
-        const current = await apiFetch<FileResponse>(
-          `/wiki/file?path=${encodeURIComponent(path)}`,
-        );
-        if (editSessionRef.current !== session) return;
-        setConflict({
-          draftBody: saved.content,
-          currentBody: current.body,
-          currentSha: current.head_sha ?? headSha ?? "",
-          baseSha: saved.base_sha,
-        });
+        // Draft is stale — attempt a 3-way rebase onto current HEAD.
+        try {
+          const rebased = await apiFetch<DraftResponse>(
+            "/wiki/file/autosave/rebase",
+            {
+              method: "POST",
+              body: JSON.stringify({
+                path,
+                base_sha: saved.base_sha,
+                content: saved.content,
+              }),
+            },
+          );
+          if (editSessionRef.current !== session) return;
+          // Clean merge — enter editing with the rebased content.
+          setPendingResumeDraft(rebased);
+        } catch (e) {
+          if (editSessionRef.current !== session) return;
+          if (e instanceof ApiError && e.status === 409) {
+            // Conflicts — show the conflict panel for manual resolution.
+            const detail = e.data as {
+              current_body: string;
+              draft_body: string;
+              current_sha: string;
+            };
+            setConflict({
+              draftBody: detail.draft_body,
+              currentBody: detail.current_body,
+              currentSha: detail.current_sha,
+              baseSha: saved.base_sha,
+            });
+          }
+          // Other errors are non-fatal — user starts fresh.
+        }
       }
     } catch {
       // Draft fetch failure is non-fatal — user just starts fresh.

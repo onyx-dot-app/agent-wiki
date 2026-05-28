@@ -437,3 +437,72 @@ def delete_drafts_for_path(rel_path: str) -> None:
         parts = branch.split("/", 2)
         if len(parts) == 3 and unquote(parts[2]) == rel_path:
             _run(["update-ref", "-d", f"refs/heads/{branch}"], check=False)
+
+
+class RebaseResult(BaseModel):
+    """Result of a draft rebase attempt."""
+
+    merged: str           # merged content (clean) or content with conflict markers
+    base_sha: str         # new base SHA (current HEAD)
+    clean: bool           # True = no conflicts, False = conflict markers present
+    current_body: str     # current HEAD content (for conflict UI)
+    draft_body: str       # original draft content (for conflict UI)
+
+
+def rebase_draft(rel_path: str, user_id: str) -> RebaseResult | None:
+    """3-way merge the user's draft onto the current HEAD of ``rel_path``.
+
+    Returns ``None`` if no draft exists.  Otherwise runs ``git merge-file``
+    (plumbing) on three temp files:
+      - current  = HEAD content
+      - base     = content at draft.base_sha
+      - draft    = draft content
+
+    ``clean=True`` means no conflict markers; the caller should call
+    ``save_draft`` with the merged content and the new base_sha.
+    ``clean=False`` means conflict markers are present; the caller should
+    show the conflict panel.
+    """
+    draft = get_draft(rel_path, user_id)
+    if draft is None:
+        return None
+
+    head_sha = head_sha_for_path(rel_path)
+    if head_sha is None or head_sha == draft["base_sha"]:
+        # No divergence — nothing to rebase.
+        return None
+
+    current_body = read_file(rel_path)
+    base_body = read_file(rel_path, ref=draft["base_sha"])
+    draft_body = draft["content"]
+
+    # Write the three versions to temp files for git merge-file.
+    fds: list[int] = []
+    paths: list[str] = []
+    try:
+        for content in (current_body, base_body, draft_body):
+            fd, p = tempfile.mkstemp(suffix=".txt")
+            fds.append(fd)
+            paths.append(p)
+            os.write(fd, content.encode())
+            os.close(fd)
+
+        # git merge-file -p writes result to stdout; exit 0 = clean, >0 = conflicts.
+        result = _run(
+            ["merge-file", "-p", "-L", "current", "-L", "base", "-L", "draft",
+             paths[0], paths[1], paths[2]],
+            check=False,
+        )
+        merged = result.stdout
+        clean = result.returncode == 0
+    finally:
+        for p in paths:
+            Path(p).unlink(missing_ok=True)
+
+    return RebaseResult(
+        merged=merged,
+        base_sha=head_sha,
+        clean=clean,
+        current_body=current_body,
+        draft_body=draft_body,
+    )
