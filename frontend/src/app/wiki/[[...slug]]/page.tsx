@@ -2692,7 +2692,15 @@ function ActivityRow({
           >
             {initial}
           </div>
-          <div style={{ flex: 1, minWidth: 0 }}>
+          <div
+            style={{
+              flex: 1,
+              minWidth: 0,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
             <Text font="main-ui-action" color="text-04" nowrap maxLines={1}>
               {title}
             </Text>
@@ -2718,7 +2726,15 @@ function ActivityRow({
             paddingLeft: 28,
           }}
         >
-          <div style={{ flex: 1, minWidth: 0 }}>
+          <div
+            style={{
+              flex: 1,
+              minWidth: 0,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
             <Text font="secondary-body" color="text-03" nowrap maxLines={1}>
               {description}
             </Text>
