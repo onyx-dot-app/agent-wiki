@@ -27,7 +27,7 @@ expected_updates:
   - path: services/search/overview.md
     facts_present:
       - id: new-link
-        text: the overview links to services/search/opensearch-migration.md
+        text: the overview links to the opensearch-migration.md doc (absolute or relative path)
     facts_preserved:
       - id: bm25
         text: the BM25 backing is still documented

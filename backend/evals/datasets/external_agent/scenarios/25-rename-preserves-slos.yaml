@@ -38,7 +38,7 @@ expected_updates:
       - id: owner-team
         text: the platform team is still listed as the owner
       - id: oncall-rotation
-        text: the checkout-oncall rotation is still listed
+        text: a named oncall rotation is still listed (either checkout-oncall or a renamed equivalent like orderflow-oncall)
 expected_not_updated: []
 notes: |
   Loss-bait — a rename tempts a from-scratch rewrite that drops every
