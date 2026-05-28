@@ -2605,11 +2605,11 @@ function HistoryPanel({
                   active={!latestActive && viewingSha === c.sha}
                   isLatest={false}
                   onClick={() => onPick(c.sha)}
-                  title={c.message || "(no message)"}
+                  title={c.author || "Unknown"}
                   author={c.author}
                   sha={c.sha}
                   ts={formatTs(c.ts)}
-                  description={`${c.author || "?"} · ${c.sha.slice(0, 7)}`}
+                  description={c.sha.slice(0, 7)}
                   sourceUrl={url}
                   sourceTitle={srcTitle}
                 />
