@@ -1,3 +1,4 @@
+import { SelectButton, Text } from "@onyx-ai/opal/components";
 import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -51,52 +52,67 @@ export function DiffView({
     <div className={styles.view}>
       <div className={styles.header}>
         <div className={styles.headerInfo}>
-          <div className={styles.title}>
+          <Text
+            font="main-ui-action"
+            color="text-04"
+            as="p"
+            nowrap
+            maxLines={1}
+          >
             {commit?.message || "(no message)"}
-          </div>
-          <div className={styles.meta}>
-            {data.sha.slice(0, 7)} · {commit?.author ?? "?"} ·{" "}
-            {commit?.ts ?? ""}
-          </div>
-        </div>
-        <div className={styles.toggle} role="tablist" aria-label="View mode">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={mode === "diff"}
-            className={`${styles.toggleBtn} ${
-              mode === "diff" ? styles.toggleBtnActive : ""
+          </Text>
+          <Text
+            font="secondary-body"
+            color="text-03"
+            as="p"
+            nowrap
+            maxLines={1}
+          >
+            {`${data.sha.slice(0, 7)} · ${commit?.author ?? "?"} · ${
+              commit?.ts ?? ""
             }`}
+          </Text>
+        </div>
+        <div role="tablist" aria-label="View mode" className={styles.toggle}>
+          <SelectButton
+            size="sm"
+            state={mode === "diff" ? "selected" : "empty"}
             onClick={() => pickMode("diff")}
           >
             Diff
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={mode === "doc"}
-            className={`${styles.toggleBtn} ${
-              mode === "doc" ? styles.toggleBtnActive : ""
-            }`}
+          </SelectButton>
+          <SelectButton
+            size="sm"
+            state={mode === "doc" ? "selected" : "empty"}
             onClick={() => void pickMode("doc")}
           >
             Doc
-          </button>
+          </SelectButton>
         </div>
       </div>
       <div className={styles.body}>
         {mode === "diff" ? (
           data.hunks.length === 0 ? (
             <div className={styles.empty}>
-              No changes for this file in that commit.
+              <Text font="secondary-body" color="text-03">
+                No changes for this file in that commit.
+              </Text>
             </div>
           ) : (
             data.hunks.map((hunk, idx) => <DiffHunk key={idx} hunk={hunk} />)
           )
         ) : loading ? (
-          <div className={styles.empty}>Loading…</div>
+          <div className={styles.empty}>
+            <Text font="secondary-body" color="text-03">
+              Loading…
+            </Text>
+          </div>
         ) : bodyError ? (
-          <div className={styles.empty}>{bodyError}</div>
+          <div className={styles.empty}>
+            <Text font="secondary-body" color="text-03">
+              {bodyError}
+            </Text>
+          </div>
         ) : (
           <article className="markdown">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>

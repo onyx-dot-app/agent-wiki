@@ -15,6 +15,9 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import useSWR from "swr";
 
+import { SelectCard, Tag, Text } from "@onyx-ai/opal/components";
+import { Section } from "@onyx-ai/opal/layouts";
+
 import { AppShell } from "@/components/common/AppShell";
 import { Button } from "@/components/common/Button";
 import { PageHeader } from "@/components/common/PageHeader";
@@ -2517,35 +2520,31 @@ function HistoryPanel({
         gap: 8,
       }}
     >
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          paddingLeft: 4,
-          fontSize: 14,
-          fontWeight: 600,
-          color: color.text.primary,
-        }}
-      >
-        <span>History</span>
-        <div style={{ flex: 1 }} />
+      <Section flexDirection="row" alignItems="center" gap={0.5} padding={0.5}>
+        <Section flexDirection="row" alignItems="center" width="full">
+          <Text font="main-ui-action" color="text-04">
+            History
+          </Text>
+        </Section>
         <button
           onClick={onClose}
           aria-label="Close history"
           style={{
+            appearance: "none",
             background: "transparent",
             border: "none",
             color: color.text.muted,
             cursor: "pointer",
-            fontSize: 16,
+            fontSize: 18,
             lineHeight: 1,
             padding: 4,
             borderRadius: 4,
+            flexShrink: 0,
           }}
         >
           ×
         </button>
-      </div>
+      </Section>
       <div
         style={{
           overflowY: "auto",
@@ -2556,20 +2555,24 @@ function HistoryPanel({
         }}
       >
         {error && (
-          <div
-            style={{ padding: 12, fontSize: 12, color: color.state.danger.fg }}
-          >
-            {error}
+          <div style={{ padding: 12 }}>
+            <Text font="secondary-body" color="text-03">
+              {error}
+            </Text>
           </div>
         )}
         {!error && commits === null && (
-          <div style={{ padding: 12, fontSize: 12, color: color.text.muted }}>
-            Loading…
+          <div style={{ padding: 12 }}>
+            <Text font="secondary-body" color="text-03">
+              Loading…
+            </Text>
           </div>
         )}
         {!error && commits && commits.length === 0 && (
-          <div style={{ padding: 12, fontSize: 12, color: color.text.muted }}>
-            No history yet.
+          <div style={{ padding: 12 }}>
+            <Text font="secondary-body" color="text-03">
+              No history yet.
+            </Text>
           </div>
         )}
         {!error && commits && commits.length > 0 && (
@@ -2636,182 +2639,101 @@ function ActivityRow({
 }) {
   const initial = (author || title || "?").charAt(0).toUpperCase();
   return (
-    <button
+    <SelectCard
+      state={active ? "selected" : "empty"}
       onClick={onClick}
-      className="history-row"
-      data-active={active ? "true" : "false"}
-      style={{
-        appearance: "none",
-        textAlign: "left",
-        width: "100%",
-        padding: 4,
-        background: active ? color.bg.page : "transparent",
-        border: "none",
-        borderRadius: 8,
-        cursor: "pointer",
-        boxShadow: active
-          ? "var(--diff-row-shadow, 0 0 2px 1px rgba(0, 0, 0, 0.05))"
-          : "none",
-        display: "flex",
-        flexDirection: "column",
-        gap: 4,
-      }}
-      onMouseEnter={(e) => {
-        if (!active) e.currentTarget.style.background = color.bg.hover;
-      }}
-      onMouseLeave={(e) => {
-        if (!active) e.currentTarget.style.background = "transparent";
-      }}
+      padding="xs"
+      rounding="md"
+      border="none"
     >
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          padding: 2,
-        }}
-      >
-        <div
-          aria-hidden
-          style={{
-            width: 20,
-            height: 20,
-            borderRadius: 9999,
-            background: "var(--diff-avatar-bg, #000000)",
-            color: "var(--diff-avatar-fg, #ffffff)",
-            border: "1px solid var(--diff-avatar-border, #e6e6e6)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            fontSize: 12,
-            fontWeight: 600,
-            flexShrink: 0,
-          }}
+      <Section flexDirection="column" alignItems="start" gap={0.5} width="full">
+        <Section
+          flexDirection="row"
+          alignItems="center"
+          gap={1}
+          padding={0.5}
+          width="full"
         >
-          {initial}
-        </div>
-        <div
-          style={{
-            flex: 1,
-            minWidth: 0,
-            fontSize: 14,
-            fontWeight: 600,
-            lineHeight: "20px",
-            color: color.text.primary,
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-          }}
-        >
-          {title}
-        </div>
-        {isLatest ? (
-          <>
-            <span
-              style={{
-                fontSize: 12,
-                fontWeight: 500,
-                color: "#397bff",
-                lineHeight: "16px",
-              }}
-            >
-              Current Version
-            </span>
-            <span
-              aria-hidden
-              style={{
-                width: 6,
-                height: 6,
-                borderRadius: 9999,
-                background: "#286df8",
-                flexShrink: 0,
-              }}
-            />
-          </>
-        ) : (
-          <span
-            style={{
-              fontSize: 12,
-              color: color.text.muted,
-              lineHeight: "16px",
-              whiteSpace: "nowrap",
-            }}
-          >
-            {ts}
-          </span>
-        )}
-      </div>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 4,
-          padding: "0 2px 2px",
-        }}
-      >
-        <span
-          style={{
-            flex: 1,
-            minWidth: 0,
-            fontSize: 12,
-            lineHeight: "16px",
-            color: color.text.muted,
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-          }}
-        >
-          {description}
-        </span>
-        {sourceUrl ? (
-          <a
-            href={sourceUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              fontSize: 12,
-              color: color.text.muted,
-              textDecoration: "none",
-              padding: 2,
-              borderRadius: 4,
-              display: "inline-flex",
-              alignItems: "center",
-            }}
-            aria-label={sourceTitle ?? "Open source"}
-          >
-            ↗
-          </a>
-        ) : (
-          <span
+          <div
             aria-hidden
             style={{
-              width: 16,
+              width: 20,
+              height: 20,
+              borderRadius: 9999,
+              background: "var(--diff-avatar-bg, #000000)",
+              color: "var(--diff-avatar-fg, #ffffff)",
+              border: "1px solid var(--diff-avatar-border, #e6e6e6)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
               fontSize: 12,
-              color: color.text.faint,
-              textAlign: "center",
-              lineHeight: "16px",
+              fontWeight: 600,
+              flexShrink: 0,
             }}
           >
-            ↗
-          </span>
-        )}
-      </div>
-      {sourceTitle && !sourceUrl ? (
-        <div
-          style={{
-            fontSize: 11,
-            color: color.text.muted,
-            padding: "0 2px",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-          }}
+            {initial}
+          </div>
+          <Section flexDirection="row" alignItems="center" width="full">
+            <Text font="main-ui-action" color="text-04" nowrap maxLines={1}>
+              {title}
+            </Text>
+          </Section>
+          {isLatest ? (
+            <Tag color="blue" size="sm" title="Current Version" />
+          ) : (
+            <Text font="secondary-body" color="text-03" nowrap>
+              {ts}
+            </Text>
+          )}
+        </Section>
+        <Section
+          flexDirection="row"
+          alignItems="center"
+          gap={0.5}
+          padding={0.5}
+          width="full"
         >
-          {sourceTitle}
-        </div>
-      ) : null}
-    </button>
+          <Section flexDirection="row" alignItems="center" width="full">
+            <Text font="secondary-body" color="text-03" nowrap maxLines={1}>
+              {description}
+            </Text>
+          </Section>
+          {sourceUrl ? (
+            <a
+              href={sourceUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => e.stopPropagation()}
+              aria-label={sourceTitle ?? "Open source"}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                padding: 2,
+                borderRadius: 4,
+                color: "inherit",
+                textDecoration: "none",
+              }}
+            >
+              <Text font="secondary-body" color="text-03">
+                ↗
+              </Text>
+            </a>
+          ) : null}
+        </Section>
+        {sourceTitle && !sourceUrl ? (
+          <Section
+            flexDirection="row"
+            alignItems="center"
+            padding={0.5}
+            width="full"
+          >
+            <Text font="secondary-body" color="text-03" nowrap maxLines={1}>
+              {sourceTitle}
+            </Text>
+          </Section>
+        ) : null}
+      </Section>
+    </SelectCard>
   );
 }
 

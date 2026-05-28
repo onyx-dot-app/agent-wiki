@@ -1,3 +1,4 @@
+import * as Tooltip from "@radix-ui/react-tooltip";
 import type { ReactNode } from "react";
 
 import { ChatWidget } from "@/components/chat/ChatWidget";
@@ -28,13 +29,21 @@ export default function RootLayout({ children }: { children: ReactNode }) {
             users don't see a light-mode flash on first paint. */}
         <ThemeBootstrapScript />
       </head>
-      <body style={{ fontFamily: "system-ui, sans-serif", margin: 0, boxSizing: "border-box" }}>
+      <body
+        style={{
+          fontFamily: "system-ui, sans-serif",
+          margin: 0,
+          boxSizing: "border-box",
+        }}
+      >
         <SWRProvider>
           <AuthProvider>
             <ThemeProvider>
               <DraftingProvider>
-                {children}
-                <ChatWidget />
+                <Tooltip.Provider delayDuration={300}>
+                  {children}
+                  <ChatWidget />
+                </Tooltip.Provider>
               </DraftingProvider>
             </ThemeProvider>
           </AuthProvider>
