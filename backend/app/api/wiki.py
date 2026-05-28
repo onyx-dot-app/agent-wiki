@@ -40,6 +40,7 @@ from app.models.file_system import (
     SearchResponse,
     SetDocumentDraftRequest,
 )
+from app.llm.agents import wiki_merge
 from app.tasks.reindex import index_path
 from app.triggers import repo as triggers_repo
 from app.wiki import (
@@ -612,8 +613,6 @@ def merge_draft(
 
     Returns the merged body for the user to review before saving.
     """
-    from app.llm.agents import wiki_merge
-
     try:
         rel = filesystem.safe_rel_path(req.path)
     except ValueError as e:
@@ -623,12 +622,15 @@ def merge_draft(
         base_body = wiki_git.read_file(rel, ref=req.base_sha)
     except subprocess.CalledProcessError as exc:
         raise HTTPException(status_code=404, detail="base revision not found") from exc
-    merged = wiki_merge.merge(
-        wiki_path=rel,
-        base_body=base_body,
-        current_body=req.current_body,
-        draft_body=req.draft_body,
-    )
+    try:
+        merged = wiki_merge.merge(
+            wiki_path=rel,
+            base_body=base_body,
+            current_body=req.current_body,
+            draft_body=req.draft_body,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
     return MergeResponse(merged=merged)
 
 

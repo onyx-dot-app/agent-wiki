@@ -40,4 +40,8 @@ def merge(
                 {"role": "user", "content": user_msg},
             ],
         )
-    return strip_outer_fence(result.text.strip())
+    text = strip_outer_fence(result.text.strip())
+    if not text:
+        log.warning("wiki_merge: LLM returned empty result for %s", wiki_path)
+        raise RuntimeError("LLM returned empty merge result")
+    return text

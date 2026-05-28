@@ -253,7 +253,7 @@ class MergeRequest(BaseModel):
     """Body for ``POST /api/wiki/file/merge`` (LLM 3-way merge)."""
 
     path: str = Field(min_length=1)
-    base_sha: str
+    base_sha: str = Field(min_length=1)
     current_body: str
     draft_body: str
 
