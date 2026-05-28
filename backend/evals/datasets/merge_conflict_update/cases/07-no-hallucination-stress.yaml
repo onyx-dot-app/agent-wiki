@@ -1,0 +1,42 @@
+id: mc-07-no-hallucination-stress
+wiki_path: architecture/data-flow.md
+base_body: |
+  # Data flow
+
+  Ingest connectors push documents to /api/ingest/push.
+current_body: |
+  # Data flow
+
+  Ingest connectors push documents to /api/ingest/push.
+
+  ## Selector pass
+  An LLM-backed selector narrows BM25 candidates before the reconciler runs.
+draft_body: |
+  # Data flow
+
+  Ingest connectors push documents to /api/ingest/push.
+
+  ## Reconciler pass
+  The reconciler decides per-page CHANGE / NO_CHANGE / IRRELEVANT.
+current_commit_message: "document the selector pre-filter"
+facts_from_current_present:
+  - id: selector
+    text: a Selector pass section describes an LLM-backed narrowing of BM25 candidates
+facts_from_draft_present:
+  - id: reconciler
+    text: a Reconciler pass section names the per-page CHANGE / NO_CHANGE / IRRELEVANT decision
+facts_must_not_appear:
+  - id: hallucinated-vespa
+    text: Vespa is named as the search backend
+  - id: hallucinated-kafka
+    text: Kafka is named as the ingest transport
+  - id: hallucinated-cost
+    text: a specific per-document cost in dollars is given
+  - id: hallucinated-latency-number
+    text: a specific p95 latency number for ingest is given
+expects_conflict_annotation: false
+notes: |
+  Stress test on no-hallucination — model has plausible-but-absent
+  related concepts it could add (Vespa, Kafka, cost numbers). Must
+  not. Both sides' real additions must be preserved.
+tags: [merge, no-hallucination, stress]

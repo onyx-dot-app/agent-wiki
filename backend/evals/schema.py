@@ -25,6 +25,7 @@ Surface = Literal[
     "ingest_selector",
     "external_agent",
     "triggers",
+    "merge_conflict_update",
 ]
 
 
@@ -94,6 +95,38 @@ class IngestSelectorCase(BaseModel):
     doc_content: str
     candidates: list[IngestSelectorCandidate]
     expected_kept_paths: list[str]
+    notes: str = ""
+    tags: list[str] = Field(default_factory=list)
+
+
+class MergeConflictCase(BaseModel):
+    """One case for the 3-way merge conflict resolution agent.
+
+    Exercises ``app.llm.agents.merge_conflict_update.merge(...)`` — the
+    agent reconciles a user's draft with a concurrent HEAD edit against
+    a shared ``base`` (common ancestor). The merged body should preserve
+    intentional changes from both Current and Draft, annotate direct
+    conflicts inline, and never drop or hallucinate information.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    id: str
+    surface: Literal["merge_conflict_update"] = "merge_conflict_update"
+    wiki_path: str
+    base_body: str
+    current_body: str
+    draft_body: str
+    current_commit_message: str | None = None
+
+    # Quality scorer ground truth
+    facts_from_current_present: list[FactClaim] = Field(default_factory=list)
+    facts_from_draft_present: list[FactClaim] = Field(default_factory=list)
+    facts_must_not_appear: list[FactClaim] = Field(default_factory=list)
+    # True when current/draft change the same content directly — output
+    # should carry the conflict annotation ("draft (current from: ...)").
+    expects_conflict_annotation: bool = False
+
     notes: str = ""
     tags: list[str] = Field(default_factory=list)
 

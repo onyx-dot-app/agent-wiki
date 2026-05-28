@@ -1,0 +1,58 @@
+id: mc-08-structural-preservation
+wiki_path: ops/incidents/template.md
+base_body: |
+  # Incident template
+
+  ## Summary
+
+  ## Impact
+
+  ## Timeline
+
+  ## Root cause
+
+  ## Resolution
+current_body: |
+  # Incident template
+
+  ## Summary
+
+  ## Impact
+
+  ## Customer-facing impact (NEW)
+
+  ## Timeline
+
+  ## Root cause
+
+  ## Resolution
+draft_body: |
+  # Incident template
+
+  ## Summary
+
+  ## Impact
+
+  ## Timeline
+
+  ## Root cause
+
+  ## Resolution
+
+  ## Follow-ups (NEW)
+current_commit_message: "add Customer-facing impact section"
+facts_from_current_present:
+  - id: customer-impact-section
+    text: a Customer-facing impact section appears after Impact
+facts_from_draft_present:
+  - id: followups-section
+    text: a Follow-ups section appears after Resolution
+facts_must_not_appear:
+  - id: invented-postmortem-date
+    text: a specific postmortem due-date or SLA is added
+expects_conflict_annotation: false
+notes: |
+  Structural preservation — both sides added new section headings at
+  different points. Output must contain all original sections AND both
+  new ones in sensible order. Heading hierarchy stays at h2.
+tags: [merge, structural, headings]

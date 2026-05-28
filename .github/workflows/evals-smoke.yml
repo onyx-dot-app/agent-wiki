@@ -21,6 +21,8 @@ on:
       - backend/app/llm/agents/common.py
       - backend/app/llm/prompts/wiki_updater.*
       - backend/app/llm/prompts/ingest_*
+      - backend/app/llm/prompts/merge_conflict_update.*
+      - backend/app/llm/agents/merge_conflict_update.py
       - backend/app/triggers/natural_language.py
       - .github/workflows/evals-smoke.yml
   workflow_dispatch:
@@ -86,6 +88,15 @@ jobs:
             --dry-run \
             --runs 1 \
             --out runs/ci_triggers.jsonl
+
+      - name: merge_conflict_update dry-run
+        run: |
+          uv run python -m evals.merge_conflict_update.run \
+            --cases evals/datasets/merge_conflict_update/cases \
+            --models claude-sonnet-4-6 \
+            --dry-run \
+            --runs 1 \
+            --out runs/ci_merge_conflict.jsonl
 
       - name: Verify dry-run produces baseline scores
         run: uv run python -m evals.ci_assert_baseline runs/

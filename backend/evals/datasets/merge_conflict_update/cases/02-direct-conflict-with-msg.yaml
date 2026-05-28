@@ -1,0 +1,34 @@
+id: mc-02-direct-conflict-with-msg
+wiki_path: services/auth/sla.md
+base_body: |
+  # Auth SLA
+
+  Availability target 99.9% monthly.
+  Latency p95 < 250ms.
+current_body: |
+  # Auth SLA
+
+  Availability target 99.95% monthly.
+  Latency p95 < 250ms.
+draft_body: |
+  # Auth SLA
+
+  Availability target 99.99% monthly.
+  Latency p95 < 250ms.
+current_commit_message: "raise auth availability target after Q1 reliability work"
+facts_from_current_present:
+  - id: current-availability
+    text: the 99.95% availability value or its commit-message context is referenced
+facts_from_draft_present:
+  - id: draft-availability
+    text: the 99.99% availability target is the primary value
+facts_must_not_appear:
+  - id: invented-latency
+    text: an availability target of exactly 99.5% is mentioned
+expects_conflict_annotation: true
+notes: |
+  Direct conflict on the same field — both Current and Draft moved the
+  availability number from base 99.9%. Output should keep the draft
+  value as primary and annotate the current value with the commit
+  message context.
+tags: [merge, direct-conflict, annotation]

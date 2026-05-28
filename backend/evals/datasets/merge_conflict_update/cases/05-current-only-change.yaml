@@ -1,0 +1,42 @@
+id: mc-05-current-only-change
+wiki_path: ops/runbooks/postgres-failover.md
+base_body: |
+  # Postgres Failover
+
+  ## Steps
+  1. Promote the standby.
+  2. Reroute the api to the new primary.
+current_body: |
+  # Postgres Failover
+
+  ## Steps
+  1. Promote the standby.
+  2. Reroute the api to the new primary.
+  3. Verify the replication topology is healthy.
+
+  ## Dependencies
+  - PgBouncer pool
+  - Patroni cluster manager
+draft_body: |
+  # Postgres Failover
+
+  ## Steps
+  1. Promote the standby.
+  2. Reroute the api to the new primary.
+current_commit_message: "ops: add post-failover replication check and dependencies"
+facts_from_current_present:
+  - id: new-step
+    text: a step about verifying the replication topology after failover is present
+  - id: new-deps-pgbouncer
+    text: PgBouncer pool is listed as a dependency
+  - id: new-deps-patroni
+    text: the Patroni cluster manager is listed as a dependency
+facts_from_draft_present: []
+facts_must_not_appear:
+  - id: invented-pitr
+    text: point-in-time recovery procedure is named
+expects_conflict_annotation: false
+notes: |
+  Draft is identical to base. All edits are Current-only. Output must
+  preserve Current's additions verbatim.
+tags: [merge, current-only]

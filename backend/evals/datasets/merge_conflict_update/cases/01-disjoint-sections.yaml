@@ -1,0 +1,56 @@
+id: mc-01-disjoint-sections
+wiki_path: services/payments/overview.md
+base_body: |
+  # Payments service
+
+  Built on FastAPI + Postgres. Stripe webhooks land at /webhooks/stripe.
+
+  ## SLOs
+  - p95 latency under 200ms
+  - availability 99.95% monthly
+current_body: |
+  # Payments service
+
+  Built on FastAPI + Postgres. Stripe webhooks land at /webhooks/stripe.
+
+  ## SLOs
+  - p95 latency under 200ms
+  - availability 99.95% monthly
+
+  ## Owners
+  - team: platform
+  - oncall: payments-oncall
+draft_body: |
+  # Payments service
+
+  Built on FastAPI + Postgres. Stripe webhooks land at /webhooks/stripe.
+
+  ## SLOs
+  - p95 latency under 200ms
+  - availability 99.95% monthly
+
+  ## Dependencies
+  - Postgres `payments` schema
+  - Stripe API
+  - Fraud-Detection (soft-allow on timeout)
+current_commit_message: "feat: add Owners section"
+facts_from_current_present:
+  - id: owners-team
+    text: an Owners section names the platform team
+  - id: owners-oncall
+    text: the payments-oncall rotation is listed
+facts_from_draft_present:
+  - id: deps-postgres
+    text: a Dependencies section lists the Postgres payments schema
+  - id: deps-stripe
+    text: the Stripe API is listed as a dependency
+  - id: deps-fraud
+    text: Fraud-Detection with soft-allow on timeout is listed as a dependency
+facts_must_not_appear:
+  - id: invented-grafana
+    text: a Grafana dashboard is named
+expects_conflict_annotation: false
+notes: |
+  Clean disjoint merge. Current added Owners; Draft added Dependencies.
+  Output must contain both sections + the original SLOs.
+tags: [merge, disjoint, easy]

@@ -1,0 +1,41 @@
+id: mc-04-draft-only-change
+wiki_path: ops/runbooks/auth-failover.md
+base_body: |
+  # Auth Failover
+
+  ## Steps
+  1. Page auth on-call.
+  2. Check the auth-api dashboard.
+  3. Fail over to auth-api-standby.
+current_body: |
+  # Auth Failover
+
+  ## Steps
+  1. Page auth on-call.
+  2. Check the auth-api dashboard.
+  3. Fail over to auth-api-standby.
+draft_body: |
+  # Auth Failover
+
+  ## Steps
+  1. Page auth on-call.
+  2. Check the auth-api dashboard.
+  3. Fail over to auth-api-standby.
+  4. After failover, verify token signing is healthy.
+
+  ## Dependencies
+  - PagerDuty service: auth-prod
+facts_from_current_present: []
+facts_from_draft_present:
+  - id: new-step
+    text: a step about verifying token signing after failover is present
+  - id: new-deps
+    text: a Dependencies section names the auth-prod PagerDuty service
+facts_must_not_appear:
+  - id: invented-grafana
+    text: a Grafana dashboard for failover health is named
+expects_conflict_annotation: false
+notes: |
+  Current is identical to base. All edits are Draft-only. Output must
+  preserve Draft additions verbatim with no annotation.
+tags: [merge, draft-only]

@@ -1,0 +1,28 @@
+id: mc-03-direct-conflict-no-msg
+wiki_path: services/checkout/sla.md
+base_body: |
+  # Checkout SLA
+
+  Latency p95 < 350ms.
+current_body: |
+  # Checkout SLA
+
+  Latency p95 < 300ms.
+draft_body: |
+  # Checkout SLA
+
+  Latency p95 < 250ms.
+facts_from_current_present:
+  - id: current-300ms
+    text: the 300ms latency value is preserved (annotated or noted)
+facts_from_draft_present:
+  - id: draft-250ms
+    text: the 250ms latency value is the primary
+facts_must_not_appear:
+  - id: invented-2s
+    text: a 2 second latency value is mentioned
+expects_conflict_annotation: true
+notes: |
+  Direct conflict, no commit message — output should still annotate
+  with the fallback "from another update" wording per the agent prompt.
+tags: [merge, direct-conflict, annotation, no-commit-msg]
