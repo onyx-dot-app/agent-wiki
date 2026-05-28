@@ -169,6 +169,7 @@ def _call_async_nl_update(
     import hashlib
 
     from app.auth import PermissionDenied, require_can
+    from app.llm.agents.tools.errors import ToolError
     from app.wiki import utils as wiki_utils
     from app.mcp_server import jobs as mcp_jobs
     from app.mcp_server import pubsub as mcp_pubsub
@@ -183,7 +184,7 @@ def _call_async_nl_update(
 
     try:
         rel = wiki_utils.validate_doc_path(raw_path)
-    except wiki_utils.ToolError as exc:
+    except ToolError as exc:
         return {"error": str(exc), "stale_paths": _compute_stale_paths(sess)}, True
     if not isinstance(instruction, str) or not instruction.strip():
         return (

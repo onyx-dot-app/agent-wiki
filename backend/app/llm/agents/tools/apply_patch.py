@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.wiki import utils as wiki_utils
+from app.llm.agents.tools.errors import ToolError
 from app.wiki import git as wiki_git
 from app.wiki import patch as wiki_patch
 from app.models.wiki import ChangeKind
@@ -23,14 +24,14 @@ def handle(args: dict[str, Any]) -> Any:
         base_sha = args.get("base_sha")
         activity_ttl = wiki_utils.parse_expires_in_seconds(args.get("expires_in_seconds"))
         if not isinstance(patch, str) or not patch.strip():
-            raise wiki_utils.ToolError("patch is required (non-empty string)")
+            raise ToolError("patch is required (non-empty string)")
         if not isinstance(commit_message, str) or not commit_message.strip():
-            raise wiki_utils.ToolError("commit_message is required")
+            raise ToolError("commit_message is required")
         if base_sha is not None and not isinstance(base_sha, str):
-            raise wiki_utils.ToolError("base_sha must be a string when provided")
+            raise ToolError("base_sha must be a string when provided")
 
         if not wiki_utils.file_exists(path):
-            raise wiki_utils.ToolError(f"file not found: {path}")
+            raise ToolError(f"file not found: {path}")
 
         head_sha = wiki_git.head_sha_for_path(path)
         if base_sha and base_sha != head_sha:
@@ -48,10 +49,10 @@ def handle(args: dict[str, Any]) -> Any:
         try:
             new_body = wiki_patch.apply(old_body, patch)
         except wiki_patch.PatchError as exc:
-            raise wiki_utils.ToolError(str(exc))
+            raise ToolError(str(exc))
 
         if new_body == old_body:
-            raise wiki_utils.ToolError(
+            raise ToolError(
                 "patch produced no change (every hunk was a no-op)"
             )
 
@@ -66,5 +67,5 @@ def handle(args: dict[str, Any]) -> Any:
             "diff": wiki_utils.unified_diff(old_body, new_body, path),
             "broken_links": wiki_utils.broken_links(path, new_body),
         }
-    except wiki_utils.ToolError as exc:
+    except ToolError as exc:
         return {"error": str(exc)}

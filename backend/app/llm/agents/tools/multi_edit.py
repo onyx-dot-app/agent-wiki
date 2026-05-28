@@ -9,6 +9,7 @@ from typing import Any, cast
 
 from app.wiki import utils as wiki_utils
 from app.wiki import edit as wiki_edit
+from app.llm.agents.tools.errors import ToolError
 from app.models.wiki import AiRebaseMaxRetriesError
 
 
@@ -20,29 +21,29 @@ def handle(args: dict[str, Any]) -> Any:
         base_sha = args.get("base_sha")
         activity_ttl = wiki_utils.parse_expires_in_seconds(args.get("expires_in_seconds"))
         if not isinstance(edits_raw, list) or not edits_raw:
-            raise wiki_utils.ToolError("edits must be a non-empty array")
+            raise ToolError("edits must be a non-empty array")
         if not isinstance(commit_message, str) or not commit_message.strip():
-            raise wiki_utils.ToolError("commit_message is required")
+            raise ToolError("commit_message is required")
         if base_sha is not None and not isinstance(base_sha, str):
-            raise wiki_utils.ToolError("base_sha must be a string when provided")
+            raise ToolError("base_sha must be a string when provided")
         edits = cast(list[Any], edits_raw)
 
         # Validate edit shapes up front before touching disk.
         parsed: list[tuple[str, str, bool]] = []
         for i, edit in enumerate(edits):
             if not isinstance(edit, dict):
-                raise wiki_utils.ToolError(f"edit #{i + 1}: must be an object")
+                raise ToolError(f"edit #{i + 1}: must be an object")
             edit_dict = cast(dict[str, Any], edit)
             old_string = edit_dict.get("old_string")
             new_string = edit_dict.get("new_string")
             if not isinstance(old_string, str) or old_string == "":
-                raise wiki_utils.ToolError(f"edit #{i + 1}: old_string is required and non-empty")
+                raise ToolError(f"edit #{i + 1}: old_string is required and non-empty")
             if not isinstance(new_string, str):
-                raise wiki_utils.ToolError(f"edit #{i + 1}: new_string is required (string)")
+                raise ToolError(f"edit #{i + 1}: new_string is required (string)")
             parsed.append((old_string, new_string, bool(edit_dict.get("replace_all", False))))
 
         if not wiki_utils.file_exists(path):
-            raise wiki_utils.ToolError(f"file not found: {path}")
+            raise ToolError(f"file not found: {path}")
 
         base_body = wiki_utils.read_existing(path)
         new_body = base_body
@@ -56,10 +57,10 @@ def handle(args: dict[str, Any]) -> Any:
             stale = wiki_utils.assert_base_sha(path, base_sha)
             if stale is not None:
                 return stale
-            raise wiki_utils.ToolError(str(exc))
+            raise ToolError(str(exc))
 
         if new_body == base_body:
-            raise wiki_utils.ToolError("edits produced no change")
+            raise ToolError("edits produced no change")
 
         try:
             result = wiki_utils.commit_with_ai_rebase(
@@ -76,7 +77,7 @@ def handle(args: dict[str, Any]) -> Any:
             }
 
         if result is None:
-            raise wiki_utils.ToolError("edits produced no change")
+            raise ToolError("edits produced no change")
 
         return {
             "path": path,
@@ -85,5 +86,5 @@ def handle(args: dict[str, Any]) -> Any:
             "diff": wiki_utils.unified_diff(result.old_body, result.new_body, path),
             "broken_links": wiki_utils.broken_links(path, result.new_body),
         }
-    except wiki_utils.ToolError as exc:
+    except ToolError as exc:
         return {"error": str(exc)}

@@ -8,6 +8,7 @@ from typing import Any
 
 from app.wiki import utils as wiki_utils
 from app.wiki import edit as wiki_edit
+from app.llm.agents.tools.errors import ToolError
 from app.models.wiki import AiRebaseMaxRetriesError
 
 
@@ -20,17 +21,17 @@ def handle(args: dict[str, Any]) -> Any:
         base_sha = args.get("base_sha")
         activity_ttl = wiki_utils.parse_expires_in_seconds(args.get("expires_in_seconds"))
         if not isinstance(old_string, str) or old_string == "":
-            raise wiki_utils.ToolError("old_string is required and must be non-empty")
+            raise ToolError("old_string is required and must be non-empty")
         if not isinstance(new_string, str):
-            raise wiki_utils.ToolError("new_string is required (string)")
+            raise ToolError("new_string is required (string)")
         if not isinstance(commit_message, str) or not commit_message.strip():
-            raise wiki_utils.ToolError("commit_message is required")
+            raise ToolError("commit_message is required")
         if base_sha is not None and not isinstance(base_sha, str):
-            raise wiki_utils.ToolError("base_sha must be a string when provided")
+            raise ToolError("base_sha must be a string when provided")
         replace_all = bool(args.get("replace_all", False))
 
         if not wiki_utils.file_exists(path):
-            raise wiki_utils.ToolError(f"file not found: {path}")
+            raise ToolError(f"file not found: {path}")
 
         base_body = wiki_utils.read_existing(path)
         try:
@@ -39,7 +40,7 @@ def handle(args: dict[str, Any]) -> Any:
             stale = wiki_utils.assert_base_sha(path, base_sha)
             if stale is not None:
                 return stale
-            raise wiki_utils.ToolError(str(exc))
+            raise ToolError(str(exc))
 
         try:
             result = wiki_utils.commit_with_ai_rebase(
@@ -56,7 +57,7 @@ def handle(args: dict[str, Any]) -> Any:
             }
 
         if result is None:
-            raise wiki_utils.ToolError("edit produced no change")
+            raise ToolError("edit produced no change")
 
         return {
             "path": path,
@@ -64,5 +65,5 @@ def handle(args: dict[str, Any]) -> Any:
             "diff": wiki_utils.unified_diff(result.old_body, result.new_body, path),
             "broken_links": wiki_utils.broken_links(path, result.new_body),
         }
-    except wiki_utils.ToolError as exc:
+    except ToolError as exc:
         return {"error": str(exc)}

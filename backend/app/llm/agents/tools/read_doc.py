@@ -9,13 +9,14 @@ import subprocess
 from typing import Any
 
 from app.wiki import utils as wiki_utils
+from app.llm.agents.tools.errors import ToolError
 from app.wiki import agent_activity, git as wiki_git
 
 
 def handle(args: dict[str, Any]) -> Any:
     try:
         path = wiki_utils.validate_doc_path(args.get("path"))
-    except wiki_utils.ToolError as exc:
+    except ToolError as exc:
         return {"error": str(exc)}
 
     raw_sha = args.get("sha")

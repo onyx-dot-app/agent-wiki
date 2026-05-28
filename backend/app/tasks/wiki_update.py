@@ -32,6 +32,7 @@ from app.ingest.models import WikiUpdateCandidate
 from app.llm.agents import ingest_batch_reconciler, ingest_selector, nl_updater
 from app.llm.agents.common import IRRELEVANT_SENTINEL
 from app.wiki import utils as wiki_utils
+from app.llm.agents.tools.errors import ToolError
 from app.llm.errors import LLMError
 from app.llm.settings import get as get_llm_settings
 from app.metrics import (
@@ -208,7 +209,7 @@ def _run_inner(job_id: str, rel: str, instruction: str, base_sha: str | None) ->
         )
         mcp_pubsub.publish_job_update(job_id, "failed")
         return
-    except wiki_utils.ToolError as exc:
+    except ToolError as exc:
         mcp_jobs.mark_failed(job_id, error=str(exc))
         mcp_pubsub.publish_job_update(job_id, "failed")
         return

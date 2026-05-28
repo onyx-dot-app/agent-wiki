@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.wiki import utils as wiki_utils
+from app.llm.agents.tools.errors import ToolError
 from app.wiki import git as wiki_git
 from app.models.wiki import AiRebaseMaxRetriesError, ChangeKind
 
@@ -20,11 +21,11 @@ def handle(args: dict[str, Any]) -> Any:
         base_sha = args.get("base_sha")
         activity_ttl = wiki_utils.parse_expires_in_seconds(args.get("expires_in_seconds"))
         if not isinstance(body, str):
-            raise wiki_utils.ToolError("body is required (string)")
+            raise ToolError("body is required (string)")
         if not isinstance(commit_message, str) or not commit_message.strip():
-            raise wiki_utils.ToolError("commit_message is required")
+            raise ToolError("commit_message is required")
         if base_sha is not None and not isinstance(base_sha, str):
-            raise wiki_utils.ToolError("base_sha must be a string when provided")
+            raise ToolError("base_sha must be a string when provided")
 
         existed = wiki_utils.file_exists(path)
         if existed:
@@ -75,5 +76,5 @@ def handle(args: dict[str, Any]) -> Any:
                 "diff": wiki_utils.unified_diff("", body, path),
                 "broken_links": wiki_utils.broken_links(path, body),
             }
-    except wiki_utils.ToolError as exc:
+    except ToolError as exc:
         return {"error": str(exc)}

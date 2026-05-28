@@ -27,15 +27,7 @@ from app.wiki import (
     notify as wiki_notify,
 )
 
-
-class ToolError(Exception):
-    """Tool input was invalid or a precondition failed.
-
-    The handler catches this and returns ``{"error": str(exc)}`` to the
-    model instead of raising. Use for user-facing error messages — the
-    string is shown to the LLM verbatim.
-    """
-
+from app.llm.agents.tools.errors import ToolError
 
 # --------------------------------------------------------------------------- #
 # Path validation                                                             #
