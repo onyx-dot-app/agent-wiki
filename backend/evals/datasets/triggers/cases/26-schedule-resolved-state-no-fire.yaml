@@ -1,0 +1,28 @@
+id: trig-26-schedule-resolved-state-no-fire
+flavor: schedule
+nl_description: |
+  when any open incident under incidents/ is older than 7 days and still
+  has status "investigating"
+message_instruction: |
+  List incident paths, the open date, and current status.
+wiki_state:
+  - path: incidents/2026-04-15-billing-spike.md
+    body: |
+      # 2026-04-15 Billing spike
+      Opened: 2026-04-15
+      Status: resolved
+      Owner: alice
+  - path: incidents/2026-05-01-search-degraded.md
+    body: |
+      # 2026-05-01 Search degraded
+      Opened: 2026-05-01
+      Status: resolved
+      Owner: bob
+scope_path: incidents
+when_iso: "2026-05-28T05:00:00Z"
+expected_matched: false
+notes: |
+  All incidents in scope are resolved. The trigger gates on
+  status="investigating" — must not fire on resolved incidents even
+  though they are older than 7 days.
+tags: [schedule, no-fire, restraint, state]

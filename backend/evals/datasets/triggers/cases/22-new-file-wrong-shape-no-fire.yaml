@@ -1,0 +1,22 @@
+id: trig-22-new-file-wrong-shape-no-fire
+flavor: new_file
+nl_description: |
+  when a new ADR (Architecture Decision Record) is added under architecture/
+message_instruction: |
+  Name the ADR title and link the path.
+wiki_state:
+  - path: architecture/index.md
+    body: |
+      # Architecture Decision Records
+      Living index of ADRs that document significant design decisions.
+new_file_path: architecture/diagrams-export-notes.md
+new_file_body: |
+  # Diagrams export notes
+  Notes on exporting Excalidraw diagrams to SVG for committing alongside
+  ADRs. Steps: open in Excalidraw → Export → SVG → save under
+  architecture/diagrams/.
+expected_matched: false
+notes: |
+  Restraint — file is filed under architecture/ but is process notes,
+  not an ADR. ADRs have Status/Context/Decision/Consequences sections.
+tags: [new_file, no-fire, restraint, shape]

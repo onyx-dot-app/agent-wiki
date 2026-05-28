@@ -1,0 +1,36 @@
+id: trig-13-delta-negation-match
+flavor: delta
+nl_description: when a runbook removes (not adds) a postgres restart step
+message_instruction: |
+  Tell oncall a postgres restart step was REMOVED and link the page.
+wiki_state:
+  - path: ops/postgres-failover.md
+    body: |
+      # Postgres Failover
+      ## Steps
+      1. Promote the standby.
+      2. Restart the writer pod.
+      3. Reroute the api to the new primary.
+change_path: ops/postgres-failover.md
+change_kind: edit
+before: |
+  # Postgres Failover
+  ## Steps
+  1. Promote the standby.
+  2. Restart the writer pod.
+  3. Reroute the api to the new primary.
+after: |
+  # Postgres Failover
+  ## Steps
+  1. Promote the standby.
+  2. Reroute the api to the new primary.
+expected_matched: true
+expected_reason_facts:
+  - id: r-removed
+    text: The reason notes the writer-pod restart step was removed.
+expected_message_facts_present:
+  - id: m-removed
+    text: The message indicates a restart step was removed.
+  - id: m-page
+    text: The message links ops/postgres-failover.md.
+tags: [delta, fire, negation, removal]

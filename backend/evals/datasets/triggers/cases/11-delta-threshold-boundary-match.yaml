@@ -1,0 +1,31 @@
+id: trig-11-delta-threshold-boundary-match
+flavor: delta
+nl_description: when a service SLO target drops below 99.9% availability
+message_instruction: |
+  Name the service and the new availability target.
+wiki_state:
+  - path: services/payments/sla.md
+    body: |
+      # Payments SLA
+      Availability target 99.95% monthly.
+      Latency p95 < 200ms.
+change_path: services/payments/sla.md
+change_kind: edit
+before: |
+  # Payments SLA
+  Availability target 99.95% monthly.
+  Latency p95 < 200ms.
+after: |
+  # Payments SLA
+  Availability target 99.5% monthly.
+  Latency p95 < 200ms.
+expected_matched: true
+expected_reason_facts:
+  - id: r-payments-99-5
+    text: The reason notes the payments availability target dropped to 99.5%.
+expected_message_facts_present:
+  - id: m-svc
+    text: The message names the payments service.
+  - id: m-target
+    text: The message notes the 99.5% availability target.
+tags: [delta, fire, threshold]

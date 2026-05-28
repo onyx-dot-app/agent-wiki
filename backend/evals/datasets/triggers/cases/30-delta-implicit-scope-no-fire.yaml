@@ -1,0 +1,34 @@
+id: trig-30-delta-implicit-scope-no-fire
+flavor: delta
+nl_description: |
+  when the production deploy schedule changes (not the staging schedule)
+message_instruction: |
+  Quote the old and new production deploy times.
+wiki_state:
+  - path: ops/deploy/schedule-multi.md
+    body: |
+      # Deploy schedule
+      ## Production
+      Daily at 16:00 UTC.
+      ## Staging
+      Every push to main.
+change_path: ops/deploy/schedule-multi.md
+change_kind: edit
+before: |
+  # Deploy schedule
+  ## Production
+  Daily at 16:00 UTC.
+  ## Staging
+  Every push to main.
+after: |
+  # Deploy schedule
+  ## Production
+  Daily at 16:00 UTC.
+  ## Staging
+  Every push to main, plus a nightly 02:00 UTC snapshot deploy.
+expected_matched: false
+notes: |
+  Implicit-scope distractor — diff touches the Staging section, not
+  Production. Trigger fires only on production. Same doc, both sections,
+  one in scope and one out. Must not fire.
+tags: [delta, no-fire, scope, multi-section]

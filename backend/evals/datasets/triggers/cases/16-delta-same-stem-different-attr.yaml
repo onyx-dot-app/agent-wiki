@@ -1,0 +1,29 @@
+id: trig-16-delta-same-stem-different-attr
+flavor: delta
+nl_description: when a service's owner team changes
+message_instruction: |
+  Name the service and the new owner team.
+wiki_state:
+  - path: services/checkout/owners.md
+    body: |
+      # Checkout owners
+      - team: platform
+      - oncall rotation: checkout-oncall
+      - escalation: vp-engineering
+change_path: services/checkout/owners.md
+change_kind: edit
+before: |
+  # Checkout owners
+  - team: platform
+  - oncall rotation: checkout-oncall
+  - escalation: vp-engineering
+after: |
+  # Checkout owners
+  - team: platform
+  - oncall rotation: checkout-fast-oncall
+  - escalation: vp-engineering
+expected_matched: false
+notes: |
+  Same-stem distractor — the diff changes oncall rotation, not the
+  owner team. The team stayed `platform`. Must not fire.
+tags: [delta, no-fire, distractor, attribute]

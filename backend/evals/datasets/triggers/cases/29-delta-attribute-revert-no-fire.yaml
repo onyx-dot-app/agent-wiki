@@ -1,0 +1,29 @@
+id: trig-29-delta-attribute-revert-no-fire
+flavor: delta
+nl_description: when the status of any service flips to yellow or red
+message_instruction: |
+  Post a short alert naming the service and the new status.
+wiki_state:
+  - path: ops/status-multi.md
+    body: |
+      # Service Status
+      - api: yellow
+      - worker: green
+      - billing: green
+change_path: ops/status-multi.md
+change_kind: edit
+before: |
+  # Service Status
+  - api: yellow
+  - worker: green
+  - billing: green
+after: |
+  # Service Status
+  - api: green
+  - worker: green
+  - billing: green
+expected_matched: false
+notes: |
+  Direction discipline — the diff is a flip BACK to green, not a flip TO
+  yellow/red. The trigger fires on going non-green, not on recovery.
+tags: [delta, no-fire, direction, revert]

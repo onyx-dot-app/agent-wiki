@@ -1,0 +1,43 @@
+id: trig-19-schedule-state-multi-doc
+flavor: schedule
+nl_description: |
+  when any open incident under incidents/ is older than 7 days and still
+  has status "investigating"
+message_instruction: |
+  List incident paths, the open date, and current status.
+wiki_state:
+  - path: incidents/2026-05-12-billing-degraded.md
+    body: |
+      # 2026-05-12 Billing degraded
+      Opened: 2026-05-12
+      Status: investigating
+      Owner: alice
+  - path: incidents/2026-05-27-api-blip.md
+    body: |
+      # 2026-05-27 API blip
+      Opened: 2026-05-27
+      Status: investigating
+      Owner: bob
+  - path: incidents/2026-04-30-search-outage.md
+    body: |
+      # 2026-04-30 Search outage
+      Opened: 2026-04-30
+      Status: resolved
+      Owner: carol
+scope_path: incidents
+when_iso: "2026-05-28T05:00:00Z"
+expected_matched: true
+expected_reason_facts:
+  - id: r-billing-old
+    text: The reason notes the billing degraded incident from 2026-05-12 is over 7 days old with investigating status.
+expected_message_facts_present:
+  - id: m-billing-path
+    text: The message references incidents/2026-05-12-billing-degraded.md.
+  - id: m-billing-opened
+    text: The message includes the 2026-05-12 open date.
+expected_message_facts_excluded:
+  - id: x-api-blip
+    text: The message references the 2026-05-27 API blip incident.
+  - id: x-resolved
+    text: The message references the resolved 2026-04-30 search outage.
+tags: [schedule, fire, state, multi-doc, age]

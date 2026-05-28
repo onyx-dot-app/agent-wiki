@@ -1,0 +1,31 @@
+id: trig-24-delta-reorder-no-fire
+flavor: delta
+nl_description: when a service runbook adds a new failover step
+message_instruction: |
+  Note the runbook and the new step.
+wiki_state:
+  - path: ops/runbooks/auth-failover.md
+    body: |
+      # Auth failover
+      ## Steps
+      1. Page auth on-call.
+      2. Check the `auth-api` dashboard.
+      3. Fail over to `auth-api-standby`.
+change_path: ops/runbooks/auth-failover.md
+change_kind: edit
+before: |
+  # Auth failover
+  ## Steps
+  1. Page auth on-call.
+  2. Check the `auth-api` dashboard.
+  3. Fail over to `auth-api-standby`.
+after: |
+  # Auth failover
+  ## Steps
+  1. Check the `auth-api` dashboard.
+  2. Page auth on-call.
+  3. Fail over to `auth-api-standby`.
+expected_matched: false
+notes: |
+  Restraint — diff reorders existing steps. No new step. Must not fire.
+tags: [delta, no-fire, reorder, distractor]
