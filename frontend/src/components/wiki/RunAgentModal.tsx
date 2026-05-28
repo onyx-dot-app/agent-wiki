@@ -6,14 +6,14 @@ import { SetupWizard } from "@/components/agents/SetupWizard";
 import { ToolCard } from "@/components/agents/ToolCard";
 import { WorkingDirInput } from "@/components/agents/WorkingDirInput";
 import { Button, MessageCard, Text } from "@onyx-ai/opal/components";
-import { InputVertical, Section } from "@onyx-ai/opal/layouts";
+import { SvgChevronDown, SvgFileText, SvgX } from "@onyx-ai/opal/icons";
+import { SvgClaude, SvgOnyxLogo, SvgOpenai } from "@onyx-ai/opal/logos";
 import { ApiError } from "@/lib/api";
 import {
   launch,
   probeHelper,
   useAgentSessions,
   useLauncherCatalog,
-  type LauncherCatalogEntry,
 } from "@/lib/launchers";
 
 import styles from "./RunAgentModal.module.css";
@@ -29,21 +29,35 @@ interface ProbeState {
   machineId: string | null;
 }
 
+function agentIcon(id: string | null) {
+  if (!id) return undefined;
+  if (id.includes("claude")) return SvgClaude;
+  if (id.includes("codex") || id.includes("openai")) return SvgOpenai;
+  if (id.includes("craft") || id.includes("onyx")) return SvgOnyxLogo;
+  return undefined;
+}
+
+function docName(wikiPath: string | null): string | null {
+  if (!wikiPath) return null;
+  const base = wikiPath.split("/").pop() ?? wikiPath;
+  return base.replace(/\.md$/, "");
+}
+
 export function RunAgentModal({ open, onClose, wikiPath }: Props) {
   const [probe, setProbe] = useState<ProbeState | null>(null);
   const { launchers, refresh: refreshCatalog } = useLauncherCatalog({
     machineId: probe?.machineId ?? null,
     wikiPath,
   });
-  const { sessions, refresh: refreshSessions } = useAgentSessions(
-    wikiPath ?? undefined,
-  );
+  const { refresh: refreshSessions } = useAgentSessions(wikiPath ?? undefined);
   const launchable = useMemo(
     () => launchers.filter((c) => c.available_for_launch),
     [launchers],
   );
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [docContextOn, setDocContextOn] = useState(true);
   const [workingDir, setWorkingDir] = useState("");
   const [workdirEdited, setWorkdirEdited] = useState(false);
   const [rememberWorkdir, setRememberWorkdir] = useState(false);
@@ -134,6 +148,12 @@ export function RunAgentModal({ open, onClose, wikiPath }: Props) {
     setWorkingDir(next);
   };
 
+  const selected = launchers.find((c) => c.id === selectedId);
+  const selectedName = selected?.name ?? "your agent";
+  const selectedKind = selected?.kind;
+  const docLabel = docName(wikiPath);
+  const SelectedIcon = agentIcon(selectedId);
+
   async function onRun(e: FormEvent) {
     e.preventDefault();
     if (!selectedId) return;
@@ -162,16 +182,14 @@ export function RunAgentModal({ open, onClose, wikiPath }: Props) {
       }
       const res = await launch({
         tool_id: selectedId,
-        wiki_path: wikiPath,
+        // Removing the doc-context chip launches without page context.
+        wiki_path: docContextOn ? wikiPath : null,
         working_dir: workingDir.trim() || null,
         message,
         machine_id: probe?.machineId ?? undefined,
         remember_workdir_for_page: rememberWorkdir,
       });
       window.location.href = res.uri;
-      // Clear the stash now that the launch went through — leaving it
-      // would pre-fill the next modal open for this page with the
-      // previous message + workdir.
       if (wikiPath) {
         sessionStorage.removeItem(`agentwiki:pending-launch:${wikiPath}`);
       }
@@ -190,22 +208,33 @@ export function RunAgentModal({ open, onClose, wikiPath }: Props) {
     launchable.some((c) => c.id === selectedId);
 
   return (
-    <div
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-      className={styles.scrim}
+    <form
+      onSubmit={onRun}
+      role="dialog"
+      aria-label="Quick Launch Agent"
+      className={styles.panel}
     >
-      <form
-        onSubmit={onRun}
-        role="dialog"
-        aria-modal="true"
-        aria-label="Run agent"
-        className={styles.dialog}
-      >
-        <h2 className={styles.title}>Run agent</h2>
+      <div className={styles.headerBand}>
+        <div className={styles.headerText}>
+          <Text font="main-content-emphasis" color="text-04">
+            Quick Launch Agent
+          </Text>
+          <Text font="secondary-body" color="text-03">
+            Start a session with your external agents
+          </Text>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close"
+          className={styles.closeBtn}
+        >
+          <SvgX />
+        </button>
+      </div>
 
-        {wizardOpen ? (
+      {wizardOpen ? (
+        <div className={styles.contentBand}>
           <SetupWizard
             catalog={launchers}
             onDone={() => {
@@ -215,152 +244,133 @@ export function RunAgentModal({ open, onClose, wikiPath }: Props) {
             }}
             onCancel={() => setWizardOpen(false)}
           />
-        ) : (
-          <>
-            <ToolList
-              catalog={launchable}
-              selectedId={selectedId}
-              onSelect={setSelectedId}
-            />
+        </div>
+      ) : (
+        <>
+          <div className={styles.contentBand}>
+            <div className={styles.section}>
+              <Text font="main-ui-action" color="text-04">
+                Agent to Launch
+              </Text>
+              {launchable.length === 0 ? (
+                <Text font="secondary-body" color="text-03">
+                  No launchable agents available yet.
+                </Text>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    className={styles.select}
+                    onClick={() => setPickerOpen((o) => !o)}
+                  >
+                    {SelectedIcon && (
+                      <span className={styles.selectIcon}>
+                        <SelectedIcon />
+                      </span>
+                    )}
+                    <span className={styles.selectName}>{selectedName}</span>
+                    <span className={styles.selectChevron}>
+                      <SvgChevronDown />
+                    </span>
+                  </button>
+                  {pickerOpen && launchable.length > 1 && (
+                    <div className={styles.picker}>
+                      {launchable.map((c) => (
+                        <ToolCard
+                          key={c.id}
+                          toolId={c.id}
+                          name={c.name}
+                          tagline={c.tagline}
+                          selected={c.id === selectedId}
+                          onSelect={() => {
+                            setSelectedId(c.id);
+                            setPickerOpen(false);
+                          }}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
 
-            <WorkingDirInput
-              value={workingDir}
-              onChange={handleWorkdirChange}
-              remember={rememberWorkdir}
-              onRememberChange={setRememberWorkdir}
-              pageHasBinding={
-                !!launchers.find((c) => c.id === selectedId)
-                  ?.default_working_dir
-              }
-            />
-
-            {(() => {
-              const sel = launchers.find((c) => c.id === selectedId);
-              const warning = sel?.unscoped_workdir_warning;
-              if (!warning || workingDir.trim().length > 0) return null;
-              // Backend includes a leading "No directory set — " in the
-              // string; drop it so it isn't duplicated under the title.
-              const body = warning.replace(/^No directory set\s*[—-]\s*/, "");
-              return (
-                <MessageCard
-                  variant="warning"
-                  title="No directory set"
-                  description={body}
+            {selectedKind === "local_cli" && (
+              <>
+                <WorkingDirInput
+                  value={workingDir}
+                  onChange={handleWorkdirChange}
+                  remember={rememberWorkdir}
+                  onRememberChange={setRememberWorkdir}
+                  pageHasBinding={!!selected?.default_working_dir}
                 />
-              );
-            })()}
 
-            <InputVertical title="Message" withLabel="run-agent-message">
-              <textarea
-                id="run-agent-message"
-                value={message}
-                onChange={(e) => setMessage(e.target.value)}
-                placeholder="What should the agent do with this doc?"
-                rows={4}
-                maxLength={16_384}
-                className={styles.textarea}
-              />
-            </InputVertical>
+                {(() => {
+                  const warning = selected?.unscoped_workdir_warning;
+                  if (!warning || workingDir.trim().length > 0) return null;
+                  const body = warning.replace(
+                    /^No directory set\s*[—-]\s*/,
+                    "",
+                  );
+                  return (
+                    <MessageCard
+                      variant="warning"
+                      title="No directory set"
+                      description={body}
+                    />
+                  );
+                })()}
+              </>
+            )}
 
-            {(() => {
-              const live = sessions.filter(
-                (s) => s.status === "active" || s.status === "idle",
-              );
-              if (live.length === 0) return null;
-              return (
-                <InputVertical title="Active sessions on this page">
-                  {live.map((s) => (
-                    <Text
-                      key={s.id}
-                      font="secondary-body"
-                      color="text-03"
-                      nowrap
-                    >
-                      {`${s.tool_id} · ${s.status} · ${s.started_at}`}
-                    </Text>
-                  ))}
-                </InputVertical>
-              );
-            })()}
+            <div className={styles.divider} />
+
+            <div className={styles.section}>
+              <Text font="main-ui-action" color="text-04">
+                Message
+              </Text>
+              <div className={styles.taginput}>
+                <div className={styles.taginputBody}>
+                  {docContextOn && docLabel && (
+                    <span className={styles.chip}>
+                      <SvgFileText />
+                      <span className={styles.chipLabel}>{docLabel}</span>
+                      <button
+                        type="button"
+                        className={styles.chipClose}
+                        aria-label="Remove page context"
+                        onClick={() => setDocContextOn(false)}
+                      >
+                        <SvgX />
+                      </button>
+                    </span>
+                  )}
+                  <textarea
+                    id="run-agent-message"
+                    className={styles.taginputArea}
+                    value={message}
+                    onChange={(e) => setMessage(e.target.value)}
+                    placeholder="Add more details and tasks for the agent"
+                    rows={3}
+                    maxLength={16_384}
+                  />
+                </div>
+              </div>
+            </div>
 
             {error && <MessageCard variant="error" title={error} />}
+          </div>
 
-            <Section
-              flexDirection="row"
-              justifyContent="between"
-              alignItems="center"
-              width="full"
-            >
-              <Button
-                prominence="tertiary"
-                size="sm"
-                onClick={() => setWizardOpen(true)}
-              >
-                Set up another tool →
-              </Button>
-              <Section
-                flexDirection="row"
-                justifyContent="end"
-                alignItems="center"
-                width="fit"
-                gap={1}
-              >
-                <Button type="button" prominence="secondary" onClick={onClose}>
-                  Cancel
-                </Button>
-                <Button
-                  type="submit"
-                  variant="action"
-                  disabled={!canRun || busy}
-                >
-                  {busy ? "Launching..." : "Run"}
-                </Button>
-              </Section>
-            </Section>
-          </>
-        )}
-      </form>
-    </div>
-  );
-}
-
-function ToolList({
-  catalog,
-  selectedId,
-  onSelect,
-}: {
-  catalog: LauncherCatalogEntry[];
-  selectedId: string | null;
-  onSelect: (id: string) => void;
-}) {
-  if (catalog.length === 0) {
-    return (
-      <Text font="secondary-body" color="text-03">
-        No launchable tools available yet.
-      </Text>
-    );
-  }
-  return (
-    <InputVertical title="Tool">
-      <Section
-        flexDirection="column"
-        alignItems="stretch"
-        justifyContent="start"
-        gap={1}
-        width="full"
-        height="fit"
-      >
-        {catalog.map((c) => (
-          <ToolCard
-            key={c.id}
-            toolId={c.id}
-            name={c.name}
-            tagline={c.tagline}
-            selected={c.id === selectedId}
-            onSelect={() => onSelect(c.id)}
-          />
-        ))}
-      </Section>
-    </InputVertical>
+          <div className={styles.footerBand}>
+            <span className={styles.helper}>
+              This will launch a session in <strong>{selectedName}</strong> with
+              your message.
+            </span>
+            <Button type="submit" variant="action" disabled={!canRun || busy}>
+              {busy ? "Launching..." : "Start"}
+            </Button>
+          </div>
+        </>
+      )}
+    </form>
   );
 }
