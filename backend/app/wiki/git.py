@@ -417,9 +417,11 @@ def get_edit_draft(rel_path: str, user_id: str) -> dict[str, str] | None:
 
 
 def delete_edit_draft(rel_path: str, user_id: str) -> None:
-    """Delete the draft branch for ``(rel_path, user_id)``."""
+    """Delete the draft branch for ``(rel_path, user_id)`` if it exists."""
     branch = _draft_branch(rel_path, user_id)
-    _run(["update-ref", "-d", f"refs/heads/{branch}"], check=False)
+    if _run(["rev-parse", "--verify", f"refs/heads/{branch}"], check=False).returncode != 0:
+        return
+    _run(["update-ref", "-d", f"refs/heads/{branch}"])
     log.debug("delete_edit_draft %s user=%s", rel_path, user_id)
 
 
