@@ -1,0 +1,33 @@
+.view {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.header {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--color-border-subtle);
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+
+.title {
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.meta {
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.body {
+  overflow: auto;
+  padding: 12px;
+}
+
+.empty {
+  padding: 24px;
+  text-align: center;
+  color: var(--color-text-muted);
+}
