@@ -449,12 +449,18 @@ class RebaseResult(BaseModel):
     draft_body: str       # original draft content (for conflict UI)
 
 
-def merge_content(base_body: str, current_body: str, incoming_body: str) -> tuple[str, bool]:
+class MergeResult(BaseModel):
+    """Result of a ``merge_content`` call."""
+
+    merged: str   # merged text (clean) or text with conflict markers
+    clean: bool   # True = no conflicts, False = conflict markers present
+
+
+def merge_content(base_body: str, current_body: str, incoming_body: str) -> MergeResult:
     """3-way merge ``incoming_body`` onto ``current_body`` using ``base_body`` as ancestor.
 
-    Returns ``(merged_text, clean)`` where ``clean=True`` means no conflict
-    markers were produced.  Raises ``RuntimeError`` on a hard git error
-    (negative returncode — e.g. binary file, permission failure).
+    Raises ``RuntimeError`` on a hard git error (negative returncode — e.g.
+    binary file, permission failure).
     """
     paths: list[str] = []
     try:
@@ -475,7 +481,7 @@ def merge_content(base_body: str, current_body: str, incoming_body: str) -> tupl
             raise RuntimeError(
                 f"git merge-file failed (exit {result.returncode}): {result.stderr.strip()}"
             )
-        return result.stdout, result.returncode == 0
+        return MergeResult(merged=result.stdout, clean=result.returncode == 0)
     finally:
         for p in paths:
             Path(p).unlink(missing_ok=True)
@@ -504,12 +510,12 @@ def rebase_draft(rel_path: str, user_id: str) -> RebaseResult | None:
     base_body = read_file(rel_path, ref=draft["base_sha"])
     draft_body = draft["content"]
 
-    merged, clean = merge_content(base_body, current_body, draft_body)
+    mr = merge_content(base_body, current_body, draft_body)
 
     return RebaseResult(
-        merged=merged,
+        merged=mr.merged,
         base_sha=head_sha,
-        clean=clean,
+        clean=mr.clean,
         current_body=current_body,
         draft_body=draft_body,
     )

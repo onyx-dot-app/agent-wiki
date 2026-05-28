@@ -144,12 +144,12 @@ def put_document_by_path(
             try:
                 base_body = wiki_git.read_file(rel, ref=req.base_sha)
                 current_body = abs_path.read_text()
-                merged, clean = wiki_git.merge_content(base_body, current_body, req.body)
+                mr = wiki_git.merge_content(base_body, current_body, req.body)
             except (subprocess.CalledProcessError, RuntimeError):
                 raise HTTPException(status_code=409, detail="conflict detected")
-            if not clean:
+            if not mr.clean:
                 raise HTTPException(status_code=409, detail="conflict detected")
-            body_to_commit = merged
+            body_to_commit = mr.merged
             log.info("doc auto-merged %s by %s", rel, author or "?")
     sha = wiki_git.commit_file(rel, body_to_commit, msg, author=author)
     wiki_notify.after_doc_write(
