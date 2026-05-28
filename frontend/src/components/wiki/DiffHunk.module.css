@@ -30,16 +30,12 @@
 }
 
 .add {
-  background: color-mix(
-    in srgb,
-    var(--color-state-success-bg) 60%,
-    transparent
-  );
+  background: var(--color-state-success-bg);
   border-left-color: var(--color-state-success-border);
 }
 
 .remove {
-  background: color-mix(in srgb, var(--color-state-danger-bg) 50%, transparent);
+  background: var(--color-state-danger-bg);
   border-left-color: var(--color-state-danger-border);
 }
 
