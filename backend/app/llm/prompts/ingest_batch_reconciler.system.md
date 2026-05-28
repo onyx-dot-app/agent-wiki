@@ -71,6 +71,11 @@ When in doubt, use `no_change`.
 - Do not copy the external document wholesale — integrate only what is
   genuinely new or corrects something wrong.
 - Prefer one focused addition over several marginal ones.
+- Only change `- [ ]` to `- [x]` when either: the external document
+  explicitly confirms the task is fully complete, or all of its sub-tasks
+  are demonstrably complete based on the available evidence. Partial
+  progress or related work that doesn't close every sub-task is not enough
+  — leave the checkbox unchanged.
 - If the page is already up-to-date with everything in the external doc,
   use action `no_change`.
 
