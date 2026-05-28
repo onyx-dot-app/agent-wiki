@@ -1,7 +1,8 @@
+import type { JSX } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
-import type { DiffHunk as DiffHunkData, DiffLine } from "@/lib/wiki";
+import type { DiffHunk as DiffHunkData, DiffLine, WordDiff } from "@/lib/wiki";
 
 import styles from "./DiffHunk.module.css";
 
@@ -46,25 +47,102 @@ function groupEntries(lines: DiffLine[]): Entry[] {
   return out;
 }
 
+const HEADING_RE = /^(#{1,6})\s+(.*)$/;
+const LIST_RE = /^(\s*)([-*+])\s+(.*)$/;
+const ORDERED_LIST_RE = /^(\s*)(\d+\.)\s+(.*)$/;
+const BLOCKQUOTE_RE = /^(>+)\s*(.*)$/;
+
+function WordChips({ w }: { w: WordDiff | null }) {
+  if (!w) return null;
+  return (
+    <>
+      {w.removed ? <del className={styles.wordRemoved}>{w.removed}</del> : null}
+      {w.added ? <ins className={styles.wordAdded}>{w.added}</ins> : null}
+    </>
+  );
+}
+
+function WordLine({ w }: { w: WordDiff | null }) {
+  if (!w) return null;
+
+  const headingMatch = HEADING_RE.exec(w.prefix);
+  if (headingMatch && headingMatch[1] !== undefined) {
+    const level = headingMatch[1].length;
+    const Tag = `h${level}` as keyof JSX.IntrinsicElements;
+    const headingPrefixText = headingMatch[2] ?? "";
+    return (
+      <Tag>
+        {headingPrefixText}
+        <WordChips w={w} />
+        {w.suffix}
+      </Tag>
+    );
+  }
+
+  const listMatch = LIST_RE.exec(w.prefix);
+  if (listMatch) {
+    const indent = listMatch[1] ?? "";
+    const listPrefixText = listMatch[3] ?? "";
+    return (
+      <ul>
+        <li>
+          {indent}
+          {listPrefixText}
+          <WordChips w={w} />
+          {w.suffix}
+        </li>
+      </ul>
+    );
+  }
+
+  const orderedListMatch = ORDERED_LIST_RE.exec(w.prefix);
+  if (orderedListMatch) {
+    const indent = orderedListMatch[1] ?? "";
+    const listPrefixText = orderedListMatch[3] ?? "";
+    return (
+      <ol>
+        <li>
+          {indent}
+          {listPrefixText}
+          <WordChips w={w} />
+          {w.suffix}
+        </li>
+      </ol>
+    );
+  }
+
+  const blockquoteMatch = BLOCKQUOTE_RE.exec(w.prefix);
+  if (blockquoteMatch) {
+    const quotePrefixText = blockquoteMatch[2] ?? "";
+    return (
+      <blockquote>
+        <p>
+          {quotePrefixText}
+          <WordChips w={w} />
+          {w.suffix}
+        </p>
+      </blockquote>
+    );
+  }
+
+  return (
+    <p>
+      {w.prefix}
+      <WordChips w={w} />
+      {w.suffix}
+    </p>
+  );
+}
+
 export function DiffHunk({ hunk }: { hunk: DiffHunkData }) {
   const entries = groupEntries(hunk.lines);
   return (
     <section className={styles.hunk}>
       {entries.map((entry, idx) => {
         if (entry.kind === "word") {
-          const w = entry.line.word_diff;
           return (
             <div key={idx} className={`${styles.wordLine} markdown`}>
-              <p>
-                {w?.prefix ?? ""}
-                {w?.removed ? (
-                  <del className={styles.wordRemoved}>{w.removed}</del>
-                ) : null}
-                {w?.added ? (
-                  <ins className={styles.wordAdded}>{w.added}</ins>
-                ) : null}
-                {w?.suffix ?? ""}
-              </p>
+              <WordLine w={entry.line.word_diff} />
             </div>
           );
         }

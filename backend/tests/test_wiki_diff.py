@@ -173,25 +173,33 @@ def test_promote_word_diff_remove_not_adjacent_to_add_no_promote() -> None:
     assert kinds == ["remove", "context", "add"]
 
 
-def test_promote_word_diff_skips_markdown_heading_lines() -> None:
-    # Headings/lists/code-fences must stay as block remove+add so the
-    # markdown renderer sees them — word-line render is plain text and
-    # would surface a literal `##` / `- `.
+def test_promote_word_diff_promotes_heading_lines() -> None:
+    # Heading word-edits stay inline — the frontend parses the
+    # markdown-block prefix when rendering the word-line so the
+    # resulting <h1>/<h2>/... wraps the inline <del>/<ins> chips.
     hunk = _make_hunk(
         DiffLine(
             kind="remove",
-            text="## Week of 2026-05-18",
+            text="# macOS Launcher App",
             word_diff=None,
             old_lineno=1,
             new_lineno=None,
         ),
         DiffLine(
-            kind="add", text="## Week of 2026-05-19", word_diff=None, old_lineno=None, new_lineno=1
+            kind="add",
+            text="# macOS Launcher Application",
+            word_diff=None,
+            old_lineno=None,
+            new_lineno=1,
         ),
     )
     out = _promote_word_diff(hunk)
     kinds = [line.kind for line in out.lines]
-    assert kinds == ["remove", "add"]
+    assert kinds == ["word"]
+    assert out.lines[0].word_diff is not None
+    assert out.lines[0].word_diff.prefix == "# macOS Launcher "
+    assert out.lines[0].word_diff.removed == "App"
+    assert out.lines[0].word_diff.added == "Application"
 
 
 def test_promote_word_diff_skips_when_no_common_content() -> None:
@@ -219,14 +227,16 @@ def test_promote_word_diff_skips_when_no_common_content() -> None:
     assert kinds == ["remove", "add"]
 
 
-def test_promote_word_diff_skips_list_item_lines() -> None:
+def test_promote_word_diff_promotes_list_item_lines() -> None:
+    # List-item word-edits also stay inline. The frontend parses the
+    # `- ` prefix and renders the word-line as a <li> with inline chips.
     hunk = _make_hunk(
         DiffLine(kind="remove", text="- one item", word_diff=None, old_lineno=1, new_lineno=None),
         DiffLine(kind="add", text="- another item", word_diff=None, old_lineno=None, new_lineno=1),
     )
     out = _promote_word_diff(hunk)
     kinds = [line.kind for line in out.lines]
-    assert kinds == ["remove", "add"]
+    assert kinds == ["word"]
 
 
 def test_promote_word_diff_two_independent_edit_blocks_both_promote() -> None:
@@ -269,17 +279,11 @@ def test_parse_commit_diff_modify(doc_with_two_commits: tuple[str, str, str]) ->
     assert out.parent_sha is not None
     assert out.is_creation is False
     assert len(out.hunks) >= 1
-    # Word-diff promotion is intentionally disabled in parse_commit_diff
-    # for visual consistency — every change renders as a block
-    # remove + block add pair. Confirm both kinds appear and "word" doesn't.
-    kinds = {line.kind for hunk in out.hunks for line in hunk.lines}
-    assert "remove" in kinds
-    assert "add" in kinds
-    assert "word" not in kinds
-    remove_texts = [line.text for hunk in out.hunks for line in hunk.lines if line.kind == "remove"]
-    add_texts = [line.text for hunk in out.hunks for line in hunk.lines if line.kind == "add"]
-    assert "line two" in remove_texts
-    assert "line TWO" in add_texts
+    word_lines = [line for hunk in out.hunks for line in hunk.lines if line.kind == "word"]
+    assert len(word_lines) == 1
+    assert word_lines[0].word_diff is not None
+    assert word_lines[0].word_diff.removed == "two"
+    assert word_lines[0].word_diff.added == "TWO"
 
 
 def test_parse_commit_diff_creation(doc_with_two_commits: tuple[str, str, str]) -> None:

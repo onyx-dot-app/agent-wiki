@@ -180,7 +180,7 @@ def _word_diff(removed: str, added: str) -> WordDiff:
     )
 
 
-def _promote_word_diff(hunk: DiffHunk) -> DiffHunk:  # pyright: ignore[reportUnusedFunction]
+def _promote_word_diff(hunk: DiffHunk) -> DiffHunk:
     """Collapse every adjacent 1×remove + 1×add edit block into a single
     ``kind="word"`` line. Blocks with multiple removes or adds stay as-is.
 
@@ -211,11 +211,6 @@ def _promote_word_diff(hunk: DiffHunk) -> DiffHunk:  # pyright: ignore[reportUnu
             add = hunk.lines[add_start]
             rem_text = rem.text or ""
             add_text = add.text or ""
-            if _MARKDOWN_BLOCK_PREFIX_RE.match(rem_text) or _MARKDOWN_BLOCK_PREFIX_RE.match(
-                add_text
-            ):
-                new_lines.extend(hunk.lines[rem_start:add_end])
-                continue
             word = _word_diff(rem_text, add_text)
             # If the two lines share basically no content (whole-line
             # replacement), inline word-diff devolves into "strikethrough
@@ -264,13 +259,7 @@ def parse_commit_diff(sha: str, rel: str) -> FileDiffResponse:
             is_creation=False,
         )
     hunks = _parse_unified(raw)
-    # Word-diff promotion intentionally disabled: it renders inline as
-    # bare colored text with no surrounding band, which reads as a
-    # different visual treatment than the neighboring block remove/add
-    # diffs. Every change now renders as a block remove + block add
-    # pair so the diff view is visually consistent end-to-end.
-    # `_promote_word_diff` is kept for unit tests + a possible future
-    # re-enable.
+    hunks = [_promote_word_diff(h) for h in hunks]
     return FileDiffResponse(
         path=rel,
         sha=sha,
