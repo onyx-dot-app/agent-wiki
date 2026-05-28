@@ -40,7 +40,7 @@ from app.models.file_system import (
     SearchResponse,
     SetDocumentDraftRequest,
 )
-from app.llm.agents import wiki_merge
+from app.llm.agents import merge_conflict_update
 from app.tasks.reindex import index_path
 from app.triggers import repo as triggers_repo
 from app.wiki import (
@@ -623,7 +623,7 @@ def merge_draft(
     except subprocess.CalledProcessError as exc:
         raise HTTPException(status_code=404, detail="base revision not found") from exc
     try:
-        merged = wiki_merge.merge(
+        merged = merge_conflict_update.merge(
             wiki_path=rel,
             base_body=base_body,
             current_body=req.current_body,
