@@ -2394,6 +2394,16 @@ function FileViewer({ path }: { path: string }) {
                   commit={
                     commits?.find((c) => c.sha === viewingSha) ?? undefined
                   }
+                  loadBody={async () => {
+                    const sha = viewingSha;
+                    if (!sha) return "";
+                    const r = await apiFetch<FileResponse>(
+                      `/wiki/file?path=${encodeURIComponent(
+                        path,
+                      )}&ref=${encodeURIComponent(sha)}`,
+                    );
+                    return r.body;
+                  }}
                 />
               </div>
             ) : (
