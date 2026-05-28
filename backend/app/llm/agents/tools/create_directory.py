@@ -25,21 +25,21 @@ def handle(args: dict[str, Any]) -> Any:
         if not cleaned:
             raise wiki_utils.ToolError("path is required")
         try:
-            rel = filesystem.safe_rel_path(cleaned)
+            path = filesystem.safe_rel_path(cleaned)
         except ValueError as exc:
             raise wiki_utils.ToolError(f"invalid path: {exc}")
-        if rel.endswith(".md"):
+        if path.endswith(".md"):
             raise wiki_utils.ToolError("directory path must not end in .md")
 
-        abs_path = filesystem.absolute(rel)
+        abs_path = filesystem.absolute(path)
         if abs_path.is_file():
-            raise wiki_utils.ToolError(f"a file already exists at {rel}")
+            raise wiki_utils.ToolError(f"a file already exists at {path}")
         if abs_path.is_dir():
-            raise wiki_utils.ToolError(f"directory already exists: {rel}")
+            raise wiki_utils.ToolError(f"directory already exists: {path}")
 
         sha = wiki_git.commit_file(
-            f"{rel}/.gitkeep", "", commit_message.strip(), author=wiki_utils.author_string()
+            f"{path}/.gitkeep", "", commit_message.strip(), author=wiki_utils.author_string()
         )
-        return {"path": rel, "sha": sha, "created": True}
+        return {"path": path, "sha": sha, "created": True}
     except wiki_utils.ToolError as exc:
         return {"error": str(exc)}

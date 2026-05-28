@@ -13,7 +13,7 @@ from app.wiki import edit as wiki_edit
 
 def handle(args: dict[str, Any]) -> Any:
     try:
-        rel = wiki_utils.validate_doc_path(args.get("path"))
+        path = wiki_utils.validate_doc_path(args.get("path"))
         edits_raw = args.get("edits")
         commit_message = args.get("commit_message")
         base_sha = args.get("base_sha")
@@ -40,10 +40,10 @@ def handle(args: dict[str, Any]) -> Any:
                 raise wiki_utils.ToolError(f"edit #{i + 1}: new_string is required (string)")
             parsed.append((old_string, new_string, bool(edit_dict.get("replace_all", False))))
 
-        if not wiki_utils.file_exists(rel):
-            raise wiki_utils.ToolError(f"file not found: {rel}")
+        if not wiki_utils.file_exists(path):
+            raise wiki_utils.ToolError(f"file not found: {path}")
 
-        base_body = wiki_utils.read_existing(rel)
+        base_body = wiki_utils.read_existing(path)
         new_body = base_body
         try:
             for i, (old_string, new_string, replace_all) in enumerate(parsed):
@@ -52,7 +52,7 @@ def handle(args: dict[str, Any]) -> Any:
                 except wiki_edit.ReplaceError as exc:
                     raise wiki_edit.ReplaceError(f"edit #{i + 1}: {exc}") from exc
         except wiki_edit.ReplaceError as exc:
-            stale = wiki_utils.assert_base_sha(rel, base_sha)
+            stale = wiki_utils.assert_base_sha(path, base_sha)
             if stale is not None:
                 return stale
             raise wiki_utils.ToolError(str(exc))
@@ -62,7 +62,7 @@ def handle(args: dict[str, Any]) -> Any:
 
         try:
             result = wiki_utils.commit_with_ai_rebase(
-                rel, commit_message.strip(),
+                path, commit_message.strip(),
                 base_body=base_body,
                 new_body=new_body,
                 activity_ttl=activity_ttl,
@@ -78,11 +78,11 @@ def handle(args: dict[str, Any]) -> Any:
             raise wiki_utils.ToolError("edits produced no change")
 
         return {
-            "path": rel,
+            "path": path,
             "sha": result.sha,
             "applied_count": len(parsed),
-            "diff": wiki_utils.unified_diff(result.old_body, result.new_body, rel),
-            "broken_links": wiki_utils.broken_links(rel, result.new_body),
+            "diff": wiki_utils.unified_diff(result.old_body, result.new_body, path),
+            "broken_links": wiki_utils.broken_links(path, result.new_body),
         }
     except wiki_utils.ToolError as exc:
         return {"error": str(exc)}

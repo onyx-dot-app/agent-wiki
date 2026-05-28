@@ -17,7 +17,7 @@ from app.models.wiki import ChangeKind
 
 def handle(args: dict[str, Any]) -> Any:
     try:
-        rel = wiki_utils.validate_doc_path(args.get("path"))
+        path = wiki_utils.validate_doc_path(args.get("path"))
         patch = args.get("patch")
         commit_message = args.get("commit_message")
         base_sha = args.get("base_sha")
@@ -29,10 +29,10 @@ def handle(args: dict[str, Any]) -> Any:
         if base_sha is not None and not isinstance(base_sha, str):
             raise wiki_utils.ToolError("base_sha must be a string when provided")
 
-        if not wiki_utils.file_exists(rel):
-            raise wiki_utils.ToolError(f"file not found: {rel}")
+        if not wiki_utils.file_exists(path):
+            raise wiki_utils.ToolError(f"file not found: {path}")
 
-        head_sha = wiki_git.head_sha_for_path(rel)
+        head_sha = wiki_git.head_sha_for_path(path)
         if base_sha and base_sha != head_sha:
             return {
                 "error": "stale_base",
@@ -44,7 +44,7 @@ def handle(args: dict[str, Any]) -> Any:
                 ),
             }
 
-        old_body = wiki_utils.read_existing(rel)
+        old_body = wiki_utils.read_existing(path)
         try:
             new_body = wiki_patch.apply(old_body, patch)
         except wiki_patch.PatchError as exc:
@@ -56,15 +56,15 @@ def handle(args: dict[str, Any]) -> Any:
             )
 
         sha = wiki_utils.commit_and_fan_out(
-            rel, new_body, commit_message.strip(),
+            path, new_body, commit_message.strip(),
             change_kind=ChangeKind.EDIT, activity_ttl=activity_ttl,
         )
 
         return {
-            "path": rel,
+            "path": path,
             "sha": sha,
-            "diff": wiki_utils.unified_diff(old_body, new_body, rel),
-            "broken_links": wiki_utils.broken_links(rel, new_body),
+            "diff": wiki_utils.unified_diff(old_body, new_body, path),
+            "broken_links": wiki_utils.broken_links(path, new_body),
         }
     except wiki_utils.ToolError as exc:
         return {"error": str(exc)}

@@ -14,7 +14,7 @@ from app.wiki import agent_activity, git as wiki_git
 
 def handle(args: dict[str, Any]) -> Any:
     try:
-        rel = wiki_utils.validate_doc_path(args.get("path"))
+        path = wiki_utils.validate_doc_path(args.get("path"))
     except wiki_utils.ToolError as exc:
         return {"error": str(exc)}
 
@@ -23,39 +23,39 @@ def handle(args: dict[str, Any]) -> Any:
         return {"error": "sha must be a string"}
     sha = raw_sha.strip() if isinstance(raw_sha, str) and raw_sha.strip() else None
 
-    head_sha = wiki_git.head_sha_for_path(rel)
-    if sha is None and not wiki_utils.file_exists(rel):
-        return {"error": f"file not found: {rel}"}
+    head_sha = wiki_git.head_sha_for_path(path)
+    if sha is None and not wiki_utils.file_exists(path):
+        return {"error": f"file not found: {path}"}
 
     from app.auth import PermissionDenied, require_can
 
     try:
-        require_can("read", rel)
+        require_can("read", path)
     except PermissionDenied as exc:
         return {"error": str(exc)}
 
     ref = sha or "HEAD"
     try:
-        body = wiki_git.read_file(rel, ref=ref)
+        body = wiki_git.read_file(path, ref=ref)
     except subprocess.CalledProcessError:
         return {
             "error": (
-                f"sha_not_found: {rel} not present at {ref}"
+                f"sha_not_found: {path} not present at {ref}"
                 if sha
-                else f"could not read {rel}"
+                else f"could not read {path}"
             )
         }
     except Exception as exc:  # pragma: no cover — git wrapper is well-defined
-        return {"error": f"could not read {rel}@{ref}: {exc}"}
+        return {"error": f"could not read {path}@{ref}: {exc}"}
 
     is_head = sha is None or sha == head_sha
     agents: list[dict[str, Any]] = []
     if is_head:
-        wiki_utils.mark_doc_read(rel)
-        agents = [r.model_dump() for r in agent_activity.list_for_doc(rel)]
+        wiki_utils.mark_doc_read(path)
+        agents = [r.model_dump() for r in agent_activity.list_for_doc(path)]
 
     return {
-        "path": rel,
+        "path": path,
         "body": body,
         "sha": sha or head_sha,
         "is_head": is_head,

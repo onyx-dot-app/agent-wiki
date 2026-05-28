@@ -14,7 +14,7 @@ from app.models.wiki import ChangeKind
 
 def handle(args: dict[str, Any]) -> Any:
     try:
-        rel = wiki_utils.validate_doc_path(args.get("path"))
+        path = wiki_utils.validate_doc_path(args.get("path"))
         body = args.get("body")
         commit_message = args.get("commit_message")
         base_sha = args.get("base_sha")
@@ -26,7 +26,7 @@ def handle(args: dict[str, Any]) -> Any:
         if base_sha is not None and not isinstance(base_sha, str):
             raise wiki_utils.ToolError("base_sha must be a string when provided")
 
-        existed = wiki_utils.file_exists(rel)
+        existed = wiki_utils.file_exists(path)
         if existed:
             # Full-body overwrite requires base_sha so we can 3-way merge
             # if a concurrent commit landed between when the agent read the
@@ -40,10 +40,10 @@ def handle(args: dict[str, Any]) -> Any:
                         "pass its sha as base_sha."
                     ),
                 }
-            base_body = wiki_git.read_file(rel, ref=base_sha)
+            base_body = wiki_git.read_file(path, ref=base_sha)
             try:
                 result = wiki_utils.commit_with_ai_rebase(
-                    rel, commit_message.strip(),
+                    path, commit_message.strip(),
                     base_body=base_body,
                     new_body=body,
                     activity_ttl=activity_ttl,
@@ -55,25 +55,25 @@ def handle(args: dict[str, Any]) -> Any:
                     "current_sha": exc.current_sha,
                 }
             if result is None:
-                return {"path": rel, "sha": wiki_git.head_sha_for_path(rel), "no_change": True}
+                return {"path": path, "sha": wiki_git.head_sha_for_path(path), "no_change": True}
             return {
-                "path": rel,
+                "path": path,
                 "sha": result.sha,
                 "created": False,
-                "diff": wiki_utils.unified_diff(result.old_body, result.new_body, rel),
-                "broken_links": wiki_utils.broken_links(rel, result.new_body),
+                "diff": wiki_utils.unified_diff(result.old_body, result.new_body, path),
+                "broken_links": wiki_utils.broken_links(path, result.new_body),
             }
         else:
             sha = wiki_utils.commit_and_fan_out(
-                rel, body, commit_message.strip(),
+                path, body, commit_message.strip(),
                 change_kind=ChangeKind.CREATE, activity_ttl=activity_ttl,
             )
             return {
-                "path": rel,
+                "path": path,
                 "sha": sha,
                 "created": True,
-                "diff": wiki_utils.unified_diff("", body, rel),
-                "broken_links": wiki_utils.broken_links(rel, body),
+                "diff": wiki_utils.unified_diff("", body, path),
+                "broken_links": wiki_utils.broken_links(path, body),
             }
     except wiki_utils.ToolError as exc:
         return {"error": str(exc)}

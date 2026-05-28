@@ -16,7 +16,7 @@ MAX_LIMIT = 100
 
 def handle(args: dict[str, Any]) -> Any:
     try:
-        rel = wiki_utils.validate_doc_path(args.get("path"))
+        path = wiki_utils.validate_doc_path(args.get("path"))
     except wiki_utils.ToolError as exc:
         return {"error": str(exc)}
 
@@ -30,15 +30,15 @@ def handle(args: dict[str, Any]) -> Any:
     from app.auth import PermissionDenied, require_can
 
     try:
-        require_can("read", rel)
+        require_can("read", path)
     except PermissionDenied as exc:
         return {"error": str(exc)}
 
-    rows = wiki_git.history(rel, limit=limit)
+    rows = wiki_git.history(path, limit=limit)
     if not rows:
-        return {"path": rel, "history": [], "note": "no history"}
+        return {"path": path, "history": [], "note": "no history"}
     return {
-        "path": rel,
+        "path": path,
         "history": [
             {"sha": r.sha, "author": r.author, "ts": r.ts, "message": r.message}
             for r in rows

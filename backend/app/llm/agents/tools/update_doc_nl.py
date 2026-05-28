@@ -22,7 +22,7 @@ log = logging.getLogger(__name__)
 
 def handle(args: dict[str, Any]) -> Any:
     try:
-        rel = wiki_utils.validate_doc_path(args.get("path"))
+        path = wiki_utils.validate_doc_path(args.get("path"))
         instruction = args.get("instruction")
         base_sha = args.get("base_sha")
         activity_ttl = wiki_utils.parse_expires_in_seconds(args.get("expires_in_seconds"))
@@ -31,10 +31,10 @@ def handle(args: dict[str, Any]) -> Any:
         if base_sha is not None and not isinstance(base_sha, str):
             raise wiki_utils.ToolError("base_sha must be a string when provided")
 
-        if not wiki_utils.file_exists(rel):
-            raise wiki_utils.ToolError(f"file not found: {rel}")
+        if not wiki_utils.file_exists(path):
+            raise wiki_utils.ToolError(f"file not found: {path}")
 
-        head_sha = wiki_git.head_sha_for_path(rel)
+        head_sha = wiki_git.head_sha_for_path(path)
         if base_sha and base_sha != head_sha:
             return {
                 "error": "stale_base",
@@ -46,39 +46,39 @@ def handle(args: dict[str, Any]) -> Any:
                 ),
             }
 
-        old_body = wiki_utils.read_existing(rel)
+        old_body = wiki_utils.read_existing(path)
         try:
             new_body = nl_updater.process_instruction(
-                wiki_path=rel,
+                wiki_path=path,
                 current_body=old_body,
                 payload={"instruction": instruction.strip()},
                 source="update_doc_nl",
             )
         except LLMError as exc:
-            log.warning("update_doc_nl LLM error on %s: %s", rel, exc)
+            log.warning("update_doc_nl LLM error on %s: %s", path, exc)
             return {"error": f"llm_error: {exc}"}
 
         if new_body is None or new_body == old_body:
             return {
-                "path": rel,
+                "path": path,
                 "committed": False,
                 "reason": "no_change",
                 "sha": head_sha,
             }
 
         sha = wiki_utils.commit_and_fan_out(
-            rel,
+            path,
             new_body,
             f"Doc update: {instruction.strip()[:80]}",
             change_kind=ChangeKind.EDIT,
             activity_ttl=activity_ttl,
         )
         return {
-            "path": rel,
+            "path": path,
             "committed": True,
             "sha": sha,
-            "diff": wiki_utils.unified_diff(old_body, new_body, rel),
-            "broken_links": wiki_utils.broken_links(rel, new_body),
+            "diff": wiki_utils.unified_diff(old_body, new_body, path),
+            "broken_links": wiki_utils.broken_links(path, new_body),
         }
     except wiki_utils.ToolError as exc:
         return {"error": str(exc)}
