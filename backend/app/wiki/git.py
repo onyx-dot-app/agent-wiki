@@ -11,6 +11,7 @@ import os
 import subprocess
 import tempfile
 from pathlib import Path
+from urllib.parse import quote, unquote
 
 from pydantic import BaseModel
 
@@ -364,7 +365,9 @@ def diff_for_commit(sha: str, rel_path: str | None = None) -> str:
 
 
 def _draft_branch(rel_path: str, user_id: str) -> str:
-    return f"drafts/{user_id}/{rel_path}"
+    # Percent-encode the path so spaces and other chars invalid in git ref
+    # names are safe. Keep '/' so nested paths stay namespaced naturally.
+    return f"drafts/{user_id}/{quote(rel_path, safe='/')}"
 
 
 def save_draft(rel_path: str, user_id: str, content: str, base_sha: str) -> None:
@@ -432,5 +435,5 @@ def delete_drafts_for_path(rel_path: str) -> None:
     for branch in out.splitlines():
         # branch = "drafts/<user_id>/<rel_path>" — split into at most 3 parts
         parts = branch.split("/", 2)
-        if len(parts) == 3 and parts[2] == rel_path:
+        if len(parts) == 3 and unquote(parts[2]) == rel_path:
             _run(["update-ref", "-d", f"refs/heads/{branch}"], check=False)
