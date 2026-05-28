@@ -13,6 +13,13 @@ class ChangeKind(str, Enum):
 
 
 class CommitResult(NamedTuple):
+    """Result of a successful wiki commit.
+
+    ``sha`` is the new commit SHA. ``old_body`` and ``new_body`` are the
+    document content before and after the write, used by callers to produce
+    diffs and broken-link reports.
+    """
+
     sha: str
     old_body: str
     new_body: str
