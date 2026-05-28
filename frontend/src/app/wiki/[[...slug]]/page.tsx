@@ -2520,12 +2520,21 @@ function HistoryPanel({
         gap: 8,
       }}
     >
-      <Section flexDirection="row" alignItems="center" gap={0.5} padding={0.5}>
-        <Section flexDirection="row" alignItems="center" width="full">
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 4,
+          padding: 4,
+          flexShrink: 0,
+        }}
+      >
+        <div style={{ flex: 1, minWidth: 0 }}>
           <Text font="main-ui-action" color="text-04">
             History
           </Text>
-        </Section>
+        </div>
         <button
           onClick={onClose}
           aria-label="Close history"
@@ -2544,7 +2553,7 @@ function HistoryPanel({
         >
           ×
         </button>
-      </Section>
+      </div>
       <div
         style={{
           overflowY: "auto",
