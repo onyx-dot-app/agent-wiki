@@ -52,6 +52,7 @@ from app.wiki import (
     search as wiki_search,
     templates as templates_repo,
 )
+from app.wiki.types import ChangeKind
 
 router = APIRouter()
 log = logging.getLogger(__name__)
@@ -135,7 +136,7 @@ def put_document_by_path(
         # creator becomes the owner and gets full rights.
         require_can("write", rel, user)
     author = _git_author(user)
-    change_kind = "edit" if existed else "create"
+    change_kind = ChangeKind.EDIT if existed else ChangeKind.CREATE
     msg = f"{change_kind} {rel}"
     body_to_commit = req.body
     if req.base_sha:
@@ -160,7 +161,7 @@ def put_document_by_path(
         sha,
         change_kind,
         author,
-        owner_user_id=user.id if change_kind == "create" else None,
+        owner_user_id=user.id if change_kind == ChangeKind.CREATE else None,
     )
     # Drafting state: if the saved body diverges from the template
     # snapshot, the user has made it their own — clear the row so the

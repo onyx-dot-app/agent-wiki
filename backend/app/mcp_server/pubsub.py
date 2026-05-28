@@ -39,6 +39,8 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from app.wiki.types import ChangeKind
+
 log = logging.getLogger(__name__)
 
 NOTIFY_CHANNEL = "wiki_commit"
@@ -239,7 +241,7 @@ async def drain_async(
 # --------------------------------------------------------------------------- #
 
 
-def publish_doc_update(rel: str, sha: str, change_kind: str) -> None:
+def publish_doc_update(rel: str, sha: str, change_kind: ChangeKind) -> None:
     """Fan out a write event to every subscribed session.
 
     Called from ``app.wiki.notify.after_doc_write`` (and from the
@@ -253,7 +255,7 @@ def publish_doc_update(rel: str, sha: str, change_kind: str) -> None:
 def publish_doc_delete(rel: str, sha: str) -> None:
     """Same shape as ``publish_doc_update`` but with ``changeKind="delete"``;
     subscribers can re-issue ``read_doc`` to confirm and unsubscribe."""
-    _publish_local(rel, _build_update(rel, sha, "delete"))
+    _publish_local(rel, _build_update(rel, sha, ChangeKind.DELETE))
     _emit_pg_notify({"kind": "delete", "rel": rel, "sha": sha})
 
 
@@ -321,7 +323,7 @@ def _should_deliver(session_id: str, rel: str) -> bool:
     return acl.can(sess.user_id, sess.is_admin, "read", rel)
 
 
-def _build_update(rel: str, sha: str, change_kind: str) -> Notification:
+def _build_update(rel: str, sha: str, change_kind: ChangeKind) -> Notification:
     return Notification(
         method="notifications/resources/updated",
         params={
@@ -462,7 +464,7 @@ def _dispatch_notify_payload(raw: str) -> None:
     elif kind == "delete":
         _publish_local(
             payload["rel"],
-            _build_update(payload["rel"], payload["sha"], "delete"),
+            _build_update(payload["rel"], payload["sha"], ChangeKind.DELETE),
         )
     elif kind == "list_changed":
         # Same as ``publish_list_changed`` but skip the re-NOTIFY (we

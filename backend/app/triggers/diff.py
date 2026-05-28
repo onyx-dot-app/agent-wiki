@@ -30,6 +30,7 @@ import difflib
 import logging
 
 from app.wiki import git as wiki_git
+from app.wiki.types import ChangeKind
 
 log = logging.getLogger(__name__)
 
@@ -78,12 +79,12 @@ def build_wiki_snapshot() -> str:
 
 
 def build_change_view(
-    *, doc_path: str, change_kind: str, before: str, after: str
+    *, doc_path: str, change_kind: ChangeKind, before: str, after: str
 ) -> str:
     """The "what changed" block: a unified diff for edits, full body for creates."""
     header = f"=== CHANGE ===\nPath: {doc_path}\nKind: {change_kind}\n"
 
-    if change_kind == "create" or not before:
+    if change_kind == ChangeKind.CREATE or not before:
         body = _truncate(after, _CHANGE_BODY_BUDGET)
         return f"{header}\n(new file — full body)\n{body.rstrip()}\n"
 
@@ -128,7 +129,7 @@ def build_new_file_payload(
 def build_payload(
     *,
     doc_path: str,
-    change_kind: str,
+    change_kind: ChangeKind,
     before: str,
     after: str,
     wiki_snapshot: str | None = None,

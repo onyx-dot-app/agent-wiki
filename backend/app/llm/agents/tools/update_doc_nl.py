@@ -15,6 +15,7 @@ from app.llm.agents import nl_updater
 from app.llm.agents.tools import _doc_helpers as h
 from app.llm.errors import LLMError
 from app.wiki import git as wiki_git
+from app.wiki.types import ChangeKind
 
 log = logging.getLogger(__name__)
 
@@ -69,7 +70,7 @@ def handle(args: dict[str, Any]) -> Any:
             rel,
             new_body,
             f"Doc update: {instruction.strip()[:80]}",
-            change_kind="edit",
+            change_kind=ChangeKind.EDIT,
             activity_ttl=activity_ttl,
         )
         return {

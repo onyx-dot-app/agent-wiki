@@ -12,6 +12,7 @@ from typing import Any
 from app.llm.agents.tools import _doc_helpers as h
 from app.wiki import git as wiki_git
 from app.wiki import patch as wiki_patch
+from app.wiki.types import ChangeKind
 
 
 def handle(args: dict[str, Any]) -> Any:
@@ -56,7 +57,7 @@ def handle(args: dict[str, Any]) -> Any:
 
         sha = h.commit_and_fan_out(
             rel, new_body, commit_message.strip(),
-            change_kind="edit", activity_ttl=activity_ttl,
+            change_kind=ChangeKind.EDIT, activity_ttl=activity_ttl,
         )
 
         return {

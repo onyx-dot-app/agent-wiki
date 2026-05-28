@@ -9,6 +9,7 @@ from typing import Any
 
 from app.llm.agents.tools import _doc_helpers as h
 from app.wiki import git as wiki_git
+from app.wiki.types import ChangeKind
 
 
 def handle(args: dict[str, Any]) -> Any:
@@ -46,7 +47,7 @@ def handle(args: dict[str, Any]) -> Any:
                     base_body=base_body,
                     new_body=body,
                     activity_ttl=activity_ttl,
-                )
+                )  # always ChangeKind.EDIT — new files take the else branch below
             except h.AiRebaseMaxRetriesError as exc:
                 return {
                     "error": "stale_base",
@@ -65,7 +66,7 @@ def handle(args: dict[str, Any]) -> Any:
         else:
             sha = h.commit_and_fan_out(
                 rel, body, commit_message.strip(),
-                change_kind="create", activity_ttl=activity_ttl,
+                change_kind=ChangeKind.CREATE, activity_ttl=activity_ttl,
             )
             return {
                 "path": rel,

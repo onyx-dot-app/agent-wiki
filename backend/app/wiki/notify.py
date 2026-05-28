@@ -34,12 +34,13 @@ from app.mcp_server import pubsub as mcp_pubsub
 from app.tasks.reindex import index_path
 from app.tasks.triggers import fan_out_trigger_eval
 from app.wiki import acl
+from app.wiki.types import ChangeKind
 
 
 def after_doc_write(
     rel_path: str,
     sha: str,
-    change_kind: str,
+    change_kind: ChangeKind,
     actor: str | None,
     *,
     owner_user_id: str | None = None,
@@ -64,12 +65,12 @@ def after_doc_write(
     """
     if not rel_path.endswith(".md"):
         return
-    if change_kind == "create":
+    if change_kind == ChangeKind.CREATE:
         acl.on_page_created(rel_path, owner_user_id=owner_user_id)
     index_path(rel_path)
     fan_out_trigger_eval(rel_path, sha, change_kind, actor)
     mcp_pubsub.publish_doc_update(rel_path, sha, change_kind)
-    if change_kind == "create":
+    if change_kind == ChangeKind.CREATE:
         mcp_pubsub.publish_list_changed()
 
 
@@ -94,7 +95,7 @@ def after_doc_delete(rel_path: str, sha: str, actor: str | None) -> None:
         return
     fts.delete_document(rel_path)
     acl.on_page_deleted(rel_path)
-    fan_out_trigger_eval(rel_path, sha, "delete", actor)
+    fan_out_trigger_eval(rel_path, sha, ChangeKind.DELETE, actor)
     mcp_pubsub.publish_doc_delete(rel_path, sha)
     mcp_pubsub.publish_list_changed()
 
@@ -129,13 +130,13 @@ def after_path_move(
         new_is_md = new_p.endswith(".md")
         if old_is_md:
             fts.delete_document(old_p)
-            fan_out_trigger_eval(old_p, sha, "delete", actor)
+            fan_out_trigger_eval(old_p, sha, ChangeKind.DELETE, actor)
             mcp_pubsub.publish_doc_delete(old_p, sha)
             list_changed = True
         if new_is_md:
             index_path(new_p)
-            fan_out_trigger_eval(new_p, sha, "create", actor)
-            mcp_pubsub.publish_doc_update(new_p, sha, "create")
+            fan_out_trigger_eval(new_p, sha, ChangeKind.CREATE, actor)
+            mcp_pubsub.publish_doc_update(new_p, sha, ChangeKind.CREATE)
             list_changed = True
     if list_changed:
         mcp_pubsub.publish_list_changed()

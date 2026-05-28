@@ -12,7 +12,7 @@ import difflib
 import logging
 from datetime import timedelta
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import Any
 
 log = logging.getLogger(__name__)
 
@@ -24,6 +24,7 @@ from app.wiki import (
     links,
     notify as wiki_notify,
 )
+from app.wiki.types import AiRebaseMaxRetriesError, ChangeKind, CommitResult
 
 
 class ToolError(Exception):
@@ -59,21 +60,6 @@ def validate_doc_path(raw_path: Any) -> str:
 # --------------------------------------------------------------------------- #
 # Optimistic concurrency                                                      #
 # --------------------------------------------------------------------------- #
-
-
-class CommitResult(NamedTuple):
-    sha: str
-    old_body: str
-    new_body: str
-
-
-class AiRebaseMaxRetriesError(Exception):
-    """Raised by ``commit_with_ai_rebase`` when HEAD keeps moving."""
-
-    def __init__(self, retries: int, current_sha: str) -> None:
-        self.retries = retries
-        self.current_sha = current_sha
-        super().__init__(f"max retries ({retries}) exceeded, current_sha={current_sha}")
 
 
 # Maximum retry attempts inside ``commit_with_ai_rebase`` — each attempt is a
@@ -127,7 +113,7 @@ def commit_with_ai_rebase(
         if post_sha == head_sha:
             sha = commit_and_fan_out(
                 wiki_path, merged, message,
-                change_kind="edit", activity_ttl=activity_ttl,
+                change_kind=ChangeKind.EDIT, activity_ttl=activity_ttl,
             )
             return CommitResult(sha=sha, old_body=current, new_body=merged)
         if attempt >= max_retries:
@@ -210,12 +196,12 @@ def commit_and_fan_out(
     body: str,
     message: str,
     *,
-    change_kind: str,
+    change_kind: ChangeKind,
     activity_ttl: timedelta | None = None,
 ) -> str:
     """Commit ``body`` to ``rel``, queue reindex, fan out to triggers.
 
-    Returns the commit SHA. ``change_kind`` is ``"create"`` or ``"edit"``.
+    Returns the commit SHA.
 
     ``activity_ttl`` overrides the default 24h TTL on the resulting
     Active-agents row — write tools surface this through their
@@ -232,7 +218,7 @@ def commit_and_fan_out(
     # Permission gate: editing requires write on the existing page.
     # Creating a new page is always allowed for the calling user — they
     # become the owner via the seeding hook in ``after_doc_write``.
-    if change_kind == "edit":
+    if change_kind == ChangeKind.EDIT:
         from app.auth import PermissionDenied, require_can
 
         try:
@@ -282,7 +268,7 @@ def commit_and_fan_out(
         sha,
         change_kind,
         author,
-        owner_user_id=user.id if (user is not None and change_kind == "create") else None,
+        owner_user_id=user.id if (user is not None and change_kind == ChangeKind.CREATE) else None,
     )
     return sha
 

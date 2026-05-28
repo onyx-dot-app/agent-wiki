@@ -57,6 +57,7 @@ from app.triggers.engine import (
 )
 from app.wiki import acl as wiki_acl
 from app.wiki import git as wiki_git
+from app.wiki.types import ChangeKind
 
 log = logging.getLogger(__name__)
 
@@ -65,7 +66,7 @@ log = logging.getLogger(__name__)
 def fan_out_trigger_eval(
     doc_path: str,
     sha: str,
-    change_kind: str,
+    change_kind: ChangeKind,
     actor: str | None = None,
 ) -> None:
     triggers = find_matching_triggers(doc_path)
@@ -92,7 +93,7 @@ def fan_out_trigger_eval(
         wiki_snapshot=wiki_snapshot,
     )
     new_file_payload: str | None = None
-    if change_kind == "create":
+    if change_kind == ChangeKind.CREATE:
         new_file_payload = diff_helper.build_new_file_payload(
             doc_path=doc_path, body=after, wiki_snapshot=wiki_snapshot
         )
@@ -137,7 +138,7 @@ def fan_out_trigger_eval(
             )
             continue
 
-        if change_kind == "create" and trigger.scope_path != doc_path:
+        if change_kind == ChangeKind.CREATE and trigger.scope_path != doc_path:
             assert new_file_payload is not None
             new_file_result = evaluate_new_file_in_dir(
                 trigger, instruction, new_file_payload
@@ -253,7 +254,7 @@ def _evaluate_one_schedule(
         trigger=trigger,
         doc_path=trigger.scope_path,
         sha="",
-        change_kind="schedule",
+        change_kind=ChangeKind.SCHEDULE,
         reason=match.reason,
         instruction=instruction,
         rendered_message=rendered,
@@ -294,7 +295,7 @@ def _record_fire(
     trigger: TriggerRecord,
     doc_path: str,
     sha: str,
-    change_kind: str,
+    change_kind: ChangeKind,
     reason: str,
     instruction: str,
     rendered_message: str,

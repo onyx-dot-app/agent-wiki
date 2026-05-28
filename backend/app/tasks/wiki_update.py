@@ -50,6 +50,7 @@ from app.mcp_server import pubsub as mcp_pubsub
 from app.auth import UserMissingError, load_user, set_current_user
 from app.tasks.queues import documents_queue
 from app.wiki import agent_activity, git as wiki_git, notify as wiki_notify
+from app.wiki.types import ChangeKind
 
 _INGEST_AUTHOR = "Onyx Ingest <ingest@agent-wiki>"
 
@@ -400,7 +401,7 @@ def process_pushed_document(push: dict[str, Any]) -> None:
             if meta_lines:
                 message += "\n\n" + "\n".join(meta_lines)
             sha = wiki_git.commit_file(c.hit.path, result, message, author=_INGEST_AUTHOR)
-            wiki_notify.after_doc_write(c.hit.path, sha, "edit", _INGEST_AUTHOR)
+            wiki_notify.after_doc_write(c.hit.path, sha, ChangeKind.EDIT, _INGEST_AUTHOR)
             committed += 1
             ingest_outcomes_total.labels(outcome="committed", wiki_path=c.hit.path).inc()
             ingest_bm25_score_by_outcome.labels(outcome="committed").observe(c.hit.score)
