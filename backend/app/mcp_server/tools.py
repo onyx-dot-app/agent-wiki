@@ -169,7 +169,7 @@ def _call_async_nl_update(
     import hashlib
 
     from app.auth import PermissionDenied, require_can
-    from app.llm.agents.tools import _doc_helpers as h
+    from app.wiki import utils as h
     from app.mcp_server import jobs as mcp_jobs
     from app.mcp_server import pubsub as mcp_pubsub
     from app.tasks.wiki_update import agent_update_document_nl

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.llm.agents.tools import _doc_helpers as h
+from app.wiki import utils as h
 from app.wiki import git as wiki_git
 from app.wiki import patch as wiki_patch
 from app.models.wiki import ChangeKind

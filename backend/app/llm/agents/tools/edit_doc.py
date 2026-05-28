@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.llm.agents.tools import _doc_helpers as h
+from app.wiki import utils as h
 from app.wiki import edit as wiki_edit
 
 

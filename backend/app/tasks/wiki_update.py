@@ -31,7 +31,7 @@ from app.ingest.source_tiers import is_filtered
 from app.ingest.models import WikiUpdateCandidate
 from app.llm.agents import ingest_batch_reconciler, ingest_selector, nl_updater
 from app.llm.agents.common import IRRELEVANT_SENTINEL
-from app.llm.agents.tools import _doc_helpers as h
+from app.wiki import utils as h
 from app.llm.errors import LLMError
 from app.llm.settings import get as get_llm_settings
 from app.metrics import (

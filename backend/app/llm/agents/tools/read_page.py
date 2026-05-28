@@ -9,7 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from app.llm.agents.tools import _doc_helpers as h
+from app.wiki import utils as h
 from app.wiki import agent_activity, git as wiki_git
 
 
