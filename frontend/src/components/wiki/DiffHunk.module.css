@@ -3,17 +3,15 @@
   flex-direction: column;
 }
 
-/* Block-level diff bands.
-
-   Pattern (GitHub rich-diff / Notion / Linear):
-     - faint tint background (no solid color bath)
-     - 3px left-border accent doing the bulk of the signal
-     - uniform 6/12 padding so the band hugs the rendered content
-     - first/last-child margin reset so the band hugs its own content
-       rather than picking up the wiki markdown's heading/paragraph
-       stack spacing
-     - same-kind neighbors collapse corners so consecutive removes
-       (or adds) read as one continuous band
+/* Diff bands match the Onyx Wiki Figma spec (node 284:22518):
+   - Soft pastel green/red bg, 8px radius, 4px outer padding
+   - Add block has an inner "quote indent" column (28px wide) holding
+     a 4px vertical bar; the markdown content sits in a flex-1 column
+     beside it
+   - Remove block has no quote indent — bg + strikethrough on text
+     carries the signal. Bullet markers stay (rendered red via the
+     list-marker text-color inheritance)
+   - No left-border accent; the bg + radius is the accent itself
 */
 
 .context {
@@ -23,26 +21,63 @@
 
 .add,
 .remove {
-  padding: 6px 12px 6px 9px;
-  border-left: 3px solid;
-  border-radius: var(--radius-xs);
+  border-radius: 8px;
+  padding: 4px;
   margin: 4px 0;
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
 }
 
-/* Fixed rgba tints — independent of the theme's dim state-bg tokens.
-   The dark-mode danger/success bg tokens are too dim against a black
-   canvas; one block looks visible, an adjacent block (same class!)
-   looks invisible depending on surrounding text-color contrast. Using
-   a known-bright hue at 15% alpha makes the band readable in both
-   light and dark modes with the same CSS rule. */
 .add {
-  background: rgba(46, 160, 67, 0.15);
-  border-left-color: rgb(46, 160, 67);
+  /* status/success-01 — soft pastel green from the Figma design system. */
+  background: #e6f2e7;
 }
 
 .remove {
+  /* status/error-01 — soft pastel red. */
+  background: #fceae7;
+  color: #ce2424;
+}
+
+/* Dark-mode overrides — Figma only ships light tokens so we derive
+   dark variants by hand. Same hue, dimmer surface, lighter text. */
+:global([data-theme="dark"]) .add {
+  background: rgba(46, 160, 67, 0.15);
+}
+:global([data-theme="dark"]) .remove {
   background: rgba(248, 81, 73, 0.15);
-  border-left-color: rgb(248, 81, 73);
+  color: #f87171;
+}
+
+/* The "quote indent" column inside an add block — 28px wide with a
+   4px-wide vertical bar centered in it. The bar is the same dim
+   tint-03 used in the Figma. */
+.quoteIndent {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 28px;
+  padding: 4px;
+  align-self: stretch;
+}
+.quoteBar {
+  width: 4px;
+  height: 100%;
+  border-radius: 2px;
+  background: rgba(0, 0, 0, 0.08);
+}
+:global([data-theme="dark"]) .quoteBar {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+/* The content area inside the diff block — wraps the rendered markdown
+   so it picks up the wiki .markdown typography rules. */
+.blockContent {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 2px 8px;
 }
 
 /* Collapse vertical gap + share corner radius for consecutive blocks
@@ -62,42 +97,39 @@
 
 /* Reset the wiki markdown's first/last child margins inside the band. */
 .context > :first-child,
-.add > :first-child,
-.remove > :first-child,
+.blockContent > :first-child,
 .wordLine > :first-child {
   margin-top: 0;
 }
 .context > :last-child,
-.add > :last-child,
-.remove > :last-child,
+.blockContent > :last-child,
 .wordLine > :last-child {
   margin-bottom: 0;
 }
 
-/* Strikethrough goes on text-bearing block elements only. Headings keep
-   legibility via opacity. List markers, code, and images never get
-   struck. */
+/* Strikethrough applies to text-bearing blocks only. Headings stay
+   legible at full color. List markers / code / images skip
+   strikethrough. */
 .remove :is(p, li, blockquote, td, th) {
   text-decoration: line-through;
-  text-decoration-color: color-mix(
-    in srgb,
-    var(--color-state-danger-fg) 60%,
-    transparent
-  );
+  text-decoration-color: currentColor;
 }
 .remove :is(h1, h2, h3, h4, h5, h6) {
-  opacity: 0.75;
+  opacity: 0.85;
 }
 .remove :is(code, pre, img) {
   text-decoration: none;
-  opacity: 0.7;
+  opacity: 0.8;
 }
 .remove li::marker {
   text-decoration: none;
+  color: currentColor;
 }
 
-/* Inline word edits — text-color + decoration, no pill background.
-   Matches Google Docs Suggesting Mode + Notion's history view. */
+/* Inline word edits — no pill/chip background. Removed word is red +
+   strikethrough; added word inherits text color (the surrounding
+   green/red block bg carries the signal). Matches the Figma word
+   pattern: "Whether the ~~user~~admin key is an acceptable fallback". */
 .wordLine {
   padding: 0 12px;
   color: var(--color-text-primary);
@@ -106,18 +138,15 @@
 }
 
 .wordRemoved {
-  color: var(--color-state-danger-fg);
+  color: #ce2424;
   text-decoration: line-through;
-  text-decoration-color: color-mix(
-    in srgb,
-    var(--color-state-danger-fg) 60%,
-    transparent
-  );
+}
+:global([data-theme="dark"]) .wordRemoved {
+  color: #f87171;
 }
 
 .wordAdded {
-  color: var(--color-state-success-fg);
-  text-decoration: underline;
-  text-decoration-style: dotted;
-  text-underline-offset: 2px;
+  /* No special color — let the surrounding container carry the signal.
+     Adding a green tint would double up on the (green) block bg. */
+  color: inherit;
 }

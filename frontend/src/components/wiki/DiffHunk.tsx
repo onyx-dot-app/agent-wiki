@@ -146,17 +146,28 @@ export function DiffHunk({ hunk }: { hunk: DiffHunkData }) {
             </div>
           );
         }
-        const cls =
-          entry.kind === "add"
-            ? styles.add
-            : entry.kind === "remove"
-              ? styles.remove
-              : styles.context;
+        if (entry.kind === "context") {
+          return (
+            <div key={idx} className={`${styles.context} markdown`}>
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                {entry.text}
+              </ReactMarkdown>
+            </div>
+          );
+        }
+        const cls = entry.kind === "add" ? styles.add : styles.remove;
         return (
-          <div key={idx} className={`${cls} markdown`}>
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>
-              {entry.text}
-            </ReactMarkdown>
+          <div key={idx} className={cls}>
+            {entry.kind === "add" ? (
+              <div className={styles.quoteIndent}>
+                <div className={styles.quoteBar} />
+              </div>
+            ) : null}
+            <div className={`${styles.blockContent} markdown`}>
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                {entry.text}
+              </ReactMarkdown>
+            </div>
           </div>
         );
       })}
