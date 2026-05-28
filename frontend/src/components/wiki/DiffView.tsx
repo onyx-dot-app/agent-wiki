@@ -3,6 +3,7 @@ import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
+import { absoluteTime, relativeTime } from "@/lib/time";
 import type { FileDiffResponse } from "@/lib/wiki";
 
 import { DiffHunk } from "./DiffHunk";
@@ -30,6 +31,14 @@ export function DiffView({
   const [body, setBody] = useState<string | null>(null);
   const [bodyError, setBodyError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  const shaShort = data.sha.slice(0, 7);
+  const authorLabel = commit?.author ?? "?";
+  const timeLabel = commit?.ts ? relativeTime(commit.ts, "long") : null;
+  const metaPieces = [shaShort, authorLabel];
+  if (timeLabel) metaPieces.push(timeLabel);
+  const metaLine = metaPieces.join(" · ");
+  const metaTitle = commit?.ts ? absoluteTime(commit.ts) : undefined;
 
   async function pickMode(next: Mode) {
     if (next === mode) return;
@@ -67,10 +76,9 @@ export function DiffView({
             as="p"
             nowrap
             maxLines={1}
+            title={metaTitle}
           >
-            {`${data.sha.slice(0, 7)} · ${commit?.author ?? "?"} · ${
-              commit?.ts ?? ""
-            }`}
+            {metaLine}
           </Text>
         </div>
         <div role="tablist" aria-label="View mode" className={styles.toggle}>

@@ -9,8 +9,7 @@
 }
 
 /* Add + Remove block tokens (Figma 284:22702 / 284:22725).
-   Light mode = CSS fallback values from get_design_context.
-   Dark mode = resolved via get_variable_defs on a dark-mode frame. */
+   Colors resolve via the --diff-* theme tokens in globals.css. */
 .add,
 .remove {
   border-radius: 8px;
@@ -21,25 +20,16 @@
 }
 
 .add {
-  background: #e6f2e7;
+  background: var(--diff-add-bg);
+  color: var(--diff-add-fg);
   padding: 4px;
 }
 
 /* Remove block in the Figma has NO outer padding — relies only on the
    inner bullet and content elements for spacing. */
 .remove {
-  background: #fceae7;
-  color: #ce2424;
-}
-
-:global([data-theme="dark"]) .add {
-  background: #002207;
-  color: #ffffffd9;
-}
-
-:global([data-theme="dark"]) .remove {
-  background: #330b09;
-  color: #f23a36;
+  background: var(--diff-remove-bg);
+  color: var(--diff-remove-fg);
 }
 
 .blockContent {
@@ -90,16 +80,10 @@
    container with the same quote indent + radius + padding). The
    <del> is red strikethrough, the <ins> is green text. */
 .wordRemoved {
-  color: #ce2424;
+  color: var(--diff-word-remove);
   text-decoration: line-through;
-}
-:global([data-theme="dark"]) .wordRemoved {
-  color: #f23a36;
 }
 
 .wordAdded {
-  color: #00a43f;
-}
-:global([data-theme="dark"]) .wordAdded {
-  color: #00a43f;
+  color: var(--diff-word-add);
 }

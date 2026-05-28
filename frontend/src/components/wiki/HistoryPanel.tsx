@@ -1,4 +1,4 @@
-import { SelectCard, Tag, Text } from "@onyx-ai/opal/components";
+import { SelectCard, Text } from "@onyx-ai/opal/components";
 import { SvgClaude, SvgOnyxLogo, SvgOpenai } from "@onyx-ai/opal/logos";
 import type { IconProps } from "@onyx-ai/opal/types";
 import type { ComponentType } from "react";
@@ -122,7 +122,6 @@ export function HistoryPanel({
                 <CommitRow
                   key={c.sha}
                   commit={c}
-                  isHead={isHead}
                   active={viewingSha === c.sha || (latestActive && isHead)}
                   onClick={() => onPick(c.sha)}
                 />
@@ -147,12 +146,10 @@ function PanelMessage({ children }: { children: string }) {
 
 function CommitRow({
   commit,
-  isHead,
   active,
   onClick,
 }: {
   commit: CommitInfo;
-  isHead: boolean;
   active: boolean;
   onClick: () => void;
 }) {
@@ -181,13 +178,9 @@ function CommitRow({
           }
           title={person}
           right={
-            isHead ? (
-              <Tag color="blue" size="sm" title="Current Version" />
-            ) : (
-              <Text font="secondary-body" color="text-03" nowrap>
-                {relativeTime(commit.ts, "long")}
-              </Text>
-            )
+            <Text font="secondary-body" color="text-03" nowrap>
+              {relativeTime(commit.ts, "long")}
+            </Text>
           }
         />
         <ActionLine
@@ -363,9 +356,9 @@ function Avatar({ initial }: { initial: string }) {
       aria-hidden
       style={{
         ...avatarBase,
-        background: "var(--diff-avatar-bg, #000000)",
-        color: "var(--diff-avatar-fg, #ffffff)",
-        border: "1px solid var(--diff-avatar-border, #e6e6e6)",
+        background: "var(--diff-avatar-bg)",
+        color: "var(--diff-avatar-fg)",
+        border: "1px solid var(--diff-avatar-border)",
         fontSize: 12,
         fontWeight: 600,
       }}
