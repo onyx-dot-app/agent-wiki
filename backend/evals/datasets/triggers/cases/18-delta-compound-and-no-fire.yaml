@@ -1,0 +1,35 @@
+id: trig-18-delta-compound-and-no-fire
+flavor: delta
+nl_description: |
+  when a deploy doc adds a new region AND the region is a production region
+  (not staging or canary)
+message_instruction: |
+  Name the new production region and link the deploy doc.
+wiki_state:
+  - path: ops/deploy/canary.md
+    body: |
+      # Deploy Canary Regions
+      ## Staging
+      - staging-1
+      ## Canary
+      - canary-1
+change_path: ops/deploy/canary.md
+change_kind: edit
+before: |
+  # Deploy Canary Regions
+  ## Staging
+  - staging-1
+  ## Canary
+  - canary-1
+after: |
+  # Deploy Canary Regions
+  ## Staging
+  - staging-1
+  ## Canary
+  - canary-1
+  - canary-2
+expected_matched: false
+notes: |
+  Compound-AND failing the second clause — diff adds canary-2, but the
+  region is in the Canary section, not Production. Must not fire.
+tags: [delta, no-fire, compound, distractor]

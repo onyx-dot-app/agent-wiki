@@ -1,0 +1,27 @@
+id: trig-28-new-file-empty-skeleton-no-fire
+flavor: new_file
+nl_description: |
+  when a new RFC is added under engineering/rfcs/ with a concrete proposal
+message_instruction: |
+  Name the RFC and the proposal in one sentence.
+wiki_state:
+  - path: engineering/rfcs/index.md
+    body: |
+      # RFCs
+      Engineering proposals before they ship.
+new_file_path: engineering/rfcs/rfc-005-template.md
+new_file_body: |
+  # RFC-005
+
+  ## Background
+
+  ## Proposal
+
+  ## Alternatives considered
+
+  ## Open questions
+expected_matched: false
+notes: |
+  Restraint — new file is just a skeleton with no content under any
+  heading. No concrete proposal yet. Must not fire.
+tags: [new_file, no-fire, restraint, empty]

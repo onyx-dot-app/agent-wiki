@@ -1,0 +1,30 @@
+id: trig-14-delta-negation-no-fire
+flavor: delta
+nl_description: when a runbook removes (not adds) a postgres restart step
+message_instruction: |
+  Tell oncall a postgres restart step was REMOVED and link the page.
+wiki_state:
+  - path: ops/postgres-recovery.md
+    body: |
+      # Postgres Recovery
+      ## Steps
+      1. Identify the failing instance.
+      2. Promote a standby.
+change_path: ops/postgres-recovery.md
+change_kind: edit
+before: |
+  # Postgres Recovery
+  ## Steps
+  1. Identify the failing instance.
+  2. Promote a standby.
+after: |
+  # Postgres Recovery
+  ## Steps
+  1. Identify the failing instance.
+  2. Promote a standby.
+  3. Restart the writer pod before reads resume.
+expected_matched: false
+notes: |
+  Negation distractor — trigger fires only on REMOVAL. This diff adds a
+  restart step. Must not fire.
+tags: [delta, no-fire, negation, restraint]

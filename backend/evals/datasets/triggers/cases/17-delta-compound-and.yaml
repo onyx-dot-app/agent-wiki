@@ -1,0 +1,43 @@
+id: trig-17-delta-compound-and
+flavor: delta
+nl_description: |
+  when a deploy doc adds a new region AND the region is a production region
+  (not staging or canary)
+message_instruction: |
+  Name the new production region and link the deploy doc.
+wiki_state:
+  - path: ops/deploy/regions.md
+    body: |
+      # Deploy Regions
+      ## Production
+      - us-west-2
+      - us-east-1
+      ## Staging
+      - staging-1
+change_path: ops/deploy/regions.md
+change_kind: edit
+before: |
+  # Deploy Regions
+  ## Production
+  - us-west-2
+  - us-east-1
+  ## Staging
+  - staging-1
+after: |
+  # Deploy Regions
+  ## Production
+  - us-west-2
+  - us-east-1
+  - eu-central-1
+  ## Staging
+  - staging-1
+expected_matched: true
+expected_reason_facts:
+  - id: r-eu-prod
+    text: The reason mentions eu-central-1 added under Production.
+expected_message_facts_present:
+  - id: m-region
+    text: The message names eu-central-1 as a new production region.
+  - id: m-doc
+    text: The message references ops/deploy/regions.md.
+tags: [delta, fire, compound]

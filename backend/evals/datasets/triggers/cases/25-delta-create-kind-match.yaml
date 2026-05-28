@@ -1,0 +1,34 @@
+id: trig-25-delta-create-kind-match
+flavor: delta
+nl_description: when a postmortem under incidents/ is created with customer impact
+message_instruction: |
+  Name the incident and quote the customer-impact line.
+wiki_state:
+  - path: incidents/index.md
+    body: |
+      # Incidents
+      Index of postmortems.
+change_path: incidents/2026-05-28-checkout-503s.md
+change_kind: create
+before: ""
+after: |
+  # 2026-05-28 Checkout 503s
+
+  ## Customer impact
+  Checkout 503s affected ~3% of paid plans in us-west-2 for 14 minutes.
+
+  ## Root cause
+  Connection pool exhaustion after a deploy.
+
+  ## Resolution
+  Bumped pool size, rolled back the deploy, validated checkout end-to-end.
+expected_matched: true
+expected_reason_facts:
+  - id: r-impact
+    text: The reason mentions the customer-impact section of the new postmortem.
+expected_message_facts_present:
+  - id: m-incident
+    text: The message names the 2026-05-28 checkout 503s incident.
+  - id: m-impact
+    text: The message quotes or paraphrases the 3% / us-west-2 / 14 minute impact.
+tags: [delta, fire, create]

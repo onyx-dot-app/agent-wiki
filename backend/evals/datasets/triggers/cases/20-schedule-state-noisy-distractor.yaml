@@ -1,0 +1,31 @@
+id: trig-20-schedule-state-noisy-distractor
+flavor: schedule
+nl_description: |
+  when any team-budget doc under finance/ shows a negative balance
+message_instruction: |
+  Name the team and the negative amount.
+wiki_state:
+  - path: finance/budgets/platform.md
+    body: |
+      # Platform team budget
+      Balance: $42,000
+      YTD spend: $158,000
+      Notes: ahead of plan
+  - path: finance/budgets/data.md
+    body: |
+      # Data team budget
+      Balance: $12,500
+      YTD spend: $87,500
+      Notes: on plan
+  - path: finance/quarterly/q2.md
+    body: |
+      # Q2 finance report
+      Q2 net change: -$30,000 vs Q1 (reduced spend).
+      Outlook: positive.
+scope_path: finance
+when_iso: "2026-05-28T05:00:00Z"
+expected_matched: false
+notes: |
+  Distractor — the Q2 report mentions "-$30,000" in change-vs-prior-period
+  text, NOT a balance. No team budget shows negative balance. Must not fire.
+tags: [schedule, no-fire, distractor, state]

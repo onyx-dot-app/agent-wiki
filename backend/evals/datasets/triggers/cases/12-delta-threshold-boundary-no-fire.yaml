@@ -1,0 +1,23 @@
+id: trig-12-delta-threshold-boundary-no-fire
+flavor: delta
+nl_description: when a service SLO target drops below 99.9% availability
+message_instruction: |
+  Name the service and the new availability target.
+wiki_state:
+  - path: services/orders/sla.md
+    body: |
+      # Orders SLA
+      Availability target 99.95% monthly.
+change_path: services/orders/sla.md
+change_kind: edit
+before: |
+  # Orders SLA
+  Availability target 99.95% monthly.
+after: |
+  # Orders SLA
+  Availability target 99.9% monthly.
+expected_matched: false
+notes: |
+  Boundary case — target drops from 99.95% to 99.9% (the exact threshold).
+  "below 99.9%" means strictly less; 99.9 itself is not below 99.9.
+tags: [delta, no-fire, threshold, boundary]

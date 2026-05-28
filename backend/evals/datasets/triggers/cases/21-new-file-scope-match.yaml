@@ -1,0 +1,42 @@
+id: trig-21-new-file-scope-match
+flavor: new_file
+nl_description: |
+  when a new ADR (Architecture Decision Record) is added under architecture/
+message_instruction: |
+  Name the ADR title and link the path.
+wiki_state:
+  - path: architecture/index.md
+    body: |
+      # Architecture Decision Records
+      Living index of ADRs that document significant design decisions.
+  - path: architecture/adr-0001-language-choice.md
+    body: |
+      # ADR-0001: Language choice
+      Decision: Python for backend, TypeScript for frontend.
+new_file_path: architecture/adr-0002-storage-engine.md
+new_file_body: |
+  # ADR-0002: Storage engine
+
+  ## Status
+  Accepted.
+
+  ## Context
+  We need durable storage for wiki content, ACL data, and trigger state.
+
+  ## Decision
+  Use PostgreSQL 17 with pg_textsearch + pgmq. Single database, no
+  per-aggregate sharding.
+
+  ## Consequences
+  Operational simplicity (one engine to back up and tune); upper bound
+  on write throughput is pg_textsearch indexing latency.
+expected_matched: true
+expected_message_facts_present:
+  - id: m-title
+    text: The message references ADR-0002 about storage engine.
+  - id: m-path
+    text: The message references architecture/adr-0002-storage-engine.md.
+expected_message_facts_excluded:
+  - id: x-adr-0001
+    text: The message references ADR-0001 about language choice.
+tags: [new_file, fire, adr]

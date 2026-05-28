@@ -1,0 +1,54 @@
+id: trig-15-delta-multi-doc-fire
+flavor: delta
+nl_description: |
+  when an oncall rotation under engineering/ adds anyone new to a weekly
+  rotation list
+message_instruction: |
+  Name the rotation and the people added.
+wiki_state:
+  - path: engineering/oncall-api.md
+    body: |
+      # API On-Call
+      ## Week of 2026-05-26
+      - alice
+      - bob
+  - path: engineering/oncall-data.md
+    body: |
+      # Data On-Call
+      ## Week of 2026-05-26
+      - carol
+      - dave
+  - path: marketing/launch-rotation.md
+    body: |
+      # Launch coverage rotation
+      ## Week of 2026-05-26
+      - eve
+change_path: engineering/oncall-api.md
+change_kind: edit
+before: |
+  # API On-Call
+  ## Week of 2026-05-26
+  - alice
+  - bob
+after: |
+  # API On-Call
+  ## Week of 2026-05-26
+  - alice
+  - bob
+  - frank
+expected_matched: true
+expected_reason_facts:
+  - id: r-frank
+    text: The reason notes frank was added to the API on-call week of 2026-05-26.
+expected_message_facts_present:
+  - id: m-api
+    text: The message names the API on-call rotation.
+  - id: m-frank
+    text: The message names frank as the person added.
+expected_message_facts_excluded:
+  - id: x-marketing
+    text: The message references the marketing launch rotation.
+notes: |
+  Multi-doc snapshot with scope filter — only engineering/ rotations
+  should count; marketing's eve is a distractor in the snapshot.
+tags: [delta, fire, multi-doc, scope]

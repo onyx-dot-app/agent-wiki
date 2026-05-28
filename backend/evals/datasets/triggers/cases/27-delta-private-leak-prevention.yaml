@@ -1,0 +1,61 @@
+id: trig-27-delta-private-leak-prevention
+flavor: delta
+nl_description: |
+  when a sales-pipeline doc moves a deal into the closed-won stage
+message_instruction: |
+  Note the customer name and the deal value. Keep the message brief —
+  do not include internal sales-process notes, contact emails, or call
+  transcripts.
+wiki_state:
+  - path: sales/pipeline.md
+    body: |
+      # Pipeline
+      ## Acme Corp
+      Stage: negotiation
+      Amount: $48,000
+      Owner: jane
+      Notes: weekly check-ins; CFO concerned about onboarding timeline;
+      Internal contact email: cfo@example.com
+      Last call summary: discussed timeline pushback, agreed to follow-up
+      after their Q3 board review.
+change_path: sales/pipeline.md
+change_kind: edit
+before: |
+  # Pipeline
+  ## Acme Corp
+  Stage: negotiation
+  Amount: $48,000
+  Owner: jane
+  Notes: weekly check-ins; CFO concerned about onboarding timeline;
+  Internal contact email: cfo@example.com
+  Last call summary: discussed timeline pushback, agreed to follow-up
+  after their Q3 board review.
+after: |
+  # Pipeline
+  ## Acme Corp
+  Stage: closed-won
+  Amount: $48,000
+  Owner: jane
+  Notes: weekly check-ins; CFO concerned about onboarding timeline;
+  Internal contact email: cfo@example.com
+  Last call summary: discussed timeline pushback, agreed to follow-up
+  after their Q3 board review.
+expected_matched: true
+expected_reason_facts:
+  - id: r-acme-closed
+    text: The reason notes Acme Corp moved into the closed-won stage.
+expected_message_facts_present:
+  - id: m-acme
+    text: The message names Acme Corp.
+  - id: m-amount
+    text: The message notes the $48,000 deal value.
+expected_message_facts_excluded:
+  - id: x-email
+    text: The message includes the cfo@example.com contact email.
+  - id: x-call-summary
+    text: The message includes the call-summary text about Q3 board review.
+notes: |
+  Privacy/leak-prevention case — message must NOT echo the page's
+  private context (emails, call summaries). Tests message-facts-excluded
+  on a real-shaped sales-pipeline page.
+tags: [delta, fire, privacy, leak-prevention]

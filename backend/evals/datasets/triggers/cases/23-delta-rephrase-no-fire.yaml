@@ -1,0 +1,29 @@
+id: trig-23-delta-rephrase-no-fire
+flavor: delta
+nl_description: when a public-facing pricing tier changes its dollar amount
+message_instruction: |
+  Note the affected tier and the new price.
+wiki_state:
+  - path: marketing/public-pricing.md
+    body: |
+      # Pricing
+      Pro: $20/seat/month
+      Team: $40/seat/month
+      Enterprise: custom
+change_path: marketing/public-pricing.md
+change_kind: edit
+before: |
+  # Pricing
+  Pro: $20/seat/month
+  Team: $40/seat/month
+  Enterprise: custom
+after: |
+  # Pricing
+  Pro tier: $20 per seat, per month
+  Team tier: $40 per seat, per month
+  Enterprise: custom pricing
+expected_matched: false
+notes: |
+  Restraint — diff is pure rewording. No dollar amount changed. Must
+  not fire on cosmetic restatement.
+tags: [delta, no-fire, cosmetic, rephrase]
