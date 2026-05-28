@@ -3,31 +3,62 @@
   flex-direction: column;
 }
 
-.context,
-.add,
-.remove,
-.wordLine {
-  padding: 0 12px;
-}
+/* Block-level diff bands.
+
+   Pattern (GitHub rich-diff / Notion / Linear):
+     - faint tint background (no solid color bath)
+     - 3px left-border accent doing the bulk of the signal
+     - uniform 6/12 padding so the band hugs the rendered content
+     - first/last-child margin reset so the band hugs its own content
+       rather than picking up the wiki markdown's heading/paragraph
+       stack spacing
+     - same-kind neighbors collapse corners so consecutive removes
+       (or adds) read as one continuous band
+*/
 
 .context {
+  padding: 0 12px;
   color: var(--color-text-primary);
 }
 
-.add {
-  background: var(--color-state-success-bg);
+.add,
+.remove {
+  padding: 6px 12px 6px 9px;
+  border-left: 3px solid;
   border-radius: var(--radius-xs);
+  margin: 4px 0;
+}
+
+.add {
+  background: color-mix(
+    in srgb,
+    var(--color-state-success-bg) 60%,
+    transparent
+  );
+  border-left-color: var(--color-state-success-border);
 }
 
 .remove {
-  background: var(--color-state-danger-bg);
-  text-decoration: line-through;
-  border-radius: var(--radius-xs);
+  background: color-mix(in srgb, var(--color-state-danger-bg) 50%, transparent);
+  border-left-color: var(--color-state-danger-border);
 }
 
-/* Collapse the wiki markdown's outer paragraph/heading margins inside a
-   diff block so the colored band hugs the rendered content instead of
-   stacking the .markdown rules' top/bottom space. */
+/* Collapse vertical gap + share corner radius for consecutive blocks
+   of the same kind so a multi-block edit reads as one band. */
+.add + .add,
+.remove + .remove {
+  margin-top: 0;
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+.add:has(+ .add),
+.remove:has(+ .remove) {
+  margin-bottom: 0;
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+/* Reset the wiki markdown's first/last child margins inside the band. */
 .context > :first-child,
 .add > :first-child,
 .remove > :first-child,
@@ -41,17 +72,50 @@
   margin-bottom: 0;
 }
 
+/* Strikethrough goes on text-bearing block elements only. Headings keep
+   legibility via opacity. List markers, code, and images never get
+   struck. */
+.remove :is(p, li, blockquote, td, th) {
+  text-decoration: line-through;
+  text-decoration-color: color-mix(
+    in srgb,
+    var(--color-state-danger-fg) 60%,
+    transparent
+  );
+}
+.remove :is(h1, h2, h3, h4, h5, h6) {
+  opacity: 0.75;
+}
+.remove :is(code, pre, img) {
+  text-decoration: none;
+  opacity: 0.7;
+}
+.remove li::marker {
+  text-decoration: none;
+}
+
+/* Inline word edits — text-color + decoration, no pill background.
+   Matches Google Docs Suggesting Mode + Notion's history view. */
+.wordLine {
+  padding: 0 12px;
+  color: var(--color-text-primary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .wordRemoved {
-  background: var(--color-state-danger-bg);
   color: var(--color-state-danger-fg);
   text-decoration: line-through;
-  padding: 0 2px;
-  border-radius: var(--radius-xs);
+  text-decoration-color: color-mix(
+    in srgb,
+    var(--color-state-danger-fg) 60%,
+    transparent
+  );
 }
 
 .wordAdded {
-  background: var(--color-state-success-bg);
   color: var(--color-state-success-fg);
-  padding: 0 2px;
-  border-radius: var(--radius-xs);
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 2px;
 }
