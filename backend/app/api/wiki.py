@@ -22,22 +22,25 @@ from app.models.file_system import (
     DraftRequest,
     DraftResponse,
     FileHistoryResponse,
-    RebaseConflictResponse,
-    RebaseRequest,
     FolderHitView,
     GetDocumentResponse,
     ListDocumentsResponse,
+    MergeRequest,
+    MergeResponse,
     MovedFile,
     MovePathRequest,
     MovePathResponse,
     PutDocumentRequest,
     PutDocumentResponse,
+    RebaseConflictResponse,
+    RebaseRequest,
     ReindexRequest,
     ReindexResponse,
     SearchHitView,
     SearchResponse,
     SetDocumentDraftRequest,
 )
+from app.llm.agents import merge_conflict_update
 from app.tasks.reindex import index_path
 from app.triggers import repo as triggers_repo
 from app.wiki import (
@@ -599,6 +602,41 @@ def rebase_draft(
             current_sha=result.base_sha,
         ).model_dump(),
     )
+
+
+@router.post("/file/merge", response_model=MergeResponse)
+def merge_draft(
+    req: MergeRequest,
+    user: User = Depends(require_user),
+) -> MergeResponse:
+    """LLM 3-way merge: combine current HEAD and the user's draft.
+
+    Returns the merged body for the user to review before saving.
+    """
+    try:
+        rel = filesystem.safe_rel_path(req.path)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    require_can("write", rel, user)
+    try:
+        base_body = wiki_git.read_file(rel, ref=req.base_sha)
+    except subprocess.CalledProcessError as exc:
+        raise HTTPException(status_code=404, detail="base revision not found") from exc
+    # Fetch the most recent commit message so the LLM can reference it when
+    # annotating conflicting facts (e.g. "12k from fix: update connection limit").
+    current_commits = wiki_git.history(rel, limit=1)
+    current_commit_message = current_commits[0].message if current_commits else None
+    try:
+        merged = merge_conflict_update.merge(
+            wiki_path=rel,
+            base_body=base_body,
+            current_body=req.current_body,
+            draft_body=req.draft_body,
+            current_commit_message=current_commit_message,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return MergeResponse(merged=merged)
 
 
 @router.get("/{doc_id}")
