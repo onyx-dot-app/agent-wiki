@@ -1438,7 +1438,8 @@ function FileViewer({ path }: { path: string }) {
   // Conflict resolution: set when a save returns 409.
   const [conflict, setConflict] = useState<ConflictState | null>(null);
   // Resume banner: set when entering edit mode and a matching draft exists.
-  const [pendingResumeDraft, setPendingResumeDraft] = useState<DraftResponse | null>(null);
+  const [pendingResumeDraft, setPendingResumeDraft] =
+    useState<DraftResponse | null>(null);
   const [resuming, setResuming] = useState(false);
   const [consolidating, setConsolidating] = useState(false);
   // Debounce timer ref for auto-saving the draft to the server.
@@ -1769,6 +1770,7 @@ function FileViewer({ path }: { path: string }) {
       // stale pre-edit body.
       setBody(draft);
       setDraft(draft);
+      setDiffData(null);
       // History changed (new commit + possible deprecations) — refetch.
       if (historyOpen) refreshHistory();
       else setCommits(null);
@@ -1928,10 +1930,9 @@ function FileViewer({ path }: { path: string }) {
     setViewingSha(null);
     setConflict(null);
     setEditing(false);
-    void apiFetch(
-      `/wiki/file/autosave?path=${encodeURIComponent(path)}`,
-      { method: "DELETE" },
-    ).catch(() => {});
+    void apiFetch(`/wiki/file/autosave?path=${encodeURIComponent(path)}`, {
+      method: "DELETE",
+    }).catch(() => {});
   }
 
   return (
@@ -2214,10 +2215,7 @@ function FileViewer({ path }: { path: string }) {
             >
               Keep mine
             </Button>
-            <Button
-              size="sm"
-              onClick={onUseCurrent}
-            >
+            <Button size="sm" onClick={onUseCurrent}>
               Use current
             </Button>
             <Button
@@ -2227,10 +2225,7 @@ function FileViewer({ path }: { path: string }) {
             >
               {consolidating ? "Merging…" : "Merge with AI"}
             </Button>
-            <Button
-              size="sm"
-              onClick={() => setConflict(null)}
-            >
+            <Button size="sm" onClick={() => setConflict(null)}>
               Edit manually
             </Button>
           </div>
@@ -2242,8 +2237,14 @@ function FileViewer({ path }: { path: string }) {
             }}
           >
             {(() => {
-              const currentHunks = diffLines(conflict.draftBody, conflict.currentBody);
-              const draftHunks = diffLines(conflict.currentBody, conflict.draftBody);
+              const currentHunks = diffLines(
+                conflict.draftBody,
+                conflict.currentBody,
+              );
+              const draftHunks = diffLines(
+                conflict.currentBody,
+                conflict.draftBody,
+              );
               const preStyle: React.CSSProperties = {
                 margin: 0,
                 fontSize: 12,
@@ -2264,7 +2265,12 @@ function FileViewer({ path }: { path: string }) {
               };
               return (
                 <>
-                  <div style={{ padding: 12, borderRight: `1px solid ${color.border.subtle}` }}>
+                  <div
+                    style={{
+                      padding: 12,
+                      borderRight: `1px solid ${color.border.subtle}`,
+                    }}
+                  >
                     <div style={labelStyle}>Current version</div>
                     <pre style={preStyle}>
                       {currentHunks.map((part, i) => (
@@ -2274,9 +2280,11 @@ function FileViewer({ path }: { path: string }) {
                             background: part.added
                               ? color.state.success.bg
                               : part.removed
+                                ? "transparent"
+                                : undefined,
+                            color: part.removed
                               ? "transparent"
-                              : undefined,
-                            color: part.removed ? "transparent" : color.text.secondary,
+                              : color.text.secondary,
                             userSelect: part.removed ? "none" : undefined,
                           }}
                         >
@@ -2295,9 +2303,11 @@ function FileViewer({ path }: { path: string }) {
                             background: part.added
                               ? color.state.warning.bg
                               : part.removed
+                                ? "transparent"
+                                : undefined,
+                            color: part.removed
                               ? "transparent"
-                              : undefined,
-                            color: part.removed ? "transparent" : color.text.secondary,
+                              : color.text.secondary,
                             userSelect: part.removed ? "none" : undefined,
                           }}
                         >
