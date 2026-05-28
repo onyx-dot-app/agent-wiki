@@ -136,6 +136,8 @@ class CommitView(BaseModel):
     ts: str
     message: str
     body: str = ""
+    added: int = 0
+    removed: int = 0
 
 
 class FileHistoryResponse(BaseModel):

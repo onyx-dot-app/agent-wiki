@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import subprocess
 import tempfile
 from pathlib import Path
@@ -20,6 +21,8 @@ from app.config import CONFIG
 
 log = logging.getLogger(__name__)
 
+_SHA_LINE_RE = re.compile(r"^[0-9a-f]{40}$")
+
 
 class CommitInfo(BaseModel):
     """One commit in a path's history (newest first)."""
@@ -29,6 +32,8 @@ class CommitInfo(BaseModel):
     ts: str  # ISO-8601 author date
     message: str  # commit subject
     body: str  # commit body (may be empty)
+    added: int = 0  # lines added to this path by this commit
+    removed: int = 0  # lines removed from this path by this commit
 
 
 def _run(
@@ -221,11 +226,13 @@ def path_at_ref(current_rel_path: str, ref: str) -> str | None:
 
 
 def history(rel_path: str, limit: int = 100) -> list[CommitInfo]:
-    """Return commit metadata (incl. body) for a path, newest first."""
+    """Return commit metadata (incl. body + per-commit line stats) for a
+    path, newest first."""
     sep_field = "\x1f"
     sep_record = "\x1e"
     fmt = f"%H{sep_field}%an{sep_field}%aI{sep_field}%s{sep_field}%b{sep_record}"
     out = _run(["log", f"-n{limit}", "--follow", f"--pretty=format:{fmt}", "--", rel_path]).stdout
+    stats = _numstat_by_sha(rel_path, limit)
     rows: list[CommitInfo] = []
     for record in out.split(sep_record):
         record = record.strip("\n")
@@ -235,8 +242,52 @@ def history(rel_path: str, limit: int = 100) -> list[CommitInfo]:
         if len(parts) < 5:
             continue
         sha, author, iso, subject, body = parts
-        rows.append(CommitInfo(sha=sha, author=author, ts=iso, message=subject, body=body))
+        added, removed = stats.get(sha, (0, 0))
+        rows.append(
+            CommitInfo(
+                sha=sha,
+                author=author,
+                ts=iso,
+                message=subject,
+                body=body,
+                added=added,
+                removed=removed,
+            )
+        )
     return rows
+
+
+def _numstat_by_sha(rel_path: str, limit: int) -> dict[str, tuple[int, int]]:
+    """``{sha: (added, removed)}`` for a path's history in one git call.
+
+    ``git log --numstat`` emits a bare sha line per commit followed by
+    ``<added>\\t<removed>\\t<path>`` rows. Binary files report ``-`` for
+    the counts, which we coerce to 0. ``--follow`` may render a rename as
+    ``old => new`` in the path column; the counts column is unaffected.
+    """
+    out = _run(
+        ["log", f"-n{limit}", "--follow", "--numstat", "--format=%H", "--", rel_path],
+        check=False,
+    ).stdout
+    stats: dict[str, tuple[int, int]] = {}
+    current: str | None = None
+    for line in out.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if _SHA_LINE_RE.match(line):
+            current = line
+            continue
+        if current is None:
+            continue
+        cols = line.split("\t")
+        if len(cols) < 2:
+            continue
+        added = int(cols[0]) if cols[0].isdigit() else 0
+        removed = int(cols[1]) if cols[1].isdigit() else 0
+        prev = stats.get(current, (0, 0))
+        stats[current] = (prev[0] + added, prev[1] + removed)
+    return stats
 
 
 def head_sha_for_path(rel_path: str) -> str | None:

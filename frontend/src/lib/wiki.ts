@@ -48,6 +48,50 @@ export interface CommitInfo {
   ts: string;
   message: string;
   body?: string;
+  added: number;
+  removed: number;
+}
+
+export type CommitAgent = "claude-code" | "codex" | "onyx" | null;
+
+export interface CommitAuthor {
+  /** Human who owns the edit, e.g. "Nik". */
+  person: string;
+  /** Coding-agent that produced it, or null for a direct human edit. */
+  agent: CommitAgent;
+  /** Display label for the agent, e.g. "Claude Code". Empty when none. */
+  agentLabel: string;
+}
+
+const AGENT_LABELS: Record<Exclude<CommitAgent, null>, string> = {
+  "claude-code": "Claude Code",
+  codex: "Codex",
+  onyx: "Onyx Craft",
+};
+
+/**
+ * Split a git author string into the human + the coding agent that drove
+ * the edit. Launcher commits author as "Nik via launcher-claude-code";
+ * direct edits are just "Nik".
+ */
+export function parseCommitAuthor(author: string): CommitAuthor {
+  const m = author.match(/^(.*?)\s+via\s+(.+)$/i);
+  if (!m)
+    return { person: author.trim() || "Unknown", agent: null, agentLabel: "" };
+  const person = m[1].trim() || "Unknown";
+  const raw = m[2]
+    .trim()
+    .toLowerCase()
+    .replace(/^launcher-/, "");
+  let agent: CommitAgent = null;
+  if (raw.includes("claude")) agent = "claude-code";
+  else if (raw.includes("codex") || raw.includes("openai")) agent = "codex";
+  else if (raw.includes("onyx") || raw.includes("craft")) agent = "onyx";
+  return {
+    person,
+    agent,
+    agentLabel: agent ? AGENT_LABELS[agent] : "",
+  };
 }
 
 export interface FileHistoryResponse {

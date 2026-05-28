@@ -1,8 +1,16 @@
 import { SelectCard, Tag, Text } from "@onyx-ai/opal/components";
+import { SvgClaude, SvgOnyxLogo, SvgOpenai } from "@onyx-ai/opal/logos";
+import type { IconProps } from "@onyx-ai/opal/types";
+import type { ComponentType } from "react";
 
 import { color } from "@/lib/theme";
 import { relativeTime } from "@/lib/time";
-import { type CommitInfo, parseCommitSource } from "@/lib/wiki";
+import {
+  type CommitAgent,
+  type CommitInfo,
+  parseCommitAuthor,
+  parseCommitSource,
+} from "@/lib/wiki";
 
 export interface HistoryPanelProps {
   commits: CommitInfo[] | null;
@@ -17,11 +25,22 @@ export interface HistoryPanelProps {
   fullHeight?: boolean;
 }
 
+const AGENT_LOGO: Record<
+  Exclude<CommitAgent, null>,
+  ComponentType<IconProps>
+> = {
+  "claude-code": SvgClaude,
+  codex: SvgOpenai,
+  onyx: SvgOnyxLogo,
+};
+
 /**
  * Activity / version history side panel for a wiki page. Mirrors the
- * Onyx Wiki history-feed mock: each entry is a selectable card showing
- * the author, a relative timestamp, and a short sha, with the working
- * tree pinned to the top as "Current Version".
+ * Onyx Wiki history-feed mock: each entry shows who edited, an
+ * avatar + agent-logo stack, a relative timestamp, and an action line
+ * ("Claude Code updated 45 lines") with `+added -removed` stats and a
+ * jump-to-source link. The working tree is pinned at the top as the
+ * current version.
  */
 export function HistoryPanel({
   commits,
@@ -92,57 +111,26 @@ export function HistoryPanel({
           gap: 4,
         }}
       >
-        {error && (
-          <div style={{ padding: 12 }}>
-            <Text font="secondary-body" color="text-03">
-              {error}
-            </Text>
-          </div>
-        )}
-        {!error && commits === null && (
-          <div style={{ padding: 12 }}>
-            <Text font="secondary-body" color="text-03">
-              Loading…
-            </Text>
-          </div>
-        )}
+        {error && <PanelMessage>{error}</PanelMessage>}
+        {!error && commits === null && <PanelMessage>Loading…</PanelMessage>}
         {!error && commits && commits.length === 0 && (
-          <div style={{ padding: 12 }}>
-            <Text font="secondary-body" color="text-03">
-              No history yet.
-            </Text>
-          </div>
+          <PanelMessage>No history yet.</PanelMessage>
         )}
         {!error && commits && commits.length > 0 && (
           <>
-            <ActivityRow
+            <LatestRow
               active={latestActive}
-              isLatest
+              headSha={headSha}
               onClick={onPickLatest}
-              title="Latest (working tree)"
-              author=""
-              ts=""
-              description={
-                headSha ? `Current HEAD · ${headSha.slice(0, 7)}` : "—"
-              }
             />
-            {commits.map((c) => {
-              const { url, title: srcTitle } = parseCommitSource(c.body);
-              return (
-                <ActivityRow
-                  key={c.sha}
-                  active={!latestActive && viewingSha === c.sha}
-                  isLatest={false}
-                  onClick={() => onPick(c.sha)}
-                  title={c.author || "Unknown"}
-                  author={c.author}
-                  ts={relativeTime(c.ts, "long")}
-                  description={c.sha.slice(0, 7)}
-                  sourceUrl={url}
-                  sourceTitle={srcTitle}
-                />
-              );
-            })}
+            {commits.map((c) => (
+              <CommitRow
+                key={c.sha}
+                commit={c}
+                active={!latestActive && viewingSha === c.sha}
+                onClick={() => onPick(c.sha)}
+              />
+            ))}
           </>
         )}
       </div>
@@ -150,30 +138,25 @@ export function HistoryPanel({
   );
 }
 
-interface ActivityRowProps {
-  active: boolean;
-  isLatest: boolean;
-  onClick: () => void;
-  title: string;
-  author: string;
-  ts: string;
-  description: string;
-  sourceUrl?: string | null;
-  sourceTitle?: string | null;
+function PanelMessage({ children }: { children: string }) {
+  return (
+    <div style={{ padding: 12 }}>
+      <Text font="secondary-body" color="text-03">
+        {children}
+      </Text>
+    </div>
+  );
 }
 
-function ActivityRow({
+function LatestRow({
   active,
-  isLatest,
+  headSha,
   onClick,
-  title,
-  author,
-  ts,
-  description,
-  sourceUrl,
-  sourceTitle,
-}: ActivityRowProps) {
-  const initial = (author || title || "?").charAt(0).toUpperCase();
+}: {
+  active: boolean;
+  headSha: string | null;
+  onClick: () => void;
+}) {
   return (
     <SelectCard
       state={active ? "selected" : "empty"}
@@ -182,105 +165,198 @@ function ActivityRow({
       rounding="md"
       border="none"
     >
+      <Row>
+        <HeaderLine
+          avatars={<Avatar initial="·" />}
+          title="Latest (working tree)"
+          right={<Tag color="blue" size="sm" title="Current Version" />}
+        />
+        <ActionLine
+          label={headSha ? `Current HEAD · ${headSha.slice(0, 7)}` : "—"}
+        />
+      </Row>
+    </SelectCard>
+  );
+}
+
+function CommitRow({
+  commit,
+  active,
+  onClick,
+}: {
+  commit: CommitInfo;
+  active: boolean;
+  onClick: () => void;
+}) {
+  const { person, agent, agentLabel } = parseCommitAuthor(commit.author);
+  const { url, title: srcTitle } = parseCommitSource(commit.body);
+  const changed = commit.added + commit.removed;
+  const action = agentLabel
+    ? `${agentLabel} updated ${changed} lines`
+    : `Updated ${changed} lines`;
+  const AgentLogo = agent ? AGENT_LOGO[agent] : null;
+  return (
+    <SelectCard
+      state={active ? "selected" : "empty"}
+      onClick={onClick}
+      padding="xs"
+      rounding="md"
+      border="none"
+    >
+      <Row>
+        <HeaderLine
+          avatars={
+            <>
+              <Avatar initial={person.charAt(0).toUpperCase()} />
+              {AgentLogo ? <LogoAvatar Logo={AgentLogo} /> : null}
+            </>
+          }
+          title={person}
+          right={
+            <Text font="secondary-body" color="text-03" nowrap>
+              {relativeTime(commit.ts, "long")}
+            </Text>
+          }
+        />
+        <ActionLine
+          label={action}
+          stats={
+            changed > 0
+              ? { added: commit.added, removed: commit.removed }
+              : null
+          }
+          sourceUrl={url}
+          sourceTitle={srcTitle}
+        />
+      </Row>
+    </SelectCard>
+  );
+}
+
+function Row({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 4,
+        width: "100%",
+        minWidth: 0,
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function HeaderLine({
+  avatars,
+  title,
+  right,
+}: {
+  avatars: React.ReactNode;
+  title: string;
+  right: React.ReactNode;
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 8,
+        width: "100%",
+        minWidth: 0,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", flexShrink: 0 }}>
+        {avatars}
+      </div>
       <div
         style={{
-          display: "flex",
-          flexDirection: "column",
-          gap: 4,
-          width: "100%",
+          flex: 1,
           minWidth: 0,
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
         }}
       >
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "row",
-            alignItems: "center",
-            gap: 8,
-            width: "100%",
-            minWidth: 0,
-          }}
-        >
-          <Avatar initial={initial} />
-          <div
-            style={{
-              flex: 1,
-              minWidth: 0,
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-            }}
-          >
-            <Text font="main-ui-action" color="text-04" nowrap maxLines={1}>
-              {title}
-            </Text>
-          </div>
-          {isLatest ? (
-            <Tag color="blue" size="sm" title="Current Version" />
-          ) : (
-            <div style={{ flexShrink: 0 }}>
-              <Text font="secondary-body" color="text-03" nowrap>
-                {ts}
-              </Text>
-            </div>
-          )}
-        </div>
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "row",
-            alignItems: "center",
-            gap: 4,
-            width: "100%",
-            minWidth: 0,
-            paddingLeft: 28,
-          }}
-        >
-          <div
-            style={{
-              flex: 1,
-              minWidth: 0,
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-            }}
-          >
-            <Text font="secondary-body" color="text-03" nowrap maxLines={1}>
-              {description}
-            </Text>
-          </div>
-          {sourceUrl ? (
-            <a
-              href={sourceUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              onClick={(e) => e.stopPropagation()}
-              aria-label={sourceTitle ?? "Open source"}
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                padding: 2,
-                borderRadius: 4,
-                color: "inherit",
-                textDecoration: "none",
-                flexShrink: 0,
-              }}
-            >
-              <Text font="secondary-body" color="text-03">
-                ↗
-              </Text>
-            </a>
-          ) : null}
-        </div>
-        {sourceTitle && !sourceUrl ? (
-          <div style={{ paddingLeft: 28, width: "100%", minWidth: 0 }}>
-            <Text font="secondary-body" color="text-03" nowrap maxLines={1}>
-              {sourceTitle}
-            </Text>
-          </div>
-        ) : null}
+        <Text font="main-ui-action" color="text-04" nowrap maxLines={1}>
+          {title}
+        </Text>
       </div>
-    </SelectCard>
+      <div style={{ flexShrink: 0 }}>{right}</div>
+    </div>
+  );
+}
+
+function ActionLine({
+  label,
+  stats,
+  sourceUrl,
+  sourceTitle,
+}: {
+  label: string;
+  stats?: { added: number; removed: number } | null;
+  sourceUrl?: string | null;
+  sourceTitle?: string | null;
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 8,
+        width: "100%",
+        minWidth: 0,
+        paddingLeft: 28,
+      }}
+    >
+      <div
+        style={{
+          flex: 1,
+          minWidth: 0,
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+        }}
+      >
+        <Text font="secondary-body" color="text-03" nowrap maxLines={1}>
+          {label}
+        </Text>
+      </div>
+      {stats ? (
+        <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+          <Text font="secondary-mono" color="text-03" nowrap>
+            {`+${stats.added}`}
+          </Text>
+          <Text font="secondary-mono" color="text-03" nowrap>
+            {`-${stats.removed}`}
+          </Text>
+        </div>
+      ) : null}
+      {sourceUrl ? (
+        <a
+          href={sourceUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={(e) => e.stopPropagation()}
+          aria-label={sourceTitle ?? "Open source"}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            color: "inherit",
+            textDecoration: "none",
+            flexShrink: 0,
+          }}
+        >
+          <Text font="secondary-body" color="text-03">
+            ↗
+          </Text>
+        </a>
+      ) : null}
+    </div>
   );
 }
 
@@ -306,6 +382,30 @@ function Avatar({ initial }: { initial: string }) {
       }}
     >
       {initial}
+    </div>
+  );
+}
+
+/** Agent logo chip in the avatar stack — overlaps the person avatar
+ *  slightly, matching the Figma stacked-avatar treatment. */
+function LogoAvatar({ Logo }: { Logo: ComponentType<IconProps> }) {
+  return (
+    <div
+      style={{
+        width: 20,
+        height: 20,
+        marginLeft: -6,
+        borderRadius: 9999,
+        background: color.bg.page,
+        border: `1px solid ${color.border.subtle}`,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        flexShrink: 0,
+        overflow: "hidden",
+      }}
+    >
+      <Logo style={{ width: 12, height: 12 }} />
     </div>
   );
 }
