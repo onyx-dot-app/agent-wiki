@@ -18,7 +18,7 @@ log = logging.getLogger(__name__)
 
 from app.auth import current_user
 from app.llm.agents import merge_conflict_update
-from app.wiki.models import AiRebaseMaxRetriesError, ChangeKind, CommitResult
+from app.models.wiki import AiRebaseMaxRetriesError, ChangeKind, CommitResult
 from app.wiki import (
     agent_activity,
     filesystem,

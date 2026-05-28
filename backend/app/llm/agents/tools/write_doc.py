@@ -9,7 +9,7 @@ from typing import Any
 
 from app.llm.agents.tools import _doc_helpers as h
 from app.wiki import git as wiki_git
-from app.wiki.models import ChangeKind
+from app.models.wiki import ChangeKind
 
 
 def handle(args: dict[str, Any]) -> Any:

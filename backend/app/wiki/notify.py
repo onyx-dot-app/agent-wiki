@@ -34,7 +34,7 @@ from app.mcp_server import pubsub as mcp_pubsub
 from app.tasks.reindex import index_path
 from app.tasks.triggers import fan_out_trigger_eval
 from app.wiki import acl
-from app.wiki.models import ChangeKind
+from app.models.wiki import ChangeKind
 
 
 def after_doc_write(

@@ -52,7 +52,7 @@ from app.wiki import (
     search as wiki_search,
     templates as templates_repo,
 )
-from app.wiki.models import ChangeKind
+from app.models.wiki import ChangeKind
 
 router = APIRouter()
 log = logging.getLogger(__name__)

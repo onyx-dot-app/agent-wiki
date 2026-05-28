@@ -57,7 +57,7 @@ from app.triggers.engine import (
 )
 from app.wiki import acl as wiki_acl
 from app.wiki import git as wiki_git
-from app.wiki.models import ChangeKind
+from app.models.wiki import ChangeKind
 
 log = logging.getLogger(__name__)
 
