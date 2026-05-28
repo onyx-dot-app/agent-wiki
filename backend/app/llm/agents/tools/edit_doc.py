@@ -8,6 +8,7 @@ from typing import Any
 
 from app.wiki import utils as wiki_utils
 from app.wiki import edit as wiki_edit
+from app.models.wiki import AiRebaseMaxRetriesError
 
 
 def handle(args: dict[str, Any]) -> Any:
@@ -47,7 +48,7 @@ def handle(args: dict[str, Any]) -> Any:
                 new_body=new_body,
                 activity_ttl=activity_ttl,
             )
-        except wiki_utils.AiRebaseMaxRetriesError as exc:
+        except AiRebaseMaxRetriesError as exc:
             return {
                 "error": "stale_base",
                 "message": "concurrent edits kept landing; max retries exceeded",

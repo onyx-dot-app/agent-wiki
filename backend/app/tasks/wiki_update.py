@@ -50,7 +50,7 @@ from app.mcp_server import pubsub as mcp_pubsub
 from app.auth import UserMissingError, load_user, set_current_user
 from app.tasks.queues import documents_queue
 from app.wiki import agent_activity, git as wiki_git, notify as wiki_notify
-from app.models.wiki import ChangeKind
+from app.models.wiki import AiRebaseMaxRetriesError, ChangeKind
 
 _INGEST_AUTHOR = "Onyx Ingest <ingest@agent-wiki>"
 
@@ -200,7 +200,7 @@ def _run_inner(job_id: str, rel: str, instruction: str, base_sha: str | None) ->
         mcp_jobs.mark_failed(job_id, error=f"llm_error: {exc}")
         mcp_pubsub.publish_job_update(job_id, "failed")
         return
-    except wiki_utils.AiRebaseMaxRetriesError as exc:
+    except AiRebaseMaxRetriesError as exc:
         mcp_jobs.mark_failed(
             job_id,
             error="max_retries_exceeded",

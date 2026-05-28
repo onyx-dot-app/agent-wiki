@@ -9,7 +9,7 @@ from typing import Any
 
 from app.wiki import utils as wiki_utils
 from app.wiki import git as wiki_git
-from app.models.wiki import ChangeKind
+from app.models.wiki import AiRebaseMaxRetriesError, ChangeKind
 
 
 def handle(args: dict[str, Any]) -> Any:
@@ -48,7 +48,7 @@ def handle(args: dict[str, Any]) -> Any:
                     new_body=body,
                     activity_ttl=activity_ttl,
                 )  # always ChangeKind.EDIT — new files take the else branch below
-            except wiki_utils.AiRebaseMaxRetriesError as exc:
+            except AiRebaseMaxRetriesError as exc:
                 return {
                     "error": "stale_base",
                     "message": "concurrent edits kept landing; max retries exceeded",
