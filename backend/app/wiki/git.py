@@ -4,10 +4,12 @@ The backend keeps the wiki as a real git repository on disk and shells out to
 git via subprocess — no library dependency. All writes commit immediately so
 history is always consistent with the working tree.
 """
+
 from __future__ import annotations
 
 import logging
 import os
+import re
 import subprocess
 import tempfile
 from pathlib import Path
@@ -19,15 +21,19 @@ from app.config import CONFIG
 
 log = logging.getLogger(__name__)
 
+_SHA_LINE_RE = re.compile(r"^[0-9a-f]{40}$")
+
 
 class CommitInfo(BaseModel):
     """One commit in a path's history (newest first)."""
 
     sha: str
     author: str
-    ts: str          # ISO-8601 author date
-    message: str     # commit subject
-    body: str        # commit body (may be empty)
+    ts: str  # ISO-8601 author date
+    message: str  # commit subject
+    body: str  # commit body (may be empty)
+    added: int = 0  # lines added to this path by this commit
+    removed: int = 0  # lines removed from this path by this commit
 
 
 def _run(
@@ -138,7 +144,7 @@ def move_path(
         if old_p == old_rel_path:
             moves.append((old_p, new_rel_path))
         else:
-            rest = old_p[len(old_rel_path):].lstrip("/")
+            rest = old_p[len(old_rel_path) :].lstrip("/")
             moves.append((old_p, f"{new_rel_path}/{rest}"))
     full_new = Path(CONFIG.wiki_dir) / new_rel_path
     full_new.parent.mkdir(parents=True, exist_ok=True)
@@ -220,13 +226,13 @@ def path_at_ref(current_rel_path: str, ref: str) -> str | None:
 
 
 def history(rel_path: str, limit: int = 100) -> list[CommitInfo]:
-    """Return commit metadata (incl. body) for a path, newest first."""
+    """Return commit metadata (incl. body + per-commit line stats) for a
+    path, newest first."""
     sep_field = "\x1f"
     sep_record = "\x1e"
     fmt = f"%H{sep_field}%an{sep_field}%aI{sep_field}%s{sep_field}%b{sep_record}"
-    out = _run(
-        ["log", f"-n{limit}", "--follow", f"--pretty=format:{fmt}", "--", rel_path]
-    ).stdout
+    out = _run(["log", f"-n{limit}", "--follow", f"--pretty=format:{fmt}", "--", rel_path]).stdout
+    stats = _numstat_by_sha(rel_path, limit)
     rows: list[CommitInfo] = []
     for record in out.split(sep_record):
         record = record.strip("\n")
@@ -236,15 +242,63 @@ def history(rel_path: str, limit: int = 100) -> list[CommitInfo]:
         if len(parts) < 5:
             continue
         sha, author, iso, subject, body = parts
-        rows.append(CommitInfo(sha=sha, author=author, ts=iso, message=subject, body=body))
+        added, removed = stats.get(sha, (0, 0))
+        rows.append(
+            CommitInfo(
+                sha=sha,
+                author=author,
+                ts=iso,
+                message=subject,
+                body=body,
+                added=added,
+                removed=removed,
+            )
+        )
     return rows
+
+
+def _numstat_by_sha(rel_path: str, limit: int) -> dict[str, tuple[int, int]]:
+    """``{sha: (added, removed)}`` for a path's history in one git call.
+
+    ``git log --numstat`` emits a bare sha line per commit followed by
+    ``<added>\\t<removed>\\t<path>`` rows. Binary files report ``-`` for
+    the counts, which we coerce to 0. ``--follow`` may render a rename as
+    ``old => new`` in the path column; the counts column is unaffected.
+    """
+    out = _run(
+        ["log", f"-n{limit}", "--follow", "--numstat", "--format=%H", "--", rel_path],
+        check=False,
+    ).stdout
+    stats: dict[str, tuple[int, int]] = {}
+    current: str | None = None
+    for line in out.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if _SHA_LINE_RE.match(line):
+            current = line
+            continue
+        if current is None:
+            continue
+        cols = line.split("\t")
+        if len(cols) < 2:
+            continue
+        added = int(cols[0]) if cols[0].isdigit() else 0
+        removed = int(cols[1]) if cols[1].isdigit() else 0
+        prev = stats.get(current, (0, 0))
+        stats[current] = (prev[0] + added, prev[1] + removed)
+    return stats
 
 
 def head_sha_for_path(rel_path: str) -> str | None:
     """SHA of the most recent commit that touched ``rel_path``, or None."""
-    out = _run(
-        ["log", "-n1", "--pretty=format:%H", "--", rel_path], check=False
-    ).stdout.strip()
+    out = _run(["log", "-n1", "--pretty=format:%H", "--", rel_path], check=False).stdout.strip()
+    return out or None
+
+
+def parent_sha(sha: str) -> str | None:
+    """First parent of ``sha`` or None if it's a root commit."""
+    out = _run(["rev-parse", "--verify", f"{sha}^"], check=False).stdout.strip()
     return out or None
 
 
@@ -296,16 +350,14 @@ def list_paths_with_head_sha(prefix: str = "") -> list[tuple[str, str]]:
     than ``head_sha_for_path`` per file.
     """
     sep = "\x1f"
-    res = _run(
-        ["log", "--name-only", f"--pretty=format:{sep}%H"], check=False
-    )
+    res = _run(["log", "--name-only", f"--pretty=format:{sep}%H"], check=False)
     if res.returncode != 0:
         return []
     head: dict[str, str] = {}
     current_sha: str | None = None
     for line in res.stdout.splitlines():
         if line.startswith(sep):
-            current_sha = line[len(sep):]
+            current_sha = line[len(sep) :]
             continue
         if not line or current_sha is None:
             continue
@@ -328,7 +380,7 @@ def list_paths_with_mtime(prefix: str = "") -> list[tuple[str, str]]:
     current_ts: str | None = None
     for line in out.splitlines():
         if line.startswith(sep):
-            current_ts = line[len(sep):]
+            current_ts = line[len(sep) :]
             continue
         if not line or current_ts is None:
             continue
@@ -340,9 +392,7 @@ def list_paths_with_mtime(prefix: str = "") -> list[tuple[str, str]]:
 
 def paths_changed_in(sha: str) -> list[str]:
     """File paths touched by a single commit. Empty list if sha is unknown."""
-    out = _run(
-        ["diff-tree", "--no-commit-id", "--name-only", "-r", sha], check=False
-    ).stdout
+    out = _run(["diff-tree", "--no-commit-id", "--name-only", "-r", sha], check=False).stdout
     return [line for line in out.splitlines() if line]
 
 
@@ -352,11 +402,22 @@ def tree_paths_at(sha: str) -> list[str]:
     return [line for line in out.splitlines() if line]
 
 
-def diff_for_commit(sha: str, rel_path: str | None = None) -> str:
-    args = ["show", "--no-color", sha]
+class UnknownSha(Exception):
+    """Raised when a SHA can't be resolved against the wiki repo.
+
+    Lets callers translate "this commit/ref doesn't exist" without leaking
+    ``subprocess.CalledProcessError`` outside the git seam.
+    """
+
+
+def diff_for_commit(sha: str, rel_path: str | None = None, *, unified: int = 3) -> str:
+    args = ["show", "--no-color", f"--unified={unified}", sha]
     if rel_path:
         args += ["--", rel_path]
-    return _run(args).stdout
+    try:
+        return _run(args).stdout
+    except subprocess.CalledProcessError as e:
+        raise UnknownSha(sha) from e
 
 
 # --------------------------------------------------------------------------- #
@@ -431,7 +492,9 @@ def delete_draft(rel_path: str, user_id: str) -> None:
 
 def delete_drafts_for_path(rel_path: str) -> None:
     """Delete all draft branches for a page — called when the page is deleted."""
-    out = _run(["for-each-ref", "--format=%(refname:short)", "refs/heads/drafts/"], check=False).stdout
+    out = _run(
+        ["for-each-ref", "--format=%(refname:short)", "refs/heads/drafts/"], check=False
+    ).stdout
     for branch in out.splitlines():
         # branch = "drafts/<user_id>/<rel_path>" — split into at most 3 parts
         parts = branch.split("/", 2)
@@ -442,18 +505,18 @@ def delete_drafts_for_path(rel_path: str) -> None:
 class RebaseResult(BaseModel):
     """Result of a draft rebase attempt."""
 
-    merged: str           # merged content (clean) or content with conflict markers
-    base_sha: str         # new base SHA (current HEAD)
-    clean: bool           # True = no conflicts, False = conflict markers present
-    current_body: str     # current HEAD content (for conflict UI)
-    draft_body: str       # original draft content (for conflict UI)
+    merged: str  # merged content (clean) or content with conflict markers
+    base_sha: str  # new base SHA (current HEAD)
+    clean: bool  # True = no conflicts, False = conflict markers present
+    current_body: str  # current HEAD content (for conflict UI)
+    draft_body: str  # original draft content (for conflict UI)
 
 
 class MergeResult(BaseModel):
     """Result of a ``merge_content`` call."""
 
-    merged: str   # merged text (clean) or text with conflict markers
-    clean: bool   # True = no conflicts, False = conflict markers present
+    merged: str  # merged text (clean) or text with conflict markers
+    clean: bool  # True = no conflicts, False = conflict markers present
 
 
 def merge_content(base_body: str, current_body: str, incoming_body: str) -> MergeResult:
@@ -473,8 +536,19 @@ def merge_content(base_body: str, current_body: str, incoming_body: str) -> Merg
                 os.close(fd)
         # git merge-file -p writes result to stdout; exit 0 = clean, >0 = conflicts.
         result = _run(
-            ["merge-file", "-p", "-L", "current", "-L", "base", "-L", "incoming",
-             paths[0], paths[1], paths[2]],
+            [
+                "merge-file",
+                "-p",
+                "-L",
+                "current",
+                "-L",
+                "base",
+                "-L",
+                "incoming",
+                paths[0],
+                paths[1],
+                paths[2],
+            ],
             check=False,
         )
         if result.returncode < 0:

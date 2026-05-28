@@ -1,7 +1,8 @@
 """HTTP shapes for /api/wiki."""
+
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -135,12 +136,61 @@ class CommitView(BaseModel):
     ts: str
     message: str
     body: str = ""
+    added: int = 0
+    removed: int = 0
+    triggered: int = 0  # number of automations this commit fired
 
 
 class FileHistoryResponse(BaseModel):
     path: str
     head_sha: str | None
     commits: list[CommitView]
+
+
+class WordDiff(BaseModel):
+    """A 1-remove/1-add line collapsed into one rendered row.
+
+    Common leading + trailing word tokens become `prefix`/`suffix`;
+    the middle is split into struck-through `removed` and green `added`.
+    """
+
+    prefix: str
+    removed: str
+    added: str
+    suffix: str
+
+
+class DiffLine(BaseModel):
+    """One rendered row in a diff hunk.
+
+    Field population by `kind`:
+    - `context` / `add` / `remove`: `text` set, `word_diff` None.
+    - `word`: `word_diff` set, `text` None.
+    - `context` and `word`: both `old_lineno` and `new_lineno` set.
+    - `add`: only `new_lineno` set. `remove`: only `old_lineno` set.
+    """
+
+    kind: Literal["context", "add", "remove", "word"]
+    text: str | None
+    word_diff: WordDiff | None
+    old_lineno: int | None
+    new_lineno: int | None
+
+
+class DiffHunk(BaseModel):
+    old_start: int
+    old_count: int
+    new_start: int
+    new_count: int
+    lines: list[DiffLine]
+
+
+class FileDiffResponse(BaseModel):
+    path: str
+    sha: str
+    parent_sha: str | None
+    hunks: list[DiffHunk]
+    is_creation: bool
 
 
 class SearchHitView(BaseModel):
@@ -177,7 +227,7 @@ class ActivityRowView(BaseModel):
 
     owner_display: str
     agent_name: str | None
-    activity: str           # "read" | "wrote"
+    activity: str  # "read" | "wrote"
     description: str | None
     registered_at: str
     expires_at: str

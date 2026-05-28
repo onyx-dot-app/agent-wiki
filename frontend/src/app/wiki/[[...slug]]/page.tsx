@@ -20,6 +20,8 @@ import { Button } from "@/components/common/Button";
 import { PageHeader } from "@/components/common/PageHeader";
 import { TriggerModal } from "@/components/triggers/TriggerModal";
 import { ActiveSessionsList } from "@/components/wiki/ActiveSessionsList";
+import { DiffView } from "@/components/wiki/DiffView";
+import { HistoryPanel } from "@/components/wiki/HistoryPanel";
 import { RunAgentModal } from "@/components/wiki/RunAgentModal";
 import { ShareDialog } from "@/components/wiki/ShareDialog";
 import { FolderIcon, FileIcon } from "@/components/wiki/WikiIcons";
@@ -35,7 +37,14 @@ import {
   type DocumentTemplateSummary,
 } from "@/lib/templates";
 import { color, radius, shadow } from "@/lib/theme";
+import { absoluteTime, relativeTime } from "@/lib/time";
 import { useIsMobile } from "@/lib/viewport";
+import {
+  type CommitInfo,
+  fetchFileDiff,
+  fetchFileHistory,
+  type FileDiffResponse,
+} from "@/lib/wiki";
 import type { DocumentActivity, DocumentActivityResponse } from "@/types";
 
 interface DocEntry {
@@ -52,20 +61,6 @@ interface FileResponse {
   body: string;
   ref?: string;
   head_sha?: string | null;
-}
-
-interface CommitInfo {
-  sha: string;
-  author: string;
-  ts: string;
-  message: string;
-  body?: string;
-}
-
-interface HistoryResponse {
-  path: string;
-  head_sha: string | null;
-  commits: CommitInfo[];
 }
 
 interface DraftResponse {
@@ -1250,7 +1245,7 @@ function Row({
               whiteSpace: "nowrap",
             }}
           >
-            {updatedAt ? formatRelative(updatedAt) : "—"}
+            {updatedAt ? relativeTime(updatedAt, "short") : "—"}
           </span>
           <button
             onClick={onStartRename}
@@ -1408,6 +1403,7 @@ function FileViewer({ path }: { path: string }) {
   const [viewingSha, setViewingSha] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [commits, setCommits] = useState<CommitInfo[] | null>(null);
+  const [diffData, setDiffData] = useState<FileDiffResponse | null>(null);
   const [historyError, setHistoryError] = useState<string | null>(null);
   // Active-agents panel (collapsible chip near the top of the doc).
   // We always know the count (so the chip can label "Active agents (N)"),
@@ -1435,7 +1431,8 @@ function FileViewer({ path }: { path: string }) {
   // Conflict resolution: set when a save returns 409.
   const [conflict, setConflict] = useState<ConflictState | null>(null);
   // Resume banner: set when entering edit mode and a matching draft exists.
-  const [pendingResumeDraft, setPendingResumeDraft] = useState<DraftResponse | null>(null);
+  const [pendingResumeDraft, setPendingResumeDraft] =
+    useState<DraftResponse | null>(null);
   const [resuming, setResuming] = useState(false);
   const [consolidating, setConsolidating] = useState(false);
   // Debounce timer ref for auto-saving the draft to the server.
@@ -1449,6 +1446,7 @@ function FileViewer({ path }: { path: string }) {
     setError(null);
     setEditing(false);
     setViewingSha(null);
+    setDiffData(null);
     apiFetch<FileResponse>(`/wiki/file?path=${encodeURIComponent(path)}`)
       .then((r) => {
         setBody(r.body);
@@ -1600,26 +1598,32 @@ function FileViewer({ path }: { path: string }) {
     return () => window.removeEventListener("focus", onFocus);
   }, [refreshAgents]);
 
-  const refreshHistory = useCallback(() => {
+  const refreshHistory = useCallback(async () => {
     setHistoryError(null);
-    apiFetch<HistoryResponse>(
-      `/wiki/file/history?path=${encodeURIComponent(path)}`,
-    )
-      .then((r) => {
-        setCommits(r.commits);
-        setHeadSha(r.head_sha);
-      })
-      .catch((e) =>
-        setHistoryError(
-          e instanceof Error ? e.message : "failed to load history",
-        ),
+    try {
+      const r = await fetchFileHistory(path);
+      setCommits(r.commits);
+      setHeadSha(r.head_sha);
+      return r;
+    } catch (e) {
+      setHistoryError(
+        e instanceof Error ? e.message : "failed to load history",
       );
+      return null;
+    }
   }, [path]);
 
-  function toggleHistory() {
+  async function toggleHistory() {
     const next = !historyOpen;
     setHistoryOpen(next);
-    if (next && commits === null) refreshHistory();
+    if (!next) return;
+    // Opening history: show the newest commit's diff immediately rather
+    // than leaving the rendered body up until the user clicks a row.
+    const loaded = commits ?? (await refreshHistory())?.commits ?? null;
+    const newest = loaded?.[0];
+    if (newest && viewingSha === null) {
+      void onPickCommit(newest.sha);
+    }
   }
 
   async function onPickCommit(sha: string) {
@@ -1628,14 +1632,8 @@ function FileViewer({ path }: { path: string }) {
     setError(null);
     setEditing(false);
     try {
-      const r = await apiFetch<FileResponse>(
-        `/wiki/file?path=${encodeURIComponent(path)}&ref=${encodeURIComponent(
-          sha,
-        )}`,
-      );
-      setBody(r.body);
-      setDraft(r.body);
-      setHeadSha(r.head_sha ?? headSha);
+      const r = await fetchFileDiff(path, sha);
+      setDiffData(r);
       setViewingSha(sha);
     } catch (e) {
       setError(e instanceof Error ? e.message : "failed to load version");
@@ -1656,7 +1654,7 @@ function FileViewer({ path }: { path: string }) {
     editing && filenameValid && filenameNoExt !== currentBasenameNoExt;
   const bodyChanged = editing && draft !== body;
   const dirty = editing && (bodyChanged || renamed);
-  const viewingOld = viewingSha !== null && viewingSha !== headSha;
+  const viewingOld = viewingSha !== null;
 
   // Guard against losing unsaved edits when the user navigates away.
   // - beforeunload: tab close, refresh, typing a URL — browser shows a
@@ -1760,6 +1758,7 @@ function FileViewer({ path }: { path: string }) {
       // stale pre-edit body.
       setBody(draft);
       setDraft(draft);
+      setDiffData(null);
       // History changed (new commit + possible deprecations) — refetch.
       if (historyOpen) refreshHistory();
       else setCommits(null);
@@ -1919,10 +1918,9 @@ function FileViewer({ path }: { path: string }) {
     setViewingSha(null);
     setConflict(null);
     setEditing(false);
-    void apiFetch(
-      `/wiki/file/autosave?path=${encodeURIComponent(path)}`,
-      { method: "DELETE" },
-    ).catch(() => {});
+    void apiFetch(`/wiki/file/autosave?path=${encodeURIComponent(path)}`, {
+      method: "DELETE",
+    }).catch(() => {});
   }
 
   return (
@@ -2205,10 +2203,7 @@ function FileViewer({ path }: { path: string }) {
             >
               Keep mine
             </Button>
-            <Button
-              size="sm"
-              onClick={onUseCurrent}
-            >
+            <Button size="sm" onClick={onUseCurrent}>
               Use current
             </Button>
             <Button
@@ -2218,10 +2213,7 @@ function FileViewer({ path }: { path: string }) {
             >
               {consolidating ? "Merging…" : "Merge with AI"}
             </Button>
-            <Button
-              size="sm"
-              onClick={() => setConflict(null)}
-            >
+            <Button size="sm" onClick={() => setConflict(null)}>
               Edit manually
             </Button>
           </div>
@@ -2233,8 +2225,14 @@ function FileViewer({ path }: { path: string }) {
             }}
           >
             {(() => {
-              const currentHunks = diffLines(conflict.draftBody, conflict.currentBody);
-              const draftHunks = diffLines(conflict.currentBody, conflict.draftBody);
+              const currentHunks = diffLines(
+                conflict.draftBody,
+                conflict.currentBody,
+              );
+              const draftHunks = diffLines(
+                conflict.currentBody,
+                conflict.draftBody,
+              );
               const preStyle: React.CSSProperties = {
                 margin: 0,
                 fontSize: 12,
@@ -2255,7 +2253,12 @@ function FileViewer({ path }: { path: string }) {
               };
               return (
                 <>
-                  <div style={{ padding: 12, borderRight: `1px solid ${color.border.subtle}` }}>
+                  <div
+                    style={{
+                      padding: 12,
+                      borderRight: `1px solid ${color.border.subtle}`,
+                    }}
+                  >
                     <div style={labelStyle}>Current version</div>
                     <pre style={preStyle}>
                       {currentHunks.map((part, i) => (
@@ -2265,9 +2268,11 @@ function FileViewer({ path }: { path: string }) {
                             background: part.added
                               ? color.state.success.bg
                               : part.removed
+                                ? "transparent"
+                                : undefined,
+                            color: part.removed
                               ? "transparent"
-                              : undefined,
-                            color: part.removed ? "transparent" : color.text.secondary,
+                              : color.text.secondary,
                             userSelect: part.removed ? "none" : undefined,
                           }}
                         >
@@ -2286,9 +2291,11 @@ function FileViewer({ path }: { path: string }) {
                             background: part.added
                               ? color.state.warning.bg
                               : part.removed
+                                ? "transparent"
+                                : undefined,
+                            color: part.removed
                               ? "transparent"
-                              : undefined,
-                            color: part.removed ? "transparent" : color.text.secondary,
+                              : color.text.secondary,
                             userSelect: part.removed ? "none" : undefined,
                           }}
                         >
@@ -2372,6 +2379,32 @@ function FileViewer({ path }: { path: string }) {
                   }}
                 />
               </>
+            ) : viewingOld && diffData ? (
+              <div
+                style={{
+                  flex: 1,
+                  minHeight: 0,
+                  overflow: "hidden",
+                  display: "flex",
+                }}
+              >
+                <DiffView
+                  data={diffData}
+                  commit={
+                    commits?.find((c) => c.sha === viewingSha) ?? undefined
+                  }
+                  loadBody={async () => {
+                    const sha = viewingSha;
+                    if (!sha) return "";
+                    const r = await apiFetch<FileResponse>(
+                      `/wiki/file?path=${encodeURIComponent(
+                        path,
+                      )}&ref=${encodeURIComponent(sha)}`,
+                    );
+                    return r.body;
+                  }}
+                />
+              </div>
             ) : (
               <article
                 className="markdown"
@@ -2390,7 +2423,6 @@ function FileViewer({ path }: { path: string }) {
               headSha={headSha}
               viewingSha={viewingSha}
               onPick={onPickCommit}
-              onPickLatest={loadLatest}
               onClose={() => setHistoryOpen(false)}
             />
           )}
@@ -2432,10 +2464,6 @@ function FileViewer({ path }: { path: string }) {
                 onPickCommit(sha);
                 setHistoryOpen(false);
               }}
-              onPickLatest={() => {
-                loadLatest();
-                setHistoryOpen(false);
-              }}
               onClose={() => setHistoryOpen(false)}
               fullHeight
             />
@@ -2444,255 +2472,6 @@ function FileViewer({ path }: { path: string }) {
       )}
     </main>
   );
-}
-
-function HistoryPanel({
-  commits,
-  error,
-  headSha,
-  viewingSha,
-  onPick,
-  onPickLatest,
-  onClose,
-  fullHeight = false,
-}: {
-  commits: CommitInfo[] | null;
-  error: string | null;
-  headSha: string | null;
-  viewingSha: string | null;
-  onPick: (sha: string) => void;
-  onPickLatest: () => void;
-  onClose: () => void;
-  /** When true (mobile sheet mode), fill the entire host container
-   *  edge-to-edge instead of rendering as a fixed-width rounded card. */
-  fullHeight?: boolean;
-}) {
-  const latestActive = viewingSha === null;
-  return (
-    <aside
-      style={{
-        width: fullHeight ? "100%" : 320,
-        height: fullHeight ? "100%" : undefined,
-        flexShrink: 0,
-        border: fullHeight ? "none" : `1px solid ${color.border.default}`,
-        borderLeft: fullHeight
-          ? `1px solid ${color.border.default}`
-          : undefined,
-        borderRadius: fullHeight ? 0 : radius.md,
-        background: color.bg.panel,
-        display: "flex",
-        flexDirection: "column",
-        minHeight: 0,
-      }}
-    >
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          padding: "10px 12px",
-          borderBottom: `1px solid ${color.border.subtle}`,
-          fontSize: 13,
-          fontWeight: 600,
-          color: color.text.secondary,
-        }}
-      >
-        <span>History</span>
-        <div style={{ flex: 1 }} />
-        <button
-          onClick={onClose}
-          aria-label="Close history"
-          style={{
-            background: "transparent",
-            border: "none",
-            color: color.text.muted,
-            cursor: "pointer",
-            fontSize: 16,
-            lineHeight: 1,
-            padding: 4,
-          }}
-        >
-          ×
-        </button>
-      </div>
-      <div style={{ overflowY: "auto", flex: 1 }}>
-        {error && (
-          <div
-            style={{ padding: 12, fontSize: 12, color: color.state.danger.fg }}
-          >
-            {error}
-          </div>
-        )}
-        {!error && commits === null && (
-          <div style={{ padding: 12, fontSize: 12, color: color.text.muted }}>
-            Loading…
-          </div>
-        )}
-        {!error && commits && commits.length === 0 && (
-          <div style={{ padding: 12, fontSize: 12, color: color.text.muted }}>
-            No history yet.
-          </div>
-        )}
-        {!error && commits && commits.length > 0 && (
-          <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
-            <CommitRow
-              active={latestActive}
-              onClick={onPickLatest}
-              title="Latest (working tree)"
-              subtitle={headSha ? headSha.slice(0, 7) : ""}
-              meta=""
-            />
-            {commits.map((c) => {
-              const { url, title: srcTitle } = parseSourceMeta(c.body);
-              return (
-                <CommitRow
-                  key={c.sha}
-                  active={!latestActive && viewingSha === c.sha}
-                  onClick={() => onPick(c.sha)}
-                  title={c.message || "(no message)"}
-                  subtitle={`${c.sha.slice(0, 7)} · ${c.author}`}
-                  meta={formatTs(c.ts)}
-                  sourceUrl={url}
-                  sourceTitle={srcTitle}
-                />
-              );
-            })}
-          </ul>
-        )}
-      </div>
-    </aside>
-  );
-}
-
-function CommitRow({
-  active,
-  onClick,
-  title,
-  subtitle,
-  meta,
-  sourceUrl,
-  sourceTitle,
-}: {
-  active: boolean;
-  onClick: () => void;
-  title: string;
-  subtitle: string;
-  meta: string;
-  sourceUrl?: string | null;
-  sourceTitle?: string | null;
-}) {
-  return (
-    <li style={{ borderBottom: `1px solid ${color.border.subtle}` }}>
-      <button
-        onClick={onClick}
-        style={{
-          width: "100%",
-          textAlign: "left",
-          padding: "10px 12px 6px",
-          background: active ? color.accent.subtleBg : "transparent",
-          color: color.text.primary,
-          border: "none",
-          cursor: "pointer",
-          display: "block",
-        }}
-      >
-        <div
-          style={{
-            fontSize: 13,
-            fontWeight: active ? 600 : 500,
-            lineHeight: 1.35,
-          }}
-        >
-          {title}
-        </div>
-        <div style={{ fontSize: 11, color: color.text.muted, marginTop: 4 }}>
-          {subtitle}
-          {meta ? ` · ${meta}` : ""}
-        </div>
-      </button>
-      {(sourceTitle || sourceUrl) && (
-        <div
-          style={{
-            padding: "0 12px 8px",
-            background: active ? color.accent.subtleBg : "transparent",
-          }}
-        >
-          {sourceUrl ? (
-            <a
-              href={sourceUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              style={{
-                display: "inline-block",
-                fontSize: 11,
-                color: color.accent.subtleFg,
-                textDecoration: "underline",
-                textUnderlineOffset: 2,
-                maxWidth: "100%",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
-              }}
-            >
-              {sourceTitle ?? sourceUrl}
-            </a>
-          ) : (
-            <span
-              style={{
-                display: "inline-block",
-                fontSize: 11,
-                color: color.text.muted,
-                maxWidth: "100%",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
-              }}
-            >
-              {sourceTitle}
-            </span>
-          )}
-        </div>
-      )}
-    </li>
-  );
-}
-
-function parseSourceMeta(body?: string): { url: string | null; title: string | null } {
-  let url: string | null = null;
-  let title: string | null = null;
-  for (const line of (body ?? "").split("\n")) {
-    if (!url) {
-      const m = line.match(/^Source:\s*(\S+)/);
-      if (m) url = /^https?:\/\//i.test(m[1]) ? m[1] : null;
-    }
-    if (!title) {
-      const m = line.match(/^Title:\s*(.+)/);
-      if (m) title = m[1].trim();
-    }
-  }
-  return { url, title };
-}
-
-function formatTs(iso: string): string {
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return iso;
-  return d.toLocaleString();
-}
-
-function formatRelative(iso: string): string {
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return iso;
-  const diffMs = d.getTime() - Date.now();
-  const past = diffMs <= 0;
-  const abs = Math.abs(diffMs);
-  const sec = Math.round(abs / 1000);
-  let value: string;
-  if (sec < 45) value = "just now";
-  else if (sec < 90) value = "1m";
-  else if (sec < 3600) value = `${Math.round(sec / 60)}m`;
-  else if (sec < 86400) value = `${Math.round(sec / 3600)}h`;
-  else value = `${Math.round(sec / 86400)}d`;
-  if (value === "just now") return value;
-  return past ? `${value} ago` : `in ${value}`;
 }
 
 function ActiveAgentsBar({
@@ -2884,12 +2663,12 @@ function ActiveAgentRow({
 
       <span
         style={{ fontSize: 11, color: color.text.faint, flexShrink: 0 }}
-        title={`Started ${formatTs(a.registered_at)} · Expires ${formatTs(
-          a.expires_at,
-        )}`}
+        title={`Started ${absoluteTime(
+          a.registered_at,
+        )} · Expires ${absoluteTime(a.expires_at)}`}
       >
-        {formatRelative(a.registered_at)} · expires{" "}
-        {formatRelative(a.expires_at)}
+        {relativeTime(a.registered_at, "short")} · expires{" "}
+        {relativeTime(a.expires_at, "short")}
       </span>
     </li>
   );

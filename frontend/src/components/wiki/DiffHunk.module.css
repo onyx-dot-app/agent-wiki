@@ -1,0 +1,89 @@
+.hunk {
+  display: flex;
+  flex-direction: column;
+}
+
+.context {
+  padding: 0 12px;
+  color: var(--color-text-primary);
+}
+
+/* Add + Remove block tokens (Figma 284:22702 / 284:22725).
+   Colors resolve via the --diff-* theme tokens in globals.css. */
+.add,
+.remove {
+  border-radius: 8px;
+  margin: 4px 0;
+  display: flex;
+  align-items: start;
+  gap: 4px;
+}
+
+.add {
+  background: var(--diff-add-bg);
+  color: var(--diff-add-fg);
+  padding: 4px;
+}
+
+/* Remove block in the Figma has NO outer padding — relies only on the
+   inner bullet and content elements for spacing. */
+.remove {
+  background: var(--diff-remove-bg);
+  color: var(--diff-remove-fg);
+}
+
+.blockContent {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 2px 8px;
+}
+
+.add + .add,
+.remove + .remove {
+  margin-top: 0;
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+.add:has(+ .add),
+.remove:has(+ .remove) {
+  margin-bottom: 0;
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.context > :first-child,
+.blockContent > :first-child {
+  margin-top: 0;
+}
+.context > :last-child,
+.blockContent > :last-child {
+  margin-bottom: 0;
+}
+
+.remove :is(p, li, blockquote, td, th) {
+  text-decoration: line-through;
+  text-decoration-color: currentColor;
+}
+.remove :is(h1, h2, h3, h4, h5, h6) {
+  opacity: 0.85;
+}
+.remove :is(code, pre, img) {
+  text-decoration: none;
+  opacity: 0.8;
+}
+.remove li::marker {
+  text-decoration: none;
+  color: currentColor;
+}
+
+/* Inline word edits — render the swap inside an `.add` block (green
+   container with the same quote indent + radius + padding). The
+   <del> is red strikethrough, the <ins> is green text. */
+.wordRemoved {
+  color: var(--diff-word-remove);
+  text-decoration: line-through;
+}
+
+.wordAdded {
+  color: var(--diff-word-add);
+}

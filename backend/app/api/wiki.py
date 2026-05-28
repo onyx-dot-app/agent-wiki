@@ -21,6 +21,7 @@ from app.models.file_system import (
     DocumentEntry,
     DraftRequest,
     DraftResponse,
+    FileDiffResponse,
     FileHistoryResponse,
     FolderHitView,
     GetDocumentResponse,
@@ -45,6 +46,7 @@ from app.tasks.reindex import index_path
 from app.triggers import repo as triggers_repo
 from app.wiki import (
     agent_activity,
+    diff as wiki_diff,
     drafts as wiki_drafts,
     filesystem,
     git as wiki_git,
@@ -61,6 +63,7 @@ log = logging.getLogger(__name__)
 # later commit's trailer, so rolled-back-over revisions disappear without
 # rewriting git history.
 _DEPRECATES_RE = re.compile(r"^Deprecates:\s*(.+)$", re.MULTILINE)
+_SHA_RE = re.compile(r"^[0-9a-f]{4,40}$")
 
 
 def _git_author(user: User | None) -> str | None:
@@ -379,12 +382,45 @@ def file_history(
             for token in m.group(1).split():
                 deprecated.add(token)
     head_sha = rows[0].sha if rows else None
+    fires = triggers_repo.fire_counts_by_sha({r.sha for r in rows})
     visible = [
-        CommitView(sha=r.sha, author=r.author, ts=r.ts, message=r.message, body=r.body)
+        CommitView(
+            sha=r.sha,
+            author=r.author,
+            ts=r.ts,
+            message=r.message,
+            body=r.body,
+            added=r.added,
+            removed=r.removed,
+            triggered=fires.get(r.sha, 0),
+        )
         for r in rows
         if r.sha not in deprecated
     ]
     return FileHistoryResponse(path=rel, head_sha=head_sha, commits=visible)
+
+
+@router.get("/file/diff", response_model=FileDiffResponse)
+def file_diff(
+    user: User = Depends(require_user),
+    path: str = "",
+    sha: str = "",
+) -> FileDiffResponse:
+    if not path:
+        raise HTTPException(status_code=400, detail="path required")
+    if not sha:
+        raise HTTPException(status_code=400, detail="sha required")
+    if not _SHA_RE.match(sha):
+        raise HTTPException(status_code=400, detail="malformed sha")
+    try:
+        rel = filesystem.safe_rel_path(path)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    require_can("read", rel, user)
+    result = wiki_diff.parse_commit_diff(sha, rel)
+    if not result.hunks:
+        raise HTTPException(status_code=404, detail="sha does not touch path")
+    return result
 
 
 @router.get("/file/activity", response_model=DocumentActivityResponse)
