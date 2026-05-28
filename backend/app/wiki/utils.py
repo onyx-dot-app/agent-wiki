@@ -102,12 +102,12 @@ def commit_with_ai_rebase(
             return None
         post_sha = wiki_git.head_sha_for_path(path)
         if post_sha == head_sha:
-            # TOCTOU: HEAD could advance again between this check and
-            # commit_file. Git's index.lock prevents corruption, but a
-            # concurrent commit would surface as a RuntimeError rather than
-            # being caught here. The window is tiny; a real fix would need
-            # a repo-scoped advisory lock around the read-merge-commit
-            # section. Deferred — narrowing the window is sufficient for now.
+            # Race: two workers can both pass this check before either
+            # commits. Git serialises via its ref lock — the loser gets
+            # a CalledProcessError ("cannot lock ref") that propagates
+            # unhandled. A repo-scoped advisory lock (e.g. pg_advisory_lock)
+            # around the read-merge-commit section would close the window;
+            # deferred for now since the race is extremely narrow in practice.
             sha = commit_and_fan_out(
                 path, merged, message,
                 change_kind=ChangeKind.EDIT, activity_ttl=activity_ttl,
