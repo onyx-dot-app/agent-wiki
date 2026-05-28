@@ -25,7 +25,7 @@ class CommitResult(NamedTuple):
     new_body: str
 
 
-class AiRebaseMaxRetriesException(Exception):
+class AiRebaseMaxRetriesError(Exception):
     """Raised by ``commit_with_ai_rebase`` when HEAD keeps moving."""
 
     def __init__(self, retries: int, current_sha: str) -> None:

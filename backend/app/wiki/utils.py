@@ -18,7 +18,7 @@ log = logging.getLogger(__name__)
 
 from app.auth import current_user
 from app.llm.agents import merge_conflict_update
-from app.models.wiki import AiRebaseMaxRetriesException, ChangeKind, CommitResult
+from app.models.wiki import AiRebaseMaxRetriesError, ChangeKind, CommitResult
 from app.wiki import (
     agent_activity,
     filesystem,
@@ -86,7 +86,7 @@ def commit_with_ai_rebase(
     to ``max_retries`` times when HEAD keeps moving during the merge step.
 
     Returns ``None`` when the merged result equals the current content.
-    Raises ``AiRebaseMaxRetriesException`` when the retry limit is hit.
+    Raises ``AiRebaseMaxRetriesError`` when the retry limit is hit.
     Any ``LLMError`` raised by the merge fallback propagates immediately.
     """
     _base = base_body
@@ -117,14 +117,14 @@ def commit_with_ai_rebase(
             )
             return CommitResult(sha=sha, old_body=current, new_body=merged)
         if attempt >= max_retries:
-            raise AiRebaseMaxRetriesException(attempt, post_sha or "")
+            raise AiRebaseMaxRetriesError(attempt, post_sha or "")
         log.info(
             "commit_with_ai_rebase: HEAD moved for %s, retrying (%d/%d)",
             wiki_path, attempt + 1, max_retries,
         )
         _base = current
         _new = merged
-    raise AiRebaseMaxRetriesException(max_retries, "")  # unreachable
+    raise AiRebaseMaxRetriesError(max_retries, "")  # unreachable
 
 
 def assert_base_sha(rel: str, base_sha: str | None) -> dict[str, str] | None:

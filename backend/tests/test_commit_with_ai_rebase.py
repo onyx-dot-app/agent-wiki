@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, call
 import pytest
 
 from app.wiki.utils import commit_with_ai_rebase
-from app.models.wiki import AiRebaseMaxRetriesException, CommitResult
+from app.models.wiki import AiRebaseMaxRetriesError, CommitResult
 from app.wiki.git import MergeResult
 
 _PATH = "docs/page.md"
@@ -234,7 +234,7 @@ def test_retries_when_head_moves_mid_merge(monkeypatch):
 
 
 def test_raises_when_max_retries_exceeded(monkeypatch):
-    """Raises AiRebaseMaxRetriesException when HEAD keeps moving."""
+    """Raises AiRebaseMaxRetriesError when HEAD keeps moving."""
     concurrent_body = "concurrent\n"
     merged_body = "merged\n"
 
@@ -254,7 +254,7 @@ def test_raises_when_max_retries_exceeded(monkeypatch):
     fan_out = MagicMock(return_value=_SHA_A)
     monkeypatch.setattr("app.wiki.utils.commit_and_fan_out", fan_out)
 
-    with pytest.raises(AiRebaseMaxRetriesException) as exc_info:
+    with pytest.raises(AiRebaseMaxRetriesError) as exc_info:
         commit_with_ai_rebase(
             _PATH, _MSG, base_body=_BASE, new_body=_NEW, max_retries=2
         )
