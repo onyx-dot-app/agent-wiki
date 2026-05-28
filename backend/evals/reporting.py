@@ -18,6 +18,7 @@ from evals.schema import (
     RunSummary,
     ScorerSummary,
     Surface,
+    TriggerCase,
     WikiUpdaterCase,
 )
 
@@ -279,6 +280,65 @@ def push_ingest_selector_dataset(dataset: str, cases: list[IngestSelectorCase]) 
             },
             expected={"expected_kept_paths": list(c.expected_kept_paths)},
             metadata={"tags": list(c.tags or [])},
+        )
+        for c in cases
+    ]
+    pushed = bt.push_dataset(project=project, dataset=dataset, api_key=api_key, rows=rows)
+    log.info(
+        "braintrust: pushed %d/%d dataset rows to project=%s dataset=%s",
+        pushed,
+        len(cases),
+        project,
+        dataset,
+    )
+    return pushed
+
+
+def push_triggers_dataset(dataset: str, cases: list[TriggerCase]) -> int:
+    """Push the trigger eval case set as a Braintrust dataset.
+
+    Mirrors ``push_wiki_updater_dataset`` / ``push_ingest_selector_dataset``
+    so the runner can link experiment results back to per-case dataset
+    rows. Without this, ``--dataset triggers`` was silently a no-op on
+    the dataset side (the experiment got pushed but the case rows didn't).
+    """
+    api_key = os.environ.get("BRAINTRUST_API_KEY", "")
+    project = os.environ.get("BRAINTRUST_PROJECT", "")
+    if not api_key or not project:
+        log.warning("braintrust: skip dataset push — no BRAINTRUST_API_KEY or BRAINTRUST_PROJECT")
+        return 0
+    rows = [
+        bt.DatasetRow(
+            id=c.id,
+            input={
+                "flavor": c.flavor.value,
+                "nl_description": c.nl_description,
+                "message_instruction": c.message_instruction,
+                "wiki_state": [{"path": d.path, "body": d.body} for d in c.wiki_state],
+                "change_path": c.change_path,
+                "change_kind": c.change_kind,
+                "before": c.before,
+                "after": c.after,
+                "scope_path": c.scope_path,
+                "when_iso": c.when_iso,
+                "new_file_path": c.new_file_path,
+                "new_file_body": c.new_file_body,
+            },
+            expected={
+                "expected_matched": c.expected_matched,
+                "expected_reason_facts": [f.model_dump() for f in c.expected_reason_facts],
+                "expected_message_facts_present": [
+                    f.model_dump() for f in c.expected_message_facts_present
+                ],
+                "expected_message_facts_excluded": [
+                    f.model_dump() for f in c.expected_message_facts_excluded
+                ],
+            },
+            metadata={
+                "flavor": c.flavor.value,
+                "tags": list(c.tags or []),
+                "max_message_bloat_ratio": c.max_message_bloat_ratio,
+            },
         )
         for c in cases
     ]
