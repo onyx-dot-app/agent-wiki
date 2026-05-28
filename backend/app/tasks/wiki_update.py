@@ -144,16 +144,13 @@ def _run_inner(job_id: str, rel: str, instruction: str, base_sha: str | None) ->
 
     head_sha = wiki_git.head_sha_for_path(rel)
     if base_sha and base_sha != head_sha:
-        mcp_jobs.mark_failed(
-            job_id,
-            error="stale_base",
-            result={
-                "base_sha": base_sha,
-                "current_sha": head_sha or "",
-            },
+        # HEAD moved since the job was enqueued. Run on current content
+        # instead of failing silently — the instruction is still valid,
+        # it just needs to apply to a newer base.
+        log.info(
+            "wiki_update: stale_base %s (base=%s head=%s), running on current HEAD",
+            rel, base_sha[:8], (head_sha or "")[:8],
         )
-        mcp_pubsub.publish_job_update(job_id, "failed")
-        return
 
     debounced = mcp_jobs.find_recent_succeeded_for_user_path(
         user_id=_current_user_id(), path=rel, within_seconds=_DEBOUNCE_SECONDS
@@ -193,10 +190,40 @@ def _run_inner(job_id: str, rel: str, instruction: str, base_sha: str | None) ->
         mcp_pubsub.publish_job_update(job_id, "succeeded")
         return
 
+    # Re-check HEAD: it may have moved during the LLM call. Merge rather
+    # than clobber the concurrent change.
+    post_llm_sha = wiki_git.head_sha_for_path(rel)
+    body_to_commit = new_body
+    if post_llm_sha != head_sha:
+        current_body = h.read_existing(rel)
+        try:
+            mr = wiki_git.merge_content(old_body, current_body, new_body)
+            if mr.clean:
+                body_to_commit = mr.merged
+                log.info("wiki_update: auto-merged %s after concurrent commit", rel)
+            else:
+                from app.llm.agents import merge_conflict_update
+                body_to_commit = merge_conflict_update.merge(
+                    wiki_path=rel,
+                    base_body=old_body,
+                    current_body=current_body,
+                    draft_body=new_body,
+                )
+                log.info("wiki_update: llm-merged %s after concurrent conflict", rel)
+        except Exception:
+            log.exception("wiki_update: merge failed for %s, dropping update", rel)
+            mcp_jobs.mark_failed(
+                job_id,
+                error="merge_failed",
+                result={"base_sha": head_sha or "", "current_sha": post_llm_sha or ""},
+            )
+            mcp_pubsub.publish_job_update(job_id, "failed")
+            return
+
     try:
         sha = h.commit_and_fan_out(
             rel,
-            new_body,
+            body_to_commit,
             f"Doc update: {instruction[:_COMMIT_MESSAGE_MAX]}",
             change_kind="edit",
         )

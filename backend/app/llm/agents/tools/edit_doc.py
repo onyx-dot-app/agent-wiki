@@ -32,14 +32,21 @@ def handle(args: dict[str, Any]) -> Any:
             raise h.ToolError(f"file not found: {rel}")
 
         stale = h.assert_base_sha(rel, base_sha)
-        if stale is not None:
-            return stale
-
         old_body = h.read_existing(rel)
-        try:
-            new_body = wiki_edit.replace(old_body, old_string, new_string, replace_all)
-        except wiki_edit.ReplaceError as exc:
-            raise h.ToolError(str(exc))
+        if stale is not None:
+            # HEAD moved. Try to apply the patch to the current content —
+            # if old_string is still present the concurrent change didn't
+            # touch this spot, so the edit is safe. If it's gone, surface
+            # the stale error so the LLM can re-read and retry.
+            try:
+                new_body = wiki_edit.replace(old_body, old_string, new_string, replace_all)
+            except wiki_edit.ReplaceError:
+                return stale
+        else:
+            try:
+                new_body = wiki_edit.replace(old_body, old_string, new_string, replace_all)
+            except wiki_edit.ReplaceError as exc:
+                raise h.ToolError(str(exc))
 
         sha = h.commit_and_fan_out(
             rel, new_body, commit_message.strip(),

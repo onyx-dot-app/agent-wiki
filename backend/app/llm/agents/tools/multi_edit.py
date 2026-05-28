@@ -30,9 +30,6 @@ def handle(args: dict[str, Any]) -> Any:
             raise h.ToolError(f"file not found: {rel}")
 
         stale = h.assert_base_sha(rel, base_sha)
-        if stale is not None:
-            return stale
-
         old_body = h.read_existing(rel)
         body = old_body
         for i, edit in enumerate(edits):
@@ -49,6 +46,10 @@ def handle(args: dict[str, Any]) -> Any:
             try:
                 body = wiki_edit.replace(body, old_string, new_string, replace_all)
             except wiki_edit.ReplaceError as exc:
+                # If stale, the concurrent change may have removed old_string —
+                # surface the stale error so the LLM can re-read and retry.
+                if stale is not None:
+                    return stale
                 raise h.ToolError(f"edit #{i + 1}: {exc}")
 
         if body == old_body:

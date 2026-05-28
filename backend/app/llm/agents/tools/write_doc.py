@@ -40,7 +40,10 @@ def handle(args: dict[str, Any]) -> Any:
                 }
             stale = h.assert_base_sha(rel, base_sha)
             if stale is not None:
-                return stale
+                merged = h.try_merge_stale(rel, base_sha, body)
+                if merged is None:
+                    return stale
+                body = merged
             old = h.read_existing(rel)
         else:
             old = ""

@@ -72,7 +72,6 @@ def assert_base_sha(rel: str, base_sha: str | None) -> dict[str, str] | None:
     """
     if base_sha is None:
         return None
-    from app.wiki import git as wiki_git
 
     head_sha = wiki_git.head_sha_for_path(rel)
     if base_sha == head_sha:
@@ -86,6 +85,35 @@ def assert_base_sha(rel: str, base_sha: str | None) -> dict[str, str] | None:
             "read_doc, re-derive the edit, and retry"
         ),
     }
+
+
+def try_merge_stale(rel: str, base_sha: str, new_body: str) -> str | None:
+    """Attempt a 3-way merge when a full-body write conflicts with a concurrent commit.
+
+    Returns the merged body on success, or ``None`` if both git and LLM
+    merge fail (caller should surface the original ``stale_base`` error).
+    """
+    import logging as _logging
+    _log = _logging.getLogger(__name__)
+    try:
+        base_body = wiki_git.read_file(rel, ref=base_sha)
+        current_body = read_existing(rel)
+        mr = wiki_git.merge_content(base_body, current_body, new_body)
+        if mr.clean:
+            _log.info("try_merge_stale: auto-merged %s", rel)
+            return mr.merged
+        from app.llm.agents import merge_conflict_update
+        merged = merge_conflict_update.merge(
+            wiki_path=rel,
+            base_body=base_body,
+            current_body=current_body,
+            draft_body=new_body,
+        )
+        _log.info("try_merge_stale: llm-merged %s", rel)
+        return merged
+    except Exception:
+        _log.exception("try_merge_stale: failed for %s", rel)
+        return None
 
 
 # --------------------------------------------------------------------------- #
