@@ -32,7 +32,7 @@ for row in csv.reader(sys.stdin):
 " > eval_samples.jsonl
 ```
 
-**Option B — Python** (psql not required, needs `psycopg` or `psycopg2`):
+**Option B — Python** (psql not required, needs `psycopg` v3):
 
 ```bash
 python3 -c "
@@ -57,6 +57,7 @@ Filter by outcome and/or ID range by adding a `WHERE` clause to either query:
 
 ```sql
 WHERE id >= 2894
+-- or:
 WHERE outcome = 'committed' AND id > 1000
 ```
 
