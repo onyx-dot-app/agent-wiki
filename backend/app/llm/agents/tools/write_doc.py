@@ -40,35 +40,40 @@ def handle(args: dict[str, Any]) -> Any:
                     ),
                 }
             base_body = wiki_git.read_file(rel, ref=base_sha)
-            change_kind = "edit"
-        else:
-            base_body = ""
-            change_kind = "create"
-
-        try:
-            result = h.commit_with_ai_rebase(
-                rel, commit_message.strip(),
-                change_kind=change_kind,
-                base_body=base_body,
-                new_body=body,
-                activity_ttl=activity_ttl,
-            )
-        except h.AiRebaseMaxRetriesError as exc:
+            try:
+                result = h.commit_with_ai_rebase(
+                    rel, commit_message.strip(),
+                    change_kind="edit",
+                    base_body=base_body,
+                    new_body=body,
+                    activity_ttl=activity_ttl,
+                )
+            except h.AiRebaseMaxRetriesError as exc:
+                return {
+                    "error": "stale_base",
+                    "message": "concurrent edits kept landing; max retries exceeded",
+                    "current_sha": exc.current_sha,
+                }
+            if result is None:
+                return {"path": rel, "sha": wiki_git.head_sha_for_path(rel), "no_change": True}
             return {
-                "error": "stale_base",
-                "message": "concurrent edits kept landing; max retries exceeded",
-                "current_sha": exc.current_sha,
+                "path": rel,
+                "sha": result.sha,
+                "created": False,
+                "diff": h.unified_diff(result.old_body, result.new_body, rel),
+                "broken_links": h.broken_links(rel, result.new_body),
             }
-
-        if result is None:
-            return {"path": rel, "sha": wiki_git.head_sha_for_path(rel), "no_change": True}
-
-        return {
-            "path": rel,
-            "sha": result.sha,
-            "created": not existed,
-            "diff": h.unified_diff(result.old_body, result.new_body, rel),
-            "broken_links": h.broken_links(rel, result.new_body),
-        }
+        else:
+            sha = h.commit_and_fan_out(
+                rel, body, commit_message.strip(),
+                change_kind="create", activity_ttl=activity_ttl,
+            )
+            return {
+                "path": rel,
+                "sha": sha,
+                "created": True,
+                "diff": h.unified_diff("", body, rel),
+                "broken_links": h.broken_links(rel, body),
+            }
     except h.ToolError as exc:
         return {"error": str(exc)}
