@@ -19,8 +19,8 @@ from app.models.file_system import (
     DocumentActivityResponse,
     DocumentDraftView,
     DocumentEntry,
-    EditDraftRequest,
-    EditDraftResponse,
+    DraftRequest,
+    DraftResponse,
     FileHistoryResponse,
     FolderHitView,
     GetDocumentResponse,
@@ -153,7 +153,7 @@ def put_document_by_path(
     # chat banner drops and the template's system prompt stops applying.
     wiki_drafts.clear_if_diverged(rel, req.body)
     # Edit draft is no longer needed after a successful commit.
-    wiki_git.delete_edit_draft(rel, user.id)
+    wiki_git.delete_draft(rel, user.id)
     log.info("doc %s %s by %s sha=%s", change_kind, rel, author or "?", sha[:8])
     return PutDocumentResponse(
         path=rel,
@@ -289,7 +289,7 @@ def delete_document_by_path(
     sha = wiki_git.delete_path(rel, f"delete {rel}", author=author)
     wiki_notify.after_doc_delete(rel, sha, author)
     wiki_drafts.delete(rel)
-    wiki_git.delete_edit_drafts_for_path(rel)
+    wiki_git.delete_drafts_for_path(rel)
     log.info("doc deleted %s by %s sha=%s", rel, author or "?", sha[:8])
     return DeleteDocumentResponse(sha=sha)
 
@@ -481,12 +481,12 @@ def set_file_draft(
     )
 
 
-@router.get("/file/edit-draft", response_model=EditDraftResponse | None)
-def get_edit_draft(
+@router.get("/file/draft", response_model=DraftResponse | None)
+def get_draft(
     user: User = Depends(require_user),
     path: str = "",
-) -> EditDraftResponse | None:
-    """Return the user's in-progress edit draft for a page, or null."""
+) -> DraftResponse | None:
+    """Return the user's in-progress draft for a page, or null."""
     if not path:
         raise HTTPException(status_code=400, detail="path required")
     try:
@@ -494,10 +494,10 @@ def get_edit_draft(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     require_can("read", rel, user)
-    row = wiki_git.get_edit_draft(rel, user.id)
+    row = wiki_git.get_draft(rel, user.id)
     if row is None:
         return None
-    return EditDraftResponse(
+    return DraftResponse(
         path=row["path"],
         base_sha=row["base_sha"],
         content=row["content"],
@@ -505,21 +505,21 @@ def get_edit_draft(
     )
 
 
-@router.put("/file/edit-draft", response_model=EditDraftResponse)
-def upsert_edit_draft(
-    req: EditDraftRequest,
+@router.put("/file/draft", response_model=DraftResponse)
+def upsert_draft(
+    req: DraftRequest,
     user: User = Depends(require_user),
-) -> EditDraftResponse:
-    """Auto-save the user's in-progress edit draft. Returns the saved draft."""
+) -> DraftResponse:
+    """Auto-save the user's in-progress draft. Returns the saved draft."""
     try:
         rel = filesystem.safe_rel_path(req.path)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     require_can("write", rel, user)
-    wiki_git.save_edit_draft(rel, user.id, req.content, req.base_sha)
-    row = wiki_git.get_edit_draft(rel, user.id)
+    wiki_git.save_draft(rel, user.id, req.content, req.base_sha)
+    row = wiki_git.get_draft(rel, user.id)
     assert row is not None
-    return EditDraftResponse(
+    return DraftResponse(
         path=row["path"],
         base_sha=row["base_sha"],
         content=row["content"],
@@ -527,19 +527,19 @@ def upsert_edit_draft(
     )
 
 
-@router.delete("/file/edit-draft", status_code=status.HTTP_204_NO_CONTENT)
-def delete_edit_draft(
+@router.delete("/file/draft", status_code=status.HTTP_204_NO_CONTENT)
+def delete_draft(
     user: User = Depends(require_user),
     path: str = "",
 ) -> None:
-    """Clear the user's in-progress edit draft for a page."""
+    """Clear the user's in-progress draft for a page."""
     if not path:
         raise HTTPException(status_code=400, detail="path required")
     try:
         rel = filesystem.safe_rel_path(path)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-    wiki_git.delete_edit_draft(rel, user.id)
+    wiki_git.delete_draft(rel, user.id)
 
 
 @router.get("/{doc_id}")

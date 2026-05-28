@@ -359,14 +359,14 @@ def diff_for_commit(sha: str, rel_path: str | None = None) -> str:
 
 
 # --------------------------------------------------------------------------- #
-# Human edit drafts — git branch + worktree per (user, page)                 #
+# Human drafts — one git branch per (user, page)                             #
 # --------------------------------------------------------------------------- #
 
 def _draft_branch(rel_path: str, user_id: str) -> str:
     return f"drafts/{user_id}/{rel_path}"
 
 
-def save_edit_draft(rel_path: str, user_id: str, content: str, base_sha: str) -> None:
+def save_draft(rel_path: str, user_id: str, content: str, base_sha: str) -> None:
     """Write ``content`` to the draft branch for ``(rel_path, user_id)``.
 
     Uses only git plumbing — no working tree checkout. The draft branch always
@@ -398,10 +398,10 @@ def save_edit_draft(rel_path: str, user_id: str, content: str, base_sha: str) ->
         ["commit-tree", tree_sha, "-p", base_sha, "-m", f"draft: {rel_path}"]
     ).stdout.strip()
     _run(["update-ref", f"refs/heads/{branch}", commit_sha])
-    log.debug("save_edit_draft %s user=%s", rel_path, user_id)
+    log.debug("save_draft %s user=%s", rel_path, user_id)
 
 
-def get_edit_draft(rel_path: str, user_id: str) -> dict[str, str] | None:
+def get_draft(rel_path: str, user_id: str) -> dict[str, str] | None:
     """Return ``{path, base_sha, content, updated_at}`` or None if no draft."""
     branch = _draft_branch(rel_path, user_id)
     if _run(["rev-parse", "--verify", f"refs/heads/{branch}"], check=False).returncode != 0:
@@ -416,16 +416,16 @@ def get_edit_draft(rel_path: str, user_id: str) -> dict[str, str] | None:
     return {"path": rel_path, "base_sha": base_sha, "content": content, "updated_at": updated_at}
 
 
-def delete_edit_draft(rel_path: str, user_id: str) -> None:
+def delete_draft(rel_path: str, user_id: str) -> None:
     """Delete the draft branch for ``(rel_path, user_id)`` if it exists."""
     branch = _draft_branch(rel_path, user_id)
     if _run(["rev-parse", "--verify", f"refs/heads/{branch}"], check=False).returncode != 0:
         return
     _run(["update-ref", "-d", f"refs/heads/{branch}"])
-    log.debug("delete_edit_draft %s user=%s", rel_path, user_id)
+    log.debug("delete_draft %s user=%s", rel_path, user_id)
 
 
-def delete_edit_drafts_for_path(rel_path: str) -> None:
+def delete_drafts_for_path(rel_path: str) -> None:
     """Delete all draft branches for a page — called when the page is deleted."""
     out = _run(["for-each-ref", "--format=%(refname:short)", "refs/heads/drafts/"], check=False).stdout
     for branch in out.splitlines():

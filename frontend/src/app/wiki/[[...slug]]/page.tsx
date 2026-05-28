@@ -67,7 +67,7 @@ interface HistoryResponse {
   commits: CommitInfo[];
 }
 
-interface EditDraftResponse {
+interface DraftResponse {
   path: string;
   base_sha: string;
   content: string;
@@ -1434,8 +1434,8 @@ function FileViewer({ path }: { path: string }) {
   // Conflict resolution: set when a save returns 409.
   const [conflict, setConflict] = useState<ConflictState | null>(null);
   // Resume banner: set when entering edit mode and a matching draft exists.
-  const [pendingResumeDraft, setPendingResumeDraft] = useState<EditDraftResponse | null>(null);
-  // Debounce timer ref for auto-saving the edit draft to the server.
+  const [pendingResumeDraft, setPendingResumeDraft] = useState<DraftResponse | null>(null);
+  // Debounce timer ref for auto-saving the draft to the server.
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const loadLatest = useCallback(() => {
@@ -1546,7 +1546,7 @@ function FileViewer({ path }: { path: string }) {
     return () => setDrafting(null);
   }, [setDrafting]);
 
-  // Auto-save the edit draft to the server while the user is editing.
+  // Auto-save the draft to the server while the user is editing.
   // Debounced 2s so we don't hammer the API on every keystroke.
   useEffect(() => {
     if (!editing) return;
@@ -1554,7 +1554,7 @@ function FileViewer({ path }: { path: string }) {
     if (!baseSha) return;
     if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
     autoSaveTimer.current = setTimeout(() => {
-      void apiFetch("/wiki/file/edit-draft", {
+      void apiFetch("/wiki/file/draft", {
         method: "PUT",
         body: JSON.stringify({ path, base_sha: baseSha, content: draft }),
       }).catch(() => {
@@ -1697,8 +1697,8 @@ function FileViewer({ path }: { path: string }) {
     setEditing(true);
     // Check for an existing in-progress draft from a previous session.
     try {
-      const saved = await apiFetch<EditDraftResponse | null>(
-        `/wiki/file/edit-draft?path=${encodeURIComponent(path)}`,
+      const saved = await apiFetch<DraftResponse | null>(
+        `/wiki/file/draft?path=${encodeURIComponent(path)}`,
       );
       if (!saved) return;
       if (saved.base_sha === headSha) {
@@ -1876,7 +1876,7 @@ function FileViewer({ path }: { path: string }) {
     setHeadSha(conflict.currentSha);
     setConflict(null);
     void apiFetch(
-      `/wiki/file/edit-draft?path=${encodeURIComponent(path)}`,
+      `/wiki/file/draft?path=${encodeURIComponent(path)}`,
       { method: "DELETE" },
     ).catch(() => {});
   }
@@ -2090,7 +2090,7 @@ function FileViewer({ path }: { path: string }) {
             onClick={() => {
               setPendingResumeDraft(null);
               void apiFetch(
-                `/wiki/file/edit-draft?path=${encodeURIComponent(path)}`,
+                `/wiki/file/draft?path=${encodeURIComponent(path)}`,
                 { method: "DELETE" },
               ).catch(() => {});
             }}
