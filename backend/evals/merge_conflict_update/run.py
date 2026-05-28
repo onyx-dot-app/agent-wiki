@@ -24,6 +24,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import re
 import sys
 import time
 from pathlib import Path
@@ -38,12 +39,23 @@ from evals.schema import MergeConflictCase, ScorerOutcome, Surface
 log = logging.getLogger(__name__)
 
 
-_ANNOTATION_MARKERS = ("from:", "(from ", "from another update")
+# Production agent emits the conflict annotation as a parenthesised inline
+# value: e.g. "10k (12k from: <commit message>)" when a commit message is
+# available, "10k (12k from another update)" as the fallback. The stub
+# emits an HTML comment for tests. The regex matches both production
+# forms + the stub form without tripping on bare prose ("migrated from:",
+# "inherited from BaseClass") that has no enclosing paren or HTML comment.
+_ANNOTATION_RE = re.compile(
+    r"""
+    \([^)]{1,200}\bfrom\b[^)]{0,200}\)  # paren-wrapped "(... from ...)"
+    | <!--[^>]{0,200}\bfrom\b[^>]{0,200}-->  # HTML comment fallback (stub)
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
 
 
 def _has_annotation(body: str) -> bool:
-    low = body.lower()
-    return any(m.lower() in low for m in _ANNOTATION_MARKERS)
+    return bool(_ANNOTATION_RE.search(body))
 
 
 def _score_case(
@@ -94,7 +106,7 @@ def _score_case(
                 name="conflict_annotation_present",
                 score=1.0 if present else 0.0,
                 passed=present,
-                detail="markers=%s" % (_ANNOTATION_MARKERS,),
+                detail="pattern=%s" % _ANNOTATION_RE.pattern,
             )
         )
     rows.append(scorers.markdown_valid(merged))

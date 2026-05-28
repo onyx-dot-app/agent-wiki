@@ -91,6 +91,28 @@ def test_score_case_skips_annotation_when_not_expected() -> None:
     assert "conflict_annotation_present" not in names
 
 
+def test_annotation_pattern_does_not_match_bare_prose() -> None:
+    """Bare 'migrated from:' / 'inherited from BaseClass' must not be a match."""
+    from evals.merge_conflict_update.run import (
+        _has_annotation,  # pyright: ignore[reportPrivateUsage]
+    )
+
+    assert not _has_annotation("# Notes\n\nMigrated from: v1.\n")
+    assert not _has_annotation("class Foo inherited from BaseClass.\n")
+    assert not _has_annotation("Output from the reconciler.\n")
+
+
+def test_annotation_pattern_matches_production_forms() -> None:
+    """Match the agent prompt's parenthesised conflict annotation."""
+    from evals.merge_conflict_update.run import (
+        _has_annotation,  # pyright: ignore[reportPrivateUsage]
+    )
+
+    assert _has_annotation("Availability target 99.99% (99.95% from: raise auth target)")
+    assert _has_annotation("Latency p95 < 250ms (300ms from another update)")
+    assert _has_annotation("body\n<!-- conflict from: some commit -->")
+
+
 def test_score_case_always_emits_markdown_valid() -> None:
     case = _make_case(
         base="# Page\n\nUNIQUE-DEF",
