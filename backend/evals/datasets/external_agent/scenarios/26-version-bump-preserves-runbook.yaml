@@ -49,7 +49,7 @@ expected_updates:
       - id: deps-postgres
         text: the Postgres auth schema is still listed as a dependency
       - id: deps-redis
-        text: the Redis auth- keyspace is still listed as a dependency
+        text: the Redis auth: keyspace is still listed as a dependency
       - id: deps-pagerduty
         text: the auth-prod PagerDuty service is still listed
 expected_not_updated: []
