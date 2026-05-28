@@ -362,6 +362,7 @@ def diff_for_commit(sha: str, rel_path: str | None = None) -> str:
 # Human drafts — one git branch per (user, page)                             #
 # --------------------------------------------------------------------------- #
 
+
 def _draft_branch(rel_path: str, user_id: str) -> str:
     return f"drafts/{user_id}/{rel_path}"
 

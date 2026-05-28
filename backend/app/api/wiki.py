@@ -132,7 +132,6 @@ def put_document_by_path(
     author = _git_author(user)
     change_kind = "edit" if existed else "create"
     msg = f"{change_kind} {rel}"
-    deprecated: list[str] = []
     if req.base_sha:
         head = wiki_git.head_sha_for_path(rel)
         if head and head != req.base_sha:
@@ -159,7 +158,7 @@ def put_document_by_path(
         path=rel,
         sha=sha,
         created=not existed,
-        deprecated=deprecated,
+        deprecated=[],
     )
 
 

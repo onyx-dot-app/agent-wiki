@@ -1836,6 +1836,8 @@ function FileViewer({ path }: { path: string }) {
     setConflict(null);
     setPendingResumeDraft(null);
     if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
+    // Server-side draft is intentionally kept on cancel so the user can
+    // resume from the same point next time they enter edit mode.
   }
 
   async function onKeepMine() {
@@ -1874,6 +1876,7 @@ function FileViewer({ path }: { path: string }) {
     setDraft(conflict.currentBody);
     setBody(conflict.currentBody);
     setHeadSha(conflict.currentSha);
+    setViewingSha(null);
     setConflict(null);
     void apiFetch(
       `/wiki/file/autosave?path=${encodeURIComponent(path)}`,
