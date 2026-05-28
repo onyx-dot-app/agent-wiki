@@ -141,8 +141,13 @@ export function DiffHunk({ hunk }: { hunk: DiffHunkData }) {
       {entries.map((entry, idx) => {
         if (entry.kind === "word") {
           return (
-            <div key={idx} className={`${styles.wordLine} markdown`}>
-              <WordLine w={entry.line.word_diff} />
+            <div key={idx} className={styles.add}>
+              <div className={styles.quoteIndent}>
+                <div className={styles.quoteBar} />
+              </div>
+              <div className={`${styles.blockContent} markdown`}>
+                <WordLine w={entry.line.word_diff} />
+              </div>
             </div>
           );
         }

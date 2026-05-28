@@ -102,6 +102,13 @@ html {
   --radius-md: 8px;
   --radius-lg: 12px;
   --radius-pill: 9999px;
+
+  /* History panel — avatar invert + active-row shadow, per Figma
+     Onyx Wiki node 284:22744. Light mode = dark avatar with white text. */
+  --diff-avatar-bg: #000000;
+  --diff-avatar-fg: #ffffff;
+  --diff-avatar-border: #e6e6e6;
+  --diff-row-shadow: 0 0 2px 1px rgba(0, 0, 0, 0.05);
 }
 
 :root[data-theme="dark"] {
@@ -163,6 +170,12 @@ html {
   --shadow-fab: 0 6px 20px rgba(0, 0, 0, 0.55);
   --shadow-modal: 0 24px 60px rgba(0, 0, 0, 0.6);
   --shadow-panel: -4px 0 24px rgba(0, 0, 0, 0.45);
+
+  /* Avatar inversion + row shadow flip for dark mode (per Figma). */
+  --diff-avatar-bg: #ffffff;
+  --diff-avatar-fg: #000000;
+  --diff-avatar-border: #333333;
+  --diff-row-shadow: 0 0 2px 1px rgba(255, 255, 255, 0.05);
 }
 
 /* Apply the page background + base text color at the document root

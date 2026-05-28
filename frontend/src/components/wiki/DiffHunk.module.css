@@ -3,46 +3,30 @@
   flex-direction: column;
 }
 
-/* Diff bands.
-
-   Token mapping from Figma Onyx Wiki file (node 284:22518):
-
-   Light mode (inline fallbacks in get_design_context):
-     .add bg          = Status/Success 01 = #e6f2e7
-     .remove bg       = Status/Error 01   = #fceae7
-     .remove text     = Status/Text/Error 05 = #ce2424
-     quote bar accent = Background/Tint/03 = #e6e6e9
-
-   Dark mode (resolved via get_variable_defs on a dark-mode frame):
-     .add bg          = Status/Success 01 = #002207
-     .remove bg       = Status/Error 01   = #330b09
-     .remove text     = Status/Text/Error 05 = #f23a36
-     quote bar accent = Background/Tint/03 = #323239
-
-   Each rule has light values first, dark overrides via
-   :global([data-theme="dark"]) selectors (the app sets data-theme on
-   <html> via ThemeProvider — see frontend/src/lib/theme-provider.tsx).
-*/
-
 .context {
   padding: 0 12px;
   color: var(--color-text-primary);
 }
 
+/* Add + Remove block tokens (Figma 284:22702 / 284:22725).
+   Light mode = CSS fallback values from get_design_context.
+   Dark mode = resolved via get_variable_defs on a dark-mode frame. */
 .add,
 .remove {
   border-radius: 8px;
-  padding: 4px;
   margin: 4px 0;
   display: flex;
-  align-items: stretch;
+  align-items: start;
   gap: 4px;
 }
 
 .add {
   background: #e6f2e7;
+  padding: 4px;
 }
 
+/* Remove block in the Figma has NO outer padding — relies only on the
+   inner bullet and content elements for spacing. */
 .remove {
   background: #fceae7;
   color: #ce2424;
@@ -58,8 +42,7 @@
   color: #f23a36;
 }
 
-/* Inner quote-indent column (28px wide) holding a 4px vertical bar,
-   only rendered for add blocks. */
+/* Quote-indent column for `.add` blocks (28px wide with a 4px bar). */
 .quoteIndent {
   display: flex;
   align-items: center;
@@ -99,13 +82,11 @@
 }
 
 .context > :first-child,
-.blockContent > :first-child,
-.wordLine > :first-child {
+.blockContent > :first-child {
   margin-top: 0;
 }
 .context > :last-child,
-.blockContent > :last-child,
-.wordLine > :last-child {
+.blockContent > :last-child {
   margin-bottom: 0;
 }
 
@@ -125,13 +106,9 @@
   color: currentColor;
 }
 
-.wordLine {
-  padding: 0 12px;
-  color: var(--color-text-primary);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
+/* Inline word edits — render the swap inside an `.add` block (green
+   container with the same quote indent + radius + padding). The
+   <del> is red strikethrough, the <ins> is green text. */
 .wordRemoved {
   color: #ce2424;
   text-decoration: line-through;
@@ -141,5 +118,8 @@
 }
 
 .wordAdded {
-  color: inherit;
+  color: #00a43f;
+}
+:global([data-theme="dark"]) .wordAdded {
+  color: #00a43f;
 }

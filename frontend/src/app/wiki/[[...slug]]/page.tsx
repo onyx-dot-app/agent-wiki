@@ -2638,6 +2638,8 @@ function ActivityRow({
   return (
     <button
       onClick={onClick}
+      className="history-row"
+      data-active={active ? "true" : "false"}
       style={{
         appearance: "none",
         textAlign: "left",
@@ -2647,7 +2649,9 @@ function ActivityRow({
         border: "none",
         borderRadius: 8,
         cursor: "pointer",
-        boxShadow: active ? "0 0 2px 1px rgba(0, 0, 0, 0.05)" : "none",
+        boxShadow: active
+          ? "var(--diff-row-shadow, 0 0 2px 1px rgba(0, 0, 0, 0.05))"
+          : "none",
         display: "flex",
         flexDirection: "column",
         gap: 4,
@@ -2673,8 +2677,9 @@ function ActivityRow({
             width: 20,
             height: 20,
             borderRadius: 9999,
-            background: color.accent.bg,
-            color: color.accent.fg,
+            background: "var(--diff-avatar-bg, #000000)",
+            color: "var(--diff-avatar-fg, #ffffff)",
+            border: "1px solid var(--diff-avatar-border, #e6e6e6)",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
@@ -2715,8 +2720,8 @@ function ActivityRow({
             <span
               aria-hidden
               style={{
-                width: 8,
-                height: 8,
+                width: 6,
+                height: 6,
                 borderRadius: 9999,
                 background: "#286df8",
                 flexShrink: 0,
