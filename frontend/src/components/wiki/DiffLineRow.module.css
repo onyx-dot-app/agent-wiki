@@ -1,11 +1,10 @@
 .row {
   display: grid;
   grid-template-columns: 3ch 5ch 5ch 1fr;
-  align-items: stretch;
+  align-items: start;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12px;
   line-height: 1.5;
-  white-space: pre;
 }
 
 .gutterSign {
@@ -23,7 +22,9 @@
 
 .content {
   padding: 0 8px;
-  overflow-x: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  min-width: 0;
 }
 
 .add {
