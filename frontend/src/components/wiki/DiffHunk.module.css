@@ -3,15 +3,25 @@
   flex-direction: column;
 }
 
-/* Diff bands match the Onyx Wiki Figma spec (node 284:22518):
-   - Soft pastel green/red bg, 8px radius, 4px outer padding
-   - Add block has an inner "quote indent" column (28px wide) holding
-     a 4px vertical bar; the markdown content sits in a flex-1 column
-     beside it
-   - Remove block has no quote indent — bg + strikethrough on text
-     carries the signal. Bullet markers stay (rendered red via the
-     list-marker text-color inheritance)
-   - No left-border accent; the bg + radius is the accent itself
+/* Diff bands.
+
+   Token mapping from Figma Onyx Wiki file (node 284:22518):
+
+   Light mode (inline fallbacks in get_design_context):
+     .add bg          = Status/Success 01 = #e6f2e7
+     .remove bg       = Status/Error 01   = #fceae7
+     .remove text     = Status/Text/Error 05 = #ce2424
+     quote bar accent = Background/Tint/03 = #e6e6e9
+
+   Dark mode (resolved via get_variable_defs on a dark-mode frame):
+     .add bg          = Status/Success 01 = #002207
+     .remove bg       = Status/Error 01   = #330b09
+     .remove text     = Status/Text/Error 05 = #f23a36
+     quote bar accent = Background/Tint/03 = #323239
+
+   Each rule has light values first, dark overrides via
+   :global([data-theme="dark"]) selectors (the app sets data-theme on
+   <html> via ThemeProvider — see frontend/src/lib/theme-provider.tsx).
 */
 
 .context {
@@ -30,29 +40,26 @@
 }
 
 .add {
-  /* status/success-01 — soft pastel green from the Figma design system. */
   background: #e6f2e7;
 }
 
 .remove {
-  /* status/error-01 — soft pastel red. */
   background: #fceae7;
   color: #ce2424;
 }
 
-/* Dark-mode overrides — Figma only ships light tokens so we derive
-   dark variants by hand. Same hue, dimmer surface, lighter text. */
 :global([data-theme="dark"]) .add {
-  background: rgba(46, 160, 67, 0.15);
-}
-:global([data-theme="dark"]) .remove {
-  background: rgba(248, 81, 73, 0.15);
-  color: #f87171;
+  background: #002207;
+  color: #ffffffd9;
 }
 
-/* The "quote indent" column inside an add block — 28px wide with a
-   4px-wide vertical bar centered in it. The bar is the same dim
-   tint-03 used in the Figma. */
+:global([data-theme="dark"]) .remove {
+  background: #330b09;
+  color: #f23a36;
+}
+
+/* Inner quote-indent column (28px wide) holding a 4px vertical bar,
+   only rendered for add blocks. */
 .quoteIndent {
   display: flex;
   align-items: center;
@@ -66,22 +73,18 @@
   width: 4px;
   height: 100%;
   border-radius: 2px;
-  background: rgba(0, 0, 0, 0.08);
+  background: #e6e6e9;
 }
 :global([data-theme="dark"]) .quoteBar {
-  background: rgba(255, 255, 255, 0.18);
+  background: #323239;
 }
 
-/* The content area inside the diff block — wraps the rendered markdown
-   so it picks up the wiki .markdown typography rules. */
 .blockContent {
   flex: 1 1 0;
   min-width: 0;
   padding: 2px 8px;
 }
 
-/* Collapse vertical gap + share corner radius for consecutive blocks
-   of the same kind so a multi-block edit reads as one band. */
 .add + .add,
 .remove + .remove {
   margin-top: 0;
@@ -95,7 +98,6 @@
   border-bottom-right-radius: 0;
 }
 
-/* Reset the wiki markdown's first/last child margins inside the band. */
 .context > :first-child,
 .blockContent > :first-child,
 .wordLine > :first-child {
@@ -107,9 +109,6 @@
   margin-bottom: 0;
 }
 
-/* Strikethrough applies to text-bearing blocks only. Headings stay
-   legible at full color. List markers / code / images skip
-   strikethrough. */
 .remove :is(p, li, blockquote, td, th) {
   text-decoration: line-through;
   text-decoration-color: currentColor;
@@ -126,10 +125,6 @@
   color: currentColor;
 }
 
-/* Inline word edits — no pill/chip background. Removed word is red +
-   strikethrough; added word inherits text color (the surrounding
-   green/red block bg carries the signal). Matches the Figma word
-   pattern: "Whether the ~~user~~admin key is an acceptable fallback". */
 .wordLine {
   padding: 0 12px;
   color: var(--color-text-primary);
@@ -142,11 +137,9 @@
   text-decoration: line-through;
 }
 :global([data-theme="dark"]) .wordRemoved {
-  color: #f87171;
+  color: #f23a36;
 }
 
 .wordAdded {
-  /* No special color — let the surrounding container carry the signal.
-     Adding a green tint would double up on the (green) block bg. */
   color: inherit;
 }

@@ -2706,7 +2706,7 @@ function ActivityRow({
               style={{
                 fontSize: 12,
                 fontWeight: 500,
-                color: color.state.info.fg,
+                color: "#397bff",
                 lineHeight: "16px",
               }}
             >
@@ -2718,7 +2718,7 @@ function ActivityRow({
                 width: 8,
                 height: 8,
                 borderRadius: 9999,
-                background: color.state.info.fg,
+                background: "#286df8",
                 flexShrink: 0,
               }}
             />
