@@ -7,7 +7,9 @@ history is always consistent with the working tree.
 from __future__ import annotations
 
 import logging
+import os
 import subprocess
+import tempfile
 from pathlib import Path
 
 from pydantic import BaseModel
@@ -28,7 +30,11 @@ class CommitInfo(BaseModel):
 
 
 def _run(
-    args: list[str], cwd: str | None = None, check: bool = True
+    args: list[str],
+    cwd: str | None = None,
+    check: bool = True,
+    input: str | None = None,
+    env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     try:
         return subprocess.run(
@@ -37,6 +43,8 @@ def _run(
             check=check,
             capture_output=True,
             text=True,
+            input=input,
+            env=env,
         )
     except subprocess.CalledProcessError as e:
         log.error(
@@ -358,72 +366,68 @@ def _draft_branch(rel_path: str, user_id: str) -> str:
     return f"drafts/{user_id}/{rel_path}"
 
 
-def _draft_worktree_path(rel_path: str, user_id: str) -> Path:
-    safe = rel_path.replace("/", "__")
-    return Path(CONFIG.wiki_dir + "-drafts") / user_id / safe
-
-
 def save_edit_draft(rel_path: str, user_id: str, content: str, base_sha: str) -> None:
     """Write ``content`` to the draft branch for ``(rel_path, user_id)``.
 
-    First call creates the branch from ``base_sha`` and makes an initial
-    commit. Subsequent calls amend that commit in place — the branch always
-    has exactly one commit on top of the fork point so ``base_sha`` is
-    always the parent of HEAD.
+    Uses only git plumbing — no working tree checkout. The draft branch always
+    has exactly one commit on top of ``base_sha``; each save replaces it so
+    ``base_sha`` is always the parent of the branch tip.
     """
     branch = _draft_branch(rel_path, user_id)
-    wt_path = _draft_worktree_path(rel_path, user_id)
 
-    if not wt_path.exists():
-        wt_path.mkdir(parents=True, exist_ok=True)
-        _run(["worktree", "add", str(wt_path), "-b", branch, base_sha])
-        (wt_path / rel_path).parent.mkdir(parents=True, exist_ok=True)
-        (wt_path / rel_path).write_text(content)
-        _run(["add", rel_path], cwd=str(wt_path))
-        _run(["commit", "--allow-empty", "--date=now", "-m", f"draft: {rel_path}"], cwd=str(wt_path))
-    else:
-        (wt_path / rel_path).parent.mkdir(parents=True, exist_ok=True)
-        (wt_path / rel_path).write_text(content)
-        _run(["add", rel_path], cwd=str(wt_path))
-        _run(["commit", "--amend", "--no-edit", "--allow-empty", "--date=now"], cwd=str(wt_path))
+    # Store the content as a loose blob object.
+    blob_sha = _run(["hash-object", "-w", "--stdin"], input=content).stdout.strip()
 
+    # Build a tree starting from base_sha's tree with rel_path replaced.
+    # Use a temp index so we don't disturb the main working-tree index.
+    fd, tmp_idx = tempfile.mkstemp(suffix=".idx")
+    os.close(fd)
+    try:
+        idx_env = {**os.environ, "GIT_INDEX_FILE": tmp_idx}
+        base_tree = _run(["rev-parse", f"{base_sha}^{{tree}}"]).stdout.strip()
+        _run(["read-tree", base_tree], env=idx_env)
+        _run(
+            ["update-index", "--add", "--cacheinfo", f"100644,{blob_sha},{rel_path}"],
+            env=idx_env,
+        )
+        tree_sha = _run(["write-tree"], env=idx_env).stdout.strip()
+    finally:
+        Path(tmp_idx).unlink(missing_ok=True)
+
+    commit_sha = _run(
+        ["commit-tree", tree_sha, "-p", base_sha, "-m", f"draft: {rel_path}"]
+    ).stdout.strip()
+    _run(["update-ref", f"refs/heads/{branch}", commit_sha])
     log.debug("save_edit_draft %s user=%s", rel_path, user_id)
 
 
 def get_edit_draft(rel_path: str, user_id: str) -> dict[str, str] | None:
     """Return ``{path, base_sha, content, updated_at}`` or None if no draft."""
-    wt_path = _draft_worktree_path(rel_path, user_id)
-    file_path = wt_path / rel_path
-    if not file_path.exists():
+    branch = _draft_branch(rel_path, user_id)
+    if _run(["rev-parse", "--verify", f"refs/heads/{branch}"], check=False).returncode != 0:
         return None
-    content = file_path.read_text()
-    # The branch has exactly one commit on top of base_sha; its parent = base_sha.
-    base_sha = _run(["log", "--format=%P", "-1"], cwd=str(wt_path)).stdout.strip()
-    updated_at = _run(["log", "--format=%aI", "-1"], cwd=str(wt_path)).stdout.strip()
+    result = _run(["show", f"{branch}:{rel_path}"], check=False)
+    if result.returncode != 0:
+        return None
+    content = result.stdout
+    # Branch has exactly one commit on top of base_sha; its parent = base_sha.
+    base_sha = _run(["rev-parse", f"{branch}^"]).stdout.strip()
+    updated_at = _run(["log", "--format=%aI", "-1", branch]).stdout.strip()
     return {"path": rel_path, "base_sha": base_sha, "content": content, "updated_at": updated_at}
 
 
 def delete_edit_draft(rel_path: str, user_id: str) -> None:
-    """Remove the draft worktree and branch for ``(rel_path, user_id)``."""
+    """Delete the draft branch for ``(rel_path, user_id)``."""
     branch = _draft_branch(rel_path, user_id)
-    wt_path = _draft_worktree_path(rel_path, user_id)
-    if wt_path.exists():
-        _run(["worktree", "remove", str(wt_path), "--force"])
-    _run(["branch", "-D", branch], check=False)
+    _run(["update-ref", "-d", f"refs/heads/{branch}"], check=False)
     log.debug("delete_edit_draft %s user=%s", rel_path, user_id)
 
 
 def delete_edit_drafts_for_path(rel_path: str) -> None:
-    """Remove all draft branches for a page — called when the page is deleted."""
-    out = _run(["branch", "--list", f"drafts/*/{rel_path}"], check=False).stdout
-    for raw in out.splitlines():
-        branch = raw.strip().lstrip("* ")
-        if not branch:
-            continue
+    """Delete all draft branches for a page — called when the page is deleted."""
+    out = _run(["for-each-ref", "--format=%(refname:short)", "refs/heads/drafts/"], check=False).stdout
+    for branch in out.splitlines():
+        # branch = "drafts/<user_id>/<rel_path>" — split into at most 3 parts
         parts = branch.split("/", 2)
-        if len(parts) >= 2:
-            user_id = parts[1]
-            wt_path = _draft_worktree_path(rel_path, user_id)
-            if wt_path.exists():
-                _run(["worktree", "remove", str(wt_path), "--force"])
-        _run(["branch", "-D", branch], check=False)
+        if len(parts) == 3 and parts[2] == rel_path:
+            _run(["update-ref", "-d", f"refs/heads/{branch}"], check=False)
