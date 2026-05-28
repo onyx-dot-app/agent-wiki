@@ -15,14 +15,13 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import useSWR from "swr";
 
-import { SelectCard, Tag, Text } from "@onyx-ai/opal/components";
-
 import { AppShell } from "@/components/common/AppShell";
 import { Button } from "@/components/common/Button";
 import { PageHeader } from "@/components/common/PageHeader";
 import { TriggerModal } from "@/components/triggers/TriggerModal";
 import { ActiveSessionsList } from "@/components/wiki/ActiveSessionsList";
 import { DiffView } from "@/components/wiki/DiffView";
+import { HistoryPanel } from "@/components/wiki/HistoryPanel";
 import { RunAgentModal } from "@/components/wiki/RunAgentModal";
 import { ShareDialog } from "@/components/wiki/ShareDialog";
 import { FolderIcon, FileIcon } from "@/components/wiki/WikiIcons";
@@ -38,8 +37,14 @@ import {
   type DocumentTemplateSummary,
 } from "@/lib/templates";
 import { color, radius, shadow } from "@/lib/theme";
+import { absoluteTime, relativeTime } from "@/lib/time";
 import { useIsMobile } from "@/lib/viewport";
-import { fetchFileDiff, type FileDiffResponse } from "@/lib/wiki";
+import {
+  type CommitInfo,
+  fetchFileDiff,
+  fetchFileHistory,
+  type FileDiffResponse,
+} from "@/lib/wiki";
 import type { DocumentActivity, DocumentActivityResponse } from "@/types";
 
 interface DocEntry {
@@ -56,20 +61,6 @@ interface FileResponse {
   body: string;
   ref?: string;
   head_sha?: string | null;
-}
-
-interface CommitInfo {
-  sha: string;
-  author: string;
-  ts: string;
-  message: string;
-  body?: string;
-}
-
-interface HistoryResponse {
-  path: string;
-  head_sha: string | null;
-  commits: CommitInfo[];
 }
 
 interface DraftResponse {
@@ -1254,7 +1245,7 @@ function Row({
               whiteSpace: "nowrap",
             }}
           >
-            {updatedAt ? formatRelative(updatedAt) : "—"}
+            {updatedAt ? relativeTime(updatedAt, "short") : "—"}
           </span>
           <button
             onClick={onStartRename}
@@ -1609,9 +1600,7 @@ function FileViewer({ path }: { path: string }) {
 
   const refreshHistory = useCallback(() => {
     setHistoryError(null);
-    apiFetch<HistoryResponse>(
-      `/wiki/file/history?path=${encodeURIComponent(path)}`,
-    )
+    fetchFileHistory(path)
       .then((r) => {
         setCommits(r.commits);
         setHeadSha(r.head_sha);
@@ -2482,340 +2471,6 @@ function FileViewer({ path }: { path: string }) {
   );
 }
 
-function HistoryPanel({
-  commits,
-  error,
-  headSha,
-  viewingSha,
-  onPick,
-  onPickLatest,
-  onClose,
-  fullHeight = false,
-}: {
-  commits: CommitInfo[] | null;
-  error: string | null;
-  headSha: string | null;
-  viewingSha: string | null;
-  onPick: (sha: string) => void;
-  onPickLatest: () => void;
-  onClose: () => void;
-  /** When true (mobile sheet mode), fill the entire host container
-   *  edge-to-edge instead of rendering as a fixed-width rounded card. */
-  fullHeight?: boolean;
-}) {
-  const latestActive = viewingSha === null;
-  return (
-    <aside
-      style={{
-        width: fullHeight ? "100%" : 400,
-        height: fullHeight ? "100%" : undefined,
-        flexShrink: 0,
-        background: color.bg.panel,
-        borderRadius: fullHeight ? 0 : 12,
-        display: "flex",
-        flexDirection: "column",
-        minHeight: 0,
-        padding: 8,
-        gap: 8,
-      }}
-    >
-      <div
-        style={{
-          display: "flex",
-          flexDirection: "row",
-          alignItems: "center",
-          gap: 4,
-          padding: 4,
-          flexShrink: 0,
-        }}
-      >
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <Text font="main-ui-action" color="text-04">
-            History
-          </Text>
-        </div>
-        <button
-          onClick={onClose}
-          aria-label="Close history"
-          style={{
-            appearance: "none",
-            background: "transparent",
-            border: "none",
-            color: color.text.muted,
-            cursor: "pointer",
-            fontSize: 18,
-            lineHeight: 1,
-            padding: 4,
-            borderRadius: 4,
-            flexShrink: 0,
-          }}
-        >
-          ×
-        </button>
-      </div>
-      <div
-        style={{
-          overflowY: "auto",
-          flex: 1,
-          display: "flex",
-          flexDirection: "column",
-          gap: 4,
-        }}
-      >
-        {error && (
-          <div style={{ padding: 12 }}>
-            <Text font="secondary-body" color="text-03">
-              {error}
-            </Text>
-          </div>
-        )}
-        {!error && commits === null && (
-          <div style={{ padding: 12 }}>
-            <Text font="secondary-body" color="text-03">
-              Loading…
-            </Text>
-          </div>
-        )}
-        {!error && commits && commits.length === 0 && (
-          <div style={{ padding: 12 }}>
-            <Text font="secondary-body" color="text-03">
-              No history yet.
-            </Text>
-          </div>
-        )}
-        {!error && commits && commits.length > 0 && (
-          <>
-            <ActivityRow
-              active={latestActive}
-              isLatest
-              onClick={onPickLatest}
-              title="Latest (working tree)"
-              author=""
-              sha={headSha ?? ""}
-              ts=""
-              description={
-                headSha ? `Current HEAD · ${headSha.slice(0, 7)}` : "—"
-              }
-            />
-            {commits.map((c) => {
-              const { url, title: srcTitle } = parseSourceMeta(c.body);
-              return (
-                <ActivityRow
-                  key={c.sha}
-                  active={!latestActive && viewingSha === c.sha}
-                  isLatest={false}
-                  onClick={() => onPick(c.sha)}
-                  title={c.author || "Unknown"}
-                  author={c.author}
-                  sha={c.sha}
-                  ts={formatTs(c.ts)}
-                  description={c.sha.slice(0, 7)}
-                  sourceUrl={url}
-                  sourceTitle={srcTitle}
-                />
-              );
-            })}
-          </>
-        )}
-      </div>
-    </aside>
-  );
-}
-
-function ActivityRow({
-  active,
-  isLatest,
-  onClick,
-  title,
-  author,
-  sha,
-  ts,
-  description,
-  sourceUrl,
-  sourceTitle,
-}: {
-  active: boolean;
-  isLatest: boolean;
-  onClick: () => void;
-  title: string;
-  author: string;
-  sha: string;
-  ts: string;
-  description: string;
-  sourceUrl?: string | null;
-  sourceTitle?: string | null;
-}) {
-  const initial = (author || title || "?").charAt(0).toUpperCase();
-  return (
-    <SelectCard
-      state={active ? "selected" : "empty"}
-      onClick={onClick}
-      padding="xs"
-      rounding="md"
-      border="none"
-    >
-      <div
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          gap: 4,
-          width: "100%",
-          minWidth: 0,
-        }}
-      >
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "row",
-            alignItems: "center",
-            gap: 8,
-            width: "100%",
-            minWidth: 0,
-          }}
-        >
-          <div
-            aria-hidden
-            style={{
-              width: 20,
-              height: 20,
-              borderRadius: 9999,
-              background: "var(--diff-avatar-bg, #000000)",
-              color: "var(--diff-avatar-fg, #ffffff)",
-              border: "1px solid var(--diff-avatar-border, #e6e6e6)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontSize: 12,
-              fontWeight: 600,
-              flexShrink: 0,
-            }}
-          >
-            {initial}
-          </div>
-          <div
-            style={{
-              flex: 1,
-              minWidth: 0,
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-            }}
-          >
-            <Text font="main-ui-action" color="text-04" nowrap maxLines={1}>
-              {title}
-            </Text>
-          </div>
-          {isLatest ? (
-            <Tag color="blue" size="sm" title="Current Version" />
-          ) : (
-            <div style={{ flexShrink: 0 }}>
-              <Text font="secondary-body" color="text-03" nowrap>
-                {ts}
-              </Text>
-            </div>
-          )}
-        </div>
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "row",
-            alignItems: "center",
-            gap: 4,
-            width: "100%",
-            minWidth: 0,
-            paddingLeft: 28,
-          }}
-        >
-          <div
-            style={{
-              flex: 1,
-              minWidth: 0,
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-            }}
-          >
-            <Text font="secondary-body" color="text-03" nowrap maxLines={1}>
-              {description}
-            </Text>
-          </div>
-          {sourceUrl ? (
-            <a
-              href={sourceUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              onClick={(e) => e.stopPropagation()}
-              aria-label={sourceTitle ?? "Open source"}
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                padding: 2,
-                borderRadius: 4,
-                color: "inherit",
-                textDecoration: "none",
-                flexShrink: 0,
-              }}
-            >
-              <Text font="secondary-body" color="text-03">
-                ↗
-              </Text>
-            </a>
-          ) : null}
-        </div>
-        {sourceTitle && !sourceUrl ? (
-          <div style={{ paddingLeft: 28, width: "100%", minWidth: 0 }}>
-            <Text font="secondary-body" color="text-03" nowrap maxLines={1}>
-              {sourceTitle}
-            </Text>
-          </div>
-        ) : null}
-      </div>
-    </SelectCard>
-  );
-}
-
-function parseSourceMeta(body?: string): {
-  url: string | null;
-  title: string | null;
-} {
-  let url: string | null = null;
-  let title: string | null = null;
-  for (const line of (body ?? "").split("\n")) {
-    if (!url) {
-      const m = line.match(/^Source:\s*(\S+)/);
-      if (m) url = /^https?:\/\//i.test(m[1]) ? m[1] : null;
-    }
-    if (!title) {
-      const m = line.match(/^Title:\s*(.+)/);
-      if (m) title = m[1].trim();
-    }
-  }
-  return { url, title };
-}
-
-function formatTs(iso: string): string {
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return iso;
-  return d.toLocaleString();
-}
-
-function formatRelative(iso: string): string {
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return iso;
-  const diffMs = d.getTime() - Date.now();
-  const past = diffMs <= 0;
-  const abs = Math.abs(diffMs);
-  const sec = Math.round(abs / 1000);
-  let value: string;
-  if (sec < 45) value = "just now";
-  else if (sec < 90) value = "1m";
-  else if (sec < 3600) value = `${Math.round(sec / 60)}m`;
-  else if (sec < 86400) value = `${Math.round(sec / 3600)}h`;
-  else value = `${Math.round(sec / 86400)}d`;
-  if (value === "just now") return value;
-  return past ? `${value} ago` : `in ${value}`;
-}
-
 function ActiveAgentsBar({
   agents,
   error,
@@ -3005,12 +2660,12 @@ function ActiveAgentRow({
 
       <span
         style={{ fontSize: 11, color: color.text.faint, flexShrink: 0 }}
-        title={`Started ${formatTs(a.registered_at)} · Expires ${formatTs(
-          a.expires_at,
-        )}`}
+        title={`Started ${absoluteTime(
+          a.registered_at,
+        )} · Expires ${absoluteTime(a.expires_at)}`}
       >
-        {formatRelative(a.registered_at)} · expires{" "}
-        {formatRelative(a.expires_at)}
+        {relativeTime(a.registered_at, "short")} · expires{" "}
+        {relativeTime(a.expires_at, "short")}
       </span>
     </li>
   );
