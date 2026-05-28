@@ -5,12 +5,18 @@ only on full success do we commit. Any failure aborts with no write.
 """
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import Any, NamedTuple, cast
 
 from app.wiki import utils as wiki_utils
 from app.wiki import edit as wiki_edit
 from app.llm.agents.tools.errors import ToolError
 from app.models.wiki import AiRebaseMaxRetriesError
+
+
+class _EditOp(NamedTuple):
+    old_string: str
+    new_string: str
+    replace_all: bool
 
 
 def handle(args: dict[str, Any]) -> Any:
@@ -29,7 +35,7 @@ def handle(args: dict[str, Any]) -> Any:
         edits = cast(list[Any], edits_raw)
 
         # Validate edit shapes up front before touching disk.
-        parsed: list[tuple[str, str, bool]] = []
+        parsed: list[_EditOp] = []
         for i, edit in enumerate(edits):
             if not isinstance(edit, dict):
                 raise ToolError(f"edit #{i + 1}: must be an object")
@@ -40,7 +46,7 @@ def handle(args: dict[str, Any]) -> Any:
                 raise ToolError(f"edit #{i + 1}: old_string is required and non-empty")
             if not isinstance(new_string, str):
                 raise ToolError(f"edit #{i + 1}: new_string is required (string)")
-            parsed.append((old_string, new_string, bool(edit_dict.get("replace_all", False))))
+            parsed.append(_EditOp(old_string, new_string, bool(edit_dict.get("replace_all", False))))
 
         if not wiki_utils.file_exists(path):
             raise ToolError(f"file not found: {path}")
@@ -48,9 +54,9 @@ def handle(args: dict[str, Any]) -> Any:
         base_body = wiki_utils.read_existing(path)
         new_body = base_body
         try:
-            for i, (old_string, new_string, replace_all) in enumerate(parsed):
+            for i, op in enumerate(parsed):
                 try:
-                    new_body = wiki_edit.replace(new_body, old_string, new_string, replace_all)
+                    new_body = wiki_edit.replace(new_body, op.old_string, op.new_string, op.replace_all)
                 except wiki_edit.ReplaceError as exc:
                     raise wiki_edit.ReplaceError(f"edit #{i + 1}: {exc}") from exc
         except wiki_edit.ReplaceError as exc:
