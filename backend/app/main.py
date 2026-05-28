@@ -58,10 +58,8 @@ log = logging.getLogger(__name__)
 
 def _on_http_exception(_request: Request, exc: Exception) -> JSONResponse:
     assert isinstance(exc, FastAPIHTTPException)
-    return JSONResponse(
-        status_code=exc.status_code,
-        content=ErrorResponse(error=str(exc.detail)).model_dump(),
-    )
+    content = exc.detail if isinstance(exc.detail, dict) else ErrorResponse(error=str(exc.detail)).model_dump()
+    return JSONResponse(status_code=exc.status_code, content=content)
 
 
 def _on_validation_error(_request: Request, exc: Exception) -> JSONResponse:

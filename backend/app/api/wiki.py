@@ -7,7 +7,6 @@ import re
 import subprocess
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from fastapi.responses import JSONResponse
 
 from app.auth import User, require_can
 from app.auth.deps import require_user
@@ -550,7 +549,7 @@ def delete_draft(
 def rebase_draft(
     req: RebaseRequest,
     user: User = Depends(require_user),
-) -> DraftResponse | JSONResponse:
+) -> DraftResponse:
     """3-way merge the user's draft onto the current HEAD.
 
     Returns the merged draft (200) when git merge-file produces no conflict
@@ -582,9 +581,9 @@ def rebase_draft(
             updated_at=row["updated_at"],
         )
 
-    return JSONResponse(
+    raise HTTPException(
         status_code=409,
-        content=RebaseConflictResponse(
+        detail=RebaseConflictResponse(
             error="conflict detected",
             current_body=result.current_body,
             draft_body=result.draft_body,
