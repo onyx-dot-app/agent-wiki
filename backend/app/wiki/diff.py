@@ -217,6 +217,14 @@ def _promote_word_diff(hunk: DiffHunk) -> DiffHunk:
                 new_lines.extend(hunk.lines[rem_start:add_end])
                 continue
             word = _word_diff(rem_text, add_text)
+            # If the two lines share basically no content (whole-line
+            # replacement), inline word-diff devolves into "strikethrough
+            # one phrase, green another" — visually inconsistent with
+            # neighboring block add/remove bands. Demote to block so the
+            # diff reads uniformly.
+            if len(word.prefix) + len(word.suffix) < 4:
+                new_lines.extend(hunk.lines[rem_start:add_end])
+                continue
             new_lines.append(
                 DiffLine(
                     kind="word",

@@ -194,6 +194,31 @@ def test_promote_word_diff_skips_markdown_heading_lines() -> None:
     assert kinds == ["remove", "add"]
 
 
+def test_promote_word_diff_skips_when_no_common_content() -> None:
+    # Whole-line replacement (no shared prefix/suffix) — word-diff would
+    # render as bare colored text, visually inconsistent with neighboring
+    # block bands. Stay as block remove + block add.
+    hunk = _make_hunk(
+        DiffLine(
+            kind="remove",
+            text="Hello world goodbye",
+            word_diff=None,
+            old_lineno=1,
+            new_lineno=None,
+        ),
+        DiffLine(
+            kind="add",
+            text="totally different sentence",
+            word_diff=None,
+            old_lineno=None,
+            new_lineno=1,
+        ),
+    )
+    out = _promote_word_diff(hunk)
+    kinds = [line.kind for line in out.lines]
+    assert kinds == ["remove", "add"]
+
+
 def test_promote_word_diff_skips_list_item_lines() -> None:
     hunk = _make_hunk(
         DiffLine(kind="remove", text="- one item", word_diff=None, old_lineno=1, new_lineno=None),
