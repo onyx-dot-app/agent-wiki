@@ -22,16 +22,18 @@ from app.models.file_system import (
     DraftRequest,
     DraftResponse,
     FileHistoryResponse,
-    RebaseConflictResponse,
-    RebaseRequest,
     FolderHitView,
     GetDocumentResponse,
     ListDocumentsResponse,
+    MergeRequest,
+    MergeResponse,
     MovedFile,
     MovePathRequest,
     MovePathResponse,
     PutDocumentRequest,
     PutDocumentResponse,
+    RebaseConflictResponse,
+    RebaseRequest,
     ReindexRequest,
     ReindexResponse,
     SearchHitView,
@@ -599,6 +601,35 @@ def rebase_draft(
             current_sha=result.base_sha,
         ).model_dump(),
     )
+
+
+@router.post("/file/merge", response_model=MergeResponse)
+def merge_draft(
+    req: MergeRequest,
+    user: User = Depends(require_user),
+) -> MergeResponse:
+    """LLM 3-way merge: combine current HEAD and the user's draft.
+
+    Returns the merged body for the user to review before saving.
+    """
+    from app.llm.agents import wiki_merge
+
+    try:
+        rel = filesystem.safe_rel_path(req.path)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    require_can("write", rel, user)
+    try:
+        base_body = wiki_git.read_file(rel, ref=req.base_sha)
+    except subprocess.CalledProcessError as exc:
+        raise HTTPException(status_code=404, detail="base revision not found") from exc
+    merged = wiki_merge.merge(
+        wiki_path=rel,
+        base_body=base_body,
+        current_body=req.current_body,
+        draft_body=req.draft_body,
+    )
+    return MergeResponse(merged=merged)
 
 
 @router.get("/{doc_id}")

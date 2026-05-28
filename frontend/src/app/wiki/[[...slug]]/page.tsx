@@ -1437,6 +1437,7 @@ function FileViewer({ path }: { path: string }) {
   // Resume banner: set when entering edit mode and a matching draft exists.
   const [pendingResumeDraft, setPendingResumeDraft] = useState<DraftResponse | null>(null);
   const [resuming, setResuming] = useState(false);
+  const [consolidating, setConsolidating] = useState(false);
   // Debounce timer ref for auto-saving the draft to the server.
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Incremented on each startEdit() call and on cancel; lets async
@@ -1848,9 +1849,35 @@ function FileViewer({ path }: { path: string }) {
     setConflict(null);
     setPendingResumeDraft(null);
     setResuming(false);
+    setConsolidating(false);
     if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
     // Server-side draft is intentionally kept on cancel so the user can
     // resume from the same point next time they enter edit mode.
+  }
+
+  async function onAiConsolidate() {
+    if (!conflict) return;
+    setConsolidating(true);
+    setError(null);
+    try {
+      const result = await apiFetch<{ merged: string }>("/wiki/file/merge", {
+        method: "POST",
+        body: JSON.stringify({
+          path,
+          base_sha: conflict.baseSha,
+          current_body: conflict.currentBody,
+          draft_body: conflict.draftBody,
+        }),
+      });
+      setDraft(result.merged);
+      setHeadSha(conflict.currentSha);
+      setViewingSha(null);
+      setConflict(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "AI consolidation failed");
+    } finally {
+      setConsolidating(false);
+    }
   }
 
   async function onKeepMine() {
@@ -2183,6 +2210,13 @@ function FileViewer({ path }: { path: string }) {
               onClick={onUseCurrent}
             >
               Use current
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => void onAiConsolidate()}
+              disabled={consolidating || saving}
+            >
+              {consolidating ? "Consolidating…" : "Let AI consolidate"}
             </Button>
             <Button
               size="sm"
