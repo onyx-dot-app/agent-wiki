@@ -1749,7 +1749,6 @@ function FileViewer({ path }: { path: string }) {
         router.push(`/wiki/${newRel}`);
         return;
       }
-      setBody(draft);
       setEditing(false);
       setViewingSha(null);
       setConflict(null);
@@ -1757,11 +1756,15 @@ function FileViewer({ path }: { path: string }) {
       // History changed (new commit + possible deprecations) — refetch.
       if (historyOpen) refreshHistory();
       else setCommits(null);
-      // Pick up the new head_sha for subsequent edits.
+      // Pick up the committed body and new head_sha. The server may have
+      // auto-merged concurrent edits, so use fresh.body rather than the
+      // local draft to keep the view consistent with what was committed.
       const fresh = await apiFetch<FileResponse>(
         `/wiki/file?path=${encodeURIComponent(path)}`,
       );
       setHeadSha(fresh.head_sha ?? null);
+      setBody(fresh.body);
+      setDraft(fresh.body);
       // The server clears the draft row when the body diverges from
       // the template snapshot — re-sync our context so the chat
       // banner disappears at the same moment.

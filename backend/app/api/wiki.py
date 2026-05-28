@@ -134,14 +134,24 @@ def put_document_by_path(
     author = _git_author(user)
     change_kind = "edit" if existed else "create"
     msg = f"{change_kind} {rel}"
+    body_to_commit = req.body
     if req.base_sha:
         head = wiki_git.head_sha_for_path(rel)
         if head and head != req.base_sha:
-            # Conflict: the page changed since the client opened it.
-            # Return 409 so the frontend can surface the conflict UI
-            # rather than silently overwriting.
-            raise HTTPException(status_code=409, detail="conflict detected")
-    sha = wiki_git.commit_file(rel, req.body, msg, author=author)
+            # The page changed since the client opened it. Attempt a 3-way
+            # merge: if the edits don't overlap, commit the merged result
+            # transparently. Only return 409 when there are actual conflicts.
+            try:
+                base_body = wiki_git.read_file(rel, ref=req.base_sha)
+                current_body = abs_path.read_text()
+                merged, clean = wiki_git.merge_content(base_body, current_body, req.body)
+            except (subprocess.CalledProcessError, RuntimeError):
+                raise HTTPException(status_code=409, detail="conflict detected")
+            if not clean:
+                raise HTTPException(status_code=409, detail="conflict detected")
+            body_to_commit = merged
+            log.info("doc auto-merged %s by %s", rel, author or "?")
+    sha = wiki_git.commit_file(rel, body_to_commit, msg, author=author)
     wiki_notify.after_doc_write(
         rel,
         sha,
@@ -152,7 +162,7 @@ def put_document_by_path(
     # Drafting state: if the saved body diverges from the template
     # snapshot, the user has made it their own — clear the row so the
     # chat banner drops and the template's system prompt stops applying.
-    wiki_drafts.clear_if_diverged(rel, req.body)
+    wiki_drafts.clear_if_diverged(rel, body_to_commit)
     # Edit draft is no longer needed after a successful commit.
     wiki_git.delete_draft(rel, user.id)
     log.info("doc %s %s by %s sha=%s", change_kind, rel, author or "?", sha[:8])
