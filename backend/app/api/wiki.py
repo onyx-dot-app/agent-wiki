@@ -24,6 +24,7 @@ from app.models.file_system import (
     DraftResponse,
     FileHistoryResponse,
     RebaseConflictResponse,
+    RebaseRequest,
     FolderHitView,
     GetDocumentResponse,
     ListDocumentsResponse,
@@ -547,7 +548,7 @@ def delete_draft(
 
 @router.post("/file/autosave/rebase")
 def rebase_draft(
-    req: DraftRequest,
+    req: RebaseRequest,
     user: User = Depends(require_user),
 ) -> DraftResponse | JSONResponse:
     """3-way merge the user's draft onto the current HEAD.
@@ -572,7 +573,8 @@ def rebase_draft(
     if result.clean:
         wiki_git.save_draft(rel, user.id, result.merged, result.base_sha)
         row = wiki_git.get_draft(rel, user.id)
-        assert row is not None
+        if row is None:
+            raise HTTPException(status_code=500, detail="draft vanished after save")
         return DraftResponse(
             path=row["path"],
             base_sha=row["base_sha"],

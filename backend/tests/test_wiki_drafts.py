@@ -276,7 +276,7 @@ def test_rebase_returns_404_when_no_draft(client, user, seeded_page):
     login_fastapi(client, user)
     resp = client.post(
         "/api/wiki/file/autosave/rebase",
-        json={"path": "notes.md", "base_sha": seeded_page, "content": ""},
+        json={"path": "notes.md"},
     )
     assert resp.status_code == 404
 
@@ -291,7 +291,7 @@ def test_rebase_returns_404_when_draft_is_current(client, user, seeded_page):
     # Draft base_sha == HEAD — nothing to rebase.
     resp = client.post(
         "/api/wiki/file/autosave/rebase",
-        json={"path": "notes.md", "base_sha": seeded_page, "content": "draft\n"},
+        json={"path": "notes.md"},
     )
     assert resp.status_code == 404
 
@@ -317,7 +317,7 @@ def test_rebase_clean_merge_returns_200_and_updates_draft(client, user, seeded_p
 
     resp = client.post(
         "/api/wiki/file/autosave/rebase",
-        json={"path": "notes.md", "base_sha": seeded_page, "content": ""},
+        json={"path": "notes.md"},
     )
     assert resp.status_code == 200
     body = resp.json()
@@ -351,7 +351,7 @@ def test_rebase_conflict_returns_409_with_conflict_details(client, user, seeded_
 
     resp = client.post(
         "/api/wiki/file/autosave/rebase",
-        json={"path": "notes.md", "base_sha": seeded_page, "content": ""},
+        json={"path": "notes.md"},
     )
     assert resp.status_code == 409
     body = resp.json()

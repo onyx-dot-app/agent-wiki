@@ -235,6 +235,12 @@ class DraftResponse(BaseModel):
     updated_at: str
 
 
+class RebaseRequest(BaseModel):
+    """Body for ``POST /api/wiki/file/autosave/rebase``."""
+
+    path: str = Field(min_length=1)
+
+
 class RebaseConflictResponse(BaseModel):
     """409 body from ``POST /api/wiki/file/autosave/rebase`` when merge has conflicts."""
 

@@ -1719,11 +1719,7 @@ function FileViewer({ path }: { path: string }) {
             "/wiki/file/autosave/rebase",
             {
               method: "POST",
-              body: JSON.stringify({
-                path,
-                base_sha: saved.base_sha,
-                content: saved.content,
-              }),
+              body: JSON.stringify({ path }),
             },
           );
           if (editSessionRef.current !== session) return;

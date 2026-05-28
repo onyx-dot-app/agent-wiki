@@ -477,22 +477,28 @@ def rebase_draft(rel_path: str, user_id: str) -> RebaseResult | None:
     draft_body = draft["content"]
 
     # Write the three versions to temp files for git merge-file.
-    fds: list[int] = []
     paths: list[str] = []
     try:
         for content in (current_body, base_body, draft_body):
             fd, p = tempfile.mkstemp(suffix=".txt")
-            fds.append(fd)
             paths.append(p)
-            os.write(fd, content.encode())
-            os.close(fd)
+            try:
+                os.write(fd, content.encode())
+            finally:
+                os.close(fd)
 
         # git merge-file -p writes result to stdout; exit 0 = clean, >0 = conflicts.
+        # A negative returncode signals a hard error (e.g. binary file, permission
+        # failure) — distinct from a normal conflict (positive integer).
         result = _run(
             ["merge-file", "-p", "-L", "current", "-L", "base", "-L", "draft",
              paths[0], paths[1], paths[2]],
             check=False,
         )
+        if result.returncode < 0:
+            raise RuntimeError(
+                f"git merge-file failed (exit {result.returncode}): {result.stderr.strip()}"
+            )
         merged = result.stdout
         clean = result.returncode == 0
     finally:
