@@ -360,17 +360,17 @@ def file_exists(path: str) -> bool:
 # --------------------------------------------------------------------------- #
 
 
-def unified_diff(old: str, new: str, rel: str) -> str:
+def unified_diff(old: str, new: str, path: str) -> str:
     diff_lines = difflib.unified_diff(
         old.splitlines(keepends=True),
         new.splitlines(keepends=True),
-        fromfile=rel,
-        tofile=rel,
+        fromfile=path,
+        tofile=path,
     )
     return "".join(diff_lines)
 
 
-def broken_links(rel: str, body: str) -> list[dict[str, str]]:
+def broken_links(path: str, body: str) -> list[dict[str, str]]:
     return [
-        {"target": b.target, "resolved": b.resolved} for b in links.find_broken_links(body, rel)
+        {"target": b.target, "resolved": b.resolved} for b in links.find_broken_links(body, path)
     ]
