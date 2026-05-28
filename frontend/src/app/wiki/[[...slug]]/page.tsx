@@ -2216,7 +2216,7 @@ function FileViewer({ path }: { path: string }) {
               onClick={() => void onAiConsolidate()}
               disabled={consolidating || saving}
             >
-              {consolidating ? "Consolidating…" : "Let AI consolidate"}
+              {consolidating ? "Merging…" : "Merge with AI"}
             </Button>
             <Button
               size="sm"
