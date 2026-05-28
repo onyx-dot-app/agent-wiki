@@ -4,7 +4,6 @@ import { useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { mutate as globalMutate } from "swr";
 
-import { AppShell } from "@/components/common/AppShell";
 import { Button } from "@/components/common/Button";
 import { BackLink, PageHeader } from "@/components/common/PageHeader";
 import { apiFetch } from "@/lib/api";
@@ -61,16 +60,14 @@ export default function AdminIngestPage() {
   if (!user.is_admin) return null;
 
   return (
-    <AppShell>
-      <main style={{ padding: isMobile ? "16px 12px" : "24px 32px", maxWidth: 720 }}>
+    <main style={{ padding: isMobile ? "16px 12px" : "24px 32px", maxWidth: 720 }}>
         <BackLink />
         <PageHeader
           title="Onyx connection"
           description="Connect your Onyx instance to automatically push indexed documents into this wiki. Copy the base URL and API key below into your Onyx environment variables."
         />
         <IngestForm />
-      </main>
-    </AppShell>
+    </main>
   );
 }
 

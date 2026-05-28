@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useEffect, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 
-import { AppShell } from "@/components/common/AppShell";
 import { PageHeader } from "@/components/common/PageHeader";
 import { useRequireAuth } from "@/lib/auth";
 import { color, radius, shadow } from "@/lib/theme";
@@ -23,8 +22,7 @@ export default function AdminPage() {
   if (!user.is_admin) return null;
 
   return (
-    <AppShell>
-      <main style={{ padding: isMobile ? "16px 12px" : "24px 32px", maxWidth: 960 }}>
+    <main style={{ padding: isMobile ? "16px 12px" : "24px 32px", maxWidth: 960 }}>
         <PageHeader
           title="Admin"
           description="Manage who can sign in and which LLM the workspace uses."
@@ -85,8 +83,7 @@ export default function AdminPage() {
             icon={<IngestIcon />}
           />
         </div>
-      </main>
-    </AppShell>
+    </main>
   );
 }
 

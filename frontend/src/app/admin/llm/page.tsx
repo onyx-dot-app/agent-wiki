@@ -4,7 +4,6 @@ import { useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { mutate as globalMutate } from "swr";
 
-import { AppShell } from "@/components/common/AppShell";
 import { Button } from "@/components/common/Button";
 import { BackLink, PageHeader } from "@/components/common/PageHeader";
 import { apiFetch } from "@/lib/api";
@@ -101,16 +100,14 @@ export default function AdminLLMPage() {
   if (!user.is_admin) return null;
 
   return (
-    <AppShell>
-      <main style={{ padding: isMobile ? "16px 12px" : "24px 32px", maxWidth: 760 }}>
+    <main style={{ padding: isMobile ? "16px 12px" : "24px 32px", maxWidth: 760 }}>
         <BackLink />
         <PageHeader
           title="Language models"
           description="Manage provider credentials and set the model used by agents. Users can override the model for their own chats in Settings."
         />
         <LLMPage />
-      </main>
-    </AppShell>
+    </main>
   );
 }
 

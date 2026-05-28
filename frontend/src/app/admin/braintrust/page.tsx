@@ -3,7 +3,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 
-import { AppShell } from "@/components/common/AppShell";
 import { Button } from "@/components/common/Button";
 import { BackLink, PageHeader } from "@/components/common/PageHeader";
 import { apiFetch } from "@/lib/api";
@@ -31,16 +30,14 @@ export default function AdminBraintrustPage() {
   if (!user.is_admin) return null;
 
   return (
-    <AppShell>
-      <main style={{ padding: isMobile ? "16px 12px" : "24px 32px", maxWidth: 720 }}>
+    <main style={{ padding: isMobile ? "16px 12px" : "24px 32px", maxWidth: 720 }}>
         <BackLink />
         <PageHeader
           title="Braintrust tracing"
           description="Send LLM exchanges (messages, tools available, tool calls + results, model output, usage) to a Braintrust project for inspection. Tracing only fires when both project and API key are saved AND the toggle below is on."
         />
         <BraintrustForm />
-      </main>
-    </AppShell>
+    </main>
   );
 }
 

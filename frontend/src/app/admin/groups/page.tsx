@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
-import { AppShell } from "@/components/common/AppShell";
 import { Button } from "@/components/common/Button";
 import { BackLink, PageHeader } from "@/components/common/PageHeader";
 import { ApiError, apiFetch } from "@/lib/api";
@@ -39,16 +38,14 @@ export default function AdminGroupsPage() {
   if (!user.is_admin) return null;
 
   return (
-    <AppShell>
-      <main style={{ padding: isMobile ? "16px 12px" : "24px 32px", maxWidth: 960 }}>
+    <main style={{ padding: isMobile ? "16px 12px" : "24px 32px", maxWidth: 960 }}>
         <BackLink />
         <PageHeader
           title="Groups"
           description="Groups bundle users so wiki pages can be shared with the whole group at once."
         />
         <GroupsManager />
-      </main>
-    </AppShell>
+    </main>
   );
 }
 

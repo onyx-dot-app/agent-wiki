@@ -3,7 +3,6 @@
 import { useEffect, useState, type CSSProperties, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 
-import { AppShell } from "@/components/common/AppShell";
 import { Button } from "@/components/common/Button";
 import { BackLink, PageHeader } from "@/components/common/PageHeader";
 import { useRequireAuth } from "@/lib/auth";
@@ -31,16 +30,14 @@ export default function AdminTemplatesPage() {
   if (!user.is_admin) return null;
 
   return (
-    <AppShell>
-      <main style={{ padding: isMobile ? "16px 12px" : "24px 32px", maxWidth: 960 }}>
+    <main style={{ padding: isMobile ? "16px 12px" : "24px 32px", maxWidth: 960 }}>
         <BackLink />
         <PageHeader
           title="Document templates"
           description="Define named starting points users can pick when creating a new wiki page. Each template can supply an optional chat system prompt that guides the in-app assistant while the user is still drafting the initial version."
         />
         <TemplatesList />
-      </main>
-    </AppShell>
+    </main>
   );
 }
 
