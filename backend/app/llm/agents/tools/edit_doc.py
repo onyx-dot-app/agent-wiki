@@ -8,7 +8,9 @@ from typing import Any
 
 from app.wiki import utils as wiki_utils
 from app.wiki import edit as wiki_edit
+from app.wiki import git as wiki_git
 from app.llm.agents.tools.errors import ToolError
+from app.llm.errors import LLMError
 from app.models.wiki import AiRebaseMaxRetriesError
 
 
@@ -56,9 +58,11 @@ def handle(args: dict[str, Any]) -> Any:
                 "message": "concurrent edits kept landing; max retries exceeded",
                 "current_sha": exc.current_sha,
             }
+        except LLMError as exc:
+            return {"error": f"llm_error: {exc}"}
 
         if result is None:
-            raise ToolError("edit produced no change")
+            return {"path": path, "sha": wiki_git.head_sha_for_path(path), "no_change": True}
 
         return {
             "path": path,
