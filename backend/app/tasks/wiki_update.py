@@ -198,9 +198,9 @@ def _run_inner(job_id: str, rel: str, instruction: str, base_sha: str | None) ->
 
     try:
         result = wiki_utils.commit_and_fan_out(
-            rel,
-            new_body,
-            f"Doc update: {instruction[:_COMMIT_MESSAGE_MAX]}",
+            path=rel,
+            body=new_body,
+            message=f"Doc update: {instruction[:_COMMIT_MESSAGE_MAX]}",
             change_kind=ChangeKind.EDIT,
             base_body=old_body,
             ai_merge=True,
@@ -411,7 +411,9 @@ def process_pushed_document(push: dict[str, Any]) -> None:
                 message += "\n\n" + "\n".join(meta_lines)
             try:
                 commit_result = wiki_utils.commit_and_fan_out(
-                    c.hit.path, result, message,
+                    path=c.hit.path,
+                    body=result,
+                    message=message,
                     change_kind=ChangeKind.EDIT,
                     base_body=c.body,
                     ai_merge=True,

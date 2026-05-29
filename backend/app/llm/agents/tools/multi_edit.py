@@ -73,7 +73,7 @@ def handle(args: dict[str, Any]) -> Any:
 
         try:
             result = wiki_utils.commit_and_fan_out(
-                path, new_body, commit_message.strip(),
+                path=path, body=new_body, message=commit_message.strip(),
                 change_kind=ChangeKind.EDIT,
                 base_body=base_body,
                 ai_merge=True,

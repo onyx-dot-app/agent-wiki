@@ -48,7 +48,7 @@ def handle(args: dict[str, Any]) -> Any:
             base_body = wiki_git.read_file(path, ref=base_sha)
             try:
                 result = wiki_utils.commit_and_fan_out(
-                    path, body, commit_message.strip(),
+                    path=path, body=body, message=commit_message.strip(),
                     change_kind=ChangeKind.EDIT,  # new files take the else branch below
                     base_body=base_body,
                     ai_merge=True,
@@ -74,7 +74,7 @@ def handle(args: dict[str, Any]) -> Any:
         else:
             # New file: no base to merge against, so this always commits.
             result = wiki_utils.commit_and_fan_out(
-                path, body, commit_message.strip(),
+                path=path, body=body, message=commit_message.strip(),
                 change_kind=ChangeKind.CREATE, activity_ttl=activity_ttl,
             )
             assert result is not None

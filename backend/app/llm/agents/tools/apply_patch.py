@@ -52,7 +52,7 @@ def handle(args: dict[str, Any]) -> Any:
         # Callers should pass base_sha and retry on stale_base. With no
         # base_body, commit_and_fan_out commits as-is and never returns None.
         result = wiki_utils.commit_and_fan_out(
-            path, new_body, commit_message.strip(),
+            path=path, body=new_body, message=commit_message.strip(),
             change_kind=ChangeKind.EDIT, activity_ttl=activity_ttl,
         )
         assert result is not None

@@ -63,9 +63,9 @@ def handle(args: dict[str, Any]) -> Any:
 
         try:
             result = wiki_utils.commit_and_fan_out(
-                path,
-                new_body,
-                f"Doc update: {instruction.strip()[:80]}",
+                path=path,
+                body=new_body,
+                message=f"Doc update: {instruction.strip()[:80]}",
                 change_kind=ChangeKind.EDIT,
                 base_body=old_body,
                 ai_merge=True,

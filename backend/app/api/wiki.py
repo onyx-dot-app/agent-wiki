@@ -151,9 +151,9 @@ def put_document_by_path(
         # skip_acl: the write gate already ran above via require_can. ai_merge
         # is off so an unresolvable merge raises -> 409 (the conflict UI).
         result = wiki_utils.commit_and_fan_out(
-            rel,
-            req.body,
-            msg,
+            path=rel,
+            body=req.body,
+            message=msg,
             change_kind=change_kind,
             base_body=base_body,
             skip_acl=True,
