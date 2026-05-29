@@ -128,76 +128,6 @@ def commit_file(rel_path: str, body: str, message: str, author: str | None = Non
 _COMMIT_RETRY_MAX = 3
 
 
-def _read_head_or_empty(rel_path: str) -> str:
-    """Body of ``rel_path`` at the last git commit (HEAD), or ``""`` if absent."""
-    try:
-        return read_file(rel_path, ref="HEAD")
-    except subprocess.CalledProcessError:
-        return ""
-
-
-def commit_with_merge(
-    rel_path: str,
-    *,
-    new_body: str,
-    message: str,
-    base_sha: str | None = None,
-    author: str | None = None,
-    max_retries: int = _COMMIT_RETRY_MAX,
-) -> tuple[str, str]:
-    """Commit ``new_body`` to ``rel_path``, 3-way merging any concurrent change.
-
-    The git-layer commit entry point for human edits (``PUT /file``).
-
-    Pass ``base_sha`` iff the edit was derived from a specific committed version
-    (read-modify-write). The function fetches the base body from that commit and
-    reconciles any concurrent change via 3-way merge (``git merge-file``): clean
-    merges commit transparently; unresolvable conflicts raise
-    ``GitMergeConflictError`` so the caller can surface a 409. Retries up to
-    ``max_retries`` times when HEAD keeps moving during the merge step.
-
-    Without ``base_sha`` (new file, .gitkeep, trigger YAML) the body is
-    committed as-is — there's nothing to merge against.
-
-    Returns ``(sha, committed_body)``. Raises ``CommitMaxRetriesError`` when
-    HEAD keeps moving past ``max_retries``.
-    """
-    base: str | None = None
-    if base_sha is not None:
-        base = read_file(rel_path, ref=base_sha)
-    new = new_body
-    for attempt in range(max_retries + 1):
-        head = head_sha_for_path(rel_path)
-        if base is None:
-            merged = new
-            current = None
-        else:
-            current = _read_head_or_empty(rel_path)
-            if current != base:
-                mr = merge_content(base, current, new)
-                if mr.clean:
-                    merged = mr.merged
-                else:
-                    raise GitMergeConflictError(rel_path)
-            else:
-                merged = new
-        post = head_sha_for_path(rel_path) if base is not None else head
-        if post == head:
-            sha = commit_file(rel_path, merged, message, author=author)
-            return sha, merged
-        if attempt >= max_retries:
-            raise CommitMaxRetriesError(attempt, post or "")
-        if post != head:
-            log.info(
-                "commit_with_merge: HEAD moved for %s, retrying (%d/%d)",
-                rel_path, attempt + 1, max_retries,
-            )
-        if base is not None:
-            base = current
-        new = merged
-    raise CommitMaxRetriesError(max_retries, "")  # unreachable
-
-
 def move_and_commit(
     old_rel_path: str,
     new_rel_path: str,
@@ -511,31 +441,20 @@ class GitCommitLockError(Exception):
 
     This is a transient race: two workers passed the pre-commit SHA check at
     the same time and both tried to commit. One wins; the other gets this
-    error. ``commit_with_ai_merge`` catches it and re-enters the merge loop
-    so the losing worker re-reads HEAD and re-merges before retrying.
+    error. ``commit_file`` retries it transparently so callers never see it
+    unless the retry budget is exhausted.
     """
 
 
 class GitMergeConflictError(Exception):
-    """Raised by ``commit_with_merge`` when a concurrent change can't be
-    merged cleanly. Human edit paths translate this into a 409 so the user
-    gets the conflict UI.
+    """Raised by ``commit_and_fan_out`` when a concurrent change can't be
+    merged cleanly and no ``on_conflict`` resolver was supplied. Human edit
+    paths translate this into a 409 so the user gets the conflict UI.
     """
 
     def __init__(self, rel_path: str) -> None:
         self.rel_path = rel_path
         super().__init__(f"merge conflict on {rel_path}")
-
-
-class CommitMaxRetriesError(Exception):
-    """Raised by ``commit_with_merge`` when HEAD keeps moving past the
-    retry budget.
-    """
-
-    def __init__(self, retries: int, current_sha: str) -> None:
-        self.retries = retries
-        self.current_sha = current_sha
-        super().__init__(f"commit failed after {retries} retries")
 
 
 def diff_for_commit(sha: str, rel_path: str | None = None, *, unified: int = 3) -> str:

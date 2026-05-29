@@ -53,8 +53,9 @@ from app.wiki import (
     notify as wiki_notify,
     search as wiki_search,
     templates as templates_repo,
+    utils as wiki_utils,
 )
-from app.models.wiki import ChangeKind
+from app.models.wiki import ChangeKind, CommitMaxRetriesError
 
 router = APIRouter()
 log = logging.getLogger(__name__)
@@ -141,23 +142,32 @@ def put_document_by_path(
     author = _git_author(user)
     change_kind = ChangeKind.EDIT if existed else ChangeKind.CREATE
     msg = f"{change_kind} {rel}"
-    try:
-        sha, body_to_commit = wiki_git.commit_with_merge(
-            rel,
-            base_sha=req.base_sha if existed else None,
-            new_body=req.body,
-            message=msg,
-            author=author,
-        )
-    except (wiki_git.GitMergeConflictError, wiki_git.CommitMaxRetriesError):
-        raise HTTPException(status_code=409, detail="conflict detected")
-    wiki_notify.after_doc_write(
-        rel,
-        sha,
-        change_kind,
-        author,
-        owner_user_id=user.id if change_kind == ChangeKind.CREATE else None,
+    # Read-modify-write: only when editing an existing page from a known base.
+    # New pages (and force-saves with no base_sha) commit as-is.
+    base_body = (
+        wiki_git.read_file(rel, ref=req.base_sha) if existed and req.base_sha else None
     )
+    try:
+        # skip_acl: the write gate already ran above via require_can. on_conflict
+        # is None so an unresolvable merge raises -> 409 (the conflict UI).
+        result = wiki_utils.commit_and_fan_out(
+            rel,
+            req.body,
+            msg,
+            change_kind=change_kind,
+            base_body=base_body,
+            skip_acl=True,
+            record_activity=False,
+        )
+    except (wiki_git.GitMergeConflictError, CommitMaxRetriesError):
+        raise HTTPException(status_code=409, detail="conflict detected")
+    if result is None:
+        # Merge produced no change — the submitted body already matches HEAD.
+        sha = wiki_git.head_sha_for_path(rel) or ""
+        body_to_commit = req.body
+    else:
+        sha = result.sha
+        body_to_commit = result.new_body
     # Drafting state: if the saved body diverges from the template
     # snapshot, the user has made it their own — clear the row so the
     # chat banner drops and the template's system prompt stops applying.

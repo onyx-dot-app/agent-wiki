@@ -11,7 +11,7 @@ from app.wiki import utils as wiki_utils
 from app.wiki import git as wiki_git
 from app.llm.agents.tools.errors import ToolError
 from app.llm.errors import LLMError
-from app.models.wiki import AiMergeMaxRetriesError, ChangeKind
+from app.models.wiki import ChangeKind, CommitMaxRetriesError
 
 
 def handle(args: dict[str, Any]) -> Any:
@@ -53,7 +53,7 @@ def handle(args: dict[str, Any]) -> Any:
                     new_body=body,
                     activity_ttl=activity_ttl,
                 )  # always ChangeKind.EDIT — new files take the else branch below
-            except AiMergeMaxRetriesError as exc:
+            except CommitMaxRetriesError as exc:
                 return {
                     "error": "stale_base",
                     "message": "concurrent edits kept landing; max retries exceeded",
@@ -71,13 +71,15 @@ def handle(args: dict[str, Any]) -> Any:
                 "broken_links": wiki_utils.broken_links(path, result.new_body),
             }
         else:
-            sha = wiki_utils.commit_and_fan_out(
+            # New file: no base to merge against, so this always commits.
+            result = wiki_utils.commit_and_fan_out(
                 path, body, commit_message.strip(),
                 change_kind=ChangeKind.CREATE, activity_ttl=activity_ttl,
             )
+            assert result is not None
             return {
                 "path": path,
-                "sha": sha,
+                "sha": result.sha,
                 "created": True,
                 "diff": wiki_utils.unified_diff("", body, path),
                 "broken_links": wiki_utils.broken_links(path, body),

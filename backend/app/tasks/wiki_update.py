@@ -51,7 +51,7 @@ from app.mcp_server import pubsub as mcp_pubsub
 from app.auth import UserMissingError, load_user, set_current_user
 from app.tasks.queues import documents_queue
 from app.wiki import agent_activity, git as wiki_git
-from app.models.wiki import AiMergeMaxRetriesError
+from app.models.wiki import CommitMaxRetriesError
 
 
 log = logging.getLogger(__name__)
@@ -207,7 +207,7 @@ def _run_inner(job_id: str, rel: str, instruction: str, base_sha: str | None) ->
         mcp_jobs.mark_failed(job_id, error=f"llm_error: {exc}")
         mcp_pubsub.publish_job_update(job_id, "failed")
         return
-    except AiMergeMaxRetriesError as exc:
+    except CommitMaxRetriesError as exc:
         mcp_jobs.mark_failed(
             job_id,
             error="max_retries_exceeded",
@@ -414,7 +414,7 @@ def process_pushed_document(push: dict[str, Any]) -> None:
                     new_body=result,
                     skip_acl=True,
                 )
-            except AiMergeMaxRetriesError:
+            except CommitMaxRetriesError:
                 log.warning("process_pushed_document: max retries for %s, skipping", c.hit.path)
                 continue
             if commit_result is None:

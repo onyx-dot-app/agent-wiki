@@ -1,7 +1,10 @@
-"""Unit tests for ``commit_with_ai_merge`` in ``wiki_utils``.
+"""Unit tests for the 3-way merge loop in ``commit_and_fan_out`` as driven by
+``commit_with_ai_merge`` — the thin wrapper that wires the LLM merge as the
+conflict resolver.
 
-All external I/O (git, filesystem, fan-out) is monkeypatched so the tests
-run without a real repo or database.
+All external I/O (git, filesystem, fan-out, DB) is monkeypatched so the tests
+run without a real repo or database. The merge loop itself lives in
+``commit_and_fan_out``; these tests exercise it through the AI wrapper.
 """
 from __future__ import annotations
 
@@ -10,7 +13,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from app.wiki.utils import commit_with_ai_merge
-from app.models.wiki import AiMergeMaxRetriesError, CommitResult
+from app.models.wiki import CommitMaxRetriesError, CommitResult
 from app.wiki.git import MergeResult
 
 _PATH = "docs/page.md"
@@ -23,40 +26,32 @@ _SHA_C = "cccc3333"
 
 
 @pytest.fixture(autouse=True)
-def _stub_fan_out(monkeypatch):
-    """Stub commit_and_fan_out to avoid any DB or git interaction."""
-    stub = MagicMock(return_value=_SHA_A)
-    monkeypatch.setattr("app.wiki.utils.commit_and_fan_out", stub)
-    return stub
+def _stub_side_effects(monkeypatch):
+    """Stub the commit leaf so no DB/git/notify runs.
+
+    With no current user the activity block is skipped and ``author_string``
+    resolves to the fallback author, so the loop can run in isolation.
+    """
+    monkeypatch.setattr("app.wiki.utils._current_user_or_none", lambda: None)
+    monkeypatch.setattr("app.wiki.utils.wiki_notify.after_doc_write", MagicMock())
 
 
-def _patch(monkeypatch, *, head_shas, current_bodies, merge_result=None, llm_merged=None):
-    """Wire up the common monkeypatches.
+def _wire(monkeypatch, *, head_shas, current_bodies, merge_result=None, commit_sha=_SHA_B):
+    """Wire the loop's leaf dependencies.
 
-    ``head_shas`` — list of return values for successive ``head_sha_for_path``
-    calls (each loop iteration calls it twice: before and after the merge).
-    ``current_bodies`` — list of return values for ``_read_head_or_empty``.
+    ``head_shas`` — successive ``head_sha_for_path`` returns (each merge
+    iteration calls it twice: before and after the merge).
+    ``current_bodies`` — successive ``_read_head_or_empty`` returns.
     """
     head_iter = iter(head_shas)
     body_iter = iter(current_bodies)
-
-    wiki_git_mock = MagicMock()
-    wiki_git_mock.head_sha_for_path.side_effect = lambda _p: next(head_iter)
+    monkeypatch.setattr("app.wiki.utils.wiki_git.head_sha_for_path", lambda _p: next(head_iter))
+    monkeypatch.setattr("app.wiki.utils._read_head_or_empty", lambda _p: next(body_iter))
     if merge_result is not None:
-        wiki_git_mock.merge_content.return_value = merge_result
-    monkeypatch.setattr("app.wiki.utils.wiki_git", wiki_git_mock)
-
-    monkeypatch.setattr(
-        "app.wiki.utils._read_head_or_empty",
-        lambda _p: next(body_iter),
-    )
-
-    if llm_merged is not None:
-        mcu = MagicMock()
-        mcu.merge.return_value = llm_merged
-        monkeypatch.setattr("app.wiki.utils.merge_conflict_update", mcu)
-
-    return wiki_git_mock
+        monkeypatch.setattr("app.wiki.utils.wiki_git.merge_content", lambda *_a: merge_result)
+    commit_file = MagicMock(return_value=commit_sha)
+    monkeypatch.setattr("app.wiki.utils.wiki_git.commit_file", commit_file)
+    return commit_file
 
 
 # ---------------------------------------------------------------------------
@@ -66,24 +61,25 @@ def _patch(monkeypatch, *, head_shas, current_bodies, merge_result=None, llm_mer
 
 def test_no_concurrent_change_commits_new_body(monkeypatch):
     """When current == base, commits new_body directly."""
-    wiki_git_mock = _patch(
+    merge_content = MagicMock()
+    monkeypatch.setattr("app.wiki.utils.wiki_git.merge_content", merge_content)
+    commit_file = _wire(
         monkeypatch,
         head_shas=[_SHA_A, _SHA_A],   # pre-merge, post-merge — same
         current_bodies=[_BASE],
+        commit_sha=_SHA_B,
     )
-    fan_out = MagicMock(return_value=_SHA_B)
-    monkeypatch.setattr("app.wiki.utils.commit_and_fan_out", fan_out)
 
     result = commit_with_ai_merge(
-        _PATH, _MSG, base_body=_BASE, new_body=_NEW, max_retries=0
+        _PATH, _MSG, base_body=_BASE, new_body=_NEW, max_retries=0, skip_acl=True
     )
 
     assert isinstance(result, CommitResult)
     assert result.sha == _SHA_B
     assert result.old_body == _BASE
     assert result.new_body == _NEW
-    wiki_git_mock.merge_content.assert_not_called()
-    fan_out.assert_called_once()
+    merge_content.assert_not_called()
+    commit_file.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
@@ -93,20 +89,18 @@ def test_no_concurrent_change_commits_new_body(monkeypatch):
 
 def test_noop_returns_none(monkeypatch):
     """When new_body equals current content, returns None without committing."""
-    fan_out = MagicMock(return_value=_SHA_B)
-    monkeypatch.setattr("app.wiki.utils.commit_and_fan_out", fan_out)
-    _patch(
+    commit_file = _wire(
         monkeypatch,
         head_shas=[_SHA_A],   # only one call — exits before post-SHA check
         current_bodies=[_BASE],
     )
 
     result = commit_with_ai_merge(
-        _PATH, _MSG, base_body=_BASE, new_body=_BASE, max_retries=0
+        _PATH, _MSG, base_body=_BASE, new_body=_BASE, max_retries=0, skip_acl=True
     )
 
     assert result is None
-    fan_out.assert_not_called()
+    commit_file.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -119,23 +113,22 @@ def test_clean_3way_merge_commits_merged(monkeypatch):
     concurrent_body = "concurrent edit\n"
     merged_body = "merged edit\n"
 
-    wiki_git_mock = _patch(
+    commit_file = _wire(
         monkeypatch,
         head_shas=[_SHA_A, _SHA_A],   # HEAD stable by post-check
         current_bodies=[concurrent_body],
         merge_result=MergeResult(merged=merged_body, clean=True),
+        commit_sha=_SHA_B,
     )
-    fan_out = MagicMock(return_value=_SHA_B)
-    monkeypatch.setattr("app.wiki.utils.commit_and_fan_out", fan_out)
 
     result = commit_with_ai_merge(
-        _PATH, _MSG, base_body=_BASE, new_body=_NEW, max_retries=0
+        _PATH, _MSG, base_body=_BASE, new_body=_NEW, max_retries=0, skip_acl=True
     )
 
     assert isinstance(result, CommitResult)
     assert result.new_body == merged_body
     assert result.old_body == concurrent_body
-    wiki_git_mock.merge_content.assert_called_once_with(_BASE, concurrent_body, _NEW)
+    commit_file.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
@@ -144,27 +137,25 @@ def test_clean_3way_merge_commits_merged(monkeypatch):
 
 
 def test_llm_fallback_on_conflict(monkeypatch):
-    """When git merge has conflicts, the LLM merge is used."""
+    """When git merge has conflicts, the LLM merge resolver is used."""
     concurrent_body = "concurrent edit\n"
     llm_result = "llm merged\n"
     conflicted = "<<<<<<< BASE\n...\n"
 
     mcu = MagicMock()
     mcu.merge.return_value = llm_result
+    monkeypatch.setattr("app.wiki.utils.merge_conflict_update", mcu)
 
-    _patch(
+    commit_file = _wire(
         monkeypatch,
         head_shas=[_SHA_A, _SHA_A],
         current_bodies=[concurrent_body],
         merge_result=MergeResult(merged=conflicted, clean=False),
-        llm_merged=llm_result,
+        commit_sha=_SHA_B,
     )
-    monkeypatch.setattr("app.wiki.utils.merge_conflict_update", mcu)
-    fan_out = MagicMock(return_value=_SHA_B)
-    monkeypatch.setattr("app.wiki.utils.commit_and_fan_out", fan_out)
 
     result = commit_with_ai_merge(
-        _PATH, _MSG, base_body=_BASE, new_body=_NEW, max_retries=0
+        _PATH, _MSG, base_body=_BASE, new_body=_NEW, max_retries=0, skip_acl=True
     )
 
     assert isinstance(result, CommitResult)
@@ -175,6 +166,7 @@ def test_llm_fallback_on_conflict(monkeypatch):
         current_body=concurrent_body,
         draft_body=_NEW,
     )
+    commit_file.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
@@ -191,36 +183,25 @@ def test_retries_when_head_moves_mid_merge(monkeypatch):
 
     # Attempt 0: pre=A, post=B (HEAD moved) → retry
     # Attempt 1: pre=B, post=B (stable) → commit
-    head_shas = [_SHA_A, _SHA_B, _SHA_B, _SHA_B]
-    current_bodies = [concurrent_body, concurrent_body_v2]
-    merge_results = [
+    head_iter = iter([_SHA_A, _SHA_B, _SHA_B, _SHA_B])
+    body_iter = iter([concurrent_body, concurrent_body_v2])
+    merge_iter = iter([
         MergeResult(merged=merged_v1, clean=True),
         MergeResult(merged=merged_v2, clean=True),
-    ]
-
-    merge_iter = iter(merge_results)
-    body_iter = iter(current_bodies)
-    head_iter = iter(head_shas)
-
-    wiki_git_mock = MagicMock()
-    wiki_git_mock.head_sha_for_path.side_effect = lambda _p: next(head_iter)
-    wiki_git_mock.merge_content.side_effect = lambda *_: next(merge_iter)
-    monkeypatch.setattr("app.wiki.utils.wiki_git", wiki_git_mock)
-    monkeypatch.setattr(
-        "app.wiki.utils._read_head_or_empty",
-        lambda _p: next(body_iter),
-    )
-
-    fan_out = MagicMock(return_value=_SHA_C)
-    monkeypatch.setattr("app.wiki.utils.commit_and_fan_out", fan_out)
+    ])
+    monkeypatch.setattr("app.wiki.utils.wiki_git.head_sha_for_path", lambda _p: next(head_iter))
+    monkeypatch.setattr("app.wiki.utils._read_head_or_empty", lambda _p: next(body_iter))
+    monkeypatch.setattr("app.wiki.utils.wiki_git.merge_content", lambda *_a: next(merge_iter))
+    commit_file = MagicMock(return_value=_SHA_C)
+    monkeypatch.setattr("app.wiki.utils.wiki_git.commit_file", commit_file)
 
     result = commit_with_ai_merge(
-        _PATH, _MSG, base_body=_BASE, new_body=_NEW, max_retries=1
+        _PATH, _MSG, base_body=_BASE, new_body=_NEW, max_retries=1, skip_acl=True
     )
 
     assert isinstance(result, CommitResult)
     assert result.sha == _SHA_C
-    assert wiki_git_mock.merge_content.call_count == 2
+    assert commit_file.call_count == 1
 
 
 # ---------------------------------------------------------------------------
@@ -229,7 +210,7 @@ def test_retries_when_head_moves_mid_merge(monkeypatch):
 
 
 def test_raises_when_max_retries_exceeded(monkeypatch):
-    """Raises AiMergeMaxRetriesError when HEAD keeps moving."""
+    """Raises CommitMaxRetriesError when HEAD keeps moving."""
     concurrent_body = "concurrent\n"
     merged_body = "merged\n"
 
@@ -237,23 +218,19 @@ def test_raises_when_max_retries_exceeded(monkeypatch):
     head_shas = [_SHA_A, _SHA_B, _SHA_B, _SHA_C, _SHA_C, "dddd4444"]
     body_iter = iter([concurrent_body] * 10)
     head_iter = iter(head_shas)
-
-    wiki_git_mock = MagicMock()
-    wiki_git_mock.head_sha_for_path.side_effect = lambda _p: next(head_iter)
-    wiki_git_mock.merge_content.return_value = MergeResult(merged=merged_body, clean=True)
-    monkeypatch.setattr("app.wiki.utils.wiki_git", wiki_git_mock)
+    monkeypatch.setattr("app.wiki.utils.wiki_git.head_sha_for_path", lambda _p: next(head_iter))
+    monkeypatch.setattr("app.wiki.utils._read_head_or_empty", lambda _p: next(body_iter))
     monkeypatch.setattr(
-        "app.wiki.utils._read_head_or_empty",
-        lambda _p: next(body_iter),
+        "app.wiki.utils.wiki_git.merge_content",
+        lambda *_a: MergeResult(merged=merged_body, clean=True),
     )
-    fan_out = MagicMock(return_value=_SHA_A)
-    monkeypatch.setattr("app.wiki.utils.commit_and_fan_out", fan_out)
+    commit_file = MagicMock(return_value=_SHA_A)
+    monkeypatch.setattr("app.wiki.utils.wiki_git.commit_file", commit_file)
 
-    with pytest.raises(AiMergeMaxRetriesError) as exc_info:
+    with pytest.raises(CommitMaxRetriesError) as exc_info:
         commit_with_ai_merge(
-            _PATH, _MSG, base_body=_BASE, new_body=_NEW, max_retries=2
+            _PATH, _MSG, base_body=_BASE, new_body=_NEW, max_retries=2, skip_acl=True
         )
 
-    exc = exc_info.value
-    assert exc.retries == 2
-    fan_out.assert_not_called()
+    assert exc_info.value.retries == 2
+    commit_file.assert_not_called()

@@ -12,7 +12,7 @@ from app.wiki import edit as wiki_edit
 from app.wiki import git as wiki_git
 from app.llm.agents.tools.errors import ToolError
 from app.llm.errors import LLMError
-from app.models.wiki import AiMergeMaxRetriesError
+from app.models.wiki import CommitMaxRetriesError
 
 
 class _EditOp(NamedTuple):
@@ -78,7 +78,7 @@ def handle(args: dict[str, Any]) -> Any:
                 new_body=new_body,
                 activity_ttl=activity_ttl,
             )
-        except AiMergeMaxRetriesError as exc:
+        except CommitMaxRetriesError as exc:
             return {
                 "error": "stale_base",
                 "message": "concurrent edits kept landing; max retries exceeded",
