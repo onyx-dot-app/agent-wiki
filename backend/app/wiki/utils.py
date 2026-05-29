@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import difflib
 import logging
+import subprocess
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
@@ -17,7 +18,7 @@ from typing import Any
 from app.auth import current_user
 from app.llm.agents import merge_conflict_update
 from app.llm.agents.tools.errors import ToolError
-from app.models.wiki import AiRebaseMaxRetriesError, ChangeKind, CommitResult
+from app.models.wiki import ChangeKind, CommitMaxRetriesError, CommitResult
 from app.wiki import (
     agent_activity,
     filesystem,
@@ -54,68 +55,10 @@ def validate_doc_path(raw_path: Any) -> str:
 # --------------------------------------------------------------------------- #
 
 
-# Maximum retry attempts inside ``commit_with_ai_rebase`` — each attempt may
-# invoke the LLM merge fallback, so keep this small to bound LLM spend.
-_AI_REBASE_MAX_RETRIES = 3
-
-
-def commit_with_ai_rebase(
-    path: str,
-    message: str,
-    *,
-    base_body: str,
-    new_body: str,
-    max_retries: int = _AI_REBASE_MAX_RETRIES,
-    activity_ttl: timedelta | None = None,
-) -> CommitResult | None:
-    """Commit with 3-way merge retry when HEAD moves between read and commit.
-
-    Caller provides ``base_body`` (the content the edit was derived from)
-    and ``new_body`` (the desired result). If HEAD has advanced since
-    ``base_body`` was read, a 3-way merge reconciles the two change sets
-    (git merge-file first, LLM fallback on conflict). The loop retries up
-    to ``max_retries`` times when HEAD keeps moving during the merge step.
-
-    Returns ``None`` when the merged result equals the current content.
-    Raises ``AiRebaseMaxRetriesError`` when the retry limit is hit.
-    Any ``LLMError`` raised by the merge fallback propagates immediately.
-    """
-    _base = base_body
-    _new = new_body
-    for attempt in range(max_retries + 1):
-        head_sha = wiki_git.head_sha_for_path(path)
-        current = read_existing_or_empty(path)
-        if current != _base:
-            mr = wiki_git.merge_content(_base, current, _new)
-            if mr.clean:
-                merged = mr.merged
-            else:
-                merged = merge_conflict_update.merge(
-                    wiki_path=path,
-                    base_body=_base,
-                    current_body=current,
-                    draft_body=_new,
-                )
-        else:
-            merged = _new
-        if merged == current:
-            return None
-        post_sha = wiki_git.head_sha_for_path(path)
-        if post_sha == head_sha:
-            sha = commit_and_fan_out(
-                path, merged, message,
-                change_kind=ChangeKind.EDIT, activity_ttl=activity_ttl,
-            )
-            return CommitResult(sha=sha, old_body=current, new_body=merged)
-        if attempt >= max_retries:
-            raise AiRebaseMaxRetriesError(attempt, post_sha or "")
-        log.info(
-            "commit_with_ai_rebase: HEAD moved for %s, retrying (%d/%d)",
-            path, attempt + 1, max_retries,
-        )
-        _base = current
-        _new = merged
-    raise AiRebaseMaxRetriesError(max_retries, "")  # unreachable
+# Maximum retry attempts for the 3-way merge loop in ``commit_and_fan_out``.
+# Each attempt may invoke an LLM merge fallback, so keep this small to bound
+# LLM spend.
+_MERGE_MAX_RETRIES = 3
 
 
 def assert_base_sha(path: str, base_sha: str | None) -> dict[str, str] | None:
@@ -189,27 +132,47 @@ def commit_and_fan_out(
     *,
     change_kind: ChangeKind,
     activity_ttl: timedelta | None = None,
-) -> str:
-    """Commit ``body`` to ``path``, queue reindex, fan out to triggers.
+    skip_acl: bool = False,
+    base_body: str | None = None,
+    ai_merge: bool = False,
+    max_retries: int = _MERGE_MAX_RETRIES,
+    record_activity: bool = True,
+) -> CommitResult | None:
+    """The single write gateway: commit ``body`` to ``path``, fan out to triggers.
 
-    Returns the commit SHA.
+    When ``base_body`` is ``None`` the body is committed as-is (new pages,
+    full-body overwrites with nothing to reconcile against). When ``base_body``
+    is supplied the commit is a read-modify-write: any concurrent change that
+    landed since ``base_body`` was read is reconciled with a 3-way merge
+    (``git merge-file``). A clean merge commits the merged result. A conflict
+    git can't resolve is handed to an LLM merge when ``ai_merge=True`` (the
+    agent write path), or raises ``GitMergeConflictError`` when not (human
+    path → 409). The loop retries up to ``max_retries`` times when HEAD keeps
+    moving during the merge step, then raises ``CommitMaxRetriesError``.
+
+    Ref-lock races are handled transparently inside ``commit_file`` — this
+    function never sees them.
 
     ``activity_ttl`` overrides the default 24h TTL on the resulting
     Active-agents row — write tools surface this through their
     ``expires_in_seconds`` argument so an agent can declare how long
     it expects to keep working.
 
-    Side effects:
-      1. Permission gate (write on existing pages).
-      2. Register a ``wrote`` activity row for the current user.
-      3. Commit, then run the standard reindex + trigger fan-out.
+    ``skip_acl=True`` bypasses the write-permission gate. Use only for
+    system-initiated writes (e.g. document ingestion) where there is no
+    human user in context whose permissions should be enforced.
 
-    Activity is DB-only — the doc body is committed verbatim.
+    ``record_activity=False`` skips the Active-agents row. The human
+    ``PUT /file`` path passes this — a person saving a page in the editor
+    is not "agent activity" and shouldn't surface on the activity rail.
+
+    Returns a ``CommitResult`` on commit; returns ``None`` only on the merge
+    path when the merged result equals the current content (no-op).
     """
     # Permission gate: editing requires write on the existing page.
     # Creating a new page is always allowed for the calling user — they
     # become the owner via the seeding hook in ``after_doc_write``.
-    if change_kind == ChangeKind.EDIT:
+    if change_kind == ChangeKind.EDIT and not skip_acl:
         from app.auth import PermissionDenied, require_can
 
         try:
@@ -217,8 +180,92 @@ def commit_and_fan_out(
         except PermissionDenied as exc:
             raise ToolError(str(exc))
 
+    if base_body is None:
+        return _commit_resolved(
+            path, body, message, change_kind, activity_ttl,
+            old_body=_read_head_or_empty(path), record_activity=record_activity,
+        )
+
+    # Read-modify-write: 3-way merge against concurrent changes, retrying when
+    # HEAD keeps moving between the merge and the commit.
+    _base = base_body
+    _new = body
+    for attempt in range(max_retries + 1):
+        head_sha = wiki_git.head_sha_for_path(path)
+        # Read from HEAD, not the working tree: after a concurrent commit the
+        # working tree may have stale content, so a filesystem read could make
+        # the next merge a no-op that clobbers the winner's commit.
+        current = _read_head_or_empty(path)
+        if current != _base:
+            mr = wiki_git.merge_content(_base, current, _new)
+            if mr.clean:
+                merged = mr.merged
+            elif ai_merge:
+                merged = merge_conflict_update.merge(
+                    wiki_path=path,
+                    base_body=_base,
+                    current_body=current,
+                    draft_body=_new,
+                )
+            else:
+                raise wiki_git.GitMergeConflictError(path)
+        else:
+            merged = _new
+        if merged == current:
+            return None
+        post_sha = wiki_git.head_sha_for_path(path)
+        if post_sha == head_sha:
+            try:
+                return _commit_resolved(
+                    path, merged, message, change_kind, activity_ttl,
+                    old_body=current, record_activity=record_activity,
+                    expected_head=head_sha,
+                )
+            except (wiki_git.GitNothingToCommitError, wiki_git.GitHeadMovedError):
+                # A concurrent writer committed in the window between our
+                # pre-commit SHA check and the locked commit. Re-read HEAD and
+                # re-merge rather than committing stale content.
+                if attempt >= max_retries:
+                    raise CommitMaxRetriesError(
+                        attempt, wiki_git.head_sha_for_path(path) or ""
+                    )
+                log.info(
+                    "commit_and_fan_out: concurrent commit under %s, retrying (%d/%d)",
+                    path, attempt + 1, max_retries,
+                )
+                _base = current
+                _new = merged
+                continue
+        if attempt >= max_retries:
+            raise CommitMaxRetriesError(attempt, post_sha or "")
+        log.info(
+            "commit_and_fan_out: HEAD moved for %s, retrying (%d/%d)",
+            path, attempt + 1, max_retries,
+        )
+        _base = current
+        _new = merged
+    raise CommitMaxRetriesError(max_retries, "")  # unreachable
+
+
+def _commit_resolved(
+    path: str,
+    body: str,
+    message: str,
+    change_kind: ChangeKind,
+    activity_ttl: timedelta | None,
+    *,
+    old_body: str,
+    record_activity: bool = True,
+    expected_head: str | None = None,
+) -> CommitResult:
+    """Record activity, commit ``body``, and run the reindex + trigger fan-out.
+
+    The leaf of ``commit_and_fan_out``: the body has already been resolved
+    (post-merge), so this just records activity, commits it verbatim, and runs
+    the reindex + trigger fan-out. Activity is DB-only.
+    """
     user = _current_user_or_none()
-    if user is not None:
+    if user is not None and record_activity:
         agent_name = agent_activity.agent_name_var.get()
         # if a launcher session is driving this commit, override
         # agent_name with the manifest's tool_id so the UI attributes
@@ -253,7 +300,7 @@ def commit_and_fan_out(
         )
 
     author = author_string()
-    sha = wiki_git.commit_file(path, body, message, author=author)
+    sha = wiki_git.commit_file(path, body, message, author=author, expected_head=expected_head)
     wiki_notify.after_doc_write(
         path,
         sha,
@@ -261,7 +308,7 @@ def commit_and_fan_out(
         author,
         owner_user_id=user.id if (user is not None and change_kind == ChangeKind.CREATE) else None,
     )
-    return sha
+    return CommitResult(sha=sha, old_body=old_body, new_body=body)
 
 
 def mark_doc_read(path: str) -> None:
@@ -343,6 +390,14 @@ def _current_user_or_none():
 def read_existing(path: str) -> str:
     """Read the current body of ``path`` from the wiki working tree."""
     return Path(filesystem.absolute(path)).read_text()
+
+
+def _read_head_or_empty(path: str) -> str:
+    """Read ``path`` from the last git commit (HEAD), or ``""`` if not yet committed."""
+    try:
+        return wiki_git.read_file(path, ref="HEAD")
+    except subprocess.CalledProcessError:
+        return ""
 
 
 def read_existing_or_empty(path: str) -> str:

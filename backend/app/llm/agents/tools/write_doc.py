@@ -11,7 +11,7 @@ from app.wiki import utils as wiki_utils
 from app.wiki import git as wiki_git
 from app.llm.agents.tools.errors import ToolError
 from app.llm.errors import LLMError
-from app.models.wiki import AiRebaseMaxRetriesError, ChangeKind
+from app.models.wiki import ChangeKind, CommitMaxRetriesError
 
 
 def handle(args: dict[str, Any]) -> Any:
@@ -47,13 +47,14 @@ def handle(args: dict[str, Any]) -> Any:
                 return stale
             base_body = wiki_git.read_file(path, ref=base_sha)
             try:
-                result = wiki_utils.commit_with_ai_rebase(
-                    path, commit_message.strip(),
+                result = wiki_utils.commit_and_fan_out(
+                    path=path, body=body, message=commit_message.strip(),
+                    change_kind=ChangeKind.EDIT,  # new files take the else branch below
                     base_body=base_body,
-                    new_body=body,
+                    ai_merge=True,
                     activity_ttl=activity_ttl,
-                )  # always ChangeKind.EDIT — new files take the else branch below
-            except AiRebaseMaxRetriesError as exc:
+                )
+            except CommitMaxRetriesError as exc:
                 return {
                     "error": "stale_base",
                     "message": "concurrent edits kept landing; max retries exceeded",
@@ -71,13 +72,16 @@ def handle(args: dict[str, Any]) -> Any:
                 "broken_links": wiki_utils.broken_links(path, result.new_body),
             }
         else:
-            sha = wiki_utils.commit_and_fan_out(
-                path, body, commit_message.strip(),
+            # New file: no base to merge against, so this always commits.
+            result = wiki_utils.commit_and_fan_out(
+                path=path, body=body, message=commit_message.strip(),
                 change_kind=ChangeKind.CREATE, activity_ttl=activity_ttl,
             )
+            if result is None:
+                raise RuntimeError("commit_and_fan_out returned None on a no-base commit")
             return {
                 "path": path,
-                "sha": sha,
+                "sha": result.sha,
                 "created": True,
                 "diff": wiki_utils.unified_diff("", body, path),
                 "broken_links": wiki_utils.broken_links(path, body),

@@ -50,10 +50,9 @@ from app.mcp_server import jobs as mcp_jobs
 from app.mcp_server import pubsub as mcp_pubsub
 from app.auth import UserMissingError, load_user, set_current_user
 from app.tasks.queues import documents_queue
-from app.wiki import agent_activity, git as wiki_git, notify as wiki_notify
-from app.models.wiki import AiRebaseMaxRetriesError, ChangeKind
+from app.wiki import agent_activity, git as wiki_git
+from app.models.wiki import ChangeKind, CommitMaxRetriesError
 
-_INGEST_AUTHOR = "Onyx Ingest <ingest@agent-wiki>"
 
 log = logging.getLogger(__name__)
 
@@ -198,17 +197,19 @@ def _run_inner(job_id: str, rel: str, instruction: str, base_sha: str | None) ->
         return
 
     try:
-        result = wiki_utils.commit_with_ai_rebase(
-            rel,
-            f"Doc update: {instruction[:_COMMIT_MESSAGE_MAX]}",
+        result = wiki_utils.commit_and_fan_out(
+            path=rel,
+            body=new_body,
+            message=f"Doc update: {instruction[:_COMMIT_MESSAGE_MAX]}",
+            change_kind=ChangeKind.EDIT,
             base_body=old_body,
-            new_body=new_body,
+            ai_merge=True,
         )
     except LLMError as exc:
         mcp_jobs.mark_failed(job_id, error=f"llm_error: {exc}")
         mcp_pubsub.publish_job_update(job_id, "failed")
         return
-    except AiRebaseMaxRetriesError as exc:
+    except CommitMaxRetriesError as exc:
         mcp_jobs.mark_failed(
             job_id,
             error="max_retries_exceeded",
@@ -408,8 +409,29 @@ def process_pushed_document(push: dict[str, Any]) -> None:
                 meta_lines.append(f"Source: {url}")
             if meta_lines:
                 message += "\n\n" + "\n".join(meta_lines)
-            sha = wiki_git.commit_file(c.hit.path, result, message, author=_INGEST_AUTHOR)
-            wiki_notify.after_doc_write(c.hit.path, sha, ChangeKind.EDIT, _INGEST_AUTHOR)
+            try:
+                commit_result = wiki_utils.commit_and_fan_out(
+                    path=c.hit.path,
+                    body=result,
+                    message=message,
+                    change_kind=ChangeKind.EDIT,
+                    base_body=c.body,
+                    ai_merge=True,
+                    skip_acl=True,
+                )
+            except CommitMaxRetriesError:
+                log.warning("process_pushed_document: max retries for %s, skipping", c.hit.path)
+                continue
+            except LLMError as exc:
+                # ai_merge fallback failed — skip this candidate, don't abort the batch.
+                log.warning("process_pushed_document: merge LLM error for %s: %s", c.hit.path, exc)
+                continue
+            if commit_result is None:
+                # Concurrent edit produced identical content — treat as no_change.
+                ingest_outcomes_total.labels(outcome="no_change", wiki_path=c.hit.path).inc()
+                ingest_bm25_score_by_outcome.labels(outcome="no_change").observe(c.hit.score)
+                continue
+            sha = commit_result.sha
             committed += 1
             ingest_outcomes_total.labels(outcome="committed", wiki_path=c.hit.path).inc()
             ingest_bm25_score_by_outcome.labels(outcome="committed").observe(c.hit.score)

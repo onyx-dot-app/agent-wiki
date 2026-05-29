@@ -161,12 +161,13 @@ def test_no_candidates_returns_early(mock_search):
     mock_search.assert_called_once()
 
 
-@patch("app.tasks.wiki_update.wiki_notify.after_doc_write")
+@patch("app.tasks.wiki_update.wiki_git.head_sha_for_path", return_value="headsha")
+@patch("app.wiki.utils.wiki_notify.after_doc_write")
 @patch("app.tasks.wiki_update.wiki_git.commit_file", return_value="sha123")
 @patch("app.tasks.wiki_update.wiki_git.read_file", return_value="old body")
 @patch("app.tasks.wiki_update.ingest_batch_reconciler.batch_reconcile")
 @patch("app.tasks.wiki_update.ingest_search.candidates")
-def test_new_body_commits(mock_search, mock_reconcile, mock_read, mock_commit, mock_notify, monkeypatch):
+def test_new_body_commits(mock_search, mock_reconcile, mock_read, mock_commit, mock_notify, mock_head, monkeypatch):
     monkeypatch.setattr("app.tasks.wiki_update.get_llm_settings", lambda: _settings_with_model())
     mock_search.return_value = [_hit("page.md", "Page", 5.0)]
     mock_reconcile.return_value = (["new body"], 1)
@@ -199,7 +200,7 @@ def test_irrelevant_does_not_commit(mock_search, mock_reconcile, mock_read, mock
     mock_commit.assert_not_called()
 
 
-@patch("app.tasks.wiki_update.wiki_notify.after_doc_write")
+@patch("app.wiki.utils.wiki_notify.after_doc_write")
 @patch("app.tasks.wiki_update.wiki_git.commit_file", return_value="sha")
 @patch("app.tasks.wiki_update.wiki_git.read_file", return_value="body")
 @patch("app.tasks.wiki_update.ingest_batch_reconciler.batch_reconcile")
@@ -214,7 +215,7 @@ def test_n_consecutive_irrelevant_stops_loop(mock_search, mock_reconcile, mock_r
     mock_commit.assert_not_called()
 
 
-@patch("app.tasks.wiki_update.wiki_notify.after_doc_write")
+@patch("app.wiki.utils.wiki_notify.after_doc_write")
 @patch("app.tasks.wiki_update.wiki_git.commit_file", return_value="sha")
 @patch("app.tasks.wiki_update.wiki_git.read_file", return_value="body")
 @patch("app.tasks.wiki_update.ingest_batch_reconciler.batch_reconcile")
@@ -229,12 +230,13 @@ def test_no_change_resets_irrelevant_counter(mock_search, mock_reconcile, mock_r
     mock_commit.assert_not_called()
 
 
-@patch("app.tasks.wiki_update.wiki_notify.after_doc_write")
+@patch("app.tasks.wiki_update.wiki_git.head_sha_for_path", return_value="headsha")
+@patch("app.wiki.utils.wiki_notify.after_doc_write")
 @patch("app.tasks.wiki_update.wiki_git.commit_file", return_value="sha")
 @patch("app.tasks.wiki_update.wiki_git.read_file", return_value="body")
 @patch("app.tasks.wiki_update.ingest_batch_reconciler.batch_reconcile")
 @patch("app.tasks.wiki_update.ingest_search.candidates")
-def test_commit_resets_irrelevant_counter(mock_search, mock_reconcile, mock_read, mock_commit, mock_notify, monkeypatch):
+def test_commit_resets_irrelevant_counter(mock_search, mock_reconcile, mock_read, mock_commit, mock_notify, mock_head, monkeypatch):
     monkeypatch.setattr("app.tasks.wiki_update.CONFIG", CONFIG.model_copy(update={"ingest_irrelevant_stop_n": 2}))
     monkeypatch.setattr("app.tasks.wiki_update.get_llm_settings", lambda: _settings_with_model())
     # IRRELEVANT, new body (resets counter), IRRELEVANT — should NOT stop early
