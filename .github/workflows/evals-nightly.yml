@@ -121,7 +121,7 @@ jobs:
         if: failure() && github.event_name == 'schedule'
         uses: onyx-dot-app/onyx/.github/actions/slack-notify@main
         with:
-          webhook-url: ${{ secrets.MONITOR_DEPLOYMENTS_WEBHOOK }}
+          webhook-url: ${{ secrets.ALERT_SLACK_WEBHOOK_URL }}
           title: "🚨 Nightly evals failed (agent-wiki)"
           ref-name: ${{ github.ref_name }}
           failed-jobs: "live"
