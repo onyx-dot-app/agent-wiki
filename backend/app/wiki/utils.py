@@ -215,10 +215,27 @@ def commit_and_fan_out(
             return None
         post_sha = wiki_git.head_sha_for_path(path)
         if post_sha == head_sha:
-            return _commit_one(
-                path, merged, message, change_kind, activity_ttl,
-                old_body=current, record_activity=record_activity,
-            )
+            try:
+                return _commit_one(
+                    path, merged, message, change_kind, activity_ttl,
+                    old_body=current, record_activity=record_activity,
+                    expected_head=head_sha,
+                )
+            except (wiki_git.GitNothingToCommitError, wiki_git.GitHeadMovedError):
+                # A concurrent writer committed in the window between our
+                # pre-commit SHA check and the locked commit. Re-read HEAD and
+                # re-merge rather than committing stale content.
+                if attempt >= max_retries:
+                    raise CommitMaxRetriesError(
+                        attempt, wiki_git.head_sha_for_path(path) or ""
+                    )
+                log.info(
+                    "commit_and_fan_out: concurrent commit under %s, retrying (%d/%d)",
+                    path, attempt + 1, max_retries,
+                )
+                _base = current
+                _new = merged
+                continue
         if attempt >= max_retries:
             raise CommitMaxRetriesError(attempt, post_sha or "")
         log.info(
@@ -239,6 +256,7 @@ def _commit_one(
     *,
     old_body: str,
     record_activity: bool = True,
+    expected_head: str | None = None,
 ) -> CommitResult:
     """Record activity, commit ``body``, and run the reindex + trigger fan-out.
 
@@ -282,7 +300,7 @@ def _commit_one(
         )
 
     author = author_string()
-    sha = wiki_git.commit_file(path, body, message, author=author)
+    sha = wiki_git.commit_file(path, body, message, author=author, expected_head=expected_head)
     wiki_notify.after_doc_write(
         path,
         sha,

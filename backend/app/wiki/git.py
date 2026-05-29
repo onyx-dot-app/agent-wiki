@@ -7,12 +7,15 @@ history is always consistent with the working tree.
 
 from __future__ import annotations
 
+import fcntl
 import logging
 import os
 import re
 import subprocess
 import tempfile
 import time
+from contextlib import contextmanager
+from collections.abc import Generator
 from pathlib import Path
 from urllib.parse import quote, unquote
 
@@ -86,39 +89,88 @@ def ensure_wiki_repo() -> None:
         log.info("seeded wiki repo with initial commit")
 
 
-def commit_file(rel_path: str, body: str, message: str, author: str | None = None) -> str:
+@contextmanager
+def commit_lock() -> Generator[None]:
+    """Cross-process exclusive lock serializing the write→add→commit section.
+
+    Every wiki writer (web process, each queue worker, agent tools) operates on
+    the same single worktree, so they share one ``.git/index`` and one ref.
+    Without serialization a concurrent ``git add`` can overwrite another
+    writer's staged blob, so ``git commit`` may commit the wrong content. This
+    ``flock`` lives on the shared wiki volume, so it coordinates across every
+    process and container mounting it.
+
+    Single-host (docker-compose) semantics only: ``flock`` over a network
+    filesystem (NFS) is not reliable, so a multi-host deploy would need a
+    Postgres advisory lock or a DB-primary store instead.
+    """
+    lock_path = Path(CONFIG.wiki_dir) / ".git" / "wiki-commit.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    f = open(lock_path, "a")
+    try:
+        fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+        yield
+    finally:
+        f.close()  # closing the descriptor releases the flock
+
+
+def commit_file(
+    rel_path: str,
+    body: str,
+    message: str,
+    author: str | None = None,
+    *,
+    expected_head: str | None = None,
+) -> str:
     """Write a file at ``rel_path`` (relative to the wiki root), commit, return SHA.
 
+    The write→add→commit section runs under :func:`commit_lock` so concurrent
+    writers can't interleave on the shared index/working tree.
+
+    ``expected_head`` is a compare-and-swap guard for read-modify-write callers:
+    when set, the committed body was merged against that SHA, so under the lock
+    we re-check HEAD and raise ``GitHeadMovedError`` if a concurrent writer
+    advanced it — committing the stale body would clobber the winner. The merge
+    loop catches that and re-merges against the new HEAD.
+
     Retries up to ``_COMMIT_RETRY_MAX`` times on a transient git ref-lock race
-    (``cannot lock ref``) so callers never need to handle that error themselves.
-    Raises ``GitCommitLockError`` only when the retry budget is exhausted.
+    (``cannot lock ref``); raises ``GitCommitLockError`` when that budget is
+    exhausted, or ``GitNothingToCommitError`` if the index ends up empty. Both
+    are defensive — the lock makes them unreachable from our own writers.
     """
     full = Path(CONFIG.wiki_dir) / rel_path
     full.parent.mkdir(parents=True, exist_ok=True)
-    full.write_text(body)
-    _run(["add", rel_path])
-    if _run(["diff", "--cached", "--quiet"], check=False).returncode == 0:
+    with commit_lock():
+        if expected_head is not None:
+            current_head = head_sha_for_path(rel_path)
+            if current_head != expected_head:
+                raise GitHeadMovedError(rel_path, current_head or "")
+        full.write_text(body)
+        _run(["add", rel_path])
+        if _run(["diff", "--cached", "--quiet"], check=False).returncode == 0:
+            sha = _run(["rev-parse", "HEAD"]).stdout.strip()
+            log.debug("commit_file no-op (no diff) %s sha=%s", rel_path, sha[:8])
+            return sha
+        env_args = ["--author", author] if author else []
+        for attempt in range(_COMMIT_RETRY_MAX + 1):
+            try:
+                _run(["commit", "-m", message, *env_args])
+                break
+            except subprocess.CalledProcessError as e:
+                out = ((e.stderr or "") + (e.stdout or "")).lower()
+                if "cannot lock ref" in out or ("unable to create" in out and ".lock" in out):
+                    if attempt >= _COMMIT_RETRY_MAX:
+                        raise GitCommitLockError(rel_path) from e
+                    log.info(
+                        "commit_file: lock race for %s, retrying (%d/%d)",
+                        rel_path, attempt + 1, _COMMIT_RETRY_MAX,
+                    )
+                    time.sleep(0.05 * (attempt + 1))
+                    continue
+                if "nothing to commit" in out or "nothing added to commit" in out:
+                    raise GitNothingToCommitError(rel_path) from e
+                raise
         sha = _run(["rev-parse", "HEAD"]).stdout.strip()
-        log.debug("commit_file no-op (no diff) %s sha=%s", rel_path, sha[:8])
-        return sha
-    env_args = ["--author", author] if author else []
-    for attempt in range(_COMMIT_RETRY_MAX + 1):
-        try:
-            _run(["commit", "-m", message, *env_args])
-            break
-        except subprocess.CalledProcessError as e:
-            stderr = (e.stderr or "").lower()
-            if "cannot lock ref" in stderr or ("unable to create" in stderr and ".lock" in stderr):
-                if attempt >= _COMMIT_RETRY_MAX:
-                    raise GitCommitLockError(rel_path) from e
-                log.info(
-                    "commit_file: lock race for %s, retrying (%d/%d)",
-                    rel_path, attempt + 1, _COMMIT_RETRY_MAX,
-                )
-                time.sleep(0.05 * (attempt + 1))
-                continue
-            raise
-    sha = _run(["rev-parse", "HEAD"]).stdout.strip()
     log.debug("commit_file %s sha=%s author=%s", rel_path, sha[:8], author or "default")
     return sha
 
@@ -141,12 +193,13 @@ def move_and_commit(
     """
     full_new = Path(CONFIG.wiki_dir) / new_rel_path
     full_new.parent.mkdir(parents=True, exist_ok=True)
-    full_new.write_text(body)
-    _run(["add", new_rel_path])
-    _run(["rm", "--", old_rel_path])
     env_args = ["--author", author] if author else []
-    _run(["commit", "-m", message, *env_args])
-    sha = _run(["rev-parse", "HEAD"]).stdout.strip()
+    with commit_lock():
+        full_new.write_text(body)
+        _run(["add", new_rel_path])
+        _run(["rm", "--", old_rel_path])
+        _run(["commit", "-m", message, *env_args])
+        sha = _run(["rev-parse", "HEAD"]).stdout.strip()
     log.debug("move_and_commit %s -> %s sha=%s", old_rel_path, new_rel_path, sha[:8])
     return sha
 
@@ -174,10 +227,11 @@ def move_path(
             moves.append((old_p, f"{new_rel_path}/{rest}"))
     full_new = Path(CONFIG.wiki_dir) / new_rel_path
     full_new.parent.mkdir(parents=True, exist_ok=True)
-    _run(["mv", old_rel_path, new_rel_path])
     env_args = ["--author", author] if author else []
-    _run(["commit", "-m", message, *env_args])
-    sha = _run(["rev-parse", "HEAD"]).stdout.strip()
+    with commit_lock():
+        _run(["mv", old_rel_path, new_rel_path])
+        _run(["commit", "-m", message, *env_args])
+        sha = _run(["rev-parse", "HEAD"]).stdout.strip()
     log.debug(
         "move_path %s -> %s sha=%s files=%d",
         old_rel_path,
@@ -195,10 +249,11 @@ def delete_path(rel_path: str, message: str, author: str | None = None) -> str:
     local modifications) doesn't block the delete — the user asked to remove
     the path, and the prior contents remain reachable in history.
     """
-    _run(["rm", "-rf", "--", rel_path])
     env_args = ["--author", author] if author else []
-    _run(["commit", "-m", message, *env_args])
-    sha = _run(["rev-parse", "HEAD"]).stdout.strip()
+    with commit_lock():
+        _run(["rm", "-rf", "--", rel_path])
+        _run(["commit", "-m", message, *env_args])
+        sha = _run(["rev-parse", "HEAD"]).stdout.strip()
     log.debug("delete_path %s sha=%s author=%s", rel_path, sha[:8], author or "default")
     return sha
 
@@ -444,6 +499,32 @@ class GitCommitLockError(Exception):
     error. ``commit_file`` retries it transparently so callers never see it
     unless the retry budget is exhausted.
     """
+
+
+class GitNothingToCommitError(Exception):
+    """Raised when ``git commit`` finds nothing staged.
+
+    The shared index/working tree means a concurrent writer's commit can
+    interleave between our ``git add`` and our ``git commit`` and reset the
+    index out from under us, so git reports "nothing to commit". The merge
+    loop treats this as a retry trigger (re-read HEAD, re-merge) rather than
+    leaking a raw ``CalledProcessError``.
+    """
+
+
+class GitHeadMovedError(Exception):
+    """Raised by ``commit_file`` when HEAD no longer matches ``expected_head``.
+
+    Compare-and-swap guard: a read-modify-write caller merged its body against
+    ``expected_head``; if a concurrent writer advanced HEAD before we took the
+    commit lock, committing the stale body would clobber the winner. The merge
+    loop catches this and re-merges against the new HEAD.
+    """
+
+    def __init__(self, rel_path: str, current_sha: str) -> None:
+        super().__init__(f"HEAD moved for {rel_path}: now {current_sha[:8] or '<none>'}")
+        self.rel_path = rel_path
+        self.current_sha = current_sha
 
 
 class GitMergeConflictError(Exception):
