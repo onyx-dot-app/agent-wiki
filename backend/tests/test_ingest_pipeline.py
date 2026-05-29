@@ -161,7 +161,7 @@ def test_no_candidates_returns_early(mock_search):
     mock_search.assert_called_once()
 
 
-@patch("app.tasks.wiki_update.wiki_notify.after_doc_write")
+@patch("app.wiki.utils.wiki_notify.after_doc_write")
 @patch("app.tasks.wiki_update.wiki_git.commit_file", return_value="sha123")
 @patch("app.tasks.wiki_update.wiki_git.read_file", return_value="old body")
 @patch("app.tasks.wiki_update.ingest_batch_reconciler.batch_reconcile")
@@ -199,7 +199,7 @@ def test_irrelevant_does_not_commit(mock_search, mock_reconcile, mock_read, mock
     mock_commit.assert_not_called()
 
 
-@patch("app.tasks.wiki_update.wiki_notify.after_doc_write")
+@patch("app.wiki.utils.wiki_notify.after_doc_write")
 @patch("app.tasks.wiki_update.wiki_git.commit_file", return_value="sha")
 @patch("app.tasks.wiki_update.wiki_git.read_file", return_value="body")
 @patch("app.tasks.wiki_update.ingest_batch_reconciler.batch_reconcile")
@@ -214,7 +214,7 @@ def test_n_consecutive_irrelevant_stops_loop(mock_search, mock_reconcile, mock_r
     mock_commit.assert_not_called()
 
 
-@patch("app.tasks.wiki_update.wiki_notify.after_doc_write")
+@patch("app.wiki.utils.wiki_notify.after_doc_write")
 @patch("app.tasks.wiki_update.wiki_git.commit_file", return_value="sha")
 @patch("app.tasks.wiki_update.wiki_git.read_file", return_value="body")
 @patch("app.tasks.wiki_update.ingest_batch_reconciler.batch_reconcile")
@@ -229,7 +229,7 @@ def test_no_change_resets_irrelevant_counter(mock_search, mock_reconcile, mock_r
     mock_commit.assert_not_called()
 
 
-@patch("app.tasks.wiki_update.wiki_notify.after_doc_write")
+@patch("app.wiki.utils.wiki_notify.after_doc_write")
 @patch("app.tasks.wiki_update.wiki_git.commit_file", return_value="sha")
 @patch("app.tasks.wiki_update.wiki_git.read_file", return_value="body")
 @patch("app.tasks.wiki_update.ingest_batch_reconciler.batch_reconcile")
