@@ -104,6 +104,9 @@ jobs:
             --out runs/nightly_merge_conflict.jsonl
 
       - name: Enforce per-surface regression floors
+        # always() so a failed eval step doesn't skip the gate — it scores
+        # whatever ran and fails loudly on any surface whose file is absent.
+        if: always()
         run: uv run python -m evals.ci_assert_nightly runs/
 
       - name: Upload run artifacts
