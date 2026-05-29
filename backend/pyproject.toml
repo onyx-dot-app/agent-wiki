@@ -37,8 +37,6 @@ dev = [
     "basedpyright>=1.18",
     "httpx>=0.27",            # fastapi.testclient.TestClient transport
     "markdown-it-py>=3.0",    # eval scorer: structural markdown validity
-    "numpy>=1.26",             # ingest score analysis scripts
-    "matplotlib>=3.8",         # ingest score analysis scripts
 ]
 
 [tool.setuptools.packages.find]

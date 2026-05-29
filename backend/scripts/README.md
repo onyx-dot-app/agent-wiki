@@ -66,7 +66,11 @@ The `id` column is a stable integer primary key — use it to refer to specific 
 ## Ingest BM25 filter analysis
 
 Two scripts help tune and validate the `INGEST_BM25_MIN_SCORE` threshold.
-Both require OpenSearch running locally and `uv sync --extra dev`.
+Both require OpenSearch running locally. Install their extra dependencies once:
+
+```bash
+pip install numpy matplotlib
+```
 
 ### ingest_score_analysis.py
 
