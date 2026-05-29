@@ -1,0 +1,59 @@
+id: ext-26-version-bump-preserves-runbook
+prompt: |
+  We upgraded the auth service from v2.4.1 to v2.5.0. Update the runbook
+  with the new version.
+wiki_state:
+  - path: ops/runbooks/auth.md
+    summary: Auth service runbook.
+    body: |
+      # Auth service runbook
+
+      Current version: v2.4.1.
+
+      ## Symptom: users see 500s on /login
+      1. Page the auth on-call (`auth-oncall` in PagerDuty).
+      2. Check the `auth-api` dashboard for elevated 5xx.
+      3. If error rate is over 5%, fail over to `auth-api-standby`.
+      4. Verify token signing: tokens are RS256, key rotation every 30 days.
+
+      ## Symptom: token verification fails
+      1. Confirm the JWKS endpoint at `/.well-known/jwks.json` is reachable.
+      2. Check the `key-rotator` cron is healthy.
+      3. If a recent rotation is suspect, fall back to the previous key by
+         setting `AUTH_PREVIOUS_KID` for 1 hour, then investigate.
+
+      ## Dependencies
+      - Postgres `auth` schema
+      - Redis `auth:` keyspace
+      - PagerDuty service: `auth-prod`
+expected_updates:
+  - path: ops/runbooks/auth.md
+    facts_present:
+      - id: new-version
+        text: the runbook lists the auth service version as v2.5.0
+    facts_preserved:
+      - id: oncall
+        text: paging the auth on-call via the auth-oncall PagerDuty service is still documented
+      - id: dashboard
+        text: the auth-api dashboard is still referenced for elevated 5xx checks
+      - id: failover
+        text: failover to auth-api-standby above 5% error rate is still documented
+      - id: rs256
+        text: tokens being RS256 with 30-day key rotation is still documented
+      - id: jwks
+        text: the /.well-known/jwks.json endpoint is still referenced
+      - id: key-rotator
+        text: the key-rotator cron is still listed
+      - id: previous-key-fallback
+        text: setting AUTH_PREVIOUS_KID for 1 hour as a fallback is still documented
+      - id: deps-postgres
+        text: the Postgres auth schema is still listed as a dependency
+      - id: deps-redis
+        text: "the Redis auth: keyspace is still listed as a dependency"
+      - id: deps-pagerduty
+        text: the auth-prod PagerDuty service is still listed
+expected_not_updated: []
+notes: |
+  Loss-bait — a one-line version bump tempts a full rewrite that drops
+  the entire runbook. The new body should change exactly one line.
+tags: [loss-bait, version-bump, fact-preservation]

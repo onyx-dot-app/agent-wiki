@@ -1,0 +1,49 @@
+id: ext-27-add-link-preserves-fallback
+prompt: |
+  Link the search service overview to the new OpenSearch index migration
+  doc at services/search/opensearch-migration.md.
+wiki_state:
+  - path: services/search/overview.md
+    summary: Search service overview.
+    body: |
+      # Search
+
+      OpenSearch-backed BM25 over the wiki corpus. Reindex runs on every
+      doc commit via the `lightweight_maintenance` task queue.
+
+      Fallback: if OpenSearch is unavailable, the API falls back to
+      Postgres full-text search with degraded ranking. The fallback path
+      is gated by the `SEARCH_FALLBACK_ENABLED` flag (default on).
+
+      Snapshot cadence: nightly at 02:00 UTC, retained 7 days. Restore
+      runbook lives at `ops/runbooks/opensearch-restore.md`.
+  - path: services/search/opensearch-migration.md
+    summary: OpenSearch migration notes.
+    body: |
+      # OpenSearch migration
+
+      Notes on migrating from Vespa to OpenSearch.
+expected_updates:
+  - path: services/search/overview.md
+    facts_present:
+      - id: new-link
+        text: the overview links to the opensearch-migration.md doc (absolute or relative path)
+    facts_preserved:
+      - id: bm25
+        text: the BM25 backing is still documented
+      - id: reindex-trigger
+        text: reindexing on every doc commit via the lightweight_maintenance queue is still documented
+      - id: pg-fallback
+        text: the Postgres full-text fallback is still documented
+      - id: fallback-flag
+        text: the SEARCH_FALLBACK_ENABLED flag with default on is still documented
+      - id: snapshot
+        text: the nightly 02:00 UTC snapshot cadence with 7-day retention is still documented
+      - id: restore-runbook
+        text: the opensearch-restore.md runbook link is still preserved
+expected_not_updated:
+  - services/search/opensearch-migration.md
+notes: |
+  Loss-bait — adding one link tempts a rewrite that loses the fallback
+  flag default, snapshot retention, and restore-runbook link.
+tags: [loss-bait, add-link, fact-preservation]

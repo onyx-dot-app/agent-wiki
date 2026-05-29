@@ -1,0 +1,47 @@
+id: ext-25-rename-preserves-slos
+prompt: |
+  The Checkout service is being renamed to OrderFlow. Update the service
+  page so it uses the new name.
+wiki_state:
+  - path: services/checkout/overview.md
+    summary: Checkout service overview.
+    body: |
+      # Checkout service
+
+      Owns the order placement flow. Talks to: Inventory, Payments,
+      Fraud-Detection.
+
+      On Fraud-Detection timeout (>2s), falls back to soft-allow with
+      manual review.
+
+      ## SLOs
+      - p95 latency under 350ms
+      - availability 99.95% monthly
+
+      ## Owners
+      - team: platform
+      - oncall rotation: `checkout-oncall`
+expected_updates:
+  - path: services/checkout/overview.md
+    facts_present:
+      - id: renamed
+        text: the service is referred to as OrderFlow
+    facts_preserved:
+      - id: downstream-deps
+        text: the page lists Inventory, Payments, and Fraud-Detection as downstream services
+      - id: fraud-fallback
+        text: the soft-allow with manual review on Fraud-Detection timeout above 2s is still documented
+      - id: slo-latency
+        text: the p95 latency under 350ms SLO is still documented
+      - id: slo-availability
+        text: the 99.95% monthly availability SLO is still documented
+      - id: owner-team
+        text: the platform team is still listed as the owner
+      - id: oncall-rotation
+        text: a named oncall rotation is still listed (either checkout-oncall or a renamed equivalent like orderflow-oncall)
+expected_not_updated: []
+notes: |
+  Loss-bait — a rename tempts a from-scratch rewrite that drops every
+  SLO, downstream dep, and owner. Tests that the agent does a surgical
+  name swap instead.
+tags: [loss-bait, rename, fact-preservation]
