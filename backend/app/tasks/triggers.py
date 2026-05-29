@@ -33,7 +33,6 @@ from __future__ import annotations
 
 import json
 import logging
-import subprocess
 
 from datetime import datetime, timezone
 
@@ -287,7 +286,7 @@ def _read_at(ref: str, rel_path: str) -> str:
     """Read ``rel_path`` at git ``ref``. Empty string if missing or parent-less."""
     try:
         return wiki_git.read_file(rel_path, ref=ref)
-    except subprocess.CalledProcessError:
+    except wiki_git.UnknownSha:
         log.debug("read_at miss ref=%s path=%s", ref, rel_path)
         return ""
 

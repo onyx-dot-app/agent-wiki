@@ -12,10 +12,6 @@
         "type": "string",
         "description": "Natural-language description of the desired change. Specific is better — name the section, the value to update, what 'done' means."
       },
-      "base_sha": {
-        "type": "string",
-        "description": "Optional SHA the instruction was authored against. If set and HEAD has moved, returns `stale_base` so you can re-read and re-issue."
-      },
       "idempotency_key": {
         "type": "string",
         "description": "Optional. Over MCP this collapses retries of the same instruction onto the same `job_id` (the second call returns the existing job, `deduplicated=true`). When omitted, the server defaults to `sha256(user_id|path|instruction)` so an agent that doesn't mint its own key still gets dedupe semantics. Ignored on the in-process chat surface (which is sync)."

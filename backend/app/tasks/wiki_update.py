@@ -90,16 +90,16 @@ def agent_update_document_nl(job_id: str) -> None:
       2. Reconstitute ``g.user`` from ``mcp_jobs.user_id`` so every
          downstream helper sees the right principal — same seam the
          POST handler uses.
-      3. ``base_sha`` recheck — HEAD might have moved between enqueue
-         and run. Fail with ``stale_base`` if so.
-      4. Server-side debounce — if a same-(user, path) job committed
+      3. Server-side debounce — if a same-(user, path) job committed
          within ``MCP_NL_DEBOUNCE_SECONDS``, succeed with
          ``committed=false reason=debounced``.
-      5. Run the document-updater agent.
-      6. ``NO_CHANGE`` → succeed with ``committed=false``.
+      4. Run the document-updater agent.
+      5. ``NO_CHANGE`` → succeed with ``committed=false``.
          New body → ``commit_and_fan_out`` → succeed with the sha.
+         Concurrent drift between enqueue and run is reconciled by the
+         3-way merge there, not rejected.
          Exception → fail with the error code.
-      7. Publish the terminal status to ``job://<id>`` subscribers.
+      6. Publish the terminal status to ``job://<id>`` subscribers.
     """
     job = mcp_jobs.get(job_id)
     if job is None:
@@ -109,7 +109,6 @@ def agent_update_document_nl(job_id: str) -> None:
     payload = job["payload"]
     rel = payload.get("path")
     instruction = payload.get("instruction") or ""
-    base_sha = payload.get("base_sha")
     agent_name = payload.get("agent_name")
 
     try:
@@ -118,7 +117,7 @@ def agent_update_document_nl(job_id: str) -> None:
         try:
             with set_current_user(user):
                 mcp_jobs.mark_running(job_id)
-                _run_inner(job_id, rel, instruction, base_sha)
+                _run_inner(job_id, rel, instruction)
         finally:
             agent_activity.agent_name_var.reset(agent_token)
     except UserMissingError as exc:
@@ -131,7 +130,7 @@ def agent_update_document_nl(job_id: str) -> None:
         mcp_pubsub.publish_job_update(job_id, "failed")
 
 
-def _run_inner(job_id: str, rel: str, instruction: str, base_sha: str | None) -> None:
+def _run_inner(job_id: str, rel: str, instruction: str) -> None:
     """Inside the worker's user context. Splits out so the outer
     function can wrap exceptions uniformly."""
     if not rel:
@@ -144,19 +143,10 @@ def _run_inner(job_id: str, rel: str, instruction: str, base_sha: str | None) ->
         mcp_pubsub.publish_job_update(job_id, "failed")
         return
 
+    # No stale_base recheck: the sub-agent regenerates from current content and
+    # any concurrent commit between enqueue and run is reconciled by the 3-way
+    # merge in commit_and_fan_out below (base_body + ai_merge).
     head_sha = wiki_git.head_sha_for_path(rel)
-    if base_sha and base_sha != head_sha:
-        log.info(
-            "wiki_update: stale_base %s (base=%s head=%s)",
-            rel, base_sha[:8], (head_sha or "")[:8],
-        )
-        mcp_jobs.mark_failed(
-            job_id,
-            error="stale_base",
-            result={"base_sha": base_sha, "current_sha": head_sha or ""},
-        )
-        mcp_pubsub.publish_job_update(job_id, "failed")
-        return
 
     debounced = mcp_jobs.find_recent_succeeded_for_user_path(
         user_id=_current_user_id(), path=rel, within_seconds=_DEBOUNCE_SECONDS

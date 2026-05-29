@@ -259,8 +259,16 @@ def delete_path(rel_path: str, message: str, author: str | None = None) -> str:
 
 
 def read_file(rel_path: str, ref: str = "HEAD") -> str:
-    """Read file contents at a given git ref. Default: working tree's last commit."""
-    return _run(["show", f"{ref}:{rel_path}"]).stdout
+    """Read file contents at a given git ref. Default: working tree's last commit.
+
+    Raises ``UnknownSha`` when ``ref`` (or the path at that ref) can't be
+    resolved, so callers get a typed error instead of a leaked
+    ``subprocess.CalledProcessError``.
+    """
+    try:
+        return _run(["show", f"{ref}:{rel_path}"]).stdout
+    except subprocess.CalledProcessError as e:
+        raise UnknownSha(ref) from e
 
 
 def path_at_ref(current_rel_path: str, ref: str) -> str | None:

@@ -5,7 +5,6 @@ accepts an optional ``sha`` for historical reads.
 """
 from __future__ import annotations
 
-import subprocess
 from typing import Any
 
 from app.wiki import utils as wiki_utils
@@ -38,7 +37,7 @@ def handle(args: dict[str, Any]) -> Any:
     ref = sha or "HEAD"
     try:
         body = wiki_git.read_file(path, ref=ref)
-    except subprocess.CalledProcessError:
+    except wiki_git.UnknownSha:
         return {
             "error": (
                 f"sha_not_found: {path} not present at {ref}"

@@ -112,7 +112,7 @@ def get_document_by_path(
         historical = wiki_git.path_at_ref(rel, ref) or rel
         try:
             body = wiki_git.read_file(historical, ref=ref)
-        except subprocess.CalledProcessError as exc:
+        except wiki_git.UnknownSha as exc:
             raise HTTPException(status_code=404, detail="not found at ref") from exc
         return GetDocumentResponse(path=rel, body=body, head_sha=head_sha, ref=ref)
     abs_path = filesystem.absolute(rel)
@@ -659,7 +659,7 @@ def merge_draft(
     require_can("write", rel, user)
     try:
         base_body = wiki_git.read_file(rel, ref=req.base_sha)
-    except subprocess.CalledProcessError as exc:
+    except wiki_git.UnknownSha as exc:
         raise HTTPException(status_code=404, detail="base revision not found") from exc
     # Fetch the most recent commit message so the LLM can reference it when
     # annotating conflicting facts (e.g. "12k from fix: update connection limit").

@@ -42,10 +42,19 @@ def handle(args: dict[str, Any]) -> Any:
                         "pass its sha as base_sha."
                     ),
                 }
-            stale = wiki_utils.assert_base_sha(path, base_sha)
-            if stale is not None:
-                return stale
-            base_body = wiki_git.read_file(path, ref=base_sha)
+            # Drift is reconciled by the 3-way merge inside commit_and_fan_out
+            # (base_sha is the merge base) rather than bailing here. base_sha
+            # must still resolve to a real commit to serve as that base.
+            try:
+                base_body = wiki_git.read_file(path, ref=base_sha)
+            except wiki_git.UnknownSha:
+                return {
+                    "error": "base_sha_not_found",
+                    "message": (
+                        "base_sha does not resolve to a known commit; "
+                        "re-read the doc and pass its sha as base_sha."
+                    ),
+                }
             try:
                 result = wiki_utils.commit_and_fan_out(
                     path=path, body=body, message=commit_message.strip(),
