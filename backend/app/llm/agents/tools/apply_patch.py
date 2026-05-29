@@ -53,6 +53,7 @@ def handle(args: dict[str, Any]) -> Any:
         sha = wiki_utils.commit_and_fan_out(
             path, new_body, commit_message.strip(),
             change_kind=ChangeKind.EDIT, activity_ttl=activity_ttl,
+            lock_retry=True,
         )
 
         return {

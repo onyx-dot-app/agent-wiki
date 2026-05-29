@@ -216,10 +216,18 @@ def commit_and_fan_out(
     change_kind: ChangeKind,
     activity_ttl: timedelta | None = None,
     skip_acl: bool = False,
+    lock_retry: bool = False,
 ) -> str:
     """Commit ``body`` to ``path``, queue reindex, fan out to triggers.
 
     Returns the commit SHA.
+
+    ``lock_retry=True`` retries ``GitCommitLockError`` blindly (up to
+    ``_COMMIT_LOCK_RETRIES`` times). Use only for callers that don't
+    re-merge on conflict — i.e. ``apply_patch`` and ``write_doc`` create.
+    Leave ``False`` (default) when the caller (e.g. ``commit_with_ai_rebase``)
+    catches ``GitCommitLockError`` itself to re-read HEAD and re-merge;
+    the inner retry would otherwise fire first and clobber the winner's commit.
 
     ``activity_ttl`` overrides the default 24h TTL on the resulting
     Active-agents row — write tools surface this through their
@@ -284,18 +292,21 @@ def commit_and_fan_out(
         )
 
     author = author_string()
-    sha = ""
-    for _attempt in range(_COMMIT_LOCK_RETRIES + 1):
-        try:
-            sha = wiki_git.commit_file(path, body, message, author=author)
-            break
-        except wiki_git.GitCommitLockError:
-            if _attempt >= _COMMIT_LOCK_RETRIES:
-                raise
-            log.info(
-                "commit_and_fan_out: lock race for %s, retrying (%d/%d)",
-                path, _attempt + 1, _COMMIT_LOCK_RETRIES,
-            )
+    if lock_retry:
+        sha = ""
+        for _attempt in range(_COMMIT_LOCK_RETRIES + 1):
+            try:
+                sha = wiki_git.commit_file(path, body, message, author=author)
+                break
+            except wiki_git.GitCommitLockError:
+                if _attempt >= _COMMIT_LOCK_RETRIES:
+                    raise
+                log.info(
+                    "commit_and_fan_out: lock race for %s, retrying (%d/%d)",
+                    path, _attempt + 1, _COMMIT_LOCK_RETRIES,
+                )
+    else:
+        sha = wiki_git.commit_file(path, body, message, author=author)
     wiki_notify.after_doc_write(
         path,
         sha,
