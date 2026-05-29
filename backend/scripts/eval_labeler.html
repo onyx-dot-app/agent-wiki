@@ -901,6 +901,9 @@ async function judgeSample(sample) {
     `- Use no_change_covered or no_change_extra when the source is topically related but adds nothing useful. ` +
     `Reserve irrelevant for sources with no connection to the page's topic whatsoever.\n` +
     `- A source about a different product that uses the same technology is not relevant — the page must cover the same specific system.\n` +
+    `- A HubSpot source that contains only contact info (name, email, job title, domain) or deal metadata (stage, amount, close date) ` +
+    `with no call notes, transcript, or stated next steps is irrelevant when pushed against a task-tracking page — not no_change_covered. ` +
+    `Only evaluate it as committed or no_change if the source includes a call summary or explicit action items.\n` +
     `- A conversational source (Slack, chat) that surfaces a potential issue or cc's team members tracked on the page ` +
     `implies a follow-up action and can qualify as committed_moderate.\n` +
     `- A call or meeting summary where a person tracked on the page appears in the attendee list with concrete next steps ` +
@@ -912,7 +915,10 @@ async function judgeSample(sample) {
     `- If the source contains a Stage or Status field set to a terminal value (closedlost, closed, expired, cancelled, ` +
     `resolved, churned), the work is over — do not commit action items from it even if the document also contains call notes with next steps.\n` +
     `- A short or minimal section is not a reason to refuse a new concrete entry. Scope concerns apply when a section ` +
-    `already has many similar items — not when it has room for a genuinely new one.\n\n` +
+    `already has many similar items — not when it has room for a genuinely new one.\n` +
+    `- Match the existing page's level of detail. If the page covers a topic in a single line or brief entry, the source ` +
+    `must add something at that same grain. Do not use committed when the update would expand a one-line entry into a ` +
+    `paragraph — that is no_change_extra.\n\n` +
     `When in doubt between committing and no_change, prefer no_change_extra.\n\n` +
     `Respond with JSON only: {"label":"<one of the labels>","reasoning":"<1-2 sentences>"}`,
   ].join("\n\n");
