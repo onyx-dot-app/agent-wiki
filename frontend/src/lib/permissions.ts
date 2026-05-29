@@ -29,6 +29,11 @@ export interface Group {
   description: string | null;
   created_by_user_id: string | null;
   created_at: string;
+  // Aggregate counts for the groups list UI (0 when not provided, e.g.
+  // the group-detail and create responses don't compute them).
+  member_count: number;
+  page_count: number;
+  folder_count: number;
 }
 
 export interface GroupMember {
@@ -47,11 +52,18 @@ export interface AclEntry {
   permission: Permission;
   granted_by_user_id: string | null;
   created_at: string;
+  // Display enrichment resolved server-side (null for `everyone` or a
+  // principal that no longer exists).
+  principal_email?: string | null;
+  principal_name?: string | null;
+  group_name?: string | null;
 }
 
 export interface PageAcl {
   path: string;
   owner_user_id: string | null;
+  owner_email?: string | null;
+  owner_name?: string | null;
   entries: AclEntry[];
 }
 

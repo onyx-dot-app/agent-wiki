@@ -14,6 +14,9 @@ import { diffLines } from "diff";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import useSWR from "swr";
+
+import { SvgShare } from "@onyx-ai/opal/icons";
+
 import { Button } from "@/components/common/Button";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { PageHeader } from "@/components/common/PageHeader";
@@ -153,6 +156,7 @@ function Explorer({ dir }: { dir: string }) {
   const [renaming, setRenaming] = useState<string | null>(null);
   const [dragSource, setDragSource] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
+  const [sharePath, setSharePath] = useState<string | null>(null);
 
   const { subdirs, files } = useMemo(() => {
     const prefix = dir ? dir + "/" : "";
@@ -452,6 +456,7 @@ function Explorer({ dir }: { dir: string }) {
                 isFile={isFile}
                 busy={busyPath === childPath}
                 onDelete={() => onDelete(childPath)}
+                onShare={() => setSharePath(childPath)}
                 renaming={renaming === childPath}
                 onStartRename={() => setRenaming(childPath)}
                 onCancelRename={() => setRenaming(null)}
@@ -493,6 +498,13 @@ function Explorer({ dir }: { dir: string }) {
           });
         })()}
       </ul>
+      {sharePath && (
+        <ShareDialog
+          path={sharePath}
+          open
+          onClose={() => setSharePath(null)}
+        />
+      )}
     </main>
   );
 }
@@ -1060,6 +1072,7 @@ function Row({
   isFile,
   busy,
   onDelete,
+  onShare,
   renaming,
   onStartRename,
   onCancelRename,
@@ -1079,6 +1092,7 @@ function Row({
   isFile: boolean;
   busy: boolean;
   onDelete: () => void;
+  onShare?: () => void;
   renaming: boolean;
   onStartRename: () => void;
   onCancelRename: () => void;
@@ -1250,6 +1264,25 @@ function Row({
           >
             {updatedAt ? relativeTime(updatedAt, "short") : "—"}
           </span>
+          {onShare && (
+            <button
+              onClick={onShare}
+              disabled={busy}
+              title="Share"
+              aria-label={`Share ${label}`}
+              style={{
+                background: "transparent",
+                border: "none",
+                color: hover ? color.text.secondary : "transparent",
+                cursor: busy ? "not-allowed" : "pointer",
+                padding: 6,
+                display: "flex",
+                alignItems: "center",
+              }}
+            >
+              <SvgShare size={16} />
+            </button>
+          )}
           <button
             onClick={onStartRename}
             disabled={busy}

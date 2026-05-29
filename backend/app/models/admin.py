@@ -1,4 +1,5 @@
 """HTTP-shape models for the admin endpoints (request + response)."""
+
 from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict
@@ -65,6 +66,8 @@ class AdminUserView(BaseModel):
     name: str | None
     is_admin: bool
     created_at: str
+    # Names of the groups this user belongs to (for the admin users table).
+    groups: list[str] = []
 
 
 class AdminUserListResponse(BaseModel):

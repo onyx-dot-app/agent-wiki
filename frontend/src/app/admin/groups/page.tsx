@@ -2,13 +2,22 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-import { Button } from "@/components/common/Button";
-import { LoadingSpinner } from "@/components/common/LoadingSpinner";
+import { Button } from "@onyx-ai/opal/components";
+import {
+  SvgChevronLeft,
+  SvgChevronRight,
+  SvgPlus,
+  SvgSearch,
+  SvgTrash,
+  SvgUserPlus,
+  SvgUsers,
+  SvgX,
+} from "@onyx-ai/opal/icons";
+
+import { Avatar } from "@/components/common/Avatar";
 import { BackLink, PageHeader } from "@/components/common/PageHeader";
 import { RequireAdmin } from "@/components/RequireAdmin";
-import { ApiError, apiFetch } from "@/lib/api";
-import { color, radius } from "@/lib/theme";
-import { useIsMobile } from "@/lib/viewport";
+import { ApiError } from "@/lib/api";
 import {
   addGroupMember,
   createGroup,
@@ -18,22 +27,33 @@ import {
   useGroups,
   type Group,
 } from "@/lib/permissions";
+import { useIsMobile } from "@/lib/viewport";
+import { displayName, initials, useAdminUsers } from "@/lib/users";
 
-interface AdminUser {
-  id: string;
-  email: string;
-  name: string | null;
+import styles from "./groups.module.css";
+
+function groupSub(g: Group): string {
+  const parts: string[] = [];
+  if (g.folder_count > 0) {
+    parts.push(`${g.folder_count} ${g.folder_count === 1 ? "folder" : "folders"}`);
+  }
+  if (g.page_count > 0) {
+    parts.push(`${g.page_count} wiki ${g.page_count === 1 ? "page" : "pages"}`);
+  }
+  return parts.length > 0 ? parts.join(" · ") : "No private pages";
 }
 
 export default function AdminGroupsPage() {
   const isMobile = useIsMobile();
   return (
     <RequireAdmin>
-      <main style={{ padding: isMobile ? "16px 12px" : "24px 32px", maxWidth: 960 }}>
+      <main
+        style={{ padding: isMobile ? "16px 12px" : "24px 32px", maxWidth: 880 }}
+      >
         <BackLink />
         <PageHeader
           title="Groups"
-          description="Groups bundle users so wiki pages can be shared with the whole group at once."
+          description="Groups bundle users so wiki pages can be shared with everyone at once."
         />
         <GroupsManager />
       </main>
@@ -42,13 +62,19 @@ export default function AdminGroupsPage() {
 }
 
 function GroupsManager() {
-  const isMobile = useIsMobile();
   const { groups, error, isLoading, refresh } = useGroups();
   const [selected, setSelected] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [busy, setBusy] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return groups.filter((g) => !q || g.name.toLowerCase().includes(q));
+  }, [groups, query]);
 
   async function onCreate(e: React.FormEvent) {
     e.preventDefault();
@@ -59,10 +85,11 @@ function GroupsManager() {
       const g = await createGroup(name.trim(), description.trim() || undefined);
       setName("");
       setDescription("");
+      setCreating(false);
       await refresh();
       setSelected(g.id);
     } catch (err) {
-      setCreateError(err instanceof Error ? err.message : "failed");
+      setCreateError(err instanceof Error ? err.message : "Failed to create group");
     } finally {
       setBusy(false);
     }
@@ -75,97 +102,140 @@ function GroupsManager() {
     await refresh();
   }
 
-  if (error) {
-    return <div style={{ color: color.state.danger.fg }}>{error.message}</div>;
+  if (selected) {
+    return <GroupDetail groupId={selected} onBack={() => setSelected(null)} />;
   }
 
+  if (error) return <div className={styles.error}>{error.message}</div>;
+
   return (
-    <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "320px 1fr", gap: isMobile ? 16 : 24 }}>
-      <div>
-        <form onSubmit={onCreate} style={{ marginBottom: 16 }}>
-          <h3 style={{ marginTop: 0, fontSize: 14 }}>New group</h3>
+    <>
+      <div className={styles.toolbar}>
+        <span className={styles.search}>
+          <SvgSearch size={16} />
           <input
+            className={styles.searchInput}
+            placeholder="Search groups…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+        </span>
+        <Button
+          variant="action"
+          size="md"
+          icon={SvgPlus}
+          onClick={() => setCreating((v) => !v)}
+        >
+          New Group
+        </Button>
+      </div>
+
+      {creating && (
+        <form className={styles.createCard} onSubmit={onCreate}>
+          <input
+            className={styles.input}
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="name (e.g. eng)"
-            style={inputStyle}
+            placeholder="Group name (e.g. Engineering)"
+            autoFocus
           />
           <input
+            className={styles.input}
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            placeholder="description (optional)"
-            style={{ ...inputStyle, marginTop: 6 }}
+            placeholder="Description (optional)"
           />
-          <Button
-            type="submit"
-            variant="primary"
-            size="sm"
-            disabled={busy || !name.trim()}
-            style={{ marginTop: 8 }}
-          >
-            Create group
-          </Button>
-          {createError && (
-            <div style={{ color: color.state.danger.fg, marginTop: 8, fontSize: 13 }}>{createError}</div>
-          )}
+          <div className={styles.createRow}>
+            <Button
+              type="submit"
+              variant="action"
+              size="md"
+              disabled={busy || !name.trim()}
+            >
+              Create
+            </Button>
+            <Button
+              type="button"
+              prominence="tertiary"
+              size="md"
+              onClick={() => setCreating(false)}
+            >
+              Cancel
+            </Button>
+          </div>
+          {createError && <div className={styles.error}>{createError}</div>}
         </form>
+      )}
 
-        <h3 style={{ fontSize: 14 }}>Groups</h3>
-        {isLoading ? (
-          <LoadingSpinner />
-        ) : groups.length === 0 ? (
-          <div style={{ color: color.text.muted, fontSize: 13 }}>No groups yet.</div>
-        ) : (
-          <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
-            {groups.map((g) => (
-              <li key={g.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0" }}>
-                <Button
-                  size="sm"
-                  onClick={() => setSelected(g.id)}
-                  style={{
-                    flex: 1,
-                    textAlign: "left",
-                    background: selected === g.id ? color.accent.subtleBg : color.bg.page,
-                    fontWeight: selected === g.id ? 600 : 400,
-                  }}
-                >
-                  {g.name}
-                </Button>
-                <Button size="sm" variant="danger" onClick={() => void onDelete(g)}>
-                  Delete
-                </Button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-
-      <div>
-        {selected ? <GroupDetail groupId={selected} /> : (
-          <div style={{ color: color.text.muted, fontSize: 13 }}>Select a group to manage members.</div>
-        )}
-      </div>
-    </div>
+      {isLoading ? (
+        <div className={styles.loading}>Loading…</div>
+      ) : filtered.length === 0 ? (
+        <div className={styles.empty}>
+          {query ? "No groups match your search." : "No groups yet."}
+        </div>
+      ) : (
+        <div className={styles.cards}>
+          {filtered.map((g) => (
+            <button
+              key={g.id}
+              type="button"
+              className={styles.card}
+              onClick={() => setSelected(g.id)}
+            >
+              <span className={styles.cardIcon}>
+                <SvgUsers size={22} />
+              </span>
+              <span className={styles.cardText}>
+                <span className={styles.cardName}>{g.name}</span>
+                <span className={styles.cardSub}>{groupSub(g)}</span>
+              </span>
+              <span className={styles.cardRight}>
+                {g.member_count} {g.member_count === 1 ? "Member" : "Members"}
+                <SvgChevronRight size={18} />
+              </span>
+              <span
+                className={styles.delete}
+                role="button"
+                tabIndex={0}
+                aria-label={`Delete ${g.name}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void onDelete(g);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.stopPropagation();
+                    void onDelete(g);
+                  }
+                }}
+              >
+                <SvgTrash size={16} />
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </>
   );
 }
 
-function GroupDetail({ groupId }: { groupId: string }) {
+function GroupDetail({
+  groupId,
+  onBack,
+}: {
+  groupId: string;
+  onBack: () => void;
+}) {
   const { group, members, isLoading, refresh } = useGroup(groupId);
-  const [allUsers, setAllUsers] = useState<AdminUser[]>([]);
+  const { users } = useAdminUsers();
   const [pickedId, setPickedId] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    void apiFetch<{ users: AdminUser[] }>("/admin/users")
-      .then((r) => setAllUsers(r.users))
-      .catch(() => {});
-  }, []);
-
   const candidates = useMemo(() => {
     const memberIds = new Set(members.map((m) => m.id));
-    return allUsers.filter((u) => !memberIds.has(u.id));
-  }, [allUsers, members]);
+    return users.filter((u) => !memberIds.has(u.id));
+  }, [users, members]);
 
   async function add() {
     if (!pickedId) return;
@@ -176,7 +246,7 @@ function GroupDetail({ groupId }: { groupId: string }) {
       setPickedId("");
       await refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "failed");
+      setError(err instanceof Error ? err.message : "Failed to add member");
     } finally {
       setBusy(false);
     }
@@ -194,68 +264,77 @@ function GroupDetail({ groupId }: { groupId: string }) {
     }
   }
 
-  if (isLoading || !group) return <LoadingSpinner />;
+  if (isLoading || !group)
+    return <div className={styles.loading}>Loading…</div>;
 
   return (
     <div>
-      <h2 style={{ margin: 0 }}>{group.name}</h2>
-      {group.description && <p style={{ marginTop: 4, color: color.text.muted }}>{group.description}</p>}
+      <Button prominence="tertiary" size="sm" icon={SvgChevronLeft} onClick={onBack}>
+        All groups
+      </Button>
+      <div className={styles.detailHead}>
+        <SvgUsers size={22} />
+        <h2 className={styles.detailTitle}>{group.name}</h2>
+      </div>
+      {group.description && <p className={styles.detailDesc}>{group.description}</p>}
 
-      <h3 style={{ fontSize: 14, marginTop: 24 }}>Add member</h3>
-      <div style={{ display: "flex", gap: 8 }}>
+      <div className={styles.sectionTitle}>Add member</div>
+      <div className={styles.addRow}>
         <select
+          className={styles.input}
           value={pickedId}
           onChange={(e) => setPickedId(e.target.value)}
-          style={{ ...inputStyle, flex: 1 }}
         >
           <option value="">Choose a user…</option>
           {candidates.map((u) => (
             <option key={u.id} value={u.id}>
-              {u.email} {u.name ? `(${u.name})` : ""}
+              {u.email}
+              {u.name ? ` (${u.name})` : ""}
             </option>
           ))}
         </select>
-        <Button onClick={() => void add()} disabled={!pickedId || busy}>
+        <Button
+          variant="action"
+          size="md"
+          icon={SvgUserPlus}
+          onClick={() => void add()}
+          disabled={!pickedId || busy}
+        >
           Add
         </Button>
       </div>
-      {error && <div style={{ color: color.state.danger.fg, marginTop: 8, fontSize: 13 }}>{error}</div>}
+      {error && <div className={styles.error}>{error}</div>}
 
-      <h3 style={{ fontSize: 14, marginTop: 24 }}>Members ({members.length})</h3>
+      <div className={styles.sectionTitle}>Members ({members.length})</div>
       {members.length === 0 ? (
-        <div style={{ color: color.text.muted, fontSize: 13 }}>No members yet.</div>
+        <div className={styles.empty}>No members yet.</div>
       ) : (
-        <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
-          {members.map((m) => (
-            <li
-              key={m.id}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                padding: "8px 0",
-                borderBottom: `1px solid ${color.border.subtle}`,
-              }}
-            >
-              <span>
-                {m.email} {m.name ? <span style={{ color: color.text.muted }}>({m.name})</span> : null}
+        members.map((m) => (
+          <div key={m.id} className={styles.memberRow}>
+            <Avatar
+              label={initials({ name: m.name, email: m.email })}
+              size={28}
+              title={displayName({ name: m.name, email: m.email })}
+            />
+            <span className={styles.memberText}>
+              <span className={styles.memberName}>
+                {displayName({ name: m.name, email: m.email })}
               </span>
-              <Button size="sm" variant="danger" onClick={() => void remove(m.id)} disabled={busy}>
-                Remove
-              </Button>
-            </li>
-          ))}
-        </ul>
+              <span className={styles.memberSub}>{m.email}</span>
+            </span>
+            <Button
+              prominence="tertiary"
+              size="sm"
+              variant="danger"
+              icon={SvgX}
+              onClick={() => void remove(m.id)}
+              disabled={busy}
+            >
+              Remove
+            </Button>
+          </div>
+        ))
       )}
     </div>
   );
 }
-
-const inputStyle: React.CSSProperties = {
-  width: "100%",
-  padding: "8px 10px",
-  fontSize: 14,
-  border: `1px solid ${color.border.default}`,
-  borderRadius: radius.sm,
-  boxSizing: "border-box",
-};

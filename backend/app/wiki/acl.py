@@ -20,6 +20,7 @@ Lifecycle hooks (:func:`on_page_created`, :func:`on_page_deleted`,
 :func:`on_path_moved`) are called from ``app.wiki.notify`` so every
 write site flows through one seam.
 """
+
 from __future__ import annotations
 
 import logging
@@ -62,9 +63,7 @@ def _ancestors(path: str) -> list[str]:
     """
     parts = [p for p in path.split("/") if p]
     parts = parts[:-1]
-    out = [
-        "/".join(parts[: i + 1]) for i in range(len(parts) - 1, -1, -1)
-    ]
+    out = ["/".join(parts[: i + 1]) for i in range(len(parts) - 1, -1, -1)]
     out.append("")
     return out
 
@@ -99,9 +98,25 @@ def set_owner(path: str, user_id: str | None) -> None:
 
 
 def transfer_owner(path: str, new_owner_id: str | None) -> None:
-    """Alias for ``set_owner`` — used by the transfer-ownership endpoint
-    so the call site reads as a transfer rather than a low-level set."""
+    """Transfer ownership, leaving the previous owner as an editor.
+
+    Moves the owner pointer to ``new_owner_id`` and, when there was a
+    distinct previous owner, grants them a ``write`` ACL on the path so
+    they keep edit access after losing ownership (Google-Docs
+    convention). Clearing the owner (``new_owner_id is None``) still
+    leaves the prior owner an editor. The grant is idempotent.
+    """
+    prev_owner = get_owner(path)
     set_owner(path, new_owner_id)
+    if prev_owner is not None and prev_owner != new_owner_id:
+        grant(
+            resource_kind="page" if _is_md_page(path) else "folder",
+            resource_path=path,
+            principal_kind="user",
+            principal_id=prev_owner,
+            permission="write",
+            granted_by_user_id=new_owner_id,
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -162,9 +177,7 @@ def grant(
     if permission not in _VALID_PERMISSIONS:
         raise ValueError(f"invalid permission: {permission!r}")
     if (principal_kind == "everyone") != (principal_id is None):
-        raise ValueError(
-            "principal_id must be NULL iff principal_kind == 'everyone'"
-        )
+        raise ValueError("principal_id must be NULL iff principal_kind == 'everyone'")
     canon = _canonicalize(resource_kind, resource_path)
 
     with session() as s:
@@ -195,7 +208,12 @@ def grant(
         )
     log.info(
         "acl grant id=%s %s:%s -> %s:%s %s",
-        eid, resource_kind, canon, principal_kind, principal_id or "*", permission,
+        eid,
+        resource_kind,
+        canon,
+        principal_kind,
+        principal_id or "*",
+        permission,
     )
     return eid
 
@@ -312,15 +330,11 @@ def effective(
     if owner is not None and user_id is not None and owner == user_id:
         return {"read", "write"}
 
-    group_ids = (
-        groups_repo.group_ids_for_user(user_id) if user_id is not None else []
-    )
+    group_ids = groups_repo.group_ids_for_user(user_id) if user_id is not None else []
 
     with session() as s:
         rows = list(
-            s.scalars(
-                _grants_for_principal(user_id, group_ids, canon_page, ancestors)
-            ).all()
+            s.scalars(_grants_for_principal(user_id, group_ids, canon_page, ancestors)).all()
         )
         if not rows and owner is None and not _path_is_managed(s, canon_page, ancestors):
             return {"read", "write"}
@@ -333,29 +347,30 @@ def effective(
     return perms
 
 
-def _path_is_managed(
-    s: Any, page_path: str, folder_paths: list[str]
-) -> bool:
+def _path_is_managed(s: Any, page_path: str, folder_paths: list[str]) -> bool:
     """True iff *any* ACL row exists at the page path or any folder
     ancestor — irrespective of principal. Used by the resolver and the
     bulk filter to detect "unconfigured" paths so the implicit-public
     fallback only kicks in when no human has ever set policy here."""
-    return s.scalar(
-        select(func.count())
-        .select_from(AclEntry)
-        .where(
-            or_(
-                and_(
-                    AclEntry.resource_kind == "page",
-                    AclEntry.resource_path == page_path,
-                ),
-                and_(
-                    AclEntry.resource_kind == "folder",
-                    AclEntry.resource_path.in_(folder_paths),
-                ),
+    return (
+        s.scalar(
+            select(func.count())
+            .select_from(AclEntry)
+            .where(
+                or_(
+                    and_(
+                        AclEntry.resource_kind == "page",
+                        AclEntry.resource_path == page_path,
+                    ),
+                    and_(
+                        AclEntry.resource_kind == "folder",
+                        AclEntry.resource_path.in_(folder_paths),
+                    ),
+                )
             )
         )
-    ) > 0
+        > 0
+    )
 
 
 def _grants_for_principal(
@@ -433,9 +448,7 @@ def visible_paths_filter(
     if is_admin:
         return literal(True)
 
-    group_ids = (
-        groups_repo.group_ids_for_user(user_id) if user_id is not None else []
-    )
+    group_ids = groups_repo.group_ids_for_user(user_id) if user_id is not None else []
 
     principal_clauses = [AclEntry.principal_kind == "everyone"]
     if user_id is not None:
@@ -464,9 +477,7 @@ def visible_paths_filter(
             path_column.like(AclEntry.resource_path + "/%"),
         ),
     )
-    acl_exists = exists(
-        select(1).where(or_(page_match, folder_match)).correlate_except(AclEntry)
-    )
+    acl_exists = exists(select(1).where(or_(page_match, folder_match)).correlate_except(AclEntry))
     # Implicit-public match: page is unconfigured (no owner, no ACL row
     # anywhere on its path). Mirrors the same fallback in ``effective``.
     any_acl_match = and_(
@@ -484,9 +495,7 @@ def visible_paths_filter(
             ),
         ),
     )
-    any_acl_exists = exists(
-        select(1).where(any_acl_match).correlate_except(AclEntry)
-    )
+    any_acl_exists = exists(select(1).where(any_acl_match).correlate_except(AclEntry))
     any_owner_exists = exists(
         select(1)
         .select_from(WikiOwner)
@@ -541,15 +550,18 @@ def on_page_created(path: str, owner_user_id: str | None) -> None:
     with session() as s:
         if s.get(WikiOwner, canon) is None:
             s.add(WikiOwner(path=canon, owner_user_id=owner_user_id))
-        existing = s.scalar(
-            select(func.count())
-            .select_from(AclEntry)
-            .where(
-                AclEntry.resource_kind == "page",
-                AclEntry.resource_path == canon,
-                AclEntry.principal_kind == "everyone",
+        existing = (
+            s.scalar(
+                select(func.count())
+                .select_from(AclEntry)
+                .where(
+                    AclEntry.resource_kind == "page",
+                    AclEntry.resource_path == canon,
+                    AclEntry.principal_kind == "everyone",
+                )
             )
-        ) or 0
+            or 0
+        )
         if existing == 0:
             for perm in ("read", "write"):
                 s.add(
@@ -596,11 +608,7 @@ def on_path_moved(moves: list[tuple[str, str]]) -> None:
                     )
                     .values(resource_path=new_p)
                 )
-                s.execute(
-                    update(WikiOwner)
-                    .where(WikiOwner.path == old_p)
-                    .values(path=new_p)
-                )
+                s.execute(update(WikiOwner).where(WikiOwner.path == old_p).values(path=new_p))
 
         # Detect a folder-level rename by looking for a common (old, new)
         # prefix shared across every moved file. ``move_path`` of a
@@ -648,13 +656,14 @@ def _common_folder_rename(
     old_prefix = first_old.rsplit("/", 1)[0]
     new_prefix = first_new.rsplit("/", 1)[0]
     while old_prefix and new_prefix:
-        suffix_old = first_old[len(old_prefix):]
-        suffix_new = first_new[len(new_prefix):]
+        suffix_old = first_old[len(old_prefix) :]
+        suffix_new = first_new[len(new_prefix) :]
         if suffix_old != suffix_new:
             return None, None
         if all(
-            o.startswith(old_prefix + "/") and n.startswith(new_prefix + "/")
-            and o[len(old_prefix):] == n[len(new_prefix):]
+            o.startswith(old_prefix + "/")
+            and n.startswith(new_prefix + "/")
+            and o[len(old_prefix) :] == n[len(new_prefix) :]
             for o, n in moves
         ):
             return old_prefix, new_prefix

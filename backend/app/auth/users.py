@@ -1,11 +1,12 @@
 """User repo — SQLAlchemy ORM. Free functions over ``User`` model."""
+
 from __future__ import annotations
 
 import logging
 import uuid
-from typing import Any
+from typing import Any, Iterable
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.auth.passwords import hash_password
@@ -57,6 +58,40 @@ def list_all() -> list[dict[str, Any]]:
         return [_to_dict(u) for u in users]
 
 
+def get_many(user_ids: Iterable[str]) -> dict[str, dict[str, Any]]:
+    ids = list(dict.fromkeys(user_ids))
+    if not ids:
+        return {}
+    stmt = select(User).where(User.id.in_(ids))
+    with session() as s:
+        rows = s.scalars(stmt).all()
+        return {u.id: _to_dict(u) for u in rows}
+
+
+def search(query: str, limit: int = 20) -> list[dict[str, Any]]:
+    """Minimal user lookup for the share / transfer typeaheads.
+
+    Case-insensitive substring match on email or name. An empty query
+    returns the first ``limit`` users by email so the picker can show
+    suggestions before the user types. Returns only public-safe fields
+    (no password hash, settings, or admin flag) since any signed-in user
+    can call this to share a page.
+    """
+    q = (query or "").strip().lower()
+    with session() as s:
+        stmt = select(User)
+        if q:
+            like = "%" + q + "%"
+            stmt = stmt.where(
+                or_(
+                    func.lower(User.email).like(like),
+                    func.lower(User.name).like(like),
+                )
+            )
+        stmt = stmt.order_by(User.email.asc()).limit(limit)
+        return [{"id": u.id, "email": u.email, "name": u.name} for u in s.scalars(stmt).all()]
+
+
 def create(email: str, password: str, name: str | None = None) -> str:
     """Create a user. The very first user is auto-promoted to admin."""
     user_id = str(uuid.uuid4())
@@ -85,9 +120,7 @@ def set_admin(user_id: str, is_admin: bool) -> None:
 
 def admin_count() -> int:
     with session() as s:
-        return s.scalar(
-            select(func.count()).select_from(User).where(User.is_admin.is_(True))
-        ) or 0
+        return s.scalar(select(func.count()).select_from(User).where(User.is_admin.is_(True))) or 0
 
 
 def delete(user_id: str) -> None:

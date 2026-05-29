@@ -1,0 +1,102 @@
+.stat {
+  font-size: 13px;
+  color: var(--color-text-muted);
+  margin-bottom: 12px;
+}
+.search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-page);
+  color: var(--color-text-muted);
+  margin-bottom: 16px;
+}
+.searchInput {
+  flex: 1;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-size: 14px;
+  color: var(--color-text-primary);
+}
+
+.table {
+  display: flex;
+  flex-direction: column;
+}
+.headRow {
+  display: grid;
+  grid-template-columns: var(--cols);
+  gap: 12px;
+  padding: 8px;
+  border-bottom: 1px solid var(--color-border-default);
+}
+.headCell {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+.row {
+  display: grid;
+  grid-template-columns: var(--cols);
+  gap: 12px;
+  align-items: center;
+  padding: 10px 8px;
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+.who {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.whoText {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.whoName {
+  font-size: 14px;
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.whoEmail {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.muted {
+  font-size: 13px;
+  color: var(--color-text-faint);
+}
+.created {
+  font-size: 13px;
+  color: var(--color-text-muted);
+}
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.error {
+  font-size: 14px;
+  color: var(--color-state-danger-fg);
+  margin-bottom: 12px;
+}
+.empty {
+  font-size: 14px;
+  color: var(--color-text-muted);
+  padding: 16px 0;
+}

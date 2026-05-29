@@ -1,4 +1,5 @@
 """FastAPI port of ``app/api/admin.py`` (Phase 3)."""
+
 from __future__ import annotations
 
 import logging
@@ -7,6 +8,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.auth import User, users as users_repo
+from app.auth import groups as groups_repo
 from app.auth.deps import require_admin
 from app.ingest import settings as ingest_settings
 from app.ingest.settings import IngestSettings
@@ -41,20 +43,22 @@ log = logging.getLogger(__name__)
 # --------------------------------------------------------------------------- #
 
 
-def _user_view(row: dict[str, Any]) -> AdminUserView:
+def _user_view(row: dict[str, Any], groups: list[str] | None = None) -> AdminUserView:
     return AdminUserView(
         id=row["id"],
         email=row["email"],
         name=row["name"],
         is_admin=bool(row["is_admin"]),
         created_at=row["created_at"],
+        groups=groups or [],
     )
 
 
 @router.get("/users", response_model=AdminUserListResponse)
 def list_users(_actor: User = Depends(require_admin)) -> AdminUserListResponse:
+    by_user = groups_repo.groups_by_user()
     return AdminUserListResponse(
-        users=[_user_view(r) for r in users_repo.list_all()],
+        users=[_user_view(r, by_user.get(r["id"], [])) for r in users_repo.list_all()],
     )
 
 
@@ -71,7 +75,10 @@ def update_user(
         raise HTTPException(status_code=400, detail="cannot demote the last admin")
     users_repo.set_admin(user_id, req.is_admin)
     log.info(
-        "admin: %s set is_admin=%s on user %s", actor.id, req.is_admin, user_id,
+        "admin: %s set is_admin=%s on user %s",
+        actor.id,
+        req.is_admin,
+        user_id,
     )
     row = users_repo.get_by_id(user_id)
     assert row is not None
@@ -161,10 +168,14 @@ def put_llm(
             return existing
         return sent
 
-    anthropic_key = _resolve_secret("anthropic_api_key", req.anthropic_api_key, current.anthropic_api_key)
+    anthropic_key = _resolve_secret(
+        "anthropic_api_key", req.anthropic_api_key, current.anthropic_api_key
+    )
     openai_key = _resolve_secret("openai_api_key", req.openai_api_key, current.openai_api_key)
     gemini_key = _resolve_secret("gemini_api_key", req.gemini_api_key, current.gemini_api_key)
-    ollama_base_url = _resolve_secret("ollama_base_url", req.ollama_base_url, current.ollama_base_url)
+    ollama_base_url = _resolve_secret(
+        "ollama_base_url", req.ollama_base_url, current.ollama_base_url
+    )
 
     new_provider_models = req.provider_models if "provider_models" in sent_fields else None
 
@@ -185,7 +196,9 @@ def put_llm(
     )
     log.info(
         "admin: %s updated llm settings provider=%s model=%s",
-        actor.id, provider, model,
+        actor.id,
+        provider,
+        model,
     )
     return _llm_view(llm_settings.get())
 
@@ -235,7 +248,9 @@ def put_web(
     )
     log.info(
         "admin: %s updated web settings serper_set=%s firecrawl_set=%s",
-        actor.id, bool(serper_key), bool(firecrawl_key),
+        actor.id,
+        bool(serper_key),
+        bool(firecrawl_key),
     )
     return _web_view(web_settings.get())
 
@@ -260,7 +275,8 @@ def get_ingest(_actor: User = Depends(require_admin)) -> IngestView:
 
 @router.put("/ingest", response_model=IngestView)
 def put_ingest(
-    req: IngestConfigRequest, actor: User = Depends(require_admin),
+    req: IngestConfigRequest,
+    actor: User = Depends(require_admin),
 ) -> IngestView:
     if req.max_doc_chars < _MIN_DOC_CHARS or req.max_doc_chars > _MAX_DOC_CHARS:
         raise HTTPException(
@@ -270,7 +286,8 @@ def put_ingest(
     ingest_settings.upsert(max_doc_chars=req.max_doc_chars)
     log.info(
         "admin: %s updated ingest settings max_doc_chars=%d",
-        actor.id, req.max_doc_chars,
+        actor.id,
+        req.max_doc_chars,
     )
     return _ingest_view(ingest_settings.get())
 
@@ -325,6 +342,9 @@ def put_braintrust(
     braintrust_settings.upsert(project=project, api_key=api_key, enabled=enabled)
     log.info(
         "admin: %s updated braintrust settings project=%s key_set=%s enabled=%s",
-        actor.id, project, bool(api_key), enabled,
+        actor.id,
+        project,
+        bool(api_key),
+        enabled,
     )
     return _braintrust_view(braintrust_settings.get())
