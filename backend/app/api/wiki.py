@@ -54,7 +54,7 @@ from app.wiki import (
     search as wiki_search,
     templates as templates_repo,
 )
-from app.models.wiki import ChangeKind
+from app.models.wiki import AiRebaseMaxRetriesError, ChangeKind
 
 router = APIRouter()
 log = logging.getLogger(__name__)
@@ -141,24 +141,32 @@ def put_document_by_path(
     author = _git_author(user)
     change_kind = ChangeKind.EDIT if existed else ChangeKind.CREATE
     msg = f"{change_kind} {rel}"
-    body_to_commit = req.body
-    if req.base_sha:
-        head = wiki_git.head_sha_for_path(rel)
-        if head and head != req.base_sha:
-            # The page changed since the client opened it. Attempt a 3-way
-            # merge: if the edits don't overlap, commit the merged result
-            # transparently. Only return 409 when there are actual conflicts.
-            try:
-                base_body = wiki_git.read_file(rel, ref=req.base_sha)
-                current_body = abs_path.read_text()
-                mr = wiki_git.merge_content(base_body, current_body, req.body)
-            except (subprocess.CalledProcessError, RuntimeError):
-                raise HTTPException(status_code=409, detail="conflict detected")
-            if not mr.clean:
-                raise HTTPException(status_code=409, detail="conflict detected")
-            body_to_commit = mr.merged
-            log.info("doc auto-merged %s by %s", rel, author or "?")
-    sha = wiki_git.commit_file(rel, body_to_commit, msg, author=author)
+    if existed and req.base_sha:
+        # The page may have changed since the client opened it. Merge against
+        # the version the edit was based on (``base_sha``): clean merges commit
+        # transparently so the user never has to re-save, and only a real
+        # conflict surfaces as a 409 (the client then shows the conflict UI).
+        # The helper also rides out a concurrent commit / ref-lock race.
+        try:
+            base_body = wiki_git.read_file(rel, ref=req.base_sha)
+        except subprocess.CalledProcessError:
+            raise HTTPException(status_code=409, detail="conflict detected")
+        try:
+            sha, body_to_commit = wiki_git.commit_with_retry(
+                rel,
+                base_body=base_body,
+                new_body=req.body,
+                message=msg,
+                author=author,
+            )
+        except (wiki_git.GitMergeConflictError, AiRebaseMaxRetriesError, RuntimeError):
+            raise HTTPException(status_code=409, detail="conflict detected")
+    else:
+        # New file, or an edit with no base_sha to merge against — commit the
+        # body as-is (still retrying the transient lock race).
+        sha, body_to_commit = wiki_git.commit_with_retry(
+            rel, new_body=req.body, message=msg, author=author
+        )
     wiki_notify.after_doc_write(
         rel,
         sha,
