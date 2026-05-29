@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
 
 export default function CatchAllPage() {
-  redirect("/app");
+  redirect("/app/wiki");
 }

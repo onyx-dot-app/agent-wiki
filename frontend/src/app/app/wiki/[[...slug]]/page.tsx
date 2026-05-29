@@ -14,7 +14,6 @@ import { diffLines } from "diff";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import useSWR from "swr";
-
 import { Button } from "@/components/common/Button";
 import { PageHeader } from "@/components/common/PageHeader";
 import { TriggerModal } from "@/components/triggers/TriggerModal";
