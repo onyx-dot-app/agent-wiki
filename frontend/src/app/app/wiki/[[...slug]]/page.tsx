@@ -19,7 +19,7 @@ import { PageHeader } from "@/components/common/PageHeader";
 import { TriggerModal } from "@/components/triggers/TriggerModal";
 import { DiffView } from "@/components/wiki/DiffView";
 import { HistoryPanel } from "@/components/wiki/HistoryPanel";
-import { RunAgentModal } from "@/components/wiki/RunAgentModal";
+import { RunAgentPanel } from "@/components/wiki/RunAgentPanel";
 import {
   closeSession,
   useAgentSessions,
@@ -2071,7 +2071,7 @@ function FileViewer({ path }: { path: string }) {
         onClose={() => setShareOpen(false)}
       />
 
-      <RunAgentModal
+      <RunAgentPanel
         open={runAgentOpen}
         onClose={() => setRunAgentOpen(false)}
         wikiPath={path || null}

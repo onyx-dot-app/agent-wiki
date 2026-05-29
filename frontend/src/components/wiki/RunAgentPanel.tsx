@@ -16,7 +16,7 @@ import {
   useLauncherCatalog,
 } from "@/lib/launchers";
 
-import styles from "./RunAgentModal.module.css";
+import styles from "./RunAgentPanel.module.css";
 
 interface Props {
   open: boolean;
@@ -43,7 +43,7 @@ function docName(wikiPath: string | null): string | null {
   return base.replace(/\.md$/, "");
 }
 
-export function RunAgentModal({ open, onClose, wikiPath }: Props) {
+export function RunAgentPanel({ open, onClose, wikiPath }: Props) {
   const [probe, setProbe] = useState<ProbeState | null>(null);
   const { launchers, refresh: refreshCatalog } = useLauncherCatalog({
     machineId: probe?.machineId ?? null,
