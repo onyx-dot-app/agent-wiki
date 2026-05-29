@@ -1,5 +1,5 @@
 @import "./css/colors.css" layer(base);
-@import "./css/opal-styles.css" layer(base);
+@import "./css/opal-styles.css";
 
 @import "tailwindcss";
 /* @import "tw-animate-css" lives at the app level (not in opal-styles.css)
