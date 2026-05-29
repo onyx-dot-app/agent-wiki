@@ -6,7 +6,7 @@ Wraps ``app.db.fts.search`` with:
   - descending score ordering (most relevant first)
 
 Parameters are read from env vars so they can be tuned without a deploy:
-  INGEST_BM25_MIN_SCORE    float, default 1.0
+  INGEST_BM25_MIN_SCORE    float, default 5.0
   INGEST_BM25_TITLE_BOOST  float, default 2.0
   INGEST_BM25_LIMIT        int,   default 20  (candidates fetched from OS)
 """
