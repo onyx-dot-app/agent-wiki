@@ -1,5 +1,6 @@
 "use client";
 
+import { InputTypeIn } from "@onyx-ai/opal/components";
 import { useRouter } from "next/navigation";
 import {
   forwardRef,
@@ -131,7 +132,7 @@ export const WikiSearch = forwardRef<WikiSearchHandle>(function WikiSearch(_, re
       setOpen(false);
       setQuery("");
       const path = row.kind === "folder" ? row.folder.path : row.hit.path;
-      router.push(`/wiki/${path}`);
+      router.push(`/app/wiki/${path}`);
     },
     [router],
   );
@@ -164,69 +165,21 @@ export const WikiSearch = forwardRef<WikiSearchHandle>(function WikiSearch(_, re
 
   return (
     <div ref={containerRef} style={{ position: "relative", width: "100%" }}>
-      <div style={{ position: "relative" }}>
-        <span
-          aria-hidden
-          style={{
-            position: "absolute",
-            left: 8,
-            top: "50%",
-            transform: "translateY(-50%)",
-            color: color.text.faint,
-            display: "flex",
-          }}
-        >
-          <SearchIcon />
-        </span>
-        <input
-          ref={inputRef}
-          type="search"
-          value={query}
-          onChange={(e) => {
-            setQuery(e.target.value);
-            setOpen(true);
-          }}
-          onFocus={() => setOpen(true)}
-          onKeyDown={onKeyDown}
-          placeholder="Search…"
-          aria-label="Search wiki"
-          style={{
-            width: "100%",
-            padding: "6px 28px 6px 28px",
-            border: `1px solid ${color.border.default}`,
-            borderRadius: radius.sm,
-            fontSize: 13,
-            outline: "none",
-            background: color.bg.page,
-            color: color.text.primary,
-            boxSizing: "border-box",
-          }}
-        />
-        {query && (
-          <button
-            type="button"
-            onClick={() => {
-              setQuery("");
-              setOpen(false);
-            }}
-            aria-label="Clear search"
-            style={{
-              position: "absolute",
-              right: 4,
-              top: "50%",
-              transform: "translateY(-50%)",
-              background: "transparent",
-              border: "none",
-              color: color.text.faint,
-              cursor: "pointer",
-              padding: 4,
-              display: "flex",
-            }}
-          >
-            ×
-          </button>
-        )}
-      </div>
+      <InputTypeIn
+        ref={inputRef}
+        variant="internal"
+        searchIcon
+        clearButton
+        value={query}
+        onChange={(e) => {
+          setQuery(e.target.value);
+          setOpen(true);
+        }}
+        onFocus={() => setOpen(true)}
+        onKeyDown={onKeyDown}
+        placeholder="Search…"
+        aria-label="Search wiki"
+      />
 
       {showDropdown && (
         <div
@@ -408,15 +361,6 @@ function SnippetText({ text }: { text: string }) {
         return <span key={i}>{p}</span>;
       })}
     </>
-  );
-}
-
-function SearchIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <circle cx="11" cy="11" r="7" />
-      <path d="m21 21-4.3-4.3" />
-    </svg>
   );
 }
 
