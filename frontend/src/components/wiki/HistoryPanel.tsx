@@ -195,12 +195,7 @@ function CommitRow({
           sourceTitle={srcTitle}
         />
         {commit.triggered > 0 ? (
-          <ActionLine
-            icon={<SvgWorkflow style={{ width: 12, height: 12 }} />}
-            label={`Triggered ${commit.triggered} automation${
-              commit.triggered === 1 ? "" : "s"
-            }`}
-          />
+          <TriggeredLine count={commit.triggered} />
         ) : null}
       </Row>
     </SelectCard>
@@ -265,13 +260,11 @@ function HeaderLine({
 }
 
 function ActionLine({
-  icon,
   label,
   stats,
   sourceUrl,
   sourceTitle,
 }: {
-  icon?: React.ReactNode;
   label: string;
   stats?: { added: number; removed: number } | null;
   sourceUrl?: string | null;
@@ -290,18 +283,6 @@ function ActionLine({
         lineHeight: "16px",
       }}
     >
-      {icon ? (
-        <span
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            flexShrink: 0,
-            color: color.text.muted,
-          }}
-        >
-          {icon}
-        </span>
-      ) : null}
       <div
         style={{
           flex: 1,
@@ -345,6 +326,42 @@ function ActionLine({
           </Text>
         </a>
       ) : null}
+    </div>
+  );
+}
+
+function TriggeredLine({ count }: { count: number }) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 4,
+        width: "100%",
+        minWidth: 0,
+        fontSize: 12,
+        lineHeight: "16px",
+      }}
+    >
+      <Text font="secondary-body" color="text-03" nowrap>
+        Triggered
+      </Text>
+      <span
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          flexShrink: 0,
+          color: color.text.muted,
+        }}
+      >
+        <SvgWorkflow style={{ width: 12, height: 12 }} />
+      </span>
+      <span style={{ fontWeight: 600 }}>
+        <Text font="secondary-action" color="text-03" nowrap>
+          {`${count} automation${count === 1 ? "" : "s"}`}
+        </Text>
+      </span>
     </div>
   );
 }
