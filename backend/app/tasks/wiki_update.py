@@ -420,6 +420,10 @@ def process_pushed_document(push: dict[str, Any]) -> None:
             except CommitMaxRetriesError:
                 log.warning("process_pushed_document: max retries for %s, skipping", c.hit.path)
                 continue
+            except LLMError as exc:
+                # ai_merge fallback failed — skip this candidate, don't abort the batch.
+                log.warning("process_pushed_document: merge LLM error for %s: %s", c.hit.path, exc)
+                continue
             if commit_result is None:
                 # Concurrent edit produced identical content — treat as no_change.
                 ingest_outcomes_total.labels(outcome="no_change", wiki_path=c.hit.path).inc()
