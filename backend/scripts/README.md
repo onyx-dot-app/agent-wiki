@@ -63,6 +63,49 @@ WHERE outcome = 'committed' AND id > 1000
 
 The `id` column is a stable integer primary key — use it to refer to specific samples across sessions.
 
+## Ingest BM25 filter analysis
+
+Two scripts help tune and validate the `INGEST_BM25_MIN_SCORE` threshold.
+Both require OpenSearch running locally and `uv sync --extra dev`.
+
+### ingest_score_analysis.py
+
+Scores every sample with BM25 (full source content as query, same settings
+as production) and semantic cosine similarity (`text-embedding-3-small`).
+Groups results into **relevant** (committed + no_change) vs **irrelevant**
+and plots score distributions plus a coverage-vs-filter-level curve.
+
+Scores are cached so re-runs only process new samples.
+
+```bash
+cd backend
+export OPENAI_API_KEY=...
+uv run --extra dev python scripts/ingest_score_analysis.py \
+    --samples eval_samples.jsonl \
+    --cache   score_cache.json \
+    --plot    score_analysis.png
+```
+
+### ingest_bm25_param_search.py
+
+Grid search over BM25 `k1` (index-level) and `title_boost` (query-level).
+Recreates the OpenSearch index once per `k1` value, then varies `title_boost`
+at query time. Reports relevant coverage heatmaps at 70/80/90% filter levels.
+
+Note: `b` (length normalization) has no effect in a single-document-per-query
+corpus — only `k1` and `title_boost` are worth tuning.
+
+```bash
+cd backend
+uv run --extra dev python scripts/ingest_bm25_param_search.py \
+    --samples eval_samples.jsonl \
+    --results param_search_results.json \
+    --plot    param_search.png
+```
+
+Both scripts accept `--os-host` / `--os-port` (default `localhost:9201`) and
+`--workers` (default 4) to control OpenSearch connection and parallelism.
+
 ## Using eval_labeler.html
 
 `eval_labeler.html` is a self-contained browser tool for reviewing and labeling samples. It reads and writes the JSONL file directly via the [File System Access API](https://developer.mozilla.org/en-US/docs/Web/API/File_System_Access_API) (Chrome / Edge only).
