@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 from evals import reporting
-from evals.schema import CaseResult, ScorerOutcome
+from evals.schema import CaseResult, MergeConflictCase, ScorerOutcome
 
 
 def _make_result(
@@ -187,6 +187,21 @@ def test_push_to_braintrust_skips_without_creds(
     monkeypatch.delenv("BRAINTRUST_PROJECT", raising=False)
     url = reporting.push_to_braintrust("exp-1", [_make_result(case_id="a", model="m")])
     assert url == ""
+
+
+def test_push_merge_conflict_dataset_skips_without_creds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("BRAINTRUST_API_KEY", raising=False)
+    monkeypatch.delenv("BRAINTRUST_PROJECT", raising=False)
+    case = MergeConflictCase(
+        id="mc-x",
+        wiki_path="p.md",
+        base_body="base",
+        current_body="cur",
+        draft_body="draft",
+    )
+    assert reporting.push_merge_conflict_dataset("merge-conflict-update", [case]) == 0
 
 
 def test_summarize_error_rate_counts_failed_cases() -> None:

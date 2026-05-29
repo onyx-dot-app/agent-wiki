@@ -15,6 +15,7 @@ from app.tracing import braintrust as bt
 from evals.schema import (
     CaseResult,
     IngestSelectorCase,
+    MergeConflictCase,
     RunSummary,
     ScorerSummary,
     Surface,
@@ -337,6 +338,53 @@ def push_triggers_dataset(dataset: str, cases: list[TriggerCase]) -> int:
                 "flavor": c.flavor.value,
                 "tags": list(c.tags or []),
                 "max_message_bloat_ratio": c.max_message_bloat_ratio,
+            },
+        )
+        for c in cases
+    ]
+    pushed = bt.push_dataset(project=project, dataset=dataset, api_key=api_key, rows=rows)
+    log.info(
+        "braintrust: pushed %d/%d dataset rows to project=%s dataset=%s",
+        pushed,
+        len(cases),
+        project,
+        dataset,
+    )
+    return pushed
+
+
+def push_merge_conflict_dataset(dataset: str, cases: list[MergeConflictCase]) -> int:
+    """Push the merge-conflict eval case set as a Braintrust dataset.
+
+    Mirrors ``push_triggers_dataset`` so the runner can link experiment
+    results back to per-case dataset rows.
+    """
+    api_key = os.environ.get("BRAINTRUST_API_KEY", "")
+    project = os.environ.get("BRAINTRUST_PROJECT", "")
+    if not api_key or not project:
+        log.warning("braintrust: skip dataset push — no BRAINTRUST_API_KEY or BRAINTRUST_PROJECT")
+        return 0
+    rows = [
+        bt.DatasetRow(
+            id=c.id,
+            input={
+                "wiki_path": c.wiki_path,
+                "base_body": c.base_body,
+                "current_body": c.current_body,
+                "draft_body": c.draft_body,
+                "current_commit_message": c.current_commit_message,
+            },
+            expected={
+                "facts_from_current_present": [
+                    f.model_dump() for f in c.facts_from_current_present
+                ],
+                "facts_from_draft_present": [f.model_dump() for f in c.facts_from_draft_present],
+                "facts_must_not_appear": [f.model_dump() for f in c.facts_must_not_appear],
+                "expects_conflict_annotation": c.expects_conflict_annotation,
+            },
+            metadata={
+                "wiki_path": c.wiki_path,
+                "tags": list(c.tags or []),
             },
         )
         for c in cases

@@ -187,6 +187,8 @@ def main(argv: list[str] | None = None) -> int:
 
     out_path = args.out or Path("runs") / ("merge_conflict_%d.jsonl" % int(time.time()))
     reporting.write_jsonl(out_path, results)
+    if args.dataset:
+        reporting.push_merge_conflict_dataset(args.dataset, cases)
     summary = reporting.summarize(results, surface="merge_conflict_update")
     reporting.print_summary(summary)
     bt_url = ""
