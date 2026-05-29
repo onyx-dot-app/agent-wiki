@@ -1,4 +1,5 @@
 import { SelectCard, Text } from "@onyx-ai/opal/components";
+import { SvgWorkflow } from "@onyx-ai/opal/icons";
 import { SvgClaude, SvgOnyxLogo, SvgOpenai } from "@onyx-ai/opal/logos";
 import type { IconProps } from "@onyx-ai/opal/types";
 import type { ComponentType } from "react";
@@ -194,11 +195,7 @@ function CommitRow({
           sourceTitle={srcTitle}
         />
         {commit.triggered > 0 ? (
-          <ActionLine
-            label={`⚡ Triggered ${commit.triggered} automation${
-              commit.triggered === 1 ? "" : "s"
-            }`}
-          />
+          <TriggeredLine count={commit.triggered} />
         ) : null}
       </Row>
     </SelectCard>
@@ -211,7 +208,7 @@ function Row({ children }: { children: React.ReactNode }) {
       style={{
         display: "flex",
         flexDirection: "column",
-        gap: 4,
+        gap: 8,
         width: "100%",
         minWidth: 0,
       }}
@@ -282,7 +279,8 @@ function ActionLine({
         gap: 8,
         width: "100%",
         minWidth: 0,
-        paddingLeft: 28,
+        fontSize: 12,
+        lineHeight: "16px",
       }}
     >
       <div
@@ -332,6 +330,42 @@ function ActionLine({
   );
 }
 
+function TriggeredLine({ count }: { count: number }) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 4,
+        width: "100%",
+        minWidth: 0,
+        fontSize: 12,
+        lineHeight: "16px",
+      }}
+    >
+      <Text font="secondary-body" color="text-03" nowrap>
+        Triggered
+      </Text>
+      <span
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          flexShrink: 0,
+          color: color.text.muted,
+        }}
+      >
+        <SvgWorkflow style={{ width: 12, height: 12 }} />
+      </span>
+      <span style={{ fontWeight: 600 }}>
+        <Text font="secondary-action" color="text-03" nowrap>
+          {`${count} automation${count === 1 ? "" : "s"}`}
+        </Text>
+      </span>
+    </div>
+  );
+}
+
 // Shared circle geometry so the person initial and the agent logo chip
 // render at identical size. box-sizing: border-box keeps the 1px border
 // inside the 20px box (otherwise content-box would inflate one of them).
@@ -377,10 +411,10 @@ function LogoAvatar({ Logo }: { Logo: ComponentType<IconProps> }) {
         ...avatarBase,
         marginLeft: -6,
         background: color.bg.page,
-        border: `1px solid ${color.border.subtle}`,
+        border: "1px solid var(--diff-avatar-border)",
       }}
     >
-      <Logo style={{ width: 12, height: 12 }} />
+      <Logo style={{ width: 16, height: 16 }} />
     </div>
   );
 }
