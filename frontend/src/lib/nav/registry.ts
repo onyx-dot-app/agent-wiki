@@ -46,7 +46,7 @@ export const NAV_ENTRIES = [
 ] as const satisfies NavEntry[];
 
 export const ADMIN_NAV_ENTRIES = [
-  { href: "/admin/llm",        label: "Language Models",  icon: SvgKey          },
+  { href: "/admin/language-models", label: "Language Models",  icon: SvgKey          },
   { href: "/admin/web",        label: "Web Search",       icon: SvgGlobe        },
   { href: "/admin/users",      label: "Users",            icon: SvgUsers        },
   { href: "/admin/groups",     label: "Groups",           icon: SvgOrganization },

@@ -315,7 +315,7 @@ function SelectorModelSection({ settings, onSaved }: { settings: LLMSettings; on
             {hasNoModels && (
               <div style={{ fontSize: 13, color: color.text.muted, padding: "4px 0 8px" }}>
                 No models configured. Add models on the{" "}
-                <a href="/admin/llm" style={{ color: color.accent.fg }}>Language models</a> page first.
+                <a href="/admin/language-models" style={{ color: color.accent.fg }}>Language models</a> page first.
               </div>
             )}
             <button

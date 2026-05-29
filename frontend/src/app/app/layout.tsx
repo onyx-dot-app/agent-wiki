@@ -113,7 +113,7 @@ function LLMSetupBanner({ isAdmin }: { isAdmin: boolean }) {
             <>
               AI features are disabled until you add a provider and API key on the{" "}
               <Link
-                href="/admin/llm"
+                href="/admin/language-models"
                 className="text-(--status-text-warning-05) underline font-semibold"
               >
                 LLM settings page
