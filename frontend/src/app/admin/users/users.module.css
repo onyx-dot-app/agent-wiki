@@ -90,6 +90,12 @@
   justify-content: flex-end;
   gap: 6px;
 }
+
+/* Wraps an OPAL SelectButton so Radix Popover can anchor to a
+   ref-forwarding DOM node (SelectButton doesn't forward its ref). */
+.menuTrigger {
+  display: inline-flex;
+}
 .error {
   font-size: 14px;
   color: var(--color-state-danger-fg);

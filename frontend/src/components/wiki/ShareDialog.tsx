@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import {
   Button,
@@ -155,7 +155,6 @@ export function ShareDialog({ path, open, onClose }: ShareDialogProps) {
   const { acl, error, isLoading, refresh } = usePageAcl(open ? path : null);
   const { groups } = useGroups();
   const { user } = useAuth();
-  const dialogRef = useRef<HTMLDivElement>(null);
 
   const baseline = useMemo(() => deriveBaseline(acl), [acl]);
 
@@ -318,7 +317,6 @@ export function ShareDialog({ path, open, onClose }: ShareDialogProps) {
       }}
     >
       <div
-        ref={dialogRef}
         className={styles.dialog}
         role="dialog"
         aria-modal="true"
@@ -416,24 +414,19 @@ export function ShareDialog({ path, open, onClose }: ShareDialogProps) {
               )}
             </div>
 
-            {/* General access */}
+            {/* General access — the scope dropdown carries the lock/globe icon */}
             <div className={styles.generalRow}>
-              <span className={styles.generalIcon}>
-                {general === "private" ? <SvgLock size={16} /> : <SvgGlobe size={16} />}
-              </span>
               <ScopeSelect
                 value={general === "private" ? "invited" : "anyone"}
                 onChange={(scope) =>
                   setGeneral(scope === "invited" ? "private" : "public-read")
                 }
-                container={dialogRef.current}
               />
               <span className={styles.generalSpacer} />
               <PermSelect
                 value={general === "public-write" ? "write" : "read"}
                 disabled={general === "private"}
                 onChange={(p) => setGeneral(p === "write" ? "public-write" : "public-read")}
-                container={dialogRef.current}
               />
             </div>
 
@@ -487,7 +480,6 @@ export function ShareDialog({ path, open, onClose }: ShareDialogProps) {
                         value={g.permission}
                         onChange={(p) => setPermission(k, p)}
                         onRemove={() => removeGrant(k)}
-                        container={dialogRef.current}
                       />
                     </span>
                   </div>
@@ -552,13 +544,11 @@ function PermSelect({
   onChange,
   onRemove,
   disabled,
-  container,
 }: {
   value: Permission;
   onChange: (p: Permission) => void;
   onRemove?: () => void;
   disabled?: boolean;
-  container: HTMLElement | null;
 }) {
   const [open, setOpen] = useState(false);
   const label = value === "write" ? "Edit" : "View";
@@ -566,17 +556,19 @@ function PermSelect({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <Popover.Trigger asChild>
-        <SelectButton
-          size="sm"
-          variant="select-light"
-          icon={icon}
-          rightIcon={SvgChevronDown}
-          disabled={disabled}
-        >
-          {label}
-        </SelectButton>
+        <span className={styles.menuTrigger}>
+          <SelectButton
+            size="sm"
+            variant="select-light"
+            icon={icon}
+            rightIcon={SvgChevronDown}
+            disabled={disabled}
+          >
+            {label}
+          </SelectButton>
+        </span>
       </Popover.Trigger>
-      <Popover.Content width="fit" align="end" sideOffset={4} container={container}>
+      <Popover.Content width="fit" align="end" sideOffset={4}>
         <Popover.Menu>
           {[
             <LineItemButton
@@ -624,27 +616,27 @@ function PermSelect({
 function ScopeSelect({
   value,
   onChange,
-  container,
 }: {
   value: "invited" | "anyone";
   onChange: (v: "invited" | "anyone") => void;
-  container: HTMLElement | null;
 }) {
   const [open, setOpen] = useState(false);
   const label = value === "invited" ? "Only those invited" : "Anyone signed in";
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <Popover.Trigger asChild>
-        <SelectButton
-          size="sm"
-          variant="select-light"
-          icon={value === "invited" ? SvgLock : SvgGlobe}
-          rightIcon={SvgChevronDown}
-        >
-          {label}
-        </SelectButton>
+        <span className={styles.menuTrigger}>
+          <SelectButton
+            size="sm"
+            variant="select-light"
+            icon={value === "invited" ? SvgLock : SvgGlobe}
+            rightIcon={SvgChevronDown}
+          >
+            {label}
+          </SelectButton>
+        </span>
       </Popover.Trigger>
-      <Popover.Content width="fit" align="start" sideOffset={4} container={container}>
+      <Popover.Content width="fit" align="start" sideOffset={4}>
         <Popover.Menu>
           {[
             <LineItemButton

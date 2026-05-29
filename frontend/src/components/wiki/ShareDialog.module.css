@@ -183,13 +183,14 @@
   gap: 8px;
   padding: 4px 2px;
 }
-.generalIcon {
-  display: inline-flex;
-  color: var(--color-text-secondary);
-  flex-shrink: 0;
-}
 .generalSpacer {
   flex: 1;
+}
+
+/* Wraps an OPAL SelectButton so Radix Popover can anchor to a
+   ref-forwarding DOM node (SelectButton doesn't forward its ref). */
+.menuTrigger {
+  display: inline-flex;
 }
 
 /* Grantee list */

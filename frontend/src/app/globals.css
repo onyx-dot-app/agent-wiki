@@ -355,3 +355,11 @@ textarea::placeholder {
 .scroll-x-hidden::-webkit-scrollbar {
   display: none;
 }
+
+/* Radix popovers (OPAL Popover / SelectButton menus) must float above modal
+   scrims (z-index 100–110). Radix sets `z-index: auto` inline on the wrapper
+   and OPAL strips className/style from Popover.Content, so `!important` here
+   is the only way to lift the menu above the modal. */
+[data-radix-popper-content-wrapper] {
+  z-index: 1000 !important;
+}

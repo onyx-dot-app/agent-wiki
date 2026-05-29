@@ -209,15 +209,17 @@ function AccountTypeSelect({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <Popover.Trigger asChild>
-        <SelectButton
-          size="sm"
-          variant="select-light"
-          icon={isAdmin ? SvgUserShield : SvgUser}
-          rightIcon={SvgChevronDown}
-          disabled={disabled}
-        >
-          {isAdmin ? "Admin" : "Basic"}
-        </SelectButton>
+        <span className={styles.menuTrigger}>
+          <SelectButton
+            size="sm"
+            variant="select-light"
+            icon={isAdmin ? SvgUserShield : SvgUser}
+            rightIcon={SvgChevronDown}
+            disabled={disabled}
+          >
+            {isAdmin ? "Admin" : "Basic"}
+          </SelectButton>
+        </span>
       </Popover.Trigger>
       <Popover.Content width="fit" align="start" sideOffset={4}>
         <Popover.Menu>
