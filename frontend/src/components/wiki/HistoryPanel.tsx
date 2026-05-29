@@ -394,7 +394,7 @@ function LogoAvatar({ Logo }: { Logo: ComponentType<IconProps> }) {
         ...avatarBase,
         marginLeft: -6,
         background: color.bg.page,
-        border: `1px solid ${color.border.subtle}`,
+        border: "1px solid var(--diff-avatar-border)",
       }}
     >
       <Logo style={{ width: 16, height: 16 }} />
