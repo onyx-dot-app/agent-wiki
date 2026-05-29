@@ -1,10 +1,9 @@
-"""Unit tests for ``commit_with_retry`` in ``app.wiki.git``.
+"""Unit tests for ``commit_with_3way_merge`` in ``app.wiki.git``.
 
-``commit_with_retry`` is the git-layer commit entry point for the non-agent
-callers (human edits, ingest, folder/trigger writes). When ``base_sha`` is
-supplied it 3-way merges a concurrent edit and retries when HEAD keeps moving.
-Ref-lock races (``GitCommitLockError``) are handled transparently inside
-``commit_file`` — ``commit_with_retry`` never sees them.
+``commit_with_3way_merge`` is the git-layer commit entry point for human edits
+(``PUT /file``). When ``base_sha`` is supplied it 3-way merges a concurrent
+edit and retries when HEAD keeps moving. Ref-lock races are handled
+transparently inside ``commit_file``.
 
 All git/filesystem I/O is monkeypatched so the tests run without a real repo
 or database.
@@ -45,7 +44,7 @@ def test_no_base_passes_through(monkeypatch):
         MagicMock(side_effect=AssertionError("should not read worktree without a base")),
     )
 
-    sha, body = wiki_git.commit_with_retry(_PATH, new_body="body", message=_MSG)
+    sha, body = wiki_git.commit_with_3way_merge(_PATH, new_body="body", message=_MSG)
 
     assert sha == _SHA_A
     assert body == "body"
@@ -75,7 +74,7 @@ def test_base_no_concurrent_change(monkeypatch):
     monkeypatch.setattr("app.wiki.git.merge_content", merge_content)
     commit_file = _wire(monkeypatch, head_shas=[_SHA_A, _SHA_A], worktrees=[_BASE])
 
-    sha, body = wiki_git.commit_with_retry(
+    sha, body = wiki_git.commit_with_3way_merge(
         _PATH, base_sha=_SHA_A, new_body=_NEW, message=_MSG, max_retries=0
     )
 
@@ -95,7 +94,7 @@ def test_base_clean_merge(monkeypatch):
         merge_result=MergeResult(merged=merged, clean=True),
     )
 
-    sha, body = wiki_git.commit_with_retry(
+    sha, body = wiki_git.commit_with_3way_merge(
         _PATH, base_sha=_SHA_A, new_body=_NEW, message=_MSG, max_retries=0
     )
 
@@ -113,7 +112,7 @@ def test_base_conflict_raises_without_resolver(monkeypatch):
     )
 
     with pytest.raises(GitMergeConflictError):
-        wiki_git.commit_with_retry(
+        wiki_git.commit_with_3way_merge(
             _PATH, base_sha=_SHA_A, new_body=_NEW, message=_MSG, max_retries=0
         )
 
@@ -140,7 +139,7 @@ def test_base_head_moves_then_commits(monkeypatch):
     commit_file = MagicMock(return_value=_SHA_C)
     monkeypatch.setattr("app.wiki.git.commit_file", commit_file)
 
-    sha, body = wiki_git.commit_with_retry(
+    sha, body = wiki_git.commit_with_3way_merge(
         _PATH, base_sha=_SHA_A, new_body=_NEW, message=_MSG, max_retries=1
     )
 
@@ -166,7 +165,7 @@ def test_base_raises_when_max_retries_exceeded(monkeypatch):
     monkeypatch.setattr("app.wiki.git.commit_file", commit_file)
 
     with pytest.raises(CommitMaxRetriesError) as exc_info:
-        wiki_git.commit_with_retry(
+        wiki_git.commit_with_3way_merge(
             _PATH, base_sha=_SHA_A, new_body=_NEW, message=_MSG, max_retries=2
         )
 

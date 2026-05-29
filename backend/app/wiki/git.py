@@ -136,7 +136,7 @@ def _read_head_or_empty(rel_path: str) -> str:
         return ""
 
 
-def commit_with_retry(
+def commit_with_3way_merge(
     rel_path: str,
     *,
     new_body: str,
@@ -145,18 +145,16 @@ def commit_with_retry(
     author: str | None = None,
     max_retries: int = _COMMIT_RETRY_MAX,
 ) -> tuple[str, str]:
-    """Commit ``new_body`` to ``rel_path``, retrying when HEAD moves mid-merge.
+    """Commit ``new_body`` to ``rel_path``, 3-way merging any concurrent change.
 
-    The git-layer commit entry point for human edits (``PUT /file``). Ref-lock
-    races are handled transparently inside ``commit_file`` — this function only
-    retries when HEAD moves between the pre/post SHA checks (a concurrent
-    commit landed during the merge step).
+    The git-layer commit entry point for human edits (``PUT /file``).
 
     Pass ``base_sha`` iff the edit was derived from a specific committed version
     (read-modify-write). The function fetches the base body from that commit and
     reconciles any concurrent change via 3-way merge (``git merge-file``): clean
     merges commit transparently; unresolvable conflicts raise
-    ``GitMergeConflictError`` so the caller can surface a 409.
+    ``GitMergeConflictError`` so the caller can surface a 409. Retries up to
+    ``max_retries`` times when HEAD keeps moving during the merge step.
 
     Without ``base_sha`` (new file, .gitkeep, trigger YAML) the body is
     committed as-is — there's nothing to merge against.
@@ -191,7 +189,7 @@ def commit_with_retry(
             raise CommitMaxRetriesError(attempt, post or "")
         if post != head:
             log.info(
-                "commit_with_retry: HEAD moved for %s, retrying (%d/%d)",
+                "commit_with_3way_merge: HEAD moved for %s, retrying (%d/%d)",
                 rel_path, attempt + 1, max_retries,
             )
         if base is not None:
@@ -519,7 +517,7 @@ class GitCommitLockError(Exception):
 
 
 class GitMergeConflictError(Exception):
-    """Raised by ``commit_with_retry`` when a concurrent change can't be
+    """Raised by ``commit_with_3way_merge`` when a concurrent change can't be
     merged cleanly. Human edit paths translate this into a 409 so the user
     gets the conflict UI.
     """
@@ -530,11 +528,8 @@ class GitMergeConflictError(Exception):
 
 
 class CommitMaxRetriesError(Exception):
-    """Raised by ``commit_with_retry`` when HEAD keeps moving or the ref-lock
-    keeps racing past the retry budget.
-
-    Callers at a higher layer (e.g. ``commit_with_ai_rebase``) may translate
-    this into a more domain-specific error.
+    """Raised by ``commit_with_3way_merge`` when HEAD keeps moving past the
+    retry budget.
     """
 
     def __init__(self, retries: int, current_sha: str) -> None:
