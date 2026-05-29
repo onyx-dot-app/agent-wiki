@@ -110,7 +110,7 @@ html {
   --diff-word-remove: var(--diff-remove-fg);
 }
 
-:root[data-theme="dark"] {
+:root.dark {
   color-scheme: dark;
 
   /* Text — inverted hierarchy so warm-grey character is preserved. */

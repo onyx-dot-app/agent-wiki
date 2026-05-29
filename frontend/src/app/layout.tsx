@@ -41,8 +41,8 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en" className={`${hankenGrotesk.variable} ${dmMono.variable}`}>
       <head>
-        {/* Sets data-theme on <html> before React hydrates so dark-mode
-            users don't see a light-mode flash on first paint. */}
+        {/* Sets data-theme attribute and .dark class on <html> before React
+            hydrates so dark-mode users don't see a light-mode flash. */}
         <ThemeBootstrapScript />
       </head>
       <body

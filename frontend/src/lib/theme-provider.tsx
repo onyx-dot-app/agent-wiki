@@ -30,10 +30,9 @@ const STORAGE_KEY = "agent-wiki:theme";
 // light-mode flash before the dark-mode preference applies. Renders into
 // <head> via ``ThemeBootstrapScript``.
 //
-// Logic: read the persisted setting (or fall back to ``system``); set
-// ``data-theme`` on <html> based on the resolved value. Wrapped in
-// try/catch so a quota error or disabled storage falls through quietly.
-const bootstrapSource = `(()=>{try{var k=${JSON.stringify(STORAGE_KEY)};var s=localStorage.getItem(k);if(s!=='light'&&s!=='dark'&&s!=='system')s='system';var r=s;if(s==='system')r=window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';document.documentElement.setAttribute('data-theme',r);}catch(e){}})();`;
+// Sets both ``data-theme`` attribute (our globals.css tokens) and the
+// ``.dark`` class (Opal's CSS) so both theming systems stay in sync.
+const bootstrapSource = `(()=>{try{var k=${JSON.stringify(STORAGE_KEY)};var s=localStorage.getItem(k);if(s!=='light'&&s!=='dark'&&s!=='system')s='system';var r=s;if(s==='system')r=window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';var el=document.documentElement;el.setAttribute('data-theme',r);el.classList.toggle('dark',r==='dark');}catch(e){}})();`;
 
 export function ThemeBootstrapScript() {
   return <script dangerouslySetInnerHTML={{ __html: bootstrapSource }} />;
@@ -53,6 +52,7 @@ function readStoredSetting(): ThemeSetting {
 function applyTheme(resolved: ResolvedTheme) {
   if (typeof document !== "undefined") {
     document.documentElement.setAttribute("data-theme", resolved);
+    document.documentElement.classList.toggle("dark", resolved === "dark");
   }
 }
 
