@@ -4,6 +4,19 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from "react"
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
+import { Button } from "@onyx-ai/opal/components";
+import {
+  SvgBubbleText,
+  SvgCheck,
+  SvgDocFile,
+  SvgEdit,
+  SvgExpand,
+  SvgFold,
+  SvgHistory,
+  SvgX,
+  SvgXCircle,
+} from "@onyx-ai/opal/icons";
+
 import { apiFetch, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import {
@@ -421,7 +434,7 @@ export function ChatWidget() {
           zIndex: 1000,
         }}
       >
-        <ChatBubbleIcon />
+        <SvgBubbleText size={24} />
       </button>
     );
   }
@@ -484,28 +497,35 @@ export function ChatWidget() {
         >
           <div style={{ fontWeight: 600, fontSize: 14 }}>Chat</div>
           <div style={{ flex: 1 }} />
-          <IconButton
-            title="New chat"
+          <Button
+            icon={SvgEdit}
+            prominence="tertiary"
+            size="sm"
+            tooltip="New chat"
             onClick={onNewChat}
             disabled={sending || (sessionId === null && items.length === 0)}
-          >
-            <NewChatIcon />
-          </IconButton>
-          <IconButton
-            title="History"
+          />
+          <Button
+            icon={SvgHistory}
+            prominence="tertiary"
+            size="sm"
+            tooltip="History"
             onClick={() => setHistoryOpen((v) => !v)}
-          >
-            <HistoryIcon />
-          </IconButton>
-          <IconButton
-            title={isExpanded ? "Collapse" : "Expand"}
+          />
+          <Button
+            icon={isExpanded ? SvgFold : SvgExpand}
+            prominence="tertiary"
+            size="sm"
+            tooltip={isExpanded ? "Collapse" : "Expand"}
             onClick={() => setMode(isExpanded ? "widget" : "expanded")}
-          >
-            {isExpanded ? <CollapseIcon /> : <ExpandIcon />}
-          </IconButton>
-          <IconButton title="Close" onClick={() => setMode("closed")}>
-            <CloseIcon />
-          </IconButton>
+          />
+          <Button
+            icon={SvgX}
+            prominence="tertiary"
+            size="sm"
+            tooltip="Close"
+            onClick={() => setMode("closed")}
+          />
         </header>
 
         {drafting && <DraftingBanner state={drafting} />}
@@ -776,7 +796,9 @@ function DraftingBanner({ state }: { state: DraftingState }) {
         flexShrink: 0,
       }}
     >
-      <DraftIcon />
+      <span style={{ flexShrink: 0, marginTop: 1, display: "flex" }}>
+        <SvgDocFile size={16} />
+      </span>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontWeight: 600 }}>Drafting initial version</div>
         <div style={{ marginTop: 2, color: color.text.secondary, overflowWrap: "anywhere" }}>
@@ -797,20 +819,6 @@ function DraftingBanner({ state }: { state: DraftingState }) {
         </div>
       </div>
     </div>
-  );
-}
-
-function DraftIcon() {
-  return (
-    <svg
-      width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-      strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-      style={{ flexShrink: 0, marginTop: 1 }}
-    >
-      <path d="M14 3v4a1 1 0 0 0 1 1h4" />
-      <path d="M17 21H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2z" />
-      <path d="M9 13l2 2 4-4" />
-    </svg>
   );
 }
 
@@ -907,103 +915,15 @@ function ToolStateIcon({ state }: { state: ToolState }) {
   }
   if (state === "error") {
     return (
-      <span style={{ color: color.state.danger.fg, fontWeight: 700, fontSize: 12 }}>✕</span>
+      <span style={{ color: color.state.danger.fg, display: "flex" }}>
+        <SvgXCircle size={12} />
+      </span>
     );
   }
   return (
-    <span style={{ color: color.state.success.fg, fontWeight: 700, fontSize: 12 }}>✓</span>
+    <span style={{ color: color.state.success.fg, display: "flex" }}>
+      <SvgCheck size={12} />
+    </span>
   );
 }
 
-function IconButton({
-  children,
-  onClick,
-  title,
-  disabled,
-}: {
-  children: React.ReactNode;
-  onClick: () => void;
-  title: string;
-  disabled?: boolean;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      title={title}
-      aria-label={title}
-      disabled={disabled}
-      style={{
-        width: 28,
-        height: 28,
-        border: "none",
-        background: "transparent",
-        borderRadius: radius.xs,
-        cursor: disabled ? "not-allowed" : "pointer",
-        color: color.text.secondary,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        opacity: disabled ? 0.4 : 1,
-      }}
-      onMouseEnter={(e) => {
-        if (!disabled) e.currentTarget.style.background = color.bg.hover;
-      }}
-      onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-    >
-      {children}
-    </button>
-  );
-}
-
-function ChatBubbleIcon() {
-  return (
-    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="M21 12a8 8 0 0 1-11.5 7.2L4 21l1.8-5.5A8 8 0 1 1 21 12z" />
-    </svg>
-  );
-}
-function NewChatIcon() {
-  // Pencil-on-paper compose glyph — universally read as "new message".
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M12 20h9" />
-      <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
-    </svg>
-  );
-}
-function HistoryIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <circle cx="12" cy="12" r="9" />
-      <path d="M12 7v5l3 2" />
-    </svg>
-  );
-}
-function ExpandIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="M9 3H3v6" />
-      <path d="M3 3l7 7" />
-      <path d="M15 21h6v-6" />
-      <path d="M21 21l-7-7" />
-    </svg>
-  );
-}
-function CollapseIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="M4 14h6v6" />
-      <path d="M10 14l-7 7" />
-      <path d="M20 10h-6V4" />
-      <path d="M14 10l7-7" />
-    </svg>
-  );
-}
-function CloseIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="M18 6L6 18" />
-      <path d="M6 6l12 12" />
-    </svg>
-  );
-}

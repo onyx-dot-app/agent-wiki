@@ -96,15 +96,16 @@ function GroupsManager() {
             placeholder="description (optional)"
             style={{ ...inputStyle, marginTop: 6 }}
           />
-          <Button
-            type="submit"
-            variant="action"
-            size="sm"
-            disabled={busy || !name.trim()}
-            style={{ marginTop: 8 }}
-          >
-            Create group
-          </Button>
+          <div style={{ marginTop: 8 }}>
+            <Button
+              type="submit"
+              variant="action"
+              size="sm"
+              disabled={busy || !name.trim()}
+            >
+              Create group
+            </Button>
+          </div>
           {createError && (
             <div style={{ color: color.state.danger.fg, marginTop: 8, fontSize: 13 }}>{createError}</div>
           )}
@@ -119,18 +120,24 @@ function GroupsManager() {
           <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
             {groups.map((g) => (
               <li key={g.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0" }}>
-                <Button
-                  size="sm"
+                <button
+                  type="button"
                   onClick={() => setSelected(g.id)}
                   style={{
                     flex: 1,
                     textAlign: "left",
                     background: selected === g.id ? color.accent.subtleBg : color.bg.page,
                     fontWeight: selected === g.id ? 600 : 400,
+                    border: "none",
+                    borderRadius: radius.sm,
+                    padding: "5px 8px",
+                    fontSize: 13,
+                    cursor: "pointer",
+                    color: color.text.primary,
                   }}
                 >
                   {g.name}
-                </Button>
+                </button>
                 <Button size="sm" variant="danger" onClick={() => void onDelete(g)}>
                   Delete
                 </Button>

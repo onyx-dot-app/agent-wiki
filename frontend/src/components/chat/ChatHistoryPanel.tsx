@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 
+import { SvgArrowLeft, SvgTrash } from "@onyx-ai/opal/icons";
+
 import {
   type ChatSession,
   deleteSession,
@@ -98,7 +100,7 @@ export function ChatHistoryPanel({
           aria-label="Back to chat"
           style={iconButtonStyle}
         >
-          <BackIcon />
+          <SvgArrowLeft size={16} />
         </button>
         <div style={{ fontWeight: 600, fontSize: 14, flex: 1, color: color.text.primary }}>History</div>
         <button
@@ -225,7 +227,7 @@ function SessionRow({
             color: color.text.faint,
           }}
         >
-          <TrashIcon />
+          <SvgTrash size={14} />
         </button>
       )}
     </div>
@@ -260,21 +262,3 @@ function formatRelative(ts: string): string {
   return d.toLocaleDateString();
 }
 
-function BackIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="M19 12H5" />
-      <path d="M12 19l-7-7 7-7" />
-    </svg>
-  );
-}
-
-function TrashIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="M3 6h18" />
-      <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-      <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-    </svg>
-  );
-}

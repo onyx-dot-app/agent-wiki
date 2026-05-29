@@ -15,7 +15,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import useSWR from "swr";
 import { Button, SelectButton } from "@onyx-ai/opal/components";
-import { SvgFolderPlus, SvgPlus, SvgWorkflow } from "@onyx-ai/opal/icons";
+import { SvgArrowLeft, SvgEdit, SvgFolderPlus, SvgPlus, SvgTrash, SvgWorkflow } from "@onyx-ai/opal/icons";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { PageHeader } from "@/components/common/PageHeader";
 import { TriggerModal } from "@/components/triggers/TriggerModal";
@@ -1268,7 +1268,7 @@ function Row({
               alignItems: "center",
             }}
           >
-            <PencilIcon />
+            <SvgEdit size={16} />
           </button>
           <button
             onClick={onDelete}
@@ -1285,7 +1285,7 @@ function Row({
               alignItems: "center",
             }}
           >
-            <TrashIcon />
+            <SvgTrash size={16} />
           </button>
         </>
       )}
@@ -1991,7 +1991,7 @@ function FileViewer({ path }: { path: string }) {
             flexShrink: 0,
           }}
         >
-          <BackIcon />
+          <SvgArrowLeft size={18} />
         </Link>
         <Breadcrumbs segments={segments} />
         <div style={{ flex: 1 }} />
@@ -2758,10 +2758,9 @@ function ActiveSessionRow({
 
       <Button
         type="button"
-        variant="secondary"
+        variant="default"
         size="sm"
         onClick={onClose}
-        style={{ flexShrink: 0 }}
       >
         Close
       </Button>
@@ -2850,51 +2849,3 @@ function FilenameRow({
   );
 }
 
-function BackIcon() {
-  return (
-    <svg
-      width="18"
-      height="18"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-    >
-      <path d="M19 12H5" />
-      <path d="M12 19l-7-7 7-7" />
-    </svg>
-  );
-}
-
-function PencilIcon() {
-  return (
-    <svg
-      width="16"
-      height="16"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-    >
-      <path d="M12 20h9" />
-      <path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4z" />
-    </svg>
-  );
-}
-
-function TrashIcon() {
-  return (
-    <svg
-      width="16"
-      height="16"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-    >
-      <path d="M3 6h18" />
-      <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-      <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-    </svg>
-  );
-}

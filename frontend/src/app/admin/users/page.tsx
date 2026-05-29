@@ -123,15 +123,16 @@ function UsersTable() {
                   >
                     {u.is_admin ? "Demote" : "Promote"}
                   </Button>
-                  <Button
-                    size="sm"
-                    variant="danger"
-                    onClick={() => void remove(u)}
-                    disabled={busy || isSelf}
-                    style={{ marginLeft: 8 }}
-                  >
-                    Delete
-                  </Button>
+                  <div style={{ marginLeft: 8 }}>
+                    <Button
+                      size="sm"
+                      variant="danger"
+                      onClick={() => void remove(u)}
+                      disabled={busy || isSelf}
+                    >
+                      Delete
+                    </Button>
+                  </div>
                 </Td>
               </tr>
             );

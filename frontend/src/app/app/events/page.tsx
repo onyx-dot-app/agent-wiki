@@ -33,7 +33,7 @@ export default function EventsPage() {
           description="Trigger fires, newest first."
           actions={
             <Button onClick={() => void refresh()} disabled={isValidating}>
-              {isValidating ? <LoadingSpinner size={14} /> : "Refresh"}
+              {isValidating ? "Refreshing…" : "Refresh"}
             </Button>
           }
         />

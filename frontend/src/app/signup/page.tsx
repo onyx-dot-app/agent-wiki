@@ -134,15 +134,16 @@ function SignupForm() {
               {error}
             </div>
           )}
-          <Button
-            type="submit"
-            variant="action"
-            width="full"
-            disabled={submitting}
-            style={{ marginTop: 4 }}
-          >
-            {submitting ? "Creating…" : "Create account"}
-          </Button>
+          <div style={{ marginTop: 4 }}>
+            <Button
+              type="submit"
+              variant="action"
+              width="full"
+              disabled={submitting}
+            >
+              {submitting ? "Creating…" : "Create account"}
+            </Button>
+          </div>
         </form>
         <p style={{ marginTop: 20, marginBottom: 0, fontSize: 13, color: color.text.muted }}>
           Already have an account?{" "}

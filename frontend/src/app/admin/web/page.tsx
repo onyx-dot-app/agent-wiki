@@ -188,7 +188,6 @@ function KeyField({
             variant="danger"
             onClick={onClear}
             disabled={clearDisabled}
-            style={{ padding: "2px 8px", fontSize: 12 }}
           >
             Clear
           </Button>
