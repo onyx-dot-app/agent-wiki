@@ -1,11 +1,11 @@
 // Centralized design tokens for the agent-wiki frontend.
 //
 // Tokens resolve to CSS custom properties (e.g. ``var(--color-text-primary)``)
-// rather than literal hex values, so a single ``data-theme="dark"`` attribute
-// on ``<html>`` swaps the entire UI without re-rendering. The actual hex
-// values for each theme live in ``app/globals.css`` keyed off ``:root`` and
-// ``:root[data-theme="dark"]``. ThemeProvider (``lib/theme-provider.tsx``)
-// reads the user preference and toggles the attribute.
+// rather than literal hex values, so toggling the ``.dark`` class on ``<html>``
+// swaps the entire UI without re-rendering. The actual hex values for each
+// theme live in ``app/globals.css`` keyed off ``:root`` and ``:root.dark``.
+// ThemeProvider (``lib/theme-provider.tsx``) reads the user preference and
+// toggles both the ``data-theme`` attribute and the ``.dark`` class.
 //
 // Palette intent: warm greyscale (Notion/Linear-flavored). The "accent"
 // role is near-black, not indigo — primary actions stand out by tonal

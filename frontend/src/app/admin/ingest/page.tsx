@@ -1,14 +1,12 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
-import { useRouter } from "next/navigation";
 import { mutate as globalMutate } from "swr";
 
-import { AppShell } from "@/components/common/AppShell";
 import { Button } from "@/components/common/Button";
 import { BackLink, PageHeader } from "@/components/common/PageHeader";
+import { RequireAdmin } from "@/components/RequireAdmin";
 import { apiFetch } from "@/lib/api";
-import { useRequireAuth } from "@/lib/auth";
 import { color, radius } from "@/lib/theme";
 import { useIsMobile } from "@/lib/viewport";
 
@@ -49,19 +47,9 @@ function isConfigured(p: Provider, s: LLMSettings): boolean {
 }
 
 export default function AdminIngestPage() {
-  const { user, loading } = useRequireAuth();
-  const router = useRouter();
   const isMobile = useIsMobile();
-
-  useEffect(() => {
-    if (!loading && user && !user.is_admin) router.replace("/");
-  }, [loading, user, router]);
-
-  if (loading || !user) return <main style={{ padding: isMobile ? 16 : 32 }}>Loading…</main>;
-  if (!user.is_admin) return null;
-
   return (
-    <AppShell>
+    <RequireAdmin>
       <main style={{ padding: isMobile ? "16px 12px" : "24px 32px", maxWidth: 720 }}>
         <BackLink />
         <PageHeader
@@ -70,7 +58,7 @@ export default function AdminIngestPage() {
         />
         <IngestForm />
       </main>
-    </AppShell>
+    </RequireAdmin>
   );
 }
 
@@ -318,7 +306,7 @@ function SelectorModelSection({ settings, onSaved }: { settings: LLMSettings; on
             {hasNoModels && (
               <div style={{ fontSize: 13, color: color.text.muted, padding: "4px 0 8px" }}>
                 No models configured. Add models on the{" "}
-                <a href="/admin/llm" style={{ color: color.accent.fg }}>Language models</a> page first.
+                <a href="/admin/language-models" style={{ color: color.accent.fg }}>Language models</a> page first.
               </div>
             )}
             <button

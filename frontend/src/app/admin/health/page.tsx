@@ -1,11 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 
-import { AppShell } from "@/components/common/AppShell";
 import { BackLink, PageHeader } from "@/components/common/PageHeader";
-import { useRequireAuth } from "@/lib/auth";
+import { RequireAdmin } from "@/components/RequireAdmin";
 import { useHealth } from "@/lib/health";
 import { color, radius } from "@/lib/theme";
 import { useIsMobile } from "@/lib/viewport";
@@ -19,17 +17,11 @@ const QUEUE_LABELS: Record<string, string> = {
 };
 
 export default function AdminHealthPage() {
-  const { user, loading } = useRequireAuth();
-  const router = useRouter();
   const isMobile = useIsMobile();
   const { health: data, error: healthError, isValidating: healthValidating } = useHealth({
     refreshIntervalMs: POLL_MS,
   });
   const error = healthError?.message ?? null;
-
-  useEffect(() => {
-    if (!loading && user && !user.is_admin) router.replace("/");
-  }, [loading, user, router]);
 
   // Track when we last got a *successful* response so the user sees a
   // freshness signal even though SWR doesn't expose `dataUpdatedAt`.
@@ -39,9 +31,6 @@ export default function AdminHealthPage() {
       setLastUpdated(new Date());
     }
   }, [data, error, healthValidating]);
-
-  if (loading || !user) return <main style={{ padding: isMobile ? 16 : 32 }}>Loading…</main>;
-  if (!user.is_admin) return null;
 
   const backendUp = !error;
   const statusColor =
@@ -55,7 +44,7 @@ export default function AdminHealthPage() {
       : "Backend degraded";
 
   return (
-    <AppShell>
+    <RequireAdmin>
       <main style={{ padding: isMobile ? "16px 12px" : "24px 32px", height: "100vh", overflowY: "auto" }}>
         <BackLink />
         <PageHeader
@@ -195,6 +184,6 @@ export default function AdminHealthPage() {
           </ul>
         )}
       </main>
-    </AppShell>
+    </RequireAdmin>
   );
 }

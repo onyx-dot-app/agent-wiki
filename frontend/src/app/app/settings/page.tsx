@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState, type CSSProperties, type FormEvent, type ReactNode } from "react";
 
-import { AppShell } from "@/components/common/AppShell";
 import { Button } from "@/components/common/Button";
 import { BackLink, PageHeader } from "@/components/common/PageHeader";
 import { apiFetch } from "@/lib/api";
@@ -49,8 +48,7 @@ export default function SettingsPage() {
   }
 
   return (
-    <AppShell>
-      <main style={{ padding: isMobile ? "16px 12px" : "24px 32px", maxWidth: 720 }}>
+    <main style={{ padding: isMobile ? "16px 12px" : "24px 32px", maxWidth: 720 }}>
         <BackLink href="/" label="← Home" />
         <PageHeader
           title="Personal settings"
@@ -65,8 +63,7 @@ export default function SettingsPage() {
         <Section title="Chat model">
           <ChatModelForm initial={user.settings} updateSettings={updateSettings} />
         </Section>
-      </main>
-    </AppShell>
+    </main>
   );
 }
 

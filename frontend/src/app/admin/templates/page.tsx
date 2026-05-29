@@ -1,12 +1,10 @@
 "use client";
 
 import { useEffect, useState, type CSSProperties, type FormEvent } from "react";
-import { useRouter } from "next/navigation";
 
-import { AppShell } from "@/components/common/AppShell";
 import { Button } from "@/components/common/Button";
 import { BackLink, PageHeader } from "@/components/common/PageHeader";
-import { useRequireAuth } from "@/lib/auth";
+import { RequireAdmin } from "@/components/RequireAdmin";
 import {
   createTemplate,
   deleteTemplate,
@@ -19,19 +17,9 @@ import { color, radius, shadow } from "@/lib/theme";
 import { useIsMobile } from "@/lib/viewport";
 
 export default function AdminTemplatesPage() {
-  const { user, loading } = useRequireAuth();
-  const router = useRouter();
   const isMobile = useIsMobile();
-
-  useEffect(() => {
-    if (!loading && user && !user.is_admin) router.replace("/");
-  }, [loading, user, router]);
-
-  if (loading || !user) return <main style={{ padding: isMobile ? 16 : 32 }}>Loading…</main>;
-  if (!user.is_admin) return null;
-
   return (
-    <AppShell>
+    <RequireAdmin>
       <main style={{ padding: isMobile ? "16px 12px" : "24px 32px", maxWidth: 960 }}>
         <BackLink />
         <PageHeader
@@ -40,7 +28,7 @@ export default function AdminTemplatesPage() {
         />
         <TemplatesList />
       </main>
-    </AppShell>
+    </RequireAdmin>
   );
 }
 

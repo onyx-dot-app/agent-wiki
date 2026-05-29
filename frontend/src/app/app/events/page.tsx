@@ -1,6 +1,5 @@
 "use client";
 
-import { AppShell } from "@/components/common/AppShell";
 import { Button } from "@/components/common/Button";
 import { PageHeader } from "@/components/common/PageHeader";
 import { useRequireAuth } from "@/lib/auth";
@@ -22,8 +21,7 @@ export default function EventsPage() {
   if (loading || !user) return <main style={{ padding: isMobile ? 16 : 32 }}>Loading…</main>;
 
   return (
-    <AppShell>
-      <main style={{ padding: isMobile ? "16px 12px" : "24px 32px" }}>
+    <main style={{ padding: isMobile ? "16px 12px" : "24px 32px" }}>
         <PageHeader
           title="Events"
           description="Trigger fires, newest first."
@@ -124,8 +122,7 @@ export default function EventsPage() {
             );
           })}
         </ul>
-      </main>
-    </AppShell>
+    </main>
   );
 }
 

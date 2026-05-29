@@ -5,7 +5,6 @@ import useSWR from "swr";
 
 import { SetupWizard } from "@/components/agents/SetupWizard";
 import { ToolCard } from "@/components/agents/ToolCard";
-import { AppShell } from "@/components/common/AppShell";
 import { Button } from "@/components/common/Button";
 import { PageHeader } from "@/components/common/PageHeader";
 import { ApiError } from "@/lib/api";
@@ -31,10 +30,9 @@ export default function AgentsPage() {
     return <main style={{ padding: isMobile ? 16 : 32 }}>Loading…</main>;
 
   return (
-    <AppShell>
-      <main
-        style={{ padding: isMobile ? "16px 12px" : "24px 32px", maxWidth: 880 }}
-      >
+    <main
+      style={{ padding: isMobile ? "16px 12px" : "24px 32px", maxWidth: 880 }}
+    >
         <PageHeader
           title="Agents"
           description="Give your agents the ability to read and update this wiki. Generate a personal API key below, then drop it into your coding agent's MCP configuration. Each key's name becomes that agent's identity — it shows up next to its activity on wiki pages and in commit history."
@@ -44,8 +42,7 @@ export default function AgentsPage() {
         <EndpointBlock />
         <TokenManager />
         <ClientConfigHelp />
-      </main>
-    </AppShell>
+    </main>
   );
 }
 

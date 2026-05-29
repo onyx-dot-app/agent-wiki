@@ -14,8 +14,6 @@ import { diffLines } from "diff";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import useSWR from "swr";
-
-import { AppShell } from "@/components/common/AppShell";
 import { Button } from "@/components/common/Button";
 import { PageHeader } from "@/components/common/PageHeader";
 import { TriggerModal } from "@/components/triggers/TriggerModal";
@@ -99,22 +97,18 @@ export default function WikiRoute() {
   // Remember the most recent wiki path so the "Last viewed" landing
   // setting has something to fall back to.
   useEffect(() => {
-    rememberWikiPath("/wiki" + (slugPath ? "/" + slugPath : ""));
+    rememberWikiPath("/app/wiki" + (slugPath ? "/" + slugPath : ""));
   }, [slugPath]);
 
   if (loading || !user)
     return <main style={{ padding: isMobile ? 16 : 32 }}>Loading…</main>;
 
-  return (
-    <AppShell>
-      {isFile ? (
-        <FileViewer path={slugPath} />
-      ) : isNewMode ? (
-        <NewDocView dir={slugPath} />
-      ) : (
-        <Explorer dir={slugPath} />
-      )}
-    </AppShell>
+  return isFile ? (
+    <FileViewer path={slugPath} />
+  ) : isNewMode ? (
+    <NewDocView dir={slugPath} />
+  ) : (
+    <Explorer dir={slugPath} />
   );
 }
 
@@ -214,7 +208,7 @@ function Explorer({ dir }: { dir: string }) {
       setNewName("");
       setCreating(null);
       refresh();
-      router.push(`/wiki/${fullPath}`);
+      router.push(`/app/wiki/${fullPath}`);
     } catch (e) {
       setError(e instanceof Error ? e.message : "create failed");
     } finally {
@@ -331,7 +325,7 @@ function Explorer({ dir }: { dir: string }) {
             </Button>
             <Button
               variant="primary"
-              onClick={() => router.push(`/wiki/${dir}?new=1`)}
+              onClick={() => router.push(`/app/wiki/${dir}?new=1`)}
             >
               + New document
             </Button>
@@ -444,7 +438,7 @@ function Explorer({ dir }: { dir: string }) {
                 icon={isFile ? <FileIcon /> : <FolderIcon />}
                 label={name}
                 updatedAt={updated_at}
-                href={`/wiki/${childPath}`}
+                href={`/app/wiki/${childPath}`}
                 path={childPath}
                 isFile={isFile}
                 busy={busyPath === childPath}
@@ -608,7 +602,7 @@ function NewDocView({ dir }: { dir: string }) {
       if (appliedTemplateId) {
         await setDraftTemplate(fullPath, appliedTemplateId);
       }
-      router.push(`/wiki/${fullPath}?new=1`);
+      router.push(`/app/wiki/${fullPath}?new=1`);
     } catch (e) {
       setError(e instanceof Error ? e.message : "create failed");
       setSaving(false);
@@ -638,7 +632,7 @@ function NewDocView({ dir }: { dir: string }) {
         actions={
           <>
             <Button
-              onClick={() => router.push(`/wiki/${dir}`)}
+              onClick={() => router.push(`/app/wiki/${dir}`)}
               disabled={saving}
             >
               Cancel
@@ -1305,10 +1299,10 @@ function Breadcrumbs({
   // Use a sentinel for the root crumb so we can track its drop state without
   // collision with a real path of "".
   const ROOT = "__root__";
-  const crumbs = [{ label: "Wiki", href: "/wiki", path: "" }];
+  const crumbs = [{ label: "Wiki", href: "/app/wiki", path: "" }];
   segments.forEach((seg, i) => {
     const path = segments.slice(0, i + 1).join("/");
-    crumbs.push({ label: seg, href: `/wiki/${path}`, path });
+    crumbs.push({ label: seg, href: `/app/wiki/${path}`, path });
   });
   return (
     <nav
@@ -1644,7 +1638,7 @@ function FileViewer({ path }: { path: string }) {
 
   const segments = path.split("/");
   const parentSlug = segments.slice(0, -1).join("/");
-  const backHref = parentSlug ? `/wiki/${parentSlug}` : "/wiki";
+  const backHref = parentSlug ? `/app/wiki/${parentSlug}` : "/app/wiki";
   const currentBasename = segments[segments.length - 1] ?? path;
   const currentBasenameNoExt = currentBasename.replace(/\.md$/i, "");
   const trimmedFilename = filenameDraft.trim().replace(/^\/+|\/+$/g, "");
@@ -1745,7 +1739,7 @@ function FileViewer({ path }: { path: string }) {
         });
         // Navigation will remount FileViewer with the new path; loadLatest
         // there resets editing/body/headSha. Bail out before touching state.
-        router.push(`/wiki/${newRel}`);
+        router.push(`/app/wiki/${newRel}`);
         return;
       }
       setEditing(false);
