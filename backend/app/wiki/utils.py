@@ -181,7 +181,7 @@ def commit_and_fan_out(
             raise ToolError(str(exc))
 
     if base_body is None:
-        return _commit_one(
+        return _commit_resolved(
             path, body, message, change_kind, activity_ttl,
             old_body=_read_head_or_empty(path), record_activity=record_activity,
         )
@@ -216,7 +216,7 @@ def commit_and_fan_out(
         post_sha = wiki_git.head_sha_for_path(path)
         if post_sha == head_sha:
             try:
-                return _commit_one(
+                return _commit_resolved(
                     path, merged, message, change_kind, activity_ttl,
                     old_body=current, record_activity=record_activity,
                     expected_head=head_sha,
@@ -247,7 +247,7 @@ def commit_and_fan_out(
     raise CommitMaxRetriesError(max_retries, "")  # unreachable
 
 
-def _commit_one(
+def _commit_resolved(
     path: str,
     body: str,
     message: str,
@@ -260,9 +260,9 @@ def _commit_one(
 ) -> CommitResult:
     """Record activity, commit ``body``, and run the reindex + trigger fan-out.
 
-    The leaf of ``commit_and_fan_out`` — assumes the body to commit has already
-    been resolved (post-merge). Activity is DB-only; the doc body is committed
-    verbatim.
+    The leaf of ``commit_and_fan_out``: the body has already been resolved
+    (post-merge), so this just records activity, commits it verbatim, and runs
+    the reindex + trigger fan-out. Activity is DB-only.
     """
     user = _current_user_or_none()
     if user is not None and record_activity:
