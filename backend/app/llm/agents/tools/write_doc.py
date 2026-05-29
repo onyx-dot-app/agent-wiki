@@ -77,7 +77,8 @@ def handle(args: dict[str, Any]) -> Any:
                 path=path, body=body, message=commit_message.strip(),
                 change_kind=ChangeKind.CREATE, activity_ttl=activity_ttl,
             )
-            assert result is not None
+            if result is None:
+                raise RuntimeError("commit_and_fan_out returned None on a no-base commit")
             return {
                 "path": path,
                 "sha": result.sha,
