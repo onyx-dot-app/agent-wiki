@@ -142,7 +142,7 @@ def put_document_by_path(
     change_kind = ChangeKind.EDIT if existed else ChangeKind.CREATE
     msg = f"{change_kind} {rel}"
     try:
-        sha, body_to_commit = wiki_git.commit_with_3way_merge(
+        sha, body_to_commit = wiki_git.commit_with_merge(
             rel,
             base_sha=req.base_sha if existed else None,
             new_body=req.body,

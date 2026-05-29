@@ -136,7 +136,7 @@ def _read_head_or_empty(rel_path: str) -> str:
         return ""
 
 
-def commit_with_3way_merge(
+def commit_with_merge(
     rel_path: str,
     *,
     new_body: str,
@@ -189,7 +189,7 @@ def commit_with_3way_merge(
             raise CommitMaxRetriesError(attempt, post or "")
         if post != head:
             log.info(
-                "commit_with_3way_merge: HEAD moved for %s, retrying (%d/%d)",
+                "commit_with_merge: HEAD moved for %s, retrying (%d/%d)",
                 rel_path, attempt + 1, max_retries,
             )
         if base is not None:
@@ -517,7 +517,7 @@ class GitCommitLockError(Exception):
 
 
 class GitMergeConflictError(Exception):
-    """Raised by ``commit_with_3way_merge`` when a concurrent change can't be
+    """Raised by ``commit_with_merge`` when a concurrent change can't be
     merged cleanly. Human edit paths translate this into a 409 so the user
     gets the conflict UI.
     """
@@ -528,7 +528,7 @@ class GitMergeConflictError(Exception):
 
 
 class CommitMaxRetriesError(Exception):
-    """Raised by ``commit_with_3way_merge`` when HEAD keeps moving past the
+    """Raised by ``commit_with_merge`` when HEAD keeps moving past the
     retry budget.
     """
 
