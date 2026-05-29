@@ -13,14 +13,12 @@ import re
 import subprocess
 import tempfile
 import time
-from collections.abc import Callable
 from pathlib import Path
 from urllib.parse import quote, unquote
 
 from pydantic import BaseModel
 
 from app.config import CONFIG
-from app.models.wiki import AiRebaseMaxRetriesError
 
 log = logging.getLogger(__name__)
 
@@ -130,7 +128,6 @@ def commit_with_retry(
     base_body: str | None = None,
     author: str | None = None,
     max_retries: int = _COMMIT_RETRY_MAX,
-    on_conflict: Callable[[str, str, str], str] | None = None,
 ) -> tuple[str, str]:
     """Commit ``new_body`` to ``rel_path``, retrying past a concurrent commit.
 
@@ -139,24 +136,15 @@ def commit_with_retry(
     ``app.wiki.utils.commit_with_ai_rebase``). Always rides out the transient
     ref-lock race (two writers commit at once; one loses the lock).
 
-    Pass ``base_body`` iff this body was *derived from a version you read*
-    (read-modify-write) — i.e. the answer to "do I have the version this edit
-    was based on?". Then a concurrent change is reconciled instead of
-    clobbered:
+    Pass ``base_body`` iff this body was derived from a version you read
+    (read-modify-write). Then a concurrent change is reconciled via 3-way
+    merge (``git merge-file``): clean merges commit transparently; unresolvable
+    conflicts raise ``GitMergeConflictError`` so the caller can surface a 409.
 
-    - ``base_body=None`` (writing fresh/fixed content — a new file, a folder
-      ``.gitkeep``, a record you fully own) — no merge; the body is committed
-      as-is. There's nothing to clobber.
-    - ``base_body`` provided — a 3-way merge (``git merge-file``) reconciles a
-      concurrent edit. ``on_conflict`` decides what a *non-clean* merge does:
-        * ``None`` (human edits) — raise ``GitMergeConflictError`` so the
-          caller can surface a 409 + conflict UI. Clean merges commit
-          transparently, so the user never has to re-save.
-        * callback ``(base, current, new) -> merged`` (automated paths, e.g.
-          ingest) — resolve the conflict silently (e.g. an AI merge) and
-          commit the result.
+    Without ``base_body`` (new file, .gitkeep, trigger YAML) the body is
+    committed as-is — there's nothing to merge against.
 
-    Returns ``(sha, committed_body)``. Raises ``AiRebaseMaxRetriesError`` when
+    Returns ``(sha, committed_body)``. Raises ``CommitMaxRetriesError`` when
     HEAD/locks keep racing past ``max_retries``.
     """
     base = base_body
@@ -164,8 +152,6 @@ def commit_with_retry(
     for attempt in range(max_retries + 1):
         head = head_sha_for_path(rel_path)
         if base is None:
-            # No base to merge against — commit the body as-is, but still
-            # retry the transient lock race below.
             merged = new
             current = None
         else:
@@ -174,14 +160,10 @@ def commit_with_retry(
                 mr = merge_content(base, current, new)
                 if mr.clean:
                     merged = mr.merged
-                elif on_conflict is not None:
-                    merged = on_conflict(base, current, new)
                 else:
                     raise GitMergeConflictError(rel_path)
             else:
                 merged = new
-        # A moved HEAD only invalidates a merge; with no base there's nothing
-        # to re-merge, so skip the recheck and just (re)commit.
         post = head_sha_for_path(rel_path) if base is not None else head
         if post == head:
             try:
@@ -195,7 +177,7 @@ def commit_with_retry(
                 if base is None:
                     time.sleep(0.05 * (attempt + 1))
         if attempt >= max_retries:
-            raise AiRebaseMaxRetriesError(attempt, post or "")
+            raise CommitMaxRetriesError(attempt, post or "")
         if post != head:
             log.info(
                 "commit_with_retry: HEAD moved for %s, retrying (%d/%d)",
@@ -204,7 +186,7 @@ def commit_with_retry(
         if base is not None:
             base = current
         new = merged
-    raise AiRebaseMaxRetriesError(max_retries, "")  # unreachable
+    raise CommitMaxRetriesError(max_retries, "")  # unreachable
 
 
 def move_and_commit(
@@ -526,7 +508,7 @@ class GitCommitLockError(Exception):
 
 
 class GitMergeConflictError(Exception):
-    """Raised by ``commit_with_merge_retry`` when a concurrent change can't be
+    """Raised by ``commit_with_retry`` when a concurrent change can't be
     merged cleanly and no ``on_conflict`` resolver was supplied.
 
     Human edit paths translate this into a 409 so the user gets the conflict
@@ -537,6 +519,20 @@ class GitMergeConflictError(Exception):
     def __init__(self, rel_path: str) -> None:
         self.rel_path = rel_path
         super().__init__(f"merge conflict on {rel_path}")
+
+
+class CommitMaxRetriesError(Exception):
+    """Raised by ``commit_with_retry`` when HEAD keeps moving or the ref-lock
+    keeps racing past the retry budget.
+
+    Callers at a higher layer (e.g. ``commit_with_ai_rebase``) may translate
+    this into a more domain-specific error.
+    """
+
+    def __init__(self, retries: int, current_sha: str) -> None:
+        self.retries = retries
+        self.current_sha = current_sha
+        super().__init__(f"commit failed after {retries} retries")
 
 
 def diff_for_commit(sha: str, rel_path: str | None = None, *, unified: int = 3) -> str:

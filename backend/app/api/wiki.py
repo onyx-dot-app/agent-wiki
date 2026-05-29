@@ -54,7 +54,7 @@ from app.wiki import (
     search as wiki_search,
     templates as templates_repo,
 )
-from app.models.wiki import AiRebaseMaxRetriesError, ChangeKind
+from app.models.wiki import ChangeKind
 
 router = APIRouter()
 log = logging.getLogger(__name__)
@@ -159,7 +159,7 @@ def put_document_by_path(
                 message=msg,
                 author=author,
             )
-        except (wiki_git.GitMergeConflictError, AiRebaseMaxRetriesError, RuntimeError):
+        except (wiki_git.GitMergeConflictError, wiki_git.CommitMaxRetriesError, RuntimeError):
             raise HTTPException(status_code=409, detail="conflict detected")
     else:
         # New file, or an edit with no base_sha to merge against — commit the

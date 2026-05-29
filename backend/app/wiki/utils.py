@@ -18,7 +18,7 @@ from app.auth import current_user
 from app.llm.agents import merge_conflict_update
 from app.llm.agents.tools.errors import ToolError
 from app.models.wiki import AiRebaseMaxRetriesError, ChangeKind, CommitResult
-from app.wiki.git import GitCommitLockError
+from app.wiki.git import CommitMaxRetriesError, GitCommitLockError
 from app.wiki import (
     agent_activity,
     filesystem,

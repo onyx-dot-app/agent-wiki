@@ -17,11 +17,11 @@ import pytest
 
 from app.wiki import git as wiki_git
 from app.wiki.git import (
+    CommitMaxRetriesError,
     GitCommitLockError,
     GitMergeConflictError,
     MergeResult,
 )
-from app.models.wiki import AiRebaseMaxRetriesError
 
 _PATH = "docs/page.md"
 _MSG = "update page"
@@ -76,7 +76,7 @@ def test_no_base_raises_after_max_lock_retries(monkeypatch):
     monkeypatch.setattr("app.wiki.git.commit_file", commit_file)
     monkeypatch.setattr("app.wiki.git.head_sha_for_path", lambda _p: _SHA_A)
 
-    with pytest.raises(AiRebaseMaxRetriesError):
+    with pytest.raises(CommitMaxRetriesError):
         wiki_git.commit_with_retry(_PATH, new_body="body", message=_MSG, max_retries=2)
 
     assert commit_file.call_count == 3  # initial + 2 retries
@@ -149,31 +149,6 @@ def test_base_conflict_raises_without_resolver(monkeypatch):
     commit_file.assert_not_called()
 
 
-def test_base_conflict_uses_resolver(monkeypatch):
-    concurrent = "concurrent edit\n"
-    resolved = "ai resolved\n"
-    commit_file = _wire(
-        monkeypatch,
-        head_shas=[_SHA_A, _SHA_A],
-        worktrees=[concurrent],
-        merge_result=MergeResult(merged="<<<<\n", clean=False),
-    )
-    resolver = MagicMock(return_value=resolved)
-
-    sha, body = wiki_git.commit_with_retry(
-        _PATH,
-        base_body=_BASE,
-        new_body=_NEW,
-        message=_MSG,
-        max_retries=0,
-        on_conflict=resolver,
-    )
-
-    assert sha == _SHA_B
-    assert body == resolved
-    resolver.assert_called_once_with(_BASE, concurrent, _NEW)
-    commit_file.assert_called_once_with(_PATH, resolved, _MSG, author=None)
-
 
 def test_base_head_moves_then_commits(monkeypatch):
     concurrent_v1 = "concurrent v1\n"
@@ -244,7 +219,7 @@ def test_base_raises_when_max_retries_exceeded(monkeypatch):
         MagicMock(side_effect=GitCommitLockError(_PATH)),
     )
 
-    with pytest.raises(AiRebaseMaxRetriesError) as exc_info:
+    with pytest.raises(CommitMaxRetriesError) as exc_info:
         wiki_git.commit_with_retry(
             _PATH, base_body=_BASE, new_body=_NEW, message=_MSG, max_retries=1
         )
