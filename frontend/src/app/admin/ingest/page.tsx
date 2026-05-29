@@ -1,13 +1,12 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
-import { useRouter } from "next/navigation";
 import { mutate as globalMutate } from "swr";
 
 import { Button } from "@/components/common/Button";
 import { BackLink, PageHeader } from "@/components/common/PageHeader";
+import { RequireAdmin } from "@/components/RequireAdmin";
 import { apiFetch } from "@/lib/api";
-import { useRequireAuth } from "@/lib/auth";
 import { color, radius } from "@/lib/theme";
 import { useIsMobile } from "@/lib/viewport";
 
@@ -48,26 +47,18 @@ function isConfigured(p: Provider, s: LLMSettings): boolean {
 }
 
 export default function AdminIngestPage() {
-  const { user, loading } = useRequireAuth();
-  const router = useRouter();
   const isMobile = useIsMobile();
-
-  useEffect(() => {
-    if (!loading && user && !user.is_admin) router.replace("/");
-  }, [loading, user, router]);
-
-  if (loading || !user) return <main style={{ padding: isMobile ? 16 : 32 }}>Loading…</main>;
-  if (!user.is_admin) return null;
-
   return (
-    <main style={{ padding: isMobile ? "16px 12px" : "24px 32px", maxWidth: 720 }}>
+    <RequireAdmin>
+      <main style={{ padding: isMobile ? "16px 12px" : "24px 32px", maxWidth: 720 }}>
         <BackLink />
         <PageHeader
           title="Onyx connection"
           description="Connect your Onyx instance to automatically push indexed documents into this wiki. Copy the base URL and API key below into your Onyx environment variables."
         />
         <IngestForm />
-    </main>
+      </main>
+    </RequireAdmin>
   );
 }
 

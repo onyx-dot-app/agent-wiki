@@ -1,12 +1,11 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
-import { useRouter } from "next/navigation";
 
 import { Button } from "@/components/common/Button";
 import { BackLink, PageHeader } from "@/components/common/PageHeader";
+import { RequireAdmin } from "@/components/RequireAdmin";
 import { apiFetch } from "@/lib/api";
-import { useRequireAuth } from "@/lib/auth";
 import { color, radius } from "@/lib/theme";
 import { useIsMobile } from "@/lib/viewport";
 
@@ -18,26 +17,18 @@ interface BraintrustSettings {
 }
 
 export default function AdminBraintrustPage() {
-  const { user, loading } = useRequireAuth();
-  const router = useRouter();
   const isMobile = useIsMobile();
-
-  useEffect(() => {
-    if (!loading && user && !user.is_admin) router.replace("/");
-  }, [loading, user, router]);
-
-  if (loading || !user) return <main style={{ padding: isMobile ? 16 : 32 }}>Loading…</main>;
-  if (!user.is_admin) return null;
-
   return (
-    <main style={{ padding: isMobile ? "16px 12px" : "24px 32px", maxWidth: 720 }}>
+    <RequireAdmin>
+      <main style={{ padding: isMobile ? "16px 12px" : "24px 32px", maxWidth: 720 }}>
         <BackLink />
         <PageHeader
           title="Braintrust tracing"
           description="Send LLM exchanges (messages, tools available, tool calls + results, model output, usage) to a Braintrust project for inspection. Tracing only fires when both project and API key are saved AND the toggle below is on."
         />
         <BraintrustForm />
-    </main>
+      </main>
+    </RequireAdmin>
   );
 }
 
