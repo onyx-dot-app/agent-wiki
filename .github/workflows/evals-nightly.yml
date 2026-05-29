@@ -113,3 +113,12 @@ jobs:
           name: eval-nightly-runs
           path: backend/runs/
           if-no-files-found: ignore
+
+      - name: Notify Slack on failure
+        if: failure() && github.event_name == 'schedule'
+        uses: onyx-dot-app/onyx/.github/actions/slack-notify@main
+        with:
+          webhook-url: ${{ secrets.MONITOR_DEPLOYMENTS_WEBHOOK }}
+          title: "🚨 Nightly evals failed (agent-wiki)"
+          ref-name: ${{ github.ref_name }}
+          failed-jobs: "live"
