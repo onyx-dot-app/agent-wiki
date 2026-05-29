@@ -11,7 +11,6 @@ from __future__ import annotations
 import difflib
 import logging
 import subprocess
-from collections.abc import Callable
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
@@ -60,51 +59,6 @@ def validate_doc_path(raw_path: Any) -> str:
 # Each attempt may invoke an LLM merge fallback, so keep this small to bound
 # LLM spend.
 _MERGE_MAX_RETRIES = 3
-
-# An ``on_conflict`` resolver: given ``(base_body, current_body, draft_body)``
-# it returns a reconciled body. The AI write path wires the LLM merge here;
-# the human path passes ``None`` so a conflict raises instead.
-ConflictResolver = Callable[[str, str, str], str]
-
-
-def commit_with_ai_merge(
-    path: str,
-    message: str,
-    *,
-    base_body: str,
-    new_body: str,
-    max_retries: int = _MERGE_MAX_RETRIES,
-    activity_ttl: timedelta | None = None,
-    skip_acl: bool = False,
-) -> CommitResult | None:
-    """Commit an agent edit, reconciling concurrent changes with an LLM merge.
-
-    Thin wrapper over ``commit_and_fan_out`` that wires the LLM merge
-    (``merge_conflict_update.merge``) as the conflict resolver, so a 3-way
-    merge that git can't resolve cleanly falls back to the model instead of
-    failing. See ``commit_and_fan_out`` for the retry/merge semantics.
-
-    Returns ``None`` when the merged result equals the current content.
-    Raises ``CommitMaxRetriesError`` when the retry limit is hit. Any
-    ``LLMError`` raised by the merge fallback propagates immediately.
-    """
-    def _llm_resolve(base: str, current: str, draft: str) -> str:
-        return merge_conflict_update.merge(
-            wiki_path=path,
-            base_body=base,
-            current_body=current,
-            draft_body=draft,
-        )
-
-    return commit_and_fan_out(
-        path, new_body, message,
-        change_kind=ChangeKind.EDIT,
-        activity_ttl=activity_ttl,
-        skip_acl=skip_acl,
-        base_body=base_body,
-        on_conflict=_llm_resolve,
-        max_retries=max_retries,
-    )
 
 
 def assert_base_sha(path: str, base_sha: str | None) -> dict[str, str] | None:
@@ -180,7 +134,7 @@ def commit_and_fan_out(
     activity_ttl: timedelta | None = None,
     skip_acl: bool = False,
     base_body: str | None = None,
-    on_conflict: ConflictResolver | None = None,
+    ai_merge: bool = False,
     max_retries: int = _MERGE_MAX_RETRIES,
     record_activity: bool = True,
 ) -> CommitResult | None:
@@ -190,11 +144,11 @@ def commit_and_fan_out(
     full-body overwrites with nothing to reconcile against). When ``base_body``
     is supplied the commit is a read-modify-write: any concurrent change that
     landed since ``base_body`` was read is reconciled with a 3-way merge
-    (``git merge-file``). A clean merge commits the merged result; a conflict
-    is handed to ``on_conflict(base, current, draft)`` when provided (e.g. the
-    LLM merge), or raises ``GitMergeConflictError`` when not (human path → 409).
-    The loop retries up to ``max_retries`` times when HEAD keeps moving during
-    the merge step, then raises ``CommitMaxRetriesError``.
+    (``git merge-file``). A clean merge commits the merged result. A conflict
+    git can't resolve is handed to an LLM merge when ``ai_merge=True`` (the
+    agent write path), or raises ``GitMergeConflictError`` when not (human
+    path → 409). The loop retries up to ``max_retries`` times when HEAD keeps
+    moving during the merge step, then raises ``CommitMaxRetriesError``.
 
     Ref-lock races are handled transparently inside ``commit_file`` — this
     function never sees them.
@@ -246,8 +200,13 @@ def commit_and_fan_out(
             mr = wiki_git.merge_content(_base, current, _new)
             if mr.clean:
                 merged = mr.merged
-            elif on_conflict is not None:
-                merged = on_conflict(_base, current, _new)
+            elif ai_merge:
+                merged = merge_conflict_update.merge(
+                    wiki_path=path,
+                    base_body=_base,
+                    current_body=current,
+                    draft_body=_new,
+                )
             else:
                 raise wiki_git.GitMergeConflictError(path)
         else:

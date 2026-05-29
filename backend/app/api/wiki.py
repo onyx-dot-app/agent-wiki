@@ -148,8 +148,8 @@ def put_document_by_path(
         wiki_git.read_file(rel, ref=req.base_sha) if existed and req.base_sha else None
     )
     try:
-        # skip_acl: the write gate already ran above via require_can. on_conflict
-        # is None so an unresolvable merge raises -> 409 (the conflict UI).
+        # skip_acl: the write gate already ran above via require_can. ai_merge
+        # is off so an unresolvable merge raises -> 409 (the conflict UI).
         result = wiki_utils.commit_and_fan_out(
             rel,
             req.body,

@@ -12,7 +12,7 @@ from app.wiki import edit as wiki_edit
 from app.wiki import git as wiki_git
 from app.llm.agents.tools.errors import ToolError
 from app.llm.errors import LLMError
-from app.models.wiki import CommitMaxRetriesError
+from app.models.wiki import ChangeKind, CommitMaxRetriesError
 
 
 class _EditOp(NamedTuple):
@@ -72,10 +72,11 @@ def handle(args: dict[str, Any]) -> Any:
             raise ToolError("edits produced no change")
 
         try:
-            result = wiki_utils.commit_with_ai_merge(
-                path, commit_message.strip(),
+            result = wiki_utils.commit_and_fan_out(
+                path, new_body, commit_message.strip(),
+                change_kind=ChangeKind.EDIT,
                 base_body=base_body,
-                new_body=new_body,
+                ai_merge=True,
                 activity_ttl=activity_ttl,
             )
         except CommitMaxRetriesError as exc:

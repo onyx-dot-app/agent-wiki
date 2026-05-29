@@ -448,8 +448,8 @@ class GitCommitLockError(Exception):
 
 class GitMergeConflictError(Exception):
     """Raised by ``commit_and_fan_out`` when a concurrent change can't be
-    merged cleanly and no ``on_conflict`` resolver was supplied. Human edit
-    paths translate this into a 409 so the user gets the conflict UI.
+    merged cleanly and ``ai_merge`` is not set. Human edit paths translate
+    this into a 409 so the user gets the conflict UI.
     """
 
     def __init__(self, rel_path: str) -> None:

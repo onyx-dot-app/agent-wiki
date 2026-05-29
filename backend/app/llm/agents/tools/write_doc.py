@@ -47,12 +47,13 @@ def handle(args: dict[str, Any]) -> Any:
                 return stale
             base_body = wiki_git.read_file(path, ref=base_sha)
             try:
-                result = wiki_utils.commit_with_ai_merge(
-                    path, commit_message.strip(),
+                result = wiki_utils.commit_and_fan_out(
+                    path, body, commit_message.strip(),
+                    change_kind=ChangeKind.EDIT,  # new files take the else branch below
                     base_body=base_body,
-                    new_body=body,
+                    ai_merge=True,
                     activity_ttl=activity_ttl,
-                )  # always ChangeKind.EDIT — new files take the else branch below
+                )
             except CommitMaxRetriesError as exc:
                 return {
                     "error": "stale_base",

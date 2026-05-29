@@ -1,10 +1,9 @@
-"""Unit tests for the 3-way merge loop in ``commit_and_fan_out`` as driven by
-``commit_with_ai_merge`` — the thin wrapper that wires the LLM merge as the
-conflict resolver.
+"""Unit tests for the 3-way merge loop in ``commit_and_fan_out`` on the AI
+write path (``ai_merge=True``) — an unresolvable git merge falls back to the
+LLM merge rather than raising.
 
 All external I/O (git, filesystem, fan-out, DB) is monkeypatched so the tests
-run without a real repo or database. The merge loop itself lives in
-``commit_and_fan_out``; these tests exercise it through the AI wrapper.
+run without a real repo or database.
 """
 from __future__ import annotations
 
@@ -12,8 +11,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from app.wiki.utils import commit_with_ai_merge
-from app.models.wiki import CommitMaxRetriesError, CommitResult
+from app.wiki.utils import commit_and_fan_out
+from app.models.wiki import ChangeKind, CommitMaxRetriesError, CommitResult
 from app.wiki.git import MergeResult
 
 _PATH = "docs/page.md"
@@ -70,8 +69,9 @@ def test_no_concurrent_change_commits_new_body(monkeypatch):
         commit_sha=_SHA_B,
     )
 
-    result = commit_with_ai_merge(
-        _PATH, _MSG, base_body=_BASE, new_body=_NEW, max_retries=0, skip_acl=True
+    result = commit_and_fan_out(
+        _PATH, _NEW, _MSG, change_kind=ChangeKind.EDIT,
+        base_body=_BASE, ai_merge=True, max_retries=0, skip_acl=True,
     )
 
     assert isinstance(result, CommitResult)
@@ -95,8 +95,9 @@ def test_noop_returns_none(monkeypatch):
         current_bodies=[_BASE],
     )
 
-    result = commit_with_ai_merge(
-        _PATH, _MSG, base_body=_BASE, new_body=_BASE, max_retries=0, skip_acl=True
+    result = commit_and_fan_out(
+        _PATH, _BASE, _MSG, change_kind=ChangeKind.EDIT,
+        base_body=_BASE, ai_merge=True, max_retries=0, skip_acl=True,
     )
 
     assert result is None
@@ -121,8 +122,9 @@ def test_clean_3way_merge_commits_merged(monkeypatch):
         commit_sha=_SHA_B,
     )
 
-    result = commit_with_ai_merge(
-        _PATH, _MSG, base_body=_BASE, new_body=_NEW, max_retries=0, skip_acl=True
+    result = commit_and_fan_out(
+        _PATH, _NEW, _MSG, change_kind=ChangeKind.EDIT,
+        base_body=_BASE, ai_merge=True, max_retries=0, skip_acl=True,
     )
 
     assert isinstance(result, CommitResult)
@@ -154,8 +156,9 @@ def test_llm_fallback_on_conflict(monkeypatch):
         commit_sha=_SHA_B,
     )
 
-    result = commit_with_ai_merge(
-        _PATH, _MSG, base_body=_BASE, new_body=_NEW, max_retries=0, skip_acl=True
+    result = commit_and_fan_out(
+        _PATH, _NEW, _MSG, change_kind=ChangeKind.EDIT,
+        base_body=_BASE, ai_merge=True, max_retries=0, skip_acl=True,
     )
 
     assert isinstance(result, CommitResult)
@@ -195,8 +198,9 @@ def test_retries_when_head_moves_mid_merge(monkeypatch):
     commit_file = MagicMock(return_value=_SHA_C)
     monkeypatch.setattr("app.wiki.utils.wiki_git.commit_file", commit_file)
 
-    result = commit_with_ai_merge(
-        _PATH, _MSG, base_body=_BASE, new_body=_NEW, max_retries=1, skip_acl=True
+    result = commit_and_fan_out(
+        _PATH, _NEW, _MSG, change_kind=ChangeKind.EDIT,
+        base_body=_BASE, ai_merge=True, max_retries=1, skip_acl=True,
     )
 
     assert isinstance(result, CommitResult)
@@ -228,8 +232,9 @@ def test_raises_when_max_retries_exceeded(monkeypatch):
     monkeypatch.setattr("app.wiki.utils.wiki_git.commit_file", commit_file)
 
     with pytest.raises(CommitMaxRetriesError) as exc_info:
-        commit_with_ai_merge(
-            _PATH, _MSG, base_body=_BASE, new_body=_NEW, max_retries=2, skip_acl=True
+        commit_and_fan_out(
+            _PATH, _NEW, _MSG, change_kind=ChangeKind.EDIT,
+            base_body=_BASE, ai_merge=True, max_retries=2, skip_acl=True,
         )
 
     assert exc_info.value.retries == 2

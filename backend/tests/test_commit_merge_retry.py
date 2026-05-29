@@ -1,7 +1,7 @@
 """Unit tests for the raise-on-conflict path of ``commit_and_fan_out``.
 
-This is the human-edit path (``PUT /file``): a read-modify-write with no
-``on_conflict`` resolver, so an unresolvable 3-way merge raises
+This is the human-edit path (``PUT /file``): a read-modify-write with
+``ai_merge`` off, so an unresolvable 3-way merge raises
 ``GitMergeConflictError`` (the caller turns it into a 409) and HEAD that keeps
 moving raises ``CommitMaxRetriesError``. Ref-lock races are handled
 transparently inside ``commit_file``.

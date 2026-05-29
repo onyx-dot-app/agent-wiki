@@ -51,7 +51,7 @@ from app.mcp_server import pubsub as mcp_pubsub
 from app.auth import UserMissingError, load_user, set_current_user
 from app.tasks.queues import documents_queue
 from app.wiki import agent_activity, git as wiki_git
-from app.models.wiki import CommitMaxRetriesError
+from app.models.wiki import ChangeKind, CommitMaxRetriesError
 
 
 log = logging.getLogger(__name__)
@@ -197,11 +197,13 @@ def _run_inner(job_id: str, rel: str, instruction: str, base_sha: str | None) ->
         return
 
     try:
-        result = wiki_utils.commit_with_ai_merge(
+        result = wiki_utils.commit_and_fan_out(
             rel,
+            new_body,
             f"Doc update: {instruction[:_COMMIT_MESSAGE_MAX]}",
+            change_kind=ChangeKind.EDIT,
             base_body=old_body,
-            new_body=new_body,
+            ai_merge=True,
         )
     except LLMError as exc:
         mcp_jobs.mark_failed(job_id, error=f"llm_error: {exc}")
@@ -408,10 +410,11 @@ def process_pushed_document(push: dict[str, Any]) -> None:
             if meta_lines:
                 message += "\n\n" + "\n".join(meta_lines)
             try:
-                commit_result = wiki_utils.commit_with_ai_merge(
-                    c.hit.path, message,
+                commit_result = wiki_utils.commit_and_fan_out(
+                    c.hit.path, result, message,
+                    change_kind=ChangeKind.EDIT,
                     base_body=c.body,
-                    new_body=result,
+                    ai_merge=True,
                     skip_acl=True,
                 )
             except CommitMaxRetriesError:

@@ -16,7 +16,7 @@ from app.wiki import utils as wiki_utils
 from app.llm.agents.tools.errors import ToolError
 from app.llm.errors import LLMError
 from app.wiki import git as wiki_git
-from app.models.wiki import CommitMaxRetriesError
+from app.models.wiki import ChangeKind, CommitMaxRetriesError
 
 log = logging.getLogger(__name__)
 
@@ -62,11 +62,13 @@ def handle(args: dict[str, Any]) -> Any:
             }
 
         try:
-            result = wiki_utils.commit_with_ai_merge(
+            result = wiki_utils.commit_and_fan_out(
                 path,
+                new_body,
                 f"Doc update: {instruction.strip()[:80]}",
+                change_kind=ChangeKind.EDIT,
                 base_body=old_body,
-                new_body=new_body,
+                ai_merge=True,
                 activity_ttl=activity_ttl,
             )
         except CommitMaxRetriesError as exc:
