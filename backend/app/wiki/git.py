@@ -125,7 +125,7 @@ def commit_with_retry(
     *,
     new_body: str,
     message: str,
-    base_body: str | None = None,
+    base_sha: str | None = None,
     author: str | None = None,
     max_retries: int = _COMMIT_RETRY_MAX,
 ) -> tuple[str, str]:
@@ -136,18 +136,21 @@ def commit_with_retry(
     ``app.wiki.utils.commit_with_ai_rebase``). Always rides out the transient
     ref-lock race (two writers commit at once; one loses the lock).
 
-    Pass ``base_body`` iff this body was derived from a version you read
-    (read-modify-write). Then a concurrent change is reconciled via 3-way
-    merge (``git merge-file``): clean merges commit transparently; unresolvable
-    conflicts raise ``GitMergeConflictError`` so the caller can surface a 409.
+    Pass ``base_sha`` iff the edit was derived from a specific committed version
+    (read-modify-write). The function fetches the base body from that commit and
+    reconciles any concurrent change via 3-way merge (``git merge-file``): clean
+    merges commit transparently; unresolvable conflicts raise
+    ``GitMergeConflictError`` so the caller can surface a 409.
 
-    Without ``base_body`` (new file, .gitkeep, trigger YAML) the body is
+    Without ``base_sha`` (new file, .gitkeep, trigger YAML) the body is
     committed as-is — there's nothing to merge against.
 
     Returns ``(sha, committed_body)``. Raises ``CommitMaxRetriesError`` when
     HEAD/locks keep racing past ``max_retries``.
     """
-    base = base_body
+    base: str | None = None
+    if base_sha is not None:
+        base = read_file(rel_path, ref=base_sha)
     new = new_body
     for attempt in range(max_retries + 1):
         head = head_sha_for_path(rel_path)

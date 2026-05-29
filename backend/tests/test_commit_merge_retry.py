@@ -2,7 +2,7 @@
 
 ``commit_with_retry`` is the git-layer commit entry point for the non-agent
 callers (human edits, ingest, folder/trigger writes). It always retries the
-ref-lock race; when ``base_body`` is supplied it also 3-way merges a concurrent
+ref-lock race; when ``base_sha`` is supplied it also 3-way merges a concurrent
 edit. The agent path's LLM-merge loop ``commit_with_ai_rebase`` is covered
 separately in ``test_commit_with_ai_rebase.py``.
 
@@ -39,7 +39,7 @@ def _no_sleep(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# base_body=None — no merge, lock-only retry
+# base_sha=None — no merge, lock-only retry
 # ---------------------------------------------------------------------------
 
 
@@ -83,7 +83,7 @@ def test_no_base_raises_after_max_lock_retries(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# base_body provided — merge helpers
+# base_sha provided — merge helpers
 # ---------------------------------------------------------------------------
 
 
@@ -91,6 +91,7 @@ def _wire(monkeypatch, *, head_shas, worktrees, merge_result=None, commit_fn=Non
     head_iter = iter(head_shas)
     body_iter = iter(worktrees)
     monkeypatch.setattr("app.wiki.git.head_sha_for_path", lambda _p: next(head_iter))
+    monkeypatch.setattr("app.wiki.git.read_file", lambda _p, ref=None: _BASE)
     monkeypatch.setattr("app.wiki.git._read_worktree", lambda _p: next(body_iter))
     if merge_result is not None:
         monkeypatch.setattr("app.wiki.git.merge_content", lambda *_a: merge_result)
@@ -105,7 +106,7 @@ def test_base_no_concurrent_change(monkeypatch):
     commit_file = _wire(monkeypatch, head_shas=[_SHA_A, _SHA_A], worktrees=[_BASE])
 
     sha, body = wiki_git.commit_with_retry(
-        _PATH, base_body=_BASE, new_body=_NEW, message=_MSG, max_retries=0
+        _PATH, base_sha=_SHA_A, new_body=_NEW, message=_MSG, max_retries=0
     )
 
     assert sha == _SHA_B
@@ -125,7 +126,7 @@ def test_base_clean_merge(monkeypatch):
     )
 
     sha, body = wiki_git.commit_with_retry(
-        _PATH, base_body=_BASE, new_body=_NEW, message=_MSG, max_retries=0
+        _PATH, base_sha=_SHA_A, new_body=_NEW, message=_MSG, max_retries=0
     )
 
     assert sha == _SHA_B
@@ -143,11 +144,10 @@ def test_base_conflict_raises_without_resolver(monkeypatch):
 
     with pytest.raises(GitMergeConflictError):
         wiki_git.commit_with_retry(
-            _PATH, base_body=_BASE, new_body=_NEW, message=_MSG, max_retries=0
+            _PATH, base_sha=_SHA_A, new_body=_NEW, message=_MSG, max_retries=0
         )
 
     commit_file.assert_not_called()
-
 
 
 def test_base_head_moves_then_commits(monkeypatch):
@@ -164,13 +164,14 @@ def test_base_head_moves_then_commits(monkeypatch):
         MergeResult(merged=merged_v2, clean=True),
     ])
     monkeypatch.setattr("app.wiki.git.head_sha_for_path", lambda _p: next(head_iter))
+    monkeypatch.setattr("app.wiki.git.read_file", lambda _p, ref=None: _BASE)
     monkeypatch.setattr("app.wiki.git._read_worktree", lambda _p: next(body_iter))
     monkeypatch.setattr("app.wiki.git.merge_content", lambda *_a: next(merge_iter))
     commit_file = MagicMock(return_value=_SHA_C)
     monkeypatch.setattr("app.wiki.git.commit_file", commit_file)
 
     sha, body = wiki_git.commit_with_retry(
-        _PATH, base_body=_BASE, new_body=_NEW, message=_MSG, max_retries=1
+        _PATH, base_sha=_SHA_A, new_body=_NEW, message=_MSG, max_retries=1
     )
 
     assert sha == _SHA_C
@@ -186,6 +187,7 @@ def test_base_lock_race_then_commits(monkeypatch):
     body_iter = iter([_BASE, concurrent])
     merge_iter = iter([MergeResult(merged=merged, clean=True)])
     monkeypatch.setattr("app.wiki.git.head_sha_for_path", lambda _p: next(head_iter))
+    monkeypatch.setattr("app.wiki.git.read_file", lambda _p, ref=None: _BASE)
     monkeypatch.setattr("app.wiki.git._read_worktree", lambda _p: next(body_iter))
     monkeypatch.setattr("app.wiki.git.merge_content", lambda *_a: next(merge_iter))
 
@@ -201,7 +203,7 @@ def test_base_lock_race_then_commits(monkeypatch):
     monkeypatch.setattr("app.wiki.git.commit_file", _commit)
 
     sha, body = wiki_git.commit_with_retry(
-        _PATH, base_body=_BASE, new_body=_NEW, message=_MSG, max_retries=1
+        _PATH, base_sha=_SHA_A, new_body=_NEW, message=_MSG, max_retries=1
     )
 
     assert sha == _SHA_C
@@ -213,6 +215,7 @@ def test_base_raises_when_max_retries_exceeded(monkeypatch):
     head_iter = iter([_SHA_A, _SHA_A, _SHA_A, _SHA_A])
     body_iter = iter([_BASE, _BASE])
     monkeypatch.setattr("app.wiki.git.head_sha_for_path", lambda _p: next(head_iter))
+    monkeypatch.setattr("app.wiki.git.read_file", lambda _p, ref=None: _BASE)
     monkeypatch.setattr("app.wiki.git._read_worktree", lambda _p: next(body_iter))
     monkeypatch.setattr(
         "app.wiki.git.commit_file",
@@ -221,7 +224,7 @@ def test_base_raises_when_max_retries_exceeded(monkeypatch):
 
     with pytest.raises(CommitMaxRetriesError) as exc_info:
         wiki_git.commit_with_retry(
-            _PATH, base_body=_BASE, new_body=_NEW, message=_MSG, max_retries=1
+            _PATH, base_sha=_SHA_A, new_body=_NEW, message=_MSG, max_retries=1
         )
 
     assert exc_info.value.retries == 1
