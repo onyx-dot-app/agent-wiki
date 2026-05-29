@@ -14,7 +14,8 @@ import { diffLines } from "diff";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import useSWR from "swr";
-import { Button } from "@/components/common/Button";
+import { Button, SelectButton } from "@onyx-ai/opal/components";
+import { SvgFolderPlus, SvgPlus, SvgWorkflow } from "@onyx-ai/opal/icons";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { PageHeader } from "@/components/common/PageHeader";
 import { TriggerModal } from "@/components/triggers/TriggerModal";
@@ -323,20 +324,22 @@ function Explorer({ dir }: { dir: string }) {
         }
         actions={
           <>
-            <Button onClick={() => setTriggerModalOpen(true)}>+ Trigger</Button>
+            <Button icon={SvgWorkflow} onClick={() => setTriggerModalOpen(true)}>Trigger</Button>
             <Button
+              icon={SvgFolderPlus}
               onClick={() => {
                 setNewName("");
                 setCreating((v) => (v === "folder" ? null : "folder"));
               }}
             >
-              + New folder
+              New folder
             </Button>
             <Button
-              variant="primary"
+              variant="action"
+              icon={SvgPlus}
               onClick={() => router.push(`/app/wiki/${dir}?new=1`)}
             >
-              + New document
+              New document
             </Button>
           </>
         }
@@ -391,7 +394,7 @@ function Explorer({ dir }: { dir: string }) {
           />
           <Button
             type="submit"
-            variant="primary"
+            variant="action"
             disabled={createBusy || !newName.trim()}
           >
             Create folder
@@ -647,7 +650,7 @@ function NewDocView({ dir }: { dir: string }) {
               Cancel
             </Button>
             <Button
-              variant="primary"
+              variant="action"
               onClick={() => void onCreate()}
               disabled={!canCreate}
               title={
@@ -1206,7 +1209,7 @@ function Row({
           <Button
             type="submit"
             size="sm"
-            variant="primary"
+            variant="action"
             disabled={busy || !draft.trim()}
           >
             Save
@@ -1996,29 +1999,18 @@ function FileViewer({ path }: { path: string }) {
           <>
             <div style={{ display: "flex", gap: 8 }}>
               <Button onClick={() => setRunAgentOpen(true)}>Run Agent</Button>
-              <Button onClick={() => setTriggerModalOpen(true)}>
-                + Trigger
-              </Button>
+              <Button icon={SvgWorkflow} onClick={() => setTriggerModalOpen(true)}>Trigger</Button>
             </div>
             <div style={{ display: "flex", gap: 8 }}>
               <Button onClick={() => setShareOpen(true)}>Share</Button>
-              <Button
+              <SelectButton
+                state={historyOpen ? "selected" : "empty"}
                 onClick={toggleHistory}
-                aria-pressed={historyOpen}
-                style={
-                  historyOpen
-                    ? {
-                        background: color.accent.subtleBg,
-                        color: color.accent.subtleFg,
-                        borderColor: color.accent.subtleBorder,
-                      }
-                    : undefined
-                }
               >
                 History
-              </Button>
+              </SelectButton>
             </div>
-            <Button variant="primary" onClick={startEdit}>
+            <Button variant="action" onClick={startEdit}>
               Edit
             </Button>
           </>
@@ -2029,7 +2021,7 @@ function FileViewer({ path }: { path: string }) {
               Cancel
             </Button>
             <Button
-              variant="primary"
+              variant="action"
               onClick={onSave}
               disabled={saving || !dirty}
             >

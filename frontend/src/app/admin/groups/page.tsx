@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-import { Button } from "@/components/common/Button";
+import { Button } from "@onyx-ai/opal/components";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { BackLink, PageHeader } from "@/components/common/PageHeader";
 import { RequireAdmin } from "@/components/RequireAdmin";
@@ -98,7 +98,7 @@ function GroupsManager() {
           />
           <Button
             type="submit"
-            variant="primary"
+            variant="action"
             size="sm"
             disabled={busy || !name.trim()}
             style={{ marginTop: 8 }}

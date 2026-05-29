@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 
-import { Button } from "@/components/common/Button";
+import { Button } from "@onyx-ai/opal/components";
 import {
   PRESET_OPTIONS,
   WEEKDAY_NAMES,
@@ -352,7 +352,7 @@ export function TriggerModal({ open, initial, onClose, onSaved, lockScope }: Pro
           <Button type="button" onClick={onClose} disabled={busy}>
             Cancel
           </Button>
-          <Button type="submit" variant="primary" disabled={busy || !canSave}>
+          <Button type="submit" variant="action" disabled={busy || !canSave}>
             {busy ? "Saving…" : isEdit ? "Save" : "Create"}
           </Button>
         </div>

@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-import { Button } from "@/components/common/Button";
+import { Button } from "@onyx-ai/opal/components";
+import { SvgX } from "@onyx-ai/opal/icons";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { ApiError, apiFetch } from "@/lib/api";
 import {
@@ -56,7 +57,7 @@ export function ShareDialog({ path, open, onClose }: ShareDialogProps) {
             <h2 style={{ margin: 0, fontSize: 18 }}>Share</h2>
             <code style={{ fontSize: 12, color: color.text.muted }}>{path}</code>
           </div>
-          <button onClick={onClose} style={iconBtnStyle}>×</button>
+          <Button icon={SvgX} prominence="tertiary" size="sm" tooltip="Close" onClick={onClose} />
         </header>
 
         {error && (
@@ -409,14 +410,4 @@ const inputStyle: React.CSSProperties = {
   border: `1px solid ${color.border.default}`,
   borderRadius: radius.sm,
   background: color.bg.page,
-};
-const iconBtnStyle: React.CSSProperties = {
-  background: "transparent",
-  border: "none",
-  fontSize: 24,
-  cursor: "pointer",
-  color: color.text.muted,
-  width: 32,
-  height: 32,
-  lineHeight: 1,
 };

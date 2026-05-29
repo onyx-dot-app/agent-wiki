@@ -3,7 +3,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { mutate as globalMutate } from "swr";
 
-import { Button } from "@/components/common/Button";
+import { Button } from "@onyx-ai/opal/components";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { BackLink, PageHeader } from "@/components/common/PageHeader";
 import { RequireAdmin } from "@/components/RequireAdmin";
@@ -245,7 +245,7 @@ function AgentModelSection({ settings, onSaved }: { settings: LLMSettings; onSav
               <span style={{ fontSize: 14, color: color.text.muted }}>No model selected — configure a provider below.</span>
             )}
           </div>
-          <Button size="sm" variant="secondary" onClick={() => setEditing(true)} disabled={availableProviders.length === 0}>Edit</Button>
+          <Button size="sm" variant="default" onClick={() => setEditing(true)} disabled={availableProviders.length === 0}>Edit</Button>
         </div>
       ) : (
         <div style={{
@@ -290,10 +290,10 @@ function AgentModelSection({ settings, onSaved }: { settings: LLMSettings; onSav
           </div>
           {error && <div style={{ color: color.state.danger.fg, fontSize: 13, padding: "0 12px 8px" }}>{error}</div>}
           <div style={{ display: "flex", gap: 8, padding: "4px 12px 12px" }}>
-            <Button type="button" variant="primary" size="sm" disabled={saving || !selProvider} onClick={() => void onSave()}>
+            <Button type="button" variant="action" size="sm" disabled={saving || !selProvider} onClick={() => void onSave()}>
               {saving ? "Saving…" : "Set as active"}
             </Button>
-            <Button type="button" variant="secondary" size="sm" onClick={() => { setEditing(false); setError(null); }}>
+            <Button type="button" variant="default" size="sm" onClick={() => { setEditing(false); setError(null); }}>
               Cancel
             </Button>
           </div>
@@ -359,7 +359,7 @@ function ProviderCard({
         <Button
           type="button"
           size="sm"
-          variant={configured ? "secondary" : "primary"}
+          variant={configured ? "default" : "action"}
           onClick={onToggle}
         >
           {configured ? (expanded ? "Close" : "Edit") : (expanded ? "Close" : "Connect")}
@@ -516,7 +516,7 @@ function ProviderForm({
       {error && <div style={{ color: color.state.danger.fg, fontSize: 13 }}>{error}</div>}
       {saved && <div style={{ color: color.state.success.fg, fontSize: 13 }}>Saved.</div>}
       <div style={{ display: "flex", gap: 8 }}>
-        <Button type="submit" variant="primary" size="sm" disabled={saving}>
+        <Button type="submit" variant="action" size="sm" disabled={saving}>
           {saving ? "Saving…" : "Save"}
         </Button>
         {configured && (

@@ -2,7 +2,7 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 
-import { Button } from "@/components/common/Button";
+import { Button } from "@onyx-ai/opal/components";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { BackLink, PageHeader } from "@/components/common/PageHeader";
 import { RequireAdmin } from "@/components/RequireAdmin";
@@ -177,7 +177,7 @@ function BraintrustForm() {
         </div>
         <Button
           type="button"
-          variant={settings.enabled ? "danger" : "primary"}
+          variant={settings.enabled ? "danger" : "action"}
           size="sm"
           disabled={saving || !canEnable || fieldsDirty}
           onClick={() => void toggleEnabled(!settings.enabled)}
@@ -189,7 +189,7 @@ function BraintrustForm() {
       {error && <div style={{ color: color.state.danger.fg }}>{error}</div>}
       {saved && <div style={{ color: color.state.success.fg }}>{saved}</div>}
       <div>
-        <Button type="submit" variant="primary" disabled={saving}>
+        <Button type="submit" variant="action" disabled={saving}>
           {saving ? "Saving…" : "Save"}
         </Button>
       </div>
@@ -229,7 +229,6 @@ function KeyField({
             variant="danger"
             onClick={onClear}
             disabled={clearDisabled}
-            style={{ padding: "2px 8px", fontSize: 12 }}
           >
             Clear
           </Button>

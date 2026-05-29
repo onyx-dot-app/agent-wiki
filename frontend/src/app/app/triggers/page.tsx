@@ -2,7 +2,8 @@
 
 import { useState, type CSSProperties } from "react";
 
-import { Button } from "@/components/common/Button";
+import { Button } from "@onyx-ai/opal/components";
+import { SvgPlus } from "@onyx-ai/opal/icons";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { PageHeader } from "@/components/common/PageHeader";
 import { TriggerHistoryModal } from "@/components/triggers/TriggerHistoryModal";
@@ -116,13 +117,14 @@ export default function TriggersPage() {
           description="Triggers watch a document (or folder) and notice when something specific changes, or check on a recurring schedule. When the trigger fires, the message you wrote shows up on the Events tab so you can review it."
           actions={
             <Button
-              variant="primary"
+              variant="action"
+              icon={SvgPlus}
               onClick={() => {
                 setEditing(null);
                 setModalOpen(true);
               }}
             >
-              + New trigger
+              New trigger
             </Button>
           }
         />

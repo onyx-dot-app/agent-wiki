@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, type CSSProperties, type FormEvent, type ReactNode } from "react";
 
-import { Button } from "@/components/common/Button";
+import { Button } from "@onyx-ai/opal/components";
 import { BackLink, PageHeader } from "@/components/common/PageHeader";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { apiFetch } from "@/lib/api";
@@ -149,7 +149,7 @@ function ProfileForm({
       {error && <div style={{ color: color.state.danger.fg }}>{error}</div>}
       {saved && <div style={{ color: color.state.success.fg }}>Saved.</div>}
       <div>
-        <Button type="submit" variant="primary" disabled={saving || !dirty}>
+        <Button type="submit" variant="action" disabled={saving || !dirty}>
           {saving ? "Saving…" : "Save"}
         </Button>
       </div>
@@ -305,7 +305,7 @@ function SettingsForm({
       {error && <div style={{ color: color.state.danger.fg }}>{error}</div>}
       {saved && <div style={{ color: color.state.success.fg }}>Saved.</div>}
       <div>
-        <Button type="submit" variant="primary" disabled={saving || !dirty}>
+        <Button type="submit" variant="action" disabled={saving || !dirty}>
           {saving ? "Saving…" : "Save"}
         </Button>
       </div>
@@ -377,7 +377,7 @@ function ChatModelForm({
       {error && <div style={{ color: color.state.danger.fg }}>{error}</div>}
       {saved && <div style={{ color: color.state.success.fg }}>Saved.</div>}
       <div>
-        <Button type="submit" variant="primary" disabled={saving}>
+        <Button type="submit" variant="action" disabled={saving}>
           {saving ? "Saving…" : "Save"}
         </Button>
       </div>

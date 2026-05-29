@@ -3,7 +3,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { mutate as globalMutate } from "swr";
 
-import { Button } from "@/components/common/Button";
+import { Button } from "@onyx-ai/opal/components";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { BackLink, PageHeader } from "@/components/common/PageHeader";
 import { RequireAdmin } from "@/components/RequireAdmin";
@@ -165,7 +165,7 @@ function IngestForm() {
               </span>
               <Button
                 type="button"
-                variant="secondary"
+                variant="default"
                 size="sm"
                 onClick={() => void copyToClipboard(`${baseUrl}/api/documents/ingest`)}
               >
@@ -188,7 +188,7 @@ function IngestForm() {
               {settings.api_key && keyVisible && (
                 <Button
                   type="button"
-                  variant="secondary"
+                  variant="default"
                   size="sm"
                   onClick={() => void copyToClipboard(settings.api_key ?? "")}
                 >
@@ -197,7 +197,7 @@ function IngestForm() {
               )}
               <Button
                 type="button"
-                variant={settings.api_key ? "secondary" : "primary"}
+                variant={settings.api_key ? "default" : "action"}
                 size="sm"
                 disabled={saving}
                 onClick={() => void regenerateKey()}
@@ -226,7 +226,7 @@ function IngestForm() {
         {error && <div style={{ color: color.state.danger.fg }}>{error}</div>}
         {saved && <div style={{ color: color.state.success.fg }}>{saved}</div>}
         <div>
-          <Button type="submit" variant="primary" disabled={saving || !dirty}>
+          <Button type="submit" variant="action" disabled={saving || !dirty}>
             {saving ? "Saving…" : "Save"}
           </Button>
         </div>
@@ -295,7 +295,7 @@ function SelectorModelSection({ settings, onSaved }: { settings: LLMSettings; on
           <span style={{ fontSize: 14, color: selModel && selModel !== settings.model ? color.text.primary : color.text.muted }}>
             {activeLabel}
           </span>
-          <Button size="sm" variant="secondary" onClick={() => setEditing(true)} disabled={availableProviders.length === 0}>Edit</Button>
+          <Button size="sm" variant="default" onClick={() => setEditing(true)} disabled={availableProviders.length === 0}>Edit</Button>
         </div>
       ) : (
         <div style={{
@@ -371,10 +371,10 @@ function SelectorModelSection({ settings, onSaved }: { settings: LLMSettings; on
           </div>
           {error && <div style={{ color: color.state.danger.fg, fontSize: 13, padding: "0 12px 8px" }}>{error}</div>}
           <div style={{ display: "flex", gap: 8, padding: "4px 12px 12px" }}>
-            <Button type="button" variant="primary" size="sm" disabled={saving} onClick={() => void onSave()}>
+            <Button type="button" variant="action" size="sm" disabled={saving} onClick={() => void onSave()}>
               {saving ? "Saving…" : "Save"}
             </Button>
-            <Button type="button" variant="secondary" size="sm" onClick={() => { setEditing(false); setError(null); setSelModel(settings.ingest_selector_model || ""); }}>
+            <Button type="button" variant="default" size="sm" onClick={() => { setEditing(false); setError(null); setSelModel(settings.ingest_selector_model || ""); }}>
               Cancel
             </Button>
           </div>

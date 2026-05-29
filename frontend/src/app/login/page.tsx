@@ -4,7 +4,7 @@ import Link from "next/link";
 import { Suspense, useState, type CSSProperties, type FormEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
-import { Button } from "@/components/common/Button";
+import { Button } from "@onyx-ai/opal/components";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { useAuth } from "@/lib/auth";
 import { color, radius, shadow } from "@/lib/theme";
@@ -170,9 +170,10 @@ function LoginForm() {
               )}
               <Button
                 type="submit"
-                variant="primary"
+                variant="action"
+                width="full"
                 disabled={submitting}
-                style={{ marginTop: 4, width: "100%" }}
+                style={{ marginTop: 4 }}
               >
                 {submitting ? "Signing in…" : "Sign in"}
               </Button>

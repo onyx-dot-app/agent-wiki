@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 
+import { Button } from "@onyx-ai/opal/components";
+import { SvgX } from "@onyx-ai/opal/icons";
 import { formatScopePath } from "@/lib/format";
 import {
   getTriggerHistory,
@@ -90,9 +92,7 @@ export function TriggerHistoryModal({ trigger, onClose, onSelectVersion }: Props
               {formatScopePath(trigger.scope_path)}
             </div>
           </div>
-          <button onClick={onClose} style={closeBtn} aria-label="Close">
-            ×
-          </button>
+          <Button icon={SvgX} prominence="tertiary" size="sm" tooltip="Close" onClick={onClose} />
         </div>
 
         <p style={{ margin: 0, fontSize: 12, color: color.text.muted, lineHeight: 1.5 }}>
@@ -141,15 +141,6 @@ export function TriggerHistoryModal({ trigger, onClose, onSelectVersion }: Props
   );
 }
 
-const closeBtn: React.CSSProperties = {
-  background: "transparent",
-  border: "none",
-  fontSize: 22,
-  cursor: "pointer",
-  color: color.text.muted,
-  lineHeight: 1,
-  padding: 4,
-};
 
 const rowBtn: React.CSSProperties = {
   width: "100%",
