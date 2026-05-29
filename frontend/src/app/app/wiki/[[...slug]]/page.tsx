@@ -2759,21 +2759,15 @@ function ActiveSessionRow({
         started {relativeTime(s.started_at, "short")}
       </span>
 
-      <button
+      <Button
+        type="button"
+        variant="secondary"
+        size="sm"
         onClick={onClose}
-        style={{
-          flexShrink: 0,
-          fontSize: 12,
-          padding: "2px 8px",
-          border: `1px solid ${color.border.default}`,
-          borderRadius: radius.sm,
-          background: color.bg.panel,
-          color: color.text.secondary,
-          cursor: "pointer",
-        }}
+        style={{ flexShrink: 0 }}
       >
         Close
-      </button>
+      </Button>
     </li>
   );
 }

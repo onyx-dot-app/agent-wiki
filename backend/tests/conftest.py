@@ -28,6 +28,7 @@ from urllib.parse import quote
 # Make sure required env vars exist before ``app.config`` is imported by any
 # subsequent test module. ``app.config.load_config()`` runs at import.
 os.environ.setdefault("SECRET_KEY", "test-secret")
+os.environ.setdefault("PUBLIC_BASE_URL", "http://testserver")
 
 import psycopg
 import pytest

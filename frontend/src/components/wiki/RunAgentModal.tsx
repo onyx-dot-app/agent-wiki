@@ -211,6 +211,7 @@ export function RunAgentModal({ open, onClose, wikiPath }: Props) {
     <form
       onSubmit={onRun}
       role="dialog"
+      aria-modal={false}
       aria-label="Quick Launch Agent"
       className={styles.panel}
     >
