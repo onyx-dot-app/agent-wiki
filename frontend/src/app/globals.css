@@ -1,5 +1,4 @@
 @import "@onyx-ai/opal/root.css";
-@import "./css/colors.css" layer(base);
 @config "../../tailwind.config.cjs";
 
 /* Reserve the scrollbar gutter on the root scroll container so layout
