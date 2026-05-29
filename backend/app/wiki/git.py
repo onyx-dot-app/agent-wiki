@@ -492,23 +492,34 @@ class UnknownSha(Exception):
 
 
 class GitCommitLockError(Exception):
-    """Raised when ``git commit`` fails to acquire the ref lock.
+    """Raised when ``git commit`` can't acquire git's own ref/index lock.
 
-    This is a transient race: two workers passed the pre-commit SHA check at
-    the same time and both tried to commit. One wins; the other gets this
-    error. ``commit_file`` retries it transparently so callers never see it
-    unless the retry budget is exhausted.
+    Defensive backstop, not an expected outcome of our concurrency. Our own
+    writers all serialize through :func:`commit_lock`, so two of *our* commits
+    can never race for the ref lock. The only way to hit this is a process that
+    mutates the repo *without* taking that flock:
+
+    - git's background auto-gc / maintenance
+    - a manual ``git`` command, backup, or fsck on the ``wiki-data`` volume
+    - a future code path that bypasses ``commit_lock``
+
+    ``commit_file`` retries transparently (``_COMMIT_RETRY_MAX`` attempts with
+    backoff) to absorb such a transient out-of-band lock; this error is the
+    terminal "retries exhausted" signal. It is currently uncaught and surfaces
+    as a 5xx — seeing one in logs means something is writing to the repo
+    outside the lock, which is the bug to chase rather than the commit path.
     """
 
 
 class GitNothingToCommitError(Exception):
     """Raised when ``git commit`` finds nothing staged.
 
-    The shared index/working tree means a concurrent writer's commit can
-    interleave between our ``git add`` and our ``git commit`` and reset the
-    index out from under us, so git reports "nothing to commit". The merge
-    loop treats this as a retry trigger (re-read HEAD, re-merge) rather than
-    leaking a raw ``CalledProcessError``.
+    Like :class:`GitCommitLockError`, this is now defensive: our own
+    ``add``→``commit`` runs inside :func:`commit_lock`, so a concurrent writer
+    of ours can't reset the index between the two steps. It remains reachable
+    only if something mutates the index out-of-band (see the bypass cases on
+    ``GitCommitLockError``). The merge loop treats it as a retry trigger
+    (re-read HEAD, re-merge) rather than leaking a raw ``CalledProcessError``.
     """
 
 
