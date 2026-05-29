@@ -2,7 +2,6 @@
 
 import { Button, SidebarTab, Text } from "@onyx-ai/opal/components";
 import {
-  SvgActivity,
   SvgDocFile,
   SvgSearch,
   SvgSettings,
@@ -193,16 +192,8 @@ export function AppSidebar() {
             )}
           </div>
 
-          {/* Footer: Activities + Admin Panel + Account */}
+          {/* Footer: Admin Panel + Account */}
           <div className="flex flex-col gap-px px-2 shrink-0">
-            <SidebarTab
-              icon={SvgActivity}
-              folded={collapsed}
-              tooltip={collapsed ? "Activities" : undefined}
-              href="/app/events"
-            >
-              Activities
-            </SidebarTab>
             {user?.is_admin && (
               <SidebarTab
                 icon={SvgSettings}

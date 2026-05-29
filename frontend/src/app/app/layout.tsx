@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { useEffect, useState, type ReactNode } from "react";
+import { Button } from "@onyx-ai/opal/components";
+import { SvgX } from "@onyx-ai/opal/icons";
 import { AppSidebar } from "@/sections/sidebar/AppSidebar";
 import { useAuth } from "@/lib/auth";
 import { useHealth } from "@/lib/health";
@@ -122,16 +124,16 @@ function LLMSetupBanner({ isAdmin }: { isAdmin: boolean }) {
             <>AI features are disabled. Please ask a workspace admin to finish setup.</>
           )}
         </span>
-        <button
+        <Button
+          icon={SvgX}
+          prominence="tertiary"
+          size="sm"
+          tooltip="Dismiss"
           onClick={() => {
             if (typeof window !== "undefined") sessionStorage.setItem("llm-banner-dismissed", "1");
             setDismissed(true);
           }}
-          aria-label="Dismiss"
-          className="bg-transparent border-0 text-(--status-text-warning-05) cursor-pointer text-lg leading-none py-0.5 px-1.5 rounded"
-        >
-          ×
-        </button>
+        />
       </span>
     </BannerShell>
   );

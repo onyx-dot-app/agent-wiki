@@ -209,7 +209,7 @@ function Explorer({ dir }: { dir: string }) {
       setNewName("");
       setCreating(null);
       refresh();
-      router.push(`/wiki/${fullPath}`);
+      router.push(`/app/wiki/${fullPath}`);
     } catch (e) {
       setError(e instanceof Error ? e.message : "create failed");
     } finally {
@@ -326,7 +326,7 @@ function Explorer({ dir }: { dir: string }) {
             </Button>
             <Button
               variant="primary"
-              onClick={() => router.push(`/wiki/${dir}?new=1`)}
+              onClick={() => router.push(`/app/wiki/${dir}?new=1`)}
             >
               + New document
             </Button>
@@ -439,7 +439,7 @@ function Explorer({ dir }: { dir: string }) {
                 icon={isFile ? <FileIcon /> : <FolderIcon />}
                 label={name}
                 updatedAt={updated_at}
-                href={`/wiki/${childPath}`}
+                href={`/app/wiki/${childPath}`}
                 path={childPath}
                 isFile={isFile}
                 busy={busyPath === childPath}
@@ -603,7 +603,7 @@ function NewDocView({ dir }: { dir: string }) {
       if (appliedTemplateId) {
         await setDraftTemplate(fullPath, appliedTemplateId);
       }
-      router.push(`/wiki/${fullPath}?new=1`);
+      router.push(`/app/wiki/${fullPath}?new=1`);
     } catch (e) {
       setError(e instanceof Error ? e.message : "create failed");
       setSaving(false);
@@ -633,7 +633,7 @@ function NewDocView({ dir }: { dir: string }) {
         actions={
           <>
             <Button
-              onClick={() => router.push(`/wiki/${dir}`)}
+              onClick={() => router.push(`/app/wiki/${dir}`)}
               disabled={saving}
             >
               Cancel
@@ -1303,7 +1303,7 @@ function Breadcrumbs({
   const crumbs = [{ label: "Wiki", href: "/app/wiki", path: "" }];
   segments.forEach((seg, i) => {
     const path = segments.slice(0, i + 1).join("/");
-    crumbs.push({ label: seg, href: `/wiki/${path}`, path });
+    crumbs.push({ label: seg, href: `/app/wiki/${path}`, path });
   });
   return (
     <nav
@@ -1740,7 +1740,7 @@ function FileViewer({ path }: { path: string }) {
         });
         // Navigation will remount FileViewer with the new path; loadLatest
         // there resets editing/body/headSha. Bail out before touching state.
-        router.push(`/wiki/${newRel}`);
+        router.push(`/app/wiki/${newRel}`);
         return;
       }
       setEditing(false);
