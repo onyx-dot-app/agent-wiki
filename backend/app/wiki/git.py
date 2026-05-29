@@ -114,10 +114,12 @@ def commit_file(rel_path: str, body: str, message: str, author: str | None = Non
 _COMMIT_RETRY_MAX = 3
 
 
-def _read_worktree(rel_path: str) -> str:
-    """Current working-tree body of ``rel_path``, or ``""`` if absent."""
-    p = Path(CONFIG.wiki_dir) / rel_path
-    return p.read_text() if p.is_file() else ""
+def _read_head_or_empty(rel_path: str) -> str:
+    """Body of ``rel_path`` at the last git commit (HEAD), or ``""`` if absent."""
+    try:
+        return read_file(rel_path, ref="HEAD")
+    except subprocess.CalledProcessError:
+        return ""
 
 
 def commit_with_retry(
@@ -158,7 +160,11 @@ def commit_with_retry(
             merged = new
             current = None
         else:
-            current = _read_worktree(rel_path)
+            # Read from HEAD, not the working tree: after a GitCommitLockError
+            # commit_file has already staged the loser's merged body to disk, so
+            # _read_worktree would return the loser's own content, making the
+            # next merge a no-op that clobbers the winner's commit.
+            current = _read_head_or_empty(rel_path)
             if current != base:
                 mr = merge_content(base, current, new)
                 if mr.clean:
@@ -177,8 +183,7 @@ def commit_with_retry(
                     "commit_with_retry: lock race for %s, retrying (%d/%d)",
                     rel_path, attempt + 1, max_retries,
                 )
-                if base is None:
-                    time.sleep(0.05 * (attempt + 1))
+                time.sleep(0.05 * (attempt + 1))
         if attempt >= max_retries:
             raise CommitMaxRetriesError(attempt, post or "")
         if post != head:
@@ -512,11 +517,8 @@ class GitCommitLockError(Exception):
 
 class GitMergeConflictError(Exception):
     """Raised by ``commit_with_retry`` when a concurrent change can't be
-    merged cleanly and no ``on_conflict`` resolver was supplied.
-
-    Human edit paths translate this into a 409 so the user gets the conflict
-    UI; automated paths pass an ``on_conflict`` callback instead and never see
-    it.
+    merged cleanly. Human edit paths translate this into a 409 so the user
+    gets the conflict UI.
     """
 
     def __init__(self, rel_path: str) -> None:

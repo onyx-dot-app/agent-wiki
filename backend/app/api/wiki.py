@@ -149,7 +149,7 @@ def put_document_by_path(
             message=msg,
             author=author,
         )
-    except (wiki_git.GitMergeConflictError, wiki_git.CommitMaxRetriesError, RuntimeError):
+    except (wiki_git.GitMergeConflictError, wiki_git.CommitMaxRetriesError):
         raise HTTPException(status_code=409, detail="conflict detected")
     wiki_notify.after_doc_write(
         rel,

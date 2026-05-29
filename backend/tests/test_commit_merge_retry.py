@@ -49,7 +49,7 @@ def test_no_base_passes_through(monkeypatch):
     monkeypatch.setattr("app.wiki.git.head_sha_for_path", lambda _p: _SHA_A)
     # _read_worktree must never be consulted when there's no base.
     monkeypatch.setattr(
-        "app.wiki.git._read_worktree",
+        "app.wiki.git._read_head_or_empty",
         MagicMock(side_effect=AssertionError("should not read worktree without a base")),
     )
 
@@ -92,7 +92,7 @@ def _wire(monkeypatch, *, head_shas, worktrees, merge_result=None, commit_fn=Non
     body_iter = iter(worktrees)
     monkeypatch.setattr("app.wiki.git.head_sha_for_path", lambda _p: next(head_iter))
     monkeypatch.setattr("app.wiki.git.read_file", lambda _p, ref=None: _BASE)
-    monkeypatch.setattr("app.wiki.git._read_worktree", lambda _p: next(body_iter))
+    monkeypatch.setattr("app.wiki.git._read_head_or_empty", lambda _p: next(body_iter))
     if merge_result is not None:
         monkeypatch.setattr("app.wiki.git.merge_content", lambda *_a: merge_result)
     commit_file = commit_fn or MagicMock(return_value=_SHA_B)
@@ -165,7 +165,7 @@ def test_base_head_moves_then_commits(monkeypatch):
     ])
     monkeypatch.setattr("app.wiki.git.head_sha_for_path", lambda _p: next(head_iter))
     monkeypatch.setattr("app.wiki.git.read_file", lambda _p, ref=None: _BASE)
-    monkeypatch.setattr("app.wiki.git._read_worktree", lambda _p: next(body_iter))
+    monkeypatch.setattr("app.wiki.git._read_head_or_empty", lambda _p: next(body_iter))
     monkeypatch.setattr("app.wiki.git.merge_content", lambda *_a: next(merge_iter))
     commit_file = MagicMock(return_value=_SHA_C)
     monkeypatch.setattr("app.wiki.git.commit_file", commit_file)
@@ -188,7 +188,7 @@ def test_base_lock_race_then_commits(monkeypatch):
     merge_iter = iter([MergeResult(merged=merged, clean=True)])
     monkeypatch.setattr("app.wiki.git.head_sha_for_path", lambda _p: next(head_iter))
     monkeypatch.setattr("app.wiki.git.read_file", lambda _p, ref=None: _BASE)
-    monkeypatch.setattr("app.wiki.git._read_worktree", lambda _p: next(body_iter))
+    monkeypatch.setattr("app.wiki.git._read_head_or_empty", lambda _p: next(body_iter))
     monkeypatch.setattr("app.wiki.git.merge_content", lambda *_a: next(merge_iter))
 
     calls = 0
@@ -216,7 +216,7 @@ def test_base_raises_when_max_retries_exceeded(monkeypatch):
     body_iter = iter([_BASE, _BASE])
     monkeypatch.setattr("app.wiki.git.head_sha_for_path", lambda _p: next(head_iter))
     monkeypatch.setattr("app.wiki.git.read_file", lambda _p, ref=None: _BASE)
-    monkeypatch.setattr("app.wiki.git._read_worktree", lambda _p: next(body_iter))
+    monkeypatch.setattr("app.wiki.git._read_head_or_empty", lambda _p: next(body_iter))
     monkeypatch.setattr(
         "app.wiki.git.commit_file",
         MagicMock(side_effect=GitCommitLockError(_PATH)),
