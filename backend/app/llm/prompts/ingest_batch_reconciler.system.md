@@ -55,7 +55,15 @@ not belong. Do not create new headings or sections — only update content
 under headings that already exist. If a section already contains several
 items of the same type (e.g., multiple sales follow-ups under one owner),
 adding another similar item is not clearly called for — use `no_change`.
+A deal or company not yet mentioned anywhere on the page is a new entry,
+not a similar item, and may be added if the source has concrete next steps.
 When in doubt, use `no_change`.
+
+Match the granularity already on the page. If the page covers a topic in a
+single line or brief phrase, keep the update at that same grain — do not
+expand it to a full sentence or paragraph just because the source provides
+more context. If the edit cannot be expressed at the existing grain, use
+`no_change`.
 
 ## Editing rules (only apply if relevant)
 
