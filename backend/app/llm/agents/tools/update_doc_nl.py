@@ -16,7 +16,7 @@ from app.wiki import utils as wiki_utils
 from app.llm.agents.tools.errors import ToolError
 from app.llm.errors import LLMError
 from app.wiki import git as wiki_git
-from app.models.wiki import ChangeKind
+from app.models.wiki import AiRebaseMaxRetriesError
 
 log = logging.getLogger(__name__)
 
@@ -61,19 +61,28 @@ def handle(args: dict[str, Any]) -> Any:
                 "sha": head_sha,
             }
 
-        sha = wiki_utils.commit_and_fan_out(
-            path,
-            new_body,
-            f"Doc update: {instruction.strip()[:80]}",
-            change_kind=ChangeKind.EDIT,
-            activity_ttl=activity_ttl,
-        )
+        try:
+            result = wiki_utils.commit_with_ai_rebase(
+                path,
+                f"Doc update: {instruction.strip()[:80]}",
+                base_body=old_body,
+                new_body=new_body,
+                activity_ttl=activity_ttl,
+            )
+        except AiRebaseMaxRetriesError as exc:
+            return {
+                "error": "stale_base",
+                "message": "concurrent edits kept landing; max retries exceeded",
+                "current_sha": exc.current_sha,
+            }
+        if result is None:
+            return {"path": path, "committed": False, "reason": "no_change", "sha": head_sha}
         return {
             "path": path,
             "committed": True,
-            "sha": sha,
-            "diff": wiki_utils.unified_diff(old_body, new_body, path),
-            "broken_links": wiki_utils.broken_links(path, new_body),
+            "sha": result.sha,
+            "diff": wiki_utils.unified_diff(result.old_body, result.new_body, path),
+            "broken_links": wiki_utils.broken_links(path, result.new_body),
         }
     except ToolError as exc:
         return {"error": str(exc)}

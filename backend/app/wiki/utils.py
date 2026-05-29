@@ -60,6 +60,9 @@ def validate_doc_path(raw_path: Any) -> str:
 # invoke the LLM merge fallback, so keep this small to bound LLM spend.
 _AI_REBASE_MAX_RETRIES = 3
 
+# Retries for the transient ref-lock race inside ``commit_and_fan_out``.
+_COMMIT_LOCK_RETRIES = 3
+
 
 def commit_with_ai_rebase(
     path: str,
@@ -281,7 +284,18 @@ def commit_and_fan_out(
         )
 
     author = author_string()
-    sha = wiki_git.commit_file(path, body, message, author=author)
+    sha = ""
+    for _attempt in range(_COMMIT_LOCK_RETRIES + 1):
+        try:
+            sha = wiki_git.commit_file(path, body, message, author=author)
+            break
+        except wiki_git.GitCommitLockError:
+            if _attempt >= _COMMIT_LOCK_RETRIES:
+                raise
+            log.info(
+                "commit_and_fan_out: lock race for %s, retrying (%d/%d)",
+                path, _attempt + 1, _COMMIT_LOCK_RETRIES,
+            )
     wiki_notify.after_doc_write(
         path,
         sha,
