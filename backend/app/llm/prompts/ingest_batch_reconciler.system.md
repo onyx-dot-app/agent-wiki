@@ -62,7 +62,8 @@ When in doubt, use `no_change`.
 Match the granularity already on the page. If the page covers a topic in a
 single line or brief phrase, keep the update at that same grain — do not
 expand it to a full sentence or paragraph just because the source provides
-more context.
+more context. If the edit cannot be expressed at the existing grain, use
+`no_change`.
 
 ## Editing rules (only apply if relevant)
 
