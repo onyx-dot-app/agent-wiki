@@ -1,10 +1,10 @@
 """Unit tests for ``commit_with_retry`` in ``app.wiki.git``.
 
 ``commit_with_retry`` is the git-layer commit entry point for the non-agent
-callers (human edits, ingest, folder/trigger writes). It always retries the
-ref-lock race; when ``base_sha`` is supplied it also 3-way merges a concurrent
-edit. The agent path's LLM-merge loop ``commit_with_ai_rebase`` is covered
-separately in ``test_commit_with_ai_rebase.py``.
+callers (human edits, ingest, folder/trigger writes). When ``base_sha`` is
+supplied it 3-way merges a concurrent edit and retries when HEAD keeps moving.
+Ref-lock races (``GitCommitLockError``) are handled transparently inside
+``commit_file`` — ``commit_with_retry`` never sees them.
 
 All git/filesystem I/O is monkeypatched so the tests run without a real repo
 or database.
@@ -18,7 +18,6 @@ import pytest
 from app.wiki import git as wiki_git
 from app.wiki.git import (
     CommitMaxRetriesError,
-    GitCommitLockError,
     GitMergeConflictError,
     MergeResult,
 )
@@ -32,14 +31,8 @@ _SHA_B = "bbbb2222"
 _SHA_C = "cccc3333"
 
 
-@pytest.fixture(autouse=True)
-def _no_sleep(monkeypatch):
-    """Don't actually sleep between lock-race retries."""
-    monkeypatch.setattr("app.wiki.git.time.sleep", lambda *_a, **_k: None)
-
-
 # ---------------------------------------------------------------------------
-# base_sha=None — no merge, lock-only retry
+# base_sha=None — no merge, direct commit
 # ---------------------------------------------------------------------------
 
 
@@ -47,7 +40,6 @@ def test_no_base_passes_through(monkeypatch):
     commit_file = MagicMock(return_value=_SHA_A)
     monkeypatch.setattr("app.wiki.git.commit_file", commit_file)
     monkeypatch.setattr("app.wiki.git.head_sha_for_path", lambda _p: _SHA_A)
-    # _read_worktree must never be consulted when there's no base.
     monkeypatch.setattr(
         "app.wiki.git._read_head_or_empty",
         MagicMock(side_effect=AssertionError("should not read worktree without a base")),
@@ -58,28 +50,6 @@ def test_no_base_passes_through(monkeypatch):
     assert sha == _SHA_A
     assert body == "body"
     commit_file.assert_called_once_with(_PATH, "body", _MSG, author=None)
-
-
-def test_no_base_retries_lock_then_succeeds(monkeypatch):
-    commit_file = MagicMock(side_effect=[GitCommitLockError(_PATH), _SHA_B])
-    monkeypatch.setattr("app.wiki.git.commit_file", commit_file)
-    monkeypatch.setattr("app.wiki.git.head_sha_for_path", lambda _p: _SHA_A)
-
-    sha, _ = wiki_git.commit_with_retry(_PATH, new_body="body", message=_MSG, max_retries=2)
-
-    assert sha == _SHA_B
-    assert commit_file.call_count == 2
-
-
-def test_no_base_raises_after_max_lock_retries(monkeypatch):
-    commit_file = MagicMock(side_effect=GitCommitLockError(_PATH))
-    monkeypatch.setattr("app.wiki.git.commit_file", commit_file)
-    monkeypatch.setattr("app.wiki.git.head_sha_for_path", lambda _p: _SHA_A)
-
-    with pytest.raises(CommitMaxRetriesError):
-        wiki_git.commit_with_retry(_PATH, new_body="body", message=_MSG, max_retries=2)
-
-    assert commit_file.call_count == 3  # initial + 2 retries
 
 
 # ---------------------------------------------------------------------------
@@ -179,52 +149,26 @@ def test_base_head_moves_then_commits(monkeypatch):
     assert commit_file.call_count == 1
 
 
-def test_base_lock_race_then_commits(monkeypatch):
-    concurrent = "concurrent edit\n"
-    merged = "merged\n"
-
-    head_iter = iter([_SHA_A, _SHA_A, _SHA_B, _SHA_B])
-    body_iter = iter([_BASE, concurrent])
-    merge_iter = iter([MergeResult(merged=merged, clean=True)])
-    monkeypatch.setattr("app.wiki.git.head_sha_for_path", lambda _p: next(head_iter))
-    monkeypatch.setattr("app.wiki.git.read_file", lambda _p, ref=None: _BASE)
-    monkeypatch.setattr("app.wiki.git._read_head_or_empty", lambda _p: next(body_iter))
-    monkeypatch.setattr("app.wiki.git.merge_content", lambda *_a: next(merge_iter))
-
-    calls = 0
-
-    def _commit(*_a, **_k):
-        nonlocal calls
-        calls += 1
-        if calls == 1:
-            raise GitCommitLockError(_PATH)
-        return _SHA_C
-
-    monkeypatch.setattr("app.wiki.git.commit_file", _commit)
-
-    sha, body = wiki_git.commit_with_retry(
-        _PATH, base_sha=_SHA_A, new_body=_NEW, message=_MSG, max_retries=1
-    )
-
-    assert sha == _SHA_C
-    assert body == merged
-    assert calls == 2
-
-
 def test_base_raises_when_max_retries_exceeded(monkeypatch):
-    head_iter = iter([_SHA_A, _SHA_A, _SHA_A, _SHA_A])
-    body_iter = iter([_BASE, _BASE])
+    """CommitMaxRetriesError when HEAD keeps moving during the merge step."""
+    # HEAD always returns a different SHA on the post-check — commit is never attempted.
+    head_shas = [_SHA_A, _SHA_B, _SHA_B, _SHA_C, _SHA_C, "dddd4444"]
+    body_iter = iter(["concurrent\n"] * 10)
+    head_iter = iter(head_shas)
     monkeypatch.setattr("app.wiki.git.head_sha_for_path", lambda _p: next(head_iter))
     monkeypatch.setattr("app.wiki.git.read_file", lambda _p, ref=None: _BASE)
     monkeypatch.setattr("app.wiki.git._read_head_or_empty", lambda _p: next(body_iter))
     monkeypatch.setattr(
-        "app.wiki.git.commit_file",
-        MagicMock(side_effect=GitCommitLockError(_PATH)),
+        "app.wiki.git.merge_content",
+        lambda *_a: MergeResult(merged="merged\n", clean=True),
     )
+    commit_file = MagicMock(return_value=_SHA_A)
+    monkeypatch.setattr("app.wiki.git.commit_file", commit_file)
 
     with pytest.raises(CommitMaxRetriesError) as exc_info:
         wiki_git.commit_with_retry(
-            _PATH, base_sha=_SHA_A, new_body=_NEW, message=_MSG, max_retries=1
+            _PATH, base_sha=_SHA_A, new_body=_NEW, message=_MSG, max_retries=2
         )
 
-    assert exc_info.value.retries == 1
+    assert exc_info.value.retries == 2
+    commit_file.assert_not_called()

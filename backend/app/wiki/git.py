@@ -87,7 +87,12 @@ def ensure_wiki_repo() -> None:
 
 
 def commit_file(rel_path: str, body: str, message: str, author: str | None = None) -> str:
-    """Write a file at ``rel_path`` (relative to the wiki root), commit, return SHA."""
+    """Write a file at ``rel_path`` (relative to the wiki root), commit, return SHA.
+
+    Retries up to ``_COMMIT_RETRY_MAX`` times on a transient git ref-lock race
+    (``cannot lock ref``) so callers never need to handle that error themselves.
+    Raises ``GitCommitLockError`` only when the retry budget is exhausted.
+    """
     full = Path(CONFIG.wiki_dir) / rel_path
     full.parent.mkdir(parents=True, exist_ok=True)
     full.write_text(body)
@@ -97,13 +102,22 @@ def commit_file(rel_path: str, body: str, message: str, author: str | None = Non
         log.debug("commit_file no-op (no diff) %s sha=%s", rel_path, sha[:8])
         return sha
     env_args = ["--author", author] if author else []
-    try:
-        _run(["commit", "-m", message, *env_args])
-    except subprocess.CalledProcessError as e:
-        stderr = (e.stderr or "").lower()
-        if "cannot lock ref" in stderr or ("unable to create" in stderr and ".lock" in stderr):
-            raise GitCommitLockError(rel_path) from e
-        raise
+    for attempt in range(_COMMIT_RETRY_MAX + 1):
+        try:
+            _run(["commit", "-m", message, *env_args])
+            break
+        except subprocess.CalledProcessError as e:
+            stderr = (e.stderr or "").lower()
+            if "cannot lock ref" in stderr or ("unable to create" in stderr and ".lock" in stderr):
+                if attempt >= _COMMIT_RETRY_MAX:
+                    raise GitCommitLockError(rel_path) from e
+                log.info(
+                    "commit_file: lock race for %s, retrying (%d/%d)",
+                    rel_path, attempt + 1, _COMMIT_RETRY_MAX,
+                )
+                time.sleep(0.05 * (attempt + 1))
+                continue
+            raise
     sha = _run(["rev-parse", "HEAD"]).stdout.strip()
     log.debug("commit_file %s sha=%s author=%s", rel_path, sha[:8], author or "default")
     return sha
@@ -131,12 +145,12 @@ def commit_with_retry(
     author: str | None = None,
     max_retries: int = _COMMIT_RETRY_MAX,
 ) -> tuple[str, str]:
-    """Commit ``new_body`` to ``rel_path``, retrying past a concurrent commit.
+    """Commit ``new_body`` to ``rel_path``, retrying when HEAD moves mid-merge.
 
-    The git-layer commit entry point for everything except the agent tools
-    (which carry their own LLM-merge loop in
-    ``app.wiki.utils.commit_with_ai_rebase``). Always rides out the transient
-    ref-lock race (two writers commit at once; one loses the lock).
+    The git-layer commit entry point for human edits (``PUT /file``). Ref-lock
+    races are handled transparently inside ``commit_file`` — this function only
+    retries when HEAD moves between the pre/post SHA checks (a concurrent
+    commit landed during the merge step).
 
     Pass ``base_sha`` iff the edit was derived from a specific committed version
     (read-modify-write). The function fetches the base body from that commit and
@@ -148,7 +162,7 @@ def commit_with_retry(
     committed as-is — there's nothing to merge against.
 
     Returns ``(sha, committed_body)``. Raises ``CommitMaxRetriesError`` when
-    HEAD/locks keep racing past ``max_retries``.
+    HEAD keeps moving past ``max_retries``.
     """
     base: str | None = None
     if base_sha is not None:
@@ -160,10 +174,6 @@ def commit_with_retry(
             merged = new
             current = None
         else:
-            # Read from HEAD, not the working tree: after a GitCommitLockError
-            # commit_file has already staged the loser's merged body to disk, so
-            # _read_worktree would return the loser's own content, making the
-            # next merge a no-op that clobbers the winner's commit.
             current = _read_head_or_empty(rel_path)
             if current != base:
                 mr = merge_content(base, current, new)
@@ -175,15 +185,8 @@ def commit_with_retry(
                 merged = new
         post = head_sha_for_path(rel_path) if base is not None else head
         if post == head:
-            try:
-                sha = commit_file(rel_path, merged, message, author=author)
-                return sha, merged
-            except GitCommitLockError:
-                log.info(
-                    "commit_with_retry: lock race for %s, retrying (%d/%d)",
-                    rel_path, attempt + 1, max_retries,
-                )
-                time.sleep(0.05 * (attempt + 1))
+            sha = commit_file(rel_path, merged, message, author=author)
+            return sha, merged
         if attempt >= max_retries:
             raise CommitMaxRetriesError(attempt, post or "")
         if post != head:

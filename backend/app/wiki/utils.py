@@ -19,7 +19,6 @@ from app.auth import current_user
 from app.llm.agents import merge_conflict_update
 from app.llm.agents.tools.errors import ToolError
 from app.models.wiki import AiRebaseMaxRetriesError, ChangeKind, CommitResult
-from app.wiki.git import GitCommitLockError
 from app.wiki import (
     agent_activity,
     filesystem,
@@ -60,9 +59,6 @@ def validate_doc_path(raw_path: Any) -> str:
 # invoke the LLM merge fallback, so keep this small to bound LLM spend.
 _AI_REBASE_MAX_RETRIES = 3
 
-# Retries for the transient ref-lock race inside ``commit_and_fan_out``.
-_COMMIT_LOCK_RETRIES = 3
-
 
 def commit_with_ai_rebase(
     path: str,
@@ -82,10 +78,8 @@ def commit_with_ai_rebase(
     (git merge-file first, LLM fallback on conflict). The loop retries up
     to ``max_retries`` times when HEAD keeps moving during the merge step.
 
-    A ``GitCommitLockError`` (two workers pass the SHA check simultaneously
-    and one loses the ref-lock race) is also treated as a retry trigger: the
-    losing worker re-reads HEAD, re-merges, and retries rather than clobbering
-    the winner's commit.
+    Ref-lock races (``GitCommitLockError``) are handled transparently inside
+    ``commit_file`` — callers including this function never see them.
 
     Returns ``None`` when the merged result equals the current content.
     Raises ``AiRebaseMaxRetriesError`` when the retry limit is hit.
@@ -95,10 +89,9 @@ def commit_with_ai_rebase(
     _new = new_body
     for attempt in range(max_retries + 1):
         head_sha = wiki_git.head_sha_for_path(path)
-        # Read from HEAD, not the working tree: after a GitCommitLockError the
-        # loser's merged body is already written to disk (commit_file stages
-        # before committing), so a filesystem read would return the loser's own
-        # content and the subsequent merge would be a no-op.
+        # Read from HEAD, not the working tree: after a concurrent commit the
+        # working tree may have stale content, so a filesystem read could make
+        # the next merge a no-op that clobbers the winner's commit.
         current = _read_head_or_empty(path)
         if current != _base:
             mr = wiki_git.merge_content(_base, current, _new)
@@ -117,28 +110,18 @@ def commit_with_ai_rebase(
             return None
         post_sha = wiki_git.head_sha_for_path(path)
         if post_sha == head_sha:
-            try:
-                sha = commit_and_fan_out(
-                    path, merged, message,
-                    change_kind=ChangeKind.EDIT, activity_ttl=activity_ttl,
-                    skip_acl=skip_acl,
-                )
-                return CommitResult(sha=sha, old_body=current, new_body=merged)
-            except GitCommitLockError:
-                log.info(
-                    "commit_with_ai_rebase: git lock race for %s, retrying (%d/%d)",
-                    path, attempt + 1, max_retries,
-                )
-                # Fall through to retry: another worker committed between the
-                # post-SHA check and our commit. Re-enter the loop to re-read
-                # HEAD and re-merge so we don't clobber their write.
+            sha = commit_and_fan_out(
+                path, merged, message,
+                change_kind=ChangeKind.EDIT, activity_ttl=activity_ttl,
+                skip_acl=skip_acl,
+            )
+            return CommitResult(sha=sha, old_body=current, new_body=merged)
         if attempt >= max_retries:
             raise AiRebaseMaxRetriesError(attempt, post_sha or "")
-        if post_sha != head_sha:
-            log.info(
-                "commit_with_ai_rebase: HEAD moved for %s, retrying (%d/%d)",
-                path, attempt + 1, max_retries,
-            )
+        log.info(
+            "commit_with_ai_rebase: HEAD moved for %s, retrying (%d/%d)",
+            path, attempt + 1, max_retries,
+        )
         _base = current
         _new = merged
     raise AiRebaseMaxRetriesError(max_retries, "")  # unreachable
@@ -216,18 +199,11 @@ def commit_and_fan_out(
     change_kind: ChangeKind,
     activity_ttl: timedelta | None = None,
     skip_acl: bool = False,
-    lock_retry: bool = False,
 ) -> str:
     """Commit ``body`` to ``path``, queue reindex, fan out to triggers.
 
-    Returns the commit SHA.
-
-    ``lock_retry=True`` retries ``GitCommitLockError`` blindly (up to
-    ``_COMMIT_LOCK_RETRIES`` times). Use only for callers that don't
-    re-merge on conflict — i.e. ``apply_patch`` and ``write_doc`` create.
-    Leave ``False`` (default) when the caller (e.g. ``commit_with_ai_rebase``)
-    catches ``GitCommitLockError`` itself to re-read HEAD and re-merge;
-    the inner retry would otherwise fire first and clobber the winner's commit.
+    Returns the commit SHA. Ref-lock races are handled transparently inside
+    ``commit_file`` — this function never sees them.
 
     ``activity_ttl`` overrides the default 24h TTL on the resulting
     Active-agents row — write tools surface this through their
@@ -292,21 +268,7 @@ def commit_and_fan_out(
         )
 
     author = author_string()
-    if lock_retry:
-        sha = ""
-        for _attempt in range(_COMMIT_LOCK_RETRIES + 1):
-            try:
-                sha = wiki_git.commit_file(path, body, message, author=author)
-                break
-            except wiki_git.GitCommitLockError:
-                if _attempt >= _COMMIT_LOCK_RETRIES:
-                    raise
-                log.info(
-                    "commit_and_fan_out: lock race for %s, retrying (%d/%d)",
-                    path, _attempt + 1, _COMMIT_LOCK_RETRIES,
-                )
-    else:
-        sha = wiki_git.commit_file(path, body, message, author=author)
+    sha = wiki_git.commit_file(path, body, message, author=author)
     wiki_notify.after_doc_write(
         path,
         sha,
