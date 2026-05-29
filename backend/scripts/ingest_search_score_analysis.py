@@ -309,7 +309,7 @@ def cmd_analyze(args: argparse.Namespace) -> None:
 
     print(f"\nrelevant={len(bm25_rel)}  irrelevant={len(bm25_irrel)}")
     print("\n-- Coverage at filter levels --")
-    print("%-22s  " % "irrel filtered %" + "  ".join("%6d%%" % l for l in FILTER_LEVELS))
+    print("%-22s  " % "irrel filtered %" + "  ".join("%6d%%" % pct for pct in FILTER_LEVELS))
     print("-" * 90)
     for name, rel, irrel in [("BM25 full content", bm25_rel, bm25_irrel),
                               ("Semantic similarity", sem_rel, sem_irrel)]:
@@ -336,7 +336,7 @@ def cmd_analyze(args: argparse.Namespace) -> None:
     ax3.set_ylabel("Relevant coverage (%)", fontsize=11)
     ax3.set_title("Relevant coverage at each filter level", fontsize=12)
     ax3.set_xticks(FILTER_LEVELS)
-    ax3.set_xticklabels(["%d%%" % l for l in FILTER_LEVELS])
+    ax3.set_xticklabels(["%d%%" % pct for pct in FILTER_LEVELS])
     ax3.set_ylim(40, 105)
     ax3.legend(fontsize=10)
     ax3.grid(True, alpha=0.3)
