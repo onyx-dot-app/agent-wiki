@@ -273,9 +273,41 @@ def test_main_fails_when_expected_file_missing(tmp_path: Path) -> None:
             )
         ],
     )
+    _write_run(
+        tmp_path,
+        "nightly_merge_conflict.jsonl",
+        [
+            _row(
+                surface="merge_conflict_update",
+                model="claude-sonnet-4-6",
+                case_id="mc1",
+                scorer="facts_from_current_present",
+                score=0.95,
+            )
+        ],
+    )
     # nightly_triggers.jsonl intentionally not written
     rc = main(["ci_assert_nightly", str(tmp_path)])
     assert rc == 1, "expected non-zero exit when an expected file is missing"
+
+
+def test_merge_conflict_floor_enforced(tmp_path: Path) -> None:
+    """merge_conflict surface gets threshold enforcement like the others."""
+    p = _write_run(
+        tmp_path,
+        "nightly_merge_conflict.jsonl",
+        [
+            _row(
+                surface="merge_conflict_update",
+                model="claude-sonnet-4-6",
+                case_id="mc1",
+                scorer="facts_from_current_present",
+                score=0.50,
+            )
+        ],
+    )
+    errs = check_run_file(p)
+    assert any("merge_conflict_update" in e and "facts_from_current_present" in e for e in errs)
 
 
 @pytest.mark.parametrize(

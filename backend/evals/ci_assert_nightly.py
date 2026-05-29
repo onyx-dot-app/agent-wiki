@@ -64,6 +64,15 @@ SURFACE_THRESHOLDS: dict[str, dict[str, float]] = {
         "trigger_match_decision": 0.85,
         "no_false_fire_compliance": 0.90,
     },
+    "merge_conflict_update": {
+        # Conservative floors on the robust scorers (every merged body is
+        # judged for both sides' fact survival + structural validity).
+        # conflict_annotation_present / facts_no_hallucination are sparse
+        # or judge-flipped, left off the gate to avoid flapping.
+        "facts_from_current_present": 0.70,
+        "facts_from_draft_present": 0.70,
+        "markdown_valid": 0.90,
+    },
 }
 
 
@@ -72,6 +81,7 @@ _FILENAME_TO_SURFACES: dict[str, tuple[str, ...]] = {
     "nightly_ingest_selector.jsonl": ("ingest_selector",),
     "nightly_external_agent.jsonl": ("external_agent",),
     "nightly_triggers.jsonl": ("triggers",),
+    "nightly_merge_conflict.jsonl": ("merge_conflict_update",),
 }
 
 
