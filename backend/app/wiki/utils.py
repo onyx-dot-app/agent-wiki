@@ -205,6 +205,7 @@ def commit_and_fan_out(
     *,
     change_kind: ChangeKind,
     activity_ttl: timedelta | None = None,
+    skip_acl: bool = False,
 ) -> str:
     """Commit ``body`` to ``path``, queue reindex, fan out to triggers.
 
@@ -215,8 +216,12 @@ def commit_and_fan_out(
     ``expires_in_seconds`` argument so an agent can declare how long
     it expects to keep working.
 
+    ``skip_acl=True`` bypasses the write-permission gate. Use only for
+    system-initiated writes (e.g. document ingestion) where there is no
+    human user in context whose permissions should be enforced.
+
     Side effects:
-      1. Permission gate (write on existing pages).
+      1. Permission gate (write on existing pages) — skipped when skip_acl=True.
       2. Register a ``wrote`` activity row for the current user.
       3. Commit, then run the standard reindex + trigger fan-out.
 
@@ -225,7 +230,7 @@ def commit_and_fan_out(
     # Permission gate: editing requires write on the existing page.
     # Creating a new page is always allowed for the calling user — they
     # become the owner via the seeding hook in ``after_doc_write``.
-    if change_kind == ChangeKind.EDIT:
+    if change_kind == ChangeKind.EDIT and not skip_acl:
         from app.auth import PermissionDenied, require_can
 
         try:
