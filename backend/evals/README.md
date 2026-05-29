@@ -83,6 +83,38 @@ Flags (all surfaces):
 Runners exit with `{"out": ..., "skipped_models": [...], "braintrust_url(s)": ...}`
 to stdout so the CI workflow can capture the artifact path and experiment URL.
 
+## Ingest pre-filter sweep
+
+The BM25 pre-filter drops a candidate wiki page before it reaches the
+reconciler LLM when the candidate's BM25 score is below
+`INGEST_BM25_MIN_SCORE`. Raising that cutoff filters more irrelevant
+pages (saving reconciler calls) but risks dropping relevant ones — a
+retrieval-tuning tradeoff, not an LLM-decision one.
+
+`evals.ingest_selector.sweep` turns that tradeoff into a repeatable eval.
+Over a labeled set it reports, per threshold, `irrelevant_filtered` vs
+`relevant_retained`, then recommends the highest cutoff that still keeps
+at least `--min-retained` of relevant pages:
+
+```bash
+cd backend
+uv run python -m evals.ingest_selector.sweep \
+  --samples evals/datasets/ingest_selector/retrieval_samples.jsonl \
+  --min-retained 0.95
+```
+
+Input is `RetrievalSample` JSONL — one (source doc → candidate page) row
+with the candidate's `bm25_score` and human `relevant` label. Scores are
+cached in the dataset so the sweep is offline + reproducible.
+
+**Refreshing scores against live OpenSearch is a separate step** (it
+needs a running cluster, like the original by-hand analysis). Follow-up:
+a `--score-live` mode that re-scores the labeled set through
+`app.ingest.search` and rewrites `bm25_score`, plus a Braintrust push so
+the recommended operating point is tracked over time. The seed dataset
+here is synthetic; the production dataset is built from the human-labeled
+`ingest_eval_samples` corpus.
+
 ## GitHub Actions integration
 
 When `$GITHUB_STEP_SUMMARY` is set (every Actions run), runners append a
