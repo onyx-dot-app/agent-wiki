@@ -258,13 +258,20 @@ def _commit_resolved(
     record_activity: bool = True,
     expected_head: str | None = None,
 ) -> CommitResult:
-    """Record activity, commit ``body``, and run the reindex + trigger fan-out.
+    """Commit ``body``, record activity, and run the reindex + trigger fan-out.
 
     The leaf of ``commit_and_fan_out``: the body has already been resolved
-    (post-merge), so this just records activity, commits it verbatim, and runs
+    (post-merge), so this just commits it verbatim, records activity, and runs
     the reindex + trigger fan-out. Activity is DB-only.
+
+    Activity is recorded only after ``commit_file`` returns: a terminal commit
+    failure (e.g. ``GitHeadMovedError``) would otherwise leave a phantom
+    "wrote" row on the activity rail for a commit that never landed.
     """
     user = _current_user_or_none()
+    author = author_string()
+    sha = wiki_git.commit_file(path, body, message, author=author, expected_head=expected_head)
+
     if user is not None and record_activity:
         agent_name = agent_activity.agent_name_var.get()
         # if a launcher session is driving this commit, override
@@ -299,8 +306,6 @@ def _commit_resolved(
             expires_at=expires_at,
         )
 
-    author = author_string()
-    sha = wiki_git.commit_file(path, body, message, author=author, expected_head=expected_head)
     wiki_notify.after_doc_write(
         path,
         sha,
