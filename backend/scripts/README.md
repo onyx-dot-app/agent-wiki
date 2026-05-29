@@ -65,50 +65,49 @@ The `id` column is a stable integer primary key — use it to refer to specific 
 
 ## Ingest BM25 filter analysis
 
-Two scripts help tune and validate the `INGEST_BM25_MIN_SCORE` threshold.
-Both require OpenSearch running locally. Install their extra dependencies once:
+`ingest_search_score_analysis.py` helps tune and validate `INGEST_BM25_MIN_SCORE`.
+Requires OpenSearch running locally. Install extra dependencies once:
 
 ```bash
 pip install numpy matplotlib
 ```
 
-### ingest_score_analysis.py
+### analyze — score distributions
 
-Scores every sample with BM25 (full source content as query, same settings
-as production) and semantic cosine similarity (`text-embedding-3-small`).
-Groups results into **relevant** (committed + no_change) vs **irrelevant**
-and plots score distributions plus a coverage-vs-filter-level curve.
-
-Scores are cached so re-runs only process new samples.
+Scores every sample with BM25 (full source content, production settings) and
+semantic cosine similarity (`text-embedding-3-small`). Groups results into
+**relevant** (committed + no_change) vs **irrelevant** and plots distributions
+plus a coverage-vs-filter-level curve. Scores are cached so re-runs only
+process new samples.
 
 ```bash
 cd backend
 export OPENAI_API_KEY=...
-uv run --extra dev python scripts/ingest_score_analysis.py \
+python scripts/ingest_search_score_analysis.py analyze \
     --samples eval_samples.jsonl \
     --cache   score_cache.json \
     --plot    score_analysis.png
 ```
 
-### ingest_bm25_param_search.py
+### paramsearch — BM25 parameter grid
 
 Grid search over BM25 `k1` (index-level) and `title_boost` (query-level).
-Recreates the OpenSearch index once per `k1` value, then varies `title_boost`
-at query time. Reports relevant coverage heatmaps at 70/80/90% filter levels.
+Recreates the OpenSearch index once per `k1` value, varies `title_boost` at
+query time, and outputs relevant coverage heatmaps at 70/80/90% filter levels.
 
 Note: `b` (length normalization) has no effect in a single-document-per-query
 corpus — only `k1` and `title_boost` are worth tuning.
 
 ```bash
 cd backend
-uv run --extra dev python scripts/ingest_bm25_param_search.py \
+python scripts/ingest_search_score_analysis.py paramsearch \
     --samples eval_samples.jsonl \
     --results param_search_results.json \
     --plot    param_search.png
 ```
 
-Both scripts accept `--os-host` / `--os-port` (default `localhost:9201`) and
-`--workers` (default 4) to control OpenSearch connection and parallelism.
+Both subcommands accept `--os-host` / `--os-port` (default `localhost:9201`)
+and `--workers` (default 4).
 
 ## Using eval_labeler.html
 
