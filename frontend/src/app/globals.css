@@ -1,11 +1,5 @@
+@import "@onyx-ai/opal/root.css";
 @import "./css/colors.css" layer(base);
-@import "./css/opal-styles.css";
-
-@import "tailwindcss";
-/* @import "tw-animate-css" lives at the app level (not in opal-styles.css)
-   because Tailwind v4's PostCSS resolver doesn't walk node_modules from
-   inside @onyx-ai/opal/dist. */
-@import "tw-animate-css";
 @config "../../tailwind.config.cjs";
 
 /* Reserve the scrollbar gutter on the root scroll container so layout

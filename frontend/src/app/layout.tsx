@@ -1,4 +1,5 @@
 import * as Tooltip from "@radix-ui/react-tooltip";
+import { DM_Mono, Hanken_Grotesk } from "next/font/google";
 import type { ReactNode } from "react";
 
 import { ChatWidget } from "@/components/chat/ChatWidget";
@@ -8,6 +9,21 @@ import { SWRProvider } from "@/lib/swr";
 import { ThemeBootstrapScript, ThemeProvider } from "@/lib/theme-provider";
 
 import "./globals.css";
+
+const hankenGrotesk = Hanken_Grotesk({
+  subsets: ["latin"],
+  variable: "--font-hanken-grotesk",
+  display: "swap",
+  fallback: ["-apple-system", "BlinkMacSystemFont", "Segoe UI", "Roboto", "sans-serif"],
+});
+
+const dmMono = DM_Mono({
+  weight: "400",
+  subsets: ["latin"],
+  variable: "--font-dm-mono",
+  display: "swap",
+  fallback: ["SF Mono", "Monaco", "Cascadia Code", "Roboto Mono", "Consolas", "Courier New", "monospace"],
+});
 
 export const metadata = {
   title: "agent-wiki",
@@ -23,7 +39,7 @@ export const viewport = {
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" className={`${hankenGrotesk.variable} ${dmMono.variable}`}>
       <head>
         {/* Sets data-theme on <html> before React hydrates so dark-mode
             users don't see a light-mode flash on first paint. */}
@@ -31,7 +47,6 @@ export default function RootLayout({ children }: { children: ReactNode }) {
       </head>
       <body
         style={{
-          fontFamily: "system-ui, sans-serif",
           margin: 0,
           boxSizing: "border-box",
         }}
