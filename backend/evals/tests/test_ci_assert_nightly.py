@@ -13,8 +13,13 @@ from pathlib import Path
 
 import pytest
 
-from evals.ci_assert_nightly import check_run_file, main
+from evals.ci_assert_nightly import SURFACE_THRESHOLDS, check_run_file, main
 from evals.schema import CaseResult, ScorerOutcome
+
+
+# Passing default for any scorer not explicitly under test — above every
+# floor in SURFACE_THRESHOLDS (max floor is 0.95).
+_PASS = 0.99
 
 
 def _row(
@@ -27,6 +32,22 @@ def _row(
     expected: str = "X",
     actual: str = "X",
 ) -> str:
+    """Build a row carrying the surface's FULL thresholded scorer set.
+
+    Real nightly rows emit every scorer for their surface; the asserter
+    now fails if a thresholded scorer is absent from all rows. So a test
+    row must carry the whole set — the named ``scorer`` is overridden to
+    ``score`` and the rest default to a passing value.
+    """
+    names = set(SURFACE_THRESHOLDS.get(surface, {})) | {scorer}
+    scorers = [
+        ScorerOutcome(
+            name=n,
+            score=score if n == scorer else _PASS,
+            passed=(score if n == scorer else _PASS) >= 0.5,
+        )
+        for n in sorted(names)
+    ]
     r = CaseResult(
         case_id=case_id,
         surface=surface,  # pyright: ignore[reportArgumentType]
@@ -35,7 +56,7 @@ def _row(
         expected_class=expected,
         actual_class=actual,
         raw_output="{}",
-        scorers=[ScorerOutcome(name=scorer, score=score, passed=score >= 0.5)],
+        scorers=scorers,
     )
     return r.model_dump_json()
 
@@ -143,6 +164,28 @@ def test_unknown_filename_skipped(tmp_path: Path) -> None:
         ],
     )
     assert check_run_file(p) == []
+
+
+def test_scorer_absent_from_rows_fails(tmp_path: Path) -> None:
+    """A thresholded scorer present on no row must fail, not silently skip.
+
+    Build rows that carry only ONE of external_agent's thresholded
+    scorers — the other three are absent and must each trip an error.
+    """
+    line = CaseResult(
+        case_id="c1",
+        surface="external_agent",  # pyright: ignore[reportArgumentType]
+        provider="anthropic",
+        model="claude-sonnet-4-6",
+        expected_class="X",
+        actual_class="X",
+        raw_output="{}",
+        scorers=[ScorerOutcome(name="facts_preserved_avg", score=0.95, passed=True)],
+    ).model_dump_json()
+    p = _write_run(tmp_path, "nightly_external_agent.jsonl", [line])
+    errs = check_run_file(p)
+    assert any("update_f1" in e and "no rows to score" in e for e in errs)
+    assert any("no_touch_compliance" in e and "no rows to score" in e for e in errs)
 
 
 def test_missing_or_empty_file_fails(tmp_path: Path) -> None:

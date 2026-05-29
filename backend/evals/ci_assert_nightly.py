@@ -141,6 +141,12 @@ def check_run_file(path: Path) -> list[str]:
         for scorer, floor in thresholds.items():
             means = _means_per_model(rows, scorer, surface)
             if not means:
+                # Surface has rows but this thresholded scorer is on none of
+                # them — a renamed/dropped scorer would otherwise skip its
+                # floor check silently. Fail loudly so the gate can't rot.
+                errs.append(
+                    "%s surface=%s scorer=%s has no rows to score" % (path.name, surface, scorer)
+                )
                 continue
             for model, mean in sorted(means.items()):
                 if mean < floor:
