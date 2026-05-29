@@ -50,10 +50,9 @@ from app.mcp_server import jobs as mcp_jobs
 from app.mcp_server import pubsub as mcp_pubsub
 from app.auth import UserMissingError, load_user, set_current_user
 from app.tasks.queues import documents_queue
-from app.wiki import agent_activity, git as wiki_git, notify as wiki_notify
-from app.models.wiki import AiRebaseMaxRetriesError, ChangeKind
+from app.wiki import agent_activity, git as wiki_git
+from app.models.wiki import AiRebaseMaxRetriesError
 
-_INGEST_AUTHOR = "Onyx Ingest <ingest@agent-wiki>"
 
 log = logging.getLogger(__name__)
 
@@ -408,8 +407,22 @@ def process_pushed_document(push: dict[str, Any]) -> None:
                 meta_lines.append(f"Source: {url}")
             if meta_lines:
                 message += "\n\n" + "\n".join(meta_lines)
-            sha = wiki_git.commit_file(c.hit.path, result, message, author=_INGEST_AUTHOR)
-            wiki_notify.after_doc_write(c.hit.path, sha, ChangeKind.EDIT, _INGEST_AUTHOR)
+            try:
+                commit_result = wiki_utils.commit_with_ai_rebase(
+                    c.hit.path, message,
+                    base_body=c.body,
+                    new_body=result,
+                    skip_acl=True,
+                )
+            except AiRebaseMaxRetriesError:
+                log.warning("process_pushed_document: max retries for %s, skipping", c.hit.path)
+                continue
+            if commit_result is None:
+                # Concurrent edit produced identical content — treat as no_change.
+                ingest_outcomes_total.labels(outcome="no_change", wiki_path=c.hit.path).inc()
+                ingest_bm25_score_by_outcome.labels(outcome="no_change").observe(c.hit.score)
+                continue
+            sha = commit_result.sha
             committed += 1
             ingest_outcomes_total.labels(outcome="committed", wiki_path=c.hit.path).inc()
             ingest_bm25_score_by_outcome.labels(outcome="committed").observe(c.hit.score)

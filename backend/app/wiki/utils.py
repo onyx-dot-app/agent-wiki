@@ -18,7 +18,7 @@ from app.auth import current_user
 from app.llm.agents import merge_conflict_update
 from app.llm.agents.tools.errors import ToolError
 from app.models.wiki import AiRebaseMaxRetriesError, ChangeKind, CommitResult
-from app.wiki.git import CommitMaxRetriesError, GitCommitLockError
+from app.wiki.git import GitCommitLockError
 from app.wiki import (
     agent_activity,
     filesystem,
@@ -68,6 +68,7 @@ def commit_with_ai_rebase(
     new_body: str,
     max_retries: int = _AI_REBASE_MAX_RETRIES,
     activity_ttl: timedelta | None = None,
+    skip_acl: bool = False,
 ) -> CommitResult | None:
     """Commit with 3-way merge retry when HEAD moves between read and commit.
 
@@ -112,6 +113,7 @@ def commit_with_ai_rebase(
                 sha = commit_and_fan_out(
                     path, merged, message,
                     change_kind=ChangeKind.EDIT, activity_ttl=activity_ttl,
+                    skip_acl=skip_acl,
                 )
                 return CommitResult(sha=sha, old_body=current, new_body=merged)
             except GitCommitLockError:
