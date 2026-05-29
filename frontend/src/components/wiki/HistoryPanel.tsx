@@ -1,4 +1,5 @@
 import { SelectCard, Text } from "@onyx-ai/opal/components";
+import { SvgWorkflow } from "@onyx-ai/opal/icons";
 import { SvgClaude, SvgOnyxLogo, SvgOpenai } from "@onyx-ai/opal/logos";
 import type { IconProps } from "@onyx-ai/opal/types";
 import type { ComponentType } from "react";
@@ -195,7 +196,8 @@ function CommitRow({
         />
         {commit.triggered > 0 ? (
           <ActionLine
-            label={`⚡ Triggered ${commit.triggered} automation${
+            icon={<SvgWorkflow style={{ width: 12, height: 12 }} />}
+            label={`Triggered ${commit.triggered} automation${
               commit.triggered === 1 ? "" : "s"
             }`}
           />
@@ -211,7 +213,7 @@ function Row({ children }: { children: React.ReactNode }) {
       style={{
         display: "flex",
         flexDirection: "column",
-        gap: 4,
+        gap: 8,
         width: "100%",
         minWidth: 0,
       }}
@@ -263,11 +265,13 @@ function HeaderLine({
 }
 
 function ActionLine({
+  icon,
   label,
   stats,
   sourceUrl,
   sourceTitle,
 }: {
+  icon?: React.ReactNode;
   label: string;
   stats?: { added: number; removed: number } | null;
   sourceUrl?: string | null;
@@ -282,9 +286,22 @@ function ActionLine({
         gap: 8,
         width: "100%",
         minWidth: 0,
-        paddingLeft: 28,
+        fontSize: 12,
+        lineHeight: "16px",
       }}
     >
+      {icon ? (
+        <span
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            flexShrink: 0,
+            color: color.text.muted,
+          }}
+        >
+          {icon}
+        </span>
+      ) : null}
       <div
         style={{
           flex: 1,
