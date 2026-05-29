@@ -1,4 +1,4 @@
-"""Unit tests for ``commit_with_ai_rebase`` in ``wiki_utils``.
+"""Unit tests for ``commit_with_ai_merge`` in ``wiki_utils``.
 
 All external I/O (git, filesystem, fan-out) is monkeypatched so the tests
 run without a real repo or database.
@@ -9,8 +9,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from app.wiki.utils import commit_with_ai_rebase
-from app.models.wiki import AiRebaseMaxRetriesError, CommitResult
+from app.wiki.utils import commit_with_ai_merge
+from app.models.wiki import AiMergeMaxRetriesError, CommitResult
 from app.wiki.git import MergeResult
 
 _PATH = "docs/page.md"
@@ -74,7 +74,7 @@ def test_no_concurrent_change_commits_new_body(monkeypatch):
     fan_out = MagicMock(return_value=_SHA_B)
     monkeypatch.setattr("app.wiki.utils.commit_and_fan_out", fan_out)
 
-    result = commit_with_ai_rebase(
+    result = commit_with_ai_merge(
         _PATH, _MSG, base_body=_BASE, new_body=_NEW, max_retries=0
     )
 
@@ -101,7 +101,7 @@ def test_noop_returns_none(monkeypatch):
         current_bodies=[_BASE],
     )
 
-    result = commit_with_ai_rebase(
+    result = commit_with_ai_merge(
         _PATH, _MSG, base_body=_BASE, new_body=_BASE, max_retries=0
     )
 
@@ -128,7 +128,7 @@ def test_clean_3way_merge_commits_merged(monkeypatch):
     fan_out = MagicMock(return_value=_SHA_B)
     monkeypatch.setattr("app.wiki.utils.commit_and_fan_out", fan_out)
 
-    result = commit_with_ai_rebase(
+    result = commit_with_ai_merge(
         _PATH, _MSG, base_body=_BASE, new_body=_NEW, max_retries=0
     )
 
@@ -163,7 +163,7 @@ def test_llm_fallback_on_conflict(monkeypatch):
     fan_out = MagicMock(return_value=_SHA_B)
     monkeypatch.setattr("app.wiki.utils.commit_and_fan_out", fan_out)
 
-    result = commit_with_ai_rebase(
+    result = commit_with_ai_merge(
         _PATH, _MSG, base_body=_BASE, new_body=_NEW, max_retries=0
     )
 
@@ -214,7 +214,7 @@ def test_retries_when_head_moves_mid_merge(monkeypatch):
     fan_out = MagicMock(return_value=_SHA_C)
     monkeypatch.setattr("app.wiki.utils.commit_and_fan_out", fan_out)
 
-    result = commit_with_ai_rebase(
+    result = commit_with_ai_merge(
         _PATH, _MSG, base_body=_BASE, new_body=_NEW, max_retries=1
     )
 
@@ -229,7 +229,7 @@ def test_retries_when_head_moves_mid_merge(monkeypatch):
 
 
 def test_raises_when_max_retries_exceeded(monkeypatch):
-    """Raises AiRebaseMaxRetriesError when HEAD keeps moving."""
+    """Raises AiMergeMaxRetriesError when HEAD keeps moving."""
     concurrent_body = "concurrent\n"
     merged_body = "merged\n"
 
@@ -249,8 +249,8 @@ def test_raises_when_max_retries_exceeded(monkeypatch):
     fan_out = MagicMock(return_value=_SHA_A)
     monkeypatch.setattr("app.wiki.utils.commit_and_fan_out", fan_out)
 
-    with pytest.raises(AiRebaseMaxRetriesError) as exc_info:
-        commit_with_ai_rebase(
+    with pytest.raises(AiMergeMaxRetriesError) as exc_info:
+        commit_with_ai_merge(
             _PATH, _MSG, base_body=_BASE, new_body=_NEW, max_retries=2
         )
 

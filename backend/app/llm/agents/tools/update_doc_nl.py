@@ -16,7 +16,7 @@ from app.wiki import utils as wiki_utils
 from app.llm.agents.tools.errors import ToolError
 from app.llm.errors import LLMError
 from app.wiki import git as wiki_git
-from app.models.wiki import AiRebaseMaxRetriesError
+from app.models.wiki import AiMergeMaxRetriesError
 
 log = logging.getLogger(__name__)
 
@@ -62,14 +62,14 @@ def handle(args: dict[str, Any]) -> Any:
             }
 
         try:
-            result = wiki_utils.commit_with_ai_rebase(
+            result = wiki_utils.commit_with_ai_merge(
                 path,
                 f"Doc update: {instruction.strip()[:80]}",
                 base_body=old_body,
                 new_body=new_body,
                 activity_ttl=activity_ttl,
             )
-        except AiRebaseMaxRetriesError as exc:
+        except AiMergeMaxRetriesError as exc:
             return {
                 "error": "stale_base",
                 "message": "concurrent edits kept landing; max retries exceeded",

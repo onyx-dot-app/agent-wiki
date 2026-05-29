@@ -51,7 +51,7 @@ from app.mcp_server import pubsub as mcp_pubsub
 from app.auth import UserMissingError, load_user, set_current_user
 from app.tasks.queues import documents_queue
 from app.wiki import agent_activity, git as wiki_git
-from app.models.wiki import AiRebaseMaxRetriesError
+from app.models.wiki import AiMergeMaxRetriesError
 
 
 log = logging.getLogger(__name__)
@@ -197,7 +197,7 @@ def _run_inner(job_id: str, rel: str, instruction: str, base_sha: str | None) ->
         return
 
     try:
-        result = wiki_utils.commit_with_ai_rebase(
+        result = wiki_utils.commit_with_ai_merge(
             rel,
             f"Doc update: {instruction[:_COMMIT_MESSAGE_MAX]}",
             base_body=old_body,
@@ -207,7 +207,7 @@ def _run_inner(job_id: str, rel: str, instruction: str, base_sha: str | None) ->
         mcp_jobs.mark_failed(job_id, error=f"llm_error: {exc}")
         mcp_pubsub.publish_job_update(job_id, "failed")
         return
-    except AiRebaseMaxRetriesError as exc:
+    except AiMergeMaxRetriesError as exc:
         mcp_jobs.mark_failed(
             job_id,
             error="max_retries_exceeded",
@@ -408,13 +408,13 @@ def process_pushed_document(push: dict[str, Any]) -> None:
             if meta_lines:
                 message += "\n\n" + "\n".join(meta_lines)
             try:
-                commit_result = wiki_utils.commit_with_ai_rebase(
+                commit_result = wiki_utils.commit_with_ai_merge(
                     c.hit.path, message,
                     base_body=c.body,
                     new_body=result,
                     skip_acl=True,
                 )
-            except AiRebaseMaxRetriesError:
+            except AiMergeMaxRetriesError:
                 log.warning("process_pushed_document: max retries for %s, skipping", c.hit.path)
                 continue
             if commit_result is None:

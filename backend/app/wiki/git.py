@@ -511,7 +511,7 @@ class GitCommitLockError(Exception):
 
     This is a transient race: two workers passed the pre-commit SHA check at
     the same time and both tried to commit. One wins; the other gets this
-    error. ``commit_with_ai_rebase`` catches it and re-enters the merge loop
+    error. ``commit_with_ai_merge`` catches it and re-enters the merge loop
     so the losing worker re-reads HEAD and re-merges before retrying.
     """
 

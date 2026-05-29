@@ -18,7 +18,7 @@ from typing import Any
 from app.auth import current_user
 from app.llm.agents import merge_conflict_update
 from app.llm.agents.tools.errors import ToolError
-from app.models.wiki import AiRebaseMaxRetriesError, ChangeKind, CommitResult
+from app.models.wiki import AiMergeMaxRetriesError, ChangeKind, CommitResult
 from app.wiki import (
     agent_activity,
     filesystem,
@@ -55,18 +55,18 @@ def validate_doc_path(raw_path: Any) -> str:
 # --------------------------------------------------------------------------- #
 
 
-# Maximum retry attempts inside ``commit_with_ai_rebase`` — each attempt may
+# Maximum retry attempts inside ``commit_with_ai_merge`` — each attempt may
 # invoke the LLM merge fallback, so keep this small to bound LLM spend.
-_AI_REBASE_MAX_RETRIES = 3
+_AI_MERGE_MAX_RETRIES = 3
 
 
-def commit_with_ai_rebase(
+def commit_with_ai_merge(
     path: str,
     message: str,
     *,
     base_body: str,
     new_body: str,
-    max_retries: int = _AI_REBASE_MAX_RETRIES,
+    max_retries: int = _AI_MERGE_MAX_RETRIES,
     activity_ttl: timedelta | None = None,
     skip_acl: bool = False,
 ) -> CommitResult | None:
@@ -82,7 +82,7 @@ def commit_with_ai_rebase(
     ``commit_file`` — callers including this function never see them.
 
     Returns ``None`` when the merged result equals the current content.
-    Raises ``AiRebaseMaxRetriesError`` when the retry limit is hit.
+    Raises ``AiMergeMaxRetriesError`` when the retry limit is hit.
     Any ``LLMError`` raised by the merge fallback propagates immediately.
     """
     _base = base_body
@@ -117,14 +117,14 @@ def commit_with_ai_rebase(
             )
             return CommitResult(sha=sha, old_body=current, new_body=merged)
         if attempt >= max_retries:
-            raise AiRebaseMaxRetriesError(attempt, post_sha or "")
+            raise AiMergeMaxRetriesError(attempt, post_sha or "")
         log.info(
-            "commit_with_ai_rebase: HEAD moved for %s, retrying (%d/%d)",
+            "commit_with_ai_merge: HEAD moved for %s, retrying (%d/%d)",
             path, attempt + 1, max_retries,
         )
         _base = current
         _new = merged
-    raise AiRebaseMaxRetriesError(max_retries, "")  # unreachable
+    raise AiMergeMaxRetriesError(max_retries, "")  # unreachable
 
 
 def assert_base_sha(path: str, base_sha: str | None) -> dict[str, str] | None:

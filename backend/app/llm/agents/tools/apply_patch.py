@@ -47,7 +47,7 @@ def handle(args: dict[str, Any]) -> Any:
                 "patch produced no change (every hunk was a no-op)"
             )
 
-        # Intentionally no commit_with_ai_rebase here: unified diff hunks are
+        # Intentionally no commit_with_ai_merge here: unified diff hunks are
         # line-anchored, so a 3-way merge after a concurrent edit would produce
         # wrong offsets. Callers should pass base_sha and retry on stale_base.
         sha = wiki_utils.commit_and_fan_out(
