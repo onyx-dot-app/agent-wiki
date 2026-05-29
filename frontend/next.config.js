@@ -12,9 +12,18 @@ const nextConfig = {
   webpack: (config) => {
     // Opal's published JS still references its internal `@opal/*` source
     // alias (tsup didn't rewrite them). Map those to the dist tree.
+    //
+    // Also pin shared Radix UI packages to our local copies so Opal (which
+    // resolves from the onyx/web monorepo) doesn't instantiate a second,
+    // incompatible React context — which would break TooltipProvider and
+    // similar context-based primitives.
     config.resolve.alias = {
       ...(config.resolve.alias || {}),
       "@opal": opalDist,
+      "@radix-ui/react-context": path.resolve(__dirname, "node_modules/@radix-ui/react-context"),
+      "@radix-ui/react-tooltip": path.resolve(__dirname, "node_modules/@radix-ui/react-tooltip"),
+      "@radix-ui/react-primitive": path.resolve(__dirname, "node_modules/@radix-ui/react-primitive"),
+      "@radix-ui/react-popper": path.resolve(__dirname, "node_modules/@radix-ui/react-popper"),
     };
     // The published artifact's JS files also import per-component CSS by
     // path, but only the bundled `styles.css` ships in dist/. We import
