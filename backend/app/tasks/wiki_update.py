@@ -96,8 +96,8 @@ def agent_update_document_nl(job_id: str) -> None:
       4. Run the document-updater agent.
       5. ``NO_CHANGE`` → succeed with ``committed=false``.
          New body → ``commit_and_fan_out`` → succeed with the sha.
-         Concurrent drift between enqueue and run is reconciled by the
-         3-way merge there, not rejected.
+         Drift between enqueue and run is reconciled by the 3-way
+         merge there.
          Exception → fail with the error code.
       6. Publish the terminal status to ``job://<id>`` subscribers.
     """
@@ -143,9 +143,9 @@ def _run_inner(job_id: str, rel: str, instruction: str) -> None:
         mcp_pubsub.publish_job_update(job_id, "failed")
         return
 
-    # No stale_base recheck: the sub-agent regenerates from current content and
-    # any concurrent commit between enqueue and run is reconciled by the 3-way
-    # merge in commit_and_fan_out below (base_body + ai_merge).
+    # The sub-agent regenerates from current content; drift between enqueue and
+    # run is reconciled by the 3-way merge in commit_and_fan_out below
+    # (base_body + ai_merge).
     head_sha = wiki_git.head_sha_for_path(rel)
 
     debounced = mcp_jobs.find_recent_succeeded_for_user_path(

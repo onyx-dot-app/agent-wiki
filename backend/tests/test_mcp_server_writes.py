@@ -274,6 +274,64 @@ def test_apply_patch_with_correct_base_sha(client):
     assert "second" not in body
 
 
+def test_apply_patch_merges_over_concurrent_change(client):
+    """A stale ``base_sha`` no longer aborts the patch: the hunk is applied
+    against ``base_sha`` (where its line anchors are exact) and the result is
+    3-way merged against HEAD, so a non-overlapping concurrent edit survives."""
+    uid = seed_user(uid="u1", email="u1@x.com")
+    wiki_git.commit_file("p.md", "first\nsecond\nthird\n", "seed", author=None)
+
+    headers = _handshake(client, _mint(uid))
+    stale = _read(client, headers, "p.md")["sha"]
+
+    # Someone else appends a line at the end, past the hunk's region.
+    wiki_git.commit_file("p.md", "first\nsecond\nthird\nfourth\n", "append", author=None)
+
+    diff = (
+        "--- a/p.md\n"
+        "+++ b/p.md\n"
+        "@@ -1,3 +1,3 @@\n"
+        " first\n"
+        "-second\n"
+        "+SECOND\n"
+        " third\n"
+    )
+    payload, is_error = _call(
+        client,
+        headers,
+        "apply_patch",
+        {
+            "path": "p.md",
+            "patch": diff,
+            "commit_message": "uppercase second over concurrent append",
+            "base_sha": stale,
+        },
+    )
+    assert not is_error, payload
+    assert payload["sha"] != stale
+
+    body = wiki_git.read_file("p.md")
+    assert "SECOND" in body
+    assert "second" not in body
+    assert "fourth" in body  # the concurrent append was preserved
+
+
+def test_apply_patch_without_base_sha_is_rejected(client):
+    uid = seed_user(uid="u1", email="u1@x.com")
+    wiki_git.commit_file("p.md", "first\nsecond\nthird\n", "seed", author=None)
+
+    headers = _handshake(client, _mint(uid))
+    diff = "@@ -1,3 +1,3 @@\n first\n-second\n+SECOND\n third\n"
+    payload, is_error = _call(
+        client,
+        headers,
+        "apply_patch",
+        {"path": "p.md", "patch": diff, "commit_message": "no base"},
+    )
+    assert is_error, payload
+    assert payload["error"] == "base_sha_required"
+
+
 # --------------------------------------------------------------------------- #
 # write_doc — base_sha required on overwrite                                  #
 # --------------------------------------------------------------------------- #

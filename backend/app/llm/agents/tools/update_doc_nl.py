@@ -32,9 +32,8 @@ def handle(args: dict[str, Any]) -> Any:
         if not wiki_utils.file_exists(path):
             raise ToolError(f"file not found: {path}")
 
-        # No staleness bail: the sub-agent regenerates from current content, and
-        # any concurrent commit landing mid-flight is reconciled by the 3-way
-        # merge in commit_and_fan_out.
+        # The sub-agent regenerates from current content; concurrent drift is
+        # reconciled by the 3-way merge in commit_and_fan_out.
         head_sha = wiki_git.head_sha_for_path(path)
 
         old_body = wiki_utils.read_existing(path)

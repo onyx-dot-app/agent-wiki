@@ -50,9 +50,9 @@ def handle(args: dict[str, Any]) -> Any:
         if not wiki_utils.file_exists(path):
             raise ToolError(f"file not found: {path}")
 
-        # No staleness bail: edits target current content, and any concurrent
-        # commit landing mid-flight is reconciled by the 3-way merge in
-        # commit_and_fan_out. A vanished anchor surfaces as a ReplaceError.
+        # Edits target current content; concurrent drift is reconciled by the
+        # 3-way merge in commit_and_fan_out, and a vanished anchor surfaces as
+        # a ReplaceError.
         base_body = wiki_utils.read_existing(path)
         new_body = base_body
         try:

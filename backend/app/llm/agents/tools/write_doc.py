@@ -42,9 +42,9 @@ def handle(args: dict[str, Any]) -> Any:
                         "pass its sha as base_sha."
                     ),
                 }
-            # Drift is reconciled by the 3-way merge inside commit_and_fan_out
-            # (base_sha is the merge base) rather than bailing here. base_sha
-            # must still resolve to a real commit to serve as that base.
+            # base_sha is the merge base: the 3-way merge inside
+            # commit_and_fan_out reconciles drift against it, so it must
+            # resolve to a real commit.
             try:
                 base_body = wiki_git.read_file(path, ref=base_sha)
             except wiki_git.UnknownSha:
