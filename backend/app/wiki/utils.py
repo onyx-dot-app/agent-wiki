@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import difflib
 import logging
+import subprocess
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
@@ -91,7 +92,11 @@ def commit_with_ai_rebase(
     _new = new_body
     for attempt in range(max_retries + 1):
         head_sha = wiki_git.head_sha_for_path(path)
-        current = read_existing_or_empty(path)
+        # Read from HEAD, not the working tree: after a GitCommitLockError the
+        # loser's merged body is already written to disk (commit_file stages
+        # before committing), so a filesystem read would return the loser's own
+        # content and the subsequent merge would be a no-op.
+        current = _read_head_or_empty(path)
         if current != _base:
             mr = wiki_git.merge_content(_base, current, _new)
             if mr.clean:
@@ -366,6 +371,14 @@ def _current_user_or_none():
 def read_existing(path: str) -> str:
     """Read the current body of ``path`` from the wiki working tree."""
     return Path(filesystem.absolute(path)).read_text()
+
+
+def _read_head_or_empty(path: str) -> str:
+    """Read ``path`` from the last git commit (HEAD), or ``""`` if not yet committed."""
+    try:
+        return wiki_git.read_file(path, ref="HEAD")
+    except subprocess.CalledProcessError:
+        return ""
 
 
 def read_existing_or_empty(path: str) -> str:

@@ -37,7 +37,7 @@ def _patch(monkeypatch, *, head_shas, current_bodies, merge_result=None, llm_mer
 
     ``head_shas`` — list of return values for successive ``head_sha_for_path``
     calls (each loop iteration calls it twice: before and after the merge).
-    ``current_bodies`` — list of return values for ``read_existing_or_empty``.
+    ``current_bodies`` — list of return values for ``_read_head_or_empty``.
     """
     head_iter = iter(head_shas)
     body_iter = iter(current_bodies)
@@ -49,7 +49,7 @@ def _patch(monkeypatch, *, head_shas, current_bodies, merge_result=None, llm_mer
     monkeypatch.setattr("app.wiki.utils.wiki_git", wiki_git_mock)
 
     monkeypatch.setattr(
-        "app.wiki.utils.read_existing_or_empty",
+        "app.wiki.utils._read_head_or_empty",
         lambda _p: next(body_iter),
     )
 
@@ -212,7 +212,7 @@ def test_retries_when_head_moves_mid_merge(monkeypatch):
     wiki_git_mock.merge_content.side_effect = lambda *_: next(merge_iter)
     monkeypatch.setattr("app.wiki.utils.wiki_git", wiki_git_mock)
     monkeypatch.setattr(
-        "app.wiki.utils.read_existing_or_empty",
+        "app.wiki.utils._read_head_or_empty",
         lambda _p: next(body_iter),
     )
 
@@ -260,7 +260,7 @@ def test_git_lock_race_retries_and_merges(monkeypatch):
     wiki_git_mock.merge_content.side_effect = lambda *_: next(merge_iter)
     monkeypatch.setattr("app.wiki.utils.wiki_git", wiki_git_mock)
     monkeypatch.setattr(
-        "app.wiki.utils.read_existing_or_empty",
+        "app.wiki.utils._read_head_or_empty",
         lambda _p: next(body_iter),
     )
 
@@ -298,7 +298,7 @@ def test_git_lock_race_raises_when_max_retries_exceeded(monkeypatch):
     wiki_git_mock.head_sha_for_path.side_effect = lambda _p: next(head_iter)
     monkeypatch.setattr("app.wiki.utils.wiki_git", wiki_git_mock)
     monkeypatch.setattr(
-        "app.wiki.utils.read_existing_or_empty",
+        "app.wiki.utils._read_head_or_empty",
         lambda _p: next(body_iter),
     )
     monkeypatch.setattr(
@@ -334,7 +334,7 @@ def test_raises_when_max_retries_exceeded(monkeypatch):
     wiki_git_mock.merge_content.return_value = MergeResult(merged=merged_body, clean=True)
     monkeypatch.setattr("app.wiki.utils.wiki_git", wiki_git_mock)
     monkeypatch.setattr(
-        "app.wiki.utils.read_existing_or_empty",
+        "app.wiki.utils._read_head_or_empty",
         lambda _p: next(body_iter),
     )
     fan_out = MagicMock(return_value=_SHA_A)
