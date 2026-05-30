@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Wiki Write Paths</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: 'Segoe UI', system-ui, Arial, sans-serif;
+    background: #f5f6f8; color: #2a2f38;
+    margin: 0; padding: 28px 32px 60px;
+  }
+  h1 { font-size: 20px; color: #1a1f29; margin: 0 0 4px; }
+  .subtitle { color: #6a7280; font-size: 13px; margin: 0 0 24px; }
+  .diagram { background: #ffffff; border: 1px solid #e2e6ec; border-radius: 10px; overflow-x: auto; }
+  .mermaid { font-size: 14px; }
+  .legend {
+    margin-top: 28px; display: flex; flex-wrap: wrap; gap: 16px;
+    justify-content: center; font-size: 12.5px; color: #5a6470;
+  }
+  .legend b { color: #8a929c; font-weight: 700; }
+  .legend i {
+    display: inline-block; width: 12px; height: 12px; border-radius: 3px;
+    vertical-align: middle; margin-right: 5px; border: 2px solid;
+  }
+  .notes { margin-top: 22px; font-size: 12.5px; color: #4a5460; line-height: 1.6; max-width: 1100px; }
+  .notes b { color: #2a2f38; }
+  .notes code { background: #eef1f5; color: #2a3540; padding: 1px 6px; border-radius: 4px; font-size: 12px; }
+</style>
+</head>
+<body>
+<h1>Wiki Write Paths</h1>
+<p class="subtitle">How an edit becomes a saved page — people and AI alike, through one shared save loop</p>
+
+<div class="diagram">
+<pre class="mermaid">
+flowchart TB
+
+  %% ───────── one person, two ways in — top of the diagram ─────────
+  PERSON["👤 Human"]:::human
+
+  subgraph SRC[" "]
+    direction LR
+    H["Human<br/><span style='font-size:11px'>edits in browser</span>"]:::human
+    C["Chat agent<br/><span style='font-size:11px'>edits live</span>"]:::chat
+    M["MCP agent<br/><span style='font-size:11px'>background, via queue</span>"]:::mcp
+    I["Ingest<br/><span style='font-size:11px'>outside content arrives</span>"]:::ingest
+  end
+
+  %% the person acts directly in the browser, or drives the chat agent
+  PERSON -- "edits directly" --> H
+  PERSON -- "drives" --> C
+  %% the conflict screen is the human-edit branch only — worked from the browser
+  H -. "resolves" .-> H409
+
+  subgraph LOOP["The commit loop — identical for human &amp; AI"]
+    direction TB
+    L1["1 · Read latest<br/><span style='font-size:11px'>current saved version</span>"]:::loop
+    L2{"2 · Changed<br/>since base?"}:::decision
+    L3["3 · Auto-merge<br/><span style='font-size:11px'>non-overlapping edits combine</span>"]:::loop
+    L4{"4 · Who wrote it?<br/><span style='font-size:11px'>the merge flag decides</span>"}:::forkpt
+    AIMERGE["🤖 AI · merge ON<br/><span style='font-size:11px'>agents &amp; ingest — LLM reconciles</span>"]:::chat
+    L5["5 · Take the write lock<br/><span style='font-size:11px'>one writer at a time</span>"]:::loop
+    L6{"6 · HEAD still ours?<br/><span style='font-size:11px'>did anyone beat us?</span>"}:::decision
+    COMMIT["7 · ✓ Commit lands"]:::ok
+
+    L1 --> L2
+    L2 -- "yes" --> L3
+    L2 -- "no" --> L5
+    L3 -- "conflict" --> L4
+    L3 -- "clean" --> L5
+    L4 -- "agent / ingest" --> AIMERGE
+    AIMERGE --> L5
+    L5 --> L6
+    L6 -. "beaten · retry (max 3×)" .-> L1
+    L6 -- "unchanged" --> COMMIT
+  end
+
+  subgraph H409["Human · merge OFF — conflict screen"]
+    direction LR
+    RKEEP["Keep mine"]:::human
+    RCUR["Use current"]:::human
+    RMAN["Edit manually"]:::human
+    RAI["🤖 Let AI consolidate"]:::chat
+  end
+
+  %% ───────── everyone flows into the one shared loop ─────────
+  H -- "Human commit" --> LOOP
+  C -- "AI commit" --> LOOP
+  M -- "AI commit" --> LOOP
+  I -- "AI commit" --> LOOP
+
+  %% a human overlap exits the loop; they pick a resolution, then save again
+  L4 -- "browser human only" --> H409
+  H409 -. "save again" .-> L1
+
+  %% ───────── shared commit gateway ─────────
+  COMMIT --> GATE
+  subgraph GATE["One save routine — every initiator"]
+    direction LR
+    G1["Check<br/>permission"]:::shared --> G2["Commit<br/>to git"]:::ok --> G3["Record on<br/>activity feed"]:::shared --> G4["Reindex<br/>&amp; notify"]:::shared
+  end
+
+  %% ───────── git layer ─────────
+  GATE --> GIT["🔒 Git layer — one writer at a time<br/><span style='font-size:11px'>shared lock across all processes · won't commit if the page moved past this edit's base</span>"]:::git
+
+  %% ───────── styles ─────────
+  classDef human   fill:#e8f0ff,stroke:#3b82d6,color:#1a3a6a;
+  classDef chat    fill:#f0e8ff,stroke:#8b5cf0,color:#3a1a6a;
+  classDef mcp     fill:#e0f5ea,stroke:#2e9e5a,color:#1a5a35;
+  classDef ingest  fill:#f5e8fc,stroke:#a64ad0,color:#5a1a7a;
+  classDef loop    fill:#eef1f6,stroke:#7a8aa0,color:#33404f;
+  classDef decision fill:#e8eef5,stroke:#5a7088,color:#2a3a4a;
+  classDef forkpt  fill:#fff2dc,stroke:#d99838,color:#6a4a10;
+  classDef ok      fill:#e4f3e4,stroke:#3e8a3e,color:#1a4a1a;
+  classDef err     fill:#ffe6e6,stroke:#d65454,color:#8a2020;
+  classDef shared  fill:#eef2f7,stroke:#5a7088,color:#2a3a4a;
+  classDef git     fill:#e4f3e4,stroke:#3e8a3e,color:#1a4a1a;
+  classDef invis   fill:transparent,stroke:transparent,color:transparent;
+
+  style SRC   fill:#ffffff,stroke:#ffffff,color:#ffffff;
+  style LOOP  fill:#f5f7fa,stroke:#c8d0da,color:#5a6470;
+  style H409  fill:#fff5f5,stroke:#d65454,color:#8a2020;
+  style GATE  fill:#f5f7fa,stroke:#c0c8d2,color:#5a6470;
+
+  %% ───────── edge colors — human (blue) vs AI (one violet) ─────────
+  %% 0 PERSON→H · 2 H⇢H409 resolves · 13 H→LOOP · 17 L4→H409 (browser human only)
+  linkStyle 0,2,13,17 stroke:#3b82d6,stroke-width:2.5px;
+  %% all AI commit paths share one color: 1 PERSON→C · 8 L4→AIMERGE · 14 C→LOOP · 15 M→LOOP · 16 I→LOOP
+  linkStyle 1,8,14,15,16 stroke:#8b5cf0,stroke-width:2.5px;
+</pre>
+</div>
+
+<div class="legend">
+  <b>Legend:</b>
+  <span><i style="background:#e8f0ff;border-color:#3b82d6"></i>Human</span>
+  <span><i style="background:#f0e8ff;border-color:#8b5cf0"></i>AI · Chat</span>
+  <span><i style="background:#e0f5ea;border-color:#2e9e5a"></i>AI · MCP</span>
+  <span><i style="background:#f5e8fc;border-color:#a64ad0"></i>AI · Ingest</span>
+  <span><i style="background:#eef1f6;border-color:#7a8aa0"></i>Commit loop</span>
+  <span><i style="background:#fff2dc;border-color:#d99838"></i>The one fork (step 4)</span>
+  <span><i style="background:#e4f3e4;border-color:#3e8a3e"></i>Git / commit</span>
+</div>
+
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'base',
+    flowchart: { curve: 'basis', nodeSpacing: 55, rankSpacing: 42, useMaxWidth: true },
+    themeVariables: {
+      background: '#ffffff',
+      lineColor: '#8a929c',
+      fontFamily: "'Segoe UI', system-ui, Arial, sans-serif",
+      fontSize: '14px'
+    }
+  });
+</script>
+</body>
+</html>
