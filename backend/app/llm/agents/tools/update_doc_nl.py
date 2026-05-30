@@ -25,20 +25,15 @@ def handle(args: dict[str, Any]) -> Any:
     try:
         path = wiki_utils.validate_doc_path(args.get("path"))
         instruction = args.get("instruction")
-        base_sha = args.get("base_sha")
         activity_ttl = wiki_utils.parse_expires_in_seconds(args.get("expires_in_seconds"))
         if not isinstance(instruction, str) or not instruction.strip():
             raise ToolError("instruction is required (non-empty string)")
-        if base_sha is not None and not isinstance(base_sha, str):
-            raise ToolError("base_sha must be a string when provided")
 
         if not wiki_utils.file_exists(path):
             raise ToolError(f"file not found: {path}")
 
-        stale = wiki_utils.assert_base_sha(path, base_sha)
-        if stale is not None:
-            return stale
-
+        # The sub-agent regenerates from current content; concurrent drift is
+        # reconciled by the 3-way merge in commit_and_fan_out.
         head_sha = wiki_git.head_sha_for_path(path)
 
         old_body = wiki_utils.read_existing(path)

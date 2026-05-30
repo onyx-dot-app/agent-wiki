@@ -79,7 +79,38 @@ def test_write_doc_overwrite_without_base_sha_is_rejected(repo_with_doc):
     assert out["error"] == "base_sha_required_for_overwrite"
 
 
-def test_write_doc_overwrite_with_stale_base_sha_returns_stale_base(repo_with_doc):
+def test_write_doc_overwrite_with_stale_base_sha_merges(repo_with_doc):
+    """A stale ``base_sha`` no longer aborts: the new body is 3-way merged
+    against the concurrent change. Here the agent rewrites the Alpha section
+    while another writer appended a Gamma section — both survive."""
+    from app.llm.agents.tools.write_doc import handle
+    from app.wiki import git as wiki_git
+
+    base = wiki_git.head_sha_for_path("guide.md")
+    # Concurrent writer appends a non-overlapping section.
+    wiki_git.commit_file(
+        "guide.md",
+        "# Guide\n\nAlpha section.\n\nBeta section.\n\nGamma section.\n",
+        "concurrent",
+        author=None,
+    )
+
+    out = handle(
+        {
+            "path": "guide.md",
+            # Agent edited the Alpha line, basing off the pre-Gamma version.
+            "body": "# Guide\n\nAlpha section (revised).\n\nBeta section.\n",
+            "commit_message": "revise alpha",
+            "base_sha": base,
+        }
+    )
+    assert "error" not in out, out
+    merged = Path(repo_with_doc.wiki_dir, "guide.md").read_text()
+    assert "Alpha section (revised)." in merged  # the agent's change
+    assert "Gamma section." in merged  # the concurrent change was preserved
+
+
+def test_write_doc_overwrite_with_unknown_base_sha_returns_not_found(repo_with_doc):
     from app.llm.agents.tools.write_doc import handle
 
     out = handle(
@@ -90,9 +121,7 @@ def test_write_doc_overwrite_with_stale_base_sha_returns_stale_base(repo_with_do
             "base_sha": "deadbeef",
         }
     )
-    assert out["error"] == "stale_base"
-    assert out["base_sha"] == "deadbeef"
-    assert out["current_sha"]
+    assert out["error"] == "base_sha_not_found"
 
 
 def test_write_doc_rejects_non_md(repo_with_doc):

@@ -20,7 +20,6 @@ def handle(args: dict[str, Any]) -> Any:
         old_string = args.get("old_string")
         new_string = args.get("new_string")
         commit_message = args.get("commit_message")
-        base_sha = args.get("base_sha")
         activity_ttl = wiki_utils.parse_expires_in_seconds(args.get("expires_in_seconds"))
         if not isinstance(old_string, str) or old_string == "":
             raise ToolError("old_string is required and must be non-empty")
@@ -28,17 +27,14 @@ def handle(args: dict[str, Any]) -> Any:
             raise ToolError("new_string is required (string)")
         if not isinstance(commit_message, str) or not commit_message.strip():
             raise ToolError("commit_message is required")
-        if base_sha is not None and not isinstance(base_sha, str):
-            raise ToolError("base_sha must be a string when provided")
         replace_all = bool(args.get("replace_all", False))
 
         if not wiki_utils.file_exists(path):
             raise ToolError(f"file not found: {path}")
 
-        stale = wiki_utils.assert_base_sha(path, base_sha)
-        if stale is not None:
-            return stale
-
+        # The replace targets current content; concurrent drift is reconciled
+        # by the 3-way merge in commit_and_fan_out, and a vanished anchor
+        # surfaces as a ReplaceError below.
         base_body = wiki_utils.read_existing(path)
         try:
             new_body = wiki_edit.replace(base_body, old_string, new_string, replace_all)

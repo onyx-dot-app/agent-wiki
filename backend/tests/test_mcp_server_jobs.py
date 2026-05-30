@@ -303,38 +303,41 @@ def test_different_instructions_get_different_jobs(
 # --------------------------------------------------------------------------- #
 
 
-def test_update_doc_nl_stale_base_in_worker(
+def test_update_doc_nl_merges_concurrent_change_in_worker(
     client, llm_returns, immediate_documents
 ):
-    """The agent passes the base_sha it last read. Between enqueue and
-    the worker running, someone else commits — the worker's recheck
-    fails the job with stale_base."""
+    """A concurrent commit between enqueue and worker run no longer fails the
+    job. The sub-agent's regenerated body is 3-way merged against the
+    concurrent change, so the job succeeds and commits."""
     uid = seed_user(uid="u1", email="u1@x.com")
-    wiki_git.commit_file("doc.md", "# v1\n", "v1", author=None)
+    wiki_git.commit_file("doc.md", "# Doc\n\nAlpha.\n\nBeta.\n", "v1", author=None)
 
     headers, _ = _handshake(client, _mint(uid))
-    stale = _read_doc(client, headers, "doc.md")["sha"]
+    _read_doc(client, headers, "doc.md")
 
-    # Someone else commits — HEAD advances past the agent's read.
-    wiki_git.commit_file("doc.md", "# v2\n", "v2", author=None)
+    # Someone else commits a non-overlapping change — HEAD advances. The worker
+    # reads this current body and hands it to the sub-agent.
+    wiki_git.commit_file("doc.md", "# Doc\n\nAlpha.\n\nBeta.\n\nGamma.\n", "v2", author=None)
 
-    llm_returns("# v3\n")
+    # Sub-agent revises Alpha against the current (post-Gamma) body.
+    llm_returns("# Doc\n\nAlpha (revised).\n\nBeta.\n\nGamma.\n")
 
     payload, is_error = _call_tool(
         client,
         headers,
         "update_doc_nl",
-        {"path": "doc.md", "instruction": "rewrite", "base_sha": stale},
+        {"path": "doc.md", "instruction": "revise alpha"},
     )
-    # Enqueue itself succeeds — the failure happens in the worker.
     assert not is_error, payload
 
     job = mcp_jobs_repo.get(payload["job_id"])
     assert job is not None
-    assert job["status"] == "failed"
-    assert job["error"] == "stale_base"
-    assert job["result"]["base_sha"] == stale
-    assert job["result"]["current_sha"] != stale
+    assert job["status"] == "succeeded", job
+    assert job["result"]["committed"] is True
+
+    merged = wiki_git.read_file("doc.md")
+    assert "Alpha (revised)." in merged
+    assert "Gamma." in merged  # the concurrent change was preserved
 
 
 # --------------------------------------------------------------------------- #

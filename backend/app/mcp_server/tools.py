@@ -179,7 +179,6 @@ def _call_async_nl_update(
     # ---- Validate ----
     raw_path = arguments.get("path")
     instruction = arguments.get("instruction")
-    base_sha = arguments.get("base_sha")
     idempotency_key = arguments.get("idempotency_key")
 
     try:
@@ -189,12 +188,6 @@ def _call_async_nl_update(
     if not isinstance(instruction, str) or not instruction.strip():
         return (
             {"error": "instruction is required (non-empty string)",
-             "stale_paths": _compute_stale_paths(sess)},
-            True,
-        )
-    if base_sha is not None and not isinstance(base_sha, str):
-        return (
-            {"error": "base_sha must be a string when provided",
              "stale_paths": _compute_stale_paths(sess)},
             True,
         )
@@ -249,7 +242,6 @@ def _call_async_nl_update(
     payload: dict[str, Any] = {
         "path": rel,
         "instruction": instruction.strip(),
-        "base_sha": base_sha,
         "head_at_enqueue": head_sha,
         "agent_name": agent_activity.agent_name_var.get(),
     }

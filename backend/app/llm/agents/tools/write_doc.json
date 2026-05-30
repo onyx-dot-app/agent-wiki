@@ -18,7 +18,7 @@
       },
       "base_sha": {
         "type": "string",
-        "description": "REQUIRED when overwriting an existing file (the sha you last read). Optional for new-file creates. Without it on an overwrite, returns `base_sha_required_for_overwrite` — full-body overwrite has no fuzzy fallback so the staleness check can't be skipped."
+        "description": "REQUIRED when overwriting an existing file (the sha you last read). Optional for new-file creates. It is the merge base: if HEAD moved since, your body is 3-way merged against the concurrent change rather than clobbering it. Without it on an overwrite, returns `base_sha_required_for_overwrite`; if it doesn't resolve to a real commit, returns `base_sha_not_found` — re-read and pass the current sha."
       },
       "expires_in_seconds": {
         "type": "integer",

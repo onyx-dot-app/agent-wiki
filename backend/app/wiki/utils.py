@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import difflib
 import logging
-import subprocess
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
@@ -401,7 +400,7 @@ def _read_head_or_empty(path: str) -> str:
     """Read ``path`` from the last git commit (HEAD), or ``""`` if not yet committed."""
     try:
         return wiki_git.read_file(path, ref="HEAD")
-    except subprocess.CalledProcessError:
+    except wiki_git.UnknownSha:
         return ""
 
 

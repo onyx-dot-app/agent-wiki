@@ -1,10 +1,10 @@
 """End-to-end tests for the Phase 4 write surface over MCP.
 
 Covers the full handshake → read → edit-with-base_sha → success flow,
-plus the staleness contract (`stale_base` rejection on drift), the
-`base_sha_required_for_overwrite` rule for ``write_doc``, ACL
-enforcement on writes, and the always-present ``stale_paths`` field
-on tool results.
+the merge-through behavior on drift (a stale ``base_sha`` reconciles
+rather than rejecting), the `base_sha_required_for_overwrite` rule for
+``write_doc``, ACL enforcement on writes, and the always-present
+``stale_paths`` field on tool results.
 """
 from __future__ import annotations
 
@@ -119,7 +119,10 @@ def test_edit_doc_with_correct_base_sha_succeeds(client):
     assert "before" not in new_body
 
 
-def test_edit_doc_with_stale_base_sha_returns_stale_base(client):
+def test_edit_doc_applies_over_concurrent_change(client):
+    """A stale ``base_sha`` no longer aborts the edit: ``edit_doc`` targets the
+    current body, so the replace lands on top of the concurrent commit and the
+    other writer's change survives."""
     uid = seed_user(uid="u1", email="u1@x.com")
     wiki_git.commit_file("guide.md", "# v1\nbefore\n", "v1", author=None)
 
@@ -141,10 +144,13 @@ def test_edit_doc_with_stale_base_sha_returns_stale_base(client):
             "base_sha": stale,
         },
     )
-    assert is_error
-    assert payload["error"] == "stale_base"
-    assert payload["base_sha"] == stale
-    assert payload["current_sha"] != stale
+    assert not is_error, payload
+    assert payload["sha"] != stale
+
+    new_body = wiki_git.read_file("guide.md")
+    assert "after" in new_body
+    assert "before" not in new_body
+    assert "# v2" in new_body  # the concurrent change was preserved
 
 
 def test_edit_doc_without_base_sha_still_works_via_mcp(client):
@@ -266,6 +272,64 @@ def test_apply_patch_with_correct_base_sha(client):
     body = wiki_git.read_file("p.md")
     assert "SECOND" in body
     assert "second" not in body
+
+
+def test_apply_patch_merges_over_concurrent_change(client):
+    """A stale ``base_sha`` no longer aborts the patch: the hunk is applied
+    against ``base_sha`` (where its line anchors are exact) and the result is
+    3-way merged against HEAD, so a non-overlapping concurrent edit survives."""
+    uid = seed_user(uid="u1", email="u1@x.com")
+    wiki_git.commit_file("p.md", "first\nsecond\nthird\n", "seed", author=None)
+
+    headers = _handshake(client, _mint(uid))
+    stale = _read(client, headers, "p.md")["sha"]
+
+    # Someone else appends a line at the end, past the hunk's region.
+    wiki_git.commit_file("p.md", "first\nsecond\nthird\nfourth\n", "append", author=None)
+
+    diff = (
+        "--- a/p.md\n"
+        "+++ b/p.md\n"
+        "@@ -1,3 +1,3 @@\n"
+        " first\n"
+        "-second\n"
+        "+SECOND\n"
+        " third\n"
+    )
+    payload, is_error = _call(
+        client,
+        headers,
+        "apply_patch",
+        {
+            "path": "p.md",
+            "patch": diff,
+            "commit_message": "uppercase second over concurrent append",
+            "base_sha": stale,
+        },
+    )
+    assert not is_error, payload
+    assert payload["sha"] != stale
+
+    body = wiki_git.read_file("p.md")
+    assert "SECOND" in body
+    assert "second" not in body
+    assert "fourth" in body  # the concurrent append was preserved
+
+
+def test_apply_patch_without_base_sha_is_rejected(client):
+    uid = seed_user(uid="u1", email="u1@x.com")
+    wiki_git.commit_file("p.md", "first\nsecond\nthird\n", "seed", author=None)
+
+    headers = _handshake(client, _mint(uid))
+    diff = "@@ -1,3 +1,3 @@\n first\n-second\n+SECOND\n third\n"
+    payload, is_error = _call(
+        client,
+        headers,
+        "apply_patch",
+        {"path": "p.md", "patch": diff, "commit_message": "no base"},
+    )
+    assert is_error, payload
+    assert payload["error"] == "base_sha_required"
 
 
 # --------------------------------------------------------------------------- #
