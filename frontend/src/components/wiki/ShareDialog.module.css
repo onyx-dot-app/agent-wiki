@@ -60,22 +60,12 @@
   gap: 8px;
   padding: 2px;
 }
-/* General-access controls render as white, token-bordered boxes (OPAL OpenButton
-   has no white+border-at-rest variant, so the box chrome is token CSS while the
-   OpenButton stays the interactive trigger). */
-.scopeBox,
-.permBox {
-  display: flex;
-  background: var(--color-bg-page);
-  border: 1px solid var(--color-border-default);
-  border-radius: var(--radius-sm);
-}
+/* Scope control fills the row; chevron pushes to the right via the
+   OpenButton's justifyContent="between". Flat — no box, no border. */
 .scopeBox {
   flex: 1;
   min-width: 0;
-}
-.permBox {
-  flex-shrink: 0;
+  display: flex;
 }
 
 /* Ref-forwarding wrappers: OPAL InputTypeIn / OpenButton don't forward refs,
@@ -94,14 +84,11 @@
   flex-direction: column;
   gap: 4px;
 }
-/* Each grantee row sits on its own white surface over the grey card. */
 .row {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 8px;
-  background: var(--color-bg-page);
-  border-radius: var(--radius-md);
+  padding: 6px 2px;
 }
 .rowText {
   display: flex;

@@ -4,8 +4,6 @@ import { useEffect, useMemo, useState } from "react";
 
 import {
   Button,
-  Card,
-  Divider,
   InputTypeIn,
   LineItemButton,
   OpenButton,
@@ -366,7 +364,6 @@ export function ShareDialog({ path, open, onClose }: ShareDialogProps) {
           </div>
         ) : (
           <div className={styles.content}>
-            <Card background="heavy" border="none" rounding="lg" padding="sm">
             <div className={styles.cardStack}>
             {/* Add people / groups — InputTypeIn anchors a portaled results menu */}
             <Popover
@@ -471,7 +468,6 @@ export function ShareDialog({ path, open, onClose }: ShareDialogProps) {
                   }
                 />
                 <PermSelect
-                  boxed
                   value={general === "public-write" ? "write" : "read"}
                   disabled={general === "private"}
                   onChange={(p) =>
@@ -479,8 +475,6 @@ export function ShareDialog({ path, open, onClose }: ShareDialogProps) {
                   }
                 />
               </div>
-
-              <Divider paddingParallel="fit" />
 
               {/* People with access */}
               <div className={styles.list}>
@@ -541,7 +535,6 @@ export function ShareDialog({ path, open, onClose }: ShareDialogProps) {
                 ))}
               </div>
             </div>
-            </Card>
           </div>
         )}
 
@@ -595,13 +588,11 @@ function PermSelect({
   onChange,
   onRemove,
   disabled,
-  boxed,
 }: {
   value: Permission;
   onChange: (p: Permission) => void;
   onRemove?: () => void;
   disabled?: boolean;
-  boxed?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const label = value === "write" ? "Edit" : "View";
@@ -609,16 +600,8 @@ function PermSelect({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <Popover.Trigger asChild>
-        <span className={boxed ? styles.permBox : styles.menuTrigger}>
-          <OpenButton
-            variant="select-light"
-            size="sm"
-            icon={icon}
-            disabled={disabled}
-            width={boxed ? "full" : undefined}
-            justifyContent={boxed ? "between" : undefined}
-            rounding={boxed ? "sm" : undefined}
-          >
+        <span className={styles.menuTrigger}>
+          <OpenButton variant="select-light" size="sm" icon={icon} disabled={disabled}>
             {label}
           </OpenButton>
         </span>

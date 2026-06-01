@@ -391,3 +391,18 @@ textarea::placeholder {
   --interactive-foreground: var(--color-text-muted);
   --interactive-foreground-icon: var(--color-text-muted);
 }
+
+/* Selected menu/select items follow the near-black accent, not OPAL's default
+   action-link blue (the mocks have no blue). */
+.interactive[data-interactive-variant="select-light"][data-interactive-state="selected"],
+.interactive[data-interactive-variant="select-heavy"][data-interactive-state="selected"],
+.interactive[data-interactive-variant="select-tinted"][data-interactive-state="selected"] {
+  --interactive-foreground: var(--text-05) !important;
+  --interactive-foreground-icon: var(--text-05) !important;
+}
+
+/* Floating menus (typeahead, dropdowns) keep their shadow for depth but drop
+   the hard border — the mocks show no bordered popover surface. */
+[data-radix-popper-content-wrapper] > * {
+  border-color: transparent !important;
+}

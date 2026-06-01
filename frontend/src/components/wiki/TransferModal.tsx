@@ -11,6 +11,7 @@ import {
   Text,
 } from "@onyx-ai/opal/components";
 import { SvgArrowExchange, SvgUser, SvgX } from "@onyx-ai/opal/icons";
+import { markdown } from "@onyx-ai/opal/utils";
 
 import { transferOwnership } from "@/lib/permissions";
 import { displayName, useUserSearch, type UserLite } from "@/lib/users";
@@ -93,7 +94,7 @@ export function TransferModal({
           </span>
           <div className={styles.headerText}>
             <Text as="h2" font="main-content-emphasis">
-              {`Transfer ${lastSegment(path)}`}
+              {markdown(`Transfer *${lastSegment(path)}*`)}
             </Text>
           </div>
           <Button
