@@ -659,7 +659,7 @@ function ScopeSelect({
   onChange: (v: "invited" | "anyone") => void;
 }) {
   const [open, setOpen] = useState(false);
-  const label = value === "invited" ? "Only those invited" : "Anyone signed in";
+  const label = value === "invited" ? "Only those invited" : "Anyone";
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <Popover.Trigger asChild>
@@ -690,7 +690,7 @@ function ScopeSelect({
           />
           <LineItemButton
             icon={SvgGlobe}
-            title="Anyone signed in"
+            title="Anyone"
             sizePreset="main-ui"
             variant="section"
             state={value === "anyone" ? "selected" : "empty"}
@@ -769,7 +769,7 @@ function InheritedRow({
   let name: string;
   let Icon = SvgUser;
   if (entry.principal_kind === "everyone") {
-    name = "Anyone signed in";
+    name = "Anyone";
     Icon = SvgGlobe;
   } else if (entry.principal_kind === "group") {
     name =
