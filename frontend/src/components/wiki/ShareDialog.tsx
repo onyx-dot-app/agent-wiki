@@ -184,11 +184,19 @@ export function ShareDialog({ path, open, onClose }: ShareDialogProps) {
 
   // Reset working state to the loaded baseline whenever the ACL changes.
   useEffect(() => {
+    if (!open) return;
     setGrants(new Map(baseline.grants));
     setScope(baseline.general === "private" ? "invited" : "anyone");
     setGeneralPerm(baseline.general === "public-write" ? "write" : "read");
     setSaveError(null);
-  }, [baseline]);
+  }, [baseline, open]);
+
+  useEffect(() => {
+    if (!open) return;
+    setQuery("");
+    setPickerOpen(false);
+    setCopied(false);
+  }, [open]);
 
   // Escape to close.
   useEffect(() => {
