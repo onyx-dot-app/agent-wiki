@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from "react";
 import useSWR from "swr";
 
 import { SetupWizard } from "@/components/agents/SetupWizard";
-import { ToolCard } from "@/components/agents/ToolCard";
 import { Button } from "@/components/common/Button";
 import { PageHeader } from "@/components/common/PageHeader";
 import { ApiError } from "@/lib/api";
@@ -18,7 +17,7 @@ import {
 } from "@/lib/agents";
 import { apiFetch } from "@/lib/api";
 import { useRequireAuth } from "@/lib/auth";
-import { useLauncherCatalog, type ProbeResult } from "@/lib/launchers";
+import { type ProbeResult } from "@/lib/launchers";
 import { color, radius, shadow } from "@/lib/theme";
 import { useIsMobile } from "@/lib/viewport";
 
@@ -480,9 +479,6 @@ function CodingToolsSection() {
         machineId: helperInstalled.machine_id,
       }
     : null;
-  const { launchers } = useLauncherCatalog({
-    machineId: probe?.machineId ?? null,
-  });
   const [wizardOpen, setWizardOpen] = useState(false);
   const dialogRef = useRef<HTMLDivElement | null>(null);
 
@@ -547,30 +543,6 @@ function CodingToolsSection() {
         )}
       </div>
 
-      <ul
-        style={{
-          listStyle: "none",
-          padding: 0,
-          margin: 0,
-          display: "flex",
-          flexDirection: "column",
-          gap: 8,
-        }}
-      >
-        {launchers
-          .filter((c) => c.id !== "onyx-craft")
-          .map((c) => (
-            <li key={c.id}>
-              <ToolCard
-                toolId={c.id}
-                name={c.name}
-                tagline={c.tagline}
-                selected={false}
-              />
-            </li>
-          ))}
-      </ul>
-
       {wizardOpen && (
         <div
           onMouseDown={(e) => {
@@ -603,7 +575,6 @@ function CodingToolsSection() {
             }}
           >
             <SetupWizard
-              catalog={launchers}
               onDone={() => setWizardOpen(false)}
               onCancel={() => setWizardOpen(false)}
             />

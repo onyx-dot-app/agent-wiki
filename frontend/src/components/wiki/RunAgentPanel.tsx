@@ -237,7 +237,6 @@ export function RunAgentPanel({ open, onClose, wikiPath }: Props) {
       {wizardOpen ? (
         <div className={styles.contentBand}>
           <SetupWizard
-            catalog={launchers}
             onDone={() => {
               setWizardOpen(false);
               refreshProbe();
