@@ -55,11 +55,13 @@
   gap: 8px;
 }
 /* General-access controls live in one subtle grey-fill container (no border),
-   with a faint vertical hairline between the scope and permission cells. */
+   with a faint vertical hairline between the scope and permission cells.
+   Shares the grantee-row min-height so every section is the same height. */
 .generalRow {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-height: 48px;
   padding: 4px 8px;
   background: var(--color-bg-sunken);
   border-radius: var(--radius-md);
@@ -99,6 +101,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
+  min-height: 48px;
   padding: 6px 8px;
   background: var(--color-bg-sunken);
   border-radius: var(--radius-md);
