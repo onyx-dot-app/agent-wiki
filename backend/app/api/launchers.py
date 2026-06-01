@@ -238,8 +238,8 @@ def post_launch(req: LaunchRequest, user: User = Depends(require_user)) -> Launc
     # (`<base>/api/mcp`) is returned by exchange in the response payload.
     # Sourced from explicit operator config (PUBLIC_BASE_URL), never
     # request headers — header sniffing behind a proxy is a spoofing surface.
-    wiki_base = CONFIG.public_base_url.rstrip("/")
-    uri = f"agentwiki://run?code={code}&tool={req.tool_id}&endpoint={wiki_base}"
+    # No rstrip needed: the config validator rejects trailing slashes.
+    uri = f"agentwiki://run?code={code}&tool={req.tool_id}&endpoint={CONFIG.public_base_url}"
 
     return LaunchResponse(launch_code=code, uri=uri, agent_session_id=sid)
 

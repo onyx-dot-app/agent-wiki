@@ -72,8 +72,26 @@ export function RunAgentPanel({ open, onClose, wikiPath }: Props) {
     );
   }
 
-  // Persist pending-launch state to sessionStorage in case the
-  // browser navigates away to dispatch agentwiki:// and comes back.
+  // Reset transient state to defaults on every (re)open. The panel returns
+  // null instead of unmounting, so without this it leaks state from the
+  // previous open (a successful launch dispatches agentwiki:// without
+  // navigating away). Defined BEFORE the stash-restore effect so a
+  // bounce-back can layer the saved values back on top.
+  useEffect(() => {
+    if (!open) return;
+    setError(null);
+    setBusy(false);
+    setPickerOpen(false);
+    setWizardOpen(false);
+    setDocContextOn(true);
+    setRememberWorkdir(false);
+    setWorkdirEdited(false);
+    refreshProbe();
+  }, [open]);
+
+  // Restore pending-launch state after an agentwiki:// bounce-back (browser
+  // navigated away to dispatch the URI, then came back). Runs after the reset
+  // effect above, so the saved values win.
   useEffect(() => {
     if (!open || !wikiPath) return;
     const key = `agentwiki:pending-launch:${wikiPath}`;
@@ -96,22 +114,6 @@ export function RunAgentPanel({ open, onClose, wikiPath }: Props) {
       }
     }
   }, [open, wikiPath]);
-
-  useEffect(() => {
-    if (!open) return;
-    // Panel returns null instead of unmounting, so transient UI state must be
-    // reset on (re)open — a successful launch dispatches agentwiki:// without
-    // navigating away, leaving stale state behind. message/workingDir are
-    // deliberately NOT reset here: the stash effect above restores them on
-    // bounce-back.
-    setError(null);
-    setBusy(false);
-    setPickerOpen(false);
-    setWizardOpen(false);
-    setDocContextOn(true);
-    setRememberWorkdir(false);
-    refreshProbe();
-  }, [open]);
 
   useEffect(() => {
     if (!open) return;
