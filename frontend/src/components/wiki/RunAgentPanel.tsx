@@ -99,12 +99,17 @@ export function RunAgentPanel({ open, onClose, wikiPath }: Props) {
 
   useEffect(() => {
     if (!open) return;
-    // Reset transient state on (re)open: a successful launch dispatches the
-    // agentwiki:// URI without navigating away, so busy/pickerOpen would
-    // otherwise stay stuck from the previous open.
+    // Panel returns null instead of unmounting, so transient UI state must be
+    // reset on (re)open — a successful launch dispatches agentwiki:// without
+    // navigating away, leaving stale state behind. message/workingDir are
+    // deliberately NOT reset here: the stash effect above restores them on
+    // bounce-back.
     setError(null);
     setBusy(false);
     setPickerOpen(false);
+    setWizardOpen(false);
+    setDocContextOn(true);
+    setRememberWorkdir(false);
     refreshProbe();
   }, [open]);
 
