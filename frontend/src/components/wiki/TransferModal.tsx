@@ -2,12 +2,18 @@
 
 import { useEffect, useState } from "react";
 
-import { Button } from "@onyx-ai/opal/components";
-import { SvgArrowExchange, SvgX } from "@onyx-ai/opal/icons";
+import {
+  Button,
+  InputTypeIn,
+  LineItemButton,
+  Popover,
+  PopoverMenu,
+  Text,
+} from "@onyx-ai/opal/components";
+import { SvgArrowExchange, SvgUser, SvgX } from "@onyx-ai/opal/icons";
 
-import { Avatar } from "@/components/common/Avatar";
 import { transferOwnership } from "@/lib/permissions";
-import { displayName, initials, useUserSearch, type UserLite } from "@/lib/users";
+import { displayName, useUserSearch, type UserLite } from "@/lib/users";
 
 import styles from "./TransferModal.module.css";
 
@@ -39,7 +45,7 @@ export function TransferModal({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const { users, isLoading } = useUserSearch(query, open && pickerOpen);
+  const { users } = useUserSearch(query, open && pickerOpen);
 
   useEffect(() => {
     if (!open) return;
@@ -66,6 +72,8 @@ export function TransferModal({
     }
   };
 
+  const showResults = pickerOpen && users.length > 0;
+
   return (
     <div
       className={styles.scrim}
@@ -84,72 +92,92 @@ export function TransferModal({
             <SvgArrowExchange size={20} />
           </span>
           <div className={styles.headerText}>
-            <h2 className={styles.title}>
-              Transfer <span className={styles.titleName}>{lastSegment(path)}</span>
-            </h2>
+            <Text as="h2" font="main-content-emphasis">
+              {`Transfer ${lastSegment(path)}`}
+            </Text>
           </div>
-          <button className={styles.closeBtn} onClick={onClose} aria-label="Close">
-            <SvgX size={18} />
-          </button>
+          <Button
+            prominence="tertiary"
+            size="sm"
+            icon={SvgX}
+            tooltip="Close"
+            onClick={onClose}
+          />
         </header>
 
         <div className={styles.content}>
-          <span className={styles.label}>Transfer Ownership To</span>
-          <div className={styles.inputWrap}>
-            <input
-              className={styles.input}
-              placeholder="Add a user or group"
-              value={query}
-              onChange={(e) => {
-                setQuery(e.target.value);
-                setSelected(null);
-                setPickerOpen(true);
-              }}
-              onFocus={() => setPickerOpen(true)}
-              onBlur={() => window.setTimeout(() => setPickerOpen(false), 120)}
-            />
-            {pickerOpen && (
-              <div className={styles.results}>
-                {isLoading && users.length === 0 && (
-                  <div className={styles.empty}>Searching…</div>
-                )}
-                {!isLoading && users.length === 0 && (
-                  <div className={styles.empty}>No users found.</div>
-                )}
+          <Text font="secondary-action" color="text-02">
+            Transfer Ownership To
+          </Text>
+          <Popover
+            open={showResults}
+            onOpenChange={(o) => {
+              if (!o) setPickerOpen(false);
+            }}
+          >
+            <Popover.Anchor asChild>
+              <div className={styles.anchorWrap}>
+                <InputTypeIn
+                  searchIcon
+                  placeholder="Add a user or group"
+                  value={query}
+                  onChange={(e) => {
+                    setQuery(e.target.value);
+                    setSelected(null);
+                    setPickerOpen(true);
+                  }}
+                  onFocus={() => setPickerOpen(true)}
+                />
+              </div>
+            </Popover.Anchor>
+            <Popover.Content
+              width="trigger"
+              align="start"
+              sideOffset={4}
+              container={typeof document !== "undefined" ? document.body : undefined}
+              onOpenAutoFocus={(e) => e.preventDefault()}
+              onCloseAutoFocus={(e) => e.preventDefault()}
+            >
+              <PopoverMenu>
                 {users.map((u) => {
                   const isOwner = u.id === currentOwnerId;
                   return (
-                    <button
+                    <LineItemButton
                       key={u.id}
-                      type="button"
-                      className={styles.row}
-                      disabled={isOwner}
-                      onMouseDown={(e) => {
-                        e.preventDefault();
+                      icon={SvgUser}
+                      title={displayName(u)}
+                      description={u.email}
+                      sizePreset="main-ui"
+                      variant="section"
+                      rightChildren={
+                        isOwner ? (
+                          <Text font="secondary-body" color="text-03">
+                            Current Owner
+                          </Text>
+                        ) : undefined
+                      }
+                      onClick={() => {
                         if (isOwner) return;
                         setSelected(u);
                         setQuery(displayName(u));
                         setPickerOpen(false);
                       }}
-                    >
-                      <Avatar label={initials(u)} size={28} title={displayName(u)} />
-                      <span className={styles.rowText}>
-                        <span className={styles.rowName}>{displayName(u)}</span>
-                        <span className={styles.rowSub}>{u.email}</span>
-                      </span>
-                      {isOwner && <span className={styles.rowTag}>Current Owner</span>}
-                    </button>
+                    />
                   );
                 })}
-              </div>
-            )}
-          </div>
+              </PopoverMenu>
+            </Popover.Content>
+          </Popover>
 
-          <span className={styles.note}>
+          <Text font="secondary-body" color="text-03">
             The current owner is kept as an editor after transfer.
-          </span>
+          </Text>
 
-          {error && <div className={styles.error}>{error}</div>}
+          {error && (
+            <Text font="secondary-body" color="text-02">
+              {error}
+            </Text>
+          )}
         </div>
 
         <footer className={styles.footer}>

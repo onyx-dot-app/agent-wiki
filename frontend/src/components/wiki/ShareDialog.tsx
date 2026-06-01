@@ -2,11 +2,18 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-import { Button, Popover, SelectButton } from "@onyx-ai/opal/components";
+import {
+  Button,
+  InputTypeIn,
+  LineItemButton,
+  OpenButton,
+  Popover,
+  PopoverMenu,
+  Text,
+} from "@onyx-ai/opal/components";
 import {
   SvgArrowExchange,
   SvgCheck,
-  SvgChevronDown,
   SvgEdit,
   SvgEye,
   SvgGlobe,
@@ -199,6 +206,7 @@ export function ShareDialog({ path, open, onClose }: ShareDialogProps) {
     next.set(k, { kind: "user", id: u.id, permission: "read", email: u.email, name: u.name });
     setGrants(next);
     setQuery("");
+    setPickerOpen(false);
   };
   const addGroup = (gid: string, name: string) => {
     const k = keyFor("group", gid);
@@ -207,6 +215,7 @@ export function ShareDialog({ path, open, onClose }: ShareDialogProps) {
     next.set(k, { kind: "group", id: gid, permission: "read", groupName: name });
     setGrants(next);
     setQuery("");
+    setPickerOpen(false);
   };
   const setPermission = (k: string, permission: Permission) => {
     const cur = grants.get(k);
@@ -300,12 +309,10 @@ export function ShareDialog({ path, open, onClose }: ShareDialogProps) {
   const forbidden = error instanceof ApiError && error.status === 403;
   const kindNoun = resourceKind === "folder" ? "folder" : "page";
 
-  // Picker candidates, excluding owner + already-granted principals (shown
-  // as "Shared" rather than addable).
-  const addedKeys = grants;
   const pickerGroups = groupResults;
   const pickerUsers = userResults;
-  const showPicker = pickerOpen && (pickerGroups.length > 0 || pickerUsers.length > 0);
+  const hasResults = pickerGroups.length > 0 || pickerUsers.length > 0;
+  const showPicker = pickerOpen && hasResults;
 
   return (
     <div
@@ -325,94 +332,118 @@ export function ShareDialog({ path, open, onClose }: ShareDialogProps) {
             <SvgShare size={20} />
           </span>
           <div className={styles.headerText}>
-            <h2 className={styles.title}>
-              Share <span className={styles.titleName}>{lastSegment(path)}</span>
-            </h2>
-            <span className={styles.subtitle}>
-              Share this {kindNoun} with people or groups
-            </span>
+            <Text as="h2" font="main-content-emphasis">
+              {`Share ${lastSegment(path)}`}
+            </Text>
+            <Text font="secondary-body" color="text-03">
+              {`Share this ${kindNoun} with people or groups`}
+            </Text>
           </div>
-          <button className={styles.closeBtn} onClick={onClose} aria-label="Close">
-            <SvgX size={18} />
-          </button>
+          <Button
+            prominence="tertiary"
+            size="sm"
+            icon={SvgX}
+            tooltip="Close"
+            onClick={onClose}
+          />
         </header>
 
         {forbidden ? (
           <div className={styles.content}>
-            <div className={styles.error}>
-              Only the owner or an admin can manage sharing for this {kindNoun}.
-            </div>
+            <Text font="secondary-body" color="text-02">
+              {`Only the owner or an admin can manage sharing for this ${kindNoun}.`}
+            </Text>
           </div>
         ) : isLoading || !acl ? (
           <div className={styles.content}>
-            <div className={styles.loading}>Loading…</div>
+            <Text font="secondary-body" color="text-03">
+              Loading…
+            </Text>
           </div>
         ) : (
           <div className={styles.content}>
-            {/* Add people / groups */}
-            <div className={styles.inputWrap}>
-              <input
-                className={styles.input}
-                placeholder="Add users and groups"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                onFocus={() => setPickerOpen(true)}
-                onBlur={() => window.setTimeout(() => setPickerOpen(false), 120)}
-              />
-              {showPicker && (
-                <div className={styles.results}>
+            {/* Add people / groups — InputTypeIn anchors a portaled results menu */}
+            <Popover
+              open={showPicker}
+              onOpenChange={(o) => {
+                if (!o) setPickerOpen(false);
+              }}
+            >
+              <Popover.Anchor asChild>
+                <div className={styles.anchorWrap}>
+                  <InputTypeIn
+                    searchIcon
+                    placeholder="Add users and groups"
+                    value={query}
+                    onChange={(e) => {
+                      setQuery(e.target.value);
+                      setPickerOpen(true);
+                    }}
+                    onFocus={() => setPickerOpen(true)}
+                  />
+                </div>
+              </Popover.Anchor>
+              <Popover.Content
+                width="trigger"
+                align="start"
+                sideOffset={4}
+                container={typeof document !== "undefined" ? document.body : undefined}
+                onOpenAutoFocus={(e) => e.preventDefault()}
+                onCloseAutoFocus={(e) => e.preventDefault()}
+              >
+                <PopoverMenu>
                   {pickerGroups.map((g) => {
-                    const already = addedKeys.has(keyFor("group", g.id));
+                    const already = grants.has(keyFor("group", g.id));
                     return (
-                      <button
+                      <LineItemButton
                         key={`g-${g.id}`}
-                        type="button"
-                        className={styles.resultRow}
-                        disabled={already}
-                        onMouseDown={(e) => {
-                          e.preventDefault();
+                        icon={SvgUsers}
+                        title={g.name}
+                        description={`${g.member_count} ${g.member_count === 1 ? "member" : "members"}`}
+                        sizePreset="main-ui"
+                        variant="section"
+                        rightChildren={
+                          already ? (
+                            <Text font="secondary-body" color="text-03">
+                              Shared
+                            </Text>
+                          ) : undefined
+                        }
+                        onClick={() => {
                           if (!already) addGroup(g.id, g.name);
                         }}
-                      >
-                        <Avatar label={(g.name[0] ?? "?").toUpperCase()} size={28} />
-                        <span className={styles.resultText}>
-                          <span className={styles.resultName}>{g.name}</span>
-                          <span className={styles.resultSub}>
-                            {g.member_count} {g.member_count === 1 ? "member" : "members"}
-                          </span>
-                        </span>
-                        {already && <span className={styles.resultTag}>Shared</span>}
-                      </button>
+                      />
                     );
                   })}
                   {pickerUsers.map((u) => {
                     const already =
-                      addedKeys.has(keyFor("user", u.id)) || u.id === ownerId;
+                      grants.has(keyFor("user", u.id)) || u.id === ownerId;
                     return (
-                      <button
+                      <LineItemButton
                         key={`u-${u.id}`}
-                        type="button"
-                        className={styles.resultRow}
-                        disabled={already}
-                        onMouseDown={(e) => {
-                          e.preventDefault();
+                        icon={SvgUser}
+                        title={displayName(u)}
+                        description={u.email}
+                        sizePreset="main-ui"
+                        variant="section"
+                        rightChildren={
+                          already ? (
+                            <Text font="secondary-body" color="text-03">
+                              Shared
+                            </Text>
+                          ) : undefined
+                        }
+                        onClick={() => {
                           if (!already) addUser(u);
                         }}
-                      >
-                        <Avatar label={initials(u)} size={28} title={displayName(u)} />
-                        <span className={styles.resultText}>
-                          <span className={styles.resultName}>{displayName(u)}</span>
-                          <span className={styles.resultSub}>{u.email}</span>
-                        </span>
-                        {already && <span className={styles.resultTag}>Shared</span>}
-                      </button>
+                      />
                     );
                   })}
-                </div>
-              )}
-            </div>
+                </PopoverMenu>
+              </Popover.Content>
+            </Popover>
 
-            {/* General access — the scope dropdown carries the lock/globe icon */}
+            {/* General access */}
             <div className={styles.generalRow}>
               <ScopeSelect
                 value={general === "private" ? "invited" : "anyone"}
@@ -428,7 +459,11 @@ export function ShareDialog({ path, open, onClose }: ShareDialogProps) {
               />
             </div>
 
-            {saveError && <div className={styles.error}>{saveError}</div>}
+            {saveError && (
+              <Text font="secondary-body" color="text-02">
+                {saveError}
+              </Text>
+            )}
 
             {/* People with access */}
             <div className={styles.list}>
@@ -459,27 +494,22 @@ export function ShareDialog({ path, open, onClose }: ShareDialogProps) {
                     : g.email ?? "";
                 return (
                   <div key={k} className={styles.row}>
-                    <Avatar
-                      label={(name[0] ?? "?").toUpperCase()}
-                      size={28}
-                      title={name}
-                    />
-                    <span className={styles.rowText}>
-                      <span className={styles.rowName}>
-                        {g.kind === "group" ? (
-                          <SvgUsers size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />
-                        ) : null}
+                    <Avatar label={(name[0] ?? "?").toUpperCase()} size={28} title={name} />
+                    <div className={styles.rowText}>
+                      <Text font="main-ui-body" nowrap>
                         {name}
-                      </span>
-                      {sub && <span className={styles.rowSub}>{sub}</span>}
-                    </span>
-                    <span className={styles.rowRight}>
-                      <PermSelect
-                        value={g.permission}
-                        onChange={(p) => setPermission(k, p)}
-                        onRemove={() => removeGrant(k)}
-                      />
-                    </span>
+                      </Text>
+                      {sub && (
+                        <Text font="secondary-body" color="text-03" nowrap>
+                          {sub}
+                        </Text>
+                      )}
+                    </div>
+                    <PermSelect
+                      value={g.permission}
+                      onChange={(p) => setPermission(k, p)}
+                      onRemove={() => removeGrant(k)}
+                    />
                   </div>
                 );
               })}
@@ -498,10 +528,9 @@ export function ShareDialog({ path, open, onClose }: ShareDialogProps) {
             icon={SvgLink}
             onClick={() => void copyLink()}
           >
-            Copy Link
+            {copied ? "Copied" : "Copy Link"}
           </Button>
           <span className={styles.footerRight}>
-            {copied && <span className={styles.copied}>Copied</span>}
             <Button prominence="tertiary" size="md" onClick={onClose}>
               Cancel
             </Button>
@@ -555,50 +584,51 @@ function PermSelect({
     <Popover open={open} onOpenChange={setOpen}>
       <Popover.Trigger asChild>
         <span className={styles.menuTrigger}>
-          <SelectButton
-            size="sm"
-            variant="select-light"
-            icon={icon}
-            rightIcon={SvgChevronDown}
-            disabled={disabled}
-          >
+          <OpenButton variant="select-light" size="sm" icon={icon} disabled={disabled}>
             {label}
-          </SelectButton>
+          </OpenButton>
         </span>
       </Popover.Trigger>
       <Popover.Content width="fit" align="end" sideOffset={4}>
-        <div className={styles.menu}>
-          <MenuRow
+        <PopoverMenu>
+          <LineItemButton
             icon={SvgEye}
-            label="View"
-            selected={value === "read"}
+            title="View"
+            sizePreset="main-ui"
+            variant="section"
+            state={value === "read" ? "selected" : "empty"}
+            rightChildren={value === "read" ? <SvgCheck size={16} /> : undefined}
             onClick={() => {
               onChange("read");
               setOpen(false);
             }}
           />
-          <MenuRow
+          <LineItemButton
             icon={SvgEdit}
-            label="Edit"
-            selected={value === "write"}
+            title="Edit"
+            sizePreset="main-ui"
+            variant="section"
+            state={value === "write" ? "selected" : "empty"}
+            rightChildren={value === "write" ? <SvgCheck size={16} /> : undefined}
             onClick={() => {
               onChange("write");
               setOpen(false);
             }}
           />
-          {onRemove && <div className={styles.menuDivider} />}
-          {onRemove && (
-            <MenuRow
+          {onRemove ? null : undefined}
+          {onRemove ? (
+            <LineItemButton
               icon={SvgX}
-              label="Remove access"
-              danger
+              title="Remove access"
+              sizePreset="main-ui"
+              variant="section"
               onClick={() => {
                 onRemove();
                 setOpen(false);
               }}
             />
-          )}
-        </div>
+          ) : undefined}
+        </PopoverMenu>
       </Popover.Content>
     </Popover>
   );
@@ -617,71 +647,42 @@ function ScopeSelect({
     <Popover open={open} onOpenChange={setOpen}>
       <Popover.Trigger asChild>
         <span className={styles.menuTrigger}>
-          <SelectButton
-            size="sm"
+          <OpenButton
             variant="select-light"
+            size="sm"
             icon={value === "invited" ? SvgLock : SvgGlobe}
-            rightIcon={SvgChevronDown}
           >
             {label}
-          </SelectButton>
+          </OpenButton>
         </span>
       </Popover.Trigger>
       <Popover.Content width="fit" align="start" sideOffset={4}>
-        <div className={styles.menu}>
-          <MenuRow
+        <PopoverMenu>
+          <LineItemButton
             icon={SvgLock}
-            label="Only those invited"
-            selected={value === "invited"}
+            title="Only those invited"
+            sizePreset="main-ui"
+            variant="section"
+            state={value === "invited" ? "selected" : "empty"}
             onClick={() => {
               if (value !== "invited") onChange("invited");
               setOpen(false);
             }}
           />
-          <MenuRow
+          <LineItemButton
             icon={SvgGlobe}
-            label="Anyone signed in"
-            selected={value === "anyone"}
+            title="Anyone signed in"
+            sizePreset="main-ui"
+            variant="section"
+            state={value === "anyone" ? "selected" : "empty"}
             onClick={() => {
               if (value !== "anyone") onChange("anyone");
               setOpen(false);
             }}
           />
-        </div>
+        </PopoverMenu>
       </Popover.Content>
     </Popover>
-  );
-}
-
-function MenuRow({
-  icon: Icon,
-  label,
-  selected,
-  danger,
-  onClick,
-}: {
-  icon: (props: { size?: number }) => React.ReactNode;
-  label: string;
-  selected?: boolean;
-  danger?: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      className={`${styles.menuItem}${danger ? ` ${styles.menuItemDanger}` : ""}`}
-      onClick={onClick}
-    >
-      <span className={styles.menuItemIcon}>
-        <Icon size={16} />
-      </span>
-      <span className={styles.menuItemLabel}>{label}</span>
-      {selected && (
-        <span className={styles.menuItemCheck}>
-          <SvgCheck size={16} />
-        </span>
-      )}
-    </button>
   );
 }
 
@@ -703,25 +704,33 @@ function OwnerRow({
   const name = displayName({ name: ownerName, email: ownerEmail ?? ownerId });
   return (
     <div className={styles.row}>
-      <Avatar label={initials({ name: ownerName, email: ownerEmail ?? ownerId })} size={28} title={name} />
-      <span className={styles.rowText}>
-        <span className={styles.rowName}>
-          {name}
-          {isYou ? " (you)" : ""}
-        </span>
-        {ownerEmail && <span className={styles.rowSub}>{ownerEmail}</span>}
-      </span>
+      <Avatar
+        label={initials({ name: ownerName, email: ownerEmail ?? ownerId })}
+        size={28}
+        title={name}
+      />
+      <div className={styles.rowText}>
+        <Text font="main-ui-body" nowrap>
+          {isYou ? `${name} (you)` : name}
+        </Text>
+        {ownerEmail && (
+          <Text font="secondary-body" color="text-03" nowrap>
+            {ownerEmail}
+          </Text>
+        )}
+      </div>
       <span className={styles.rowRight}>
-        <span className={styles.ownerTag}>Owner</span>
+        <Text font="secondary-body" color="text-03">
+          Owner
+        </Text>
         {canTransfer && (
-          <button
-            className={styles.transferBtn}
+          <Button
+            prominence="tertiary"
+            size="sm"
+            icon={SvgArrowExchange}
+            tooltip="Transfer ownership"
             onClick={onTransfer}
-            aria-label="Transfer ownership"
-            title="Transfer ownership"
-          >
-            <SvgArrowExchange size={16} />
-          </button>
+          />
         )}
       </span>
     </div>
@@ -736,30 +745,40 @@ function InheritedRow({
   groups: { id: string; name: string }[];
 }) {
   let name: string;
-  let icon = <SvgUser size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />;
+  let Icon = SvgUser;
   if (entry.principal_kind === "everyone") {
     name = "Anyone signed in";
-    icon = <SvgGlobe size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />;
+    Icon = SvgGlobe;
   } else if (entry.principal_kind === "group") {
-    name = entry.group_name ?? groups.find((g) => g.id === entry.principal_id)?.name ?? "Group";
-    icon = <SvgUsers size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />;
+    name =
+      entry.group_name ??
+      groups.find((g) => g.id === entry.principal_id)?.name ??
+      "Group";
+    Icon = SvgUsers;
   } else {
-    name = displayName({ name: entry.principal_name, email: entry.principal_email ?? entry.principal_id ?? "?" });
+    name = displayName({
+      name: entry.principal_name,
+      email: entry.principal_email ?? entry.principal_id ?? "?",
+    });
   }
   const where = entry.resource_path ? `folder "${entry.resource_path}"` : "root folder";
   return (
     <div className={styles.row}>
-      <span className={styles.rowText}>
-        <span className={styles.rowName}>
-          {icon}
-          {name}
-        </span>
-        <span className={styles.rowSub}>
-          {entry.permission === "write" ? "Can edit" : "Can view"} · inherited from {where}
-        </span>
+      <span className={styles.inheritedIcon}>
+        <Icon size={16} />
       </span>
+      <div className={styles.rowText}>
+        <Text font="main-ui-body" nowrap>
+          {name}
+        </Text>
+        <Text font="secondary-body" color="text-03" nowrap>
+          {`${entry.permission === "write" ? "Can edit" : "Can view"} · inherited from ${where}`}
+        </Text>
+      </div>
       <span className={styles.rowRight}>
-        <span className={styles.inheritedTag}>Inherited</span>
+        <Text font="secondary-body" color="text-03">
+          Inherited
+        </Text>
       </span>
     </div>
   );
