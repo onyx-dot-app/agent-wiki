@@ -96,6 +96,49 @@
 .menuTrigger {
   display: inline-flex;
 }
+
+/* Compact dropdown menu (OPAL LineItemButton renders oversized cards). */
+.menu {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 160px;
+  padding: 4px;
+  background: var(--color-bg-page);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-popover);
+}
+.menuItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  text-align: left;
+  font-size: 14px;
+  color: var(--color-text-primary);
+}
+.menuItem:hover {
+  background: var(--color-bg-hover);
+}
+.menuItemIcon {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--color-text-secondary);
+}
+.menuItemLabel {
+  flex: 1;
+}
+.menuItemCheck {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--color-text-secondary);
+}
 .error {
   font-size: 14px;
   color: var(--color-state-danger-fg);

@@ -2,12 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-import {
-  Button,
-  LineItemButton,
-  Popover,
-  SelectButton,
-} from "@onyx-ai/opal/components";
+import { Button, Popover, SelectButton } from "@onyx-ai/opal/components";
 import {
   SvgArrowExchange,
   SvgCheck,
@@ -569,45 +564,38 @@ function PermSelect({
         </span>
       </Popover.Trigger>
       <Popover.Content width="fit" align="end" sideOffset={4}>
-        <Popover.Menu>
-          {[
-            <LineItemButton
-              key="view"
-              icon={SvgEye}
-              title="View"
-              state={value === "read" ? "selected" : "empty"}
-              rightChildren={value === "read" ? <SvgCheck size={16} /> : undefined}
+        <div className={styles.menu}>
+          <MenuRow
+            icon={SvgEye}
+            label="View"
+            selected={value === "read"}
+            onClick={() => {
+              onChange("read");
+              setOpen(false);
+            }}
+          />
+          <MenuRow
+            icon={SvgEdit}
+            label="Edit"
+            selected={value === "write"}
+            onClick={() => {
+              onChange("write");
+              setOpen(false);
+            }}
+          />
+          {onRemove && <div className={styles.menuDivider} />}
+          {onRemove && (
+            <MenuRow
+              icon={SvgX}
+              label="Remove access"
+              danger
               onClick={() => {
-                onChange("read");
+                onRemove();
                 setOpen(false);
               }}
-            />,
-            <LineItemButton
-              key="edit"
-              icon={SvgEdit}
-              title="Edit"
-              state={value === "write" ? "selected" : "empty"}
-              rightChildren={value === "write" ? <SvgCheck size={16} /> : undefined}
-              onClick={() => {
-                onChange("write");
-                setOpen(false);
-              }}
-            />,
-            onRemove ? null : undefined,
-            onRemove ? (
-              <LineItemButton
-                key="remove"
-                icon={SvgX}
-                title="Remove access"
-                color="danger"
-                onClick={() => {
-                  onRemove();
-                  setOpen(false);
-                }}
-              />
-            ) : undefined,
-          ]}
-        </Popover.Menu>
+            />
+          )}
+        </div>
       </Popover.Content>
     </Popover>
   );
@@ -637,36 +625,60 @@ function ScopeSelect({
         </span>
       </Popover.Trigger>
       <Popover.Content width="fit" align="start" sideOffset={4}>
-        <Popover.Menu>
-          {[
-            <LineItemButton
-              key="invited"
-              icon={SvgLock}
-              title="Only those invited"
-              state={value === "invited" ? "selected" : "empty"}
-              onClick={() => {
-                if (value !== "invited") {
-                  onChange("invited");
-                }
-                setOpen(false);
-              }}
-            />,
-            <LineItemButton
-              key="anyone"
-              icon={SvgGlobe}
-              title="Anyone signed in"
-              state={value === "anyone" ? "selected" : "empty"}
-              onClick={() => {
-                if (value !== "anyone") {
-                  onChange("anyone");
-                }
-                setOpen(false);
-              }}
-            />,
-          ]}
-        </Popover.Menu>
+        <div className={styles.menu}>
+          <MenuRow
+            icon={SvgLock}
+            label="Only those invited"
+            selected={value === "invited"}
+            onClick={() => {
+              if (value !== "invited") onChange("invited");
+              setOpen(false);
+            }}
+          />
+          <MenuRow
+            icon={SvgGlobe}
+            label="Anyone signed in"
+            selected={value === "anyone"}
+            onClick={() => {
+              if (value !== "anyone") onChange("anyone");
+              setOpen(false);
+            }}
+          />
+        </div>
       </Popover.Content>
     </Popover>
+  );
+}
+
+function MenuRow({
+  icon: Icon,
+  label,
+  selected,
+  danger,
+  onClick,
+}: {
+  icon: (props: { size?: number }) => React.ReactNode;
+  label: string;
+  selected?: boolean;
+  danger?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className={`${styles.menuItem}${danger ? ` ${styles.menuItemDanger}` : ""}`}
+      onClick={onClick}
+    >
+      <span className={styles.menuItemIcon}>
+        <Icon size={16} />
+      </span>
+      <span className={styles.menuItemLabel}>{label}</span>
+      {selected && (
+        <span className={styles.menuItemCheck}>
+          <SvgCheck size={16} />
+        </span>
+      )}
+    </button>
   );
 }
 

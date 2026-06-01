@@ -2,14 +2,9 @@
 
 import { useMemo, useState } from "react";
 
+import { Button, Popover, SelectButton, Tag } from "@onyx-ai/opal/components";
 import {
-  Button,
-  LineItemButton,
-  Popover,
-  SelectButton,
-  Tag,
-} from "@onyx-ai/opal/components";
-import {
+  SvgCheck,
   SvgChevronDown,
   SvgSearch,
   SvgTrash,
@@ -222,30 +217,44 @@ function AccountTypeSelect({
         </span>
       </Popover.Trigger>
       <Popover.Content width="fit" align="start" sideOffset={4}>
-        <Popover.Menu>
-          {[
-            <LineItemButton
-              key="basic"
-              icon={SvgUser}
-              title="Basic"
-              state={!isAdmin ? "selected" : "empty"}
-              onClick={() => {
-                onChange(false);
-                setOpen(false);
-              }}
-            />,
-            <LineItemButton
-              key="admin"
-              icon={SvgUserShield}
-              title="Admin"
-              state={isAdmin ? "selected" : "empty"}
-              onClick={() => {
-                onChange(true);
-                setOpen(false);
-              }}
-            />,
-          ]}
-        </Popover.Menu>
+        <div className={styles.menu}>
+          <button
+            type="button"
+            className={styles.menuItem}
+            onClick={() => {
+              onChange(false);
+              setOpen(false);
+            }}
+          >
+            <span className={styles.menuItemIcon}>
+              <SvgUser size={16} />
+            </span>
+            <span className={styles.menuItemLabel}>Basic</span>
+            {!isAdmin && (
+              <span className={styles.menuItemCheck}>
+                <SvgCheck size={16} />
+              </span>
+            )}
+          </button>
+          <button
+            type="button"
+            className={styles.menuItem}
+            onClick={() => {
+              onChange(true);
+              setOpen(false);
+            }}
+          >
+            <span className={styles.menuItemIcon}>
+              <SvgUserShield size={16} />
+            </span>
+            <span className={styles.menuItemLabel}>Admin</span>
+            {isAdmin && (
+              <span className={styles.menuItemCheck}>
+                <SvgCheck size={16} />
+              </span>
+            )}
+          </button>
+        </div>
       </Popover.Content>
     </Popover>
   );
