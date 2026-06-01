@@ -166,11 +166,28 @@ def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv or sys.argv[1:])
     setup_logging(args.log_level)
     samples = _load_samples(args.samples)
-    thresholds = (
-        [float(t) for t in args.thresholds.split(",") if t.strip()]
-        if args.thresholds
-        else _default_thresholds()
-    )
+
+    # A dataset with no relevant samples makes relevant_retained vacuously
+    # 1.0 at every threshold, so recommend() would return the max cutoff
+    # with no evidentiary basis. Fail loudly instead — the sweep is
+    # meaningless without a relevant class to trade against.
+    n_rel = sum(1 for s in samples if s.relevant)
+    n_irr = len(samples) - n_rel
+    if n_rel == 0 or n_irr == 0:
+        log.error(
+            "dataset has %d relevant / %d irrelevant — the sweep needs both classes",
+            n_rel,
+            n_irr,
+        )
+        return 2
+
+    if args.thresholds:
+        thresholds = [float(t) for t in args.thresholds.split(",") if t.strip()]
+        if not thresholds:
+            log.error("--thresholds produced an empty list; pass at least one value or omit it")
+            return 2
+    else:
+        thresholds = _default_thresholds()
     points = sweep(samples, thresholds)
     rec = recommend(points, min_retained=args.min_retained)
     _print_curve(points, rec)
