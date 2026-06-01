@@ -468,8 +468,8 @@ export function ShareDialog({ path, open, onClose }: ShareDialogProps) {
                     setGeneral(scope === "invited" ? "private" : "public-read")
                   }
                 />
-                <span className={styles.vDivider} />
                 <PermSelect
+                  boxed
                   value={general === "public-write" ? "write" : "read"}
                   disabled={general === "private"}
                   onChange={(p) =>
@@ -592,11 +592,13 @@ function PermSelect({
   onChange,
   onRemove,
   disabled,
+  boxed,
 }: {
   value: Permission;
   onChange: (p: Permission) => void;
   onRemove?: () => void;
   disabled?: boolean;
+  boxed?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const label = value === "write" ? "Edit" : "View";
@@ -604,8 +606,16 @@ function PermSelect({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <Popover.Trigger asChild>
-        <span className={styles.menuTrigger}>
-          <OpenButton variant="select-light" size="sm" icon={icon} disabled={disabled}>
+        <span className={boxed ? styles.permBox : styles.menuTrigger}>
+          <OpenButton
+            variant="select-light"
+            size="sm"
+            icon={icon}
+            disabled={disabled}
+            width={boxed ? "full" : undefined}
+            justifyContent={boxed ? "between" : undefined}
+            rounding={boxed ? "sm" : undefined}
+          >
             {label}
           </OpenButton>
         </span>
