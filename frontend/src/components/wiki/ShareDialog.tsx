@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 
 import {
   Button,
+  Card,
+  Divider,
   InputTypeIn,
   LineItemButton,
   OpenButton,
@@ -364,6 +366,8 @@ export function ShareDialog({ path, open, onClose }: ShareDialogProps) {
           </div>
         ) : (
           <div className={styles.content}>
+            <Card background="heavy" border="none" rounding="lg" padding="sm">
+            <div className={styles.cardStack}>
             {/* Add people / groups — InputTypeIn anchors a portaled results menu */}
             <Popover
               open={showPicker}
@@ -445,42 +449,53 @@ export function ShareDialog({ path, open, onClose }: ShareDialogProps) {
               </Popover.Content>
             </Popover>
 
-            {/* General access */}
-            <div className={styles.generalRow}>
-              <ScopeSelect
-                value={general === "private" ? "invited" : "anyone"}
-                onChange={(scope) =>
-                  setGeneral(scope === "invited" ? "private" : "public-read")
-                }
-              />
-              <span className={styles.generalSpacer} />
-              <PermSelect
-                value={general === "public-write" ? "write" : "read"}
-                disabled={general === "private"}
-                onChange={(p) => setGeneral(p === "write" ? "public-write" : "public-read")}
-              />
-            </div>
-
             {saveError && (
               <Text font="secondary-body" color="text-02">
                 {saveError}
               </Text>
             )}
 
-            {/* People with access */}
-            <div className={styles.list}>
-              {ownerId && (
-                <OwnerRow
-                  ownerId={ownerId}
-                  ownerEmail={acl.owner_email ?? null}
-                  ownerName={acl.owner_name ?? null}
-                  isYou={ownerId === user?.id}
-                  canTransfer={ownerId === user?.id || Boolean(user?.is_admin)}
-                  onTransfer={() => setTransferOpen(true)}
+              {/* General access */}
+              <div className={styles.generalRow}>
+                <span className={styles.inheritedIcon}>
+                  {general === "private" ? (
+                    <SvgLock size={18} />
+                  ) : (
+                    <SvgGlobe size={18} />
+                  )}
+                </span>
+                <ScopeSelect
+                  value={general === "private" ? "invited" : "anyone"}
+                  onChange={(scope) =>
+                    setGeneral(scope === "invited" ? "private" : "public-read")
+                  }
                 />
-              )}
+                <PermSelect
+                  boxed
+                  value={general === "public-write" ? "write" : "read"}
+                  disabled={general === "private"}
+                  onChange={(p) =>
+                    setGeneral(p === "write" ? "public-write" : "public-read")
+                  }
+                />
+              </div>
 
-              {[...grants.values()].map((g) => {
+              <Divider paddingParallel="fit" />
+
+              {/* People with access */}
+              <div className={styles.list}>
+                {ownerId && (
+                  <OwnerRow
+                    ownerId={ownerId}
+                    ownerEmail={acl.owner_email ?? null}
+                    ownerName={acl.owner_name ?? null}
+                    isYou={ownerId === user?.id}
+                    canTransfer={ownerId === user?.id || Boolean(user?.is_admin)}
+                    onTransfer={() => setTransferOpen(true)}
+                  />
+                )}
+
+                {[...grants.values()].map((g) => {
                 const k = keyFor(g.kind, g.id);
                 const group =
                   g.kind === "group" ? groups.find((x) => x.id === g.id) : undefined;
@@ -521,16 +536,18 @@ export function ShareDialog({ path, open, onClose }: ShareDialogProps) {
                 );
               })}
 
-              {baseline.inherited.map((e) => (
-                <InheritedRow key={e.id} entry={e} groups={groups} />
-              ))}
+                {baseline.inherited.map((e) => (
+                  <InheritedRow key={e.id} entry={e} groups={groups} />
+                ))}
+              </div>
             </div>
+            </Card>
           </div>
         )}
 
         <footer className={styles.footer}>
           <Button
-            prominence="tertiary"
+            prominence="secondary"
             size="md"
             icon={SvgLink}
             onClick={() => void copyLink()}
@@ -538,7 +555,7 @@ export function ShareDialog({ path, open, onClose }: ShareDialogProps) {
             {copied ? "Copied" : "Copy Link"}
           </Button>
           <span className={styles.footerRight}>
-            <Button prominence="tertiary" size="md" onClick={onClose}>
+            <Button prominence="secondary" size="md" onClick={onClose}>
               Cancel
             </Button>
             <Button
@@ -578,11 +595,13 @@ function PermSelect({
   onChange,
   onRemove,
   disabled,
+  boxed,
 }: {
   value: Permission;
   onChange: (p: Permission) => void;
   onRemove?: () => void;
   disabled?: boolean;
+  boxed?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const label = value === "write" ? "Edit" : "View";
@@ -590,8 +609,16 @@ function PermSelect({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <Popover.Trigger asChild>
-        <span className={styles.menuTrigger}>
-          <OpenButton variant="select-light" size="sm" icon={icon} disabled={disabled}>
+        <span className={boxed ? styles.permBox : styles.menuTrigger}>
+          <OpenButton
+            variant="select-light"
+            size="sm"
+            icon={icon}
+            disabled={disabled}
+            width={boxed ? "full" : undefined}
+            justifyContent={boxed ? "between" : undefined}
+            rounding={boxed ? "sm" : undefined}
+          >
             {label}
           </OpenButton>
         </span>
@@ -653,17 +680,19 @@ function ScopeSelect({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <Popover.Trigger asChild>
-        <span className={styles.menuTrigger}>
+        <span className={styles.scopeBox}>
           <OpenButton
             variant="select-light"
             size="sm"
-            icon={value === "invited" ? SvgLock : SvgGlobe}
+            width="full"
+            justifyContent="between"
+            rounding="sm"
           >
             {label}
           </OpenButton>
         </span>
       </Popover.Trigger>
-      <Popover.Content width="fit" align="start" sideOffset={4}>
+      <Popover.Content width="trigger" align="start" sideOffset={4}>
         <PopoverMenu>
           <LineItemButton
             icon={SvgLock}

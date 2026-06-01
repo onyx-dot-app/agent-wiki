@@ -45,21 +45,37 @@
 .content {
   display: flex;
   flex-direction: column;
-  gap: 12px;
   padding: 12px;
   overflow-y: auto;
 }
 
+.cardStack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
 .generalRow {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 4px 8px;
-  background: var(--color-bg-sunken);
-  border-radius: var(--radius-md);
+  padding: 2px;
 }
-.generalSpacer {
+/* General-access controls render as white, token-bordered boxes (OPAL OpenButton
+   has no white+border-at-rest variant, so the box chrome is token CSS while the
+   OpenButton stays the interactive trigger). */
+.scopeBox,
+.permBox {
+  display: flex;
+  background: var(--color-bg-page);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+}
+.scopeBox {
   flex: 1;
+  min-width: 0;
+}
+.permBox {
+  flex-shrink: 0;
 }
 
 /* Ref-forwarding wrappers: OPAL InputTypeIn / OpenButton don't forward refs,
@@ -76,13 +92,16 @@
 .list {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
 }
+/* Each grantee row sits on its own white surface over the grey card. */
 .row {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 2px;
+  padding: 6px 8px;
+  background: var(--color-bg-page);
+  border-radius: var(--radius-md);
 }
 .rowText {
   display: flex;
