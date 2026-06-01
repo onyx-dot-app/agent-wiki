@@ -99,6 +99,32 @@ class IngestSelectorCase(BaseModel):
     tags: list[str] = Field(default_factory=list)
 
 
+class RetrievalSample(BaseModel):
+    """One (source doc → candidate wiki page) pair with its BM25 score + label.
+
+    Feeds the ingest pre-filter sweep: the threshold gate drops candidates
+    whose ``bm25_score`` falls below a cutoff before they reach the
+    reconciler LLM. ``relevant`` is the human-verified ground truth (the
+    page would have committed or no-changed, i.e. NOT irrelevant). The
+    sweep moves the cutoff across a range and measures, at each level, how
+    many relevant pages are retained vs how many irrelevant pages are
+    filtered.
+
+    ``bm25_score`` is cached in the dataset so the sweep is offline +
+    reproducible; refreshing it against live OpenSearch is a separate step.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    id: str
+    source_type: str = ""
+    wiki_path: str
+    bm25_score: float
+    relevant: bool
+    notes: str = ""
+    tags: list[str] = Field(default_factory=list)
+
+
 class MergeConflictCase(BaseModel):
     """One case for the 3-way merge conflict resolution agent.
 

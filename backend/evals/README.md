@@ -83,6 +83,53 @@ Flags (all surfaces):
 Runners exit with `{"out": ..., "skipped_models": [...], "braintrust_url(s)": ...}`
 to stdout so the CI workflow can capture the artifact path and experiment URL.
 
+## Ingest pre-filter sweep
+
+The BM25 pre-filter drops a candidate wiki page before it reaches the
+reconciler LLM when the candidate's BM25 score is below
+`INGEST_BM25_MIN_SCORE`. Raising that cutoff filters more irrelevant
+pages (saving reconciler calls) but risks dropping relevant ones — a
+retrieval-tuning tradeoff, not an LLM-decision one.
+
+`evals.ingest_selector.sweep` turns that tradeoff into a repeatable eval.
+Over a labeled set it reports, per threshold, `irrelevant_filtered` vs
+`relevant_retained`, then recommends the highest cutoff that still keeps
+at least `--min-retained` of relevant pages:
+
+```bash
+cd backend
+uv run python -m evals.ingest_selector.sweep \
+  --samples evals/datasets/ingest_selector/retrieval_samples.jsonl \
+  --min-retained 0.95
+```
+
+Input is `RetrievalSample` JSONL — one (source doc → candidate page) row
+with the candidate's `bm25_score` and human `relevant` label. Scores are
+cached in the dataset so the sweep is offline + reproducible.
+
+`retrieval_samples.jsonl` holds **1268 real production samples**:
+each row's `bm25_score` is the actual ingest BM25 score (`fts_search` +
+title boost, pre-threshold) of the labeled source document against its
+candidate wiki page, scored against the live dev-wiki OpenSearch index.
+Labels are Bo's human-verified `committed_moderate` / `no_change_*` →
+`relevant`, `irrelevant` → not. 58 relevant / 1210 irrelevant — the
+relevant tail is thin, so read the recommended operating point with that
+in mind. `wiki_path` customer + person names are hashed (the sweep only
+uses `bm25_score` + `relevant`; the path is a row label).
+
+On this dataset the sweep recommends a cutoff near 18 at
+`--min-retained 0.95` (≈57% irrelevant filtered, 98% relevant retained),
+which corroborates the production `INGEST_BM25_MIN_SCORE = 20` set in
+PR #145.
+
+**Refreshing scores against live OpenSearch is a separate step** (it
+needs a running cluster). The samples here were scored by piping the
+labeled corpus through `app.ingest.search` inside the dev-wiki backend
+pod. Follow-up: fold that into a `--score-live` mode + a Braintrust push
+so the operating point is tracked over time, and widen the relevant tail
+from the full `ingest_eval_samples` table (raw `outcome` labels, not
+Bo's re-verified ones).
+
 ## GitHub Actions integration
 
 When `$GITHUB_STEP_SUMMARY` is set (every Actions run), runners append a
