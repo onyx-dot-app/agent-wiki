@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 
 import { Button } from "@onyx-ai/opal/components";
-import { SvgArrowExchange, SvgCheck, SvgX } from "@onyx-ai/opal/icons";
+import { SvgArrowExchange, SvgX } from "@onyx-ai/opal/icons";
 
 import { Avatar } from "@/components/common/Avatar";
 import { transferOwnership } from "@/lib/permissions";
@@ -35,10 +35,11 @@ export function TransferModal({
 }: TransferModalProps) {
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<UserLite | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const { users, isLoading } = useUserSearch(query, open);
+  const { users, isLoading } = useUserSearch(query, open && pickerOpen);
 
   useEffect(() => {
     if (!open) return;
@@ -94,54 +95,61 @@ export function TransferModal({
 
         <div className={styles.content}>
           <span className={styles.label}>Transfer Ownership To</span>
-          <input
-            className={styles.input}
-            placeholder="Add a user or group"
-            value={query}
-            autoFocus
-            onChange={(e) => setQuery(e.target.value)}
-          />
+          <div className={styles.inputWrap}>
+            <input
+              className={styles.input}
+              placeholder="Add a user or group"
+              value={query}
+              onChange={(e) => {
+                setQuery(e.target.value);
+                setSelected(null);
+                setPickerOpen(true);
+              }}
+              onFocus={() => setPickerOpen(true)}
+              onBlur={() => window.setTimeout(() => setPickerOpen(false), 120)}
+            />
+            {pickerOpen && (
+              <div className={styles.results}>
+                {isLoading && users.length === 0 && (
+                  <div className={styles.empty}>Searching…</div>
+                )}
+                {!isLoading && users.length === 0 && (
+                  <div className={styles.empty}>No users found.</div>
+                )}
+                {users.map((u) => {
+                  const isOwner = u.id === currentOwnerId;
+                  return (
+                    <button
+                      key={u.id}
+                      type="button"
+                      className={styles.row}
+                      disabled={isOwner}
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        if (isOwner) return;
+                        setSelected(u);
+                        setQuery(displayName(u));
+                        setPickerOpen(false);
+                      }}
+                    >
+                      <Avatar label={initials(u)} size={28} title={displayName(u)} />
+                      <span className={styles.rowText}>
+                        <span className={styles.rowName}>{displayName(u)}</span>
+                        <span className={styles.rowSub}>{u.email}</span>
+                      </span>
+                      {isOwner && <span className={styles.rowTag}>Current Owner</span>}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
 
           <span className={styles.note}>
             The current owner is kept as an editor after transfer.
           </span>
 
           {error && <div className={styles.error}>{error}</div>}
-
-          <div className={styles.list}>
-            {isLoading && users.length === 0 && (
-              <div className={styles.empty}>Searching…</div>
-            )}
-            {!isLoading && users.length === 0 && (
-              <div className={styles.empty}>No users found.</div>
-            )}
-            {users.map((u) => {
-              const isOwner = u.id === currentOwnerId;
-              const isSel = selected?.id === u.id;
-              return (
-                <button
-                  key={u.id}
-                  type="button"
-                  className={`${styles.row} ${isSel ? styles.rowSelected : ""}`}
-                  disabled={isOwner}
-                  onClick={() => setSelected(u)}
-                >
-                  <Avatar label={initials(u)} size={28} title={displayName(u)} />
-                  <span className={styles.rowText}>
-                    <span className={styles.rowName}>{displayName(u)}</span>
-                    <span className={styles.rowSub}>{u.email}</span>
-                  </span>
-                  {isOwner ? (
-                    <span className={styles.rowTag}>Current Owner</span>
-                  ) : isSel ? (
-                    <span className={styles.check}>
-                      <SvgCheck size={16} />
-                    </span>
-                  ) : null}
-                </button>
-              );
-            })}
-          </div>
         </div>
 
         <footer className={styles.footer}>

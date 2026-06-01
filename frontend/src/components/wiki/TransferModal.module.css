@@ -17,7 +17,9 @@
   box-shadow: var(--shadow-modal);
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  /* visible (not hidden) so the user-search popover can extend past the
+     short modal body; header/footer round their own outer corners. */
+  overflow: visible;
 }
 
 .header {
@@ -26,6 +28,7 @@
   gap: 8px;
   padding: 16px;
   background: var(--color-bg-page);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
 }
 .headerIcon {
   display: inline-flex;
@@ -72,7 +75,9 @@
   flex-direction: column;
   gap: 8px;
   padding: 16px;
-  overflow-y: auto;
+  /* visible so the user-search popover (absolute, anchored to the input)
+     isn't clipped — it scrolls internally via .results. */
+  overflow: visible;
 }
 .label {
   font-size: 12px;
@@ -93,11 +98,25 @@
   border-color: var(--color-border-focus);
 }
 
-.list {
+.inputWrap {
+  position: relative;
+}
+.results {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 1;
+  background: var(--color-bg-page);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-popover);
+  padding: 4px;
+  max-height: 240px;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 2px;
-  margin-top: 4px;
 }
 .row {
   display: flex;
@@ -111,11 +130,8 @@
   cursor: pointer;
   text-align: left;
 }
-.row:hover {
+.row:hover:not(:disabled) {
   background: var(--color-bg-hover);
-}
-.rowSelected {
-  background: var(--color-accent-subtle-bg);
 }
 .row:disabled {
   cursor: default;
@@ -145,10 +161,6 @@
   color: var(--color-text-faint);
   flex-shrink: 0;
 }
-.check {
-  color: var(--color-accent-subtle-fg);
-  flex-shrink: 0;
-}
 .empty {
   font-size: 13px;
   color: var(--color-text-muted);
@@ -170,4 +182,5 @@
   gap: 8px;
   padding: 16px;
   background: var(--color-bg-page);
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
 }
