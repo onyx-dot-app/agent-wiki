@@ -363,3 +363,24 @@ textarea::placeholder {
 [data-radix-popper-content-wrapper] {
   z-index: 1000 !important;
 }
+
+/* Primary (action) buttons follow the agent-wiki near-black accent, not
+   OPAL's default blue — matches the Figma mocks and CLAUDE.md's "accent is
+   near-black, not a hue" rule. Scoped to the action *button* so links keep
+   their own color. The accent tokens invert per theme (near-black on light,
+   near-white on dark), so the foreground is flipped to match. */
+.interactive[data-interactive-variant="action"][data-interactive-prominence="primary"]:not(
+    [data-disabled]
+  ) {
+  background-color: var(--color-accent-bg) !important;
+  --interactive-foreground: var(--color-accent-fg);
+  --interactive-foreground-icon: var(--color-accent-fg);
+}
+.interactive[data-interactive-variant="action"][data-interactive-prominence="primary"]:hover:not(
+    [data-disabled]
+  ),
+.interactive[data-interactive-variant="action"][data-interactive-prominence="primary"][data-interaction="hover"]:not(
+    [data-disabled]
+  ) {
+  background-color: var(--color-accent-bg-hover) !important;
+}
