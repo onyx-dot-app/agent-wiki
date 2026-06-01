@@ -4,6 +4,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { mutate as globalMutate } from "swr";
 
 import { Button } from "@/components/common/Button";
+import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { BackLink, PageHeader } from "@/components/common/PageHeader";
 import { RequireAdmin } from "@/components/RequireAdmin";
 import { apiFetch } from "@/lib/api";
@@ -145,7 +146,7 @@ function IngestForm() {
     }
   }
 
-  if (!settings || !llmSettings) return <div>Loading…</div>;
+  if (!settings || !llmSettings) return <LoadingSpinner />;
 
   const dirty = maxDocChars !== String(settings.max_doc_chars);
 

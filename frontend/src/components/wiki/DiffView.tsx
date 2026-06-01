@@ -3,6 +3,7 @@ import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
+import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { absoluteTime, relativeTime } from "@/lib/time";
 import type { FileDiffResponse } from "@/lib/wiki";
 
@@ -111,9 +112,7 @@ export function DiffView({
           )
         ) : loading ? (
           <div className={styles.empty}>
-            <Text font="secondary-body" color="text-03">
-              Loading…
-            </Text>
+            <LoadingSpinner />
           </div>
         ) : bodyError ? (
           <div className={styles.empty}>

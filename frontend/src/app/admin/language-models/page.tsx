@@ -4,6 +4,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { mutate as globalMutate } from "swr";
 
 import { Button } from "@/components/common/Button";
+import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { BackLink, PageHeader } from "@/components/common/PageHeader";
 import { RequireAdmin } from "@/components/RequireAdmin";
 import { apiFetch } from "@/lib/api";
@@ -119,7 +120,7 @@ function LLMPage() {
   useEffect(() => { void load(); }, []);
 
   if (error) return <div style={{ color: color.state.danger.fg }}>{error}</div>;
-  if (!settings) return <div style={{ color: color.text.muted }}>Loading…</div>;
+  if (!settings) return <LoadingSpinner />;
 
   const configured = ALL_PROVIDERS.filter((p) => isConfigured(p, settings));
   const unconfigured = ALL_PROVIDERS.filter((p) => !isConfigured(p, settings));

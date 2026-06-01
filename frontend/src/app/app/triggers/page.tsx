@@ -3,6 +3,7 @@
 import { useState, type CSSProperties } from "react";
 
 import { Button } from "@/components/common/Button";
+import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { PageHeader } from "@/components/common/PageHeader";
 import { TriggerHistoryModal } from "@/components/triggers/TriggerHistoryModal";
 import { TriggerModal } from "@/components/triggers/TriggerModal";
@@ -63,7 +64,12 @@ export default function TriggersPage() {
 
   const listError = mutationError ?? listSwrError?.message ?? null;
 
-  if (loading || !user) return <main style={{ padding: isMobile ? 16 : 32 }}>Loading…</main>;
+  if (loading || !user)
+    return (
+      <main style={{ padding: isMobile ? 16 : 32 }}>
+        <LoadingSpinner center />
+      </main>
+    );
 
   async function onToggle(t: Trigger) {
     setBusyId(t.id);

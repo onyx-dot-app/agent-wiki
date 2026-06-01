@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, type CSSProperties, type FormEvent, type 
 
 import { Button } from "@/components/common/Button";
 import { BackLink, PageHeader } from "@/components/common/PageHeader";
+import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { apiFetch } from "@/lib/api";
 import { useRequireAuth } from "@/lib/auth";
 import { color, radius } from "@/lib/theme";
@@ -44,7 +45,11 @@ export default function SettingsPage() {
   const isMobile = useIsMobile();
 
   if (loading || !user) {
-    return <main style={{ padding: isMobile ? 16 : 32 }}>Loading…</main>;
+    return (
+      <main style={{ padding: isMobile ? 16 : 32 }}>
+        <LoadingSpinner center />
+      </main>
+    );
   }
 
   return (

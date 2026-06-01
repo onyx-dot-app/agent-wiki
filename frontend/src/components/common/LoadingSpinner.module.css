@@ -1,0 +1,28 @@
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.ring {
+  display: inline-block;
+  flex-shrink: 0;
+  border: 2px solid var(--color-border-default);
+  border-top-color: var(--color-text-secondary);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+.wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-text-muted);
+  font-size: 14px;
+}
+
+.center {
+  display: flex;
+  width: 100%;
+  justify-content: center;
+}

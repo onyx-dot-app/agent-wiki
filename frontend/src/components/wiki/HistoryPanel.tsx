@@ -4,6 +4,7 @@ import { SvgClaude, SvgOnyxLogo, SvgOpenai } from "@onyx-ai/opal/logos";
 import type { IconProps } from "@onyx-ai/opal/types";
 import type { ComponentType } from "react";
 
+import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { color } from "@/lib/theme";
 import { relativeTime } from "@/lib/time";
 import {
@@ -111,7 +112,11 @@ export function HistoryPanel({
         }}
       >
         {error && <PanelMessage>{error}</PanelMessage>}
-        {!error && commits === null && <PanelMessage>Loading…</PanelMessage>}
+        {!error && commits === null && (
+          <div style={{ padding: 12 }}>
+            <LoadingSpinner />
+          </div>
+        )}
         {!error && commits && commits.length === 0 && (
           <PanelMessage>No history yet.</PanelMessage>
         )}

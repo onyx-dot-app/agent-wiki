@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 
+import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { BackLink, PageHeader } from "@/components/common/PageHeader";
 import { RequireAdmin } from "@/components/RequireAdmin";
 import { useHealth } from "@/lib/health";
@@ -88,7 +89,7 @@ export default function AdminHealthPage() {
         </section>
 
         <h2 style={{ fontSize: 16, fontWeight: 600, margin: "0 0 10px" }}>Queues</h2>
-        {!data && !error && <p style={{ color: color.text.muted, fontSize: 13 }}>Loading…</p>}
+        {!data && !error && <LoadingSpinner />}
         {data && (
           <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
             {data.queues.map((q) => {

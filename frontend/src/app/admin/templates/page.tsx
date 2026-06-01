@@ -3,6 +3,7 @@
 import { useEffect, useState, type CSSProperties, type FormEvent } from "react";
 
 import { Button } from "@/components/common/Button";
+import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { BackLink, PageHeader } from "@/components/common/PageHeader";
 import { RequireAdmin } from "@/components/RequireAdmin";
 import {
@@ -41,7 +42,7 @@ function TemplatesList() {
   const [reordering, setReordering] = useState<string | null>(null);
   const [reorderError, setReorderError] = useState<string | null>(null);
 
-  if (isLoading) return <div>Loading…</div>;
+  if (isLoading) return <LoadingSpinner />;
   if (error) return <div style={{ color: color.state.danger.fg }}>{error.message}</div>;
 
   async function move(index: number, direction: -1 | 1) {
