@@ -2,15 +2,17 @@
 
 import { useMemo, useState } from "react";
 
-import { Button, Popover, SelectButton, Tag } from "@onyx-ai/opal/components";
 import {
-  SvgCheck,
-  SvgChevronDown,
-  SvgSearch,
-  SvgTrash,
-  SvgUser,
-  SvgUserShield,
-} from "@onyx-ai/opal/icons";
+  Button,
+  InputTypeIn,
+  LineItemButton,
+  OpenButton,
+  Popover,
+  PopoverMenu,
+  Tag,
+  Text,
+} from "@onyx-ai/opal/components";
+import { SvgTrash, SvgUser, SvgUserShield } from "@onyx-ai/opal/icons";
 
 import { Avatar } from "@/components/common/Avatar";
 import { BackLink, PageHeader } from "@/components/common/PageHeader";
@@ -102,35 +104,54 @@ function UsersTable() {
   return (
     <div>
       <div className={styles.stat}>
-        {users.length} {users.length === 1 ? "active user" : "active users"}
+        <Text font="secondary-body" color="text-03">
+          {`${users.length} ${users.length === 1 ? "active user" : "active users"}`}
+        </Text>
       </div>
-      <span className={styles.search}>
-        <SvgSearch size={16} />
-        <input
-          className={styles.searchInput}
+      <div className={styles.searchWrap}>
+        <InputTypeIn
+          searchIcon
           placeholder="Search users…"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
-      </span>
+      </div>
 
       {(actionError || loadError) && (
-        <div className={styles.error}>
-          {actionError ?? loadError?.message}
+        <div className={styles.errorRow}>
+          <Text font="secondary-body" color="text-02">
+            {actionError ?? loadError?.message ?? ""}
+          </Text>
         </div>
       )}
 
       <div className={styles.table} style={{ ["--cols" as string]: cols }}>
         <div className={styles.headRow}>
-          <span className={styles.headCell}>Name</span>
-          {!isMobile && <span className={styles.headCell}>Groups</span>}
-          <span className={styles.headCell}>Account type</span>
-          {!isMobile && <span className={styles.headCell}>Created</span>}
-          <span className={styles.headCell} />
+          <Text font="secondary-action" color="text-03">
+            Name
+          </Text>
+          {!isMobile && (
+            <Text font="secondary-action" color="text-03">
+              Groups
+            </Text>
+          )}
+          <Text font="secondary-action" color="text-03">
+            Account type
+          </Text>
+          {!isMobile && (
+            <Text font="secondary-action" color="text-03">
+              Created
+            </Text>
+          )}
+          <span />
         </div>
 
         {filtered.length === 0 ? (
-          <div className={styles.empty}>No users match your search.</div>
+          <div className={styles.emptyRow}>
+            <Text font="secondary-body" color="text-03">
+              No users match your search.
+            </Text>
+          </div>
         ) : (
           filtered.map((u) => {
             const isSelf = u.id === currentUserId;
@@ -138,21 +159,23 @@ function UsersTable() {
             return (
               <div key={u.id} className={styles.row}>
                 <span className={styles.who}>
-                  <Avatar
-                    label={initials(u)}
-                    size={32}
-                    title={displayName(u)}
-                  />
+                  <Avatar label={initials(u)} size={32} title={displayName(u)} />
                   <span className={styles.whoText}>
-                    <span className={styles.whoName}>{displayName(u)}</span>
-                    <span className={styles.whoEmail}>{u.email}</span>
+                    <Text font="main-ui-body" nowrap>
+                      {displayName(u)}
+                    </Text>
+                    <Text font="secondary-body" color="text-03" nowrap>
+                      {u.email}
+                    </Text>
                   </span>
                 </span>
 
                 {!isMobile && (
                   <span className={styles.tags}>
                     {u.groups.length === 0 ? (
-                      <span className={styles.muted}>—</span>
+                      <Text font="secondary-body" color="text-05">
+                        —
+                      </Text>
                     ) : (
                       u.groups.map((g) => <Tag key={g} title={g} color="gray" />)
                     )}
@@ -166,9 +189,9 @@ function UsersTable() {
                 />
 
                 {!isMobile && (
-                  <span className={styles.created}>
+                  <Text font="secondary-body" color="text-03" nowrap>
                     {u.created_at.split(" ")[0]}
-                  </span>
+                  </Text>
                 )}
 
                 <span className={styles.actions}>
@@ -205,56 +228,41 @@ function AccountTypeSelect({
     <Popover open={open} onOpenChange={setOpen}>
       <Popover.Trigger asChild>
         <span className={styles.menuTrigger}>
-          <SelectButton
-            size="sm"
+          <OpenButton
             variant="select-light"
+            size="sm"
             icon={isAdmin ? SvgUserShield : SvgUser}
-            rightIcon={SvgChevronDown}
             disabled={disabled}
           >
             {isAdmin ? "Admin" : "Basic"}
-          </SelectButton>
+          </OpenButton>
         </span>
       </Popover.Trigger>
       <Popover.Content width="fit" align="start" sideOffset={4}>
-        <div className={styles.menu}>
-          <button
-            type="button"
-            className={styles.menuItem}
+        <PopoverMenu>
+          <LineItemButton
+            icon={SvgUser}
+            title="Basic"
+            sizePreset="main-ui"
+            variant="section"
+            state={!isAdmin ? "selected" : "empty"}
             onClick={() => {
               onChange(false);
               setOpen(false);
             }}
-          >
-            <span className={styles.menuItemIcon}>
-              <SvgUser size={16} />
-            </span>
-            <span className={styles.menuItemLabel}>Basic</span>
-            {!isAdmin && (
-              <span className={styles.menuItemCheck}>
-                <SvgCheck size={16} />
-              </span>
-            )}
-          </button>
-          <button
-            type="button"
-            className={styles.menuItem}
+          />
+          <LineItemButton
+            icon={SvgUserShield}
+            title="Admin"
+            sizePreset="main-ui"
+            variant="section"
+            state={isAdmin ? "selected" : "empty"}
             onClick={() => {
               onChange(true);
               setOpen(false);
             }}
-          >
-            <span className={styles.menuItemIcon}>
-              <SvgUserShield size={16} />
-            </span>
-            <span className={styles.menuItemLabel}>Admin</span>
-            {isAdmin && (
-              <span className={styles.menuItemCheck}>
-                <SvgCheck size={16} />
-              </span>
-            )}
-          </button>
-        </div>
+          />
+        </PopoverMenu>
       </Popover.Content>
     </Popover>
   );

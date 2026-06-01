@@ -1,14 +1,22 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 
-import { Button } from "@onyx-ai/opal/components";
+import {
+  Button,
+  InputTypeIn,
+  LineItemButton,
+  OpenButton,
+  Popover,
+  PopoverMenu,
+  Text,
+} from "@onyx-ai/opal/components";
 import {
   SvgChevronLeft,
   SvgChevronRight,
   SvgPlus,
-  SvgSearch,
   SvgTrash,
+  SvgUser,
   SvgUserPlus,
   SvgUsers,
   SvgX,
@@ -103,23 +111,34 @@ function GroupsManager() {
   }
 
   if (selected) {
-    return <GroupDetail groupId={selected} onBack={() => setSelected(null)} />;
+    const g = groups.find((x) => x.id === selected);
+    return (
+      <GroupDetail
+        groupId={selected}
+        onBack={() => setSelected(null)}
+        onDelete={g ? () => void onDelete(g) : undefined}
+      />
+    );
   }
 
-  if (error) return <div className={styles.error}>{error.message}</div>;
+  if (error)
+    return (
+      <Text font="secondary-body" color="text-02">
+        {error.message}
+      </Text>
+    );
 
   return (
     <>
       <div className={styles.toolbar}>
-        <span className={styles.search}>
-          <SvgSearch size={16} />
-          <input
-            className={styles.searchInput}
+        <div className={styles.searchWrap}>
+          <InputTypeIn
+            searchIcon
             placeholder="Search groups…"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
-        </span>
+        </div>
         <Button
           variant="action"
           size="md"
@@ -132,26 +151,18 @@ function GroupsManager() {
 
       {creating && (
         <form className={styles.createCard} onSubmit={onCreate}>
-          <input
-            className={styles.input}
+          <InputTypeIn
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="Group name (e.g. Engineering)"
-            autoFocus
           />
-          <input
-            className={styles.input}
+          <InputTypeIn
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             placeholder="Description (optional)"
           />
           <div className={styles.createRow}>
-            <Button
-              type="submit"
-              variant="action"
-              size="md"
-              disabled={busy || !name.trim()}
-            >
+            <Button type="submit" variant="action" size="md" disabled={busy || !name.trim()}>
               Create
             </Button>
             <Button
@@ -163,55 +174,42 @@ function GroupsManager() {
               Cancel
             </Button>
           </div>
-          {createError && <div className={styles.error}>{createError}</div>}
+          {createError && (
+            <Text font="secondary-body" color="text-02">
+              {createError}
+            </Text>
+          )}
         </form>
       )}
 
       {isLoading ? (
-        <div className={styles.loading}>Loading…</div>
+        <Text font="secondary-body" color="text-03">
+          Loading…
+        </Text>
       ) : filtered.length === 0 ? (
-        <div className={styles.empty}>
+        <Text font="secondary-body" color="text-03">
           {query ? "No groups match your search." : "No groups yet."}
-        </div>
+        </Text>
       ) : (
         <div className={styles.cards}>
           {filtered.map((g) => (
-            <button
+            <LineItemButton
               key={g.id}
-              type="button"
-              className={styles.card}
+              icon={SvgUsers}
+              title={g.name}
+              description={groupSub(g)}
+              sizePreset="main-content"
+              variant="section"
+              rightChildren={
+                <span className={styles.cardRight}>
+                  <Text font="secondary-body" color="text-03">
+                    {`${g.member_count} ${g.member_count === 1 ? "Member" : "Members"}`}
+                  </Text>
+                  <SvgChevronRight size={18} />
+                </span>
+              }
               onClick={() => setSelected(g.id)}
-            >
-              <span className={styles.cardIcon}>
-                <SvgUsers size={22} />
-              </span>
-              <span className={styles.cardText}>
-                <span className={styles.cardName}>{g.name}</span>
-                <span className={styles.cardSub}>{groupSub(g)}</span>
-              </span>
-              <span className={styles.cardRight}>
-                {g.member_count} {g.member_count === 1 ? "Member" : "Members"}
-                <SvgChevronRight size={18} />
-              </span>
-              <span
-                className={styles.delete}
-                role="button"
-                tabIndex={0}
-                aria-label={`Delete ${g.name}`}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  void onDelete(g);
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.stopPropagation();
-                    void onDelete(g);
-                  }
-                }}
-              >
-                <SvgTrash size={16} />
-              </span>
-            </button>
+            />
           ))}
         </div>
       )}
@@ -222,13 +220,15 @@ function GroupsManager() {
 function GroupDetail({
   groupId,
   onBack,
+  onDelete,
 }: {
   groupId: string;
   onBack: () => void;
+  onDelete?: () => void;
 }) {
   const { group, members, isLoading, refresh } = useGroup(groupId);
   const { users } = useAdminUsers();
-  const [pickedId, setPickedId] = useState("");
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -237,13 +237,12 @@ function GroupDetail({
     return users.filter((u) => !memberIds.has(u.id));
   }, [users, members]);
 
-  async function add() {
-    if (!pickedId) return;
+  async function add(userId: string) {
     setBusy(true);
     setError(null);
     try {
-      await addGroupMember(groupId, pickedId);
-      setPickedId("");
+      await addGroupMember(groupId, userId);
+      setPickerOpen(false);
       await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to add member");
@@ -265,7 +264,11 @@ function GroupDetail({
   }
 
   if (isLoading || !group)
-    return <div className={styles.loading}>Loading…</div>;
+    return (
+      <Text font="secondary-body" color="text-03">
+        Loading…
+      </Text>
+    );
 
   return (
     <div>
@@ -274,40 +277,74 @@ function GroupDetail({
       </Button>
       <div className={styles.detailHead}>
         <SvgUsers size={22} />
-        <h2 className={styles.detailTitle}>{group.name}</h2>
+        <Text as="h2" font="heading-h3">
+          {group.name}
+        </Text>
+        <span className={styles.detailSpacer} />
+        {onDelete && (
+          <Button
+            prominence="tertiary"
+            size="sm"
+            variant="danger"
+            icon={SvgTrash}
+            onClick={onDelete}
+          >
+            Delete group
+          </Button>
+        )}
       </div>
-      {group.description && <p className={styles.detailDesc}>{group.description}</p>}
+      {group.description && (
+        <Text font="secondary-body" color="text-03">
+          {group.description}
+        </Text>
+      )}
 
-      <div className={styles.sectionTitle}>Add member</div>
+      <div className={styles.sectionTitle}>
+        <Text font="main-ui-action" color="text-02">
+          Add member
+        </Text>
+      </div>
       <div className={styles.addRow}>
-        <select
-          className={styles.input}
-          value={pickedId}
-          onChange={(e) => setPickedId(e.target.value)}
-        >
-          <option value="">Choose a user…</option>
-          {candidates.map((u) => (
-            <option key={u.id} value={u.id}>
-              {u.email}
-              {u.name ? ` (${u.name})` : ""}
-            </option>
-          ))}
-        </select>
-        <Button
-          variant="action"
-          size="md"
-          icon={SvgUserPlus}
-          onClick={() => void add()}
-          disabled={!pickedId || busy}
-        >
-          Add
-        </Button>
+        <Popover open={pickerOpen} onOpenChange={setPickerOpen}>
+          <Popover.Trigger asChild>
+            <span className={styles.pickerTrigger}>
+              <OpenButton variant="select-light" size="md" icon={SvgUserPlus}>
+                {candidates.length ? "Choose a user…" : "No users to add"}
+              </OpenButton>
+            </span>
+          </Popover.Trigger>
+          <Popover.Content width="trigger" align="start" sideOffset={4}>
+            <PopoverMenu>
+              {candidates.map((u) => (
+                <LineItemButton
+                  key={u.id}
+                  icon={SvgUser}
+                  title={displayName({ name: u.name, email: u.email })}
+                  description={u.email}
+                  sizePreset="main-ui"
+                  variant="section"
+                  onClick={() => void add(u.id)}
+                />
+              ))}
+            </PopoverMenu>
+          </Popover.Content>
+        </Popover>
       </div>
-      {error && <div className={styles.error}>{error}</div>}
+      {error && (
+        <Text font="secondary-body" color="text-02">
+          {error}
+        </Text>
+      )}
 
-      <div className={styles.sectionTitle}>Members ({members.length})</div>
+      <div className={styles.sectionTitle}>
+        <Text font="main-ui-action" color="text-02">
+          {`Members (${members.length})`}
+        </Text>
+      </div>
       {members.length === 0 ? (
-        <div className={styles.empty}>No members yet.</div>
+        <Text font="secondary-body" color="text-03">
+          No members yet.
+        </Text>
       ) : (
         members.map((m) => (
           <div key={m.id} className={styles.memberRow}>
@@ -316,12 +353,14 @@ function GroupDetail({
               size={28}
               title={displayName({ name: m.name, email: m.email })}
             />
-            <span className={styles.memberText}>
-              <span className={styles.memberName}>
+            <div className={styles.memberText}>
+              <Text font="main-ui-body" nowrap>
                 {displayName({ name: m.name, email: m.email })}
-              </span>
-              <span className={styles.memberSub}>{m.email}</span>
-            </span>
+              </Text>
+              <Text font="secondary-body" color="text-03" nowrap>
+                {m.email}
+              </Text>
+            </div>
             <Button
               prominence="tertiary"
               size="sm"
