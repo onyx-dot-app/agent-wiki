@@ -66,16 +66,14 @@
   background: var(--color-bg-sunken);
   border-radius: var(--radius-md);
 }
-/* Scope + permission are white, input-style boxes (subtle border, like the
-   search field) on the grey container. OPAL has no white-bordered select
-   variant, so the box is token chrome around a transparent select-light
-   OpenButton (which provides left label + right chevron). Scope is wider. */
+/* Scope + permission are white-fill boxes on the grey container — the
+   white-on-grey contrast is the edge, no border line. Token chrome around a
+   transparent select-light OpenButton (left label + right chevron). */
 .scopeBox,
 .permBox {
   display: flex;
   min-width: 0;
   background: var(--color-bg-page);
-  border: 1px solid var(--color-border-default);
   border-radius: var(--radius-sm);
 }
 .scopeBox {

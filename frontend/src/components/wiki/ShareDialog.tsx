@@ -626,7 +626,7 @@ function PermSelect({
             icon={SvgEye}
             title="View"
             sizePreset="main-ui"
-            variant="section"
+            variant="body"
             state={value === "read" ? "selected" : "empty"}
             rightChildren={value === "read" ? <SvgCheck size={16} /> : undefined}
             onClick={() => {
@@ -638,7 +638,7 @@ function PermSelect({
             icon={SvgEdit}
             title="Edit"
             sizePreset="main-ui"
-            variant="section"
+            variant="body"
             state={value === "write" ? "selected" : "empty"}
             rightChildren={value === "write" ? <SvgCheck size={16} /> : undefined}
             onClick={() => {
@@ -652,7 +652,7 @@ function PermSelect({
               icon={SvgX}
               title="Remove access"
               sizePreset="main-ui"
-              variant="section"
+              variant="body"
               onClick={() => {
                 onRemove();
                 setOpen(false);
@@ -695,7 +695,7 @@ function ScopeSelect({
             icon={SvgLock}
             title="Only those invited"
             sizePreset="main-ui"
-            variant="section"
+            variant="body"
             state={value === "invited" ? "selected" : "empty"}
             onClick={() => {
               if (value !== "invited") onChange("invited");
@@ -706,7 +706,7 @@ function ScopeSelect({
             icon={SvgGlobe}
             title="Anyone"
             sizePreset="main-ui"
-            variant="section"
+            variant="body"
             state={value === "anyone" ? "selected" : "empty"}
             onClick={() => {
               if (value !== "anyone") onChange("anyone");
