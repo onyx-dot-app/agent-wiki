@@ -26,9 +26,22 @@ jobs:
 
       - name: Setup bun
         uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.13"
 
+      - name: Cache bun dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('frontend/bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+
+      # Frozen: fail if bun.lock is out of sync with package.json rather than
+      # silently resolving a different graph — that drift is exactly what this
+      # job exists to catch.
       - name: Install deps
-        run: bun install
+        run: bun install --frozen-lockfile
 
       - name: Production build
         run: bun run build
