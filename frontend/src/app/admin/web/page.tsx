@@ -3,6 +3,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 
 import { Button } from "@/components/common/Button";
+import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { BackLink, PageHeader } from "@/components/common/PageHeader";
 import { RequireAdmin } from "@/components/RequireAdmin";
 import { apiFetch } from "@/lib/api";
@@ -102,7 +103,7 @@ function WebForm() {
     }
   }
 
-  if (!settings) return <div>Loading…</div>;
+  if (!settings) return <LoadingSpinner />;
 
   return (
     <form onSubmit={onSubmit} style={{ display: "flex", flexDirection: "column", gap: 16 }}>

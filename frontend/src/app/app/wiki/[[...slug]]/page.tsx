@@ -15,6 +15,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import useSWR from "swr";
 import { Button } from "@/components/common/Button";
+import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { PageHeader } from "@/components/common/PageHeader";
 import { TriggerModal } from "@/components/triggers/TriggerModal";
 import { DiffView } from "@/components/wiki/DiffView";
@@ -105,7 +106,11 @@ export default function WikiRoute() {
   }, [slugPath]);
 
   if (loading || !user)
-    return <main style={{ padding: isMobile ? 16 : 32 }}>Loading…</main>;
+    return (
+      <main style={{ padding: isMobile ? 16 : 32 }}>
+        <LoadingSpinner center />
+      </main>
+    );
 
   return isFile ? (
     <FileViewer path={slugPath} />
@@ -2331,7 +2336,7 @@ function FileViewer({ path }: { path: string }) {
         </div>
       )}
 
-      {loading && <p>Loading…</p>}
+      {loading && <LoadingSpinner />}
 
       {!loading && !error && (
         <div style={{ flex: 1, minHeight: 0, display: "flex", gap: 16 }}>

@@ -5,6 +5,7 @@ import { Suspense, useEffect, useState, type CSSProperties, type FormEvent } fro
 import { useRouter, useSearchParams } from "next/navigation";
 
 import { Button } from "@/components/common/Button";
+import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { useAuth } from "@/lib/auth";
 import { color, radius, shadow } from "@/lib/theme";
 
@@ -155,7 +156,13 @@ function SignupForm() {
 
 export default function SignupPage() {
   return (
-    <Suspense fallback={<main style={{ padding: 32 }}>Loading…</main>}>
+    <Suspense
+      fallback={
+        <main style={{ padding: 32 }}>
+          <LoadingSpinner center />
+        </main>
+      }
+    >
       <SignupForm />
     </Suspense>
   );

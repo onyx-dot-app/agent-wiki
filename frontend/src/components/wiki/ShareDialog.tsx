@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { Button } from "@/components/common/Button";
+import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { ApiError, apiFetch } from "@/lib/api";
 import {
   grantAcl,
@@ -67,7 +68,7 @@ export function ShareDialog({ path, open, onClose }: ShareDialogProps) {
         )}
 
         {isLoading || !acl ? (
-          <div style={{ color: color.text.muted, fontSize: 14 }}>Loading…</div>
+          <LoadingSpinner />
         ) : (
           <>
             <Section title="Visibility">

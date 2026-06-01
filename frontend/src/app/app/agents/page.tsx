@@ -5,6 +5,7 @@ import useSWR from "swr";
 
 import { SetupWizard } from "@/components/agents/SetupWizard";
 import { Button } from "@/components/common/Button";
+import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { PageHeader } from "@/components/common/PageHeader";
 import { ApiError } from "@/lib/api";
 import {
@@ -26,7 +27,11 @@ export default function AgentsPage() {
   const isMobile = useIsMobile();
 
   if (loading || !user)
-    return <main style={{ padding: isMobile ? 16 : 32 }}>Loading…</main>;
+    return (
+      <main style={{ padding: isMobile ? 16 : 32 }}>
+        <LoadingSpinner center />
+      </main>
+    );
 
   return (
     <main
@@ -119,9 +124,7 @@ function TokenManager() {
 
       {reveal && <RevealOnce token={reveal} onClose={() => setReveal(null)} />}
 
-      {isLoading && tokens.length === 0 && !error && (
-        <p style={{ color: color.text.muted, fontSize: 14 }}>Loading…</p>
-      )}
+      {isLoading && tokens.length === 0 && !error && <LoadingSpinner />}
 
       {!isLoading && tokens.length === 0 && (
         <p style={{ color: color.text.muted, fontSize: 14 }}>

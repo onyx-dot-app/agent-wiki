@@ -1,6 +1,7 @@
 "use client";
 
 import { Button } from "@/components/common/Button";
+import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { PageHeader } from "@/components/common/PageHeader";
 import { useRequireAuth } from "@/lib/auth";
 import { useEvents } from "@/lib/events";
@@ -18,7 +19,12 @@ export default function EventsPage() {
   });
   const errorMessage = error?.message ?? null;
 
-  if (loading || !user) return <main style={{ padding: isMobile ? 16 : 32 }}>Loading…</main>;
+  if (loading || !user)
+    return (
+      <main style={{ padding: isMobile ? 16 : 32 }}>
+        <LoadingSpinner center />
+      </main>
+    );
 
   return (
     <main style={{ padding: isMobile ? "16px 12px" : "24px 32px" }}>
@@ -27,7 +33,7 @@ export default function EventsPage() {
           description="Trigger fires, newest first."
           actions={
             <Button onClick={() => void refresh()} disabled={isValidating}>
-              {isValidating ? "Loading…" : "Refresh"}
+              {isValidating ? <LoadingSpinner size={14} /> : "Refresh"}
             </Button>
           }
         />

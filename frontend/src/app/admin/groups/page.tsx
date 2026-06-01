@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { Button } from "@/components/common/Button";
+import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { BackLink, PageHeader } from "@/components/common/PageHeader";
 import { RequireAdmin } from "@/components/RequireAdmin";
 import { ApiError, apiFetch } from "@/lib/api";
@@ -111,7 +112,7 @@ function GroupsManager() {
 
         <h3 style={{ fontSize: 14 }}>Groups</h3>
         {isLoading ? (
-          <div style={{ color: color.text.muted, fontSize: 13 }}>Loading…</div>
+          <LoadingSpinner />
         ) : groups.length === 0 ? (
           <div style={{ color: color.text.muted, fontSize: 13 }}>No groups yet.</div>
         ) : (
@@ -193,7 +194,7 @@ function GroupDetail({ groupId }: { groupId: string }) {
     }
   }
 
-  if (isLoading || !group) return <div style={{ color: color.text.muted }}>Loading…</div>;
+  if (isLoading || !group) return <LoadingSpinner />;
 
   return (
     <div>

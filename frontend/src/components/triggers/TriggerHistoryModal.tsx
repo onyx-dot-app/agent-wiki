@@ -8,6 +8,7 @@ import {
   type Trigger,
   type TriggerCommit,
 } from "@/lib/triggers";
+import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { color, radius, shadow } from "@/lib/theme";
 
 interface Props {
@@ -99,7 +100,7 @@ export function TriggerHistoryModal({ trigger, onClose, onSelectVersion }: Props
           new commit. Trigger <em>fires</em> live on the Events tab.
         </p>
 
-        {loading && <div style={{ fontSize: 13, color: color.text.muted }}>Loading…</div>}
+        {loading && <LoadingSpinner />}
 
         {error && (
           <div

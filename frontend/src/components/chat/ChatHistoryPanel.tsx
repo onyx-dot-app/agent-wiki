@@ -7,6 +7,7 @@ import {
   deleteSession,
   listSessions,
 } from "@/lib/chat";
+import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { color, radius } from "@/lib/theme";
 
 interface Props {
@@ -135,7 +136,9 @@ export function ChatHistoryPanel({
           </div>
         )}
         {loading && sessions.length === 0 && (
-          <p style={{ color: color.text.muted, fontSize: 13, padding: 8, margin: 0 }}>Loading…</p>
+          <div style={{ padding: 8 }}>
+            <LoadingSpinner />
+          </div>
         )}
         {!loading && sessions.length === 0 && !error && (
           <p style={{ color: color.text.muted, fontSize: 13, padding: 8, margin: 0 }}>

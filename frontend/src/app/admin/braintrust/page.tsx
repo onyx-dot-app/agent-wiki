@@ -3,6 +3,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 
 import { Button } from "@/components/common/Button";
+import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { BackLink, PageHeader } from "@/components/common/PageHeader";
 import { RequireAdmin } from "@/components/RequireAdmin";
 import { apiFetch } from "@/lib/api";
@@ -119,7 +120,7 @@ function BraintrustForm() {
     }
   }
 
-  if (!settings) return <div>Loading…</div>;
+  if (!settings) return <LoadingSpinner />;
 
   // Server-side: enabled is forced to false unless project AND key are both
   // set. Mirror that gating here so the toggle button is greyed out until
