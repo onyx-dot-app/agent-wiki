@@ -609,7 +609,7 @@ function PermSelect({
         <span className={boxed ? styles.permBox : styles.menuTrigger}>
           <OpenButton
             variant="select-light"
-            size="sm"
+            size={boxed ? "lg" : "sm"}
             icon={icon}
             disabled={disabled}
             width={boxed ? "full" : undefined}
@@ -680,7 +680,7 @@ function ScopeSelect({
         <span className={styles.scopeBox}>
           <OpenButton
             variant="select-light"
-            size="sm"
+            size="lg"
             width="full"
             justifyContent="between"
             rounding="sm"
