@@ -54,7 +54,9 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 4px 2px;
+  padding: 4px 8px;
+  background: var(--color-bg-sunken);
+  border-radius: var(--radius-md);
 }
 .generalSpacer {
   flex: 1;

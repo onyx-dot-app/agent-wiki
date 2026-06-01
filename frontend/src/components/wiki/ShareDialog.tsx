@@ -22,6 +22,7 @@ import {
   SvgShare,
   SvgUser,
   SvgUsers,
+  SvgUserShield,
   SvgX,
 } from "@onyx-ai/opal/icons";
 
@@ -494,7 +495,12 @@ export function ShareDialog({ path, open, onClose }: ShareDialogProps) {
                     : g.email ?? "";
                 return (
                   <div key={k} className={styles.row}>
-                    <Avatar label={(name[0] ?? "?").toUpperCase()} size={28} title={name} />
+                    <Avatar
+                      label={(name[0] ?? "?").toUpperCase()}
+                      icon={g.kind === "group" ? SvgUsers : undefined}
+                      size={28}
+                      title={name}
+                    />
                     <div className={styles.rowText}>
                       <Text font="main-ui-body" nowrap>
                         {name}
@@ -720,6 +726,9 @@ function OwnerRow({
         )}
       </div>
       <span className={styles.rowRight}>
+        <span className={styles.inheritedIcon}>
+          <SvgUserShield size={16} />
+        </span>
         <Text font="secondary-body" color="text-03">
           Owner
         </Text>
