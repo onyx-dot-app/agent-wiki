@@ -67,6 +67,10 @@ def upgrade() -> None:
             "AND end_offset IS NOT NULL)",
             name="comments_inline_root_anchored",
         ),
+        sa.CheckConstraint(
+            "start_offset IS NULL OR end_offset > start_offset",
+            name="comments_anchor_nonempty",
+        ),
     )
     op.create_index("idx_comments_doc_status", "comments", ["doc_path", "status"])
     op.create_index("idx_comments_thread", "comments", ["thread_root_id"])

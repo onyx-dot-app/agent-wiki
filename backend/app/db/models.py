@@ -740,12 +740,12 @@ class Comment(Base):
     parent (NULL for roots) and cascades on delete. The anchor lives on the
     **root** of a thread; replies leave the anchor columns NULL.
 
-    **Reserved for later phases.** ``scope='page'`` (whole-page threads,
-    Phase 2) and ``author_kind='agent'`` (AI-authored comments, Phase 3) are
-    valid values now so those features need no migration. v1 only ever writes
-    ``scope='inline'`` / ``author_kind='user'``. ``thread_root_id`` references
-    a comment id but is not a real FK (enforced at the repo layer), matching
-    the ``acl_entries.principal_id`` convention.
+    ``scope`` distinguishes a text-anchored (``inline``) comment from a
+    whole-page thread; ``author_kind`` records whether the author is a ``user``
+    or an ``agent``. Both are stored as open enumerations so either dimension
+    can grow without a migration. ``thread_root_id`` references a comment id but
+    is not a real FK (enforced at the repo layer), matching the
+    ``acl_entries.principal_id`` convention.
     """
 
     __tablename__ = "comments"
@@ -803,6 +803,12 @@ class Comment(Base):
             "(anchor_sha IS NOT NULL AND start_offset IS NOT NULL "
             "AND end_offset IS NOT NULL)",
             name="comments_inline_root_anchored",
+        ),
+        # Offsets must form a non-empty half-open range; a zero-width or
+        # inverted anchor has no text to highlight.
+        CheckConstraint(
+            "start_offset IS NULL OR end_offset > start_offset",
+            name="comments_anchor_nonempty",
         ),
         Index("idx_comments_doc_status", "doc_path", "status"),
         Index("idx_comments_thread", "thread_root_id"),
