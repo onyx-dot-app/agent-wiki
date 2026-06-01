@@ -71,18 +71,16 @@ def test_clean_disjoint_replacement_orphans():
     assert remap_range(old, new, s, e) is None
 
 
-def test_rewrite_sharing_characters_migrates_not_orphan():
-    # Realistic agent rewrite: shared words/spaces/letters mean the span does
-    # NOT collapse — the comment migrates onto the rewritten text rather than
-    # orphaning. Documents the deliberate exact-diff (non-fuzzy) behavior.
+def test_rewrite_sharing_characters_orphans_via_survival_guard():
+    # Realistic agent rewrite: difflib shares incidental characters
+    # (spaces/letters) so the span doesn't fully collapse, but the remapped
+    # range would land mostly on text the user never commented on. The
+    # preserved-fraction guard orphans it rather than migrating to a wrong
+    # location.
     old = "see the old wording here"
     new = "see the brand new phrasing here"
     s, e = old.index("old wording"), old.index("old wording") + len("old wording")
-    result = remap_range(old, new, s, e)
-    assert result is not None
-    # The migrated range lands within the rewritten middle, never past the
-    # untouched " here" suffix.
-    assert result[1] <= new.index(" here")
+    assert remap_range(old, new, s, e) is None
 
 
 def test_insertion_at_start_edge_stays_outside():
@@ -119,6 +117,23 @@ def test_sentence_removed_later_comment_stays_put():
     e = s + len("Third sentence.")
     result = remap_range(old, new, s, e)
     assert _slice(new, result) == "Third sentence."
+
+
+def test_survival_guard_keeps_real_surviving_tail():
+    # Even though most of the span's characters were deleted, the survivor
+    # ("keep") is a contiguous preserved block, so the remapped highlight is
+    # 100% preserved content -> kept, not orphaned.
+    old = "remove this whole leading clause but keep"
+    new = "keep"
+    result = remap_range(old, new, 0, len(old))
+    assert _slice(new, result) == "keep"
+
+
+def test_survival_guard_orphans_when_highlight_would_be_mostly_new():
+    # Tiny survivor swamped by inserted text the comment never referred to.
+    old = "fox"
+    new = "a long inserted sentence f o x with lots of new words around"
+    assert remap_range(old, new, 0, 3) is None
 
 
 def test_out_of_bounds_raises():
