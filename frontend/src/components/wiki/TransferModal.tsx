@@ -120,7 +120,7 @@ export function TransferModal({
               <div className={styles.anchorWrap}>
                 <InputTypeIn
                   searchIcon
-                  placeholder="Add a user or group"
+                  placeholder="Add a user"
                   value={query}
                   onChange={(e) => {
                     setQuery(e.target.value);

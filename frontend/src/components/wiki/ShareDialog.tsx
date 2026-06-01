@@ -246,7 +246,15 @@ export function ShareDialog({ path, open, onClose }: ShareDialogProps) {
 
   const copyLink = async () => {
     try {
-      await navigator.clipboard.writeText(window.location.href);
+      const trimmed = path.replace(/\/+$/, "");
+      const encodedPath = trimmed
+        .split("/")
+        .filter(Boolean)
+        .map((segment) => encodeURIComponent(segment))
+        .join("/");
+      const targetPath = encodedPath ? `/app/wiki/${encodedPath}` : "/app/wiki";
+      const shareUrl = `${window.location.origin}${targetPath}`;
+      await navigator.clipboard.writeText(shareUrl);
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1500);
     } catch {
