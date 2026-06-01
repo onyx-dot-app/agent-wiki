@@ -59,12 +59,12 @@ launchersEnabled: false
 # decision (committed / no_change / irrelevant). Off by default; enable on
 # environments where you want to collect real traffic for eval review.
 ingestEvalLogging: false
-# Browser-facing wiki origin (e.g. "https://wiki.example.com",
-# no trailing slash). REQUIRED. Backend advertises this URL in
-# launcher launch URIs, redirect targets, email links. Not inferred
-# from request headers — explicit operator config (cf. GitLab
-# external_url, Sentry system.url-prefix). Backend fails to start
-# if unset or malformed.
+# Browser-facing wiki origin (e.g. "https://wiki.example.com", no
+# trailing slash). Backend advertises this URL in launcher launch URIs,
+# redirect targets, email links. Optional: when left empty the chart
+# derives "https://<ingress.host>" (same pattern as auth.oidc.redirectUri).
+# Set it only to override that default (cf. GitLab external_url, Sentry
+# system.url-prefix).
 publicBaseUrl: ""
 
 auth:
