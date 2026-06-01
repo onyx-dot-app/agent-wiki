@@ -88,11 +88,11 @@ export const shadow = {
   md: "var(--shadow-md)",
   popover: "var(--shadow-popover)",
   fab: "var(--shadow-fab)",
-  // Centered focal modals (RunAgentModal, TriggerModal, ShareDialog,
-  // history modal). One token so every modal lifts off the page the
-  // same amount.
+  // Centered focal modals (TriggerModal, ShareDialog, history modal).
+  // One token so every modal lifts off the page the same amount.
   modal: "var(--shadow-modal)",
-  // Side panels anchored to a screen edge (chat widget expanded mode).
+  // Side panels anchored to a screen edge (chat widget expanded mode,
+  // RunAgentPanel quick-launch).
   panel: "var(--shadow-panel)",
 } as const;
 

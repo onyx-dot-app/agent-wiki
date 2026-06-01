@@ -1,0 +1,245 @@
+.panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(464px, 92vw);
+  background: var(--color-bg-page);
+  border-left: 1px solid var(--color-border-default);
+  box-shadow: var(--shadow-panel);
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  z-index: 100;
+}
+
+/* Header band — Figma: padding 8, gap 8, items-start */
+.headerBand {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px;
+}
+
+.headerText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 2px;
+}
+
+.closeBtn {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-md);
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.closeBtn:hover {
+  background: var(--color-bg-hover);
+}
+
+.closeBtn svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* Content band — Figma: bg tint-01, padding 12, gap 12 */
+.contentBand {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+  background: var(--color-bg-sunken);
+}
+
+/* label → control group: gap 4 */
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* Agent select — Figma Input/Select: h36, border-02, padding 6, radius 8, gap 4 */
+.select {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  height: 36px;
+  padding: 6px;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-page);
+  cursor: pointer;
+  text-align: left;
+}
+
+.selectIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+}
+
+.selectIcon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.selectName {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--color-text-primary);
+}
+
+.selectChevron {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+}
+
+.selectChevron svg {
+  width: 16px;
+  height: 16px;
+}
+
+.picker {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.divider {
+  height: 1px;
+  width: 100%;
+  background: var(--color-border-subtle);
+}
+
+/* Message tag-input — Figma Input/Tags: padding 6, radius 8, gap 4 */
+.taginput {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 6px;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-page);
+}
+
+.taginput:focus-within {
+  border-color: var(--color-border-strong);
+  box-shadow: 0 0 0 2px var(--color-border-focus);
+}
+
+.taginputBody {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 2px;
+}
+
+/* doc-context chip — Figma Tag: bg tint-02, px 4 py 2, radius 8 */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  align-self: flex-start;
+  max-width: 100%;
+  padding: 2px 4px;
+  border-radius: var(--radius-md);
+  background: var(--color-bg-active);
+}
+
+.chip > svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+}
+
+.chipLabel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0 2px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--color-text-primary);
+}
+
+/* remove button — Figma: size 16, radius 4 */
+.chipClose {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-xs);
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.chipClose:hover {
+  background: var(--color-bg-hover);
+}
+
+.chipClose svg {
+  width: 12px;
+  height: 12px;
+}
+
+.taginputArea {
+  width: 100%;
+  border: none;
+  outline: none;
+  background: transparent;
+  resize: vertical;
+  min-height: 48px;
+  padding: 2px;
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--color-text-primary);
+}
+
+/* Footer band — Figma: bg tint-00, top border, padding 12, gap 8, justify-end */
+.footerBand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  border-top: 1px solid var(--color-border-subtle);
+}
+
+.helper {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--color-text-secondary);
+}
+
+.helper strong {
+  color: var(--color-text-primary);
+  font-weight: 700;
+}

@@ -17,10 +17,14 @@ import useSWR from "swr";
 import { Button } from "@/components/common/Button";
 import { PageHeader } from "@/components/common/PageHeader";
 import { TriggerModal } from "@/components/triggers/TriggerModal";
-import { ActiveSessionsList } from "@/components/wiki/ActiveSessionsList";
 import { DiffView } from "@/components/wiki/DiffView";
 import { HistoryPanel } from "@/components/wiki/HistoryPanel";
-import { RunAgentModal } from "@/components/wiki/RunAgentModal";
+import { RunAgentPanel } from "@/components/wiki/RunAgentPanel";
+import {
+  closeSession,
+  useAgentSessions,
+  type AgentSessionSummary,
+} from "@/lib/launchers";
 import { ShareDialog } from "@/components/wiki/ShareDialog";
 import { FolderIcon, FileIcon } from "@/components/wiki/WikiIcons";
 import { apiFetch, ApiError } from "@/lib/api";
@@ -1469,6 +1473,28 @@ function FileViewer({ path }: { path: string }) {
     revalidateOnFocus: true,
     dedupingInterval: 0,
   });
+
+  // Active external agent sessions on this page — surfaced in the
+  // Active agents bar alongside read/write activity.
+  const { sessions: agentSessions, refresh: refreshSessions } =
+    useAgentSessions(path);
+  const activeSessions = agentSessions.filter(
+    (s) => s.status === "active" || s.status === "idle",
+  );
+
+  const handleCloseSession = useCallback(
+    async (id: string) => {
+      if (!confirm("Close this agent session?")) return;
+      try {
+        await closeSession(id, "user_clicked");
+      } catch (err) {
+        alert(err instanceof Error ? err.message : "Failed to close session");
+      } finally {
+        await refreshSessions();
+      }
+    },
+    [refreshSessions],
+  );
   useEffect(() => {
     if (!liveDoc) return;
     // Re-check the gate at apply time — an in-flight fetch from before
@@ -2011,9 +2037,11 @@ function FileViewer({ path }: { path: string }) {
       {!editing && (
         <ActiveAgentsBar
           agents={agents}
+          sessions={activeSessions}
           error={agentsError}
           open={agentsOpen}
           onToggle={() => setAgentsOpen((v) => !v)}
+          onCloseSession={handleCloseSession}
         />
       )}
 
@@ -2043,9 +2071,7 @@ function FileViewer({ path }: { path: string }) {
         onClose={() => setShareOpen(false)}
       />
 
-      <ActiveSessionsList wikiPath={path} />
-
-      <RunAgentModal
+      <RunAgentPanel
         open={runAgentOpen}
         onClose={() => setRunAgentOpen(false)}
         wikiPath={path || null}
@@ -2470,16 +2496,20 @@ function FileViewer({ path }: { path: string }) {
 
 function ActiveAgentsBar({
   agents,
+  sessions,
   error,
   open,
   onToggle,
+  onCloseSession,
 }: {
   agents: DocumentActivity[];
+  sessions: AgentSessionSummary[];
   error: string | null;
   open: boolean;
   onToggle: () => void;
+  onCloseSession: (id: string) => void;
 }) {
-  const count = agents.length;
+  const count = agents.length + sessions.length;
   const expandable = count > 0;
   return (
     <div
@@ -2549,6 +2579,14 @@ function ActiveAgentsBar({
             background: color.bg.page,
           }}
         >
+          {sessions.map((s, i) => (
+            <ActiveSessionRow
+              key={s.id}
+              s={s}
+              isLast={agents.length === 0 && i === sessions.length - 1}
+              onClose={() => onCloseSession(s.id)}
+            />
+          ))}
           {agents.map((a, i) => (
             <ActiveAgentRow
               key={`${a.owner_display}-${a.agent_name ?? ""}-${
@@ -2664,6 +2702,72 @@ function ActiveAgentRow({
         {relativeTime(a.registered_at, "short")} · expires{" "}
         {relativeTime(a.expires_at, "short")}
       </span>
+    </li>
+  );
+}
+
+function ActiveSessionRow({
+  s,
+  isLast,
+  onClose,
+}: {
+  s: AgentSessionSummary;
+  isLast: boolean;
+  onClose: () => void;
+}) {
+  return (
+    <li
+      style={{
+        padding: "10px 12px",
+        borderBottom: isLast ? "none" : `1px solid ${color.border.subtle}`,
+        fontSize: 13,
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        whiteSpace: "nowrap",
+        overflow: "hidden",
+      }}
+    >
+      <span
+        style={{
+          flexShrink: 0,
+          fontSize: 10,
+          fontWeight: 600,
+          padding: "1px 6px",
+          borderRadius: radius.xs,
+          background: color.accent.subtleBg,
+          color: color.accent.subtleFg,
+          textTransform: "uppercase",
+          letterSpacing: 0.3,
+        }}
+      >
+        {s.status}
+      </span>
+
+      <span
+        style={{ fontWeight: 500, color: color.text.primary, flexShrink: 0 }}
+      >
+        {s.tool_id}
+      </span>
+
+      <span style={{ flex: 1 }} />
+
+      <span
+        style={{ fontSize: 11, color: color.text.faint, flexShrink: 0 }}
+        title={`Started ${absoluteTime(s.started_at)}`}
+      >
+        started {relativeTime(s.started_at, "short")}
+      </span>
+
+      <Button
+        type="button"
+        variant="secondary"
+        size="sm"
+        onClick={onClose}
+        style={{ flexShrink: 0 }}
+      >
+        Close
+      </Button>
     </li>
   );
 }

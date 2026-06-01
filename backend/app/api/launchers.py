@@ -18,7 +18,7 @@ from __future__ import annotations
 from threading import RLock
 from time import time
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException
 
 from app.auth import User
 from app.db import launch_codes as codes_repo
@@ -47,6 +47,7 @@ from app.wiki import acl as wiki_acl
 from app.wiki import filesystem as wiki_fs
 from app.wiki import git as wiki_git
 from app.wiki import linked_repos as wiki_linked_repos
+
 
 router = APIRouter()
 
@@ -150,9 +151,7 @@ def _maybe_read_page_body(wiki_path: str, user: User) -> tuple[str, str | None, 
 
 
 @router.post("/launch", response_model=LaunchResponse)
-def post_launch(
-    req: LaunchRequest, request: Request, user: User = Depends(require_user)
-) -> LaunchResponse:
+def post_launch(req: LaunchRequest, user: User = Depends(require_user)) -> LaunchResponse:
     _check_flag()
 
     manifest = get_registry().get(req.tool_id)
@@ -237,8 +236,10 @@ def post_launch(
     # URI's `endpoint` is the wiki BASE URL — the helper pins it +
     # POSTs `<base>/api/launch/exchange` against it. The MCP server URL
     # (`<base>/api/mcp`) is returned by exchange in the response payload.
-    wiki_base = str(request.base_url).rstrip("/")
-    uri = f"agentwiki://run?code={code}&tool={req.tool_id}&endpoint={wiki_base}"
+    # Sourced from explicit operator config (PUBLIC_BASE_URL), never
+    # request headers — header sniffing behind a proxy is a spoofing surface.
+    # No rstrip needed: the config validator rejects trailing slashes.
+    uri = f"agentwiki://run?code={code}&tool={req.tool_id}&endpoint={CONFIG.public_base_url}"
 
     return LaunchResponse(launch_code=code, uri=uri, agent_session_id=sid)
 
@@ -249,7 +250,7 @@ def post_launch(
 
 
 @router.post("/launch/exchange", response_model=ExchangeResponse)
-def post_exchange(req: ExchangeRequest, request: Request) -> ExchangeResponse:
+def post_exchange(req: ExchangeRequest) -> ExchangeResponse:
     _check_flag()
     consumed = codes_repo.consume(req.code)
     if consumed is None:
@@ -286,7 +287,7 @@ def post_exchange(req: ExchangeRequest, request: Request) -> ExchangeResponse:
     if raw_token is None:
         raise HTTPException(status_code=500, detail="launcher token plaintext missing")
 
-    endpoint = str(request.base_url).rstrip("/") + "/api/mcp"
+    endpoint = CONFIG.public_base_url + "/api/mcp"
     is_resume = sess["cli_session_id"] is not None
     payload = ExchangePayload(
         session_id=sess["id"],

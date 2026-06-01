@@ -73,6 +73,8 @@ and wiki path stay in lockstep.
   value: {{ .Values.launchersEnabled | default false | quote }}
 - name: INGEST_EVAL_LOGGING
   value: {{ .Values.ingestEvalLogging | default false | quote }}
+- name: PUBLIC_BASE_URL
+  value: {{ required "publicBaseUrl is required (e.g. https://wiki.example.com)" .Values.publicBaseUrl | quote }}
 - name: SECURE_COOKIES
   value: {{ .Values.secureCookies | quote }}
 {{- if eq .Values.auth.mode "oidc" }}

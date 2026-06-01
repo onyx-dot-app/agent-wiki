@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from "react";
 import useSWR from "swr";
 
 import { SetupWizard } from "@/components/agents/SetupWizard";
-import { ToolCard } from "@/components/agents/ToolCard";
 import { Button } from "@/components/common/Button";
 import { PageHeader } from "@/components/common/PageHeader";
 import { ApiError } from "@/lib/api";
@@ -18,7 +17,7 @@ import {
 } from "@/lib/agents";
 import { apiFetch } from "@/lib/api";
 import { useRequireAuth } from "@/lib/auth";
-import { useLauncherCatalog, type ProbeResult } from "@/lib/launchers";
+import { type ProbeResult } from "@/lib/launchers";
 import { color, radius, shadow } from "@/lib/theme";
 import { useIsMobile } from "@/lib/viewport";
 
@@ -38,10 +37,10 @@ export default function AgentsPage() {
           description="Give your agents the ability to read and update this wiki. Generate a personal API key below, then drop it into your coding agent's MCP configuration. Each key's name becomes that agent's identity — it shows up next to its activity on wiki pages and in commit history."
         />
 
-        <CodingToolsSection />
         <EndpointBlock />
         <TokenManager />
         <ClientConfigHelp />
+        <CodingToolsSection />
     </main>
   );
 }
@@ -480,9 +479,6 @@ function CodingToolsSection() {
         machineId: helperInstalled.machine_id,
       }
     : null;
-  const { launchers } = useLauncherCatalog({
-    machineId: probe?.machineId ?? null,
-  });
   const [wizardOpen, setWizardOpen] = useState(false);
   const dialogRef = useRef<HTMLDivElement | null>(null);
 
@@ -508,14 +504,19 @@ function CodingToolsSection() {
           display: "flex",
           justifyContent: "space-between",
           alignItems: "center",
-          marginBottom: 12,
+          marginBottom: 4,
         }}
       >
-        <h2 style={{ margin: 0, fontSize: 16 }}>Coding tools</h2>
+        <h2 style={{ margin: 0, fontSize: 16 }}>Agent launcher</h2>
         <Button variant="primary" onClick={() => setWizardOpen(true)}>
-          Set up tools
+          Set up launcher
         </Button>
       </div>
+
+      <p style={{ margin: "0 0 12px", fontSize: 13, color: color.text.muted }}>
+        Launch Claude Code or Codex directly from the wiki. Install the launcher
+        once, then start a session from any page with Run Agent.
+      </p>
 
       {/* Surface helper-install status. */}
       <div style={{ fontSize: 13, color: color.text.muted, marginBottom: 12 }}>
@@ -542,28 +543,6 @@ function CodingToolsSection() {
         )}
       </div>
 
-      <ul
-        style={{
-          listStyle: "none",
-          padding: 0,
-          margin: 0,
-          display: "flex",
-          flexDirection: "column",
-          gap: 8,
-        }}
-      >
-        {launchers.map((c) => (
-          <li key={c.id}>
-            <ToolCard
-              toolId={c.id}
-              name={c.name}
-              tagline={c.tagline}
-              selected={false}
-            />
-          </li>
-        ))}
-      </ul>
-
       {wizardOpen && (
         <div
           onMouseDown={(e) => {
@@ -583,7 +562,7 @@ function CodingToolsSection() {
             ref={dialogRef}
             role="dialog"
             aria-modal="true"
-            aria-label="Set up coding tools"
+            aria-label="Set up launcher"
             tabIndex={-1}
             style={{
               background: color.bg.page,
@@ -596,7 +575,6 @@ function CodingToolsSection() {
             }}
           >
             <SetupWizard
-              catalog={launchers}
               onDone={() => setWizardOpen(false)}
               onCancel={() => setWizardOpen(false)}
             />
