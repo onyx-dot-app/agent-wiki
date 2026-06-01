@@ -16,9 +16,8 @@
   flex-direction: column;
   gap: 8px;
   padding: 16px;
-  border: 1px solid var(--color-border-default);
   border-radius: var(--radius-lg);
-  background: var(--color-bg-page);
+  background: var(--color-bg-sunken);
   margin-bottom: 16px;
 }
 .createRow {
@@ -31,8 +30,9 @@
   flex-direction: column;
   gap: 10px;
 }
+/* Group rows are subtle grey-fill surfaces, not bordered cards (per mock). */
 .card {
-  border: 1px solid var(--color-border-default);
+  background: var(--color-bg-sunken);
   border-radius: var(--radius-lg);
   overflow: hidden;
   padding: 4px;
