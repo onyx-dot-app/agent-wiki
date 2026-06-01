@@ -38,10 +38,10 @@ export default function AgentsPage() {
           description="Give your agents the ability to read and update this wiki. Generate a personal API key below, then drop it into your coding agent's MCP configuration. Each key's name becomes that agent's identity — it shows up next to its activity on wiki pages and in commit history."
         />
 
-        <CodingToolsSection />
         <EndpointBlock />
         <TokenManager />
         <ClientConfigHelp />
+        <CodingToolsSection />
     </main>
   );
 }
@@ -508,14 +508,19 @@ function CodingToolsSection() {
           display: "flex",
           justifyContent: "space-between",
           alignItems: "center",
-          marginBottom: 12,
+          marginBottom: 4,
         }}
       >
-        <h2 style={{ margin: 0, fontSize: 16 }}>Coding tools</h2>
+        <h2 style={{ margin: 0, fontSize: 16 }}>Agent launcher</h2>
         <Button variant="primary" onClick={() => setWizardOpen(true)}>
-          Set up tools
+          Set up launcher
         </Button>
       </div>
+
+      <p style={{ margin: "0 0 12px", fontSize: 13, color: color.text.muted }}>
+        Launch Claude Code or Codex directly from the wiki. Install the launcher
+        once, then start a session from any page with Run Agent.
+      </p>
 
       {/* Surface helper-install status. */}
       <div style={{ fontSize: 13, color: color.text.muted, marginBottom: 12 }}>
@@ -585,7 +590,7 @@ function CodingToolsSection() {
             ref={dialogRef}
             role="dialog"
             aria-modal="true"
-            aria-label="Set up coding tools"
+            aria-label="Set up launcher"
             tabIndex={-1}
             style={{
               background: color.bg.page,
