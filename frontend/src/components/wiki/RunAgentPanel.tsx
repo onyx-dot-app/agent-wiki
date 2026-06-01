@@ -99,7 +99,12 @@ export function RunAgentPanel({ open, onClose, wikiPath }: Props) {
 
   useEffect(() => {
     if (!open) return;
+    // Reset transient state on (re)open: a successful launch dispatches the
+    // agentwiki:// URI without navigating away, so busy/pickerOpen would
+    // otherwise stay stuck from the previous open.
     setError(null);
+    setBusy(false);
+    setPickerOpen(false);
     refreshProbe();
   }, [open]);
 
