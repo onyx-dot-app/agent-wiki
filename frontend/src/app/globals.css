@@ -384,3 +384,10 @@ textarea::placeholder {
   ) {
   background-color: var(--color-accent-bg-hover) !important;
 }
+/* Disabled primary action — neutral grey, never OPAL's default blue tint
+   (matches the mock's greyed-out Save). */
+.interactive[data-interactive-variant="action"][data-interactive-prominence="primary"][data-disabled] {
+  background-color: var(--color-bg-active) !important;
+  --interactive-foreground: var(--color-text-muted);
+  --interactive-foreground-icon: var(--color-text-muted);
+}

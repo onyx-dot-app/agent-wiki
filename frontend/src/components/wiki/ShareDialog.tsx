@@ -40,6 +40,7 @@ import {
   type Visibility,
 } from "@/lib/permissions";
 import { displayName, initials, useUserSearch, type UserLite } from "@/lib/users";
+import { markdown } from "@onyx-ai/opal/utils";
 
 import { TransferModal } from "./TransferModal";
 import styles from "./ShareDialog.module.css";
@@ -334,7 +335,7 @@ export function ShareDialog({ path, open, onClose }: ShareDialogProps) {
           </span>
           <div className={styles.headerText}>
             <Text as="h2" font="main-content-emphasis">
-              {`Share ${lastSegment(path)}`}
+              {markdown(`Share *${lastSegment(path)}*`)}
             </Text>
             <Text font="secondary-body" color="text-03">
               {`Share this ${kindNoun} with people or groups`}
@@ -400,7 +401,7 @@ export function ShareDialog({ path, open, onClose }: ShareDialogProps) {
                         key={`g-${g.id}`}
                         icon={SvgUsers}
                         title={g.name}
-                        description={`${g.member_count} ${g.member_count === 1 ? "member" : "members"}`}
+                        description={`${g.member_count} ${g.member_count === 1 ? "user" : "users"}`}
                         sizePreset="main-ui"
                         variant="section"
                         rightChildren={
@@ -490,7 +491,7 @@ export function ShareDialog({ path, open, onClose }: ShareDialogProps) {
                 const sub =
                   g.kind === "group"
                     ? group
-                      ? `${group.member_count} ${group.member_count === 1 ? "member" : "members"}`
+                      ? `${group.member_count} ${group.member_count === 1 ? "user" : "users"}`
                       : "Group"
                     : g.email ?? "";
                 return (
