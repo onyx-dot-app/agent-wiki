@@ -142,7 +142,7 @@ function GroupsManager() {
         <Button
           variant="action"
           size="md"
-          icon={SvgPlus}
+          rightIcon={SvgPlus}
           onClick={() => setCreating((v) => !v)}
         >
           New Group
@@ -193,23 +193,24 @@ function GroupsManager() {
       ) : (
         <div className={styles.cards}>
           {filtered.map((g) => (
-            <LineItemButton
-              key={g.id}
-              icon={SvgUsers}
-              title={g.name}
-              description={groupSub(g)}
-              sizePreset="main-content"
-              variant="section"
-              rightChildren={
-                <span className={styles.cardRight}>
-                  <Text font="secondary-body" color="text-03">
-                    {`${g.member_count} ${g.member_count === 1 ? "Member" : "Members"}`}
-                  </Text>
-                  <SvgChevronRight size={18} />
-                </span>
-              }
-              onClick={() => setSelected(g.id)}
-            />
+            <div key={g.id} className={styles.card}>
+              <LineItemButton
+                icon={SvgUsers}
+                title={g.name}
+                description={groupSub(g)}
+                sizePreset="main-content"
+                variant="section"
+                rightChildren={
+                  <span className={styles.cardRight}>
+                    <Text font="secondary-body" color="text-03">
+                      {`${g.member_count} ${g.member_count === 1 ? "Member" : "Members"}`}
+                    </Text>
+                    <SvgChevronRight size={18} />
+                  </span>
+                }
+                onClick={() => setSelected(g.id)}
+              />
+            </div>
           ))}
         </div>
       )}
