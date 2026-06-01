@@ -45,13 +45,18 @@
 .content {
   display: flex;
   flex-direction: column;
+  flex: 1;
+  min-height: 0;
   padding: 12px;
-  overflow-y: auto;
+  overflow: hidden;
 }
 
+/* Input + general-access stay fixed; only the people list scrolls. */
 .cardStack {
   display: flex;
   flex-direction: column;
+  flex: 1;
+  min-height: 0;
   gap: 8px;
 }
 /* General-access row: a subtle grey-fill container (matching the grantee
@@ -61,6 +66,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-shrink: 0;
   min-height: 48px;
   padding: 6px 8px;
   background: var(--color-bg-sunken);
@@ -88,21 +94,29 @@
 .anchorWrap {
   display: block;
   width: 100%;
+  flex-shrink: 0;
 }
 .menuTrigger {
   display: inline-flex;
 }
 
+/* The people list is the only scrollable region when the modal hits its
+   max height; rows above (input, general-access) stay pinned. */
 .list {
   display: flex;
   flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
   gap: 4px;
+  padding-right: 2px;
 }
 /* Each grantee/owner row is its own slightly shaded container (fill, no border). */
 .row {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-shrink: 0;
   min-height: 48px;
   padding: 6px 8px;
   background: var(--color-bg-sunken);

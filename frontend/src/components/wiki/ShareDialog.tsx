@@ -164,7 +164,17 @@ export function ShareDialog({ path, open, onClose }: ShareDialogProps) {
   const baseline = useMemo(() => deriveBaseline(acl), [acl]);
 
   const [grants, setGrants] = useState<Map<string, GrantDraft>>(new Map());
-  const [general, setGeneral] = useState<Visibility>("private");
+  // Scope (who) and the general permission (what) are independent: the
+  // permission stays selectable even while "Only those invited" is chosen —
+  // it only takes effect (as an `everyone` grant) once scope is "anyone".
+  const [scope, setScope] = useState<"invited" | "anyone">("invited");
+  const [generalPerm, setGeneralPerm] = useState<Permission>("read");
+  const general: Visibility =
+    scope === "invited"
+      ? "private"
+      : generalPerm === "write"
+        ? "public-write"
+        : "public-read";
   const [query, setQuery] = useState("");
   const [pickerOpen, setPickerOpen] = useState(false);
   const [transferOpen, setTransferOpen] = useState(false);
@@ -175,7 +185,8 @@ export function ShareDialog({ path, open, onClose }: ShareDialogProps) {
   // Reset working state to the loaded baseline whenever the ACL changes.
   useEffect(() => {
     setGrants(new Map(baseline.grants));
-    setGeneral(baseline.general);
+    setScope(baseline.general === "private" ? "invited" : "anyone");
+    setGeneralPerm(baseline.general === "public-write" ? "write" : "read");
     setSaveError(null);
   }, [baseline]);
 
@@ -456,26 +467,14 @@ export function ShareDialog({ path, open, onClose }: ShareDialogProps) {
               {/* General access */}
               <div className={styles.generalRow}>
                 <span className={styles.inheritedIcon}>
-                  {general === "private" ? (
+                  {scope === "invited" ? (
                     <SvgLock size={18} />
                   ) : (
                     <SvgGlobe size={18} />
                   )}
                 </span>
-                <ScopeSelect
-                  value={general === "private" ? "invited" : "anyone"}
-                  onChange={(scope) =>
-                    setGeneral(scope === "invited" ? "private" : "public-read")
-                  }
-                />
-                <PermSelect
-                  boxed
-                  value={general === "public-write" ? "write" : "read"}
-                  disabled={general === "private"}
-                  onChange={(p) =>
-                    setGeneral(p === "write" ? "public-write" : "public-read")
-                  }
-                />
+                <ScopeSelect value={scope} onChange={setScope} />
+                <PermSelect boxed value={generalPerm} onChange={setGeneralPerm} />
               </div>
 
               <Divider paddingParallel="fit" paddingPerpendicular="2xs" />
