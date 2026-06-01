@@ -166,9 +166,11 @@ export function AppSidebar() {
                 </div>
                 <div className="flex flex-col gap-px">
                   {pages.map((page) => {
-                    const slug = page.path.replace(/\.md$/, "");
-                    const label = slug.split("/").pop() ?? slug;
-                    const href = `/app/wiki/${slug}`;
+                    const label = (page.path.split("/").pop() ?? page.path).replace(
+                      /\.md$/,
+                      "",
+                    );
+                    const href = `/app/wiki/${page.path}`;
                     const active = pathname === href;
                     return (
                       <SidebarTab
