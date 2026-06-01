@@ -289,6 +289,9 @@ export function ShareDialog({ path, open, onClose }: ShareDialogProps) {
       onClose();
     } catch (e) {
       setSaveError(e instanceof Error ? e.message : "Failed to save changes");
+      // Re-pull the ACL so the baseline reflects whatever partially applied;
+      // otherwise a retry re-issues already-committed grants/revokes and 404s.
+      await refresh();
     } finally {
       setSaving(false);
     }

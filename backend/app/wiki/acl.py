@@ -106,17 +106,41 @@ def transfer_owner(path: str, new_owner_id: str | None) -> None:
     convention). Clearing the owner (``new_owner_id is None``) still
     leaves the prior owner an editor. The grant is idempotent.
     """
-    prev_owner = get_owner(path)
-    set_owner(path, new_owner_id)
-    if prev_owner is not None and prev_owner != new_owner_id:
-        grant(
-            resource_kind="page" if _is_md_page(path) else "folder",
-            resource_path=path,
-            principal_kind="user",
-            principal_id=prev_owner,
-            permission="write",
-            granted_by_user_id=new_owner_id,
-        )
+    resource_kind = "page" if _is_md_page(path) else "folder"
+    canon = _canonicalize(resource_kind, path)
+    # Single session so the owner move and the editor grant commit (or roll
+    # back) together — otherwise a failed grant after a committed owner move
+    # would strand the previous owner with no access.
+    with session() as s:
+        row = s.get(WikiOwner, path)
+        prev_owner = row.owner_user_id if row is not None else None
+        if row is None:
+            s.add(WikiOwner(path=path, owner_user_id=new_owner_id))
+        else:
+            row.owner_user_id = new_owner_id
+
+        if prev_owner is not None and prev_owner != new_owner_id:
+            already = s.scalar(
+                select(AclEntry).where(
+                    AclEntry.resource_kind == resource_kind,
+                    AclEntry.resource_path == canon,
+                    AclEntry.principal_kind == "user",
+                    AclEntry.principal_id == prev_owner,
+                    AclEntry.permission == "write",
+                )
+            )
+            if already is None:
+                s.add(
+                    AclEntry(
+                        id=f"acl_{uuid.uuid4().hex[:12]}",
+                        resource_kind=resource_kind,
+                        resource_path=canon,
+                        principal_kind="user",
+                        principal_id=prev_owner,
+                        permission="write",
+                        granted_by_user_id=new_owner_id,
+                    )
+                )
 
 
 # --------------------------------------------------------------------------- #
