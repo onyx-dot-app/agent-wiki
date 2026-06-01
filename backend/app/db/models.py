@@ -714,6 +714,108 @@ class AclEntry(Base):
 
 
 # --------------------------------------------------------------------------- #
+# Comments — human discussion anchored to wiki pages (Postgres-only)          #
+# --------------------------------------------------------------------------- #
+
+
+class Comment(Base):
+    """A comment anchored to a span of a wiki page.
+
+    **Postgres-only.** Comments are never written to the wiki git repo or
+    the ``wiki-data`` volume (same as ACLs/owners) — they are discussion
+    *about* content, not content, so git history stays clean for agents.
+
+    **Position anchor.** ``[start_offset, end_offset)`` is a character range
+    into the page body *as of* ``anchor_sha``. The range is re-derived by a
+    diff-transform on every commit (the lightweight ``remap_comments`` task),
+    so it tracks human *and* agent edits with the same mechanism. The two
+    endpoints map independently, so a mid-span edit resizes the highlight;
+    the comment is ``orphaned`` only when the span collapses to empty.
+    ``quoted_text`` is **display-only** — the snippet shown in the UI and the
+    tombstone kept when a comment orphans. It is never used to re-locate the
+    anchor (no fuzzy matching).
+
+    **Threading.** ``thread_root_id`` groups a thread (a root comment's
+    ``thread_root_id`` equals its own ``id``); ``parent_id`` is the direct
+    parent (NULL for roots) and cascades on delete. The anchor lives on the
+    **root** of a thread; replies leave the anchor columns NULL.
+
+    ``scope`` distinguishes a text-anchored (``inline``) comment from a
+    whole-page thread; ``author_kind`` records whether the author is a ``user``
+    or an ``agent``. Both are stored as open enumerations so either dimension
+    can grow without a migration. ``thread_root_id`` references a comment id but
+    is not a real FK (enforced at the repo layer), matching the
+    ``acl_entries.principal_id`` convention.
+    """
+
+    __tablename__ = "comments"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    doc_path: Mapped[str] = mapped_column(Text, nullable=False)
+
+    # Threading
+    thread_root_id: Mapped[str] = mapped_column(Text, nullable=False)
+    parent_id: Mapped[str | None] = mapped_column(
+        Text, ForeignKey("comments.id", ondelete="CASCADE")
+    )
+
+    # Anchor — set on the thread root for scope='inline'; NULL otherwise.
+    scope: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'inline'"))
+    anchor_sha: Mapped[str | None] = mapped_column(Text)
+    start_offset: Mapped[int | None] = mapped_column(Integer)
+    end_offset: Mapped[int | None] = mapped_column(Integer)
+    quoted_text: Mapped[str | None] = mapped_column(Text)
+
+    # Author
+    author_kind: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'user'"))
+    author_user_id: Mapped[str | None] = mapped_column(
+        Text, ForeignKey("users.id", ondelete="SET NULL")
+    )
+
+    # Content + lifecycle
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'open'"))
+    resolved_by_user_id: Mapped[str | None] = mapped_column(
+        Text, ForeignKey("users.id", ondelete="SET NULL")
+    )
+    resolved_at: Mapped[str | None] = mapped_column(Text)
+
+    created_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
+    updated_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
+
+    __table_args__ = (
+        CheckConstraint(
+            "scope IN ('inline', 'page')",
+            name="comments_scope_check",
+        ),
+        CheckConstraint(
+            "author_kind IN ('user', 'agent')",
+            name="comments_author_kind_check",
+        ),
+        CheckConstraint(
+            "status IN ('open', 'resolved', 'orphaned')",
+            name="comments_status_check",
+        ),
+        # An inline thread root must carry a full anchor; replies (parent_id
+        # set) and page-scoped comments leave the anchor columns NULL.
+        CheckConstraint(
+            "scope <> 'inline' OR parent_id IS NOT NULL OR "
+            "(anchor_sha IS NOT NULL AND start_offset IS NOT NULL "
+            "AND end_offset IS NOT NULL)",
+            name="comments_inline_root_anchored",
+        ),
+        # Offsets must form a non-empty half-open range; a zero-width or
+        # inverted anchor has no text to highlight.
+        CheckConstraint(
+            "start_offset IS NULL OR end_offset > start_offset",
+            name="comments_anchor_nonempty",
+        ),
+        Index("idx_comments_doc_status", "doc_path", "status"),
+        Index("idx_comments_thread", "thread_root_id"),
+    )
+
+
+# --------------------------------------------------------------------------- #
 # Ingest eval samples — opt-in eval logging (INGEST_EVAL_LOGGING=true)     #
 # --------------------------------------------------------------------------- #
 
