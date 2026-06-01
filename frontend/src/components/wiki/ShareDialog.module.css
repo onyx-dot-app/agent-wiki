@@ -54,21 +54,22 @@
   flex-direction: column;
   gap: 8px;
 }
-/* General-access controls live in one subtle grey-fill container (no border),
-   with a faint vertical hairline between the scope and permission cells.
+/* General-access row: a subtle grey-fill container (matching the grantee
+   rows) holding the lock/globe icon and the scope + permission controls.
    Shares the grantee-row min-height so every section is the same height. */
 .generalRow {
   display: flex;
   align-items: center;
   gap: 8px;
   min-height: 48px;
-  padding: 4px 8px;
+  padding: 6px 8px;
   background: var(--color-bg-sunken);
   border-radius: var(--radius-md);
 }
 /* Scope + permission are white, input-style boxes (subtle border, like the
-   search field above) sitting inside the grey general-access container. Scope
-   is the wider of the two; chevrons push to each box's right edge. */
+   search field) on the grey container. OPAL has no white-bordered select
+   variant, so the box is token chrome around a transparent select-light
+   OpenButton (which provides left label + right chevron). Scope is wider. */
 .scopeBox,
 .permBox {
   display: flex;
