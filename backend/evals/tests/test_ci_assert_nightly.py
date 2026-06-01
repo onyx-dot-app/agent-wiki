@@ -1,0 +1,344 @@
+"""Unit tests for the nightly regression-floor asserter.
+
+Builds synthetic ``CaseResult`` JSONL files and checks the asserter
+flags below-floor scores per (surface, scorer, model) while passing
+on the at-or-above case. Also covers the file-skip + multi-surface
+(wiki_updater splits into process_instruction + reconcile_document)
+paths.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from evals.ci_assert_nightly import SURFACE_THRESHOLDS, check_run_file, main
+from evals.schema import CaseResult, ScorerOutcome
+
+
+# Passing default for any scorer not explicitly under test — above every
+# floor in SURFACE_THRESHOLDS (max floor is 0.95).
+_PASS = 0.99
+
+
+def _row(
+    *,
+    surface: str,
+    model: str,
+    case_id: str,
+    scorer: str,
+    score: float,
+    expected: str = "X",
+    actual: str = "X",
+) -> str:
+    """Build a row carrying the surface's FULL thresholded scorer set.
+
+    Real nightly rows emit every scorer for their surface; the asserter
+    now fails if a thresholded scorer is absent from all rows. So a test
+    row must carry the whole set — the named ``scorer`` is overridden to
+    ``score`` and the rest default to a passing value.
+    """
+    names = set(SURFACE_THRESHOLDS.get(surface, {})) | {scorer}
+    scorers = [
+        ScorerOutcome(
+            name=n,
+            score=score if n == scorer else _PASS,
+            passed=(score if n == scorer else _PASS) >= 0.5,
+        )
+        for n in sorted(names)
+    ]
+    r = CaseResult(
+        case_id=case_id,
+        surface=surface,  # pyright: ignore[reportArgumentType]
+        provider="anthropic",
+        model=model,
+        expected_class=expected,
+        actual_class=actual,
+        raw_output="{}",
+        scorers=scorers,
+    )
+    return r.model_dump_json()
+
+
+def _write_run(tmp_path: Path, name: str, lines: list[str]) -> Path:
+    p = tmp_path / name
+    p.write_text("\n".join(lines) + "\n")
+    return p
+
+
+def test_passes_when_all_scores_above_floor(tmp_path: Path) -> None:
+    p = _write_run(
+        tmp_path,
+        "nightly_external_agent.jsonl",
+        [
+            _row(
+                surface="external_agent",
+                model="claude-sonnet-4-6",
+                case_id="c1",
+                scorer="facts_preserved_avg",
+                score=0.95,
+            ),
+            _row(
+                surface="external_agent",
+                model="claude-sonnet-4-6",
+                case_id="c2",
+                scorer="facts_preserved_avg",
+                score=0.90,
+            ),
+        ],
+    )
+    assert check_run_file(p) == []
+
+
+def test_fails_when_below_floor(tmp_path: Path) -> None:
+    p = _write_run(
+        tmp_path,
+        "nightly_external_agent.jsonl",
+        [
+            _row(
+                surface="external_agent",
+                model="gpt-5",
+                case_id="c1",
+                scorer="facts_preserved_avg",
+                score=0.50,
+            ),
+        ],
+    )
+    errs = check_run_file(p)
+    assert errs, "expected a failure"
+    assert "facts_preserved_avg" in errs[0]
+    assert "gpt-5" in errs[0]
+    assert "external_agent" in errs[0]
+
+
+def test_wiki_updater_splits_into_two_surfaces(tmp_path: Path) -> None:
+    """One file, two distinct sub-surfaces — each threshold-checked separately."""
+    p = _write_run(
+        tmp_path,
+        "nightly_wiki_updater.jsonl",
+        [
+            # process_instruction case passes its floor (0.80)
+            _row(
+                surface="process_instruction",
+                model="claude-sonnet-4-6",
+                case_id="pi-01",
+                scorer="trigger_class_match",
+                score=1.0,
+            ),
+            # reconcile_document case dips below its floor (0.45)
+            _row(
+                surface="reconcile_document",
+                model="claude-sonnet-4-6",
+                case_id="rd-01",
+                scorer="trigger_class_match",
+                score=0.30,
+            ),
+            _row(
+                surface="reconcile_document",
+                model="claude-sonnet-4-6",
+                case_id="rd-02",
+                scorer="trigger_class_match",
+                score=0.30,
+            ),
+        ],
+    )
+    errs = check_run_file(p)
+    assert any("reconcile_document" in e for e in errs)
+    assert not any("process_instruction" in e for e in errs)
+
+
+def test_unknown_filename_skipped(tmp_path: Path) -> None:
+    """A rogue jsonl file under runs/ should not fail the asserter."""
+    p = _write_run(
+        tmp_path,
+        "ad-hoc-debug-run.jsonl",
+        [
+            _row(
+                surface="external_agent",
+                model="claude-sonnet-4-6",
+                case_id="c1",
+                scorer="facts_preserved_avg",
+                score=0.10,
+            ),
+        ],
+    )
+    assert check_run_file(p) == []
+
+
+def test_scorer_absent_from_rows_fails(tmp_path: Path) -> None:
+    """A thresholded scorer present on no row must fail, not silently skip.
+
+    Build rows that carry only ONE of external_agent's thresholded
+    scorers — the other three are absent and must each trip an error.
+    """
+    line = CaseResult(
+        case_id="c1",
+        surface="external_agent",  # pyright: ignore[reportArgumentType]
+        provider="anthropic",
+        model="claude-sonnet-4-6",
+        expected_class="X",
+        actual_class="X",
+        raw_output="{}",
+        scorers=[ScorerOutcome(name="facts_preserved_avg", score=0.95, passed=True)],
+    ).model_dump_json()
+    p = _write_run(tmp_path, "nightly_external_agent.jsonl", [line])
+    errs = check_run_file(p)
+    assert any("update_f1" in e and "no rows to score" in e for e in errs)
+    assert any("no_touch_compliance" in e and "no rows to score" in e for e in errs)
+
+
+def test_missing_or_empty_file_fails(tmp_path: Path) -> None:
+    missing = tmp_path / "nightly_external_agent.jsonl"
+    errs = check_run_file(missing)
+    assert errs
+    assert "missing or empty" in errs[0]
+    empty = tmp_path / "nightly_triggers.jsonl"
+    empty.write_text("")
+    assert any("missing or empty" in e or "zero rows" in e for e in check_run_file(empty))
+
+
+def test_surface_absent_from_file_fails(tmp_path: Path) -> None:
+    """A mapped surface with zero matching rows must fail, not silently skip.
+
+    nightly_wiki_updater maps to process_instruction + reconcile_document;
+    a file whose rows all carry some other surface tag means the run
+    produced no data for the mapped surfaces.
+    """
+    p = _write_run(
+        tmp_path,
+        "nightly_wiki_updater.jsonl",
+        [
+            _row(
+                surface="external_agent",  # wrong tag for this file
+                model="claude-sonnet-4-6",
+                case_id="x1",
+                scorer="facts_preserved_avg",
+                score=0.95,
+            )
+        ],
+    )
+    errs = check_run_file(p)
+    assert any("expected surface=process_instruction" in e for e in errs)
+    assert any("expected surface=reconcile_document" in e for e in errs)
+
+
+def test_main_fails_when_expected_file_missing(tmp_path: Path) -> None:
+    """A nightly step that exits 0 but never writes its file must trip the gate."""
+    # Write the other expected files with correct-surface rows so the ONLY
+    # error source is the missing triggers file.
+    _write_run(
+        tmp_path,
+        "nightly_wiki_updater.jsonl",
+        [
+            _row(
+                surface="process_instruction",
+                model="claude-sonnet-4-6",
+                case_id="pi1",
+                scorer="trigger_class_match",
+                score=1.0,
+            ),
+            _row(
+                surface="reconcile_document",
+                model="claude-sonnet-4-6",
+                case_id="rd1",
+                scorer="trigger_class_match",
+                score=0.9,
+            ),
+        ],
+    )
+    _write_run(
+        tmp_path,
+        "nightly_ingest_selector.jsonl",
+        [
+            _row(
+                surface="ingest_selector",
+                model="gpt-5-mini",
+                case_id="s1",
+                scorer="f1",
+                score=0.9,
+            )
+        ],
+    )
+    _write_run(
+        tmp_path,
+        "nightly_external_agent.jsonl",
+        [
+            _row(
+                surface="external_agent",
+                model="claude-sonnet-4-6",
+                case_id="c1",
+                scorer="facts_preserved_avg",
+                score=0.95,
+            )
+        ],
+    )
+    _write_run(
+        tmp_path,
+        "nightly_merge_conflict.jsonl",
+        [
+            _row(
+                surface="merge_conflict_update",
+                model="claude-sonnet-4-6",
+                case_id="mc1",
+                scorer="facts_from_current_present",
+                score=0.95,
+            )
+        ],
+    )
+    # nightly_triggers.jsonl intentionally not written
+    rc = main(["ci_assert_nightly", str(tmp_path)])
+    assert rc == 1, "expected non-zero exit when an expected file is missing"
+
+
+def test_merge_conflict_floor_enforced(tmp_path: Path) -> None:
+    """merge_conflict surface gets threshold enforcement like the others."""
+    p = _write_run(
+        tmp_path,
+        "nightly_merge_conflict.jsonl",
+        [
+            _row(
+                surface="merge_conflict_update",
+                model="claude-sonnet-4-6",
+                case_id="mc1",
+                scorer="facts_from_current_present",
+                score=0.50,
+            )
+        ],
+    )
+    errs = check_run_file(p)
+    assert any("merge_conflict_update" in e and "facts_from_current_present" in e for e in errs)
+
+
+@pytest.mark.parametrize(
+    "scorer,score,should_fail",
+    [
+        ("facts_preserved_avg", 0.79, True),
+        ("facts_preserved_avg", 0.81, False),
+        ("update_f1", 0.94, True),
+        ("update_f1", 0.96, False),
+        ("no_touch_compliance", 0.89, True),
+        ("no_touch_compliance", 0.91, False),
+    ],
+)
+def test_external_agent_thresholds(
+    tmp_path: Path, scorer: str, score: float, should_fail: bool
+) -> None:
+    p = _write_run(
+        tmp_path,
+        "nightly_external_agent.jsonl",
+        [
+            _row(
+                surface="external_agent",
+                model="claude-sonnet-4-6",
+                case_id="c1",
+                scorer=scorer,
+                score=score,
+            )
+        ],
+    )
+    errs = check_run_file(p)
+    if should_fail:
+        assert errs
+    else:
+        assert errs == []
