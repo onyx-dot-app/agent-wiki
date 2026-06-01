@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import {
   Button,
+  Divider,
   InputTypeIn,
   LineItemButton,
   OpenButton,
@@ -467,6 +468,7 @@ export function ShareDialog({ path, open, onClose }: ShareDialogProps) {
                     setGeneral(scope === "invited" ? "private" : "public-read")
                   }
                 />
+                <span className={styles.vDivider} />
                 <PermSelect
                   value={general === "public-write" ? "write" : "read"}
                   disabled={general === "private"}
@@ -475,6 +477,8 @@ export function ShareDialog({ path, open, onClose }: ShareDialogProps) {
                   }
                 />
               </div>
+
+              <Divider paddingParallel="fit" paddingPerpendicular="2xs" />
 
               {/* People with access */}
               <div className={styles.list}>

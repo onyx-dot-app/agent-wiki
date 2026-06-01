@@ -54,11 +54,21 @@
   flex-direction: column;
   gap: 8px;
 }
+/* General-access controls live in one subtle grey-fill container (no border),
+   with a faint vertical hairline between the scope and permission cells. */
 .generalRow {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 2px;
+  padding: 4px 8px;
+  background: var(--color-bg-sunken);
+  border-radius: var(--radius-md);
+}
+.vDivider {
+  width: 1px;
+  align-self: stretch;
+  margin: 4px 0;
+  background: var(--color-border-subtle);
 }
 /* Scope control fills the row; chevron pushes to the right via the
    OpenButton's justifyContent="between". Flat — no box, no border. */
@@ -84,11 +94,14 @@
   flex-direction: column;
   gap: 4px;
 }
+/* Each grantee/owner row is its own slightly shaded container (fill, no border). */
 .row {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 2px;
+  padding: 6px 8px;
+  background: var(--color-bg-sunken);
+  border-radius: var(--radius-md);
 }
 .rowText {
   display: flex;
