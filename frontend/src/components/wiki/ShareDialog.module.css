@@ -66,14 +66,17 @@
   background: var(--color-bg-sunken);
   border-radius: var(--radius-md);
 }
-/* Scope + permission are white-fill boxes on the grey container — the
-   white-on-grey contrast is the edge, no border line. Token chrome around a
-   transparent select-light OpenButton (left label + right chevron). */
+/* Scope + permission are input-style boxes matching the search field above:
+   page fill + the same 1px border. The border (not fill contrast) is what
+   defines them — fill contrast alone fails in dark, where bg-page is darker
+   than the bg-sunken container. Token chrome around a transparent
+   select-light OpenButton (left label + right chevron). */
 .scopeBox,
 .permBox {
   display: flex;
   min-width: 0;
   background: var(--color-bg-page);
+  border: 1px solid var(--color-border-default);
   border-radius: var(--radius-sm);
 }
 .scopeBox {
