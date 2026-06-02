@@ -15,12 +15,16 @@ preceding content, so text inserted at an edge lands outside the highlight.
 on a separate **word/token** diff, not the character diff. A character diff
 treats coincidental shared letters and spaces as "preserved," which makes a
 rewritten span look half-survived and yields confidently-wrong anchors; a token
-diff makes a genuine rewrite register as a clean replacement. A comment is
-orphaned (shows its ``quoted_text`` tombstone instead of a highlight) when:
+diff makes a genuine rewrite register as a clean replacement. Tokens that
+survive unchanged count in full; a token *edited in place* (a typo fix, a
+pluralization, "weekly"→"biweekly") gets **partial credit** by how similar the
+old and new run are, so an ordinary human edit inside the span keeps its anchor
+instead of orphaning. A comment is orphaned (shows its ``quoted_text`` tombstone
+instead of a highlight) when:
 
 - the span collapses to empty (``start >= end``): the whole region was removed;
-- too little of the remapped span is preserved *whole words* (below
-  ``_MIN_PRESERVED``): the alignment landed mostly on rewritten text; or
+- too little of the remapped span carries over (below ``_MIN_PRESERVED``): the
+  alignment landed mostly on rewritten/unrelated text; or
 - the survivor is only whitespace: nothing real is left to anchor to.
 
 Orphaning is the safe failure mode — better a tombstone than a confidently wrong
@@ -48,11 +52,12 @@ _TOKEN_RE = re.compile(r"\s+|\S+")
 _START = 1
 _END = -1
 
-# A remapped span must be at least this fraction *preserved* (covered by
-# unchanged whole tokens) to be trusted; below it the alignment has likely
-# landed on rewritten text the comment never referred to, so we orphan. The one
-# tunable knob — raise it to orphan more aggressively, lower it to keep more
-# migrated anchors.
+# A remapped span must carry over at least this fraction from the old span —
+# unchanged tokens at full weight, in-place-edited tokens at their char-level
+# similarity — to be trusted; below it the alignment has likely landed on
+# rewritten text the comment never referred to, so we orphan. The one tunable
+# knob — raise it to orphan more aggressively, lower it to keep more migrated
+# anchors.
 _MIN_PRESERVED = 0.5
 
 # (tag, i1, i2, j1, j2) as returned by SequenceMatcher.get_opcodes().
@@ -77,12 +82,20 @@ def _map_pos(opcodes: Sequence[_Opcode], pos: int, assoc: int) -> int:
 
 
 def _word_preserved_fraction(old_body: str, new_body: str, new_start: int, new_end: int) -> float:
-    """Fraction of the new span ``[new_start, new_end)`` covered by whole tokens
-    that survived unchanged from ``old_body``.
+    """How much of the new span ``[new_start, new_end)`` carries over from
+    ``old_body``, scored at word/whitespace-token granularity.
 
-    Diffs at word/whitespace-token granularity (not characters) so coincidental
-    shared letters in a rewrite don't count as "preserved" — that's what keeps a
-    genuine rewrite from looking half-survived."""
+    Diffing at token granularity (not characters) is what stops a genuine
+    rewrite from looking half-survived: difflib won't align two unrelated runs
+    on coincidental shared letters/spaces when the unit is a whole token.
+
+    Tokens that survive **unchanged** (``equal`` opcodes) count in full. A token
+    run that was **edited in place** (``replace`` opcode) gets *partial* credit
+    equal to the character-level similarity between the old and new run — so a
+    one-letter typo fix, a pluralization, or "weekly"→"biweekly" still reads as
+    mostly-preserved (the comment follows the edit), while a run replaced by
+    unrelated text scores near zero and orphans. Inserted/deleted runs count for
+    nothing."""
     span = new_end - new_start
     if span <= 0:
         return 0.0
@@ -96,14 +109,22 @@ def _word_preserved_fraction(old_body: str, new_body: str, new_start: int, new_e
     opcodes = SequenceMatcher(
         None, old_tokens, [t[0] for t in new_tokens], autojunk=False
     ).get_opcodes()
-    kept = 0
-    for tag, _i1, _i2, j1, j2 in opcodes:
-        if tag != "equal":
-            continue
+    kept = 0.0
+    for tag, i1, i2, j1, j2 in opcodes:
+        if tag not in ("equal", "replace"):
+            continue  # insert / delete preserve nothing
         lo = max(new_start, token_start(j1))
         hi = min(new_end, token_start(j2))
-        if hi > lo:
-            kept += hi - lo
+        overlap = hi - lo
+        if overlap <= 0:
+            continue
+        if tag == "equal":
+            kept += overlap
+        else:  # replace — credit the in-place edit by how similar the runs are
+            old_run = "".join(old_tokens[i1:i2])
+            new_run = "".join(t[0] for t in new_tokens[j1:j2])
+            similarity = SequenceMatcher(None, old_run, new_run, autojunk=False).ratio()
+            kept += similarity * overlap
     return kept / span
 
 
