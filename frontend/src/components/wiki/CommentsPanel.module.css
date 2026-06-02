@@ -35,7 +35,7 @@
    not rows inside one panel. */
 .thread {
   border: 1px solid var(--color-border-subtle);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   padding: 14px;
   background: var(--color-bg-page);
   box-shadow: var(--shadow-sm);
@@ -63,7 +63,7 @@
 
 .draft {
   border: 1px solid var(--color-accent-subtle-border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 10px;
   background: var(--color-bg-sunken);
 }
@@ -76,7 +76,7 @@
   background: var(--color-accent-subtle-bg);
   border-left: 3px solid var(--color-accent-subtle-border);
   padding: 4px 8px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   margin-bottom: 6px;
   white-space: pre-wrap;
   word-break: break-word;
@@ -125,7 +125,7 @@
   height: 28px;
   padding: 0;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--color-text-muted);
   cursor: pointer;
@@ -171,7 +171,7 @@
   font-size: 13px;
   padding: 8px 10px;
   border: 1px solid var(--color-border-default);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--color-bg-page);
   color: var(--color-text-primary);
 }
@@ -193,17 +193,9 @@
   padding: 4px 0;
 }
 
-/* Low-key toggle to reveal/hide the resolved threads kept out of the main list. */
+/* Left-aligns the low-key OPAL toggle that reveals/hides the resolved threads
+   kept out of the main list. */
 .resolvedToggle {
-  align-self: flex-start;
-  border: none;
-  background: transparent;
-  color: var(--color-text-muted);
-  font-size: 12px;
-  padding: 4px 2px;
-  cursor: pointer;
-}
-.resolvedToggle:hover {
-  color: var(--color-text-primary);
-  text-decoration: underline;
+  display: flex;
+  justify-content: flex-start;
 }

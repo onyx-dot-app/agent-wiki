@@ -166,15 +166,17 @@ export function CommentsPanel({
 
             {resolvedThreads.length > 0 && (
               <>
-                <button
-                  type="button"
-                  className={styles.resolvedToggle}
-                  onClick={() => setShowResolved((v) => !v)}
-                >
-                  {showResolved
-                    ? `Hide resolved (${resolvedThreads.length})`
-                    : `Show resolved (${resolvedThreads.length})`}
-                </button>
+                <div className={styles.resolvedToggle}>
+                  <Button
+                    prominence="tertiary"
+                    size="sm"
+                    onClick={() => setShowResolved((v) => !v)}
+                  >
+                    {showResolved
+                      ? `Hide resolved (${resolvedThreads.length})`
+                      : `Show resolved (${resolvedThreads.length})`}
+                  </Button>
+                </div>
                 {showResolved && resolvedThreads.map(renderThread)}
               </>
             )}
