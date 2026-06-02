@@ -144,9 +144,9 @@ def remap_range(
     if new_start >= new_end:
         return None  # whole span deleted/replaced
     # Snap to whole-word boundaries so an edited word inside the span re-anchors
-    # cleanly (e.g. "variable"->"parameter" keeps the full word, not "parame";
-    # and pulling in the surrounding preserved word lifts the survival fraction
-    # for in-place edits like "weekly"->"biweekly" instead of orphaning).
+    # cleanly (e.g. "variable"->"parameter" anchors to the full word; pulling in
+    # the surrounding preserved word also lifts the survival fraction for in-place
+    # edits like "weekly"->"biweekly").
     new_start, new_end = _snap_to_words(new_body, new_start, new_end)
     if _word_preserved_fraction(old_body, new_body, new_start, new_end) < _MIN_PRESERVED:
         return None  # alignment landed on mostly-rewritten text — orphan, don't mislead
