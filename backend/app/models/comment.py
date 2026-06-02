@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from enum import Enum
 
+from pydantic import BaseModel, Field
+
 
 class CommentScope(str, Enum):
     """What a comment is attached to."""
@@ -35,3 +37,64 @@ class CommentStatus(str, Enum):
     OPEN = "open"
     RESOLVED = "resolved"
     ORPHANED = "orphaned"
+
+
+# --------------------------------------------------------------------------- #
+# HTTP shapes                                                                 #
+# --------------------------------------------------------------------------- #
+
+
+class CreateCommentRequest(BaseModel):
+    """Start an inline comment thread on a page.
+
+    ``anchor_sha`` + the offsets are the version the client *read* and computed
+    the selection against — not necessarily current HEAD. The server stores
+    them as-is; the re-anchor path drifts them to HEAD. (This is what makes a
+    comment created against a stale view land correctly.)
+    """
+
+    path: str = Field(min_length=1)
+    anchor_sha: str = Field(min_length=1)
+    start_offset: int = Field(ge=0)
+    end_offset: int = Field(gt=0)
+    quoted_text: str
+    body: str = Field(min_length=1)
+
+
+class CreateReplyRequest(BaseModel):
+    body: str = Field(min_length=1)
+
+
+class EditCommentRequest(BaseModel):
+    body: str = Field(min_length=1)
+
+
+class CommentView(BaseModel):
+    id: str
+    doc_path: str
+    thread_root_id: str
+    parent_id: str | None
+    scope: CommentScope
+    anchor_sha: str | None
+    start_offset: int | None
+    end_offset: int | None
+    quoted_text: str | None
+    author_kind: CommentAuthorKind
+    author_user_id: str | None
+    body: str
+    status: CommentStatus
+    resolved_by_user_id: str | None
+    resolved_at: str | None
+    created_at: str
+    updated_at: str
+
+
+class CommentThreadView(BaseModel):
+    """A root comment plus its replies (oldest first)."""
+
+    root: CommentView
+    replies: list[CommentView]
+
+
+class CommentListResponse(BaseModel):
+    threads: list[CommentThreadView]
