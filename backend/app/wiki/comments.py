@@ -242,12 +242,28 @@ def set_thread_status(
 
 
 def delete(comment_id: str) -> bool:
-    """Delete a comment. Deleting a root removes its replies via the
-    ``parent_id`` ON DELETE CASCADE. Returns True if a row was deleted."""
+    """Delete a comment. Returns True if a row was deleted.
+
+    - **Root** (``parent_id IS NULL``): deletes the whole thread — every reply
+      cascades via the ``parent_id`` ON DELETE CASCADE.
+    - **Non-root**: deletes only this comment; its direct replies are *kept* by
+      first re-parenting them up to this comment's parent, so a mid-thread
+      delete never takes the replies-to-it down with it.
+    """
     with session() as s:
         c = s.get(Comment, comment_id)
         if c is None:
             return False
+        if c.parent_id is not None:
+            # Promote this comment's children to its parent, then delete only
+            # this node (nothing references it anymore, so the cascade is a
+            # no-op beyond the single row).
+            s.execute(
+                update(Comment)
+                .where(Comment.parent_id == comment_id)
+                .values(parent_id=c.parent_id)
+                .execution_options(synchronize_session=False)
+            )
         s.delete(c)
         return True
 
