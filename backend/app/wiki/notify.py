@@ -166,5 +166,10 @@ def after_path_move(
             # commit may also change content; path_at_ref follows the rename).
             comments.reassign_doc_path(old_p, new_p)
             _remap_comments_safe(new_p)
+        elif old_is_md:
+            # The page left .md-space (renamed to a non-doc path) — there's no
+            # new doc to carry the comments onto, so orphan them rather than
+            # strand them on a path that no longer exists.
+            comments.orphan_all_for_doc(old_p)
     if list_changed:
         mcp_pubsub.publish_list_changed()

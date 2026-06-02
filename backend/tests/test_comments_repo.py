@@ -6,6 +6,8 @@ DB-backed (uses the per-test schema from the ``tmp_db`` fixture), mirroring
 """
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from app.wiki import comments
@@ -14,7 +16,7 @@ from tests._seed import seed_user
 _DOC = "guides/setup.md"
 
 
-def _seed_root(author: str, *, doc: str = _DOC, sha: str = "sha1") -> dict:
+def _seed_root(author: str, *, doc: str = _DOC, sha: str = "sha1") -> dict[str, Any]:
     return comments.create_thread(
         doc_path=doc,
         body="is this still accurate?",
@@ -222,4 +224,6 @@ def test_orphan_all_for_doc_on_delete(tmp_db):
 
     orphaned = comments.orphan_all_for_doc(_DOC)
     assert orphaned == 1  # only r2 was still anchored
-    assert comments.get(r2["id"])["status"] == "orphaned"
+    got = comments.get(r2["id"])
+    assert got is not None
+    assert got["status"] == "orphaned"

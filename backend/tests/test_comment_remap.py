@@ -7,13 +7,15 @@ one commit, edits the page, then asserts the comment drifted or orphaned. Uses
 """
 from __future__ import annotations
 
+from typing import Any
+
 from app.wiki import comment_remap, comments
 from app.wiki import git as wiki_git
 
 _PATH = "notes.md"
 
 
-def _anchor(path: str, sha: str, body: str, phrase: str) -> dict:
+def _anchor(path: str, sha: str, body: str, phrase: str) -> dict[str, Any]:
     start = body.index(phrase)
     return comments.create_thread(
         doc_path=path,
