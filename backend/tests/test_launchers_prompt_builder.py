@@ -93,8 +93,10 @@ def test_page_body_wrapped_in_isolation_tag():
     assert "ignore previous instructions" in p[start:end]
 
 
-def test_prompt_builder_truncates_oversized_body():
-    """ — body capped at ~256KB; truncation marker present."""
+def test_oversized_body_defers_to_read_doc():
+    """Body too large to inline: NOT embedded (not even truncated) — the
+    agent is told to read_doc it instead. A truncated body presented as
+    complete would be worse than none."""
     big_body = "X" * (300 * 1024)  # 300KB
     p = build_first_turn_prompt(
         wiki_path="x.md",
@@ -104,14 +106,20 @@ def test_prompt_builder_truncates_oversized_body():
         user_message="m",
     )
     assert len(p.encode("utf-8")) <= 256 * 1024
-    assert "[truncated]" in p
-    # User message preserved.
+    # No body inlined — no <wiki_page> block, no run of the body content.
+    assert "\n<wiki_page>\n" not in p  # section delimiter, not the guardrail prose ref
+    assert "XXXXXXXXXX" not in p
+    # Agent is pointed at read_doc for the full page.
+    assert "read_doc" in p
+    assert "too large to inline" in p
+    # User message preserved intact.
     assert "<user_message>" in p
     assert p.rstrip().endswith("</user_message>")
 
 
-def test_prompt_builder_unicode_body_truncation_safe():
-    """Body containing multi-byte unicode must not produce invalid UTF-8 after slice."""
+def test_oversized_unicode_body_defers_cleanly():
+    """A multi-byte-unicode body over the cap defers without inlining and
+    leaves a valid UTF-8 prompt."""
     body = "💩" * 100_000  # ~400KB of emoji
     p = build_first_turn_prompt(
         wiki_path="x.md",
@@ -122,7 +130,9 @@ def test_prompt_builder_unicode_body_truncation_safe():
     )
     # Decodes without error.
     p.encode("utf-8").decode("utf-8")
-    assert "[truncated]" in p
+    assert len(p.encode("utf-8")) <= 256 * 1024
+    assert "\n<wiki_page>\n" not in p  # section delimiter, not the guardrail prose ref
+    assert "read_doc" in p
 
 
 def test_prompt_builder_unicode_user_message_truncates_to_cap():
