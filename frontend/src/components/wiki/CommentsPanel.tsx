@@ -1,8 +1,8 @@
 "use client";
 
+import { Button, Text } from "@onyx-ai/opal/components";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { Button } from "@/components/common/Button";
 import { useAuth } from "@/lib/auth";
 import {
   createComment,
@@ -102,10 +102,10 @@ export function CommentsPanel({
   return (
     <div className={`${styles.panel} ${fullHeight ? styles.fullHeight : ""}`}>
       <div className={styles.header}>
-        <span className={styles.title}>
-          Comments<span className={styles.count}>{total ? ` (${total})` : ""}</span>
-        </span>
-        <Button variant="ghost" size="sm" onClick={onClose} aria-label="Close comments">
+        <Text font="main-ui-action" color="text-04">
+          {`Comments${total ? ` (${total})` : ""}`}
+        </Text>
+        <Button prominence="tertiary" size="sm" onClick={onClose} aria-label="Close comments">
           ×
         </Button>
       </div>
@@ -139,11 +139,13 @@ export function CommentsPanel({
         )}
 
         {loading ? (
-          <div className={styles.empty}>Loading…</div>
+          <Text font="secondary-body" color="text-03">
+            Loading…
+          </Text>
         ) : total === 0 && !draft ? (
-          <div className={styles.empty}>
+          <Text font="secondary-body" color="text-03">
             No comments yet. Select text in the page to add one.
-          </div>
+          </Text>
         ) : (
           threads.map((t) => (
             <Thread
@@ -188,11 +190,11 @@ function DraftComposer({
         onChange={(e) => setBody(e.target.value)}
       />
       <div className={styles.composeRow}>
-        <Button variant="ghost" size="sm" onClick={onCancel}>
+        <Button prominence="tertiary" size="sm" onClick={onCancel}>
           Cancel
         </Button>
         <Button
-          variant="primary"
+          variant="action"
           size="sm"
           disabled={disabled || !body.trim()}
           onClick={() => onSubmit(body.trim())}
@@ -249,15 +251,20 @@ function Thread({
       />
 
       <div className={styles.actions}>
-        <Button variant="ghost" size="sm" disabled={busy} onClick={() => setReplyOpen((v) => !v)}>
+        <Button
+          prominence="tertiary"
+          size="sm"
+          disabled={busy}
+          onClick={() => setReplyOpen((v) => !v)}
+        >
           Reply
         </Button>
         {resolved ? (
-          <Button variant="ghost" size="sm" disabled={busy} onClick={onReopen}>
+          <Button prominence="tertiary" size="sm" disabled={busy} onClick={onReopen}>
             Reopen
           </Button>
         ) : (
-          <Button variant="ghost" size="sm" disabled={busy} onClick={onResolve}>
+          <Button prominence="tertiary" size="sm" disabled={busy} onClick={onResolve}>
             Resolve
           </Button>
         )}
@@ -286,11 +293,11 @@ function Thread({
                 onChange={(e) => setReplyBody(e.target.value)}
               />
               <div className={styles.composeRow}>
-                <Button variant="ghost" size="sm" onClick={() => setReplyOpen(false)}>
+                <Button prominence="tertiary" size="sm" onClick={() => setReplyOpen(false)}>
                   Cancel
                 </Button>
                 <Button
-                  variant="primary"
+                  variant="action"
                   size="sm"
                   disabled={busy || !replyBody.trim()}
                   onClick={async () => {
@@ -333,9 +340,13 @@ function Comment({
   return (
     <div>
       <div className={styles.metaRow}>
-        <span className={styles.author}>{authorLabel(comment.author_user_id, selfId)}</span>
+        <Text font="main-ui-action" color="text-04">
+          {authorLabel(comment.author_user_id, selfId)}
+        </Text>
         <span className={styles.time} title={absoluteTime(toIso(comment.created_at))}>
-          {relativeTime(toIso(comment.created_at), "short")}
+          <Text font="secondary-body" color="text-03">
+            {relativeTime(toIso(comment.created_at), "short")}
+          </Text>
         </span>
         {comment.status === "resolved" && (
           <span className={`${styles.badge} ${styles.badgeResolved}`}>resolved</span>
@@ -355,7 +366,7 @@ function Comment({
           />
           <div className={styles.composeRow}>
             <Button
-              variant="ghost"
+              prominence="tertiary"
               size="sm"
               onClick={() => {
                 setDraft(comment.body);
@@ -365,7 +376,7 @@ function Comment({
               Cancel
             </Button>
             <Button
-              variant="primary"
+              variant="action"
               size="sm"
               disabled={busy || !draft.trim()}
               onClick={async () => {
@@ -382,15 +393,10 @@ function Comment({
 
       {canModify && !editing && (
         <div className={styles.actions}>
-          <Button variant="ghost" size="sm" disabled={busy} onClick={() => setEditing(true)}>
+          <Button prominence="tertiary" size="sm" disabled={busy} onClick={() => setEditing(true)}>
             Edit
           </Button>
-          <Button
-            variant="danger"
-            size="sm"
-            disabled={busy}
-            onClick={() => onDelete(comment.id)}
-          >
+          <Button variant="danger" size="sm" disabled={busy} onClick={() => onDelete(comment.id)}>
             Delete
           </Button>
         </div>
