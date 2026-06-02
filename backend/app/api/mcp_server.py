@@ -30,7 +30,7 @@ from app.db import agent_sessions as agent_sessions_repo
 from app.launchers.current_session import set_current_agent_session_id
 from app.mcp_server import pubsub as mcp_pubsub
 from app.mcp_server import session as mcp_session
-from app.mcp_server.transport import dispatch
+from app.mcp_server.transport import UnknownSessionError, dispatch
 from app.wiki import agent_activity
 
 router = APIRouter()
@@ -107,6 +107,13 @@ async def transport_post(
     try:
         with set_current_user(user), set_current_agent_session_id(agent_sid):
             response, outgoing = dispatch(cast("dict[str, Any]", body), incoming, user)
+    except UnknownSessionError as exc:
+        # Stale/unknown session id → 404 so the client starts a new session.
+        return Response(
+            content=json.dumps(exc.jsonrpc_error()),
+            media_type="application/json",
+            status_code=404,
+        )
     finally:
         agent_activity.agent_name_var.reset(agent_token)
 
@@ -147,7 +154,10 @@ async def transport_sse(
     if not sess_id:
         raise HTTPException(status_code=400, detail=f"missing {SESSION_HEADER} header")
     sess = mcp_session.get(sess_id)
-    if sess is None or not sess.initialized:
+    if sess is None:
+        # Unknown/expired id (header present) → 404 so the client re-inits.
+        raise HTTPException(status_code=404, detail="missing or invalid Mcp-Session-Id")
+    if not sess.initialized:
         raise HTTPException(status_code=400, detail="session not initialized")
     if sess.user_id != bearer_user.id:
         # Bearer resolves to user A but the supplied session id was

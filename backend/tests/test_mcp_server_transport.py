@@ -1,5 +1,6 @@
 """Tests for the inbound MCP transport — bearer auth, session
 handshake, JSON-RPC dispatch."""
+
 from __future__ import annotations
 
 import pytest
@@ -208,6 +209,55 @@ def test_request_without_session_id_is_protocol_error(client):
     # JSON-RPC 2.0 "Invalid Request"
     assert body["error"]["code"] == -32600
     assert "Mcp-Session-Id" in body["error"]["message"]
+
+
+def test_unknown_session_id_request_is_404(client):
+    # A request bearing an Mcp-Session-Id the server doesn't recognize
+    # (e.g. the session died on a backend restart) must return HTTP 404 so
+    # the client re-initializes, per the MCP Streamable HTTP spec.
+    uid = seed_user(uid="u1", email="u1@x.com")
+    raw = _mint_token(uid)
+
+    res = client.post(
+        "/api/mcp",
+        json={"jsonrpc": "2.0", "id": 7, "method": "tools/list"},
+        headers={
+            "Authorization": f"Bearer {raw}",
+            "Mcp-Session-Id": "mcps_does-not-exist",
+        },
+    )
+    assert res.status_code == 404
+    assert res.json()["error"]["code"] == -32600
+
+
+def test_unknown_session_id_sse_is_404(client):
+    # Same rule on the SSE GET stream — a stale session id reconnecting
+    # gets 404, not 400, so the client knows to start a fresh session.
+    uid = seed_user(uid="u1", email="u1@x.com")
+    raw = _mint_token(uid)
+
+    res = client.get(
+        "/api/mcp",
+        headers={
+            "Authorization": f"Bearer {raw}",
+            "Mcp-Session-Id": "mcps_does-not-exist",
+        },
+    )
+    assert res.status_code == 404
+
+
+def test_uninitialized_session_sse_is_400(client):
+    # A *known* session that simply hasn't sent notifications/initialized
+    # yet is a protocol-ordering error (400), distinct from an unknown id.
+    uid = seed_user(uid="u1", email="u1@x.com")
+    raw = _mint_token(uid)
+    auth = {"Authorization": f"Bearer {raw}"}
+
+    res = client.post("/api/mcp", json=_initialize_request(), headers=auth)
+    sess_id = res.headers["Mcp-Session-Id"]
+
+    res = client.get("/api/mcp", headers={**auth, "Mcp-Session-Id": sess_id})
+    assert res.status_code == 400
 
 
 def test_method_before_initialized_ack_is_error(client):
