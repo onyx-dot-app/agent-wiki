@@ -122,27 +122,27 @@ def _fire_event(doc_path: str, row: dict[str, Any], user: User) -> None:
 def list_comments(
     path: str = "", user: User = Depends(require_user)
 ) -> CommentListResponse:
-    rel = _safe_path(path)
-    require_can("read", rel, user)
+    rel_path = _safe_path(path)
+    require_can("read", rel_path, user)
     # Backstop: re-anchor any comment whose anchor lags HEAD (idempotent — a
     # no-op once the on-commit remap has run, which is the normal case).
     try:
-        comment_remap.remap_comments(rel)
+        comment_remap.remap_comments(rel_path)
     except Exception:
-        log.exception("comment remap backstop failed for %s", rel)
-    return CommentListResponse(threads=_group_threads(comments_repo.list_for_doc(rel)))
+        log.exception("comment remap backstop failed for %s", rel_path)
+    return CommentListResponse(threads=_group_threads(comments_repo.list_for_doc(rel_path)))
 
 
 @router.post("", response_model=CommentView, status_code=status.HTTP_201_CREATED)
 def create_comment(
     req: CreateCommentRequest, user: User = Depends(require_user)
 ) -> CommentView:
-    rel = _safe_path(req.path)
-    require_can("read", rel, user)
+    rel_path = _safe_path(req.path)
+    require_can("read", rel_path, user)
     if req.end_offset <= req.start_offset:
         raise HTTPException(status_code=400, detail="end_offset must be > start_offset")
     row = comments_repo.create_thread(
-        doc_path=rel,
+        doc_path=rel_path,
         body=req.body,
         author_user_id=user.id,
         anchor_sha=req.anchor_sha,
@@ -150,7 +150,7 @@ def create_comment(
         end_offset=req.end_offset,
         quoted_text=req.quoted_text,
     )
-    _fire_event(rel, row, user)
+    _fire_event(rel_path, row, user)
     return CommentView.model_validate(row)
 
 
