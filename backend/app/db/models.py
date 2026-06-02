@@ -510,6 +510,26 @@ class BraintrustSettings(Base):
     __table_args__ = (CheckConstraint("id = 1", name="braintrust_settings_singleton"),)
 
 
+class SlackSettings(Base):
+    """Singleton row backing the admin-configured Slack incoming webhook.
+
+    Backs the ``slack`` trigger destination: when a trigger fires and its
+    destination is ``slack``, the rendered message is POSTed to
+    ``webhook_url`` — but only when ``enabled`` is true and a URL is set.
+    Shape mirrors ``BraintrustSettings``; the pydantic model lives in
+    ``app/slack/settings.py``.
+    """
+
+    __tablename__ = "slack_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
+    webhook_url: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    updated_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
+
+    __table_args__ = (CheckConstraint("id = 1", name="slack_settings_singleton"),)
+
+
 # --------------------------------------------------------------------------- #
 # Agent activity registry                                                     #
 # --------------------------------------------------------------------------- #

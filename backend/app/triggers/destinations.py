@@ -25,6 +25,12 @@ from app.db.session import session
 # spread the literal across the codebase.
 EVENT_LOG_ID = "event_log"
 
+# Slug of the Slack destination (seeded by migration 0023). When a fire's
+# destination is this, the dispatcher in ``app/tasks/triggers.py`` POSTs the
+# rendered message to the admin-configured incoming webhook. Same
+# "don't spread the literal" rationale as ``EVENT_LOG_ID``.
+SLACK_ID = "slack"
+
 
 def _to_dict(d: TriggerDestination) -> dict[str, Any]:
     return {

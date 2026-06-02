@@ -303,20 +303,14 @@ def _record_fire(
     destination: object,
     actor: str | None,
 ) -> None:
-    """Write a single ``trigger.fire`` row to the events table.
+    """Record a ``trigger.fire`` row, then dispatch outbound if configured.
 
-    v0 only delivers to the ``event_log`` destination (a row in the
-    ``trigger.fire`` events table). A trigger pointed at a destination
-    without a wired-up dispatcher logs a warning and still records to the
-    events table so no fire is lost.
+    The events row is always written first, so a fire is never lost even
+    if outbound delivery fails or the destination has no dispatcher. After
+    recording, ``slack`` destinations POST the rendered message to the
+    admin-configured incoming webhook; an unknown destination just logs a
+    warning. (``event_log`` records and stops — that's the whole delivery.)
     """
-    if destination != destinations_repo.EVENT_LOG_ID:
-        log.warning(
-            "trigger %s has destination=%r but no outbound dispatcher is "
-            "wired up; recording to events anyway",
-            trigger.id, destination,
-        )
-
     event_payload = json.dumps(
         {
             "trigger_id": trigger.id,
@@ -338,3 +332,42 @@ def _record_fire(
                 payload_json=event_payload,
             )
         )
+
+    if destination == destinations_repo.SLACK_ID:
+        _dispatch_to_slack(trigger=trigger, rendered_message=rendered_message)
+    elif destination != destinations_repo.EVENT_LOG_ID:
+        log.warning(
+            "trigger %s has destination=%r but no outbound dispatcher is "
+            "wired up; recorded to events only",
+            trigger.id, destination,
+        )
+
+
+def _dispatch_to_slack(*, trigger: TriggerRecord, rendered_message: str) -> None:
+    """POST a fire's rendered message to the configured Slack webhook.
+
+    No-op when Slack is disabled or unconfigured. Failures are logged and
+    swallowed — the fire is already recorded in the events table, so an
+    unreachable Slack must not fail the trigger task or lose the event.
+    """
+    from app.slack import settings as slack_settings
+    from app.slack.client import SlackApiError, post_message
+
+    cfg = slack_settings.get()
+    if not cfg.enabled or not cfg.webhook_url:
+        log.info(
+            "trigger %s targets slack but slack is not enabled/configured; "
+            "recorded to events only",
+            trigger.id,
+        )
+        return
+
+    if not rendered_message.strip():
+        log.info("trigger %s slack dispatch skipped: empty message", trigger.id)
+        return
+
+    try:
+        post_message(webhook_url=cfg.webhook_url, text=rendered_message)
+        log.info("trigger %s dispatched to slack", trigger.id)
+    except SlackApiError:
+        log.exception("trigger %s slack dispatch failed", trigger.id)

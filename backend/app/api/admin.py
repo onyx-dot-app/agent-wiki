@@ -25,10 +25,14 @@ from app.models.admin import (
     LLMConfigRequest,
     LLMView,
     OkResponse,
+    SlackConfigRequest,
+    SlackView,
     UpdateUserRequest,
     WebConfigRequest,
     WebView,
 )
+from app.slack import settings as slack_settings
+from app.slack.settings import SlackSettings
 from app.tracing import settings as braintrust_settings
 from app.tracing.settings import BraintrustSettings
 from app.web import settings as web_settings
@@ -348,3 +352,47 @@ def put_braintrust(
         enabled,
     )
     return _braintrust_view(braintrust_settings.get())
+
+
+def _slack_view(s: SlackSettings) -> SlackView:
+    return SlackView(
+        webhook_url_set=bool(s.webhook_url),
+        webhook_url_hint=_redact(s.webhook_url),
+        enabled=s.enabled,
+    )
+
+
+@router.get("/slack", response_model=SlackView)
+def get_slack(_actor: User = Depends(require_admin)) -> SlackView:
+    return _slack_view(slack_settings.get())
+
+
+@router.put("/slack", response_model=SlackView)
+def put_slack(
+    req: SlackConfigRequest,
+    actor: User = Depends(require_admin),
+) -> SlackView:
+    sent_fields = req.model_fields_set
+    current = slack_settings.get()
+
+    def _resolve_secret(field: str, sent: str | None, existing: str) -> str:
+        if field not in sent_fields:
+            return existing
+        if sent is None:
+            return ""
+        if sent == "":
+            return existing
+        return sent.strip()
+
+    webhook_url = _resolve_secret("webhook_url", req.webhook_url, current.webhook_url)
+    # Mirror the braintrust gate: delivery can only be on when a URL is set.
+    enabled = bool(req.enabled and webhook_url)
+
+    slack_settings.upsert(webhook_url=webhook_url, enabled=enabled)
+    log.info(
+        "admin: %s updated slack settings webhook_set=%s enabled=%s",
+        actor.id,
+        bool(webhook_url),
+        enabled,
+    )
+    return _slack_view(slack_settings.get())
