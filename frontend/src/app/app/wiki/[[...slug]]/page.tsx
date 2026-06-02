@@ -36,8 +36,16 @@ import {
   type AgentSessionSummary,
 } from "@/lib/launchers";
 import { ShareDialog } from "@/components/wiki/ShareDialog";
+import { CommentsPanel } from "@/components/wiki/CommentsPanel";
 import { FolderIcon, FileIcon } from "@/components/wiki/WikiIcons";
 import { apiFetch, ApiError } from "@/lib/api";
+import { listComments } from "@/lib/comments";
+import {
+  paintCommentHighlights,
+  selectionToAnchor,
+  type CommentDraft,
+} from "@/lib/commentAnchor";
+import { rehypeSourcePos } from "@/lib/rehypeSourcePos";
 import { useRequireAuth } from "@/lib/auth";
 import { useDrafting } from "@/lib/drafting";
 import { rememberWikiPath } from "@/lib/lastViewed";
@@ -57,7 +65,11 @@ import {
   fetchFileHistory,
   type FileDiffResponse,
 } from "@/lib/wiki";
-import type { DocumentActivity, DocumentActivityResponse } from "@/types";
+import type {
+  CommentThreadView,
+  DocumentActivity,
+  DocumentActivityResponse,
+} from "@/types";
 
 interface DocEntry {
   path: string;
@@ -1449,6 +1461,155 @@ function FileViewer({ path }: { path: string }) {
   const [commits, setCommits] = useState<CommitInfo[] | null>(null);
   const [diffData, setDiffData] = useState<FileDiffResponse | null>(null);
   const [historyError, setHistoryError] = useState<string | null>(null);
+  // Comments (render-mode). `commentDraft` is a pending text selection being
+  // composed; `selTool` is the floating "Comment" affordance shown on select.
+  const [commentsOpen, setCommentsOpen] = useState(false);
+  const [commentDraft, setCommentDraft] = useState<CommentDraft | null>(null);
+  const [commentThreads, setCommentThreads] = useState<CommentThreadView[]>([]);
+  const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
+  const [selTool, setSelTool] = useState<{ x: number; y: number; draft: CommentDraft } | null>(
+    null,
+  );
+  const articleRef = useRef<HTMLElement | null>(null);
+  // Page owns the comment threads (so highlights render even with the panel
+  // closed). Auto-open the panel once per path when a page has comments.
+  const autoOpenedPathRef = useRef<string | null>(null);
+
+  const refreshComments = useCallback(async () => {
+    try {
+      const t = await listComments(path);
+      setCommentThreads(t);
+      if (t.length > 0 && autoOpenedPathRef.current !== path) {
+        autoOpenedPathRef.current = path;
+        setCommentsOpen(true);
+      }
+    } catch {
+      // comments are non-critical chrome; ignore load failures
+    }
+  }, [path]);
+
+  useEffect(() => {
+    autoOpenedPathRef.current = null;
+    setCommentThreads([]);
+    void refreshComments();
+  }, [refreshComments]);
+
+  // Render the markdown once per body change and reuse the element on every
+  // unrelated re-render (panel open/close, active-comment change, …). A fresh
+  // <ReactMarkdown> element would let React reconcile and replace the article's
+  // text nodes, which silently invalidates the CSS Highlight Ranges painted
+  // over them — the bug where highlights vanished until you clicked a comment.
+  const renderedBody = useMemo(
+    () => (
+      <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSourcePos]}>
+        {body}
+      </ReactMarkdown>
+    ),
+    [body],
+  );
+
+  // Paint Google-Docs-style highlights over the rendered article for each
+  // (non-orphaned) anchored comment. Cleared in edit/diff mode (no article).
+  //
+  // On a fresh load the comments and the doc body arrive on separate renders,
+  // and react-markdown commits its text nodes a tick later than this effect
+  // runs — so a single synchronous (or even rAF-deferred) paint finds no text
+  // to range over and silently no-ops, which is why nothing was highlighted
+  // until a click happened to re-run the paint against a settled DOM. We make
+  // it robust by (a) painting now, (b) painting on the next frame, and (c)
+  // watching the article subtree with a MutationObserver and repainting whenever
+  // react-markdown finally swaps in / replaces the rendered nodes. The CSS
+  // Custom Highlight API doesn't mutate the DOM, so this never loops.
+  useEffect(() => {
+    const el = articleRef.current;
+    if (!el) return;
+    const clear = editing || viewingSha;
+    const targets = clear
+      ? []
+      : commentThreads
+          .map((t) => t.root)
+          .filter(
+            // Resolved threads disappear from the panel, so drop their doc
+            // highlight too; orphaned ones have no live span to paint.
+            (r) =>
+              r.status !== "orphaned" &&
+              r.status !== "resolved" &&
+              r.start_offset !== null &&
+              r.end_offset !== null &&
+              r.quoted_text !== null,
+          )
+          .map((r) => ({
+            startOffset: r.start_offset as number,
+            endOffset: r.end_offset as number,
+            quotedText: r.quoted_text as string,
+            active: r.id === activeCommentId,
+          }));
+
+    let cancelled = false;
+    let raf = 0;
+    let attempts = 0;
+    const MAX_ATTEMPTS = 60; // ~1s at 60fps, then give up (some spans may be unmappable)
+    const tick = () => {
+      if (cancelled) return;
+      const painted = paintCommentHighlights(el, body, targets);
+      attempts += 1;
+      // The markdown text nodes commit a tick after React renders, so the first
+      // paint can find nothing to range over. Retry per-frame until every target
+      // lands (or we hit the cap) — this is what makes highlights appear on a
+      // fresh load instead of only after a click re-ran the paint.
+      if (painted < targets.length && attempts < MAX_ATTEMPTS) {
+        raf = requestAnimationFrame(tick);
+      }
+    };
+    tick();
+
+    // Repaint when react-markdown later swaps nodes (e.g. an edit/remap rerenders
+    // the body). Reset the retry budget so the fresh DOM gets a full set of tries.
+    const observer = new MutationObserver(() => {
+      attempts = 0;
+      cancelAnimationFrame(raf);
+      tick();
+    });
+    observer.observe(el, { childList: true, subtree: true, characterData: true });
+
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(raf);
+      observer.disconnect();
+    };
+    // `loading` gates whether <article> is mounted: when the body is primed by
+    // the SWR cache before `loading` flips, `body` doesn't change on mount, so
+    // without this dep the effect wouldn't re-run and the article would mount
+    // with no paint (highlights only appeared after a click). Re-run on mount.
+  }, [commentThreads, body, editing, viewingSha, activeCommentId, loading]);
+
+  // On a text selection in the rendered article, offer a floating "Comment"
+  // affordance anchored above the selection (render mode only).
+  const onArticleMouseUp = useCallback(() => {
+    const el = articleRef.current;
+    const sel = window.getSelection();
+    if (!el || !sel || sel.rangeCount === 0) {
+      setSelTool(null);
+      return;
+    }
+    const draft = selectionToAnchor(el, body);
+    if (!draft) {
+      setSelTool(null);
+      return;
+    }
+    const rect = sel.getRangeAt(0).getBoundingClientRect();
+    setSelTool({ x: rect.left + rect.width / 2, y: rect.top, draft });
+  }, [body]);
+
+  useEffect(() => {
+    const onSel = () => {
+      const s = window.getSelection();
+      if (!s || s.isCollapsed) setSelTool(null);
+    };
+    document.addEventListener("selectionchange", onSel);
+    return () => document.removeEventListener("selectionchange", onSel);
+  }, []);
+
   // Active-agents panel (collapsible chip near the top of the doc).
   // We always know the count (so the chip can label "Active agents (N)"),
   // but the entry list only renders when the user expands it.
@@ -1842,6 +2003,9 @@ function FileViewer({ path }: { path: string }) {
       } catch {
         // fresh fetch failed — body already shows the local draft
       }
+      // The commit re-anchored comments server-side; refetch so the panel +
+      // highlights reflect the drift (won't re-open the panel — guarded).
+      void refreshComments();
       // The server clears the draft row when the body diverges from
       // the template snapshot — re-sync our context so the chat
       // banner disappears at the same moment.
@@ -2046,6 +2210,12 @@ function FileViewer({ path }: { path: string }) {
                 onClick={toggleHistory}
               >
                 History
+              </SelectButton>
+              <SelectButton
+                state={commentsOpen ? "selected" : "empty"}
+                onClick={() => setCommentsOpen((v) => !v)}
+              >
+                Comments
               </SelectButton>
             </div>
             <Button variant="action" onClick={startEdit}>
@@ -2462,12 +2632,12 @@ function FileViewer({ path }: { path: string }) {
               </div>
             ) : (
               <article
+                ref={articleRef}
                 className="markdown"
                 style={{ flex: 1, minHeight: 0, overflowY: "auto" }}
+                onMouseUp={onArticleMouseUp}
               >
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                  {body}
-                </ReactMarkdown>
+                {renderedBody}
               </article>
             )}
           </div>
@@ -2479,6 +2649,22 @@ function FileViewer({ path }: { path: string }) {
               viewingSha={viewingSha}
               onPick={onPickCommit}
               onClose={() => setHistoryOpen(false)}
+            />
+          )}
+          {commentsOpen && !isMobile && (
+            <CommentsPanel
+              path={path}
+              headSha={headSha}
+              draft={commentDraft}
+              threads={commentThreads}
+              onChanged={refreshComments}
+              activeId={activeCommentId}
+              onActivate={setActiveCommentId}
+              onDraftConsumed={() => setCommentDraft(null)}
+              onClose={() => {
+                setCommentsOpen(false);
+                setCommentDraft(null);
+              }}
             />
           )}
         </div>
@@ -2524,6 +2710,74 @@ function FileViewer({ path }: { path: string }) {
             />
           </div>
         </>
+      )}
+      {commentsOpen && isMobile && (
+        <>
+          <div
+            onClick={() => setCommentsOpen(false)}
+            aria-hidden
+            style={{ position: "fixed", inset: 0, background: color.overlay, zIndex: 60 }}
+          />
+          <div
+            style={{
+              position: "fixed",
+              top: 0,
+              right: 0,
+              bottom: 0,
+              width: "min(360px, 100vw)",
+              zIndex: 70,
+              display: "flex",
+              boxShadow: shadow.panel,
+            }}
+          >
+            <CommentsPanel
+              path={path}
+              headSha={headSha}
+              draft={commentDraft}
+              threads={commentThreads}
+              onChanged={refreshComments}
+              activeId={activeCommentId}
+              onActivate={setActiveCommentId}
+              onDraftConsumed={() => setCommentDraft(null)}
+              onClose={() => {
+                setCommentsOpen(false);
+                setCommentDraft(null);
+              }}
+              fullHeight
+            />
+          </div>
+        </>
+      )}
+      {selTool && (
+        <div
+          onMouseDown={(e) => e.preventDefault()}
+          style={{
+            position: "fixed",
+            left: selTool.x,
+            top: selTool.y - 8,
+            transform: "translate(-50%, -100%)",
+            zIndex: 80,
+            background: color.bg.panel,
+            border: `1px solid ${color.border.default}`,
+            borderRadius: radius.md,
+            boxShadow: shadow.popover,
+            padding: 4,
+          }}
+        >
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              setCommentDraft(selTool.draft);
+              setCommentsOpen(true);
+              setSelTool(null);
+              window.getSelection()?.removeAllRanges();
+            }}
+            style={{ display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}
+          >
+            💬 Comment
+          </Button>
+        </div>
       )}
     </main>
   );

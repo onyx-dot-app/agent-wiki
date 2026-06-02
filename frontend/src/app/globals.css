@@ -60,6 +60,11 @@ html {
   --color-accent-subtle-bg-hover: #e8e7e4;
   --color-accent-subtle-fg: #37352f;
   --color-accent-subtle-border: #dcdbd8;
+  /* Commented-span highlight (Google-Docs-style yellow). Semi-transparent so it
+     blends over code-span backgrounds too. The -active shade is the stronger
+     orange shown when its comment thread is selected. */
+  --color-comment-highlight: rgba(255, 212, 0, 0.38);
+  --color-comment-highlight-active: rgba(255, 159, 28, 0.6);
 
   /* Semantic state colors */
   --color-state-success-bg: #dcfce7;
@@ -140,6 +145,9 @@ html {
   --color-accent-subtle-bg-hover: #46433e;
   --color-accent-subtle-fg: #ededec;
   --color-accent-subtle-border: #555049;
+  /* Dimmer amber so it reads on the dark page without glowing. */
+  --color-comment-highlight: rgba(250, 204, 21, 0.3);
+  --color-comment-highlight-active: rgba(255, 159, 28, 0.5);
 
   /* State colors — desaturated for dark mode, foregrounds lifted. */
   --color-state-success-bg: #14361f;
@@ -354,6 +362,15 @@ textarea::placeholder {
 }
 .scroll-x-hidden::-webkit-scrollbar {
   display: none;
+}
+
+/* Inline highlight for commented spans (CSS Custom Highlight API). The wiki
+   page registers Ranges under this name via paintCommentHighlights(). */
+::highlight(wiki-comment) {
+  background-color: var(--color-comment-highlight);
+}
+::highlight(wiki-comment-active) {
+  background-color: var(--color-comment-highlight-active);
 }
 
 /* Radix popovers (OPAL Popover / SelectButton menus) must float above modal
