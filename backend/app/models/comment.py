@@ -57,7 +57,7 @@ class CreateCommentRequest(BaseModel):
     anchor_sha: str = Field(min_length=1)
     start_offset: int = Field(ge=0)
     end_offset: int = Field(gt=0)
-    quoted_text: str
+    quoted_text: str = Field(min_length=1)
     body: str = Field(min_length=1)
 
 
