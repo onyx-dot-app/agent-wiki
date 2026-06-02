@@ -149,8 +149,26 @@ def test_delete_root_cascades_replies(tmp_db):
 
     assert comments.delete(root["id"]) is True
     assert comments.get(root["id"]) is None
-    assert comments.get(reply["id"]) is None  # cascaded
+    assert comments.get(reply["id"]) is None  # whole thread gone
     assert comments.delete("cmt_missing") is False
+
+
+def test_delete_middle_comment_keeps_children(tmp_db):
+    alice = seed_user(uid="u_alice", email="alice@x.com")
+    root = _seed_root(alice)
+    mid = comments.add_reply(parent_id=root["id"], body="mid", author_user_id=alice)
+    assert mid is not None
+    leaf = comments.add_reply(parent_id=mid["id"], body="leaf", author_user_id=alice)
+    assert leaf is not None
+
+    # Delete the middle comment — the leaf must survive, re-parented up to root.
+    assert comments.delete(mid["id"]) is True
+    assert comments.get(mid["id"]) is None
+    surviving = comments.get(leaf["id"])
+    assert surviving is not None
+    assert surviving["parent_id"] == root["id"]  # promoted to the deleted node's parent
+    assert surviving["thread_root_id"] == root["id"]
+    assert comments.get(root["id"]) is not None
 
 
 # --------------------------------------------------------------------------- #
