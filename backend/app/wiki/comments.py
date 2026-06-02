@@ -275,15 +275,22 @@ def delete(comment_id: str) -> bool:
 
 def roots_needing_remap(doc_path: str, head_sha: str) -> list[dict[str, Any]]:
     """Inline thread roots on ``doc_path`` whose stored anchor is not yet at
-    ``head_sha`` and can still be remapped (not orphaned). The re-anchor task
-    diffs each one's body-at-``anchor_sha`` to the body at HEAD."""
+    ``head_sha`` and should track edits — i.e. **open** threads only. The
+    re-anchor task diffs each one's body-at-``anchor_sha`` to the body at HEAD.
+
+    Orphaned and resolved threads are deliberately excluded. Orphaned ones have
+    no live span left; resolved ones are done, so re-anchoring a resolved
+    comment (and re-orphaning it when its span is gone) would silently flip it
+    back out of ``resolved`` — which read as "resolve doesn't stick". A reopened
+    thread returns to ``open`` and re-enters this pool, so its anchor catches up
+    then."""
     with session() as s:
         rows = s.scalars(
             select(Comment).where(
                 Comment.doc_path == doc_path,
                 Comment.parent_id.is_(None),
                 Comment.scope == CommentScope.INLINE.value,
-                Comment.status != CommentStatus.ORPHANED.value,
+                Comment.status == CommentStatus.OPEN.value,
                 Comment.anchor_sha != head_sha,
             )
         ).all()
