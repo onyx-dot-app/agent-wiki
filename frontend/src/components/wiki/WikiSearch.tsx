@@ -1,6 +1,5 @@
 "use client";
 
-import { InputTypeIn } from "@onyx-ai/opal/components";
 import { useRouter } from "next/navigation";
 import {
   forwardRef,
@@ -165,21 +164,75 @@ export const WikiSearch = forwardRef<WikiSearchHandle>(function WikiSearch(_, re
 
   return (
     <div ref={containerRef} style={{ position: "relative", width: "100%" }}>
-      <InputTypeIn
-        ref={inputRef}
-        variant="internal"
-        searchIcon
-        clearButton
-        value={query}
-        onChange={(e) => {
-          setQuery(e.target.value);
-          setOpen(true);
-        }}
-        onFocus={() => setOpen(true)}
-        onKeyDown={onKeyDown}
-        placeholder="Search…"
-        aria-label="Search wiki"
-      />
+      <div style={{ position: "relative", width: "100%" }}>
+        <span
+          aria-hidden
+          style={{
+            position: "absolute",
+            left: 9,
+            top: "50%",
+            transform: "translateY(-50%)",
+            display: "flex",
+            color: color.text.muted,
+            pointerEvents: "none",
+          }}
+        >
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6">
+            <circle cx="7" cy="7" r="4.5" />
+            <line x1="10.5" y1="10.5" x2="14" y2="14" strokeLinecap="round" />
+          </svg>
+        </span>
+        <input
+          ref={inputRef}
+          type="text"
+          value={query}
+          onChange={(e) => {
+            setQuery(e.target.value);
+            setOpen(true);
+          }}
+          onFocus={() => setOpen(true)}
+          onKeyDown={onKeyDown}
+          placeholder="Search…"
+          aria-label="Search wiki"
+          style={{
+            width: "100%",
+            boxSizing: "border-box",
+            padding: "8px 28px 8px 28px",
+            border: `1px solid ${color.border.default}`,
+            borderRadius: radius.sm,
+            background: color.bg.page,
+            color: color.text.primary,
+            fontSize: 13,
+            outline: "none",
+          }}
+        />
+        {query && (
+          <button
+            type="button"
+            aria-label="Clear search"
+            onClick={() => {
+              setQuery("");
+              inputRef.current?.focus();
+            }}
+            style={{
+              position: "absolute",
+              right: 6,
+              top: "50%",
+              transform: "translateY(-50%)",
+              appearance: "none",
+              border: "none",
+              background: "transparent",
+              color: color.text.muted,
+              cursor: "pointer",
+              fontSize: 15,
+              lineHeight: 1,
+              padding: 2,
+            }}
+          >
+            ×
+          </button>
+        )}
+      </div>
 
       {showDropdown && (
         <div

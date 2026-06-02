@@ -1,7 +1,7 @@
 import {
   SvgActions,
   SvgActivity,
-  SvgDocFile,
+  SvgFileText,
   SvgDownloadCloud,
   SvgGlobe,
   SvgKey,
@@ -52,6 +52,6 @@ export const ADMIN_NAV_ENTRIES = [
   { href: "/admin/groups",     label: "Groups",           icon: SvgOrganization },
   { href: "/admin/health",     label: "Health",           icon: SvgActivity     },
   { href: "/admin/braintrust", label: "Braintrust",       icon: SvgLinkedDots   },
-  { href: "/admin/templates",  label: "Templates",        icon: SvgDocFile      },
+  { href: "/admin/templates",  label: "Templates",        icon: SvgFileText      },
   { href: "/admin/ingest",     label: "Onyx Connection",  icon: SvgDownloadCloud},
 ] as const satisfies NavEntry[];

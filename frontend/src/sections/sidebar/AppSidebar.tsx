@@ -2,7 +2,7 @@
 
 import { Button, SidebarTab, Text } from "@onyx-ai/opal/components";
 import {
-  SvgDocFile,
+  SvgFileText,
   SvgSearch,
   SvgSettings,
   SvgSidebar,
@@ -178,7 +178,7 @@ export function AppSidebar() {
                         href={href}
                         selected={active}
                         folded={collapsed}
-                        icon={SvgDocFile}
+                        icon={SvgFileText}
                         tooltip={undefined}
                         nested
                         onClick={() => {
