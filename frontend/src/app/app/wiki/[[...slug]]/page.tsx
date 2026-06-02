@@ -2773,7 +2773,6 @@ function FileViewer({ path }: { path: string }) {
               setSelTool(null);
               window.getSelection()?.removeAllRanges();
             }}
-            style={{ display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}
           >
             💬 Comment
           </Button>
