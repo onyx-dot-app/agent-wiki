@@ -281,6 +281,7 @@ export function ShareDialog({ path, open, onClose }: ShareDialogProps) {
   const save = async () => {
     setSaving(true);
     setSaveError(null);
+    let ok = false;
     try {
       const revokes: string[] = [];
       const adds: GrantDraft[] = [];
@@ -330,20 +331,23 @@ export function ShareDialog({ path, open, onClose }: ShareDialogProps) {
           permission: "write",
         });
       }
+      ok = true;
     } catch (e) {
       setSaveError(e instanceof Error ? e.message : "Failed to save changes");
       // Re-pull the ACL so the baseline reflects whatever partially applied;
       // otherwise a retry re-issues already-committed grants/revokes and 404s.
-      await refresh();
+      // Best-effort — a failing refetch must not skip the cleanup below.
+      await refresh().catch(() => undefined);
+    } finally {
       setSaving(false);
-      return;
     }
-    // All mutations committed — the save succeeded. Close immediately and
-    // refresh the cache best-effort; a failing refetch must NOT surface as a
-    // save error or keep the dialog open after the DB already changed.
-    setSaving(false);
-    onClose();
-    void refresh();
+    // All mutations committed — the save succeeded. Close and refresh the
+    // cache best-effort; a failing refetch must NOT surface as a save error
+    // or keep the dialog open after the DB already changed.
+    if (ok) {
+      onClose();
+      void refresh();
+    }
   };
 
   const forbidden = error instanceof ApiError && error.status === 403;

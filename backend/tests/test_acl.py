@@ -87,7 +87,9 @@ def test_transfer_leaves_previous_owner_as_editor(tmp_db):
     assert acl.effective(alice, False, "docs/spec.md") == {"read", "write"}
     entries = acl.list_for_path("docs/spec.md")
     assert any(
-        e["principal_kind"] == "user" and e["principal_id"] == alice and e["permission"] == "write"
+        e["principal_kind"] == "user"
+        and e["principal_id"] == alice
+        and e["permission"] == "write"
         for e in entries
     )
 
@@ -312,6 +314,22 @@ def test_folder_grant_cascades_to_descendants(tmp_db):
     assert acl.effective(alice, False, "other/spec.md") == set()
 
 
+def test_folder_grant_applies_to_the_folder_itself(tmp_db):
+    # A folder-level grant must also resolve when checking access to that
+    # folder path itself (the share-a-folder flow), not only its descendants.
+    alice = seed_user(uid="u_alice", email="alice@x.com")
+    acl.grant(
+        resource_kind="folder",
+        resource_path="docs",
+        principal_kind="user",
+        principal_id=alice,
+        permission="write",
+        granted_by_user_id=None,
+    )
+    assert acl.effective(alice, False, "docs") == {"read", "write"}
+    assert acl.can(alice, False, "write", "docs") is True
+
+
 def test_root_folder_grant_matches_everything(tmp_db):
     alice = seed_user(uid="u_alice", email="alice@x.com")
     acl.grant(
@@ -389,7 +407,11 @@ def test_on_page_created_is_idempotent(tmp_db):
     alice = seed_user(uid="u_alice", email="alice@x.com")
     acl.on_page_created("docs/spec.md", owner_user_id=alice)
     acl.on_page_created("docs/spec.md", owner_user_id=alice)
-    grants = [g for g in acl.list_for_path("docs/spec.md") if g["principal_kind"] == "everyone"]
+    grants = [
+        g
+        for g in acl.list_for_path("docs/spec.md")
+        if g["principal_kind"] == "everyone"
+    ]
     assert len(grants) == 2  # one read + one write, not duplicated.
 
 
@@ -516,7 +538,9 @@ def test_filter_paths_in_python(tmp_db):
     acl.on_page_created("public.md", owner_user_id=None)  # everyone read+write
     acl.set_owner("private.md", bob)  # alice has no access
     # Alice can see public, not private.
-    assert acl.filter_paths_in_python(alice, False, ["public.md", "private.md"]) == ["public.md"]
+    assert acl.filter_paths_in_python(alice, False, ["public.md", "private.md"]) == [
+        "public.md"
+    ]
     # Admin sees all.
     assert acl.filter_paths_in_python(alice, True, ["public.md", "private.md"]) == [
         "public.md",
@@ -760,11 +784,15 @@ def test_visible_paths_filter_against_db(tmp_db):
 
     pred = acl.visible_paths_filter(alice, False, Document.path)
     with session() as s:
-        rows = s.scalars(sa_select(Document.path).where(pred).order_by(Document.path)).all()
+        rows = s.scalars(
+            sa_select(Document.path).where(pred).order_by(Document.path)
+        ).all()
     assert list(rows) == ["public.md"]
 
     # Admin filter is universal-true.
     pred_admin = acl.visible_paths_filter("u_admin", True, Document.path)
     with session() as s:
-        rows = s.scalars(sa_select(Document.path).where(pred_admin).order_by(Document.path)).all()
+        rows = s.scalars(
+            sa_select(Document.path).where(pred_admin).order_by(Document.path)
+        ).all()
     assert list(rows) == ["private.md", "public.md"]

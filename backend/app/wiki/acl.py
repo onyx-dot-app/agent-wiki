@@ -29,6 +29,7 @@ import uuid
 from typing import Any, Iterable
 
 from sqlalchemy import (
+    ColumnElement,
     Select,
     and_,
     delete,
@@ -66,6 +67,13 @@ def _ancestors(path: str) -> list[str]:
     out = ["/".join(parts[: i + 1]) for i in range(len(parts) - 1, -1, -1)]
     out.append("")
     return out
+
+
+def _folder_self_and_ancestors(path: str) -> list[str]:
+    """``path`` plus every ancestor folder, deepest first, root last."""
+    if not path:
+        return [""]
+    return _ancestors(f"{path}/_")
 
 
 def _is_md_page(path: str) -> bool:
@@ -384,10 +392,18 @@ def effective(
     if is_admin:
         return {"read", "write"}
 
-    canon_page = path.strip().strip("/")
-    ancestors = _ancestors(canon_page)
+    raw_path = path.strip().strip("/")
+    is_page = _is_md_page(raw_path)
+    canon_path = (
+        _canonicalize("page", raw_path)
+        if is_page
+        else _canonicalize("folder", raw_path)
+    )
+    folder_paths = (
+        _ancestors(canon_path) if is_page else _folder_self_and_ancestors(canon_path)
+    )
 
-    owner = get_owner(canon_page)
+    owner = get_owner(canon_path)
     if owner is not None and user_id is not None and owner == user_id:
         return {"read", "write"}
 
@@ -396,13 +412,13 @@ def effective(
     with session() as s:
         rows = list(
             s.scalars(
-                _grants_for_principal(user_id, group_ids, canon_page, ancestors)
+                _grants_for_principal(user_id, group_ids, canon_path, folder_paths)
             ).all()
         )
         if (
             not rows
             and owner is None
-            and not _path_is_managed(s, canon_page, ancestors)
+            and not _path_is_managed(s, canon_path, folder_paths)
         ):
             return {"read", "write"}
 
@@ -419,24 +435,25 @@ def _path_is_managed(s: Any, page_path: str, folder_paths: list[str]) -> bool:
     ancestor — irrespective of principal. Used by the resolver and the
     bulk filter to detect "unconfigured" paths so the implicit-public
     fallback only kicks in when no human has ever set policy here."""
-    return (
-        s.scalar(
-            select(func.count())
-            .select_from(AclEntry)
-            .where(
-                or_(
-                    and_(
-                        AclEntry.resource_kind == "page",
-                        AclEntry.resource_path == page_path,
-                    ),
-                    and_(
-                        AclEntry.resource_kind == "folder",
-                        AclEntry.resource_path.in_(folder_paths),
-                    ),
-                )
+    conditions: list[ColumnElement[bool]] = []
+    if page_path and _is_md_page(page_path):
+        conditions.append(
+            and_(
+                AclEntry.resource_kind == "page",
+                AclEntry.resource_path == page_path,
             )
         )
-        > 0
+    if folder_paths:
+        conditions.append(
+            and_(
+                AclEntry.resource_kind == "folder",
+                AclEntry.resource_path.in_(folder_paths),
+            )
+        )
+    if not conditions:
+        return False
+    return (
+        s.scalar(select(func.count()).select_from(AclEntry).where(or_(*conditions))) > 0
     )
 
 
@@ -459,9 +476,11 @@ def _grants_for_principal(
                 AclEntry.principal_id.in_(group_ids),
             )
         )
-    resource_clauses = [
-        and_(AclEntry.resource_kind == "page", AclEntry.resource_path == page_path),
-    ]
+    resource_clauses: list[ColumnElement[bool]] = []
+    if page_path and _is_md_page(page_path):
+        resource_clauses.append(
+            and_(AclEntry.resource_kind == "page", AclEntry.resource_path == page_path)
+        )
     if folder_paths:
         resource_clauses.append(
             and_(
@@ -469,6 +488,11 @@ def _grants_for_principal(
                 AclEntry.resource_path.in_(folder_paths),
             )
         )
+    if not resource_clauses:
+        # Should never happen: every resource is either a page (with at least
+        # the root ancestor) or a folder (which yields the folder itself and
+        # its ancestors). Defensive fallback to avoid a pointless OR () clause.
+        resource_clauses.append(literal(False))
     return select(AclEntry).where(or_(*principal_clauses), or_(*resource_clauses))
 
 
