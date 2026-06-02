@@ -355,3 +355,9 @@ textarea::placeholder {
 .scroll-x-hidden::-webkit-scrollbar {
   display: none;
 }
+
+/* Inline highlight for commented spans (CSS Custom Highlight API). The wiki
+   page registers Ranges under this name via paintCommentHighlights(). */
+::highlight(wiki-comment) {
+  background-color: var(--color-accent-subtle-bg);
+}

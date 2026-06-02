@@ -116,3 +116,98 @@ export function selectionToAnchor(article: HTMLElement, body: string): CommentDr
   const endOffset = startOffset + text.length;
   return { startOffset, endOffset, quotedText: body.slice(startOffset, endOffset) };
 }
+
+// --------------------------------------------------------------------------- //
+// Inline highlights — paint commented spans via the CSS Custom Highlight API  //
+// (registers Ranges, no DOM mutation, so it doesn't fight react-markdown).    //
+// --------------------------------------------------------------------------- //
+
+const HIGHLIGHT_NAME = "wiki-comment";
+
+export interface HighlightTarget {
+  startOffset: number;
+  endOffset: number;
+  quotedText: string;
+}
+
+// Minimal typings for the CSS Custom Highlight API (not in every TS lib yet).
+interface HighlightLike {
+  set(name: string, value: object): void;
+  delete(name: string): void;
+}
+type HighlightCtor = new (...ranges: Range[]) => object;
+
+function highlightRegistry(): HighlightLike | null {
+  const reg = (CSS as unknown as { highlights?: HighlightLike }).highlights;
+  return reg ?? null;
+}
+
+/** Build a DOM Range over the first occurrence of `needle` within `el`'s text. */
+function rangeForText(el: Element, needle: string): Range | null {
+  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+  const parts: { node: Text; start: number }[] = [];
+  let acc = "";
+  let n = walker.nextNode();
+  while (n) {
+    const t = n as Text;
+    parts.push({ node: t, start: acc.length });
+    acc += t.nodeValue ?? "";
+    n = walker.nextNode();
+  }
+  const idx = acc.indexOf(needle);
+  if (idx < 0) return null;
+  const end = idx + needle.length;
+  const startPart = parts.find((p) => p.start <= idx && idx < p.start + (p.node.length || 0));
+  const endPart = parts.find((p) => p.start < end && end <= p.start + (p.node.length || 0));
+  if (!startPart || !endPart) return null;
+  const range = document.createRange();
+  range.setStart(startPart.node, idx - startPart.start);
+  range.setEnd(endPart.node, end - endPart.start);
+  return range;
+}
+
+/** Repaint comment highlights over the rendered article. Pass an empty list to
+ * clear (e.g. when entering edit mode). No-op where the API is unsupported. */
+export function paintCommentHighlights(
+  article: HTMLElement,
+  body: string,
+  targets: HighlightTarget[],
+): void {
+  const reg = highlightRegistry();
+  const Ctor = (globalThis as { Highlight?: HighlightCtor }).Highlight;
+  if (!reg || !Ctor) return;
+
+  if (targets.length === 0) {
+    reg.delete(HIGHLIGHT_NAME);
+    return;
+  }
+
+  const starts = lineStartOffsets(body);
+  const blocks = Array.from(article.querySelectorAll<HTMLElement>("[data-sourcepos]"))
+    .map((el) => {
+      const pos = parseSourcePos(el.getAttribute("data-sourcepos") ?? "");
+      if (!pos) return null;
+      const bStart = offsetOf(starts, pos.startLine, pos.startCol);
+      const bEnd = offsetOf(starts, pos.endLine, pos.endCol);
+      return { el, bStart, bEnd, size: bEnd - bStart };
+    })
+    .filter((b): b is { el: HTMLElement; bStart: number; bEnd: number; size: number } => b !== null);
+
+  const ranges: Range[] = [];
+  for (const t of targets) {
+    // Innermost block whose source range contains the comment's start.
+    const candidates = blocks
+      .filter((b) => b.bStart <= t.startOffset && t.startOffset < b.bEnd)
+      .sort((a, b) => a.size - b.size);
+    for (const cand of candidates) {
+      const range = rangeForText(cand.el, t.quotedText);
+      if (range) {
+        ranges.push(range);
+        break;
+      }
+    }
+  }
+
+  if (ranges.length === 0) reg.delete(HIGHLIGHT_NAME);
+  else reg.set(HIGHLIGHT_NAME, new Ctor(...ranges));
+}

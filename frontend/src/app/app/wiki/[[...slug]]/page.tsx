@@ -30,7 +30,12 @@ import { ShareDialog } from "@/components/wiki/ShareDialog";
 import { CommentsPanel } from "@/components/wiki/CommentsPanel";
 import { FolderIcon, FileIcon } from "@/components/wiki/WikiIcons";
 import { apiFetch, ApiError } from "@/lib/api";
-import { selectionToAnchor, type CommentDraft } from "@/lib/commentAnchor";
+import { listComments } from "@/lib/comments";
+import {
+  paintCommentHighlights,
+  selectionToAnchor,
+  type CommentDraft,
+} from "@/lib/commentAnchor";
 import { rehypeSourcePos } from "@/lib/rehypeSourcePos";
 import { useRequireAuth } from "@/lib/auth";
 import { useDrafting } from "@/lib/drafting";
@@ -51,7 +56,11 @@ import {
   fetchFileHistory,
   type FileDiffResponse,
 } from "@/lib/wiki";
-import type { DocumentActivity, DocumentActivityResponse } from "@/types";
+import type {
+  CommentThreadView,
+  DocumentActivity,
+  DocumentActivityResponse,
+} from "@/types";
 
 interface DocEntry {
   path: string;
@@ -1415,10 +1424,58 @@ function FileViewer({ path }: { path: string }) {
   // composed; `selTool` is the floating "Comment" affordance shown on select.
   const [commentsOpen, setCommentsOpen] = useState(false);
   const [commentDraft, setCommentDraft] = useState<CommentDraft | null>(null);
+  const [commentThreads, setCommentThreads] = useState<CommentThreadView[]>([]);
   const [selTool, setSelTool] = useState<{ x: number; y: number; draft: CommentDraft } | null>(
     null,
   );
   const articleRef = useRef<HTMLElement | null>(null);
+  // Page owns the comment threads (so highlights render even with the panel
+  // closed). Auto-open the panel once per path when a page has comments.
+  const autoOpenedPathRef = useRef<string | null>(null);
+
+  const refreshComments = useCallback(async () => {
+    try {
+      const t = await listComments(path);
+      setCommentThreads(t);
+      if (t.length > 0 && autoOpenedPathRef.current !== path) {
+        autoOpenedPathRef.current = path;
+        setCommentsOpen(true);
+      }
+    } catch {
+      // comments are non-critical chrome; ignore load failures
+    }
+  }, [path]);
+
+  useEffect(() => {
+    autoOpenedPathRef.current = null;
+    setCommentThreads([]);
+    void refreshComments();
+  }, [refreshComments]);
+
+  // Paint Google-Docs-style highlights over the rendered article for each
+  // (non-orphaned) anchored comment. Cleared in edit/diff mode (no article).
+  useEffect(() => {
+    const el = articleRef.current;
+    if (!el || editing || viewingSha) {
+      if (el) paintCommentHighlights(el, body, []);
+      return;
+    }
+    const targets = commentThreads
+      .map((t) => t.root)
+      .filter(
+        (r) =>
+          r.status !== "orphaned" &&
+          r.start_offset !== null &&
+          r.end_offset !== null &&
+          r.quoted_text !== null,
+      )
+      .map((r) => ({
+        startOffset: r.start_offset as number,
+        endOffset: r.end_offset as number,
+        quotedText: r.quoted_text as string,
+      }));
+    paintCommentHighlights(el, body, targets);
+  }, [commentThreads, body, editing, viewingSha]);
 
   // On a text selection in the rendered article, offer a floating "Comment"
   // affordance anchored above the selection (render mode only).
@@ -2515,6 +2572,8 @@ function FileViewer({ path }: { path: string }) {
               path={path}
               headSha={headSha}
               draft={commentDraft}
+              threads={commentThreads}
+              onChanged={refreshComments}
               onDraftConsumed={() => setCommentDraft(null)}
               onClose={() => {
                 setCommentsOpen(false);
@@ -2589,6 +2648,8 @@ function FileViewer({ path }: { path: string }) {
               path={path}
               headSha={headSha}
               draft={commentDraft}
+              threads={commentThreads}
+              onChanged={refreshComments}
               onDraftConsumed={() => setCommentDraft(null)}
               onClose={() => {
                 setCommentsOpen(false);

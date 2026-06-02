@@ -1,14 +1,13 @@
 "use client";
 
 import { Button, Text } from "@onyx-ai/opal/components";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useState } from "react";
 
 import { useAuth } from "@/lib/auth";
 import {
   createComment,
   deleteComment,
   editComment,
-  listComments,
   reopenThread,
   replyToComment,
   resolveThread,
@@ -25,8 +24,11 @@ interface Props {
   path: string;
   headSha: string | null;
   draft: CommentDraft | null;
+  /** Threads are owned by the page (so highlights stay in sync); the panel
+   * renders them and calls `onChanged` after a mutation to trigger a refetch. */
+  threads: CommentThreadView[];
+  onChanged: () => void | Promise<void>;
   onDraftConsumed: () => void;
-  onThreadsChange?: (threads: CommentThreadView[]) => void;
   onClose: () => void;
   fullHeight?: boolean;
 }
@@ -46,37 +48,15 @@ export function CommentsPanel({
   path,
   headSha,
   draft,
+  threads,
+  onChanged,
   onDraftConsumed,
-  onThreadsChange,
   onClose,
   fullHeight,
 }: Props) {
   const { user } = useAuth();
-  const [threads, setThreads] = useState<CommentThreadView[]>([]);
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-
-  const onThreadsChangeRef = useRef(onThreadsChange);
-  onThreadsChangeRef.current = onThreadsChange;
-
-  const refresh = useCallback(async () => {
-    try {
-      const t = await listComments(path);
-      setThreads(t);
-      onThreadsChangeRef.current?.(t);
-      setError(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "failed to load comments");
-    } finally {
-      setLoading(false);
-    }
-  }, [path]);
-
-  useEffect(() => {
-    setLoading(true);
-    void refresh();
-  }, [refresh]);
 
   // Returns true on success so callers can clear/close their input only when
   // the action actually went through.
@@ -85,7 +65,7 @@ export function CommentsPanel({
       setBusy(true);
       try {
         await fn();
-        await refresh();
+        await onChanged();
         return true;
       } catch (e) {
         setError(e instanceof Error ? e.message : "action failed");
@@ -94,7 +74,7 @@ export function CommentsPanel({
         setBusy(false);
       }
     },
-    [refresh],
+    [onChanged],
   );
 
   const total = threads.length;
@@ -138,11 +118,7 @@ export function CommentsPanel({
           />
         )}
 
-        {loading ? (
-          <Text font="secondary-body" color="text-03">
-            Loading…
-          </Text>
-        ) : total === 0 && !draft ? (
+        {total === 0 && !draft ? (
           <Text font="secondary-body" color="text-03">
             No comments yet. Select text in the page to add one.
           </Text>
@@ -231,6 +207,9 @@ function Thread({
   const [replyOpen, setReplyOpen] = useState(false);
   const [replyBody, setReplyBody] = useState("");
   const resolved = root.status === "resolved";
+  // One flat conversation (Google-Docs style): the root and every reply render
+  // uniformly, appended in order — no nesting/indentation.
+  const conversation = [root, ...thread.replies];
 
   return (
     <div className={`${styles.thread} ${resolved ? styles.threadResolved : ""}`}>
@@ -241,77 +220,62 @@ function Thread({
         {root.quoted_text}
       </div>
 
-      <Comment
-        comment={root}
-        canModify={isAdmin || root.author_user_id === selfId}
-        selfId={selfId}
-        busy={busy}
-        onEdit={onEdit}
-        onDelete={onDelete}
-      />
-
-      <div className={styles.actions}>
-        <Button
-          prominence="tertiary"
-          size="sm"
-          disabled={busy}
-          onClick={() => setReplyOpen((v) => !v)}
-        >
-          Reply
-        </Button>
-        {resolved ? (
-          <Button prominence="tertiary" size="sm" disabled={busy} onClick={onReopen}>
-            Reopen
-          </Button>
-        ) : (
-          <Button prominence="tertiary" size="sm" disabled={busy} onClick={onResolve}>
-            Resolve
-          </Button>
-        )}
+      <div className={styles.threadBody}>
+        {conversation.map((c) => (
+          <Comment
+            key={c.id}
+            comment={c}
+            canModify={isAdmin || c.author_user_id === selfId}
+            selfId={selfId}
+            busy={busy}
+            onEdit={onEdit}
+            onDelete={onDelete}
+          />
+        ))}
       </div>
 
-      {(thread.replies.length > 0 || replyOpen) && (
-        <div className={styles.replies}>
-          {thread.replies.map((r) => (
-            <Comment
-              key={r.id}
-              comment={r}
-              canModify={isAdmin || r.author_user_id === selfId}
-              selfId={selfId}
-              busy={busy}
-              onEdit={onEdit}
-              onDelete={onDelete}
-            />
-          ))}
-          {replyOpen && (
-            <div>
-              <textarea
-                className={styles.textarea}
-                placeholder="Reply…"
-                value={replyBody}
-                autoFocus
-                onChange={(e) => setReplyBody(e.target.value)}
-              />
-              <div className={styles.composeRow}>
-                <Button prominence="tertiary" size="sm" onClick={() => setReplyOpen(false)}>
-                  Cancel
-                </Button>
-                <Button
-                  variant="action"
-                  size="sm"
-                  disabled={busy || !replyBody.trim()}
-                  onClick={async () => {
-                    // Clear/close only on success so a failed reply isn't lost.
-                    if (await onReply(replyBody.trim())) {
-                      setReplyBody("");
-                      setReplyOpen(false);
-                    }
-                  }}
-                >
-                  Reply
-                </Button>
-              </div>
-            </div>
+      {replyOpen ? (
+        <div className={styles.replyBox}>
+          <textarea
+            className={styles.textarea}
+            placeholder="Reply…"
+            value={replyBody}
+            autoFocus
+            onChange={(e) => setReplyBody(e.target.value)}
+          />
+          <div className={styles.composeRow}>
+            <Button prominence="tertiary" size="sm" onClick={() => setReplyOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="action"
+              size="sm"
+              disabled={busy || !replyBody.trim()}
+              onClick={async () => {
+                // Clear/close only on success so a failed reply isn't lost.
+                if (await onReply(replyBody.trim())) {
+                  setReplyBody("");
+                  setReplyOpen(false);
+                }
+              }}
+            >
+              Reply
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <div className={styles.actions}>
+          <Button prominence="tertiary" size="sm" disabled={busy} onClick={() => setReplyOpen(true)}>
+            Reply
+          </Button>
+          {resolved ? (
+            <Button prominence="tertiary" size="sm" disabled={busy} onClick={onReopen}>
+              Reopen
+            </Button>
+          ) : (
+            <Button prominence="tertiary" size="sm" disabled={busy} onClick={onResolve}>
+              Resolve
+            </Button>
           )}
         </div>
       )}
