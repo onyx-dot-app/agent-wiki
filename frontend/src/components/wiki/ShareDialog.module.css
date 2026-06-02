@@ -1,0 +1,156 @@
+/* Layout only — typography, inputs, menus, and buttons come from OPAL. */
+
+.scrim {
+  position: fixed;
+  inset: 0;
+  background: var(--color-overlay);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: max(20px, min(80px, 5vh)) 16px;
+  z-index: 100;
+}
+
+.dialog {
+  background: var(--color-bg-panel);
+  border-radius: var(--radius-lg);
+  width: min(480px, 100%);
+  max-height: calc(100vh - 80px);
+  box-shadow: var(--shadow-modal);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 16px;
+  background: var(--color-bg-page);
+}
+.headerIcon {
+  display: inline-flex;
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--color-text-secondary);
+}
+.headerText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+.content {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  padding: 12px;
+  overflow: hidden;
+}
+
+/* Input + general-access stay fixed; only the people list scrolls. */
+.cardStack {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  gap: 8px;
+}
+/* General-access row: a subtle grey-fill container (matching the grantee
+   rows) holding the lock/globe icon and the scope + permission controls.
+   Shares the grantee-row min-height so every section is the same height. */
+.generalRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  min-height: 48px;
+  padding: 6px 8px;
+  background: var(--color-bg-sunken);
+  border-radius: var(--radius-md);
+}
+/* Scope + permission are white-fill boxes on the grey container — no border.
+   Scope is the wider of the two. */
+.scopeBox,
+.permBox {
+  display: flex;
+  min-width: 0;
+  background: var(--color-bg-page);
+  border-radius: var(--radius-sm);
+}
+.scopeBox {
+  flex: 1.7 1.7 0;
+}
+.permBox {
+  flex: 1 1 0;
+}
+
+/* Ref-forwarding wrappers: OPAL InputTypeIn / OpenButton don't forward refs,
+   so Popover.Anchor / Popover.Trigger asChild must wrap them in a real
+   element for Radix to anchor the floating menu. */
+.anchorWrap {
+  display: block;
+  width: 100%;
+  flex-shrink: 0;
+}
+.menuTrigger {
+  display: inline-flex;
+}
+
+/* The people list is the only scrollable region when the modal hits its
+   max height; rows above (input, general-access) stay pinned. */
+.list {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  gap: 4px;
+  padding-right: 2px;
+}
+/* Each grantee/owner row is its own slightly shaded container (fill, no border). */
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  min-height: 48px;
+  padding: 6px 8px;
+  background: var(--color-bg-sunken);
+  border-radius: var(--radius-md);
+}
+.rowText {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+.rowRight {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.inheritedIcon {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+}
+
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 16px;
+  background: var(--color-bg-page);
+}
+.footerRight {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}

@@ -4,13 +4,14 @@ Free functions over the ``Group`` and ``GroupMember`` ORM models, same
 shape as ``app.auth.users``. All return plain dicts so callers don't
 depend on the ORM.
 """
+
 from __future__ import annotations
 
 import logging
 import uuid
-from typing import Any
+from typing import Any, Iterable
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 
 from app.db.models import Group, GroupMember, User
 from app.db.session import session
@@ -66,6 +67,16 @@ def get(group_id: str) -> dict[str, Any] | None:
     with session() as s:
         g = s.get(Group, group_id)
         return _to_dict(g) if g else None
+
+
+def get_many(group_ids: Iterable[str]) -> dict[str, dict[str, Any]]:
+    ids = list(dict.fromkeys(group_ids))
+    if not ids:
+        return {}
+    stmt = select(Group).where(Group.id.in_(ids))
+    with session() as s:
+        rows = s.scalars(stmt).all()
+        return {g.id: _to_dict(g) for g in rows}
 
 
 def get_by_name(name: str) -> dict[str, Any] | None:
@@ -126,6 +137,24 @@ def members(group_id: str) -> list[dict[str, Any]]:
         ]
 
 
+def groups_by_user() -> dict[str, list[str]]:
+    """Map each user id to the sorted names of groups they belong to.
+
+    One join query for the whole table — used by the admin users list to
+    show each user's groups without an N+1.
+    """
+    stmt = (
+        select(GroupMember.user_id, Group.name)
+        .join(Group, Group.id == GroupMember.group_id)
+        .order_by(Group.name.asc())
+    )
+    out: dict[str, list[str]] = {}
+    with session() as s:
+        for uid, name in s.execute(stmt).all():
+            out.setdefault(uid, []).append(name)
+    return out
+
+
 def group_ids_for_user(user_id: str) -> list[str]:
     """All group ids the user belongs to. Used by the ACL resolver to
     expand a user into the set of group principals it satisfies."""
@@ -135,6 +164,24 @@ def group_ids_for_user(user_id: str) -> list[str]:
                 select(GroupMember.group_id).where(GroupMember.user_id == user_id)
             ).all()
         )
+
+
+def member_counts() -> dict[str, int]:
+    """Per-group member count (``group_members`` rows). One aggregate query,
+    no N+1. Groups with no members are absent (callers default to 0).
+
+    Page/folder grant counts live in ``app.wiki.acl.group_grant_counts`` so
+    all ACL-table reads stay inside the ACL module.
+    """
+    with session() as s:
+        return {
+            gid: int(n)
+            for gid, n in s.execute(
+                select(GroupMember.group_id, func.count()).group_by(
+                    GroupMember.group_id
+                )
+            ).all()
+        }
 
 
 def add_member(group_id: str, user_id: str) -> None:

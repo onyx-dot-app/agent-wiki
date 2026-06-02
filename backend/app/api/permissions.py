@@ -1,7 +1,9 @@
 """FastAPI port of ``app/api/permissions.py`` (Phase 3)."""
+
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
@@ -36,16 +38,34 @@ log = logging.getLogger(__name__)
 
 @router.get("/groups", response_model=GroupListResponse)
 def list_groups(user: User = Depends(require_user)) -> GroupListResponse:
-    """Admin sees all groups; a regular user sees only the ones they're in."""
-    rows = groups_repo.list_all() if user.is_admin else groups_repo.list_for_user(user.id)
-    return GroupListResponse(groups=[GroupOut(**g) for g in rows])
+    """Admin sees all groups; a regular user sees only the ones they're in.
+
+    Each group is enriched with member / page / folder counts for the
+    groups list UI.
+    """
+    rows = (
+        groups_repo.list_all() if user.is_admin else groups_repo.list_for_user(user.id)
+    )
+    member_counts = groups_repo.member_counts()
+    grant_counts = acl.group_grant_counts()
+    groups: list[GroupOut] = []
+    for g in rows:
+        grants = grant_counts.get(g["id"], {})
+        groups.append(
+            GroupOut(
+                **g,
+                member_count=member_counts.get(g["id"], 0),
+                page_count=grants.get("pages", 0),
+                folder_count=grants.get("folders", 0),
+            )
+        )
+    return GroupListResponse(groups=groups)
 
 
-@router.post(
-    "/groups", response_model=GroupOut, status_code=status.HTTP_201_CREATED
-)
+@router.post("/groups", response_model=GroupOut, status_code=status.HTTP_201_CREATED)
 def create_group(
-    req: GroupCreateRequest, actor: User = Depends(require_admin),
+    req: GroupCreateRequest,
+    actor: User = Depends(require_admin),
 ) -> GroupOut:
     try:
         gid = groups_repo.create(req.name, req.description, created_by_user_id=actor.id)
@@ -58,7 +78,8 @@ def create_group(
 
 @router.get("/groups/{group_id}", response_model=GroupMembersResponse)
 def get_group(
-    group_id: str, user: User = Depends(require_user),
+    group_id: str,
+    user: User = Depends(require_user),
 ) -> GroupMembersResponse:
     g = groups_repo.get(group_id)
     if g is None:
@@ -71,7 +92,8 @@ def get_group(
 
 @router.delete("/groups/{group_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_group(
-    group_id: str, _actor: User = Depends(require_admin),
+    group_id: str,
+    _actor: User = Depends(require_admin),
 ) -> Response:
     if groups_repo.get(group_id) is None:
         raise HTTPException(status_code=404, detail="not found")
@@ -79,9 +101,7 @@ def delete_group(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.post(
-    "/groups/{group_id}/members", status_code=status.HTTP_204_NO_CONTENT
-)
+@router.post("/groups/{group_id}/members", status_code=status.HTTP_204_NO_CONTENT)
 def add_group_member(
     group_id: str,
     req: GroupMemberAddRequest,
@@ -100,7 +120,9 @@ def add_group_member(
     status_code=status.HTTP_204_NO_CONTENT,
 )
 def remove_group_member(
-    group_id: str, user_id: str, _actor: User = Depends(require_admin),
+    group_id: str,
+    user_id: str,
+    _actor: User = Depends(require_admin),
 ) -> Response:
     if groups_repo.get(group_id) is None:
         raise HTTPException(status_code=404, detail="not found")
@@ -131,7 +153,8 @@ def _is_owner_or_admin(path: str, user: User) -> bool:
 
 @router.get("/wiki/acl", response_model=AclListResponse)
 def list_acl(
-    path: str = Query(""), user: User = Depends(require_user),
+    path: str = Query(""),
+    user: User = Depends(require_user),
 ) -> AclListResponse:
     if not path:
         raise HTTPException(status_code=400, detail="path required")
@@ -141,11 +164,58 @@ def list_acl(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if not _can_share_path(path, user):
         raise HTTPException(status_code=403, detail="forbidden")
-    entries = [AclEntryOut(**e) for e in acl.list_for_path(path)]
+    owner_id = acl.get_owner(path)
+    rows = acl.list_for_path(path)
+    user_ids = {
+        e["principal_id"]
+        for e in rows
+        if e["principal_kind"] == "user" and e.get("principal_id") is not None
+    }
+    if owner_id is not None:
+        user_ids.add(owner_id)
+    group_ids = {
+        e["principal_id"]
+        for e in rows
+        if e["principal_kind"] == "group" and e.get("principal_id") is not None
+    }
+    users = users_repo.get_many(user_ids)
+    groups = groups_repo.get_many(group_ids)
+    entries = [_entry_out(e, users, groups) for e in rows]
+    owner_email = owner_name = None
+    if owner_id is not None:
+        owner = users.get(owner_id)
+        if owner is not None:
+            owner_email, owner_name = owner["email"], owner["name"]
     return AclListResponse(
         path=path,
-        owner_user_id=acl.get_owner(path),
+        owner_user_id=owner_id,
+        owner_email=owner_email,
+        owner_name=owner_name,
         entries=entries,
+    )
+
+
+def _entry_out(
+    e: dict[str, Any],
+    users: dict[str, dict[str, Any]],
+    groups: dict[str, dict[str, Any]],
+) -> AclEntryOut:
+    """Serialize an ACL row, resolving the principal to a display label."""
+    principal_email = principal_name = group_name = None
+    pid = e.get("principal_id")
+    if pid is not None and e["principal_kind"] == "user":
+        u = users.get(pid)
+        if u is not None:
+            principal_email, principal_name = u["email"], u["name"]
+    elif pid is not None and e["principal_kind"] == "group":
+        g = groups.get(pid)
+        if g is not None:
+            group_name = g["name"]
+    return AclEntryOut(
+        **e,
+        principal_email=principal_email,
+        principal_name=principal_name,
+        group_name=group_name,
     )
 
 
@@ -155,7 +225,8 @@ def list_acl(
     status_code=status.HTTP_201_CREATED,
 )
 def create_acl_entry(
-    req: AclGrantRequest, user: User = Depends(require_user),
+    req: AclGrantRequest,
+    user: User = Depends(require_user),
 ) -> AclGrantResponse:
     try:
         path = filesystem.safe_rel_path(req.resource_path)
@@ -187,7 +258,8 @@ def create_acl_entry(
 
 @router.delete("/wiki/acl/{entry_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_acl_entry(
-    entry_id: str, user: User = Depends(require_user),
+    entry_id: str,
+    user: User = Depends(require_user),
 ) -> Response:
     # We need the entry's resource_path to know whose owner-check to
     # apply. Fetch via the same code path the listing uses.
@@ -210,11 +282,10 @@ def delete_acl_entry(
 # --------------------------------------------------------------------------- #
 
 
-@router.post(
-    "/wiki/transfer-ownership", response_model=TransferOwnershipResponse
-)
+@router.post("/wiki/transfer-ownership", response_model=TransferOwnershipResponse)
 def transfer_ownership(
-    req: TransferOwnershipRequest, user: User = Depends(require_user),
+    req: TransferOwnershipRequest,
+    user: User = Depends(require_user),
 ) -> TransferOwnershipResponse:
     try:
         path = filesystem.safe_rel_path(req.path)
@@ -222,13 +293,18 @@ def transfer_ownership(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if not _is_owner_or_admin(path, user):
         raise HTTPException(status_code=403, detail="forbidden")
-    if req.new_owner_user_id is not None and users_repo.get_by_id(req.new_owner_user_id) is None:
+    if (
+        req.new_owner_user_id is not None
+        and users_repo.get_by_id(req.new_owner_user_id) is None
+    ):
         raise HTTPException(status_code=404, detail="user not found")
     acl.transfer_owner(path, req.new_owner_user_id)
     log.info(
         "ownership transferred path=%s new_owner=%s",
-        path, req.new_owner_user_id or "<cleared>",
+        path,
+        req.new_owner_user_id or "<cleared>",
     )
     return TransferOwnershipResponse(
-        path=path, owner_user_id=req.new_owner_user_id,
+        path=path,
+        owner_user_id=req.new_owner_user_id,
     )

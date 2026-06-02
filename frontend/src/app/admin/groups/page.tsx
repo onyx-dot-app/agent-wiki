@@ -1,14 +1,31 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 
-import { Button } from "@onyx-ai/opal/components";
-import { LoadingSpinner } from "@/components/common/LoadingSpinner";
+import {
+  Button,
+  InputTypeIn,
+  LineItemButton,
+  OpenButton,
+  Popover,
+  PopoverMenu,
+  Text,
+} from "@onyx-ai/opal/components";
+import {
+  SvgChevronLeft,
+  SvgChevronRight,
+  SvgPlus,
+  SvgTrash,
+  SvgUser,
+  SvgUserPlus,
+  SvgUsers,
+  SvgX,
+} from "@onyx-ai/opal/icons";
+
+import { Avatar } from "@/components/common/Avatar";
 import { BackLink, PageHeader } from "@/components/common/PageHeader";
 import { RequireAdmin } from "@/components/RequireAdmin";
-import { ApiError, apiFetch } from "@/lib/api";
-import { color, radius } from "@/lib/theme";
-import { useIsMobile } from "@/lib/viewport";
+import { ApiError } from "@/lib/api";
 import {
   addGroupMember,
   createGroup,
@@ -18,22 +35,33 @@ import {
   useGroups,
   type Group,
 } from "@/lib/permissions";
+import { useIsMobile } from "@/lib/viewport";
+import { displayName, initials, useAdminUsers } from "@/lib/users";
 
-interface AdminUser {
-  id: string;
-  email: string;
-  name: string | null;
+import styles from "./groups.module.css";
+
+function groupSub(g: Group): string {
+  const parts: string[] = [];
+  if (g.folder_count > 0) {
+    parts.push(`${g.folder_count} ${g.folder_count === 1 ? "folder" : "folders"}`);
+  }
+  if (g.page_count > 0) {
+    parts.push(`${g.page_count} wiki ${g.page_count === 1 ? "page" : "pages"}`);
+  }
+  return parts.length > 0 ? parts.join(" · ") : "No private pages";
 }
 
 export default function AdminGroupsPage() {
   const isMobile = useIsMobile();
   return (
     <RequireAdmin>
-      <main style={{ padding: isMobile ? "16px 12px" : "24px 32px", maxWidth: 960 }}>
+      <main
+        style={{ padding: isMobile ? "16px 12px" : "24px 32px", maxWidth: 880 }}
+      >
         <BackLink />
         <PageHeader
           title="Groups"
-          description="Groups bundle users so wiki pages can be shared with the whole group at once."
+          description="Groups bundle users so wiki pages can be shared with everyone at once."
         />
         <GroupsManager />
       </main>
@@ -42,13 +70,19 @@ export default function AdminGroupsPage() {
 }
 
 function GroupsManager() {
-  const isMobile = useIsMobile();
   const { groups, error, isLoading, refresh } = useGroups();
   const [selected, setSelected] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [busy, setBusy] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return groups.filter((g) => !q || g.name.toLowerCase().includes(q));
+  }, [groups, query]);
 
   async function onCreate(e: React.FormEvent) {
     e.preventDefault();
@@ -59,10 +93,11 @@ function GroupsManager() {
       const g = await createGroup(name.trim(), description.trim() || undefined);
       setName("");
       setDescription("");
+      setCreating(false);
       await refresh();
       setSelected(g.id);
     } catch (err) {
-      setCreateError(err instanceof Error ? err.message : "failed");
+      setCreateError(err instanceof Error ? err.message : "Failed to create group");
     } finally {
       setBusy(false);
     }
@@ -75,115 +110,143 @@ function GroupsManager() {
     await refresh();
   }
 
-  if (error) {
-    return <div style={{ color: color.state.danger.fg }}>{error.message}</div>;
+  if (selected) {
+    const g = groups.find((x) => x.id === selected);
+    return (
+      <GroupDetail
+        groupId={selected}
+        onBack={() => setSelected(null)}
+        onDelete={g ? () => void onDelete(g) : undefined}
+      />
+    );
   }
 
+  if (error)
+    return (
+      <Text font="secondary-body" color="text-02">
+        {error.message}
+      </Text>
+    );
+
   return (
-    <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "320px 1fr", gap: isMobile ? 16 : 24 }}>
-      <div>
-        <form onSubmit={onCreate} style={{ marginBottom: 16 }}>
-          <h3 style={{ marginTop: 0, fontSize: 14 }}>New group</h3>
-          <input
+    <>
+      <div className={styles.toolbar}>
+        <div className={styles.searchWrap}>
+          <InputTypeIn
+            searchIcon
+            placeholder="Search groups…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+        </div>
+        <Button
+          variant="action"
+          size="md"
+          rightIcon={SvgPlus}
+          onClick={() => setCreating((v) => !v)}
+        >
+          New Group
+        </Button>
+      </div>
+
+      {creating && (
+        <form className={styles.createCard} onSubmit={onCreate}>
+          <InputTypeIn
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="name (e.g. eng)"
-            style={inputStyle}
+            placeholder="Group name (e.g. Engineering)"
           />
-          <input
+          <InputTypeIn
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            placeholder="description (optional)"
-            style={{ ...inputStyle, marginTop: 6 }}
+            placeholder="Description (optional)"
           />
-          <div style={{ marginTop: 8 }}>
+          <div className={styles.createRow}>
+            <Button type="submit" variant="action" size="md" disabled={busy || !name.trim()}>
+              Create
+            </Button>
             <Button
-              type="submit"
-              variant="action"
-              size="sm"
-              disabled={busy || !name.trim()}
+              type="button"
+              prominence="tertiary"
+              size="md"
+              onClick={() => setCreating(false)}
             >
-              Create group
+              Cancel
             </Button>
           </div>
           {createError && (
-            <div style={{ color: color.state.danger.fg, marginTop: 8, fontSize: 13 }}>{createError}</div>
+            <Text font="secondary-body" color="text-02">
+              {createError}
+            </Text>
           )}
         </form>
+      )}
 
-        <h3 style={{ fontSize: 14 }}>Groups</h3>
-        {isLoading ? (
-          <LoadingSpinner />
-        ) : groups.length === 0 ? (
-          <div style={{ color: color.text.muted, fontSize: 13 }}>No groups yet.</div>
-        ) : (
-          <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
-            {groups.map((g) => (
-              <li key={g.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0" }}>
-                <button
-                  type="button"
-                  onClick={() => setSelected(g.id)}
-                  style={{
-                    flex: 1,
-                    textAlign: "left",
-                    background: selected === g.id ? color.accent.subtleBg : color.bg.page,
-                    fontWeight: selected === g.id ? 600 : 400,
-                    border: "none",
-                    borderRadius: radius.sm,
-                    padding: "5px 8px",
-                    fontSize: 13,
-                    cursor: "pointer",
-                    color: color.text.primary,
-                  }}
-                >
-                  {g.name}
-                </button>
-                <Button size="sm" variant="danger" onClick={() => void onDelete(g)}>
-                  Delete
-                </Button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-
-      <div>
-        {selected ? <GroupDetail groupId={selected} /> : (
-          <div style={{ color: color.text.muted, fontSize: 13 }}>Select a group to manage members.</div>
-        )}
-      </div>
-    </div>
+      {isLoading ? (
+        <Text font="secondary-body" color="text-03">
+          Loading…
+        </Text>
+      ) : filtered.length === 0 ? (
+        <Text font="secondary-body" color="text-03">
+          {query ? "No groups match your search." : "No groups yet."}
+        </Text>
+      ) : (
+        <div className={styles.cards}>
+          {filtered.map((g) => (
+            <div key={g.id} className={styles.card}>
+              <LineItemButton
+                icon={SvgUsers}
+                title={g.name}
+                description={groupSub(g)}
+                sizePreset="main-content"
+                variant="section"
+                rightChildren={
+                  <span className={styles.cardRight}>
+                    <Text font="secondary-body" color="text-03">
+                      {`${g.member_count} ${g.member_count === 1 ? "Member" : "Members"}`}
+                    </Text>
+                    <SvgChevronRight size={18} />
+                  </span>
+                }
+                onClick={() => setSelected(g.id)}
+              />
+            </div>
+          ))}
+        </div>
+      )}
+    </>
   );
 }
 
-function GroupDetail({ groupId }: { groupId: string }) {
+function GroupDetail({
+  groupId,
+  onBack,
+  onDelete,
+}: {
+  groupId: string;
+  onBack: () => void;
+  onDelete?: () => void;
+}) {
   const { group, members, isLoading, refresh } = useGroup(groupId);
-  const [allUsers, setAllUsers] = useState<AdminUser[]>([]);
-  const [pickedId, setPickedId] = useState("");
+  const { users } = useAdminUsers();
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    void apiFetch<{ users: AdminUser[] }>("/admin/users")
-      .then((r) => setAllUsers(r.users))
-      .catch(() => {});
-  }, []);
-
   const candidates = useMemo(() => {
     const memberIds = new Set(members.map((m) => m.id));
-    return allUsers.filter((u) => !memberIds.has(u.id));
-  }, [allUsers, members]);
+    return users.filter((u) => !memberIds.has(u.id));
+  }, [users, members]);
 
-  async function add() {
-    if (!pickedId) return;
+  async function add(userId: string) {
     setBusy(true);
     setError(null);
     try {
-      await addGroupMember(groupId, pickedId);
-      setPickedId("");
+      await addGroupMember(groupId, userId);
+      setPickerOpen(false);
       await refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "failed");
+      setError(err instanceof Error ? err.message : "Failed to add member");
     } finally {
       setBusy(false);
     }
@@ -201,68 +264,117 @@ function GroupDetail({ groupId }: { groupId: string }) {
     }
   }
 
-  if (isLoading || !group) return <LoadingSpinner />;
+  if (isLoading || !group)
+    return (
+      <Text font="secondary-body" color="text-03">
+        Loading…
+      </Text>
+    );
 
   return (
     <div>
-      <h2 style={{ margin: 0 }}>{group.name}</h2>
-      {group.description && <p style={{ marginTop: 4, color: color.text.muted }}>{group.description}</p>}
-
-      <h3 style={{ fontSize: 14, marginTop: 24 }}>Add member</h3>
-      <div style={{ display: "flex", gap: 8 }}>
-        <select
-          value={pickedId}
-          onChange={(e) => setPickedId(e.target.value)}
-          style={{ ...inputStyle, flex: 1 }}
-        >
-          <option value="">Choose a user…</option>
-          {candidates.map((u) => (
-            <option key={u.id} value={u.id}>
-              {u.email} {u.name ? `(${u.name})` : ""}
-            </option>
-          ))}
-        </select>
-        <Button onClick={() => void add()} disabled={!pickedId || busy}>
-          Add
-        </Button>
+      <Button prominence="tertiary" size="sm" icon={SvgChevronLeft} onClick={onBack}>
+        All groups
+      </Button>
+      <div className={styles.detailHead}>
+        <SvgUsers size={22} />
+        <Text as="h2" font="heading-h3">
+          {group.name}
+        </Text>
+        <span className={styles.detailSpacer} />
+        {onDelete && (
+          <Button
+            prominence="tertiary"
+            size="sm"
+            variant="danger"
+            icon={SvgTrash}
+            onClick={onDelete}
+          >
+            Delete group
+          </Button>
+        )}
       </div>
-      {error && <div style={{ color: color.state.danger.fg, marginTop: 8, fontSize: 13 }}>{error}</div>}
+      {group.description && (
+        <Text font="secondary-body" color="text-03">
+          {group.description}
+        </Text>
+      )}
 
-      <h3 style={{ fontSize: 14, marginTop: 24 }}>Members ({members.length})</h3>
+      <div className={styles.sectionTitle}>
+        <Text font="main-ui-action" color="text-02">
+          Add member
+        </Text>
+      </div>
+      <div className={styles.addRow}>
+        <Popover open={pickerOpen} onOpenChange={setPickerOpen}>
+          <Popover.Trigger asChild>
+            <span className={styles.pickerTrigger}>
+              <OpenButton variant="select-light" size="md" icon={SvgUserPlus}>
+                {candidates.length ? "Choose a user…" : "No users to add"}
+              </OpenButton>
+            </span>
+          </Popover.Trigger>
+          <Popover.Content width="trigger" align="start" sideOffset={4}>
+            <PopoverMenu>
+              {candidates.map((u) => (
+                <LineItemButton
+                  key={u.id}
+                  icon={SvgUser}
+                  title={displayName({ name: u.name, email: u.email })}
+                  description={u.email}
+                  sizePreset="main-ui"
+                  variant="section"
+                  onClick={() => void add(u.id)}
+                />
+              ))}
+            </PopoverMenu>
+          </Popover.Content>
+        </Popover>
+      </div>
+      {error && (
+        <Text font="secondary-body" color="text-02">
+          {error}
+        </Text>
+      )}
+
+      <div className={styles.sectionTitle}>
+        <Text font="main-ui-action" color="text-02">
+          {`Members (${members.length})`}
+        </Text>
+      </div>
       {members.length === 0 ? (
-        <div style={{ color: color.text.muted, fontSize: 13 }}>No members yet.</div>
+        <Text font="secondary-body" color="text-03">
+          No members yet.
+        </Text>
       ) : (
-        <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
-          {members.map((m) => (
-            <li
-              key={m.id}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                padding: "8px 0",
-                borderBottom: `1px solid ${color.border.subtle}`,
-              }}
+        members.map((m) => (
+          <div key={m.id} className={styles.memberRow}>
+            <Avatar
+              label={initials({ name: m.name, email: m.email })}
+              size={28}
+              title={displayName({ name: m.name, email: m.email })}
+            />
+            <div className={styles.memberText}>
+              <Text font="main-ui-body" nowrap>
+                {displayName({ name: m.name, email: m.email })}
+              </Text>
+              <Text font="secondary-body" color="text-03" nowrap>
+                {m.email}
+              </Text>
+            </div>
+            <Button
+              prominence="tertiary"
+              size="sm"
+              variant="danger"
+              icon={SvgX}
+              onClick={() => void remove(m.id)}
+              disabled={busy}
             >
-              <span>
-                {m.email} {m.name ? <span style={{ color: color.text.muted }}>({m.name})</span> : null}
-              </span>
-              <Button size="sm" variant="danger" onClick={() => void remove(m.id)} disabled={busy}>
-                Remove
-              </Button>
-            </li>
-          ))}
-        </ul>
+              Remove
+            </Button>
+          </div>
+        ))
       )}
     </div>
   );
 }
-
-const inputStyle: React.CSSProperties = {
-  width: "100%",
-  padding: "8px 10px",
-  fontSize: 14,
-  border: `1px solid ${color.border.default}`,
-  borderRadius: radius.sm,
-  boxSizing: "border-box",
-};
