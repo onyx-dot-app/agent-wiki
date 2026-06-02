@@ -372,3 +372,54 @@ textarea::placeholder {
 ::highlight(wiki-comment-active) {
   background-color: var(--color-comment-highlight-active);
 }
+
+/* Radix popovers (OPAL Popover / SelectButton menus) must float above modal
+   scrims (z-index 100–110). Radix sets `z-index: auto` inline on the wrapper
+   and OPAL strips className/style from Popover.Content, so `!important` here
+   is the only way to lift the menu above the modal. */
+[data-radix-popper-content-wrapper] {
+  z-index: 1000 !important;
+}
+
+/* Primary (action) buttons follow the agent-wiki near-black accent, not
+   OPAL's default blue — matches the Figma mocks and CLAUDE.md's "accent is
+   near-black, not a hue" rule. Scoped to the action *button* so links keep
+   their own color. The accent tokens invert per theme (near-black on light,
+   near-white on dark), so the foreground is flipped to match. */
+.interactive[data-interactive-variant="action"][data-interactive-prominence="primary"]:not(
+    [data-disabled]
+  ) {
+  background-color: var(--color-accent-bg) !important;
+  --interactive-foreground: var(--color-accent-fg);
+  --interactive-foreground-icon: var(--color-accent-fg);
+}
+.interactive[data-interactive-variant="action"][data-interactive-prominence="primary"]:hover:not(
+    [data-disabled]
+  ),
+.interactive[data-interactive-variant="action"][data-interactive-prominence="primary"][data-interaction="hover"]:not(
+    [data-disabled]
+  ) {
+  background-color: var(--color-accent-bg-hover) !important;
+}
+/* Disabled primary action — neutral grey, never OPAL's default blue tint
+   (matches the mock's greyed-out Save). */
+.interactive[data-interactive-variant="action"][data-interactive-prominence="primary"][data-disabled] {
+  background-color: var(--color-bg-active) !important;
+  --interactive-foreground: var(--color-text-muted);
+  --interactive-foreground-icon: var(--color-text-muted);
+}
+
+/* Selected menu/select items follow the near-black accent, not OPAL's default
+   action-link blue (the mocks have no blue). */
+.interactive[data-interactive-variant="select-light"][data-interactive-state="selected"],
+.interactive[data-interactive-variant="select-heavy"][data-interactive-state="selected"],
+.interactive[data-interactive-variant="select-tinted"][data-interactive-state="selected"] {
+  --interactive-foreground: var(--text-05) !important;
+  --interactive-foreground-icon: var(--text-05) !important;
+}
+
+/* Floating menus (typeahead, dropdowns) keep their shadow for depth but drop
+   the hard border — the mocks show no bordered popover surface. */
+[data-radix-popper-content-wrapper] > * {
+  border-color: transparent !important;
+}

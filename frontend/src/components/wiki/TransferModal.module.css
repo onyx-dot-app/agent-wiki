@@ -1,0 +1,83 @@
+/* Layout only — typography, inputs, menus, and buttons come from OPAL. */
+
+.scrim {
+  position: fixed;
+  inset: 0;
+  background: var(--color-overlay);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: max(20px, min(80px, 5vh)) 16px;
+  z-index: 110;
+}
+
+.dialog {
+  background: var(--color-bg-panel);
+  border-radius: var(--radius-lg);
+  width: min(480px, 100%);
+  max-height: calc(100vh - 80px);
+  box-shadow: var(--shadow-modal);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 16px;
+  background: var(--color-bg-page);
+}
+.headerIcon {
+  display: inline-flex;
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--color-text-secondary);
+}
+.headerText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.content {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px;
+}
+
+.anchorWrap {
+  display: block;
+  width: 100%;
+}
+
+/* Selected new-owner row — same shaded line-item treatment as the share
+   modal's grantee rows. */
+.selectedRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 48px;
+  padding: 6px 8px;
+  background: var(--color-bg-sunken);
+  border-radius: var(--radius-md);
+}
+.rowText {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 16px;
+  background: var(--color-bg-page);
+}
