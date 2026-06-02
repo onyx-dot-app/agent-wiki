@@ -29,12 +29,29 @@ clean (``api/`` → ``wiki/`` ← ``tools/``).
 """
 from __future__ import annotations
 
+import logging
+
 from app.db import fts
 from app.mcp_server import pubsub as mcp_pubsub
 from app.tasks.reindex import index_path
 from app.tasks.triggers import fan_out_trigger_eval
-from app.wiki import acl
+from app.wiki import acl, comments
+from app.wiki.comment_remap import remap_comments
 from app.models.wiki import ChangeKind
+
+log = logging.getLogger(__name__)
+
+
+def _remap_comments_safe(path: str) -> None:
+    """Re-anchor comments inline, but never let a remap failure abort a save.
+
+    A stale comment self-heals on the next edit (and the API read path remaps
+    on a stale anchor), so swallowing here only ever costs a brief position
+    inaccuracy — never a lost write."""
+    try:
+        remap_comments(path)
+    except Exception:
+        log.exception("comment remap failed for %s", path)
 
 
 def after_doc_write(
@@ -69,6 +86,9 @@ def after_doc_write(
         acl.on_page_created(rel_path, owner_user_id=owner_user_id)
     index_path(rel_path)
     fan_out_trigger_eval(rel_path, sha, change_kind, actor)
+    # Drift any comments anchored to this page onto the new body. A no-op on
+    # CREATE (no comments yet); the real work is on EDIT.
+    _remap_comments_safe(rel_path)
     mcp_pubsub.publish_doc_update(rel_path, sha, change_kind)
     if change_kind == ChangeKind.CREATE:
         mcp_pubsub.publish_list_changed()
@@ -95,6 +115,9 @@ def after_doc_delete(rel_path: str, sha: str, actor: str | None) -> None:
         return
     fts.delete_document(rel_path)
     acl.on_page_deleted(rel_path)
+    # The body is gone, so there's nothing to re-anchor against — orphan the
+    # page's comments (keeps them as tombstones) rather than dropping them.
+    comments.orphan_all_for_doc(rel_path)
     fan_out_trigger_eval(rel_path, sha, ChangeKind.DELETE, actor)
     mcp_pubsub.publish_doc_delete(rel_path, sha)
     mcp_pubsub.publish_list_changed()
@@ -138,5 +161,15 @@ def after_path_move(
             fan_out_trigger_eval(new_p, sha, ChangeKind.CREATE, actor)
             mcp_pubsub.publish_doc_update(new_p, sha, ChangeKind.CREATE)
             list_changed = True
+        if old_is_md and new_is_md:
+            # Re-key comments to the new path, then re-anchor them (a rename
+            # commit may also change content; path_at_ref follows the rename).
+            comments.reassign_doc_path(old_p, new_p)
+            _remap_comments_safe(new_p)
+        elif old_is_md:
+            # The page left .md-space (renamed to a non-doc path) — there's no
+            # new doc to carry the comments onto, so orphan them rather than
+            # strand them on a path that no longer exists.
+            comments.orphan_all_for_doc(old_p)
     if list_changed:
         mcp_pubsub.publish_list_changed()
