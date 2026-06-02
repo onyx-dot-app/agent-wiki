@@ -1,0 +1,201 @@
+.panel {
+  display: flex;
+  flex-direction: column;
+  width: 340px;
+  min-height: 0;
+  background: var(--color-bg-panel);
+  border-left: 1px solid var(--color-border-subtle);
+}
+
+.fullHeight {
+  width: 100%;
+  height: 100%;
+  border-left: none;
+}
+
+/* No title bar — comments float as separate cards (Google-Docs style). Just a
+   quiet close affordance pinned to the top-right. */
+.closeRow {
+  display: flex;
+  justify-content: flex-end;
+  padding: 6px 8px 0;
+}
+
+.scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* Each thread is its own floating card, clearly separated from its neighbors —
+   not rows inside one panel. */
+.thread {
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-lg);
+  padding: 14px;
+  background: var(--color-bg-page);
+  box-shadow: var(--shadow-sm);
+  cursor: pointer;
+}
+.threadResolved {
+  opacity: 0.65;
+}
+/* Selected thread — a crisp bold (near-black, accent) outline on the white card.
+   No layout shift: the extra weight comes from a 1px ring, not a wider border. */
+.threadActive {
+  border-color: var(--color-accent-bg);
+  box-shadow: 0 0 0 1px var(--color-accent-bg);
+}
+
+/* Tombstone shown in place of the (now-removed) quote box when the referenced
+   text was deleted from the doc, so there's no highlight to point at. Plain
+   muted text — no colored callout. */
+.orphanedNote {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  font-style: italic;
+  margin-bottom: 8px;
+}
+
+.draft {
+  border: 1px solid var(--color-accent-subtle-border);
+  border-radius: var(--radius-md);
+  padding: 10px;
+  background: var(--color-bg-sunken);
+}
+/* Preview of the selected span while drafting a new comment — confirms the
+   anchor before the comment (and its doc highlight) exist. Existing comments
+   point at the doc highlight instead, so they have no quote box. */
+.quote {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  background: var(--color-accent-subtle-bg);
+  border-left: 3px solid var(--color-accent-subtle-border);
+  padding: 4px 8px;
+  border-radius: var(--radius-xs);
+  margin-bottom: 6px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.metaRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+  min-height: 24px;
+}
+.time {
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+/* Right-aligned trailing group: resolved badge + overflow menu. */
+.metaRight {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+/* Overflow (⋯) menu trigger — hidden until the comment is hovered/focused, or
+   forced visible while its menu is open. Always shown on touch (no hover). */
+.kebab {
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.comment:hover .kebab,
+.comment:focus-within .kebab,
+.kebabOpen {
+  opacity: 1;
+}
+@media (hover: none) {
+  .kebab {
+    opacity: 1;
+  }
+}
+/* Icon-only overflow trigger (Radix renders this <button> directly). */
+.kebabBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+.kebabBtn:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+}
+.kebabBtn svg {
+  width: 16px;
+  height: 16px;
+}
+
+.body {
+  font-size: 13px;
+  color: var(--color-text-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.threadBody {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.replyBox {
+  margin-top: 10px;
+}
+
+.textarea {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  min-height: 54px;
+  font: inherit;
+  font-size: 13px;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-page);
+  color: var(--color-text-primary);
+}
+.textarea:focus {
+  outline: none;
+  border-color: var(--color-border-focus);
+}
+
+.composeRow {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.error {
+  color: var(--color-state-danger-fg);
+  font-size: 12px;
+  padding: 4px 0;
+}
+
+/* Left-aligns the low-key OPAL toggle that reveals/hides the resolved threads
+   kept out of the main list. */
+.resolvedToggle {
+  display: flex;
+  justify-content: flex-start;
+}

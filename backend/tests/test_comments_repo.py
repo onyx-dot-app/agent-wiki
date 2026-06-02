@@ -188,7 +188,15 @@ def test_roots_needing_remap_filters(tmp_db):
     need = comments.roots_needing_remap(_DOC, "sha2")
     assert [c["id"] for c in need] == [root["id"]]
 
-    # Orphaned roots are excluded; resolved roots are still remapped.
+    # Resolved roots are excluded: re-anchoring (and possibly re-orphaning) a
+    # resolved thread would flip it back out of `resolved`. Reopening returns it
+    # to the pool.
+    comments.set_thread_status(root["id"], "resolved", resolved_by_user_id=alice)
+    assert comments.roots_needing_remap(_DOC, "sha2") == []
+    comments.set_thread_status(root["id"], "open")
+    assert [c["id"] for c in comments.roots_needing_remap(_DOC, "sha2")] == [root["id"]]
+
+    # Orphaned roots are excluded too — no live span left to track.
     comments.orphan(root["id"])
     assert comments.roots_needing_remap(_DOC, "sha2") == []
 
