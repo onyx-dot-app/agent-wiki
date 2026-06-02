@@ -17,6 +17,7 @@ enough to keep here.
 Spec reference (MCP 2025-03-26):
   https://spec.modelcontextprotocol.io/specification/2025-03-26/
 """
+
 from __future__ import annotations
 
 import logging
@@ -52,8 +53,29 @@ INVALID_PARAMS = -32602
 INTERNAL_ERROR = -32603
 
 
+class UnknownSessionError(Exception):
+    """A request carried an ``Mcp-Session-Id`` the server doesn't recognize.
+
+    Sessions are in-memory and don't survive a backend restart, so a stale
+    id is the common case after a redeploy. The HTTP layer maps this to a
+    404 so the client starts a fresh session — per the MCP Streamable HTTP
+    spec, a 404 to a request bearing a session id is the signal to
+    re-initialize. (Contrast with a request that omits the header entirely,
+    which is a plain protocol error, not a recoverable stale session.)
+    """
+
+    def __init__(self, request_id: Any) -> None:
+        self.request_id = request_id
+        super().__init__("missing or invalid Mcp-Session-Id")
+
+    def jsonrpc_error(self) -> dict[str, Any]:
+        return _error(self.request_id, INVALID_REQUEST, "missing or invalid Mcp-Session-Id")
+
+
 def dispatch(
-    message: dict[str, Any], session_id: str | None, bearer_user: User,
+    message: dict[str, Any],
+    session_id: str | None,
+    bearer_user: User,
 ) -> tuple[dict[str, Any] | None, str | None]:
     """Process one JSON-RPC message.
 
@@ -86,6 +108,9 @@ def dispatch(
 
     try:
         return _route(method, params, request_id, is_notification, session_id, bearer_user)
+    except UnknownSessionError:
+        # Surfaced to the HTTP layer as a 404 so the client re-initializes.
+        raise
     except Exception:
         log.exception("mcp transport: handler raised for method=%s", method)
         if is_notification:
@@ -113,10 +138,15 @@ def _route(
         if is_notification:
             # Stale notification for a session we don't track; ignore.
             return None, session_id
-        return (
-            _error(request_id, INVALID_REQUEST, "missing or invalid Mcp-Session-Id"),
-            session_id,
-        )
+        if session_id is None:
+            # No session header at all — a plain protocol error, not a
+            # recoverable stale session. Stays an HTTP-200 JSON-RPC error.
+            return (
+                _error(request_id, INVALID_REQUEST, "missing or invalid Mcp-Session-Id"),
+                session_id,
+            )
+        # Header present but unknown/expired → 404 so the client re-inits.
+        raise UnknownSessionError(request_id)
 
     if method == "notifications/initialized":
         sess.initialized = True
@@ -216,7 +246,8 @@ def _handle_resources_unsubscribe(
 
 
 def _handle_initialize(
-    _params: dict[str, Any], bearer_user: User,
+    _params: dict[str, Any],
+    bearer_user: User,
 ) -> tuple[dict[str, Any], str]:
     """Mint a fresh session for the authenticated user, return the
     capabilities envelope. The session is created in the
@@ -266,9 +297,7 @@ def _success(request_id: Any, result: Any) -> dict[str, Any]:
     return {"jsonrpc": "2.0", "id": request_id, "result": result}
 
 
-def _error(
-    request_id: Any, code: int, message: str, data: Any = None
-) -> dict[str, Any]:
+def _error(request_id: Any, code: int, message: str, data: Any = None) -> dict[str, Any]:
     err: dict[str, Any] = {"code": code, "message": message}
     if data is not None:
         err["data"] = data
