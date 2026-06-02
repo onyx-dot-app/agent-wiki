@@ -22,14 +22,17 @@ from sqlalchemy import func, select, update
 
 from app.db.models import Comment
 from app.db.session import execute_dml, session
+from app.models.comment import CommentAuthorKind, CommentScope, CommentStatus
 
 log = logging.getLogger(__name__)
 
-_VALID_SCOPES = {"inline", "page"}
-_VALID_AUTHOR_KINDS = {"user", "agent"}
+# Derived from the enums in app/models/comment.py so they stay the single
+# source of truth (the DB CHECK constraints mirror the same values).
+_VALID_SCOPES = frozenset(s.value for s in CommentScope)
+_VALID_AUTHOR_KINDS = frozenset(k.value for k in CommentAuthorKind)
 # Statuses a caller may set. 'orphaned' is system-only (set by the re-anchor
-# task when a span collapses), so it is not accepted from the resolve path.
-_SETTABLE_STATUSES = {"open", "resolved"}
+# path when a span collapses), so it is not accepted from the resolve path.
+_SETTABLE_STATUSES = frozenset({CommentStatus.OPEN.value, CommentStatus.RESOLVED.value})
 
 
 def _to_dict(c: Comment) -> dict[str, Any]:
@@ -75,8 +78,8 @@ def create_thread(
     start_offset: int | None,
     end_offset: int | None,
     quoted_text: str | None,
-    scope: str = "inline",
-    author_kind: str = "user",
+    scope: str = CommentScope.INLINE.value,
+    author_kind: str = CommentAuthorKind.USER.value,
 ) -> dict[str, Any]:
     """Create a new root comment (starts a thread). Returns the row dict.
 
@@ -87,7 +90,7 @@ def create_thread(
         raise ValueError(f"invalid scope: {scope!r}")
     if author_kind not in _VALID_AUTHOR_KINDS:
         raise ValueError(f"invalid author_kind: {author_kind!r}")
-    if scope == "inline" and (
+    if scope == CommentScope.INLINE.value and (
         anchor_sha is None or start_offset is None or end_offset is None
     ):
         raise ValueError("inline comment requires anchor_sha + start/end offset")
@@ -108,7 +111,7 @@ def create_thread(
             author_kind=author_kind,
             author_user_id=author_user_id,
             body=body,
-            status="open",
+            status=CommentStatus.OPEN.value,
             created_at=now,
             updated_at=now,
         )
@@ -124,7 +127,7 @@ def add_reply(
     parent_id: str,
     body: str,
     author_user_id: str | None,
-    author_kind: str = "user",
+    author_kind: str = CommentAuthorKind.USER.value,
 ) -> dict[str, Any] | None:
     """Reply to an existing comment. ``thread_root_id`` and ``doc_path`` are
     inherited from the parent; the anchor columns stay NULL (replies inherit
@@ -151,7 +154,7 @@ def add_reply(
             author_kind=author_kind,
             author_user_id=author_user_id,
             body=body,
-            status="open",
+            status=CommentStatus.OPEN.value,
             created_at=now,
             updated_at=now,
         )
@@ -228,7 +231,7 @@ def set_thread_status(
         now = _now_text(s)
         root.status = status
         root.updated_at = now
-        if status == "resolved":
+        if status == CommentStatus.RESOLVED.value:
             root.resolved_by_user_id = resolved_by_user_id
             root.resolved_at = now
         else:
@@ -263,8 +266,8 @@ def roots_needing_remap(doc_path: str, head_sha: str) -> list[dict[str, Any]]:
             select(Comment).where(
                 Comment.doc_path == doc_path,
                 Comment.parent_id.is_(None),
-                Comment.scope == "inline",
-                Comment.status != "orphaned",
+                Comment.scope == CommentScope.INLINE.value,
+                Comment.status != CommentStatus.ORPHANED.value,
                 Comment.anchor_sha != head_sha,
             )
         ).all()
@@ -302,7 +305,7 @@ def orphan(comment_id: str) -> None:
         c = s.get(Comment, comment_id)
         if c is None:
             return
-        c.status = "orphaned"
+        c.status = CommentStatus.ORPHANED.value
 
 
 def reassign_doc_path(old_path: str, new_path: str) -> int:
@@ -325,7 +328,7 @@ def orphan_all_for_doc(doc_path: str) -> int:
         return execute_dml(
             s,
             update(Comment)
-            .where(Comment.doc_path == doc_path, Comment.status != "orphaned")
-            .values(status="orphaned")
+            .where(Comment.doc_path == doc_path, Comment.status != CommentStatus.ORPHANED.value)
+            .values(status=CommentStatus.ORPHANED.value)
             .execution_options(synchronize_session=False),
         )
