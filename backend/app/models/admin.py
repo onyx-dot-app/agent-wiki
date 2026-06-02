@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 # --------------------------------------------------------------------------- #
@@ -67,7 +67,7 @@ class AdminUserView(BaseModel):
     is_admin: bool
     created_at: str
     # Names of the groups this user belongs to (for the admin users table).
-    groups: list[str] = []
+    groups: list[str] = Field(default_factory=list)
 
 
 class AdminUserListResponse(BaseModel):
