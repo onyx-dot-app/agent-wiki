@@ -1,5 +1,14 @@
 import { apiFetch } from "@/lib/api";
 
+/** Last path segment as a display name — drops a trailing `.md`. Shared by the
+ * share + transfer dialogs so the two copies don't drift. */
+export function lastSegment(path: string): string {
+  const clean = path.replace(/\/+$/, "");
+  if (!clean) return "Wiki";
+  const seg = clean.split("/").pop() ?? clean;
+  return seg.endsWith(".md") ? seg.slice(0, -3) : seg;
+}
+
 export interface WordDiff {
   prefix: string;
   removed: string;

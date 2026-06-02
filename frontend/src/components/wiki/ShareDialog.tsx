@@ -2,27 +2,50 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-import { Button } from "@/components/common/Button";
-import { LoadingSpinner } from "@/components/common/LoadingSpinner";
-import { ApiError, apiFetch } from "@/lib/api";
+import {
+  Button,
+  Divider,
+  InputTypeIn,
+  LineItemButton,
+  OpenButton,
+  Popover,
+  PopoverMenu,
+  Text,
+} from "@onyx-ai/opal/components";
+import {
+  SvgArrowExchange,
+  SvgCheck,
+  SvgEdit,
+  SvgEye,
+  SvgGlobe,
+  SvgLink,
+  SvgLock,
+  SvgShare,
+  SvgUser,
+  SvgUsers,
+  SvgUserShield,
+  SvgX,
+} from "@onyx-ai/opal/icons";
+
+import { Avatar } from "@/components/common/Avatar";
+import { ApiError } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 import {
   grantAcl,
   revokeAcl,
-  transferOwnership,
   useGroups,
   usePageAcl,
-  visibility,
   type AclEntry,
   type Permission,
-  type PrincipalKind,
+  type ResourceKind,
+  type Visibility,
 } from "@/lib/permissions";
-import { color, radius, shadow } from "@/lib/theme";
+import { displayName, initials, useUserSearch, type UserLite } from "@/lib/users";
+import { lastSegment } from "@/lib/wiki";
+import { markdown } from "@onyx-ai/opal/utils";
 
-interface AdminUser {
-  id: string;
-  email: string;
-  name: string | null;
-}
+import { TransferModal } from "./TransferModal";
+import styles from "./ShareDialog.module.css";
 
 interface ShareDialogProps {
   path: string;
@@ -30,106 +53,561 @@ interface ShareDialogProps {
   onClose: () => void;
 }
 
+type PrincipalKind = "user" | "group";
+
+interface GrantDraft {
+  kind: PrincipalKind;
+  id: string;
+  permission: Permission;
+  email?: string | null;
+  name?: string | null;
+  groupName?: string | null;
+}
+
+interface Baseline {
+  grants: Map<string, GrantDraft>;
+  general: Visibility;
+  // All ACL row IDs per principal — a principal can hold multiple rows
+  // (e.g. read + write); removing them must revoke every row, not just the
+  // strongest, or the weaker one resurfaces on refresh.
+  entryIdByKey: Map<string, string[]>;
+  everyoneReadId: string | null;
+  everyoneWriteId: string | null;
+  inherited: AclEntry[];
+}
+
+const EMPTY_BASELINE: Baseline = {
+  grants: new Map(),
+  general: "private",
+  entryIdByKey: new Map(),
+  everyoneReadId: null,
+  everyoneWriteId: null,
+  inherited: [],
+};
+
+function keyFor(kind: PrincipalKind, id: string): string {
+  return `${kind}:${id}`;
+}
+
+function deriveBaseline(
+  acl: { path: string; entries: AclEntry[] } | null,
+): Baseline {
+  if (!acl) return EMPTY_BASELINE;
+  const grants = new Map<string, GrantDraft>();
+  const entryIdByKey = new Map<string, string[]>();
+  let everyoneReadId: string | null = null;
+  let everyoneWriteId: string | null = null;
+  const inherited: AclEntry[] = [];
+
+  for (const e of acl.entries) {
+    const own = e.resource_path === acl.path;
+    if (!own) {
+      inherited.push(e);
+      continue;
+    }
+    if (e.principal_kind === "everyone") {
+      if (e.permission === "write") everyoneWriteId = e.id;
+      else if (e.permission === "read") everyoneReadId = e.id;
+      continue;
+    }
+    if (e.principal_kind !== "user" && e.principal_kind !== "group") continue;
+    if (!e.principal_id) continue;
+    const k = keyFor(e.principal_kind, e.principal_id);
+    // Record every row ID for the principal so removal revokes them all.
+    const ids = entryIdByKey.get(k) ?? [];
+    ids.push(e.id);
+    entryIdByKey.set(k, ids);
+    // Display the strongest grant (write > read); upgrade read → write but
+    // never downgrade.
+    const existing = grants.get(k);
+    if (!existing || (existing.permission !== "write" && e.permission === "write")) {
+      grants.set(k, {
+        kind: e.principal_kind,
+        id: e.principal_id,
+        permission: e.permission,
+        email: e.principal_email,
+        name: e.principal_name,
+        groupName: e.group_name,
+      });
+    }
+  }
+
+  const general: Visibility = everyoneWriteId
+    ? "public-write"
+    : everyoneReadId
+      ? "public-read"
+      : "private";
+
+  return {
+    grants,
+    general,
+    entryIdByKey,
+    everyoneReadId,
+    everyoneWriteId,
+    inherited,
+  };
+}
+
+function grantsEqual(a: Map<string, GrantDraft>, b: Map<string, GrantDraft>) {
+  if (a.size !== b.size) return false;
+  for (const [k, v] of a) {
+    const o = b.get(k);
+    if (!o || o.permission !== v.permission) return false;
+  }
+  return true;
+}
+
 export function ShareDialog({ path, open, onClose }: ShareDialogProps) {
+  const resourceKind: ResourceKind = path.endsWith(".md") ? "page" : "folder";
   const { acl, error, isLoading, refresh } = usePageAcl(open ? path : null);
   const { groups } = useGroups();
+  const { user } = useAuth();
 
-  // Limited-scope user list — only used for principal selection in the
-  // grant form. Falls back gracefully for non-admins (the endpoint is
-  // admin-only); they can still grant to groups they're in or pick
-  // 'everyone'.
-  const [users, setUsers] = useState<AdminUser[]>([]);
+  const baseline = useMemo(() => deriveBaseline(acl), [acl]);
+
+  const [grants, setGrants] = useState<Map<string, GrantDraft>>(new Map());
+  // Scope (who) and the general permission (what) are independent: the
+  // permission stays selectable even while "Only those invited" is chosen —
+  // it only takes effect (as an `everyone` grant) once scope is "anyone".
+  const [scope, setScope] = useState<"invited" | "anyone">("invited");
+  const [generalPerm, setGeneralPerm] = useState<Permission>("read");
+  const general: Visibility =
+    scope === "invited"
+      ? "private"
+      : generalPerm === "write"
+        ? "public-write"
+        : "public-read";
+  const [query, setQuery] = useState("");
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [transferOpen, setTransferOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  // Reset working state to the loaded baseline whenever the ACL changes.
+  // Does NOT clear saveError — a save failure re-pulls the ACL (changing
+  // baseline), and the error must survive that refresh so the user sees it.
   useEffect(() => {
     if (!open) return;
-    void apiFetch<{ users: AdminUser[] }>("/admin/users")
-      .then((r) => setUsers(r.users))
-      .catch(() => setUsers([]));
+    setGrants(new Map(baseline.grants));
+    setScope(baseline.general === "private" ? "invited" : "anyone");
+    setGeneralPerm(baseline.general === "public-write" ? "write" : "read");
+  }, [baseline, open]);
+
+  // Clear any stale save error only on (re)open, not on baseline refresh.
+  useEffect(() => {
+    if (open) setSaveError(null);
   }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    setQuery("");
+    setPickerOpen(false);
+    setCopied(false);
+  }, [open]);
+
+  // Escape to close.
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
+
+  const userSearchEnabled = open && pickerOpen;
+  const { users: userResults } = useUserSearch(query, userSearchEnabled);
+
+  const groupResults = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return groups.filter((g) => !q || g.name.toLowerCase().includes(q));
+  }, [groups, query]);
 
   if (!open) return null;
 
+  const ownerId = acl?.owner_user_id ?? null;
+  const dirty = !grantsEqual(grants, baseline.grants) || general !== baseline.general;
+
+  const addUser = (u: UserLite) => {
+    const k = keyFor("user", u.id);
+    if (grants.has(k) || u.id === ownerId) return;
+    const next = new Map(grants);
+    next.set(k, { kind: "user", id: u.id, permission: "read", email: u.email, name: u.name });
+    setGrants(next);
+    setQuery("");
+    setPickerOpen(false);
+  };
+  const addGroup = (gid: string, name: string) => {
+    const k = keyFor("group", gid);
+    if (grants.has(k)) return;
+    const next = new Map(grants);
+    next.set(k, { kind: "group", id: gid, permission: "read", groupName: name });
+    setGrants(next);
+    setQuery("");
+    setPickerOpen(false);
+  };
+  const setPermission = (k: string, permission: Permission) => {
+    const cur = grants.get(k);
+    if (!cur) return;
+    const next = new Map(grants);
+    next.set(k, { ...cur, permission });
+    setGrants(next);
+  };
+  const removeGrant = (k: string) => {
+    const next = new Map(grants);
+    next.delete(k);
+    setGrants(next);
+  };
+
+  const copyLink = async () => {
+    try {
+      const trimmed = path.replace(/\/+$/, "");
+      const encodedPath = trimmed
+        .split("/")
+        .filter(Boolean)
+        .map((segment) => encodeURIComponent(segment))
+        .join("/");
+      const targetPath = encodedPath ? `/app/wiki/${encodedPath}` : "/app/wiki";
+      const shareUrl = `${window.location.origin}${targetPath}`;
+      await navigator.clipboard.writeText(shareUrl);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* clipboard blocked — no-op */
+    }
+  };
+
+  const save = async () => {
+    setSaving(true);
+    setSaveError(null);
+    let ok = false;
+    try {
+      const revokes: string[] = [];
+      const adds: GrantDraft[] = [];
+      const keys = new Set([...baseline.grants.keys(), ...grants.keys()]);
+      for (const k of keys) {
+        const o = baseline.grants.get(k);
+        const n = grants.get(k);
+        if (n && !o) adds.push(n);
+        else if (o && !n) {
+          revokes.push(...(baseline.entryIdByKey.get(k) ?? []));
+        } else if (o && n && o.permission !== n.permission) {
+          revokes.push(...(baseline.entryIdByKey.get(k) ?? []));
+          adds.push(n);
+        }
+      }
+
+      const desiredRead = general === "public-read";
+      const desiredWrite = general === "public-write";
+      if (baseline.everyoneReadId && !desiredRead) revokes.push(baseline.everyoneReadId);
+      if (baseline.everyoneWriteId && !desiredWrite) revokes.push(baseline.everyoneWriteId);
+
+      for (const id of revokes) await revokeAcl(id);
+      for (const g of adds) {
+        await grantAcl({
+          resource_kind: resourceKind,
+          resource_path: path,
+          principal_kind: g.kind,
+          principal_id: g.id,
+          permission: g.permission,
+        });
+      }
+      if (desiredRead && !baseline.everyoneReadId) {
+        await grantAcl({
+          resource_kind: resourceKind,
+          resource_path: path,
+          principal_kind: "everyone",
+          principal_id: null,
+          permission: "read",
+        });
+      }
+      if (desiredWrite && !baseline.everyoneWriteId) {
+        await grantAcl({
+          resource_kind: resourceKind,
+          resource_path: path,
+          principal_kind: "everyone",
+          principal_id: null,
+          permission: "write",
+        });
+      }
+      ok = true;
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : "Failed to save changes");
+      // Re-pull the ACL so the baseline reflects whatever partially applied;
+      // otherwise a retry re-issues already-committed grants/revokes and 404s.
+      // Best-effort — a failing refetch must not skip the cleanup below.
+      await refresh().catch(() => undefined);
+    } finally {
+      setSaving(false);
+    }
+    // All mutations committed — the save succeeded. Close and refresh the
+    // cache best-effort; a failing refetch must NOT surface as a save error
+    // or keep the dialog open after the DB already changed.
+    if (ok) {
+      onClose();
+      void refresh();
+    }
+  };
+
+  const forbidden = error instanceof ApiError && error.status === 403;
+  const kindNoun = resourceKind === "folder" ? "folder" : "page";
+
+  const pickerGroups = groupResults;
+  const pickerUsers = userResults;
+  const hasResults = pickerGroups.length > 0 || pickerUsers.length > 0;
+  const showPicker = pickerOpen && hasResults;
+
   return (
-    <div style={overlayStyle} onClick={onClose}>
-      <div style={modalStyle} onClick={(e) => e.stopPropagation()}>
-        <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
-          <div>
-            <h2 style={{ margin: 0, fontSize: 18 }}>Share</h2>
-            <code style={{ fontSize: 12, color: color.text.muted }}>{path}</code>
+    <div
+      className={styles.scrim}
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div
+        className={styles.dialog}
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Share ${lastSegment(path)}`}
+      >
+        <header className={styles.header}>
+          <span className={styles.headerIcon}>
+            <SvgShare size={20} />
+          </span>
+          <div className={styles.headerText}>
+            <Text as="h2" font="main-content-emphasis">
+              {markdown(`Share *${lastSegment(path)}*`)}
+            </Text>
+            <Text font="secondary-body" color="text-03">
+              {`Share this ${kindNoun} with people or groups`}
+            </Text>
           </div>
-          <button onClick={onClose} style={iconBtnStyle}>×</button>
+          <Button
+            prominence="tertiary"
+            size="sm"
+            icon={SvgX}
+            tooltip="Close"
+            onClick={onClose}
+          />
         </header>
 
-        {error && (
-          <div style={{ color: color.state.danger.fg, marginBottom: 12 }}>
-            {error instanceof ApiError && error.status === 403
-              ? "Only the owner or an admin can manage sharing for this page."
-              : error.message}
+        {forbidden ? (
+          <div className={styles.content}>
+            <Text font="secondary-body" color="text-02">
+              {`Only the owner or an admin can manage sharing for this ${kindNoun}.`}
+            </Text>
+          </div>
+        ) : isLoading || !acl ? (
+          <div className={styles.content}>
+            <Text font="secondary-body" color="text-03">
+              Loading…
+            </Text>
+          </div>
+        ) : (
+          <div className={styles.content}>
+            <div className={styles.cardStack}>
+            {/* Add people / groups — InputTypeIn anchors a portaled results menu */}
+            <Popover
+              open={showPicker}
+              onOpenChange={(o) => {
+                if (!o) setPickerOpen(false);
+              }}
+            >
+              <Popover.Anchor asChild>
+                <div className={styles.anchorWrap}>
+                  <InputTypeIn
+                    searchIcon
+                    placeholder="Add users and groups"
+                    value={query}
+                    onChange={(e) => {
+                      setQuery(e.target.value);
+                      setPickerOpen(true);
+                    }}
+                    onFocus={() => setPickerOpen(true)}
+                  />
+                </div>
+              </Popover.Anchor>
+              <Popover.Content
+                width="trigger"
+                align="start"
+                sideOffset={4}
+                container={typeof document !== "undefined" ? document.body : undefined}
+                onOpenAutoFocus={(e) => e.preventDefault()}
+                onCloseAutoFocus={(e) => e.preventDefault()}
+              >
+                <PopoverMenu>
+                  {pickerGroups.map((g) => {
+                    const already = grants.has(keyFor("group", g.id));
+                    return (
+                      <LineItemButton
+                        key={`g-${g.id}`}
+                        icon={SvgUsers}
+                        title={g.name}
+                        description={`${g.member_count} ${g.member_count === 1 ? "user" : "users"}`}
+                        sizePreset="main-ui"
+                        variant="section"
+                        rightChildren={
+                          already ? (
+                            <Text font="secondary-body" color="text-03">
+                              Shared
+                            </Text>
+                          ) : undefined
+                        }
+                        onClick={() => {
+                          if (!already) addGroup(g.id, g.name);
+                        }}
+                      />
+                    );
+                  })}
+                  {pickerUsers.map((u) => {
+                    const already =
+                      grants.has(keyFor("user", u.id)) || u.id === ownerId;
+                    return (
+                      <LineItemButton
+                        key={`u-${u.id}`}
+                        icon={SvgUser}
+                        title={displayName(u)}
+                        description={u.email}
+                        sizePreset="main-ui"
+                        variant="section"
+                        rightChildren={
+                          already ? (
+                            <Text font="secondary-body" color="text-03">
+                              Shared
+                            </Text>
+                          ) : undefined
+                        }
+                        onClick={() => {
+                          if (!already) addUser(u);
+                        }}
+                      />
+                    );
+                  })}
+                </PopoverMenu>
+              </Popover.Content>
+            </Popover>
+
+            {saveError && (
+              <Text font="secondary-body" color="text-02">
+                {saveError}
+              </Text>
+            )}
+
+              {/* General access */}
+              <div className={styles.generalRow}>
+                <span className={styles.inheritedIcon}>
+                  {scope === "invited" ? (
+                    <SvgLock size={18} />
+                  ) : (
+                    <SvgGlobe size={18} />
+                  )}
+                </span>
+                <ScopeSelect value={scope} onChange={setScope} />
+                <PermSelect boxed value={generalPerm} onChange={setGeneralPerm} />
+              </div>
+
+              <Divider paddingParallel="fit" paddingPerpendicular="2xs" />
+
+              {/* People with access */}
+              <div className={styles.list}>
+                {ownerId && (
+                  <OwnerRow
+                    ownerId={ownerId}
+                    ownerEmail={acl.owner_email ?? null}
+                    ownerName={acl.owner_name ?? null}
+                    isYou={ownerId === user?.id}
+                    canTransfer={ownerId === user?.id || Boolean(user?.is_admin)}
+                    onTransfer={() => setTransferOpen(true)}
+                  />
+                )}
+
+                {[...grants.values()].map((g) => {
+                const k = keyFor(g.kind, g.id);
+                const group =
+                  g.kind === "group" ? groups.find((x) => x.id === g.id) : undefined;
+                const name =
+                  g.kind === "group"
+                    ? g.groupName ?? group?.name ?? "Group"
+                    : displayName({ name: g.name, email: g.email ?? g.id });
+                const sub =
+                  g.kind === "group"
+                    ? group
+                      ? `${group.member_count} ${group.member_count === 1 ? "user" : "users"}`
+                      : "Group"
+                    : g.email ?? "";
+                return (
+                  <div key={k} className={styles.row}>
+                    <Avatar
+                      label={(name[0] ?? "?").toUpperCase()}
+                      icon={g.kind === "group" ? SvgUsers : undefined}
+                      size={28}
+                      title={name}
+                    />
+                    <div className={styles.rowText}>
+                      <Text font="main-ui-body" nowrap>
+                        {name}
+                      </Text>
+                      {sub && (
+                        <Text font="secondary-body" color="text-03" nowrap>
+                          {sub}
+                        </Text>
+                      )}
+                    </div>
+                    <PermSelect
+                      value={g.permission}
+                      onChange={(p) => setPermission(k, p)}
+                      onRemove={() => removeGrant(k)}
+                    />
+                  </div>
+                );
+              })}
+
+                {baseline.inherited.map((e) => (
+                  <InheritedRow key={e.id} entry={e} groups={groups} />
+                ))}
+              </div>
+            </div>
           </div>
         )}
 
-        {isLoading || !acl ? (
-          <LoadingSpinner />
-        ) : (
-          <>
-            <Section title="Visibility">
-              <div style={{ fontSize: 14, color: color.text.secondary }}>
-                {(() => {
-                  const v = visibility(acl);
-                  if (v === "private") {
-                    return (
-                      <span>
-                        <strong>Private</strong> — only the owner and explicit grants below can access.
-                      </span>
-                    );
-                  }
-                  if (v === "public-read") {
-                    return (
-                      <span>
-                        <strong>Public (read-only)</strong> — every signed-in user can read; only the owner and explicit write grants can edit.
-                      </span>
-                    );
-                  }
-                  return (
-                    <span>
-                      <strong>Public</strong> — every signed-in user can read and edit.
-                    </span>
-                  );
-                })()}
-              </div>
-            </Section>
-
-            <Section title="Owner">
-              <OwnerControls
-                path={path}
-                ownerId={acl.owner_user_id}
-                users={users}
-                onChanged={() => void refresh()}
-              />
-            </Section>
-
-            <Section title="Grants">
-              <Grants
-                entries={acl.entries}
-                users={users}
-                groups={groups}
-                onRevoke={async (id) => {
-                  await revokeAcl(id);
-                  await refresh();
-                }}
-              />
-            </Section>
-
-            <Section title="Add grant">
-              <GrantForm
-                path={path}
-                users={users}
-                groups={groups}
-                onGranted={() => void refresh()}
-              />
-            </Section>
-          </>
-        )}
+        <footer className={styles.footer}>
+          <Button
+            prominence="secondary"
+            size="md"
+            icon={SvgLink}
+            onClick={() => void copyLink()}
+          >
+            {copied ? "Copied" : "Copy Link"}
+          </Button>
+          <span className={styles.footerRight}>
+            <Button prominence="secondary" size="md" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button
+              variant="action"
+              size="md"
+              disabled={!dirty || saving || forbidden}
+              onClick={() => void save()}
+            >
+              {saving ? "Saving…" : "Save"}
+            </Button>
+          </span>
+        </footer>
       </div>
+
+      {transferOpen && acl && (
+        <TransferModal
+          path={path}
+          currentOwnerId={ownerId}
+          open={transferOpen}
+          onClose={() => setTransferOpen(false)}
+          onTransferred={() => {
+            setTransferOpen(false);
+            void refresh();
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -138,285 +616,235 @@ export function ShareDialog({ path, open, onClose }: ShareDialogProps) {
 // Sub-components                                                              //
 // --------------------------------------------------------------------------- //
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <section style={{ marginBottom: 20 }}>
-      <h3 style={{ fontSize: 13, fontWeight: 600, color: color.text.secondary, margin: "0 0 8px 0" }}>
-        {title}
-      </h3>
-      {children}
-    </section>
-  );
-}
-
-function OwnerControls({
-  path,
-  ownerId,
-  users,
-  onChanged,
+function PermSelect({
+  value,
+  onChange,
+  onRemove,
+  disabled,
+  boxed,
 }: {
-  path: string;
-  ownerId: string | null;
-  users: AdminUser[];
-  onChanged: () => void;
+  value: Permission;
+  onChange: (p: Permission) => void;
+  onRemove?: () => void;
+  disabled?: boolean;
+  boxed?: boolean;
 }) {
-  const ownerLabel = useMemo(() => {
-    if (!ownerId) return "—";
-    const u = users.find((x) => x.id === ownerId);
-    return u ? u.email : ownerId;
-  }, [ownerId, users]);
-  const [transferTo, setTransferTo] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-
-  async function transfer() {
-    setBusy(true);
-    setErr(null);
-    try {
-      await transferOwnership(path, transferTo || null);
-      setTransferTo("");
-      onChanged();
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : "failed");
-    } finally {
-      setBusy(false);
-    }
-  }
-
+  const [open, setOpen] = useState(false);
+  const label = value === "write" ? "Edit" : "View";
+  const icon = value === "write" ? SvgEdit : SvgEye;
   return (
-    <div>
-      <div style={{ fontSize: 14, marginBottom: 8 }}>{ownerLabel}</div>
-      <div style={{ display: "flex", gap: 8 }}>
-        <select value={transferTo} onChange={(e) => setTransferTo(e.target.value)} style={inputStyle}>
-          <option value="">Transfer ownership to…</option>
-          {users.map((u) => (
-            <option key={u.id} value={u.id}>
-              {u.email}
-            </option>
-          ))}
-        </select>
-        <Button size="sm" onClick={() => void transfer()} disabled={busy || !transferTo}>
-          Transfer
-        </Button>
-      </div>
-      {err && <div style={{ color: color.state.danger.fg, marginTop: 6, fontSize: 13 }}>{err}</div>}
-    </div>
-  );
-}
-
-function Grants({
-  entries,
-  users,
-  groups,
-  onRevoke,
-}: {
-  entries: AclEntry[];
-  users: AdminUser[];
-  groups: { id: string; name: string }[];
-  onRevoke: (id: string) => Promise<void>;
-}) {
-  if (entries.length === 0) {
-    return <div style={{ fontSize: 13, color: color.text.muted }}>No explicit grants.</div>;
-  }
-  return (
-    <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
-      {entries.map((e) => (
-        <li
-          key={e.id}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            padding: "6px 0",
-            borderBottom: `1px solid ${color.border.subtle}`,
-            fontSize: 13,
-          }}
-        >
-          <span>
-            <PrincipalLabel
-              kind={e.principal_kind}
-              id={e.principal_id}
-              users={users}
-              groups={groups}
+    <Popover open={open} onOpenChange={setOpen}>
+      <Popover.Trigger asChild>
+        <span className={boxed ? styles.permBox : styles.menuTrigger}>
+          <OpenButton
+            variant="select-light"
+            size={boxed ? "lg" : "sm"}
+            icon={icon}
+            disabled={disabled}
+            width={boxed ? "full" : undefined}
+            justifyContent={boxed ? "between" : undefined}
+            rounding={boxed ? "sm" : undefined}
+          >
+            {label}
+          </OpenButton>
+        </span>
+      </Popover.Trigger>
+      <Popover.Content width="fit" align="end" sideOffset={4}>
+        <PopoverMenu>
+          <LineItemButton
+            icon={SvgEye}
+            title="View"
+            sizePreset="main-ui"
+            variant="body"
+            state={value === "read" ? "selected" : "empty"}
+            rightChildren={value === "read" ? <SvgCheck size={16} /> : undefined}
+            onClick={() => {
+              onChange("read");
+              setOpen(false);
+            }}
+          />
+          <LineItemButton
+            icon={SvgEdit}
+            title="Edit"
+            sizePreset="main-ui"
+            variant="body"
+            state={value === "write" ? "selected" : "empty"}
+            rightChildren={value === "write" ? <SvgCheck size={16} /> : undefined}
+            onClick={() => {
+              onChange("write");
+              setOpen(false);
+            }}
+          />
+          {onRemove ? <Divider paddingParallel="fit" paddingPerpendicular="2xs" /> : null}
+          {onRemove ? (
+            <LineItemButton
+              icon={SvgX}
+              title="Remove access"
+              sizePreset="main-ui"
+              variant="body"
+              onClick={() => {
+                onRemove();
+                setOpen(false);
+              }}
             />
-            {" "}
-            <span style={{ color: color.text.muted }}>
-              · {e.permission}
-              {e.resource_kind === "folder"
-                ? ` · folder${e.resource_path ? ` "${e.resource_path}"` : " (root)"}`
-                : ""}
-            </span>
-          </span>
-          {e.resource_kind === "page" ? (
-            <Button size="sm" variant="danger" onClick={() => void onRevoke(e.id)}>
-              Revoke
-            </Button>
-          ) : (
-            <span style={{ fontSize: 11, color: color.text.faint }}>inherited</span>
-          )}
-        </li>
-      ))}
-    </ul>
+          ) : undefined}
+        </PopoverMenu>
+      </Popover.Content>
+    </Popover>
   );
 }
 
-function PrincipalLabel({
-  kind,
-  id,
-  users,
-  groups,
+function ScopeSelect({
+  value,
+  onChange,
 }: {
-  kind: PrincipalKind;
-  id: string | null;
-  users: AdminUser[];
-  groups: { id: string; name: string }[];
+  value: "invited" | "anyone";
+  onChange: (v: "invited" | "anyone") => void;
 }) {
-  if (kind === "everyone") return <strong>Everyone</strong>;
-  if (kind === "user") {
-    const u = id ? users.find((x) => x.id === id) : null;
-    return <span>👤 {u ? u.email : id ?? "?"}</span>;
-  }
-  if (kind === "group") {
-    const g = id ? groups.find((x) => x.id === id) : null;
-    return <span>👥 {g ? g.name : id ?? "?"}</span>;
-  }
-  return <span>{kind}</span>;
+  const [open, setOpen] = useState(false);
+  const label = value === "invited" ? "Only those invited" : "Anyone";
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <Popover.Trigger asChild>
+        <span className={styles.scopeBox}>
+          <OpenButton
+            variant="select-light"
+            size="lg"
+            width="full"
+            justifyContent="between"
+            rounding="sm"
+          >
+            {label}
+          </OpenButton>
+        </span>
+      </Popover.Trigger>
+      <Popover.Content width="trigger" align="start" sideOffset={4}>
+        <PopoverMenu>
+          <LineItemButton
+            icon={SvgLock}
+            title="Only those invited"
+            sizePreset="main-ui"
+            variant="body"
+            state={value === "invited" ? "selected" : "empty"}
+            onClick={() => {
+              if (value !== "invited") onChange("invited");
+              setOpen(false);
+            }}
+          />
+          <LineItemButton
+            icon={SvgGlobe}
+            title="Anyone"
+            sizePreset="main-ui"
+            variant="body"
+            state={value === "anyone" ? "selected" : "empty"}
+            onClick={() => {
+              if (value !== "anyone") onChange("anyone");
+              setOpen(false);
+            }}
+          />
+        </PopoverMenu>
+      </Popover.Content>
+    </Popover>
+  );
 }
 
-function GrantForm({
-  path,
-  users,
-  groups,
-  onGranted,
+function OwnerRow({
+  ownerId,
+  ownerEmail,
+  ownerName,
+  isYou,
+  canTransfer,
+  onTransfer,
 }: {
-  path: string;
-  users: AdminUser[];
-  groups: { id: string; name: string }[];
-  onGranted: () => void;
+  ownerId: string;
+  ownerEmail: string | null;
+  ownerName: string | null;
+  isYou: boolean;
+  canTransfer: boolean;
+  onTransfer: () => void;
 }) {
-  const [principalKind, setPrincipalKind] = useState<PrincipalKind>("user");
-  const [principalId, setPrincipalId] = useState("");
-  const [permission, setPermission] = useState<Permission>("read");
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-
-  async function submit() {
-    setBusy(true);
-    setErr(null);
-    try {
-      await grantAcl({
-        resource_kind: "page",
-        resource_path: path,
-        principal_kind: principalKind,
-        principal_id: principalKind === "everyone" ? null : principalId,
-        permission,
-      });
-      setPrincipalId("");
-      onGranted();
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : "failed");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  const canSubmit =
-    !busy && (principalKind === "everyone" || principalId !== "");
-
+  const name = displayName({ name: ownerName, email: ownerEmail ?? ownerId });
   return (
-    <div style={{ display: "grid", gap: 8 }}>
-      <div style={{ display: "flex", gap: 8 }}>
-        <select
-          value={principalKind}
-          onChange={(e) => {
-            setPrincipalKind(e.target.value as PrincipalKind);
-            setPrincipalId("");
-          }}
-          style={inputStyle}
-        >
-          <option value="user">User</option>
-          <option value="group">Group</option>
-          <option value="everyone">Everyone</option>
-        </select>
-        {principalKind === "user" ? (
-          <select value={principalId} onChange={(e) => setPrincipalId(e.target.value)} style={inputStyle}>
-            <option value="">Pick a user…</option>
-            {users.map((u) => (
-              <option key={u.id} value={u.id}>
-                {u.email}
-              </option>
-            ))}
-          </select>
-        ) : principalKind === "group" ? (
-          <select value={principalId} onChange={(e) => setPrincipalId(e.target.value)} style={inputStyle}>
-            <option value="">Pick a group…</option>
-            {groups.map((g) => (
-              <option key={g.id} value={g.id}>
-                {g.name}
-              </option>
-            ))}
-          </select>
-        ) : (
-          <span style={{ flex: 1, fontSize: 13, color: color.text.muted, alignSelf: "center" }}>
-            All signed-in users
-          </span>
+    <div className={styles.row}>
+      <Avatar
+        label={initials({ name: ownerName, email: ownerEmail ?? ownerId })}
+        size={28}
+        title={name}
+      />
+      <div className={styles.rowText}>
+        <Text font="main-ui-body" nowrap>
+          {isYou ? `${name} (you)` : name}
+        </Text>
+        {ownerEmail && (
+          <Text font="secondary-body" color="text-03" nowrap>
+            {ownerEmail}
+          </Text>
         )}
-        <select value={permission} onChange={(e) => setPermission(e.target.value as Permission)} style={inputStyle}>
-          <option value="read">Read</option>
-          <option value="write">Write</option>
-        </select>
       </div>
-      <Button onClick={() => void submit()} disabled={!canSubmit}>
-        Grant access
-      </Button>
-      {err && <div style={{ color: color.state.danger.fg, fontSize: 13 }}>{err}</div>}
+      <span className={styles.rowRight}>
+        <span className={styles.inheritedIcon}>
+          <SvgUserShield size={16} />
+        </span>
+        <Text font="secondary-body" color="text-03">
+          Owner
+        </Text>
+        {canTransfer && (
+          <Button
+            prominence="tertiary"
+            size="sm"
+            icon={SvgArrowExchange}
+            tooltip="Transfer ownership"
+            onClick={onTransfer}
+          />
+        )}
+      </span>
     </div>
   );
 }
 
-// --------------------------------------------------------------------------- //
-// Styles                                                                      //
-// --------------------------------------------------------------------------- //
-
-const overlayStyle: React.CSSProperties = {
-  position: "fixed",
-  inset: 0,
-  background: color.overlay,
-  display: "flex",
-  alignItems: "flex-start",
-  justifyContent: "center",
-  // 80px on tall viewports for a generous top gap; clamps down to 5vh
-  // (~33px on a 667px-tall iPhone) so the modal doesn't get pushed off
-  // screen on short phone viewports.
-  paddingTop: "max(20px, min(80px, 5vh))",
-  paddingLeft: 16,
-  paddingRight: 16,
-  zIndex: 50,
-};
-const modalStyle: React.CSSProperties = {
-  background: color.bg.page,
-  borderRadius: radius.lg,
-  width: "min(560px, 100%)",
-  maxHeight: "calc(100vh - 80px)",
-  overflowY: "auto",
-  padding: 24,
-  boxShadow: shadow.modal,
-};
-const inputStyle: React.CSSProperties = {
-  flex: 1,
-  padding: "6px 10px",
-  fontSize: 13,
-  border: `1px solid ${color.border.default}`,
-  borderRadius: radius.sm,
-  background: color.bg.page,
-};
-const iconBtnStyle: React.CSSProperties = {
-  background: "transparent",
-  border: "none",
-  fontSize: 24,
-  cursor: "pointer",
-  color: color.text.muted,
-  width: 32,
-  height: 32,
-  lineHeight: 1,
-};
+function InheritedRow({
+  entry,
+  groups,
+}: {
+  entry: AclEntry;
+  groups: { id: string; name: string }[];
+}) {
+  let name: string;
+  let Icon = SvgUser;
+  if (entry.principal_kind === "everyone") {
+    name = "Anyone";
+    Icon = SvgGlobe;
+  } else if (entry.principal_kind === "group") {
+    name =
+      entry.group_name ??
+      groups.find((g) => g.id === entry.principal_id)?.name ??
+      "Group";
+    Icon = SvgUsers;
+  } else {
+    name = displayName({
+      name: entry.principal_name,
+      email: entry.principal_email ?? entry.principal_id ?? "?",
+    });
+  }
+  const where = entry.resource_path ? `folder "${entry.resource_path}"` : "root folder";
+  return (
+    <div className={styles.row}>
+      <span className={styles.inheritedIcon}>
+        <Icon size={16} />
+      </span>
+      <div className={styles.rowText}>
+        <Text font="main-ui-body" nowrap>
+          {name}
+        </Text>
+        <Text font="secondary-body" color="text-03" nowrap>
+          {`${entry.permission === "write" ? "Can edit" : "Can view"} · inherited from ${where}`}
+        </Text>
+      </div>
+      <span className={styles.rowRight}>
+        <Text font="secondary-body" color="text-03">
+          Inherited
+        </Text>
+      </span>
+    </div>
+  );
+}

@@ -1,0 +1,59 @@
+/* Layout only — typography, inputs, menus, and buttons come from OPAL. */
+
+.stat {
+  margin-bottom: 12px;
+}
+.searchWrap {
+  margin-bottom: 16px;
+}
+.errorRow {
+  margin-bottom: 12px;
+}
+
+.table {
+  display: flex;
+  flex-direction: column;
+}
+.headRow {
+  display: grid;
+  grid-template-columns: var(--cols);
+  gap: 12px;
+  padding: 8px;
+  border-bottom: 1px solid var(--color-border-default);
+}
+.row {
+  display: grid;
+  grid-template-columns: var(--cols);
+  gap: 12px;
+  align-items: center;
+  padding: 10px 8px;
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+.who {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.whoText {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.actions {
+  display: flex;
+  justify-content: flex-end;
+}
+.emptyRow {
+  padding: 16px 8px;
+}
+
+/* Ref-forwarding wrapper for OpenButton inside Popover.Trigger asChild. */
+.menuTrigger {
+  display: inline-flex;
+}

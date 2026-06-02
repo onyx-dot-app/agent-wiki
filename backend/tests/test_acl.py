@@ -5,11 +5,13 @@ every shape of grant, the bootstrap walk, and the rename/delete hooks.
 ``app.auth.groups`` is exercised end-to-end through the same tests since
 the resolver depends on group membership.
 """
+
 from __future__ import annotations
 
 import pytest
 
 from app.auth import groups as groups_repo
+from app.auth import users as users_repo
 from app.wiki import acl
 from tests._seed import seed_user
 
@@ -71,6 +73,114 @@ def test_owner_has_full_access_without_acl_rows(tmp_db):
     alice = seed_user(uid="u_alice", email="alice@x.com")
     acl.set_owner("docs/spec.md", alice)
     assert acl.effective(alice, False, "docs/spec.md") == {"read", "write"}
+
+
+def test_transfer_leaves_previous_owner_as_editor(tmp_db):
+    alice = seed_user(uid="u_alice", email="alice@x.com")
+    bob = seed_user(uid="u_bob", email="bob@x.com")
+    acl.set_owner("docs/spec.md", alice)
+
+    acl.transfer_owner("docs/spec.md", bob)
+
+    assert acl.get_owner("docs/spec.md") == bob
+    # Previous owner keeps edit access via an explicit write grant.
+    assert acl.effective(alice, False, "docs/spec.md") == {"read", "write"}
+    entries = acl.list_for_path("docs/spec.md")
+    assert any(
+        e["principal_kind"] == "user"
+        and e["principal_id"] == alice
+        and e["permission"] == "write"
+        for e in entries
+    )
+
+
+def test_transfer_clearing_owner_still_leaves_editor(tmp_db):
+    alice = seed_user(uid="u_alice", email="alice@x.com")
+    acl.set_owner("docs/spec.md", alice)
+
+    acl.transfer_owner("docs/spec.md", None)
+
+    assert acl.get_owner("docs/spec.md") is None
+    assert acl.effective(alice, False, "docs/spec.md") == {"read", "write"}
+
+
+def test_transfer_to_self_is_noop_no_grant(tmp_db):
+    alice = seed_user(uid="u_alice", email="alice@x.com")
+    acl.set_owner("docs/spec.md", alice)
+
+    acl.transfer_owner("docs/spec.md", alice)
+
+    assert acl.get_owner("docs/spec.md") == alice
+    # No spurious self write-grant.
+    assert acl.list_for_path("docs/spec.md") == []
+
+
+def test_user_search_matches_email_and_name(tmp_db):
+    seed_user(uid="u1", email="alice@x.com", name="Alice Smith")
+    seed_user(uid="u2", email="bob@y.com", name="Bob Jones")
+    seed_user(uid="u3", email="carol@x.com", name=None)
+
+    # Email substring.
+    assert {r["id"] for r in users_repo.search("x.com")} == {"u1", "u3"}
+    # Name substring, case-insensitive.
+    assert [r["id"] for r in users_repo.search("ALICE")] == ["u1"]
+    # Empty query returns all, email-ordered, public-safe fields only.
+    res = users_repo.search("")
+    assert [r["email"] for r in res] == [
+        "alice@x.com",
+        "bob@y.com",
+        "carol@x.com",
+    ]
+    assert set(res[0].keys()) == {"id", "email", "name"}
+    # Limit respected.
+    assert len(users_repo.search("", limit=1)) == 1
+
+
+def test_group_counts(tmp_db):
+    admin = seed_user(uid="u_admin", email="admin@x.com", is_admin=True)
+    alice = seed_user(uid="u_alice", email="alice@x.com")
+    g1 = groups_repo.create("eng", None, created_by_user_id=admin)
+    g2 = groups_repo.create("growth", None, created_by_user_id=admin)
+    groups_repo.add_member(g1, admin)
+    groups_repo.add_member(g1, alice)
+    acl.grant(
+        resource_kind="page",
+        resource_path="docs/a.md",
+        principal_kind="group",
+        principal_id=g1,
+        permission="read",
+        granted_by_user_id=admin,
+    )
+    acl.grant(
+        resource_kind="folder",
+        resource_path="docs",
+        principal_kind="group",
+        principal_id=g1,
+        permission="write",
+        granted_by_user_id=admin,
+    )
+
+    member_counts = groups_repo.member_counts()
+    grant_counts = acl.group_grant_counts()
+    assert member_counts[g1] == 2
+    assert grant_counts[g1] == {"pages": 1, "folders": 1}
+    # A group with no members and no grants is absent from both results.
+    assert g2 not in member_counts
+    assert g2 not in grant_counts
+
+
+def test_groups_by_user(tmp_db):
+    admin = seed_user(uid="u_admin", email="admin@x.com", is_admin=True)
+    alice = seed_user(uid="u_alice", email="alice@x.com")
+    g1 = groups_repo.create("eng", None, created_by_user_id=admin)
+    g2 = groups_repo.create("growth", None, created_by_user_id=admin)
+    groups_repo.add_member(g1, alice)
+    groups_repo.add_member(g2, alice)
+    groups_repo.add_member(g1, admin)
+
+    m = groups_repo.groups_by_user()
+    assert m[alice] == ["eng", "growth"]  # sorted by group name
+    assert m[admin] == ["eng"]
 
 
 def test_anonymous_has_no_access_when_path_is_managed(tmp_db):
@@ -204,6 +314,22 @@ def test_folder_grant_cascades_to_descendants(tmp_db):
     assert acl.effective(alice, False, "other/spec.md") == set()
 
 
+def test_folder_grant_applies_to_the_folder_itself(tmp_db):
+    # A folder-level grant must also resolve when checking access to that
+    # folder path itself (the share-a-folder flow), not only its descendants.
+    alice = seed_user(uid="u_alice", email="alice@x.com")
+    acl.grant(
+        resource_kind="folder",
+        resource_path="docs",
+        principal_kind="user",
+        principal_id=alice,
+        permission="write",
+        granted_by_user_id=None,
+    )
+    assert acl.effective(alice, False, "docs") == {"read", "write"}
+    assert acl.can(alice, False, "write", "docs") is True
+
+
 def test_root_folder_grant_matches_everything(tmp_db):
     alice = seed_user(uid="u_alice", email="alice@x.com")
     acl.grant(
@@ -281,7 +407,11 @@ def test_on_page_created_is_idempotent(tmp_db):
     alice = seed_user(uid="u_alice", email="alice@x.com")
     acl.on_page_created("docs/spec.md", owner_user_id=alice)
     acl.on_page_created("docs/spec.md", owner_user_id=alice)
-    grants = [g for g in acl.list_for_path("docs/spec.md") if g["principal_kind"] == "everyone"]
+    grants = [
+        g
+        for g in acl.list_for_path("docs/spec.md")
+        if g["principal_kind"] == "everyone"
+    ]
     assert len(grants) == 2  # one read + one write, not duplicated.
 
 
@@ -527,23 +657,35 @@ def test_list_for_path_orders_page_then_folder_deepest_first(tmp_db):
     admin = seed_user(uid="u_admin", email="admin@x.com", is_admin=True)
     # Folder grant at root, mid, deep — plus a page grant.
     acl.grant(
-        resource_kind="folder", resource_path="",
-        principal_kind="everyone", principal_id=None, permission="read",
+        resource_kind="folder",
+        resource_path="",
+        principal_kind="everyone",
+        principal_id=None,
+        permission="read",
         granted_by_user_id=admin,
     )
     acl.grant(
-        resource_kind="folder", resource_path="docs",
-        principal_kind="everyone", principal_id=None, permission="read",
+        resource_kind="folder",
+        resource_path="docs",
+        principal_kind="everyone",
+        principal_id=None,
+        permission="read",
         granted_by_user_id=admin,
     )
     acl.grant(
-        resource_kind="folder", resource_path="docs/sub",
-        principal_kind="everyone", principal_id=None, permission="read",
+        resource_kind="folder",
+        resource_path="docs/sub",
+        principal_kind="everyone",
+        principal_id=None,
+        permission="read",
         granted_by_user_id=admin,
     )
     acl.grant(
-        resource_kind="page", resource_path="docs/sub/x.md",
-        principal_kind="everyone", principal_id=None, permission="read",
+        resource_kind="page",
+        resource_path="docs/sub/x.md",
+        principal_kind="everyone",
+        principal_id=None,
+        permission="read",
         granted_by_user_id=admin,
     )
     rows = acl.list_for_path("docs/sub/x.md")
@@ -570,8 +712,11 @@ def test_grants_to_deleted_group_become_inert(tmp_db):
     groups_repo.add_member(gid, alice)
     acl.set_owner("docs/spec.md", bob)
     acl.grant(
-        resource_kind="page", resource_path="docs/spec.md",
-        principal_kind="group", principal_id=gid, permission="read",
+        resource_kind="page",
+        resource_path="docs/spec.md",
+        principal_kind="group",
+        principal_id=gid,
+        permission="read",
         granted_by_user_id=admin,
     )
     assert acl.effective(alice, False, "docs/spec.md") == {"read"}
@@ -593,8 +738,11 @@ def test_deleting_owner_user_clears_owner_row(tmp_db):
     bob = seed_user(uid="u_bob", email="bob@x.com")
     acl.set_owner("docs/spec.md", alice)
     acl.grant(
-        resource_kind="page", resource_path="docs/spec.md",
-        principal_kind="user", principal_id=bob, permission="read",
+        resource_kind="page",
+        resource_path="docs/spec.md",
+        principal_kind="user",
+        principal_id=bob,
+        permission="read",
         granted_by_user_id=alice,
     )
     # Sanity: Alice as owner has full access.

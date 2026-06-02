@@ -4,6 +4,7 @@ Routes in ``app/api/permissions.py`` and the wiki ACL endpoints in
 ``app/api/wiki.py`` parse requests and serialize responses through
 these models.
 """
+
 from __future__ import annotations
 
 from typing import Literal
@@ -27,6 +28,12 @@ class GroupOut(BaseModel):
     description: str | None
     created_by_user_id: str | None
     created_at: str
+    # Aggregate counts for the groups list UI. Default 0 so callers that
+    # build a GroupOut straight from the repo dict (group detail, create)
+    # don't have to supply them.
+    member_count: int = 0
+    page_count: int = 0
+    folder_count: int = 0
 
 
 class GroupListResponse(BaseModel):
@@ -76,11 +83,19 @@ class AclEntryOut(BaseModel):
     permission: str
     granted_by_user_id: str | None
     created_at: str
+    # Display enrichment for the share UI (resolved server-side so the
+    # client doesn't need the admin-only user list). None for principals
+    # that no longer exist or for the `everyone` principal.
+    principal_email: str | None = None
+    principal_name: str | None = None
+    group_name: str | None = None
 
 
 class AclListResponse(BaseModel):
     path: str
     owner_user_id: str | None
+    owner_email: str | None = None
+    owner_name: str | None = None
     entries: list[AclEntryOut]
 
 
