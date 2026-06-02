@@ -90,21 +90,27 @@ def _group_threads(rows: list[dict[str, Any]]) -> list[CommentThreadView]:
 
 
 def _fire_event(doc_path: str, row: dict[str, Any], user: User) -> None:
-    with session() as s:
-        s.add(
-            Event(
-                kind="page.comment",
-                actor=user.id,
-                target=doc_path,
-                payload_json=json.dumps(
-                    {
-                        "comment_id": row["id"],
-                        "thread_root_id": row["thread_root_id"],
-                        "doc_path": doc_path,
-                    }
-                ),
+    """Best-effort activity-feed event. The comment is already committed by the
+    time this runs, so a failure here must not 500 the request (which could
+    prompt a retry and a duplicate comment) — log and move on."""
+    try:
+        with session() as s:
+            s.add(
+                Event(
+                    kind="page.comment",
+                    actor=user.id,
+                    target=doc_path,
+                    payload_json=json.dumps(
+                        {
+                            "comment_id": row["id"],
+                            "thread_root_id": row["thread_root_id"],
+                            "doc_path": doc_path,
+                        }
+                    ),
+                )
             )
-        )
+    except Exception:
+        log.exception("failed to record page.comment event for %s", doc_path)
 
 
 # --------------------------------------------------------------------------- #
