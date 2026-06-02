@@ -2765,7 +2765,7 @@ function FileViewer({ path }: { path: string }) {
           }}
         >
           <Button
-            variant="ghost"
+            prominence="tertiary"
             size="sm"
             onClick={() => {
               setCommentDraft(selTool.draft);
@@ -3140,4 +3140,3 @@ function FilenameRow({
     </div>
   );
 }
-

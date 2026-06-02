@@ -926,4 +926,3 @@ function ToolStateIcon({ state }: { state: ToolState }) {
     </span>
   );
 }
-

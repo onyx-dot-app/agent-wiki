@@ -364,4 +364,3 @@ function SnippetText({ text }: { text: string }) {
     </>
   );
 }
-
