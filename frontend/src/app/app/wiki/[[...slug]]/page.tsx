@@ -1425,6 +1425,7 @@ function FileViewer({ path }: { path: string }) {
   const [commentsOpen, setCommentsOpen] = useState(false);
   const [commentDraft, setCommentDraft] = useState<CommentDraft | null>(null);
   const [commentThreads, setCommentThreads] = useState<CommentThreadView[]>([]);
+  const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
   const [selTool, setSelTool] = useState<{ x: number; y: number; draft: CommentDraft } | null>(
     null,
   );
@@ -1473,9 +1474,10 @@ function FileViewer({ path }: { path: string }) {
         startOffset: r.start_offset as number,
         endOffset: r.end_offset as number,
         quotedText: r.quoted_text as string,
+        active: r.id === activeCommentId,
       }));
     paintCommentHighlights(el, body, targets);
-  }, [commentThreads, body, editing, viewingSha]);
+  }, [commentThreads, body, editing, viewingSha, activeCommentId]);
 
   // On a text selection in the rendered article, offer a floating "Comment"
   // affordance anchored above the selection (render mode only).
@@ -1897,6 +1899,9 @@ function FileViewer({ path }: { path: string }) {
       } catch {
         // fresh fetch failed — body already shows the local draft
       }
+      // The commit re-anchored comments server-side; refetch so the panel +
+      // highlights reflect the drift (won't re-open the panel — guarded).
+      void refreshComments();
       // The server clears the draft row when the body diverges from
       // the template snapshot — re-sync our context so the chat
       // banner disappears at the same moment.
@@ -2574,6 +2579,8 @@ function FileViewer({ path }: { path: string }) {
               draft={commentDraft}
               threads={commentThreads}
               onChanged={refreshComments}
+              activeId={activeCommentId}
+              onActivate={setActiveCommentId}
               onDraftConsumed={() => setCommentDraft(null)}
               onClose={() => {
                 setCommentsOpen(false);
@@ -2650,6 +2657,8 @@ function FileViewer({ path }: { path: string }) {
               draft={commentDraft}
               threads={commentThreads}
               onChanged={refreshComments}
+              activeId={activeCommentId}
+              onActivate={setActiveCommentId}
               onDraftConsumed={() => setCommentDraft(null)}
               onClose={() => {
                 setCommentsOpen(false);

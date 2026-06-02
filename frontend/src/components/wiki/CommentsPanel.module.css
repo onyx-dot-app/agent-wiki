@@ -33,6 +33,43 @@
   gap: 10px;
 }
 
+.thread {
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 8px;
+  padding: 10px;
+  background: var(--color-bg-page);
+  cursor: pointer;
+}
+.threadResolved {
+  opacity: 0.65;
+}
+/* Selected thread — matches the orange doc highlight on its referenced span. */
+.threadActive {
+  border-color: var(--color-comment-highlight-active);
+  box-shadow: 0 0 0 1px var(--color-comment-highlight-active);
+}
+
+/* Tombstone shown in place of the (now-removed) quote box when the referenced
+   text was deleted from the doc, so there's no highlight to point at. */
+.orphanedNote {
+  font-size: 12px;
+  color: var(--color-state-warning-fg);
+  background: var(--color-state-warning-bg);
+  border-left: 3px solid var(--color-state-warning-border);
+  padding: 4px 8px;
+  border-radius: 4px;
+  margin-bottom: 8px;
+}
+
+.draft {
+  border: 1px solid var(--color-accent-subtle-border);
+  border-radius: 8px;
+  padding: 10px;
+  background: var(--color-bg-sunken);
+}
+/* Preview of the selected span while drafting a new comment — confirms the
+   anchor before the comment (and its doc highlight) exist. Existing comments
+   point at the doc highlight instead, so they have no quote box. */
 .quote {
   font-size: 12px;
   color: var(--color-text-secondary);
@@ -43,28 +80,6 @@
   margin-bottom: 6px;
   white-space: pre-wrap;
   word-break: break-word;
-}
-.quoteOrphaned {
-  border-left-color: var(--color-state-warning-border);
-  background: var(--color-state-warning-bg);
-  color: var(--color-state-warning-fg);
-}
-
-.thread {
-  border: 1px solid var(--color-border-subtle);
-  border-radius: 8px;
-  padding: 10px;
-  background: var(--color-bg-page);
-}
-.threadResolved {
-  opacity: 0.65;
-}
-
-.draft {
-  border: 1px solid var(--color-accent-subtle-border);
-  border-radius: 8px;
-  padding: 10px;
-  background: var(--color-bg-sunken);
 }
 
 .metaRow {
@@ -92,11 +107,6 @@
   border-color: var(--color-state-success-border);
   color: var(--color-state-success-fg);
 }
-.badgeOrphaned {
-  background: var(--color-state-warning-bg);
-  border-color: var(--color-state-warning-border);
-  color: var(--color-state-warning-fg);
-}
 
 .body {
   font-size: 13px;
@@ -110,6 +120,27 @@
   flex-wrap: wrap;
   gap: 6px;
   margin-top: 8px;
+}
+
+/* Per-comment Edit/Delete — revealed on hover (or keyboard focus within) so the
+   thread stays quiet until you reach for it. Always visible on touch, which has
+   no hover state. */
+.commentActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.comment:hover .commentActions,
+.comment:focus-within .commentActions {
+  opacity: 1;
+}
+@media (hover: none) {
+  .commentActions {
+    opacity: 1;
+  }
 }
 .threadBody {
   display: flex;

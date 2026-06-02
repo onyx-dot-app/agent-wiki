@@ -123,11 +123,14 @@ export function selectionToAnchor(article: HTMLElement, body: string): CommentDr
 // --------------------------------------------------------------------------- //
 
 const HIGHLIGHT_NAME = "wiki-comment";
+const ACTIVE_HIGHLIGHT_NAME = "wiki-comment-active";
 
 export interface HighlightTarget {
   startOffset: number;
   endOffset: number;
   quotedText: string;
+  /** The selected/active thread gets the stronger (orange) highlight. */
+  active?: boolean;
 }
 
 // Minimal typings for the CSS Custom Highlight API (not in every TS lib yet).
@@ -179,6 +182,7 @@ export function paintCommentHighlights(
 
   if (targets.length === 0) {
     reg.delete(HIGHLIGHT_NAME);
+    reg.delete(ACTIVE_HIGHLIGHT_NAME);
     return;
   }
 
@@ -193,7 +197,8 @@ export function paintCommentHighlights(
     })
     .filter((b): b is { el: HTMLElement; bStart: number; bEnd: number; size: number } => b !== null);
 
-  const ranges: Range[] = [];
+  const defaultRanges: Range[] = [];
+  const activeRanges: Range[] = [];
   for (const t of targets) {
     // Innermost block whose source range contains the comment's start.
     const candidates = blocks
@@ -202,12 +207,15 @@ export function paintCommentHighlights(
     for (const cand of candidates) {
       const range = rangeForText(cand.el, t.quotedText);
       if (range) {
-        ranges.push(range);
+        (t.active ? activeRanges : defaultRanges).push(range);
         break;
       }
     }
   }
 
-  if (ranges.length === 0) reg.delete(HIGHLIGHT_NAME);
-  else reg.set(HIGHLIGHT_NAME, new Ctor(...ranges));
+  // Two registries: default (light) and the selected thread (strong).
+  if (defaultRanges.length) reg.set(HIGHLIGHT_NAME, new Ctor(...defaultRanges));
+  else reg.delete(HIGHLIGHT_NAME);
+  if (activeRanges.length) reg.set(ACTIVE_HIGHLIGHT_NAME, new Ctor(...activeRanges));
+  else reg.delete(ACTIVE_HIGHLIGHT_NAME);
 }

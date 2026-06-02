@@ -28,6 +28,9 @@ interface Props {
    * renders them and calls `onChanged` after a mutation to trigger a refetch. */
   threads: CommentThreadView[];
   onChanged: () => void | Promise<void>;
+  /** Selected thread (its span gets the orange highlight in the doc). */
+  activeId: string | null;
+  onActivate: (id: string | null) => void;
   onDraftConsumed: () => void;
   onClose: () => void;
   fullHeight?: boolean;
@@ -50,6 +53,8 @@ export function CommentsPanel({
   draft,
   threads,
   onChanged,
+  activeId,
+  onActivate,
   onDraftConsumed,
   onClose,
   fullHeight,
@@ -130,6 +135,8 @@ export function CommentsPanel({
               selfId={user?.id}
               isAdmin={!!user?.is_admin}
               busy={busy}
+              active={t.root.id === activeId}
+              onActivate={() => onActivate(t.root.id)}
               onReply={(body) => run(() => replyToComment(t.root.id, body))}
               onResolve={() => run(() => resolveThread(t.root.id))}
               onReopen={() => run(() => reopenThread(t.root.id))}
@@ -187,6 +194,8 @@ function Thread({
   selfId,
   isAdmin,
   busy,
+  active,
+  onActivate,
   onReply,
   onResolve,
   onReopen,
@@ -197,6 +206,8 @@ function Thread({
   selfId: string | undefined;
   isAdmin: boolean;
   busy: boolean;
+  active: boolean;
+  onActivate: () => void;
   onReply: (body: string) => Promise<boolean>;
   onResolve: () => void;
   onReopen: () => void;
@@ -212,13 +223,15 @@ function Thread({
   const conversation = [root, ...thread.replies];
 
   return (
-    <div className={`${styles.thread} ${resolved ? styles.threadResolved : ""}`}>
-      <div
-        className={`${styles.quote} ${root.status === "orphaned" ? styles.quoteOrphaned : ""}`}
-      >
-        {root.status === "orphaned" ? "(text removed) " : ""}
-        {root.quoted_text}
-      </div>
+    // Clicking the thread selects it (its span gets the orange highlight). The
+    // commented text itself lives as a highlight in the doc, so no quote box.
+    <div
+      className={`${styles.thread} ${resolved ? styles.threadResolved : ""} ${active ? styles.threadActive : ""}`}
+      onClick={onActivate}
+    >
+      {root.status === "orphaned" && (
+        <div className={styles.orphanedNote}>Original content deleted</div>
+      )}
 
       <div className={styles.threadBody}>
         {conversation.map((c) => (
@@ -302,7 +315,7 @@ function Comment({
   const [draft, setDraft] = useState(comment.body);
 
   return (
-    <div>
+    <div className={styles.comment}>
       <div className={styles.metaRow}>
         <Text font="main-ui-action" color="text-04">
           {authorLabel(comment.author_user_id, selfId)}
@@ -314,9 +327,6 @@ function Comment({
         </span>
         {comment.status === "resolved" && (
           <span className={`${styles.badge} ${styles.badgeResolved}`}>resolved</span>
-        )}
-        {comment.status === "orphaned" && (
-          <span className={`${styles.badge} ${styles.badgeOrphaned}`}>orphaned</span>
         )}
       </div>
 
@@ -356,7 +366,7 @@ function Comment({
       )}
 
       {canModify && !editing && (
-        <div className={styles.actions}>
+        <div className={styles.commentActions}>
           <Button prominence="tertiary" size="sm" disabled={busy} onClick={() => setEditing(true)}>
             Edit
           </Button>
