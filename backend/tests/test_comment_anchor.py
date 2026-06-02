@@ -136,6 +136,30 @@ def test_survival_guard_orphans_when_highlight_would_be_mostly_new():
     assert remap_range(old, new, 0, 3) is None
 
 
+def test_word_replacement_keeps_full_word_not_mid_word():
+    # "variable" -> "parameter": the span must re-anchor to the whole new word,
+    # not truncate mid-word (the reported "environment parame" bug).
+    old = "set via the environment variable here"
+    new = "set via the environment parameter here"
+    s, e = old.index("environment variable"), old.index("environment variable") + len(
+        "environment variable"
+    )
+    result = remap_range(old, new, s, e)
+    assert _slice(new, result) == "environment parameter"
+
+
+def test_in_place_word_edit_keeps_via_word_snap():
+    # "weekly" -> "biweekly" inside a span that starts mid-word: snapping pulls
+    # in the preserved word ("rotation"), so it re-anchors instead of orphaning.
+    old = "The rotation is weekly here"
+    new = "The rotation is biweekly here"
+    s = old.index("n is weekly")
+    e = s + len("n is weekly")
+    result = remap_range(old, new, s, e)
+    assert result is not None
+    assert _slice(new, result) == "rotation is biweekly"
+
+
 def test_out_of_bounds_raises():
     with pytest.raises(ValueError):
         remap_range("short", "longer body", 0, 99)
