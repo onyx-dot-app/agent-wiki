@@ -127,27 +127,29 @@ def transfer_owner(path: str, new_owner_id: str | None) -> None:
             row.owner_user_id = new_owner_id
 
         if prev_owner is not None and prev_owner != new_owner_id:
-            already = s.scalar(
-                select(AclEntry).where(
+            # Drop any existing grant (read or write) for the previous owner on
+            # this path, then add a single write grant — otherwise a pre-existing
+            # read row would linger beside the new write row, and the UI (which
+            # collapses to the strongest grant) couldn't fully revoke them later.
+            s.execute(
+                delete(AclEntry).where(
                     AclEntry.resource_kind == resource_kind,
                     AclEntry.resource_path == canon,
                     AclEntry.principal_kind == "user",
                     AclEntry.principal_id == prev_owner,
-                    AclEntry.permission == "write",
                 )
             )
-            if already is None:
-                s.add(
-                    AclEntry(
-                        id=f"acl_{uuid.uuid4().hex[:12]}",
-                        resource_kind=resource_kind,
-                        resource_path=canon,
-                        principal_kind="user",
-                        principal_id=prev_owner,
-                        permission="write",
-                        granted_by_user_id=new_owner_id,
-                    )
+            s.add(
+                AclEntry(
+                    id=f"acl_{uuid.uuid4().hex[:12]}",
+                    resource_kind=resource_kind,
+                    resource_path=canon,
+                    principal_kind="user",
+                    principal_id=prev_owner,
+                    permission="write",
+                    granted_by_user_id=new_owner_id,
                 )
+            )
 
 
 def group_grant_counts() -> dict[str, dict[str, int]]:

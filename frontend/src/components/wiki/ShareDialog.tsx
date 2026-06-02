@@ -67,7 +67,10 @@ interface GrantDraft {
 interface Baseline {
   grants: Map<string, GrantDraft>;
   general: Visibility;
-  entryIdByKey: Map<string, string>;
+  // All ACL row IDs per principal — a principal can hold multiple rows
+  // (e.g. read + write); removing them must revoke every row, not just the
+  // strongest, or the weaker one resurfaces on refresh.
+  entryIdByKey: Map<string, string[]>;
   everyoneReadId: string | null;
   everyoneWriteId: string | null;
   inherited: AclEntry[];
@@ -91,7 +94,7 @@ function deriveBaseline(
 ): Baseline {
   if (!acl) return EMPTY_BASELINE;
   const grants = new Map<string, GrantDraft>();
-  const entryIdByKey = new Map<string, string>();
+  const entryIdByKey = new Map<string, string[]>();
   let everyoneReadId: string | null = null;
   let everyoneWriteId: string | null = null;
   const inherited: AclEntry[] = [];
@@ -110,18 +113,23 @@ function deriveBaseline(
     if (e.principal_kind !== "user" && e.principal_kind !== "group") continue;
     if (!e.principal_id) continue;
     const k = keyFor(e.principal_kind, e.principal_id);
+    // Record every row ID for the principal so removal revokes them all.
+    const ids = entryIdByKey.get(k) ?? [];
+    ids.push(e.id);
+    entryIdByKey.set(k, ids);
+    // Display the strongest grant (write > read); upgrade read → write but
+    // never downgrade.
     const existing = grants.get(k);
-    // Collapse a duplicate principal to its strongest grant (write > read).
-    if (existing && existing.permission === "write") continue;
-    grants.set(k, {
-      kind: e.principal_kind,
-      id: e.principal_id,
-      permission: e.permission,
-      email: e.principal_email,
-      name: e.principal_name,
-      groupName: e.group_name,
-    });
-    entryIdByKey.set(k, e.id);
+    if (!existing || (existing.permission !== "write" && e.permission === "write")) {
+      grants.set(k, {
+        kind: e.principal_kind,
+        id: e.principal_id,
+        permission: e.permission,
+        email: e.principal_email,
+        name: e.principal_name,
+        groupName: e.group_name,
+      });
+    }
   }
 
   const general: Visibility = everyoneWriteId
@@ -282,11 +290,9 @@ export function ShareDialog({ path, open, onClose }: ShareDialogProps) {
         const n = grants.get(k);
         if (n && !o) adds.push(n);
         else if (o && !n) {
-          const id = baseline.entryIdByKey.get(k);
-          if (id) revokes.push(id);
+          revokes.push(...(baseline.entryIdByKey.get(k) ?? []));
         } else if (o && n && o.permission !== n.permission) {
-          const id = baseline.entryIdByKey.get(k);
-          if (id) revokes.push(id);
+          revokes.push(...(baseline.entryIdByKey.get(k) ?? []));
           adds.push(n);
         }
       }
