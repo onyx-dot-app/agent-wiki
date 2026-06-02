@@ -330,16 +330,20 @@ export function ShareDialog({ path, open, onClose }: ShareDialogProps) {
           permission: "write",
         });
       }
-      await refresh();
-      onClose();
     } catch (e) {
       setSaveError(e instanceof Error ? e.message : "Failed to save changes");
       // Re-pull the ACL so the baseline reflects whatever partially applied;
       // otherwise a retry re-issues already-committed grants/revokes and 404s.
       await refresh();
-    } finally {
       setSaving(false);
+      return;
     }
+    // All mutations committed — the save succeeded. Close immediately and
+    // refresh the cache best-effort; a failing refetch must NOT surface as a
+    // save error or keep the dialog open after the DB already changed.
+    setSaving(false);
+    onClose();
+    void refresh();
   };
 
   const forbidden = error instanceof ApiError && error.status === 403;

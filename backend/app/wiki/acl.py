@@ -159,8 +159,14 @@ def group_grant_counts() -> dict[str, dict[str, int]]:
     """
     out: dict[str, dict[str, int]] = {}
     with session() as s:
+        # COUNT(DISTINCT resource_path): a group can hold both a read and a
+        # write row on the same resource — count the resource once, not twice.
         for gid, kind, n in s.execute(
-            select(AclEntry.principal_id, AclEntry.resource_kind, func.count())
+            select(
+                AclEntry.principal_id,
+                AclEntry.resource_kind,
+                func.count(func.distinct(AclEntry.resource_path)),
+            )
             .where(AclEntry.principal_kind == "group")
             .group_by(AclEntry.principal_id, AclEntry.resource_kind)
         ).all():
