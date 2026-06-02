@@ -1,6 +1,7 @@
 "use client";
 
-import { Button, Text } from "@onyx-ai/opal/components";
+import { Button, LineItemButton, Popover, Text } from "@onyx-ai/opal/components";
+import { SvgEdit, SvgMoreHorizontal, SvgTrash } from "@onyx-ai/opal/icons";
 import { useCallback, useState } from "react";
 
 import { useAuth } from "@/lib/auth";
@@ -82,14 +83,46 @@ export function CommentsPanel({
     [onChanged],
   );
 
-  const total = threads.length;
+  const [showResolved, setShowResolved] = useState(false);
+
+  // Order threads to match the doc: by their referenced position (start_offset)
+  // top-to-bottom. Orphaned threads ("Original content deleted") have no live
+  // anchor, so they sink to the bottom, ordered among themselves by creation.
+  const orderedThreads = [...threads].sort((a, b) => {
+    const ao = a.root.status === "orphaned" ? null : a.root.start_offset;
+    const bo = b.root.status === "orphaned" ? null : b.root.start_offset;
+    if (ao === null && bo === null) return a.root.created_at.localeCompare(b.root.created_at);
+    if (ao === null) return 1;
+    if (bo === null) return -1;
+    return ao - bo;
+  });
+
+  // Resolved threads drop out of the main list (Google-Docs style) — they're
+  // "done", so they shouldn't clutter the doc. They stay reachable (to reopen)
+  // behind a toggle.
+  const openThreads = orderedThreads.filter((t) => t.root.status !== "resolved");
+  const resolvedThreads = orderedThreads.filter((t) => t.root.status === "resolved");
+
+  const renderThread = (t: CommentThreadView) => (
+    <Thread
+      key={t.root.id}
+      thread={t}
+      selfId={user?.id}
+      isAdmin={!!user?.is_admin}
+      busy={busy}
+      active={t.root.id === activeId}
+      onActivate={() => onActivate(t.root.id)}
+      onReply={(body) => run(() => replyToComment(t.root.id, body))}
+      onResolve={() => run(() => resolveThread(t.root.id))}
+      onReopen={() => run(() => reopenThread(t.root.id))}
+      onEdit={(id, body) => run(() => editComment(id, body))}
+      onDelete={(id) => run(() => deleteComment(id))}
+    />
+  );
 
   return (
     <div className={`${styles.panel} ${fullHeight ? styles.fullHeight : ""}`}>
-      <div className={styles.header}>
-        <Text font="main-ui-action" color="text-04">
-          {`Comments${total ? ` (${total})` : ""}`}
-        </Text>
+      <div className={styles.closeRow}>
         <Button prominence="tertiary" size="sm" onClick={onClose} aria-label="Close comments">
           ×
         </Button>
@@ -123,27 +156,29 @@ export function CommentsPanel({
           />
         )}
 
-        {total === 0 && !draft ? (
+        {openThreads.length === 0 && resolvedThreads.length === 0 && !draft ? (
           <Text font="secondary-body" color="text-03">
             No comments yet. Select text in the page to add one.
           </Text>
         ) : (
-          threads.map((t) => (
-            <Thread
-              key={t.root.id}
-              thread={t}
-              selfId={user?.id}
-              isAdmin={!!user?.is_admin}
-              busy={busy}
-              active={t.root.id === activeId}
-              onActivate={() => onActivate(t.root.id)}
-              onReply={(body) => run(() => replyToComment(t.root.id, body))}
-              onResolve={() => run(() => resolveThread(t.root.id))}
-              onReopen={() => run(() => reopenThread(t.root.id))}
-              onEdit={(id, body) => run(() => editComment(id, body))}
-              onDelete={(id) => run(() => deleteComment(id))}
-            />
-          ))
+          <>
+            {openThreads.map(renderThread)}
+
+            {resolvedThreads.length > 0 && (
+              <>
+                <button
+                  type="button"
+                  className={styles.resolvedToggle}
+                  onClick={() => setShowResolved((v) => !v)}
+                >
+                  {showResolved
+                    ? `Hide resolved (${resolvedThreads.length})`
+                    : `Show resolved (${resolvedThreads.length})`}
+                </button>
+                {showResolved && resolvedThreads.map(renderThread)}
+              </>
+            )}
+          </>
         )}
       </div>
     </div>
@@ -313,6 +348,7 @@ function Comment({
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(comment.body);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   return (
     <div className={styles.comment}>
@@ -325,9 +361,51 @@ function Comment({
             {relativeTime(toIso(comment.created_at), "short")}
           </Text>
         </span>
-        {comment.status === "resolved" && (
-          <span className={`${styles.badge} ${styles.badgeResolved}`}>resolved</span>
-        )}
+        <span className={styles.metaRight}>
+          {canModify && !editing && (
+            // Overflow menu (Google-Docs style) keeps Edit/Delete off the card
+            // until hovered, so comments stay compact. Forced visible while open.
+            <span className={`${styles.kebab} ${menuOpen ? styles.kebabOpen : ""}`}>
+              <Popover open={menuOpen} onOpenChange={setMenuOpen}>
+                {/* Radix renders its own <button> here (no asChild) so the
+                    trigger's onClick/ref/data-state are guaranteed to wire up —
+                    OPAL's Button isn't a Radix Slot and drops them. */}
+                <Popover.Trigger
+                  className={styles.kebabBtn}
+                  aria-label="Comment actions"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <SvgMoreHorizontal />
+                </Popover.Trigger>
+                <Popover.Content width="fit" align="end">
+                  <Popover.Menu>
+                    <LineItemButton
+                      title="Edit"
+                      icon={SvgEdit}
+                      sizePreset="main-ui"
+                      variant="section"
+                      onClick={() => {
+                        setMenuOpen(false);
+                        setEditing(true);
+                      }}
+                    />
+                    <LineItemButton
+                      title="Delete"
+                      color="danger"
+                      icon={SvgTrash}
+                      sizePreset="main-ui"
+                      variant="section"
+                      onClick={() => {
+                        setMenuOpen(false);
+                        onDelete(comment.id);
+                      }}
+                    />
+                  </Popover.Menu>
+                </Popover.Content>
+              </Popover>
+            </span>
+          )}
+        </span>
       </div>
 
       {editing ? (
@@ -363,17 +441,6 @@ function Comment({
         </div>
       ) : (
         <div className={styles.body}>{comment.body}</div>
-      )}
-
-      {canModify && !editing && (
-        <div className={styles.commentActions}>
-          <Button prominence="tertiary" size="sm" disabled={busy} onClick={() => setEditing(true)}>
-            Edit
-          </Button>
-          <Button variant="danger" size="sm" disabled={busy} onClick={() => onDelete(comment.id)}>
-            Delete
-          </Button>
-        </div>
       )}
     </div>
   );

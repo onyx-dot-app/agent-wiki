@@ -170,20 +170,26 @@ function rangeForText(el: Element, needle: string): Range | null {
 }
 
 /** Repaint comment highlights over the rendered article. Pass an empty list to
- * clear (e.g. when entering edit mode). No-op where the API is unsupported. */
+ * clear (e.g. when entering edit mode). No-op where the API is unsupported.
+ *
+ * Returns the number of target ranges actually painted. Callers use this to
+ * detect "DOM not ready yet" (asked for N, painted < N) and retry — react-
+ * markdown commits its text nodes a tick after React renders, so an eager paint
+ * finds nothing to range over. Returns the target count when unsupported so
+ * callers don't retry forever on a browser without the Custom Highlight API. */
 export function paintCommentHighlights(
   article: HTMLElement,
   body: string,
   targets: HighlightTarget[],
-): void {
+): number {
   const reg = highlightRegistry();
   const Ctor = (globalThis as { Highlight?: HighlightCtor }).Highlight;
-  if (!reg || !Ctor) return;
+  if (!reg || !Ctor) return targets.length;
 
   if (targets.length === 0) {
     reg.delete(HIGHLIGHT_NAME);
     reg.delete(ACTIVE_HIGHLIGHT_NAME);
-    return;
+    return 0;
   }
 
   const starts = lineStartOffsets(body);
@@ -218,4 +224,6 @@ export function paintCommentHighlights(
   else reg.delete(HIGHLIGHT_NAME);
   if (activeRanges.length) reg.set(ACTIVE_HIGHLIGHT_NAME, new Ctor(...activeRanges));
   else reg.delete(ACTIVE_HIGHLIGHT_NAME);
+
+  return defaultRanges.length + activeRanges.length;
 }

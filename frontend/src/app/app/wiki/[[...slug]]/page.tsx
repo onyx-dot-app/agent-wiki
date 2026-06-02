@@ -1486,31 +1486,94 @@ function FileViewer({ path }: { path: string }) {
     void refreshComments();
   }, [refreshComments]);
 
+  // Render the markdown once per body change and reuse the element on every
+  // unrelated re-render (panel open/close, active-comment change, …). A fresh
+  // <ReactMarkdown> element would let React reconcile and replace the article's
+  // text nodes, which silently invalidates the CSS Highlight Ranges painted
+  // over them — the bug where highlights vanished until you clicked a comment.
+  const renderedBody = useMemo(
+    () => (
+      <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSourcePos]}>
+        {body}
+      </ReactMarkdown>
+    ),
+    [body],
+  );
+
   // Paint Google-Docs-style highlights over the rendered article for each
   // (non-orphaned) anchored comment. Cleared in edit/diff mode (no article).
+  //
+  // On a fresh load the comments and the doc body arrive on separate renders,
+  // and react-markdown commits its text nodes a tick later than this effect
+  // runs — so a single synchronous (or even rAF-deferred) paint finds no text
+  // to range over and silently no-ops, which is why nothing was highlighted
+  // until a click happened to re-run the paint against a settled DOM. We make
+  // it robust by (a) painting now, (b) painting on the next frame, and (c)
+  // watching the article subtree with a MutationObserver and repainting whenever
+  // react-markdown finally swaps in / replaces the rendered nodes. The CSS
+  // Custom Highlight API doesn't mutate the DOM, so this never loops.
   useEffect(() => {
     const el = articleRef.current;
-    if (!el || editing || viewingSha) {
-      if (el) paintCommentHighlights(el, body, []);
-      return;
-    }
-    const targets = commentThreads
-      .map((t) => t.root)
-      .filter(
-        (r) =>
-          r.status !== "orphaned" &&
-          r.start_offset !== null &&
-          r.end_offset !== null &&
-          r.quoted_text !== null,
-      )
-      .map((r) => ({
-        startOffset: r.start_offset as number,
-        endOffset: r.end_offset as number,
-        quotedText: r.quoted_text as string,
-        active: r.id === activeCommentId,
-      }));
-    paintCommentHighlights(el, body, targets);
-  }, [commentThreads, body, editing, viewingSha, activeCommentId]);
+    if (!el) return;
+    const clear = editing || viewingSha;
+    const targets = clear
+      ? []
+      : commentThreads
+          .map((t) => t.root)
+          .filter(
+            // Resolved threads disappear from the panel, so drop their doc
+            // highlight too; orphaned ones have no live span to paint.
+            (r) =>
+              r.status !== "orphaned" &&
+              r.status !== "resolved" &&
+              r.start_offset !== null &&
+              r.end_offset !== null &&
+              r.quoted_text !== null,
+          )
+          .map((r) => ({
+            startOffset: r.start_offset as number,
+            endOffset: r.end_offset as number,
+            quotedText: r.quoted_text as string,
+            active: r.id === activeCommentId,
+          }));
+
+    let cancelled = false;
+    let raf = 0;
+    let attempts = 0;
+    const MAX_ATTEMPTS = 60; // ~1s at 60fps, then give up (some spans may be unmappable)
+    const tick = () => {
+      if (cancelled) return;
+      const painted = paintCommentHighlights(el, body, targets);
+      attempts += 1;
+      // The markdown text nodes commit a tick after React renders, so the first
+      // paint can find nothing to range over. Retry per-frame until every target
+      // lands (or we hit the cap) — this is what makes highlights appear on a
+      // fresh load instead of only after a click re-ran the paint.
+      if (painted < targets.length && attempts < MAX_ATTEMPTS) {
+        raf = requestAnimationFrame(tick);
+      }
+    };
+    tick();
+
+    // Repaint when react-markdown later swaps nodes (e.g. an edit/remap rerenders
+    // the body). Reset the retry budget so the fresh DOM gets a full set of tries.
+    const observer = new MutationObserver(() => {
+      attempts = 0;
+      cancelAnimationFrame(raf);
+      tick();
+    });
+    observer.observe(el, { childList: true, subtree: true, characterData: true });
+
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(raf);
+      observer.disconnect();
+    };
+    // `loading` gates whether <article> is mounted: when the body is primed by
+    // the SWR cache before `loading` flips, `body` doesn't change on mount, so
+    // without this dep the effect wouldn't re-run and the article would mount
+    // with no paint (highlights only appeared after a click). Re-run on mount.
+  }, [commentThreads, body, editing, viewingSha, activeCommentId, loading]);
 
   // On a text selection in the rendered article, offer a floating "Comment"
   // affordance anchored above the selection (render mode only).
@@ -2586,12 +2649,7 @@ function FileViewer({ path }: { path: string }) {
                 style={{ flex: 1, minHeight: 0, overflowY: "auto" }}
                 onMouseUp={onArticleMouseUp}
               >
-                <ReactMarkdown
-                  remarkPlugins={[remarkGfm]}
-                  rehypePlugins={[rehypeSourcePos]}
-                >
-                  {body}
-                </ReactMarkdown>
+                {renderedBody}
               </article>
             )}
           </div>
