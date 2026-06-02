@@ -27,8 +27,11 @@ import {
   type AgentSessionSummary,
 } from "@/lib/launchers";
 import { ShareDialog } from "@/components/wiki/ShareDialog";
+import { CommentsPanel } from "@/components/wiki/CommentsPanel";
 import { FolderIcon, FileIcon } from "@/components/wiki/WikiIcons";
 import { apiFetch, ApiError } from "@/lib/api";
+import { selectionToAnchor, type CommentDraft } from "@/lib/commentAnchor";
+import { rehypeSourcePos } from "@/lib/rehypeSourcePos";
 import { useRequireAuth } from "@/lib/auth";
 import { useDrafting } from "@/lib/drafting";
 import { rememberWikiPath } from "@/lib/lastViewed";
@@ -1408,6 +1411,42 @@ function FileViewer({ path }: { path: string }) {
   const [commits, setCommits] = useState<CommitInfo[] | null>(null);
   const [diffData, setDiffData] = useState<FileDiffResponse | null>(null);
   const [historyError, setHistoryError] = useState<string | null>(null);
+  // Comments (render-mode). `commentDraft` is a pending text selection being
+  // composed; `selTool` is the floating "Comment" affordance shown on select.
+  const [commentsOpen, setCommentsOpen] = useState(false);
+  const [commentDraft, setCommentDraft] = useState<CommentDraft | null>(null);
+  const [selTool, setSelTool] = useState<{ x: number; y: number; draft: CommentDraft } | null>(
+    null,
+  );
+  const articleRef = useRef<HTMLElement | null>(null);
+
+  // On a text selection in the rendered article, offer a floating "Comment"
+  // affordance anchored above the selection (render mode only).
+  const onArticleMouseUp = useCallback(() => {
+    const el = articleRef.current;
+    const sel = window.getSelection();
+    if (!el || !sel || sel.rangeCount === 0) {
+      setSelTool(null);
+      return;
+    }
+    const draft = selectionToAnchor(el, body);
+    if (!draft) {
+      setSelTool(null);
+      return;
+    }
+    const rect = sel.getRangeAt(0).getBoundingClientRect();
+    setSelTool({ x: rect.left + rect.width / 2, y: rect.top, draft });
+  }, [body]);
+
+  useEffect(() => {
+    const onSel = () => {
+      const s = window.getSelection();
+      if (!s || s.isCollapsed) setSelTool(null);
+    };
+    document.addEventListener("selectionchange", onSel);
+    return () => document.removeEventListener("selectionchange", onSel);
+  }, []);
+
   // Active-agents panel (collapsible chip near the top of the doc).
   // We always know the count (so the chip can label "Active agents (N)"),
   // but the entry list only renders when the user expands it.
@@ -2017,6 +2056,21 @@ function FileViewer({ path }: { path: string }) {
               >
                 History
               </Button>
+              <Button
+                onClick={() => setCommentsOpen((v) => !v)}
+                aria-pressed={commentsOpen}
+                style={
+                  commentsOpen
+                    ? {
+                        background: color.accent.subtleBg,
+                        color: color.accent.subtleFg,
+                        borderColor: color.accent.subtleBorder,
+                      }
+                    : undefined
+                }
+              >
+                Comments
+              </Button>
             </div>
             <Button variant="primary" onClick={startEdit}>
               Edit
@@ -2432,10 +2486,15 @@ function FileViewer({ path }: { path: string }) {
               </div>
             ) : (
               <article
+                ref={articleRef}
                 className="markdown"
                 style={{ flex: 1, minHeight: 0, overflowY: "auto" }}
+                onMouseUp={onArticleMouseUp}
               >
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  rehypePlugins={[rehypeSourcePos]}
+                >
                   {body}
                 </ReactMarkdown>
               </article>
@@ -2449,6 +2508,18 @@ function FileViewer({ path }: { path: string }) {
               viewingSha={viewingSha}
               onPick={onPickCommit}
               onClose={() => setHistoryOpen(false)}
+            />
+          )}
+          {commentsOpen && !isMobile && (
+            <CommentsPanel
+              path={path}
+              headSha={headSha}
+              draft={commentDraft}
+              onDraftConsumed={() => setCommentDraft(null)}
+              onClose={() => {
+                setCommentsOpen(false);
+                setCommentDraft(null);
+              }}
             />
           )}
         </div>
@@ -2494,6 +2565,80 @@ function FileViewer({ path }: { path: string }) {
             />
           </div>
         </>
+      )}
+      {commentsOpen && isMobile && (
+        <>
+          <div
+            onClick={() => setCommentsOpen(false)}
+            aria-hidden
+            style={{ position: "fixed", inset: 0, background: color.overlay, zIndex: 60 }}
+          />
+          <div
+            style={{
+              position: "fixed",
+              top: 0,
+              right: 0,
+              bottom: 0,
+              width: "min(360px, 100vw)",
+              zIndex: 70,
+              display: "flex",
+              boxShadow: shadow.panel,
+            }}
+          >
+            <CommentsPanel
+              path={path}
+              headSha={headSha}
+              draft={commentDraft}
+              onDraftConsumed={() => setCommentDraft(null)}
+              onClose={() => {
+                setCommentsOpen(false);
+                setCommentDraft(null);
+              }}
+              fullHeight
+            />
+          </div>
+        </>
+      )}
+      {selTool && (
+        <div
+          onMouseDown={(e) => e.preventDefault()}
+          style={{
+            position: "fixed",
+            left: selTool.x,
+            top: selTool.y - 8,
+            transform: "translate(-50%, -100%)",
+            zIndex: 80,
+            background: color.bg.panel,
+            border: `1px solid ${color.border.default}`,
+            borderRadius: radius.md,
+            boxShadow: shadow.popover,
+            padding: 4,
+          }}
+        >
+          <button
+            onClick={() => {
+              setCommentDraft(selTool.draft);
+              setCommentsOpen(true);
+              setSelTool(null);
+              window.getSelection()?.removeAllRanges();
+            }}
+            style={{
+              appearance: "none",
+              border: "none",
+              background: "transparent",
+              color: color.text.primary,
+              cursor: "pointer",
+              fontSize: 13,
+              padding: "6px 10px",
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              whiteSpace: "nowrap",
+            }}
+          >
+            💬 Comment
+          </button>
+        </div>
       )}
     </main>
   );

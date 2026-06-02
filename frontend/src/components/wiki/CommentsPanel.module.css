@@ -1,0 +1,209 @@
+.panel {
+  display: flex;
+  flex-direction: column;
+  width: 340px;
+  min-height: 0;
+  background: var(--color-bg-panel);
+  border-left: 1px solid var(--color-border-subtle);
+  box-shadow: var(--shadow-panel);
+}
+
+.fullHeight {
+  width: 100%;
+  height: 100%;
+  border-left: none;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.title {
+  font-weight: 600;
+  color: var(--color-text-primary);
+  font-size: 14px;
+}
+
+.count {
+  color: var(--color-text-muted);
+  font-weight: 400;
+  margin-left: 6px;
+}
+
+.closeBtn {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 16px;
+  line-height: 1;
+}
+.closeBtn:hover {
+  background: var(--color-bg-hover);
+}
+
+.scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.empty {
+  color: var(--color-text-muted);
+  font-size: 13px;
+  text-align: center;
+  padding: 24px 8px;
+}
+
+.quote {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  background: var(--color-accent-subtle-bg);
+  border-left: 3px solid var(--color-accent-subtle-border);
+  padding: 4px 8px;
+  border-radius: 4px;
+  margin-bottom: 6px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.quoteOrphaned {
+  border-left-color: var(--color-state-warning-border);
+  background: var(--color-state-warning-bg);
+  color: var(--color-state-warning-fg);
+}
+
+.thread {
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 8px;
+  padding: 10px;
+  background: var(--color-bg-page);
+}
+.threadResolved {
+  opacity: 0.65;
+}
+
+.draft {
+  border: 1px solid var(--color-accent-subtle-border);
+  border-radius: 8px;
+  padding: 10px;
+  background: var(--color-bg-sunken);
+}
+
+.metaRow {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.author {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--color-text-primary);
+}
+.time {
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+.badge {
+  margin-left: auto;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 1px 6px;
+  border-radius: 9999px;
+  border: 1px solid var(--color-border-default);
+  color: var(--color-text-muted);
+}
+.badgeResolved {
+  background: var(--color-state-success-bg);
+  border-color: var(--color-state-success-border);
+  color: var(--color-state-success-fg);
+}
+.badgeOrphaned {
+  background: var(--color-state-warning-bg);
+  border-color: var(--color-state-warning-border);
+  color: var(--color-state-warning-fg);
+}
+
+.body {
+  font-size: 13px;
+  color: var(--color-text-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.linkBtn {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+.linkBtn:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+}
+.linkBtnDanger:hover {
+  color: var(--color-state-danger-fg);
+}
+
+.replies {
+  margin-top: 8px;
+  padding-left: 10px;
+  border-left: 2px solid var(--color-border-subtle);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.textarea {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  min-height: 54px;
+  font: inherit;
+  font-size: 13px;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border-default);
+  border-radius: 6px;
+  background: var(--color-bg-page);
+  color: var(--color-text-primary);
+}
+.textarea:focus {
+  outline: none;
+  border-color: var(--color-border-focus);
+}
+
+.composeRow {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.error {
+  color: var(--color-state-danger-fg);
+  font-size: 12px;
+  padding: 4px 0;
+}

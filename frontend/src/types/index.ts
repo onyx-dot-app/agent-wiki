@@ -38,6 +38,35 @@ export interface DocumentActivity {
   expires_at: string;
 }
 
+export type CommentScope = "inline" | "page";
+export type CommentAuthorKind = "user" | "agent";
+export type CommentStatus = "open" | "resolved" | "orphaned";
+
+export interface CommentView {
+  id: string;
+  doc_path: string;
+  thread_root_id: string;
+  parent_id: string | null;
+  scope: CommentScope;
+  anchor_sha: string | null;
+  start_offset: number | null;
+  end_offset: number | null;
+  quoted_text: string | null;
+  author_kind: CommentAuthorKind;
+  author_user_id: string | null;
+  body: string;
+  status: CommentStatus;
+  resolved_by_user_id: string | null;
+  resolved_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CommentThreadView {
+  root: CommentView;
+  replies: CommentView[];
+}
+
 export interface DocumentActivityResponse {
   path: string;
   agents: DocumentActivity[];
