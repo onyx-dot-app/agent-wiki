@@ -107,6 +107,21 @@ def _word_preserved_fraction(old_body: str, new_body: str, new_start: int, new_e
     return kept / span
 
 
+def _is_word_char(c: str) -> bool:
+    return c.isalnum() or c == "_"
+
+
+def _snap_to_words(body: str, start: int, end: int) -> tuple[int, int]:
+    """Expand ``[start, end)`` outward over adjacent word characters so a
+    remapped anchor never lands mid-word. Stops at whitespace and punctuation,
+    so a span ending before "." doesn't swallow the period."""
+    while start > 0 and _is_word_char(body[start - 1]):
+        start -= 1
+    while end < len(body) and _is_word_char(body[end]):
+        end += 1
+    return start, end
+
+
 def remap_range(
     old_body: str, new_body: str, start: int, end: int
 ) -> tuple[int, int] | None:
@@ -128,6 +143,11 @@ def remap_range(
 
     if new_start >= new_end:
         return None  # whole span deleted/replaced
+    # Snap to whole-word boundaries so an edited word inside the span re-anchors
+    # cleanly (e.g. "variable"->"parameter" keeps the full word, not "parame";
+    # and pulling in the surrounding preserved word lifts the survival fraction
+    # for in-place edits like "weekly"->"biweekly" instead of orphaning).
+    new_start, new_end = _snap_to_words(new_body, new_start, new_end)
     if _word_preserved_fraction(old_body, new_body, new_start, new_end) < _MIN_PRESERVED:
         return None  # alignment landed on mostly-rewritten text — orphan, don't mislead
     if not new_body[new_start:new_end].strip():
