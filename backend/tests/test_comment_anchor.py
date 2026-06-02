@@ -161,15 +161,16 @@ def test_in_place_word_edit_keeps_via_word_snap():
 
 
 # --------------------------------------------------------------------------- #
-# In-place human edits: a word changed inside the span used to orphan because   #
-# the survival guard scored the edited word as a wholly-new token. The guard    #
-# now gives partial credit by character similarity, so these keep their anchor. #
+# In-place human edits: a word changed inside the span keeps its anchor. The     #
+# survival guard gives a replaced token partial credit by the character          #
+# similarity of its old and new run, so high-overlap edits (typos, plurals,      #
+# prefixes) stay trusted.                                                        #
 # --------------------------------------------------------------------------- #
 
 
 def test_single_word_span_edit_keeps():
     # The whole span is one word that's edited in place — no surrounding word to
-    # lean on. Partial credit (high char overlap) keeps it; before it orphaned.
+    # lean on. Partial credit (high char overlap) keeps it.
     old = "on-call rotation is weekly."
     new = "on-call rotation is biweekly."
     s, e = old.index("weekly"), old.index("weekly") + len("weekly")
@@ -203,12 +204,14 @@ def test_number_change_in_span_keeps():
     assert _slice(new, result) == "50 connections"
 
 
-def test_short_span_replaced_by_unrelated_text_still_orphans():
-    # Partial credit must NOT rescue a genuine rewrite: a one-word span swapped
-    # for an unrelated word shares too little to trust.
-    old = "the cat sat on the mat"
-    new = "the dashboard sat on the mat"
-    s, e = old.index("cat"), old.index("cat") + len("cat")
+def test_partial_credit_does_not_rescue_unrelated_rewrite():
+    # The span maps onto replacement text (it does not collapse), so the survival
+    # guard actually runs. Partial credit must NOT rescue it: rewording "quick
+    # fix" to the unrelated "thorough overhaul" shares too few characters, so the
+    # preserved fraction stays well below the threshold and the comment orphans.
+    old = "a quick fix applied"
+    new = "a thorough overhaul applied"
+    s, e = old.index("quick fix"), old.index("quick fix") + len("quick fix")
     assert remap_range(old, new, s, e) is None
 
 
