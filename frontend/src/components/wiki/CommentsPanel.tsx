@@ -14,6 +14,7 @@ import {
   resolveThread,
 } from "@/lib/comments";
 import type { CommentDraft } from "@/lib/commentAnchor";
+import { absoluteTime, relativeTime } from "@/lib/time";
 import type { CommentThreadView, CommentView } from "@/types";
 
 import styles from "./CommentsPanel.module.css";
@@ -35,6 +36,12 @@ function authorLabel(authorUserId: string | null, selfId: string | undefined): s
   return "User";
 }
 
+/** Backend timestamps are "YYYY-MM-DD HH:MM:SS" in UTC (not ISO). Normalize so
+ * Date parses them as UTC, not local. */
+function toIso(ts: string): string {
+  return ts.includes("T") ? ts : `${ts.replace(" ", "T")}Z`;
+}
+
 export function CommentsPanel({
   path,
   headSha,
@@ -50,8 +57,6 @@ export function CommentsPanel({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  // Hand the latest threads up without making `refresh` depend on the (possibly
-  // unstable) callback identity — avoids a refetch loop.
   const onThreadsChangeRef = useRef(onThreadsChange);
   onThreadsChangeRef.current = onThreadsChange;
 
@@ -73,14 +78,18 @@ export function CommentsPanel({
     void refresh();
   }, [refresh]);
 
+  // Returns true on success so callers can clear/close their input only when
+  // the action actually went through.
   const run = useCallback(
-    async (fn: () => Promise<unknown>) => {
+    async (fn: () => Promise<unknown>): Promise<boolean> => {
       setBusy(true);
       try {
         await fn();
         await refresh();
+        return true;
       } catch (e) {
         setError(e instanceof Error ? e.message : "action failed");
+        return false;
       } finally {
         setBusy(false);
       }
@@ -96,9 +105,9 @@ export function CommentsPanel({
         <span className={styles.title}>
           Comments<span className={styles.count}>{total ? ` (${total})` : ""}</span>
         </span>
-        <button className={styles.closeBtn} onClick={onClose} aria-label="Close comments">
+        <Button variant="ghost" size="sm" onClick={onClose} aria-label="Close comments">
           ×
-        </button>
+        </Button>
       </div>
 
       <div className={styles.scroll}>
@@ -109,20 +118,23 @@ export function CommentsPanel({
             draft={draft}
             disabled={busy || !headSha}
             onCancel={onDraftConsumed}
-            onSubmit={(body) =>
-              run(async () => {
-                if (!headSha) throw new Error("page version unknown — reload and retry");
-                await createComment({
+            onSubmit={async (body) => {
+              if (!headSha) {
+                setError("page version unknown — reload and retry");
+                return;
+              }
+              const ok = await run(() =>
+                createComment({
                   path,
                   anchorSha: headSha,
                   startOffset: draft.startOffset,
                   endOffset: draft.endOffset,
                   quotedText: draft.quotedText,
                   body,
-                });
-                onDraftConsumed();
-              })
-            }
+                }),
+              );
+              if (ok) onDraftConsumed();
+            }}
           />
         )}
 
@@ -207,10 +219,10 @@ function Thread({
   selfId: string | undefined;
   isAdmin: boolean;
   busy: boolean;
-  onReply: (body: string) => void;
+  onReply: (body: string) => Promise<boolean>;
   onResolve: () => void;
   onReopen: () => void;
-  onEdit: (id: string, body: string) => void;
+  onEdit: (id: string, body: string) => Promise<boolean>;
   onDelete: (id: string) => void;
 }) {
   const { root } = thread;
@@ -237,17 +249,17 @@ function Thread({
       />
 
       <div className={styles.actions}>
-        <button className={styles.linkBtn} disabled={busy} onClick={() => setReplyOpen((v) => !v)}>
+        <Button variant="ghost" size="sm" disabled={busy} onClick={() => setReplyOpen((v) => !v)}>
           Reply
-        </button>
+        </Button>
         {resolved ? (
-          <button className={styles.linkBtn} disabled={busy} onClick={onReopen}>
+          <Button variant="ghost" size="sm" disabled={busy} onClick={onReopen}>
             Reopen
-          </button>
+          </Button>
         ) : (
-          <button className={styles.linkBtn} disabled={busy} onClick={onResolve}>
+          <Button variant="ghost" size="sm" disabled={busy} onClick={onResolve}>
             Resolve
-          </button>
+          </Button>
         )}
       </div>
 
@@ -281,10 +293,12 @@ function Thread({
                   variant="primary"
                   size="sm"
                   disabled={busy || !replyBody.trim()}
-                  onClick={() => {
-                    onReply(replyBody.trim());
-                    setReplyBody("");
-                    setReplyOpen(false);
+                  onClick={async () => {
+                    // Clear/close only on success so a failed reply isn't lost.
+                    if (await onReply(replyBody.trim())) {
+                      setReplyBody("");
+                      setReplyOpen(false);
+                    }
                   }}
                 >
                   Reply
@@ -310,7 +324,7 @@ function Comment({
   canModify: boolean;
   selfId: string | undefined;
   busy: boolean;
-  onEdit: (id: string, body: string) => void;
+  onEdit: (id: string, body: string) => Promise<boolean>;
   onDelete: (id: string) => void;
 }) {
   const [editing, setEditing] = useState(false);
@@ -320,7 +334,9 @@ function Comment({
     <div>
       <div className={styles.metaRow}>
         <span className={styles.author}>{authorLabel(comment.author_user_id, selfId)}</span>
-        <span className={styles.time}>{comment.created_at}</span>
+        <span className={styles.time} title={absoluteTime(toIso(comment.created_at))}>
+          {relativeTime(toIso(comment.created_at), "short")}
+        </span>
         {comment.status === "resolved" && (
           <span className={`${styles.badge} ${styles.badgeResolved}`}>resolved</span>
         )}
@@ -352,9 +368,8 @@ function Comment({
               variant="primary"
               size="sm"
               disabled={busy || !draft.trim()}
-              onClick={() => {
-                onEdit(comment.id, draft.trim());
-                setEditing(false);
+              onClick={async () => {
+                if (await onEdit(comment.id, draft.trim())) setEditing(false);
               }}
             >
               Save
@@ -367,16 +382,17 @@ function Comment({
 
       {canModify && !editing && (
         <div className={styles.actions}>
-          <button className={styles.linkBtn} disabled={busy} onClick={() => setEditing(true)}>
+          <Button variant="ghost" size="sm" disabled={busy} onClick={() => setEditing(true)}>
             Edit
-          </button>
-          <button
-            className={`${styles.linkBtn} ${styles.linkBtnDanger}`}
+          </Button>
+          <Button
+            variant="danger"
+            size="sm"
             disabled={busy}
             onClick={() => onDelete(comment.id)}
           >
             Delete
-          </button>
+          </Button>
         </div>
       )}
     </div>

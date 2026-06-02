@@ -2615,29 +2615,19 @@ function FileViewer({ path }: { path: string }) {
             padding: 4,
           }}
         >
-          <button
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={() => {
               setCommentDraft(selTool.draft);
               setCommentsOpen(true);
               setSelTool(null);
               window.getSelection()?.removeAllRanges();
             }}
-            style={{
-              appearance: "none",
-              border: "none",
-              background: "transparent",
-              color: color.text.primary,
-              cursor: "pointer",
-              fontSize: 13,
-              padding: "6px 10px",
-              display: "flex",
-              alignItems: "center",
-              gap: 6,
-              whiteSpace: "nowrap",
-            }}
+            style={{ display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}
           >
             💬 Comment
-          </button>
+          </Button>
         </div>
       )}
     </main>
