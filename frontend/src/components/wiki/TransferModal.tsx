@@ -13,8 +13,9 @@ import {
 import { SvgArrowExchange, SvgUser, SvgX } from "@onyx-ai/opal/icons";
 import { markdown } from "@onyx-ai/opal/utils";
 
+import { Avatar } from "@/components/common/Avatar";
 import { transferOwnership } from "@/lib/permissions";
-import { displayName, useUserSearch, type UserLite } from "@/lib/users";
+import { displayName, initials, useUserSearch, type UserLite } from "@/lib/users";
 
 import styles from "./TransferModal.module.css";
 
@@ -160,7 +161,7 @@ export function TransferModal({
                       onClick={() => {
                         if (isOwner) return;
                         setSelected(u);
-                        setQuery(displayName(u));
+                        setQuery("");
                         setPickerOpen(false);
                       }}
                     />
@@ -169,6 +170,33 @@ export function TransferModal({
               </PopoverMenu>
             </Popover.Content>
           </Popover>
+
+          {selected && (
+            <div className={styles.selectedRow}>
+              <Avatar
+                label={initials(selected)}
+                size={28}
+                title={displayName(selected)}
+              />
+              <div className={styles.rowText}>
+                <Text font="main-ui-body" nowrap>
+                  {displayName(selected)}
+                </Text>
+                {selected.email && (
+                  <Text font="secondary-body" color="text-03" nowrap>
+                    {selected.email}
+                  </Text>
+                )}
+              </div>
+              <Button
+                prominence="tertiary"
+                size="sm"
+                icon={SvgX}
+                tooltip="Remove"
+                onClick={() => setSelected(null)}
+              />
+            </div>
+          )}
 
           <Text font="secondary-body" color="text-03">
             The current owner is kept as an editor after transfer.
