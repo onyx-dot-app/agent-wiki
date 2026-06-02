@@ -41,6 +41,7 @@ import {
   type Visibility,
 } from "@/lib/permissions";
 import { displayName, initials, useUserSearch, type UserLite } from "@/lib/users";
+import { lastSegment } from "@/lib/wiki";
 import { markdown } from "@onyx-ai/opal/utils";
 
 import { TransferModal } from "./TransferModal";
@@ -83,13 +84,6 @@ const EMPTY_BASELINE: Baseline = {
 
 function keyFor(kind: PrincipalKind, id: string): string {
   return `${kind}:${id}`;
-}
-
-function lastSegment(path: string): string {
-  const clean = path.replace(/\/+$/, "");
-  if (!clean) return "Wiki";
-  const seg = clean.split("/").pop() ?? clean;
-  return seg.endsWith(".md") ? seg.slice(0, -3) : seg;
 }
 
 function deriveBaseline(
@@ -183,13 +177,19 @@ export function ShareDialog({ path, open, onClose }: ShareDialogProps) {
   const [copied, setCopied] = useState(false);
 
   // Reset working state to the loaded baseline whenever the ACL changes.
+  // Does NOT clear saveError — a save failure re-pulls the ACL (changing
+  // baseline), and the error must survive that refresh so the user sees it.
   useEffect(() => {
     if (!open) return;
     setGrants(new Map(baseline.grants));
     setScope(baseline.general === "private" ? "invited" : "anyone");
     setGeneralPerm(baseline.general === "public-write" ? "write" : "read");
-    setSaveError(null);
   }, [baseline, open]);
+
+  // Clear any stale save error only on (re)open, not on baseline refresh.
+  useEffect(() => {
+    if (open) setSaveError(null);
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -661,7 +661,7 @@ function PermSelect({
               setOpen(false);
             }}
           />
-          {onRemove ? null : undefined}
+          {onRemove ? <Divider paddingParallel="fit" paddingPerpendicular="2xs" /> : null}
           {onRemove ? (
             <LineItemButton
               icon={SvgX}

@@ -43,17 +43,20 @@ def list_groups(user: User = Depends(require_user)) -> GroupListResponse:
     Each group is enriched with member / page / folder counts for the
     groups list UI.
     """
-    rows = groups_repo.list_all() if user.is_admin else groups_repo.list_for_user(user.id)
-    counts = groups_repo.counts()
+    rows = (
+        groups_repo.list_all() if user.is_admin else groups_repo.list_for_user(user.id)
+    )
+    member_counts = groups_repo.member_counts()
+    grant_counts = acl.group_grant_counts()
     groups: list[GroupOut] = []
     for g in rows:
-        c = counts.get(g["id"], {})
+        grants = grant_counts.get(g["id"], {})
         groups.append(
             GroupOut(
                 **g,
-                member_count=c.get("members", 0),
-                page_count=c.get("pages", 0),
-                folder_count=c.get("folders", 0),
+                member_count=member_counts.get(g["id"], 0),
+                page_count=grants.get("pages", 0),
+                folder_count=grants.get("folders", 0),
             )
         )
     return GroupListResponse(groups=groups)
@@ -290,7 +293,10 @@ def transfer_ownership(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if not _is_owner_or_admin(path, user):
         raise HTTPException(status_code=403, detail="forbidden")
-    if req.new_owner_user_id is not None and users_repo.get_by_id(req.new_owner_user_id) is None:
+    if (
+        req.new_owner_user_id is not None
+        and users_repo.get_by_id(req.new_owner_user_id) is None
+    ):
         raise HTTPException(status_code=404, detail="user not found")
     acl.transfer_owner(path, req.new_owner_user_id)
     log.info(

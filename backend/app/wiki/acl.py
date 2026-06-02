@@ -77,9 +77,15 @@ def _is_md_page(path: str) -> bool:
 # --------------------------------------------------------------------------- #
 
 
+def _owner_key(path: str) -> str:
+    """WikiOwner rows are keyed by the same canonical path as AclEntry rows,
+    so owner lookups and grants on the same resource always agree."""
+    return _canonicalize("page" if _is_md_page(path) else "folder", path)
+
+
 def get_owner(path: str) -> str | None:
     with session() as s:
-        row = s.get(WikiOwner, path)
+        row = s.get(WikiOwner, _owner_key(path))
         return row.owner_user_id if row is not None else None
 
 
@@ -89,10 +95,11 @@ def set_owner(path: str, user_id: str | None) -> None:
     ``None`` clears the owner (used during account deletion or as the
     default for pages backfilled at bootstrap when no owner is known).
     """
+    key = _owner_key(path)
     with session() as s:
-        row = s.get(WikiOwner, path)
+        row = s.get(WikiOwner, key)
         if row is None:
-            s.add(WikiOwner(path=path, owner_user_id=user_id))
+            s.add(WikiOwner(path=key, owner_user_id=user_id))
         else:
             row.owner_user_id = user_id
 
@@ -112,10 +119,10 @@ def transfer_owner(path: str, new_owner_id: str | None) -> None:
     # back) together — otherwise a failed grant after a committed owner move
     # would strand the previous owner with no access.
     with session() as s:
-        row = s.get(WikiOwner, path)
+        row = s.get(WikiOwner, canon)
         prev_owner = row.owner_user_id if row is not None else None
         if row is None:
-            s.add(WikiOwner(path=path, owner_user_id=new_owner_id))
+            s.add(WikiOwner(path=canon, owner_user_id=new_owner_id))
         else:
             row.owner_user_id = new_owner_id
 
@@ -141,6 +148,28 @@ def transfer_owner(path: str, new_owner_id: str | None) -> None:
                         granted_by_user_id=new_owner_id,
                     )
                 )
+
+
+def group_grant_counts() -> dict[str, dict[str, int]]:
+    """Per-group count of granted pages/folders — ACL rows whose principal is a
+    group, split by ``resource_kind``. Lives here so all ACL-table reads stay
+    inside this module. One aggregate query, no N+1.
+    """
+    out: dict[str, dict[str, int]] = {}
+    with session() as s:
+        for gid, kind, n in s.execute(
+            select(AclEntry.principal_id, AclEntry.resource_kind, func.count())
+            .where(AclEntry.principal_kind == "group")
+            .group_by(AclEntry.principal_id, AclEntry.resource_kind)
+        ).all():
+            if gid is None:
+                continue
+            row = out.setdefault(gid, {"pages": 0, "folders": 0})
+            if kind == "page":
+                row["pages"] = int(n)
+            elif kind == "folder":
+                row["folders"] = int(n)
+    return out
 
 
 # --------------------------------------------------------------------------- #
@@ -358,9 +387,15 @@ def effective(
 
     with session() as s:
         rows = list(
-            s.scalars(_grants_for_principal(user_id, group_ids, canon_page, ancestors)).all()
+            s.scalars(
+                _grants_for_principal(user_id, group_ids, canon_page, ancestors)
+            ).all()
         )
-        if not rows and owner is None and not _path_is_managed(s, canon_page, ancestors):
+        if (
+            not rows
+            and owner is None
+            and not _path_is_managed(s, canon_page, ancestors)
+        ):
             return {"read", "write"}
 
     perms: set[str] = set()
@@ -501,7 +536,9 @@ def visible_paths_filter(
             path_column.like(AclEntry.resource_path + "/%"),
         ),
     )
-    acl_exists = exists(select(1).where(or_(page_match, folder_match)).correlate_except(AclEntry))
+    acl_exists = exists(
+        select(1).where(or_(page_match, folder_match)).correlate_except(AclEntry)
+    )
     # Implicit-public match: page is unconfigured (no owner, no ACL row
     # anywhere on its path). Mirrors the same fallback in ``effective``.
     any_acl_match = and_(
@@ -632,7 +669,9 @@ def on_path_moved(moves: list[tuple[str, str]]) -> None:
                     )
                     .values(resource_path=new_p)
                 )
-                s.execute(update(WikiOwner).where(WikiOwner.path == old_p).values(path=new_p))
+                s.execute(
+                    update(WikiOwner).where(WikiOwner.path == old_p).values(path=new_p)
+                )
 
         # Detect a folder-level rename by looking for a common (old, new)
         # prefix shared across every moved file. ``move_path`` of a

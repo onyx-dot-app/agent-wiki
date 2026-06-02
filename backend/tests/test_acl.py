@@ -158,10 +158,13 @@ def test_group_counts(tmp_db):
         granted_by_user_id=admin,
     )
 
-    c = groups_repo.counts()
-    assert c[g1] == {"members": 2, "pages": 1, "folders": 1}
-    # A group with no members and no grants is absent from the result.
-    assert g2 not in c
+    member_counts = groups_repo.member_counts()
+    grant_counts = acl.group_grant_counts()
+    assert member_counts[g1] == 2
+    assert grant_counts[g1] == {"pages": 1, "folders": 1}
+    # A group with no members and no grants is absent from both results.
+    assert g2 not in member_counts
+    assert g2 not in grant_counts
 
 
 def test_groups_by_user(tmp_db):

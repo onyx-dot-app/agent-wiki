@@ -16,6 +16,7 @@ import { markdown } from "@onyx-ai/opal/utils";
 import { Avatar } from "@/components/common/Avatar";
 import { transferOwnership } from "@/lib/permissions";
 import { displayName, initials, useUserSearch, type UserLite } from "@/lib/users";
+import { lastSegment } from "@/lib/wiki";
 
 import styles from "./TransferModal.module.css";
 
@@ -25,13 +26,6 @@ interface TransferModalProps {
   open: boolean;
   onClose: () => void;
   onTransferred: () => void;
-}
-
-function lastSegment(path: string): string {
-  const clean = path.replace(/\/+$/, "");
-  if (!clean) return "Wiki";
-  const seg = clean.split("/").pop() ?? clean;
-  return seg.endsWith(".md") ? seg.slice(0, -3) : seg;
 }
 
 export function TransferModal({

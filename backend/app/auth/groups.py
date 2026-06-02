@@ -13,7 +13,7 @@ from typing import Any, Iterable
 
 from sqlalchemy import delete, func, select
 
-from app.db.models import AclEntry, Group, GroupMember, User
+from app.db.models import Group, GroupMember, User
 from app.db.session import session
 
 log = logging.getLogger(__name__)
@@ -115,7 +115,9 @@ def member_ids(group_id: str) -> list[str]:
     """User ids belonging to ``group_id``."""
     with session() as s:
         return list(
-            s.scalars(select(GroupMember.user_id).where(GroupMember.group_id == group_id)).all()
+            s.scalars(
+                select(GroupMember.user_id).where(GroupMember.group_id == group_id)
+            ).all()
         )
 
 
@@ -130,7 +132,8 @@ def members(group_id: str) -> list[dict[str, Any]]:
     with session() as s:
         rows = s.scalars(stmt).all()
         return [
-            {"id": u.id, "email": u.email, "name": u.name, "is_admin": u.is_admin} for u in rows
+            {"id": u.id, "email": u.email, "name": u.name, "is_admin": u.is_admin}
+            for u in rows
         ]
 
 
@@ -157,40 +160,28 @@ def group_ids_for_user(user_id: str) -> list[str]:
     expand a user into the set of group principals it satisfies."""
     with session() as s:
         return list(
-            s.scalars(select(GroupMember.group_id).where(GroupMember.user_id == user_id)).all()
+            s.scalars(
+                select(GroupMember.group_id).where(GroupMember.user_id == user_id)
+            ).all()
         )
 
 
-def counts() -> dict[str, dict[str, int]]:
-    """Per-group ``{members, pages, folders}`` for the groups list UI.
+def member_counts() -> dict[str, int]:
+    """Per-group member count (``group_members`` rows). One aggregate query,
+    no N+1. Groups with no members are absent (callers default to 0).
 
-    ``members`` = ``group_members`` rows; ``pages`` / ``folders`` =
-    ``acl_entries`` granted to the group, split by ``resource_kind``.
-    Two aggregate queries, no N+1. Groups with no members and no grants
-    are absent from the result (callers default missing entries to 0).
+    Page/folder grant counts live in ``app.wiki.acl.group_grant_counts`` so
+    all ACL-table reads stay inside the ACL module.
     """
-    out: dict[str, dict[str, int]] = {}
-
-    def _row(gid: str) -> dict[str, int]:
-        return out.setdefault(gid, {"members": 0, "pages": 0, "folders": 0})
-
     with session() as s:
-        for gid, n in s.execute(
-            select(GroupMember.group_id, func.count()).group_by(GroupMember.group_id)
-        ).all():
-            _row(gid)["members"] = int(n)
-        for gid, kind, n in s.execute(
-            select(AclEntry.principal_id, AclEntry.resource_kind, func.count())
-            .where(AclEntry.principal_kind == "group")
-            .group_by(AclEntry.principal_id, AclEntry.resource_kind)
-        ).all():
-            if gid is None:
-                continue
-            if kind == "page":
-                _row(gid)["pages"] = int(n)
-            elif kind == "folder":
-                _row(gid)["folders"] = int(n)
-    return out
+        return {
+            gid: int(n)
+            for gid, n in s.execute(
+                select(GroupMember.group_id, func.count()).group_by(
+                    GroupMember.group_id
+                )
+            ).all()
+        }
 
 
 def add_member(group_id: str, user_id: str) -> None:
