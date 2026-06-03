@@ -151,11 +151,10 @@ def init_db() -> None:
 
     engine = get_engine()
     with engine.connect() as conn:
-        # Ensure the public schema and pgmq extension exist before Alembic
-        # applies any migrations — both are prerequisites for the migration
-        # scripts and are not created automatically by PostgreSQL itself.
+        # Ensure the public schema exists before Alembic applies any
+        # migrations — it is a prerequisite for the migration scripts and
+        # is not created automatically by PostgreSQL itself.
         conn.execute(sa.text("CREATE SCHEMA IF NOT EXISTS public"))
-        conn.execute(sa.text("CREATE EXTENSION IF NOT EXISTS pgmq"))
         conn.commit()
 
         conn.execute(

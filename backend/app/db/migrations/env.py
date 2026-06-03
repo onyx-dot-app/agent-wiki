@@ -60,11 +60,10 @@ def run_migrations_online() -> None:
     connectable = create_engine(_db_url, poolclass=pool.NullPool, future=True)
 
     with connectable.connect() as connection:
-        # Ensure the public schema and pgmq extension exist before Alembic
-        # applies any migrations — both are prerequisites for the migration
-        # scripts and are not created automatically by PostgreSQL itself.
+        # Ensure the public schema exists before Alembic applies any
+        # migrations — it is a prerequisite for the migration scripts and
+        # is not created automatically by PostgreSQL itself.
         connection.execute(text("CREATE SCHEMA IF NOT EXISTS public"))
-        connection.execute(text("CREATE EXTENSION IF NOT EXISTS pgmq"))
         connection.commit()
 
         context.configure(
