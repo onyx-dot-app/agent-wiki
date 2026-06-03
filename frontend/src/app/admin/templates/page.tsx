@@ -2,7 +2,7 @@
 
 import { useEffect, useState, type CSSProperties, type FormEvent } from "react";
 
-import { Button } from "@/components/common/Button";
+import { Button } from "@onyx-ai/opal/components";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { BackLink, PageHeader } from "@/components/common/PageHeader";
 import { RequireAdmin } from "@/components/RequireAdmin";
@@ -78,7 +78,7 @@ function TemplatesList() {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <div style={{ display: "flex", justifyContent: "flex-end" }}>
-        <Button variant="primary" onClick={() => setEditing("new")}>
+        <Button variant="action" onClick={() => setEditing("new")}>
           New template
         </Button>
       </div>
@@ -388,7 +388,7 @@ function TemplateModal({
           <Button type="button" onClick={onClose} disabled={saving}>
             Cancel
           </Button>
-          <Button type="submit" variant="primary" disabled={saving}>
+          <Button type="submit" variant="action" disabled={saving}>
             {saving ? "Saving…" : initial ? "Save" : "Create"}
           </Button>
         </div>

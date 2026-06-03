@@ -2,7 +2,7 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 
-import { Button } from "@/components/common/Button";
+import { Button } from "@onyx-ai/opal/components";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { BackLink, PageHeader } from "@/components/common/PageHeader";
 import { RequireAdmin } from "@/components/RequireAdmin";
@@ -136,7 +136,7 @@ function WebForm() {
       {error && <div style={{ color: color.state.danger.fg }}>{error}</div>}
       {saved && <div style={{ color: color.state.success.fg }}>Saved.</div>}
       <div>
-        <Button type="submit" variant="primary" disabled={saving}>
+        <Button type="submit" variant="action" disabled={saving}>
           {saving ? "Saving…" : "Save"}
         </Button>
       </div>
@@ -188,7 +188,6 @@ function KeyField({
             variant="danger"
             onClick={onClear}
             disabled={clearDisabled}
-            style={{ padding: "2px 8px", fontSize: 12 }}
           >
             Clear
           </Button>

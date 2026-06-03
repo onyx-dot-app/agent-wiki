@@ -4,7 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import useSWR from "swr";
 
 import { SetupWizard } from "@/components/agents/SetupWizard";
-import { Button } from "@/components/common/Button";
+import { ToolCard } from "@/components/agents/ToolCard";
+import { Button } from "@onyx-ai/opal/components";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { PageHeader } from "@/components/common/PageHeader";
 import { ApiError } from "@/lib/api";
@@ -99,7 +100,7 @@ function TokenManager() {
       >
         <h2 style={{ margin: 0, fontSize: 16 }}>API keys</h2>
         <Button
-          variant="primary"
+          variant="action"
           onClick={() => setShowCreate(true)}
           disabled={showCreate || reveal !== null}
         >
@@ -258,7 +259,7 @@ function CreateForm({
       </label>
       {err && <div style={{ ...errorBanner, marginTop: 10 }}>{err}</div>}
       <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-        <Button type="submit" variant="primary" disabled={busy || !name.trim()}>
+        <Button type="submit" variant="action" disabled={busy || !name.trim()}>
           {busy ? "Creating…" : "Create"}
         </Button>
         <Button type="button" onClick={onCancel} disabled={busy}>
@@ -302,9 +303,9 @@ function RevealOnce({
       >
         If you lose it, revoke this key and generate a new one.
       </div>
-      <Button onClick={onClose} style={{ marginTop: 12 }}>
-        I&apos;ve saved it
-      </Button>
+      <div style={{ marginTop: 12 }}>
+        <Button onClick={onClose}>I&apos;ve saved it</Button>
+      </div>
     </div>
   );
 }
@@ -510,9 +511,9 @@ function CodingToolsSection() {
           marginBottom: 4,
         }}
       >
-        <h2 style={{ margin: 0, fontSize: 16 }}>Agent launcher</h2>
-        <Button variant="primary" onClick={() => setWizardOpen(true)}>
-          Set up launcher
+        <h2 style={{ margin: 0, fontSize: 16 }}>Coding tools</h2>
+        <Button variant="action" onClick={() => setWizardOpen(true)}>
+          Set up tools
         </Button>
       </div>
 

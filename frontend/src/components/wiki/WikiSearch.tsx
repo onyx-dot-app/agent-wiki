@@ -1,6 +1,7 @@
 "use client";
 
 import { InputTypeIn } from "@onyx-ai/opal/components";
+import { SvgFolder } from "@onyx-ai/opal/icons";
 import { useRouter } from "next/navigation";
 import {
   forwardRef,
@@ -261,7 +262,7 @@ function FolderRow({ folder }: { folder: FolderHit }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
       <span style={{ color: color.text.muted, display: "flex", flexShrink: 0 }}>
-        <FolderIcon />
+        <SvgFolder size={16} />
       </span>
       <div style={{ minWidth: 0, flex: 1 }}>
         <div
@@ -361,13 +362,5 @@ function SnippetText({ text }: { text: string }) {
         return <span key={i}>{p}</span>;
       })}
     </>
-  );
-}
-
-function FolderIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-      <path d="M10 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2z" />
-    </svg>
   );
 }

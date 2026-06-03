@@ -4,7 +4,7 @@ import Link from "next/link";
 import { Suspense, useEffect, useState, type CSSProperties, type FormEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
-import { Button } from "@/components/common/Button";
+import { Button } from "@onyx-ai/opal/components";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { useAuth } from "@/lib/auth";
 import { color, radius, shadow } from "@/lib/theme";
@@ -134,14 +134,16 @@ function SignupForm() {
               {error}
             </div>
           )}
-          <Button
-            type="submit"
-            variant="primary"
-            disabled={submitting}
-            style={{ marginTop: 4, width: "100%" }}
-          >
-            {submitting ? "Creating…" : "Create account"}
-          </Button>
+          <div style={{ marginTop: 4 }}>
+            <Button
+              type="submit"
+              variant="action"
+              width="full"
+              disabled={submitting}
+            >
+              {submitting ? "Creating…" : "Create account"}
+            </Button>
+          </div>
         </form>
         <p style={{ marginTop: 20, marginBottom: 0, fontSize: 13, color: color.text.muted }}>
           Already have an account?{" "}

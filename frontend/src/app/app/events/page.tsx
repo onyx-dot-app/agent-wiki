@@ -1,6 +1,6 @@
 "use client";
 
-import { Button } from "@/components/common/Button";
+import { Button } from "@onyx-ai/opal/components";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { PageHeader } from "@/components/common/PageHeader";
 import { useRequireAuth } from "@/lib/auth";
@@ -33,7 +33,7 @@ export default function EventsPage() {
           description="Trigger fires, newest first."
           actions={
             <Button onClick={() => void refresh()} disabled={isValidating}>
-              {isValidating ? <LoadingSpinner size={14} /> : "Refresh"}
+              {isValidating ? "Refreshing…" : "Refresh"}
             </Button>
           }
         />

@@ -1,5 +1,5 @@
-import { SelectCard, Text } from "@onyx-ai/opal/components";
-import { SvgWorkflow } from "@onyx-ai/opal/icons";
+import { Button, SelectCard, Text } from "@onyx-ai/opal/components";
+import { SvgWorkflow, SvgX } from "@onyx-ai/opal/icons";
 import { SvgClaude, SvgOnyxLogo, SvgOpenai } from "@onyx-ai/opal/logos";
 import type { IconProps } from "@onyx-ai/opal/types";
 import type { ComponentType } from "react";
@@ -83,24 +83,7 @@ export function HistoryPanel({
             History
           </Text>
         </div>
-        <button
-          onClick={onClose}
-          aria-label="Close history"
-          style={{
-            appearance: "none",
-            background: "transparent",
-            border: "none",
-            color: color.text.muted,
-            cursor: "pointer",
-            fontSize: 18,
-            lineHeight: 1,
-            padding: 4,
-            borderRadius: 4,
-            flexShrink: 0,
-          }}
-        >
-          ×
-        </button>
+        <Button icon={SvgX} prominence="tertiary" size="sm" tooltip="Close history" onClick={onClose} />
       </div>
       <div
         style={{
