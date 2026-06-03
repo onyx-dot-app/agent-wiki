@@ -1,8 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+
+import styles from "./ChatWidget.module.css";
 
 import { Button } from "@onyx-ai/opal/components";
 import {
@@ -29,7 +31,6 @@ import {
 } from "@/lib/chat";
 import { useDrafting, type DraftingState } from "@/lib/drafting";
 import { ChatHistoryPanel } from "@/components/chat/ChatHistoryPanel";
-import { color, radius, shadow } from "@/lib/theme";
 import { presentTool } from "@/lib/tools";
 
 // Items in the chat transcript. Tool calls are first-class entries
@@ -416,23 +417,7 @@ export function ChatWidget() {
         onClick={() => setMode("widget")}
         title="Open chat"
         aria-label="Open chat"
-        style={{
-          position: "fixed",
-          right: 20,
-          bottom: 20,
-          width: 48,
-          height: 48,
-          borderRadius: radius.lg,
-          background: color.accent.bg,
-          color: color.accent.fg,
-          border: "none",
-          cursor: "pointer",
-          boxShadow: shadow.fab,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          zIndex: 1000,
-        }}
+        className="fixed right-5 bottom-5 w-12 h-12 rounded-(--border-radius-12) bg-(--background-tint-inverted-00) text-(--text-inverted-05) border-none cursor-pointer shadow-(--shadow-fab) flex items-center justify-center z-[1000]"
       >
         <SvgBubbleText size={24} />
       </button>
@@ -440,63 +425,36 @@ export function ChatWidget() {
   }
 
   const isExpanded = mode === "expanded";
-  const containerStyle: React.CSSProperties = isExpanded
-    ? {
-        position: "fixed",
-        top: 0,
-        right: 0,
-        height: "100vh",
-        width: expandedWidth,
-        background: color.bg.page,
-        borderLeft: `1px solid ${color.border.strong}`,
-        boxShadow: shadow.panel,
-        zIndex: 1000,
-      }
-    : {
-        position: "fixed",
-        right: 20,
-        bottom: 20,
-        // Clamp width and height so the widget never overflows on
-        // narrow phones. `calc(100vw - 24px)` leaves 4px of breathing
-        // room either side of the right:20 anchor.
-        width: "min(380px, calc(100vw - 24px))",
-        height: "min(560px, calc(100vh - 80px))",
-        background: color.bg.page,
-        border: `1px solid ${color.border.default}`,
-        borderRadius: radius.lg,
-        boxShadow: shadow.modal,
-        zIndex: 1000,
-      };
 
   return (
-    <div style={containerStyle} role="dialog" aria-label="Chat">
+    <div
+      role="dialog"
+      aria-label="Chat"
+      className={
+        isExpanded
+          ? "fixed top-0 right-0 h-screen bg-(--background-tint-00) border-l border-(--border-02) shadow-(--shadow-panel) z-[1000]"
+          : "fixed right-5 bottom-5 bg-(--background-tint-00) border border-(--border-01) rounded-(--border-radius-12) shadow-(--shadow-modal) z-[1000]"
+      }
+      style={
+        isExpanded
+          ? { width: expandedWidth }
+          : {
+              width: "min(380px, calc(100vw - 24px))",
+              height: "min(560px, calc(100vh - 80px))",
+            }
+      }
+    >
       {/* Inner clipped surface — keeps the history panel's slide animation
           contained and lets it cover the chat header. The resize handle in
           expanded mode lives outside this so it can extend past the left edge. */}
       <div
-        style={{
-          position: "relative",
-          height: "100%",
-          width: "100%",
-          display: "flex",
-          flexDirection: "column",
-          overflow: "hidden",
-          borderRadius: isExpanded ? 0 : radius.lg,
-        }}
+        className={`relative h-full w-full flex flex-col overflow-hidden ${isExpanded ? "" : "rounded-(--border-radius-12)"}`}
       >
         <header
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-            padding: "10px 12px",
-            borderBottom: `1px solid ${color.border.subtle}`,
-            background: color.bg.panel,
-            flexShrink: 0,
-          }}
+          className="flex items-center gap-2 py-[10px] px-3 border-b border-(--border-01) bg-(--background-tint-01) shrink-0"
         >
-          <div style={{ fontWeight: 600, fontSize: 14 }}>Chat</div>
-          <div style={{ flex: 1 }} />
+          <div className="font-semibold text-sm">Chat</div>
+          <div className="flex-1" />
           <Button
             icon={SvgEdit}
             prominence="tertiary"
@@ -532,18 +490,10 @@ export function ChatWidget() {
 
         <div
           ref={scrollRef}
-          style={{
-            flex: 1,
-            overflowY: "auto",
-            padding: 12,
-            display: "flex",
-            flexDirection: "column",
-            gap: 10,
-            minHeight: 0,
-          }}
+          className="flex-1 overflow-y-auto p-3 flex flex-col gap-[10px] min-h-0"
         >
           {items.length === 0 && (
-            <p style={{ color: color.text.muted, fontSize: 13, margin: 0 }}>
+            <p className="text-(--text-03) text-[13px] m-0">
               Hi, I can help create pages, make changes, explain things, help
               you create triggers, or explain how this wiki works. Ask me
               anything!
@@ -564,35 +514,14 @@ export function ChatWidget() {
         {error && (
           <div
             role="alert"
-            style={{
-              display: "flex",
-              alignItems: "flex-start",
-              gap: 8,
-              margin: "0 12px 8px",
-              padding: "8px 10px",
-              background: color.state.danger.bg,
-              border: `1px solid ${color.state.danger.border}`,
-              color: color.state.danger.fg,
-              borderRadius: radius.sm,
-              fontSize: 12,
-            }}
+            className="flex items-start gap-2 mx-3 mb-2 py-2 px-[10px] bg-(--status-error-01) border border-(--status-error-02) text-(--status-text-error-05) rounded-(--border-radius-04) text-xs"
           >
-            <div style={{ flex: 1, whiteSpace: "pre-wrap" }}>{error}</div>
+            <div className="flex-1 whitespace-pre-wrap">{error}</div>
             {items.length > 0 && items[items.length - 1].kind === "user" && (
               <button
                 onClick={onRetry}
                 disabled={sending}
-                style={{
-                  padding: "3px 8px",
-                  background: color.bg.page,
-                  border: `1px solid ${color.state.danger.border}`,
-                  borderRadius: radius.xs,
-                  color: color.state.danger.fg,
-                  cursor: sending ? "not-allowed" : "pointer",
-                  fontSize: 11,
-                  fontWeight: 600,
-                  flexShrink: 0,
-                }}
+                className={`py-[3px] px-2 bg-(--background-tint-00) border border-(--status-error-02) rounded-(--border-radius-04) text-(--status-text-error-05) ${sending ? "cursor-not-allowed" : "cursor-pointer"} text-[11px] font-semibold shrink-0`}
               >
                 Retry
               </button>
@@ -602,13 +531,7 @@ export function ChatWidget() {
 
         <form
           onSubmit={onSend}
-          style={{
-            display: "flex",
-            gap: 6,
-            padding: 10,
-            borderTop: `1px solid ${color.border.subtle}`,
-            flexShrink: 0,
-          }}
+          className="flex gap-[6px] p-[10px] border-t border-(--border-01) shrink-0"
         >
           <textarea
             value={input}
@@ -622,34 +545,12 @@ export function ChatWidget() {
             placeholder="Send a message…"
             rows={2}
             disabled={sending}
-            style={{
-              flex: 1,
-              minWidth: 0,
-              boxSizing: "border-box",
-              resize: "none",
-              padding: 8,
-              border: `1px solid ${color.border.default}`,
-              borderRadius: radius.sm,
-              fontFamily: "inherit",
-              fontSize: 13,
-              color: color.text.primary,
-              background: color.bg.page,
-            }}
+            className="flex-1 min-w-0 box-border resize-none p-2 border border-(--border-01) rounded-(--border-radius-04) font-[inherit] text-[13px] text-(--text-05) bg-(--background-tint-00)"
           />
           <button
             type="submit"
             disabled={sending || !input.trim()}
-            style={{
-              padding: "0 14px",
-              background: color.accent.bg,
-              color: color.accent.fg,
-              border: "none",
-              borderRadius: radius.sm,
-              cursor: sending || !input.trim() ? "not-allowed" : "pointer",
-              opacity: sending || !input.trim() ? 0.5 : 1,
-              fontWeight: 600,
-              fontSize: 13,
-            }}
+            className={`px-[14px] bg-(--background-tint-inverted-00) text-(--text-inverted-05) border-none rounded-(--border-radius-04) ${sending || !input.trim() ? "cursor-not-allowed opacity-50" : "cursor-pointer"} font-semibold text-[13px]`}
           >
             Send
           </button>
@@ -671,15 +572,7 @@ export function ChatWidget() {
           title="Drag to resize"
           aria-label="Resize chat panel"
           role="separator"
-          style={{
-            position: "absolute",
-            top: 0,
-            left: -3,
-            width: 6,
-            height: "100%",
-            cursor: "col-resize",
-            zIndex: 1001,
-          }}
+          className="absolute top-0 left-[-3px] w-[6px] h-full cursor-col-resize z-[1001]"
         />
       )}
     </div>
@@ -784,24 +677,17 @@ function DraftingBanner({ state }: { state: DraftingState }) {
   return (
     <div
       role="status"
-      style={{
-        display: "flex",
-        alignItems: "flex-start",
-        gap: 8,
-        padding: "8px 12px",
-        background: color.accent.subtleBg,
-        borderBottom: `1px solid ${color.accent.subtleBorder}`,
-        color: color.accent.subtleFg,
-        fontSize: 12,
-        flexShrink: 0,
-      }}
+      className="flex items-start gap-2 py-2 px-3 bg-(--background-tint-03) border-b border-(--border-01) text-(--text-05) text-xs shrink-0"
     >
-      <span style={{ flexShrink: 0, marginTop: 1, display: "flex" }}>
+      <span className="shrink-0 mt-[1px] flex">
         <SvgDocFile size={16} />
       </span>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontWeight: 600 }}>Drafting initial version</div>
-        <div style={{ marginTop: 2, color: color.text.secondary, overflowWrap: "anywhere" }}>
+      <div className="flex-1 min-w-0">
+        <div className="font-semibold">Drafting initial version</div>
+        <div
+          className="mt-[2px] text-(--text-04)"
+          style={{ overflowWrap: "anywhere" }}
+        >
           {docName && templateName ? (
             <>
               Helping draft <strong>{docName}</strong> from the{" "}
@@ -822,6 +708,19 @@ function DraftingBanner({ state }: { state: DraftingState }) {
   );
 }
 
+const markdownComponents: Components = {
+  p:    ({ children }) => <p    className={styles.markdownP}>{children}</p>,
+  ul:   ({ children }) => <ul   className={styles.markdownUl}>{children}</ul>,
+  ol:   ({ children }) => <ol   className={styles.markdownOl}>{children}</ol>,
+  li:   ({ children }) => <li   className={styles.markdownLi}>{children}</li>,
+  h1:   ({ children }) => <h1   className={styles.markdownHeading}>{children}</h1>,
+  h2:   ({ children }) => <h2   className={styles.markdownHeading}>{children}</h2>,
+  h3:   ({ children }) => <h3   className={styles.markdownHeading}>{children}</h3>,
+  h4:   ({ children }) => <h4   className={styles.markdownHeading}>{children}</h4>,
+  code: ({ children }) => <code className={styles.markdownCode}>{children}</code>,
+  pre:  ({ children }) => <pre  className={styles.markdownPre}>{children}</pre>,
+};
+
 function Bubble({
   role,
   content,
@@ -834,30 +733,19 @@ function Bubble({
   const isUser = role === "user";
   const renderMarkdown = !isUser && !muted;
   return (
-    <div style={{ display: "flex", justifyContent: isUser ? "flex-end" : "flex-start", minWidth: 0 }}>
+    <div className={`flex ${isUser ? "justify-end" : "justify-start"} min-w-0`}>
       <div
-        className={renderMarkdown ? "markdown markdown-chat" : undefined}
-        style={{
-          maxWidth: "85%",
-          minWidth: 0,
-          padding: "8px 12px",
-          borderRadius: radius.md,
-          background: isUser ? color.accent.bg : color.bg.sunken,
-          color: isUser ? color.accent.fg : color.text.primary,
-          // User messages preserve newlines via pre-wrap; assistant
-          // messages flow through react-markdown which produces real
-          // block elements, so pre-wrap would just inject blank gaps.
-          whiteSpace: renderMarkdown ? "normal" : "pre-wrap",
-          // Without this, a long unbroken token (URL, path, hash) blows
-          // past the 85% max-width and pushes the layout horizontally.
-          overflowWrap: "anywhere",
-          fontSize: 13,
-          lineHeight: 1.5,
-          opacity: muted ? 0.6 : 1,
-        }}
+        className={`max-w-[85%] min-w-0 py-2 px-3 rounded-(--border-radius-08) text-[13px] leading-[1.5] ${
+          isUser
+            ? "bg-(--background-tint-inverted-00) text-(--text-inverted-05)"
+            : "bg-(--background-tint-02) text-(--text-05)"
+        } ${renderMarkdown ? "whitespace-normal" : "whitespace-pre-wrap"} ${muted ? "opacity-60" : "opacity-100"}`}
+        // Without this, a long unbroken token (URL, path, hash) blows
+        // past the 85% max-width and pushes the layout horizontally.
+        style={{ overflowWrap: "anywhere" }}
       >
         {renderMarkdown ? (
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+          <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{content}</ReactMarkdown>
         ) : (
           content
         )}
@@ -878,15 +766,7 @@ function ToolStatus({ item }: { item: Extract<ChatItem, { kind: "tool" }> }) {
   const { label } = presentTool(item.name);
   return (
     <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 8,
-        paddingLeft: 4,
-        fontSize: 12,
-        color: color.text.muted,
-        fontStyle: "italic",
-      }}
+      className="flex items-center gap-2 pl-1 text-xs text-(--text-03) italic"
     >
       <ToolStateIcon state={item.state} />
       <span>{label}</span>
@@ -899,13 +779,9 @@ function ToolStateIcon({ state }: { state: ToolState }) {
     return (
       <span
         aria-label="running"
+        className="inline-block w-[10px] h-[10px] rounded-full border-2 border-(--border-01)"
         style={{
-          display: "inline-block",
-          width: 10,
-          height: 10,
-          borderRadius: "50%",
-          border: `2px solid ${color.border.default}`,
-          borderTopColor: color.text.secondary,
+          borderTopColor: "var(--text-04)",
           animation: "chat-tool-spin 0.7s linear infinite",
         }}
       >
@@ -915,13 +791,13 @@ function ToolStateIcon({ state }: { state: ToolState }) {
   }
   if (state === "error") {
     return (
-      <span style={{ color: color.state.danger.fg, display: "flex" }}>
+      <span className="text-(--status-text-error-05) flex">
         <SvgXCircle size={12} />
       </span>
     );
   }
   return (
-    <span style={{ color: color.state.success.fg, display: "flex" }}>
+    <span className="text-(--status-text-success-05) flex">
       <SvgCheck size={12} />
     </span>
   );

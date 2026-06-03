@@ -3,8 +3,8 @@
   flex-direction: column;
   width: 340px;
   min-height: 0;
-  background: var(--color-bg-panel);
-  border-left: 1px solid var(--color-border-subtle);
+  background: var(--background-tint-01);
+  border-left: 1px solid var(--border-01);
 }
 
 .fullHeight {
@@ -34,10 +34,10 @@
 /* Each thread is its own floating card, clearly separated from its neighbors —
    not rows inside one panel. */
 .thread {
-  border: 1px solid var(--color-border-subtle);
-  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-01);
+  border-radius: var(--border-radius-12);
   padding: 14px;
-  background: var(--color-bg-page);
+  background: var(--background-tint-00);
   box-shadow: var(--shadow-sm);
   cursor: pointer;
 }
@@ -47,8 +47,8 @@
 /* Selected thread — a crisp bold (near-black, accent) outline on the white card.
    No layout shift: the extra weight comes from a 1px ring, not a wider border. */
 .threadActive {
-  border-color: var(--color-accent-bg);
-  box-shadow: 0 0 0 1px var(--color-accent-bg);
+  border-color: var(--background-tint-inverted-00);
+  box-shadow: 0 0 0 1px var(--background-tint-inverted-00);
 }
 
 /* Tombstone shown in place of the (now-removed) quote box when the referenced
@@ -56,27 +56,27 @@
    muted text — no colored callout. */
 .orphanedNote {
   font-size: 12px;
-  color: var(--color-text-muted);
+  color: var(--text-03);
   font-style: italic;
   margin-bottom: 8px;
 }
 
 .draft {
-  border: 1px solid var(--color-accent-subtle-border);
-  border-radius: var(--radius-md);
+  border: 1px solid var(--border-01);
+  border-radius: var(--border-radius-08);
   padding: 10px;
-  background: var(--color-bg-sunken);
+  background: var(--background-tint-02);
 }
 /* Preview of the selected span while drafting a new comment — confirms the
    anchor before the comment (and its doc highlight) exist. Existing comments
    point at the doc highlight instead, so they have no quote box. */
 .quote {
   font-size: 12px;
-  color: var(--color-text-secondary);
-  background: var(--color-accent-subtle-bg);
-  border-left: 3px solid var(--color-accent-subtle-border);
+  color: var(--text-04);
+  background: var(--background-tint-03);
+  border-left: 3px solid var(--border-01);
   padding: 4px 8px;
-  border-radius: var(--radius-xs);
+  border-radius: var(--border-radius-04);
   margin-bottom: 6px;
   white-space: pre-wrap;
   word-break: break-word;
@@ -91,7 +91,7 @@
 }
 .time {
   font-size: 11px;
-  color: var(--color-text-muted);
+  color: var(--text-03);
 }
 /* Right-aligned trailing group: resolved badge + overflow menu. */
 .metaRight {
@@ -125,14 +125,14 @@
   height: 28px;
   padding: 0;
   border: none;
-  border-radius: var(--radius-sm);
+  border-radius: var(--border-radius-04);
   background: transparent;
-  color: var(--color-text-muted);
+  color: var(--text-03);
   cursor: pointer;
 }
 .kebabBtn:hover {
-  background: var(--color-bg-hover);
-  color: var(--color-text-primary);
+  background: var(--background-tint-03);
+  color: var(--text-05);
 }
 .kebabBtn svg {
   width: 16px;
@@ -141,7 +141,7 @@
 
 .body {
   font-size: 13px;
-  color: var(--color-text-primary);
+  color: var(--text-05);
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -170,14 +170,14 @@
   font: inherit;
   font-size: 13px;
   padding: 8px 10px;
-  border: 1px solid var(--color-border-default);
-  border-radius: var(--radius-sm);
-  background: var(--color-bg-page);
-  color: var(--color-text-primary);
+  border: 1px solid var(--border-01);
+  border-radius: var(--border-radius-04);
+  background: var(--background-tint-00);
+  color: var(--text-05);
 }
 .textarea:focus {
   outline: none;
-  border-color: var(--color-border-focus);
+  border-color: var(--border-05);
 }
 
 .composeRow {
@@ -188,7 +188,7 @@
 }
 
 .error {
-  color: var(--color-state-danger-fg);
+  color: var(--status-text-error-05);
   font-size: 12px;
   padding: 4px 0;
 }

@@ -26,7 +26,7 @@ import {
 import { ApiError } from "@/lib/api";
 
 const sentenceTagCn =
-  "shrink-0 text-[10px] font-semibold px-[6px] py-[1px] rounded-(--radius-xs) bg-(--color-accent-subtle-bg) text-(--color-accent-subtle-fg) uppercase tracking-[0.3px]";
+  "shrink-0 text-[10px] font-semibold px-[6px] py-[1px] rounded-(--border-radius-04) bg-(--background-tint-03) text-(--text-05) uppercase tracking-[0.3px]";
 
 function formatRelative(iso: string | null | undefined): string {
   if (!iso) return "";
@@ -135,13 +135,13 @@ export default function TriggersPage() {
         />
 
         {listError && (
-          <div className="p-[10px] bg-(--color-state-danger-bg) text-(--color-state-danger-fg) rounded-(--radius-sm) text-[13px] mb-3">
+          <div className="p-[10px] bg-(--status-error-01) text-(--status-text-error-05) rounded-(--border-radius-04) text-[13px] mb-3">
             {listError}
           </div>
         )}
 
         {triggers.length === 0 && !listError && (
-          <p className="text-(--color-text-muted) text-sm">
+          <p className="text-(--text-03) text-sm">
             No triggers yet. Create one to start watching documents for changes.
           </p>
         )}
@@ -150,18 +150,18 @@ export default function TriggersPage() {
           {triggers.map((t) => (
             <li
               key={t.id}
-              className={`py-[14px] px-4 border border-(--color-border-default) rounded-(--radius-md) mb-[10px] bg-(--color-bg-page) ${busyId === t.id ? "opacity-60" : "opacity-100"}`}
+              className={`py-[14px] px-4 border border-(--border-01) rounded-(--border-radius-08) mb-[10px] bg-(--background-tint-00) ${busyId === t.id ? "opacity-60" : "opacity-100"}`}
             >
               <div className="flex items-center justify-between gap-3 flex-wrap mb-[10px]">
-                <div className="font-mono text-xs text-(--color-text-muted) flex gap-[10px] items-baseline flex-wrap min-w-0">
+                <div className="font-mono text-xs text-(--text-03) flex gap-[10px] items-baseline flex-wrap min-w-0">
                   <span title={t.scope_path}>{formatScopePath(t.scope_path)}</span>
-                  <span className="text-[11px] text-(--color-text-faint)">
+                  <span className="text-[11px] text-(--text-02)">
                     {t.id}
                   </span>
                   {t.last_edited_at && (
                     <span
                       title={new Date(t.last_edited_at).toLocaleString()}
-                      className="text-[11px] text-(--color-text-faint)"
+                      className="text-[11px] text-(--text-02)"
                     >
                       edited {formatRelative(t.last_edited_at)}
                     </span>
@@ -169,11 +169,11 @@ export default function TriggersPage() {
                 </div>
                 <div className="flex gap-1.5 items-center shrink-0 flex-wrap">
                   <span
-                    className={`inline-flex items-center gap-1.5 text-[11px] py-[2px] px-2 rounded-full font-semibold tracking-[0.3px] border ${t.enabled ? "bg-(--color-accent-subtle-bg) text-(--color-accent-subtle-fg) border-(--color-accent-subtle-border)" : "bg-(--color-bg-sunken) text-(--color-text-muted) border-(--color-border-default)"}`}
+                    className={`inline-flex items-center gap-1.5 text-[11px] py-[2px] px-2 rounded-full font-semibold tracking-[0.3px] border ${t.enabled ? "bg-(--background-tint-03) text-(--text-05) border-(--border-01)" : "bg-(--background-tint-02) text-(--text-03) border-(--border-01)"}`}
                   >
                     <span
                       aria-hidden
-                      className={`w-[6px] h-[6px] rounded-full ${t.enabled ? "bg-(--color-state-success-fg)" : "bg-(--color-text-faint)"}`}
+                      className={`w-[6px] h-[6px] rounded-full ${t.enabled ? "bg-(--status-text-success-05)" : "bg-(--text-02)"}`}
                     />
                     {t.enabled ? "ENABLED" : "DISABLED"}
                   </span>
@@ -207,7 +207,7 @@ export default function TriggersPage() {
                   </Button>
                 </div>
               </div>
-              <div className="text-sm text-(--color-text-primary) leading-[1.55]">
+              <div className="text-sm text-(--text-05) leading-[1.55]">
                 {t.kind === "schedule" && (
                   <div className="flex items-baseline gap-2 mb-[6px]">
                     <span className={sentenceTagCn}>WHEN</span>
@@ -216,7 +216,7 @@ export default function TriggersPage() {
                       {t.schedule_start_at && (
                         <>
                           {" "}
-                          <span className="text-(--color-text-muted) text-xs">
+                          <span className="text-(--text-03) text-xs">
                             · starting {new Date(t.schedule_start_at).toLocaleString()}
                           </span>
                         </>
@@ -224,7 +224,7 @@ export default function TriggersPage() {
                       {t.schedule_last_fired_at && (
                         <>
                           {" "}
-                          <span className="text-(--color-text-faint) text-xs">
+                          <span className="text-(--text-02) text-xs">
                             · last fired {formatRelative(t.schedule_last_fired_at)}
                           </span>
                         </>
@@ -244,7 +244,7 @@ export default function TriggersPage() {
                 )}
                 <div className="flex items-baseline gap-2 mt-[6px]">
                   <span className={sentenceTagCn}>TO</span>
-                  <span className="flex-1 min-w-0 text-(--color-text-secondary)">
+                  <span className="flex-1 min-w-0 text-(--text-04)">
                     {destinationLabel(t)}
                   </span>
                 </div>
@@ -349,7 +349,7 @@ function SlackChannelsCard() {
   }
 
   return (
-    <section className="mt-[28px] p-4 border border-(--color-border-default) rounded-(--radius-md) bg-(--color-bg-panel)">
+    <section className="mt-[28px] p-4 border border-(--border-01) rounded-(--border-radius-08) bg-(--background-tint-01)">
       <div className="flex items-center justify-between mb-1">
         <h2 className="m-0 text-base">Slack channels</h2>
         {!adding && (
@@ -358,36 +358,36 @@ function SlackChannelsCard() {
           </Button>
         )}
       </div>
-      <p className="mt-0 mb-3 text-[13px] text-(--color-text-muted)">
+      <p className="mt-0 mb-3 text-[13px] text-(--text-03)">
         Incoming webhooks you can point a trigger at. Create one in Slack (Apps → Incoming
         Webhooks), then pick it as a trigger&apos;s destination. Private to you.
       </p>
 
       {error && (
-        <div className="text-(--color-state-danger-fg) text-[13px] mb-2">
+        <div className="text-(--status-text-error-05) text-[13px] mb-2">
           {error.message || "Failed to load channels."}
         </div>
       )}
 
       {adding && (
-        <div className="flex flex-col gap-2 p-3 mb-3 border border-(--color-border-default) rounded-(--radius-sm) bg-(--color-bg-sunken)">
+        <div className="flex flex-col gap-2 p-3 mb-3 border border-(--border-01) rounded-(--border-radius-04) bg-(--background-tint-02)">
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="Channel name (e.g. PM Standup)"
             disabled={busy}
             maxLength={80}
-            className="w-full py-2 px-[10px] box-border border border-(--color-border-default) rounded-(--radius-sm) text-sm"
+            className="w-full py-2 px-[10px] box-border border border-(--border-01) rounded-(--border-radius-04) text-sm"
           />
           <input
             value={url}
             onChange={(e) => setUrl(e.target.value)}
             placeholder="https://hooks.slack.com/services/…"
             disabled={busy}
-            className="w-full py-2 px-[10px] box-border border border-(--color-border-default) rounded-(--radius-sm) text-sm"
+            className="w-full py-2 px-[10px] box-border border border-(--border-01) rounded-(--border-radius-04) text-sm"
           />
           {formError && (
-            <div className="text-(--color-state-danger-fg) text-[13px]">{formError}</div>
+            <div className="text-(--status-text-error-05) text-[13px]">{formError}</div>
           )}
           <div className="flex gap-2">
             <Button
@@ -408,7 +408,7 @@ function SlackChannelsCard() {
       {isLoading && webhooks.length === 0 && !error && <LoadingSpinner />}
 
       {!isLoading && webhooks.length === 0 && !adding && (
-        <p className="text-(--color-text-muted) text-sm m-0">
+        <p className="text-(--text-03) text-sm m-0">
           No channels yet — add one to deliver trigger fires to Slack.
         </p>
       )}
@@ -418,13 +418,13 @@ function SlackChannelsCard() {
           {webhooks.map((w) => (
             <li
               key={w.id}
-              className="flex items-center gap-3 py-[10px] px-3 border border-(--color-border-default) rounded-(--radius-sm) mt-2 bg-(--color-bg-page)"
+              className="flex items-center gap-3 py-[10px] px-3 border border-(--border-01) rounded-(--border-radius-04) mt-2 bg-(--background-tint-00)"
             >
               <div className="flex-1 min-w-0">
-                <div className="font-medium text-sm text-(--color-text-primary)">
+                <div className="font-medium text-sm text-(--text-05)">
                   {w.name}
                 </div>
-                <div className="text-xs text-(--color-text-muted) mt-[2px] font-mono">
+                <div className="text-xs text-(--text-03) mt-[2px] font-mono">
                   {w.webhook_url_hint}
                 </div>
               </div>

@@ -59,7 +59,6 @@ import {
   setDraftTemplate,
   type DocumentTemplateSummary,
 } from "@/lib/templates";
-import { color } from "@/lib/theme";
 import { absoluteTime, relativeTime } from "@/lib/time";
 import { useIsMobile } from "@/lib/viewport";
 import {
@@ -344,7 +343,12 @@ function Explorer({ dir }: { dir: string }) {
         }
         actions={
           <>
-            <Button icon={SvgWorkflow} onClick={() => setTriggerModalOpen(true)}>Trigger</Button>
+            <Button
+              icon={SvgWorkflow}
+              onClick={() => setTriggerModalOpen(true)}
+            >
+              Trigger
+            </Button>
             <Button
               icon={SvgFolderPlus}
               onClick={() => {
@@ -355,7 +359,6 @@ function Explorer({ dir }: { dir: string }) {
               New folder
             </Button>
             <Button
-              variant="action"
               icon={SvgPlus}
               onClick={() => router.push(`/app/wiki/${dir}?new=1`)}
             >
@@ -374,15 +377,13 @@ function Explorer({ dir }: { dir: string }) {
       />
 
       {triggerStatus && (
-        <div className="text-xs text-(--color-text-secondary) mb-3">
-          {triggerStatus}
-        </div>
+        <div className="text-xs text-(--text-04) mb-3">{triggerStatus}</div>
       )}
 
       {creating && (
         <form
           onSubmit={onCreate}
-          className="flex gap-2 mb-4 p-3 bg-(--color-bg-panel) border border-(--color-border-default) rounded-(--radius-md)"
+          className="flex gap-2 mb-4 p-3 bg-(--background-tint-01) border border-(--border-01) rounded-(--border-radius-08)"
         >
           <input
             autoFocus
@@ -390,7 +391,7 @@ function Explorer({ dir }: { dir: string }) {
             onChange={(e) => setNewName(e.target.value)}
             placeholder="folder-name (or subdir/folder-name)"
             disabled={createBusy}
-            className="flex-1 p-2 border border-(--color-border-default) rounded-(--radius-sm) text-sm"
+            className="flex-1 p-2 border border-(--border-01) rounded-(--border-radius-04) text-sm"
           />
           <Button
             type="submit"
@@ -412,13 +413,13 @@ function Explorer({ dir }: { dir: string }) {
       )}
 
       {error && (
-        <div className="p-[10px] bg-(--color-state-danger-bg) text-(--color-state-danger-fg) rounded-(--radius-sm) text-[13px] mb-3">
+        <div className="p-[10px] bg-(--status-error-01) text-(--status-text-error-05) rounded-(--border-radius-04) text-[13px] mb-3">
           {error}
         </div>
       )}
 
       {subdirs.length === 0 && files.length === 0 && !error && (
-        <p className="text-(--color-text-muted) text-sm">
+        <p className="text-(--text-03) text-sm">
           This folder is empty. Create a document to get started.
         </p>
       )}
@@ -438,7 +439,9 @@ function Explorer({ dir }: { dir: string }) {
             return (
               <Row
                 key={(isFile ? "f:" : "d:") + name}
-                icon={isFile ? <SvgDocFile size={20} /> : <SvgFolder size={20} />}
+                icon={
+                  isFile ? <SvgDocFile size={20} /> : <SvgFolder size={20} />
+                }
                 label={name}
                 updatedAt={updated_at}
                 href={`/app/wiki/${childPath}`}
@@ -489,11 +492,7 @@ function Explorer({ dir }: { dir: string }) {
         })()}
       </ul>
       {sharePath && (
-        <ShareDialog
-          path={sharePath}
-          open
-          onClose={() => setSharePath(null)}
-        />
+        <ShareDialog path={sharePath} open onClose={() => setSharePath(null)} />
       )}
     </main>
   );
@@ -667,7 +666,7 @@ function NewDocView({ dir }: { dir: string }) {
       />
 
       {error && (
-        <div className="p-[10px] bg-(--color-state-danger-bg) text-(--color-state-danger-fg) rounded-(--radius-sm) text-[13px]">
+        <div className="p-[10px] bg-(--status-error-01) text-(--status-text-error-05) rounded-(--border-radius-04) text-[13px]">
           {error}
         </div>
       )}
@@ -692,7 +691,7 @@ function NewDocView({ dir }: { dir: string }) {
             ? "Start typing, or pick a template above…"
             : "Start typing your new document…"
         }
-        className="flex-1 min-h-0 w-full box-border p-4 border border-(--color-border-default) rounded-(--radius-md) font-mono text-sm leading-[1.6] resize-none outline-none"
+        className="flex-1 min-h-0 w-full box-border p-4 border border-(--border-01) rounded-(--border-radius-08) font-mono text-sm leading-[1.6] resize-none outline-none"
       />
     </main>
   );
@@ -717,12 +716,12 @@ function TemplateGallery({
   // line. On wide screens the user scrolls / clicks chevrons through
   // the row; on narrow screens the same layout becomes a swipe strip.
   return (
-    <div className="flex flex-col gap-[10px] p-[14px] bg-(--color-bg-panel) border border-(--color-border-default) rounded-(--radius-md)">
+    <div className="flex flex-col gap-[10px] p-[14px] bg-(--background-tint-01) border border-(--border-01) rounded-(--border-radius-08)">
       <div className="flex items-baseline gap-2">
-        <span className="text-[13px] font-semibold text-(--color-text-primary)">
+        <span className="text-[13px] font-semibold text-(--text-05)">
           Start from a template
         </span>
-        <span className="text-xs text-(--color-text-muted)">
+        <span className="text-xs text-(--text-03)">
           Scroll or use the arrows to browse — tap to apply.
         </span>
       </div>
@@ -807,10 +806,7 @@ function TemplateStrip({
           />
         </div>
         {templates.map((t) => (
-          <div
-            key={t.id}
-            className="shrink-0 snap-start w-[200px]"
-          >
+          <div key={t.id} className="shrink-0 snap-start w-[200px]">
             <TemplateCard
               title={t.name}
               description={t.description}
@@ -843,7 +839,7 @@ function StripArrow({
       type="button"
       onClick={onClick}
       aria-label={direction === "left" ? "Scroll left" : "Scroll right"}
-      className={`absolute top-1/2 -translate-y-1/2 ${direction === "left" ? "left-1" : "right-1"} w-7 h-7 rounded-(--radius-pill) bg-(--color-bg-page) border border-(--color-border-default) shadow-(--shadow-sm) cursor-pointer text-(--color-text-secondary) flex items-center justify-center p-0`}
+      className={`absolute top-1/2 -translate-y-1/2 ${direction === "left" ? "left-1" : "right-1"} w-7 h-7 rounded-full bg-(--background-tint-00) border border-(--border-01) shadow-(--shadow-sm) cursor-pointer text-(--text-04) flex items-center justify-center p-0`}
     >
       {direction === "left" ? (
         <SvgChevronLeft size={14} />
@@ -872,11 +868,11 @@ function TemplateCard({
       type="button"
       onClick={onClick}
       disabled={busy}
-      className={`text-left py-[10px] px-3 rounded-(--radius-sm) text-(--color-text-primary) w-full h-full box-border min-h-[64px] flex flex-col gap-1 transition-[background,border-color] duration-[80ms] ease-in-out border ${busy ? "opacity-[0.7] cursor-wait" : "cursor-pointer"} ${active ? "bg-(--color-accent-subtle-bg) border-(--color-accent-subtle-border)" : "bg-(--color-bg-page) border-(--color-border-default)"}`}
+      className={`text-left py-[10px] px-3 rounded-(--border-radius-04) text-(--text-05) w-full h-full box-border min-h-[64px] flex flex-col gap-1 transition-[background,border-color] duration-[80ms] ease-in-out border ${busy ? "opacity-[0.7] cursor-wait" : "cursor-pointer"} ${active ? "bg-(--background-tint-03) border-(--border-01)" : "bg-(--background-tint-00) border-(--border-01)"}`}
       onMouseEnter={(e) => {
         if (!active && !busy) {
-          e.currentTarget.style.background = color.bg.hover;
-          e.currentTarget.style.borderColor = color.border.strong;
+          e.currentTarget.style.background = "var(--background-tint-03)";
+          e.currentTarget.style.borderColor = "var(--border-02)";
         }
       }}
       onMouseLeave={(e) => {
@@ -888,7 +884,7 @@ function TemplateCard({
     >
       <div className="text-[13px] font-semibold">{title}</div>
       {description && (
-        <div className="text-xs text-(--color-text-muted) line-clamp-2">
+        <div className="text-xs text-(--text-03) line-clamp-2">
           {description}
         </div>
       )}
@@ -906,13 +902,13 @@ function SortBar({
   onChange: (v: SortMode) => void;
 }) {
   return (
-    <div className="flex items-center gap-2 mb-2 text-xs text-(--color-text-muted)">
+    <div className="flex items-center gap-2 mb-2 text-xs text-(--text-03)">
       <label htmlFor="wiki-sort">Sort:</label>
       <select
         id="wiki-sort"
         value={value}
         onChange={(e) => onChange(e.target.value as SortMode)}
-        className="py-1 px-2 border border-(--color-border-default) rounded-(--radius-sm) bg-(--color-bg-page) text-(--color-text-primary) text-xs"
+        className="py-1 px-2 border border-(--border-01) rounded-(--border-radius-04) bg-(--background-tint-00) text-(--text-05) text-xs"
       >
         <option value="name-asc">Name (A → Z)</option>
         <option value="name-desc">Name (Z → A)</option>
@@ -1025,11 +1021,9 @@ function Row({
       }
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
-      className={`flex items-center py-[10px] px-3 border-b border-(--color-border-subtle) ${dropActive ? "bg-(--color-accent-subtle-bg) outline outline-2 outline-(--color-accent-bg)" : hover ? "bg-(--color-bg-sunken)" : "bg-transparent"} ${busy ? "opacity-50" : "opacity-100"} ${renaming ? "cursor-default" : "cursor-pointer"}`}
+      className={`flex items-center py-[10px] px-3 border-b border-(--border-01) ${dropActive ? "bg-(--background-tint-03) outline outline-2 outline-(--background-tint-inverted-00)" : hover ? "bg-(--background-tint-02)" : "bg-transparent"} ${busy ? "opacity-50" : "opacity-100"} ${renaming ? "cursor-default" : "cursor-pointer"}`}
     >
-      <span className="text-(--color-text-muted) flex mr-[10px]">
-        {icon}
-      </span>
+      <span className="text-(--text-03) flex mr-[10px]">{icon}</span>
       {renaming ? (
         <form
           onSubmit={(e) => {
@@ -1049,7 +1043,7 @@ function Row({
               }
             }}
             disabled={busy}
-            className="flex-1 py-1 px-2 border border-(--color-border-default) rounded-(--radius-sm) text-sm"
+            className="flex-1 py-1 px-2 border border-(--border-01) rounded-(--border-radius-04) text-sm"
           />
           <Button
             type="submit"
@@ -1073,13 +1067,13 @@ function Row({
         // <li>. flex: 1 keeps it stretching to fill the space between
         // icon and action buttons, so any click on the label area
         // still hits the row's onClick.
-        <span className="flex items-center gap-[10px] flex-1 text-(--color-text-primary) text-sm">
+        <span className="flex items-center gap-[10px] flex-1 text-(--text-05) text-sm">
           {label}
         </span>
       )}
       {!renaming && (
         <>
-          <span className="text-xs text-(--color-text-faint) mr-2 whitespace-nowrap">
+          <span className="text-xs text-(--text-02) mr-2 whitespace-nowrap">
             {updatedAt ? relativeTime(updatedAt, "short") : "—"}
           </span>
           {onShare && (
@@ -1088,7 +1082,7 @@ function Row({
               disabled={busy}
               title="Share"
               aria-label={`Share ${label}`}
-              className={`bg-transparent border-none p-[6px] flex items-center ${busy ? "cursor-not-allowed" : "cursor-pointer"} ${hover ? "text-(--color-text-secondary)" : "text-transparent"}`}
+              className={`bg-transparent border-none p-[6px] flex items-center ${busy ? "cursor-not-allowed" : "cursor-pointer"} ${hover ? "text-(--text-04)" : "text-transparent"}`}
             >
               <SvgShare size={16} />
             </button>
@@ -1098,7 +1092,7 @@ function Row({
             disabled={busy}
             title="Rename"
             aria-label={`Rename ${label}`}
-            className={`bg-transparent border-none p-[6px] flex items-center ${busy ? "cursor-not-allowed" : "cursor-pointer"} ${hover ? "text-(--color-text-secondary)" : "text-transparent"}`}
+            className={`bg-transparent border-none p-[6px] flex items-center ${busy ? "cursor-not-allowed" : "cursor-pointer"} ${hover ? "text-(--text-04)" : "text-transparent"}`}
           >
             <SvgEdit size={16} />
           </button>
@@ -1107,7 +1101,7 @@ function Row({
             disabled={busy}
             title="Delete"
             aria-label={`Delete ${label}`}
-            className={`bg-transparent border-none p-[6px] flex items-center ${busy ? "cursor-not-allowed" : "cursor-pointer"} ${hover ? "text-(--color-state-danger-fg)" : "text-transparent"}`}
+            className={`bg-transparent border-none p-[6px] flex items-center ${busy ? "cursor-not-allowed" : "cursor-pointer"} ${hover ? "text-(--status-text-error-05)" : "text-transparent"}`}
           >
             <SvgTrash size={16} />
           </button>
@@ -1162,19 +1156,22 @@ function Breadcrumbs({
             }
           : {};
         const activeClass = active
-          ? "bg-(--color-accent-subtle-bg) outline outline-2 outline-(--color-accent-bg) rounded-(--radius-sm) py-[2px] px-[6px]"
+          ? "bg-(--background-tint-03) outline outline-2 outline-(--background-tint-inverted-00) rounded-(--border-radius-04) py-[2px] px-[6px]"
           : "";
         return (
           <span key={c.href} className="flex items-center gap-1.5">
-            {i > 0 && <span className="text-(--color-text-faint)">/</span>}
+            {i > 0 && <span className="text-(--text-02)">/</span>}
             {last ? (
-              <span className={`font-semibold ${activeClass}`} {...dropHandlers}>
+              <span
+                className={`font-semibold ${activeClass}`}
+                {...dropHandlers}
+              >
                 {c.label}
               </span>
             ) : (
               <Link
                 href={c.href}
-                className={`text-(--color-text-primary) underline ${activeClass}`}
+                className={`text-(--text-05) underline ${activeClass}`}
                 {...dropHandlers}
               >
                 {c.label}
@@ -1218,9 +1215,11 @@ function FileViewer({ path }: { path: string }) {
   const [commentDraft, setCommentDraft] = useState<CommentDraft | null>(null);
   const [commentThreads, setCommentThreads] = useState<CommentThreadView[]>([]);
   const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
-  const [selTool, setSelTool] = useState<{ x: number; y: number; draft: CommentDraft } | null>(
-    null,
-  );
+  const [selTool, setSelTool] = useState<{
+    x: number;
+    y: number;
+    draft: CommentDraft;
+  } | null>(null);
   const articleRef = useRef<HTMLElement | null>(null);
   // Page owns the comment threads (so highlights render even with the panel
   // closed). Auto-open the panel once per path when a page has comments.
@@ -1252,7 +1251,10 @@ function FileViewer({ path }: { path: string }) {
   // over them — the bug where highlights vanished until you clicked a comment.
   const renderedBody = useMemo(
     () => (
-      <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSourcePos]}>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        rehypePlugins={[rehypeSourcePos]}
+      >
         {body}
       </ReactMarkdown>
     ),
@@ -1321,7 +1323,11 @@ function FileViewer({ path }: { path: string }) {
       cancelAnimationFrame(raf);
       tick();
     });
-    observer.observe(el, { childList: true, subtree: true, characterData: true });
+    observer.observe(el, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+    });
 
     return () => {
       cancelled = true;
@@ -1915,7 +1921,7 @@ function FileViewer({ path }: { path: string }) {
           href={backHref}
           title="Back"
           aria-label="Back"
-          className="flex items-center justify-center w-8 h-8 rounded-(--radius-md) border border-(--color-border-default) text-(--color-text-secondary) no-underline shrink-0"
+          className="flex items-center justify-center w-8 h-8 rounded-(--border-radius-08) border border-(--border-01) text-(--text-04) no-underline shrink-0"
         >
           <SvgArrowLeft size={18} />
         </Link>
@@ -1925,7 +1931,12 @@ function FileViewer({ path }: { path: string }) {
           <>
             <div className="flex gap-2">
               <Button onClick={() => setRunAgentOpen(true)}>Run Agent</Button>
-              <Button icon={SvgWorkflow} onClick={() => setTriggerModalOpen(true)}>Trigger</Button>
+              <Button
+                icon={SvgWorkflow}
+                onClick={() => setTriggerModalOpen(true)}
+              >
+                Trigger
+              </Button>
             </div>
             <div className="flex gap-2">
               <Button onClick={() => setShareOpen(true)}>Share</Button>
@@ -1975,9 +1986,7 @@ function FileViewer({ path }: { path: string }) {
       )}
 
       {!editing && triggerStatus && (
-        <div className="text-xs text-(--color-text-secondary) mb-3">
-          {triggerStatus}
-        </div>
+        <div className="text-xs text-(--text-04) mb-3">{triggerStatus}</div>
       )}
 
       <TriggerModal
@@ -2001,13 +2010,13 @@ function FileViewer({ path }: { path: string }) {
       />
 
       {error && (
-        <div className="p-[10px] bg-(--color-state-danger-bg) text-(--color-state-danger-fg) rounded-(--radius-sm) text-[13px] mb-3">
+        <div className="p-[10px] bg-(--status-error-01) text-(--status-text-error-05) rounded-(--border-radius-04) text-[13px] mb-3">
           {error}
         </div>
       )}
 
       {viewingOld && !loading && !error && (
-        <div className="flex items-center gap-3 py-2 px-3 mb-3 bg-(--color-state-warning-bg) border border-(--color-state-warning-border) rounded-(--radius-md) text-[13px] text-(--color-state-warning-fg)">
+        <div className="flex items-center gap-3 py-2 px-3 mb-3 bg-(--status-warning-01) border border-(--status-warning-02) rounded-(--border-radius-08) text-[13px] text-(--status-text-warning-05)">
           <span>
             Viewing an older version
             {viewingSha ? ` (${viewingSha.slice(0, 7)})` : ""}.
@@ -2023,9 +2032,7 @@ function FileViewer({ path }: { path: string }) {
       )}
 
       {editing && pendingResumeDraft && (
-        <div
-          className="flex items-center gap-3 py-2 px-3 mb-3 bg-(--color-state-info-bg) border border-(--color-state-info-border) rounded-(--radius-md) text-[13px] text-(--color-state-info-fg)"
-        >
+        <div className="flex items-center gap-3 py-2 px-3 mb-3 bg-(--status-info-01) border border-(--status-info-02) rounded-(--border-radius-08) text-[13px] text-(--status-text-info-05)">
           <span>You have unsaved changes from a previous session.</span>
           <div className="flex-1" />
           <Button
@@ -2085,8 +2092,8 @@ function FileViewer({ path }: { path: string }) {
       )}
 
       {editing && conflict && (
-        <div className="mb-3 border border-(--color-state-warning-border) rounded-(--radius-md) overflow-hidden">
-          <div className="flex items-center gap-3 py-2 px-3 bg-(--color-state-warning-bg) text-(--color-state-warning-fg) text-[13px]">
+        <div className="mb-3 border border-(--status-warning-02) rounded-(--border-radius-08) overflow-hidden">
+          <div className="flex items-center gap-3 py-2 px-3 bg-(--status-warning-01) text-(--status-text-warning-05) text-[13px]">
             <span>This page was updated while you were editing.</span>
             <div className="flex-1" />
             <Button
@@ -2120,17 +2127,19 @@ function FileViewer({ path }: { path: string }) {
                 conflict.currentBody,
                 conflict.draftBody,
               );
-              const preClass = "m-0 text-xs leading-[1.5] font-mono whitespace-pre-wrap break-words max-h-[240px] overflow-y-auto";
-              const labelClass = "text-[11px] font-semibold text-(--color-text-muted) mb-[6px] uppercase tracking-[0.05em]";
+              const preClass =
+                "m-0 text-xs leading-[1.5] font-mono whitespace-pre-wrap break-words max-h-[240px] overflow-y-auto";
+              const labelClass =
+                "text-[11px] font-semibold text-(--text-03) mb-[6px] uppercase tracking-[0.05em]";
               return (
                 <>
-                  <div className="p-3 border-r border-(--color-border-subtle)">
+                  <div className="p-3 border-r border-(--border-01)">
                     <div className={labelClass}>Current version</div>
                     <pre className={preClass}>
                       {currentHunks.map((part, i) => (
                         <span
                           key={i}
-                          className={`${part.added ? "bg-(--color-state-success-bg)" : "bg-transparent"} ${part.removed ? "text-transparent select-none" : "text-(--color-text-secondary)"}`}
+                          className={`${part.added ? "bg-(--status-success-01)" : "bg-transparent"} ${part.removed ? "text-transparent select-none" : "text-(--text-04)"}`}
                         >
                           {part.value}
                         </span>
@@ -2143,7 +2152,7 @@ function FileViewer({ path }: { path: string }) {
                       {draftHunks.map((part, i) => (
                         <span
                           key={i}
-                          className={`${part.added ? "bg-(--color-state-warning-bg)" : "bg-transparent"} ${part.removed ? "text-transparent select-none" : "text-(--color-text-secondary)"}`}
+                          className={`${part.added ? "bg-(--status-warning-01)" : "bg-transparent"} ${part.removed ? "text-transparent select-none" : "text-(--text-04)"}`}
                         >
                           {part.value}
                         </span>
@@ -2200,7 +2209,7 @@ function FileViewer({ path }: { path: string }) {
                   onChange={(e) => setDraft(e.target.value)}
                   spellCheck={false}
                   placeholder="Start typing, or pick a template above…"
-                  className="flex-1 min-h-0 w-full box-border p-4 border border-(--color-border-default) rounded-(--radius-md) font-mono text-sm leading-[1.6] resize-none outline-none"
+                  className="flex-1 min-h-0 w-full box-border p-4 border border-(--border-01) rounded-(--border-radius-08) font-mono text-sm leading-[1.6] resize-none outline-none"
                 />
               </>
             ) : viewingOld && diffData ? (
@@ -2268,11 +2277,9 @@ function FileViewer({ path }: { path: string }) {
           <div
             onClick={() => setHistoryOpen(false)}
             aria-hidden
-            className="fixed inset-0 bg-(--color-overlay) z-[60]"
+            className="fixed inset-0 bg-(--mask-03) z-[60]"
           />
-          <div
-            className="fixed top-0 right-0 bottom-0 z-[70] flex shadow-(--shadow-panel) w-[min(360px,100vw)]"
-          >
+          <div className="fixed top-0 right-0 bottom-0 z-[70] flex shadow-(--shadow-panel) w-[min(360px,100vw)]">
             <HistoryPanel
               commits={commits}
               error={historyError}
@@ -2293,11 +2300,9 @@ function FileViewer({ path }: { path: string }) {
           <div
             onClick={() => setCommentsOpen(false)}
             aria-hidden
-            className="fixed inset-0 bg-(--color-overlay) z-[60]"
+            className="fixed inset-0 bg-(--mask-03) z-[60]"
           />
-          <div
-            className="fixed top-0 right-0 bottom-0 z-[70] flex shadow-(--shadow-panel) w-[min(360px,100vw)]"
-          >
+          <div className="fixed top-0 right-0 bottom-0 z-[70] flex shadow-(--shadow-panel) w-[min(360px,100vw)]">
             <CommentsPanel
               path={path}
               headSha={headSha}
@@ -2319,7 +2324,7 @@ function FileViewer({ path }: { path: string }) {
       {selTool && (
         <div
           onMouseDown={(e) => e.preventDefault()}
-          className="fixed -translate-x-1/2 -translate-y-full z-[80] bg-(--color-bg-panel) border border-(--color-border-default) rounded-(--radius-md) shadow-(--shadow-popover) p-1"
+          className="fixed -translate-x-1/2 -translate-y-full z-[80] bg-(--background-tint-01) border border-(--border-01) rounded-(--border-radius-08) shadow-(--shadow-popover) p-1"
           style={{
             left: selTool.x,
             top: selTool.y - 8,
@@ -2361,16 +2366,16 @@ function ActiveAgentsBar({
   const count = agents.length + sessions.length;
   const expandable = count > 0;
   return (
-    <div className="mb-3 border border-(--color-border-default) rounded-(--radius-md) bg-(--color-bg-panel) overflow-hidden">
+    <div className="mb-3 border border-(--border-01) rounded-(--border-radius-08) bg-(--background-tint-01) overflow-hidden">
       <button
         onClick={expandable ? onToggle : undefined}
         aria-expanded={expandable ? open : undefined}
         disabled={!expandable}
-        className={`w-full text-left py-2 px-3 bg-transparent border-none text-[13px] flex items-center gap-2 ${expandable ? "cursor-pointer text-(--color-text-primary)" : "cursor-default text-(--color-text-muted)"}`}
+        className={`w-full text-left py-2 px-3 bg-transparent border-none text-[13px] flex items-center gap-2 ${expandable ? "cursor-pointer text-(--text-05)" : "cursor-default text-(--text-03)"}`}
       >
         <span
           aria-hidden
-          className={`shrink-0 flex transition-transform duration-[120ms] ease-in-out ${open ? "rotate-90" : "rotate-0"} ${!expandable ? "text-(--color-text-faint)" : "text-(--color-text-muted)"}`}
+          className={`shrink-0 flex transition-transform duration-[120ms] ease-in-out ${open ? "rotate-90" : "rotate-0"} ${!expandable ? "text-(--text-02)" : "text-(--text-03)"}`}
         >
           <SvgChevronRight size={10} />
         </span>
@@ -2378,18 +2383,18 @@ function ActiveAgentsBar({
           {expandable ? "Active agents" : "No agents active"}
         </span>
         {expandable && (
-          <span className="text-[11px] font-semibold py-[1px] px-[6px] rounded-(--radius-pill) bg-(--color-accent-subtle-bg) text-(--color-accent-subtle-fg)">
+          <span className="text-[11px] font-semibold py-[1px] px-[6px] rounded-full bg-(--background-tint-03) text-(--text-05)">
             {count}
           </span>
         )}
         {error && (
-          <span className="ml-auto text-xs text-(--color-state-danger-fg)">
+          <span className="ml-auto text-xs text-(--status-text-error-05)">
             {error}
           </span>
         )}
       </button>
       {expandable && open && (
-        <ul className="list-none p-0 m-0 border-t border-(--color-border-default) bg-(--color-bg-page)">
+        <ul className="list-none p-0 m-0 border-t border-(--border-01) bg-(--background-tint-00)">
           {sessions.map((s, i) => (
             <ActiveSessionRow
               key={s.id}
@@ -2424,41 +2429,43 @@ function ActiveAgentRow({
     <li
       className={
         `py-[10px] px-3 text-[13px] flex items-center gap-[10px] whitespace-nowrap overflow-hidden` +
-        (isLast ? `` : ` border-b border-(--color-border-subtle)`)
+        (isLast ? `` : ` border-b border-(--border-01)`)
       }
     >
-      <span className='shrink-0 text-[10px] font-semibold py-[1px] px-[6px] rounded-(--radius-xs) bg-(--color-accent-subtle-bg) text-(--color-accent-subtle-fg) uppercase tracking-[0.3px]'>
+      <span className="shrink-0 text-[10px] font-semibold py-[1px] px-[6px] rounded-(--border-radius-04) bg-(--background-tint-03) text-(--text-05) uppercase tracking-[0.3px]">
         {a.activity}
       </span>
 
-      <span className='font-medium text-(--color-text-primary) shrink-0'>
+      <span className="font-medium text-(--text-05) shrink-0">
         {a.owner_display}
       </span>
       {a.agent_name ? (
-        <span className='text-(--color-text-muted) shrink-0'>
-          {'·'} {a.agent_name}
+        <span className="text-(--text-03) shrink-0">
+          {"·"} {a.agent_name}
         </span>
       ) : null}
 
       {a.description ? (
         <span
-          className='text-(--color-text-secondary) italic overflow-hidden text-ellipsis min-w-0 grow'
+          className="text-(--text-04) italic overflow-hidden text-ellipsis min-w-0 grow"
           title={a.description}
         >
-          {'“'}{a.description}{'”'}
+          {"“"}
+          {a.description}
+          {"”"}
         </span>
       ) : (
-        <span className='flex-1' />
+        <span className="flex-1" />
       )}
 
       <span
-        className='text-[11px] text-(--color-text-faint) shrink-0'
+        className="text-[11px] text-(--text-02) shrink-0"
         title={`Started ${absoluteTime(
           a.registered_at,
         )} · Expires ${absoluteTime(a.expires_at)}`}
       >
-        {relativeTime(a.registered_at, 'short')} {'·'} expires{' '}
-        {relativeTime(a.expires_at, 'short')}
+        {relativeTime(a.registered_at, "short")} {"·"} expires{" "}
+        {relativeTime(a.expires_at, "short")}
       </span>
     </li>
   );
@@ -2477,32 +2484,25 @@ function ActiveSessionRow({
     <li
       className={
         `py-[10px] px-3 text-[13px] flex items-center gap-[10px] whitespace-nowrap overflow-hidden` +
-        (isLast ? `` : ` border-b border-(--color-border-subtle)`)
+        (isLast ? `` : ` border-b border-(--border-01)`)
       }
     >
-      <span className='shrink-0 text-[10px] font-semibold py-[1px] px-[6px] rounded-(--radius-xs) bg-(--color-accent-subtle-bg) text-(--color-accent-subtle-fg) uppercase tracking-[0.3px]'>
+      <span className="shrink-0 text-[10px] font-semibold py-[1px] px-[6px] rounded-(--border-radius-04) bg-(--background-tint-03) text-(--text-05) uppercase tracking-[0.3px]">
         {s.status}
       </span>
 
-      <span className='font-medium text-(--color-text-primary) shrink-0'>
-        {s.tool_id}
-      </span>
+      <span className="font-medium text-(--text-05) shrink-0">{s.tool_id}</span>
 
-      <span className='flex-1' />
+      <span className="flex-1" />
 
       <span
-        className='text-[11px] text-(--color-text-faint) shrink-0'
+        className="text-[11px] text-(--text-02) shrink-0"
         title={`Started ${absoluteTime(s.started_at)}`}
       >
-        started {relativeTime(s.started_at, 'short')}
+        started {relativeTime(s.started_at, "short")}
       </span>
 
-      <Button
-        type='button'
-        variant='default'
-        size='sm'
-        onClick={onClose}
-      >
+      <Button type="button" variant="default" size="sm" onClick={onClose}>
         Close
       </Button>
     </li>
@@ -2525,9 +2525,9 @@ function FilenameRow({
   placeholder?: string;
 }) {
   return (
-    <div className="flex items-stretch border border-(--color-border-default) rounded-(--radius-sm) bg-(--color-bg-page) overflow-hidden shrink-0">
+    <div className="flex items-stretch border border-(--border-01) rounded-(--border-radius-04) bg-(--background-tint-00) overflow-hidden shrink-0">
       {parent && (
-        <span className="flex items-center px-[10px] bg-(--color-bg-sunken) border-r border-(--color-border-default) text-(--color-text-secondary) font-mono text-[13px]">
+        <span className="flex items-center px-[10px] bg-(--background-tint-02) border-r border-(--border-01) text-(--text-04) font-mono text-[13px]">
           {parent}/
         </span>
       )}
@@ -2543,7 +2543,7 @@ function FilenameRow({
       />
       <span
         aria-hidden
-        className="flex items-center px-[10px] bg-(--color-bg-sunken) border-l border-(--color-border-default) text-(--color-text-secondary) font-mono text-[13px] font-semibold"
+        className="flex items-center px-[10px] bg-(--background-tint-02) border-l border-(--border-01) text-(--text-04) font-mono text-[13px] font-semibold"
       >
         .md
       </span>

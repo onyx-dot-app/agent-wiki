@@ -7,7 +7,6 @@ import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { BackLink, PageHeader } from "@/components/common/PageHeader";
 import { RequireAdmin } from "@/components/RequireAdmin";
 import { apiFetch } from "@/lib/api";
-import { color, radius } from "@/lib/theme";
 import { useIsMobile } from "@/lib/viewport";
 
 interface BraintrustSettings {
@@ -21,7 +20,7 @@ export default function AdminBraintrustPage() {
   const isMobile = useIsMobile();
   return (
     <RequireAdmin>
-      <main style={{ padding: isMobile ? "16px 12px" : "24px 32px", maxWidth: 720 }}>
+      <main className="max-w-[720px]" style={{ padding: isMobile ? "16px 12px" : "24px 32px" }}>
         <BackLink />
         <PageHeader
           title="Braintrust tracing"
@@ -131,15 +130,15 @@ function BraintrustForm() {
   const fieldsDirty = projectChanged || apiKey.length > 0;
 
   return (
-    <form onSubmit={onSubmit} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+    <form onSubmit={onSubmit} className="flex flex-col gap-4">
       <label>
-        <div style={lblStyle}>Project</div>
+        <div className={lblClass}>Project</div>
         <input
           value={project}
           onChange={(e) => setProject(e.target.value)}
           placeholder="agent-wiki"
           required
-          style={inputStyle}
+          className={inputClass}
         />
       </label>
 
@@ -154,22 +153,12 @@ function BraintrustForm() {
         clearDisabled={saving || !settings.api_key_set}
       />
 
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          padding: "12px 14px",
-          border: `1px solid ${color.border.default}`,
-          borderRadius: radius.sm,
-          background: color.bg.sunken,
-        }}
-      >
+      <div className="flex items-center justify-between py-3 px-[14px] border border-(--border-01) rounded-(--border-radius-04) bg-(--background-tint-02)">
         <div>
-          <div style={{ fontSize: 13, fontWeight: 500 }}>
+          <div className="text-[13px] font-medium">
             Tracing is currently <strong>{settings.enabled ? "ON" : "OFF"}</strong>
           </div>
-          <div style={{ fontSize: 12, color: color.text.muted, marginTop: 2 }}>
+          <div className="text-xs text-(--text-03) mt-[2px]">
             {canEnable
               ? "Toggle sends every LLM call, tool call, and flow span to Braintrust."
               : "Save a project name and API key first to enable tracing."}
@@ -186,8 +175,8 @@ function BraintrustForm() {
         </Button>
       </div>
 
-      {error && <div style={{ color: color.state.danger.fg }}>{error}</div>}
-      {saved && <div style={{ color: color.state.success.fg }}>{saved}</div>}
+      {error && <div className="text-(--status-text-error-05)">{error}</div>}
+      {saved && <div className="text-(--status-text-success-05)">{saved}</div>}
       <div>
         <Button type="submit" variant="action" disabled={saving}>
           {saving ? "Saving…" : "Save"}
@@ -218,10 +207,10 @@ function KeyField({
 }) {
   return (
     <label>
-      <div style={{ ...lblStyle, display: "flex", alignItems: "center", gap: 6 }}>
+      <div className="mb-1 text-[13px] font-medium flex items-center gap-[6px]">
         <span>{label}</span>
-        {isSet && <span style={hintStyle}>currently {hint}</span>}
-        <span style={{ flex: 1 }} />
+        {isSet && <span className="font-normal text-(--text-03) font-mono text-xs">currently {hint}</span>}
+        <span className="flex-1" />
         {isSet && (
           <Button
             type="button"
@@ -239,24 +228,12 @@ function KeyField({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={isSet ? "leave blank to keep" : placeholder}
-        style={inputStyle}
+        className={inputClass}
       />
     </label>
   );
 }
 
-const inputStyle: React.CSSProperties = {
-  width: "100%",
-  padding: "8px 10px",
-  boxSizing: "border-box",
-  border: `1px solid ${color.border.default}`,
-  borderRadius: radius.sm,
-  fontSize: 14,
-};
-const lblStyle: React.CSSProperties = { marginBottom: 4, fontSize: 13, fontWeight: 500 };
-const hintStyle: React.CSSProperties = {
-  fontWeight: 400,
-  color: color.text.muted,
-  fontFamily: "ui-monospace, monospace",
-  fontSize: 12,
-};
+const inputClass =
+  "w-full py-2 px-[10px] box-border border border-(--border-01) rounded-(--border-radius-04) text-sm";
+const lblClass = "mb-1 text-[13px] font-medium";

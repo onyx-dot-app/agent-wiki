@@ -3,8 +3,6 @@
 import Link from "next/link";
 import type { CSSProperties, ReactNode } from "react";
 
-import { color } from "@/lib/theme";
-
 // Single source of truth for page-level headers.
 //
 // - title is a string (rendered as <h1>) or a node (e.g. breadcrumbs).
@@ -27,15 +25,7 @@ export function PageHeader({
 }) {
   const titleNode =
     typeof title === "string" ? (
-      <h1
-        style={{
-          margin: 0,
-          fontSize: 22,
-          fontWeight: 600,
-          lineHeight: 1.2,
-          color: color.text.primary,
-        }}
-      >
+      <h1 className="m-0 text-[22px] font-semibold leading-[1.2] text-(--text-05)">
         {title}
       </h1>
     ) : (
@@ -44,33 +34,19 @@ export function PageHeader({
 
   return (
     <header
-      style={{
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        gap: 16,
-        flexWrap: "wrap",
-        marginBottom: 24,
-        ...style,
-      }}
+      className="flex items-center justify-between gap-4 flex-wrap mb-6"
+      style={style}
     >
-      <div style={{ minWidth: 0 }}>
+      <div className="min-w-0">
         {titleNode}
         {description && (
-          <p
-            style={{
-              margin: "6px 0 0",
-              fontSize: 13,
-              lineHeight: 1.55,
-              color: color.text.muted,
-            }}
-          >
+          <p className="mt-[6px] mb-0 text-[13px] leading-[1.55] text-(--text-03)">
             {description}
           </p>
         )}
       </div>
       {actions && (
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <div className="flex items-center gap-2 flex-wrap">
           {actions}
         </div>
       )}
@@ -90,13 +66,7 @@ export function BackLink({
   return (
     <Link
       href={href}
-      style={{
-        display: "inline-block",
-        marginBottom: 12,
-        fontSize: 13,
-        color: color.text.muted,
-        textDecoration: "none",
-      }}
+      className="inline-block mb-3 text-[13px] text-(--text-03) no-underline"
     >
       {label}
     </Link>

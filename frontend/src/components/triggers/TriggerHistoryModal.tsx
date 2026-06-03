@@ -11,7 +11,6 @@ import {
   type TriggerCommit,
 } from "@/lib/triggers";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
-import { color, radius, shadow } from "@/lib/theme";
 
 interface Props {
   trigger: Trigger | null;
@@ -53,41 +52,17 @@ export function TriggerHistoryModal({ trigger, onClose, onSelectVersion }: Props
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: color.overlay,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        zIndex: 100,
-      }}
+      className="fixed inset-0 bg-(--mask-03) flex items-center justify-center z-[100]"
     >
       <div
-        style={{
-          background: color.bg.page,
-          borderRadius: radius.lg,
-          width: "min(640px, 92vw)",
-          maxHeight: "92vh",
-          overflowY: "auto",
-          padding: 24,
-          boxShadow: shadow.modal,
-          display: "flex",
-          flexDirection: "column",
-          gap: 14,
-        }}
+        className="bg-(--background-tint-00) rounded-(--border-radius-12) w-[min(640px,92vw)] max-h-[92vh] overflow-y-auto p-6 shadow-(--shadow-modal) flex flex-col gap-[14px]"
       >
-        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
+        <div className="flex items-start justify-between">
           <div>
-            <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>Edit history</h2>
+            <h2 className="m-0 text-[18px] font-bold">Edit history</h2>
             <div
               title={trigger.scope_path}
-              style={{
-                fontFamily: "ui-monospace, Menlo, monospace",
-                fontSize: 12,
-                color: color.text.muted,
-                marginTop: 4,
-              }}
+              className="font-mono text-xs text-(--text-03) mt-1"
             >
               {formatScopePath(trigger.scope_path)}
             </div>
@@ -95,7 +70,7 @@ export function TriggerHistoryModal({ trigger, onClose, onSelectVersion }: Props
           <Button icon={SvgX} prominence="tertiary" size="sm" tooltip="Close" onClick={onClose} />
         </div>
 
-        <p style={{ margin: 0, fontSize: 12, color: color.text.muted, lineHeight: 1.5 }}>
+        <p className="m-0 text-xs text-(--text-03) leading-[1.5]">
           Click a version to open it in the editor. Saving from there creates a
           new commit. Trigger <em>fires</em> live on the Events tab.
         </p>
@@ -104,33 +79,27 @@ export function TriggerHistoryModal({ trigger, onClose, onSelectVersion }: Props
 
         {error && (
           <div
-            style={{
-              padding: 10,
-              background: color.state.danger.bg,
-              color: color.state.danger.fg,
-              borderRadius: radius.sm,
-              fontSize: 13,
-            }}
+            className="p-[10px] bg-(--status-error-01) text-(--status-text-error-05) rounded-(--border-radius-04) text-[13px]"
           >
             {error}
           </div>
         )}
 
         {!loading && !error && commits.length === 0 && (
-          <div style={{ fontSize: 13, color: color.text.muted }}>No history yet.</div>
+          <div className="text-[13px] text-(--text-03)">No history yet.</div>
         )}
 
         {commits.length > 0 && (
-          <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+          <ul className="list-none p-0 m-0">
             {commits.map((c) => (
-              <li key={c.sha} style={{ marginBottom: 6 }}>
+              <li key={c.sha} className="mb-[6px]">
                 <button
                   type="button"
                   onClick={() => onSelectVersion(c.sha)}
-                  style={rowBtn}
+                  className="w-full text-left py-[10px] px-3 border border-(--border-01) rounded-(--border-radius-08) bg-(--background-tint-01) cursor-pointer flex items-baseline justify-between gap-3 font-[inherit]"
                 >
-                  <span style={{ fontSize: 13, color: color.text.primary }}>{formatTs(c.ts)}</span>
-                  <span style={{ fontSize: 12, color: color.text.muted }}>{c.author}</span>
+                  <span className="text-[13px] text-(--text-05)">{formatTs(c.ts)}</span>
+                  <span className="text-xs text-(--text-03)">{c.author}</span>
                 </button>
               </li>
             ))}
@@ -140,19 +109,3 @@ export function TriggerHistoryModal({ trigger, onClose, onSelectVersion }: Props
     </div>
   );
 }
-
-
-const rowBtn: React.CSSProperties = {
-  width: "100%",
-  textAlign: "left",
-  padding: "10px 12px",
-  border: `1px solid ${color.border.default}`,
-  borderRadius: radius.md,
-  background: color.bg.panel,
-  cursor: "pointer",
-  display: "flex",
-  alignItems: "baseline",
-  justifyContent: "space-between",
-  gap: 12,
-  font: "inherit",
-};

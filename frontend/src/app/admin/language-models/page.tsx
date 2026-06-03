@@ -119,7 +119,7 @@ function LLMPage() {
 
   useEffect(() => { void load(); }, []);
 
-  if (error) return <div className="text-(--color-state-danger-fg)">{error}</div>;
+  if (error) return <div className="text-(--status-text-error-05)">{error}</div>;
   if (!settings) return <LoadingSpinner />;
 
   const configured = ALL_PROVIDERS.filter((p) => isConfigured(p, settings));
@@ -133,13 +133,13 @@ function LLMPage() {
     <div className="flex flex-col gap-8">
       <AgentModelSection settings={settings} onSaved={load} />
 
-      <div className="border-t border-(--color-border-subtle)" />
+      <div className="border-t border-(--border-01)" />
 
       {/* Available Providers */}
       <section>
         <div className={sectionHeaderClass}>Available providers</div>
         {configured.length === 0 && (
-          <div className="text-(--color-text-muted) text-sm">No providers configured yet.</div>
+          <div className="text-(--text-03) text-sm">No providers configured yet.</div>
         )}
         <div className="flex flex-col gap-2">
           {configured.map((p) => (
@@ -159,10 +159,10 @@ function LLMPage() {
       {/* Add Provider */}
       {unconfigured.length > 0 && (
         <>
-          <div className="border-t border-(--color-border-subtle)" />
+          <div className="border-t border-(--border-01)" />
           <section>
             <div className={sectionHeaderClass}>Add provider</div>
-            <div className="text-(--color-text-muted) text-[13px] mb-3">
+            <div className="text-(--text-03) text-[13px] mb-3">
               Connect a provider to make it available for agent and chat use.
             </div>
             <div className="flex flex-col gap-2">
@@ -230,21 +230,21 @@ function AgentModelSection({ settings, onSaved }: { settings: LLMSettings; onSav
     <section>
       <div className={sectionHeaderClass}>Default model</div>
       {!editing ? (
-        <div className="flex items-center justify-between py-3 px-4 border border-(--color-border-default) rounded-(--radius-md) bg-(--color-bg-panel)">
+        <div className="flex items-center justify-between py-3 px-4 border border-(--border-01) rounded-(--border-radius-08) bg-(--background-tint-01)">
           <div>
             {settings.provider && PROVIDER_META[settings.provider as Provider] ? (
               <>
                 <span className="text-sm font-medium">{PROVIDER_META[settings.provider as Provider].label}</span>
-                <span className="text-sm text-(--color-text-muted) ml-2">{settings.model || "—"}</span>
+                <span className="text-sm text-(--text-03) ml-2">{settings.model || "—"}</span>
               </>
             ) : (
-              <span className="text-sm text-(--color-text-muted)">No model selected — configure a provider below.</span>
+              <span className="text-sm text-(--text-03)">No model selected — configure a provider below.</span>
             )}
           </div>
           <Button size="sm" variant="default" onClick={() => setEditing(true)} disabled={availableProviders.length === 0}>Edit</Button>
         </div>
       ) : (
-        <div className="border border-(--color-border-default) rounded-(--radius-md) bg-(--color-bg-panel) flex flex-col">
+        <div className="border border-(--border-01) rounded-(--border-radius-08) bg-(--background-tint-01) flex flex-col">
           <div className="flex flex-col gap-1 p-3">
             {options.map(({ provider: p, model: m }) => {
               const isSelected = selProvider === p && selModel === m;
@@ -253,24 +253,24 @@ function AgentModelSection({ settings, onSaved }: { settings: LLMSettings; onSav
                   key={`${p}:${m}`}
                   type="button"
                   onClick={() => { setSelProvider(p); setSelModel(m); }}
-                  className={`flex items-center gap-3 py-[10px] px-3 border rounded-(--radius-sm) cursor-pointer text-left ${isSelected ? "border-(--color-accent-subtle-border) bg-(--color-accent-subtle-bg)" : "border-(--color-border-default) bg-(--color-bg-page)"}`}
+                  className={`flex items-center gap-3 py-[10px] px-3 border rounded-(--border-radius-04) cursor-pointer text-left ${isSelected ? "border-(--border-01) bg-(--background-tint-03)" : "border-(--border-01) bg-(--background-tint-00)"}`}
                 >
                   <div
-                    className={`w-[16px] h-[16px] rounded-full shrink-0 flex items-center justify-center ${isSelected ? "bg-(--color-accent-bg) border-none" : "bg-transparent border-[1.5px] border-(--color-border-strong)"}`}
+                    className={`w-[16px] h-[16px] rounded-full shrink-0 flex items-center justify-center ${isSelected ? "bg-(--background-tint-inverted-00) border-none" : "bg-transparent border-[1.5px] border-(--border-02)"}`}
                   >
-                    {isSelected && <div className="w-[8px] h-[8px] rounded-full bg-(--color-accent-fg)" />}
+                    {isSelected && <div className="w-[8px] h-[8px] rounded-full bg-(--text-inverted-05)" />}
                   </div>
-                  <span className={`text-[13px] font-medium shrink-0 ${isSelected ? "text-(--color-accent-subtle-fg)" : "text-(--color-text-secondary)"}`}>
+                  <span className={`text-[13px] font-medium shrink-0 ${isSelected ? "text-(--text-05)" : "text-(--text-04)"}`}>
                     {PROVIDER_META[p].label}
                   </span>
-                  <span className={`text-[13px] font-mono ${isSelected ? "text-(--color-accent-subtle-fg)" : "text-(--color-text-muted)"}`}>
+                  <span className={`text-[13px] font-mono ${isSelected ? "text-(--text-05)" : "text-(--text-03)"}`}>
                     {m}
                   </span>
                 </button>
               );
             })}
           </div>
-          {error && <div className="text-(--color-state-danger-fg) text-[13px] px-3 pb-2">{error}</div>}
+          {error && <div className="text-(--status-text-error-05) text-[13px] px-3 pb-2">{error}</div>}
           <div className="flex gap-2 pt-1 px-3 pb-3">
             <Button type="button" variant="action" size="sm" disabled={saving || !selProvider} onClick={() => void onSave()}>
               {saving ? "Saving…" : "Set as active"}
@@ -300,11 +300,11 @@ function ProviderCard({
   const hint = keyHint(provider, settings);
 
   return (
-    <div className="border border-(--color-border-default) rounded-(--radius-md) overflow-hidden">
+    <div className="border border-(--border-01) rounded-(--border-radius-08) overflow-hidden">
       {/* Card header row */}
-      <div className="flex items-center gap-3 py-3 px-4 bg-(--color-bg-panel)">
+      <div className="flex items-center gap-3 py-3 px-4 bg-(--background-tint-01)">
         {/* Provider initial icon */}
-        <div className="w-[32px] h-[32px] rounded-(--radius-sm) bg-(--color-bg-sunken) flex items-center justify-center text-[13px] font-bold text-(--color-text-secondary) shrink-0">
+        <div className="w-[32px] h-[32px] rounded-(--border-radius-04) bg-(--background-tint-02) flex items-center justify-center text-[13px] font-bold text-(--text-04) shrink-0">
           {meta.initial}
         </div>
 
@@ -312,11 +312,11 @@ function ProviderCard({
           <div className="flex items-center gap-2">
             <span className="text-sm font-medium">{meta.label}</span>
             {isActive && (
-              <span className="text-[11px] font-semibold py-[2px] px-[6px] rounded-(--radius-pill) bg-(--color-accent-subtle-bg) text-(--color-accent-subtle-fg) border border-(--color-accent-subtle-border)">Agent</span>
+              <span className="text-[11px] font-semibold py-[2px] px-[6px] rounded-full bg-(--background-tint-03) text-(--text-05) border border-(--border-01)">Agent</span>
             )}
           </div>
           {configured && hint && (
-            <div className="text-xs text-(--color-text-muted) font-mono mt-[2px]">
+            <div className="text-xs text-(--text-03) font-mono mt-[2px]">
               {hint}
             </div>
           )}
@@ -334,7 +334,7 @@ function ProviderCard({
 
       {/* Expanded form */}
       {expanded && (
-        <div className="border-t border-(--color-border-subtle) p-4 bg-(--color-bg-page)">
+        <div className="border-t border-(--border-01) p-4 bg-(--background-tint-00)">
           <ProviderForm
             provider={provider}
             settings={settings}
@@ -436,7 +436,7 @@ function ProviderForm({
       <div>
         <div className="flex items-baseline justify-between mb-2">
           <div className={lblClass}>Models</div>
-          <div className="text-xs text-(--color-text-muted)">Select models to make available</div>
+          <div className="text-xs text-(--text-03)">Select models to make available</div>
         </div>
         <div className="flex flex-col gap-1.5">
           {knownModels.map((id) => {
@@ -446,18 +446,18 @@ function ProviderForm({
                 key={id}
                 type="button"
                 onClick={() => toggleModel(id)}
-                className={`flex items-center gap-[10px] py-[10px] px-3 border rounded-(--radius-md) cursor-pointer text-left ${checked ? "border-(--color-accent-subtle-border) bg-(--color-accent-subtle-bg)" : "border-(--color-border-default) bg-(--color-bg-page)"}`}
+                className={`flex items-center gap-[10px] py-[10px] px-3 border rounded-(--border-radius-08) cursor-pointer text-left ${checked ? "border-(--border-01) bg-(--background-tint-03)" : "border-(--border-01) bg-(--background-tint-00)"}`}
               >
                 <div
-                  className={`w-[18px] h-[18px] rounded-(--radius-xs) shrink-0 flex items-center justify-center ${checked ? "bg-(--color-accent-bg) border-none" : "bg-transparent border-[1.5px] border-(--color-border-strong)"}`}
+                  className={`w-[18px] h-[18px] rounded-(--border-radius-04) shrink-0 flex items-center justify-center ${checked ? "bg-(--background-tint-inverted-00) border-none" : "bg-transparent border-[1.5px] border-(--border-02)"}`}
                 >
                   {checked && (
-                    <span className="text-(--color-accent-fg) flex">
+                    <span className="text-(--text-inverted-05) flex">
                       <SvgCheckSmall size={11} />
                     </span>
                   )}
                 </div>
-                <span className={`text-[13px] font-mono ${checked ? "text-(--color-accent-subtle-fg)" : "text-(--color-text-primary)"}`}>
+                <span className={`text-[13px] font-mono ${checked ? "text-(--text-05)" : "text-(--text-05)"}`}>
                   {id}
                 </span>
               </button>
@@ -466,8 +466,8 @@ function ProviderForm({
         </div>
       </div>
 
-      {error && <div className="text-(--color-state-danger-fg) text-[13px]">{error}</div>}
-      {saved && <div className="text-(--color-state-success-fg) text-[13px]">Saved.</div>}
+      {error && <div className="text-(--status-text-error-05) text-[13px]">{error}</div>}
+      {saved && <div className="text-(--status-text-success-05) text-[13px]">Saved.</div>}
       <div className="flex gap-2">
         <Button type="submit" variant="action" size="sm" disabled={saving}>
           {saving ? "Saving…" : "Save"}
@@ -482,6 +482,6 @@ function ProviderForm({
   );
 }
 
-const inputClass = "w-full py-2 px-[10px] box-border border border-(--color-border-default) rounded-(--radius-sm) text-sm";
+const inputClass = "w-full py-2 px-[10px] box-border border border-(--border-01) rounded-(--border-radius-04) text-sm";
 const lblClass = "mb-1 text-[13px] font-medium";
-const sectionHeaderClass = "text-[13px] font-semibold text-(--color-text-secondary) uppercase tracking-[0.05em] mb-3";
+const sectionHeaderClass = "text-[13px] font-semibold text-(--text-04) uppercase tracking-[0.05em] mb-3";

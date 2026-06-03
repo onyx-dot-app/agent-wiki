@@ -15,7 +15,6 @@ import {
 } from "react";
 
 import { apiFetch, ApiError } from "@/lib/api";
-import { color, radius, shadow } from "@/lib/theme";
 
 // Imperative handle so the sidebar can focus the search input after
 // expanding from a collapsed state (the input only mounts when the
@@ -165,7 +164,7 @@ export const WikiSearch = forwardRef<WikiSearchHandle>(function WikiSearch(_, re
   );
 
   return (
-    <div ref={containerRef} style={{ position: "relative", width: "100%" }}>
+    <div ref={containerRef} className="relative w-full">
       <InputTypeIn
         ref={inputRef}
         variant="internal"
@@ -185,33 +184,19 @@ export const WikiSearch = forwardRef<WikiSearchHandle>(function WikiSearch(_, re
       {showDropdown && (
         <div
           role="listbox"
-          style={{
-            position: "absolute",
-            top: "calc(100% + 4px)",
-            left: 0,
-            minWidth: "100%",
-            width: 360,
-            maxWidth: "70vw",
-            background: color.bg.page,
-            border: `1px solid ${color.border.default}`,
-            borderRadius: radius.md,
-            boxShadow: shadow.popover,
-            maxHeight: 420,
-            overflowY: "auto",
-            zIndex: 40,
-          }}
+          className="absolute top-[calc(100%+4px)] left-0 min-w-full w-[360px] max-w-[70vw] bg-(--background-tint-00) border border-(--border-01) rounded-(--border-radius-08) shadow-(--shadow-popover) max-h-[420px] overflow-y-auto z-[40]"
         >
           {error && (
-            <div style={{ padding: 12, fontSize: 13, color: color.state.danger.fg }}>{error}</div>
+            <div className="p-3 text-[13px] text-(--status-text-error-05)">{error}</div>
           )}
           {!error && loading && rows.length === 0 && (
-            <div style={{ padding: 12, fontSize: 13, color: color.text.muted }}>Searching…</div>
+            <div className="p-3 text-[13px] text-(--text-03)">Searching…</div>
           )}
           {showEmpty && (
-            <div style={{ padding: 12, fontSize: 13, color: color.text.muted }}>No matches.</div>
+            <div className="p-3 text-[13px] text-(--text-03)">No matches.</div>
           )}
           {!error && rows.length > 0 && (
-            <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
+            <ul className="list-none m-0 p-0">
               {rows.map((row, i) => {
                 const active = i === activeIdx;
                 const key =
@@ -226,16 +211,7 @@ export const WikiSearch = forwardRef<WikiSearchHandle>(function WikiSearch(_, re
                         e.preventDefault();
                         pick(row);
                       }}
-                      style={{
-                        width: "100%",
-                        textAlign: "left",
-                        padding: "10px 12px",
-                        border: "none",
-                        background: active ? color.accent.subtleBg : "transparent",
-                        cursor: "pointer",
-                        display: "block",
-                        borderBottom: `1px solid ${color.border.subtle}`,
-                      }}
+                      className={`w-full text-left py-2.5 px-3 border-none cursor-pointer block border-b border-(--border-01) ${active ? "bg-(--background-tint-03)" : "bg-transparent"}`}
                     >
                       {row.kind === "folder" ? (
                         <FolderRow folder={row.folder} />
@@ -260,35 +236,16 @@ function FolderRow({ folder }: { folder: FolderHit }) {
     ? folder.path.slice(0, folder.path.lastIndexOf("/"))
     : "";
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
-      <span style={{ color: color.text.muted, display: "flex", flexShrink: 0 }}>
+    <div className="flex items-center gap-2 min-w-0">
+      <span className="text-(--text-03) flex shrink-0">
         <SvgFolder size={16} />
       </span>
-      <div style={{ minWidth: 0, flex: 1 }}>
-        <div
-          style={{
-            fontSize: 13,
-            fontWeight: 600,
-            color: color.text.primary,
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-          }}
-        >
+      <div className="min-w-0 flex-1">
+        <div className="text-[13px] font-semibold text-(--text-05) overflow-hidden text-ellipsis whitespace-nowrap">
           {leaf}
         </div>
         {parent && (
-          <div
-            style={{
-              fontSize: 11,
-              color: color.text.muted,
-              marginTop: 2,
-              fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-            }}
-          >
+          <div className="text-[11px] text-(--text-03) mt-0.5 font-mono overflow-hidden text-ellipsis whitespace-nowrap">
             {parent}/
           </div>
         )}
@@ -300,44 +257,14 @@ function FolderRow({ folder }: { folder: FolderHit }) {
 function DocRow({ hit }: { hit: SearchHit }) {
   return (
     <>
-      <div
-        style={{
-          fontSize: 13,
-          fontWeight: 600,
-          color: color.text.primary,
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          whiteSpace: "nowrap",
-        }}
-      >
+      <div className="text-[13px] font-semibold text-(--text-05) overflow-hidden text-ellipsis whitespace-nowrap">
         {hit.title || hit.path}
       </div>
-      <div
-        style={{
-          fontSize: 11,
-          color: color.text.muted,
-          marginTop: 2,
-          fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          whiteSpace: "nowrap",
-        }}
-      >
+      <div className="text-[11px] text-(--text-03) mt-0.5 font-mono overflow-hidden text-ellipsis whitespace-nowrap">
         {hit.path}
       </div>
       {hit.snippet && (
-        <div
-          style={{
-            fontSize: 12,
-            color: color.text.secondary,
-            marginTop: 4,
-            lineHeight: 1.4,
-            display: "-webkit-box",
-            WebkitLineClamp: 2,
-            WebkitBoxOrient: "vertical",
-            overflow: "hidden",
-          }}
-        >
+        <div className="text-xs text-(--text-04) mt-1 leading-[1.4] line-clamp-2">
           <SnippetText text={hit.snippet} />
         </div>
       )}
@@ -354,7 +281,7 @@ function SnippetText({ text }: { text: string }) {
       {parts.map((p, i) => {
         if (p.startsWith("**") && p.endsWith("**")) {
           return (
-            <strong key={i} style={{ color: color.text.primary, fontWeight: 700 }}>
+            <strong key={i} className="text-(--text-05) font-bold">
               {p.slice(2, -2)}
             </strong>
           );

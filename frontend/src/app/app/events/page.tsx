@@ -6,7 +6,6 @@ import { PageHeader } from "@/components/common/PageHeader";
 import { useRequireAuth } from "@/lib/auth";
 import { useEvents } from "@/lib/events";
 import { formatInTimezone, formatScopePath } from "@/lib/format";
-import { color, radius } from "@/lib/theme";
 import { useIsMobile } from "@/lib/viewport";
 
 export default function EventsPage() {
@@ -21,7 +20,7 @@ export default function EventsPage() {
 
   if (loading || !user)
     return (
-      <main style={{ padding: isMobile ? 16 : 32 }}>
+      <main className={isMobile ? "p-4" : "p-8"}>
         <LoadingSpinner center />
       </main>
     );
@@ -39,25 +38,16 @@ export default function EventsPage() {
         />
 
         {errorMessage && (
-          <div
-            style={{
-              padding: 10,
-              background: color.state.danger.bg,
-              color: color.state.danger.fg,
-              borderRadius: radius.sm,
-              fontSize: 13,
-              marginBottom: 12,
-            }}
-          >
+          <div className="p-[10px] bg-(--status-error-01) text-(--status-text-error-05) rounded-(--border-radius-04) text-[13px] mb-3">
             {errorMessage}
           </div>
         )}
 
         {events.length === 0 && !errorMessage && !isValidating && (
-          <p style={{ color: color.text.muted, fontSize: 14 }}>No trigger fires yet.</p>
+          <p className="text-(--text-03) text-sm">No trigger fires yet.</p>
         )}
 
-        <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+        <ul className="list-none p-0 m-0">
           {events.map((ev) => {
             const p = ev.payload as {
               doc_path?: string;
@@ -68,60 +58,29 @@ export default function EventsPage() {
             return (
               <li
                 key={ev.id}
-                style={{
-                  padding: "14px 16px",
-                  border: `1px solid ${color.border.default}`,
-                  borderRadius: radius.md,
-                  marginBottom: 10,
-                  background: color.bg.page,
-                }}
+                className="py-[14px] px-4 border border-(--border-01) rounded-(--border-radius-08) mb-[10px] bg-(--background-tint-00)"
               >
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "baseline",
-                    justifyContent: "space-between",
-                    gap: 12,
-                    marginBottom: 6,
-                  }}
-                >
-                  <div
-                    style={{
-                      fontFamily: "ui-monospace, Menlo, monospace",
-                      fontSize: 12,
-                      color: color.text.primary,
-                    }}
-                  >
+                <div className="flex items-baseline justify-between gap-3 mb-[6px]">
+                  <div className="font-mono text-xs text-(--text-05)">
                     {p.doc_path ? (
                       <span title={p.doc_path}>{formatScopePath(p.doc_path)}</span>
                     ) : (
-                      <em style={{ color: color.text.faint }}>(no path)</em>
+                      <em className="text-(--text-02)">(no path)</em>
                     )}
                     {p.change_kind && (
-                      <span
-                        style={{
-                          marginLeft: 8,
-                          padding: "1px 6px",
-                          background: color.accent.subtleBg,
-                          color: color.accent.subtleFg,
-                          borderRadius: radius.xs,
-                          fontSize: 10,
-                          fontWeight: 600,
-                          textTransform: "uppercase",
-                        }}
-                      >
+                      <span className="ml-2 py-[1px] px-[6px] bg-(--background-tint-03) text-(--text-05) rounded-(--border-radius-04) text-[10px] font-semibold uppercase">
                         {p.change_kind}
                       </span>
                     )}
                   </div>
-                  <span style={{ fontSize: 12, color: color.text.muted }}>{formatTs(ev.ts, timezone)}</span>
+                  <span className="text-xs text-(--text-03)">{formatTs(ev.ts, timezone)}</span>
                 </div>
                 {p.reason && (
-                  <div style={{ fontSize: 14, color: color.text.secondary, whiteSpace: "pre-wrap" }}>
+                  <div className="text-sm text-(--text-04) whitespace-pre-wrap">
                     {p.reason}
                   </div>
                 )}
-                <div style={{ marginTop: 8, fontSize: 11, color: color.text.faint }}>
+                <div className="mt-2 text-[11px] text-(--text-02)">
                   trigger {ev.target ?? "?"}
                 </div>
               </li>

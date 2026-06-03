@@ -292,14 +292,16 @@ installed in `app/main.py:_install_error_handlers`. The frontend's
 ### Every change considers light mode, dark mode, and responsiveness
 
 Before declaring a frontend change done, verify it in **both themes** and at
-**both viewport sizes**. The app supports light and dark mode (toggled via
-`data-theme` on `<html>`; tokens live in `src/lib/theme.ts` + `globals.css`)
-and a mobile breakpoint (`useIsMobile()` from `src/lib/viewport.ts`).
+**both viewport sizes**. The app supports light and dark mode (Opal's token
+vars flip automatically when `data-theme="dark"` is set on `<html>`) and a
+mobile breakpoint (`useIsMobile()` from `src/lib/viewport.ts`).
 
-- Don't introduce raw hex/rgb/named colors — always go through `color.*` /
-  `shadow.*` from `src/lib/theme.ts`. New shades must be added to both
-  `:root` and `:root[data-theme="dark"]` in `globals.css`.
-- Don't use `background: "white"` (or any literal) — use `color.bg.page`.
+- Don't introduce raw hex/rgb/named colors — always use Opal CSS vars directly
+  (`var(--text-05)`, `var(--background-tint-00)`, etc.) or their Tailwind
+  equivalents (`text-text-05`, `bg-background-tint-00`). Shadow composites
+  (`--shadow-sm`, `--shadow-md`, etc.) are defined in `globals.css` since Opal
+  only provides the raw alpha tokens.
+- Don't use `background: "white"` (or any literal) — use `var(--background-tint-00)`.
 - Bare `<input>` / `<textarea>` / `<select>` inherit themed defaults from
   `globals.css`; keep them themed when overriding.
 - Layouts must hold up at the mobile breakpoint — gate dense desktop
@@ -337,55 +339,49 @@ applied with `className={styles.foo}`. Next.js scopes class names at
 build time so component-local class names (`.card`, `.header`) can stay
 short without collision risk.
 
-Cross-cutting rules (page background, native input themes, markdown
-typography) live in `src/app/globals.css`. CSS variables for theme
-tokens (color, shadow, radius) are defined there and consumed from
-both CSS Modules (`var(--color-text-primary)`) and the TS token
-re-exports in `src/lib/theme.ts` (which point at the same CSS vars).
+Cross-cutting rules (page background, native input themes) live in
+`src/app/globals.css`. It also defines composite shadow vars (`--shadow-sm`,
+`--shadow-md`, etc.) since Opal only provides the raw alpha tokens. Color,
+radius, and typography all come from Opal directly — no app-level token
+re-exports.
 
-Existing components written with inline `style={{...}}` and `theme.ts`
-imports are not retroactively migrated — they continue to read tokens
-through `theme.ts`. The token source of truth is the CSS variables in
-`globals.css`; `theme.ts` is a typed wrapper for inline-style callers
-that haven't migrated. Both render to the same value at runtime.
+Tokens are Opal CSS vars, consumed as Tailwind utilities or `var(--...)` in
+inline styles:
 
-Tokens (whether read via `var(--…)` in CSS or `color.*` in TS) are the
-**only** source of color, radius, and shadow values:
-
-- `color.text` — `primary | secondary | muted | faint | inverse`
-- `color.bg` — `page | panel | sunken | hover | active`
-- `color.border` — `subtle | default | strong | focus`
-- `color.accent` — primary action surface (`bg`, `bgHover`, `fg`) + subtle
-  variants (`subtleBg`, `subtleFg`, `subtleBorder`) for selected rows /
-  badges / hover-active states
-- `color.state` — `success | warning | danger | info`, each with
-  `{ bg, border, fg }` for banners, alerts, semantic chips
-- `color.overlay` — fixed warm-near-black tint for modal scrims
-- `radius` — `xs (4) | sm (6) | md (8) | lg (12) | pill (9999)`
-- `shadow` — `sm | md | popover | fab | modal | panel`
+- **Text** — `--text-05` (darkest) … `--text-01` (faintest); `--text-inverted-05`
+  for text on dark accent surfaces
+- **Backgrounds** — `--background-tint-00` (page/white) … `--background-tint-04`
+  (active); `--background-tint-inverted-00/01` for the near-black accent
+- **Borders** — `--border-01` (subtle/default) · `--border-02` (strong) · `--border-05` (focus)
+- **Status** — `--status-{success|warning|error|info}-01` (bg) · `-02` (border);
+  `--status-text-{...}-05` for fg text
+- **Overlay** — `--mask-03` for modal scrims
+- **Shadows** — `--shadow-sm | --shadow-md | --shadow-popover | --shadow-fab | --shadow-modal | --shadow-panel`
+  (composite values defined in `globals.css`)
+- **Radius** — `--border-radius-04` (4px) · `--border-radius-08` (8px) · `--border-radius-12` (12px);
+  use `rounded-full` for pills
 
 **Rules:**
 
-- Don't write a raw hex (`#xxxxxx`) in a component. If the shade you need
-  isn't in `theme.ts`, add it there (with a name that describes intent, not
-  appearance — `accent.bg` not `nearBlack`) and import it.
+- Don't write a raw hex (`#xxxxxx`) in a component. Use the Opal CSS var that
+  matches the intent (e.g. `var(--background-tint-inverted-00)` for the accent
+  surface, not `#1a1a1a`).
 - The accent color is **near-black warm grey**, not a hue. Primary buttons,
-  selected sidebar avatars, FABs, and active text all flow from
-  `color.accent`. If you find yourself reaching for blue/indigo/purple to
-  mark "primary," use the accent instead.
-- Status colors (`color.state.*`) are reserved for semantic signals
-  (banners, error toasts, "destructive" buttons). Don't use them as
-  decorative chips — use `color.accent.subtle*` for that.
-- Pick a radius from the scale; don't sprinkle arbitrary integers. Inputs
-  / pills inside dense rows = `xs`. Buttons / inputs / list items = `sm`.
-  Cards / popovers / modals = `md`–`lg`.
+  selected sidebar avatars, FABs, and active text all use
+  `--background-tint-inverted-00`. If you reach for blue/indigo/purple, stop.
+- Status colors (`--status-*`) are reserved for semantic signals (banners,
+  error toasts, "destructive" buttons). Don't use them as decorative chips —
+  use `--background-tint-03` / `--text-05` for that.
+- Pick a radius from the scale; don't sprinkle arbitrary integers. Inputs /
+  pills inside dense rows = `--border-radius-04`. Buttons / inputs / list items
+  = `--border-radius-04`. Cards / popovers / modals = `--border-radius-08`–`12`.
 - Decorative SVG icon glyphs (e.g. the amber folder, the blue file icon)
   are the only place raw hex is acceptable — they're illustrations, not UI
   surfaces. Don't extend that exception to anything that paints chrome.
 
 ### Buttons — `<Button>` from `@onyx-ai/opal/components` (new code) or `src/components/common/Button.tsx` (existing surfaces)
 
-OPAL's `Button` is the preferred primitive for net-new components.
+Opal's `Button` is the preferred primitive for net-new components.
 Variant / prominence mapping when migrating existing call sites or
 writing new ones:
 
@@ -404,39 +400,35 @@ isolation — but don't mix them inside the same component.
 Don't write ad-hoc `<button style={{ ... }}>` for primary/secondary/danger
 chrome. If you need an unusual one-off (icon-only toolbar buttons in
 `AppShell` / `ChatWidget`, the wiki row hover actions), keep them inline
-but pull every color/radius from the theme — never raw hex.
+but pull every color/radius from Opal tokens — never raw hex.
 
 ### Modals — fixed scrim and shadow
 
 All modal-style dialogs (`TriggerModal`, `TriggerHistoryModal`,
 `RunAgentModal`, `ShareDialog`) use:
 
-- scrim: `color.overlay` (warm near-black, never slate, never pure black)
-- shadow: `shadow.modal`
-- radius: `radius.lg` for the surface
+- scrim: `var(--mask-03)` (warm near-black, never slate, never pure black)
+- shadow: `var(--shadow-modal)`
+- radius: `var(--border-radius-12)` for the surface
 - buttons: `<Button>`, with the action row at `justifyContent: flex-end`,
   Cancel first, primary action last
 
-Side panels anchored to a screen edge use `shadow.panel`.
+Side panels anchored to a screen edge use `var(--shadow-panel)`.
 
 ### Inputs / selects — consistent border and radius
 
 Form inputs and `<select>` controls use:
 
-- border: `1px solid ${color.border.default}` (use `border.strong` only
-  for emphasis — most inputs should be `default`)
-- radius: `radius.sm`
+- border: `1px solid var(--border-01)` (use `var(--border-02)` only
+  for emphasis — most inputs should be `border-01`)
+- radius: `var(--border-radius-04)`
 - padding: `8px 10px` (or `padding: 8` for compact contexts)
 
 Don't set `appearance: "auto"` on a `<select>` — it bypasses the rest of
 the styling and produces a native control next to custom-looking ones.
 
-- Modal scrims are `rgba(15, 15, 15, 0.45)` (warm-neutral, matches the
-  greyscale palette). Don't use slate-tinted scrims (`rgba(15, 23, 42, ...)`).
-
-Adding a new token: edit `theme.ts`, leave a one-line comment if the
-intent isn't obvious from the name, and migrate any callers in the same
-PR. Don't accumulate parallel ad-hoc colors.
+Don't accumulate parallel ad-hoc colors. If a shade you need is missing from
+Opal, file a request — don't invent `--color-*` aliases.
 
 ### Components
 
@@ -479,7 +471,7 @@ PR. Don't accumulate parallel ad-hoc colors.
 
 ### Frontend
 
-Type-check with `npm run typecheck`. Component tests can be added with
+Type-check with `bun run typecheck`. Component tests can be added with
 Vitest + React Testing Library when needed. Keep components pure functions
 of props so they're trivially testable.
 
@@ -516,15 +508,16 @@ of props so they're trivially testable.
 - Don't reach for `@dataclass` — use `pydantic.BaseModel` (see the data
   classes seam above).
 - Don't write a raw hex color, border-radius integer, or shadow string in a
-  React component — import from `src/lib/theme.ts`. If the shade isn't
-  there, add it there. (See the design tokens seam above.)
+  React component — use Opal CSS vars (`var(--text-05)`, `var(--border-01)`,
+  etc.) or the equivalent Tailwind utilities (`text-text-05`, `border-border-01`).
+  Don't create `--color-*` alias vars — use Opal tokens directly.
 - Don't roll a new primary/secondary/danger button in a component — use
-  the OPAL `Button` (`@onyx-ai/opal/components`) for new code, or
+  Opal's `Button` (`@onyx-ai/opal/components`) for new code, or
   `src/components/common/Button.tsx` on legacy surfaces. (See the
   buttons seam.)
 - Don't use slate-tinted (`rgba(15,23,42,…)`) or pure-black modal scrims —
-  use `color.overlay`. Don't invent ad-hoc modal shadows — use
-  `shadow.modal`. (See the modals seam.)
+  use `var(--mask-03)`. Don't invent ad-hoc modal shadows — use
+  `var(--shadow-modal)`. (See the modals seam.)
 
 ## Open questions worth knowing
 

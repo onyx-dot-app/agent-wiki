@@ -1,9 +1,9 @@
 .cmd {
   flex: 1;
   padding: 6px 8px;
-  background: var(--color-bg-sunken);
-  border-radius: var(--radius-xs);
+  background: var(--background-tint-02);
+  border-radius: var(--border-radius-04);
   font-family: ui-monospace, Menlo, monospace;
   font-size: 12px;
-  color: var(--color-text-primary);
+  color: var(--text-05);
 }

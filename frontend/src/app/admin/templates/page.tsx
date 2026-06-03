@@ -43,7 +43,7 @@ function TemplatesList() {
   const [reorderError, setReorderError] = useState<string | null>(null);
 
   if (isLoading) return <LoadingSpinner />;
-  if (error) return <div className="text-(--color-state-danger-fg)">{error.message}</div>;
+  if (error) return <div className="text-(--status-text-error-05)">{error.message}</div>;
 
   async function move(index: number, direction: -1 | 1) {
     const target = index + direction;
@@ -83,12 +83,12 @@ function TemplatesList() {
         </Button>
       </div>
       {reorderError && (
-        <div className="py-2 px-3 bg-(--color-state-danger-bg) border border-(--color-state-danger-border) text-(--color-state-danger-fg) rounded-(--radius-sm) text-[13px]">
+        <div className="py-2 px-3 bg-(--status-error-01) border border-(--status-error-02) text-(--status-text-error-05) rounded-(--border-radius-04) text-[13px]">
           {reorderError}
         </div>
       )}
       {templates.length === 0 ? (
-        <div className="p-6 border border-dashed border-(--color-border-default) rounded-(--radius-md) text-(--color-text-muted) text-center">
+        <div className="p-6 border border-dashed border-(--border-01) rounded-(--border-radius-08) text-(--text-03) text-center">
           No templates yet. Click "New template" to define the first one.
         </div>
       ) : (
@@ -96,7 +96,7 @@ function TemplatesList() {
           {templates.map((t, i) => (
             <li
               key={t.id}
-              className="py-3 px-4 border border-(--color-border-default) rounded-(--radius-md) bg-(--color-bg-page) flex items-center gap-3"
+              className="py-3 px-4 border border-(--border-01) rounded-(--border-radius-08) bg-(--background-tint-00) flex items-center gap-3"
             >
               <ReorderHandle
                 disabled={reordering !== null}
@@ -108,11 +108,11 @@ function TemplatesList() {
               <div className="flex-1 min-w-0">
                 <div className="font-semibold text-sm">{t.name}</div>
                 {t.description && (
-                  <div className="text-[13px] text-(--color-text-muted) mt-[2px] overflow-hidden text-ellipsis whitespace-nowrap">
+                  <div className="text-[13px] text-(--text-03) mt-[2px] overflow-hidden text-ellipsis whitespace-nowrap">
                     {t.description}
                   </div>
                 )}
-                <div className="text-xs text-(--color-text-faint) mt-1">
+                <div className="text-xs text-(--text-02) mt-1">
                   {t.system_prompt ? "Has chat prompt" : "No chat prompt"} • Updated {t.updated_at}
                 </div>
               </div>
@@ -200,7 +200,7 @@ function ArrowButton({
       disabled={disabled}
       title={title}
       aria-label={title}
-      className={`w-[24px] h-[18px] flex items-center justify-center bg-transparent border border-(--color-border-default) rounded-(--radius-xs) text-(--color-text-secondary) p-0 ${disabled ? "cursor-not-allowed opacity-35" : "cursor-pointer"}`}
+      className={`w-[24px] h-[18px] flex items-center justify-center bg-transparent border border-(--border-01) rounded-(--border-radius-04) text-(--text-04) p-0 ${disabled ? "cursor-not-allowed opacity-35" : "cursor-pointer"}`}
     >
       {direction === "up" ? <SvgChevronUp size={10} /> : <SvgChevronDown size={10} />}
     </button>
@@ -257,13 +257,13 @@ function TemplateModal({
 
   return (
     <div
-      className="fixed inset-0 bg-(--color-overlay) flex items-center justify-center z-[1000] p-4"
+      className="fixed inset-0 bg-(--mask-03) flex items-center justify-center z-[1000] p-4"
       onClick={onClose}
     >
       <form
         onSubmit={onSubmit}
         onClick={(e) => e.stopPropagation()}
-        className="bg-(--color-bg-page) rounded-(--radius-lg) shadow-(--shadow-modal) p-5 w-[min(640px,100%)] max-h-[90vh] overflow-y-auto flex flex-col gap-3"
+        className="bg-(--background-tint-00) rounded-(--border-radius-12) shadow-(--shadow-modal) p-5 w-[min(640px,100%)] max-h-[90vh] overflow-y-auto flex flex-col gap-3"
       >
         <h2 className="m-0 text-lg">
           {initial ? "Edit template" : "New template"}
@@ -313,7 +313,7 @@ function TemplateModal({
           />
         </label>
 
-        {error && <div className="text-(--color-state-danger-fg) text-[13px]">{error}</div>}
+        {error && <div className="text-(--status-text-error-05) text-[13px]">{error}</div>}
 
         <div className="flex justify-end gap-2 mt-1">
           <Button type="button" onClick={onClose} disabled={saving}>
@@ -328,5 +328,5 @@ function TemplateModal({
   );
 }
 
-const inputClass = "w-full py-2 px-[10px] box-border border border-(--color-border-default) rounded-(--radius-sm) text-sm";
+const inputClass = "w-full py-2 px-[10px] box-border border border-(--border-01) rounded-(--border-radius-04) text-sm";
 const lblClass = "mb-1 text-[13px] font-medium";

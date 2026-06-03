@@ -14,71 +14,18 @@ html {
 :root { color-scheme: light; }
 .dark { color-scheme: dark; }
 
-/* ── App-level token aliases ──────────────────────────────────────────────
-   The app's own className strings and theme.ts reference these vars.
-   They are thin aliases onto Opal's semantic tokens so the values stay
-   in sync with Opal's light/dark themes without any app-level overrides.
+/* ── Shadow tokens ────────────────────────────────────────────────────────
+   Composite box-shadow strings built from Opal's alpha shadow tokens.
+   Single Opal var references (--shadow-01 etc.) are raw alpha values, not
+   full box-shadow strings, so we compose them here.
    ───────────────────────────────────────────────────────────────────── */
 :root {
-  /* Text */
-  --color-text-primary:   var(--text-05);
-  --color-text-secondary: var(--text-04);
-  --color-text-muted:     var(--text-03);
-  --color-text-faint:     var(--text-02);
-  --color-text-inverse:   var(--text-inverted-05);
-
-  /* Backgrounds */
-  --color-bg-page:   var(--background-tint-00);
-  --color-bg-panel:  var(--background-tint-01);
-  --color-bg-sunken: var(--background-tint-02);
-  --color-bg-hover:  var(--background-tint-03);
-  --color-bg-active: var(--background-tint-04);
-
-  /* Borders */
-  --color-border-subtle:  var(--border-01);
-  --color-border-default: var(--border-01);
-  --color-border-strong:  var(--border-02);
-  --color-border-focus:   var(--border-05);
-
-  /* Accent — near-black action surface, using Opal's tint-inverted scale */
-  --color-accent-bg:            var(--background-tint-inverted-00);
-  --color-accent-bg-hover:      var(--background-tint-inverted-01);
-  --color-accent-fg:            var(--text-inverted-05);
-  --color-accent-subtle-bg:     var(--background-tint-03);
-  --color-accent-subtle-bg-hover: var(--background-tint-04);
-  --color-accent-subtle-fg:     var(--text-05);
-  --color-accent-subtle-border: var(--border-01);
-
-  /* State — mapped from Opal's status scale */
-  --color-state-success-bg:     var(--status-success-01);
-  --color-state-success-border: var(--status-success-02);
-  --color-state-success-fg:     var(--status-text-success-05);
-  --color-state-warning-bg:     var(--status-warning-01);
-  --color-state-warning-border: var(--status-warning-02);
-  --color-state-warning-fg:     var(--status-text-warning-05);
-  --color-state-danger-bg:      var(--status-error-01);
-  --color-state-danger-border:  var(--status-error-02);
-  --color-state-danger-fg:      var(--status-text-error-05);
-  --color-state-info-bg:        var(--status-info-01);
-  --color-state-info-border:    var(--status-info-02);
-  --color-state-info-fg:        var(--status-text-info-05);
-
-  /* Modal scrim */
-  --color-overlay: var(--mask-03);
-
-  /* Shadows — box-shadow strings built from Opal's alpha shadow tokens */
   --shadow-sm:      0 1px 2px var(--shadow-01);
   --shadow-md:      0 4px 12px var(--shadow-02);
   --shadow-popover: 0 8px 24px var(--shadow-02);
   --shadow-fab:     0 6px 20px var(--shadow-03);
   --shadow-modal:   0 24px 60px var(--shadow-03);
   --shadow-panel:   -4px 0 24px var(--shadow-02);
-
-  /* Radii — mapped to Opal's border-radius scale */
-  --radius-xs: var(--border-radius-04);  /* 4px  */
-  --radius-sm: var(--border-radius-04);  /* 4px  (Opal has no 6px step) */
-  --radius-md: var(--border-radius-08);  /* 8px  */
-  --radius-lg: var(--border-radius-12);  /* 12px */
 }
 
 /* ── Primary (action) buttons ─────────────────────────────────────────────
@@ -86,19 +33,19 @@ html {
    accent. Scoped to button elements so links keep their Opal color.
    ───────────────────────────────────────────────────────────────────── */
 .interactive[data-interactive-variant="action"][data-interactive-prominence="primary"]:not([data-disabled]) {
-  background-color: var(--color-accent-bg) !important;
-  --interactive-foreground: var(--color-accent-fg);
-  --interactive-foreground-icon: var(--color-accent-fg);
+  background-color: var(--background-tint-inverted-00) !important;
+  --interactive-foreground: var(--text-inverted-05);
+  --interactive-foreground-icon: var(--text-inverted-05);
 }
 .interactive[data-interactive-variant="action"][data-interactive-prominence="primary"]:hover:not([data-disabled]),
 .interactive[data-interactive-variant="action"][data-interactive-prominence="primary"][data-interaction="hover"]:not([data-disabled]) {
-  background-color: var(--color-accent-bg-hover) !important;
+  background-color: var(--background-tint-inverted-01) !important;
 }
 /* Disabled primary action — neutral grey, never Opal's default blue tint. */
 .interactive[data-interactive-variant="action"][data-interactive-prominence="primary"][data-disabled] {
-  background-color: var(--color-bg-active) !important;
-  --interactive-foreground: var(--color-text-muted);
-  --interactive-foreground-icon: var(--color-text-muted);
+  background-color: var(--background-tint-04) !important;
+  --interactive-foreground: var(--text-03);
+  --interactive-foreground-icon: var(--text-03);
 }
 
 /* Selected menu/select items use the near-black accent text, not Opal's blue. */
@@ -135,20 +82,6 @@ html {
 [data-radix-popper-content-wrapper] > * {
     border-color: transparent !important;
 }
-
-/* ── Markdown rendered inside the chat widget ─────────────────────────── */
-.markdown-chat > * { margin: 0; }
-.markdown-chat > :last-child { margin-bottom: 0; }
-.markdown-chat p { margin: 6px 0; }
-.markdown-chat ul,
-.markdown-chat ol { margin: 6px 0; padding-left: 22px; }
-.markdown-chat li { margin: 2px 0; }
-.markdown-chat h1,
-.markdown-chat h2,
-.markdown-chat h3,
-.markdown-chat h4 { margin: 10px 0 4px; font-size: 14px; font-weight: 600; }
-.markdown-chat code { background: var(--color-bg-hover); }
-.markdown-chat pre  { background: var(--color-bg-hover); padding: 8px 10px; }
 
 /* ── Inline comment highlights (CSS Custom Highlight API) ─────────────────
    The wiki page registers Ranges under these names via paintCommentHighlights().
