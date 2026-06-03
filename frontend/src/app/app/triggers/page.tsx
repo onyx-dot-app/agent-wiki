@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type CSSProperties } from "react";
+import { useState } from "react";
 
 import { Button } from "@onyx-ai/opal/components";
 import { SvgPlus } from "@onyx-ai/opal/icons";
@@ -9,7 +9,6 @@ import { PageHeader } from "@/components/common/PageHeader";
 import { TriggerHistoryModal } from "@/components/triggers/TriggerHistoryModal";
 import { TriggerModal } from "@/components/triggers/TriggerModal";
 import { useRequireAuth } from "@/lib/auth";
-import { color, radius } from "@/lib/theme";
 import { useIsMobile } from "@/lib/viewport";
 import { describeCron } from "@/lib/cron";
 import { formatScopePath } from "@/lib/format";
@@ -26,17 +25,8 @@ import {
 } from "@/lib/triggers";
 import { ApiError } from "@/lib/api";
 
-const sentenceTagStyle: CSSProperties = {
-  flexShrink: 0,
-  fontSize: 10,
-  fontWeight: 600,
-  padding: "1px 6px",
-  borderRadius: radius.xs,
-  background: color.accent.subtleBg,
-  color: color.accent.subtleFg,
-  textTransform: "uppercase",
-  letterSpacing: 0.3,
-};
+const sentenceTagCn =
+  "shrink-0 text-[10px] font-semibold px-[6px] py-[1px] rounded-(--radius-xs) bg-(--color-accent-subtle-bg) text-(--color-accent-subtle-fg) uppercase tracking-[0.3px]";
 
 function formatRelative(iso: string | null | undefined): string {
   if (!iso) return "";
@@ -82,7 +72,7 @@ export default function TriggersPage() {
 
   if (loading || !user)
     return (
-      <main style={{ padding: isMobile ? 16 : 32 }}>
+      <main className={isMobile ? "p-4" : "p-8"}>
         <LoadingSpinner center />
       </main>
     );
@@ -126,7 +116,7 @@ export default function TriggersPage() {
   }
 
   return (
-    <main style={{ padding: isMobile ? "16px 12px" : "24px 32px" }}>
+    <main className={isMobile ? "py-4 px-3" : "py-6 px-8"}>
         <PageHeader
           title="Triggers"
           description="Triggers watch a document (or folder) and notice when something specific changes, or check on a recurring schedule. When the trigger fires, the message you wrote shows up on the Events tab so you can review it."
@@ -145,106 +135,45 @@ export default function TriggersPage() {
         />
 
         {listError && (
-          <div
-            style={{
-              padding: 10,
-              background: color.state.danger.bg,
-              color: color.state.danger.fg,
-              borderRadius: radius.sm,
-              fontSize: 13,
-              marginBottom: 12,
-            }}
-          >
+          <div className="p-[10px] bg-(--color-state-danger-bg) text-(--color-state-danger-fg) rounded-(--radius-sm) text-[13px] mb-3">
             {listError}
           </div>
         )}
 
         {triggers.length === 0 && !listError && (
-          <p style={{ color: color.text.muted, fontSize: 14 }}>
+          <p className="text-(--color-text-muted) text-sm">
             No triggers yet. Create one to start watching documents for changes.
           </p>
         )}
 
-        <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+        <ul className="list-none p-0 m-0">
           {triggers.map((t) => (
             <li
               key={t.id}
-              style={{
-                padding: "14px 16px",
-                border: `1px solid ${color.border.default}`,
-                borderRadius: radius.md,
-                marginBottom: 10,
-                background: color.bg.page,
-                opacity: busyId === t.id ? 0.6 : 1,
-              }}
+              className={`py-[14px] px-4 border border-(--color-border-default) rounded-(--radius-md) mb-[10px] bg-(--color-bg-page) ${busyId === t.id ? "opacity-60" : "opacity-100"}`}
             >
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  gap: 12,
-                  flexWrap: "wrap",
-                  marginBottom: 10,
-                }}
-              >
-                <div
-                  style={{
-                    fontFamily: "ui-monospace, Menlo, monospace",
-                    fontSize: 12,
-                    color: color.text.muted,
-                    display: "flex",
-                    gap: 10,
-                    alignItems: "baseline",
-                    flexWrap: "wrap",
-                    minWidth: 0,
-                  }}
-                >
+              <div className="flex items-center justify-between gap-3 flex-wrap mb-[10px]">
+                <div className="font-mono text-xs text-(--color-text-muted) flex gap-[10px] items-baseline flex-wrap min-w-0">
                   <span title={t.scope_path}>{formatScopePath(t.scope_path)}</span>
-                  <span style={{ fontFamily: "inherit", fontSize: 11, color: color.text.faint }}>
+                  <span className="text-[11px] text-(--color-text-faint)">
                     {t.id}
                   </span>
                   {t.last_edited_at && (
                     <span
                       title={new Date(t.last_edited_at).toLocaleString()}
-                      style={{ fontFamily: "inherit", fontSize: 11, color: color.text.faint }}
+                      className="text-[11px] text-(--color-text-faint)"
                     >
                       edited {formatRelative(t.last_edited_at)}
                     </span>
                   )}
                 </div>
-                <div
-                  style={{
-                    display: "flex",
-                    gap: 6,
-                    alignItems: "center",
-                    flexShrink: 0,
-                    flexWrap: "wrap",
-                  }}
-                >
+                <div className="flex gap-1.5 items-center shrink-0 flex-wrap">
                   <span
-                    style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: 6,
-                      fontSize: 11,
-                      padding: "2px 8px",
-                      borderRadius: radius.pill,
-                      background: t.enabled ? color.accent.subtleBg : color.bg.sunken,
-                      color: t.enabled ? color.accent.subtleFg : color.text.muted,
-                      border: `1px solid ${t.enabled ? color.accent.subtleBorder : color.border.default}`,
-                      fontWeight: 600,
-                      letterSpacing: 0.3,
-                    }}
+                    className={`inline-flex items-center gap-1.5 text-[11px] py-[2px] px-2 rounded-full font-semibold tracking-[0.3px] border ${t.enabled ? "bg-(--color-accent-subtle-bg) text-(--color-accent-subtle-fg) border-(--color-accent-subtle-border)" : "bg-(--color-bg-sunken) text-(--color-text-muted) border-(--color-border-default)"}`}
                   >
                     <span
                       aria-hidden
-                      style={{
-                        width: 6,
-                        height: 6,
-                        borderRadius: "50%",
-                        background: t.enabled ? color.state.success.fg : color.text.faint,
-                      }}
+                      className={`w-[6px] h-[6px] rounded-full ${t.enabled ? "bg-(--color-state-success-fg)" : "bg-(--color-text-faint)"}`}
                     />
                     {t.enabled ? "ENABLED" : "DISABLED"}
                   </span>
@@ -278,16 +207,16 @@ export default function TriggersPage() {
                   </Button>
                 </div>
               </div>
-              <div style={{ fontSize: 14, color: color.text.primary, lineHeight: 1.55 }}>
+              <div className="text-sm text-(--color-text-primary) leading-[1.55]">
                 {t.kind === "schedule" && (
-                  <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 6 }}>
-                    <span style={sentenceTagStyle}>WHEN</span>
-                    <span style={{ flex: 1, minWidth: 0 }}>
+                  <div className="flex items-baseline gap-2 mb-[6px]">
+                    <span className={sentenceTagCn}>WHEN</span>
+                    <span className="flex-1 min-w-0">
                       {describeCron(t.schedule_cron, t.schedule_timezone)}
                       {t.schedule_start_at && (
                         <>
                           {" "}
-                          <span style={{ color: color.text.muted, fontSize: 12 }}>
+                          <span className="text-(--color-text-muted) text-xs">
                             · starting {new Date(t.schedule_start_at).toLocaleString()}
                           </span>
                         </>
@@ -295,7 +224,7 @@ export default function TriggersPage() {
                       {t.schedule_last_fired_at && (
                         <>
                           {" "}
-                          <span style={{ color: color.text.faint, fontSize: 12 }}>
+                          <span className="text-(--color-text-faint) text-xs">
                             · last fired {formatRelative(t.schedule_last_fired_at)}
                           </span>
                         </>
@@ -303,19 +232,19 @@ export default function TriggersPage() {
                     </span>
                   </div>
                 )}
-                <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-                  <span style={sentenceTagStyle}>IF</span>
-                  <span style={{ flex: 1, minWidth: 0 }}>{t.nl_description}</span>
+                <div className="flex items-baseline gap-2">
+                  <span className={sentenceTagCn}>IF</span>
+                  <span className="flex-1 min-w-0">{t.nl_description}</span>
                 </div>
                 {t.message && (
-                  <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginTop: 6 }}>
-                    <span style={sentenceTagStyle}>THEN SEND</span>
-                    <span style={{ flex: 1, minWidth: 0 }}>{t.message}</span>
+                  <div className="flex items-baseline gap-2 mt-[6px]">
+                    <span className={sentenceTagCn}>THEN SEND</span>
+                    <span className="flex-1 min-w-0">{t.message}</span>
                   </div>
                 )}
-                <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginTop: 6 }}>
-                  <span style={sentenceTagStyle}>TO</span>
-                  <span style={{ flex: 1, minWidth: 0, color: color.text.secondary }}>
+                <div className="flex items-baseline gap-2 mt-[6px]">
+                  <span className={sentenceTagCn}>TO</span>
+                  <span className="flex-1 min-w-0 text-(--color-text-secondary)">
                     {destinationLabel(t)}
                   </span>
                 </div>
@@ -420,73 +349,47 @@ function SlackChannelsCard() {
   }
 
   return (
-    <section
-      style={{
-        marginTop: 28,
-        padding: 16,
-        border: `1px solid ${color.border.default}`,
-        borderRadius: radius.md,
-        background: color.bg.panel,
-      }}
-    >
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          marginBottom: 4,
-        }}
-      >
-        <h2 style={{ margin: 0, fontSize: 16 }}>Slack channels</h2>
+    <section className="mt-[28px] p-4 border border-(--color-border-default) rounded-(--radius-md) bg-(--color-bg-panel)">
+      <div className="flex items-center justify-between mb-1">
+        <h2 className="m-0 text-base">Slack channels</h2>
         {!adding && (
           <Button variant="action" size="sm" onClick={() => setAdding(true)}>
             + Add channel
           </Button>
         )}
       </div>
-      <p style={{ margin: "0 0 12px", fontSize: 13, color: color.text.muted }}>
+      <p className="mt-0 mb-3 text-[13px] text-(--color-text-muted)">
         Incoming webhooks you can point a trigger at. Create one in Slack (Apps → Incoming
         Webhooks), then pick it as a trigger&apos;s destination. Private to you.
       </p>
 
       {error && (
-        <div style={{ color: color.state.danger.fg, fontSize: 13, marginBottom: 8 }}>
+        <div className="text-(--color-state-danger-fg) text-[13px] mb-2">
           {error.message || "Failed to load channels."}
         </div>
       )}
 
       {adding && (
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            gap: 8,
-            padding: 12,
-            marginBottom: 12,
-            border: `1px solid ${color.border.default}`,
-            borderRadius: radius.sm,
-            background: color.bg.sunken,
-          }}
-        >
+        <div className="flex flex-col gap-2 p-3 mb-3 border border-(--color-border-default) rounded-(--radius-sm) bg-(--color-bg-sunken)">
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="Channel name (e.g. PM Standup)"
             disabled={busy}
             maxLength={80}
-            style={channelInputStyle}
+            className="w-full py-2 px-[10px] box-border border border-(--color-border-default) rounded-(--radius-sm) text-sm"
           />
           <input
             value={url}
             onChange={(e) => setUrl(e.target.value)}
             placeholder="https://hooks.slack.com/services/…"
             disabled={busy}
-            style={channelInputStyle}
+            className="w-full py-2 px-[10px] box-border border border-(--color-border-default) rounded-(--radius-sm) text-sm"
           />
           {formError && (
-            <div style={{ color: color.state.danger.fg, fontSize: 13 }}>{formError}</div>
+            <div className="text-(--color-state-danger-fg) text-[13px]">{formError}</div>
           )}
-          <div style={{ display: "flex", gap: 8 }}>
+          <div className="flex gap-2">
             <Button
               variant="action"
               size="sm"
@@ -505,39 +408,23 @@ function SlackChannelsCard() {
       {isLoading && webhooks.length === 0 && !error && <LoadingSpinner />}
 
       {!isLoading && webhooks.length === 0 && !adding && (
-        <p style={{ color: color.text.muted, fontSize: 14, margin: 0 }}>
+        <p className="text-(--color-text-muted) text-sm m-0">
           No channels yet — add one to deliver trigger fires to Slack.
         </p>
       )}
 
       {webhooks.length > 0 && (
-        <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+        <ul className="list-none p-0 m-0">
           {webhooks.map((w) => (
             <li
               key={w.id}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 12,
-                padding: "10px 12px",
-                border: `1px solid ${color.border.default}`,
-                borderRadius: radius.sm,
-                marginTop: 8,
-                background: color.bg.page,
-              }}
+              className="flex items-center gap-3 py-[10px] px-3 border border-(--color-border-default) rounded-(--radius-sm) mt-2 bg-(--color-bg-page)"
             >
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontWeight: 500, fontSize: 14, color: color.text.primary }}>
+              <div className="flex-1 min-w-0">
+                <div className="font-medium text-sm text-(--color-text-primary)">
                   {w.name}
                 </div>
-                <div
-                  style={{
-                    fontSize: 12,
-                    color: color.text.muted,
-                    marginTop: 2,
-                    fontFamily: "ui-monospace, monospace",
-                  }}
-                >
+                <div className="text-xs text-(--color-text-muted) mt-[2px] font-mono">
                   {w.webhook_url_hint}
                 </div>
               </div>
@@ -552,11 +439,3 @@ function SlackChannelsCard() {
   );
 }
 
-const channelInputStyle: CSSProperties = {
-  width: "100%",
-  padding: "8px 10px",
-  boxSizing: "border-box",
-  border: `1px solid ${color.border.default}`,
-  borderRadius: radius.sm,
-  fontSize: 14,
-};

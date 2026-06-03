@@ -9,7 +9,6 @@ import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { BackLink, PageHeader } from "@/components/common/PageHeader";
 import { RequireAdmin } from "@/components/RequireAdmin";
 import { apiFetch } from "@/lib/api";
-import { color, radius, shadow } from "@/lib/theme";
 import { useIsMobile } from "@/lib/viewport";
 
 type Provider = "anthropic" | "openai" | "gemini" | "ollama";
@@ -92,7 +91,7 @@ export default function AdminLLMPage() {
   const isMobile = useIsMobile();
   return (
     <RequireAdmin>
-      <main style={{ padding: isMobile ? "16px 12px" : "24px 32px", maxWidth: 760 }}>
+      <main className={`max-w-[760px] ${isMobile ? "py-4 px-3" : "py-6 px-8"}`}>
         <BackLink />
         <PageHeader
           title="Language models"
@@ -120,7 +119,7 @@ function LLMPage() {
 
   useEffect(() => { void load(); }, []);
 
-  if (error) return <div style={{ color: color.state.danger.fg }}>{error}</div>;
+  if (error) return <div className="text-(--color-state-danger-fg)">{error}</div>;
   if (!settings) return <LoadingSpinner />;
 
   const configured = ALL_PROVIDERS.filter((p) => isConfigured(p, settings));
@@ -131,18 +130,18 @@ function LLMPage() {
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 32 }}>
+    <div className="flex flex-col gap-8">
       <AgentModelSection settings={settings} onSaved={load} />
 
-      <div style={{ borderTop: `1px solid ${color.border.subtle}` }} />
+      <div className="border-t border-(--color-border-subtle)" />
 
       {/* Available Providers */}
       <section>
-        <div style={sectionHeaderStyle}>Available providers</div>
+        <div className={sectionHeaderClass}>Available providers</div>
         {configured.length === 0 && (
-          <div style={{ color: color.text.muted, fontSize: 14 }}>No providers configured yet.</div>
+          <div className="text-(--color-text-muted) text-sm">No providers configured yet.</div>
         )}
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        <div className="flex flex-col gap-2">
           {configured.map((p) => (
             <ProviderCard
               key={p}
@@ -160,13 +159,13 @@ function LLMPage() {
       {/* Add Provider */}
       {unconfigured.length > 0 && (
         <>
-          <div style={{ borderTop: `1px solid ${color.border.subtle}` }} />
+          <div className="border-t border-(--color-border-subtle)" />
           <section>
-            <div style={sectionHeaderStyle}>Add provider</div>
-            <div style={{ color: color.text.muted, fontSize: 13, marginBottom: 12 }}>
+            <div className={sectionHeaderClass}>Add provider</div>
+            <div className="text-(--color-text-muted) text-[13px] mb-3">
               Connect a provider to make it available for agent and chat use.
             </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <div className="flex flex-col gap-2">
               {unconfigured.map((p) => (
                 <ProviderCard
                   key={p}
@@ -229,32 +228,24 @@ function AgentModelSection({ settings, onSaved }: { settings: LLMSettings; onSav
 
   return (
     <section>
-      <div style={sectionHeaderStyle}>Default model</div>
+      <div className={sectionHeaderClass}>Default model</div>
       {!editing ? (
-        <div style={{
-          display: "flex", alignItems: "center", justifyContent: "space-between",
-          padding: "12px 16px", border: `1px solid ${color.border.default}`,
-          borderRadius: radius.md, background: color.bg.panel,
-        }}>
+        <div className="flex items-center justify-between py-3 px-4 border border-(--color-border-default) rounded-(--radius-md) bg-(--color-bg-panel)">
           <div>
             {settings.provider && PROVIDER_META[settings.provider as Provider] ? (
               <>
-                <span style={{ fontSize: 14, fontWeight: 500 }}>{PROVIDER_META[settings.provider as Provider].label}</span>
-                <span style={{ fontSize: 14, color: color.text.muted, marginLeft: 8 }}>{settings.model || "—"}</span>
+                <span className="text-sm font-medium">{PROVIDER_META[settings.provider as Provider].label}</span>
+                <span className="text-sm text-(--color-text-muted) ml-2">{settings.model || "—"}</span>
               </>
             ) : (
-              <span style={{ fontSize: 14, color: color.text.muted }}>No model selected — configure a provider below.</span>
+              <span className="text-sm text-(--color-text-muted)">No model selected — configure a provider below.</span>
             )}
           </div>
           <Button size="sm" variant="default" onClick={() => setEditing(true)} disabled={availableProviders.length === 0}>Edit</Button>
         </div>
       ) : (
-        <div style={{
-          border: `1px solid ${color.border.default}`,
-          borderRadius: radius.md, background: color.bg.panel,
-          display: "flex", flexDirection: "column",
-        }}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 4, padding: 12 }}>
+        <div className="border border-(--color-border-default) rounded-(--radius-md) bg-(--color-bg-panel) flex flex-col">
+          <div className="flex flex-col gap-1 p-3">
             {options.map(({ provider: p, model: m }) => {
               const isSelected = selProvider === p && selModel === m;
               return (
@@ -262,35 +253,25 @@ function AgentModelSection({ settings, onSaved }: { settings: LLMSettings; onSav
                   key={`${p}:${m}`}
                   type="button"
                   onClick={() => { setSelProvider(p); setSelModel(m); }}
-                  style={{
-                    display: "flex", alignItems: "center", gap: 12,
-                    padding: "10px 12px",
-                    border: `1px solid ${isSelected ? color.accent.subtleBorder : color.border.default}`,
-                    borderRadius: radius.sm,
-                    background: isSelected ? color.accent.subtleBg : color.bg.page,
-                    cursor: "pointer", textAlign: "left",
-                  }}
+                  className={`flex items-center gap-3 py-[10px] px-3 border rounded-(--radius-sm) cursor-pointer text-left ${isSelected ? "border-(--color-accent-subtle-border) bg-(--color-accent-subtle-bg)" : "border-(--color-border-default) bg-(--color-bg-page)"}`}
                 >
-                  <div style={{
-                    width: 16, height: 16, borderRadius: "50%", flexShrink: 0,
-                    border: isSelected ? "none" : `1.5px solid ${color.border.strong}`,
-                    background: isSelected ? color.accent.bg : "transparent",
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                  }}>
-                    {isSelected && <div style={{ width: 8, height: 8, borderRadius: "50%", background: color.accent.fg }} />}
+                  <div
+                    className={`w-[16px] h-[16px] rounded-full shrink-0 flex items-center justify-center ${isSelected ? "bg-(--color-accent-bg) border-none" : "bg-transparent border-[1.5px] border-(--color-border-strong)"}`}
+                  >
+                    {isSelected && <div className="w-[8px] h-[8px] rounded-full bg-(--color-accent-fg)" />}
                   </div>
-                  <span style={{ fontSize: 13, fontWeight: 500, color: isSelected ? color.accent.subtleFg : color.text.secondary, flexShrink: 0 }}>
+                  <span className={`text-[13px] font-medium shrink-0 ${isSelected ? "text-(--color-accent-subtle-fg)" : "text-(--color-text-secondary)"}`}>
                     {PROVIDER_META[p].label}
                   </span>
-                  <span style={{ fontSize: 13, color: isSelected ? color.accent.subtleFg : color.text.muted, fontFamily: "ui-monospace, monospace" }}>
+                  <span className={`text-[13px] font-mono ${isSelected ? "text-(--color-accent-subtle-fg)" : "text-(--color-text-muted)"}`}>
                     {m}
                   </span>
                 </button>
               );
             })}
           </div>
-          {error && <div style={{ color: color.state.danger.fg, fontSize: 13, padding: "0 12px 8px" }}>{error}</div>}
-          <div style={{ display: "flex", gap: 8, padding: "4px 12px 12px" }}>
+          {error && <div className="text-(--color-state-danger-fg) text-[13px] px-3 pb-2">{error}</div>}
+          <div className="flex gap-2 pt-1 px-3 pb-3">
             <Button type="button" variant="action" size="sm" disabled={saving || !selProvider} onClick={() => void onSave()}>
               {saving ? "Saving…" : "Set as active"}
             </Button>
@@ -319,39 +300,23 @@ function ProviderCard({
   const hint = keyHint(provider, settings);
 
   return (
-    <div style={{
-      border: `1px solid ${color.border.default}`,
-      borderRadius: radius.md,
-      overflow: "hidden",
-    }}>
+    <div className="border border-(--color-border-default) rounded-(--radius-md) overflow-hidden">
       {/* Card header row */}
-      <div style={{
-        display: "flex", alignItems: "center", gap: 12,
-        padding: "12px 16px", background: color.bg.panel,
-      }}>
+      <div className="flex items-center gap-3 py-3 px-4 bg-(--color-bg-panel)">
         {/* Provider initial icon */}
-        <div style={{
-          width: 32, height: 32, borderRadius: radius.sm,
-          background: color.bg.sunken, display: "flex", alignItems: "center",
-          justifyContent: "center", fontSize: 13, fontWeight: 700,
-          color: color.text.secondary, flexShrink: 0,
-        }}>
+        <div className="w-[32px] h-[32px] rounded-(--radius-sm) bg-(--color-bg-sunken) flex items-center justify-center text-[13px] font-bold text-(--color-text-secondary) shrink-0">
           {meta.initial}
         </div>
 
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ fontSize: 14, fontWeight: 500 }}>{meta.label}</span>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium">{meta.label}</span>
             {isActive && (
-              <span style={{
-                fontSize: 11, fontWeight: 600, padding: "2px 6px",
-                borderRadius: radius.pill, background: color.accent.subtleBg,
-                color: color.accent.subtleFg, border: `1px solid ${color.accent.subtleBorder}`,
-              }}>Agent</span>
+              <span className="text-[11px] font-semibold py-[2px] px-[6px] rounded-(--radius-pill) bg-(--color-accent-subtle-bg) text-(--color-accent-subtle-fg) border border-(--color-accent-subtle-border)">Agent</span>
             )}
           </div>
           {configured && hint && (
-            <div style={{ fontSize: 12, color: color.text.muted, fontFamily: "ui-monospace, monospace", marginTop: 2 }}>
+            <div className="text-xs text-(--color-text-muted) font-mono mt-[2px]">
               {hint}
             </div>
           )}
@@ -369,7 +334,7 @@ function ProviderCard({
 
       {/* Expanded form */}
       {expanded && (
-        <div style={{ borderTop: `1px solid ${color.border.subtle}`, padding: 16, background: color.bg.page }}>
+        <div className="border-t border-(--color-border-subtle) p-4 bg-(--color-bg-page)">
           <ProviderForm
             provider={provider}
             settings={settings}
@@ -456,24 +421,24 @@ function ProviderForm({
   }
 
   return (
-    <form onSubmit={onSubmit} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+    <form onSubmit={onSubmit} className="flex flex-col gap-4">
       <label>
-        <div style={lblStyle}>{meta.keyLabel}</div>
+        <div className={lblClass}>{meta.keyLabel}</div>
         <input
           type={isOllama ? "text" : "password"}
           value={keyValue}
           onChange={(e) => setKeyValue(e.target.value)}
           placeholder={configured ? (isOllama ? currentHint : "leave blank to keep current") : meta.keyPlaceholder}
-          style={inputStyle}
+          className={inputClass}
         />
       </label>
 
       <div>
-        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 8 }}>
-          <div style={lblStyle}>Models</div>
-          <div style={{ fontSize: 12, color: color.text.muted }}>Select models to make available</div>
+        <div className="flex items-baseline justify-between mb-2">
+          <div className={lblClass}>Models</div>
+          <div className="text-xs text-(--color-text-muted)">Select models to make available</div>
         </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        <div className="flex flex-col gap-1.5">
           {knownModels.map((id) => {
             const checked = selectedModels.has(id);
             return (
@@ -481,31 +446,18 @@ function ProviderForm({
                 key={id}
                 type="button"
                 onClick={() => toggleModel(id)}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 10,
-                  padding: "10px 12px",
-                  border: `1px solid ${checked ? color.accent.subtleBorder : color.border.default}`,
-                  borderRadius: radius.md,
-                  background: checked ? color.accent.subtleBg : color.bg.page,
-                  cursor: "pointer",
-                  textAlign: "left",
-                }}
+                className={`flex items-center gap-[10px] py-[10px] px-3 border rounded-(--radius-md) cursor-pointer text-left ${checked ? "border-(--color-accent-subtle-border) bg-(--color-accent-subtle-bg)" : "border-(--color-border-default) bg-(--color-bg-page)"}`}
               >
-                <div style={{
-                  width: 18, height: 18, borderRadius: radius.xs, flexShrink: 0,
-                  border: checked ? "none" : `1.5px solid ${color.border.strong}`,
-                  background: checked ? color.accent.bg : "transparent",
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                }}>
+                <div
+                  className={`w-[18px] h-[18px] rounded-(--radius-xs) shrink-0 flex items-center justify-center ${checked ? "bg-(--color-accent-bg) border-none" : "bg-transparent border-[1.5px] border-(--color-border-strong)"}`}
+                >
                   {checked && (
-                    <span style={{ color: color.accent.fg, display: "flex" }}>
+                    <span className="text-(--color-accent-fg) flex">
                       <SvgCheckSmall size={11} />
                     </span>
                   )}
                 </div>
-                <span style={{ fontSize: 13, color: checked ? color.accent.subtleFg : color.text.primary, fontFamily: "ui-monospace, monospace" }}>
+                <span className={`text-[13px] font-mono ${checked ? "text-(--color-accent-subtle-fg)" : "text-(--color-text-primary)"}`}>
                   {id}
                 </span>
               </button>
@@ -514,9 +466,9 @@ function ProviderForm({
         </div>
       </div>
 
-      {error && <div style={{ color: color.state.danger.fg, fontSize: 13 }}>{error}</div>}
-      {saved && <div style={{ color: color.state.success.fg, fontSize: 13 }}>Saved.</div>}
-      <div style={{ display: "flex", gap: 8 }}>
+      {error && <div className="text-(--color-state-danger-fg) text-[13px]">{error}</div>}
+      {saved && <div className="text-(--color-state-success-fg) text-[13px]">Saved.</div>}
+      <div className="flex gap-2">
         <Button type="submit" variant="action" size="sm" disabled={saving}>
           {saving ? "Saving…" : "Save"}
         </Button>
@@ -530,16 +482,6 @@ function ProviderForm({
   );
 }
 
-const inputStyle: React.CSSProperties = {
-  width: "100%",
-  padding: "8px 10px",
-  boxSizing: "border-box",
-  border: `1px solid ${color.border.default}`,
-  borderRadius: radius.sm,
-  fontSize: 14,
-};
-const lblStyle: React.CSSProperties = { marginBottom: 4, fontSize: 13, fontWeight: 500 };
-const sectionHeaderStyle: React.CSSProperties = {
-  fontSize: 13, fontWeight: 600, color: color.text.secondary,
-  textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 12,
-};
+const inputClass = "w-full py-2 px-[10px] box-border border border-(--color-border-default) rounded-(--radius-sm) text-sm";
+const lblClass = "mb-1 text-[13px] font-medium";
+const sectionHeaderClass = "text-[13px] font-semibold text-(--color-text-secondary) uppercase tracking-[0.05em] mb-3";
