@@ -3,7 +3,7 @@
 .scrim {
   position: fixed;
   inset: 0;
-  background: var(--color-overlay);
+  background: var(--mask-03);
   display: flex;
   align-items: flex-start;
   justify-content: center;
@@ -12,8 +12,8 @@
 }
 
 .dialog {
-  background: var(--color-bg-panel);
-  border-radius: var(--radius-lg);
+  background: var(--background-tint-01);
+  border-radius: var(--border-radius-12);
   width: min(480px, 100%);
   max-height: calc(100vh - 80px);
   box-shadow: var(--shadow-modal);
@@ -27,13 +27,13 @@
   align-items: flex-start;
   gap: 8px;
   padding: 16px;
-  background: var(--color-bg-page);
+  background: var(--background-tint-00);
 }
 .headerIcon {
   display: inline-flex;
   flex-shrink: 0;
   margin-top: 2px;
-  color: var(--color-text-secondary);
+  color: var(--text-04);
 }
 .headerText {
   display: flex;
@@ -69,8 +69,8 @@
   flex-shrink: 0;
   min-height: 48px;
   padding: 6px 8px;
-  background: var(--color-bg-sunken);
-  border-radius: var(--radius-md);
+  background: var(--background-tint-02);
+  border-radius: var(--border-radius-08);
 }
 /* Scope + permission are white-fill boxes on the grey container — no border.
    Scope is the wider of the two. */
@@ -78,8 +78,8 @@
 .permBox {
   display: flex;
   min-width: 0;
-  background: var(--color-bg-page);
-  border-radius: var(--radius-sm);
+  background: var(--background-tint-00);
+  border-radius: var(--border-radius-04);
 }
 .scopeBox {
   flex: 1.7 1.7 0;
@@ -119,8 +119,8 @@
   flex-shrink: 0;
   min-height: 48px;
   padding: 6px 8px;
-  background: var(--color-bg-sunken);
-  border-radius: var(--radius-md);
+  background: var(--background-tint-02);
+  border-radius: var(--border-radius-08);
 }
 .rowText {
   display: flex;
@@ -138,7 +138,7 @@
 .inheritedIcon {
   display: inline-flex;
   flex-shrink: 0;
-  color: var(--color-text-muted);
+  color: var(--text-03);
 }
 
 .footer {
@@ -147,7 +147,7 @@
   justify-content: space-between;
   gap: 8px;
   padding: 16px;
-  background: var(--color-bg-page);
+  background: var(--background-tint-00);
 }
 .footerRight {
   display: flex;

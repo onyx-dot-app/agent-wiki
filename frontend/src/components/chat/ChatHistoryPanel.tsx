@@ -10,7 +10,6 @@ import {
   listSessions,
 } from "@/lib/chat";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
-import { color, radius } from "@/lib/theme";
 
 interface Props {
   open: boolean;
@@ -72,78 +71,48 @@ export function ChatHistoryPanel({
   return (
     <div
       aria-hidden={!open}
+      className="absolute inset-0 bg-(--background-tint-00) flex flex-col z-[2]"
       style={{
-        position: "absolute",
-        inset: 0,
-        background: color.bg.page,
-        display: "flex",
-        flexDirection: "column",
         transform: open ? "translateX(0)" : "translateX(-100%)",
         transition: "transform 180ms ease-out",
-        zIndex: 2,
       }}
     >
       <header
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          padding: "10px 12px",
-          borderBottom: `1px solid ${color.border.subtle}`,
-          background: color.bg.panel,
-          flexShrink: 0,
-        }}
+        className="flex items-center gap-2 px-3 py-[10px] border-b border-(--border-01) bg-(--background-tint-01) shrink-0"
       >
         <button
           onClick={onClose}
           title="Back to chat"
           aria-label="Back to chat"
-          style={iconButtonStyle}
+          className="w-7 h-7 border-none bg-transparent rounded-(--border-radius-04) cursor-pointer text-(--text-04) flex items-center justify-center"
         >
           <SvgArrowLeft size={16} />
         </button>
-        <div style={{ fontWeight: 600, fontSize: 14, flex: 1, color: color.text.primary }}>History</div>
+        <div className="font-semibold text-sm flex-1 text-(--text-05)">History</div>
         <button
           onClick={onNewChat}
-          style={{
-            padding: "5px 10px",
-            background: color.accent.bg,
-            color: color.accent.fg,
-            border: "none",
-            borderRadius: radius.sm,
-            cursor: "pointer",
-            fontSize: 12,
-            fontWeight: 600,
-          }}
+          className="py-[5px] px-[10px] bg-(--background-tint-inverted-00) text-(--text-inverted-05) border-none rounded-(--border-radius-04) cursor-pointer text-xs font-semibold"
         >
           + New chat
         </button>
       </header>
 
-      <div style={{ flex: 1, overflowY: "auto", padding: 8 }}>
+      <div className="flex-1 overflow-y-auto p-2">
         {error && (
           <div
             role="alert"
-            style={{
-              margin: "4px 4px 8px",
-              padding: "8px 10px",
-              background: color.state.danger.bg,
-              border: `1px solid ${color.state.danger.border}`,
-              color: color.state.danger.fg,
-              borderRadius: radius.sm,
-              fontSize: 12,
-            }}
+            className="mx-1 mt-1 mb-2 py-2 px-[10px] bg-(--status-error-01) border border-(--status-error-02) text-(--status-text-error-05) rounded-(--border-radius-04) text-xs"
           >
             {error}
           </div>
         )}
         {loading && sessions.length === 0 && (
-          <div style={{ padding: 8 }}>
+          <div className="p-2">
             <LoadingSpinner />
           </div>
         )}
         {!loading && sessions.length === 0 && !error && (
-          <p style={{ color: color.text.muted, fontSize: 13, padding: 8, margin: 0 }}>
+          <p className="text-(--text-03) text-[13px] p-2 m-0">
             No past conversations yet.
           </p>
         )}
@@ -190,42 +159,28 @@ function SessionRow({
           onClick();
         }
       }}
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 6,
-        padding: "8px 10px",
-        borderRadius: radius.sm,
-        cursor: "pointer",
-        background: active ? color.bg.active : hover ? color.bg.hover : "transparent",
-      }}
+      className={`flex items-center gap-[6px] py-2 px-[10px] rounded-(--border-radius-04) cursor-pointer ${
+        active
+          ? "bg-(--background-tint-04)"
+          : hover
+            ? "bg-(--background-tint-03)"
+            : "bg-transparent"
+      }`}
     >
-      <div style={{ flex: 1, minWidth: 0 }}>
+      <div className="flex-1 min-w-0">
         <div
-          style={{
-            fontSize: 13,
-            fontWeight: active ? 600 : 500,
-            color: color.text.primary,
-            whiteSpace: "nowrap",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-          }}
+          className={`text-[13px] ${active ? "font-semibold" : "font-medium"} text-(--text-05) whitespace-nowrap overflow-hidden text-ellipsis`}
         >
           {title}
         </div>
-        <div style={{ fontSize: 11, color: color.text.muted }}>{formatRelative(session.updated_at)}</div>
+        <div className="text-[11px] text-(--text-03)">{formatRelative(session.updated_at)}</div>
       </div>
       {hover && (
         <button
           onClick={onDelete}
           title="Delete"
           aria-label="Delete chat"
-          style={{
-            ...iconButtonStyle,
-            width: 24,
-            height: 24,
-            color: color.text.faint,
-          }}
+          className="w-6 h-6 border-none bg-transparent rounded-(--border-radius-04) cursor-pointer text-(--text-02) flex items-center justify-center"
         >
           <SvgTrash size={14} />
         </button>
@@ -233,19 +188,6 @@ function SessionRow({
     </div>
   );
 }
-
-const iconButtonStyle: React.CSSProperties = {
-  width: 28,
-  height: 28,
-  border: "none",
-  background: "transparent",
-  borderRadius: radius.xs,
-  cursor: "pointer",
-  color: color.text.secondary,
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-};
 
 function formatRelative(ts: string): string {
   // ts is "YYYY-MM-DD HH:MM:SS" UTC. Treat as UTC by appending 'Z'.

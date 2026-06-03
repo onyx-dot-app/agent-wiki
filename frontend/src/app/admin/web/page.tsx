@@ -7,7 +7,6 @@ import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { BackLink, PageHeader } from "@/components/common/PageHeader";
 import { RequireAdmin } from "@/components/RequireAdmin";
 import { apiFetch } from "@/lib/api";
-import { color, radius } from "@/lib/theme";
 import { useIsMobile } from "@/lib/viewport";
 
 interface WebSettings {
@@ -23,7 +22,7 @@ export default function AdminWebPage() {
   const isMobile = useIsMobile();
   return (
     <RequireAdmin>
-      <main style={{ padding: isMobile ? "16px 12px" : "24px 32px", maxWidth: 720 }}>
+      <main className="max-w-[720px]" style={{ padding: isMobile ? "16px 12px" : "24px 32px" }}>
         <BackLink />
         <PageHeader
           title="Web search & crawl"
@@ -106,7 +105,7 @@ function WebForm() {
   if (!settings) return <LoadingSpinner />;
 
   return (
-    <form onSubmit={onSubmit} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+    <form onSubmit={onSubmit} className="flex flex-col gap-4">
       <ProviderRow label="Search" value="Serper" url="https://serper.dev/" />
       <KeyField
         label="Serper API key"
@@ -119,7 +118,7 @@ function WebForm() {
         clearDisabled={saving || !settings.serper_api_key_set}
       />
 
-      <div style={{ height: 1, background: color.border.subtle, margin: "8px 0" }} />
+      <div className="h-px bg-(--border-01) my-2" />
 
       <ProviderRow label="Crawl" value="Firecrawl" url="https://www.firecrawl.dev/" />
       <KeyField
@@ -133,8 +132,8 @@ function WebForm() {
         clearDisabled={saving || !settings.firecrawl_api_key_set}
       />
 
-      {error && <div style={{ color: color.state.danger.fg }}>{error}</div>}
-      {saved && <div style={{ color: color.state.success.fg }}>Saved.</div>}
+      {error && <div className="text-(--status-text-error-05)">{error}</div>}
+      {saved && <div className="text-(--status-text-success-05)">Saved.</div>}
       <div>
         <Button type="submit" variant="action" disabled={saving}>
           {saving ? "Saving…" : "Save"}
@@ -146,10 +145,10 @@ function WebForm() {
 
 function ProviderRow({ label, value, url }: { label: string; value: string; url: string }) {
   return (
-    <div style={{ display: "flex", alignItems: "baseline", gap: 8, fontSize: 13 }}>
-      <span style={{ color: color.text.muted, width: 60 }}>{label}</span>
-      <span style={{ fontWeight: 500 }}>{value}</span>
-      <a href={url} target="_blank" rel="noreferrer" style={{ color: color.text.primary, fontSize: 12, textDecoration: "underline" }}>
+    <div className="flex items-baseline gap-2 text-[13px]">
+      <span className="text-(--text-03) w-[60px]">{label}</span>
+      <span className="font-medium">{value}</span>
+      <a href={url} target="_blank" rel="noreferrer" className="text-(--text-05) text-xs underline">
         get key ↗
       </a>
     </div>
@@ -177,10 +176,10 @@ function KeyField({
 }) {
   return (
     <label>
-      <div style={{ ...lblStyle, display: "flex", alignItems: "center", gap: 6 }}>
+      <div className="mb-1 text-[13px] font-medium flex items-center gap-[6px]">
         <span>{label}</span>
-        {isSet && <span style={hintStyle}>currently {hint}</span>}
-        <span style={{ flex: 1 }} />
+        {isSet && <span className="font-normal text-(--text-03) font-mono text-xs">currently {hint}</span>}
+        <span className="flex-1" />
         {isSet && (
           <Button
             type="button"
@@ -198,24 +197,11 @@ function KeyField({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={isSet ? "leave blank to keep" : placeholder}
-        style={inputStyle}
+        className={inputClass}
       />
     </label>
   );
 }
 
-const inputStyle: React.CSSProperties = {
-  width: "100%",
-  padding: "8px 10px",
-  boxSizing: "border-box",
-  border: `1px solid ${color.border.default}`,
-  borderRadius: radius.sm,
-  fontSize: 14,
-};
-const lblStyle: React.CSSProperties = { marginBottom: 4, fontSize: 13, fontWeight: 500 };
-const hintStyle: React.CSSProperties = {
-  fontWeight: 400,
-  color: color.text.muted,
-  fontFamily: "ui-monospace, monospace",
-  fontSize: 12,
-};
+const inputClass =
+  "w-full py-2 px-[10px] box-border border border-(--border-01) rounded-(--border-radius-04) text-sm";

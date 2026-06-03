@@ -17,7 +17,11 @@ import useSWR from "swr";
 import { Button, SelectButton } from "@onyx-ai/opal/components";
 import {
   SvgArrowLeft,
+  SvgChevronLeft,
+  SvgChevronRight,
+  SvgDocFile,
   SvgEdit,
+  SvgFolder,
   SvgFolderPlus,
   SvgPlus,
   SvgShare,
@@ -37,7 +41,6 @@ import {
 } from "@/lib/launchers";
 import { ShareDialog } from "@/components/wiki/ShareDialog";
 import { CommentsPanel } from "@/components/wiki/CommentsPanel";
-import { FolderIcon, FileIcon } from "@/components/wiki/WikiIcons";
 import { apiFetch, ApiError } from "@/lib/api";
 import { listComments } from "@/lib/comments";
 import {
@@ -56,7 +59,6 @@ import {
   setDraftTemplate,
   type DocumentTemplateSummary,
 } from "@/lib/templates";
-import { color, radius, shadow } from "@/lib/theme";
 import { absoluteTime, relativeTime } from "@/lib/time";
 import { useIsMobile } from "@/lib/viewport";
 import {
@@ -128,7 +130,7 @@ export default function WikiRoute() {
 
   if (loading || !user)
     return (
-      <main style={{ padding: isMobile ? 16 : 32 }}>
+      <main className={isMobile ? "p-4" : "p-8"}>
         <LoadingSpinner center />
       </main>
     );
@@ -321,11 +323,7 @@ function Explorer({ dir }: { dir: string }) {
 
   return (
     <main
-      style={{
-        padding: isMobile ? "16px 12px" : "24px 32px",
-        height: "100vh",
-        overflowY: "auto",
-      }}
+      className={`h-screen overflow-y-auto ${isMobile ? "py-4 px-3" : "py-6 px-8"}`}
     >
       <PageHeader
         title={
@@ -345,7 +343,12 @@ function Explorer({ dir }: { dir: string }) {
         }
         actions={
           <>
-            <Button icon={SvgWorkflow} onClick={() => setTriggerModalOpen(true)}>Trigger</Button>
+            <Button
+              icon={SvgWorkflow}
+              onClick={() => setTriggerModalOpen(true)}
+            >
+              Trigger
+            </Button>
             <Button
               icon={SvgFolderPlus}
               onClick={() => {
@@ -356,7 +359,6 @@ function Explorer({ dir }: { dir: string }) {
               New folder
             </Button>
             <Button
-              variant="action"
               icon={SvgPlus}
               onClick={() => router.push(`/app/wiki/${dir}?new=1`)}
             >
@@ -375,29 +377,13 @@ function Explorer({ dir }: { dir: string }) {
       />
 
       {triggerStatus && (
-        <div
-          style={{
-            fontSize: 12,
-            color: color.text.secondary,
-            marginBottom: 12,
-          }}
-        >
-          {triggerStatus}
-        </div>
+        <div className="text-xs text-(--text-04) mb-3">{triggerStatus}</div>
       )}
 
       {creating && (
         <form
           onSubmit={onCreate}
-          style={{
-            display: "flex",
-            gap: 8,
-            marginBottom: 16,
-            padding: 12,
-            background: color.bg.panel,
-            border: `1px solid ${color.border.default}`,
-            borderRadius: radius.md,
-          }}
+          className="flex gap-2 mb-4 p-3 bg-(--background-tint-01) border border-(--border-01) rounded-(--border-radius-08)"
         >
           <input
             autoFocus
@@ -405,13 +391,7 @@ function Explorer({ dir }: { dir: string }) {
             onChange={(e) => setNewName(e.target.value)}
             placeholder="folder-name (or subdir/folder-name)"
             disabled={createBusy}
-            style={{
-              flex: 1,
-              padding: 8,
-              border: `1px solid ${color.border.default}`,
-              borderRadius: radius.sm,
-              fontSize: 14,
-            }}
+            className="flex-1 p-2 border border-(--border-01) rounded-(--border-radius-04) text-sm"
           />
           <Button
             type="submit"
@@ -433,22 +413,13 @@ function Explorer({ dir }: { dir: string }) {
       )}
 
       {error && (
-        <div
-          style={{
-            padding: 10,
-            background: color.state.danger.bg,
-            color: color.state.danger.fg,
-            borderRadius: radius.sm,
-            fontSize: 13,
-            marginBottom: 12,
-          }}
-        >
+        <div className="p-[10px] bg-(--status-error-01) text-(--status-text-error-05) rounded-(--border-radius-04) text-[13px] mb-3">
           {error}
         </div>
       )}
 
       {subdirs.length === 0 && files.length === 0 && !error && (
-        <p style={{ color: color.text.muted, fontSize: 14 }}>
+        <p className="text-(--text-03) text-sm">
           This folder is empty. Create a document to get started.
         </p>
       )}
@@ -457,7 +428,7 @@ function Explorer({ dir }: { dir: string }) {
         <SortBar value={sort} onChange={setSort} />
       )}
 
-      <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+      <ul className="list-none p-0 m-0">
         {(() => {
           const dirEntries = subdirs.map((d) => ({ ...d, isFile: false }));
           const fileEntries = files.map((f) => ({ ...f, isFile: true }));
@@ -468,7 +439,9 @@ function Explorer({ dir }: { dir: string }) {
             return (
               <Row
                 key={(isFile ? "f:" : "d:") + name}
-                icon={isFile ? <FileIcon /> : <FolderIcon />}
+                icon={
+                  isFile ? <SvgDocFile size={20} aria-hidden /> : <SvgFolder size={20} aria-hidden />
+                }
                 label={name}
                 updatedAt={updated_at}
                 href={`/app/wiki/${childPath}`}
@@ -519,11 +492,7 @@ function Explorer({ dir }: { dir: string }) {
         })()}
       </ul>
       {sharePath && (
-        <ShareDialog
-          path={sharePath}
-          open
-          onClose={() => setSharePath(null)}
-        />
+        <ShareDialog path={sharePath} open onClose={() => setSharePath(null)} />
       )}
     </main>
   );
@@ -659,14 +628,7 @@ function NewDocView({ dir }: { dir: string }) {
 
   return (
     <main
-      style={{
-        padding: isMobile ? "16px 12px" : "24px 32px",
-        height: "100vh",
-        display: "flex",
-        flexDirection: "column",
-        boxSizing: "border-box",
-        gap: 12,
-      }}
+      className={`h-screen flex flex-col box-border gap-3 ${isMobile ? "py-4 px-3" : "py-6 px-8"}`}
     >
       <PageHeader
         title="New document"
@@ -704,15 +666,7 @@ function NewDocView({ dir }: { dir: string }) {
       />
 
       {error && (
-        <div
-          style={{
-            padding: 10,
-            background: color.state.danger.bg,
-            color: color.state.danger.fg,
-            borderRadius: radius.sm,
-            fontSize: 13,
-          }}
-        >
+        <div className="p-[10px] bg-(--status-error-01) text-(--status-text-error-05) rounded-(--border-radius-04) text-[13px]">
           {error}
         </div>
       )}
@@ -737,20 +691,7 @@ function NewDocView({ dir }: { dir: string }) {
             ? "Start typing, or pick a template above…"
             : "Start typing your new document…"
         }
-        style={{
-          flex: 1,
-          minHeight: 0,
-          width: "100%",
-          boxSizing: "border-box",
-          padding: 16,
-          border: `1px solid ${color.border.default}`,
-          borderRadius: radius.md,
-          fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-          fontSize: 14,
-          lineHeight: 1.6,
-          resize: "none",
-          outline: "none",
-        }}
+        className="flex-1 min-h-0 w-full box-border p-4 border border-(--border-01) rounded-(--border-radius-08) font-mono text-sm leading-[1.6] resize-none outline-none"
       />
     </main>
   );
@@ -775,24 +716,12 @@ function TemplateGallery({
   // line. On wide screens the user scrolls / clicks chevrons through
   // the row; on narrow screens the same layout becomes a swipe strip.
   return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        gap: 10,
-        padding: 14,
-        background: color.bg.panel,
-        border: `1px solid ${color.border.default}`,
-        borderRadius: radius.md,
-      }}
-    >
-      <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-        <span
-          style={{ fontSize: 13, fontWeight: 600, color: color.text.primary }}
-        >
+    <div className="flex flex-col gap-[10px] p-[14px] bg-(--background-tint-01) border border-(--border-01) rounded-(--border-radius-08)">
+      <div className="flex items-baseline gap-2">
+        <span className="text-[13px] font-semibold text-(--text-05)">
           Start from a template
         </span>
-        <span style={{ fontSize: 12, color: color.text.muted }}>
+        <span className="text-xs text-(--text-03)">
           Scroll or use the arrows to browse — tap to apply.
         </span>
       </div>
@@ -861,26 +790,13 @@ function TemplateStrip({
   const STEP = CARD_WIDTH + 8; // card width + gap
 
   return (
-    <div style={{ position: "relative" }}>
+    <div className="relative">
       <div
         ref={scrollerRef}
-        className="scroll-x-hidden"
-        style={{
-          display: "flex",
-          gap: 8,
-          overflowX: "auto",
-          scrollSnapType: "x mandatory",
-          WebkitOverflowScrolling: "touch",
-          paddingBottom: 2, // leave room for focus rings
-        }}
+        className="scroll-x-hidden flex gap-2 overflow-x-auto pb-[2px] snap-x snap-mandatory"
+        style={{ WebkitOverflowScrolling: "touch" }}
       >
-        <div
-          style={{
-            flex: "0 0 auto",
-            scrollSnapAlign: "start",
-            width: CARD_WIDTH,
-          }}
-        >
+        <div className="shrink-0 snap-start w-[200px]">
           <TemplateCard
             title="Blank document"
             description="Empty file — just start typing."
@@ -890,14 +806,7 @@ function TemplateStrip({
           />
         </div>
         {templates.map((t) => (
-          <div
-            key={t.id}
-            style={{
-              flex: "0 0 auto",
-              scrollSnapAlign: "start",
-              width: CARD_WIDTH,
-            }}
-          >
+          <div key={t.id} className="shrink-0 snap-start w-[200px]">
             <TemplateCard
               title={t.name}
               description={t.description}
@@ -930,41 +839,13 @@ function StripArrow({
       type="button"
       onClick={onClick}
       aria-label={direction === "left" ? "Scroll left" : "Scroll right"}
-      style={{
-        position: "absolute",
-        top: "50%",
-        transform: "translateY(-50%)",
-        ...(direction === "left" ? { left: 4 } : { right: 4 }),
-        width: 28,
-        height: 28,
-        borderRadius: radius.pill,
-        background: color.bg.page,
-        border: `1px solid ${color.border.default}`,
-        boxShadow: shadow.sm,
-        cursor: "pointer",
-        color: color.text.secondary,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: 0,
-      }}
+      className={`absolute top-1/2 -translate-y-1/2 ${direction === "left" ? "left-1" : "right-1"} w-7 h-7 rounded-full bg-(--background-tint-00) border border-(--border-01) shadow-(--shadow-sm) cursor-pointer text-(--text-04) flex items-center justify-center p-0`}
     >
-      <svg
-        width="14"
-        height="14"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      >
-        {direction === "left" ? (
-          <path d="M15 18l-6-6 6-6" />
-        ) : (
-          <path d="M9 6l6 6-6 6" />
-        )}
-      </svg>
+      {direction === "left" ? (
+        <SvgChevronLeft size={14} />
+      ) : (
+        <SvgChevronRight size={14} />
+      )}
     </button>
   );
 }
@@ -987,53 +868,23 @@ function TemplateCard({
       type="button"
       onClick={onClick}
       disabled={busy}
-      style={{
-        textAlign: "left",
-        padding: "10px 12px",
-        background: active ? color.accent.subtleBg : color.bg.page,
-        border: `1px solid ${
-          active ? color.accent.subtleBorder : color.border.default
-        }`,
-        borderRadius: radius.sm,
-        cursor: busy ? "wait" : "pointer",
-        color: color.text.primary,
-        // Fill the wrapper (grid cell or strip slot) so adjacent cards
-        // align even when their description text differs in length.
-        width: "100%",
-        height: "100%",
-        boxSizing: "border-box",
-        minHeight: 64,
-        display: "flex",
-        flexDirection: "column",
-        gap: 4,
-        opacity: busy ? 0.7 : 1,
-        transition: "background 80ms ease, border-color 80ms ease",
-      }}
+      className={`text-left py-[10px] px-3 rounded-(--border-radius-04) text-(--text-05) w-full h-full box-border min-h-[64px] flex flex-col gap-1 transition-[background,border-color] duration-[80ms] ease-in-out border ${busy ? "opacity-[0.7] cursor-wait" : "cursor-pointer"} ${active ? "bg-(--background-tint-03) border-(--border-01)" : "bg-(--background-tint-00) border-(--border-01)"}`}
       onMouseEnter={(e) => {
         if (!active && !busy) {
-          e.currentTarget.style.background = color.bg.hover;
-          e.currentTarget.style.borderColor = color.border.strong;
+          e.currentTarget.style.background = "var(--background-tint-03)";
+          e.currentTarget.style.borderColor = "var(--border-02)";
         }
       }}
       onMouseLeave={(e) => {
         if (!active && !busy) {
-          e.currentTarget.style.background = color.bg.page;
-          e.currentTarget.style.borderColor = color.border.default;
+          e.currentTarget.style.background = "";
+          e.currentTarget.style.borderColor = "";
         }
       }}
     >
-      <div style={{ fontSize: 13, fontWeight: 600 }}>{title}</div>
+      <div className="text-[13px] font-semibold">{title}</div>
       {description && (
-        <div
-          style={{
-            fontSize: 12,
-            color: color.text.muted,
-            overflow: "hidden",
-            display: "-webkit-box",
-            WebkitLineClamp: 2,
-            WebkitBoxOrient: "vertical",
-          }}
-        >
+        <div className="text-xs text-(--text-03) line-clamp-2">
           {description}
         </div>
       )}
@@ -1051,29 +902,13 @@ function SortBar({
   onChange: (v: SortMode) => void;
 }) {
   return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 8,
-        marginBottom: 8,
-        fontSize: 12,
-        color: color.text.muted,
-      }}
-    >
+    <div className="flex items-center gap-2 mb-2 text-xs text-(--text-03)">
       <label htmlFor="wiki-sort">Sort:</label>
       <select
         id="wiki-sort"
         value={value}
         onChange={(e) => onChange(e.target.value as SortMode)}
-        style={{
-          padding: "4px 8px",
-          border: `1px solid ${color.border.default}`,
-          borderRadius: radius.sm,
-          background: color.bg.page,
-          color: color.text.primary,
-          fontSize: 12,
-        }}
+        className="py-1 px-2 border border-(--border-01) rounded-(--border-radius-04) bg-(--background-tint-00) text-(--text-05) text-xs"
       >
         <option value="name-asc">Name (A → Z)</option>
         <option value="name-desc">Name (Z → A)</option>
@@ -1186,37 +1021,16 @@ function Row({
       }
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
-      style={{
-        display: "flex",
-        alignItems: "center",
-        padding: "10px 12px",
-        borderBottom: `1px solid ${color.border.subtle}`,
-        background: dropActive
-          ? color.accent.subtleBg
-          : hover
-            ? color.bg.sunken
-            : "transparent",
-        outline: dropActive ? `2px solid ${color.accent.bg}` : undefined,
-        opacity: busy ? 0.5 : 1,
-        // Click is the primary action; drag is secondary. Pointer
-        // matches the row's main affordance and lines up with how
-        // every other list row in the app feels. Drag still works
-        // from anywhere in the row regardless of cursor style.
-        cursor: renaming ? "default" : "pointer",
-      }}
+      className={`flex items-center py-[10px] px-3 border-b border-(--border-01) ${dropActive ? "bg-(--background-tint-03) outline outline-2 outline-(--background-tint-inverted-00)" : hover ? "bg-(--background-tint-02)" : "bg-transparent"} ${busy ? "opacity-50" : "opacity-100"} ${renaming ? "cursor-default" : "cursor-pointer"}`}
     >
-      <span
-        style={{ color: color.text.muted, display: "flex", marginRight: 10 }}
-      >
-        {icon}
-      </span>
+      <span className="text-(--text-03) flex mr-[10px]">{icon}</span>
       {renaming ? (
         <form
           onSubmit={(e) => {
             e.preventDefault();
             onSubmitRename(draft);
           }}
-          style={{ display: "flex", flex: 1, gap: 6 }}
+          className="flex flex-1 gap-1.5"
         >
           <input
             autoFocus
@@ -1229,13 +1043,7 @@ function Row({
               }
             }}
             disabled={busy}
-            style={{
-              flex: 1,
-              padding: "4px 8px",
-              border: `1px solid ${color.border.default}`,
-              borderRadius: radius.sm,
-              fontSize: 14,
-            }}
+            className="flex-1 py-1 px-2 border border-(--border-01) rounded-(--border-radius-04) text-sm"
           />
           <Button
             type="submit"
@@ -1259,29 +1067,13 @@ function Row({
         // <li>. flex: 1 keeps it stretching to fill the space between
         // icon and action buttons, so any click on the label area
         // still hits the row's onClick.
-        <span
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 10,
-            flex: 1,
-            color: color.text.primary,
-            fontSize: 14,
-          }}
-        >
+        <span className="flex items-center gap-[10px] flex-1 text-(--text-05) text-sm">
           {label}
         </span>
       )}
       {!renaming && (
         <>
-          <span
-            style={{
-              fontSize: 12,
-              color: color.text.faint,
-              marginRight: 8,
-              whiteSpace: "nowrap",
-            }}
-          >
+          <span className="text-xs text-(--text-02) mr-2 whitespace-nowrap">
             {updatedAt ? relativeTime(updatedAt, "short") : "—"}
           </span>
           {onShare && (
@@ -1290,15 +1082,7 @@ function Row({
               disabled={busy}
               title="Share"
               aria-label={`Share ${label}`}
-              style={{
-                background: "transparent",
-                border: "none",
-                color: hover ? color.text.secondary : "transparent",
-                cursor: busy ? "not-allowed" : "pointer",
-                padding: 6,
-                display: "flex",
-                alignItems: "center",
-              }}
+              className={`bg-transparent border-none p-[6px] flex items-center ${busy ? "cursor-not-allowed" : "cursor-pointer"} ${hover ? "text-(--text-04)" : "text-transparent"}`}
             >
               <SvgShare size={16} />
             </button>
@@ -1308,15 +1092,7 @@ function Row({
             disabled={busy}
             title="Rename"
             aria-label={`Rename ${label}`}
-            style={{
-              background: "transparent",
-              border: "none",
-              color: hover ? color.text.secondary : "transparent",
-              cursor: busy ? "not-allowed" : "pointer",
-              padding: 6,
-              display: "flex",
-              alignItems: "center",
-            }}
+            className={`bg-transparent border-none p-[6px] flex items-center ${busy ? "cursor-not-allowed" : "cursor-pointer"} ${hover ? "text-(--text-04)" : "text-transparent"}`}
           >
             <SvgEdit size={16} />
           </button>
@@ -1325,15 +1101,7 @@ function Row({
             disabled={busy}
             title="Delete"
             aria-label={`Delete ${label}`}
-            style={{
-              background: "transparent",
-              border: "none",
-              color: hover ? color.state.danger.fg : "transparent",
-              cursor: busy ? "not-allowed" : "pointer",
-              padding: 6,
-              display: "flex",
-              alignItems: "center",
-            }}
+            className={`bg-transparent border-none p-[6px] flex items-center ${busy ? "cursor-not-allowed" : "cursor-pointer"} ${hover ? "text-(--status-text-error-05)" : "text-transparent"}`}
           >
             <SvgTrash size={16} />
           </button>
@@ -1367,15 +1135,7 @@ function Breadcrumbs({
     crumbs.push({ label: seg, href: `/app/wiki/${path}`, path });
   });
   return (
-    <nav
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 6,
-        fontSize: 14,
-        flexWrap: "wrap",
-      }}
-    >
+    <nav className="flex items-center gap-1.5 text-sm flex-wrap">
       {crumbs.map((c, i) => {
         const last = i === crumbs.length - 1;
         const targetKey = c.path === "" ? ROOT : c.path;
@@ -1395,23 +1155,15 @@ function Breadcrumbs({
               },
             }
           : {};
-        const activeStyle: React.CSSProperties = active
-          ? {
-              background: color.accent.subtleBg,
-              outline: `2px solid ${color.accent.bg}`,
-              borderRadius: radius.sm,
-              padding: "2px 6px",
-            }
-          : {};
+        const activeClass = active
+          ? "bg-(--background-tint-03) outline outline-2 outline-(--background-tint-inverted-00) rounded-(--border-radius-04) py-[2px] px-[6px]"
+          : "";
         return (
-          <span
-            key={c.href}
-            style={{ display: "flex", alignItems: "center", gap: 6 }}
-          >
-            {i > 0 && <span style={{ color: color.text.faint }}>/</span>}
+          <span key={c.href} className="flex items-center gap-1.5">
+            {i > 0 && <span className="text-(--text-02)">/</span>}
             {last ? (
               <span
-                style={{ fontWeight: 600, ...activeStyle }}
+                className={`font-semibold ${activeClass}`}
                 {...dropHandlers}
               >
                 {c.label}
@@ -1419,11 +1171,7 @@ function Breadcrumbs({
             ) : (
               <Link
                 href={c.href}
-                style={{
-                  color: color.text.primary,
-                  textDecoration: "underline",
-                  ...activeStyle,
-                }}
+                className={`text-(--text-05) underline ${activeClass}`}
                 {...dropHandlers}
               >
                 {c.label}
@@ -1467,9 +1215,11 @@ function FileViewer({ path }: { path: string }) {
   const [commentDraft, setCommentDraft] = useState<CommentDraft | null>(null);
   const [commentThreads, setCommentThreads] = useState<CommentThreadView[]>([]);
   const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
-  const [selTool, setSelTool] = useState<{ x: number; y: number; draft: CommentDraft } | null>(
-    null,
-  );
+  const [selTool, setSelTool] = useState<{
+    x: number;
+    y: number;
+    draft: CommentDraft;
+  } | null>(null);
   const articleRef = useRef<HTMLElement | null>(null);
   // Page owns the comment threads (so highlights render even with the panel
   // closed). Auto-open the panel once per path when a page has comments.
@@ -1501,7 +1251,10 @@ function FileViewer({ path }: { path: string }) {
   // over them — the bug where highlights vanished until you clicked a comment.
   const renderedBody = useMemo(
     () => (
-      <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSourcePos]}>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        rehypePlugins={[rehypeSourcePos]}
+      >
         {body}
       </ReactMarkdown>
     ),
@@ -1570,7 +1323,11 @@ function FileViewer({ path }: { path: string }) {
       cancelAnimationFrame(raf);
       tick();
     });
-    observer.observe(el, { childList: true, subtree: true, characterData: true });
+    observer.observe(el, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+    });
 
     return () => {
       cancelled = true;
@@ -2155,55 +1912,33 @@ function FileViewer({ path }: { path: string }) {
 
   return (
     <main
-      style={{
-        padding: isMobile ? "16px 12px" : "24px 32px",
-        height: "100vh",
-        boxSizing: "border-box",
-        display: "flex",
-        flexDirection: "column",
-        minHeight: 0,
-      }}
+      className={`h-screen box-border flex flex-col min-h-0 ${isMobile ? "py-4 px-3" : "py-6 px-8"}`}
     >
       <header
-        style={{
-          display: "flex",
-          alignItems: "center",
-          // Tighter gap on mobile so wrapped button rows don't waste
-          // vertical space; the spacer below still pushes the action
-          // buttons onto their own row(s) below the breadcrumbs.
-          gap: isMobile ? 8 : 12,
-          marginBottom: 16,
-          flexWrap: "wrap",
-        }}
+        className={`flex items-center mb-4 flex-wrap ${isMobile ? "gap-2" : "gap-3"}`}
       >
         <Link
           href={backHref}
           title="Back"
           aria-label="Back"
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            width: 32,
-            height: 32,
-            borderRadius: radius.md,
-            border: `1px solid ${color.border.default}`,
-            color: color.text.secondary,
-            textDecoration: "none",
-            flexShrink: 0,
-          }}
+          className="flex items-center justify-center w-8 h-8 rounded-(--border-radius-08) border border-(--border-01) text-(--text-04) no-underline shrink-0"
         >
           <SvgArrowLeft size={18} />
         </Link>
         <Breadcrumbs segments={segments} />
-        <div style={{ flex: 1 }} />
+        <div className="flex-1" />
         {!editing && !loading && !error && (
           <>
-            <div style={{ display: "flex", gap: 8 }}>
+            <div className="flex gap-2">
               <Button onClick={() => setRunAgentOpen(true)}>Run Agent</Button>
-              <Button icon={SvgWorkflow} onClick={() => setTriggerModalOpen(true)}>Trigger</Button>
+              <Button
+                icon={SvgWorkflow}
+                onClick={() => setTriggerModalOpen(true)}
+              >
+                Trigger
+              </Button>
             </div>
-            <div style={{ display: "flex", gap: 8 }}>
+            <div className="flex gap-2">
               <Button onClick={() => setShareOpen(true)}>Share</Button>
               <SelectButton
                 state={historyOpen ? "selected" : "empty"}
@@ -2251,15 +1986,7 @@ function FileViewer({ path }: { path: string }) {
       )}
 
       {!editing && triggerStatus && (
-        <div
-          style={{
-            fontSize: 12,
-            color: color.text.secondary,
-            marginBottom: 12,
-          }}
-        >
-          {triggerStatus}
-        </div>
+        <div className="text-xs text-(--text-04) mb-3">{triggerStatus}</div>
       )}
 
       <TriggerModal
@@ -2283,35 +2010,13 @@ function FileViewer({ path }: { path: string }) {
       />
 
       {error && (
-        <div
-          style={{
-            padding: 10,
-            background: color.state.danger.bg,
-            color: color.state.danger.fg,
-            borderRadius: radius.sm,
-            fontSize: 13,
-            marginBottom: 12,
-          }}
-        >
+        <div className="p-[10px] bg-(--status-error-01) text-(--status-text-error-05) rounded-(--border-radius-04) text-[13px] mb-3">
           {error}
         </div>
       )}
 
       {viewingOld && !loading && !error && (
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 12,
-            padding: "8px 12px",
-            marginBottom: 12,
-            background: color.state.warning.bg,
-            border: `1px solid ${color.state.warning.border}`,
-            borderRadius: radius.md,
-            fontSize: 13,
-            color: color.state.warning.fg,
-          }}
-        >
+        <div className="flex items-center gap-3 py-2 px-3 mb-3 bg-(--status-warning-01) border border-(--status-warning-02) rounded-(--border-radius-08) text-[13px] text-(--status-text-warning-05)">
           <span>
             Viewing an older version
             {viewingSha ? ` (${viewingSha.slice(0, 7)})` : ""}.
@@ -2319,7 +2024,7 @@ function FileViewer({ path }: { path: string }) {
               ? " Saving will replace the current version and mark the in-between revisions as deprecated."
               : " Click Edit to fork from this version."}
           </span>
-          <div style={{ flex: 1 }} />
+          <div className="flex-1" />
           <Button size="sm" onClick={loadLatest}>
             Back to latest
           </Button>
@@ -2327,22 +2032,9 @@ function FileViewer({ path }: { path: string }) {
       )}
 
       {editing && pendingResumeDraft && (
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 12,
-            padding: "8px 12px",
-            marginBottom: 12,
-            background: color.state.info.bg,
-            border: `1px solid ${color.state.info.border}`,
-            borderRadius: radius.md,
-            fontSize: 13,
-            color: color.state.info.fg,
-          }}
-        >
+        <div className="flex items-center gap-3 py-2 px-3 mb-3 bg-(--status-info-01) border border-(--status-info-02) rounded-(--border-radius-08) text-[13px] text-(--status-text-info-05)">
           <span>You have unsaved changes from a previous session.</span>
-          <div style={{ flex: 1 }} />
+          <div className="flex-1" />
           <Button
             size="sm"
             disabled={resuming}
@@ -2400,27 +2092,10 @@ function FileViewer({ path }: { path: string }) {
       )}
 
       {editing && conflict && (
-        <div
-          style={{
-            marginBottom: 12,
-            border: `1px solid ${color.state.warning.border}`,
-            borderRadius: radius.md,
-            overflow: "hidden",
-          }}
-        >
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 12,
-              padding: "8px 12px",
-              background: color.state.warning.bg,
-              color: color.state.warning.fg,
-              fontSize: 13,
-            }}
-          >
+        <div className="mb-3 border border-(--status-warning-02) rounded-(--border-radius-08) overflow-hidden">
+          <div className="flex items-center gap-3 py-2 px-3 bg-(--status-warning-01) text-(--status-text-warning-05) text-[13px]">
             <span>This page was updated while you were editing.</span>
-            <div style={{ flex: 1 }} />
+            <div className="flex-1" />
             <Button
               size="sm"
               onClick={() => void onKeepMine()}
@@ -2442,13 +2117,7 @@ function FileViewer({ path }: { path: string }) {
               Edit manually
             </Button>
           </div>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1fr 1fr",
-              gap: 0,
-            }}
-          >
+          <div className="grid grid-cols-2 gap-0">
             {(() => {
               const currentHunks = diffLines(
                 conflict.draftBody,
@@ -2458,71 +2127,32 @@ function FileViewer({ path }: { path: string }) {
                 conflict.currentBody,
                 conflict.draftBody,
               );
-              const preStyle: React.CSSProperties = {
-                margin: 0,
-                fontSize: 12,
-                lineHeight: 1.5,
-                fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-                whiteSpace: "pre-wrap",
-                wordBreak: "break-word",
-                maxHeight: 240,
-                overflowY: "auto",
-              };
-              const labelStyle: React.CSSProperties = {
-                fontSize: 11,
-                fontWeight: 600,
-                color: color.text.muted,
-                marginBottom: 6,
-                textTransform: "uppercase",
-                letterSpacing: "0.05em",
-              };
+              const preClass =
+                "m-0 text-xs leading-[1.5] font-mono whitespace-pre-wrap break-words max-h-[240px] overflow-y-auto";
+              const labelClass =
+                "text-[11px] font-semibold text-(--text-03) mb-[6px] uppercase tracking-[0.05em]";
               return (
                 <>
-                  <div
-                    style={{
-                      padding: 12,
-                      borderRight: `1px solid ${color.border.subtle}`,
-                    }}
-                  >
-                    <div style={labelStyle}>Current version</div>
-                    <pre style={preStyle}>
+                  <div className="p-3 border-r border-(--border-01)">
+                    <div className={labelClass}>Current version</div>
+                    <pre className={preClass}>
                       {currentHunks.map((part, i) => (
                         <span
                           key={i}
-                          style={{
-                            background: part.added
-                              ? color.state.success.bg
-                              : part.removed
-                                ? "transparent"
-                                : undefined,
-                            color: part.removed
-                              ? "transparent"
-                              : color.text.secondary,
-                            userSelect: part.removed ? "none" : undefined,
-                          }}
+                          className={`${part.added ? "bg-(--status-success-01)" : "bg-transparent"} ${part.removed ? "text-transparent select-none" : "text-(--text-04)"}`}
                         >
                           {part.value}
                         </span>
                       ))}
                     </pre>
                   </div>
-                  <div style={{ padding: 12 }}>
-                    <div style={labelStyle}>Your draft</div>
-                    <pre style={preStyle}>
+                  <div className="p-3">
+                    <div className={labelClass}>Your draft</div>
+                    <pre className={preClass}>
                       {draftHunks.map((part, i) => (
                         <span
                           key={i}
-                          style={{
-                            background: part.added
-                              ? color.state.warning.bg
-                              : part.removed
-                                ? "transparent"
-                                : undefined,
-                            color: part.removed
-                              ? "transparent"
-                              : color.text.secondary,
-                            userSelect: part.removed ? "none" : undefined,
-                          }}
+                          className={`${part.added ? "bg-(--status-warning-01)" : "bg-transparent"} ${part.removed ? "text-transparent select-none" : "text-(--text-04)"}`}
                         >
                           {part.value}
                         </span>
@@ -2539,16 +2169,8 @@ function FileViewer({ path }: { path: string }) {
       {loading && <LoadingSpinner />}
 
       {!loading && !error && (
-        <div style={{ flex: 1, minHeight: 0, display: "flex", gap: 16 }}>
-          <div
-            style={{
-              flex: 1,
-              minWidth: 0,
-              display: "flex",
-              flexDirection: "column",
-              gap: 12,
-            }}
-          >
+        <div className="flex-1 min-h-0 flex gap-4">
+          <div className="flex-1 min-w-0 flex flex-col gap-3">
             {editing ? (
               <>
                 <FilenameRow
@@ -2587,32 +2209,11 @@ function FileViewer({ path }: { path: string }) {
                   onChange={(e) => setDraft(e.target.value)}
                   spellCheck={false}
                   placeholder="Start typing, or pick a template above…"
-                  style={{
-                    flex: 1,
-                    minHeight: 0,
-                    width: "100%",
-                    boxSizing: "border-box",
-                    padding: 16,
-                    border: `1px solid ${color.border.default}`,
-                    borderRadius: radius.md,
-                    fontFamily:
-                      "ui-monospace, SFMono-Regular, Menlo, monospace",
-                    fontSize: 14,
-                    lineHeight: 1.6,
-                    resize: "none",
-                    outline: "none",
-                  }}
+                  className="flex-1 min-h-0 w-full box-border p-4 border border-(--border-01) rounded-(--border-radius-08) font-mono text-sm leading-[1.6] resize-none outline-none"
                 />
               </>
             ) : viewingOld && diffData ? (
-              <div
-                style={{
-                  flex: 1,
-                  minHeight: 0,
-                  overflow: "hidden",
-                  display: "flex",
-                }}
-              >
+              <div className="flex-1 min-h-0 overflow-hidden flex">
                 <DiffView
                   data={diffData}
                   commit={
@@ -2633,8 +2234,7 @@ function FileViewer({ path }: { path: string }) {
             ) : (
               <article
                 ref={articleRef}
-                className="markdown"
-                style={{ flex: 1, minHeight: 0, overflowY: "auto" }}
+                className="markdown flex-1 min-h-0 overflow-y-auto"
                 onMouseUp={onArticleMouseUp}
               >
                 {renderedBody}
@@ -2677,25 +2277,9 @@ function FileViewer({ path }: { path: string }) {
           <div
             onClick={() => setHistoryOpen(false)}
             aria-hidden
-            style={{
-              position: "fixed",
-              inset: 0,
-              background: color.overlay,
-              zIndex: 60,
-            }}
+            className="fixed inset-0 bg-(--mask-03) z-[60]"
           />
-          <div
-            style={{
-              position: "fixed",
-              top: 0,
-              right: 0,
-              bottom: 0,
-              width: "min(360px, 100vw)",
-              zIndex: 70,
-              display: "flex",
-              boxShadow: shadow.panel,
-            }}
-          >
+          <div className="fixed top-0 right-0 bottom-0 z-[70] flex shadow-(--shadow-panel) w-[min(360px,100vw)]">
             <HistoryPanel
               commits={commits}
               error={historyError}
@@ -2716,20 +2300,9 @@ function FileViewer({ path }: { path: string }) {
           <div
             onClick={() => setCommentsOpen(false)}
             aria-hidden
-            style={{ position: "fixed", inset: 0, background: color.overlay, zIndex: 60 }}
+            className="fixed inset-0 bg-(--mask-03) z-[60]"
           />
-          <div
-            style={{
-              position: "fixed",
-              top: 0,
-              right: 0,
-              bottom: 0,
-              width: "min(360px, 100vw)",
-              zIndex: 70,
-              display: "flex",
-              boxShadow: shadow.panel,
-            }}
-          >
+          <div className="fixed top-0 right-0 bottom-0 z-[70] flex shadow-(--shadow-panel) w-[min(360px,100vw)]">
             <CommentsPanel
               path={path}
               headSha={headSha}
@@ -2751,17 +2324,10 @@ function FileViewer({ path }: { path: string }) {
       {selTool && (
         <div
           onMouseDown={(e) => e.preventDefault()}
+          className="fixed -translate-x-1/2 -translate-y-full z-[80] bg-(--background-tint-01) border border-(--border-01) rounded-(--border-radius-08) shadow-(--shadow-popover) p-1"
           style={{
-            position: "fixed",
             left: selTool.x,
             top: selTool.y - 8,
-            transform: "translate(-50%, -100%)",
-            zIndex: 80,
-            background: color.bg.panel,
-            border: `1px solid ${color.border.default}`,
-            borderRadius: radius.md,
-            boxShadow: shadow.popover,
-            padding: 4,
           }}
         >
           <Button
@@ -2800,73 +2366,35 @@ function ActiveAgentsBar({
   const count = agents.length + sessions.length;
   const expandable = count > 0;
   return (
-    <div
-      style={{
-        marginBottom: 12,
-        border: `1px solid ${color.border.default}`,
-        borderRadius: radius.md,
-        background: color.bg.panel,
-        overflow: "hidden",
-      }}
-    >
+    <div className="mb-3 border border-(--border-01) rounded-(--border-radius-08) bg-(--background-tint-01) overflow-hidden">
       <button
         onClick={expandable ? onToggle : undefined}
         aria-expanded={expandable ? open : undefined}
         disabled={!expandable}
-        style={{
-          width: "100%",
-          textAlign: "left",
-          padding: "8px 12px",
-          background: "transparent",
-          border: "none",
-          cursor: expandable ? "pointer" : "default",
-          fontSize: 13,
-          color: expandable ? color.text.primary : color.text.muted,
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-        }}
+        className={`w-full text-left py-2 px-3 bg-transparent border-none text-[13px] flex items-center gap-2 ${expandable ? "cursor-pointer text-(--text-05)" : "cursor-default text-(--text-03)"}`}
       >
-        <Chevron open={open} disabled={!expandable} />
-        <span style={{ fontWeight: 500 }}>
+        <span
+          aria-hidden
+          className={`shrink-0 flex transition-transform duration-[120ms] ease-in-out ${open ? "rotate-90" : "rotate-0"} ${!expandable ? "text-(--text-02)" : "text-(--text-03)"}`}
+        >
+          <SvgChevronRight size={10} />
+        </span>
+        <span className="font-medium">
           {expandable ? "Active agents" : "No agents active"}
         </span>
         {expandable && (
-          <span
-            style={{
-              fontSize: 11,
-              fontWeight: 600,
-              padding: "1px 6px",
-              borderRadius: radius.pill,
-              background: color.accent.subtleBg,
-              color: color.accent.subtleFg,
-            }}
-          >
+          <span className="text-[11px] font-semibold py-[1px] px-[6px] rounded-full bg-(--background-tint-03) text-(--text-05)">
             {count}
           </span>
         )}
         {error && (
-          <span
-            style={{
-              marginLeft: "auto",
-              fontSize: 12,
-              color: color.state.danger.fg,
-            }}
-          >
+          <span className="ml-auto text-xs text-(--status-text-error-05)">
             {error}
           </span>
         )}
       </button>
       {expandable && open && (
-        <ul
-          style={{
-            listStyle: "none",
-            padding: 0,
-            margin: 0,
-            borderTop: `1px solid ${color.border.default}`,
-            background: color.bg.page,
-          }}
-        >
+        <ul className="list-none p-0 m-0 border-t border-(--border-01) bg-(--background-tint-00)">
           {sessions.map((s, i) => (
             <ActiveSessionRow
               key={s.id}
@@ -2890,32 +2418,6 @@ function ActiveAgentsBar({
   );
 }
 
-function Chevron({ open, disabled }: { open: boolean; disabled: boolean }) {
-  return (
-    <svg
-      width="10"
-      height="10"
-      viewBox="0 0 10 10"
-      aria-hidden
-      style={{
-        flexShrink: 0,
-        color: disabled ? color.text.faint : color.text.muted,
-        transform: open ? "rotate(90deg)" : "rotate(0deg)",
-        transition: "transform 120ms ease",
-      }}
-    >
-      <path
-        d="M3 1.5l4 3.5-4 3.5"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
 function ActiveAgentRow({
   a,
   isLast,
@@ -2925,69 +2427,44 @@ function ActiveAgentRow({
 }) {
   return (
     <li
-      style={{
-        padding: "10px 12px",
-        borderBottom: isLast ? "none" : `1px solid ${color.border.subtle}`,
-        fontSize: 13,
-        display: "flex",
-        alignItems: "center",
-        gap: 10,
-        whiteSpace: "nowrap",
-        overflow: "hidden",
-      }}
+      className={
+        `py-[10px] px-3 text-[13px] flex items-center gap-[10px] whitespace-nowrap overflow-hidden` +
+        (isLast ? `` : ` border-b border-(--border-01)`)
+      }
     >
-      <span
-        style={{
-          flexShrink: 0,
-          fontSize: 10,
-          fontWeight: 600,
-          padding: "1px 6px",
-          borderRadius: radius.xs,
-          background: color.accent.subtleBg,
-          color: color.accent.subtleFg,
-          textTransform: "uppercase",
-          letterSpacing: 0.3,
-        }}
-      >
+      <span className="shrink-0 text-[10px] font-semibold py-[1px] px-[6px] rounded-(--border-radius-04) bg-(--background-tint-03) text-(--text-05) uppercase tracking-[0.3px]">
         {a.activity}
       </span>
 
-      <span
-        style={{ fontWeight: 500, color: color.text.primary, flexShrink: 0 }}
-      >
+      <span className="font-medium text-(--text-05) shrink-0">
         {a.owner_display}
       </span>
       {a.agent_name ? (
-        <span style={{ color: color.text.muted, flexShrink: 0 }}>
-          · {a.agent_name}
+        <span className="text-(--text-03) shrink-0">
+          {"·"} {a.agent_name}
         </span>
       ) : null}
 
       {a.description ? (
         <span
-          style={{
-            color: color.text.secondary,
-            fontStyle: "italic",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            minWidth: 0,
-            flex: "1 1 auto",
-          }}
+          className="text-(--text-04) italic overflow-hidden text-ellipsis min-w-0 grow"
           title={a.description}
         >
-          “{a.description}”
+          {"“"}
+          {a.description}
+          {"”"}
         </span>
       ) : (
-        <span style={{ flex: 1 }} />
+        <span className="flex-1" />
       )}
 
       <span
-        style={{ fontSize: 11, color: color.text.faint, flexShrink: 0 }}
+        className="text-[11px] text-(--text-02) shrink-0"
         title={`Started ${absoluteTime(
           a.registered_at,
         )} · Expires ${absoluteTime(a.expires_at)}`}
       >
-        {relativeTime(a.registered_at, "short")} · expires{" "}
+        {relativeTime(a.registered_at, "short")} {"·"} expires{" "}
         {relativeTime(a.expires_at, "short")}
       </span>
     </li>
@@ -3005,54 +2482,27 @@ function ActiveSessionRow({
 }) {
   return (
     <li
-      style={{
-        padding: "10px 12px",
-        borderBottom: isLast ? "none" : `1px solid ${color.border.subtle}`,
-        fontSize: 13,
-        display: "flex",
-        alignItems: "center",
-        gap: 10,
-        whiteSpace: "nowrap",
-        overflow: "hidden",
-      }}
+      className={
+        `py-[10px] px-3 text-[13px] flex items-center gap-[10px] whitespace-nowrap overflow-hidden` +
+        (isLast ? `` : ` border-b border-(--border-01)`)
+      }
     >
-      <span
-        style={{
-          flexShrink: 0,
-          fontSize: 10,
-          fontWeight: 600,
-          padding: "1px 6px",
-          borderRadius: radius.xs,
-          background: color.accent.subtleBg,
-          color: color.accent.subtleFg,
-          textTransform: "uppercase",
-          letterSpacing: 0.3,
-        }}
-      >
+      <span className="shrink-0 text-[10px] font-semibold py-[1px] px-[6px] rounded-(--border-radius-04) bg-(--background-tint-03) text-(--text-05) uppercase tracking-[0.3px]">
         {s.status}
       </span>
 
-      <span
-        style={{ fontWeight: 500, color: color.text.primary, flexShrink: 0 }}
-      >
-        {s.tool_id}
-      </span>
+      <span className="font-medium text-(--text-05) shrink-0">{s.tool_id}</span>
 
-      <span style={{ flex: 1 }} />
+      <span className="flex-1" />
 
       <span
-        style={{ fontSize: 11, color: color.text.faint, flexShrink: 0 }}
+        className="text-[11px] text-(--text-02) shrink-0"
         title={`Started ${absoluteTime(s.started_at)}`}
       >
         started {relativeTime(s.started_at, "short")}
       </span>
 
-      <Button
-        type="button"
-        variant="default"
-        size="sm"
-        onClick={onClose}
-      >
+      <Button type="button" variant="default" size="sm" onClick={onClose}>
         Close
       </Button>
     </li>
@@ -3075,30 +2525,9 @@ function FilenameRow({
   placeholder?: string;
 }) {
   return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "stretch",
-        border: `1px solid ${color.border.default}`,
-        borderRadius: radius.sm,
-        background: color.bg.page,
-        overflow: "hidden",
-        flexShrink: 0,
-      }}
-    >
+    <div className="flex items-stretch border border-(--border-01) rounded-(--border-radius-04) bg-(--background-tint-00) overflow-hidden shrink-0">
       {parent && (
-        <span
-          style={{
-            display: "flex",
-            alignItems: "center",
-            padding: "0 10px",
-            background: color.bg.sunken,
-            borderRight: `1px solid ${color.border.default}`,
-            color: color.text.secondary,
-            fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-            fontSize: 13,
-          }}
-        >
+        <span className="flex items-center px-[10px] bg-(--background-tint-02) border-r border-(--border-01) text-(--text-04) font-mono text-[13px]">
           {parent}/
         </span>
       )}
@@ -3110,29 +2539,11 @@ function FilenameRow({
         placeholder={placeholder}
         disabled={disabled}
         spellCheck={false}
-        style={{
-          flex: 1,
-          padding: "8px 10px",
-          border: "none",
-          outline: "none",
-          fontSize: 14,
-          fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-          background: "transparent",
-        }}
+        className="flex-1 py-2 px-[10px] border-none outline-none text-sm font-mono bg-transparent"
       />
       <span
         aria-hidden
-        style={{
-          display: "flex",
-          alignItems: "center",
-          padding: "0 10px",
-          background: color.bg.sunken,
-          borderLeft: `1px solid ${color.border.default}`,
-          color: color.text.secondary,
-          fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-          fontSize: 13,
-          fontWeight: 600,
-        }}
+        className="flex items-center px-[10px] bg-(--background-tint-02) border-l border-(--border-01) text-(--text-04) font-mono text-[13px] font-semibold"
       >
         .md
       </span>

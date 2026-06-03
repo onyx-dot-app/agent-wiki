@@ -1,16 +1,15 @@
 "use client";
 
-import { useEffect, useMemo, useState, type CSSProperties, type FormEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 
 import { Button } from "@onyx-ai/opal/components";
 import { BackLink, PageHeader } from "@/components/common/PageHeader";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { apiFetch } from "@/lib/api";
 import { useRequireAuth } from "@/lib/auth";
-import { color, radius } from "@/lib/theme";
 import { setLocalThemePreview } from "@/lib/theme-provider";
-import { useIsMobile } from "@/lib/viewport";
 import type { DefaultLanding, ThemeSetting, UserSettings } from "@/types";
+import styles from "./page.module.css";
 
 const DEFAULT_SETTINGS: UserSettings = {
   theme: "system",
@@ -42,18 +41,17 @@ const COMMON_TIMEZONES = [
 
 export default function SettingsPage() {
   const { user, loading, updateSettings, updateProfile } = useRequireAuth();
-  const isMobile = useIsMobile();
 
   if (loading || !user) {
     return (
-      <main style={{ padding: isMobile ? 16 : 32 }}>
+      <main className={styles.loading}>
         <LoadingSpinner center />
       </main>
     );
   }
 
   return (
-    <main style={{ padding: isMobile ? "16px 12px" : "24px 32px", maxWidth: 720 }}>
+    <main className={styles.main}>
         <BackLink href="/" label="← Home" />
         <PageHeader
           title="Personal settings"
@@ -74,17 +72,8 @@ export default function SettingsPage() {
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <section style={{ marginTop: 24 }}>
-      <h2
-        style={{
-          margin: "0 0 12px",
-          fontSize: 14,
-          fontWeight: 600,
-          textTransform: "uppercase",
-          letterSpacing: 0.4,
-          color: color.text.muted,
-        }}
-      >
+    <section className="mt-6">
+      <h2 className="m-0 mb-3 text-sm font-semibold uppercase tracking-[0.4px] text-(--text-03)">
         {title}
       </h2>
       {children}
@@ -127,9 +116,9 @@ function ProfileForm({
   }
 
   return (
-    <form onSubmit={onSubmit} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+    <form onSubmit={onSubmit} className="flex flex-col gap-4">
       <label>
-        <div style={lblStyle}>Display name</div>
+        <div className={lblClass}>Display name</div>
         <input
           value={name}
           onChange={(e) => {
@@ -139,15 +128,15 @@ function ProfileForm({
           }}
           placeholder="e.g. Ada Lovelace"
           maxLength={200}
-          style={inputStyle}
+          className={inputClass}
         />
-        <div style={hintStyle}>
+        <div className={hintClass}>
           Shown in the app header and on activity attributed to you. Leave blank to fall back to your email.
         </div>
       </label>
 
-      {error && <div style={{ color: color.state.danger.fg }}>{error}</div>}
-      {saved && <div style={{ color: color.state.success.fg }}>Saved.</div>}
+      {error && <div className="text-(--status-text-error-05)">{error}</div>}
+      {saved && <div className="text-(--status-text-success-05)">Saved.</div>}
       <div>
         <Button type="submit" variant="action" disabled={saving || !dirty}>
           {saving ? "Saving…" : "Save"}
@@ -222,29 +211,29 @@ function SettingsForm({
   }
 
   return (
-    <form onSubmit={onSubmit} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+    <form onSubmit={onSubmit} className="flex flex-col gap-4">
       <label>
-        <div style={lblStyle}>Theme</div>
+        <div className={lblClass}>Theme</div>
         <select
           value={draft.theme}
           onChange={(e) => pickTheme(e.target.value as ThemeSetting)}
-          style={inputStyle}
+          className={inputClass}
         >
           <option value="system">System (match OS)</option>
           <option value="light">Light</option>
           <option value="dark">Dark</option>
         </select>
-        <div style={hintStyle}>Visual chrome of the app on this account.</div>
+        <div className={hintClass}>Visual chrome of the app on this account.</div>
       </label>
 
       <label>
-        <div style={lblStyle}>Timezone</div>
+        <div className={lblClass}>Timezone</div>
         {tzCustom ? (
           <input
             value={draft.timezone}
             onChange={(e) => update("timezone", e.target.value)}
             placeholder="e.g. America/Los_Angeles"
-            style={inputStyle}
+            className={inputClass}
           />
         ) : (
           <select
@@ -256,7 +245,7 @@ function SettingsForm({
               }
               update("timezone", e.target.value);
             }}
-            style={inputStyle}
+            className={inputClass}
           >
             {COMMON_TIMEZONES.map((tz) => (
               <option key={tz} value={tz}>
@@ -266,7 +255,7 @@ function SettingsForm({
             <option value="__custom__">Other…</option>
           </select>
         )}
-        <div style={hintStyle}>
+        <div className={hintClass}>
           Used for timestamps and scheduled-trigger displays.
           {tzCustom && (
             <>
@@ -279,7 +268,7 @@ function SettingsForm({
                     update("timezone", "UTC");
                   }
                 }}
-                style={linkButtonStyle}
+                className="bg-transparent border-none p-0 text-xs text-(--text-03) cursor-pointer underline"
               >
                 Pick from common list
               </button>
@@ -289,21 +278,21 @@ function SettingsForm({
       </label>
 
       <label>
-        <div style={lblStyle}>Default landing page</div>
+        <div className={lblClass}>Default landing page</div>
         <select
           value={draft.default_landing}
           onChange={(e) => update("default_landing", e.target.value as DefaultLanding)}
-          style={inputStyle}
+          className={inputClass}
         >
           <option value="wiki_home">Wiki home</option>
           <option value="recent">Recently edited</option>
           <option value="last_viewed">Last viewed page</option>
         </select>
-        <div style={hintStyle}>Where the app opens after sign-in.</div>
+        <div className={hintClass}>Where the app opens after sign-in.</div>
       </label>
 
-      {error && <div style={{ color: color.state.danger.fg }}>{error}</div>}
-      {saved && <div style={{ color: color.state.success.fg }}>Saved.</div>}
+      {error && <div className="text-(--status-text-error-05)">{error}</div>}
+      {saved && <div className="text-(--status-text-success-05)">Saved.</div>}
       <div>
         <Button type="submit" variant="action" disabled={saving || !dirty}>
           {saving ? "Saving…" : "Save"}
@@ -360,22 +349,22 @@ function ChatModelForm({
     : "leave blank to use agent default";
 
   return (
-    <form onSubmit={onSubmit} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+    <form onSubmit={onSubmit} className="flex flex-col gap-4">
       <label>
-        <div style={lblStyle}>Chat model</div>
+        <div className={lblClass}>Chat model</div>
         <input
           value={chatModel}
           onChange={(e) => { setChatModel(e.target.value); setSaved(false); setError(null); }}
           placeholder={placeholder}
-          style={inputStyle}
+          className={inputClass}
         />
-        <div style={hintStyle}>
+        <div className={hintClass}>
           Override the model used in your chat sessions. Leave blank to use the admin-configured agent default
           {llmStatus?.configured ? ` (currently ${llmStatus.provider} / ${llmStatus.model})` : ""}.
         </div>
       </label>
-      {error && <div style={{ color: color.state.danger.fg }}>{error}</div>}
-      {saved && <div style={{ color: color.state.success.fg }}>Saved.</div>}
+      {error && <div className="text-(--status-text-error-05)">{error}</div>}
+      {saved && <div className="text-(--status-text-success-05)">Saved.</div>}
       <div>
         <Button type="submit" variant="action" disabled={saving}>
           {saving ? "Saving…" : "Save"}
@@ -385,27 +374,7 @@ function ChatModelForm({
   );
 }
 
-const inputStyle: CSSProperties = {
-  width: "100%",
-  padding: "8px 10px",
-  boxSizing: "border-box",
-  border: `1px solid ${color.border.default}`,
-  borderRadius: radius.sm,
-  fontSize: 14,
-};
-const lblStyle: CSSProperties = { marginBottom: 4, fontSize: 13, fontWeight: 500 };
-const hintStyle: CSSProperties = {
-  marginTop: 4,
-  fontSize: 12,
-  color: color.text.muted,
-  lineHeight: 1.5,
-};
-const linkButtonStyle: CSSProperties = {
-  background: "transparent",
-  border: "none",
-  padding: 0,
-  fontSize: 12,
-  color: color.text.muted,
-  cursor: "pointer",
-  textDecoration: "underline",
-};
+const inputClass =
+  "w-full py-2 px-[10px] box-border border border-(--border-01) rounded-(--border-radius-04) text-sm";
+const lblClass = "mb-1 text-[13px] font-medium";
+const hintClass = "mt-1 text-xs text-(--text-03) leading-[1.5]";

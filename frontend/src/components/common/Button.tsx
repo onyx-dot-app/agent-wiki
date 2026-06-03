@@ -6,8 +6,6 @@ import {
   type CSSProperties,
 } from "react";
 
-import { color, radius } from "@/lib/theme";
-
 // Button variants used across the app:
 //
 // - primary  — near-black accent surface; one per row at most
@@ -49,37 +47,37 @@ export const Button = forwardRef<HTMLButtonElement, Props>(function Button(
 
 function sizeStyle(size: ButtonSize): CSSProperties {
   if (size === "sm") {
-    return { padding: "6px 12px", fontSize: 12, borderRadius: radius.sm };
+    return { padding: "6px 12px", fontSize: 12, borderRadius: "var(--border-radius-04)" };
   }
-  return { padding: "8px 14px", fontSize: 13, borderRadius: radius.md };
+  return { padding: "8px 14px", fontSize: 13, borderRadius: "var(--border-radius-08)" };
 }
 
 function variantStyle(variant: ButtonVariant): CSSProperties {
   switch (variant) {
     case "primary":
       return {
-        background: color.accent.bg,
-        color: color.accent.fg,
-        border: `1px solid ${color.accent.bg}`,
+        background: "var(--background-tint-inverted-00)",
+        color: "var(--text-inverted-05)",
+        border: "1px solid var(--background-tint-inverted-00)",
       };
     case "danger":
       return {
-        background: color.bg.page,
-        color: color.state.danger.fg,
-        border: `1px solid ${color.state.danger.border}`,
+        background: "var(--background-tint-00)",
+        color: "var(--status-text-error-05)",
+        border: "1px solid var(--status-error-02)",
       };
     case "ghost":
       return {
         background: "transparent",
-        color: color.text.primary,
+        color: "var(--text-05)",
         border: "1px solid transparent",
       };
     case "secondary":
     default:
       return {
-        background: color.bg.page,
-        color: color.text.primary,
-        border: `1px solid ${color.border.default}`,
+        background: "var(--background-tint-00)",
+        color: "var(--text-05)",
+        border: "1px solid var(--border-01)",
       };
   }
 }

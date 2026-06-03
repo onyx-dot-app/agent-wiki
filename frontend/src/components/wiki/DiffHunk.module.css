@@ -5,7 +5,7 @@
 
 .context {
   padding: 0 12px;
-  color: var(--color-text-primary);
+  color: var(--text-05);
 }
 
 /* Add + Remove block tokens (Figma 284:22702 / 284:22725).

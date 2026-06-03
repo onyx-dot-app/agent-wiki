@@ -8,7 +8,6 @@ import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { BackLink, PageHeader } from "@/components/common/PageHeader";
 import { RequireAdmin } from "@/components/RequireAdmin";
 import { apiFetch } from "@/lib/api";
-import { color, radius } from "@/lib/theme";
 import { useIsMobile } from "@/lib/viewport";
 
 interface IngestSettings {
@@ -51,7 +50,7 @@ export default function AdminIngestPage() {
   const isMobile = useIsMobile();
   return (
     <RequireAdmin>
-      <main style={{ padding: isMobile ? "16px 12px" : "24px 32px", maxWidth: 720 }}>
+      <main className={`max-w-[720px] ${isMobile ? "px-3 py-4" : "px-8 py-6"}`}>
         <BackLink />
         <PageHeader
           title="Onyx connection"
@@ -151,16 +150,16 @@ function IngestForm() {
   const dirty = maxDocChars !== String(settings.max_doc_chars);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+    <div className="flex flex-col gap-6">
       {/* Connection details */}
       <section>
-        <h3 style={{ margin: "0 0 12px", fontSize: 14, fontWeight: 600 }}>Connection details</h3>
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <h3 className="m-0 mb-3 text-sm font-semibold">Connection details</h3>
+        <div className="flex flex-col gap-3">
           {/* Base URL */}
           <div>
-            <div style={lblStyle}>Base URL</div>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <span style={{ fontFamily: "ui-monospace, monospace", fontSize: 13, color: color.text.primary }}>
+            <div className="mb-1 text-[13px] font-medium">Base URL</div>
+            <div className="flex items-center gap-2">
+              <span className="font-mono text-[13px] text-(--text-05)">
                 {baseUrl}/api/documents/ingest
               </span>
               <Button
@@ -176,14 +175,14 @@ function IngestForm() {
 
           {/* API Key */}
           <div>
-            <div style={lblStyle}>API key</div>
-            <div style={{ display: "flex", gap: 8 }}>
+            <div className="mb-1 text-[13px] font-medium">API key</div>
+            <div className="flex gap-2">
               <input
                 readOnly
                 type={keyVisible ? "text" : "password"}
                 value={settings.api_key ?? ""}
                 placeholder={settings.api_key ? undefined : "No key yet — click Regenerate"}
-                style={{ ...inputStyle, flex: 1, fontFamily: settings.api_key ? "ui-monospace, monospace" : undefined }}
+                className={`flex-1 w-full box-border py-2 px-[10px] border border-(--border-01) rounded-(--border-radius-04) text-sm${settings.api_key ? " font-mono" : ""}`}
               />
               {settings.api_key && keyVisible && (
                 <Button
@@ -210,21 +209,21 @@ function IngestForm() {
       </section>
 
       {/* Max doc size */}
-      <form onSubmit={onSubmit} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>Ingest settings</h3>
+      <form onSubmit={onSubmit} className="flex flex-col gap-3">
+        <h3 className="m-0 text-sm font-semibold">Ingest settings</h3>
         <label>
-          <div style={lblStyle}>Max document size (characters)</div>
+          <div className="mb-1 text-[13px] font-medium">Max document size (characters)</div>
           <input
             type="number"
             min={1000}
             max={5000000}
             value={maxDocChars}
             onChange={(e) => setMaxDocChars(e.target.value)}
-            style={{ ...inputStyle, width: 160 }}
+            className="w-[160px] box-border py-2 px-[10px] border border-(--border-01) rounded-(--border-radius-04) text-sm"
           />
         </label>
-        {error && <div style={{ color: color.state.danger.fg }}>{error}</div>}
-        {saved && <div style={{ color: color.state.success.fg }}>{saved}</div>}
+        {error && <div className="text-(--status-text-error-05)">{error}</div>}
+        {saved && <div className="text-(--status-text-success-05)">{saved}</div>}
         <div>
           <Button type="submit" variant="action" disabled={saving || !dirty}>
             {saving ? "Saving…" : "Save"}
@@ -232,7 +231,7 @@ function IngestForm() {
         </div>
       </form>
 
-      <div style={{ borderTop: `1px solid ${color.border.subtle}` }} />
+      <div className="border-t border-(--border-01)" />
 
       <SelectorModelSection settings={llmSettings} onSaved={() => void load()} />
     </div>
@@ -281,55 +280,36 @@ function SelectorModelSection({ settings, onSaved }: { settings: LLMSettings; on
 
   return (
     <section>
-      <h3 style={{ margin: "0 0 4px", fontSize: 14, fontWeight: 600 }}>Selector model</h3>
-      <div style={{ color: color.text.muted, fontSize: 13, marginBottom: 12 }}>
+      <h3 className="m-0 mb-1 text-sm font-semibold">Selector model</h3>
+      <div className="text-(--text-03) text-[13px] mb-3">
         A faster, cheaper model that screens incoming documents before the main model decides what to update.
         Helps reduce cost when many documents are being pushed. Leave unset to send all documents straight to the main model.
       </div>
       {!editing ? (
-        <div style={{
-          display: "flex", alignItems: "center", justifyContent: "space-between",
-          padding: "12px 16px", border: `1px solid ${color.border.default}`,
-          borderRadius: radius.md, background: color.bg.panel,
-        }}>
-          <span style={{ fontSize: 14, color: selModel && selModel !== settings.model ? color.text.primary : color.text.muted }}>
+        <div className="flex items-center justify-between py-3 px-4 border border-(--border-01) rounded-(--border-radius-08) bg-(--background-tint-01)">
+          <span className={`text-sm ${selModel && selModel !== settings.model ? "text-(--text-05)" : "text-(--text-03)"}`}>
             {activeLabel}
           </span>
           <Button size="sm" variant="default" onClick={() => setEditing(true)} disabled={availableProviders.length === 0}>Edit</Button>
         </div>
       ) : (
-        <div style={{
-          border: `1px solid ${color.border.default}`,
-          borderRadius: radius.md, background: color.bg.panel,
-          display: "flex", flexDirection: "column",
-        }}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 4, padding: 12 }}>
+        <div className="border border-(--border-01) rounded-(--border-radius-08) bg-(--background-tint-01) flex flex-col">
+          <div className="flex flex-col gap-1 p-3">
             {hasNoModels && (
-              <div style={{ fontSize: 13, color: color.text.muted, padding: "4px 0 8px" }}>
+              <div className="text-[13px] text-(--text-03) py-1 pb-2">
                 No models configured. Add models on the{" "}
-                <a href="/admin/language-models" style={{ color: color.accent.fg }}>Language models</a> page first.
+                <a href="/admin/language-models" className="text-(--text-inverted-05)">Language models</a> page first.
               </div>
             )}
             <button
               type="button"
               onClick={() => setSelModel("")}
-              style={{
-                display: "flex", alignItems: "center", gap: 12, padding: "10px 12px",
-                border: `1px solid ${selModel === "" ? color.accent.subtleBorder : color.border.default}`,
-                borderRadius: radius.sm,
-                background: selModel === "" ? color.accent.subtleBg : color.bg.page,
-                cursor: "pointer", textAlign: "left",
-              }}
+              className={`flex items-center gap-3 py-[10px] px-3 border rounded-(--border-radius-04) cursor-pointer text-left ${selModel === "" ? "border-(--border-01) bg-(--background-tint-03)" : "border-(--border-01) bg-(--background-tint-00)"}`}
             >
-              <div style={{
-                width: 16, height: 16, borderRadius: "50%", flexShrink: 0,
-                border: selModel === "" ? "none" : `1.5px solid ${color.border.strong}`,
-                background: selModel === "" ? color.accent.bg : "transparent",
-                display: "flex", alignItems: "center", justifyContent: "center",
-              }}>
-                {selModel === "" && <div style={{ width: 8, height: 8, borderRadius: "50%", background: color.accent.fg }} />}
+              <div className={`w-4 h-4 rounded-full shrink-0 flex items-center justify-center ${selModel === "" ? "bg-(--background-tint-inverted-00)" : "border-[1.5px] border-(--border-02) bg-transparent"}`}>
+                {selModel === "" && <div className="w-2 h-2 rounded-full bg-(--text-inverted-05)" />}
               </div>
-              <span style={{ fontSize: 13, color: selModel === "" ? color.accent.subtleFg : color.text.muted, fontStyle: "italic" }}>
+              <span className={`text-[13px] italic ${selModel === "" ? "text-(--text-05)" : "text-(--text-03)"}`}>
                 None — all documents go to the main model
               </span>
             </button>
@@ -340,37 +320,26 @@ function SelectorModelSection({ settings, onSaved }: { settings: LLMSettings; on
                   key={`${p}:${m}`}
                   type="button"
                   onClick={() => setSelModel(m)}
-                  style={{
-                    display: "flex", alignItems: "center", gap: 12, padding: "10px 12px",
-                    border: `1px solid ${isSelected ? color.accent.subtleBorder : color.border.default}`,
-                    borderRadius: radius.sm,
-                    background: isSelected ? color.accent.subtleBg : color.bg.page,
-                    cursor: "pointer", textAlign: "left",
-                  }}
+                  className={`flex items-center gap-3 py-[10px] px-3 border rounded-(--border-radius-04) cursor-pointer text-left ${isSelected ? "border-(--border-01) bg-(--background-tint-03)" : "border-(--border-01) bg-(--background-tint-00)"}`}
                 >
-                  <div style={{
-                    width: 16, height: 16, borderRadius: "50%", flexShrink: 0,
-                    border: isSelected ? "none" : `1.5px solid ${color.border.strong}`,
-                    background: isSelected ? color.accent.bg : "transparent",
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                  }}>
-                    {isSelected && <div style={{ width: 8, height: 8, borderRadius: "50%", background: color.accent.fg }} />}
+                  <div className={`w-4 h-4 rounded-full shrink-0 flex items-center justify-center ${isSelected ? "bg-(--background-tint-inverted-00)" : "border-[1.5px] border-(--border-02) bg-transparent"}`}>
+                    {isSelected && <div className="w-2 h-2 rounded-full bg-(--text-inverted-05)" />}
                   </div>
-                  <span style={{ fontSize: 13, fontWeight: 500, color: isSelected ? color.accent.subtleFg : color.text.secondary, flexShrink: 0 }}>
+                  <span className={`text-[13px] font-medium shrink-0 ${isSelected ? "text-(--text-05)" : "text-(--text-04)"}`}>
                     {PROVIDER_LABEL[p]}
                   </span>
-                  <span style={{ fontSize: 13, color: isSelected ? color.accent.subtleFg : color.text.muted, fontFamily: "ui-monospace, monospace" }}>
+                  <span className={`text-[13px] font-mono ${isSelected ? "text-(--text-05)" : "text-(--text-03)"}`}>
                     {m}
                   </span>
                   {m === settings.model && (
-                    <span style={{ fontSize: 11, color: color.text.muted, marginLeft: "auto" }}>same as main — pre-filter disabled</span>
+                    <span className="text-[11px] text-(--text-03) ml-auto">same as main — pre-filter disabled</span>
                   )}
                 </button>
               );
             })}
           </div>
-          {error && <div style={{ color: color.state.danger.fg, fontSize: 13, padding: "0 12px 8px" }}>{error}</div>}
-          <div style={{ display: "flex", gap: 8, padding: "4px 12px 12px" }}>
+          {error && <div className="text-(--status-text-error-05) text-[13px] px-3 pb-2">{error}</div>}
+          <div className="flex gap-2 px-3 pt-1 pb-3">
             <Button type="button" variant="action" size="sm" disabled={saving} onClick={() => void onSave()}>
               {saving ? "Saving…" : "Save"}
             </Button>
@@ -383,19 +352,3 @@ function SelectorModelSection({ settings, onSaved }: { settings: LLMSettings; on
     </section>
   );
 }
-
-const inputStyle: React.CSSProperties = {
-  width: "100%",
-  padding: "8px 10px",
-  boxSizing: "border-box",
-  border: `1px solid ${color.border.default}`,
-  borderRadius: radius.sm,
-  fontSize: 14,
-};
-const lblStyle: React.CSSProperties = { marginBottom: 4, fontSize: 13, fontWeight: 500 };
-const hintStyle: React.CSSProperties = {
-  fontWeight: 400,
-  color: color.text.muted,
-  fontFamily: "ui-monospace, monospace",
-  fontSize: 12,
-};

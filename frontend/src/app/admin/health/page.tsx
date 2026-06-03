@@ -6,7 +6,6 @@ import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { BackLink, PageHeader } from "@/components/common/PageHeader";
 import { RequireAdmin } from "@/components/RequireAdmin";
 import { useHealth } from "@/lib/health";
-import { color, radius } from "@/lib/theme";
 import { useIsMobile } from "@/lib/viewport";
 
 const POLL_MS = 5000;
@@ -36,8 +35,8 @@ export default function AdminHealthPage() {
   const backendUp = !error;
   const statusColor =
     backendUp && data?.status === "ok"
-      ? color.state.success.fg
-      : color.state.danger.fg;
+      ? "var(--status-text-success-05)"
+      : "var(--status-text-error-05)";
   const statusLabel = !backendUp
     ? "Backend unreachable"
     : data?.status === "ok"
@@ -46,52 +45,39 @@ export default function AdminHealthPage() {
 
   return (
     <RequireAdmin>
-      <main style={{ padding: isMobile ? "16px 12px" : "24px 32px", height: "100vh", overflowY: "auto" }}>
+      <main
+        style={{ padding: isMobile ? "16px 12px" : "24px 32px" }}
+        className="h-screen overflow-y-auto"
+      >
         <BackLink />
         <PageHeader
           title="Health"
           description={`Backend liveness and queue depth. Polls every ${POLL_MS / 1000}s.`}
         />
 
-        <section
-          style={{
-            padding: 16,
-            border: `1px solid ${color.border.default}`,
-            borderRadius: radius.md,
-            background: color.bg.page,
-            marginBottom: 20,
-            display: "flex",
-            alignItems: "center",
-            gap: 12,
-          }}
-        >
+        <section className="p-4 border border-(--border-01) rounded-(--border-radius-08) bg-(--background-tint-00) mb-5 flex items-center gap-3">
           <span
             aria-hidden
-            style={{
-              width: 12,
-              height: 12,
-              borderRadius: "50%",
-              background: statusColor,
-              flexShrink: 0,
-            }}
+            style={{ background: statusColor }}
+            className="w-3 h-3 rounded-full shrink-0"
           />
-          <div style={{ flex: 1 }}>
-            <div style={{ fontWeight: 600, fontSize: 14 }}>{statusLabel}</div>
+          <div className="flex-1">
+            <div className="font-semibold text-sm">{statusLabel}</div>
             {error && (
-              <div style={{ color: color.state.danger.fg, fontSize: 12, marginTop: 4 }}>{error}</div>
+              <div className="text-(--status-text-error-05) text-xs mt-1">{error}</div>
             )}
           </div>
           {lastUpdated && (
-            <div style={{ fontSize: 11, color: color.text.faint }}>
+            <div className="text-[11px] text-(--text-02)">
               updated {lastUpdated.toLocaleTimeString()}
             </div>
           )}
         </section>
 
-        <h2 style={{ fontSize: 16, fontWeight: 600, margin: "0 0 10px" }}>Queues</h2>
+        <h2 className="text-base font-semibold m-0 mb-[10px]">Queues</h2>
         {!data && !error && <LoadingSpinner />}
         {data && (
-          <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+          <ul className="list-none p-0 m-0">
             {data.queues.map((q) => {
               const haveCounts =
                 q.ok && q.ready != null && q.delayed != null && q.in_flight != null;
@@ -105,77 +91,51 @@ export default function AdminHealthPage() {
                   : 0;
               const barColor =
                 pct >= 90
-                  ? color.state.danger.fg
+                  ? "var(--status-text-error-05)"
                   : pct >= 70
-                    ? color.state.warning.fg
-                    : color.accent.bg;
+                    ? "var(--status-text-warning-05)"
+                    : "var(--background-tint-inverted-00)";
               return (
                 <li
                   key={q.name}
-                  style={{
-                    padding: "14px 16px",
-                    border: `1px solid ${color.border.default}`,
-                    borderRadius: radius.md,
-                    marginBottom: 10,
-                    background: color.bg.page,
-                  }}
+                  className="px-4 py-[14px] border border-(--border-01) rounded-(--border-radius-08) mb-[10px] bg-(--background-tint-00)"
                 >
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "baseline",
-                      marginBottom: 8,
-                    }}
-                  >
-                    <div style={{ fontSize: 14 }}>{QUEUE_LABELS[q.name] ?? q.name}</div>
-                    <div style={{ fontSize: 12, color: color.text.secondary }}>
+                  <div className="flex justify-between items-baseline mb-2">
+                    <div className="text-sm">{QUEUE_LABELS[q.name] ?? q.name}</div>
+                    <div className="text-xs text-(--text-04)">
                       {haveCounts && pending != null ? (
                         <>
                           <strong>{pending.toLocaleString()}</strong> /{" "}
                           {q.limit.toLocaleString()} ({pct}%)
                         </>
                       ) : (
-                        <span style={{ color: color.state.danger.fg }}>{q.error ?? "unknown"}</span>
+                        <span className="text-(--status-text-error-05)">{q.error ?? "unknown"}</span>
                       )}
                     </div>
                   </div>
                   <div
-                    style={{
-                      height: 6,
-                      background: color.bg.sunken,
-                      borderRadius: radius.xs,
-                      overflow: "hidden",
-                      marginBottom: haveCounts ? 8 : 0,
-                    }}
+                    style={{ marginBottom: haveCounts ? 8 : 0 }}
+                    className="h-[6px] bg-(--background-tint-02) rounded-(--border-radius-04) overflow-hidden"
                   >
                     <div
                       style={{
                         width: `${pct}%`,
-                        height: "100%",
                         background: barColor,
-                        transition: "width 200ms ease",
                       }}
+                      className="h-full transition-[width] duration-200 ease-[ease]"
                     />
                   </div>
                   {haveCounts && (
-                    <div
-                      style={{
-                        display: "flex",
-                        gap: 16,
-                        fontSize: 11,
-                        color: color.text.muted,
-                      }}
-                    >
+                    <div className="flex gap-4 text-[11px] text-(--text-03)">
                       <span>
-                        ready <strong style={{ color: color.text.primary }}>{q.ready}</strong>
+                        ready <strong className="text-(--text-05)">{q.ready}</strong>
                       </span>
                       <span title="Tasks scheduled for a future run time — waiting their turn, not stuck.">
-                        scheduled <strong style={{ color: color.text.primary }}>{q.delayed}</strong>
+                        scheduled <strong className="text-(--text-05)">{q.delayed}</strong>
                       </span>
                       <span>
                         in flight{" "}
-                        <strong style={{ color: color.text.primary }}>{q.in_flight}</strong>
+                        <strong className="text-(--text-05)">{q.in_flight}</strong>
                       </span>
                     </div>
                   )}

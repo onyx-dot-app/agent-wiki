@@ -6,23 +6,23 @@
   font-size: 12px;
   font-weight: 500;
   border: 1px solid;
-  border-radius: var(--radius-pill);
+  border-radius: 9999px;
 }
 
 .ok {
-  color: var(--color-state-success-fg);
-  background: var(--color-state-success-bg);
-  border-color: var(--color-state-success-border);
+  color: var(--status-text-success-05);
+  background: var(--status-success-01);
+  border-color: var(--status-success-02);
 }
 
 .warn {
-  color: var(--color-state-warning-fg);
-  background: var(--color-state-warning-bg);
-  border-color: var(--color-state-warning-border);
+  color: var(--status-text-warning-05);
+  background: var(--status-warning-01);
+  border-color: var(--status-warning-02);
 }
 
 .muted {
-  color: var(--color-text-muted);
-  background: var(--color-bg-sunken);
-  border-color: var(--color-border-subtle);
+  color: var(--text-03);
+  background: var(--background-tint-02);
+  border-color: var(--border-01);
 }

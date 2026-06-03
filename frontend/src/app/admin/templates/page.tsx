@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState, type CSSProperties, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 
 import { Button } from "@onyx-ai/opal/components";
+import { SvgChevronDown, SvgChevronUp } from "@onyx-ai/opal/icons";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { BackLink, PageHeader } from "@/components/common/PageHeader";
 import { RequireAdmin } from "@/components/RequireAdmin";
@@ -14,14 +15,13 @@ import {
   useAdminTemplates,
   type DocumentTemplate,
 } from "@/lib/templates";
-import { color, radius, shadow } from "@/lib/theme";
 import { useIsMobile } from "@/lib/viewport";
 
 export default function AdminTemplatesPage() {
   const isMobile = useIsMobile();
   return (
     <RequireAdmin>
-      <main style={{ padding: isMobile ? "16px 12px" : "24px 32px", maxWidth: 960 }}>
+      <main className={`max-w-[960px] ${isMobile ? "py-4 px-3" : "py-6 px-8"}`}>
         <BackLink />
         <PageHeader
           title="Document templates"
@@ -43,7 +43,7 @@ function TemplatesList() {
   const [reorderError, setReorderError] = useState<string | null>(null);
 
   if (isLoading) return <LoadingSpinner />;
-  if (error) return <div style={{ color: color.state.danger.fg }}>{error.message}</div>;
+  if (error) return <div className="text-(--status-text-error-05)">{error.message}</div>;
 
   async function move(index: number, direction: -1 | 1) {
     const target = index + direction;
@@ -76,52 +76,27 @@ function TemplatesList() {
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <div style={{ display: "flex", justifyContent: "flex-end" }}>
+    <div className="flex flex-col gap-4">
+      <div className="flex justify-end">
         <Button variant="action" onClick={() => setEditing("new")}>
           New template
         </Button>
       </div>
       {reorderError && (
-        <div
-          style={{
-            padding: "8px 12px",
-            background: color.state.danger.bg,
-            border: `1px solid ${color.state.danger.border}`,
-            color: color.state.danger.fg,
-            borderRadius: radius.sm,
-            fontSize: 13,
-          }}
-        >
+        <div className="py-2 px-3 bg-(--status-error-01) border border-(--status-error-02) text-(--status-text-error-05) rounded-(--border-radius-04) text-[13px]">
           {reorderError}
         </div>
       )}
       {templates.length === 0 ? (
-        <div
-          style={{
-            padding: 24,
-            border: `1px dashed ${color.border.default}`,
-            borderRadius: radius.md,
-            color: color.text.muted,
-            textAlign: "center",
-          }}
-        >
+        <div className="p-6 border border-dashed border-(--border-01) rounded-(--border-radius-08) text-(--text-03) text-center">
           No templates yet. Click "New template" to define the first one.
         </div>
       ) : (
-        <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 8 }}>
+        <ul className="list-none p-0 m-0 flex flex-col gap-2">
           {templates.map((t, i) => (
             <li
               key={t.id}
-              style={{
-                padding: "12px 16px",
-                border: `1px solid ${color.border.default}`,
-                borderRadius: radius.md,
-                background: color.bg.page,
-                display: "flex",
-                alignItems: "center",
-                gap: 12,
-              }}
+              className="py-3 px-4 border border-(--border-01) rounded-(--border-radius-08) bg-(--background-tint-00) flex items-center gap-3"
             >
               <ReorderHandle
                 disabled={reordering !== null}
@@ -130,23 +105,14 @@ function TemplatesList() {
                 onUp={() => void move(i, -1)}
                 onDown={() => void move(i, 1)}
               />
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontWeight: 600, fontSize: 14 }}>{t.name}</div>
+              <div className="flex-1 min-w-0">
+                <div className="font-semibold text-sm">{t.name}</div>
                 {t.description && (
-                  <div
-                    style={{
-                      fontSize: 13,
-                      color: color.text.muted,
-                      marginTop: 2,
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
+                  <div className="text-[13px] text-(--text-03) mt-[2px] overflow-hidden text-ellipsis whitespace-nowrap">
                     {t.description}
                   </div>
                 )}
-                <div style={{ fontSize: 12, color: color.text.faint, marginTop: 4 }}>
+                <div className="text-xs text-(--text-02) mt-1">
                   {t.system_prompt ? "Has chat prompt" : "No chat prompt"} • Updated {t.updated_at}
                 </div>
               </div>
@@ -197,7 +163,7 @@ function ReorderHandle({
 }) {
   return (
     <div
-      style={{ display: "flex", flexDirection: "column", gap: 2, flexShrink: 0 }}
+      className="flex flex-col gap-[2px] shrink-0"
       aria-label="Reorder template"
     >
       <ArrowButton
@@ -234,24 +200,9 @@ function ArrowButton({
       disabled={disabled}
       title={title}
       aria-label={title}
-      style={{
-        width: 24,
-        height: 18,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        background: "transparent",
-        border: `1px solid ${color.border.default}`,
-        borderRadius: radius.xs,
-        color: color.text.secondary,
-        cursor: disabled ? "not-allowed" : "pointer",
-        opacity: disabled ? 0.35 : 1,
-        padding: 0,
-      }}
+      className={`w-[24px] h-[18px] flex items-center justify-center bg-transparent border border-(--border-01) rounded-(--border-radius-04) text-(--text-04) p-0 ${disabled ? "cursor-not-allowed opacity-35" : "cursor-pointer"}`}
     >
-      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-        {direction === "up" ? <path d="M6 15l6-6 6 6" /> : <path d="M6 9l6 6 6-6" />}
-      </svg>
+      {direction === "up" ? <SvgChevronUp size={10} /> : <SvgChevronDown size={10} />}
     </button>
   );
 }
@@ -306,85 +257,65 @@ function TemplateModal({
 
   return (
     <div
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: color.overlay,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        zIndex: 1000,
-        padding: 16,
-      }}
+      className="fixed inset-0 bg-(--mask-03) flex items-center justify-center z-[1000] p-4"
       onClick={onClose}
     >
       <form
         onSubmit={onSubmit}
         onClick={(e) => e.stopPropagation()}
-        style={{
-          background: color.bg.page,
-          borderRadius: radius.lg,
-          boxShadow: shadow.modal,
-          padding: 20,
-          width: "min(640px, 100%)",
-          maxHeight: "90vh",
-          overflowY: "auto",
-          display: "flex",
-          flexDirection: "column",
-          gap: 12,
-        }}
+        className="bg-(--background-tint-00) rounded-(--border-radius-12) shadow-(--shadow-modal) p-5 w-[min(640px,100%)] max-h-[90vh] overflow-y-auto flex flex-col gap-3"
       >
-        <h2 style={{ margin: 0, fontSize: 18 }}>
+        <h2 className="m-0 text-lg">
           {initial ? "Edit template" : "New template"}
         </h2>
 
         <label>
-          <div style={lblStyle}>Name *</div>
+          <div className={lblClass}>Name *</div>
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="e.g. Project brief, RFC, Meeting notes"
             required
-            style={inputStyle}
+            className={inputClass}
           />
         </label>
 
         <label>
-          <div style={lblStyle}>Description</div>
+          <div className={lblClass}>Description</div>
           <input
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             placeholder="Optional. Shown in the picker."
-            style={inputStyle}
+            className={inputClass}
           />
         </label>
 
         <label>
-          <div style={lblStyle}>Markdown body *</div>
+          <div className={lblClass}>Markdown body *</div>
           <textarea
             value={body}
             onChange={(e) => setBody(e.target.value)}
             placeholder="# Title&#10;&#10;## Section&#10;…"
             required
             rows={12}
-            style={{ ...inputStyle, fontFamily: "ui-monospace, monospace", resize: "vertical" }}
+            className={`${inputClass} font-mono resize-y`}
           />
         </label>
 
         <label>
-          <div style={lblStyle}>Chat system prompt</div>
+          <div className={lblClass}>Chat system prompt</div>
           <textarea
             value={systemPrompt}
             onChange={(e) => setSystemPrompt(e.target.value)}
             placeholder="Optional. Appended to the chat agent's default prompt while the user is drafting from this template."
             rows={5}
-            style={{ ...inputStyle, fontFamily: "ui-monospace, monospace", resize: "vertical" }}
+            className={`${inputClass} font-mono resize-y`}
           />
         </label>
 
-        {error && <div style={{ color: color.state.danger.fg, fontSize: 13 }}>{error}</div>}
+        {error && <div className="text-(--status-text-error-05) text-[13px]">{error}</div>}
 
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 4 }}>
+        <div className="flex justify-end gap-2 mt-1">
           <Button type="button" onClick={onClose} disabled={saving}>
             Cancel
           </Button>
@@ -397,12 +328,5 @@ function TemplateModal({
   );
 }
 
-const inputStyle: CSSProperties = {
-  width: "100%",
-  padding: "8px 10px",
-  boxSizing: "border-box",
-  border: `1px solid ${color.border.default}`,
-  borderRadius: radius.sm,
-  fontSize: 14,
-};
-const lblStyle: CSSProperties = { marginBottom: 4, fontSize: 13, fontWeight: 500 };
+const inputClass = "w-full py-2 px-[10px] box-border border border-(--border-01) rounded-(--border-radius-04) text-sm";
+const lblClass = "mb-1 text-[13px] font-medium";

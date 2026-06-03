@@ -5,7 +5,6 @@ import type { IconProps } from "@onyx-ai/opal/types";
 import type { ComponentType } from "react";
 
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
-import { color } from "@/lib/theme";
 import { relativeTime } from "@/lib/time";
 import {
   type CommitAgent,
@@ -58,45 +57,22 @@ export function HistoryPanel({
       style={{
         width: fullHeight ? "100%" : 400,
         height: fullHeight ? "100%" : undefined,
-        flexShrink: 0,
-        background: color.bg.panel,
         borderRadius: fullHeight ? 0 : 12,
-        display: "flex",
-        flexDirection: "column",
-        minHeight: 0,
-        padding: 8,
-        gap: 8,
       }}
+      className="shrink-0 bg-(--background-tint-01) flex flex-col min-h-0 p-2 gap-2"
     >
-      <div
-        style={{
-          display: "flex",
-          flexDirection: "row",
-          alignItems: "center",
-          gap: 4,
-          padding: 4,
-          flexShrink: 0,
-        }}
-      >
-        <div style={{ flex: 1, minWidth: 0 }}>
+      <div className="flex flex-row items-center gap-1 p-1 shrink-0">
+        <div className="flex-1 min-w-0">
           <Text font="main-ui-action" color="text-04">
             History
           </Text>
         </div>
         <Button icon={SvgX} prominence="tertiary" size="sm" tooltip="Close history" onClick={onClose} />
       </div>
-      <div
-        style={{
-          overflowY: "auto",
-          flex: 1,
-          display: "flex",
-          flexDirection: "column",
-          gap: 4,
-        }}
-      >
+      <div className="overflow-y-auto flex-1 flex flex-col gap-1">
         {error && <PanelMessage>{error}</PanelMessage>}
         {!error && commits === null && (
-          <div style={{ padding: 12 }}>
+          <div className="p-3">
             <LoadingSpinner />
           </div>
         )}
@@ -125,7 +101,7 @@ export function HistoryPanel({
 
 function PanelMessage({ children }: { children: string }) {
   return (
-    <div style={{ padding: 12 }}>
+    <div className="p-3">
       <Text font="secondary-body" color="text-03">
         {children}
       </Text>
@@ -192,15 +168,7 @@ function CommitRow({
 
 function Row({ children }: { children: React.ReactNode }) {
   return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        gap: 8,
-        width: "100%",
-        minWidth: 0,
-      }}
-    >
+    <div className="flex flex-col gap-2 w-full min-w-0">
       {children}
     </div>
   );
@@ -216,33 +184,16 @@ function HeaderLine({
   right: React.ReactNode;
 }) {
   return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 8,
-        width: "100%",
-        minWidth: 0,
-      }}
-    >
-      <div style={{ display: "flex", alignItems: "center", flexShrink: 0 }}>
+    <div className="flex flex-row items-center gap-2 w-full min-w-0">
+      <div className="flex items-center shrink-0">
         {avatars}
       </div>
-      <div
-        style={{
-          flex: 1,
-          minWidth: 0,
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          whiteSpace: "nowrap",
-        }}
-      >
+      <div className="flex-1 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
         <Text font="main-ui-action" color="text-04" nowrap maxLines={1}>
           {title}
         </Text>
       </div>
-      <div style={{ flexShrink: 0 }}>{right}</div>
+      <div className="shrink-0">{right}</div>
     </div>
   );
 }
@@ -259,33 +210,14 @@ function ActionLine({
   sourceTitle?: string | null;
 }) {
   return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 8,
-        width: "100%",
-        minWidth: 0,
-        fontSize: 12,
-        lineHeight: "16px",
-      }}
-    >
-      <div
-        style={{
-          flex: 1,
-          minWidth: 0,
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          whiteSpace: "nowrap",
-        }}
-      >
+    <div className="flex flex-row items-center gap-2 w-full min-w-0 text-xs leading-4">
+      <div className="flex-1 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
         <Text font="secondary-body" color="text-03" nowrap maxLines={1}>
           {label}
         </Text>
       </div>
       {stats ? (
-        <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+        <div className="flex gap-1 shrink-0">
           <Text font="secondary-mono" color="text-03" nowrap>
             {`+${stats.added}`}
           </Text>
@@ -301,13 +233,7 @@ function ActionLine({
           rel="noopener noreferrer"
           onClick={(e) => e.stopPropagation()}
           aria-label={sourceTitle ?? "Open source"}
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            color: "inherit",
-            textDecoration: "none",
-            flexShrink: 0,
-          }}
+          className="inline-flex items-center text-inherit no-underline shrink-0"
         >
           <Text font="secondary-body" color="text-03">
             ↗
@@ -320,32 +246,14 @@ function ActionLine({
 
 function TriggeredLine({ count }: { count: number }) {
   return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 4,
-        width: "100%",
-        minWidth: 0,
-        fontSize: 12,
-        lineHeight: "16px",
-      }}
-    >
+    <div className="flex flex-row items-center gap-1 w-full min-w-0 text-xs leading-4">
       <Text font="secondary-body" color="text-03" nowrap>
         Triggered
       </Text>
-      <span
-        style={{
-          display: "inline-flex",
-          alignItems: "center",
-          flexShrink: 0,
-          color: color.text.muted,
-        }}
-      >
+      <span className="inline-flex items-center shrink-0 text-(--text-03)">
         <SvgWorkflow style={{ width: 12, height: 12 }} />
       </span>
-      <span style={{ fontWeight: 600 }}>
+      <span className="font-semibold">
         <Text font="secondary-action" color="text-03" nowrap>
           {`${count} automation${count === 1 ? "" : "s"}`}
         </Text>
@@ -358,17 +266,6 @@ function TriggeredLine({ count }: { count: number }) {
 // render at identical size. box-sizing: border-box keeps the 1px border
 // inside the 20px box (otherwise content-box would inflate one of them).
 const AVATAR_SIZE = 20;
-const avatarBase = {
-  boxSizing: "border-box" as const,
-  width: AVATAR_SIZE,
-  height: AVATAR_SIZE,
-  borderRadius: 9999,
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  flexShrink: 0,
-  overflow: "hidden" as const,
-};
 
 /** Single-initial avatar. Inverts per theme via the --diff-avatar-*
  *  CSS vars defined in globals.css. */
@@ -377,13 +274,10 @@ function Avatar({ initial }: { initial: string }) {
     <div
       aria-hidden
       style={{
-        ...avatarBase,
-        background: "var(--diff-avatar-bg)",
-        color: "var(--diff-avatar-fg)",
-        border: "1px solid var(--diff-avatar-border)",
-        fontSize: 12,
-        fontWeight: 600,
+        width: AVATAR_SIZE,
+        height: AVATAR_SIZE,
       }}
+      className="box-border rounded-full flex items-center justify-center shrink-0 overflow-hidden bg-[var(--diff-avatar-bg)] text-[var(--diff-avatar-fg)] border border-[var(--diff-avatar-border)] text-xs font-semibold"
     >
       {initial}
     </div>
@@ -396,11 +290,10 @@ function LogoAvatar({ Logo }: { Logo: ComponentType<IconProps> }) {
   return (
     <div
       style={{
-        ...avatarBase,
-        marginLeft: -6,
-        background: color.bg.page,
-        border: "1px solid var(--diff-avatar-border)",
+        width: AVATAR_SIZE,
+        height: AVATAR_SIZE,
       }}
+      className="box-border rounded-full flex items-center justify-center shrink-0 overflow-hidden -ml-[6px] bg-(--background-tint-00) border border-[var(--diff-avatar-border)]"
     >
       <Logo style={{ width: 16, height: 16 }} />
     </div>

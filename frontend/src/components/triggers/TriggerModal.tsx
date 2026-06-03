@@ -27,7 +27,6 @@ import {
   type TriggerDestination,
   type TriggerKind,
 } from "@/lib/triggers";
-import { color, radius, shadow } from "@/lib/theme";
 
 interface Props {
   open: boolean;
@@ -226,29 +225,11 @@ export function TriggerModal({ open, initial, onClose, onSaved, lockScope }: Pro
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: color.overlay,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        zIndex: 100,
-      }}
+      className="fixed inset-0 bg-(--mask-03) flex items-center justify-center z-[100]"
     >
       <div
         aria-hidden
-        style={{
-          position: "absolute",
-          top: "50%",
-          left: "50%",
-          transform: "translate(-50%, -50%) translate(40px, 44px) rotate(-1.5deg)",
-          width: "min(560px, 92vw)",
-          filter: "blur(3.5px)",
-          opacity: 0.85,
-          pointerEvents: "none",
-          zIndex: 0,
-        }}
+        className="absolute top-1/2 left-1/2 translate-x-[calc(-50%+40px)] translate-y-[calc(-50%+44px)] rotate-[-1.5deg] w-[min(560px,92vw)] blur-[3.5px] opacity-85 pointer-events-none z-0"
       >
         <PreviewCard
           scope={EXAMPLE_SCOPE}
@@ -260,61 +241,48 @@ export function TriggerModal({ open, initial, onClose, onSaved, lockScope }: Pro
 
       <form
         onSubmit={onSubmit}
-        style={{
-          position: "relative",
-          background: color.bg.page,
-          borderRadius: radius.lg,
-          width: "min(560px, 92vw)",
-          maxHeight: "92vh",
-          overflowY: "auto",
-          padding: 24,
-          boxShadow: shadow.modal,
-          display: "flex",
-          flexDirection: "column",
-          gap: 16,
-          zIndex: 1,
-        }}
+        className="relative bg-(--background-tint-00) rounded-(--border-radius-12) max-h-[92vh] overflow-y-auto p-6 shadow-(--shadow-modal) flex flex-col gap-4 z-[1] w-[min(560px,92vw)]"
       >
         <div>
-          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600, color: color.text.primary }}>
+          <h2 className="m-0 text-lg font-semibold text-(--text-05)">
             {isEdit ? "Edit trigger" : "Create a trigger"}
           </h2>
-          <p style={{ margin: "6px 0 0", fontSize: 13, color: color.text.secondary, lineHeight: 1.55 }}>
+          <p className="mt-[6px] mb-0 text-[13px] text-(--text-04) leading-[1.55]">
             Triggers monitor documents or folders and send events when a
             specified condition is met. They can fire on document updates
             or on a recurring schedule.
           </p>
         </div>
 
-        <label style={fieldStyle}>
-          <span style={fieldLabelStyle}>When to run</span>
+        <label className="flex flex-col gap-1.5">
+          <span className="text-[11px] font-bold text-(--text-03) uppercase tracking-[0.06em]">When to run</span>
           <select
             value={kind}
             onChange={(e) => setKind(e.target.value as TriggerKind)}
             disabled={busy || isEdit}
-            style={{ ...inputStyle, cursor: isEdit ? "not-allowed" : "pointer" }}
+            className={`py-2 px-[10px] border border-(--border-01) rounded-(--border-radius-04) text-sm outline-none w-full box-border bg-(--background-tint-00) ${isEdit ? "cursor-not-allowed" : "cursor-pointer"}`}
           >
             <option value="delta">On a document update</option>
             <option value="schedule">On a schedule</option>
           </select>
           {isEdit && (
-            <span style={fieldHintStyle}>
+            <span className="text-xs text-(--text-03) leading-[1.4]">
               The trigger type can&rsquo;t be changed after creation. Delete
               and recreate to switch.
             </span>
           )}
         </label>
 
-        <label style={fieldStyle}>
-          <span style={fieldLabelStyle}>Watching</span>
+        <label className="flex flex-col gap-1.5">
+          <span className="text-[11px] font-bold text-(--text-03) uppercase tracking-[0.06em]">Watching</span>
           <input
             value={scopePath}
             onChange={(e) => setScopePath(e.target.value)}
             disabled={busy || lockScope}
             placeholder="projects/foo.md or projects"
-            style={inputStyle}
+            className="py-2 px-[10px] border border-(--border-01) rounded-(--border-radius-04) text-sm outline-none w-full box-border bg-(--background-tint-00)"
           />
-          <span style={fieldHintStyle}>
+          <span className="text-xs text-(--text-03) leading-[1.4]">
             e.g. <code>projects/foo.md</code> for one document,{" "}
             <code>projects</code> for a folder, or <code>/</code> to watch
             the whole wiki.
@@ -338,18 +306,18 @@ export function TriggerModal({ open, initial, onClose, onSaved, lockScope }: Pro
           />
         )}
 
-        <label style={fieldStyle}>
-          <span style={fieldLabelStyle}>If</span>
+        <label className="flex flex-col gap-1.5">
+          <span className="text-[11px] font-bold text-(--text-03) uppercase tracking-[0.06em]">If</span>
           <textarea
             value={ifText}
             onChange={(e) => setIfText(e.target.value)}
             disabled={busy}
             placeholder={EXAMPLE_IF}
             rows={2}
-            style={{ ...inputStyle, fontFamily: "inherit", resize: "vertical" }}
+            className="py-2 px-[10px] border border-(--border-01) rounded-(--border-radius-04) text-sm outline-none w-full box-border bg-(--background-tint-00) resize-y"
           />
           {kind === "schedule" && (
-            <span style={fieldHintStyle}>
+            <span className="text-xs text-(--text-03) leading-[1.4]">
               On each scheduled run, the trigger fires only when this
               condition is satisfied by the current state of the
               documents under <em>Watching</em>.
@@ -357,25 +325,25 @@ export function TriggerModal({ open, initial, onClose, onSaved, lockScope }: Pro
           )}
         </label>
 
-        <label style={fieldStyle}>
-          <span style={fieldLabelStyle}>Then send</span>
+        <label className="flex flex-col gap-1.5">
+          <span className="text-[11px] font-bold text-(--text-03) uppercase tracking-[0.06em]">Then send</span>
           <textarea
             value={sendText}
             onChange={(e) => setSendText(e.target.value)}
             disabled={busy}
             placeholder={EXAMPLE_SEND}
             rows={2}
-            style={{ ...inputStyle, fontFamily: "inherit", resize: "vertical" }}
+            className="py-2 px-[10px] border border-(--border-01) rounded-(--border-radius-04) text-sm outline-none w-full box-border bg-(--background-tint-00) resize-y"
           />
         </label>
 
-        <label style={fieldStyle}>
-          <span style={fieldLabelStyle}>To</span>
+        <label className="flex flex-col gap-1.5">
+          <span className="text-[11px] font-bold text-(--text-03) uppercase tracking-[0.06em]">To</span>
           <select
             value={destSelectValue}
             onChange={(e) => onPickDestination(e.target.value)}
             disabled={busy}
-            style={{ ...inputStyle, cursor: "pointer" }}
+            className="py-2 px-[10px] border border-(--border-01) rounded-(--border-radius-04) text-sm outline-none w-full box-border bg-(--background-tint-00) cursor-pointer"
           >
             {destinations
               .filter((d) => d.id !== "slack")
@@ -390,9 +358,9 @@ export function TriggerModal({ open, initial, onClose, onSaved, lockScope }: Pro
               </option>
             ))}
           </select>
-          {destDescription && <span style={fieldHintStyle}>{destDescription}</span>}
+          {destDescription && <span className="text-xs text-(--text-03) leading-[1.4]">{destDescription}</span>}
           {destination === "slack" && !slackWebhookId && (
-            <span style={{ ...fieldHintStyle, color: color.state.danger.fg }}>
+            <span className="text-xs text-(--status-text-error-05) leading-[1.4]">
               Pick a Slack channel, or add one below.
             </span>
           )}
@@ -401,47 +369,27 @@ export function TriggerModal({ open, initial, onClose, onSaved, lockScope }: Pro
               type="button"
               onClick={() => setAddingChannel(true)}
               disabled={busy}
-              style={{
-                alignSelf: "flex-start",
-                marginTop: 6,
-                background: "none",
-                border: "none",
-                padding: 0,
-                cursor: "pointer",
-                fontSize: 13,
-                color: color.accent.fg,
-              }}
+              className="self-start mt-[6px] bg-transparent border-none p-0 cursor-pointer text-[13px] text-(--text-inverted-05)"
             >
               + Add Slack channel
             </button>
           ) : (
-            <div
-              style={{
-                marginTop: 8,
-                padding: 10,
-                border: `1px solid ${color.border.default}`,
-                borderRadius: radius.sm,
-                background: color.bg.sunken,
-                display: "flex",
-                flexDirection: "column",
-                gap: 8,
-              }}
-            >
+            <div className="mt-2 p-[10px] border border-(--border-01) rounded-(--border-radius-04) bg-(--background-tint-02) flex flex-col gap-2">
               <input
                 value={newChannelName}
                 onChange={(e) => setNewChannelName(e.target.value)}
                 placeholder="Channel name (e.g. PM Standup)"
                 disabled={busy}
-                style={inputStyle}
+                className="py-2 px-[10px] border border-(--border-01) rounded-(--border-radius-04) text-sm outline-none w-full box-border bg-(--background-tint-00)"
               />
               <input
                 value={newChannelUrl}
                 onChange={(e) => setNewChannelUrl(e.target.value)}
                 placeholder="https://hooks.slack.com/services/…"
                 disabled={busy}
-                style={inputStyle}
+                className="py-2 px-[10px] border border-(--border-01) rounded-(--border-radius-04) text-sm outline-none w-full box-border bg-(--background-tint-00)"
               />
-              <div style={{ display: "flex", gap: 8 }}>
+              <div className="flex gap-2">
                 <Button
                   type="button"
                   variant="action"
@@ -465,20 +413,12 @@ export function TriggerModal({ open, initial, onClose, onSaved, lockScope }: Pro
         </label>
 
         {error && (
-          <div
-            style={{
-              background: color.state.danger.bg,
-              color: color.state.danger.fg,
-              borderRadius: radius.sm,
-              padding: 10,
-              fontSize: 13,
-            }}
-          >
+          <div className="bg-(--status-error-01) text-(--status-text-error-05) rounded-(--border-radius-04) p-[10px] text-[13px]">
             {error}
           </div>
         )}
 
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+        <div className="flex justify-end gap-2">
           <Button type="button" onClick={onClose} disabled={busy}>
             Cancel
           </Button>
@@ -528,24 +468,14 @@ function ScheduleFields({
   const timeValue = `${pad(parts.hour)}:${pad(parts.minute)}`;
 
   return (
-    <div
-      style={{
-        border: `1px solid ${color.border.default}`,
-        borderRadius: radius.sm,
-        padding: 14,
-        display: "flex",
-        flexDirection: "column",
-        gap: 12,
-        background: color.bg.panel,
-      }}
-    >
-      <label style={fieldStyle}>
-        <span style={fieldLabelStyle}>Frequency</span>
+    <div className="border border-(--border-01) rounded-(--border-radius-04) p-[14px] flex flex-col gap-3 bg-(--background-tint-01)">
+      <label className="flex flex-col gap-1.5">
+        <span className="text-[11px] font-bold text-(--text-03) uppercase tracking-[0.06em]">Frequency</span>
         <select
           value={parts.preset}
           onChange={(e) => onPartsChange({ ...parts, preset: e.target.value as FrequencyPreset })}
           disabled={disabled}
-          style={{ ...inputStyle, cursor: "pointer" }}
+          className="py-2 px-[10px] border border-(--border-01) rounded-(--border-radius-04) text-sm outline-none w-full box-border bg-(--background-tint-00) cursor-pointer"
         >
           {PRESET_OPTIONS.map((o) => (
             <option key={o.value} value={o.value}>
@@ -556,8 +486,8 @@ function ScheduleFields({
       </label>
 
       {showTimeOfDay && (
-        <label style={fieldStyle}>
-          <span style={fieldLabelStyle}>Time of day</span>
+        <label className="flex flex-col gap-1.5">
+          <span className="text-[11px] font-bold text-(--text-03) uppercase tracking-[0.06em]">Time of day</span>
           <input
             type="time"
             value={timeValue}
@@ -568,20 +498,20 @@ function ScheduleFields({
               }
             }}
             disabled={disabled}
-            style={inputStyle}
+            className="py-2 px-[10px] border border-(--border-01) rounded-(--border-radius-04) text-sm outline-none w-full box-border bg-(--background-tint-00)"
           />
-          <span style={fieldHintStyle}>Interpreted in the timezone selected below.</span>
+          <span className="text-xs text-(--text-03) leading-[1.4]">Interpreted in the timezone selected below.</span>
         </label>
       )}
 
       {showWeekday && (
-        <label style={fieldStyle}>
-          <span style={fieldLabelStyle}>Day of week</span>
+        <label className="flex flex-col gap-1.5">
+          <span className="text-[11px] font-bold text-(--text-03) uppercase tracking-[0.06em]">Day of week</span>
           <select
             value={parts.dayOfWeek}
             onChange={(e) => onPartsChange({ ...parts, dayOfWeek: Number(e.target.value) })}
             disabled={disabled}
-            style={{ ...inputStyle, cursor: "pointer" }}
+            className="py-2 px-[10px] border border-(--border-01) rounded-(--border-radius-04) text-sm outline-none w-full box-border bg-(--background-tint-00) cursor-pointer"
           >
             {WEEKDAY_NAMES.map((name, i) => (
               <option key={i} value={i}>
@@ -593,8 +523,8 @@ function ScheduleFields({
       )}
 
       {showDayOfMonth && (
-        <label style={fieldStyle}>
-          <span style={fieldLabelStyle}>Day of month</span>
+        <label className="flex flex-col gap-1.5">
+          <span className="text-[11px] font-bold text-(--text-03) uppercase tracking-[0.06em]">Day of month</span>
           <input
             type="number"
             min={1}
@@ -607,9 +537,9 @@ function ScheduleFields({
               }
             }}
             disabled={disabled}
-            style={inputStyle}
+            className="py-2 px-[10px] border border-(--border-01) rounded-(--border-radius-04) text-sm outline-none w-full box-border bg-(--background-tint-00)"
           />
-          <span style={fieldHintStyle}>
+          <span className="text-xs text-(--text-03) leading-[1.4]">
             Months without this day (e.g. day 31 in February) skip that
             month entirely &mdash; the schedule does not roll over to the
             next valid day.
@@ -617,13 +547,13 @@ function ScheduleFields({
         </label>
       )}
 
-      <label style={fieldStyle}>
-        <span style={fieldLabelStyle}>Timezone</span>
+      <label className="flex flex-col gap-1.5">
+        <span className="text-[11px] font-bold text-(--text-03) uppercase tracking-[0.06em]">Timezone</span>
         <select
           value={tz}
           onChange={(e) => onTzChange(e.target.value)}
           disabled={disabled}
-          style={{ ...inputStyle, cursor: "pointer" }}
+          className="py-2 px-[10px] border border-(--border-01) rounded-(--border-radius-04) text-sm outline-none w-full box-border bg-(--background-tint-00) cursor-pointer"
         >
           {tzOptions.includes(tz) ? null : <option value={tz}>{tz}</option>}
           {tzOptions.map((zone) => (
@@ -632,22 +562,22 @@ function ScheduleFields({
             </option>
           ))}
         </select>
-        <span style={fieldHintStyle}>
+        <span className="text-xs text-(--text-03) leading-[1.4]">
           The schedule runs in this timezone. Daylight-saving
           transitions are handled automatically.
         </span>
       </label>
 
-      <label style={fieldStyle}>
-        <span style={fieldLabelStyle}>Do not fire before (optional)</span>
+      <label className="flex flex-col gap-1.5">
+        <span className="text-[11px] font-bold text-(--text-03) uppercase tracking-[0.06em]">Do not fire before (optional)</span>
         <input
           type="datetime-local"
           value={startAtLocal}
           onChange={(e) => onStartAtChange(e.target.value)}
           disabled={disabled}
-          style={inputStyle}
+          className="py-2 px-[10px] border border-(--border-01) rounded-(--border-radius-04) text-sm outline-none w-full box-border bg-(--background-tint-00)"
         />
-        <span style={fieldHintStyle}>
+        <span className="text-xs text-(--text-03) leading-[1.4]">
           Anchored to your local time. Leave empty to start at the next
           scheduled run. Useful for delaying a launch (e.g.
           &ldquo;don&rsquo;t start until next Monday&rdquo;).
@@ -655,46 +585,17 @@ function ScheduleFields({
       </label>
 
       <details>
-        <summary
-          style={{
-            cursor: "pointer",
-            fontSize: 12,
-            fontWeight: 600,
-            color: color.text.secondary,
-            userSelect: "none",
-          }}
-        >
+        <summary className="cursor-pointer text-xs font-semibold text-(--text-04) select-none">
           Advanced &mdash; raw cron expression
         </summary>
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            gap: 8,
-            marginTop: 10,
-          }}
-        >
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(5, 1fr)",
-              gap: 6,
-            }}
-          >
+        <div className="flex flex-col gap-2 mt-[10px]">
+          <div className="grid grid-cols-5 gap-1.5">
             {CRON_FIELD_HELP.map((f) => (
               <div key={f.label}>
-                <div
-                  style={{
-                    fontSize: 10,
-                    fontWeight: 700,
-                    color: color.text.muted,
-                    textTransform: "uppercase",
-                    letterSpacing: 0.06,
-                  }}
-                >
+                <div className="text-[10px] font-bold text-(--text-03) uppercase tracking-[0.06px]">
                   {f.label}
                 </div>
-                <div style={{ fontSize: 11, color: color.text.faint, lineHeight: 1.4 }}>
+                <div className="text-[11px] text-(--text-02) leading-[1.4]">
                   {f.help}
                 </div>
               </div>
@@ -708,26 +609,16 @@ function ScheduleFields({
             }}
             disabled={disabled}
             placeholder="*/15 * * * *"
-            style={{ ...inputStyle, fontFamily: "ui-monospace, Menlo, monospace" }}
+            className="py-2 px-[10px] border border-(--border-01) rounded-(--border-radius-04) text-sm outline-none w-full box-border bg-(--background-tint-00) font-mono"
           />
-          <span style={fieldHintStyle}>
+          <span className="text-xs text-(--text-03) leading-[1.4]">
             Standard 5-field cron. Editing this switches the frequency to
             &ldquo;Custom&rdquo;.
           </span>
         </div>
       </details>
 
-      <div
-        style={{
-          fontSize: 13,
-          color: color.text.primary,
-          background: color.bg.page,
-          border: `1px solid ${color.border.subtle}`,
-          borderRadius: radius.xs,
-          padding: 8,
-          lineHeight: 1.5,
-        }}
-      >
+      <div className="text-[13px] text-(--text-05) bg-(--background-tint-00) border border-(--border-01) rounded-(--border-radius-04) p-2 leading-[1.5]">
         <strong>{cronSummary}</strong>
       </div>
     </div>
@@ -758,66 +649,29 @@ function PreviewCard({
   destLabel: string;
 }) {
   return (
-    <div
-      style={{
-        background: color.bg.page,
-        borderRadius: radius.lg,
-        padding: 24,
-        boxShadow: shadow.modal,
-        display: "flex",
-        flexDirection: "column",
-        gap: 16,
-      }}
-    >
+    <div className="bg-(--background-tint-00) rounded-(--border-radius-12) p-6 shadow-(--shadow-modal) flex flex-col gap-4">
       <div>
-        <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600, color: color.text.primary }}>Create a trigger</h2>
-        <p style={{ margin: "6px 0 0", fontSize: 13, color: color.text.secondary }}>
+        <h2 className="m-0 text-lg font-semibold text-(--text-05)">Create a trigger</h2>
+        <p className="mt-[6px] mb-0 text-[13px] text-(--text-04)">
           Triggers monitor documents or folders and send events when a specified change occurs.
         </p>
       </div>
-      <div style={fieldStyle}>
-        <span style={fieldLabelStyle}>Watching</span>
-        <div style={{ ...inputStyle, color: color.text.primary }}>{scope}</div>
+      <div className="flex flex-col gap-1.5">
+        <span className="text-[11px] font-bold text-(--text-03) uppercase tracking-[0.06em]">Watching</span>
+        <div className="py-2 px-[10px] border border-(--border-01) rounded-(--border-radius-04) text-sm outline-none w-full box-border bg-(--background-tint-00) text-(--text-05)">{scope}</div>
       </div>
-      <div style={fieldStyle}>
-        <span style={fieldLabelStyle}>If</span>
-        <div style={{ ...inputStyle, color: color.text.primary, whiteSpace: "pre-wrap" }}>{ifText}</div>
+      <div className="flex flex-col gap-1.5">
+        <span className="text-[11px] font-bold text-(--text-03) uppercase tracking-[0.06em]">If</span>
+        <div className="py-2 px-[10px] border border-(--border-01) rounded-(--border-radius-04) text-sm outline-none w-full box-border bg-(--background-tint-00) text-(--text-05) whitespace-pre-wrap">{ifText}</div>
       </div>
-      <div style={fieldStyle}>
-        <span style={fieldLabelStyle}>Then send</span>
-        <div style={{ ...inputStyle, color: color.text.primary, whiteSpace: "pre-wrap" }}>{sendText}</div>
+      <div className="flex flex-col gap-1.5">
+        <span className="text-[11px] font-bold text-(--text-03) uppercase tracking-[0.06em]">Then send</span>
+        <div className="py-2 px-[10px] border border-(--border-01) rounded-(--border-radius-04) text-sm outline-none w-full box-border bg-(--background-tint-00) text-(--text-05) whitespace-pre-wrap">{sendText}</div>
       </div>
-      <div style={fieldStyle}>
-        <span style={fieldLabelStyle}>To</span>
-        <div style={{ ...inputStyle, color: color.text.primary }}>{destLabel}</div>
+      <div className="flex flex-col gap-1.5">
+        <span className="text-[11px] font-bold text-(--text-03) uppercase tracking-[0.06em]">To</span>
+        <div className="py-2 px-[10px] border border-(--border-01) rounded-(--border-radius-04) text-sm outline-none w-full box-border bg-(--background-tint-00) text-(--text-05)">{destLabel}</div>
       </div>
     </div>
   );
 }
-
-const fieldStyle: React.CSSProperties = { display: "flex", flexDirection: "column", gap: 6 };
-
-const fieldLabelStyle: React.CSSProperties = {
-  fontSize: 11,
-  fontWeight: 700,
-  color: color.text.muted,
-  textTransform: "uppercase",
-  letterSpacing: "0.06em",
-};
-
-const fieldHintStyle: React.CSSProperties = {
-  fontSize: 12,
-  color: color.text.muted,
-  lineHeight: 1.4,
-};
-
-const inputStyle: React.CSSProperties = {
-  padding: "8px 10px",
-  border: `1px solid ${color.border.default}`,
-  borderRadius: radius.sm,
-  fontSize: 14,
-  outline: "none",
-  width: "100%",
-  boxSizing: "border-box",
-  background: color.bg.page,
-};

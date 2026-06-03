@@ -3,7 +3,7 @@
 .scrim {
   position: fixed;
   inset: 0;
-  background: var(--color-overlay);
+  background: var(--mask-03);
   display: flex;
   align-items: flex-start;
   justify-content: center;
@@ -12,8 +12,8 @@
 }
 
 .dialog {
-  background: var(--color-bg-panel);
-  border-radius: var(--radius-lg);
+  background: var(--background-tint-01);
+  border-radius: var(--border-radius-12);
   width: min(480px, 100%);
   max-height: calc(100vh - 80px);
   box-shadow: var(--shadow-modal);
@@ -27,13 +27,13 @@
   align-items: flex-start;
   gap: 8px;
   padding: 16px;
-  background: var(--color-bg-page);
+  background: var(--background-tint-00);
 }
 .headerIcon {
   display: inline-flex;
   flex-shrink: 0;
   margin-top: 2px;
-  color: var(--color-text-secondary);
+  color: var(--text-04);
 }
 .headerText {
   display: flex;
@@ -63,8 +63,8 @@
   gap: 8px;
   min-height: 48px;
   padding: 6px 8px;
-  background: var(--color-bg-sunken);
-  border-radius: var(--radius-md);
+  background: var(--background-tint-02);
+  border-radius: var(--border-radius-08);
 }
 .rowText {
   display: flex;
@@ -79,5 +79,5 @@
   justify-content: flex-end;
   gap: 8px;
   padding: 16px;
-  background: var(--color-bg-page);
+  background: var(--background-tint-00);
 }

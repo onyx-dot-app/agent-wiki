@@ -20,7 +20,6 @@ import {
 import { apiFetch } from "@/lib/api";
 import { useRequireAuth } from "@/lib/auth";
 import { type ProbeResult } from "@/lib/launchers";
-import { color, radius, shadow } from "@/lib/theme";
 import { useIsMobile } from "@/lib/viewport";
 
 export default function AgentsPage() {
@@ -29,14 +28,14 @@ export default function AgentsPage() {
 
   if (loading || !user)
     return (
-      <main style={{ padding: isMobile ? 16 : 32 }}>
+      <main className={isMobile ? "p-4" : "p-8"}>
         <LoadingSpinner center />
       </main>
     );
 
   return (
     <main
-      style={{ padding: isMobile ? "16px 12px" : "24px 32px", maxWidth: 880 }}
+      className={`max-w-[880px] ${isMobile ? "px-3 py-4" : "px-8 py-6"}`}
     >
         <PageHeader
           title="Agents"
@@ -63,17 +62,17 @@ function EndpointBlock() {
   }, []);
 
   return (
-    <section style={card}>
-      <div style={{ fontSize: 13, color: color.text.muted, marginBottom: 6 }}>
+    <section className="p-4 border border-(--border-01) rounded-(--border-radius-08) bg-(--background-tint-00) mb-4">
+      <div className="text-[13px] text-(--text-03) mb-1.5">
         MCP server URL
       </div>
-      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-        <code style={codeBlock}>{endpoint || "—"}</code>
+      <div className="flex gap-2 items-center">
+        <code className="flex-1 py-2 px-[10px] bg-(--background-tint-02) rounded-(--border-radius-04) font-mono text-xs text-(--text-05) overflow-x-auto">{endpoint || "—"}</code>
         <CopyButton text={endpoint} />
       </div>
-      <div style={{ fontSize: 12, color: color.text.muted, marginTop: 8 }}>
-        Send the API key in the <code style={inlineCode}>Authorization</code>{" "}
-        header as <code style={inlineCode}>Bearer mcp_…</code>.
+      <div className="text-xs text-(--text-03) mt-2">
+        Send the API key in the <code className="py-px px-1 bg-(--background-tint-02) rounded-(--border-radius-04) font-mono text-xs">Authorization</code>{" "}
+        header as <code className="py-px px-1 bg-(--background-tint-02) rounded-(--border-radius-04) font-mono text-xs">Bearer mcp_…</code>.
       </div>
     </section>
   );
@@ -89,16 +88,9 @@ function TokenManager() {
   const [reveal, setReveal] = useState<CreatedToken | null>(null);
 
   return (
-    <section style={card}>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          marginBottom: 12,
-        }}
-      >
-        <h2 style={{ margin: 0, fontSize: 16 }}>API keys</h2>
+    <section className="p-4 border border-(--border-01) rounded-(--border-radius-08) bg-(--background-tint-00) mb-4">
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="m-0 text-base">API keys</h2>
         <Button
           variant="action"
           onClick={() => setShowCreate(true)}
@@ -109,7 +101,7 @@ function TokenManager() {
       </div>
 
       {error && (
-        <div style={errorBanner}>{error.message || "Failed to load keys."}</div>
+        <div className="p-[10px] bg-(--status-error-01) text-(--status-text-error-05) rounded-(--border-radius-04) text-[13px] mb-2">{error.message || "Failed to load keys."}</div>
       )}
 
       {showCreate && (
@@ -128,13 +120,13 @@ function TokenManager() {
       {isLoading && tokens.length === 0 && !error && <LoadingSpinner />}
 
       {!isLoading && tokens.length === 0 && (
-        <p style={{ color: color.text.muted, fontSize: 14 }}>
+        <p className="text-(--text-03) text-sm">
           No keys yet — generate one above.
         </p>
       )}
 
       {tokens.length > 0 && (
-        <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+        <ul className="list-none p-0 m-0">
           {tokens.map((t) => (
             <TokenRow key={t.id} token={t} onRevoked={() => void refresh()} />
           ))}
@@ -173,25 +165,12 @@ function TokenRow({
   }
 
   return (
-    <li
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 12,
-        padding: "10px 12px",
-        border: `1px solid ${color.border.default}`,
-        borderRadius: radius.sm,
-        marginTop: 8,
-        background: color.bg.page,
-      }}
-    >
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div
-          style={{ fontWeight: 500, fontSize: 14, color: color.text.primary }}
-        >
+    <li className="flex items-center gap-3 py-[10px] px-3 border border-(--border-01) rounded-(--border-radius-04) mt-2 bg-(--background-tint-00)">
+      <div className="flex-1 min-w-0">
+        <div className="font-medium text-sm text-(--text-05)">
           {token.name}
         </div>
-        <div style={{ fontSize: 12, color: color.text.muted, marginTop: 2 }}>
+        <div className="text-xs text-(--text-03) mt-0.5">
           Created {token.created_at}
           {token.last_used_at
             ? ` · last used ${token.last_used_at}`
@@ -233,32 +212,26 @@ function CreateForm({
   return (
     <form
       onSubmit={onSubmit}
-      style={{
-        padding: 12,
-        background: color.bg.panel,
-        border: `1px solid ${color.border.default}`,
-        borderRadius: radius.sm,
-        marginBottom: 12,
-      }}
+      className="p-3 bg-(--background-tint-01) border border-(--border-01) rounded-(--border-radius-04) mb-3"
     >
-      <label style={{ fontSize: 13, color: color.text.secondary }}>
+      <label className="text-[13px] text-(--text-04)">
         Agent name
         <input
           autoFocus
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="e.g. Claude Code, Cursor, Codex"
-          style={{ ...inputStyle, marginTop: 4 }}
+          className="w-full box-border py-2 px-[10px] border border-(--border-01) rounded-(--border-radius-04) text-sm mt-1"
           maxLength={80}
         />
-        <div style={{ fontSize: 12, color: color.text.muted, marginTop: 6 }}>
+        <div className="text-xs text-(--text-03) mt-1.5">
           Appears next to this agent&apos;s reads, writes, and commits on the
           wiki. Pick something you&apos;ll recognize — you can have several
           agents per user.
         </div>
       </label>
-      {err && <div style={{ ...errorBanner, marginTop: 10 }}>{err}</div>}
-      <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+      {err && <div className="p-[10px] bg-(--status-error-01) text-(--status-text-error-05) rounded-(--border-radius-04) text-[13px] mb-2 mt-[10px]">{err}</div>}
+      <div className="flex gap-2 mt-3">
         <Button type="submit" variant="action" disabled={busy || !name.trim()}>
           {busy ? "Creating…" : "Create"}
         </Button>
@@ -278,32 +251,18 @@ function RevealOnce({
   onClose: () => void;
 }) {
   return (
-    <div
-      style={{
-        padding: 14,
-        background: color.state.warning.bg,
-        border: `1px solid ${color.state.warning.border}`,
-        borderRadius: radius.sm,
-        marginBottom: 12,
-      }}
-    >
-      <div
-        style={{ fontWeight: 600, color: color.state.warning.fg, fontSize: 14 }}
-      >
+    <div className="p-[14px] bg-(--status-warning-01) border border-(--status-warning-02) rounded-(--border-radius-04) mb-3">
+      <div className="font-semibold text-(--status-text-warning-05) text-sm">
         Copy your key now — this is the only time it&apos;ll be shown.
       </div>
-      <div
-        style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 10 }}
-      >
-        <code style={codeBlock}>{token.token}</code>
+      <div className="flex gap-2 items-center mt-[10px]">
+        <code className="flex-1 py-2 px-[10px] bg-(--background-tint-02) rounded-(--border-radius-04) font-mono text-xs text-(--text-05) overflow-x-auto">{token.token}</code>
         <CopyButton text={token.token} />
       </div>
-      <div
-        style={{ fontSize: 12, color: color.state.warning.fg, marginTop: 8 }}
-      >
+      <div className="text-xs text-(--status-text-warning-05) mt-2">
         If you lose it, revoke this key and generate a new one.
       </div>
-      <div style={{ marginTop: 12 }}>
+      <div className="mt-3">
         <Button onClick={onClose}>I&apos;ve saved it</Button>
       </div>
     </div>
@@ -336,48 +295,23 @@ function ClientConfigHelp() {
   );
 
   return (
-    <section style={card}>
+    <section className="p-4 border border-(--border-01) rounded-(--border-radius-08) bg-(--background-tint-00) mb-4">
       <button
         onClick={() => setOpen((v) => !v)}
-        style={{
-          background: "transparent",
-          border: "none",
-          padding: 0,
-          cursor: "pointer",
-          fontSize: 14,
-          fontWeight: 500,
-          color: color.text.primary,
-          display: "flex",
-          alignItems: "center",
-          gap: 6,
-        }}
+        className="bg-transparent border-none p-0 cursor-pointer text-sm font-medium text-(--text-05) flex items-center gap-1.5"
       >
-        <span style={{ fontSize: 12, color: color.text.muted }}>
+        <span className="text-xs text-(--text-03)">
           {open ? "▾" : "▸"}
         </span>
         How to wire this into Claude Code, Cursor, or Codex
       </button>
       {open && (
-        <div style={{ marginTop: 12 }}>
-          <div
-            style={{
-              fontSize: 13,
-              color: color.text.secondary,
-              marginBottom: 6,
-            }}
-          >
-            Sample <code style={inlineCode}>mcp_servers.json</code> entry —
+        <div className="mt-3">
+          <div className="text-[13px] text-(--text-04) mb-1.5">
+            Sample <code className="py-px px-1 bg-(--background-tint-02) rounded-(--border-radius-04) font-mono text-xs">mcp_servers.json</code> entry —
             replace the placeholder with your generated key:
           </div>
-          <pre
-            style={{
-              ...codeBlock,
-              padding: 12,
-              whiteSpace: "pre",
-              overflowX: "auto",
-              maxWidth: "100%",
-            }}
-          >
+          <pre className="flex-1 py-2 px-[10px] bg-(--background-tint-02) rounded-(--border-radius-04) font-mono text-xs text-(--text-05) overflow-x-auto p-3 whitespace-pre max-w-full">
             {claudeCodeSnippet}
           </pre>
         </div>
@@ -413,51 +347,6 @@ function CopyButton({ text }: { text: string }) {
     </Button>
   );
 }
-
-const card: React.CSSProperties = {
-  padding: 16,
-  border: `1px solid ${color.border.default}`,
-  borderRadius: radius.md,
-  background: color.bg.page,
-  marginBottom: 16,
-};
-
-const codeBlock: React.CSSProperties = {
-  flex: 1,
-  padding: "8px 10px",
-  background: color.bg.sunken,
-  borderRadius: radius.xs,
-  fontFamily: "ui-monospace, Menlo, monospace",
-  fontSize: 12,
-  color: color.text.primary,
-  overflowX: "auto",
-};
-
-const inlineCode: React.CSSProperties = {
-  padding: "1px 4px",
-  background: color.bg.sunken,
-  borderRadius: radius.xs,
-  fontFamily: "ui-monospace, Menlo, monospace",
-  fontSize: 12,
-};
-
-const inputStyle: React.CSSProperties = {
-  width: "100%",
-  boxSizing: "border-box",
-  padding: "8px 10px",
-  border: `1px solid ${color.border.default}`,
-  borderRadius: radius.sm,
-  fontSize: 14,
-};
-
-const errorBanner: React.CSSProperties = {
-  padding: 10,
-  background: color.state.danger.bg,
-  color: color.state.danger.fg,
-  borderRadius: radius.sm,
-  fontSize: 13,
-  marginBottom: 8,
-};
 
 // --------------------------------------------------------------------------- //
 // Coding tools section                          //
@@ -502,44 +391,34 @@ function CodingToolsSection() {
   }, [wizardOpen]);
 
   return (
-    <section style={card}>
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          marginBottom: 4,
-        }}
-      >
-        <h2 style={{ margin: 0, fontSize: 16 }}>Coding tools</h2>
+    <section className="p-4 border border-(--border-01) rounded-(--border-radius-08) bg-(--background-tint-00) mb-4">
+      <div className="flex justify-between items-center mb-1">
+        <h2 className="m-0 text-base">Coding tools</h2>
         <Button variant="action" onClick={() => setWizardOpen(true)}>
           Set up tools
         </Button>
       </div>
 
-      <p style={{ margin: "0 0 12px", fontSize: 13, color: color.text.muted }}>
+      <p className="m-0 mb-3 text-[13px] text-(--text-03)">
         Launch Claude Code or Codex directly from the wiki. Install the launcher
         once, then start a session from any page with Run Agent.
       </p>
 
       {/* Surface helper-install status. */}
-      <div style={{ fontSize: 13, color: color.text.muted, marginBottom: 12 }}>
+      <div className="text-[13px] text-(--text-03) mb-3">
         Launcher:{" "}
         {probe === null ? (
           "checking…"
         ) : probe.acked ? (
-          <span style={{ color: color.state.success.fg }}>
+          <span className="text-(--status-text-success-05)">
             ✓ detected on this machine
           </span>
         ) : (
-          <span style={{ color: color.state.warning.fg }}>
+          <span className="text-(--status-text-warning-05)">
             ⚠ not detected —{" "}
             <a
               href="/api/installer/app"
-              style={{
-                color: color.state.warning.fg,
-                textDecoration: "underline",
-              }}
+              className="text-(--status-text-warning-05) underline"
             >
               download AgentWikiLauncher.app
             </a>
@@ -552,15 +431,7 @@ function CodingToolsSection() {
           onMouseDown={(e) => {
             if (e.target === e.currentTarget) setWizardOpen(false);
           }}
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: color.overlay,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 100,
-          }}
+          className="fixed inset-0 bg-(--mask-03) flex items-center justify-center z-[100]"
         >
           <div
             ref={dialogRef}
@@ -568,15 +439,7 @@ function CodingToolsSection() {
             aria-modal="true"
             aria-label="Set up launcher"
             tabIndex={-1}
-            style={{
-              background: color.bg.page,
-              borderRadius: radius.lg,
-              padding: 22,
-              width: "min(560px, 92vw)",
-              boxShadow: shadow.modal,
-              maxHeight: "90vh",
-              overflowY: "auto",
-            }}
+            className="bg-(--background-tint-00) rounded-(--border-radius-12) p-[22px] w-[min(560px,92vw)] shadow-(--shadow-modal) max-h-[90vh] overflow-y-auto"
           >
             <SetupWizard
               onDone={() => setWizardOpen(false)}

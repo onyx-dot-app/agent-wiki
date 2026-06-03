@@ -7,8 +7,8 @@
 .ring {
   display: inline-block;
   flex-shrink: 0;
-  border: 2px solid var(--color-border-default);
-  border-top-color: var(--color-text-secondary);
+  border: 2px solid var(--border-01);
+  border-top-color: var(--text-04);
   border-radius: 50%;
   animation: spin 0.7s linear infinite;
 }
@@ -17,7 +17,7 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  color: var(--color-text-muted);
+  color: var(--text-03);
   font-size: 14px;
 }
 

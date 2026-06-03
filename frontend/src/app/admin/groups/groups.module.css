@@ -16,8 +16,8 @@
   flex-direction: column;
   gap: 8px;
   padding: 16px;
-  border-radius: var(--radius-lg);
-  background: var(--color-bg-sunken);
+  border-radius: var(--border-radius-12);
+  background: var(--background-tint-02);
   margin-bottom: 16px;
 }
 .createRow {
@@ -32,8 +32,8 @@
 }
 /* Group rows are subtle grey-fill surfaces, not bordered cards (per mock). */
 .card {
-  background: var(--color-bg-sunken);
-  border-radius: var(--radius-lg);
+  background: var(--background-tint-02);
+  border-radius: var(--border-radius-12);
   overflow: hidden;
   padding: 4px;
 }
@@ -41,7 +41,7 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  color: var(--color-text-secondary);
+  color: var(--text-04);
 }
 
 /* Detail view */
@@ -50,7 +50,7 @@
   align-items: center;
   gap: 10px;
   margin: 4px 0;
-  color: var(--color-text-secondary);
+  color: var(--text-04);
 }
 .detailSpacer {
   flex: 1;
@@ -70,7 +70,7 @@
   align-items: center;
   gap: 10px;
   padding: 8px 0;
-  border-bottom: 1px solid var(--color-border-subtle);
+  border-bottom: 1px solid var(--border-01);
 }
 .memberText {
   display: flex;

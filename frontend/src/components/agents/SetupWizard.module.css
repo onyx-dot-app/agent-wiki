@@ -6,13 +6,13 @@
 
 .heading {
   font-size: 14px;
-  color: var(--color-text-primary);
+  color: var(--text-05);
   font-weight: 600;
 }
 
 .subheading {
   font-size: 12px;
-  color: var(--color-text-muted);
+  color: var(--text-03);
 }
 
 .toolList {
@@ -29,8 +29,8 @@
   align-items: center;
   gap: 10px;
   padding: 10px;
-  border: 1px solid var(--color-border-default);
-  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-01);
+  border-radius: var(--border-radius-04);
   cursor: pointer;
 }
 
@@ -41,12 +41,12 @@
 .toolOptionName {
   font-size: 14px;
   font-weight: 600;
-  color: var(--color-text-primary);
+  color: var(--text-05);
 }
 
 .toolOptionTagline {
   font-size: 12px;
-  color: var(--color-text-muted);
+  color: var(--text-03);
 }
 
 .actions {
@@ -63,8 +63,8 @@
 
 .checklistCard {
   padding: 12px;
-  border: 1px solid var(--color-border-default);
-  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-01);
+  border-radius: var(--border-radius-04);
 }
 
 .checklistHeader {

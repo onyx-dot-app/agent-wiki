@@ -9,9 +9,9 @@
   align-items: flex-start;
   gap: 12px;
   padding: 8px 12px;
-  border-bottom: 1px solid var(--color-border-subtle);
+  border-bottom: 1px solid var(--border-01);
   font-size: 13px;
-  color: var(--color-text-secondary);
+  color: var(--text-04);
 }
 
 .headerInfo {
@@ -21,21 +21,21 @@
 
 .title {
   font-weight: 600;
-  color: var(--color-text-primary);
+  color: var(--text-05);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .meta {
-  color: var(--color-text-muted);
+  color: var(--text-03);
   font-size: 12px;
 }
 
 .toggle {
   display: inline-flex;
-  border: 1px solid var(--color-border-default);
-  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-01);
+  border-radius: var(--border-radius-04);
   overflow: hidden;
   flex-shrink: 0;
 }
@@ -44,7 +44,7 @@
   appearance: none;
   border: none;
   background: transparent;
-  color: var(--color-text-secondary);
+  color: var(--text-04);
   font: inherit;
   font-size: 12px;
   padding: 4px 10px;
@@ -53,20 +53,20 @@
 }
 
 .toggleBtn:not(:last-child) {
-  border-right: 1px solid var(--color-border-default);
+  border-right: 1px solid var(--border-01);
 }
 
 .toggleBtn:hover {
-  background: var(--color-bg-hover);
+  background: var(--background-tint-03);
 }
 
 .toggleBtnActive {
-  background: var(--color-accent-bg);
-  color: var(--color-accent-fg);
+  background: var(--background-tint-inverted-00);
+  color: var(--text-inverted-05);
 }
 
 .toggleBtnActive:hover {
-  background: var(--color-accent-bg-hover);
+  background: var(--background-tint-inverted-01);
 }
 
 .body {
@@ -88,5 +88,5 @@
 .empty {
   padding: 24px;
   text-align: center;
-  color: var(--color-text-muted);
+  color: var(--text-03);
 }
