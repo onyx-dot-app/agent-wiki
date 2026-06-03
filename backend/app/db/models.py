@@ -256,20 +256,6 @@ class LauncherToken(Base):
 
 
 # --------------------------------------------------------------------------- #
-# Documents (metadata) — canonical content lives in git                       #
-# --------------------------------------------------------------------------- #
-
-
-class Document(Base):
-    __tablename__ = "documents"
-
-    id: Mapped[str] = mapped_column(Text, primary_key=True)
-    path: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
-    title: Mapped[str | None] = mapped_column(Text)
-    updated_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
-
-
-# --------------------------------------------------------------------------- #
 # Triggers — git-backed YAML is the source of truth; this is a lookup cache   #
 # --------------------------------------------------------------------------- #
 
