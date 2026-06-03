@@ -675,4 +675,3 @@ function PreviewCard({
     </div>
   );
 }
-

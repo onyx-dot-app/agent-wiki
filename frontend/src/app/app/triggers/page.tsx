@@ -438,4 +438,3 @@ function SlackChannelsCard() {
     </section>
   );
 }
-

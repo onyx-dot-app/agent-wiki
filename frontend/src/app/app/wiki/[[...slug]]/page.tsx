@@ -440,7 +440,7 @@ function Explorer({ dir }: { dir: string }) {
               <Row
                 key={(isFile ? "f:" : "d:") + name}
                 icon={
-                  isFile ? <SvgDocFile size={20} /> : <SvgFolder size={20} />
+                  isFile ? <SvgDocFile size={20} aria-hidden /> : <SvgFolder size={20} aria-hidden />
                 }
                 label={name}
                 updatedAt={updated_at}
