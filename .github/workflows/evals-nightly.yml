@@ -45,8 +45,8 @@ jobs:
       EVAL_MODELS: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.models || 'claude-sonnet-4-6,gpt-5' }}
       SELECTOR_MODELS: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.selector_models || 'claude-haiku-4-5,gpt-5-mini' }}
       OPENSEARCH_URL: ""
-      # Required by app.config since #141. Evals never serve browsers or
-      # build launcher links — any valid value satisfies the validator.
+      # Required by app.config. Evals never serve browsers or build
+      # launcher links — any valid value satisfies the validator.
       PUBLIC_BASE_URL: "http://localhost:3088"
     steps:
       - uses: actions/checkout@v4

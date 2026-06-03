@@ -36,8 +36,8 @@ jobs:
         working-directory: backend
     env:
       OPENSEARCH_URL: ""
-      # Required by app.config since #141; harmless for dry-run but set it
-      # so any path that loads CONFIG doesn't crash at import.
+      # Required by app.config; harmless for dry-run but set it so any
+      # path that loads CONFIG doesn't crash at import.
       PUBLIC_BASE_URL: "http://localhost:3088"
     steps:
       - uses: actions/checkout@v4
