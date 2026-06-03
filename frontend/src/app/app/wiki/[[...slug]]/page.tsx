@@ -346,13 +346,17 @@ function Explorer({ dir }: { dir: string }) {
         }
         actions={
           <>
+            {/* Same language as the doc-view header: quiet ghost buttons
+                with a single solid CTA (New document). */}
             <Button
+              prominence="tertiary"
               icon={SvgWorkflow}
               onClick={() => setTriggerModalOpen(true)}
             >
               Trigger
             </Button>
             <Button
+              prominence="tertiary"
               icon={SvgFolderPlus}
               onClick={() => {
                 setNewName("");
@@ -362,6 +366,7 @@ function Explorer({ dir }: { dir: string }) {
               New folder
             </Button>
             <Button
+              variant="action"
               icon={SvgPlus}
               onClick={() => router.push(`/app/wiki/${dir}?new=1`)}
             >
@@ -561,8 +566,17 @@ function NewDocView({ dir }: { dir: string }) {
       setDrafting({ kind: "blank", path: null });
     }
   }, [appliedTemplateId, templates, setDrafting]);
+  // Clear drafting on unmount (cancel, sidebar nav, …) — the chat widget
+  // tears its drafting session down synchronously on null, so the collapse
+  // happens in the same paint as the page change. The one exception is
+  // Create: it navigates to the doc it just made and FileViewer re-syncs
+  // drafting from the server-side draft row, so passing through null there
+  // would collapse the chat only to re-init it a moment later.
+  const createHandoffRef = useRef(false);
   useEffect(() => {
-    return () => setDrafting(null);
+    return () => {
+      if (!createHandoffRef.current) setDrafting(null);
+    };
   }, [setDrafting]);
 
   const trimmedFilename = filename.trim().replace(/^\/+|\/+$/g, "");
@@ -615,6 +629,9 @@ function NewDocView({ dir }: { dir: string }) {
       if (appliedTemplateId) {
         await setDraftTemplate(fullPath, appliedTemplateId);
       }
+      // Hand-off: keep the drafting state (and the chat's drafting
+      // session) alive across the navigation — see the unmount cleanup.
+      createHandoffRef.current = true;
       router.push(`/app/wiki/${fullPath}?new=1`);
     } catch (e) {
       setError(e instanceof Error ? e.message : "create failed");
@@ -1767,8 +1784,9 @@ function FileViewer({ path }: { path: string }) {
       // highlights reflect the drift (won't re-open the panel — guarded).
       void refreshComments();
       // The server clears the draft row when the body diverges from
-      // the template snapshot — re-sync our context so the chat
-      // banner disappears at the same moment.
+      // the template snapshot — re-sync our context so the chat widget
+      // winds down drafting (banner + mode + conversation revert
+      // together after its debounce).
       await refreshDraftState();
     } catch (e) {
       if (e instanceof ApiError && e.status === 409) {
@@ -1932,9 +1950,20 @@ function FileViewer({ path }: { path: string }) {
         <div className="flex-1" />
         {!editing && !loading && !error && (
           <>
+            {/* Ghost buttons: transparent at rest, tint-02 on hover — the
+                one solid CTA in the header is Edit. The two panel toggles
+                are SelectButtons so the open panel shows the selected tint;
+                empty-state SelectButton hovers identically to a tertiary
+                Button, so the row reads as one style. */}
             <div className="flex gap-2">
-              <Button onClick={() => setRunAgentOpen(true)}>Run Agent</Button>
               <Button
+                prominence="tertiary"
+                onClick={() => setRunAgentOpen(true)}
+              >
+                Run Agent
+              </Button>
+              <Button
+                prominence="tertiary"
                 icon={SvgWorkflow}
                 onClick={() => setTriggerModalOpen(true)}
               >
@@ -1942,7 +1971,9 @@ function FileViewer({ path }: { path: string }) {
               </Button>
             </div>
             <div className="flex gap-2">
-              <Button onClick={() => setShareOpen(true)}>Share</Button>
+              <Button prominence="tertiary" onClick={() => setShareOpen(true)}>
+                Share
+              </Button>
               <SelectButton
                 state={historyOpen ? "selected" : "empty"}
                 onClick={toggleHistory}
