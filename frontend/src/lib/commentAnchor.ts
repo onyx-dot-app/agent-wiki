@@ -24,9 +24,9 @@
  *
  * Alignment fails (→ null / skip) only when a rendered char has no counterpart
  * in the raw slice (e.g. an HTML entity like `&lt;`); such selections just
- * don't get the affordance, same as before. The backend stores raw code-point
- * offsets and treats `quoted_text` as display-only, so wider/multi-block spans
- * are fine server-side.
+ * don't get the affordance. The backend stores raw code-point offsets and
+ * treats `quoted_text` as display-only, so wider/multi-block spans are fine
+ * server-side.
  */
 
 export interface CommentDraft {
