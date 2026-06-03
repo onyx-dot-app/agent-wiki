@@ -1,17 +1,5 @@
-@import "./app-layout.css";
-
-.root {
-  display: flex;
-  flex-direction: column;
-  height: 100vh;
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-}
-
-.header {
-  height: var(--app-header-height);
-  flex-shrink: 0;
+.headerBar {
+  height: 56px;
   display: flex;
   align-items: center;
   padding: 0 16px;
@@ -19,33 +7,13 @@
   background: var(--background-tint-00);
 }
 
-.body {
-  display: flex;
-  flex-direction: row;
-  flex: 1;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.actionSidebar {
-  width: 0;
-  flex-shrink: 0;
-  overflow: hidden;
-  border-right: 1px solid var(--border-01);
-  transition: width 200ms ease;
-}
-.actionSidebar[data-open="true"] {
-  width: var(--app-action-sidebar-width);
-}
-
-.main {
-  flex: 1;
-  overflow-y: auto;
-  min-width: 0;
-}
-
 .mainInner {
   max-width: var(--breakpoint-content-md);
   margin: 0 auto;
   width: 100%;
+}
+
+.rightPanel {
+  width: 240px;
+  border-left: 1px solid var(--border-01);
 }

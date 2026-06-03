@@ -1,6 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { RootLayout } from "@onyx-ai/opal/layouts";
 import styles from "./AppContentLayout.module.css";
 import { StatusBanner } from "./StatusBanner";
 import { useAppLayout } from "./AppLayoutContext";
@@ -8,17 +9,21 @@ import { useAppLayout } from "./AppLayoutContext";
 export function AppContentLayout({ children }: { children: ReactNode }) {
   const { headerContent, actionSidebarContent, isActionSidebarOpen } = useAppLayout();
   return (
-    <div className={styles.root}>
-      <StatusBanner />
-      <header className={styles.header}>{headerContent}</header>
-      <div className={styles.body}>
-        <div className={styles.actionSidebar} data-open={String(isActionSidebarOpen)}>
-          {actionSidebarContent}
-        </div>
-        <main className={styles.main}>
+    <>
+      <RootLayout.App>
+        <StatusBanner />
+        <RootLayout.Header>
+          <div className={styles.headerBar}>{headerContent}</div>
+        </RootLayout.Header>
+        <RootLayout.MainContent>
           <div className={styles.mainInner}>{children}</div>
-        </main>
-      </div>
-    </div>
+        </RootLayout.MainContent>
+      </RootLayout.App>
+      {isActionSidebarOpen && actionSidebarContent && (
+        <RootLayout.RightPanel className={styles.rightPanel}>
+          {actionSidebarContent}
+        </RootLayout.RightPanel>
+      )}
+    </>
   );
 }
