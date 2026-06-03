@@ -294,18 +294,26 @@ def delete_document_by_path(
     abs_path = filesystem.absolute(rel)
     if not abs_path.exists():
         raise HTTPException(status_code=404, detail="not found")
+    # The .md pages being removed: the file itself, or every page under a
+    # folder. We snapshot these *before* the delete so the post-delete fan-out
+    # (which drops each page's caches) covers a folder delete too.
+    md_paths: list[str]
     if abs_path.is_file() and rel.endswith(".md"):
-        require_can("write", rel, user)
+        md_paths = [rel]
     elif abs_path.is_dir():
-        for p in wiki_git.list_paths(rel):
-            if p.endswith(".md"):
-                require_can("write", p, user)
+        md_paths = [p for p in wiki_git.list_paths(rel) if p.endswith(".md")]
+    else:
+        md_paths = []
+    for p in md_paths:
+        require_can("write", p, user)
     author = _git_author(user)
     sha = wiki_git.delete_path(rel, f"delete {rel}", author=author)
-    wiki_notify.after_doc_delete(rel, sha, author)
-    wiki_drafts.delete(rel)
-    wiki_git.delete_drafts_for_path(rel)
-    log.info("doc deleted %s by %s sha=%s", rel, author or "?", sha[:8])
+    for p in md_paths:
+        # Drops FTS / ACL / comments / activity / drafts / working-dir state
+        # for each removed page.
+        wiki_notify.after_doc_delete(p, sha, author)
+        wiki_git.delete_drafts_for_path(p)
+    log.info("doc deleted %s (%d pages) by %s sha=%s", rel, len(md_paths), author or "?", sha[:8])
     return DeleteDocumentResponse(sha=sha)
 
 
