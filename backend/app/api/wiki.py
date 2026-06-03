@@ -297,6 +297,7 @@ def delete_document_by_path(
     # The .md pages being removed: the file itself, or every page under a
     # folder. We snapshot these *before* the delete so the post-delete fan-out
     # (which drops each page's caches) covers a folder delete too.
+    md_paths: list[str]
     if abs_path.is_file() and rel.endswith(".md"):
         md_paths = [rel]
     elif abs_path.is_dir():

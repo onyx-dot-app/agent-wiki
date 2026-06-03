@@ -52,16 +52,25 @@ def test_delete_folder_fans_out_to_nested_pages(tmp_repo):
     # Deleting a folder must clean every nested page's state, not just the
     # folder path (which isn't a .md and would otherwise no-op the hook).
     admin = seed_user(uid="u_admin", email="admin@x.com", is_admin=True)
-    wiki_git.commit_file("proj/a.md", "# A\n", "seed a", author=None)
-    wiki_git.commit_file("proj/b.md", "# B\n", "seed b", author=None)
-    for p in ("proj/a.md", "proj/b.md"):
+    tid = _seed_template()
+    nested = ("proj/a.md", "proj/b.md")
+    for p in nested:
+        wiki_git.commit_file(p, "# Page\n", f"seed {p}", author=None)
         page_dirs.set_for_page(user_id=admin, machine_id="m1", wiki_path=p, working_dir="/tmp/x")
+        drafts.create(
+            path=p, template_id=tid, template_body_snapshot="# T\n", created_by_user_id=admin
+        )
+        agent_activity.upsert_activity(
+            user_id=admin, agent_name=p, doc_path=p, activity="wrote", description=None
+        )
 
     client = TestClient(create_app())
     login_fastapi(client, admin)
     resp = client.delete("/api/wiki/file?path=proj")
     assert resp.status_code == 200
 
-    # Both nested pages' no-TTL working-dir bindings are gone.
-    assert page_dirs.get_for_page(user_id=admin, machine_id="m1", wiki_path="proj/a.md") is None
-    assert page_dirs.get_for_page(user_id=admin, machine_id="m1", wiki_path="proj/b.md") is None
+    # Every nested page's live state is cleared — not just the working-dir one.
+    for p in nested:
+        assert page_dirs.get_for_page(user_id=admin, machine_id="m1", wiki_path=p) is None
+        assert drafts.get(p) is None
+        assert agent_activity.list_for_doc(p) == []
