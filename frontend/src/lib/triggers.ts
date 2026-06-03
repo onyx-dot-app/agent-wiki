@@ -12,6 +12,7 @@ export interface Trigger {
   nl_description: string;
   message: string | null;
   destination: string | null;
+  slack_webhook_id: string | null;
   enabled: boolean;
   created_at: string;
   last_edited_at: string;
@@ -35,6 +36,7 @@ export interface TriggerCreateInput {
   nl_description: string;
   message: string;
   destination?: string | null;
+  slack_webhook_id?: string | null;
   enabled?: boolean;
   kind?: TriggerKind;
   schedule_cron?: string | null;
@@ -47,6 +49,7 @@ export interface TriggerUpdateInput {
   nl_description?: string;
   message?: string;
   destination?: string | null;
+  slack_webhook_id?: string | null;
   enabled?: boolean;
   schedule_cron?: string | null;
   schedule_timezone?: string | null;
@@ -122,4 +125,39 @@ export function useTriggerDestinations() {
     "/triggers/destinations",
   );
   return data?.destinations ?? [];
+}
+
+// ---- Slack channels (per-user named webhooks) ----
+
+export interface SlackWebhook {
+  id: string;
+  name: string;
+  webhook_url_hint: string;
+  created_at: string | null;
+}
+
+export function useSlackWebhooks() {
+  const { data, error, isLoading, mutate } = useSWR<{ webhooks: SlackWebhook[] }>(
+    "/triggers/slack-webhooks",
+  );
+  return {
+    webhooks: data?.webhooks ?? [],
+    error: error as Error | undefined,
+    isLoading,
+    refresh: mutate,
+  };
+}
+
+export function createSlackWebhook(
+  name: string,
+  webhook_url: string,
+): Promise<SlackWebhook> {
+  return apiFetch<SlackWebhook>("/triggers/slack-webhooks", {
+    method: "POST",
+    body: JSON.stringify({ name, webhook_url }),
+  });
+}
+
+export function deleteSlackWebhook(id: string): Promise<void> {
+  return apiFetch<void>(`/triggers/slack-webhooks/${id}`, { method: "DELETE" });
 }

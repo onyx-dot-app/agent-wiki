@@ -1,13 +1,13 @@
-"""slack webhook settings table + slack trigger destination
+"""slack webhooks registry + slack trigger destination
 
-Adds the singleton ``slack_settings`` row that backs the admin-configured
-Slack incoming webhook, and seeds a ``slack`` row into the
-``trigger_destinations`` catalog so triggers can deliver fires to Slack.
+Adds the per-user ``slack_webhooks`` table (named incoming webhooks a user
+can point triggers at), a ``triggers.slack_webhook_id`` reference column, and
+seeds a ``slack`` row into the ``trigger_destinations`` catalog.
 
-The ``slack_settings`` create is guarded on ``inspector.get_table_names()``
-because ``0001_initial`` runs ``Base.metadata.create_all`` against the live
-model registry — fresh databases bootstrapped after this table was added to
-``models.py`` will already have it (same pattern as ``0010_braintrust_settings``).
+The table create and column add are guarded on the live inspector because
+``0001_initial`` runs ``Base.metadata.create_all`` against the current model
+registry — fresh databases bootstrapped after these were added to
+``models.py`` already have them (same pattern as ``0010_braintrust_settings``).
 The destination seed is an idempotent ``ON CONFLICT DO NOTHING`` insert.
 
 Revision ID: 0023
@@ -31,29 +31,37 @@ depends_on: str | Sequence[str] | None = None
 def upgrade() -> None:
     bind = op.get_bind()
     inspector = sa.inspect(bind)
-    if "slack_settings" not in inspector.get_table_names():
+
+    if "slack_webhooks" not in inspector.get_table_names():
         op.create_table(
-            "slack_settings",
-            sa.Column("id", sa.Integer, primary_key=True, autoincrement=False),
+            "slack_webhooks",
+            sa.Column("id", sa.Text, primary_key=True),
             sa.Column(
-                "webhook_url", sa.Text, nullable=False, server_default=sa.text("''")
+                "owner_user_id",
+                sa.Text,
+                sa.ForeignKey("users.id", ondelete="CASCADE"),
+                nullable=False,
             ),
+            sa.Column("name", sa.Text, nullable=False),
+            sa.Column("webhook_url", sa.Text, nullable=False),
             sa.Column(
-                "enabled", sa.Boolean, nullable=False, server_default=sa.text("false")
-            ),
-            sa.Column(
-                "updated_at",
+                "created_at",
                 sa.Text,
                 nullable=False,
                 server_default=sa.text(
                     "to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')"
                 ),
             ),
-            sa.CheckConstraint("id = 1", name="slack_settings_singleton"),
+        )
+        op.create_index(
+            "idx_slack_webhooks_owner", "slack_webhooks", ["owner_user_id"]
         )
 
-    # Seed the slack destination row. Idempotent so re-running (or a fresh
-    # DB whose 0001 already seeded only event_log) stays clean.
+    trigger_cols = {c["name"] for c in inspector.get_columns("triggers")}
+    if "slack_webhook_id" not in trigger_cols:
+        op.add_column("triggers", sa.Column("slack_webhook_id", sa.Text, nullable=True))
+
+    # Seed the slack destination row (idempotent).
     bind.execute(
         sa.text(
             "INSERT INTO trigger_destinations (id, name, description) "
@@ -63,7 +71,7 @@ def upgrade() -> None:
         {
             "id": "slack",
             "name": "Slack",
-            "description": "Posted to a Slack channel via incoming webhook.",
+            "description": "Posted to one of your Slack channels via an incoming webhook.",
         },
     )
 
@@ -71,4 +79,6 @@ def upgrade() -> None:
 def downgrade() -> None:
     bind = op.get_bind()
     bind.execute(sa.text("DELETE FROM trigger_destinations WHERE id = 'slack'"))
-    op.drop_table("slack_settings")
+    op.drop_column("triggers", "slack_webhook_id")
+    op.drop_index("idx_slack_webhooks_owner", table_name="slack_webhooks")
+    op.drop_table("slack_webhooks")

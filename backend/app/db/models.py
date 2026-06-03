@@ -298,6 +298,11 @@ class Trigger(Base):
     file_path: Mapped[str | None] = mapped_column(Text)
     last_edited_at: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
+    # When ``action_json.destination == "slack"``, the specific user-owned
+    # Slack channel this trigger posts to (FK ``slack_webhooks.id``). Null for
+    # ``event_log`` triggers. Not a secret — the webhook URL itself lives only
+    # on the ``slack_webhooks`` row — so this id is safe to persist to the YAML.
+    slack_webhook_id: Mapped[str | None] = mapped_column(Text)
 
 
 class TriggerDestination(Base):
@@ -316,6 +321,29 @@ class TriggerDestination(Base):
     name: Mapped[str] = mapped_column(Text, nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
     created_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
+
+
+class SlackWebhook(Base):
+    """A user-owned, named Slack incoming webhook (one per channel).
+
+    Each row is a delivery target a user can point a trigger at: a human
+    ``name`` (e.g. "PM Standup") and the secret ``webhook_url``. Webhooks
+    are private to ``owner_user_id``; a trigger references one via
+    ``Trigger.slack_webhook_id`` and only the owner's triggers may use it.
+    The URL is a secret and lives **only** here — never in the wiki git repo.
+    """
+
+    __tablename__ = "slack_webhooks"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    owner_user_id: Mapped[str] = mapped_column(
+        Text, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    webhook_url: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
+
+    __table_args__ = (Index("idx_slack_webhooks_owner", "owner_user_id"),)
 
 
 # --------------------------------------------------------------------------- #
@@ -508,26 +536,6 @@ class BraintrustSettings(Base):
     updated_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
 
     __table_args__ = (CheckConstraint("id = 1", name="braintrust_settings_singleton"),)
-
-
-class SlackSettings(Base):
-    """Singleton row backing the admin-configured Slack incoming webhook.
-
-    Backs the ``slack`` trigger destination: when a trigger fires and its
-    destination is ``slack``, the rendered message is POSTed to
-    ``webhook_url`` — but only when ``enabled`` is true and a URL is set.
-    Shape mirrors ``BraintrustSettings``; the pydantic model lives in
-    ``app/slack/settings.py``.
-    """
-
-    __tablename__ = "slack_settings"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
-    webhook_url: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
-    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
-    updated_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
-
-    __table_args__ = (CheckConstraint("id = 1", name="slack_settings_singleton"),)
 
 
 # --------------------------------------------------------------------------- #

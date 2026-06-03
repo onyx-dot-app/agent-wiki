@@ -124,18 +124,3 @@ class BraintrustView(BaseModel):
     enabled: bool
 
 
-class SlackConfigRequest(BaseModel):
-    """Empty-string ``webhook_url`` means 'leave existing untouched'; explicit
-    ``null`` clears it (and disables delivery). ``enabled`` is rejected
-    server-side when the resolved webhook URL would be empty."""
-
-    webhook_url: str | None = None
-    enabled: bool = False
-
-
-class SlackView(BaseModel):
-    """Admin view of the Slack webhook settings."""
-
-    webhook_url_set: bool
-    webhook_url_hint: str
-    enabled: bool

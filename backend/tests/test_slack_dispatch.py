@@ -2,8 +2,8 @@
 
 A fire is *always* recorded to the events table; Slack delivery is an
 additive outbound POST that only happens when the destination is ``slack``
-AND Slack is enabled+configured — and a Slack failure must never lose the
-recorded event.
+and the trigger references a webhook the owner still owns — and a Slack
+failure must never lose the recorded event.
 """
 from __future__ import annotations
 
@@ -11,24 +11,26 @@ import pytest
 
 from app.models.wiki import ChangeKind
 from app.slack import client as slack_client
-from app.slack import settings as slack_settings
+from app.slack import webhooks as slack_webhooks
 from app.tasks.triggers import _record_fire
 from app.triggers.engine import TriggerRecord
 
 from tests._seed import list_events, seed_user
 
 _HOOK = "https://hooks.slack.com/services/T00/B00/XXXXXXXX"
+_OWNER = "usr_1"
 
 
-def _trigger(*, destination: str) -> TriggerRecord:
+def _trigger(*, destination: str, slack_webhook_id: str | None = None) -> TriggerRecord:
     return TriggerRecord(
         id="trg_1",
-        owner_user_id="usr_1",
+        owner_user_id=_OWNER,
         scope_path="projects/foo.md",
         kind="delta",
         nl_description="fire when status changes",
         message="status changed",
         destination=destination,
+        slack_webhook_id=slack_webhook_id,
         enabled=True,
         file_path=None,
         created_at=None,
@@ -52,7 +54,7 @@ def _fire(trigger: TriggerRecord, *, message: str = "Status flipped to done") ->
 
 @pytest.fixture
 def _captured_post(monkeypatch):
-    """Replace the real webhook POST with a capture so no network call fires."""
+    """Capture webhook POSTs so no network call fires."""
     calls: list[dict] = []
 
     def fake_post(*, webhook_url: str, text: str) -> None:
@@ -69,45 +71,53 @@ def _last_fire() -> dict:
 
 
 def test_slack_destination_records_event_and_posts(tmp_db, _captured_post):
-    seed_user()
-    slack_settings.upsert(webhook_url=_HOOK, enabled=True)
+    seed_user(_OWNER)
+    wh = slack_webhooks.create(_OWNER, "PM Standup", _HOOK)
 
-    _fire(_trigger(destination="slack"))
+    _fire(_trigger(destination="slack", slack_webhook_id=wh["id"]))
 
-    # Event recorded with the slack destination.
     payload = _last_fire()["payload"]
     assert payload["destination"] == "slack"
     assert payload["message"] == "Status flipped to done"
 
-    # And the webhook was posted with the rendered message.
     assert len(_captured_post) == 1
     assert _captured_post[0]["webhook_url"] == _HOOK
     assert _captured_post[0]["text"] == "Status flipped to done"
 
 
-def test_slack_disabled_records_but_does_not_post(tmp_db, _captured_post):
-    seed_user()
-    slack_settings.upsert(webhook_url=_HOOK, enabled=False)
+def test_slack_without_channel_records_but_does_not_post(tmp_db, _captured_post):
+    seed_user(_OWNER)
 
-    _fire(_trigger(destination="slack"))
+    _fire(_trigger(destination="slack", slack_webhook_id=None))
 
     assert _last_fire()["payload"]["destination"] == "slack"
-    assert _captured_post == []  # no outbound POST when disabled
+    assert _captured_post == []  # no channel → recorded only
+
+
+def test_slack_channel_not_owned_records_but_does_not_post(tmp_db, _captured_post):
+    seed_user(_OWNER)
+    seed_user("usr_other", email="other@x.com")
+    other_wh = slack_webhooks.create("usr_other", "Theirs", _HOOK)
+
+    # trg owner is _OWNER but references another user's webhook → must not post.
+    _fire(_trigger(destination="slack", slack_webhook_id=other_wh["id"]))
+
+    assert _last_fire()["payload"]["destination"] == "slack"
+    assert _captured_post == []
 
 
 def test_event_log_destination_never_posts(tmp_db, _captured_post):
-    seed_user()
-    slack_settings.upsert(webhook_url=_HOOK, enabled=True)
+    seed_user(_OWNER)
 
     _fire(_trigger(destination="event_log"))
 
     assert _last_fire()["payload"]["destination"] == "event_log"
-    assert _captured_post == []  # event_log delivers in-app only
+    assert _captured_post == []
 
 
 def test_slack_failure_still_records_event(tmp_db, monkeypatch):
-    seed_user()
-    slack_settings.upsert(webhook_url=_HOOK, enabled=True)
+    seed_user(_OWNER)
+    wh = slack_webhooks.create(_OWNER, "PM Standup", _HOOK)
 
     def boom(*, webhook_url: str, text: str) -> None:
         raise slack_client.SlackApiError("slack is down")
@@ -115,6 +125,6 @@ def test_slack_failure_still_records_event(tmp_db, monkeypatch):
     monkeypatch.setattr(slack_client, "post_message", boom)
 
     # Must not raise — the fire is already recorded before dispatch.
-    _fire(_trigger(destination="slack"))
+    _fire(_trigger(destination="slack", slack_webhook_id=wh["id"]))
 
     assert _last_fire()["payload"]["destination"] == "slack"

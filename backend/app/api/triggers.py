@@ -10,7 +10,10 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 from app.auth import User, require_can
 from app.auth.deps import require_user
 from app.models.trigger import (
+    CreateSlackWebhookRequest,
     CreateTriggerRequest,
+    SlackWebhookListResponse,
+    SlackWebhookView,
     TriggerCommit,
     TriggerDestinationsResponse,
     TriggerDestinationView,
@@ -20,6 +23,7 @@ from app.models.trigger import (
     TriggerView,
     UpdateTriggerRequest,
 )
+from app.slack import webhooks as slack_webhooks
 from app.triggers import destinations as destinations_repo
 from app.triggers import repo as triggers_repo
 from app.triggers import storage as triggers_storage
@@ -33,6 +37,23 @@ _SHA_RE = re.compile(r"^[0-9a-f]{4,40}$")
 
 def _git_author(user: User) -> str:
     return f"{user.name or user.email} <{user.email}>"
+
+
+def _mask_url(url: str) -> str:
+    """Show only enough of a webhook URL to recognize it (last path segment)."""
+    tail = url.rstrip("/").rsplit("/", 1)[-1]
+    if len(tail) <= 4:
+        return "…" + tail
+    return "…/" + tail[:4] + "…" + tail[-4:]
+
+
+def _webhook_view(row: dict[str, Any]) -> SlackWebhookView:
+    return SlackWebhookView(
+        id=row["id"],
+        name=row["name"],
+        webhook_url_hint=_mask_url(row["webhook_url"]),
+        created_at=row.get("created_at"),
+    )
 
 
 def _normalize_scope_path(raw: str) -> str:
@@ -68,6 +89,35 @@ def list_destinations(
     )
 
 
+@router.get("/slack-webhooks", response_model=SlackWebhookListResponse)
+def list_slack_webhooks(user: User = Depends(require_user)) -> SlackWebhookListResponse:
+    """The caller's own Slack channels (named webhooks). URLs are masked."""
+    rows = slack_webhooks.list_for_user(user.id)
+    return SlackWebhookListResponse(webhooks=[_webhook_view(r) for r in rows])
+
+
+@router.post(
+    "/slack-webhooks",
+    response_model=SlackWebhookView,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_slack_webhook(
+    req: CreateSlackWebhookRequest, user: User = Depends(require_user)
+) -> SlackWebhookView:
+    try:
+        row = slack_webhooks.create(user.id, req.name, req.webhook_url)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _webhook_view(row)
+
+
+@router.delete("/slack-webhooks/{webhook_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_slack_webhook(webhook_id: str, user: User = Depends(require_user)) -> Response:
+    if not slack_webhooks.delete(webhook_id, user.id):
+        raise HTTPException(status_code=404, detail="not found")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.post(
     "", response_model=TriggerView, status_code=status.HTTP_201_CREATED
 )
@@ -93,6 +143,7 @@ def create_trigger(
             nl_description=req.nl_description.strip(),
             message=req.message.strip(),
             destination=req.destination,
+            slack_webhook_id=req.slack_webhook_id,
             kind=req.kind,
             enabled=req.enabled,
             actor=_git_author(user),
@@ -153,6 +204,9 @@ def update_trigger(
 
     if "destination" in sent_fields:
         kwargs["destination"] = req.destination
+
+    if "slack_webhook_id" in sent_fields:
+        kwargs["slack_webhook_id"] = req.slack_webhook_id
 
     if "enabled" in sent_fields:
         kwargs["enabled"] = req.enabled

@@ -344,21 +344,30 @@ def _record_fire(
 
 
 def _dispatch_to_slack(*, trigger: TriggerRecord, rendered_message: str) -> None:
-    """POST a fire's rendered message to the configured Slack webhook.
+    """POST a fire's rendered message to the trigger's Slack channel.
 
-    No-op when Slack is disabled or unconfigured. Failures are logged and
-    swallowed — the fire is already recorded in the events table, so an
-    unreachable Slack must not fail the trigger task or lose the event.
+    Resolves ``trigger.slack_webhook_id`` to its owner's webhook URL. No-op
+    when the trigger has no channel set or the webhook was deleted/not owned.
+    Failures are logged and swallowed — the fire is already recorded in the
+    events table, so an unreachable Slack must not fail the task or lose it.
     """
-    from app.slack import settings as slack_settings
+    from app.slack import webhooks as slack_webhooks
     from app.slack.client import SlackApiError, post_message
 
-    cfg = slack_settings.get()
-    if not cfg.enabled or not cfg.webhook_url:
+    if not trigger.slack_webhook_id:
         log.info(
-            "trigger %s targets slack but slack is not enabled/configured; "
-            "recorded to events only",
+            "trigger %s targets slack but has no channel set; recorded to events only",
             trigger.id,
+        )
+        return
+
+    webhook_url = slack_webhooks.get_url(
+        trigger.slack_webhook_id, owner_user_id=trigger.owner_user_id
+    )
+    if not webhook_url:
+        log.info(
+            "trigger %s slack channel %s missing/not owned; recorded to events only",
+            trigger.id, trigger.slack_webhook_id,
         )
         return
 
@@ -367,7 +376,7 @@ def _dispatch_to_slack(*, trigger: TriggerRecord, rendered_message: str) -> None
         return
 
     try:
-        post_message(webhook_url=cfg.webhook_url, text=rendered_message)
-        log.info("trigger %s dispatched to slack", trigger.id)
+        post_message(webhook_url=webhook_url, text=rendered_message)
+        log.info("trigger %s dispatched to slack channel %s", trigger.id, trigger.slack_webhook_id)
     except SlackApiError:
         log.exception("trigger %s slack dispatch failed", trigger.id)

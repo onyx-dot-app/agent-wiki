@@ -35,6 +35,9 @@ class CreateTriggerRequest(BaseModel):
     nl_description: str = Field(min_length=1)
     message: str = Field(min_length=1)
     destination: str | None = None
+    # Required when ``destination == "slack"``: the id of one of the caller's
+    # Slack channels (see GET /triggers/slack-webhooks). Ignored otherwise.
+    slack_webhook_id: str | None = None
     kind: str = "delta"
     enabled: bool = True
     schedule_cron: str | None = None
@@ -49,6 +52,7 @@ class UpdateTriggerRequest(BaseModel):
     nl_description: str | None = None
     message: str | None = None
     destination: str | None = None
+    slack_webhook_id: str | None = None
     enabled: bool | None = None
     schedule_cron: str | None = None
     schedule_timezone: str | None = None
@@ -72,6 +76,7 @@ class TriggerView(BaseModel):
     nl_description: str
     message: str | None
     destination: str
+    slack_webhook_id: str | None = None
     enabled: bool
     created_at: str | None
     last_edited_at: str | None
@@ -108,6 +113,28 @@ class TriggerDestinationView(BaseModel):
 
 class TriggerDestinationsResponse(BaseModel):
     destinations: list[TriggerDestinationView]
+
+
+class CreateSlackWebhookRequest(BaseModel):
+    """A named Slack incoming webhook the caller owns. ``webhook_url`` is the
+    secret ``https://hooks.slack.com/…`` URL; it's stored but never returned
+    in full (only a masked hint)."""
+
+    name: str = Field(min_length=1, max_length=80)
+    webhook_url: str = Field(min_length=1)
+
+
+class SlackWebhookView(BaseModel):
+    """A user's Slack channel in list form — the URL is masked to a hint."""
+
+    id: str
+    name: str
+    webhook_url_hint: str
+    created_at: str | None
+
+
+class SlackWebhookListResponse(BaseModel):
+    webhooks: list[SlackWebhookView]
 
 
 class TriggerVersionResponse(BaseModel):
