@@ -31,6 +31,7 @@ _TASK_MODULES = (
     "app.tasks.chat_title",
     "app.tasks.wiki_update",
     "app.tasks.expire_launch_artifacts",
+    "app.tasks.mcp_session_cleanup",
     "app.tasks.periodic",
     "app.tasks.reindex",
     "app.tasks.triggers",

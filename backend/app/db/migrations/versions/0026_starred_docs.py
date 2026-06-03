@@ -1,7 +1,7 @@
 """starred docs
 
-Revision ID: 0025
-Revises: 0024
+Revision ID: 0026
+Revises: 0025
 Create Date: 2026-06-03
 """
 
@@ -12,15 +12,15 @@ from typing import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "0025"
-down_revision: str | None = "0024"
+revision: str = "0026"
+down_revision: str | None = "0025"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
     # Fresh installs get the table from 0001's ``create_all`` — guard so
-    # this migration is a no-op there (same pattern as 0014/0024).
+    # this migration is a no-op there (same pattern as 0014/0025).
     bind = op.get_bind()
     inspector = sa.inspect(bind)
     if "starred_docs" in set(inspector.get_table_names()):

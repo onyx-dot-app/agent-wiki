@@ -91,11 +91,19 @@ def _row_to_record(row: orm.McpSession) -> McpSession:
 
 
 def create(user: User) -> McpSession:
-    """Mint a fresh session for ``user`` and persist it.
+    """Mint a fresh session for ``user``, persist it, and add it to the
+    local cache.
 
     Called from ``transport._handle_initialize``. Caller is responsible
     for flipping ``initialized`` via ``mark_initialized()`` once the
     client's ``notifications/initialized`` arrives.
+
+    The session is added to ``_local_sessions`` at creation (not at
+    SSE-open) so that an MCP client which posts ``initialize`` →
+    ``tools/call`` without opening an SSE stream still receives
+    locally-fanned-out notifications (e.g. ``list_changed``) into its
+    in-memory queue. ``adopt_local`` on SSE-reconnect is what
+    repopulates the cache for sessions that survived a restart.
     """
     sid = _new_id()
     now = _now()
@@ -111,6 +119,8 @@ def create(user: User) -> McpSession:
         )
         s.add(row)
     sess = McpSession(id=sid, user_id=user.id, is_admin=user.is_admin, initialized=False)
+    with _local_lock:
+        _local_sessions[sid] = sess
     log.info("mcp session created id=%s user_id=%s", sid, user.id)
     return sess
 

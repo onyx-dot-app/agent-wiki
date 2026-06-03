@@ -202,11 +202,13 @@ class McpPathSubscription(Base):
     auto-subscribe and explicit ``resources/subscribe``; cascade-deleted
     when the parent ``mcp_sessions`` row is removed.
 
-    The in-memory ``_subscribers_by_path`` index in
-    ``app/mcp_server/pubsub.py`` is the fast-path fan-out lookup for
-    sessions whose SSE stream is open on *this* process; these rows
-    rehydrate that index on SSE reconnect and let cross-process delivery
-    (NOTIFY bridge) resolve who's subscribed to what across replicas.
+    This table is the source of truth for fan-out: every publish in
+    ``app/mcp_server/pubsub.py`` intersects these rows with the
+    sessions reachable on the local process (live SSE writers + parked
+    subscribers), so subscribe/unsubscribe handled by any replica takes
+    effect everywhere on the next commit — no sticky routing required.
+    ``idx_mcp_path_subs_path`` keeps the per-publish lookup an index
+    scan.
     """
 
     __tablename__ = "mcp_path_subscriptions"
