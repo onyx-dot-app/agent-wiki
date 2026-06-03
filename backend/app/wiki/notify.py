@@ -104,8 +104,17 @@ def after_doc_delete(rel_path: str, sha: str, actor: str | None) -> None:
     that sha is empty (the file is gone) and ``before`` at ``sha^`` is
     the body just before deletion.
 
-    Also drops the page's owner + page-level ACL rows. Folder ACLs
-    above the page are untouched.
+    Drops every Postgres row that is a *live pointer* to the page: the
+    owner + page-level ACL rows (folder ACLs above are untouched), the
+    agent-activity rail, template-draft state, and per-(user, machine)
+    working-dir bindings. Comments are kept as tombstones (orphaned, not
+    deleted) since they have archival value; the rest are operational state
+    with none. Point-in-time records (launch history, eval samples) are left
+    alone.
+
+    Caller deletes one ``.md`` at a time — for a folder delete it invokes
+    this per nested page (see ``api/wiki.py``), so the folder path itself
+    never reaches here.
 
     MCP-side: subscribers to the deleted path get one final
     ``notifications/resources/updated`` with ``changeKind="delete"`` so
@@ -119,6 +128,12 @@ def after_doc_delete(rel_path: str, sha: str, actor: str | None) -> None:
     # The body is gone, so there's nothing to re-anchor against — orphan the
     # page's comments (keeps them as tombstones) rather than dropping them.
     comments.orphan_all_for_doc(rel_path)
+    # No-TTL pointers (drafts, working-dirs) would otherwise mis-bind a page
+    # later recreated at this path; agent_activity is TTL'd but cleared here
+    # for symmetry with the move-out-of-.md-space path.
+    agent_activity.delete_for_doc(rel_path)
+    drafts.delete(rel_path)
+    page_dirs.delete_all_for_page(rel_path)
     fan_out_trigger_eval(rel_path, sha, ChangeKind.DELETE, actor)
     mcp_pubsub.publish_doc_delete(rel_path, sha)
     mcp_pubsub.publish_list_changed()
