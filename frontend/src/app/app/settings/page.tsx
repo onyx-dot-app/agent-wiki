@@ -8,8 +8,8 @@ import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { apiFetch } from "@/lib/api";
 import { useRequireAuth } from "@/lib/auth";
 import { setLocalThemePreview } from "@/lib/theme-provider";
-import { useIsMobile } from "@/lib/viewport";
 import type { DefaultLanding, ThemeSetting, UserSettings } from "@/types";
+import styles from "./page.module.css";
 
 const DEFAULT_SETTINGS: UserSettings = {
   theme: "system",
@@ -41,21 +41,17 @@ const COMMON_TIMEZONES = [
 
 export default function SettingsPage() {
   const { user, loading, updateSettings, updateProfile } = useRequireAuth();
-  const isMobile = useIsMobile();
 
   if (loading || !user) {
     return (
-      <main className={isMobile ? "p-4" : "p-8"}>
+      <main className={styles.loading}>
         <LoadingSpinner center />
       </main>
     );
   }
 
   return (
-    <main
-      className="max-w-[720px]"
-      style={{ padding: isMobile ? "16px 12px" : "24px 32px" }}
-    >
+    <main className={styles.main}>
         <BackLink href="/" label="← Home" />
         <PageHeader
           title="Personal settings"
