@@ -102,6 +102,24 @@ class StarredDocsResponse(BaseModel):
     paths: list[str]
 
 
+class RecentPageView(BaseModel):
+    """A recently-updated page for the home-page "Recent Pages" grid.
+
+    ``title`` is the doc's leading ``# H1`` when present, else the
+    filename. ``preview`` is the body with frontmatter and that leading
+    heading stripped — the card renders it as masked markdown.
+    """
+
+    path: str
+    title: str
+    updated_at: str
+    preview: str
+
+
+class ListRecentPagesResponse(BaseModel):
+    pages: list[RecentPageView]
+
+
 class GetDocumentResponse(BaseModel):
     path: str
     body: str

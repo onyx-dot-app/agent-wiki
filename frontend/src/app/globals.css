@@ -1,4 +1,5 @@
 @import "@onyx-ai/opal/root.css";
+@import "./css/z-index.css";
 @config "../../tailwind.config.cjs";
 
 /* Tell the browser which color scheme is active so native UI (scrollbars,
@@ -72,12 +73,11 @@
 
 /* ── Radix popovers ───────────────────────────────────────────────────────
    Opal's Popover/SelectButton menus must float above modal scrims
-   (z-index 100–110). Radix sets `z-index: auto` inline on the wrapper
-   and Opal strips className/style from Popover.Content, so !important
-   is the only way to lift the menu above the modal.
-   ───────────────────────────────────────────────────────────────────── */
+   (--z-modal). Radix sets `z-index: auto` inline on the wrapper and Opal
+   strips className/style from Popover.Content, so !important is the only way
+   to lift the menu above the modal. Uses the onyx --z-popover layer. */
 [data-radix-popper-content-wrapper] {
-  z-index: 1000 !important;
+  z-index: var(--z-popover) !important;
 }
 
 /* Floating menus keep their shadow for depth but drop the hard border. */
