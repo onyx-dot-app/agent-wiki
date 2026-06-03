@@ -39,7 +39,7 @@ export const NAV_ENTRIES = [
   },
   {
     href: "/app/agents",
-    label: "Agents & Actions",
+    label: "Agents",
     icon: SvgActions,
     description: "Connect agents to read and update your wiki.",
   },

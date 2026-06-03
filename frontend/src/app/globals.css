@@ -83,6 +83,110 @@ html {
     border-color: transparent !important;
 }
 
+/* ── Markdown rendering ───────────────────────────────────────────────────
+   The wiki article body and DiffView render react-markdown output under
+   className="markdown" with no styling layer of their own. Tailwind's
+   preflight strips element defaults, so without these rules headings,
+   lists, code, and tables render as flat unstyled text.
+   ───────────────────────────────────────────────────────────────────── */
+.markdown {
+  color: var(--text-05);
+  line-height: 1.6;
+}
+.markdown h1,
+.markdown h2,
+.markdown h3,
+.markdown h4 {
+  color: var(--text-05);
+  font-weight: 600;
+  line-height: 1.3;
+}
+.markdown h1 {
+  font-size: 1.875em;
+  margin: 28px 0 10px;
+}
+.markdown h2 {
+  font-size: 1.5em;
+  margin: 24px 0 8px;
+}
+.markdown h3 {
+  font-size: 1.25em;
+  margin: 20px 0 6px;
+}
+.markdown h4 {
+  font-size: 1.1em;
+  margin: 16px 0 4px;
+}
+.markdown p {
+  margin: 10px 0;
+}
+.markdown ul,
+.markdown ol {
+  margin: 10px 0;
+  padding-left: 24px;
+}
+.markdown ul {
+  list-style: disc;
+}
+.markdown ol {
+  list-style: decimal;
+}
+.markdown li {
+  margin: 4px 0;
+}
+.markdown a {
+  color: var(--text-05);
+  text-decoration: underline;
+}
+.markdown a:hover {
+  color: var(--text-04);
+}
+.markdown code {
+  background: var(--background-tint-02);
+  color: var(--text-05);
+  border: 1px solid var(--border-01);
+  border-radius: var(--border-radius-04);
+  padding: 1px 6px;
+  font-size: 0.92em;
+}
+.markdown pre {
+  background: var(--background-tint-02);
+  color: var(--text-05);
+  border: 1px solid var(--border-01);
+  border-radius: var(--border-radius-04);
+  padding: 12px 14px;
+  overflow-x: auto;
+}
+.markdown pre code {
+  background: transparent;
+  border: none;
+  padding: 0;
+  font-size: inherit;
+}
+.markdown blockquote {
+  border-left: 3px solid var(--border-02);
+  margin: 12px 0;
+  padding: 4px 12px;
+  color: var(--text-04);
+  background: var(--background-tint-01);
+}
+.markdown table {
+  border-collapse: collapse;
+}
+.markdown th,
+.markdown td {
+  border: 1px solid var(--border-01);
+  padding: 6px 10px;
+}
+.markdown th {
+  background: var(--background-tint-02);
+}
+.markdown hr {
+  border: none;
+  border-top: 1px solid var(--border-01);
+  margin: 16px 0;
+}
+
 /* ── Inline comment highlights (CSS Custom Highlight API) ─────────────────
    The wiki page registers Ranges under these names via paintCommentHighlights().
    Yellow/orange are illustrative decoration — raw hex is intentional here.

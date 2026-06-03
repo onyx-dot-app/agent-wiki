@@ -8,10 +8,10 @@ import {
   SvgSidebar,
   SvgStar,
 } from "@onyx-ai/opal/icons";
-import { SvgOnyxLogoTyped } from "@onyx-ai/opal/logos";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import useSWR from "swr";
+import { Wordmark } from "@/components/common/Wordmark";
 import {
   WikiSearch,
   type WikiSearchHandle,
@@ -127,8 +127,8 @@ export function AppSidebar() {
               </div>
             ) : (
               <>
-                <div className="px-1">
-                  <SvgOnyxLogoTyped size={28} />
+                <div className="px-1 flex items-center h-7">
+                  <Wordmark />
                 </div>
                 <div className="px-1">
                   <Button

@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -84,6 +91,12 @@ export function ChatWidget() {
   // pre-drafting snapshot is restored when the user leaves drafting so
   // their regular conversation isn't lost.
   const [draftingKey, setDraftingKey] = useState<string | null>(null);
+  // What the drafting banner renders. Tracks ``drafting`` while it's
+  // active but is cleared by the deactivation below — in the same render
+  // as the mode/conversation restore — so leaving drafting is one visual
+  // step (banner gone + panel collapsed + chat swapped), not the banner
+  // vanishing on its own first.
+  const [draftingBanner, setDraftingBanner] = useState<DraftingState | null>(null);
   const preDraftingRef = useRef<{ sessionId: string | null; items: ChatItem[] } | null>(
     null,
   );
@@ -238,9 +251,7 @@ export function ChatWidget() {
   // (b) swap to a fresh hidden session, and (c) call the init endpoint
   // so the agent kicks off with template-aware guiding questions (or a
   // generic "what do you want to work on" prime for blank). When the
-  // page leaves drafting we restore the snapshot. Brief null
-  // transitions (NewDocView → FileViewer hand-off) are debounced so we
-  // don't flap.
+  // page leaves drafting we restore the snapshot.
   //
   // We watch a derived ``desiredKey`` rather than ``templateId``
   // directly so that "blank" is a distinct watch value (template_A →
@@ -252,6 +263,15 @@ export function ChatWidget() {
       : drafting.kind === "template"
         ? `tpl:${drafting.templateId ?? "deleted"}`
         : "blank";
+
+  // Keep the banner in sync while drafting is active (path/template name
+  // can refine on the NewDocView → FileViewer hand-off). When ``drafting``
+  // goes null we deliberately hold the last value — the deactivation
+  // below clears it together with the mode restore.
+  useEffect(() => {
+    if (drafting !== null) setDraftingBanner(drafting);
+  }, [drafting]);
+
   useEffect(() => {
     // Activate immediately when a drafting state arrives.
     if (desiredKey !== null && drafting !== null) {
@@ -293,36 +313,44 @@ export function ChatWidget() {
       return;
     }
 
-    // Deactivate, but debounce so a brief null between page hand-offs
-    // (NewDocView unmounts before FileViewer mounts) doesn't tear down
-    // the drafting conversation only to spin up another one immediately.
+    // Deactivate. Null always means drafting really ended — the
+    // NewDocView → FileViewer create hand-off keeps the drafting state
+    // alive across navigation instead of passing through null — so we
+    // tear down synchronously. Everything reverts in one batched render
+    // (banner gone + mode restored + conversation swapped), in the same
+    // paint as the page change that ended drafting, rather than the chat
+    // visibly collapsing a beat after the page already moved on.
     if (draftingKey === null) return;
-    const handle = window.setTimeout(() => {
-      const snapshot = preDraftingRef.current;
-      preDraftingRef.current = null;
-      setDraftingKey(null);
-      if (snapshot) {
-        setSessionId(snapshot.sessionId);
-        setItems(snapshot.items);
-      } else {
-        setSessionId(null);
-        setItems([]);
-      }
-      // If drafting force-expanded the widget (and the user never
-      // touched the mode since), drop back to whatever it was before —
-      // open widget or fully collapsed.
-      const priorMode = preDraftingModeRef.current;
-      preDraftingModeRef.current = null;
-      if (priorMode !== null) setMode(priorMode);
-      setError(null);
-    }, 300);
-    return () => window.clearTimeout(handle);
+    const snapshot = preDraftingRef.current;
+    preDraftingRef.current = null;
+    setDraftingKey(null);
+    if (snapshot) {
+      setSessionId(snapshot.sessionId);
+      setItems(snapshot.items);
+    } else {
+      setSessionId(null);
+      setItems([]);
+    }
+    // If drafting force-expanded the widget (and the user never
+    // touched the mode since), drop back to whatever it was before —
+    // open widget or fully collapsed.
+    const priorMode = preDraftingModeRef.current;
+    preDraftingModeRef.current = null;
+    if (priorMode !== null) setMode(priorMode);
+    // Cleared here (not via the ``drafting`` sync effect) so the banner,
+    // mode, and conversation all revert in one render — see the
+    // ``draftingBanner`` declaration.
+    setDraftingBanner(null);
+    setError(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [desiredKey]);
 
   // When expanded, reserve real layout space on the right so the page is
-  // pushed left rather than being overlaid by the panel.
-  useEffect(() => {
+  // pushed left rather than being overlaid by the panel. Layout effect so
+  // the padding lands in the same paint as the panel itself — with a plain
+  // effect the collapse painted first and the page reflowed a frame later
+  // (panel gone, gap still there → visible two-step).
+  useLayoutEffect(() => {
     if (mode !== "expanded") {
       document.body.style.paddingRight = "";
       return;
@@ -526,7 +554,7 @@ export function ChatWidget() {
           />
         </header>
 
-        {drafting && <DraftingBanner state={drafting} />}
+        {draftingBanner && <DraftingBanner state={draftingBanner} />}
 
         <div
           ref={scrollRef}

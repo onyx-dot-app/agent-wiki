@@ -2,7 +2,7 @@
 
 import { SidebarTab } from "@onyx-ai/opal/components";
 import { SvgX } from "@onyx-ai/opal/icons";
-import { SvgOnyxLogoTyped } from "@onyx-ai/opal/logos";
+import { Wordmark } from "@/components/common/Wordmark";
 import { usePathname } from "next/navigation";
 import { ADMIN_NAV_ENTRIES } from "@/lib/nav/registry";
 import { UserMenu } from "./UserMenu";
@@ -13,8 +13,8 @@ export function AdminSidebar() {
   return (
     <nav className="flex flex-col h-screen w-[248px] box-border py-2 gap-4 shrink-0 sticky top-0 bg-background-tint-02 overflow-hidden">
       {/* Logo */}
-      <div className="pt-3 px-3">
-        <SvgOnyxLogoTyped size={28} />
+      <div className="pt-3 px-3 flex items-center h-7">
+        <Wordmark />
       </div>
 
       {/* Nav items */}
