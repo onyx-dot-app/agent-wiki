@@ -45,7 +45,6 @@ const FALLBACK_DESTINATIONS: TriggerDestination[] = [
   },
 ];
 
-const EXAMPLE_SCOPE = "projects/release-v3.md";
 const EXAMPLE_IF = "the document is updated with a release version";
 const EXAMPLE_SEND =
   "a message saying that the version has been finalized or updated to the specific version number.";
@@ -245,18 +244,6 @@ export function TriggerModal({
       }}
       className="fixed inset-0 z-[100] flex items-center justify-center bg-(--mask-03)"
     >
-      <div
-        aria-hidden
-        className="pointer-events-none absolute top-1/2 left-1/2 z-0 w-[min(560px,92vw)] translate-x-[calc(-50%+40px)] translate-y-[calc(-50%+44px)] rotate-[-1.5deg] opacity-85 blur-[3.5px]"
-      >
-        <PreviewCard
-          scope={EXAMPLE_SCOPE}
-          ifText={EXAMPLE_IF}
-          sendText={EXAMPLE_SEND}
-          destLabel="Event log only"
-        />
-      </div>
-
       <form
         onSubmit={onSubmit}
         className="relative z-[1] flex max-h-[92vh] w-[min(560px,92vw)] flex-col gap-4 overflow-y-auto rounded-(--border-radius-12) bg-(--background-tint-00) p-6 shadow-(--shadow-modal)"
@@ -693,62 +680,4 @@ const CRON_FIELD_HELP: { label: string; help: string }[] = [
 
 function pad(n: number): string {
   return n.toString().padStart(2, "0");
-}
-
-function PreviewCard({
-  scope,
-  ifText,
-  sendText,
-  destLabel,
-}: {
-  scope: string;
-  ifText: string;
-  sendText: string;
-  destLabel: string;
-}) {
-  return (
-    <div className="flex flex-col gap-4 rounded-(--border-radius-12) bg-(--background-tint-00) p-6 shadow-(--shadow-modal)">
-      <div>
-        <h2 className="m-0 text-lg font-semibold text-(--text-05)">
-          Create a trigger
-        </h2>
-        <p className="mt-[6px] mb-0 text-[13px] text-(--text-04)">
-          Triggers monitor documents or folders and send events when a specified
-          change occurs.
-        </p>
-      </div>
-      <div className="flex flex-col gap-1.5">
-        <span className="text-[11px] font-bold tracking-[0.06em] text-(--text-03) uppercase">
-          Watching
-        </span>
-        <div className="box-border w-full rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-00) px-[10px] py-2 text-sm text-(--text-05) outline-none">
-          {scope}
-        </div>
-      </div>
-      <div className="flex flex-col gap-1.5">
-        <span className="text-[11px] font-bold tracking-[0.06em] text-(--text-03) uppercase">
-          If
-        </span>
-        <div className="box-border w-full rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-00) px-[10px] py-2 text-sm whitespace-pre-wrap text-(--text-05) outline-none">
-          {ifText}
-        </div>
-      </div>
-      <div className="flex flex-col gap-1.5">
-        <span className="text-[11px] font-bold tracking-[0.06em] text-(--text-03) uppercase">
-          Then send
-        </span>
-        <div className="box-border w-full rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-00) px-[10px] py-2 text-sm whitespace-pre-wrap text-(--text-05) outline-none">
-          {sendText}
-        </div>
-      </div>
-      <div className="flex flex-col gap-1.5">
-        <span className="text-[11px] font-bold tracking-[0.06em] text-(--text-03) uppercase">
-          To
-        </span>
-        <div className="box-border w-full rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-00) px-[10px] py-2 text-sm text-(--text-05) outline-none">
-          {destLabel}
-        </div>
-      </div>
-    </div>
-  );
 }
