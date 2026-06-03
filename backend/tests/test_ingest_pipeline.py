@@ -176,6 +176,29 @@ def test_new_body_commits(mock_search, mock_reconcile, mock_read, mock_commit, m
     mock_notify.assert_called_once()
 
 
+@patch("app.tasks.wiki_update.wiki_git.head_sha_for_path", return_value="headsha")
+@patch("app.wiki.utils.wiki_notify.after_doc_write")
+@patch("app.tasks.wiki_update.wiki_git.commit_file", return_value="sha123")
+@patch("app.tasks.wiki_update.wiki_git.read_file", return_value="old body")
+@patch("app.tasks.wiki_update.ingest_batch_reconciler.batch_reconcile")
+@patch("app.tasks.wiki_update.ingest_search.candidates")
+def test_commit_attributed_to_onyx_ingest(
+    mock_search, mock_reconcile, mock_read, mock_commit, mock_notify, mock_head, monkeypatch
+):
+    # No human user is bound on the ingest path, so the commit author would
+    # otherwise fall back to "AI Wiki Helper". process_pushed_document binds the
+    # Onyx Ingest identity for the run instead.
+    monkeypatch.setattr("app.tasks.wiki_update.get_llm_settings", lambda: _settings_with_model())
+    mock_search.return_value = [_hit("page.md", "Page", 5.0)]
+    mock_reconcile.return_value = (["new body"], 1)
+    _run(_make_push())
+    assert mock_commit.call_args.kwargs["author"] == "Onyx Ingest <onyx-ingest@local>"
+    # And the binding is unwound after the run — no leak into later tasks.
+    from app.wiki.utils import author_string
+
+    assert author_string() == "AI Wiki Helper <ai-wiki-helper@local>"
+
+
 @patch("app.tasks.wiki_update.wiki_git.commit_file")
 @patch("app.tasks.wiki_update.wiki_git.read_file", return_value="body")
 @patch("app.tasks.wiki_update.ingest_batch_reconciler.batch_reconcile")
