@@ -2819,7 +2819,18 @@ function ActiveAgentsBar({
           gap: 8,
         }}
       >
-        <Chevron open={open} disabled={!expandable} />
+        <span
+          aria-hidden
+          style={{
+            flexShrink: 0,
+            display: "flex",
+            color: !expandable ? color.text.faint : color.text.muted,
+            transform: open ? "rotate(90deg)" : "rotate(0deg)",
+            transition: "transform 120ms ease",
+          }}
+        >
+          <SvgChevronRight size={10} />
+        </span>
         <span style={{ fontWeight: 500 }}>
           {expandable ? "Active agents" : "No agents active"}
         </span>
@@ -2879,23 +2890,6 @@ function ActiveAgentsBar({
         </ul>
       )}
     </div>
-  );
-}
-
-function Chevron({ open, disabled }: { open: boolean; disabled: boolean }) {
-  return (
-    <span
-      aria-hidden
-      style={{
-        flexShrink: 0,
-        display: "flex",
-        color: disabled ? color.text.faint : color.text.muted,
-        transform: open ? "rotate(90deg)" : "rotate(0deg)",
-        transition: "transform 120ms ease",
-      }}
-    >
-      <SvgChevronRight size={10} />
-    </span>
   );
 }
 
