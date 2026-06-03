@@ -2,6 +2,16 @@
 @import "./css/z-index.css";
 @config "../../tailwind.config.cjs";
 
+/* Reserve the scrollbar gutter on the root scroll container so layout
+   width stays constant whether content fits or overflows. Without this,
+   pages that toggle between short and tall content cause a horizontal
+   shift as the scrollbar appears/disappears. */
+html,
+body {
+    height: 100%;
+    scrollbar-gutter: stable;
+}
+
 /* Tell the browser which color scheme is active so native UI (scrollbars,
    autofill, date pickers) uses matching light/dark variants. */
 :root {

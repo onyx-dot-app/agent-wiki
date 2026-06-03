@@ -64,6 +64,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         style={{
           margin: 0,
           boxSizing: "border-box",
+          height: "100%",
         }}
       >
         <SWRProvider>
