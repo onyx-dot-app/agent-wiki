@@ -244,7 +244,7 @@ def parse_commit_diff(sha: str, rel: str) -> FileDiffResponse:
     that into 404 for end users. Unknown SHA (passes hex regex but doesn't
     resolve in the repo) → same empty-hunks response, same 404 at the route.
     """
-    effective_rel = wiki_git.path_at_ref(rel, sha) or rel
+    effective_rel: str = wiki_git.path_at_ref(rel, sha) or rel
     try:
         parent = wiki_git.parent_sha(sha)
         # Pass unified=99_999 so the full doc body lands in `context`
