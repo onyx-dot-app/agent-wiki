@@ -103,6 +103,24 @@ All modal-style dialogs (`TriggerModal`, `TriggerHistoryModal`,
 
 Side panels anchored to a screen edge use `var(--shadow-panel)`.
 
+### Destructive confirmations — `useConfirm`, never `window.confirm`
+
+Don't call the browser's `confirm()` for delete/revoke/clear warnings — use
+the in-app dialog from `src/components/common/ConfirmDialog.tsx`:
+
+```tsx
+const confirmDialog = useConfirm();
+if (!(await confirmDialog({
+  title: "Delete this trigger?",
+  body: "Optional supporting line.",   // optional
+  confirmLabel: "Delete",              // the danger button label
+}))) return;
+```
+
+`ConfirmProvider` is mounted once in the root layout. The only sanctioned
+`window.confirm` left is the unsaved-changes navigation guard in the wiki
+page, which must synchronously block a click event.
+
 ## Inputs / selects — consistent border and radius
 
 Form inputs and `<select>` controls use:

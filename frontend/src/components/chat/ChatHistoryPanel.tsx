@@ -4,11 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { SvgArrowLeft, SvgTrash } from "@onyx-ai/opal/icons";
 
-import {
-  type ChatSession,
-  deleteSession,
-  listSessions,
-} from "@/lib/chat";
+import { type ChatSession, deleteSession, listSessions } from "@/lib/chat";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 
 interface Props {
@@ -71,27 +67,27 @@ export function ChatHistoryPanel({
   return (
     <div
       aria-hidden={!open}
-      className="absolute inset-0 bg-(--background-tint-00) flex flex-col z-[2]"
+      className="absolute inset-0 z-[2] flex flex-col bg-(--background-tint-00)"
       style={{
         transform: open ? "translateX(0)" : "translateX(-100%)",
         transition: "transform 180ms ease-out",
       }}
     >
-      <header
-        className="flex items-center gap-2 px-3 py-[10px] border-b border-(--border-01) bg-(--background-tint-01) shrink-0"
-      >
+      <header className="flex shrink-0 items-center gap-2 border-b border-(--border-01) bg-(--background-tint-01) px-3 py-[10px]">
         <button
           onClick={onClose}
           title="Back to chat"
           aria-label="Back to chat"
-          className="w-7 h-7 border-none bg-transparent rounded-(--border-radius-04) cursor-pointer text-(--text-04) flex items-center justify-center"
+          className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-(--border-radius-04) border-none bg-transparent text-(--text-04)"
         >
           <SvgArrowLeft size={16} />
         </button>
-        <div className="font-semibold text-sm flex-1 text-(--text-05)">History</div>
+        <div className="flex-1 text-sm font-semibold text-(--text-05)">
+          History
+        </div>
         <button
           onClick={onNewChat}
-          className="py-[5px] px-[10px] bg-(--background-tint-inverted-00) text-(--text-inverted-05) border-none rounded-(--border-radius-04) cursor-pointer text-xs font-semibold"
+          className="cursor-pointer rounded-(--border-radius-04) border-none bg-(--background-tint-inverted-00) px-[10px] py-[5px] text-xs font-semibold text-(--text-inverted-05)"
         >
           + New chat
         </button>
@@ -101,7 +97,7 @@ export function ChatHistoryPanel({
         {error && (
           <div
             role="alert"
-            className="mx-1 mt-1 mb-2 py-2 px-[10px] bg-(--status-error-01) border border-(--status-error-02) text-(--status-text-error-05) rounded-(--border-radius-04) text-xs"
+            className="mx-1 mt-1 mb-2 rounded-(--border-radius-04) border border-(--status-error-02) bg-(--status-error-01) px-[10px] py-2 text-xs text-(--status-text-error-05)"
           >
             {error}
           </div>
@@ -112,7 +108,7 @@ export function ChatHistoryPanel({
           </div>
         )}
         {!loading && sessions.length === 0 && !error && (
-          <p className="text-(--text-03) text-[13px] p-2 m-0">
+          <p className="m-0 p-2 text-[13px] text-(--text-03)">
             No past conversations yet.
           </p>
         )}
@@ -159,7 +155,7 @@ function SessionRow({
           onClick();
         }
       }}
-      className={`flex items-center gap-[6px] py-2 px-[10px] rounded-(--border-radius-04) cursor-pointer ${
+      className={`flex cursor-pointer items-center gap-[6px] rounded-(--border-radius-04) px-[10px] py-2 ${
         active
           ? "bg-(--background-tint-04)"
           : hover
@@ -167,20 +163,22 @@ function SessionRow({
             : "bg-transparent"
       }`}
     >
-      <div className="flex-1 min-w-0">
+      <div className="min-w-0 flex-1">
         <div
-          className={`text-[13px] ${active ? "font-semibold" : "font-medium"} text-(--text-05) whitespace-nowrap overflow-hidden text-ellipsis`}
+          className={`text-[13px] ${active ? "font-semibold" : "font-medium"} overflow-hidden text-ellipsis whitespace-nowrap text-(--text-05)`}
         >
           {title}
         </div>
-        <div className="text-[11px] text-(--text-03)">{formatRelative(session.updated_at)}</div>
+        <div className="text-[11px] text-(--text-03)">
+          {formatRelative(session.updated_at)}
+        </div>
       </div>
       {hover && (
         <button
           onClick={onDelete}
           title="Delete"
           aria-label="Delete chat"
-          className="w-6 h-6 border-none bg-transparent rounded-(--border-radius-04) cursor-pointer text-(--text-02) flex items-center justify-center"
+          className="flex h-6 w-6 cursor-pointer items-center justify-center rounded-(--border-radius-04) border-none bg-transparent text-(--text-02)"
         >
           <SvgTrash size={14} />
         </button>

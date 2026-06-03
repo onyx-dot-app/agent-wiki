@@ -11,14 +11,14 @@ export function AdminSidebar() {
   const pathname = usePathname();
 
   return (
-    <nav className="flex flex-col h-screen w-[248px] box-border py-2 gap-4 shrink-0 sticky top-0 bg-background-tint-02 overflow-hidden">
+    <nav className="sticky top-0 box-border flex h-screen w-[248px] shrink-0 flex-col gap-4 overflow-hidden bg-background-tint-02 py-2">
       {/* Logo */}
-      <div className="pt-3 px-3 flex items-center h-7">
+      <div className="flex h-7 items-center px-3 pt-3">
         <Wordmark />
       </div>
 
       {/* Nav items */}
-      <div className="flex-1 min-h-0 flex flex-col gap-3 px-2 overflow-x-hidden">
+      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-x-hidden px-2">
         <div className="flex flex-col gap-px">
           {ADMIN_NAV_ENTRIES.map((item) => {
             const active = pathname?.startsWith(item.href) ?? false;
@@ -40,7 +40,7 @@ export function AdminSidebar() {
       {/* Footer: exit + account — same slot order as AppSidebar (panel
           toggle above, account pinned at the very bottom) so the rows
           don't appear to swap when entering/leaving the admin panel. */}
-      <div className="flex flex-col gap-px px-2 shrink-0">
+      <div className="flex shrink-0 flex-col gap-px px-2">
         <SidebarTab icon={SvgX} folded={false} href="/app/wiki">
           Exit Admin Panel
         </SidebarTab>

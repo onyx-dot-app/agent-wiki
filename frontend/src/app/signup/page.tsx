@@ -17,7 +17,9 @@ function SignupForm() {
   useEffect(() => {
     if (config?.mode === "oidc") {
       const next = params.get("next");
-      router.replace(next ? `/login?next=${encodeURIComponent(next)}` : "/login");
+      router.replace(
+        next ? `/login?next=${encodeURIComponent(next)}` : "/login",
+      );
     }
   }, [config?.mode, params, router]);
   const [email, setEmail] = useState("");
@@ -45,8 +47,8 @@ function SignupForm() {
   const loginHref = next ? `/login?next=${encodeURIComponent(next)}` : "/login";
 
   return (
-    <main className="min-h-screen flex items-center justify-center p-6 bg-(--background-tint-02)">
-      <div className="w-full max-w-[400px] bg-(--background-tint-00) border border-(--border-01) rounded-(--border-radius-12) p-8 shadow-(--shadow-md)">
+    <main className="flex min-h-screen items-center justify-center bg-(--background-tint-02) p-6">
+      <div className="w-full max-w-[400px] rounded-(--border-radius-12) border border-(--border-01) bg-(--background-tint-00) p-8 shadow-(--shadow-md)">
         <h1 className="m-0 mb-1.5 text-[22px] text-(--text-05)">
           Create account
         </h1>
@@ -62,7 +64,7 @@ function SignupForm() {
               onChange={(e) => setEmail(e.target.value)}
               required
               autoFocus
-              className="w-full py-2 px-2.5 text-sm border border-(--border-01) rounded-(--border-radius-04) bg-(--background-tint-00) text-(--text-05) box-border outline-none"
+              className="box-border w-full rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-00) px-2.5 py-2 text-sm text-(--text-05) outline-none"
             />
           </label>
           <label className="text-[13px] text-(--text-04)">
@@ -71,7 +73,7 @@ function SignupForm() {
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="w-full py-2 px-2.5 text-sm border border-(--border-01) rounded-(--border-radius-04) bg-(--background-tint-00) text-(--text-05) box-border outline-none"
+              className="box-border w-full rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-00) px-2.5 py-2 text-sm text-(--text-05) outline-none"
             />
           </label>
           <label className="text-[13px] text-(--text-04)">
@@ -82,14 +84,14 @@ function SignupForm() {
               onChange={(e) => setPassword(e.target.value)}
               required
               minLength={8}
-              className="w-full py-2 px-2.5 text-sm border border-(--border-01) rounded-(--border-radius-04) bg-(--background-tint-00) text-(--text-05) box-border outline-none"
+              className="box-border w-full rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-00) px-2.5 py-2 text-sm text-(--text-05) outline-none"
             />
-            <div className="text-xs text-(--text-03) mt-1.5">
+            <div className="mt-1.5 text-xs text-(--text-03)">
               At least 8 characters.
             </div>
           </label>
           {error && (
-            <div className="py-2.5 px-3 text-[13px] bg-(--status-error-01) border border-(--status-error-02) text-(--status-text-error-05) rounded-(--border-radius-04)">
+            <div className="rounded-(--border-radius-04) border border-(--status-error-02) bg-(--status-error-01) px-3 py-2.5 text-[13px] text-(--status-text-error-05)">
               {error}
             </div>
           )}

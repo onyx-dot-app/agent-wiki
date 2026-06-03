@@ -10,7 +10,10 @@ export class ApiError extends Error {
   }
 }
 
-export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
+export async function apiFetch<T>(
+  path: string,
+  init?: RequestInit,
+): Promise<T> {
   const isAbsolute = /^https?:\/\//i.test(path);
   const url = isAbsolute ? path : `${BASE}${path}`;
   const headers: HeadersInit = {

@@ -38,7 +38,11 @@ interface Props {
 }
 
 const FALLBACK_DESTINATIONS: TriggerDestination[] = [
-  { id: "event_log", name: "Event Log", description: "Tracked in the event log only." },
+  {
+    id: "event_log",
+    name: "Event Log",
+    description: "Tracked in the event log only.",
+  },
 ];
 
 const EXAMPLE_SCOPE = "projects/release-v3.md";
@@ -46,7 +50,13 @@ const EXAMPLE_IF = "the document is updated with a release version";
 const EXAMPLE_SEND =
   "a message saying that the version has been finalized or updated to the specific version number.";
 
-export function TriggerModal({ open, initial, onClose, onSaved, lockScope }: Props) {
+export function TriggerModal({
+  open,
+  initial,
+  onClose,
+  onSaved,
+  lockScope,
+}: Props) {
   const isEdit = Boolean(initial?.id);
   const [scopePath, setScopePath] = useState("");
   const [ifText, setIfText] = useState("");
@@ -55,7 +65,8 @@ export function TriggerModal({ open, initial, onClose, onSaved, lockScope }: Pro
     FALLBACK_DESTINATIONS,
   );
   const [destination, setDestination] = useState(FALLBACK_DESTINATIONS[0].id);
-  const { webhooks: slackWebhooks, refresh: refreshSlackWebhooks } = useSlackWebhooks();
+  const { webhooks: slackWebhooks, refresh: refreshSlackWebhooks } =
+    useSlackWebhooks();
   const [slackWebhookId, setSlackWebhookId] = useState<string | null>(null);
   const [addingChannel, setAddingChannel] = useState(false);
   const [newChannelName, setNewChannelName] = useState("");
@@ -83,7 +94,9 @@ export function TriggerModal({ open, initial, onClose, onSaved, lockScope }: Pro
     setKind((initial?.kind as TriggerKind) ?? "delta");
     const parts = cronToParts(initial?.schedule_cron ?? null);
     setScheduleParts(parts);
-    setCustomCron(parts.preset === "custom" ? (initial?.schedule_cron ?? "") : "");
+    setCustomCron(
+      parts.preset === "custom" ? (initial?.schedule_cron ?? "") : "",
+    );
     setTz(initial?.schedule_timezone ?? browserTimezone());
     setStartAtLocal(utcIsoToLocalInput(initial?.schedule_start_at ?? null));
     setError(null);
@@ -108,7 +121,9 @@ export function TriggerModal({ open, initial, onClose, onSaved, lockScope }: Pro
       .then((rows) => {
         if (cancelled || rows.length === 0) return;
         setDestinations(rows);
-        setDestination((cur) => (rows.some((r) => r.id === cur) ? cur : rows[0].id));
+        setDestination((cur) =>
+          rows.some((r) => r.id === cur) ? cur : rows[0].id,
+        );
       })
       .catch(() => {
         // Keep fallback list silently.
@@ -160,7 +175,8 @@ export function TriggerModal({ open, initial, onClose, onSaved, lockScope }: Pro
           slack_webhook_id: destination === "slack" ? slackWebhookId : null,
           schedule_cron: kind === "schedule" ? computedCron : null,
           schedule_timezone: kind === "schedule" ? tz : null,
-          schedule_start_at: kind === "schedule" ? localInputToUtcIso(startAtLocal) : null,
+          schedule_start_at:
+            kind === "schedule" ? localInputToUtcIso(startAtLocal) : null,
         });
       } else {
         saved = await createTrigger(baseInput);
@@ -182,12 +198,14 @@ export function TriggerModal({ open, initial, onClose, onSaved, lockScope }: Pro
     (destination !== "slack" || Boolean(slackWebhookId));
   const selectedDest = destinations.find((d) => d.id === destination);
   const destDescription =
-    destination === "slack" ? "" : selectedDest?.description ?? "";
+    destination === "slack" ? "" : (selectedDest?.description ?? "");
 
   // The "TO" select value encodes a slack channel as ``slack:<id>`` so one
   // control can pick Event Log or any of the user's channels.
   const destSelectValue =
-    destination === "slack" && slackWebhookId ? `slack:${slackWebhookId}` : destination;
+    destination === "slack" && slackWebhookId
+      ? `slack:${slackWebhookId}`
+      : destination;
 
   function onPickDestination(value: string) {
     if (value.startsWith("slack:")) {
@@ -225,11 +243,11 @@ export function TriggerModal({ open, initial, onClose, onSaved, lockScope }: Pro
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
-      className="fixed inset-0 bg-(--mask-03) flex items-center justify-center z-[100]"
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-(--mask-03)"
     >
       <div
         aria-hidden
-        className="absolute top-1/2 left-1/2 translate-x-[calc(-50%+40px)] translate-y-[calc(-50%+44px)] rotate-[-1.5deg] w-[min(560px,92vw)] blur-[3.5px] opacity-85 pointer-events-none z-0"
+        className="pointer-events-none absolute top-1/2 left-1/2 z-0 w-[min(560px,92vw)] translate-x-[calc(-50%+40px)] translate-y-[calc(-50%+44px)] rotate-[-1.5deg] opacity-85 blur-[3.5px]"
       >
         <PreviewCard
           scope={EXAMPLE_SCOPE}
@@ -241,51 +259,55 @@ export function TriggerModal({ open, initial, onClose, onSaved, lockScope }: Pro
 
       <form
         onSubmit={onSubmit}
-        className="relative bg-(--background-tint-00) rounded-(--border-radius-12) max-h-[92vh] overflow-y-auto p-6 shadow-(--shadow-modal) flex flex-col gap-4 z-[1] w-[min(560px,92vw)]"
+        className="relative z-[1] flex max-h-[92vh] w-[min(560px,92vw)] flex-col gap-4 overflow-y-auto rounded-(--border-radius-12) bg-(--background-tint-00) p-6 shadow-(--shadow-modal)"
       >
         <div>
           <h2 className="m-0 text-lg font-semibold text-(--text-05)">
             {isEdit ? "Edit trigger" : "Create a trigger"}
           </h2>
-          <p className="mt-[6px] mb-0 text-[13px] text-(--text-04) leading-[1.55]">
+          <p className="mt-[6px] mb-0 text-[13px] leading-[1.55] text-(--text-04)">
             Triggers monitor documents or folders and send events when a
-            specified condition is met. They can fire on document updates
-            or on a recurring schedule.
+            specified condition is met. They can fire on document updates or on
+            a recurring schedule.
           </p>
         </div>
 
         <label className="flex flex-col gap-1.5">
-          <span className="text-[11px] font-bold text-(--text-03) uppercase tracking-[0.06em]">When to run</span>
+          <span className="text-[11px] font-bold tracking-[0.06em] text-(--text-03) uppercase">
+            When to run
+          </span>
           <select
             value={kind}
             onChange={(e) => setKind(e.target.value as TriggerKind)}
             disabled={busy || isEdit}
-            className={`py-2 px-[10px] border border-(--border-01) rounded-(--border-radius-04) text-sm outline-none w-full box-border bg-(--background-tint-00) ${isEdit ? "cursor-not-allowed" : "cursor-pointer"}`}
+            className={`box-border w-full rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-00) px-[10px] py-2 text-sm outline-none ${isEdit ? "cursor-not-allowed" : "cursor-pointer"}`}
           >
             <option value="delta">On a document update</option>
             <option value="schedule">On a schedule</option>
           </select>
           {isEdit && (
-            <span className="text-xs text-(--text-03) leading-[1.4]">
-              The trigger type can&rsquo;t be changed after creation. Delete
-              and recreate to switch.
+            <span className="text-xs leading-[1.4] text-(--text-03)">
+              The trigger type can&rsquo;t be changed after creation. Delete and
+              recreate to switch.
             </span>
           )}
         </label>
 
         <label className="flex flex-col gap-1.5">
-          <span className="text-[11px] font-bold text-(--text-03) uppercase tracking-[0.06em]">Watching</span>
+          <span className="text-[11px] font-bold tracking-[0.06em] text-(--text-03) uppercase">
+            Watching
+          </span>
           <input
             value={scopePath}
             onChange={(e) => setScopePath(e.target.value)}
             disabled={busy || lockScope}
             placeholder="projects/foo.md or projects"
-            className="py-2 px-[10px] border border-(--border-01) rounded-(--border-radius-04) text-sm outline-none w-full box-border bg-(--background-tint-00)"
+            className="box-border w-full rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-00) px-[10px] py-2 text-sm outline-none"
           />
-          <span className="text-xs text-(--text-03) leading-[1.4]">
+          <span className="text-xs leading-[1.4] text-(--text-03)">
             e.g. <code>projects/foo.md</code> for one document,{" "}
-            <code>projects</code> for a folder, or <code>/</code> to watch
-            the whole wiki.
+            <code>projects</code> for a folder, or <code>/</code> to watch the
+            whole wiki.
           </span>
         </label>
 
@@ -307,43 +329,49 @@ export function TriggerModal({ open, initial, onClose, onSaved, lockScope }: Pro
         )}
 
         <label className="flex flex-col gap-1.5">
-          <span className="text-[11px] font-bold text-(--text-03) uppercase tracking-[0.06em]">If</span>
+          <span className="text-[11px] font-bold tracking-[0.06em] text-(--text-03) uppercase">
+            If
+          </span>
           <textarea
             value={ifText}
             onChange={(e) => setIfText(e.target.value)}
             disabled={busy}
             placeholder={EXAMPLE_IF}
             rows={2}
-            className="py-2 px-[10px] border border-(--border-01) rounded-(--border-radius-04) text-sm outline-none w-full box-border bg-(--background-tint-00) resize-y"
+            className="box-border w-full resize-y rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-00) px-[10px] py-2 text-sm outline-none"
           />
           {kind === "schedule" && (
-            <span className="text-xs text-(--text-03) leading-[1.4]">
-              On each scheduled run, the trigger fires only when this
-              condition is satisfied by the current state of the
-              documents under <em>Watching</em>.
+            <span className="text-xs leading-[1.4] text-(--text-03)">
+              On each scheduled run, the trigger fires only when this condition
+              is satisfied by the current state of the documents under{" "}
+              <em>Watching</em>.
             </span>
           )}
         </label>
 
         <label className="flex flex-col gap-1.5">
-          <span className="text-[11px] font-bold text-(--text-03) uppercase tracking-[0.06em]">Then send</span>
+          <span className="text-[11px] font-bold tracking-[0.06em] text-(--text-03) uppercase">
+            Then send
+          </span>
           <textarea
             value={sendText}
             onChange={(e) => setSendText(e.target.value)}
             disabled={busy}
             placeholder={EXAMPLE_SEND}
             rows={2}
-            className="py-2 px-[10px] border border-(--border-01) rounded-(--border-radius-04) text-sm outline-none w-full box-border bg-(--background-tint-00) resize-y"
+            className="box-border w-full resize-y rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-00) px-[10px] py-2 text-sm outline-none"
           />
         </label>
 
         <label className="flex flex-col gap-1.5">
-          <span className="text-[11px] font-bold text-(--text-03) uppercase tracking-[0.06em]">To</span>
+          <span className="text-[11px] font-bold tracking-[0.06em] text-(--text-03) uppercase">
+            To
+          </span>
           <select
             value={destSelectValue}
             onChange={(e) => onPickDestination(e.target.value)}
             disabled={busy}
-            className="py-2 px-[10px] border border-(--border-01) rounded-(--border-radius-04) text-sm outline-none w-full box-border bg-(--background-tint-00) cursor-pointer"
+            className="box-border w-full cursor-pointer rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-00) px-[10px] py-2 text-sm outline-none"
           >
             {destinations
               .filter((d) => d.id !== "slack")
@@ -358,9 +386,13 @@ export function TriggerModal({ open, initial, onClose, onSaved, lockScope }: Pro
               </option>
             ))}
           </select>
-          {destDescription && <span className="text-xs text-(--text-03) leading-[1.4]">{destDescription}</span>}
+          {destDescription && (
+            <span className="text-xs leading-[1.4] text-(--text-03)">
+              {destDescription}
+            </span>
+          )}
           {destination === "slack" && !slackWebhookId && (
-            <span className="text-xs text-(--status-text-error-05) leading-[1.4]">
+            <span className="text-xs leading-[1.4] text-(--status-text-error-05)">
               Pick a Slack channel, or add one below.
             </span>
           )}
@@ -369,32 +401,34 @@ export function TriggerModal({ open, initial, onClose, onSaved, lockScope }: Pro
               type="button"
               onClick={() => setAddingChannel(true)}
               disabled={busy}
-              className="self-start mt-[6px] bg-transparent border-none p-0 cursor-pointer text-[13px] text-(--text-inverted-05)"
+              className="mt-[6px] cursor-pointer self-start border-none bg-transparent p-0 text-[13px] text-(--text-inverted-05)"
             >
               + Add Slack channel
             </button>
           ) : (
-            <div className="mt-2 p-[10px] border border-(--border-01) rounded-(--border-radius-04) bg-(--background-tint-02) flex flex-col gap-2">
+            <div className="mt-2 flex flex-col gap-2 rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-02) p-[10px]">
               <input
                 value={newChannelName}
                 onChange={(e) => setNewChannelName(e.target.value)}
                 placeholder="Channel name (e.g. PM Standup)"
                 disabled={busy}
-                className="py-2 px-[10px] border border-(--border-01) rounded-(--border-radius-04) text-sm outline-none w-full box-border bg-(--background-tint-00)"
+                className="box-border w-full rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-00) px-[10px] py-2 text-sm outline-none"
               />
               <input
                 value={newChannelUrl}
                 onChange={(e) => setNewChannelUrl(e.target.value)}
                 placeholder="https://hooks.slack.com/services/…"
                 disabled={busy}
-                className="py-2 px-[10px] border border-(--border-01) rounded-(--border-radius-04) text-sm outline-none w-full box-border bg-(--background-tint-00)"
+                className="box-border w-full rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-00) px-[10px] py-2 text-sm outline-none"
               />
               <div className="flex gap-2">
                 <Button
                   type="button"
                   variant="action"
                   size="sm"
-                  disabled={busy || !newChannelName.trim() || !newChannelUrl.trim()}
+                  disabled={
+                    busy || !newChannelName.trim() || !newChannelUrl.trim()
+                  }
                   onClick={() => void onAddChannel()}
                 >
                   Add channel
@@ -413,7 +447,7 @@ export function TriggerModal({ open, initial, onClose, onSaved, lockScope }: Pro
         </label>
 
         {error && (
-          <div className="bg-(--status-error-01) text-(--status-text-error-05) rounded-(--border-radius-04) p-[10px] text-[13px]">
+          <div className="rounded-(--border-radius-04) bg-(--status-error-01) p-[10px] text-[13px] text-(--status-text-error-05)">
             {error}
           </div>
         )}
@@ -460,7 +494,10 @@ function ScheduleFields({
   computedCron,
   disabled,
 }: ScheduleFieldsProps) {
-  const showTimeOfDay = parts.preset === "daily" || parts.preset === "weekly" || parts.preset === "monthly";
+  const showTimeOfDay =
+    parts.preset === "daily" ||
+    parts.preset === "weekly" ||
+    parts.preset === "monthly";
   const showWeekday = parts.preset === "weekly";
   const showDayOfMonth = parts.preset === "monthly";
   const isCustom = parts.preset === "custom";
@@ -468,14 +505,21 @@ function ScheduleFields({
   const timeValue = `${pad(parts.hour)}:${pad(parts.minute)}`;
 
   return (
-    <div className="border border-(--border-01) rounded-(--border-radius-04) p-[14px] flex flex-col gap-3 bg-(--background-tint-01)">
+    <div className="flex flex-col gap-3 rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-01) p-[14px]">
       <label className="flex flex-col gap-1.5">
-        <span className="text-[11px] font-bold text-(--text-03) uppercase tracking-[0.06em]">Frequency</span>
+        <span className="text-[11px] font-bold tracking-[0.06em] text-(--text-03) uppercase">
+          Frequency
+        </span>
         <select
           value={parts.preset}
-          onChange={(e) => onPartsChange({ ...parts, preset: e.target.value as FrequencyPreset })}
+          onChange={(e) =>
+            onPartsChange({
+              ...parts,
+              preset: e.target.value as FrequencyPreset,
+            })
+          }
           disabled={disabled}
-          className="py-2 px-[10px] border border-(--border-01) rounded-(--border-radius-04) text-sm outline-none w-full box-border bg-(--background-tint-00) cursor-pointer"
+          className="box-border w-full cursor-pointer rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-00) px-[10px] py-2 text-sm outline-none"
         >
           {PRESET_OPTIONS.map((o) => (
             <option key={o.value} value={o.value}>
@@ -487,7 +531,9 @@ function ScheduleFields({
 
       {showTimeOfDay && (
         <label className="flex flex-col gap-1.5">
-          <span className="text-[11px] font-bold text-(--text-03) uppercase tracking-[0.06em]">Time of day</span>
+          <span className="text-[11px] font-bold tracking-[0.06em] text-(--text-03) uppercase">
+            Time of day
+          </span>
           <input
             type="time"
             value={timeValue}
@@ -498,20 +544,26 @@ function ScheduleFields({
               }
             }}
             disabled={disabled}
-            className="py-2 px-[10px] border border-(--border-01) rounded-(--border-radius-04) text-sm outline-none w-full box-border bg-(--background-tint-00)"
+            className="box-border w-full rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-00) px-[10px] py-2 text-sm outline-none"
           />
-          <span className="text-xs text-(--text-03) leading-[1.4]">Interpreted in the timezone selected below.</span>
+          <span className="text-xs leading-[1.4] text-(--text-03)">
+            Interpreted in the timezone selected below.
+          </span>
         </label>
       )}
 
       {showWeekday && (
         <label className="flex flex-col gap-1.5">
-          <span className="text-[11px] font-bold text-(--text-03) uppercase tracking-[0.06em]">Day of week</span>
+          <span className="text-[11px] font-bold tracking-[0.06em] text-(--text-03) uppercase">
+            Day of week
+          </span>
           <select
             value={parts.dayOfWeek}
-            onChange={(e) => onPartsChange({ ...parts, dayOfWeek: Number(e.target.value) })}
+            onChange={(e) =>
+              onPartsChange({ ...parts, dayOfWeek: Number(e.target.value) })
+            }
             disabled={disabled}
-            className="py-2 px-[10px] border border-(--border-01) rounded-(--border-radius-04) text-sm outline-none w-full box-border bg-(--background-tint-00) cursor-pointer"
+            className="box-border w-full cursor-pointer rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-00) px-[10px] py-2 text-sm outline-none"
           >
             {WEEKDAY_NAMES.map((name, i) => (
               <option key={i} value={i}>
@@ -524,7 +576,9 @@ function ScheduleFields({
 
       {showDayOfMonth && (
         <label className="flex flex-col gap-1.5">
-          <span className="text-[11px] font-bold text-(--text-03) uppercase tracking-[0.06em]">Day of month</span>
+          <span className="text-[11px] font-bold tracking-[0.06em] text-(--text-03) uppercase">
+            Day of month
+          </span>
           <input
             type="number"
             min={1}
@@ -537,23 +591,25 @@ function ScheduleFields({
               }
             }}
             disabled={disabled}
-            className="py-2 px-[10px] border border-(--border-01) rounded-(--border-radius-04) text-sm outline-none w-full box-border bg-(--background-tint-00)"
+            className="box-border w-full rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-00) px-[10px] py-2 text-sm outline-none"
           />
-          <span className="text-xs text-(--text-03) leading-[1.4]">
-            Months without this day (e.g. day 31 in February) skip that
-            month entirely &mdash; the schedule does not roll over to the
-            next valid day.
+          <span className="text-xs leading-[1.4] text-(--text-03)">
+            Months without this day (e.g. day 31 in February) skip that month
+            entirely &mdash; the schedule does not roll over to the next valid
+            day.
           </span>
         </label>
       )}
 
       <label className="flex flex-col gap-1.5">
-        <span className="text-[11px] font-bold text-(--text-03) uppercase tracking-[0.06em]">Timezone</span>
+        <span className="text-[11px] font-bold tracking-[0.06em] text-(--text-03) uppercase">
+          Timezone
+        </span>
         <select
           value={tz}
           onChange={(e) => onTzChange(e.target.value)}
           disabled={disabled}
-          className="py-2 px-[10px] border border-(--border-01) rounded-(--border-radius-04) text-sm outline-none w-full box-border bg-(--background-tint-00) cursor-pointer"
+          className="box-border w-full cursor-pointer rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-00) px-[10px] py-2 text-sm outline-none"
         >
           {tzOptions.includes(tz) ? null : <option value={tz}>{tz}</option>}
           {tzOptions.map((zone) => (
@@ -562,25 +618,27 @@ function ScheduleFields({
             </option>
           ))}
         </select>
-        <span className="text-xs text-(--text-03) leading-[1.4]">
-          The schedule runs in this timezone. Daylight-saving
-          transitions are handled automatically.
+        <span className="text-xs leading-[1.4] text-(--text-03)">
+          The schedule runs in this timezone. Daylight-saving transitions are
+          handled automatically.
         </span>
       </label>
 
       <label className="flex flex-col gap-1.5">
-        <span className="text-[11px] font-bold text-(--text-03) uppercase tracking-[0.06em]">Do not fire before (optional)</span>
+        <span className="text-[11px] font-bold tracking-[0.06em] text-(--text-03) uppercase">
+          Do not fire before (optional)
+        </span>
         <input
           type="datetime-local"
           value={startAtLocal}
           onChange={(e) => onStartAtChange(e.target.value)}
           disabled={disabled}
-          className="py-2 px-[10px] border border-(--border-01) rounded-(--border-radius-04) text-sm outline-none w-full box-border bg-(--background-tint-00)"
+          className="box-border w-full rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-00) px-[10px] py-2 text-sm outline-none"
         />
-        <span className="text-xs text-(--text-03) leading-[1.4]">
+        <span className="text-xs leading-[1.4] text-(--text-03)">
           Anchored to your local time. Leave empty to start at the next
-          scheduled run. Useful for delaying a launch (e.g.
-          &ldquo;don&rsquo;t start until next Monday&rdquo;).
+          scheduled run. Useful for delaying a launch (e.g. &ldquo;don&rsquo;t
+          start until next Monday&rdquo;).
         </span>
       </label>
 
@@ -588,14 +646,14 @@ function ScheduleFields({
         <summary className="cursor-pointer text-xs font-semibold text-(--text-04) select-none">
           Advanced &mdash; raw cron expression
         </summary>
-        <div className="flex flex-col gap-2 mt-[10px]">
+        <div className="mt-[10px] flex flex-col gap-2">
           <div className="grid grid-cols-5 gap-1.5">
             {CRON_FIELD_HELP.map((f) => (
               <div key={f.label}>
-                <div className="text-[10px] font-bold text-(--text-03) uppercase tracking-[0.06px]">
+                <div className="text-[10px] font-bold tracking-[0.06px] text-(--text-03) uppercase">
                   {f.label}
                 </div>
-                <div className="text-[11px] text-(--text-02) leading-[1.4]">
+                <div className="text-[11px] leading-[1.4] text-(--text-02)">
                   {f.help}
                 </div>
               </div>
@@ -609,16 +667,16 @@ function ScheduleFields({
             }}
             disabled={disabled}
             placeholder="*/15 * * * *"
-            className="py-2 px-[10px] border border-(--border-01) rounded-(--border-radius-04) text-sm outline-none w-full box-border bg-(--background-tint-00) font-mono"
+            className="box-border w-full rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-00) px-[10px] py-2 font-mono text-sm outline-none"
           />
-          <span className="text-xs text-(--text-03) leading-[1.4]">
+          <span className="text-xs leading-[1.4] text-(--text-03)">
             Standard 5-field cron. Editing this switches the frequency to
             &ldquo;Custom&rdquo;.
           </span>
         </div>
       </details>
 
-      <div className="text-[13px] text-(--text-05) bg-(--background-tint-00) border border-(--border-01) rounded-(--border-radius-04) p-2 leading-[1.5]">
+      <div className="rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-00) p-2 text-[13px] leading-[1.5] text-(--text-05)">
         <strong>{cronSummary}</strong>
       </div>
     </div>
@@ -649,28 +707,47 @@ function PreviewCard({
   destLabel: string;
 }) {
   return (
-    <div className="bg-(--background-tint-00) rounded-(--border-radius-12) p-6 shadow-(--shadow-modal) flex flex-col gap-4">
+    <div className="flex flex-col gap-4 rounded-(--border-radius-12) bg-(--background-tint-00) p-6 shadow-(--shadow-modal)">
       <div>
-        <h2 className="m-0 text-lg font-semibold text-(--text-05)">Create a trigger</h2>
+        <h2 className="m-0 text-lg font-semibold text-(--text-05)">
+          Create a trigger
+        </h2>
         <p className="mt-[6px] mb-0 text-[13px] text-(--text-04)">
-          Triggers monitor documents or folders and send events when a specified change occurs.
+          Triggers monitor documents or folders and send events when a specified
+          change occurs.
         </p>
       </div>
       <div className="flex flex-col gap-1.5">
-        <span className="text-[11px] font-bold text-(--text-03) uppercase tracking-[0.06em]">Watching</span>
-        <div className="py-2 px-[10px] border border-(--border-01) rounded-(--border-radius-04) text-sm outline-none w-full box-border bg-(--background-tint-00) text-(--text-05)">{scope}</div>
+        <span className="text-[11px] font-bold tracking-[0.06em] text-(--text-03) uppercase">
+          Watching
+        </span>
+        <div className="box-border w-full rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-00) px-[10px] py-2 text-sm text-(--text-05) outline-none">
+          {scope}
+        </div>
       </div>
       <div className="flex flex-col gap-1.5">
-        <span className="text-[11px] font-bold text-(--text-03) uppercase tracking-[0.06em]">If</span>
-        <div className="py-2 px-[10px] border border-(--border-01) rounded-(--border-radius-04) text-sm outline-none w-full box-border bg-(--background-tint-00) text-(--text-05) whitespace-pre-wrap">{ifText}</div>
+        <span className="text-[11px] font-bold tracking-[0.06em] text-(--text-03) uppercase">
+          If
+        </span>
+        <div className="box-border w-full rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-00) px-[10px] py-2 text-sm whitespace-pre-wrap text-(--text-05) outline-none">
+          {ifText}
+        </div>
       </div>
       <div className="flex flex-col gap-1.5">
-        <span className="text-[11px] font-bold text-(--text-03) uppercase tracking-[0.06em]">Then send</span>
-        <div className="py-2 px-[10px] border border-(--border-01) rounded-(--border-radius-04) text-sm outline-none w-full box-border bg-(--background-tint-00) text-(--text-05) whitespace-pre-wrap">{sendText}</div>
+        <span className="text-[11px] font-bold tracking-[0.06em] text-(--text-03) uppercase">
+          Then send
+        </span>
+        <div className="box-border w-full rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-00) px-[10px] py-2 text-sm whitespace-pre-wrap text-(--text-05) outline-none">
+          {sendText}
+        </div>
       </div>
       <div className="flex flex-col gap-1.5">
-        <span className="text-[11px] font-bold text-(--text-03) uppercase tracking-[0.06em]">To</span>
-        <div className="py-2 px-[10px] border border-(--border-01) rounded-(--border-radius-04) text-sm outline-none w-full box-border bg-(--background-tint-00) text-(--text-05)">{destLabel}</div>
+        <span className="text-[11px] font-bold tracking-[0.06em] text-(--text-03) uppercase">
+          To
+        </span>
+        <div className="box-border w-full rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-00) px-[10px] py-2 text-sm text-(--text-05) outline-none">
+          {destLabel}
+        </div>
       </div>
     </div>
   );

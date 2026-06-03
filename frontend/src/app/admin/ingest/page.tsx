@@ -4,6 +4,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { mutate as globalMutate } from "swr";
 
 import { Button } from "@onyx-ai/opal/components";
+import { useConfirm } from "@/components/common/ConfirmDialog";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { BackLink, PageHeader } from "@/components/common/PageHeader";
 import { RequireAdmin } from "@/components/RequireAdmin";
@@ -36,7 +37,6 @@ const PROVIDER_LABEL: Record<Provider, string> = {
 };
 
 const ALL_PROVIDERS: Provider[] = ["anthropic", "openai", "gemini", "ollama"];
-
 
 function isConfigured(p: Provider, s: LLMSettings): boolean {
   if (p === "anthropic") return s.anthropic_api_key_set;
@@ -71,6 +71,7 @@ function IngestForm() {
   const [saved, setSaved] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [baseUrl, setBaseUrl] = useState("");
+  const confirmDialog = useConfirm();
 
   useEffect(() => {
     setBaseUrl(window.location.origin);
@@ -117,19 +118,28 @@ function IngestForm() {
   async function regenerateKey() {
     if (
       settings?.api_key &&
-      !confirm("Regenerate the API key? The old key will stop working immediately.")
+      !(await confirmDialog({
+        title: "Regenerate the API key?",
+        body: "The old key will stop working immediately.",
+        confirmLabel: "Regenerate",
+      }))
     )
       return;
     setSaving(true);
     setError(null);
     setSaved(null);
     try {
-      const r = await apiFetch<{ api_key: string }>("/admin/ingest/regenerate-key", {
-        method: "POST",
-      });
+      const r = await apiFetch<{ api_key: string }>(
+        "/admin/ingest/regenerate-key",
+        {
+          method: "POST",
+        },
+      );
       setSettings((prev) => (prev ? { ...prev, api_key: r.api_key } : prev));
       setKeyVisible(true);
-      setSaved("New API key generated. Copy it now — it will be masked after you leave this page.");
+      setSaved(
+        "New API key generated. Copy it now — it will be masked after you leave this page.",
+      );
     } catch (e) {
       setError(e instanceof Error ? e.message : "failed to regenerate");
     } finally {
@@ -166,7 +176,9 @@ function IngestForm() {
                 type="button"
                 variant="default"
                 size="sm"
-                onClick={() => void copyToClipboard(`${baseUrl}/api/documents/ingest`)}
+                onClick={() =>
+                  void copyToClipboard(`${baseUrl}/api/documents/ingest`)
+                }
               >
                 Copy
               </Button>
@@ -181,8 +193,10 @@ function IngestForm() {
                 readOnly
                 type={keyVisible ? "text" : "password"}
                 value={settings.api_key ?? ""}
-                placeholder={settings.api_key ? undefined : "No key yet — click Regenerate"}
-                className={`flex-1 w-full box-border py-2 px-[10px] border border-(--border-01) rounded-(--border-radius-04) text-sm${settings.api_key ? " font-mono" : ""}`}
+                placeholder={
+                  settings.api_key ? undefined : "No key yet — click Regenerate"
+                }
+                className={`box-border w-full flex-1 rounded-(--border-radius-04) border border-(--border-01) px-[10px] py-2 text-sm${settings.api_key ? "font-mono" : ""}`}
               />
               {settings.api_key && keyVisible && (
                 <Button
@@ -212,18 +226,22 @@ function IngestForm() {
       <form onSubmit={onSubmit} className="flex flex-col gap-3">
         <h3 className="m-0 text-sm font-semibold">Ingest settings</h3>
         <label>
-          <div className="mb-1 text-[13px] font-medium">Max document size (characters)</div>
+          <div className="mb-1 text-[13px] font-medium">
+            Max document size (characters)
+          </div>
           <input
             type="number"
             min={1000}
             max={5000000}
             value={maxDocChars}
             onChange={(e) => setMaxDocChars(e.target.value)}
-            className="w-[160px] box-border py-2 px-[10px] border border-(--border-01) rounded-(--border-radius-04) text-sm"
+            className="box-border w-[160px] rounded-(--border-radius-04) border border-(--border-01) px-[10px] py-2 text-sm"
           />
         </label>
         {error && <div className="text-(--status-text-error-05)">{error}</div>}
-        {saved && <div className="text-(--status-text-success-05)">{saved}</div>}
+        {saved && (
+          <div className="text-(--status-text-success-05)">{saved}</div>
+        )}
         <div>
           <Button type="submit" variant="action" disabled={saving || !dirty}>
             {saving ? "Saving…" : "Save"}
@@ -233,18 +251,31 @@ function IngestForm() {
 
       <div className="border-t border-(--border-01)" />
 
-      <SelectorModelSection settings={llmSettings} onSaved={() => void load()} />
+      <SelectorModelSection
+        settings={llmSettings}
+        onSaved={() => void load()}
+      />
     </div>
   );
 }
 
-function SelectorModelSection({ settings, onSaved }: { settings: LLMSettings; onSaved: () => void }) {
+function SelectorModelSection({
+  settings,
+  onSaved,
+}: {
+  settings: LLMSettings;
+  onSaved: () => void;
+}) {
   const [editing, setEditing] = useState(false);
-  const [selModel, setSelModel] = useState(settings.ingest_selector_model || "");
+  const [selModel, setSelModel] = useState(
+    settings.ingest_selector_model || "",
+  );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const availableProviders = ALL_PROVIDERS.filter((p) => isConfigured(p, settings));
+  const availableProviders = ALL_PROVIDERS.filter((p) =>
+    isConfigured(p, settings),
+  );
   const options = availableProviders.flatMap((p) =>
     (settings.provider_models[p] ?? []).map((m) => ({ provider: p, model: m })),
   );
@@ -281,35 +312,58 @@ function SelectorModelSection({ settings, onSaved }: { settings: LLMSettings; on
   return (
     <section>
       <h3 className="m-0 mb-1 text-sm font-semibold">Selector model</h3>
-      <div className="text-(--text-03) text-[13px] mb-3">
-        A faster, cheaper model that screens incoming documents before the main model decides what to update.
-        Helps reduce cost when many documents are being pushed. Leave unset to send all documents straight to the main model.
+      <div className="mb-3 text-[13px] text-(--text-03)">
+        A faster, cheaper model that screens incoming documents before the main
+        model decides what to update. Helps reduce cost when many documents are
+        being pushed. Leave unset to send all documents straight to the main
+        model.
       </div>
       {!editing ? (
-        <div className="flex items-center justify-between py-3 px-4 border border-(--border-01) rounded-(--border-radius-08) bg-(--background-tint-01)">
-          <span className={`text-sm ${selModel && selModel !== settings.model ? "text-(--text-05)" : "text-(--text-03)"}`}>
+        <div className="flex items-center justify-between rounded-(--border-radius-08) border border-(--border-01) bg-(--background-tint-01) px-4 py-3">
+          <span
+            className={`text-sm ${selModel && selModel !== settings.model ? "text-(--text-05)" : "text-(--text-03)"}`}
+          >
             {activeLabel}
           </span>
-          <Button size="sm" variant="default" onClick={() => setEditing(true)} disabled={availableProviders.length === 0}>Edit</Button>
+          <Button
+            size="sm"
+            variant="default"
+            onClick={() => setEditing(true)}
+            disabled={availableProviders.length === 0}
+          >
+            Edit
+          </Button>
         </div>
       ) : (
-        <div className="border border-(--border-01) rounded-(--border-radius-08) bg-(--background-tint-01) flex flex-col">
+        <div className="flex flex-col rounded-(--border-radius-08) border border-(--border-01) bg-(--background-tint-01)">
           <div className="flex flex-col gap-1 p-3">
             {hasNoModels && (
-              <div className="text-[13px] text-(--text-03) py-1 pb-2">
+              <div className="py-1 pb-2 text-[13px] text-(--text-03)">
                 No models configured. Add models on the{" "}
-                <a href="/admin/language-models" className="text-(--text-inverted-05)">Language models</a> page first.
+                <a
+                  href="/admin/language-models"
+                  className="text-(--text-inverted-05)"
+                >
+                  Language models
+                </a>{" "}
+                page first.
               </div>
             )}
             <button
               type="button"
               onClick={() => setSelModel("")}
-              className={`flex items-center gap-3 py-[10px] px-3 border rounded-(--border-radius-04) cursor-pointer text-left ${selModel === "" ? "border-(--border-01) bg-(--background-tint-03)" : "border-(--border-01) bg-(--background-tint-00)"}`}
+              className={`flex cursor-pointer items-center gap-3 rounded-(--border-radius-04) border px-3 py-[10px] text-left ${selModel === "" ? "border-(--border-01) bg-(--background-tint-03)" : "border-(--border-01) bg-(--background-tint-00)"}`}
             >
-              <div className={`w-4 h-4 rounded-full shrink-0 flex items-center justify-center ${selModel === "" ? "bg-(--background-tint-inverted-00)" : "border-[1.5px] border-(--border-02) bg-transparent"}`}>
-                {selModel === "" && <div className="w-2 h-2 rounded-full bg-(--text-inverted-05)" />}
+              <div
+                className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full ${selModel === "" ? "bg-(--background-tint-inverted-00)" : "border-[1.5px] border-(--border-02) bg-transparent"}`}
+              >
+                {selModel === "" && (
+                  <div className="h-2 w-2 rounded-full bg-(--text-inverted-05)" />
+                )}
               </div>
-              <span className={`text-[13px] italic ${selModel === "" ? "text-(--text-05)" : "text-(--text-03)"}`}>
+              <span
+                className={`text-[13px] italic ${selModel === "" ? "text-(--text-05)" : "text-(--text-03)"}`}
+              >
                 None — all documents go to the main model
               </span>
             </button>
@@ -320,30 +374,59 @@ function SelectorModelSection({ settings, onSaved }: { settings: LLMSettings; on
                   key={`${p}:${m}`}
                   type="button"
                   onClick={() => setSelModel(m)}
-                  className={`flex items-center gap-3 py-[10px] px-3 border rounded-(--border-radius-04) cursor-pointer text-left ${isSelected ? "border-(--border-01) bg-(--background-tint-03)" : "border-(--border-01) bg-(--background-tint-00)"}`}
+                  className={`flex cursor-pointer items-center gap-3 rounded-(--border-radius-04) border px-3 py-[10px] text-left ${isSelected ? "border-(--border-01) bg-(--background-tint-03)" : "border-(--border-01) bg-(--background-tint-00)"}`}
                 >
-                  <div className={`w-4 h-4 rounded-full shrink-0 flex items-center justify-center ${isSelected ? "bg-(--background-tint-inverted-00)" : "border-[1.5px] border-(--border-02) bg-transparent"}`}>
-                    {isSelected && <div className="w-2 h-2 rounded-full bg-(--text-inverted-05)" />}
+                  <div
+                    className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full ${isSelected ? "bg-(--background-tint-inverted-00)" : "border-[1.5px] border-(--border-02) bg-transparent"}`}
+                  >
+                    {isSelected && (
+                      <div className="h-2 w-2 rounded-full bg-(--text-inverted-05)" />
+                    )}
                   </div>
-                  <span className={`text-[13px] font-medium shrink-0 ${isSelected ? "text-(--text-05)" : "text-(--text-04)"}`}>
+                  <span
+                    className={`shrink-0 text-[13px] font-medium ${isSelected ? "text-(--text-05)" : "text-(--text-04)"}`}
+                  >
                     {PROVIDER_LABEL[p]}
                   </span>
-                  <span className={`text-[13px] font-mono ${isSelected ? "text-(--text-05)" : "text-(--text-03)"}`}>
+                  <span
+                    className={`font-mono text-[13px] ${isSelected ? "text-(--text-05)" : "text-(--text-03)"}`}
+                  >
                     {m}
                   </span>
                   {m === settings.model && (
-                    <span className="text-[11px] text-(--text-03) ml-auto">same as main — pre-filter disabled</span>
+                    <span className="ml-auto text-[11px] text-(--text-03)">
+                      same as main — pre-filter disabled
+                    </span>
                   )}
                 </button>
               );
             })}
           </div>
-          {error && <div className="text-(--status-text-error-05) text-[13px] px-3 pb-2">{error}</div>}
+          {error && (
+            <div className="px-3 pb-2 text-[13px] text-(--status-text-error-05)">
+              {error}
+            </div>
+          )}
           <div className="flex gap-2 px-3 pt-1 pb-3">
-            <Button type="button" variant="action" size="sm" disabled={saving} onClick={() => void onSave()}>
+            <Button
+              type="button"
+              variant="action"
+              size="sm"
+              disabled={saving}
+              onClick={() => void onSave()}
+            >
               {saving ? "Saving…" : "Save"}
             </Button>
-            <Button type="button" variant="default" size="sm" onClick={() => { setEditing(false); setError(null); setSelModel(settings.ingest_selector_model || ""); }}>
+            <Button
+              type="button"
+              variant="default"
+              size="sm"
+              onClick={() => {
+                setEditing(false);
+                setError(null);
+                setSelModel(settings.ingest_selector_model || "");
+              }}
+            >
               Cancel
             </Button>
           </div>

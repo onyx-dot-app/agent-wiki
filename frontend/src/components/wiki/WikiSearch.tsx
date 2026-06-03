@@ -56,232 +56,243 @@ interface WikiSearchProps {
   onNavigate?: () => void;
 }
 
-export const WikiSearch = forwardRef<WikiSearchHandle, WikiSearchProps>(function WikiSearch(
-  { onNavigate },
-  ref,
-) {
-  const router = useRouter();
-  const [query, setQuery] = useState("");
-  const [hits, setHits] = useState<SearchHit[]>([]);
-  const [folders, setFolders] = useState<FolderHit[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [open, setOpen] = useState(false);
-  const [activeIdx, setActiveIdx] = useState(0);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const dropdownRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
-  // Viewport position of the dropdown — the sidebar nav clips overflow
-  // (it needs overflow-hidden for its collapse animation), so the
-  // dropdown renders in a body portal, fixed-positioned under the input.
-  const [anchor, setAnchor] = useState<{ top: number; left: number } | null>(null);
-  // Track the latest in-flight request so a slower response can't overwrite
-  // a fresher one's results.
-  const requestSeq = useRef(0);
+export const WikiSearch = forwardRef<WikiSearchHandle, WikiSearchProps>(
+  function WikiSearch({ onNavigate }, ref) {
+    const router = useRouter();
+    const [query, setQuery] = useState("");
+    const [hits, setHits] = useState<SearchHit[]>([]);
+    const [folders, setFolders] = useState<FolderHit[]>([]);
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    const [open, setOpen] = useState(false);
+    const [activeIdx, setActiveIdx] = useState(0);
+    const containerRef = useRef<HTMLDivElement>(null);
+    const dropdownRef = useRef<HTMLDivElement>(null);
+    const inputRef = useRef<HTMLInputElement>(null);
+    // Viewport position of the dropdown — the sidebar nav clips overflow
+    // (it needs overflow-hidden for its collapse animation), so the
+    // dropdown renders in a body portal, fixed-positioned under the input.
+    const [anchor, setAnchor] = useState<{ top: number; left: number } | null>(
+      null,
+    );
+    // Track the latest in-flight request so a slower response can't overwrite
+    // a fresher one's results.
+    const requestSeq = useRef(0);
 
-  useImperativeHandle(
-    ref,
-    () => ({
-      focus: () => inputRef.current?.focus(),
-    }),
-    [],
-  );
+    useImperativeHandle(
+      ref,
+      () => ({
+        focus: () => inputRef.current?.focus(),
+      }),
+      [],
+    );
 
-  useEffect(() => {
-    const trimmed = query.trim();
-    if (!trimmed) {
-      setHits([]);
-      setFolders([]);
-      setLoading(false);
+    useEffect(() => {
+      const trimmed = query.trim();
+      if (!trimmed) {
+        setHits([]);
+        setFolders([]);
+        setLoading(false);
+        setError(null);
+        return;
+      }
+      const seq = ++requestSeq.current;
+      setLoading(true);
       setError(null);
-      return;
+      const handle = setTimeout(() => {
+        apiFetch<SearchResponse>(
+          `/wiki/search?q=${encodeURIComponent(trimmed)}&limit=${RESULT_LIMIT}`,
+        )
+          .then((r) => {
+            if (seq !== requestSeq.current) return;
+            setHits(r.hits);
+            setFolders(r.folders ?? []);
+            setActiveIdx(0);
+          })
+          .catch((e) => {
+            if (seq !== requestSeq.current) return;
+            setHits([]);
+            setFolders([]);
+            setError(e instanceof ApiError ? e.message : "search failed");
+          })
+          .finally(() => {
+            if (seq === requestSeq.current) setLoading(false);
+          });
+      }, DEBOUNCE_MS);
+      return () => clearTimeout(handle);
+    }, [query]);
+
+    // Close the dropdown on outside click. The dropdown lives in a body
+    // portal, so "inside" means the input container or the dropdown itself.
+    useEffect(() => {
+      if (!open) return;
+      function handleClick(e: MouseEvent) {
+        const t = e.target as Node;
+        if (containerRef.current?.contains(t)) return;
+        if (dropdownRef.current?.contains(t)) return;
+        setOpen(false);
+      }
+      window.addEventListener("mousedown", handleClick);
+      return () => window.removeEventListener("mousedown", handleClick);
+    }, [open]);
+
+    // Folders render first; both groups share one keyboard cursor.
+    const rows = useMemo<Row[]>(
+      () => [
+        ...folders.map<Row>((f) => ({ kind: "folder", folder: f })),
+        ...hits.map<Row>((h) => ({ kind: "doc", hit: h })),
+      ],
+      [folders, hits],
+    );
+
+    const pick = useCallback(
+      (row: Row) => {
+        setOpen(false);
+        setQuery("");
+        const path = row.kind === "folder" ? row.folder.path : row.hit.path;
+        router.push(`/app/wiki/${path}`);
+        onNavigate?.();
+      },
+      [router, onNavigate],
+    );
+
+    function onKeyDown(e: KeyboardEvent<HTMLInputElement>) {
+      if (!open || rows.length === 0) {
+        if (e.key === "Escape") setOpen(false);
+        return;
+      }
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setActiveIdx((i) => (i + 1) % rows.length);
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setActiveIdx((i) => (i - 1 + rows.length) % rows.length);
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        const row = rows[activeIdx];
+        if (row) pick(row);
+      } else if (e.key === "Escape") {
+        setOpen(false);
+      }
     }
-    const seq = ++requestSeq.current;
-    setLoading(true);
-    setError(null);
-    const handle = setTimeout(() => {
-      apiFetch<SearchResponse>(
-        `/wiki/search?q=${encodeURIComponent(trimmed)}&limit=${RESULT_LIMIT}`,
-      )
-        .then((r) => {
-          if (seq !== requestSeq.current) return;
-          setHits(r.hits);
-          setFolders(r.folders ?? []);
-          setActiveIdx(0);
-        })
-        .catch((e) => {
-          if (seq !== requestSeq.current) return;
-          setHits([]);
-          setFolders([]);
-          setError(e instanceof ApiError ? e.message : "search failed");
-        })
-        .finally(() => {
-          if (seq === requestSeq.current) setLoading(false);
-        });
-    }, DEBOUNCE_MS);
-    return () => clearTimeout(handle);
-  }, [query]);
 
-  // Close the dropdown on outside click. The dropdown lives in a body
-  // portal, so "inside" means the input container or the dropdown itself.
-  useEffect(() => {
-    if (!open) return;
-    function handleClick(e: MouseEvent) {
-      const t = e.target as Node;
-      if (containerRef.current?.contains(t)) return;
-      if (dropdownRef.current?.contains(t)) return;
-      setOpen(false);
-    }
-    window.addEventListener("mousedown", handleClick);
-    return () => window.removeEventListener("mousedown", handleClick);
-  }, [open]);
+    const showDropdown = open && query.trim().length > 0;
+    const showEmpty = useMemo(
+      () => showDropdown && !loading && !error && rows.length === 0,
+      [showDropdown, loading, error, rows.length],
+    );
 
-  // Folders render first; both groups share one keyboard cursor.
-  const rows = useMemo<Row[]>(
-    () => [
-      ...folders.map<Row>((f) => ({ kind: "folder", folder: f })),
-      ...hits.map<Row>((h) => ({ kind: "doc", hit: h })),
-    ],
-    [folders, hits],
-  );
+    // Anchor the portal dropdown under the input; re-measure on viewport
+    // resize and on any scroll (capture phase catches the sidebar's own
+    // scroll containers, not just the window).
+    useLayoutEffect(() => {
+      if (!showDropdown) {
+        setAnchor(null);
+        return;
+      }
+      function measure() {
+        const rect = containerRef.current?.getBoundingClientRect();
+        if (rect) setAnchor({ top: rect.bottom + 4, left: rect.left });
+      }
+      measure();
+      window.addEventListener("resize", measure);
+      window.addEventListener("scroll", measure, true);
+      return () => {
+        window.removeEventListener("resize", measure);
+        window.removeEventListener("scroll", measure, true);
+      };
+    }, [showDropdown]);
 
-  const pick = useCallback(
-    (row: Row) => {
-      setOpen(false);
-      setQuery("");
-      const path = row.kind === "folder" ? row.folder.path : row.hit.path;
-      router.push(`/app/wiki/${path}`);
-      onNavigate?.();
-    },
-    [router, onNavigate],
-  );
-
-  function onKeyDown(e: KeyboardEvent<HTMLInputElement>) {
-    if (!open || rows.length === 0) {
-      if (e.key === "Escape") setOpen(false);
-      return;
-    }
-    if (e.key === "ArrowDown") {
-      e.preventDefault();
-      setActiveIdx((i) => (i + 1) % rows.length);
-    } else if (e.key === "ArrowUp") {
-      e.preventDefault();
-      setActiveIdx((i) => (i - 1 + rows.length) % rows.length);
-    } else if (e.key === "Enter") {
-      e.preventDefault();
-      const row = rows[activeIdx];
-      if (row) pick(row);
-    } else if (e.key === "Escape") {
-      setOpen(false);
-    }
-  }
-
-  const showDropdown = open && query.trim().length > 0;
-  const showEmpty = useMemo(
-    () => showDropdown && !loading && !error && rows.length === 0,
-    [showDropdown, loading, error, rows.length],
-  );
-
-  // Anchor the portal dropdown under the input; re-measure on viewport
-  // resize and on any scroll (capture phase catches the sidebar's own
-  // scroll containers, not just the window).
-  useLayoutEffect(() => {
-    if (!showDropdown) {
-      setAnchor(null);
-      return;
-    }
-    function measure() {
-      const rect = containerRef.current?.getBoundingClientRect();
-      if (rect) setAnchor({ top: rect.bottom + 4, left: rect.left });
-    }
-    measure();
-    window.addEventListener("resize", measure);
-    window.addEventListener("scroll", measure, true);
-    return () => {
-      window.removeEventListener("resize", measure);
-      window.removeEventListener("scroll", measure, true);
-    };
-  }, [showDropdown]);
-
-  return (
-    <div ref={containerRef} className="relative w-full">
-      <InputTypeIn
-        ref={inputRef}
-        variant="internal"
-        searchIcon
-        clearButton
-        value={query}
-        onChange={(e) => {
-          setQuery(e.target.value);
-          setOpen(true);
-        }}
-        onFocus={() => setOpen(true)}
-        onKeyDown={onKeyDown}
-        placeholder="Search…"
-        aria-label="Search wiki"
-      />
-
-      {showDropdown && anchor && createPortal(
-        <div
-          ref={dropdownRef}
-          role="listbox"
-          className="fixed w-[360px] bg-(--background-tint-00) border border-(--border-01) rounded-(--border-radius-08) shadow-(--shadow-popover) overflow-y-auto z-[120]"
-          // Anchor-derived geometry stays inline — it's measured at runtime,
-          // not a design token. z-[120] must stack above the OPAL SidebarTab
-          // hit-target anchor (absolute inset-0 z-99) on the nav tabs below
-          // the search box — anything lower and the invisible anchor swallows
-          // clicks on dropdown rows that overlap a tab.
-          style={{
-            top: anchor.top,
-            left: anchor.left,
-            maxWidth: `calc(100vw - ${anchor.left}px - 12px)`,
-            maxHeight: `calc(100vh - ${anchor.top}px - 12px)`,
+    return (
+      <div ref={containerRef} className="relative w-full">
+        <InputTypeIn
+          ref={inputRef}
+          variant="internal"
+          searchIcon
+          clearButton
+          value={query}
+          onChange={(e) => {
+            setQuery(e.target.value);
+            setOpen(true);
           }}
-        >
-          {error && (
-            <div className="p-3 text-[13px] text-(--status-text-error-05)">{error}</div>
+          onFocus={() => setOpen(true)}
+          onKeyDown={onKeyDown}
+          placeholder="Search…"
+          aria-label="Search wiki"
+        />
+
+        {showDropdown &&
+          anchor &&
+          createPortal(
+            <div
+              ref={dropdownRef}
+              role="listbox"
+              className="fixed z-[120] w-[360px] overflow-y-auto rounded-(--border-radius-08) border border-(--border-02) bg-(--background-tint-00) shadow-(--shadow-modal)"
+              // Anchor-derived geometry stays inline — it's measured at runtime,
+              // not a design token. z-[120] must stack above the OPAL SidebarTab
+              // hit-target anchor (absolute inset-0 z-99) on the nav tabs below
+              // the search box — anything lower and the invisible anchor swallows
+              // clicks on dropdown rows that overlap a tab.
+              style={{
+                top: anchor.top,
+                left: anchor.left,
+                maxWidth: `calc(100vw - ${anchor.left}px - 12px)`,
+                maxHeight: `calc(100vh - ${anchor.top}px - 12px)`,
+              }}
+            >
+              {error && (
+                <div className="p-3 text-[13px] text-(--status-text-error-05)">
+                  {error}
+                </div>
+              )}
+              {!error && loading && rows.length === 0 && (
+                <div className="p-3 text-[13px] text-(--text-03)">
+                  Searching…
+                </div>
+              )}
+              {showEmpty && (
+                <div className="p-3 text-[13px] text-(--text-03)">
+                  No matches.
+                </div>
+              )}
+              {!error && rows.length > 0 && (
+                <ul className="m-0 list-none p-0">
+                  {rows.map((row, i) => {
+                    const active = i === activeIdx;
+                    const key =
+                      row.kind === "folder"
+                        ? `f:${row.folder.path}`
+                        : `d:${row.hit.doc_id}`;
+                    return (
+                      <li key={key}>
+                        <button
+                          type="button"
+                          onMouseEnter={() => setActiveIdx(i)}
+                          onMouseDown={(e) => {
+                            // mousedown so the input doesn't blur first.
+                            e.preventDefault();
+                            pick(row);
+                          }}
+                          className={`block w-full cursor-pointer border-b border-none border-(--border-01) px-3 py-2.5 text-left ${active ? "bg-(--background-tint-03)" : "bg-transparent"}`}
+                        >
+                          {row.kind === "folder" ? (
+                            <FolderRow folder={row.folder} />
+                          ) : (
+                            <DocRow hit={row.hit} />
+                          )}
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>,
+            document.body,
           )}
-          {!error && loading && rows.length === 0 && (
-            <div className="p-3 text-[13px] text-(--text-03)">Searching…</div>
-          )}
-          {showEmpty && (
-            <div className="p-3 text-[13px] text-(--text-03)">No matches.</div>
-          )}
-          {!error && rows.length > 0 && (
-            <ul className="list-none m-0 p-0">
-              {rows.map((row, i) => {
-                const active = i === activeIdx;
-                const key =
-                  row.kind === "folder" ? `f:${row.folder.path}` : `d:${row.hit.doc_id}`;
-                return (
-                  <li key={key}>
-                    <button
-                      type="button"
-                      onMouseEnter={() => setActiveIdx(i)}
-                      onMouseDown={(e) => {
-                        // mousedown so the input doesn't blur first.
-                        e.preventDefault();
-                        pick(row);
-                      }}
-                      className={`w-full text-left py-2.5 px-3 border-none cursor-pointer block border-b border-(--border-01) ${active ? "bg-(--background-tint-03)" : "bg-transparent"}`}
-                    >
-                      {row.kind === "folder" ? (
-                        <FolderRow folder={row.folder} />
-                      ) : (
-                        <DocRow hit={row.hit} />
-                      )}
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </div>,
-        document.body,
-      )}
-    </div>
-  );
-});
+      </div>
+    );
+  },
+);
 
 function FolderRow({ folder }: { folder: FolderHit }) {
   const leaf = folder.path.split("/").pop() || folder.path;
@@ -289,16 +300,16 @@ function FolderRow({ folder }: { folder: FolderHit }) {
     ? folder.path.slice(0, folder.path.lastIndexOf("/"))
     : "";
   return (
-    <div className="flex items-center gap-2 min-w-0">
-      <span className="text-(--text-03) flex shrink-0">
+    <div className="flex min-w-0 items-center gap-2">
+      <span className="flex shrink-0 text-(--text-03)">
         <SvgFolder size={16} />
       </span>
       <div className="min-w-0 flex-1">
-        <div className="text-[13px] font-semibold text-(--text-05) overflow-hidden text-ellipsis whitespace-nowrap">
+        <div className="overflow-hidden text-[13px] font-semibold text-ellipsis whitespace-nowrap text-(--text-05)">
           {leaf}
         </div>
         {parent && (
-          <div className="text-[11px] text-(--text-03) mt-0.5 font-mono overflow-hidden text-ellipsis whitespace-nowrap">
+          <div className="mt-0.5 overflow-hidden font-mono text-[11px] text-ellipsis whitespace-nowrap text-(--text-03)">
             {parent}/
           </div>
         )}
@@ -310,14 +321,14 @@ function FolderRow({ folder }: { folder: FolderHit }) {
 function DocRow({ hit }: { hit: SearchHit }) {
   return (
     <>
-      <div className="text-[13px] font-semibold text-(--text-05) overflow-hidden text-ellipsis whitespace-nowrap">
+      <div className="overflow-hidden text-[13px] font-semibold text-ellipsis whitespace-nowrap text-(--text-05)">
         {hit.title || hit.path}
       </div>
-      <div className="text-[11px] text-(--text-03) mt-0.5 font-mono overflow-hidden text-ellipsis whitespace-nowrap">
+      <div className="mt-0.5 overflow-hidden font-mono text-[11px] text-ellipsis whitespace-nowrap text-(--text-03)">
         {hit.path}
       </div>
       {hit.snippet && (
-        <div className="text-xs text-(--text-04) mt-1 leading-[1.4] line-clamp-2">
+        <div className="mt-1 line-clamp-2 text-xs leading-[1.4] text-(--text-04)">
           <SnippetText text={hit.snippet} />
         </div>
       )}
@@ -343,7 +354,7 @@ function SnippetText({ text }: { text: string }) {
             : null;
         if (inner !== null) {
           return (
-            <strong key={i} className="text-(--text-05) font-bold">
+            <strong key={i} className="font-bold text-(--text-05)">
               {stripEm(inner)}
             </strong>
           );

@@ -9,7 +9,7 @@
 }
 
 /* Add + Remove block tokens (Figma 284:22702 / 284:22725).
-   Colors resolve via the --diff-* theme tokens in globals.css. */
+   Colors are Opal status tokens, which flip for dark mode. */
 .add,
 .remove {
   border-radius: 8px;
@@ -20,16 +20,16 @@
 }
 
 .add {
-  background: var(--diff-add-bg);
-  color: var(--diff-add-fg);
+  background: var(--status-success-01);
+  color: var(--text-05);
   padding: 4px;
 }
 
 /* Remove block in the Figma has NO outer padding — relies only on the
    inner bullet and content elements for spacing. */
 .remove {
-  background: var(--diff-remove-bg);
-  color: var(--diff-remove-fg);
+  background: var(--status-error-01);
+  color: var(--status-text-error-05);
 }
 
 .blockContent {
@@ -80,10 +80,10 @@
    container with the same quote indent + radius + padding). The
    <del> is red strikethrough, the <ins> is green text. */
 .wordRemoved {
-  color: var(--diff-word-remove);
+  color: var(--status-text-error-05);
   text-decoration: line-through;
 }
 
 .wordAdded {
-  color: var(--diff-word-add);
+  color: var(--status-text-success-05);
 }

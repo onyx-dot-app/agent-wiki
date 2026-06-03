@@ -3,6 +3,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 
 import { Button } from "@onyx-ai/opal/components";
+import { useConfirm } from "@/components/common/ConfirmDialog";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { BackLink, PageHeader } from "@/components/common/PageHeader";
 import { RequireAdmin } from "@/components/RequireAdmin";
@@ -22,15 +23,18 @@ export default function AdminWebPage() {
   const isMobile = useIsMobile();
   return (
     <RequireAdmin>
-      <main className="max-w-[720px]" style={{ padding: isMobile ? "16px 12px" : "24px 32px" }}>
+      <main
+        className="max-w-[720px]"
+        style={{ padding: isMobile ? "16px 12px" : "24px 32px" }}
+      >
         <BackLink />
         <PageHeader
           title="Web search & crawl"
           description={
             <>
-              Search results come from <strong>Serper</strong>; full page contents come from{" "}
-              <strong>Firecrawl</strong>. Keys are stored in the database and never echoed back
-              to the browser.
+              Search results come from <strong>Serper</strong>; full page
+              contents come from <strong>Firecrawl</strong>. Keys are stored in
+              the database and never echoed back to the browser.
             </>
           }
         />
@@ -47,6 +51,7 @@ function WebForm() {
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
+  const confirmDialog = useConfirm();
 
   async function load() {
     try {
@@ -86,7 +91,13 @@ function WebForm() {
   }
 
   async function clearKey(field: "serper_api_key" | "firecrawl_api_key") {
-    if (!confirm("Clear this API key?")) return;
+    if (
+      !(await confirmDialog({
+        title: "Clear this API key?",
+        confirmLabel: "Clear key",
+      }))
+    )
+      return;
     setSaving(true);
     setError(null);
     try {
@@ -118,9 +129,13 @@ function WebForm() {
         clearDisabled={saving || !settings.serper_api_key_set}
       />
 
-      <div className="h-px bg-(--border-01) my-2" />
+      <div className="my-2 h-px bg-(--border-01)" />
 
-      <ProviderRow label="Crawl" value="Firecrawl" url="https://www.firecrawl.dev/" />
+      <ProviderRow
+        label="Crawl"
+        value="Firecrawl"
+        url="https://www.firecrawl.dev/"
+      />
       <KeyField
         label="Firecrawl API key"
         value={firecrawlKey}
@@ -143,12 +158,25 @@ function WebForm() {
   );
 }
 
-function ProviderRow({ label, value, url }: { label: string; value: string; url: string }) {
+function ProviderRow({
+  label,
+  value,
+  url,
+}: {
+  label: string;
+  value: string;
+  url: string;
+}) {
   return (
     <div className="flex items-baseline gap-2 text-[13px]">
-      <span className="text-(--text-03) w-[60px]">{label}</span>
+      <span className="w-[60px] text-(--text-03)">{label}</span>
       <span className="font-medium">{value}</span>
-      <a href={url} target="_blank" rel="noreferrer" className="text-(--text-05) text-xs underline">
+      <a
+        href={url}
+        target="_blank"
+        rel="noreferrer"
+        className="text-xs text-(--text-05) underline"
+      >
         get key ↗
       </a>
     </div>
@@ -176,9 +204,13 @@ function KeyField({
 }) {
   return (
     <label>
-      <div className="mb-1 text-[13px] font-medium flex items-center gap-[6px]">
+      <div className="mb-1 flex items-center gap-[6px] text-[13px] font-medium">
         <span>{label}</span>
-        {isSet && <span className="font-normal text-(--text-03) font-mono text-xs">currently {hint}</span>}
+        {isSet && (
+          <span className="font-mono text-xs font-normal text-(--text-03)">
+            currently {hint}
+          </span>
+        )}
         <span className="flex-1" />
         {isSet && (
           <Button

@@ -1,7 +1,17 @@
 "use client";
 
-import { Button, LineItemButton, Popover, Text } from "@onyx-ai/opal/components";
-import { SvgEdit, SvgMoreHorizontal, SvgTrash } from "@onyx-ai/opal/icons";
+import {
+  Button,
+  LineItemButton,
+  Popover,
+  Text,
+} from "@onyx-ai/opal/components";
+import {
+  SvgEdit,
+  SvgMoreHorizontal,
+  SvgTrash,
+  SvgX,
+} from "@onyx-ai/opal/icons";
 import { useCallback, useState } from "react";
 
 import { useAuth } from "@/lib/auth";
@@ -37,7 +47,10 @@ interface Props {
   fullHeight?: boolean;
 }
 
-function authorLabel(authorUserId: string | null, selfId: string | undefined): string {
+function authorLabel(
+  authorUserId: string | null,
+  selfId: string | undefined,
+): string {
   if (authorUserId && authorUserId === selfId) return "You";
   return "User";
 }
@@ -91,7 +104,8 @@ export function CommentsPanel({
   const orderedThreads = [...threads].sort((a, b) => {
     const ao = a.root.status === "orphaned" ? null : a.root.start_offset;
     const bo = b.root.status === "orphaned" ? null : b.root.start_offset;
-    if (ao === null && bo === null) return a.root.created_at.localeCompare(b.root.created_at);
+    if (ao === null && bo === null)
+      return a.root.created_at.localeCompare(b.root.created_at);
     if (ao === null) return 1;
     if (bo === null) return -1;
     return ao - bo;
@@ -100,8 +114,12 @@ export function CommentsPanel({
   // Resolved threads drop out of the main list (Google-Docs style) — they're
   // "done", so they shouldn't clutter the doc. They stay reachable (to reopen)
   // behind a toggle.
-  const openThreads = orderedThreads.filter((t) => t.root.status !== "resolved");
-  const resolvedThreads = orderedThreads.filter((t) => t.root.status === "resolved");
+  const openThreads = orderedThreads.filter(
+    (t) => t.root.status !== "resolved",
+  );
+  const resolvedThreads = orderedThreads.filter(
+    (t) => t.root.status === "resolved",
+  );
 
   const renderThread = (t: CommentThreadView) => (
     <Thread
@@ -122,10 +140,19 @@ export function CommentsPanel({
 
   return (
     <div className={`${styles.panel} ${fullHeight ? styles.fullHeight : ""}`}>
-      <div className={styles.closeRow}>
-        <Button prominence="tertiary" size="sm" onClick={onClose} aria-label="Close comments">
-          ×
-        </Button>
+      <div className={styles.headerRow}>
+        <div className={styles.headerTitle}>
+          <Text font="main-ui-action" color="text-04">
+            Comments
+          </Text>
+        </div>
+        <Button
+          icon={SvgX}
+          prominence="tertiary"
+          size="sm"
+          tooltip="Close comments"
+          onClick={onClose}
+        />
       </div>
 
       <div className={styles.scroll}>
@@ -294,7 +321,11 @@ function Thread({
             onChange={(e) => setReplyBody(e.target.value)}
           />
           <div className={styles.composeRow}>
-            <Button prominence="tertiary" size="sm" onClick={() => setReplyOpen(false)}>
+            <Button
+              prominence="tertiary"
+              size="sm"
+              onClick={() => setReplyOpen(false)}
+            >
               Cancel
             </Button>
             <Button
@@ -315,15 +346,30 @@ function Thread({
         </div>
       ) : (
         <div className={styles.actions}>
-          <Button prominence="tertiary" size="sm" disabled={busy} onClick={() => setReplyOpen(true)}>
+          <Button
+            prominence="tertiary"
+            size="sm"
+            disabled={busy}
+            onClick={() => setReplyOpen(true)}
+          >
             Reply
           </Button>
           {resolved ? (
-            <Button prominence="tertiary" size="sm" disabled={busy} onClick={onReopen}>
+            <Button
+              prominence="tertiary"
+              size="sm"
+              disabled={busy}
+              onClick={onReopen}
+            >
               Reopen
             </Button>
           ) : (
-            <Button prominence="tertiary" size="sm" disabled={busy} onClick={onResolve}>
+            <Button
+              prominence="tertiary"
+              size="sm"
+              disabled={busy}
+              onClick={onResolve}
+            >
               Resolve
             </Button>
           )}
@@ -358,7 +404,10 @@ function Comment({
         <Text font="main-ui-action" color="text-04">
           {authorLabel(comment.author_user_id, selfId)}
         </Text>
-        <span className={styles.time} title={absoluteTime(toIso(comment.created_at))}>
+        <span
+          className={styles.time}
+          title={absoluteTime(toIso(comment.created_at))}
+        >
           <Text font="secondary-body" color="text-03">
             {relativeTime(toIso(comment.created_at), "short")}
           </Text>
@@ -367,7 +416,9 @@ function Comment({
           {canModify && !editing && (
             // Overflow menu (Google-Docs style) keeps Edit/Delete off the card
             // until hovered, so comments stay compact. Forced visible while open.
-            <span className={`${styles.kebab} ${menuOpen ? styles.kebabOpen : ""}`}>
+            <span
+              className={`${styles.kebab} ${menuOpen ? styles.kebabOpen : ""}`}
+            >
               <Popover open={menuOpen} onOpenChange={setMenuOpen}>
                 {/* Radix renders its own <button> here (no asChild) so the
                     trigger's onClick/ref/data-state are guaranteed to wire up —

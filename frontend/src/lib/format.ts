@@ -36,7 +36,10 @@ function formatter(timezone: string): Intl.DateTimeFormat {
   return f;
 }
 
-export function formatInTimezone(value: string | Date | number, timezone: string): string {
+export function formatInTimezone(
+  value: string | Date | number,
+  timezone: string,
+): string {
   const date = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(date.getTime())) return "";
   return formatter(timezone).format(date);

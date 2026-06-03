@@ -58,9 +58,12 @@ function closestSourcePos(node: Node | null): HTMLElement | null {
   return cur;
 }
 
-function parseSourcePos(
-  sp: string,
-): { startLine: number; startCol: number; endLine: number; endCol: number } | null {
+function parseSourcePos(sp: string): {
+  startLine: number;
+  startCol: number;
+  endLine: number;
+  endCol: number;
+} | null {
   const m = /^(\d+):(\d+)-(\d+):(\d+)$/.exec(sp.trim());
   if (!m) return null;
   return {
@@ -94,7 +97,11 @@ function charsAlign(raw: string, rendered: string): boolean {
  * counterpart is tolerated (react-markdown adds newlines around block
  * structure); a non-whitespace rendered char with no counterpart returns null
  * (the selection/highlight then just isn't mapped). */
-function alignBlock(el: HTMLElement, body: string, starts: number[]): BlockAlign | null {
+function alignBlock(
+  el: HTMLElement,
+  body: string,
+  starts: number[],
+): BlockAlign | null {
   const pos = parseSourcePos(el.getAttribute("data-sourcepos") ?? "");
   if (!pos) return null;
   const blockStart = offsetOf(starts, pos.startLine, pos.startCol);
@@ -126,7 +133,11 @@ function alignBlock(el: HTMLElement, body: string, starts: number[]): BlockAlign
 
 /** Count of rendered chars from the start of `block` up to a (container, offset)
  * selection boundary — i.e. the boundary's index into `block.textContent`. */
-function renderedOffsetInBlock(block: HTMLElement, container: Node, offset: number): number {
+function renderedOffsetInBlock(
+  block: HTMLElement,
+  container: Node,
+  offset: number,
+): number {
   const r = document.createRange();
   r.selectNodeContents(block);
   r.setEnd(container, offset);
@@ -153,7 +164,10 @@ function rawEndOffset(a: BlockAlign, i: number): number {
  * nearest source-positioned element, so selections that cross inline syntax
  * (`**bold**`) or span multiple blocks map fine — both endpoints become
  * absolute body offsets. */
-export function selectionToAnchor(article: HTMLElement, body: string): CommentDraft | null {
+export function selectionToAnchor(
+  article: HTMLElement,
+  body: string,
+): CommentDraft | null {
   const sel = window.getSelection();
   if (!sel || sel.isCollapsed || sel.rangeCount === 0) return null;
   if (!sel.toString().trim()) return null;
@@ -180,7 +194,11 @@ export function selectionToAnchor(article: HTMLElement, body: string): CommentDr
   );
   if (endOffset <= startOffset) return null;
 
-  return { startOffset, endOffset, quotedText: body.slice(startOffset, endOffset) };
+  return {
+    startOffset,
+    endOffset,
+    quotedText: body.slice(startOffset, endOffset),
+  };
 }
 
 // --------------------------------------------------------------------------- //
@@ -226,7 +244,11 @@ function isTopLevelBlock(el: HTMLElement, article: HTMLElement): boolean {
 
 /** DOM Range over rendered offsets `[start, end)` (indices into the element's
  * concatenated text) of `el`. */
-function rangeForRenderedSpan(el: HTMLElement, start: number, end: number): Range | null {
+function rangeForRenderedSpan(
+  el: HTMLElement,
+  start: number,
+  end: number,
+): Range | null {
   if (end <= start) return null;
   const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
   let acc = 0;
@@ -318,7 +340,8 @@ export function paintCommentHighlights(
   // Two registries: default (light) and the selected thread (strong).
   if (defaultRanges.length) reg.set(HIGHLIGHT_NAME, new Ctor(...defaultRanges));
   else reg.delete(HIGHLIGHT_NAME);
-  if (activeRanges.length) reg.set(ACTIVE_HIGHLIGHT_NAME, new Ctor(...activeRanges));
+  if (activeRanges.length)
+    reg.set(ACTIVE_HIGHLIGHT_NAME, new Ctor(...activeRanges));
   else reg.delete(ACTIVE_HIGHLIGHT_NAME);
 
   return painted;

@@ -17,9 +17,9 @@ function eventsPath(opts: { kind?: string; limit?: number }): string {
 }
 
 export function useEvents(opts: { kind?: string; limit?: number } = {}) {
-  const { data, error, isLoading, isValidating, mutate } = useSWR<{ events: AppEvent[] }>(
-    eventsPath(opts),
-  );
+  const { data, error, isLoading, isValidating, mutate } = useSWR<{
+    events: AppEvent[];
+  }>(eventsPath(opts));
   return {
     events: data?.events ?? [],
     error: error as Error | undefined,

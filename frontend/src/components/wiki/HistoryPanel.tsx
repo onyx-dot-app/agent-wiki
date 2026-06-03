@@ -59,17 +59,23 @@ export function HistoryPanel({
         height: fullHeight ? "100%" : undefined,
         borderRadius: fullHeight ? 0 : 12,
       }}
-      className="shrink-0 bg-(--background-tint-01) flex flex-col min-h-0 p-2 gap-2"
+      className="flex min-h-0 shrink-0 flex-col gap-2 bg-(--background-tint-01) p-2"
     >
-      <div className="flex flex-row items-center gap-1 p-1 shrink-0">
-        <div className="flex-1 min-w-0">
+      <div className="flex shrink-0 flex-row items-center gap-1 p-1">
+        <div className="min-w-0 flex-1">
           <Text font="main-ui-action" color="text-04">
             History
           </Text>
         </div>
-        <Button icon={SvgX} prominence="tertiary" size="sm" tooltip="Close history" onClick={onClose} />
+        <Button
+          icon={SvgX}
+          prominence="tertiary"
+          size="sm"
+          tooltip="Close history"
+          onClick={onClose}
+        />
       </div>
-      <div className="overflow-y-auto flex-1 flex flex-col gap-1">
+      <div className="flex flex-1 flex-col gap-1 overflow-y-auto">
         {error && <PanelMessage>{error}</PanelMessage>}
         {!error && commits === null && (
           <div className="p-3">
@@ -167,11 +173,7 @@ function CommitRow({
 }
 
 function Row({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="flex flex-col gap-2 w-full min-w-0">
-      {children}
-    </div>
-  );
+  return <div className="flex w-full min-w-0 flex-col gap-2">{children}</div>;
 }
 
 function HeaderLine({
@@ -184,11 +186,9 @@ function HeaderLine({
   right: React.ReactNode;
 }) {
   return (
-    <div className="flex flex-row items-center gap-2 w-full min-w-0">
-      <div className="flex items-center shrink-0">
-        {avatars}
-      </div>
-      <div className="flex-1 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
+    <div className="flex w-full min-w-0 flex-row items-center gap-2">
+      <div className="flex shrink-0 items-center">{avatars}</div>
+      <div className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap">
         <Text font="main-ui-action" color="text-04" nowrap maxLines={1}>
           {title}
         </Text>
@@ -210,14 +210,14 @@ function ActionLine({
   sourceTitle?: string | null;
 }) {
   return (
-    <div className="flex flex-row items-center gap-2 w-full min-w-0 text-xs leading-4">
-      <div className="flex-1 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
+    <div className="flex w-full min-w-0 flex-row items-center gap-2 text-xs leading-4">
+      <div className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap">
         <Text font="secondary-body" color="text-03" nowrap maxLines={1}>
           {label}
         </Text>
       </div>
       {stats ? (
-        <div className="flex gap-1 shrink-0">
+        <div className="flex shrink-0 gap-1">
           <Text font="secondary-mono" color="text-03" nowrap>
             {`+${stats.added}`}
           </Text>
@@ -233,7 +233,7 @@ function ActionLine({
           rel="noopener noreferrer"
           onClick={(e) => e.stopPropagation()}
           aria-label={sourceTitle ?? "Open source"}
-          className="inline-flex items-center text-inherit no-underline shrink-0"
+          className="inline-flex shrink-0 items-center text-inherit no-underline"
         >
           <Text font="secondary-body" color="text-03">
             ↗
@@ -246,11 +246,11 @@ function ActionLine({
 
 function TriggeredLine({ count }: { count: number }) {
   return (
-    <div className="flex flex-row items-center gap-1 w-full min-w-0 text-xs leading-4">
+    <div className="flex w-full min-w-0 flex-row items-center gap-1 text-xs leading-4">
       <Text font="secondary-body" color="text-03" nowrap>
         Triggered
       </Text>
-      <span className="inline-flex items-center shrink-0 text-(--text-03)">
+      <span className="inline-flex shrink-0 items-center text-(--text-03)">
         <SvgWorkflow style={{ width: 12, height: 12 }} />
       </span>
       <span className="font-semibold">
@@ -267,8 +267,8 @@ function TriggeredLine({ count }: { count: number }) {
 // inside the 20px box (otherwise content-box would inflate one of them).
 const AVATAR_SIZE = 20;
 
-/** Single-initial avatar. Inverts per theme via the --diff-avatar-*
- *  CSS vars defined in globals.css. */
+/** Single-initial avatar. Inverts per theme via Opal's neutral-inverted
+ *  background + inverted text tokens. */
 function Avatar({ initial }: { initial: string }) {
   return (
     <div
@@ -277,7 +277,7 @@ function Avatar({ initial }: { initial: string }) {
         width: AVATAR_SIZE,
         height: AVATAR_SIZE,
       }}
-      className="box-border rounded-full flex items-center justify-center shrink-0 overflow-hidden bg-[var(--diff-avatar-bg)] text-[var(--diff-avatar-fg)] border border-[var(--diff-avatar-border)] text-xs font-semibold"
+      className="box-border flex shrink-0 items-center justify-center overflow-hidden rounded-full border border-(--border-01) bg-(--background-neutral-inverted-00) text-xs font-semibold text-(--text-inverted-05)"
     >
       {initial}
     </div>
@@ -293,7 +293,7 @@ function LogoAvatar({ Logo }: { Logo: ComponentType<IconProps> }) {
         width: AVATAR_SIZE,
         height: AVATAR_SIZE,
       }}
-      className="box-border rounded-full flex items-center justify-center shrink-0 overflow-hidden -ml-[6px] bg-(--background-tint-00) border border-[var(--diff-avatar-border)]"
+      className="-ml-[6px] box-border flex shrink-0 items-center justify-center overflow-hidden rounded-full border border-(--border-01) bg-(--background-tint-00)"
     >
       <Logo style={{ width: 16, height: 16 }} />
     </div>

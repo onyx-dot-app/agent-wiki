@@ -25,7 +25,10 @@ export async function starDoc(path: string): Promise<void> {
         });
         return appended(current, path);
       },
-      { optimisticData: (current) => appended(current, path), rollbackOnError: true },
+      {
+        optimisticData: (current) => appended(current, path),
+        rollbackOnError: true,
+      },
     );
   } catch {
     /* rolled back — starring is best-effort UI state */
@@ -37,12 +40,18 @@ export async function unstarDoc(path: string): Promise<void> {
     await mutate<StarredDocsResponse>(
       STARRED_KEY,
       async (current) => {
-        await apiFetch<void>(`${STARRED_KEY}?path=${encodeURIComponent(path)}`, {
-          method: "DELETE",
-        });
+        await apiFetch<void>(
+          `${STARRED_KEY}?path=${encodeURIComponent(path)}`,
+          {
+            method: "DELETE",
+          },
+        );
         return removed(current, path);
       },
-      { optimisticData: (current) => removed(current, path), rollbackOnError: true },
+      {
+        optimisticData: (current) => removed(current, path),
+        rollbackOnError: true,
+      },
     );
   } catch {
     /* rolled back */

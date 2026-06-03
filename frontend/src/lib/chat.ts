@@ -33,7 +33,9 @@ export function createSession(): Promise<ChatSession> {
 }
 
 export function getSession(id: string): Promise<ChatSessionDetail> {
-  return apiFetch<ChatSessionDetail>(`/chat/sessions/${encodeURIComponent(id)}`);
+  return apiFetch<ChatSessionDetail>(
+    `/chat/sessions/${encodeURIComponent(id)}`,
+  );
 }
 
 export function deleteSession(id: string): Promise<void> {

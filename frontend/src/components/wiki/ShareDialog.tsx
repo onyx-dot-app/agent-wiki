@@ -40,7 +40,12 @@ import {
   type ResourceKind,
   type Visibility,
 } from "@/lib/permissions";
-import { displayName, initials, useUserSearch, type UserLite } from "@/lib/users";
+import {
+  displayName,
+  initials,
+  useUserSearch,
+  type UserLite,
+} from "@/lib/users";
 import { lastSegment } from "@/lib/wiki";
 import { markdown } from "@onyx-ai/opal/utils";
 
@@ -120,7 +125,10 @@ function deriveBaseline(
     // Display the strongest grant (write > read); upgrade read → write but
     // never downgrade.
     const existing = grants.get(k);
-    if (!existing || (existing.permission !== "write" && e.permission === "write")) {
+    if (
+      !existing ||
+      (existing.permission !== "write" && e.permission === "write")
+    ) {
       grants.set(k, {
         kind: e.principal_kind,
         id: e.principal_id,
@@ -227,13 +235,20 @@ export function ShareDialog({ path, open, onClose }: ShareDialogProps) {
   if (!open) return null;
 
   const ownerId = acl?.owner_user_id ?? null;
-  const dirty = !grantsEqual(grants, baseline.grants) || general !== baseline.general;
+  const dirty =
+    !grantsEqual(grants, baseline.grants) || general !== baseline.general;
 
   const addUser = (u: UserLite) => {
     const k = keyFor("user", u.id);
     if (grants.has(k) || u.id === ownerId) return;
     const next = new Map(grants);
-    next.set(k, { kind: "user", id: u.id, permission: "read", email: u.email, name: u.name });
+    next.set(k, {
+      kind: "user",
+      id: u.id,
+      permission: "read",
+      email: u.email,
+      name: u.name,
+    });
     setGrants(next);
     setQuery("");
     setPickerOpen(false);
@@ -242,7 +257,12 @@ export function ShareDialog({ path, open, onClose }: ShareDialogProps) {
     const k = keyFor("group", gid);
     if (grants.has(k)) return;
     const next = new Map(grants);
-    next.set(k, { kind: "group", id: gid, permission: "read", groupName: name });
+    next.set(k, {
+      kind: "group",
+      id: gid,
+      permission: "read",
+      groupName: name,
+    });
     setGrants(next);
     setQuery("");
     setPickerOpen(false);
@@ -300,8 +320,10 @@ export function ShareDialog({ path, open, onClose }: ShareDialogProps) {
 
       const desiredRead = general === "public-read";
       const desiredWrite = general === "public-write";
-      if (baseline.everyoneReadId && !desiredRead) revokes.push(baseline.everyoneReadId);
-      if (baseline.everyoneWriteId && !desiredWrite) revokes.push(baseline.everyoneWriteId);
+      if (baseline.everyoneReadId && !desiredRead)
+        revokes.push(baseline.everyoneReadId);
+      if (baseline.everyoneWriteId && !desiredWrite)
+        revokes.push(baseline.everyoneWriteId);
 
       for (const id of revokes) await revokeAcl(id);
       for (const g of adds) {
@@ -407,92 +429,94 @@ export function ShareDialog({ path, open, onClose }: ShareDialogProps) {
         ) : (
           <div className={styles.content}>
             <div className={styles.cardStack}>
-            {/* Add people / groups — InputTypeIn anchors a portaled results menu */}
-            <Popover
-              open={showPicker}
-              onOpenChange={(o) => {
-                if (!o) setPickerOpen(false);
-              }}
-            >
-              <Popover.Anchor asChild>
-                <div className={styles.anchorWrap}>
-                  <InputTypeIn
-                    searchIcon
-                    placeholder="Add users and groups"
-                    value={query}
-                    onChange={(e) => {
-                      setQuery(e.target.value);
-                      setPickerOpen(true);
-                    }}
-                    onFocus={() => setPickerOpen(true)}
-                  />
-                </div>
-              </Popover.Anchor>
-              <Popover.Content
-                width="trigger"
-                align="start"
-                sideOffset={4}
-                container={typeof document !== "undefined" ? document.body : undefined}
-                onOpenAutoFocus={(e) => e.preventDefault()}
-                onCloseAutoFocus={(e) => e.preventDefault()}
+              {/* Add people / groups — InputTypeIn anchors a portaled results menu */}
+              <Popover
+                open={showPicker}
+                onOpenChange={(o) => {
+                  if (!o) setPickerOpen(false);
+                }}
               >
-                <PopoverMenu>
-                  {pickerGroups.map((g) => {
-                    const already = grants.has(keyFor("group", g.id));
-                    return (
-                      <LineItemButton
-                        key={`g-${g.id}`}
-                        icon={SvgUsers}
-                        title={g.name}
-                        description={`${g.member_count} ${g.member_count === 1 ? "user" : "users"}`}
-                        sizePreset="main-ui"
-                        variant="section"
-                        rightChildren={
-                          already ? (
-                            <Text font="secondary-body" color="text-03">
-                              Shared
-                            </Text>
-                          ) : undefined
-                        }
-                        onClick={() => {
-                          if (!already) addGroup(g.id, g.name);
-                        }}
-                      />
-                    );
-                  })}
-                  {pickerUsers.map((u) => {
-                    const already =
-                      grants.has(keyFor("user", u.id)) || u.id === ownerId;
-                    return (
-                      <LineItemButton
-                        key={`u-${u.id}`}
-                        icon={SvgUser}
-                        title={displayName(u)}
-                        description={u.email}
-                        sizePreset="main-ui"
-                        variant="section"
-                        rightChildren={
-                          already ? (
-                            <Text font="secondary-body" color="text-03">
-                              Shared
-                            </Text>
-                          ) : undefined
-                        }
-                        onClick={() => {
-                          if (!already) addUser(u);
-                        }}
-                      />
-                    );
-                  })}
-                </PopoverMenu>
-              </Popover.Content>
-            </Popover>
+                <Popover.Anchor asChild>
+                  <div className={styles.anchorWrap}>
+                    <InputTypeIn
+                      searchIcon
+                      placeholder="Add users and groups"
+                      value={query}
+                      onChange={(e) => {
+                        setQuery(e.target.value);
+                        setPickerOpen(true);
+                      }}
+                      onFocus={() => setPickerOpen(true)}
+                    />
+                  </div>
+                </Popover.Anchor>
+                <Popover.Content
+                  width="trigger"
+                  align="start"
+                  sideOffset={4}
+                  container={
+                    typeof document !== "undefined" ? document.body : undefined
+                  }
+                  onOpenAutoFocus={(e) => e.preventDefault()}
+                  onCloseAutoFocus={(e) => e.preventDefault()}
+                >
+                  <PopoverMenu>
+                    {pickerGroups.map((g) => {
+                      const already = grants.has(keyFor("group", g.id));
+                      return (
+                        <LineItemButton
+                          key={`g-${g.id}`}
+                          icon={SvgUsers}
+                          title={g.name}
+                          description={`${g.member_count} ${g.member_count === 1 ? "user" : "users"}`}
+                          sizePreset="main-ui"
+                          variant="section"
+                          rightChildren={
+                            already ? (
+                              <Text font="secondary-body" color="text-03">
+                                Shared
+                              </Text>
+                            ) : undefined
+                          }
+                          onClick={() => {
+                            if (!already) addGroup(g.id, g.name);
+                          }}
+                        />
+                      );
+                    })}
+                    {pickerUsers.map((u) => {
+                      const already =
+                        grants.has(keyFor("user", u.id)) || u.id === ownerId;
+                      return (
+                        <LineItemButton
+                          key={`u-${u.id}`}
+                          icon={SvgUser}
+                          title={displayName(u)}
+                          description={u.email}
+                          sizePreset="main-ui"
+                          variant="section"
+                          rightChildren={
+                            already ? (
+                              <Text font="secondary-body" color="text-03">
+                                Shared
+                              </Text>
+                            ) : undefined
+                          }
+                          onClick={() => {
+                            if (!already) addUser(u);
+                          }}
+                        />
+                      );
+                    })}
+                  </PopoverMenu>
+                </Popover.Content>
+              </Popover>
 
-            {saveError && (
-              <Text font="secondary-body" color="text-02">
-                {saveError}
-              </Text>
-            )}
+              {saveError && (
+                <Text font="secondary-body" color="text-02">
+                  {saveError}
+                </Text>
+              )}
 
               {/* General access */}
               <div className={styles.generalRow}>
@@ -504,7 +528,11 @@ export function ShareDialog({ path, open, onClose }: ShareDialogProps) {
                   )}
                 </span>
                 <ScopeSelect value={scope} onChange={setScope} />
-                <PermSelect boxed value={generalPerm} onChange={setGeneralPerm} />
+                <PermSelect
+                  boxed
+                  value={generalPerm}
+                  onChange={setGeneralPerm}
+                />
               </div>
 
               <Divider paddingParallel="fit" paddingPerpendicular="2xs" />
@@ -517,51 +545,55 @@ export function ShareDialog({ path, open, onClose }: ShareDialogProps) {
                     ownerEmail={acl.owner_email ?? null}
                     ownerName={acl.owner_name ?? null}
                     isYou={ownerId === user?.id}
-                    canTransfer={ownerId === user?.id || Boolean(user?.is_admin)}
+                    canTransfer={
+                      ownerId === user?.id || Boolean(user?.is_admin)
+                    }
                     onTransfer={() => setTransferOpen(true)}
                   />
                 )}
 
                 {[...grants.values()].map((g) => {
-                const k = keyFor(g.kind, g.id);
-                const group =
-                  g.kind === "group" ? groups.find((x) => x.id === g.id) : undefined;
-                const name =
-                  g.kind === "group"
-                    ? g.groupName ?? group?.name ?? "Group"
-                    : displayName({ name: g.name, email: g.email ?? g.id });
-                const sub =
-                  g.kind === "group"
-                    ? group
-                      ? `${group.member_count} ${group.member_count === 1 ? "user" : "users"}`
-                      : "Group"
-                    : g.email ?? "";
-                return (
-                  <div key={k} className={styles.row}>
-                    <Avatar
-                      label={(name[0] ?? "?").toUpperCase()}
-                      icon={g.kind === "group" ? SvgUsers : undefined}
-                      size={28}
-                      title={name}
-                    />
-                    <div className={styles.rowText}>
-                      <Text font="main-ui-body" nowrap>
-                        {name}
-                      </Text>
-                      {sub && (
-                        <Text font="secondary-body" color="text-03" nowrap>
-                          {sub}
+                  const k = keyFor(g.kind, g.id);
+                  const group =
+                    g.kind === "group"
+                      ? groups.find((x) => x.id === g.id)
+                      : undefined;
+                  const name =
+                    g.kind === "group"
+                      ? (g.groupName ?? group?.name ?? "Group")
+                      : displayName({ name: g.name, email: g.email ?? g.id });
+                  const sub =
+                    g.kind === "group"
+                      ? group
+                        ? `${group.member_count} ${group.member_count === 1 ? "user" : "users"}`
+                        : "Group"
+                      : (g.email ?? "");
+                  return (
+                    <div key={k} className={styles.row}>
+                      <Avatar
+                        label={(name[0] ?? "?").toUpperCase()}
+                        icon={g.kind === "group" ? SvgUsers : undefined}
+                        size={28}
+                        title={name}
+                      />
+                      <div className={styles.rowText}>
+                        <Text font="main-ui-body" nowrap>
+                          {name}
                         </Text>
-                      )}
+                        {sub && (
+                          <Text font="secondary-body" color="text-03" nowrap>
+                            {sub}
+                          </Text>
+                        )}
+                      </div>
+                      <PermSelect
+                        value={g.permission}
+                        onChange={(p) => setPermission(k, p)}
+                        onRemove={() => removeGrant(k)}
+                      />
                     </div>
-                    <PermSelect
-                      value={g.permission}
-                      onChange={(p) => setPermission(k, p)}
-                      onRemove={() => removeGrant(k)}
-                    />
-                  </div>
-                );
-              })}
+                  );
+                })}
 
                 {baseline.inherited.map((e) => (
                   <InheritedRow key={e.id} entry={e} groups={groups} />
@@ -657,7 +689,9 @@ function PermSelect({
             sizePreset="main-ui"
             variant="body"
             state={value === "read" ? "selected" : "empty"}
-            rightChildren={value === "read" ? <SvgCheck size={16} /> : undefined}
+            rightChildren={
+              value === "read" ? <SvgCheck size={16} /> : undefined
+            }
             onClick={() => {
               onChange("read");
               setOpen(false);
@@ -669,13 +703,17 @@ function PermSelect({
             sizePreset="main-ui"
             variant="body"
             state={value === "write" ? "selected" : "empty"}
-            rightChildren={value === "write" ? <SvgCheck size={16} /> : undefined}
+            rightChildren={
+              value === "write" ? <SvgCheck size={16} /> : undefined
+            }
             onClick={() => {
               onChange("write");
               setOpen(false);
             }}
           />
-          {onRemove ? <Divider paddingParallel="fit" paddingPerpendicular="2xs" /> : null}
+          {onRemove ? (
+            <Divider paddingParallel="fit" paddingPerpendicular="2xs" />
+          ) : null}
           {onRemove ? (
             <LineItemButton
               icon={SvgX}
@@ -826,7 +864,9 @@ function InheritedRow({
       email: entry.principal_email ?? entry.principal_id ?? "?",
     });
   }
-  const where = entry.resource_path ? `folder "${entry.resource_path}"` : "root folder";
+  const where = entry.resource_path
+    ? `folder "${entry.resource_path}"`
+    : "root folder";
   return (
     <div className={styles.row}>
       <span className={styles.inheritedIcon}>

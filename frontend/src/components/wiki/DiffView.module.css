@@ -72,6 +72,18 @@
 .body {
   overflow: auto;
   padding: 12px;
+  /* Keep the layout width identical whether or not this mode's content
+     overflows — otherwise toggling Diff/Doc shifts content sideways as
+     the scrollbar appears/disappears (non-overlay scrollbars). */
+  scrollbar-gutter: stable;
+}
+
+/* Doc mode: match the 12px horizontal text inset that diff mode gets
+   from .context / the add-remove bands' inner padding, so toggling
+   between the modes doesn't shift the text left/right. The diff bands
+   need that inset so their colored backgrounds extend past the text. */
+.doc {
+  padding: 0 12px;
 }
 
 /* Both modes (Diff bands, Doc markdown render) drop the top margin on

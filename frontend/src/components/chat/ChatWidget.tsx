@@ -53,7 +53,12 @@ type ChatItem =
 
 type StreamEvent =
   | { type: "text_delta"; text: string }
-  | { type: "tool_call"; id: string; name: string; arguments: Record<string, unknown> }
+  | {
+      type: "tool_call";
+      id: string;
+      name: string;
+      arguments: Record<string, unknown>;
+    }
   | { type: "tool_result"; id: string; name: string; content: string }
   | { type: "iteration_done" }
   | { type: "done" }
@@ -72,7 +77,9 @@ export function ChatWidget() {
   const { user } = useAuth();
   const { drafting, expandTick } = useDrafting();
   const [mode, setMode] = useState<Mode>("closed");
-  const [expandedWidth, setExpandedWidth] = useState<number>(DEFAULT_EXPANDED_WIDTH);
+  const [expandedWidth, setExpandedWidth] = useState<number>(
+    DEFAULT_EXPANDED_WIDTH,
+  );
   const [items, setItems] = useState<ChatItem[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -81,6 +88,7 @@ export function ChatWidget() {
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const resizingRef = useRef(false);
   const hydratedSessionRef = useRef(false);
   // Drafting bookkeeping. ``draftingKey`` is a string we derive from
@@ -96,10 +104,13 @@ export function ChatWidget() {
   // as the mode/conversation restore — so leaving drafting is one visual
   // step (banner gone + panel collapsed + chat swapped), not the banner
   // vanishing on its own first.
-  const [draftingBanner, setDraftingBanner] = useState<DraftingState | null>(null);
-  const preDraftingRef = useRef<{ sessionId: string | null; items: ChatItem[] } | null>(
+  const [draftingBanner, setDraftingBanner] = useState<DraftingState | null>(
     null,
   );
+  const preDraftingRef = useRef<{
+    sessionId: string | null;
+    items: ChatItem[];
+  } | null>(null);
   // Mode the widget was in before drafting force-expanded it ("closed" or
   // "widget"). Restored when drafting ends so the doc-creation flow doesn't
   // permanently commandeer the chat. Any manual mode change (FAB, expand
@@ -166,7 +177,8 @@ export function ChatWidget() {
     // localStorage from the prior write and gets restored on unmount.
     if (draftingKey !== null) return;
     try {
-      if (sessionId) window.localStorage.setItem(STORAGE_KEY_SESSION, sessionId);
+      if (sessionId)
+        window.localStorage.setItem(STORAGE_KEY_SESSION, sessionId);
       else window.localStorage.removeItem(STORAGE_KEY_SESSION);
     } catch {
       // ignore
@@ -457,24 +469,28 @@ export function ChatWidget() {
     document.body.style.cursor = "col-resize";
   }, []);
 
-  const onSelectSession = useCallback(async (id: string) => {
-    setHistoryOpen(false);
-    setError(null);
-    if (id === sessionId) return;
-    try {
-      const detail = await getSession(id);
-      setSessionId(id);
-      setItems(itemsFromPersisted(detail.messages));
-    } catch (e) {
-      setError(formatError(e));
-    }
-  }, [sessionId]);
+  const onSelectSession = useCallback(
+    async (id: string) => {
+      setHistoryOpen(false);
+      setError(null);
+      if (id === sessionId) return;
+      try {
+        const detail = await getSession(id);
+        setSessionId(id);
+        setItems(itemsFromPersisted(detail.messages));
+      } catch (e) {
+        setError(formatError(e));
+      }
+    },
+    [sessionId],
+  );
 
   const onNewChat = useCallback(() => {
     setHistoryOpen(false);
     setError(null);
     setSessionId(null);
     setItems([]);
+    inputRef.current?.focus();
   }, []);
 
   if (!user) return null;
@@ -485,7 +501,7 @@ export function ChatWidget() {
         onClick={() => setModeManually("widget")}
         title="Open chat"
         aria-label="Open chat"
-        className="fixed right-5 bottom-5 w-12 h-12 rounded-(--border-radius-12) bg-(--background-tint-inverted-00) text-(--text-inverted-05) border-none cursor-pointer shadow-(--shadow-fab) flex items-center justify-center z-[1000]"
+        className="fixed right-5 bottom-5 z-[1000] flex h-12 w-12 cursor-pointer items-center justify-center rounded-(--border-radius-12) border-none bg-(--background-tint-inverted-00) text-(--text-inverted-05) shadow-(--shadow-fab)"
       >
         <SvgBubbleText size={24} />
       </button>
@@ -500,8 +516,8 @@ export function ChatWidget() {
       aria-label="Chat"
       className={
         isExpanded
-          ? "fixed top-0 right-0 h-screen bg-(--background-tint-00) border-l border-(--border-02) shadow-(--shadow-panel) z-[1000]"
-          : "fixed right-5 bottom-5 bg-(--background-tint-00) border border-(--border-01) rounded-(--border-radius-12) shadow-(--shadow-modal) z-[1000]"
+          ? "fixed top-0 right-0 z-[1000] h-screen border-l border-(--border-02) bg-(--background-tint-00) shadow-(--shadow-panel)"
+          : "fixed right-5 bottom-5 z-[1000] rounded-(--border-radius-12) border border-(--border-01) bg-(--background-tint-00) shadow-(--shadow-modal)"
       }
       style={
         isExpanded
@@ -516,12 +532,10 @@ export function ChatWidget() {
           contained and lets it cover the chat header. The resize handle in
           expanded mode lives outside this so it can extend past the left edge. */}
       <div
-        className={`relative h-full w-full flex flex-col overflow-hidden ${isExpanded ? "" : "rounded-(--border-radius-12)"}`}
+        className={`relative flex h-full w-full flex-col overflow-hidden ${isExpanded ? "" : "rounded-(--border-radius-12)"}`}
       >
-        <header
-          className="flex items-center gap-2 py-[10px] px-3 border-b border-(--border-01) bg-(--background-tint-01) shrink-0"
-        >
-          <div className="font-semibold text-sm">Chat</div>
+        <header className="flex shrink-0 items-center gap-2 border-b border-(--border-01) bg-(--background-tint-01) px-3 py-[10px]">
+          <div className="text-sm font-semibold">Chat</div>
           <div className="flex-1" />
           <Button
             icon={SvgEdit}
@@ -558,10 +572,10 @@ export function ChatWidget() {
 
         <div
           ref={scrollRef}
-          className="flex-1 overflow-y-auto p-3 flex flex-col gap-[10px] min-h-0"
+          className="flex min-h-0 flex-1 flex-col gap-[10px] overflow-y-auto p-3"
         >
           {items.length === 0 && (
-            <p className="text-(--text-03) text-[13px] m-0">
+            <p className="m-0 text-[13px] text-(--text-03)">
               Hi, I can help create pages, make changes, explain things, help
               you create triggers, or explain how this wiki works. Ask me
               anything!
@@ -582,14 +596,14 @@ export function ChatWidget() {
         {error && (
           <div
             role="alert"
-            className="flex items-start gap-2 mx-3 mb-2 py-2 px-[10px] bg-(--status-error-01) border border-(--status-error-02) text-(--status-text-error-05) rounded-(--border-radius-04) text-xs"
+            className="mx-3 mb-2 flex items-start gap-2 rounded-(--border-radius-04) border border-(--status-error-02) bg-(--status-error-01) px-[10px] py-2 text-xs text-(--status-text-error-05)"
           >
             <div className="flex-1 whitespace-pre-wrap">{error}</div>
             {items.length > 0 && items[items.length - 1].kind === "user" && (
               <button
                 onClick={onRetry}
                 disabled={sending}
-                className={`py-[3px] px-2 bg-(--background-tint-00) border border-(--status-error-02) rounded-(--border-radius-04) text-(--status-text-error-05) ${sending ? "cursor-not-allowed" : "cursor-pointer"} text-[11px] font-semibold shrink-0`}
+                className={`rounded-(--border-radius-04) border border-(--status-error-02) bg-(--background-tint-00) px-2 py-[3px] text-(--status-text-error-05) ${sending ? "cursor-not-allowed" : "cursor-pointer"} shrink-0 text-[11px] font-semibold`}
               >
                 Retry
               </button>
@@ -599,9 +613,10 @@ export function ChatWidget() {
 
         <form
           onSubmit={onSend}
-          className="flex gap-[6px] p-[10px] border-t border-(--border-01) shrink-0"
+          className="flex shrink-0 gap-[6px] border-t border-(--border-01) p-[10px]"
         >
           <textarea
+            ref={inputRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {
@@ -613,12 +628,12 @@ export function ChatWidget() {
             placeholder="Send a message…"
             rows={2}
             disabled={sending}
-            className="flex-1 min-w-0 box-border resize-none p-2 border border-(--border-01) rounded-(--border-radius-04) font-[inherit] text-[13px] text-(--text-05) bg-(--background-tint-00)"
+            className="box-border min-w-0 flex-1 resize-none rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-00) p-2 font-[inherit] text-[13px] text-(--text-05) outline-none focus:border-(--border-05)"
           />
           <button
             type="submit"
             disabled={sending || !input.trim()}
-            className={`px-[14px] bg-(--background-tint-inverted-00) text-(--text-inverted-05) border-none rounded-(--border-radius-04) ${sending || !input.trim() ? "cursor-not-allowed opacity-50" : "cursor-pointer"} font-semibold text-[13px]`}
+            className={`rounded-(--border-radius-04) border-none bg-(--background-tint-inverted-00) px-[14px] text-(--text-inverted-05) ${sending || !input.trim() ? "cursor-not-allowed opacity-50" : "cursor-pointer"} text-[13px] font-semibold`}
           >
             Send
           </button>
@@ -640,7 +655,7 @@ export function ChatWidget() {
           title="Drag to resize"
           aria-label="Resize chat panel"
           role="separator"
-          className="absolute top-0 left-[-3px] w-[6px] h-full cursor-col-resize z-[1001]"
+          className="absolute top-0 left-[-3px] z-[1001] h-full w-[6px] cursor-col-resize"
         />
       )}
     </div>
@@ -650,7 +665,10 @@ export function ChatWidget() {
 function clampWidth(n: number): number {
   // Leave at least ~80px of page visible so the user can still see / click
   // the AppShell sidebar without collapsing the panel.
-  const max = typeof window !== "undefined" ? Math.max(MIN_EXPANDED_WIDTH, window.innerWidth - 80) : 1200;
+  const max =
+    typeof window !== "undefined"
+      ? Math.max(MIN_EXPANDED_WIDTH, window.innerWidth - 80)
+      : 1200;
   return Math.min(max, Math.max(MIN_EXPANDED_WIDTH, n));
 }
 
@@ -676,7 +694,10 @@ function reduceEvent(items: ChatItem[], ev: StreamEvent): ChatItem[] {
     // transcript. A later ``tool_result`` for the same id will no-op
     // through the ``map`` below, so we don't need a second guard.
     if (presentTool(ev.name).hidden) return items;
-    return [...items, { kind: "tool", id: ev.id, name: ev.name, state: "running" }];
+    return [
+      ...items,
+      { kind: "tool", id: ev.id, name: ev.name, state: "running" },
+    ];
   }
   if (ev.type === "tool_result") {
     return items.map((it) =>
@@ -723,7 +744,9 @@ function shouldShowEllipsis(items: ChatItem[]): boolean {
 // transcript doesn't lie about ongoing activity.
 function markRunningToolsAsError(items: ChatItem[]): ChatItem[] {
   return items.map((it) =>
-    it.kind === "tool" && it.state === "running" ? { ...it, state: "error" } : it,
+    it.kind === "tool" && it.state === "running"
+      ? { ...it, state: "error" }
+      : it,
   );
 }
 
@@ -740,17 +763,19 @@ function formatError(err: unknown): string {
 }
 
 function DraftingBanner({ state }: { state: DraftingState }) {
-  const docName = state.path ? state.path.split("/").pop() ?? state.path : null;
+  const docName = state.path
+    ? (state.path.split("/").pop() ?? state.path)
+    : null;
   const templateName = state.kind === "template" ? state.templateName : null;
   return (
     <div
       role="status"
-      className="flex items-start gap-2 py-2 px-3 bg-(--background-tint-03) border-b border-(--border-01) text-(--text-05) text-xs shrink-0"
+      className="flex shrink-0 items-start gap-2 border-b border-(--border-01) bg-(--background-tint-03) px-3 py-2 text-xs text-(--text-05)"
     >
-      <span className="shrink-0 mt-[1px] flex">
+      <span className="mt-[1px] flex shrink-0">
         <SvgDocFile size={16} />
       </span>
-      <div className="flex-1 min-w-0">
+      <div className="min-w-0 flex-1">
         <div className="font-semibold">Drafting initial version</div>
         <div
           className="mt-[2px] text-(--text-04)"
@@ -762,7 +787,9 @@ function DraftingBanner({ state }: { state: DraftingState }) {
               <em>{templateName}</em> template.
             </>
           ) : docName ? (
-            <>Helping draft <strong>{docName}</strong>.</>
+            <>
+              Helping draft <strong>{docName}</strong>.
+            </>
           ) : templateName ? (
             <>
               Helping draft a new doc from the <em>{templateName}</em> template.
@@ -777,16 +804,18 @@ function DraftingBanner({ state }: { state: DraftingState }) {
 }
 
 const markdownComponents: Components = {
-  p:    ({ children }) => <p    className={styles.markdownP}>{children}</p>,
-  ul:   ({ children }) => <ul   className={styles.markdownUl}>{children}</ul>,
-  ol:   ({ children }) => <ol   className={styles.markdownOl}>{children}</ol>,
-  li:   ({ children }) => <li   className={styles.markdownLi}>{children}</li>,
-  h1:   ({ children }) => <h1   className={styles.markdownHeading}>{children}</h1>,
-  h2:   ({ children }) => <h2   className={styles.markdownHeading}>{children}</h2>,
-  h3:   ({ children }) => <h3   className={styles.markdownHeading}>{children}</h3>,
-  h4:   ({ children }) => <h4   className={styles.markdownHeading}>{children}</h4>,
-  code: ({ children }) => <code className={styles.markdownCode}>{children}</code>,
-  pre:  ({ children }) => <pre  className={styles.markdownPre}>{children}</pre>,
+  p: ({ children }) => <p className={styles.markdownP}>{children}</p>,
+  ul: ({ children }) => <ul className={styles.markdownUl}>{children}</ul>,
+  ol: ({ children }) => <ol className={styles.markdownOl}>{children}</ol>,
+  li: ({ children }) => <li className={styles.markdownLi}>{children}</li>,
+  h1: ({ children }) => <h1 className={styles.markdownHeading}>{children}</h1>,
+  h2: ({ children }) => <h2 className={styles.markdownHeading}>{children}</h2>,
+  h3: ({ children }) => <h3 className={styles.markdownHeading}>{children}</h3>,
+  h4: ({ children }) => <h4 className={styles.markdownHeading}>{children}</h4>,
+  code: ({ children }) => (
+    <code className={styles.markdownCode}>{children}</code>
+  ),
+  pre: ({ children }) => <pre className={styles.markdownPre}>{children}</pre>,
 };
 
 function Bubble({
@@ -803,7 +832,7 @@ function Bubble({
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"} min-w-0`}>
       <div
-        className={`max-w-[85%] min-w-0 py-2 px-3 rounded-(--border-radius-08) text-[13px] leading-[1.5] ${
+        className={`max-w-[85%] min-w-0 rounded-(--border-radius-08) px-3 py-2 text-[13px] leading-[1.5] ${
           isUser
             ? "bg-(--background-tint-inverted-00) text-(--text-inverted-05)"
             : "bg-(--background-tint-02) text-(--text-05)"
@@ -813,7 +842,12 @@ function Bubble({
         style={{ overflowWrap: "anywhere" }}
       >
         {renderMarkdown ? (
-          <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{content}</ReactMarkdown>
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
+            components={markdownComponents}
+          >
+            {content}
+          </ReactMarkdown>
         ) : (
           content
         )}
@@ -833,9 +867,7 @@ function Bubble({
 function ToolStatus({ item }: { item: Extract<ChatItem, { kind: "tool" }> }) {
   const { label } = presentTool(item.name);
   return (
-    <div
-      className="flex items-center gap-2 pl-1 text-xs text-(--text-03) italic"
-    >
+    <div className="flex items-center gap-2 pl-1 text-xs text-(--text-03) italic">
       <ToolStateIcon state={item.state} />
       <span>{label}</span>
     </div>
@@ -847,7 +879,7 @@ function ToolStateIcon({ state }: { state: ToolState }) {
     return (
       <span
         aria-label="running"
-        className="inline-block w-[10px] h-[10px] rounded-full border-2 border-(--border-01)"
+        className="inline-block h-[10px] w-[10px] rounded-full border-2 border-(--border-01)"
         style={{
           borderTopColor: "var(--text-04)",
           animation: "chat-tool-spin 0.7s linear infinite",
@@ -859,13 +891,13 @@ function ToolStateIcon({ state }: { state: ToolState }) {
   }
   if (state === "error") {
     return (
-      <span className="text-(--status-text-error-05) flex">
+      <span className="flex text-(--status-text-error-05)">
         <SvgXCircle size={12} />
       </span>
     );
   }
   return (
-    <span className="text-(--status-text-success-05) flex">
+    <span className="flex text-(--status-text-success-05)">
       <SvgCheck size={12} />
     </span>
   );

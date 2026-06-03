@@ -6,6 +6,7 @@ import useSWR from "swr";
 import { SetupWizard } from "@/components/agents/SetupWizard";
 import { ToolCard } from "@/components/agents/ToolCard";
 import { Button } from "@onyx-ai/opal/components";
+import { useConfirm } from "@/components/common/ConfirmDialog";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { PageHeader } from "@/components/common/PageHeader";
 import { ApiError } from "@/lib/api";
@@ -34,18 +35,16 @@ export default function AgentsPage() {
     );
 
   return (
-    <main
-      className={`max-w-[880px] ${isMobile ? "px-3 py-4" : "px-8 py-6"}`}
-    >
-        <PageHeader
-          title="Agents"
-          description="Give your agents the ability to read and update this wiki. Generate a personal API key below, then drop it into your coding agent's MCP configuration. Each key's name becomes that agent's identity — it shows up next to its activity on wiki pages and in commit history."
-        />
+    <main className={`max-w-[880px] ${isMobile ? "px-3 py-4" : "px-8 py-6"}`}>
+      <PageHeader
+        title="Agents"
+        description="Give your agents the ability to read and update this wiki. Generate a personal API key below, then drop it into your coding agent's MCP configuration. Each key's name becomes that agent's identity — it shows up next to its activity on wiki pages and in commit history."
+      />
 
-        <EndpointBlock />
-        <TokenManager />
-        <ClientConfigHelp />
-        <CodingToolsSection />
+      <EndpointBlock />
+      <TokenManager />
+      <ClientConfigHelp />
+      <CodingToolsSection />
     </main>
   );
 }
@@ -62,17 +61,24 @@ function EndpointBlock() {
   }, []);
 
   return (
-    <section className="p-4 border border-(--border-01) rounded-(--border-radius-08) bg-(--background-tint-00) mb-4">
-      <div className="text-[13px] text-(--text-03) mb-1.5">
-        MCP server URL
-      </div>
-      <div className="flex gap-2 items-center">
-        <code className="flex-1 py-2 px-[10px] bg-(--background-tint-02) rounded-(--border-radius-04) font-mono text-xs text-(--text-05) overflow-x-auto">{endpoint || "—"}</code>
+    <section className="mb-4 rounded-(--border-radius-08) border border-(--border-01) bg-(--background-tint-00) p-4">
+      <div className="mb-1.5 text-[13px] text-(--text-03)">MCP server URL</div>
+      <div className="flex items-center gap-2">
+        <code className="flex-1 overflow-x-auto rounded-(--border-radius-04) bg-(--background-tint-02) px-[10px] py-2 font-mono text-xs text-(--text-05)">
+          {endpoint || "—"}
+        </code>
         <CopyButton text={endpoint} />
       </div>
-      <div className="text-xs text-(--text-03) mt-2">
-        Send the API key in the <code className="py-px px-1 bg-(--background-tint-02) rounded-(--border-radius-04) font-mono text-xs">Authorization</code>{" "}
-        header as <code className="py-px px-1 bg-(--background-tint-02) rounded-(--border-radius-04) font-mono text-xs">Bearer mcp_…</code>.
+      <div className="mt-2 text-xs text-(--text-03)">
+        Send the API key in the{" "}
+        <code className="rounded-(--border-radius-04) bg-(--background-tint-02) px-1 py-px font-mono text-xs">
+          Authorization
+        </code>{" "}
+        header as{" "}
+        <code className="rounded-(--border-radius-04) bg-(--background-tint-02) px-1 py-px font-mono text-xs">
+          Bearer mcp_…
+        </code>
+        .
       </div>
     </section>
   );
@@ -88,8 +94,8 @@ function TokenManager() {
   const [reveal, setReveal] = useState<CreatedToken | null>(null);
 
   return (
-    <section className="p-4 border border-(--border-01) rounded-(--border-radius-08) bg-(--background-tint-00) mb-4">
-      <div className="flex items-center justify-between mb-3">
+    <section className="mb-4 rounded-(--border-radius-08) border border-(--border-01) bg-(--background-tint-00) p-4">
+      <div className="mb-3 flex items-center justify-between">
         <h2 className="m-0 text-base">API keys</h2>
         <Button
           variant="action"
@@ -101,7 +107,9 @@ function TokenManager() {
       </div>
 
       {error && (
-        <div className="p-[10px] bg-(--status-error-01) text-(--status-text-error-05) rounded-(--border-radius-04) text-[13px] mb-2">{error.message || "Failed to load keys."}</div>
+        <div className="mb-2 rounded-(--border-radius-04) bg-(--status-error-01) p-[10px] text-[13px] text-(--status-text-error-05)">
+          {error.message || "Failed to load keys."}
+        </div>
       )}
 
       {showCreate && (
@@ -120,13 +128,13 @@ function TokenManager() {
       {isLoading && tokens.length === 0 && !error && <LoadingSpinner />}
 
       {!isLoading && tokens.length === 0 && (
-        <p className="text-(--text-03) text-sm">
+        <p className="text-sm text-(--text-03)">
           No keys yet — generate one above.
         </p>
       )}
 
       {tokens.length > 0 && (
-        <ul className="list-none p-0 m-0">
+        <ul className="m-0 list-none p-0">
           {tokens.map((t) => (
             <TokenRow key={t.id} token={t} onRevoked={() => void refresh()} />
           ))}
@@ -144,12 +152,15 @@ function TokenRow({
   onRevoked: () => void;
 }) {
   const [busy, setBusy] = useState(false);
+  const confirmDialog = useConfirm();
 
   async function onRevoke() {
     if (
-      !confirm(
-        `Revoke "${token.name}"? Any agent using this key will stop working.`,
-      )
+      !(await confirmDialog({
+        title: `Revoke "${token.name}"?`,
+        body: "Any agent using this key will stop working.",
+        confirmLabel: "Revoke",
+      }))
     ) {
       return;
     }
@@ -165,12 +176,10 @@ function TokenRow({
   }
 
   return (
-    <li className="flex items-center gap-3 py-[10px] px-3 border border-(--border-01) rounded-(--border-radius-04) mt-2 bg-(--background-tint-00)">
-      <div className="flex-1 min-w-0">
-        <div className="font-medium text-sm text-(--text-05)">
-          {token.name}
-        </div>
-        <div className="text-xs text-(--text-03) mt-0.5">
+    <li className="mt-2 flex items-center gap-3 rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-00) px-3 py-[10px]">
+      <div className="min-w-0 flex-1">
+        <div className="text-sm font-medium text-(--text-05)">{token.name}</div>
+        <div className="mt-0.5 text-xs text-(--text-03)">
           Created {token.created_at}
           {token.last_used_at
             ? ` · last used ${token.last_used_at}`
@@ -212,7 +221,7 @@ function CreateForm({
   return (
     <form
       onSubmit={onSubmit}
-      className="p-3 bg-(--background-tint-01) border border-(--border-01) rounded-(--border-radius-04) mb-3"
+      className="mb-3 rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-01) p-3"
     >
       <label className="text-[13px] text-(--text-04)">
         Agent name
@@ -221,17 +230,21 @@ function CreateForm({
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="e.g. Claude Code, Cursor, Codex"
-          className="w-full box-border py-2 px-[10px] border border-(--border-01) rounded-(--border-radius-04) text-sm mt-1"
+          className="mt-1 box-border w-full rounded-(--border-radius-04) border border-(--border-01) px-[10px] py-2 text-sm"
           maxLength={80}
         />
-        <div className="text-xs text-(--text-03) mt-1.5">
+        <div className="mt-1.5 text-xs text-(--text-03)">
           Appears next to this agent&apos;s reads, writes, and commits on the
           wiki. Pick something you&apos;ll recognize — you can have several
           agents per user.
         </div>
       </label>
-      {err && <div className="p-[10px] bg-(--status-error-01) text-(--status-text-error-05) rounded-(--border-radius-04) text-[13px] mb-2 mt-[10px]">{err}</div>}
-      <div className="flex gap-2 mt-3">
+      {err && (
+        <div className="mt-[10px] mb-2 rounded-(--border-radius-04) bg-(--status-error-01) p-[10px] text-[13px] text-(--status-text-error-05)">
+          {err}
+        </div>
+      )}
+      <div className="mt-3 flex gap-2">
         <Button type="submit" variant="action" disabled={busy || !name.trim()}>
           {busy ? "Creating…" : "Create"}
         </Button>
@@ -251,15 +264,17 @@ function RevealOnce({
   onClose: () => void;
 }) {
   return (
-    <div className="p-[14px] bg-(--status-warning-01) border border-(--status-warning-02) rounded-(--border-radius-04) mb-3">
-      <div className="font-semibold text-(--status-text-warning-05) text-sm">
+    <div className="mb-3 rounded-(--border-radius-04) border border-(--status-warning-02) bg-(--status-warning-01) p-[14px]">
+      <div className="text-sm font-semibold text-(--status-text-warning-05)">
         Copy your key now — this is the only time it&apos;ll be shown.
       </div>
-      <div className="flex gap-2 items-center mt-[10px]">
-        <code className="flex-1 py-2 px-[10px] bg-(--background-tint-02) rounded-(--border-radius-04) font-mono text-xs text-(--text-05) overflow-x-auto">{token.token}</code>
+      <div className="mt-[10px] flex items-center gap-2">
+        <code className="flex-1 overflow-x-auto rounded-(--border-radius-04) bg-(--background-tint-02) px-[10px] py-2 font-mono text-xs text-(--text-05)">
+          {token.token}
+        </code>
         <CopyButton text={token.token} />
       </div>
-      <div className="text-xs text-(--status-text-warning-05) mt-2">
+      <div className="mt-2 text-xs text-(--status-text-warning-05)">
         If you lose it, revoke this key and generate a new one.
       </div>
       <div className="mt-3">
@@ -295,23 +310,24 @@ function ClientConfigHelp() {
   );
 
   return (
-    <section className="p-4 border border-(--border-01) rounded-(--border-radius-08) bg-(--background-tint-00) mb-4">
+    <section className="mb-4 rounded-(--border-radius-08) border border-(--border-01) bg-(--background-tint-00) p-4">
       <button
         onClick={() => setOpen((v) => !v)}
-        className="bg-transparent border-none p-0 cursor-pointer text-sm font-medium text-(--text-05) flex items-center gap-1.5"
+        className="flex cursor-pointer items-center gap-1.5 border-none bg-transparent p-0 text-sm font-medium text-(--text-05)"
       >
-        <span className="text-xs text-(--text-03)">
-          {open ? "▾" : "▸"}
-        </span>
+        <span className="text-xs text-(--text-03)">{open ? "▾" : "▸"}</span>
         How to wire this into Claude Code, Cursor, or Codex
       </button>
       {open && (
         <div className="mt-3">
-          <div className="text-[13px] text-(--text-04) mb-1.5">
-            Sample <code className="py-px px-1 bg-(--background-tint-02) rounded-(--border-radius-04) font-mono text-xs">mcp_servers.json</code> entry —
-            replace the placeholder with your generated key:
+          <div className="mb-1.5 text-[13px] text-(--text-04)">
+            Sample{" "}
+            <code className="rounded-(--border-radius-04) bg-(--background-tint-02) px-1 py-px font-mono text-xs">
+              mcp_servers.json
+            </code>{" "}
+            entry — replace the placeholder with your generated key:
           </div>
-          <pre className="flex-1 py-2 px-[10px] bg-(--background-tint-02) rounded-(--border-radius-04) font-mono text-xs text-(--text-05) overflow-x-auto p-3 whitespace-pre max-w-full">
+          <pre className="max-w-full flex-1 overflow-x-auto rounded-(--border-radius-04) bg-(--background-tint-02) p-3 px-[10px] py-2 font-mono text-xs whitespace-pre text-(--text-05)">
             {claudeCodeSnippet}
           </pre>
         </div>
@@ -391,8 +407,8 @@ function CodingToolsSection() {
   }, [wizardOpen]);
 
   return (
-    <section className="p-4 border border-(--border-01) rounded-(--border-radius-08) bg-(--background-tint-00) mb-4">
-      <div className="flex justify-between items-center mb-1">
+    <section className="mb-4 rounded-(--border-radius-08) border border-(--border-01) bg-(--background-tint-00) p-4">
+      <div className="mb-1 flex items-center justify-between">
         <h2 className="m-0 text-base">Coding tools</h2>
         <Button variant="action" onClick={() => setWizardOpen(true)}>
           Set up tools
@@ -405,7 +421,7 @@ function CodingToolsSection() {
       </p>
 
       {/* Surface helper-install status. */}
-      <div className="text-[13px] text-(--text-03) mb-3">
+      <div className="mb-3 text-[13px] text-(--text-03)">
         Launcher:{" "}
         {probe === null ? (
           "checking…"
@@ -431,7 +447,7 @@ function CodingToolsSection() {
           onMouseDown={(e) => {
             if (e.target === e.currentTarget) setWizardOpen(false);
           }}
-          className="fixed inset-0 bg-(--mask-03) flex items-center justify-center z-[100]"
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-(--mask-03)"
         >
           <div
             ref={dialogRef}
@@ -439,7 +455,7 @@ function CodingToolsSection() {
             aria-modal="true"
             aria-label="Set up launcher"
             tabIndex={-1}
-            className="bg-(--background-tint-00) rounded-(--border-radius-12) p-[22px] w-[min(560px,92vw)] shadow-(--shadow-modal) max-h-[90vh] overflow-y-auto"
+            className="max-h-[90vh] w-[min(560px,92vw)] overflow-y-auto rounded-(--border-radius-12) bg-(--background-tint-00) p-[22px] shadow-(--shadow-modal)"
           >
             <SetupWizard
               onDone={() => setWizardOpen(false)}

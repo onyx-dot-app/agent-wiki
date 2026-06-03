@@ -18,7 +18,11 @@ const QUEUE_LABELS: Record<string, string> = {
 
 export default function AdminHealthPage() {
   const isMobile = useIsMobile();
-  const { health: data, error: healthError, isValidating: healthValidating } = useHealth({
+  const {
+    health: data,
+    error: healthError,
+    isValidating: healthValidating,
+  } = useHealth({
     refreshIntervalMs: POLL_MS,
   });
   const error = healthError?.message ?? null;
@@ -55,16 +59,18 @@ export default function AdminHealthPage() {
           description={`Backend liveness and queue depth. Polls every ${POLL_MS / 1000}s.`}
         />
 
-        <section className="p-4 border border-(--border-01) rounded-(--border-radius-08) bg-(--background-tint-00) mb-5 flex items-center gap-3">
+        <section className="mb-5 flex items-center gap-3 rounded-(--border-radius-08) border border-(--border-01) bg-(--background-tint-00) p-4">
           <span
             aria-hidden
             style={{ background: statusColor }}
-            className="w-3 h-3 rounded-full shrink-0"
+            className="h-3 w-3 shrink-0 rounded-full"
           />
           <div className="flex-1">
-            <div className="font-semibold text-sm">{statusLabel}</div>
+            <div className="text-sm font-semibold">{statusLabel}</div>
             {error && (
-              <div className="text-(--status-text-error-05) text-xs mt-1">{error}</div>
+              <div className="mt-1 text-xs text-(--status-text-error-05)">
+                {error}
+              </div>
             )}
           </div>
           {lastUpdated && (
@@ -74,17 +80,21 @@ export default function AdminHealthPage() {
           )}
         </section>
 
-        <h2 className="text-base font-semibold m-0 mb-[10px]">Queues</h2>
+        <h2 className="m-0 mb-[10px] text-base font-semibold">Queues</h2>
         {!data && !error && <LoadingSpinner />}
         {data && (
-          <ul className="list-none p-0 m-0">
+          <ul className="m-0 list-none p-0">
             {data.queues.map((q) => {
               const haveCounts =
-                q.ok && q.ready != null && q.delayed != null && q.in_flight != null;
+                q.ok &&
+                q.ready != null &&
+                q.delayed != null &&
+                q.in_flight != null;
               // Cap is gated on ready + delayed; in-flight is shown
               // separately because workers already pulled it.
-              const pending =
-                haveCounts ? (q.ready as number) + (q.delayed as number) : null;
+              const pending = haveCounts
+                ? (q.ready as number) + (q.delayed as number)
+                : null;
               const pct =
                 pending != null && q.limit > 0
                   ? Math.min(100, Math.round((pending / q.limit) * 100))
@@ -98,10 +108,12 @@ export default function AdminHealthPage() {
               return (
                 <li
                   key={q.name}
-                  className="px-4 py-[14px] border border-(--border-01) rounded-(--border-radius-08) mb-[10px] bg-(--background-tint-00)"
+                  className="mb-[10px] rounded-(--border-radius-08) border border-(--border-01) bg-(--background-tint-00) px-4 py-[14px]"
                 >
-                  <div className="flex justify-between items-baseline mb-2">
-                    <div className="text-sm">{QUEUE_LABELS[q.name] ?? q.name}</div>
+                  <div className="mb-2 flex items-baseline justify-between">
+                    <div className="text-sm">
+                      {QUEUE_LABELS[q.name] ?? q.name}
+                    </div>
                     <div className="text-xs text-(--text-04)">
                       {haveCounts && pending != null ? (
                         <>
@@ -109,13 +121,15 @@ export default function AdminHealthPage() {
                           {q.limit.toLocaleString()} ({pct}%)
                         </>
                       ) : (
-                        <span className="text-(--status-text-error-05)">{q.error ?? "unknown"}</span>
+                        <span className="text-(--status-text-error-05)">
+                          {q.error ?? "unknown"}
+                        </span>
                       )}
                     </div>
                   </div>
                   <div
                     style={{ marginBottom: haveCounts ? 8 : 0 }}
-                    className="h-[6px] bg-(--background-tint-02) rounded-(--border-radius-04) overflow-hidden"
+                    className="h-[6px] overflow-hidden rounded-(--border-radius-04) bg-(--background-tint-02)"
                   >
                     <div
                       style={{
@@ -128,14 +142,20 @@ export default function AdminHealthPage() {
                   {haveCounts && (
                     <div className="flex gap-4 text-[11px] text-(--text-03)">
                       <span>
-                        ready <strong className="text-(--text-05)">{q.ready}</strong>
+                        ready{" "}
+                        <strong className="text-(--text-05)">{q.ready}</strong>
                       </span>
                       <span title="Tasks scheduled for a future run time — waiting their turn, not stuck.">
-                        scheduled <strong className="text-(--text-05)">{q.delayed}</strong>
+                        scheduled{" "}
+                        <strong className="text-(--text-05)">
+                          {q.delayed}
+                        </strong>
                       </span>
                       <span>
                         in flight{" "}
-                        <strong className="text-(--text-05)">{q.in_flight}</strong>
+                        <strong className="text-(--text-05)">
+                          {q.in_flight}
+                        </strong>
                       </span>
                     </div>
                   )}

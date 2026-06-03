@@ -47,8 +47,8 @@ export function SetupWizard({ onDone, onCancel }: Props) {
         Set up the launcher
       </Text>
       <Text font="secondary-body" color="text-03" as="p">
-        Install the launcher once to start agent sessions from any wiki page.
-        It currently supports Claude Code and Codex.
+        Install the launcher once to start agent sessions from any wiki page. It
+        currently supports Claude Code and Codex.
       </Text>
 
       {acked ? (

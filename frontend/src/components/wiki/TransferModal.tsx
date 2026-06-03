@@ -15,7 +15,12 @@ import { markdown } from "@onyx-ai/opal/utils";
 
 import { Avatar } from "@/components/common/Avatar";
 import { transferOwnership } from "@/lib/permissions";
-import { displayName, initials, useUserSearch, type UserLite } from "@/lib/users";
+import {
+  displayName,
+  initials,
+  useUserSearch,
+  type UserLite,
+} from "@/lib/users";
 import { lastSegment } from "@/lib/wiki";
 
 import styles from "./TransferModal.module.css";
@@ -130,7 +135,9 @@ export function TransferModal({
               width="trigger"
               align="start"
               sideOffset={4}
-              container={typeof document !== "undefined" ? document.body : undefined}
+              container={
+                typeof document !== "undefined" ? document.body : undefined
+              }
               onOpenAutoFocus={(e) => e.preventDefault()}
               onCloseAutoFocus={(e) => e.preventDefault()}
             >

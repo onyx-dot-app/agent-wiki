@@ -3,6 +3,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 
 import { Button } from "@onyx-ai/opal/components";
+import { useConfirm } from "@/components/common/ConfirmDialog";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { BackLink, PageHeader } from "@/components/common/PageHeader";
 import { RequireAdmin } from "@/components/RequireAdmin";
@@ -20,7 +21,10 @@ export default function AdminBraintrustPage() {
   const isMobile = useIsMobile();
   return (
     <RequireAdmin>
-      <main className="max-w-[720px]" style={{ padding: isMobile ? "16px 12px" : "24px 32px" }}>
+      <main
+        className="max-w-[720px]"
+        style={{ padding: isMobile ? "16px 12px" : "24px 32px" }}
+      >
         <BackLink />
         <PageHeader
           title="Braintrust tracing"
@@ -39,6 +43,7 @@ function BraintrustForm() {
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const confirmDialog = useConfirm();
 
   async function load() {
     try {
@@ -81,7 +86,14 @@ function BraintrustForm() {
   }
 
   async function clearKey() {
-    if (!confirm("Clear the Braintrust API key? Tracing will be disabled until a new key is set.")) return;
+    if (
+      !(await confirmDialog({
+        title: "Clear the Braintrust API key?",
+        body: "Tracing will be disabled until a new key is set.",
+        confirmLabel: "Clear key",
+      }))
+    )
+      return;
     if (!settings) return;
     setSaving(true);
     setError(null);
@@ -153,12 +165,13 @@ function BraintrustForm() {
         clearDisabled={saving || !settings.api_key_set}
       />
 
-      <div className="flex items-center justify-between py-3 px-[14px] border border-(--border-01) rounded-(--border-radius-04) bg-(--background-tint-02)">
+      <div className="flex items-center justify-between rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-02) px-[14px] py-3">
         <div>
           <div className="text-[13px] font-medium">
-            Tracing is currently <strong>{settings.enabled ? "ON" : "OFF"}</strong>
+            Tracing is currently{" "}
+            <strong>{settings.enabled ? "ON" : "OFF"}</strong>
           </div>
-          <div className="text-xs text-(--text-03) mt-[2px]">
+          <div className="mt-[2px] text-xs text-(--text-03)">
             {canEnable
               ? "Toggle sends every LLM call, tool call, and flow span to Braintrust."
               : "Save a project name and API key first to enable tracing."}
@@ -207,9 +220,13 @@ function KeyField({
 }) {
   return (
     <label>
-      <div className="mb-1 text-[13px] font-medium flex items-center gap-[6px]">
+      <div className="mb-1 flex items-center gap-[6px] text-[13px] font-medium">
         <span>{label}</span>
-        {isSet && <span className="font-normal text-(--text-03) font-mono text-xs">currently {hint}</span>}
+        {isSet && (
+          <span className="font-mono text-xs font-normal text-(--text-03)">
+            currently {hint}
+          </span>
+        )}
         <span className="flex-1" />
         {isSet && (
           <Button

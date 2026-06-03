@@ -25,7 +25,7 @@ export function PageHeader({
 }) {
   const titleNode =
     typeof title === "string" ? (
-      <h1 className="m-0 text-[22px] font-semibold leading-[1.2] text-(--text-05)">
+      <h1 className="m-0 text-[22px] leading-[1.2] font-semibold text-(--text-05)">
         {title}
       </h1>
     ) : (
@@ -34,7 +34,7 @@ export function PageHeader({
 
   return (
     <header
-      className="flex items-center justify-between gap-4 flex-wrap mb-6"
+      className="mb-6 flex flex-wrap items-center justify-between gap-4"
       style={style}
     >
       <div className="min-w-0">
@@ -46,9 +46,7 @@ export function PageHeader({
         )}
       </div>
       {actions && (
-        <div className="flex items-center gap-2 flex-wrap">
-          {actions}
-        </div>
+        <div className="flex flex-wrap items-center gap-2">{actions}</div>
       )}
     </header>
   );
@@ -66,7 +64,7 @@ export function BackLink({
   return (
     <Link
       href={href}
-      className="inline-block mb-3 text-[13px] text-(--text-03) no-underline"
+      className="mb-3 inline-block text-[13px] text-(--text-03) no-underline"
     >
       {label}
     </Link>

@@ -118,7 +118,11 @@ function ConfirmDialog({
           )}
         </div>
         <footer className={styles.footer}>
-          <Button prominence="tertiary" size="md" onClick={() => onSettle(false)}>
+          <Button
+            prominence="tertiary"
+            size="md"
+            onClick={() => onSettle(false)}
+          >
             {opts.cancelLabel ?? "Cancel"}
           </Button>
           <Button variant="danger" size="md" onClick={() => onSettle(true)}>
