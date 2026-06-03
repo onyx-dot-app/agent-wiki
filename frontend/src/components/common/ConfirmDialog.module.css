@@ -1,0 +1,41 @@
+/* Layout only — typography and buttons come from OPAL. */
+
+.scrim {
+  position: fixed;
+  inset: 0;
+  background: var(--mask-03);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: max(20px, min(120px, 12vh)) 16px;
+  z-index: 200;
+}
+
+.dialog {
+  background: var(--background-tint-01);
+  border-radius: var(--border-radius-12);
+  width: min(420px, 100%);
+  box-shadow: var(--shadow-modal);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  /* The dialog receives programmatic focus on open (for Escape handling);
+     don't draw a focus ring around the whole surface. */
+  outline: none;
+}
+
+.content {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 16px;
+}
+
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 16px;
+  background: var(--background-tint-00);
+}
