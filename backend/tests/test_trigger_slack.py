@@ -57,3 +57,19 @@ def test_flip_to_event_log_clears_webhook(tmp_repo):
     assert updated is not None
     assert updated["destination"] == "event_log"
     assert updated["slack_webhook_id"] is None
+
+
+def test_rebuild_preserves_slack_webhook_id(tmp_repo):
+    # Regression: rebuild_from_filesystem dropped slack_webhook_id when
+    # reconstructing the cache row, so any rebuild (boot, path move) made the
+    # channel show as "(channel removed)" even though the YAML still had it.
+    seed_user("usr_1")
+    wh = slack_webhooks.create("usr_1", "PM Standup", _HOOK)
+    t = _create("usr_1", destination="slack", slack_webhook_id=wh["id"])
+
+    triggers_repo.rebuild_from_filesystem()
+
+    rebuilt = triggers_repo.get(t["id"])
+    assert rebuilt is not None
+    assert rebuilt["destination"] == "slack"
+    assert rebuilt["slack_webhook_id"] == wh["id"]

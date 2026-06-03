@@ -624,6 +624,10 @@ def rebuild_from_filesystem() -> int:
                     kind=data["kind"],
                     nl_description=data["nl_description"],
                     action_json=action_payload,
+                    # Carry the Slack channel link from the YAML; omitting it
+                    # here nulled the cache on every rebuild (boot, path move),
+                    # so slack triggers showed "(channel removed)" in the UI.
+                    slack_webhook_id=data.get("slack_webhook_id"),
                     enabled=bool(data.get("enabled", True)),
                     file_path=file_path,
                     created_at=created_at,
