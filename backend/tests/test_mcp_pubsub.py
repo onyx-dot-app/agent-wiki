@@ -40,9 +40,12 @@ from app.models.wiki import ChangeKind
 # --------------------------------------------------------------------------- #
 
 
-def test_drain_async_returns_published_notification():
+def test_drain_async_returns_published_notification(tmp_db):
     """The happy path: an item put on the async queue from inside the
-    loop is returned by ``drain_async``."""
+    loop is returned by ``drain_async``.
+
+    Needs ``tmp_db``: ``register_async_consumer`` rehydrates the
+    session's persistent subscriptions from Postgres at stream open."""
     async def run() -> None:
         q = mcp_pubsub.register_async_consumer("s1")
         q.put_nowait(
@@ -56,10 +59,11 @@ def test_drain_async_returns_published_notification():
     asyncio.run(run())
 
 
-def test_drain_async_returns_none_on_timeout():
+def test_drain_async_returns_none_on_timeout(tmp_db):
     """Nothing queued → returns None after the timeout fires. The SSE
     writer relies on this to emit a heartbeat instead of parking the
-    request indefinitely."""
+    request indefinitely. ``tmp_db`` because ``register_async_consumer``
+    rehydrates from Postgres."""
     async def run() -> None:
         q = mcp_pubsub.register_async_consumer("s1")
         notif = await mcp_pubsub.drain_async(q, timeout=0.05)
