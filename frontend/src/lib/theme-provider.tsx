@@ -58,7 +58,9 @@ function applyTheme(resolved: ResolvedTheme) {
 
 function resolveSystem(): ResolvedTheme {
   if (typeof window === "undefined") return "light";
-  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  return window.matchMedia("(prefers-color-scheme: dark)").matches
+    ? "dark"
+    : "light";
 }
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
@@ -66,7 +68,9 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   // Pre-auth render: lazy-init from localStorage so the inline bootstrap
   // and React's first paint agree.
   const [setting, setSetting] = useState<ThemeSetting>(readStoredSetting);
-  const [systemTheme, setSystemTheme] = useState<ResolvedTheme>(() => resolveSystem());
+  const [systemTheme, setSystemTheme] = useState<ResolvedTheme>(() =>
+    resolveSystem(),
+  );
 
   // Once the user logs in, prefer the server-side preference.
   const userSetting = user?.settings?.theme ?? null;
@@ -100,9 +104,14 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     applyTheme(resolved);
   }, [resolved]);
 
-  const value = useMemo<ThemeContextValue>(() => ({ setting, resolved }), [setting, resolved]);
+  const value = useMemo<ThemeContextValue>(
+    () => ({ setting, resolved }),
+    [setting, resolved],
+  );
 
-  return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
+  return (
+    <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>
+  );
 }
 
 export function useTheme(): ThemeContextValue {

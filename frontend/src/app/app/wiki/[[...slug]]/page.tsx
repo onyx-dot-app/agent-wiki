@@ -28,6 +28,7 @@ import {
   SvgTrash,
   SvgWorkflow,
 } from "@onyx-ai/opal/icons";
+import { useConfirm } from "@/components/common/ConfirmDialog";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { PageHeader } from "@/components/common/PageHeader";
 import { TriggerModal } from "@/components/triggers/TriggerModal";
@@ -157,6 +158,7 @@ function Explorer({ dir }: { dir: string }) {
   } = useSWR<ListResponse>("/wiki");
   const entries = data?.entries ?? [];
   const [mutationError, setMutationError] = useState<string | null>(null);
+  const confirmDialog = useConfirm();
   const error =
     mutationError ?? (listError instanceof Error ? listError.message : null);
   const setError = setMutationError;
@@ -253,7 +255,14 @@ function Explorer({ dir }: { dir: string }) {
   }
 
   async function onDelete(rel: string) {
-    if (!confirm(`Delete ${rel}? This cannot be undone.`)) return;
+    if (
+      !(await confirmDialog({
+        title: `Delete ${rel}?`,
+        body: "This cannot be undone.",
+        confirmLabel: "Delete",
+      }))
+    )
+      return;
     setBusyPath(rel);
     setError(null);
     try {
@@ -326,7 +335,7 @@ function Explorer({ dir }: { dir: string }) {
 
   return (
     <main
-      className={`h-screen overflow-y-auto ${isMobile ? "py-4 px-3" : "py-6 px-8"}`}
+      className={`h-screen overflow-y-auto ${isMobile ? "px-3 py-4" : "px-8 py-6"}`}
     >
       <PageHeader
         title={
@@ -385,13 +394,13 @@ function Explorer({ dir }: { dir: string }) {
       />
 
       {triggerStatus && (
-        <div className="text-xs text-(--text-04) mb-3">{triggerStatus}</div>
+        <div className="mb-3 text-xs text-(--text-04)">{triggerStatus}</div>
       )}
 
       {creating && (
         <form
           onSubmit={onCreate}
-          className="flex gap-2 mb-4 p-3 bg-(--background-tint-01) border border-(--border-01) rounded-(--border-radius-08)"
+          className="mb-4 flex gap-2 rounded-(--border-radius-08) border border-(--border-01) bg-(--background-tint-01) p-3"
         >
           <input
             autoFocus
@@ -399,7 +408,7 @@ function Explorer({ dir }: { dir: string }) {
             onChange={(e) => setNewName(e.target.value)}
             placeholder="folder-name (or subdir/folder-name)"
             disabled={createBusy}
-            className="flex-1 p-2 border border-(--border-01) rounded-(--border-radius-04) text-sm"
+            className="flex-1 rounded-(--border-radius-04) border border-(--border-01) p-2 text-sm"
           />
           <Button
             type="submit"
@@ -421,13 +430,13 @@ function Explorer({ dir }: { dir: string }) {
       )}
 
       {error && (
-        <div className="p-[10px] bg-(--status-error-01) text-(--status-text-error-05) rounded-(--border-radius-04) text-[13px] mb-3">
+        <div className="mb-3 rounded-(--border-radius-04) bg-(--status-error-01) p-[10px] text-[13px] text-(--status-text-error-05)">
           {error}
         </div>
       )}
 
       {subdirs.length === 0 && files.length === 0 && !error && (
-        <p className="text-(--text-03) text-sm">
+        <p className="text-sm text-(--text-03)">
           This folder is empty. Create a document to get started.
         </p>
       )}
@@ -436,7 +445,7 @@ function Explorer({ dir }: { dir: string }) {
         <SortBar value={sort} onChange={setSort} />
       )}
 
-      <ul className="list-none p-0 m-0">
+      <ul className="m-0 list-none p-0">
         {(() => {
           const dirEntries = subdirs.map((d) => ({ ...d, isFile: false }));
           const fileEntries = files.map((f) => ({ ...f, isFile: true }));
@@ -448,7 +457,11 @@ function Explorer({ dir }: { dir: string }) {
               <Row
                 key={(isFile ? "f:" : "d:") + name}
                 icon={
-                  isFile ? <SvgDocFile size={20} aria-hidden /> : <SvgFolder size={20} aria-hidden />
+                  isFile ? (
+                    <SvgDocFile size={20} aria-hidden />
+                  ) : (
+                    <SvgFolder size={20} aria-hidden />
+                  )
                 }
                 label={name}
                 updatedAt={updated_at}
@@ -648,7 +661,7 @@ function NewDocView({ dir }: { dir: string }) {
 
   return (
     <main
-      className={`h-screen flex flex-col box-border gap-3 ${isMobile ? "py-4 px-3" : "py-6 px-8"}`}
+      className={`box-border flex h-screen flex-col gap-3 ${isMobile ? "px-3 py-4" : "px-8 py-6"}`}
     >
       <PageHeader
         title="New document"
@@ -686,7 +699,7 @@ function NewDocView({ dir }: { dir: string }) {
       />
 
       {error && (
-        <div className="p-[10px] bg-(--status-error-01) text-(--status-text-error-05) rounded-(--border-radius-04) text-[13px]">
+        <div className="rounded-(--border-radius-04) bg-(--status-error-01) p-[10px] text-[13px] text-(--status-text-error-05)">
           {error}
         </div>
       )}
@@ -711,7 +724,7 @@ function NewDocView({ dir }: { dir: string }) {
             ? "Start typing, or pick a template above…"
             : "Start typing your new document…"
         }
-        className="flex-1 min-h-0 w-full box-border p-4 border border-(--border-01) rounded-(--border-radius-08) font-mono text-sm leading-[1.6] resize-none outline-none"
+        className="box-border min-h-0 w-full flex-1 resize-none rounded-(--border-radius-08) border border-(--border-01) p-4 font-mono text-sm leading-[1.6] outline-none"
       />
     </main>
   );
@@ -736,7 +749,7 @@ function TemplateGallery({
   // line. On wide screens the user scrolls / clicks chevrons through
   // the row; on narrow screens the same layout becomes a swipe strip.
   return (
-    <div className="flex flex-col gap-[10px] p-[14px] bg-(--background-tint-01) border border-(--border-01) rounded-(--border-radius-08)">
+    <div className="flex flex-col gap-[10px] rounded-(--border-radius-08) border border-(--border-01) bg-(--background-tint-01) p-[14px]">
       <div className="flex items-baseline gap-2">
         <span className="text-[13px] font-semibold text-(--text-05)">
           Start from a template
@@ -813,10 +826,10 @@ function TemplateStrip({
     <div className="relative">
       <div
         ref={scrollerRef}
-        className="scroll-x-hidden flex gap-2 overflow-x-auto pb-[2px] snap-x snap-mandatory"
+        className="scroll-x-hidden flex snap-x snap-mandatory gap-2 overflow-x-auto pb-[2px]"
         style={{ WebkitOverflowScrolling: "touch" }}
       >
-        <div className="shrink-0 snap-start w-[200px]">
+        <div className="w-[200px] shrink-0 snap-start">
           <TemplateCard
             title="Blank document"
             description="Empty file — just start typing."
@@ -826,7 +839,7 @@ function TemplateStrip({
           />
         </div>
         {templates.map((t) => (
-          <div key={t.id} className="shrink-0 snap-start w-[200px]">
+          <div key={t.id} className="w-[200px] shrink-0 snap-start">
             <TemplateCard
               title={t.name}
               description={t.description}
@@ -859,7 +872,7 @@ function StripArrow({
       type="button"
       onClick={onClick}
       aria-label={direction === "left" ? "Scroll left" : "Scroll right"}
-      className={`absolute top-1/2 -translate-y-1/2 ${direction === "left" ? "left-1" : "right-1"} w-7 h-7 rounded-full bg-(--background-tint-00) border border-(--border-01) shadow-(--shadow-sm) cursor-pointer text-(--text-04) flex items-center justify-center p-0`}
+      className={`absolute top-1/2 -translate-y-1/2 ${direction === "left" ? "left-1" : "right-1"} flex h-7 w-7 cursor-pointer items-center justify-center rounded-full border border-(--border-01) bg-(--background-tint-00) p-0 text-(--text-04) shadow-(--shadow-sm)`}
     >
       {direction === "left" ? (
         <SvgChevronLeft size={14} />
@@ -888,7 +901,7 @@ function TemplateCard({
       type="button"
       onClick={onClick}
       disabled={busy}
-      className={`text-left py-[10px] px-3 rounded-(--border-radius-04) text-(--text-05) w-full h-full box-border min-h-[64px] flex flex-col gap-1 transition-[background,border-color] duration-[80ms] ease-in-out border ${busy ? "opacity-[0.7] cursor-wait" : "cursor-pointer"} ${active ? "bg-(--background-tint-03) border-(--border-01)" : "bg-(--background-tint-00) border-(--border-01)"}`}
+      className={`box-border flex h-full min-h-[64px] w-full flex-col gap-1 rounded-(--border-radius-04) border px-3 py-[10px] text-left text-(--text-05) transition-[background,border-color] duration-[80ms] ease-in-out ${busy ? "cursor-wait opacity-[0.7]" : "cursor-pointer"} ${active ? "border-(--border-01) bg-(--background-tint-03)" : "border-(--border-01) bg-(--background-tint-00)"}`}
       onMouseEnter={(e) => {
         if (!active && !busy) {
           e.currentTarget.style.background = "var(--background-tint-03)";
@@ -904,7 +917,7 @@ function TemplateCard({
     >
       <div className="text-[13px] font-semibold">{title}</div>
       {description && (
-        <div className="text-xs text-(--text-03) line-clamp-2">
+        <div className="line-clamp-2 text-xs text-(--text-03)">
           {description}
         </div>
       )}
@@ -922,13 +935,13 @@ function SortBar({
   onChange: (v: SortMode) => void;
 }) {
   return (
-    <div className="flex items-center gap-2 mb-2 text-xs text-(--text-03)">
+    <div className="mb-2 flex items-center gap-2 text-xs text-(--text-03)">
       <label htmlFor="wiki-sort">Sort:</label>
       <select
         id="wiki-sort"
         value={value}
         onChange={(e) => onChange(e.target.value as SortMode)}
-        className="py-1 px-2 border border-(--border-01) rounded-(--border-radius-04) bg-(--background-tint-00) text-(--text-05) text-xs"
+        className="rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-00) px-2 py-1 text-xs text-(--text-05)"
       >
         <option value="name-asc">Name (A → Z)</option>
         <option value="name-desc">Name (Z → A)</option>
@@ -1041,9 +1054,9 @@ function Row({
       }
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
-      className={`flex items-center py-[10px] px-3 border-b border-(--border-01) ${dropActive ? "bg-(--background-tint-03) outline outline-2 outline-(--background-tint-inverted-00)" : hover ? "bg-(--background-tint-02)" : "bg-transparent"} ${busy ? "opacity-50" : "opacity-100"} ${renaming ? "cursor-default" : "cursor-pointer"}`}
+      className={`flex items-center border-b border-(--border-01) px-3 py-[10px] ${dropActive ? "bg-(--background-tint-03) outline outline-2 outline-(--background-tint-inverted-00)" : hover ? "bg-(--background-tint-02)" : "bg-transparent"} ${busy ? "opacity-50" : "opacity-100"} ${renaming ? "cursor-default" : "cursor-pointer"}`}
     >
-      <span className="text-(--text-03) flex mr-[10px]">{icon}</span>
+      <span className="mr-[10px] flex text-(--text-03)">{icon}</span>
       {renaming ? (
         <form
           onSubmit={(e) => {
@@ -1063,7 +1076,7 @@ function Row({
               }
             }}
             disabled={busy}
-            className="flex-1 py-1 px-2 border border-(--border-01) rounded-(--border-radius-04) text-sm"
+            className="flex-1 rounded-(--border-radius-04) border border-(--border-01) px-2 py-1 text-sm"
           />
           <Button
             type="submit"
@@ -1087,13 +1100,13 @@ function Row({
         // <li>. flex: 1 keeps it stretching to fill the space between
         // icon and action buttons, so any click on the label area
         // still hits the row's onClick.
-        <span className="flex items-center gap-[10px] flex-1 text-(--text-05) text-sm">
+        <span className="flex flex-1 items-center gap-[10px] text-sm text-(--text-05)">
           {label}
         </span>
       )}
       {!renaming && (
         <>
-          <span className="text-xs text-(--text-02) mr-2 whitespace-nowrap">
+          <span className="mr-2 text-xs whitespace-nowrap text-(--text-02)">
             {updatedAt ? relativeTime(updatedAt, "short") : "—"}
           </span>
           {onShare && (
@@ -1102,7 +1115,7 @@ function Row({
               disabled={busy}
               title="Share"
               aria-label={`Share ${label}`}
-              className={`bg-transparent border-none p-[6px] flex items-center ${busy ? "cursor-not-allowed" : "cursor-pointer"} ${hover ? "text-(--text-04)" : "text-transparent"}`}
+              className={`flex items-center border-none bg-transparent p-[6px] ${busy ? "cursor-not-allowed" : "cursor-pointer"} ${hover ? "text-(--text-04)" : "text-transparent"}`}
             >
               <SvgShare size={16} />
             </button>
@@ -1112,7 +1125,7 @@ function Row({
             disabled={busy}
             title="Rename"
             aria-label={`Rename ${label}`}
-            className={`bg-transparent border-none p-[6px] flex items-center ${busy ? "cursor-not-allowed" : "cursor-pointer"} ${hover ? "text-(--text-04)" : "text-transparent"}`}
+            className={`flex items-center border-none bg-transparent p-[6px] ${busy ? "cursor-not-allowed" : "cursor-pointer"} ${hover ? "text-(--text-04)" : "text-transparent"}`}
           >
             <SvgEdit size={16} />
           </button>
@@ -1121,7 +1134,7 @@ function Row({
             disabled={busy}
             title="Delete"
             aria-label={`Delete ${label}`}
-            className={`bg-transparent border-none p-[6px] flex items-center ${busy ? "cursor-not-allowed" : "cursor-pointer"} ${hover ? "text-(--status-text-error-05)" : "text-transparent"}`}
+            className={`flex items-center border-none bg-transparent p-[6px] ${busy ? "cursor-not-allowed" : "cursor-pointer"} ${hover ? "text-(--status-text-error-05)" : "text-transparent"}`}
           >
             <SvgTrash size={16} />
           </button>
@@ -1155,7 +1168,7 @@ function Breadcrumbs({
     crumbs.push({ label: seg, href: `/app/wiki/${path}`, path });
   });
   return (
-    <nav className="flex items-center gap-1.5 text-sm flex-wrap">
+    <nav className="flex flex-wrap items-center gap-1.5 text-sm">
       {crumbs.map((c, i) => {
         const last = i === crumbs.length - 1;
         const targetKey = c.path === "" ? ROOT : c.path;
@@ -1220,6 +1233,7 @@ function FileViewer({ path }: { path: string }) {
   const [triggerStatus, setTriggerStatus] = useState<string | null>(null);
   const [runAgentOpen, setRunAgentOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+  const confirmDialog = useConfirm();
   // History state. `viewingSha` is null when looking at the working-tree
   // (latest) version; otherwise it's the sha being viewed and is what we
   // pass back as `base_sha` on save so the server records a rollback.
@@ -1245,18 +1259,26 @@ function FileViewer({ path }: { path: string }) {
   // closed). Auto-open the panel once per path when a page has comments.
   const autoOpenedPathRef = useRef<string | null>(null);
 
+  // The history and comments side panels are mutually exclusive — every
+  // path that opens one closes the other (toolbar toggles, the comments
+  // auto-open, the selection "💬 Comment" tool).
+  const openComments = useCallback(() => {
+    setHistoryOpen(false);
+    setCommentsOpen(true);
+  }, []);
+
   const refreshComments = useCallback(async () => {
     try {
       const t = await listComments(path);
       setCommentThreads(t);
       if (t.length > 0 && autoOpenedPathRef.current !== path) {
         autoOpenedPathRef.current = path;
-        setCommentsOpen(true);
+        openComments();
       }
     } catch {
       // comments are non-critical chrome; ignore load failures
     }
-  }, [path]);
+  }, [path, openComments]);
 
   useEffect(() => {
     autoOpenedPathRef.current = null;
@@ -1468,7 +1490,13 @@ function FileViewer({ path }: { path: string }) {
 
   const handleCloseSession = useCallback(
     async (id: string) => {
-      if (!confirm("Close this agent session?")) return;
+      if (
+        !(await confirmDialog({
+          title: "Close this agent session?",
+          confirmLabel: "Close session",
+        }))
+      )
+        return;
       try {
         await closeSession(id, "user_clicked");
       } catch (err) {
@@ -1477,7 +1505,7 @@ function FileViewer({ path }: { path: string }) {
         await refreshSessions();
       }
     },
-    [refreshSessions],
+    [refreshSessions, confirmDialog],
   );
   useEffect(() => {
     if (!liveDoc) return;
@@ -1617,10 +1645,26 @@ function FileViewer({ path }: { path: string }) {
     }
   }, [path]);
 
+  function closeHistory() {
+    setHistoryOpen(false);
+    // Closing the panel exits history mode entirely — back to the rendered
+    // latest version. Skip while editing: `viewingSha` is the fork base the
+    // save needs, and the textarea is showing the user's draft anyway.
+    if (!editing && viewingSha !== null) {
+      setViewingSha(null);
+      setDiffData(null);
+    }
+  }
+
   async function toggleHistory() {
-    const next = !historyOpen;
-    setHistoryOpen(next);
-    if (!next) return;
+    if (historyOpen) {
+      closeHistory();
+      return;
+    }
+    setHistoryOpen(true);
+    // Mutual exclusion with the comments panel (see ``openComments``).
+    setCommentsOpen(false);
+    setCommentDraft(null);
     // Opening history: show the newest commit's diff immediately rather
     // than leaving the rendered body up until the user clicks a row.
     const loaded = commits ?? (await refreshHistory())?.commits ?? null;
@@ -1658,7 +1702,11 @@ function FileViewer({ path }: { path: string }) {
     editing && filenameValid && filenameNoExt !== currentBasenameNoExt;
   const bodyChanged = editing && draft !== body;
   const dirty = editing && (bodyChanged || renamed);
-  const viewingOld = viewingSha !== null;
+  // `viewingVersion`: a history version is displayed in the main pane.
+  // `viewingOld`: that version is not the newest commit for this file
+  // (`headSha` tracks `commits[0]`), so the warning banner applies.
+  const viewingVersion = viewingSha !== null;
+  const viewingOld = viewingVersion && viewingSha !== headSha;
 
   // Guard against losing unsaved edits when the user navigates away.
   // - beforeunload: tab close, refresh, typing a URL — browser shows a
@@ -1704,8 +1752,27 @@ function FileViewer({ path }: { path: string }) {
   async function startEdit() {
     setFilenameDraft(currentBasenameNoExt);
     setError(null);
-    setEditing(true);
     const session = ++editSessionRef.current;
+    if (viewingOld && viewingSha) {
+      // Editing from an older version forks it: load that version's body
+      // into the editor. `viewingSha` stays set so save/autosave use it as
+      // base_sha and the server records the rollback. Skip the resume-draft
+      // check — any saved draft was based on a different version.
+      try {
+        const r = await apiFetch<FileResponse>(
+          `/wiki/file?path=${encodeURIComponent(path)}&ref=${encodeURIComponent(viewingSha)}`,
+        );
+        if (editSessionRef.current !== session) return;
+        setDraft(r.body);
+        setEditing(true);
+      } catch (e) {
+        setError(
+          e instanceof Error ? e.message : "failed to load version for edit",
+        );
+      }
+      return;
+    }
+    setEditing(true);
     // Check for an existing in-progress draft from a previous session.
     try {
       const saved = await apiFetch<DraftResponse | null>(
@@ -1933,16 +2000,16 @@ function FileViewer({ path }: { path: string }) {
 
   return (
     <main
-      className={`h-screen box-border flex flex-col min-h-0 ${isMobile ? "py-4 px-3" : "py-6 px-8"}`}
+      className={`box-border flex h-screen min-h-0 flex-col ${isMobile ? "px-3 py-4" : "px-8 py-6"}`}
     >
       <header
-        className={`flex items-center mb-4 flex-wrap ${isMobile ? "gap-2" : "gap-3"}`}
+        className={`mb-4 flex flex-wrap items-center ${isMobile ? "gap-2" : "gap-3"}`}
       >
         <Link
           href={backHref}
           title="Back"
           aria-label="Back"
-          className="flex items-center justify-center w-8 h-8 rounded-(--border-radius-08) border border-(--border-01) text-(--text-04) no-underline shrink-0"
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-(--border-radius-08) border border-(--border-01) text-(--text-04) no-underline"
         >
           <SvgArrowLeft size={18} />
         </Link>
@@ -1982,7 +2049,9 @@ function FileViewer({ path }: { path: string }) {
               </SelectButton>
               <SelectButton
                 state={commentsOpen ? "selected" : "empty"}
-                onClick={() => setCommentsOpen((v) => !v)}
+                onClick={() =>
+                  commentsOpen ? setCommentsOpen(false) : openComments()
+                }
               >
                 Comments
               </SelectButton>
@@ -2020,7 +2089,7 @@ function FileViewer({ path }: { path: string }) {
       )}
 
       {!editing && triggerStatus && (
-        <div className="text-xs text-(--text-04) mb-3">{triggerStatus}</div>
+        <div className="mb-3 text-xs text-(--text-04)">{triggerStatus}</div>
       )}
 
       <TriggerModal
@@ -2044,19 +2113,18 @@ function FileViewer({ path }: { path: string }) {
       />
 
       {error && (
-        <div className="p-[10px] bg-(--status-error-01) text-(--status-text-error-05) rounded-(--border-radius-04) text-[13px] mb-3">
+        <div className="mb-3 rounded-(--border-radius-04) bg-(--status-error-01) p-[10px] text-[13px] text-(--status-text-error-05)">
           {error}
         </div>
       )}
 
       {viewingOld && !loading && !error && (
-        <div className="flex items-center gap-3 py-2 px-3 mb-3 bg-(--status-warning-01) border border-(--status-warning-02) rounded-(--border-radius-08) text-[13px] text-(--status-text-warning-05)">
+        <div className="mb-3 flex items-center gap-3 rounded-(--border-radius-08) border border-(--status-warning-02) bg-(--status-warning-01) px-3 py-2 text-[13px] text-(--status-text-warning-05)">
           <span>
             Viewing an older version
             {viewingSha ? ` (${viewingSha.slice(0, 7)})` : ""}.
-            {editing
-              ? " Saving will replace the current version and mark the in-between revisions as deprecated."
-              : " Click Edit to fork from this version."}
+            {editing &&
+              " Saving will replace the current version and mark the in-between revisions as deprecated."}
           </span>
           <div className="flex-1" />
           <Button size="sm" onClick={loadLatest}>
@@ -2066,7 +2134,7 @@ function FileViewer({ path }: { path: string }) {
       )}
 
       {editing && pendingResumeDraft && (
-        <div className="flex items-center gap-3 py-2 px-3 mb-3 bg-(--status-info-01) border border-(--status-info-02) rounded-(--border-radius-08) text-[13px] text-(--status-text-info-05)">
+        <div className="mb-3 flex items-center gap-3 rounded-(--border-radius-08) border border-(--status-info-02) bg-(--status-info-01) px-3 py-2 text-[13px] text-(--status-text-info-05)">
           <span>You have unsaved changes from a previous session.</span>
           <div className="flex-1" />
           <Button
@@ -2126,8 +2194,8 @@ function FileViewer({ path }: { path: string }) {
       )}
 
       {editing && conflict && (
-        <div className="mb-3 border border-(--status-warning-02) rounded-(--border-radius-08) overflow-hidden">
-          <div className="flex items-center gap-3 py-2 px-3 bg-(--status-warning-01) text-(--status-text-warning-05) text-[13px]">
+        <div className="mb-3 overflow-hidden rounded-(--border-radius-08) border border-(--status-warning-02)">
+          <div className="flex items-center gap-3 bg-(--status-warning-01) px-3 py-2 text-[13px] text-(--status-text-warning-05)">
             <span>This page was updated while you were editing.</span>
             <div className="flex-1" />
             <Button
@@ -2167,7 +2235,7 @@ function FileViewer({ path }: { path: string }) {
                 "text-[11px] font-semibold text-(--text-03) mb-[6px] uppercase tracking-[0.05em]";
               return (
                 <>
-                  <div className="p-3 border-r border-(--border-01)">
+                  <div className="border-r border-(--border-01) p-3">
                     <div className={labelClass}>Current version</div>
                     <pre className={preClass}>
                       {currentHunks.map((part, i) => (
@@ -2203,8 +2271,8 @@ function FileViewer({ path }: { path: string }) {
       {loading && <LoadingSpinner />}
 
       {!loading && !error && (
-        <div className="flex-1 min-h-0 flex gap-4">
-          <div className="flex-1 min-w-0 flex flex-col gap-3">
+        <div className="flex min-h-0 flex-1 gap-4">
+          <div className="flex min-w-0 flex-1 flex-col gap-3">
             {editing ? (
               <>
                 <FilenameRow
@@ -2243,11 +2311,11 @@ function FileViewer({ path }: { path: string }) {
                   onChange={(e) => setDraft(e.target.value)}
                   spellCheck={false}
                   placeholder="Start typing, or pick a template above…"
-                  className="flex-1 min-h-0 w-full box-border p-4 border border-(--border-01) rounded-(--border-radius-08) font-mono text-sm leading-[1.6] resize-none outline-none"
+                  className="box-border min-h-0 w-full flex-1 resize-none rounded-(--border-radius-08) border border-(--border-01) p-4 font-mono text-sm leading-[1.6] outline-none"
                 />
               </>
-            ) : viewingOld && diffData ? (
-              <div className="flex-1 min-h-0 overflow-hidden flex">
+            ) : viewingVersion && diffData ? (
+              <div className="flex min-h-0 flex-1 overflow-hidden">
                 <DiffView
                   data={diffData}
                   commit={
@@ -2268,7 +2336,7 @@ function FileViewer({ path }: { path: string }) {
             ) : (
               <article
                 ref={articleRef}
-                className="markdown flex-1 min-h-0 overflow-y-auto"
+                className="markdown min-h-0 flex-1 overflow-y-auto"
                 onMouseUp={onArticleMouseUp}
               >
                 {renderedBody}
@@ -2282,7 +2350,7 @@ function FileViewer({ path }: { path: string }) {
               headSha={headSha}
               viewingSha={viewingSha}
               onPick={onPickCommit}
-              onClose={() => setHistoryOpen(false)}
+              onClose={closeHistory}
             />
           )}
           {commentsOpen && !isMobile && (
@@ -2309,11 +2377,11 @@ function FileViewer({ path }: { path: string }) {
         // squeeze the body to nothing on a 375px screen.
         <>
           <div
-            onClick={() => setHistoryOpen(false)}
+            onClick={closeHistory}
             aria-hidden
-            className="fixed inset-0 bg-(--mask-03) z-[60]"
+            className="fixed inset-0 z-[60] bg-(--mask-03)"
           />
-          <div className="fixed top-0 right-0 bottom-0 z-[70] flex shadow-(--shadow-panel) w-[min(360px,100vw)]">
+          <div className="fixed top-0 right-0 bottom-0 z-[70] flex w-[min(360px,100vw)] shadow-(--shadow-panel)">
             <HistoryPanel
               commits={commits}
               error={historyError}
@@ -2321,9 +2389,12 @@ function FileViewer({ path }: { path: string }) {
               viewingSha={viewingSha}
               onPick={(sha) => {
                 onPickCommit(sha);
+                // Plain close (no reset): the sheet covers the content, so a
+                // deliberate pick must keep the chosen version visible. The
+                // banner's "Back to latest" is the way back.
                 setHistoryOpen(false);
               }}
-              onClose={() => setHistoryOpen(false)}
+              onClose={closeHistory}
               fullHeight
             />
           </div>
@@ -2334,9 +2405,9 @@ function FileViewer({ path }: { path: string }) {
           <div
             onClick={() => setCommentsOpen(false)}
             aria-hidden
-            className="fixed inset-0 bg-(--mask-03) z-[60]"
+            className="fixed inset-0 z-[60] bg-(--mask-03)"
           />
-          <div className="fixed top-0 right-0 bottom-0 z-[70] flex shadow-(--shadow-panel) w-[min(360px,100vw)]">
+          <div className="fixed top-0 right-0 bottom-0 z-[70] flex w-[min(360px,100vw)] shadow-(--shadow-panel)">
             <CommentsPanel
               path={path}
               headSha={headSha}
@@ -2358,7 +2429,7 @@ function FileViewer({ path }: { path: string }) {
       {selTool && (
         <div
           onMouseDown={(e) => e.preventDefault()}
-          className="fixed -translate-x-1/2 -translate-y-full z-[80] bg-(--background-tint-01) border border-(--border-01) rounded-(--border-radius-08) shadow-(--shadow-popover) p-1"
+          className="fixed z-[80] -translate-x-1/2 -translate-y-full rounded-(--border-radius-08) border border-(--border-01) bg-(--background-tint-01) p-1 shadow-(--shadow-popover)"
           style={{
             left: selTool.x,
             top: selTool.y - 8,
@@ -2369,7 +2440,7 @@ function FileViewer({ path }: { path: string }) {
             size="sm"
             onClick={() => {
               setCommentDraft(selTool.draft);
-              setCommentsOpen(true);
+              openComments();
               setSelTool(null);
               window.getSelection()?.removeAllRanges();
             }}
@@ -2400,16 +2471,16 @@ function ActiveAgentsBar({
   const count = agents.length + sessions.length;
   const expandable = count > 0;
   return (
-    <div className="mb-3 border border-(--border-01) rounded-(--border-radius-08) bg-(--background-tint-01) overflow-hidden">
+    <div className="mb-3 overflow-hidden rounded-(--border-radius-08) border border-(--border-01) bg-(--background-tint-01)">
       <button
         onClick={expandable ? onToggle : undefined}
         aria-expanded={expandable ? open : undefined}
         disabled={!expandable}
-        className={`w-full text-left py-2 px-3 bg-transparent border-none text-[13px] flex items-center gap-2 ${expandable ? "cursor-pointer text-(--text-05)" : "cursor-default text-(--text-03)"}`}
+        className={`flex w-full items-center gap-2 border-none bg-transparent px-3 py-2 text-left text-[13px] ${expandable ? "cursor-pointer text-(--text-05)" : "cursor-default text-(--text-03)"}`}
       >
         <span
           aria-hidden
-          className={`shrink-0 flex transition-transform duration-[120ms] ease-in-out ${open ? "rotate-90" : "rotate-0"} ${!expandable ? "text-(--text-02)" : "text-(--text-03)"}`}
+          className={`flex shrink-0 transition-transform duration-[120ms] ease-in-out ${open ? "rotate-90" : "rotate-0"} ${!expandable ? "text-(--text-02)" : "text-(--text-03)"}`}
         >
           <SvgChevronRight size={10} />
         </span>
@@ -2417,7 +2488,7 @@ function ActiveAgentsBar({
           {expandable ? "Active agents" : "No agents active"}
         </span>
         {expandable && (
-          <span className="text-[11px] font-semibold py-[1px] px-[6px] rounded-full bg-(--background-tint-03) text-(--text-05)">
+          <span className="rounded-full bg-(--background-tint-03) px-[6px] py-[1px] text-[11px] font-semibold text-(--text-05)">
             {count}
           </span>
         )}
@@ -2428,7 +2499,7 @@ function ActiveAgentsBar({
         )}
       </button>
       {expandable && open && (
-        <ul className="list-none p-0 m-0 border-t border-(--border-01) bg-(--background-tint-00)">
+        <ul className="m-0 list-none border-t border-(--border-01) bg-(--background-tint-00) p-0">
           {sessions.map((s, i) => (
             <ActiveSessionRow
               key={s.id}
@@ -2462,26 +2533,26 @@ function ActiveAgentRow({
   return (
     <li
       className={
-        `py-[10px] px-3 text-[13px] flex items-center gap-[10px] whitespace-nowrap overflow-hidden` +
+        `flex items-center gap-[10px] overflow-hidden px-3 py-[10px] text-[13px] whitespace-nowrap` +
         (isLast ? `` : ` border-b border-(--border-01)`)
       }
     >
-      <span className="shrink-0 text-[10px] font-semibold py-[1px] px-[6px] rounded-(--border-radius-04) bg-(--background-tint-03) text-(--text-05) uppercase tracking-[0.3px]">
+      <span className="shrink-0 rounded-(--border-radius-04) bg-(--background-tint-03) px-[6px] py-[1px] text-[10px] font-semibold tracking-[0.3px] text-(--text-05) uppercase">
         {a.activity}
       </span>
 
-      <span className="font-medium text-(--text-05) shrink-0">
+      <span className="shrink-0 font-medium text-(--text-05)">
         {a.owner_display}
       </span>
       {a.agent_name ? (
-        <span className="text-(--text-03) shrink-0">
+        <span className="shrink-0 text-(--text-03)">
           {"·"} {a.agent_name}
         </span>
       ) : null}
 
       {a.description ? (
         <span
-          className="text-(--text-04) italic overflow-hidden text-ellipsis min-w-0 grow"
+          className="min-w-0 grow overflow-hidden text-ellipsis text-(--text-04) italic"
           title={a.description}
         >
           {"“"}
@@ -2493,7 +2564,7 @@ function ActiveAgentRow({
       )}
 
       <span
-        className="text-[11px] text-(--text-02) shrink-0"
+        className="shrink-0 text-[11px] text-(--text-02)"
         title={`Started ${absoluteTime(
           a.registered_at,
         )} · Expires ${absoluteTime(a.expires_at)}`}
@@ -2517,20 +2588,20 @@ function ActiveSessionRow({
   return (
     <li
       className={
-        `py-[10px] px-3 text-[13px] flex items-center gap-[10px] whitespace-nowrap overflow-hidden` +
+        `flex items-center gap-[10px] overflow-hidden px-3 py-[10px] text-[13px] whitespace-nowrap` +
         (isLast ? `` : ` border-b border-(--border-01)`)
       }
     >
-      <span className="shrink-0 text-[10px] font-semibold py-[1px] px-[6px] rounded-(--border-radius-04) bg-(--background-tint-03) text-(--text-05) uppercase tracking-[0.3px]">
+      <span className="shrink-0 rounded-(--border-radius-04) bg-(--background-tint-03) px-[6px] py-[1px] text-[10px] font-semibold tracking-[0.3px] text-(--text-05) uppercase">
         {s.status}
       </span>
 
-      <span className="font-medium text-(--text-05) shrink-0">{s.tool_id}</span>
+      <span className="shrink-0 font-medium text-(--text-05)">{s.tool_id}</span>
 
       <span className="flex-1" />
 
       <span
-        className="text-[11px] text-(--text-02) shrink-0"
+        className="shrink-0 text-[11px] text-(--text-02)"
         title={`Started ${absoluteTime(s.started_at)}`}
       >
         started {relativeTime(s.started_at, "short")}
@@ -2559,9 +2630,9 @@ function FilenameRow({
   placeholder?: string;
 }) {
   return (
-    <div className="flex items-stretch border border-(--border-01) rounded-(--border-radius-04) bg-(--background-tint-00) overflow-hidden shrink-0">
+    <div className="flex shrink-0 items-stretch overflow-hidden rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-00)">
       {parent && (
-        <span className="flex items-center px-[10px] bg-(--background-tint-02) border-r border-(--border-01) text-(--text-04) font-mono text-[13px]">
+        <span className="flex items-center border-r border-(--border-01) bg-(--background-tint-02) px-[10px] font-mono text-[13px] text-(--text-04)">
           {parent}/
         </span>
       )}
@@ -2573,11 +2644,11 @@ function FilenameRow({
         placeholder={placeholder}
         disabled={disabled}
         spellCheck={false}
-        className="flex-1 py-2 px-[10px] border-none outline-none text-sm font-mono bg-transparent"
+        className="flex-1 border-none bg-transparent px-[10px] py-2 font-mono text-sm outline-none"
       />
       <span
         aria-hidden
-        className="flex items-center px-[10px] bg-(--background-tint-02) border-l border-(--border-01) text-(--text-04) font-mono text-[13px] font-semibold"
+        className="flex items-center border-l border-(--border-01) bg-(--background-tint-02) px-[10px] font-mono text-[13px] font-semibold text-(--text-04)"
       >
         .md
       </span>

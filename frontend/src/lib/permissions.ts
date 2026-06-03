@@ -72,7 +72,9 @@ export interface PageAcl {
 // --------------------------------------------------------------------------- //
 
 export function useGroups() {
-  const { data, error, isLoading, mutate } = useSWR<{ groups: Group[] }>("/groups");
+  const { data, error, isLoading, mutate } = useSWR<{ groups: Group[] }>(
+    "/groups",
+  );
   return {
     groups: data?.groups ?? [],
     error: error as Error | undefined,
@@ -95,7 +97,10 @@ export function useGroup(id: string | null) {
   };
 }
 
-export function createGroup(name: string, description?: string): Promise<Group> {
+export function createGroup(
+  name: string,
+  description?: string,
+): Promise<Group> {
   return apiFetch<Group>("/groups", {
     method: "POST",
     body: JSON.stringify({ name, description: description ?? null }),
@@ -113,8 +118,13 @@ export function addGroupMember(groupId: string, userId: string): Promise<void> {
   });
 }
 
-export function removeGroupMember(groupId: string, userId: string): Promise<void> {
-  return apiFetch<void>(`/groups/${groupId}/members/${userId}`, { method: "DELETE" });
+export function removeGroupMember(
+  groupId: string,
+  userId: string,
+): Promise<void> {
+  return apiFetch<void>(`/groups/${groupId}/members/${userId}`, {
+    method: "DELETE",
+  });
 }
 
 // --------------------------------------------------------------------------- //

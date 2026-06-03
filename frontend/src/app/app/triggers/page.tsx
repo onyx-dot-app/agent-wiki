@@ -4,6 +4,7 @@ import { useState } from "react";
 
 import { Button } from "@onyx-ai/opal/components";
 import { SvgPlus } from "@onyx-ai/opal/icons";
+import { useConfirm } from "@/components/common/ConfirmDialog";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { PageHeader } from "@/components/common/PageHeader";
 import { TriggerHistoryModal } from "@/components/triggers/TriggerHistoryModal";
@@ -67,6 +68,7 @@ export default function TriggersPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<Trigger | null>(null);
   const [historyFor, setHistoryFor] = useState<Trigger | null>(null);
+  const confirmDialog = useConfirm();
 
   const listError = mutationError ?? listSwrError?.message ?? null;
 
@@ -85,7 +87,9 @@ export default function TriggersPage() {
       // Optimistic update: patch the cached list, then revalidate.
       await refresh(
         (cur) => ({
-          triggers: (cur?.triggers ?? []).map((x) => (x.id === t.id ? updated : x)),
+          triggers: (cur?.triggers ?? []).map((x) =>
+            x.id === t.id ? updated : x,
+          ),
         }),
         { revalidate: true },
       );
@@ -97,7 +101,14 @@ export default function TriggersPage() {
   }
 
   async function onDelete(t: Trigger) {
-    if (!confirm(`Delete this trigger?\n\n"${t.nl_description}"`)) return;
+    if (
+      !(await confirmDialog({
+        title: "Delete this trigger?",
+        body: `"${t.nl_description}"`,
+        confirmLabel: "Delete",
+      }))
+    )
+      return;
     setBusyId(t.id);
     setMutationError(null);
     try {
@@ -116,193 +127,201 @@ export default function TriggersPage() {
   }
 
   return (
-    <main className={isMobile ? "py-4 px-3" : "py-6 px-8"}>
-        <PageHeader
-          title="Triggers"
-          description="Triggers watch a document (or folder) and notice when something specific changes, or check on a recurring schedule. When the trigger fires, the message you wrote shows up on the Events tab so you can review it."
-          actions={
-            <Button
-              variant="action"
-              icon={SvgPlus}
-              onClick={() => {
-                setEditing(null);
-                setModalOpen(true);
-              }}
-            >
-              New trigger
-            </Button>
-          }
-        />
-
-        {listError && (
-          <div className="p-[10px] bg-(--status-error-01) text-(--status-text-error-05) rounded-(--border-radius-04) text-[13px] mb-3">
-            {listError}
-          </div>
-        )}
-
-        {triggers.length === 0 && !listError && (
-          <p className="text-(--text-03) text-sm">
-            No triggers yet. Create one to start watching documents for changes.
-          </p>
-        )}
-
-        <ul className="list-none p-0 m-0">
-          {triggers.map((t) => (
-            <li
-              key={t.id}
-              className={`py-[14px] px-4 border border-(--border-01) rounded-(--border-radius-08) mb-[10px] bg-(--background-tint-00) ${busyId === t.id ? "opacity-60" : "opacity-100"}`}
-            >
-              <div className="flex items-center justify-between gap-3 flex-wrap mb-[10px]">
-                <div className="font-mono text-xs text-(--text-03) flex gap-[10px] items-baseline flex-wrap min-w-0">
-                  <span title={t.scope_path}>{formatScopePath(t.scope_path)}</span>
-                  <span className="text-[11px] text-(--text-02)">
-                    {t.id}
-                  </span>
-                  {t.last_edited_at && (
-                    <span
-                      title={new Date(t.last_edited_at).toLocaleString()}
-                      className="text-[11px] text-(--text-02)"
-                    >
-                      edited {formatRelative(t.last_edited_at)}
-                    </span>
-                  )}
-                </div>
-                <div className="flex gap-1.5 items-center shrink-0 flex-wrap">
-                  <span
-                    className={`inline-flex items-center gap-1.5 text-[11px] py-[2px] px-2 rounded-full font-semibold tracking-[0.3px] border ${t.enabled ? "bg-(--background-tint-03) text-(--text-05) border-(--border-01)" : "bg-(--background-tint-02) text-(--text-03) border-(--border-01)"}`}
-                  >
-                    <span
-                      aria-hidden
-                      className={`w-[6px] h-[6px] rounded-full ${t.enabled ? "bg-(--status-text-success-05)" : "bg-(--text-02)"}`}
-                    />
-                    {t.enabled ? "ENABLED" : "DISABLED"}
-                  </span>
-                  <Button size="sm" onClick={() => onToggle(t)} disabled={busyId === t.id}>
-                    {t.enabled ? "Disable" : "Enable"}
-                  </Button>
-                  <Button
-                    size="sm"
-                    onClick={() => {
-                      setEditing(t);
-                      setModalOpen(true);
-                    }}
-                    disabled={busyId === t.id}
-                  >
-                    Edit
-                  </Button>
-                  <Button
-                    size="sm"
-                    onClick={() => setHistoryFor(t)}
-                    disabled={busyId === t.id}
-                  >
-                    History
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="danger"
-                    onClick={() => onDelete(t)}
-                    disabled={busyId === t.id}
-                  >
-                    Delete
-                  </Button>
-                </div>
-              </div>
-              <div className="text-sm text-(--text-05) leading-[1.55]">
-                {t.kind === "schedule" && (
-                  <div className="flex items-baseline gap-2 mb-[6px]">
-                    <span className={sentenceTagCn}>WHEN</span>
-                    <span className="flex-1 min-w-0">
-                      {describeCron(t.schedule_cron, t.schedule_timezone)}
-                      {t.schedule_start_at && (
-                        <>
-                          {" "}
-                          <span className="text-(--text-03) text-xs">
-                            · starting {new Date(t.schedule_start_at).toLocaleString()}
-                          </span>
-                        </>
-                      )}
-                      {t.schedule_last_fired_at && (
-                        <>
-                          {" "}
-                          <span className="text-(--text-02) text-xs">
-                            · last fired {formatRelative(t.schedule_last_fired_at)}
-                          </span>
-                        </>
-                      )}
-                    </span>
-                  </div>
-                )}
-                <div className="flex items-baseline gap-2">
-                  <span className={sentenceTagCn}>IF</span>
-                  <span className="flex-1 min-w-0">{t.nl_description}</span>
-                </div>
-                {t.message && (
-                  <div className="flex items-baseline gap-2 mt-[6px]">
-                    <span className={sentenceTagCn}>THEN SEND</span>
-                    <span className="flex-1 min-w-0">{t.message}</span>
-                  </div>
-                )}
-                <div className="flex items-baseline gap-2 mt-[6px]">
-                  <span className={sentenceTagCn}>TO</span>
-                  <span className="flex-1 min-w-0 text-(--text-04)">
-                    {destinationLabel(t)}
-                  </span>
-                </div>
-              </div>
-            </li>
-          ))}
-        </ul>
-
-        <SlackChannelsCard />
-
-        <TriggerModal
-          open={modalOpen}
-          initial={editing ?? undefined}
-          onClose={() => {
-            setModalOpen(false);
-            setEditing(null);
-          }}
-          onSaved={(saved) => {
-            void refresh(
-              (cur) => {
-                const prev = cur?.triggers ?? [];
-                const i = prev.findIndex((t) => t.id === saved.id);
-                if (i === -1) return { triggers: [saved, ...prev] };
-                const next = prev.slice();
-                next[i] = saved;
-                return { triggers: next };
-              },
-              { revalidate: true },
-            );
-          }}
-        />
-
-        <TriggerHistoryModal
-          trigger={historyFor}
-          onClose={() => setHistoryFor(null)}
-          onSelectVersion={async (sha) => {
-            if (!historyFor) return;
-            try {
-              const version = await getTriggerVersion(historyFor.id, sha);
-              setEditing({
-                ...historyFor,
-                scope_path: version.scope_path,
-                nl_description: version.nl_description,
-                message: version.message,
-                destination: version.destination,
-                enabled: version.enabled,
-                kind: version.kind ?? historyFor.kind,
-                schedule_cron: version.schedule_cron,
-                schedule_timezone: version.schedule_timezone,
-                schedule_start_at: version.schedule_start_at,
-              });
-              setHistoryFor(null);
+    <main className={isMobile ? "px-3 py-4" : "px-8 py-6"}>
+      <PageHeader
+        title="Triggers"
+        description="Triggers watch a document (or folder) and notice when something specific changes, or check on a recurring schedule. When the trigger fires, the message you wrote shows up on the Events tab so you can review it."
+        actions={
+          <Button
+            variant="action"
+            icon={SvgPlus}
+            onClick={() => {
+              setEditing(null);
               setModalOpen(true);
-            } catch (e) {
-              setMutationError(e instanceof Error ? e.message : "failed to load version");
-            }
-          }}
-        />
+            }}
+          >
+            New trigger
+          </Button>
+        }
+      />
+
+      {listError && (
+        <div className="mb-3 rounded-(--border-radius-04) bg-(--status-error-01) p-[10px] text-[13px] text-(--status-text-error-05)">
+          {listError}
+        </div>
+      )}
+
+      {triggers.length === 0 && !listError && (
+        <p className="text-sm text-(--text-03)">
+          No triggers yet. Create one to start watching documents for changes.
+        </p>
+      )}
+
+      <ul className="m-0 list-none p-0">
+        {triggers.map((t) => (
+          <li
+            key={t.id}
+            className={`mb-[10px] rounded-(--border-radius-08) border border-(--border-01) bg-(--background-tint-00) px-4 py-[14px] ${busyId === t.id ? "opacity-60" : "opacity-100"}`}
+          >
+            <div className="mb-[10px] flex flex-wrap items-center justify-between gap-3">
+              <div className="flex min-w-0 flex-wrap items-baseline gap-[10px] font-mono text-xs text-(--text-03)">
+                <span title={t.scope_path}>
+                  {formatScopePath(t.scope_path)}
+                </span>
+                <span className="text-[11px] text-(--text-02)">{t.id}</span>
+                {t.last_edited_at && (
+                  <span
+                    title={new Date(t.last_edited_at).toLocaleString()}
+                    className="text-[11px] text-(--text-02)"
+                  >
+                    edited {formatRelative(t.last_edited_at)}
+                  </span>
+                )}
+              </div>
+              <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+                <span
+                  className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-[2px] text-[11px] font-semibold tracking-[0.3px] ${t.enabled ? "border-(--border-01) bg-(--background-tint-03) text-(--text-05)" : "border-(--border-01) bg-(--background-tint-02) text-(--text-03)"}`}
+                >
+                  <span
+                    aria-hidden
+                    className={`h-[6px] w-[6px] rounded-full ${t.enabled ? "bg-(--status-text-success-05)" : "bg-(--text-02)"}`}
+                  />
+                  {t.enabled ? "ENABLED" : "DISABLED"}
+                </span>
+                <Button
+                  size="sm"
+                  onClick={() => onToggle(t)}
+                  disabled={busyId === t.id}
+                >
+                  {t.enabled ? "Disable" : "Enable"}
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    setEditing(t);
+                    setModalOpen(true);
+                  }}
+                  disabled={busyId === t.id}
+                >
+                  Edit
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={() => setHistoryFor(t)}
+                  disabled={busyId === t.id}
+                >
+                  History
+                </Button>
+                <Button
+                  size="sm"
+                  variant="danger"
+                  onClick={() => onDelete(t)}
+                  disabled={busyId === t.id}
+                >
+                  Delete
+                </Button>
+              </div>
+            </div>
+            <div className="text-sm leading-[1.55] text-(--text-05)">
+              {t.kind === "schedule" && (
+                <div className="mb-[6px] flex items-baseline gap-2">
+                  <span className={sentenceTagCn}>WHEN</span>
+                  <span className="min-w-0 flex-1">
+                    {describeCron(t.schedule_cron, t.schedule_timezone)}
+                    {t.schedule_start_at && (
+                      <>
+                        {" "}
+                        <span className="text-xs text-(--text-03)">
+                          · starting{" "}
+                          {new Date(t.schedule_start_at).toLocaleString()}
+                        </span>
+                      </>
+                    )}
+                    {t.schedule_last_fired_at && (
+                      <>
+                        {" "}
+                        <span className="text-xs text-(--text-02)">
+                          · last fired{" "}
+                          {formatRelative(t.schedule_last_fired_at)}
+                        </span>
+                      </>
+                    )}
+                  </span>
+                </div>
+              )}
+              <div className="flex items-baseline gap-2">
+                <span className={sentenceTagCn}>IF</span>
+                <span className="min-w-0 flex-1">{t.nl_description}</span>
+              </div>
+              {t.message && (
+                <div className="mt-[6px] flex items-baseline gap-2">
+                  <span className={sentenceTagCn}>THEN SEND</span>
+                  <span className="min-w-0 flex-1">{t.message}</span>
+                </div>
+              )}
+              <div className="mt-[6px] flex items-baseline gap-2">
+                <span className={sentenceTagCn}>TO</span>
+                <span className="min-w-0 flex-1 text-(--text-04)">
+                  {destinationLabel(t)}
+                </span>
+              </div>
+            </div>
+          </li>
+        ))}
+      </ul>
+
+      <SlackChannelsCard />
+
+      <TriggerModal
+        open={modalOpen}
+        initial={editing ?? undefined}
+        onClose={() => {
+          setModalOpen(false);
+          setEditing(null);
+        }}
+        onSaved={(saved) => {
+          void refresh(
+            (cur) => {
+              const prev = cur?.triggers ?? [];
+              const i = prev.findIndex((t) => t.id === saved.id);
+              if (i === -1) return { triggers: [saved, ...prev] };
+              const next = prev.slice();
+              next[i] = saved;
+              return { triggers: next };
+            },
+            { revalidate: true },
+          );
+        }}
+      />
+
+      <TriggerHistoryModal
+        trigger={historyFor}
+        onClose={() => setHistoryFor(null)}
+        onSelectVersion={async (sha) => {
+          if (!historyFor) return;
+          try {
+            const version = await getTriggerVersion(historyFor.id, sha);
+            setEditing({
+              ...historyFor,
+              scope_path: version.scope_path,
+              nl_description: version.nl_description,
+              message: version.message,
+              destination: version.destination,
+              enabled: version.enabled,
+              kind: version.kind ?? historyFor.kind,
+              schedule_cron: version.schedule_cron,
+              schedule_timezone: version.schedule_timezone,
+              schedule_start_at: version.schedule_start_at,
+            });
+            setHistoryFor(null);
+            setModalOpen(true);
+          } catch (e) {
+            setMutationError(
+              e instanceof Error ? e.message : "failed to load version",
+            );
+          }
+        }}
+      />
     </main>
   );
 }
@@ -318,6 +337,7 @@ function SlackChannelsCard() {
   const [url, setUrl] = useState("");
   const [busy, setBusy] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const confirmDialog = useConfirm();
 
   async function onAdd() {
     if (!name.trim() || !url.trim()) return;
@@ -337,7 +357,13 @@ function SlackChannelsCard() {
   }
 
   async function onDelete(id: string, label: string) {
-    if (!confirm(`Delete "${label}"? Triggers posting to it will stop delivering to Slack.`)) {
+    if (
+      !(await confirmDialog({
+        title: `Delete "${label}"?`,
+        body: "Triggers posting to it will stop delivering to Slack.",
+        confirmLabel: "Delete",
+      }))
+    ) {
       return;
     }
     try {
@@ -349,8 +375,8 @@ function SlackChannelsCard() {
   }
 
   return (
-    <section className="mt-[28px] p-4 border border-(--border-01) rounded-(--border-radius-08) bg-(--background-tint-01)">
-      <div className="flex items-center justify-between mb-1">
+    <section className="mt-[28px] rounded-(--border-radius-08) border border-(--border-01) bg-(--background-tint-01) p-4">
+      <div className="mb-1 flex items-center justify-between">
         <h2 className="m-0 text-base">Slack channels</h2>
         {!adding && (
           <Button variant="action" size="sm" onClick={() => setAdding(true)}>
@@ -359,35 +385,38 @@ function SlackChannelsCard() {
         )}
       </div>
       <p className="mt-0 mb-3 text-[13px] text-(--text-03)">
-        Incoming webhooks you can point a trigger at. Create one in Slack (Apps → Incoming
-        Webhooks), then pick it as a trigger&apos;s destination. Private to you.
+        Incoming webhooks you can point a trigger at. Create one in Slack (Apps
+        → Incoming Webhooks), then pick it as a trigger&apos;s destination.
+        Private to you.
       </p>
 
       {error && (
-        <div className="text-(--status-text-error-05) text-[13px] mb-2">
+        <div className="mb-2 text-[13px] text-(--status-text-error-05)">
           {error.message || "Failed to load channels."}
         </div>
       )}
 
       {adding && (
-        <div className="flex flex-col gap-2 p-3 mb-3 border border-(--border-01) rounded-(--border-radius-04) bg-(--background-tint-02)">
+        <div className="mb-3 flex flex-col gap-2 rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-02) p-3">
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="Channel name (e.g. PM Standup)"
             disabled={busy}
             maxLength={80}
-            className="w-full py-2 px-[10px] box-border border border-(--border-01) rounded-(--border-radius-04) text-sm"
+            className="box-border w-full rounded-(--border-radius-04) border border-(--border-01) px-[10px] py-2 text-sm"
           />
           <input
             value={url}
             onChange={(e) => setUrl(e.target.value)}
             placeholder="https://hooks.slack.com/services/…"
             disabled={busy}
-            className="w-full py-2 px-[10px] box-border border border-(--border-01) rounded-(--border-radius-04) text-sm"
+            className="box-border w-full rounded-(--border-radius-04) border border-(--border-01) px-[10px] py-2 text-sm"
           />
           {formError && (
-            <div className="text-(--status-text-error-05) text-[13px]">{formError}</div>
+            <div className="text-[13px] text-(--status-text-error-05)">
+              {formError}
+            </div>
           )}
           <div className="flex gap-2">
             <Button
@@ -408,27 +437,31 @@ function SlackChannelsCard() {
       {isLoading && webhooks.length === 0 && !error && <LoadingSpinner />}
 
       {!isLoading && webhooks.length === 0 && !adding && (
-        <p className="text-(--text-03) text-sm m-0">
+        <p className="m-0 text-sm text-(--text-03)">
           No channels yet — add one to deliver trigger fires to Slack.
         </p>
       )}
 
       {webhooks.length > 0 && (
-        <ul className="list-none p-0 m-0">
+        <ul className="m-0 list-none p-0">
           {webhooks.map((w) => (
             <li
               key={w.id}
-              className="flex items-center gap-3 py-[10px] px-3 border border-(--border-01) rounded-(--border-radius-04) mt-2 bg-(--background-tint-00)"
+              className="mt-2 flex items-center gap-3 rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-00) px-3 py-[10px]"
             >
-              <div className="flex-1 min-w-0">
-                <div className="font-medium text-sm text-(--text-05)">
+              <div className="min-w-0 flex-1">
+                <div className="text-sm font-medium text-(--text-05)">
                   {w.name}
                 </div>
-                <div className="text-xs text-(--text-03) mt-[2px] font-mono">
+                <div className="mt-[2px] font-mono text-xs text-(--text-03)">
                   {w.webhook_url_hint}
                 </div>
               </div>
-              <Button size="sm" variant="danger" onClick={() => void onDelete(w.id, w.name)}>
+              <Button
+                size="sm"
+                variant="danger"
+                onClick={() => void onDelete(w.id, w.name)}
+              >
                 Delete
               </Button>
             </li>

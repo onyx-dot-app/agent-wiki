@@ -17,9 +17,9 @@ export type FrequencyPreset =
 
 export interface ScheduleParts {
   preset: FrequencyPreset;
-  hour: number;       // 0-23, used for daily/weekly/monthly
-  minute: number;     // 0-59, used for daily/weekly/monthly
-  dayOfWeek: number;  // 0=Sun … 6=Sat, used for weekly
+  hour: number; // 0-23, used for daily/weekly/monthly
+  minute: number; // 0-59, used for daily/weekly/monthly
+  dayOfWeek: number; // 0=Sun … 6=Sat, used for weekly
   dayOfMonth: number; // 1-31, used for monthly
 }
 
@@ -45,7 +45,13 @@ export const WEEKDAY_NAMES = [
 ];
 
 export function defaultScheduleParts(): ScheduleParts {
-  return { preset: "every_15_min", hour: 9, minute: 0, dayOfWeek: 1, dayOfMonth: 1 };
+  return {
+    preset: "every_15_min",
+    hour: 9,
+    minute: 0,
+    dayOfWeek: 1,
+    dayOfMonth: 1,
+  };
 }
 
 export function partsToCron(p: ScheduleParts, customCron: string): string {
@@ -81,10 +87,13 @@ export function cronToParts(cron: string | null): ScheduleParts {
   const fallback = defaultScheduleParts();
   if (!cron) return fallback;
   const trimmed = cron.trim();
-  if (trimmed === "*/15 * * * *") return { ...fallback, preset: "every_15_min" };
-  if (trimmed === "*/30 * * * *") return { ...fallback, preset: "every_30_min" };
+  if (trimmed === "*/15 * * * *")
+    return { ...fallback, preset: "every_15_min" };
+  if (trimmed === "*/30 * * * *")
+    return { ...fallback, preset: "every_30_min" };
   if (trimmed === "0 * * * *") return { ...fallback, preset: "hourly" };
-  if (trimmed === "0 */6 * * *") return { ...fallback, preset: "every_6_hours" };
+  if (trimmed === "0 */6 * * *")
+    return { ...fallback, preset: "every_6_hours" };
   const daily = DAILY_RE.exec(trimmed);
   if (daily) {
     return { ...fallback, preset: "daily", minute: +daily[1], hour: +daily[2] };

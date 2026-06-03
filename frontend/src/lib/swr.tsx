@@ -7,7 +7,9 @@ import { apiFetch } from "@/lib/api";
 
 /** Default fetcher: SWR keys are API paths (e.g. "/events?kind=trigger.fire").
  * Pass a tuple `[path, init]` to send a non-GET. */
-function fetcher(key: string | readonly [string, RequestInit?]): Promise<unknown> {
+function fetcher(
+  key: string | readonly [string, RequestInit?],
+): Promise<unknown> {
   if (typeof key === "string") return apiFetch(key);
   const [path, init] = key;
   return apiFetch(path, init);

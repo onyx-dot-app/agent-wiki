@@ -30,7 +30,8 @@ export const NAV_ENTRIES = [
     href: "/app/triggers",
     label: "Triggers",
     icon: SvgWorkflow,
-    description: "Watch wiki pages for specific changes, or check on recurring schedules.",
+    description:
+      "Watch wiki pages for specific changes, or check on recurring schedules.",
   },
   {
     href: "/app/events",
@@ -46,12 +47,12 @@ export const NAV_ENTRIES = [
 ] as const satisfies NavEntry[];
 
 export const ADMIN_NAV_ENTRIES = [
-  { href: "/admin/language-models", label: "Language Models",  icon: SvgKey          },
-  { href: "/admin/web",        label: "Web Search",       icon: SvgGlobe        },
-  { href: "/admin/users",      label: "Users",            icon: SvgUsers        },
-  { href: "/admin/groups",     label: "Groups",           icon: SvgOrganization },
-  { href: "/admin/health",     label: "Health",           icon: SvgActivity     },
-  { href: "/admin/braintrust", label: "Braintrust",       icon: SvgLinkedDots   },
-  { href: "/admin/templates",  label: "Templates",        icon: SvgDocFile      },
-  { href: "/admin/ingest",     label: "Onyx Connection",  icon: SvgDownloadCloud},
+  { href: "/admin/language-models", label: "Language Models", icon: SvgKey },
+  { href: "/admin/web", label: "Web Search", icon: SvgGlobe },
+  { href: "/admin/users", label: "Users", icon: SvgUsers },
+  { href: "/admin/groups", label: "Groups", icon: SvgOrganization },
+  { href: "/admin/health", label: "Health", icon: SvgActivity },
+  { href: "/admin/braintrust", label: "Braintrust", icon: SvgLinkedDots },
+  { href: "/admin/templates", label: "Templates", icon: SvgDocFile },
+  { href: "/admin/ingest", label: "Onyx Connection", icon: SvgDownloadCloud },
 ] as const satisfies NavEntry[];

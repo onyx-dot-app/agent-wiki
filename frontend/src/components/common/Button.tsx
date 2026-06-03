@@ -47,9 +47,17 @@ export const Button = forwardRef<HTMLButtonElement, Props>(function Button(
 
 function sizeStyle(size: ButtonSize): CSSProperties {
   if (size === "sm") {
-    return { padding: "6px 12px", fontSize: 12, borderRadius: "var(--border-radius-04)" };
+    return {
+      padding: "6px 12px",
+      fontSize: 12,
+      borderRadius: "var(--border-radius-04)",
+    };
   }
-  return { padding: "8px 14px", fontSize: 13, borderRadius: "var(--border-radius-08)" };
+  return {
+    padding: "8px 14px",
+    fontSize: 13,
+    borderRadius: "var(--border-radius-08)",
+  };
 }
 
 function variantStyle(variant: ButtonVariant): CSSProperties {

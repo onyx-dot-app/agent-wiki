@@ -3,17 +3,25 @@
 import { Button, Card, Text } from "@onyx-ai/opal/components";
 import { Section } from "@onyx-ai/opal/layouts";
 
+import { useConfirm } from "@/components/common/ConfirmDialog";
 import { closeSession, useAgentSessions } from "@/lib/launchers";
 
 export function ActiveSessionsList({ wikiPath }: { wikiPath: string }) {
   const { sessions, refresh } = useAgentSessions(wikiPath);
+  const confirmDialog = useConfirm();
   const active = sessions.filter(
     (s) => s.status === "active" || s.status === "idle",
   );
   if (active.length === 0) return null;
 
   async function onClose(id: string) {
-    if (!confirm("Close this agent session?")) return;
+    if (
+      !(await confirmDialog({
+        title: "Close this agent session?",
+        confirmLabel: "Close session",
+      }))
+    )
+      return;
     try {
       await closeSession(id, "user_clicked");
     } catch (err) {

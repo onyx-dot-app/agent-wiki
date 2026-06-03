@@ -35,14 +35,20 @@ export function createComment(input: CreateCommentInput): Promise<CommentView> {
 }
 
 /** Reply to a comment (root or another reply). */
-export function replyToComment(commentId: string, body: string): Promise<CommentView> {
+export function replyToComment(
+  commentId: string,
+  body: string,
+): Promise<CommentView> {
   return apiFetch<CommentView>(`/comments/${commentId}/replies`, {
     method: "POST",
     body: JSON.stringify({ body }),
   });
 }
 
-export function editComment(commentId: string, body: string): Promise<CommentView> {
+export function editComment(
+  commentId: string,
+  body: string,
+): Promise<CommentView> {
   return apiFetch<CommentView>(`/comments/${commentId}`, {
     method: "PATCH",
     body: JSON.stringify({ body }),
@@ -50,11 +56,15 @@ export function editComment(commentId: string, body: string): Promise<CommentVie
 }
 
 export function resolveThread(commentId: string): Promise<CommentView> {
-  return apiFetch<CommentView>(`/comments/${commentId}/resolve`, { method: "POST" });
+  return apiFetch<CommentView>(`/comments/${commentId}/resolve`, {
+    method: "POST",
+  });
 }
 
 export function reopenThread(commentId: string): Promise<CommentView> {
-  return apiFetch<CommentView>(`/comments/${commentId}/reopen`, { method: "POST" });
+  return apiFetch<CommentView>(`/comments/${commentId}/reopen`, {
+    method: "POST",
+  });
 }
 
 export function deleteComment(commentId: string): Promise<void> {

@@ -15,6 +15,7 @@ import {
 import { SvgTrash, SvgUser, SvgUserShield } from "@onyx-ai/opal/icons";
 
 import { Avatar } from "@/components/common/Avatar";
+import { useConfirm } from "@/components/common/ConfirmDialog";
 import { BackLink, PageHeader } from "@/components/common/PageHeader";
 import { RequireAdmin } from "@/components/RequireAdmin";
 import { apiFetch } from "@/lib/api";
@@ -55,6 +56,7 @@ function UsersTable() {
   const [query, setQuery] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const confirmDialog = useConfirm();
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -84,7 +86,14 @@ function UsersTable() {
   }
 
   async function remove(u: AdminUser) {
-    if (!confirm(`Delete ${u.email}? This cannot be undone.`)) return;
+    if (
+      !(await confirmDialog({
+        title: `Delete ${u.email}?`,
+        body: "This cannot be undone.",
+        confirmLabel: "Delete",
+      }))
+    )
+      return;
     setBusyId(u.id);
     setActionError(null);
     try {
@@ -159,7 +168,11 @@ function UsersTable() {
             return (
               <div key={u.id} className={styles.row}>
                 <span className={styles.who}>
-                  <Avatar label={initials(u)} size={32} title={displayName(u)} />
+                  <Avatar
+                    label={initials(u)}
+                    size={32}
+                    title={displayName(u)}
+                  />
                   <span className={styles.whoText}>
                     <Text font="main-ui-body" nowrap>
                       {displayName(u)}
@@ -177,7 +190,9 @@ function UsersTable() {
                         —
                       </Text>
                     ) : (
-                      u.groups.map((g) => <Tag key={g} title={g} color="gray" />)
+                      u.groups.map((g) => (
+                        <Tag key={g} title={g} color="gray" />
+                      ))
                     )}
                   </span>
                 )}
@@ -202,7 +217,9 @@ function UsersTable() {
                     icon={SvgTrash}
                     onClick={() => void remove(u)}
                     disabled={busy || isSelf}
-                    tooltip={isSelf ? "You can't delete yourself" : "Delete user"}
+                    tooltip={
+                      isSelf ? "You can't delete yourself" : "Delete user"
+                    }
                   />
                 </span>
               </div>

@@ -23,6 +23,7 @@ import {
 } from "@onyx-ai/opal/icons";
 
 import { Avatar } from "@/components/common/Avatar";
+import { useConfirm } from "@/components/common/ConfirmDialog";
 import { BackLink, PageHeader } from "@/components/common/PageHeader";
 import { RequireAdmin } from "@/components/RequireAdmin";
 import { ApiError } from "@/lib/api";
@@ -43,7 +44,9 @@ import styles from "./groups.module.css";
 function groupSub(g: Group): string {
   const parts: string[] = [];
   if (g.folder_count > 0) {
-    parts.push(`${g.folder_count} ${g.folder_count === 1 ? "folder" : "folders"}`);
+    parts.push(
+      `${g.folder_count} ${g.folder_count === 1 ? "folder" : "folders"}`,
+    );
   }
   if (g.page_count > 0) {
     parts.push(`${g.page_count} wiki ${g.page_count === 1 ? "page" : "pages"}`);
@@ -77,6 +80,7 @@ function GroupsManager() {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [busy, setBusy] = useState(false);
+  const confirmDialog = useConfirm();
   const [createError, setCreateError] = useState<string | null>(null);
 
   const filtered = useMemo(() => {
@@ -97,14 +101,23 @@ function GroupsManager() {
       await refresh();
       setSelected(g.id);
     } catch (err) {
-      setCreateError(err instanceof Error ? err.message : "Failed to create group");
+      setCreateError(
+        err instanceof Error ? err.message : "Failed to create group",
+      );
     } finally {
       setBusy(false);
     }
   }
 
   async function onDelete(g: Group) {
-    if (!confirm(`Delete group "${g.name}"? Members aren't deleted.`)) return;
+    if (
+      !(await confirmDialog({
+        title: `Delete group "${g.name}"?`,
+        body: "Members aren't deleted.",
+        confirmLabel: "Delete",
+      }))
+    )
+      return;
     await deleteGroup(g.id);
     if (selected === g.id) setSelected(null);
     await refresh();
@@ -162,7 +175,12 @@ function GroupsManager() {
             placeholder="Description (optional)"
           />
           <div className={styles.createRow}>
-            <Button type="submit" variant="action" size="md" disabled={busy || !name.trim()}>
+            <Button
+              type="submit"
+              variant="action"
+              size="md"
+              disabled={busy || !name.trim()}
+            >
               Create
             </Button>
             <Button
@@ -273,7 +291,12 @@ function GroupDetail({
 
   return (
     <div>
-      <Button prominence="tertiary" size="sm" icon={SvgChevronLeft} onClick={onBack}>
+      <Button
+        prominence="tertiary"
+        size="sm"
+        icon={SvgChevronLeft}
+        onClick={onBack}
+      >
         All groups
       </Button>
       <div className={styles.detailHead}>

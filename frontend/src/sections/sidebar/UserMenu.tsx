@@ -57,9 +57,7 @@ export function UserMenu({
       >
         {/* Identity header — who is signed in */}
         <div className="flex flex-col px-3 pt-2 pb-1.5">
-          {user?.name && (
-            <Text font="main-content-body">{user.name}</Text>
-          )}
+          {user?.name && <Text font="main-content-body">{user.name}</Text>}
           <Text font="secondary-body" color="text-03">
             {user?.email ?? ""}
           </Text>

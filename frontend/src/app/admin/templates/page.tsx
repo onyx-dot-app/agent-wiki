@@ -4,6 +4,7 @@ import { useEffect, useState, type FormEvent } from "react";
 
 import { Button } from "@onyx-ai/opal/components";
 import { SvgChevronDown, SvgChevronUp } from "@onyx-ai/opal/icons";
+import { useConfirm } from "@/components/common/ConfirmDialog";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { BackLink, PageHeader } from "@/components/common/PageHeader";
 import { RequireAdmin } from "@/components/RequireAdmin";
@@ -21,7 +22,7 @@ export default function AdminTemplatesPage() {
   const isMobile = useIsMobile();
   return (
     <RequireAdmin>
-      <main className={`max-w-[960px] ${isMobile ? "py-4 px-3" : "py-6 px-8"}`}>
+      <main className={`max-w-[960px] ${isMobile ? "px-3 py-4" : "px-8 py-6"}`}>
         <BackLink />
         <PageHeader
           title="Document templates"
@@ -41,9 +42,11 @@ function TemplatesList() {
   // ordering and the server's view in sync without manual reconciliation.
   const [reordering, setReordering] = useState<string | null>(null);
   const [reorderError, setReorderError] = useState<string | null>(null);
+  const confirmDialog = useConfirm();
 
   if (isLoading) return <LoadingSpinner />;
-  if (error) return <div className="text-(--status-text-error-05)">{error.message}</div>;
+  if (error)
+    return <div className="text-(--status-text-error-05)">{error.message}</div>;
 
   async function move(index: number, direction: -1 | 1) {
     const target = index + direction;
@@ -83,20 +86,20 @@ function TemplatesList() {
         </Button>
       </div>
       {reorderError && (
-        <div className="py-2 px-3 bg-(--status-error-01) border border-(--status-error-02) text-(--status-text-error-05) rounded-(--border-radius-04) text-[13px]">
+        <div className="rounded-(--border-radius-04) border border-(--status-error-02) bg-(--status-error-01) px-3 py-2 text-[13px] text-(--status-text-error-05)">
           {reorderError}
         </div>
       )}
       {templates.length === 0 ? (
-        <div className="p-6 border border-dashed border-(--border-01) rounded-(--border-radius-08) text-(--text-03) text-center">
+        <div className="rounded-(--border-radius-08) border border-dashed border-(--border-01) p-6 text-center text-(--text-03)">
           No templates yet. Click "New template" to define the first one.
         </div>
       ) : (
-        <ul className="list-none p-0 m-0 flex flex-col gap-2">
+        <ul className="m-0 flex list-none flex-col gap-2 p-0">
           {templates.map((t, i) => (
             <li
               key={t.id}
-              className="py-3 px-4 border border-(--border-01) rounded-(--border-radius-08) bg-(--background-tint-00) flex items-center gap-3"
+              className="flex items-center gap-3 rounded-(--border-radius-08) border border-(--border-01) bg-(--background-tint-00) px-4 py-3"
             >
               <ReorderHandle
                 disabled={reordering !== null}
@@ -105,15 +108,16 @@ function TemplatesList() {
                 onUp={() => void move(i, -1)}
                 onDown={() => void move(i, 1)}
               />
-              <div className="flex-1 min-w-0">
-                <div className="font-semibold text-sm">{t.name}</div>
+              <div className="min-w-0 flex-1">
+                <div className="text-sm font-semibold">{t.name}</div>
                 {t.description && (
-                  <div className="text-[13px] text-(--text-03) mt-[2px] overflow-hidden text-ellipsis whitespace-nowrap">
+                  <div className="mt-[2px] overflow-hidden text-[13px] text-ellipsis whitespace-nowrap text-(--text-03)">
                     {t.description}
                   </div>
                 )}
-                <div className="text-xs text-(--text-02) mt-1">
-                  {t.system_prompt ? "Has chat prompt" : "No chat prompt"} • Updated {t.updated_at}
+                <div className="mt-1 text-xs text-(--text-02)">
+                  {t.system_prompt ? "Has chat prompt" : "No chat prompt"} •
+                  Updated {t.updated_at}
                 </div>
               </div>
               <Button size="sm" onClick={() => setEditing(t)}>
@@ -123,7 +127,13 @@ function TemplatesList() {
                 size="sm"
                 variant="danger"
                 onClick={async () => {
-                  if (!confirm(`Delete template "${t.name}"?`)) return;
+                  if (
+                    !(await confirmDialog({
+                      title: `Delete template "${t.name}"?`,
+                      confirmLabel: "Delete",
+                    }))
+                  )
+                    return;
                   await deleteTemplate(t.id);
                   await refresh();
                 }}
@@ -163,7 +173,7 @@ function ReorderHandle({
 }) {
   return (
     <div
-      className="flex flex-col gap-[2px] shrink-0"
+      className="flex shrink-0 flex-col gap-[2px]"
       aria-label="Reorder template"
     >
       <ArrowButton
@@ -200,9 +210,13 @@ function ArrowButton({
       disabled={disabled}
       title={title}
       aria-label={title}
-      className={`w-[24px] h-[18px] flex items-center justify-center bg-transparent border border-(--border-01) rounded-(--border-radius-04) text-(--text-04) p-0 ${disabled ? "cursor-not-allowed opacity-35" : "cursor-pointer"}`}
+      className={`flex h-[18px] w-[24px] items-center justify-center rounded-(--border-radius-04) border border-(--border-01) bg-transparent p-0 text-(--text-04) ${disabled ? "cursor-not-allowed opacity-35" : "cursor-pointer"}`}
     >
-      {direction === "up" ? <SvgChevronUp size={10} /> : <SvgChevronDown size={10} />}
+      {direction === "up" ? (
+        <SvgChevronUp size={10} />
+      ) : (
+        <SvgChevronDown size={10} />
+      )}
     </button>
   );
 }
@@ -219,7 +233,9 @@ function TemplateModal({
   const [name, setName] = useState(initial?.name ?? "");
   const [body, setBody] = useState(initial?.body ?? "");
   const [description, setDescription] = useState(initial?.description ?? "");
-  const [systemPrompt, setSystemPrompt] = useState(initial?.system_prompt ?? "");
+  const [systemPrompt, setSystemPrompt] = useState(
+    initial?.system_prompt ?? "",
+  );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -257,13 +273,13 @@ function TemplateModal({
 
   return (
     <div
-      className="fixed inset-0 bg-(--mask-03) flex items-center justify-center z-[1000] p-4"
+      className="fixed inset-0 z-[1000] flex items-center justify-center bg-(--mask-03) p-4"
       onClick={onClose}
     >
       <form
         onSubmit={onSubmit}
         onClick={(e) => e.stopPropagation()}
-        className="bg-(--background-tint-00) rounded-(--border-radius-12) shadow-(--shadow-modal) p-5 w-[min(640px,100%)] max-h-[90vh] overflow-y-auto flex flex-col gap-3"
+        className="flex max-h-[90vh] w-[min(640px,100%)] flex-col gap-3 overflow-y-auto rounded-(--border-radius-12) bg-(--background-tint-00) p-5 shadow-(--shadow-modal)"
       >
         <h2 className="m-0 text-lg">
           {initial ? "Edit template" : "New template"}
@@ -298,7 +314,7 @@ function TemplateModal({
             placeholder="# Title&#10;&#10;## Section&#10;…"
             required
             rows={12}
-            className={`${inputClass} font-mono resize-y`}
+            className={`${inputClass} resize-y font-mono`}
           />
         </label>
 
@@ -309,13 +325,17 @@ function TemplateModal({
             onChange={(e) => setSystemPrompt(e.target.value)}
             placeholder="Optional. Appended to the chat agent's default prompt while the user is drafting from this template."
             rows={5}
-            className={`${inputClass} font-mono resize-y`}
+            className={`${inputClass} resize-y font-mono`}
           />
         </label>
 
-        {error && <div className="text-(--status-text-error-05) text-[13px]">{error}</div>}
+        {error && (
+          <div className="text-[13px] text-(--status-text-error-05)">
+            {error}
+          </div>
+        )}
 
-        <div className="flex justify-end gap-2 mt-1">
+        <div className="mt-1 flex justify-end gap-2">
           <Button type="button" onClick={onClose} disabled={saving}>
             Cancel
           </Button>
@@ -328,5 +348,6 @@ function TemplateModal({
   );
 }
 
-const inputClass = "w-full py-2 px-[10px] box-border border border-(--border-01) rounded-(--border-radius-04) text-sm";
+const inputClass =
+  "w-full py-2 px-[10px] box-border border border-(--border-01) rounded-(--border-radius-04) text-sm";
 const lblClass = "mb-1 text-[13px] font-medium";

@@ -3,6 +3,7 @@ import { DM_Mono, Hanken_Grotesk } from "next/font/google";
 import type { ReactNode } from "react";
 
 import { ChatWidget } from "@/components/chat/ChatWidget";
+import { ConfirmProvider } from "@/components/common/ConfirmDialog";
 import { AuthProvider } from "@/lib/auth";
 import { DraftingProvider } from "@/lib/drafting";
 import { SWRProvider } from "@/lib/swr";
@@ -14,7 +15,13 @@ const hankenGrotesk = Hanken_Grotesk({
   subsets: ["latin"],
   variable: "--font-hanken-grotesk",
   display: "swap",
-  fallback: ["-apple-system", "BlinkMacSystemFont", "Segoe UI", "Roboto", "sans-serif"],
+  fallback: [
+    "-apple-system",
+    "BlinkMacSystemFont",
+    "Segoe UI",
+    "Roboto",
+    "sans-serif",
+  ],
 });
 
 const dmMono = DM_Mono({
@@ -22,7 +29,15 @@ const dmMono = DM_Mono({
   subsets: ["latin"],
   variable: "--font-dm-mono",
   display: "swap",
-  fallback: ["SF Mono", "Monaco", "Cascadia Code", "Roboto Mono", "Consolas", "Courier New", "monospace"],
+  fallback: [
+    "SF Mono",
+    "Monaco",
+    "Cascadia Code",
+    "Roboto Mono",
+    "Consolas",
+    "Courier New",
+    "monospace",
+  ],
 });
 
 export const metadata = {
@@ -56,8 +71,10 @@ export default function RootLayout({ children }: { children: ReactNode }) {
             <ThemeProvider>
               <DraftingProvider>
                 <Tooltip.Provider delayDuration={300}>
-                  {children}
-                  <ChatWidget />
+                  <ConfirmProvider>
+                    {children}
+                    <ChatWidget />
+                  </ConfirmProvider>
                 </Tooltip.Provider>
               </DraftingProvider>
             </ThemeProvider>

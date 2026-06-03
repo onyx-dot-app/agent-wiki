@@ -121,7 +121,7 @@ export function DiffView({
             </Text>
           </div>
         ) : (
-          <article className="markdown">
+          <article className={`${styles.doc} markdown`}>
             <ReactMarkdown remarkPlugins={[remarkGfm]}>
               {body ?? ""}
             </ReactMarkdown>

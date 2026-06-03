@@ -27,66 +27,70 @@ export default function EventsPage() {
 
   return (
     <main style={{ padding: isMobile ? "16px 12px" : "24px 32px" }}>
-        <PageHeader
-          title="Events"
-          description="Trigger fires, newest first."
-          actions={
-            <Button onClick={() => void refresh()} disabled={isValidating}>
-              {isValidating ? "Refreshing…" : "Refresh"}
-            </Button>
-          }
-        />
+      <PageHeader
+        title="Events"
+        description="Trigger fires, newest first."
+        actions={
+          <Button onClick={() => void refresh()} disabled={isValidating}>
+            {isValidating ? "Refreshing…" : "Refresh"}
+          </Button>
+        }
+      />
 
-        {errorMessage && (
-          <div className="p-[10px] bg-(--status-error-01) text-(--status-text-error-05) rounded-(--border-radius-04) text-[13px] mb-3">
-            {errorMessage}
-          </div>
-        )}
+      {errorMessage && (
+        <div className="mb-3 rounded-(--border-radius-04) bg-(--status-error-01) p-[10px] text-[13px] text-(--status-text-error-05)">
+          {errorMessage}
+        </div>
+      )}
 
-        {events.length === 0 && !errorMessage && !isValidating && (
-          <p className="text-(--text-03) text-sm">No trigger fires yet.</p>
-        )}
+      {events.length === 0 && !errorMessage && !isValidating && (
+        <p className="text-sm text-(--text-03)">No trigger fires yet.</p>
+      )}
 
-        <ul className="list-none p-0 m-0">
-          {events.map((ev) => {
-            const p = ev.payload as {
-              doc_path?: string;
-              change_kind?: string;
-              reason?: string;
-              trigger_id?: string;
-            };
-            return (
-              <li
-                key={ev.id}
-                className="py-[14px] px-4 border border-(--border-01) rounded-(--border-radius-08) mb-[10px] bg-(--background-tint-00)"
-              >
-                <div className="flex items-baseline justify-between gap-3 mb-[6px]">
-                  <div className="font-mono text-xs text-(--text-05)">
-                    {p.doc_path ? (
-                      <span title={p.doc_path}>{formatScopePath(p.doc_path)}</span>
-                    ) : (
-                      <em className="text-(--text-02)">(no path)</em>
-                    )}
-                    {p.change_kind && (
-                      <span className="ml-2 py-[1px] px-[6px] bg-(--background-tint-03) text-(--text-05) rounded-(--border-radius-04) text-[10px] font-semibold uppercase">
-                        {p.change_kind}
-                      </span>
-                    )}
-                  </div>
-                  <span className="text-xs text-(--text-03)">{formatTs(ev.ts, timezone)}</span>
+      <ul className="m-0 list-none p-0">
+        {events.map((ev) => {
+          const p = ev.payload as {
+            doc_path?: string;
+            change_kind?: string;
+            reason?: string;
+            trigger_id?: string;
+          };
+          return (
+            <li
+              key={ev.id}
+              className="mb-[10px] rounded-(--border-radius-08) border border-(--border-01) bg-(--background-tint-00) px-4 py-[14px]"
+            >
+              <div className="mb-[6px] flex items-baseline justify-between gap-3">
+                <div className="font-mono text-xs text-(--text-05)">
+                  {p.doc_path ? (
+                    <span title={p.doc_path}>
+                      {formatScopePath(p.doc_path)}
+                    </span>
+                  ) : (
+                    <em className="text-(--text-02)">(no path)</em>
+                  )}
+                  {p.change_kind && (
+                    <span className="ml-2 rounded-(--border-radius-04) bg-(--background-tint-03) px-[6px] py-[1px] text-[10px] font-semibold text-(--text-05) uppercase">
+                      {p.change_kind}
+                    </span>
+                  )}
                 </div>
-                {p.reason && (
-                  <div className="text-sm text-(--text-04) whitespace-pre-wrap">
-                    {p.reason}
-                  </div>
-                )}
-                <div className="mt-2 text-[11px] text-(--text-02)">
-                  trigger {ev.target ?? "?"}
+                <span className="text-xs text-(--text-03)">
+                  {formatTs(ev.ts, timezone)}
+                </span>
+              </div>
+              {p.reason && (
+                <div className="text-sm whitespace-pre-wrap text-(--text-04)">
+                  {p.reason}
                 </div>
-              </li>
-            );
-          })}
-        </ul>
+              )}
+              <div className="mt-2 text-[11px] text-(--text-02)">
+                trigger {ev.target ?? "?"}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
     </main>
   );
 }

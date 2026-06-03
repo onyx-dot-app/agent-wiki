@@ -31,6 +31,17 @@ Both hooks resolve their version via `uv run --project backend --extra dev`
 so the pre-commit run uses the exact same tools as `uv sync --extra dev`.
 Make sure you've run `uv sync --extra dev` in `backend/` first.
 
+What runs on frontend files:
+
+- **prettier** (`frontend/.prettierrc`, with `prettier-plugin-tailwindcss`
+  for deterministic class ordering) — formats staged files under
+  `frontend/src/` in place.
+- **tsc** (`bun run typecheck`) — whole-project on any frontend `.ts`/`.tsx`
+  change, for the same import-graph reason as basedpyright; the incremental
+  cache keeps it sub-second.
+
+Both shell out to `bun` inside `frontend/`, so run `bun install` there first.
+
 Add new checks as hooks here, not as one-off CI steps.
 
 ## Layout

@@ -50,7 +50,10 @@ export function useAdminUsers() {
 }
 
 /** Best display label for a user — name if set, else email. */
-export function displayName(u: { name?: string | null; email: string }): string {
+export function displayName(u: {
+  name?: string | null;
+  email: string;
+}): string {
   return (u.name && u.name.trim()) || u.email;
 }
 

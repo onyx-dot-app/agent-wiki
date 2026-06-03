@@ -1,6 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import {
+  useEffect,
+  useMemo,
+  useState,
+  type FormEvent,
+  type ReactNode,
+} from "react";
 
 import { Button } from "@onyx-ai/opal/components";
 import { BackLink, PageHeader } from "@/components/common/PageHeader";
@@ -52,20 +58,23 @@ export default function SettingsPage() {
 
   return (
     <main className={styles.main}>
-        <BackLink href="/" label="← Home" />
-        <PageHeader
-          title="Personal settings"
-          description="Profile fields and preferences scoped to your account. Saved on the server, so they follow you across browsers."
+      <BackLink href="/" label="← Home" />
+      <PageHeader
+        title="Personal settings"
+        description="Profile fields and preferences scoped to your account. Saved on the server, so they follow you across browsers."
+      />
+      <Section title="Profile">
+        <ProfileForm initialName={user.name} updateProfile={updateProfile} />
+      </Section>
+      <Section title="Preferences">
+        <SettingsForm initial={user.settings} updateSettings={updateSettings} />
+      </Section>
+      <Section title="Chat model">
+        <ChatModelForm
+          initial={user.settings}
+          updateSettings={updateSettings}
         />
-        <Section title="Profile">
-          <ProfileForm initialName={user.name} updateProfile={updateProfile} />
-        </Section>
-        <Section title="Preferences">
-          <SettingsForm initial={user.settings} updateSettings={updateSettings} />
-        </Section>
-        <Section title="Chat model">
-          <ChatModelForm initial={user.settings} updateSettings={updateSettings} />
-        </Section>
+      </Section>
     </main>
   );
 }
@@ -73,7 +82,7 @@ export default function SettingsPage() {
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section className="mt-6">
-      <h2 className="m-0 mb-3 text-sm font-semibold uppercase tracking-[0.4px] text-(--text-03)">
+      <h2 className="m-0 mb-3 text-sm font-semibold tracking-[0.4px] text-(--text-03) uppercase">
         {title}
       </h2>
       {children}
@@ -131,7 +140,8 @@ function ProfileForm({
           className={inputClass}
         />
         <div className={hintClass}>
-          Shown in the app header and on activity attributed to you. Leave blank to fall back to your email.
+          Shown in the app header and on activity attributed to you. Leave blank
+          to fall back to your email.
         </div>
       </label>
 
@@ -153,7 +163,10 @@ function SettingsForm({
   initial: UserSettings;
   updateSettings: (partial: Partial<UserSettings>) => Promise<UserSettings>;
 }) {
-  const [draft, setDraft] = useState<UserSettings>({ ...DEFAULT_SETTINGS, ...initial });
+  const [draft, setDraft] = useState<UserSettings>({
+    ...DEFAULT_SETTINGS,
+    ...initial,
+  });
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -173,7 +186,10 @@ function SettingsForm({
     );
   }, [draft, initial]);
 
-  function update<K extends keyof UserSettings>(key: K, value: UserSettings[K]) {
+  function update<K extends keyof UserSettings>(
+    key: K,
+    value: UserSettings[K],
+  ) {
     setDraft((d) => ({ ...d, [key]: value }));
     setSaved(false);
     setError(null);
@@ -223,7 +239,9 @@ function SettingsForm({
           <option value="light">Light</option>
           <option value="dark">Dark</option>
         </select>
-        <div className={hintClass}>Visual chrome of the app on this account.</div>
+        <div className={hintClass}>
+          Visual chrome of the app on this account.
+        </div>
       </label>
 
       <label>
@@ -268,7 +286,7 @@ function SettingsForm({
                     update("timezone", "UTC");
                   }
                 }}
-                className="bg-transparent border-none p-0 text-xs text-(--text-03) cursor-pointer underline"
+                className="cursor-pointer border-none bg-transparent p-0 text-xs text-(--text-03) underline"
               >
                 Pick from common list
               </button>
@@ -281,7 +299,9 @@ function SettingsForm({
         <div className={lblClass}>Default landing page</div>
         <select
           value={draft.default_landing}
-          onChange={(e) => update("default_landing", e.target.value as DefaultLanding)}
+          onChange={(e) =>
+            update("default_landing", e.target.value as DefaultLanding)
+          }
           className={inputClass}
         >
           <option value="wiki_home">Wiki home</option>
@@ -326,7 +346,9 @@ function ChatModelForm({
   }, [initial.chat_model]);
 
   useEffect(() => {
-    apiFetch<LLMStatus>("/llm/status").then(setLlmStatus).catch(() => null);
+    apiFetch<LLMStatus>("/llm/status")
+      .then(setLlmStatus)
+      .catch(() => null);
   }, []);
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
@@ -354,13 +376,21 @@ function ChatModelForm({
         <div className={lblClass}>Chat model</div>
         <input
           value={chatModel}
-          onChange={(e) => { setChatModel(e.target.value); setSaved(false); setError(null); }}
+          onChange={(e) => {
+            setChatModel(e.target.value);
+            setSaved(false);
+            setError(null);
+          }}
           placeholder={placeholder}
           className={inputClass}
         />
         <div className={hintClass}>
-          Override the model used in your chat sessions. Leave blank to use the admin-configured agent default
-          {llmStatus?.configured ? ` (currently ${llmStatus.provider} / ${llmStatus.model})` : ""}.
+          Override the model used in your chat sessions. Leave blank to use the
+          admin-configured agent default
+          {llmStatus?.configured
+            ? ` (currently ${llmStatus.provider} / ${llmStatus.model})`
+            : ""}
+          .
         </div>
       </label>
       {error && <div className="text-(--status-text-error-05)">{error}</div>}

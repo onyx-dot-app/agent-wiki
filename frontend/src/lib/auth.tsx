@@ -1,6 +1,13 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useState,
+  type ReactNode,
+} from "react";
 import { useRouter, usePathname } from "next/navigation";
 
 import { ApiError, apiFetch } from "@/lib/api";
@@ -76,13 +83,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(withDefaultSettings(me));
   }, []);
 
-  const signup = useCallback(async (email: string, password: string, name?: string) => {
-    const me = await apiFetch<AuthUser>("/auth/signup", {
-      method: "POST",
-      body: JSON.stringify({ email, password, name }),
-    });
-    setUser(withDefaultSettings(me));
-  }, []);
+  const signup = useCallback(
+    async (email: string, password: string, name?: string) => {
+      const me = await apiFetch<AuthUser>("/auth/signup", {
+        method: "POST",
+        body: JSON.stringify({ email, password, name }),
+      });
+      setUser(withDefaultSettings(me));
+    },
+    [],
+  );
 
   const logout = useCallback(async () => {
     await apiFetch<void>("/auth/logout", { method: "POST" });
@@ -116,7 +126,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ user, config, loading, login, signup, logout, updateSettings, updateProfile }}
+      value={{
+        user,
+        config,
+        loading,
+        login,
+        signup,
+        logout,
+        updateSettings,
+        updateProfile,
+      }}
     >
       {children}
     </AuthContext.Provider>
@@ -147,7 +166,12 @@ export function useRequireAuth(): AuthContextValue {
   const router = useRouter();
   const pathname = usePathname();
   useEffect(() => {
-    if (!auth.loading && !auth.user && pathname !== "/login" && pathname !== "/signup") {
+    if (
+      !auth.loading &&
+      !auth.user &&
+      pathname !== "/login" &&
+      pathname !== "/signup"
+    ) {
       const next = encodeURIComponent(pathname || "/");
       router.replace(`/login?next=${next}`);
     }

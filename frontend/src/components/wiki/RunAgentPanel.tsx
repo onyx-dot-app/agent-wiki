@@ -380,8 +380,8 @@ export function RunAgentPanel({ open, onClose, wikiPath }: Props) {
 
             <div className={styles.footerBand}>
               <span className={styles.helper}>
-                This will launch a session in <strong>{selectedName}</strong> with
-                your message.
+                This will launch a session in <strong>{selectedName}</strong>{" "}
+                with your message.
               </span>
               <Button type="submit" variant="action" disabled={!canRun || busy}>
                 {busy ? "Launching..." : "Start"}

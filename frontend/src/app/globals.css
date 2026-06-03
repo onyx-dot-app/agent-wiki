@@ -1,18 +1,14 @@
 @import "@onyx-ai/opal/root.css";
 @config "../../tailwind.config.cjs";
 
-/* Reserve the scrollbar gutter on the root scroll container so layout
-   width stays constant whether content fits or overflows. Without this,
-   pages that toggle between short and tall content cause a horizontal
-   shift as the scrollbar appears/disappears. */
-html {
-    scrollbar-gutter: stable;
-}
-
 /* Tell the browser which color scheme is active so native UI (scrollbars,
    autofill, date pickers) uses matching light/dark variants. */
-:root { color-scheme: light; }
-.dark { color-scheme: dark; }
+:root {
+  color-scheme: light;
+}
+.dark {
+  color-scheme: dark;
+}
 
 /* ── Shadow tokens ────────────────────────────────────────────────────────
    Composite box-shadow strings built from Opal's alpha shadow tokens.
@@ -20,25 +16,31 @@ html {
    full box-shadow strings, so we compose them here.
    ───────────────────────────────────────────────────────────────────── */
 :root {
-  --shadow-sm:      0 1px 2px var(--shadow-01);
-  --shadow-md:      0 4px 12px var(--shadow-02);
+  --shadow-sm: 0 1px 2px var(--shadow-01);
+  --shadow-md: 0 4px 12px var(--shadow-02);
   --shadow-popover: 0 8px 24px var(--shadow-02);
-  --shadow-fab:     0 6px 20px var(--shadow-03);
-  --shadow-modal:   0 24px 60px var(--shadow-03);
-  --shadow-panel:   -4px 0 24px var(--shadow-02);
+  --shadow-fab: 0 6px 20px var(--shadow-03);
+  --shadow-modal: 0 24px 60px var(--shadow-03);
+  --shadow-panel: -4px 0 24px var(--shadow-02);
 }
 
 /* ── Primary (action) buttons ─────────────────────────────────────────────
    Override Opal's default blue action surface with the app's near-black
    accent. Scoped to button elements so links keep their Opal color.
    ───────────────────────────────────────────────────────────────────── */
-.interactive[data-interactive-variant="action"][data-interactive-prominence="primary"]:not([data-disabled]) {
+.interactive[data-interactive-variant="action"][data-interactive-prominence="primary"]:not(
+    [data-disabled]
+  ) {
   background-color: var(--background-tint-inverted-00) !important;
   --interactive-foreground: var(--text-inverted-05);
   --interactive-foreground-icon: var(--text-inverted-05);
 }
-.interactive[data-interactive-variant="action"][data-interactive-prominence="primary"]:hover:not([data-disabled]),
-.interactive[data-interactive-variant="action"][data-interactive-prominence="primary"][data-interaction="hover"]:not([data-disabled]) {
+.interactive[data-interactive-variant="action"][data-interactive-prominence="primary"]:hover:not(
+    [data-disabled]
+  ),
+.interactive[data-interactive-variant="action"][data-interactive-prominence="primary"][data-interaction="hover"]:not(
+    [data-disabled]
+  ) {
   background-color: var(--background-tint-inverted-01) !important;
 }
 /* Disabled primary action — neutral grey, never Opal's default blue tint. */
@@ -61,11 +63,11 @@ html {
    picker). The container still scrolls — only the chrome is hidden.
    ───────────────────────────────────────────────────────────────────── */
 .scroll-x-hidden {
-    scrollbar-width: none;
-    -ms-overflow-style: none;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
 }
 .scroll-x-hidden::-webkit-scrollbar {
-    display: none;
+  display: none;
 }
 
 /* ── Radix popovers ───────────────────────────────────────────────────────
@@ -75,12 +77,12 @@ html {
    is the only way to lift the menu above the modal.
    ───────────────────────────────────────────────────────────────────── */
 [data-radix-popper-content-wrapper] {
-    z-index: 1000 !important;
+  z-index: 1000 !important;
 }
 
 /* Floating menus keep their shadow for depth but drop the hard border. */
 [data-radix-popper-content-wrapper] > * {
-    border-color: transparent !important;
+  border-color: transparent !important;
 }
 
 /* ── Markdown rendering ───────────────────────────────────────────────────

@@ -57,7 +57,9 @@ export interface TriggerUpdateInput {
 }
 
 export function useTriggers() {
-  const { data, error, isLoading, mutate } = useSWR<{ triggers: Trigger[] }>("/triggers");
+  const { data, error, isLoading, mutate } = useSWR<{ triggers: Trigger[] }>(
+    "/triggers",
+  );
   return {
     triggers: data?.triggers ?? [],
     error: error as Error | undefined,
@@ -73,7 +75,10 @@ export function createTrigger(input: TriggerCreateInput): Promise<Trigger> {
   });
 }
 
-export function updateTrigger(id: string, patch: TriggerUpdateInput): Promise<Trigger> {
+export function updateTrigger(
+  id: string,
+  patch: TriggerUpdateInput,
+): Promise<Trigger> {
   return apiFetch<Trigger>(`/triggers/${id}`, {
     method: "PUT",
     body: JSON.stringify(patch),
@@ -85,7 +90,9 @@ export function deleteTrigger(id: string): Promise<void> {
 }
 
 export async function getTriggerHistory(id: string): Promise<TriggerCommit[]> {
-  const r = await apiFetch<{ commits: TriggerCommit[] }>(`/triggers/${id}/history`);
+  const r = await apiFetch<{ commits: TriggerCommit[] }>(
+    `/triggers/${id}/history`,
+  );
   return r.commits;
 }
 
@@ -103,7 +110,10 @@ export interface TriggerVersion {
   schedule_start_at: string | null;
 }
 
-export function getTriggerVersion(id: string, sha: string): Promise<TriggerVersion> {
+export function getTriggerVersion(
+  id: string,
+  sha: string,
+): Promise<TriggerVersion> {
   return apiFetch<TriggerVersion>(`/triggers/${id}/version/${sha}`);
 }
 
@@ -137,9 +147,9 @@ export interface SlackWebhook {
 }
 
 export function useSlackWebhooks() {
-  const { data, error, isLoading, mutate } = useSWR<{ webhooks: SlackWebhook[] }>(
-    "/triggers/slack-webhooks",
-  );
+  const { data, error, isLoading, mutate } = useSWR<{
+    webhooks: SlackWebhook[];
+  }>("/triggers/slack-webhooks");
   return {
     webhooks: data?.webhooks ?? [],
     error: error as Error | undefined,

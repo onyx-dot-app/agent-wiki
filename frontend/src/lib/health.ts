@@ -20,9 +20,10 @@ export interface HealthResponse {
 }
 
 export function useHealth(opts: { refreshIntervalMs?: number } = {}) {
-  const { data, error, isLoading, isValidating, mutate } = useSWR<HealthResponse>("/health", {
-    refreshInterval: opts.refreshIntervalMs,
-  });
+  const { data, error, isLoading, isValidating, mutate } =
+    useSWR<HealthResponse>("/health", {
+      refreshInterval: opts.refreshIntervalMs,
+    });
   return {
     health: data,
     error: error as Error | undefined,

@@ -29,8 +29,12 @@ export interface CreateTemplateInput {
 export type UpdateTemplateInput = CreateTemplateInput;
 
 /** Picker-facing list (no body / system_prompt) for any authed user. */
-export async function listTemplateSummaries(): Promise<DocumentTemplateSummary[]> {
-  const r = await apiFetch<{ templates: DocumentTemplateSummary[] }>("/templates");
+export async function listTemplateSummaries(): Promise<
+  DocumentTemplateSummary[]
+> {
+  const r = await apiFetch<{ templates: DocumentTemplateSummary[] }>(
+    "/templates",
+  );
   return r.templates;
 }
 
@@ -63,7 +67,9 @@ export function useAdminTemplates() {
   };
 }
 
-export function createTemplate(input: CreateTemplateInput): Promise<DocumentTemplate> {
+export function createTemplate(
+  input: CreateTemplateInput,
+): Promise<DocumentTemplate> {
   return apiFetch<DocumentTemplate>("/admin/templates", {
     method: "POST",
     body: JSON.stringify(input),
@@ -108,7 +114,9 @@ export interface DocumentDraftState {
   created_at: string;
 }
 
-export function getDraftState(path: string): Promise<DocumentDraftState | null> {
+export function getDraftState(
+  path: string,
+): Promise<DocumentDraftState | null> {
   const qs = new URLSearchParams({ path });
   return apiFetch<DocumentDraftState | null>(`/wiki/file/draft?${qs}`);
 }
@@ -117,7 +125,8 @@ export function getDraftState(path: string): Promise<DocumentDraftState | null> 
  *  with null). The server upserts a row; chat traffic for the page then
  *  carries the template's system prompt. */
 export function setDraftTemplate(
-  path: string, templateId: string | null,
+  path: string,
+  templateId: string | null,
 ): Promise<DocumentDraftState | null> {
   return apiFetch<DocumentDraftState | null>("/wiki/file/draft", {
     method: "POST",

@@ -57,7 +57,11 @@ export function DraftingProvider({ children }: { children: ReactNode }) {
     [drafting, expandTick, requestExpand],
   );
 
-  return <DraftingContext.Provider value={value}>{children}</DraftingContext.Provider>;
+  return (
+    <DraftingContext.Provider value={value}>
+      {children}
+    </DraftingContext.Provider>
+  );
 }
 
 export function useDrafting(): DraftingContextValue {

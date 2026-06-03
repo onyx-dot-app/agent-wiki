@@ -5,6 +5,7 @@ import { mutate as globalMutate } from "swr";
 
 import { Button } from "@onyx-ai/opal/components";
 import { SvgCheckSmall } from "@onyx-ai/opal/icons";
+import { useConfirm } from "@/components/common/ConfirmDialog";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { BackLink, PageHeader } from "@/components/common/PageHeader";
 import { RequireAdmin } from "@/components/RequireAdmin";
@@ -22,10 +23,34 @@ interface ProviderMeta {
 }
 
 const PROVIDER_META: Record<Provider, ProviderMeta> = {
-  anthropic: { label: "Anthropic", defaultModel: "claude-sonnet-4-6", keyLabel: "API key", keyPlaceholder: "sk-ant-…", initial: "A" },
-  openai:    { label: "OpenAI",    defaultModel: "gpt-5.5",          keyLabel: "API key", keyPlaceholder: "sk-…",     initial: "O" },
-  gemini:    { label: "Gemini",    defaultModel: "gemini-3.1-pro-preview", keyLabel: "API key", keyPlaceholder: "AIza…",    initial: "G" },
-  ollama:    { label: "Ollama",    defaultModel: "llama3.1",         keyLabel: "Base URL", keyPlaceholder: "http://localhost:11434", initial: "L" },
+  anthropic: {
+    label: "Anthropic",
+    defaultModel: "claude-sonnet-4-6",
+    keyLabel: "API key",
+    keyPlaceholder: "sk-ant-…",
+    initial: "A",
+  },
+  openai: {
+    label: "OpenAI",
+    defaultModel: "gpt-5.5",
+    keyLabel: "API key",
+    keyPlaceholder: "sk-…",
+    initial: "O",
+  },
+  gemini: {
+    label: "Gemini",
+    defaultModel: "gemini-3.1-pro-preview",
+    keyLabel: "API key",
+    keyPlaceholder: "AIza…",
+    initial: "G",
+  },
+  ollama: {
+    label: "Ollama",
+    defaultModel: "llama3.1",
+    keyLabel: "Base URL",
+    keyPlaceholder: "http://localhost:11434",
+    initial: "L",
+  },
 };
 
 const ALL_PROVIDERS: Provider[] = ["anthropic", "openai", "gemini", "ollama"];
@@ -37,26 +62,10 @@ const PROVIDER_MODELS: Record<Provider, string[]> = {
     "claude-opus-4-6",
     "claude-haiku-4-5",
   ],
-  openai: [
-    "gpt-5.5",
-    "gpt-5.4",
-    "gpt-5.4-mini",
-    "gpt-5.2",
-  ],
-  gemini: [
-    "gemini-3.1-pro-preview",
-    "gemini-3-flash-preview",
-  ],
-  ollama: [
-    "llama3.1",
-    "llama3.2",
-    "mistral",
-    "phi3",
-    "qwen2.5",
-    "deepseek-r1",
-  ],
+  openai: ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.2"],
+  gemini: ["gemini-3.1-pro-preview", "gemini-3-flash-preview"],
+  ollama: ["llama3.1", "llama3.2", "mistral", "phi3", "qwen2.5", "deepseek-r1"],
 };
-
 
 interface LLMSettings {
   provider: Provider;
@@ -91,7 +100,7 @@ export default function AdminLLMPage() {
   const isMobile = useIsMobile();
   return (
     <RequireAdmin>
-      <main className={`max-w-[760px] ${isMobile ? "py-4 px-3" : "py-6 px-8"}`}>
+      <main className={`max-w-[760px] ${isMobile ? "px-3 py-4" : "px-8 py-6"}`}>
         <BackLink />
         <PageHeader
           title="Language models"
@@ -106,7 +115,9 @@ export default function AdminLLMPage() {
 function LLMPage() {
   const [settings, setSettings] = useState<LLMSettings | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [expandedProvider, setExpandedProvider] = useState<Provider | null>(null);
+  const [expandedProvider, setExpandedProvider] = useState<Provider | null>(
+    null,
+  );
 
   async function load() {
     try {
@@ -117,9 +128,12 @@ function LLMPage() {
     }
   }
 
-  useEffect(() => { void load(); }, []);
+  useEffect(() => {
+    void load();
+  }, []);
 
-  if (error) return <div className="text-(--status-text-error-05)">{error}</div>;
+  if (error)
+    return <div className="text-(--status-text-error-05)">{error}</div>;
   if (!settings) return <LoadingSpinner />;
 
   const configured = ALL_PROVIDERS.filter((p) => isConfigured(p, settings));
@@ -139,7 +153,9 @@ function LLMPage() {
       <section>
         <div className={sectionHeaderClass}>Available providers</div>
         {configured.length === 0 && (
-          <div className="text-(--text-03) text-sm">No providers configured yet.</div>
+          <div className="text-sm text-(--text-03)">
+            No providers configured yet.
+          </div>
         )}
         <div className="flex flex-col gap-2">
           {configured.map((p) => (
@@ -150,7 +166,10 @@ function LLMPage() {
               isActive={settings.provider === p}
               expanded={expandedProvider === p}
               onToggle={() => toggle(p)}
-              onSaved={() => { void load(); setExpandedProvider(null); }}
+              onSaved={() => {
+                void load();
+                setExpandedProvider(null);
+              }}
             />
           ))}
         </div>
@@ -162,7 +181,7 @@ function LLMPage() {
           <div className="border-t border-(--border-01)" />
           <section>
             <div className={sectionHeaderClass}>Add provider</div>
-            <div className="text-(--text-03) text-[13px] mb-3">
+            <div className="mb-3 text-[13px] text-(--text-03)">
               Connect a provider to make it available for agent and chat use.
             </div>
             <div className="flex flex-col gap-2">
@@ -174,7 +193,10 @@ function LLMPage() {
                   isActive={false}
                   expanded={expandedProvider === p}
                   onToggle={() => toggle(p)}
-                  onSaved={() => { void load(); setExpandedProvider(null); }}
+                  onSaved={() => {
+                    void load();
+                    setExpandedProvider(null);
+                  }}
                 />
               ))}
             </div>
@@ -185,20 +207,30 @@ function LLMPage() {
   );
 }
 
-function AgentModelSection({ settings, onSaved }: { settings: LLMSettings; onSaved: () => void }) {
+function AgentModelSection({
+  settings,
+  onSaved,
+}: {
+  settings: LLMSettings;
+  onSaved: () => void;
+}) {
   const [editing, setEditing] = useState(false);
-  const [selProvider, setSelProvider] = useState<Provider | "">(settings.provider as Provider | "");
+  const [selProvider, setSelProvider] = useState<Provider | "">(
+    settings.provider as Provider | "",
+  );
   const [selModel, setSelModel] = useState(settings.model);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const availableProviders = ALL_PROVIDERS.filter((p) => isConfigured(p, settings));
+  const availableProviders = ALL_PROVIDERS.filter((p) =>
+    isConfigured(p, settings),
+  );
 
   // Flat list of every configured-provider + enabled-model combination.
   const options = availableProviders.flatMap((p) => {
     const models = settings.provider_models[p]?.length
       ? settings.provider_models[p]
-      : PROVIDER_MODELS[p] ?? [];
+      : (PROVIDER_MODELS[p] ?? []);
     return models.map((m) => ({ provider: p, model: m }));
   });
 
@@ -230,21 +262,35 @@ function AgentModelSection({ settings, onSaved }: { settings: LLMSettings; onSav
     <section>
       <div className={sectionHeaderClass}>Default model</div>
       {!editing ? (
-        <div className="flex items-center justify-between py-3 px-4 border border-(--border-01) rounded-(--border-radius-08) bg-(--background-tint-01)">
+        <div className="flex items-center justify-between rounded-(--border-radius-08) border border-(--border-01) bg-(--background-tint-01) px-4 py-3">
           <div>
-            {settings.provider && PROVIDER_META[settings.provider as Provider] ? (
+            {settings.provider &&
+            PROVIDER_META[settings.provider as Provider] ? (
               <>
-                <span className="text-sm font-medium">{PROVIDER_META[settings.provider as Provider].label}</span>
-                <span className="text-sm text-(--text-03) ml-2">{settings.model || "—"}</span>
+                <span className="text-sm font-medium">
+                  {PROVIDER_META[settings.provider as Provider].label}
+                </span>
+                <span className="ml-2 text-sm text-(--text-03)">
+                  {settings.model || "—"}
+                </span>
               </>
             ) : (
-              <span className="text-sm text-(--text-03)">No model selected — configure a provider below.</span>
+              <span className="text-sm text-(--text-03)">
+                No model selected — configure a provider below.
+              </span>
             )}
           </div>
-          <Button size="sm" variant="default" onClick={() => setEditing(true)} disabled={availableProviders.length === 0}>Edit</Button>
+          <Button
+            size="sm"
+            variant="default"
+            onClick={() => setEditing(true)}
+            disabled={availableProviders.length === 0}
+          >
+            Edit
+          </Button>
         </div>
       ) : (
-        <div className="border border-(--border-01) rounded-(--border-radius-08) bg-(--background-tint-01) flex flex-col">
+        <div className="flex flex-col rounded-(--border-radius-08) border border-(--border-01) bg-(--background-tint-01)">
           <div className="flex flex-col gap-1 p-3">
             {options.map(({ provider: p, model: m }) => {
               const isSelected = selProvider === p && selModel === m;
@@ -252,30 +298,57 @@ function AgentModelSection({ settings, onSaved }: { settings: LLMSettings; onSav
                 <button
                   key={`${p}:${m}`}
                   type="button"
-                  onClick={() => { setSelProvider(p); setSelModel(m); }}
-                  className={`flex items-center gap-3 py-[10px] px-3 border rounded-(--border-radius-04) cursor-pointer text-left ${isSelected ? "border-(--border-01) bg-(--background-tint-03)" : "border-(--border-01) bg-(--background-tint-00)"}`}
+                  onClick={() => {
+                    setSelProvider(p);
+                    setSelModel(m);
+                  }}
+                  className={`flex cursor-pointer items-center gap-3 rounded-(--border-radius-04) border px-3 py-[10px] text-left ${isSelected ? "border-(--border-01) bg-(--background-tint-03)" : "border-(--border-01) bg-(--background-tint-00)"}`}
                 >
                   <div
-                    className={`w-[16px] h-[16px] rounded-full shrink-0 flex items-center justify-center ${isSelected ? "bg-(--background-tint-inverted-00) border-none" : "bg-transparent border-[1.5px] border-(--border-02)"}`}
+                    className={`flex h-[16px] w-[16px] shrink-0 items-center justify-center rounded-full ${isSelected ? "border-none bg-(--background-tint-inverted-00)" : "border-[1.5px] border-(--border-02) bg-transparent"}`}
                   >
-                    {isSelected && <div className="w-[8px] h-[8px] rounded-full bg-(--text-inverted-05)" />}
+                    {isSelected && (
+                      <div className="h-[8px] w-[8px] rounded-full bg-(--text-inverted-05)" />
+                    )}
                   </div>
-                  <span className={`text-[13px] font-medium shrink-0 ${isSelected ? "text-(--text-05)" : "text-(--text-04)"}`}>
+                  <span
+                    className={`shrink-0 text-[13px] font-medium ${isSelected ? "text-(--text-05)" : "text-(--text-04)"}`}
+                  >
                     {PROVIDER_META[p].label}
                   </span>
-                  <span className={`text-[13px] font-mono ${isSelected ? "text-(--text-05)" : "text-(--text-03)"}`}>
+                  <span
+                    className={`font-mono text-[13px] ${isSelected ? "text-(--text-05)" : "text-(--text-03)"}`}
+                  >
                     {m}
                   </span>
                 </button>
               );
             })}
           </div>
-          {error && <div className="text-(--status-text-error-05) text-[13px] px-3 pb-2">{error}</div>}
-          <div className="flex gap-2 pt-1 px-3 pb-3">
-            <Button type="button" variant="action" size="sm" disabled={saving || !selProvider} onClick={() => void onSave()}>
+          {error && (
+            <div className="px-3 pb-2 text-[13px] text-(--status-text-error-05)">
+              {error}
+            </div>
+          )}
+          <div className="flex gap-2 px-3 pt-1 pb-3">
+            <Button
+              type="button"
+              variant="action"
+              size="sm"
+              disabled={saving || !selProvider}
+              onClick={() => void onSave()}
+            >
               {saving ? "Saving…" : "Set as active"}
             </Button>
-            <Button type="button" variant="default" size="sm" onClick={() => { setEditing(false); setError(null); }}>
+            <Button
+              type="button"
+              variant="default"
+              size="sm"
+              onClick={() => {
+                setEditing(false);
+                setError(null);
+              }}
+            >
               Cancel
             </Button>
           </div>
@@ -286,7 +359,12 @@ function AgentModelSection({ settings, onSaved }: { settings: LLMSettings; onSav
 }
 
 function ProviderCard({
-  provider, settings, isActive, expanded, onToggle, onSaved,
+  provider,
+  settings,
+  isActive,
+  expanded,
+  onToggle,
+  onSaved,
 }: {
   provider: Provider;
   settings: LLMSettings;
@@ -300,23 +378,25 @@ function ProviderCard({
   const hint = keyHint(provider, settings);
 
   return (
-    <div className="border border-(--border-01) rounded-(--border-radius-08) overflow-hidden">
+    <div className="overflow-hidden rounded-(--border-radius-08) border border-(--border-01)">
       {/* Card header row */}
-      <div className="flex items-center gap-3 py-3 px-4 bg-(--background-tint-01)">
+      <div className="flex items-center gap-3 bg-(--background-tint-01) px-4 py-3">
         {/* Provider initial icon */}
-        <div className="w-[32px] h-[32px] rounded-(--border-radius-04) bg-(--background-tint-02) flex items-center justify-center text-[13px] font-bold text-(--text-04) shrink-0">
+        <div className="flex h-[32px] w-[32px] shrink-0 items-center justify-center rounded-(--border-radius-04) bg-(--background-tint-02) text-[13px] font-bold text-(--text-04)">
           {meta.initial}
         </div>
 
-        <div className="flex-1 min-w-0">
+        <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <span className="text-sm font-medium">{meta.label}</span>
             {isActive && (
-              <span className="text-[11px] font-semibold py-[2px] px-[6px] rounded-full bg-(--background-tint-03) text-(--text-05) border border-(--border-01)">Agent</span>
+              <span className="rounded-full border border-(--border-01) bg-(--background-tint-03) px-[6px] py-[2px] text-[11px] font-semibold text-(--text-05)">
+                Agent
+              </span>
             )}
           </div>
           {configured && hint && (
-            <div className="text-xs text-(--text-03) font-mono mt-[2px]">
+            <div className="mt-[2px] font-mono text-xs text-(--text-03)">
               {hint}
             </div>
           )}
@@ -328,13 +408,19 @@ function ProviderCard({
           variant={configured ? "default" : "action"}
           onClick={onToggle}
         >
-          {configured ? (expanded ? "Close" : "Edit") : (expanded ? "Close" : "Connect")}
+          {configured
+            ? expanded
+              ? "Close"
+              : "Edit"
+            : expanded
+              ? "Close"
+              : "Connect"}
         </Button>
       </div>
 
       {/* Expanded form */}
       {expanded && (
-        <div className="border-t border-(--border-01) p-4 bg-(--background-tint-00)">
+        <div className="border-t border-(--border-01) bg-(--background-tint-00) p-4">
           <ProviderForm
             provider={provider}
             settings={settings}
@@ -348,7 +434,10 @@ function ProviderCard({
 }
 
 function ProviderForm({
-  provider, settings, configured, onSaved,
+  provider,
+  settings,
+  configured,
+  onSaved,
 }: {
   provider: Provider;
   settings: LLMSettings;
@@ -366,14 +455,19 @@ function ProviderForm({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  const confirmDialog = useConfirm();
 
-  const keyField = `${provider}_api_key` as "anthropic_api_key" | "openai_api_key" | "gemini_api_key";
+  const keyField = `${provider}_api_key` as
+    | "anthropic_api_key"
+    | "openai_api_key"
+    | "gemini_api_key";
   const currentHint = keyHint(provider, settings);
 
   function toggleModel(id: string) {
     setSelectedModels((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       return next;
     });
   }
@@ -391,9 +485,15 @@ function ProviderForm({
         body[keyField] = keyValue;
       }
       const enabledModels = knownModels.filter((m) => selectedModels.has(m));
-      const updated = { ...settings.provider_models, [provider]: enabledModels };
+      const updated = {
+        ...settings.provider_models,
+        [provider]: enabledModels,
+      };
       body.provider_models = updated;
-      await apiFetch("/admin/llm", { method: "PUT", body: JSON.stringify(body) });
+      await apiFetch("/admin/llm", {
+        method: "PUT",
+        body: JSON.stringify(body),
+      });
       setKeyValue("");
       setSaved(true);
       onSaved();
@@ -406,12 +506,23 @@ function ProviderForm({
   }
 
   async function onClear() {
-    if (!confirm(`Remove ${meta.label} credentials?`)) return;
+    if (
+      !(await confirmDialog({
+        title: `Remove ${meta.label} credentials?`,
+        confirmLabel: "Remove",
+      }))
+    )
+      return;
     setSaving(true);
     setError(null);
     try {
-      const body: Record<string, unknown> = isOllama ? { ollama_base_url: null } : { [keyField]: null };
-      await apiFetch("/admin/llm", { method: "PUT", body: JSON.stringify(body) });
+      const body: Record<string, unknown> = isOllama
+        ? { ollama_base_url: null }
+        : { [keyField]: null };
+      await apiFetch("/admin/llm", {
+        method: "PUT",
+        body: JSON.stringify(body),
+      });
       onSaved();
     } catch (e) {
       setError(e instanceof Error ? e.message : "failed to remove");
@@ -428,15 +539,23 @@ function ProviderForm({
           type={isOllama ? "text" : "password"}
           value={keyValue}
           onChange={(e) => setKeyValue(e.target.value)}
-          placeholder={configured ? (isOllama ? currentHint : "leave blank to keep current") : meta.keyPlaceholder}
+          placeholder={
+            configured
+              ? isOllama
+                ? currentHint
+                : "leave blank to keep current"
+              : meta.keyPlaceholder
+          }
           className={inputClass}
         />
       </label>
 
       <div>
-        <div className="flex items-baseline justify-between mb-2">
+        <div className="mb-2 flex items-baseline justify-between">
           <div className={lblClass}>Models</div>
-          <div className="text-xs text-(--text-03)">Select models to make available</div>
+          <div className="text-xs text-(--text-03)">
+            Select models to make available
+          </div>
         </div>
         <div className="flex flex-col gap-1.5">
           {knownModels.map((id) => {
@@ -446,18 +565,20 @@ function ProviderForm({
                 key={id}
                 type="button"
                 onClick={() => toggleModel(id)}
-                className={`flex items-center gap-[10px] py-[10px] px-3 border rounded-(--border-radius-08) cursor-pointer text-left ${checked ? "border-(--border-01) bg-(--background-tint-03)" : "border-(--border-01) bg-(--background-tint-00)"}`}
+                className={`flex cursor-pointer items-center gap-[10px] rounded-(--border-radius-08) border px-3 py-[10px] text-left ${checked ? "border-(--border-01) bg-(--background-tint-03)" : "border-(--border-01) bg-(--background-tint-00)"}`}
               >
                 <div
-                  className={`w-[18px] h-[18px] rounded-(--border-radius-04) shrink-0 flex items-center justify-center ${checked ? "bg-(--background-tint-inverted-00) border-none" : "bg-transparent border-[1.5px] border-(--border-02)"}`}
+                  className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-(--border-radius-04) ${checked ? "border-none bg-(--background-tint-inverted-00)" : "border-[1.5px] border-(--border-02) bg-transparent"}`}
                 >
                   {checked && (
-                    <span className="text-(--text-inverted-05) flex">
+                    <span className="flex text-(--text-inverted-05)">
                       <SvgCheckSmall size={11} />
                     </span>
                   )}
                 </div>
-                <span className={`text-[13px] font-mono ${checked ? "text-(--text-05)" : "text-(--text-05)"}`}>
+                <span
+                  className={`font-mono text-[13px] ${checked ? "text-(--text-05)" : "text-(--text-05)"}`}
+                >
                   {id}
                 </span>
               </button>
@@ -466,14 +587,26 @@ function ProviderForm({
         </div>
       </div>
 
-      {error && <div className="text-(--status-text-error-05) text-[13px]">{error}</div>}
-      {saved && <div className="text-(--status-text-success-05) text-[13px]">Saved.</div>}
+      {error && (
+        <div className="text-[13px] text-(--status-text-error-05)">{error}</div>
+      )}
+      {saved && (
+        <div className="text-[13px] text-(--status-text-success-05)">
+          Saved.
+        </div>
+      )}
       <div className="flex gap-2">
         <Button type="submit" variant="action" size="sm" disabled={saving}>
           {saving ? "Saving…" : "Save"}
         </Button>
         {configured && (
-          <Button type="button" variant="danger" size="sm" disabled={saving} onClick={onClear}>
+          <Button
+            type="button"
+            variant="danger"
+            size="sm"
+            disabled={saving}
+            onClick={onClear}
+          >
             Remove
           </Button>
         )}
@@ -482,6 +615,8 @@ function ProviderForm({
   );
 }
 
-const inputClass = "w-full py-2 px-[10px] box-border border border-(--border-01) rounded-(--border-radius-04) text-sm";
+const inputClass =
+  "w-full py-2 px-[10px] box-border border border-(--border-01) rounded-(--border-radius-04) text-sm";
 const lblClass = "mb-1 text-[13px] font-medium";
-const sectionHeaderClass = "text-[13px] font-semibold text-(--text-04) uppercase tracking-[0.05em] mb-3";
+const sectionHeaderClass =
+  "text-[13px] font-semibold text-(--text-04) uppercase tracking-[0.05em] mb-3";

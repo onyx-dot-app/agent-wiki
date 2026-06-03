@@ -81,8 +81,14 @@ function StarredRow({
   selected: boolean;
   onNavigate: () => void;
 }) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
-    useSortable({ id: path });
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: path });
 
   return (
     <div
