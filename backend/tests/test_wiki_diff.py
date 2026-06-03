@@ -296,11 +296,10 @@ def test_parse_commit_diff_creation(doc_with_two_commits: tuple[str, str, str]) 
 
 
 def test_parse_commit_diff_pre_rename_commit_resolves_old_path(tmp_repo: None) -> None:
-    # Regression: the history panel lists commits via `git log --follow`, so it
-    # includes commits from before a rename. Clicking such a commit diffs it
-    # against the file's *current* name — which the pre-rename commit never
-    # touched, yielding empty hunks and a "sha does not touch path" 404.
-    # parse_commit_diff must resolve the historical name at that sha.
+    # The history panel walks commits via `git log --follow`, which includes
+    # pre-rename commits when the file lived at a different path. Querying a
+    # pre-rename commit by the file's current name must still produce a diff;
+    # parse_commit_diff resolves the historical path at that sha via path_at_ref.
     old = "notes/old name.md"
     new = "projects/new name.md"
     wiki_git.commit_file(old, "alpha old gamma\n", "create", author=None)
