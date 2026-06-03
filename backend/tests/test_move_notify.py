@@ -78,11 +78,16 @@ def test_after_path_move_out_of_md_space_clears_activity_and_drafts(tmp_repo):
     drafts.create(
         path="a.md", template_id=tid, template_body_snapshot="# T\n", created_by_user_id=user
     )
+    page_dirs.set_for_page(
+        user_id=user, machine_id="m1", wiki_path="a.md", working_dir="/tmp/checkout"
+    )
 
     notify.after_path_move([("a.md", "notes.txt")], sha, actor=None)
 
     assert agent_activity.list_for_doc("a.md") == []
     assert drafts.get("a.md") is None
+    # No-TTL working-dir binding must be dropped too, or a future a.md inherits it.
+    assert page_dirs.get_for_page(user_id=user, machine_id="m1", wiki_path="a.md") is None
 
 
 def test_after_path_move_reconverges_trigger_cache(tmp_repo, monkeypatch):

@@ -69,6 +69,14 @@ def rename_page(*, old_wiki_path: str, new_wiki_path: str) -> None:
         )
 
 
+def delete_all_for_page(wiki_path: str) -> None:
+    """Drop every (user, machine) binding for a page that no longer exists
+    (deleted, or renamed out of .md-space). These rows have no TTL, so leaving
+    them would mis-bind a future page created at the same path."""
+    with session() as s:
+        s.execute(delete(PageWorkingDir).where(PageWorkingDir.wiki_path == wiki_path))
+
+
 def clear(*, user_id: str, machine_id: str, wiki_path: str) -> None:
     with session() as s:
         s.execute(

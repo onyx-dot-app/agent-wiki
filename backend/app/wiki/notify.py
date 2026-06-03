@@ -186,6 +186,7 @@ def after_path_move(
             comments.orphan_all_for_doc(old_p)
             agent_activity.delete_for_doc(old_p)
             drafts.delete(old_p)
+            page_dirs.delete_all_for_page(old_p)
     # Trigger YAMLs moved with their folder; their absolute file_path cache is
     # stale until reconverged from disk. Best-effort — a cache rebuild failure
     # must not abort the move's other side effects.
