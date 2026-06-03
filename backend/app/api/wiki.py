@@ -265,14 +265,9 @@ def move_document_or_folder(
         log.warning("move_path git error %s -> %s: %s", old_rel, new_rel, exc.stderr)
         raise HTTPException(status_code=500, detail="git move failed") from exc
 
+    # after_path_move re-points every live path-keyed cache (ACL, comments,
+    # activity, drafts, working-dirs) and reconverges the trigger cache.
     wiki_notify.after_path_move(moves, sha, author)
-
-    # Trigger YAML files may have moved with their containing folder. The
-    # Postgres cache stores their absolute file_path; reconverge from disk.
-    try:
-        triggers_repo.rebuild_from_filesystem()
-    except Exception:
-        log.exception("trigger cache rebuild after move %s -> %s failed", old_rel, new_rel)
 
     log.info(
         "move %s -> %s by %s sha=%s files=%d", old_rel, new_rel, author or "?", sha[:8], len(moves)

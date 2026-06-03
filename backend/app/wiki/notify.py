@@ -31,11 +31,12 @@ from __future__ import annotations
 
 import logging
 
-from app.db import fts
+from app.db import fts, page_dirs
 from app.mcp_server import pubsub as mcp_pubsub
 from app.tasks.reindex import index_path
 from app.tasks.triggers import fan_out_trigger_eval
-from app.wiki import acl, comments
+from app.triggers import repo as triggers_repo
+from app.wiki import acl, agent_activity, comments, drafts
 from app.wiki.comment_remap import remap_comments
 from app.models.wiki import ChangeKind
 
@@ -138,9 +139,17 @@ def after_path_move(
     Non-``.md`` moves (e.g. ``.gitkeep``) are skipped — they don't carry
     doc content and triggers can't evaluate them.
 
-    ACL rows and owner rows keyed by path are rewritten in one pass via
-    ``acl.on_path_moved`` so a rename doesn't strand permissions on a
-    no-longer-existing path.
+    Every Postgres row that is a *live pointer* to the page is re-pointed to
+    the new path so nothing strands on a path that no longer exists:
+    ACL + owner rows in one pass via ``acl.on_path_moved``; comments; the
+    agent-activity rail; template-draft state; and per-(user, machine)
+    working-dir bindings. Point-in-time records (launch history, ingest eval
+    samples, the audit log) are deliberately left alone.
+
+    The trigger cache is reconverged from disk once at the end — trigger
+    YAMLs ride along with their folder in the ``git mv``, but their stored
+    ``file_path`` is absolute. Doing it here (rather than in the API route)
+    means the agent-tool move path gets it too.
 
     MCP-side: each affected path gets the corresponding update or
     delete, and a single ``list_changed`` is fired at the end (the
@@ -166,10 +175,24 @@ def after_path_move(
             # commit may also change content; path_at_ref follows the rename).
             comments.reassign_doc_path(old_p, new_p)
             _remap_comments_safe(new_p)
+            # Other live pointers follow the page to its new path.
+            agent_activity.rename_doc(old_p, new_p)
+            drafts.rename(old_p, new_p)
+            page_dirs.rename_page(old_wiki_path=old_p, new_wiki_path=new_p)
         elif old_is_md:
             # The page left .md-space (renamed to a non-doc path) — there's no
-            # new doc to carry the comments onto, so orphan them rather than
-            # strand them on a path that no longer exists.
+            # new doc to carry these onto, so drop them rather than strand them
+            # on a path that no longer exists.
             comments.orphan_all_for_doc(old_p)
+            agent_activity.delete_for_doc(old_p)
+            drafts.delete(old_p)
+            page_dirs.delete_all_for_page(old_p)
+    # Trigger YAMLs moved with their folder; their absolute file_path cache is
+    # stale until reconverged from disk. Best-effort — a cache rebuild failure
+    # must not abort the move's other side effects.
+    try:
+        triggers_repo.rebuild_from_filesystem()
+    except Exception:
+        log.exception("trigger cache rebuild after path move failed")
     if list_changed:
         mcp_pubsub.publish_list_changed()
