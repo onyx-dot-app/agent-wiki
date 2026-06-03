@@ -4,6 +4,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { mutate as globalMutate } from "swr";
 
 import { Button } from "@onyx-ai/opal/components";
+import { SvgCheckSmall } from "@onyx-ai/opal/icons";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { BackLink, PageHeader } from "@/components/common/PageHeader";
 import { RequireAdmin } from "@/components/RequireAdmin";
@@ -499,9 +500,9 @@ function ProviderForm({
                   display: "flex", alignItems: "center", justifyContent: "center",
                 }}>
                   {checked && (
-                    <svg width="11" height="11" viewBox="0 0 12 12" fill="none">
-                      <path d="M2 6l3 3 5-5" stroke={color.accent.fg} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
+                    <span style={{ color: color.accent.fg, display: "flex" }}>
+                      <SvgCheckSmall size={11} />
+                    </span>
                   )}
                 </div>
                 <span style={{ fontSize: 13, color: checked ? color.accent.subtleFg : color.text.primary, fontFamily: "ui-monospace, monospace" }}>

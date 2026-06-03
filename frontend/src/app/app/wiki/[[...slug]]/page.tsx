@@ -17,6 +17,8 @@ import useSWR from "swr";
 import { Button, SelectButton } from "@onyx-ai/opal/components";
 import {
   SvgArrowLeft,
+  SvgChevronLeft,
+  SvgChevronRight,
   SvgEdit,
   SvgFolderPlus,
   SvgPlus,
@@ -949,22 +951,11 @@ function StripArrow({
         padding: 0,
       }}
     >
-      <svg
-        width="14"
-        height="14"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      >
-        {direction === "left" ? (
-          <path d="M15 18l-6-6 6-6" />
-        ) : (
-          <path d="M9 6l6 6-6 6" />
-        )}
-      </svg>
+      {direction === "left" ? (
+        <SvgChevronLeft size={14} />
+      ) : (
+        <SvgChevronRight size={14} />
+      )}
     </button>
   );
 }
@@ -2892,27 +2883,18 @@ function ActiveAgentsBar({
 
 function Chevron({ open, disabled }: { open: boolean; disabled: boolean }) {
   return (
-    <svg
-      width="10"
-      height="10"
-      viewBox="0 0 10 10"
+    <span
       aria-hidden
       style={{
         flexShrink: 0,
+        display: "flex",
         color: disabled ? color.text.faint : color.text.muted,
         transform: open ? "rotate(90deg)" : "rotate(0deg)",
         transition: "transform 120ms ease",
       }}
     >
-      <path
-        d="M3 1.5l4 3.5-4 3.5"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
+      <SvgChevronRight size={10} />
+    </span>
   );
 }
 

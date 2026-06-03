@@ -3,6 +3,7 @@
 import { useEffect, useState, type CSSProperties, type FormEvent } from "react";
 
 import { Button } from "@onyx-ai/opal/components";
+import { SvgChevronDown, SvgChevronUp } from "@onyx-ai/opal/icons";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { BackLink, PageHeader } from "@/components/common/PageHeader";
 import { RequireAdmin } from "@/components/RequireAdmin";
@@ -249,9 +250,7 @@ function ArrowButton({
         padding: 0,
       }}
     >
-      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-        {direction === "up" ? <path d="M6 15l6-6 6 6" /> : <path d="M6 9l6 6 6-6" />}
-      </svg>
+      {direction === "up" ? <SvgChevronUp size={10} /> : <SvgChevronDown size={10} />}
     </button>
   );
 }
