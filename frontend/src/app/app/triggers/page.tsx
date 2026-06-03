@@ -14,13 +14,17 @@ import { useIsMobile } from "@/lib/viewport";
 import { describeCron } from "@/lib/cron";
 import { formatScopePath } from "@/lib/format";
 import {
+  createSlackWebhook,
+  deleteSlackWebhook,
   deleteTrigger,
   getTriggerVersion,
   updateTrigger,
+  useSlackWebhooks,
   useTriggerDestinations,
   useTriggers,
   type Trigger,
 } from "@/lib/triggers";
+import { ApiError } from "@/lib/api";
 
 const sentenceTagStyle: CSSProperties = {
   flexShrink: 0,
@@ -55,8 +59,19 @@ export default function TriggersPage() {
   const isMobile = useIsMobile();
   const { triggers, error: listSwrError, refresh } = useTriggers();
   const destinations = useTriggerDestinations();
-  const destinationLabel = (id: string | null | undefined) =>
-    destinations.find((d) => d.id === id)?.name ?? id ?? "—";
+  const { webhooks: slackWebhooks } = useSlackWebhooks();
+  const destinationLabel = (t: Trigger) => {
+    // For Slack, name the specific channel rather than the generic kind.
+    if (t.destination === "slack") {
+      const ch = slackWebhooks.find((w) => w.id === t.slack_webhook_id);
+      return ch ? `Slack · ${ch.name}` : "Slack · (channel removed)";
+    }
+    return (
+      destinations.find((d) => d.id === t.destination)?.name ??
+      t.destination ??
+      "—"
+    );
+  };
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
@@ -301,13 +316,15 @@ export default function TriggersPage() {
                 <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginTop: 6 }}>
                   <span style={sentenceTagStyle}>TO</span>
                   <span style={{ flex: 1, minWidth: 0, color: color.text.secondary }}>
-                    {destinationLabel(t.destination)}
+                    {destinationLabel(t)}
                   </span>
                 </div>
               </div>
             </li>
           ))}
         </ul>
+
+        <SlackChannelsCard />
 
         <TriggerModal
           open={modalOpen}
@@ -360,3 +377,186 @@ export default function TriggersPage() {
     </main>
   );
 }
+
+// --------------------------------------------------------------------------- //
+// Slack channels — per-user named webhooks a trigger can post to.             //
+// --------------------------------------------------------------------------- //
+
+function SlackChannelsCard() {
+  const { webhooks, error, isLoading, refresh } = useSlackWebhooks();
+  const [adding, setAdding] = useState(false);
+  const [name, setName] = useState("");
+  const [url, setUrl] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+
+  async function onAdd() {
+    if (!name.trim() || !url.trim()) return;
+    setBusy(true);
+    setFormError(null);
+    try {
+      await createSlackWebhook(name.trim(), url.trim());
+      await refresh();
+      setAdding(false);
+      setName("");
+      setUrl("");
+    } catch (e) {
+      setFormError(e instanceof ApiError ? e.message : "failed to add channel");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onDelete(id: string, label: string) {
+    if (!confirm(`Delete "${label}"? Triggers posting to it will stop delivering to Slack.`)) {
+      return;
+    }
+    try {
+      await deleteSlackWebhook(id);
+      await refresh();
+    } catch (e) {
+      alert(e instanceof ApiError ? e.message : "failed to delete");
+    }
+  }
+
+  return (
+    <section
+      style={{
+        marginTop: 28,
+        padding: 16,
+        border: `1px solid ${color.border.default}`,
+        borderRadius: radius.md,
+        background: color.bg.panel,
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          marginBottom: 4,
+        }}
+      >
+        <h2 style={{ margin: 0, fontSize: 16 }}>Slack channels</h2>
+        {!adding && (
+          <Button variant="primary" size="sm" onClick={() => setAdding(true)}>
+            + Add channel
+          </Button>
+        )}
+      </div>
+      <p style={{ margin: "0 0 12px", fontSize: 13, color: color.text.muted }}>
+        Incoming webhooks you can point a trigger at. Create one in Slack (Apps → Incoming
+        Webhooks), then pick it as a trigger&apos;s destination. Private to you.
+      </p>
+
+      {error && (
+        <div style={{ color: color.state.danger.fg, fontSize: 13, marginBottom: 8 }}>
+          {error.message || "Failed to load channels."}
+        </div>
+      )}
+
+      {adding && (
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 8,
+            padding: 12,
+            marginBottom: 12,
+            border: `1px solid ${color.border.default}`,
+            borderRadius: radius.sm,
+            background: color.bg.sunken,
+          }}
+        >
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Channel name (e.g. PM Standup)"
+            disabled={busy}
+            maxLength={80}
+            style={channelInputStyle}
+          />
+          <input
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            placeholder="https://hooks.slack.com/services/…"
+            disabled={busy}
+            style={channelInputStyle}
+          />
+          {formError && (
+            <div style={{ color: color.state.danger.fg, fontSize: 13 }}>{formError}</div>
+          )}
+          <div style={{ display: "flex", gap: 8 }}>
+            <Button
+              variant="primary"
+              size="sm"
+              disabled={busy || !name.trim() || !url.trim()}
+              onClick={() => void onAdd()}
+            >
+              {busy ? "Adding…" : "Add"}
+            </Button>
+            <Button size="sm" disabled={busy} onClick={() => setAdding(false)}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {isLoading && webhooks.length === 0 && !error && <LoadingSpinner />}
+
+      {!isLoading && webhooks.length === 0 && !adding && (
+        <p style={{ color: color.text.muted, fontSize: 14, margin: 0 }}>
+          No channels yet — add one to deliver trigger fires to Slack.
+        </p>
+      )}
+
+      {webhooks.length > 0 && (
+        <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+          {webhooks.map((w) => (
+            <li
+              key={w.id}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 12,
+                padding: "10px 12px",
+                border: `1px solid ${color.border.default}`,
+                borderRadius: radius.sm,
+                marginTop: 8,
+                background: color.bg.page,
+              }}
+            >
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 500, fontSize: 14, color: color.text.primary }}>
+                  {w.name}
+                </div>
+                <div
+                  style={{
+                    fontSize: 12,
+                    color: color.text.muted,
+                    marginTop: 2,
+                    fontFamily: "ui-monospace, monospace",
+                  }}
+                >
+                  {w.webhook_url_hint}
+                </div>
+              </div>
+              <Button size="sm" variant="danger" onClick={() => void onDelete(w.id, w.name)}>
+                Delete
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+const channelInputStyle: CSSProperties = {
+  width: "100%",
+  padding: "8px 10px",
+  boxSizing: "border-box",
+  border: `1px solid ${color.border.default}`,
+  borderRadius: radius.sm,
+  fontSize: 14,
+};

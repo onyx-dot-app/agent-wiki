@@ -9,7 +9,7 @@ Each trigger has:
 - **Scope** — either a single document (doc-scoped) or a directory (folder-scoped).
 - **Firing Criteria** — a verifiable condition for if the trigger should fire or not. For example "If the status of a blocker changes" or "When someone assigns me an item to do".
 - **Message** — what message to send along when the condition is met.
-- **Destination** — where the message goes. The end platform might be be Slack, emails, AI agent platforms, automation apps, etc.
+- **Destination** — where the message goes. **Event Log** (the default) records the fire to the [Events](#events) tab in-app. **Slack** posts the message to one of *your* Slack channels — add a channel (an incoming-webhook URL) in the **Slack channels** section of the Triggers page, then pick it as the destination. Your channels are private to you; more destination types (email, automation apps) are on the roadmap.
 
 > 💡 The **Message** can refer to the contents of the page or to what changed — it doesn't have to be a static string. For example, on a holiday-party planning page you could set the message to *"List the new RSVPs added since the last update"* — every fire produces a different, context-aware summary.
 

@@ -24,8 +24,12 @@ dirs, and routes each one through the appropriate evaluation flow:
   diff view would be noise (every line is a ``+``), so the payload is
   the wiki snapshot + the new file's full body, no diff section.
 
-Each fire becomes one ``trigger.fire`` row in the events table. V0 has
-no outbound dispatch (see ``local_data/wiki/natural-language-triggers``).
+Each fire becomes one ``trigger.fire`` row in the events table. After
+recording, a ``slack``-destination trigger POSTs the rendered message to
+the owner's chosen Slack channel via ``_dispatch_to_slack`` (see
+``app/slack/webhooks.py`` and ``app/slack/client.py``); ``event_log`` records
+and stops. The event row is always written before any outbound attempt, so a
+fire is never lost.
 
 See ``app/tasks/queues.py`` for the queue rationale.
 """
@@ -40,6 +44,8 @@ from sqlalchemy import select
 
 from app.db.models import Event, User
 from app.db.session import session
+from app.slack import client as slack_client
+from app.slack import webhooks as slack_webhooks
 from app.tasks.queues import triggers_queue
 from app.triggers import destinations as destinations_repo
 from app.triggers import diff as diff_helper
@@ -303,20 +309,14 @@ def _record_fire(
     destination: object,
     actor: str | None,
 ) -> None:
-    """Write a single ``trigger.fire`` row to the events table.
+    """Record a ``trigger.fire`` row, then dispatch outbound if configured.
 
-    v0 only delivers to the ``event_log`` destination (a row in the
-    ``trigger.fire`` events table). A trigger pointed at a destination
-    without a wired-up dispatcher logs a warning and still records to the
-    events table so no fire is lost.
+    The events row is always written first, so a fire is never lost even
+    if outbound delivery fails or the destination has no dispatcher. After
+    recording, ``slack`` destinations POST the rendered message to the
+    admin-configured incoming webhook; an unknown destination just logs a
+    warning. (``event_log`` records and stops — that's the whole delivery.)
     """
-    if destination != destinations_repo.EVENT_LOG_ID:
-        log.warning(
-            "trigger %s has destination=%r but no outbound dispatcher is "
-            "wired up; recording to events anyway",
-            trigger.id, destination,
-        )
-
     event_payload = json.dumps(
         {
             "trigger_id": trigger.id,
@@ -338,3 +338,48 @@ def _record_fire(
                 payload_json=event_payload,
             )
         )
+
+    if destination == destinations_repo.SLACK_ID:
+        _dispatch_to_slack(trigger=trigger, rendered_message=rendered_message)
+    elif destination != destinations_repo.EVENT_LOG_ID:
+        log.warning(
+            "trigger %s has destination=%r but no outbound dispatcher is "
+            "wired up; recorded to events only",
+            trigger.id, destination,
+        )
+
+
+def _dispatch_to_slack(*, trigger: TriggerRecord, rendered_message: str) -> None:
+    """POST a fire's rendered message to the trigger's Slack channel.
+
+    Resolves ``trigger.slack_webhook_id`` to its owner's webhook URL. No-op
+    when the trigger has no channel set or the webhook was deleted/not owned.
+    Failures are logged and swallowed — the fire is already recorded in the
+    events table, so an unreachable Slack must not fail the task or lose it.
+    """
+    if not trigger.slack_webhook_id:
+        log.info(
+            "trigger %s targets slack but has no channel set; recorded to events only",
+            trigger.id,
+        )
+        return
+
+    webhook_url = slack_webhooks.get_url(
+        trigger.slack_webhook_id, owner_user_id=trigger.owner_user_id
+    )
+    if not webhook_url:
+        log.info(
+            "trigger %s slack channel %s missing/not owned; recorded to events only",
+            trigger.id, trigger.slack_webhook_id,
+        )
+        return
+
+    if not rendered_message.strip():
+        log.info("trigger %s slack dispatch skipped: empty message", trigger.id)
+        return
+
+    try:
+        slack_client.post_message(webhook_url=webhook_url, text=rendered_message)
+        log.info("trigger %s dispatched to slack channel %s", trigger.id, trigger.slack_webhook_id)
+    except slack_client.SlackApiError:
+        log.exception("trigger %s slack dispatch failed", trigger.id)

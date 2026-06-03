@@ -17,9 +17,11 @@ import {
   type FrequencyPreset,
 } from "@/lib/cron";
 import {
+  createSlackWebhook,
   createTrigger,
   getTriggerDestinations,
   updateTrigger,
+  useSlackWebhooks,
   type Trigger,
   type TriggerCreateInput,
   type TriggerDestination,
@@ -54,6 +56,11 @@ export function TriggerModal({ open, initial, onClose, onSaved, lockScope }: Pro
     FALLBACK_DESTINATIONS,
   );
   const [destination, setDestination] = useState(FALLBACK_DESTINATIONS[0].id);
+  const { webhooks: slackWebhooks, refresh: refreshSlackWebhooks } = useSlackWebhooks();
+  const [slackWebhookId, setSlackWebhookId] = useState<string | null>(null);
+  const [addingChannel, setAddingChannel] = useState(false);
+  const [newChannelName, setNewChannelName] = useState("");
+  const [newChannelUrl, setNewChannelUrl] = useState("");
   const [kind, setKind] = useState<TriggerKind>("delta");
   const [scheduleParts, setScheduleParts] = useState(defaultScheduleParts());
   const [customCron, setCustomCron] = useState("");
@@ -70,6 +77,10 @@ export function TriggerModal({ open, initial, onClose, onSaved, lockScope }: Pro
     setIfText(initial?.nl_description ?? "");
     setSendText(initial?.message ?? "");
     setDestination(initial?.destination ?? FALLBACK_DESTINATIONS[0].id);
+    setSlackWebhookId(initial?.slack_webhook_id ?? null);
+    setAddingChannel(false);
+    setNewChannelName("");
+    setNewChannelUrl("");
     setKind((initial?.kind as TriggerKind) ?? "delta");
     const parts = cronToParts(initial?.schedule_cron ?? null);
     setScheduleParts(parts);
@@ -84,6 +95,7 @@ export function TriggerModal({ open, initial, onClose, onSaved, lockScope }: Pro
     initial?.nl_description,
     initial?.message,
     initial?.destination,
+    initial?.slack_webhook_id,
     initial?.kind,
     initial?.schedule_cron,
     initial?.schedule_timezone,
@@ -124,6 +136,7 @@ export function TriggerModal({ open, initial, onClose, onSaved, lockScope }: Pro
         nl_description: nl,
         message: msg,
         destination,
+        slack_webhook_id: destination === "slack" ? slackWebhookId : null,
         kind,
       };
       if (kind === "schedule") {
@@ -145,6 +158,7 @@ export function TriggerModal({ open, initial, onClose, onSaved, lockScope }: Pro
           nl_description: nl,
           message: msg,
           destination,
+          slack_webhook_id: destination === "slack" ? slackWebhookId : null,
           schedule_cron: kind === "schedule" ? computedCron : null,
           schedule_timezone: kind === "schedule" ? tz : null,
           schedule_start_at: kind === "schedule" ? localInputToUtcIso(startAtLocal) : null,
@@ -165,9 +179,47 @@ export function TriggerModal({ open, initial, onClose, onSaved, lockScope }: Pro
     scopePath.trim() &&
     ifText.trim() &&
     sendText.trim() &&
-    (kind === "delta" || (computedCron && tz));
+    (kind === "delta" || (computedCron && tz)) &&
+    (destination !== "slack" || Boolean(slackWebhookId));
   const selectedDest = destinations.find((d) => d.id === destination);
-  const destDescription = selectedDest?.description ?? "";
+  const destDescription =
+    destination === "slack" ? "" : selectedDest?.description ?? "";
+
+  // The "TO" select value encodes a slack channel as ``slack:<id>`` so one
+  // control can pick Event Log or any of the user's channels.
+  const destSelectValue =
+    destination === "slack" && slackWebhookId ? `slack:${slackWebhookId}` : destination;
+
+  function onPickDestination(value: string) {
+    if (value.startsWith("slack:")) {
+      setDestination("slack");
+      setSlackWebhookId(value.slice("slack:".length));
+    } else {
+      setDestination(value);
+      setSlackWebhookId(null);
+    }
+  }
+
+  async function onAddChannel() {
+    const name = newChannelName.trim();
+    const url = newChannelUrl.trim();
+    if (!name || !url) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const created = await createSlackWebhook(name, url);
+      await refreshSlackWebhooks();
+      setDestination("slack");
+      setSlackWebhookId(created.id);
+      setAddingChannel(false);
+      setNewChannelName("");
+      setNewChannelUrl("");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "failed to add channel");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
     <div
@@ -320,18 +372,96 @@ export function TriggerModal({ open, initial, onClose, onSaved, lockScope }: Pro
         <label style={fieldStyle}>
           <span style={fieldLabelStyle}>To</span>
           <select
-            value={destination}
-            onChange={(e) => setDestination(e.target.value)}
+            value={destSelectValue}
+            onChange={(e) => onPickDestination(e.target.value)}
             disabled={busy}
             style={{ ...inputStyle, cursor: "pointer" }}
           >
-            {destinations.map((d) => (
-              <option key={d.id} value={d.id}>
-                {d.name}
+            {destinations
+              .filter((d) => d.id !== "slack")
+              .map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.name}
+                </option>
+              ))}
+            {slackWebhooks.map((w) => (
+              <option key={w.id} value={`slack:${w.id}`}>
+                Slack · {w.name}
               </option>
             ))}
           </select>
           {destDescription && <span style={fieldHintStyle}>{destDescription}</span>}
+          {destination === "slack" && !slackWebhookId && (
+            <span style={{ ...fieldHintStyle, color: color.state.danger.fg }}>
+              Pick a Slack channel, or add one below.
+            </span>
+          )}
+          {!addingChannel ? (
+            <button
+              type="button"
+              onClick={() => setAddingChannel(true)}
+              disabled={busy}
+              style={{
+                alignSelf: "flex-start",
+                marginTop: 6,
+                background: "none",
+                border: "none",
+                padding: 0,
+                cursor: "pointer",
+                fontSize: 13,
+                color: color.accent.fg,
+              }}
+            >
+              + Add Slack channel
+            </button>
+          ) : (
+            <div
+              style={{
+                marginTop: 8,
+                padding: 10,
+                border: `1px solid ${color.border.default}`,
+                borderRadius: radius.sm,
+                background: color.bg.sunken,
+                display: "flex",
+                flexDirection: "column",
+                gap: 8,
+              }}
+            >
+              <input
+                value={newChannelName}
+                onChange={(e) => setNewChannelName(e.target.value)}
+                placeholder="Channel name (e.g. PM Standup)"
+                disabled={busy}
+                style={inputStyle}
+              />
+              <input
+                value={newChannelUrl}
+                onChange={(e) => setNewChannelUrl(e.target.value)}
+                placeholder="https://hooks.slack.com/services/…"
+                disabled={busy}
+                style={inputStyle}
+              />
+              <div style={{ display: "flex", gap: 8 }}>
+                <Button
+                  type="button"
+                  variant="primary"
+                  size="sm"
+                  disabled={busy || !newChannelName.trim() || !newChannelUrl.trim()}
+                  onClick={() => void onAddChannel()}
+                >
+                  Add channel
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  disabled={busy}
+                  onClick={() => setAddingChannel(false)}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          )}
         </label>
 
         {error && (

@@ -53,6 +53,7 @@ class TriggerRecord(BaseModel):
     nl_description: str
     message: str | None
     destination: str
+    slack_webhook_id: str | None = None
     enabled: bool
     file_path: str | None
     created_at: str | None
@@ -73,6 +74,7 @@ def _to_record(t: Trigger) -> TriggerRecord:
         nl_description=t.nl_description,
         message=action.get("message"),
         destination=action["destination"],
+        slack_webhook_id=t.slack_webhook_id,
         enabled=t.enabled,
         file_path=t.file_path,
         created_at=t.created_at,

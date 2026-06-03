@@ -67,6 +67,11 @@ def serialize(trigger: dict[str, Any]) -> str:
         "enabled": bool(trigger["enabled"]),
         "created_at": trigger.get("created_at"),
     }
+    # Slack channel reference — emitted only for slack-destination triggers so
+    # other YAMLs stay clean. It's an opaque id (not the secret webhook URL,
+    # which lives only on the slack_webhooks row), so it's safe in the repo.
+    if trigger.get("slack_webhook_id") is not None:
+        payload["slack_webhook_id"] = trigger["slack_webhook_id"]
     # Schedule fields are emitted only when the trigger is schedule-kind, so
     # delta YAMLs stay clean. ``schedule_last_fired_at`` is intentionally
     # *never* written — it's runtime state, and persisting it would commit
@@ -88,6 +93,7 @@ def parse(yaml_text: str) -> dict[str, Any]:
     typed = cast(dict[str, Any], data)
     typed.setdefault("message", None)
     typed.setdefault("destination", None)
+    typed.setdefault("slack_webhook_id", None)
     typed.setdefault("schedule_cron", None)
     typed.setdefault("schedule_timezone", None)
     typed.setdefault("schedule_start_at", None)

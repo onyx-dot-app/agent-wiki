@@ -35,6 +35,7 @@ from sqlalchemy import delete as sa_delete, or_, select
 
 from app.db.models import Event, Trigger
 from app.db.session import session
+from app.slack import webhooks as slack_webhooks
 from app.triggers import destinations as destinations_repo
 from app.triggers import storage
 
@@ -62,6 +63,25 @@ def _validate_destination(destination: object) -> str:
             f"destination {slug!r} not found — call get_trigger_destinations to list available ids"
         )
     return slug
+
+
+def _validate_slack_webhook(
+    *, destination: str, slack_webhook_id: object, owner_user_id: str
+) -> str | None:
+    """Resolve the Slack channel reference for a trigger.
+
+    A ``slack`` destination requires a ``slack_webhook_id`` that the owner
+    actually owns. Any other destination must not carry one (we null it so a
+    destination flip doesn't leave a dangling reference).
+    """
+    if destination != destinations_repo.SLACK_ID:
+        return None
+    if not isinstance(slack_webhook_id, str) or not slack_webhook_id.strip():
+        raise ValueError("a Slack destination requires slack_webhook_id (the channel to post to)")
+    wid = slack_webhook_id.strip()
+    if not slack_webhooks.owned_by(wid, owner_user_id):
+        raise ValueError(f"slack_webhook_id {wid!r} not found")
+    return wid
 
 
 def _action_payload(*, message: str, destination: object) -> str:
@@ -135,6 +155,7 @@ def _to_dict(t: Trigger) -> dict[str, Any]:
         "nl_description": t.nl_description,
         "message": action.get("message"),
         "destination": action["destination"],
+        "slack_webhook_id": t.slack_webhook_id,
         "enabled": t.enabled,
         "created_at": t.created_at,
         "last_edited_at": t.last_edited_at,
@@ -157,6 +178,7 @@ def create(
     nl_description: str,
     message: str,
     destination: object = None,
+    slack_webhook_id: object = None,
     kind: str = "delta",
     enabled: bool = True,
     actor: str | None = None,
@@ -173,6 +195,11 @@ def create(
     if not message.strip():
         raise ValueError("message (the fire message) is required and must be a non-empty string")
     destination_id = _validate_destination(destination)
+    webhook_id = _validate_slack_webhook(
+        destination=destination_id,
+        slack_webhook_id=slack_webhook_id,
+        owner_user_id=owner_user_id,
+    )
     cron_value, tz_value, start_at_value = _validate_schedule_fields(
         kind=kind,
         schedule_cron=schedule_cron,
@@ -191,6 +218,7 @@ def create(
         "nl_description": nl_description,
         "message": message.strip(),
         "destination": destination_id,
+        "slack_webhook_id": webhook_id,
         "enabled": enabled,
         "created_at": created_at,
         "schedule_cron": cron_value,
@@ -208,6 +236,7 @@ def create(
                 kind=kind,
                 nl_description=nl_description,
                 action_json=_action_payload(message=message.strip(), destination=destination_id),
+                slack_webhook_id=webhook_id,
                 enabled=enabled,
                 file_path=file_path,
                 created_at=created_at,
@@ -252,6 +281,7 @@ def update(
     nl_description: str | None = None,
     message: str | None = None,
     destination: object = _UNSET,
+    slack_webhook_id: object = _UNSET,
     enabled: bool | None = None,
     actor: str | None = None,
     schedule_cron: str | None = None,
@@ -275,6 +305,15 @@ def update(
         new["message"] = message.strip()
     if destination is not _UNSET:
         new["destination"] = _validate_destination(destination)
+    if slack_webhook_id is not _UNSET:
+        new["slack_webhook_id"] = slack_webhook_id
+    # Re-resolve the channel reference against the *final* destination: a flip
+    # to slack requires a webhook, a flip away from slack nulls it.
+    new["slack_webhook_id"] = _validate_slack_webhook(
+        destination=new["destination"],
+        slack_webhook_id=new.get("slack_webhook_id"),
+        owner_user_id=existing["owner_user_id"],
+    )
     if enabled is not None:
         new["enabled"] = enabled
     if schedule_cron is not None:
@@ -310,6 +349,7 @@ def update(
         and new["nl_description"] == existing["nl_description"]
         and new["message"] == existing["message"]
         and new["destination"] == existing["destination"]
+        and new.get("slack_webhook_id") == existing.get("slack_webhook_id")
         and new["enabled"] == existing["enabled"]
         and new.get("schedule_cron") == existing.get("schedule_cron")
         and new.get("schedule_timezone") == existing.get("schedule_timezone")
@@ -338,6 +378,7 @@ def update(
         t.action_json = _action_payload(
             message=new["message"] or "", destination=new["destination"]
         )
+        t.slack_webhook_id = new.get("slack_webhook_id")
         t.enabled = new["enabled"]
         t.file_path = new_file_path
         t.last_edited_at = _now_iso()
