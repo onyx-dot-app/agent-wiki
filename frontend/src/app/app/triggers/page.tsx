@@ -58,8 +58,19 @@ export default function TriggersPage() {
   const isMobile = useIsMobile();
   const { triggers, error: listSwrError, refresh } = useTriggers();
   const destinations = useTriggerDestinations();
-  const destinationLabel = (id: string | null | undefined) =>
-    destinations.find((d) => d.id === id)?.name ?? id ?? "—";
+  const { webhooks: slackWebhooks } = useSlackWebhooks();
+  const destinationLabel = (t: Trigger) => {
+    // For Slack, name the specific channel rather than the generic kind.
+    if (t.destination === "slack") {
+      const ch = slackWebhooks.find((w) => w.id === t.slack_webhook_id);
+      return ch ? `Slack · ${ch.name}` : "Slack · (channel removed)";
+    }
+    return (
+      destinations.find((d) => d.id === t.destination)?.name ??
+      t.destination ??
+      "—"
+    );
+  };
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
@@ -303,7 +314,7 @@ export default function TriggersPage() {
                 <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginTop: 6 }}>
                   <span style={sentenceTagStyle}>TO</span>
                   <span style={{ flex: 1, minWidth: 0, color: color.text.secondary }}>
-                    {destinationLabel(t.destination)}
+                    {destinationLabel(t)}
                   </span>
                 </div>
               </div>
