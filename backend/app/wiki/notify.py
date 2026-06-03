@@ -190,12 +190,16 @@ def after_path_move(
     # Triggers store their scope_path inside the moved YAML (and the YAML's
     # location is derived from it), so a git mv leaves scopes dangling. Rewrite
     # the affected YAMLs, then reconverge the absolute file_path cache from
-    # disk. Best-effort — a trigger reconcile failure must not abort the move's
-    # other side effects.
+    # disk. Both best-effort, in *separate* try blocks: a partial repoint
+    # failure must still let the rebuild run, or the cache would stay stale
+    # against the YAMLs that were rewritten until some later incidental rebuild.
     try:
         triggers_repo.repoint_scopes_for_moves(moves, actor=actor)
+    except Exception:
+        log.exception("trigger scope repoint after path move failed")
+    try:
         triggers_repo.rebuild_from_filesystem()
     except Exception:
-        log.exception("trigger scope/cache reconcile after path move failed")
+        log.exception("trigger cache rebuild after path move failed")
     if list_changed:
         mcp_pubsub.publish_list_changed()
