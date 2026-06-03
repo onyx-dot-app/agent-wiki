@@ -439,7 +439,7 @@ function SlackChannelsCard() {
       >
         <h2 style={{ margin: 0, fontSize: 16 }}>Slack channels</h2>
         {!adding && (
-          <Button variant="primary" size="sm" onClick={() => setAdding(true)}>
+          <Button variant="action" size="sm" onClick={() => setAdding(true)}>
             + Add channel
           </Button>
         )}
@@ -488,7 +488,7 @@ function SlackChannelsCard() {
           )}
           <div style={{ display: "flex", gap: 8 }}>
             <Button
-              variant="primary"
+              variant="action"
               size="sm"
               disabled={busy || !name.trim() || !url.trim()}
               onClick={() => void onAdd()}
