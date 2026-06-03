@@ -151,6 +151,13 @@ def init_db() -> None:
 
     engine = get_engine()
     with engine.connect() as conn:
+        # Ensure the public schema and required extensions exist before
+        # migrations run. In Docker this is handled by POSTGRES_DB + the
+        # custom image; locally it's not guaranteed.
+        conn.execute(sa.text("CREATE SCHEMA IF NOT EXISTS public"))
+        conn.execute(sa.text("CREATE EXTENSION IF NOT EXISTS pgmq"))
+        conn.commit()
+
         conn.execute(
             sa.text("SELECT pg_advisory_lock(:lock_key)"), {"lock_key": _MIGRATION_ADVISORY_LOCK}
         )
