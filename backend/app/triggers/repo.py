@@ -35,6 +35,7 @@ from sqlalchemy import delete as sa_delete, or_, select
 
 from app.db.models import Event, Trigger
 from app.db.session import session
+from app.slack import webhooks as slack_webhooks
 from app.triggers import destinations as destinations_repo
 from app.triggers import storage
 
@@ -73,8 +74,6 @@ def _validate_slack_webhook(
     actually owns. Any other destination must not carry one (we null it so a
     destination flip doesn't leave a dangling reference).
     """
-    from app.slack import webhooks as slack_webhooks
-
     if destination != destinations_repo.SLACK_ID:
         return None
     if not isinstance(slack_webhook_id, str) or not slack_webhook_id.strip():

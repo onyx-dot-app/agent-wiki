@@ -17,7 +17,7 @@ from app.triggers.engine import TriggerRecord
 
 from tests._seed import list_events, seed_user
 
-_HOOK = "https://hooks.slack.com/services/T00/B00/XXXXXXXX"
+_HOOK = "https://hooks.slack.com/services/EXAMPLE"
 _OWNER = "usr_1"
 
 

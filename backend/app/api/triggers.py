@@ -9,11 +9,13 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 
 from app.auth import User, require_can
 from app.auth.deps import require_user
-from app.models.trigger import (
+from app.models.slack import (
     CreateSlackWebhookRequest,
-    CreateTriggerRequest,
     SlackWebhookListResponse,
     SlackWebhookView,
+)
+from app.models.trigger import (
+    CreateTriggerRequest,
     TriggerCommit,
     TriggerDestinationsResponse,
     TriggerDestinationView,

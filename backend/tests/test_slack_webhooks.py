@@ -7,7 +7,7 @@ from app.slack import webhooks as slack_webhooks
 
 from tests._seed import seed_user
 
-_HOOK = "https://hooks.slack.com/services/T00/B00/XXXXXXXX"
+_HOOK = "https://hooks.slack.com/services/EXAMPLE"
 
 
 def test_create_then_list(tmp_db):

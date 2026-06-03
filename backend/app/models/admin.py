@@ -122,5 +122,3 @@ class BraintrustView(BaseModel):
     api_key_set: bool
     api_key_hint: str
     enabled: bool
-
-
