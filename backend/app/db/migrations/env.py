@@ -21,7 +21,7 @@ from __future__ import annotations
 from logging.config import fileConfig
 
 from alembic import context
-from sqlalchemy import create_engine, pool
+from sqlalchemy import create_engine, pool, text
 
 from app.config import CONFIG
 from app.db import models  # noqa: F401 — registers all tables on Base.metadata  # pyright: ignore[reportUnusedImport]
@@ -60,6 +60,12 @@ def run_migrations_online() -> None:
     connectable = create_engine(_db_url, poolclass=pool.NullPool, future=True)
 
     with connectable.connect() as connection:
+        # Ensure the public schema exists before Alembic applies any
+        # migrations — it is a prerequisite for the migration scripts and
+        # is not created automatically by PostgreSQL itself.
+        connection.execute(text("CREATE SCHEMA IF NOT EXISTS public"))
+        connection.commit()
+
         context.configure(
             connection=connection,
             target_metadata=target_metadata,

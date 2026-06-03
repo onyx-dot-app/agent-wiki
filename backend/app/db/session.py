@@ -151,6 +151,12 @@ def init_db() -> None:
 
     engine = get_engine()
     with engine.connect() as conn:
+        # Ensure the public schema exists before Alembic applies any
+        # migrations — it is a prerequisite for the migration scripts and
+        # is not created automatically by PostgreSQL itself.
+        conn.execute(sa.text("CREATE SCHEMA IF NOT EXISTS public"))
+        conn.commit()
+
         conn.execute(
             sa.text("SELECT pg_advisory_lock(:lock_key)"), {"lock_key": _MIGRATION_ADVISORY_LOCK}
         )
