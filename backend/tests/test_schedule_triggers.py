@@ -36,6 +36,27 @@ class _FakeResp(BaseModel):
     usage: dict = {}
 
 
+def _record(**overrides):
+    from app.triggers.engine import TriggerRecord
+
+    base = TriggerRecord(
+        id="trg_x",
+        owner_user_id="usr_x",
+        scope_path="a.md",
+        kind="schedule",
+        nl_description="x",
+        message="m",
+        destination="event_log",
+        enabled=True,
+        file_path=None,
+        created_at=None,
+        last_edited_at=None,
+        schedule_cron="0 * * * *",
+        schedule_timezone="UTC",
+    )
+    return base.model_copy(update=overrides)
+
+
 def _matched_response(matched: bool, reason: str = "test reason") -> _FakeResp:
     return _FakeResp(
         tool_calls=[
@@ -377,6 +398,82 @@ def test_evaluator_skips_owner_without_read(tmp_repo):
 
     assert fired == 0
     assert list_events(kind="trigger.fire") == []
+
+
+# --------------------------------------------------------------------------- #
+# schedule_window_start — the "changes since last check" window               #
+# --------------------------------------------------------------------------- #
+
+
+def test_window_start_uses_last_fired_when_present():
+    from app.triggers.engine import schedule_window_start
+
+    now = _now()
+    last = now - timedelta(minutes=10)
+    start = schedule_window_start(_record(schedule_last_fired_at=_iso(last)), now)
+    assert abs((start - last).total_seconds()) < 1
+
+
+def test_window_start_first_fire_uses_previous_cron_tick():
+    from app.triggers.engine import schedule_window_start
+
+    now = _now()
+    # Hourly cron, never fired: window start is the most recent top-of-hour
+    # at or before now — i.e. < 1h back, on the hour boundary.
+    start = schedule_window_start(_record(schedule_last_fired_at=None), now)
+    assert start <= now
+    assert now - start < timedelta(hours=1)
+    assert start.minute == 0 and start.second == 0
+
+
+def test_window_start_clamps_stale_base():
+    from app.triggers.engine import schedule_window_start
+
+    now = _now()
+    stale = now - timedelta(days=30)
+    start = schedule_window_start(_record(schedule_last_fired_at=_iso(stale)), now)
+    # Clamped to the 14-day lookback floor, not the 30-day-old base.
+    assert abs((now - start) - timedelta(days=14)).total_seconds() < 60
+
+
+# --------------------------------------------------------------------------- #
+# evaluator threads the changes-since diff into the payload                   #
+# --------------------------------------------------------------------------- #
+
+
+def test_evaluator_payload_includes_changes_since_block(tmp_repo):
+    from app.tasks.triggers import evaluate_due_schedule_triggers
+    from app.wiki import git as wiki_git
+
+    uid = seed_user(is_admin=True, email="a@b.com")
+    wiki_git.commit_file("watched.md", "# Watched\n\nstatus: green\n", "seed", author=None)
+    last = _iso(_now() - timedelta(minutes=10))
+    seed_trigger(
+        tid="trg_sched_diff",
+        owner_user_id=uid,
+        scope_path="",
+        kind="schedule",
+        nl_description="any change",
+        message="ping",
+        schedule_cron="* * * * *",
+        schedule_timezone="UTC",
+        schedule_last_fired_at=last,
+    )
+
+    seen: list[str] = []
+
+    def _capture(messages, **kw):
+        seen.append(messages[1]["content"])
+        # First call is the eval gate, second is render.
+        return _matched_response(True, "changed") if len(seen) == 1 else _rendered_response("ok")
+
+    with patch("app.triggers.natural_language.complete", side_effect=_capture):
+        evaluate_due_schedule_triggers(_now())
+
+    assert seen, "evaluator never called the LLM"
+    assert "CHANGES SINCE LAST CHECK" in seen[0]
+    # watched.md was committed within the 10-min window → shows as a change.
+    assert "watched.md" in seen[0]
 
 
 # --------------------------------------------------------------------------- #

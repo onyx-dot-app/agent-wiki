@@ -6,10 +6,17 @@ versions of every tracked .md), and the combined payload.
 """
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 import pytest
 
 from app.triggers import diff as diff_helper
+from app.triggers.diff import _change_entry  # pyright: ignore[reportPrivateUsage]
 from app.models.wiki import ChangeKind
+
+
+def _iso(dt: datetime) -> str:
+    return dt.astimezone(timezone.utc).isoformat(timespec="seconds")
 
 
 # --------------------------------------------------------------------------- #
@@ -146,3 +153,96 @@ def test_new_file_payload_accepts_prebuilt_snapshot(repo_with_docs):
     )
     assert payload.startswith(custom)
     assert "alpha body" not in payload
+
+
+# --------------------------------------------------------------------------- #
+# _change_entry — per-path classification                                     #
+# --------------------------------------------------------------------------- #
+
+
+def test_change_entry_new_file_shows_full_body():
+    out = _change_entry("n.md", "", "# New\n\nbody\n")
+    assert out is not None
+    assert "(new file)" in out
+    assert "body" in out
+
+
+def test_change_entry_deleted_is_noted():
+    out = _change_entry("gone.md", "had content\n", "")
+    assert out is not None
+    assert "(deleted)" in out
+    assert "had content" not in out  # body of a deleted file isn't echoed
+
+
+def test_change_entry_edit_low_density_is_unified_diff():
+    before = "\n".join(f"line {i}" for i in range(50))
+    after = before.replace("line 25", "line 25 — updated")
+    out = _change_entry("g.md", before, after)
+    assert out is not None
+    assert "(edited)" in out
+    assert "line 25 — updated" in out
+
+
+def test_change_entry_high_density_rewrite_shows_both_bodies():
+    out = _change_entry("g.md", "old\n", "completely different content\n")
+    assert out is not None
+    assert "(rewritten)" in out
+    assert "BEFORE:" in out and "AFTER:" in out
+
+
+def test_change_entry_no_effective_change_returns_none():
+    assert _change_entry("g.md", "same\n", "same\n") is None
+
+
+# --------------------------------------------------------------------------- #
+# build_changes_since                                                         #
+# --------------------------------------------------------------------------- #
+
+
+def test_changes_since_lists_recent_docs_as_new_when_no_prior_commit(repo_with_docs):
+    # All commits in the fixture happened "now"; a window opened an hour ago
+    # has no commit before it, so every touched .md is a brand-new file.
+    since = _iso(datetime.now(timezone.utc) - timedelta(hours=1))
+    out = diff_helper.build_changes_since(scope_path="", since_iso=since)
+    assert "=== CHANGES SINCE LAST CHECK" in out
+    assert "--- a.md  (new file)" in out
+    assert "alpha body" in out
+    # YAML trigger files never appear in the diff block
+    assert ".trigger_x.yaml" not in out
+
+
+def test_changes_since_respects_scope(repo_with_docs):
+    since = _iso(datetime.now(timezone.utc) - timedelta(hours=1))
+    out = diff_helper.build_changes_since(scope_path="auth", since_iso=since)
+    assert "auth/passwords.md" in out
+    assert "--- a.md" not in out  # outside the scope
+
+
+def test_changes_since_empty_window(repo_with_docs):
+    # A window opening in the future captures nothing.
+    since = _iso(datetime.now(timezone.utc) + timedelta(hours=1))
+    out = diff_helper.build_changes_since(scope_path="", since_iso=since)
+    assert "(no changes in this window)" in out
+
+
+# --------------------------------------------------------------------------- #
+# build_schedule_payload                                                      #
+# --------------------------------------------------------------------------- #
+
+
+def test_schedule_payload_without_since_has_no_changes_block(repo_with_docs):
+    payload = diff_helper.build_schedule_payload(scope_path="", when_iso="2026-06-03T09:00:00+00:00")
+    assert "=== WIKI (latest version) ===" in payload
+    assert "=== SCHEDULED CHECK ===" in payload
+    assert "CHANGES SINCE LAST CHECK" not in payload
+
+
+def test_schedule_payload_with_since_orders_snapshot_changes_check(repo_with_docs):
+    since = _iso(datetime.now(timezone.utc) - timedelta(hours=1))
+    payload = diff_helper.build_schedule_payload(
+        scope_path="", when_iso="2026-06-03T09:00:00+00:00", since_iso=since
+    )
+    snap_idx = payload.index("WIKI (latest version)")
+    chg_idx = payload.index("CHANGES SINCE LAST CHECK")
+    chk_idx = payload.index("=== SCHEDULED CHECK ===")
+    assert snap_idx < chg_idx < chk_idx

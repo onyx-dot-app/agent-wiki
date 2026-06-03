@@ -5,8 +5,11 @@ Two flavors:
                     a meaningful update. Uses an LLM check against the
                     ``nl_description`` of the trigger.
   * **schedule**  — fires on cron, evaluated by the periodic task. Same NL
-                    gate as delta, but the payload is a snapshot of the
-                    current wiki (no diff) since there's no commit.
+                    gate as delta. The payload is a snapshot of the current
+                    wiki plus a "changes since last check" diff covering the
+                    window since the previous tick (see ``schedule_window_start``),
+                    so a schedule trigger can reason about change over time
+                    and not just current state.
 
 When a doc is updated we evaluate triggers whose ``scope_path`` matches the
 doc itself or any parent directory. When the schedule scheduler ticks we
@@ -15,7 +18,7 @@ load all enabled schedule triggers and ask croniter whether each is due.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -191,6 +194,47 @@ def _parse_iso(raw: str | None) -> datetime | None:
     return parsed
 
 
+# Cap on the "changes since last check" lookback. A stale base (worker
+# downtime, a backdated start_at, a trigger idle for weeks) shouldn't pull
+# the whole repo history into the eval payload.
+_MAX_SCHEDULE_LOOKBACK = timedelta(days=14)
+
+
+def schedule_window_start(t: TriggerRecord, now: datetime) -> datetime:
+    """Start of the "changes since last check" window for a schedule fire.
+
+    Subsequent fires use the prior fire time (``schedule_last_fired_at``).
+    The first fire has no prior fire, so we fall back to the previous cron
+    tick before ``now`` — one interval back — so the first fire sees the
+    same one-interval window of changes as every later fire (a daily
+    schedule always looks back ~a day, hourly ~an hour, etc).
+
+    Clamped to ``_MAX_SCHEDULE_LOOKBACK`` before ``now`` so a stale base
+    can't dump the whole repo history into the payload.
+    """
+    now_utc = now.astimezone(timezone.utc) if now.tzinfo else now.replace(tzinfo=timezone.utc)
+    last_fired = _parse_iso(t.schedule_last_fired_at)
+    start = last_fired if last_fired is not None else _previous_tick(t, now_utc)
+    floor = now_utc - _MAX_SCHEDULE_LOOKBACK
+    return max(start, floor)
+
+
+def _previous_tick(t: TriggerRecord, now_utc: datetime) -> datetime:
+    """The most recent cron fire strictly before ``now`` (one interval
+    back). Falls back to the max-lookback floor if cron/tz are missing or
+    croniter can't resolve a prior tick."""
+    floor = now_utc - _MAX_SCHEDULE_LOOKBACK
+    if not t.schedule_cron or not t.schedule_timezone:
+        return floor
+    try:
+        tz = ZoneInfo(t.schedule_timezone)
+        itr = croniter(t.schedule_cron, now_utc.astimezone(tz))
+        return itr.get_prev(datetime).astimezone(timezone.utc)
+    except Exception:
+        log.exception("schedule_window_start: prev-tick failed for %s", t.id)
+        return floor
+
+
 def evaluate_delta(trigger: TriggerRecord, payload: str) -> MatchResult:
     """Phase 1 LLM check: does this delta satisfy ``trigger.nl_description``?
 
@@ -211,9 +255,10 @@ def render_delta_message(
 def evaluate_schedule(trigger: TriggerRecord, payload: str) -> MatchResult:
     """Phase 1 LLM check for a schedule tick.
 
-    ``payload`` is the wiki-snapshot + scheduled-check block from
-    ``app.triggers.diff.build_schedule_payload``. The prompt asks the
-    model to evaluate against current wiki state (no diff is available).
+    ``payload`` is the wiki-snapshot + changes-since-last-check diff +
+    scheduled-check block from ``app.triggers.diff.build_schedule_payload``.
+    The prompt evaluates change-over-time conditions against the diff and
+    overall-state conditions against the snapshot.
     """
     return nl_matches_snapshot(trigger.nl_description, payload)
 

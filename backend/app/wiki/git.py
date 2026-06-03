@@ -429,6 +429,20 @@ def paths_touched_since(since_iso: str) -> set[str]:
     return {line for line in out.splitlines() if line.strip()}
 
 
+def rev_before(iso: str) -> str | None:
+    """The newest commit at or before ``iso`` (any timestamp ``git rev-list
+    --before`` accepts), or ``None`` if the repo has no commit that old.
+
+    Used to resolve the "before" ref for a time-windowed diff: diffing this
+    ref against HEAD captures the net change over ``[iso, now]``.
+    """
+    out = _run(
+        ["rev-list", "-1", f"--before={iso}", "HEAD"],
+        check=False,
+    ).stdout.strip()
+    return out or None
+
+
 def list_paths_with_head_sha(prefix: str = "") -> list[tuple[str, str]]:
     """``(path, HEAD-touching sha)`` for every tracked file under ``prefix``.
 

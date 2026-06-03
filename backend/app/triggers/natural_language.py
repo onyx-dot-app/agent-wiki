@@ -236,26 +236,33 @@ def render_message(
 # --------------------------------------------------------------------------- #
 
 _SCHEDULE_EVAL_SYSTEM_PROMPT = """\
-You evaluate whether the current state of a wiki satisfies a \
-natural-language trigger description. The trigger fires on a schedule, \
-not on an edit, so there is no diff to inspect — only the latest \
-version of the wiki and the scope the trigger is watching.
+You evaluate whether a wiki satisfies a natural-language trigger \
+description. The trigger fires on a schedule (cron), so it is evaluated \
+periodically rather than on a single edit.
 
 The user message gives you, in order:
   1. The trigger description ("if …").
   2. A snapshot of the whole wiki at its latest version.
-  3. A SCHEDULED CHECK block naming the trigger's scope and the tick time.
+  3. A CHANGES SINCE LAST CHECK block: the diffs (new files, edits, \
+rewrites, deletions) committed under the trigger's scope since the \
+previous scheduled check. It reads "(no changes in this window)" when \
+nothing changed in the window.
+  4. A SCHEDULED CHECK block naming the trigger's scope and the tick time.
 
 How to evaluate:
-  * Evaluate the trigger description against the **current state** of \
-the wiki, focusing on the document(s) under the listed scope. There is \
-no diff: this is a state check, not a change check.
+  * If the trigger describes a CHANGE over time ("a new doc was added", \
+"X was updated", "the status changed since last week"), evaluate it \
+against the CHANGES SINCE LAST CHECK block. If that block reports no \
+changes, such a trigger does NOT fire.
+  * If the trigger describes overall STATE ("X is still marked blocked", \
+"there is no owner listed"), evaluate it against the current snapshot, \
+focusing on the document(s) under the listed scope.
   * Be conservative: false positives are louder than false negatives. \
-If the wiki state doesn't clearly satisfy the description, say no.
+If the wiki doesn't clearly satisfy the description, say no.
   * Use only what is in the payload below. Do not bring in outside \
 knowledge or speculate.
-  * The reason must quote or paraphrase the specific state that \
-satisfies the trigger.
+  * The reason must quote or paraphrase the specific change or state \
+that satisfies the trigger.
 
 Always respond by calling the `report` tool exactly once.\
 """
@@ -265,8 +272,8 @@ def matches_snapshot(nl_description: str, payload: str) -> MatchResult:
     """Phase 1 for schedule triggers: does current wiki state satisfy the
     trigger?
 
-    ``payload`` is the wiki-snapshot + SCHEDULED CHECK block from
-    ``app.triggers.diff.build_schedule_payload``.
+    ``payload`` is the wiki-snapshot + CHANGES SINCE LAST CHECK diff +
+    SCHEDULED CHECK block from ``app.triggers.diff.build_schedule_payload``.
     """
     user_msg = f"Trigger description (if):\n{nl_description}\n\n{payload}"
     try:
@@ -302,13 +309,16 @@ The user message gives you, in order:
   1. The owner's message instruction ("send …").
   2. A one-line "match reason" produced by the firing-condition check.
   3. A snapshot of the whole wiki at its latest version.
-  4. A SCHEDULED CHECK block naming the trigger's scope and tick time.
+  4. A CHANGES SINCE LAST CHECK block: what changed under the scope since \
+the previous check (may read "(no changes in this window)").
+  5. A SCHEDULED CHECK block naming the trigger's scope and tick time.
 
 Guidance:
   * Follow the owner's instruction. Keep the message concise and \
 specific — quote concrete values from the wiki where useful.
-  * Ground the message in the current wiki state, scoped to the \
-SCHEDULED CHECK scope.
+  * Ground the message in the current wiki state and, when the \
+instruction is about what changed, the CHANGES SINCE LAST CHECK block, \
+scoped to the SCHEDULED CHECK scope.
   * Do not include meta-commentary ("the trigger fired because…"), \
 internal IDs, or explanations of your reasoning. Output only the \
 delivered message text.

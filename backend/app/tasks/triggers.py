@@ -59,6 +59,7 @@ from app.triggers.engine import (
     find_matching_triggers,
     render_delta_message,
     render_schedule_message,
+    schedule_window_start,
 )
 from app.wiki import acl as wiki_acl
 from app.wiki import git as wiki_git
@@ -212,7 +213,13 @@ def evaluate_due_schedule_triggers(now: datetime) -> int:
     fired = 0
     for trigger in triggers:
         try:
-            if _evaluate_one_schedule(trigger, now_iso=now_iso, wiki_snapshot=wiki_snapshot):
+            since_iso = schedule_window_start(trigger, now).isoformat(timespec="seconds")
+            if _evaluate_one_schedule(
+                trigger,
+                now_iso=now_iso,
+                since_iso=since_iso,
+                wiki_snapshot=wiki_snapshot,
+            ):
                 fired += 1
         finally:
             # Always advance last_fired_at, even on no-match or exception,
@@ -226,10 +233,14 @@ def _evaluate_one_schedule(
     trigger: TriggerRecord,
     *,
     now_iso: str,
+    since_iso: str,
     wiki_snapshot: str,
 ) -> bool:
     """Evaluate a single schedule trigger; record a ``trigger.fire`` event
     on match. Returns True if it fired.
+
+    ``since_iso`` bounds the "changes since last check" diff window (the
+    previous tick / last fire — see ``schedule_window_start``).
     """
     if not _owner_can_read_scope(trigger):
         log.info(
@@ -241,6 +252,7 @@ def _evaluate_one_schedule(
     payload = diff_helper.build_schedule_payload(
         scope_path=trigger.scope_path,
         when_iso=now_iso,
+        since_iso=since_iso,
         wiki_snapshot=wiki_snapshot,
     )
     match = evaluate_schedule(trigger, payload)

@@ -46,6 +46,9 @@ _CHANGE_BODY_BUDGET = 8_000
 # A diff covering more than this fraction of the file isn't a useful summary;
 # fall back to passing the bodies straight through.
 _DIFF_DENSITY_FALLBACK = 0.5
+# Soft cap on the whole CHANGES-SINCE block. Keeps a busy window from
+# crowding the snapshot out of the model's context.
+_CHANGES_TOTAL_BUDGET = 60_000
 
 
 def build_wiki_snapshot() -> str:
@@ -151,23 +154,112 @@ def build_schedule_payload(
     *,
     scope_path: str,
     when_iso: str,
+    since_iso: str | None = None,
     wiki_snapshot: str | None = None,
 ) -> str:
     """Payload for a schedule-kind trigger evaluation.
 
-    No diff section — schedule ticks aren't tied to a commit. We give the
-    LLM the full wiki snapshot plus a SCHEDULED CHECK block that names
-    the trigger's scope and the tick time, so the prompt can tell the
-    model to evaluate against current state.
+    A schedule tick isn't tied to a single commit, so we give the LLM the
+    full wiki snapshot for overall-state conditions. When ``since_iso`` is
+    provided (the previous tick / last fire), we also append a CHANGES
+    SINCE LAST CHECK block — the diffs committed under ``scope_path`` over
+    ``[since_iso, when_iso]`` — so the trigger can reason about *change*
+    over the window ("a new doc appeared", "X was updated since yesterday")
+    and not just current state. The trailing SCHEDULED CHECK block names
+    the scope and tick time.
     """
     snapshot = wiki_snapshot if wiki_snapshot is not None else build_wiki_snapshot()
     scope_label = scope_path or "(whole wiki)"
-    block = (
+    parts = [snapshot]
+    if since_iso is not None:
+        parts.append(build_changes_since(scope_path=scope_path, since_iso=since_iso))
+    parts.append(
         f"=== SCHEDULED CHECK ===\n"
         f"Scope: {scope_label}\n"
         f"Time: {when_iso}\n"
     )
-    return f"{snapshot}\n\n{block}"
+    return "\n\n".join(parts)
+
+
+def _in_scope(path: str, scope_path: str) -> bool:
+    """Is ``path`` under the trigger's scope? Empty scope = whole wiki."""
+    if not scope_path:
+        return True
+    if path == scope_path:
+        return True
+    return path.startswith(scope_path.rstrip("/") + "/")
+
+
+def _read_or_empty(path: str, ref: str) -> str:
+    """Body of ``path`` at ``ref``, or ``""`` if it didn't exist there
+    (a brand-new file at the window start, or a path deleted by HEAD)."""
+    try:
+        return wiki_git.read_file(path, ref)
+    except Exception:
+        return ""
+
+
+def _change_entry(path: str, before: str, after: str) -> str | None:
+    """One ``--- <path> (kind)`` entry for the changes-since block. Returns
+    ``None`` when there's no effective change (touched then reverted)."""
+    if before == after:
+        return None
+    if not before:
+        body = _truncate(after, _CHANGE_BODY_BUDGET)
+        return f"--- {path}  (new file)\n{body.rstrip()}\n"
+    if not after:
+        return f"--- {path}  (deleted)\n"
+    diff = _unified_diff(before, after)
+    if diff and _diff_density(diff, after) <= _DIFF_DENSITY_FALLBACK:
+        return f"--- {path}  (edited)\n{_truncate(diff, _CHANGE_BODY_BUDGET).rstrip()}\n"
+    # High-density rewrite: the diff is noise; show both bodies.
+    return (
+        f"--- {path}  (rewritten)\n"
+        f"BEFORE:\n{_truncate(before, _CHANGE_BODY_BUDGET).rstrip()}\n\n"
+        f"AFTER:\n{_truncate(after, _CHANGE_BODY_BUDGET).rstrip()}\n"
+    )
+
+
+def build_changes_since(*, scope_path: str, since_iso: str) -> str:
+    """The CHANGES SINCE LAST CHECK block for a schedule fire.
+
+    Diffs every ``.md`` doc under ``scope_path`` committed since
+    ``since_iso`` (the previous tick / last fire) against its body at the
+    window start, reusing the delta path's unified-diff + density-fallback
+    logic. New files show their full body; deletions are noted. The block
+    is explicitly "(no changes in this window)" when nothing matched, so
+    the model can tell "nothing changed" apart from "I wasn't given a diff".
+    """
+    header = f"=== CHANGES SINCE LAST CHECK (since {since_iso}) ==="
+    empty = f"{header}\n(no changes in this window)\n"
+    before_ref = wiki_git.rev_before(since_iso)
+    touched = sorted(
+        p
+        for p in wiki_git.paths_touched_since(since_iso)
+        if p.endswith(".md") and _in_scope(p, scope_path)
+    )
+    if not touched:
+        return empty
+
+    chunks = [header]
+    total = len(header)
+    truncated = 0
+    for path in touched:
+        if total >= _CHANGES_TOTAL_BUDGET:
+            truncated += 1
+            continue
+        after = _read_or_empty(path, "HEAD")
+        before = _read_or_empty(path, before_ref) if before_ref else ""
+        entry = _change_entry(path, before, after)
+        if entry is None:
+            continue
+        chunks.append(entry)
+        total += len(entry)
+    if truncated:
+        chunks.append(f"[truncated {truncated} more changed docs to fit budget]\n")
+    if len(chunks) == 1:
+        return empty
+    return "\n".join(chunks)
 
 
 def _unified_diff(before: str, after: str) -> str:
