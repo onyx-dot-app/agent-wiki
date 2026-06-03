@@ -57,3 +57,18 @@ def test_flip_to_event_log_clears_webhook(tmp_repo):
     assert updated is not None
     assert updated["destination"] == "event_log"
     assert updated["slack_webhook_id"] is None
+
+
+def test_rebuild_preserves_slack_webhook_id(tmp_repo):
+    # slack_webhook_id must survive rebuild_from_filesystem so the UI can still
+    # resolve the channel after a cache rebuild (boot, path move).
+    seed_user("usr_1")
+    wh = slack_webhooks.create("usr_1", "PM Standup", _HOOK)
+    t = _create("usr_1", destination="slack", slack_webhook_id=wh["id"])
+
+    triggers_repo.rebuild_from_filesystem()
+
+    rebuilt = triggers_repo.get(t["id"])
+    assert rebuilt is not None
+    assert rebuilt["destination"] == "slack"
+    assert rebuilt["slack_webhook_id"] == wh["id"]

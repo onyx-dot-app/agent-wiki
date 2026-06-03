@@ -624,6 +624,8 @@ def rebuild_from_filesystem() -> int:
                     kind=data["kind"],
                     nl_description=data["nl_description"],
                     action_json=action_payload,
+                    # The Slack channel link the UI resolves to a channel name.
+                    slack_webhook_id=data.get("slack_webhook_id"),
                     enabled=bool(data.get("enabled", True)),
                     file_path=file_path,
                     created_at=created_at,
