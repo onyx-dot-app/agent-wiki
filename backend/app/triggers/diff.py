@@ -193,10 +193,7 @@ def _in_scope(path: str, scope_path: str) -> bool:
 def _read_or_empty(path: str, ref: str) -> str:
     """Body of ``path`` at ``ref``, or ``""`` if it didn't exist there
     (a brand-new file at the window start, or a path deleted by HEAD)."""
-    try:
-        return wiki_git.read_file(path, ref)
-    except Exception:
-        return ""
+    return wiki_git.read_file_opt(path, ref) or ""
 
 
 def _change_entry(path: str, before: str, after: str) -> str | None:

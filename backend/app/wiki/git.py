@@ -271,6 +271,18 @@ def read_file(rel_path: str, ref: str = "HEAD") -> str:
         raise UnknownSha(ref) from e
 
 
+def read_file_opt(rel_path: str, ref: str = "HEAD") -> str | None:
+    """Like ``read_file`` but returns ``None`` when the path doesn't exist
+    at ``ref`` — and stays quiet about it.
+
+    A path absent at a ref is a normal, expected outcome for time-windowed
+    diffs (a file that's brand-new in the window has no body at the window
+    start), so this skips the ERROR log ``read_file`` would emit.
+    """
+    res = _run(["show", f"{ref}:{rel_path}"], check=False)
+    return res.stdout if res.returncode == 0 else None
+
+
 def path_at_ref(current_rel_path: str, ref: str) -> str | None:
     """Return the path ``current_rel_path`` had at commit ``ref``.
 
