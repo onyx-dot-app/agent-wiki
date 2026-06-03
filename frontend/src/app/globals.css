@@ -6,411 +6,102 @@
    pages that toggle between short and tall content cause a horizontal
    shift as the scrollbar appears/disappears. */
 html {
-  scrollbar-gutter: stable;
+    scrollbar-gutter: stable;
 }
 
-/* Theme tokens — light is the default, dark overrides via the
-   ``data-theme="dark"`` attribute toggled by ThemeProvider on <html>.
-   Raw hex values live here; ``lib/theme.ts`` exposes them as CSS
-   variable references that components consume. */
+/* Tell the browser which color scheme is active so native UI (scrollbars,
+   autofill, date pickers) uses matching light/dark variants. */
+:root { color-scheme: light; }
+.dark { color-scheme: dark; }
 
+/* ── App-level token aliases ──────────────────────────────────────────────
+   The app's own className strings and theme.ts reference these vars.
+   They are thin aliases onto Opal's semantic tokens so the values stay
+   in sync with Opal's light/dark themes without any app-level overrides.
+   ───────────────────────────────────────────────────────────────────── */
 :root {
-  /* Tells the browser to use light variants for native UI (scrollbars,
-     autofill, calendar/date popouts, etc.). The dark-theme block flips
-     this. Without it, native form controls keep their hardcoded white
-     surfaces in dark mode and look broken. */
-  color-scheme: light;
-
-  /* OPAL tailwind preset references --border-radius-* vars via
-     rounded-08 / rounded-12 / etc. utilities (used by the ported
-     OnyxButton wrapper). Define them at the :root so those classes
-     resolve to actual radii instead of unset / 0. */
-  --border-radius-02: 0.125rem;
-  --border-radius-04: 0.25rem;
-  --border-radius-08: 0.5rem;
-  --border-radius-12: 0.75rem;
-  --border-radius-16: 1rem;
-  --border-radius-full: 64rem;
-
   /* Text */
-  --color-text-primary: #37352f;
-  --color-text-secondary: #5a5854;
-  --color-text-muted: #787671;
-  --color-text-faint: #9b9a96;
-  --color-text-inverse: #ffffff;
+  --color-text-primary:   var(--text-05);
+  --color-text-secondary: var(--text-04);
+  --color-text-muted:     var(--text-03);
+  --color-text-faint:     var(--text-02);
+  --color-text-inverse:   var(--text-inverted-05);
 
   /* Backgrounds */
-  --color-bg-page: #ffffff;
-  --color-bg-panel: #fbfbfa;
-  --color-bg-sunken: #f7f6f3;
-  --color-bg-hover: #efeeec;
-  --color-bg-active: #e8e7e4;
+  --color-bg-page:   var(--background-tint-00);
+  --color-bg-panel:  var(--background-tint-01);
+  --color-bg-sunken: var(--background-tint-02);
+  --color-bg-hover:  var(--background-tint-03);
+  --color-bg-active: var(--background-tint-04);
 
   /* Borders */
-  --color-border-subtle: #f1f0ee;
-  --color-border-default: #ebebea;
-  --color-border-strong: #d9d8d5;
-  --color-border-focus: #37352f;
+  --color-border-subtle:  var(--border-01);
+  --color-border-default: var(--border-01);
+  --color-border-strong:  var(--border-02);
+  --color-border-focus:   var(--border-05);
 
-  /* Accent (near-black warm grey, not a hue) */
-  --color-accent-bg: #37352f;
-  --color-accent-bg-hover: #1f1d1a;
-  --color-accent-fg: #ffffff;
-  --color-accent-subtle-bg: #f1f0ee;
-  --color-accent-subtle-bg-hover: #e8e7e4;
-  --color-accent-subtle-fg: #37352f;
-  --color-accent-subtle-border: #dcdbd8;
-  /* Commented-span highlight (Google-Docs-style yellow). Semi-transparent so it
-     blends over code-span backgrounds too. The -active shade is the stronger
-     orange shown when its comment thread is selected. */
-  --color-comment-highlight: rgba(255, 212, 0, 0.38);
-  --color-comment-highlight-active: rgba(255, 159, 28, 0.6);
+  /* Accent — near-black action surface, using Opal's tint-inverted scale */
+  --color-accent-bg:            var(--background-tint-inverted-00);
+  --color-accent-bg-hover:      var(--background-tint-inverted-01);
+  --color-accent-fg:            var(--text-inverted-05);
+  --color-accent-subtle-bg:     var(--background-tint-03);
+  --color-accent-subtle-bg-hover: var(--background-tint-04);
+  --color-accent-subtle-fg:     var(--text-05);
+  --color-accent-subtle-border: var(--border-01);
 
-  /* Semantic state colors */
-  --color-state-success-bg: #dcfce7;
-  --color-state-success-border: #86efac;
-  --color-state-success-fg: #166534;
-
-  --color-state-warning-bg: #fef3c7;
-  --color-state-warning-border: #fcd34d;
-  --color-state-warning-fg: #78350f;
-
-  --color-state-danger-bg: #fee2e2;
-  --color-state-danger-border: #fca5a5;
-  --color-state-danger-fg: #7f1d1d;
-
-  --color-state-info-bg: #e0f2fe;
-  --color-state-info-border: #7dd3fc;
-  --color-state-info-fg: #075985;
+  /* State — mapped from Opal's status scale */
+  --color-state-success-bg:     var(--status-success-01);
+  --color-state-success-border: var(--status-success-02);
+  --color-state-success-fg:     var(--status-text-success-05);
+  --color-state-warning-bg:     var(--status-warning-01);
+  --color-state-warning-border: var(--status-warning-02);
+  --color-state-warning-fg:     var(--status-text-warning-05);
+  --color-state-danger-bg:      var(--status-error-01);
+  --color-state-danger-border:  var(--status-error-02);
+  --color-state-danger-fg:      var(--status-text-error-05);
+  --color-state-info-bg:        var(--status-info-01);
+  --color-state-info-border:    var(--status-info-02);
+  --color-state-info-fg:        var(--status-text-info-05);
 
   /* Modal scrim */
-  --color-overlay: rgba(15, 15, 15, 0.45);
+  --color-overlay: var(--mask-03);
 
-  /* Shadows */
-  --shadow-sm: 0 1px 2px rgba(15, 15, 15, 0.06);
-  --shadow-md: 0 4px 12px rgba(15, 15, 15, 0.08);
-  --shadow-popover: 0 8px 24px rgba(15, 15, 15, 0.1);
-  --shadow-fab: 0 6px 20px rgba(15, 15, 15, 0.18);
-  --shadow-modal: 0 24px 60px rgba(15, 15, 15, 0.18);
-  --shadow-panel: -4px 0 24px rgba(15, 15, 15, 0.08);
+  /* Shadows — box-shadow strings built from Opal's alpha shadow tokens */
+  --shadow-sm:      0 1px 2px var(--shadow-01);
+  --shadow-md:      0 4px 12px var(--shadow-02);
+  --shadow-popover: 0 8px 24px var(--shadow-02);
+  --shadow-fab:     0 6px 20px var(--shadow-03);
+  --shadow-modal:   0 24px 60px var(--shadow-03);
+  --shadow-panel:   -4px 0 24px var(--shadow-02);
 
-  /* Radii — shared with lib/theme.ts. */
-  --radius-xs: 4px;
-  --radius-sm: 6px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
-  --radius-pill: 9999px;
-
-  /* History / diff surfaces — avatars, row shadow, tokenized add/remove colors. */
-  --diff-avatar-bg: #000000;
-  --diff-avatar-fg: #ffffff;
-  --diff-avatar-border: #e6e6e6;
-  --diff-row-shadow: 0 0 2px 1px rgba(0, 0, 0, 0.05);
-  --diff-add-bg: #e6f2e7;
-  --diff-add-fg: var(--color-text-primary);
-  --diff-remove-bg: #fceae7;
-  --diff-remove-fg: #ce2424;
-  --diff-word-add: #00a43f;
-  --diff-word-remove: var(--diff-remove-fg);
+  /* Radii — mapped to Opal's border-radius scale */
+  --radius-xs: var(--border-radius-04);  /* 4px  */
+  --radius-sm: var(--border-radius-04);  /* 4px  (Opal has no 6px step) */
+  --radius-md: var(--border-radius-08);  /* 8px  */
+  --radius-lg: var(--border-radius-12);  /* 12px */
 }
 
-:root.dark {
-  color-scheme: dark;
-
-  /* Text — inverted hierarchy so warm-grey character is preserved. */
-  --color-text-primary: #ededec;
-  --color-text-secondary: #bdbcb8;
-  --color-text-muted: #8d8c87;
-  --color-text-faint: #6a6965;
-  --color-text-inverse: #1f1d1a;
-
-  /* Backgrounds — climbing tonal scale from page → active. */
-  --color-bg-page: #1f1d1a;
-  --color-bg-panel: #2a2826;
-  --color-bg-sunken: #36332f;
-  --color-bg-hover: #3d3a36;
-  --color-bg-active: #46433e;
-
-  /* Borders — visible without glaring against the dark surfaces. */
-  --color-border-subtle: #2f2c29;
-  --color-border-default: #3d3a36;
-  --color-border-strong: #555049;
-  --color-border-focus: #ededec;
-
-  /* Accent inverts: light surface, dark text. */
-  --color-accent-bg: #ededec;
-  --color-accent-bg-hover: #ffffff;
-  --color-accent-fg: #1f1d1a;
-  --color-accent-subtle-bg: #36332f;
-  --color-accent-subtle-bg-hover: #46433e;
-  --color-accent-subtle-fg: #ededec;
-  --color-accent-subtle-border: #555049;
-  /* Dimmer amber so it reads on the dark page without glowing. */
-  --color-comment-highlight: rgba(250, 204, 21, 0.3);
-  --color-comment-highlight-active: rgba(255, 159, 28, 0.5);
-
-  /* State colors — desaturated for dark mode, foregrounds lifted. */
-  --color-state-success-bg: #14361f;
-  --color-state-success-border: #2a6b3c;
-  --color-state-success-fg: #86efac;
-
-  --color-state-warning-bg: #3d2c10;
-  --color-state-warning-border: #6b521e;
-  --color-state-warning-fg: #fcd34d;
-
-  --color-state-danger-bg: #3a1313;
-  --color-state-danger-border: #6b2727;
-  --color-state-danger-fg: #fca5a5;
-
-  --color-state-info-bg: #0f2c3d;
-  --color-state-info-border: #1f4f6b;
-  --color-state-info-fg: #7dd3fc;
-
-  /* Heavier scrim — dark UI behind a modal still needs separation. */
-  --color-overlay: rgba(0, 0, 0, 0.6);
-
-  /* Shadows lean on near-black + higher alpha. */
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.45);
-  --shadow-popover: 0 8px 24px rgba(0, 0, 0, 0.5);
-  --shadow-fab: 0 6px 20px rgba(0, 0, 0, 0.55);
-  --shadow-modal: 0 24px 60px rgba(0, 0, 0, 0.6);
-  --shadow-panel: -4px 0 24px rgba(0, 0, 0, 0.45);
-
-  /* Diff tokens flip for dark mode. */
-  --diff-avatar-bg: #ffffff;
-  --diff-avatar-fg: #000000;
-  --diff-avatar-border: #333333;
-  --diff-row-shadow: 0 0 2px 1px rgba(255, 255, 255, 0.05);
-  --diff-add-bg: #002207;
-  --diff-add-fg: #ffffffd9;
-  --diff-remove-bg: #330b09;
-  --diff-remove-fg: #f23a36;
-  --diff-word-add: #00a43f;
-  --diff-word-remove: var(--diff-remove-fg);
-}
-
-/* Apply the page background + base text color at the document root
-   so unmounted areas (e.g. between route transitions) don't flash
-   white in dark mode. */
-html,
-body {
-  background: var(--color-bg-page);
-  color: var(--color-text-primary);
-}
-
-/* Native form controls — components that don't pass explicit color/background
-   would otherwise render white-on-white in dark mode. These rules only
-   establish defaults; component-level inline styles still win when set. */
-input,
-textarea,
-select {
-  background: var(--color-bg-page);
-  color: var(--color-text-primary);
-}
-input::placeholder,
-textarea::placeholder {
-  color: var(--color-text-faint);
-}
-
-/* Markdown rendering (wiki article body uses className="markdown"). The
-   wiki uses react-markdown with no styling layer; without these rules
-   <pre>/<code>/<blockquote>/<table> render with browser defaults that
-   look fine in light mode but unreadable in dark. */
-.markdown {
-  color: var(--color-text-primary);
-  line-height: 1.6;
-}
-.markdown h1,
-.markdown h2,
-.markdown h3,
-.markdown h4 {
-  color: var(--color-text-primary);
-  font-weight: 600;
-  line-height: 1.3;
-}
-.markdown h1 {
-  font-size: 1.875em;
-  margin: 28px 0 10px;
-}
-.markdown h2 {
-  font-size: 1.5em;
-  margin: 24px 0 8px;
-}
-.markdown h3 {
-  font-size: 1.25em;
-  margin: 20px 0 6px;
-}
-.markdown h4 {
-  font-size: 1.1em;
-  margin: 16px 0 4px;
-}
-.markdown p {
-  margin: 10px 0;
-}
-.markdown ul,
-.markdown ol {
-  margin: 10px 0;
-  padding-left: 24px;
-}
-.markdown ul {
-  list-style: disc;
-}
-.markdown ol {
-  list-style: decimal;
-}
-.markdown li {
-  margin: 4px 0;
-}
-.markdown a {
-  color: var(--color-text-primary);
-  text-decoration: underline;
-}
-.markdown a:hover {
-  color: var(--color-accent-bg);
-}
-.markdown code {
-  background: var(--color-bg-sunken);
-  color: var(--color-text-primary);
-  border: 1px solid var(--color-border-subtle);
-  border-radius: 4px;
-  padding: 1px 6px;
-  font-size: 0.92em;
-}
-.markdown pre {
-  background: var(--color-bg-sunken);
-  color: var(--color-text-primary);
-  border: 1px solid var(--color-border-default);
-  border-radius: 6px;
-  padding: 12px 14px;
-  overflow-x: auto;
-}
-.markdown pre code {
-  background: transparent;
-  border: none;
-  padding: 0;
-  font-size: inherit;
-}
-.markdown blockquote {
-  border-left: 3px solid var(--color-border-strong);
-  margin: 12px 0;
-  padding: 4px 12px;
-  color: var(--color-text-secondary);
-  background: var(--color-bg-panel);
-}
-.markdown table {
-  border-collapse: collapse;
-}
-.markdown th,
-.markdown td {
-  border: 1px solid var(--color-border-default);
-  padding: 6px 10px;
-}
-.markdown th {
-  background: var(--color-bg-sunken);
-}
-.markdown hr {
-  border: none;
-  border-top: 1px solid var(--color-border-default);
-  margin: 16px 0;
-}
-
-/* Chat-bubble variant: tighter rhythm and code blocks that contrast against
-   the sunken assistant-bubble background instead of blending into it. */
-.markdown-chat {
-  line-height: 1.5;
-}
-.markdown-chat > :first-child {
-  margin-top: 0;
-}
-.markdown-chat > :last-child {
-  margin-bottom: 0;
-}
-.markdown-chat p {
-  margin: 6px 0;
-}
-.markdown-chat ul,
-.markdown-chat ol {
-  margin: 6px 0;
-  padding-left: 22px;
-}
-.markdown-chat li {
-  margin: 2px 0;
-}
-.markdown-chat h1,
-.markdown-chat h2,
-.markdown-chat h3,
-.markdown-chat h4 {
-  margin: 10px 0 4px;
-  font-size: 14px;
-  font-weight: 600;
-}
-.markdown-chat code {
-  background: var(--color-bg-hover);
-}
-.markdown-chat pre {
-  background: var(--color-bg-hover);
-  padding: 8px 10px;
-}
-
-/* Horizontal scroll containers (e.g. the mobile template picker) that
-   want native swipe/scroll behavior without a visible scrollbar. The
-   container still scrolls — only the chrome is hidden. */
-.scroll-x-hidden {
-  scrollbar-width: none;
-  -ms-overflow-style: none;
-}
-.scroll-x-hidden::-webkit-scrollbar {
-  display: none;
-}
-
-/* Inline highlight for commented spans (CSS Custom Highlight API). The wiki
-   page registers Ranges under this name via paintCommentHighlights(). */
-::highlight(wiki-comment) {
-  background-color: var(--color-comment-highlight);
-}
-::highlight(wiki-comment-active) {
-  background-color: var(--color-comment-highlight-active);
-}
-
-/* Radix popovers (OPAL Popover / SelectButton menus) must float above modal
-   scrims (z-index 100–110). Radix sets `z-index: auto` inline on the wrapper
-   and OPAL strips className/style from Popover.Content, so `!important` here
-   is the only way to lift the menu above the modal. */
-[data-radix-popper-content-wrapper] {
-  z-index: 1000 !important;
-}
-
-/* Primary (action) buttons follow the agent-wiki near-black accent, not
-   OPAL's default blue — matches the Figma mocks and CLAUDE.md's "accent is
-   near-black, not a hue" rule. Scoped to the action *button* so links keep
-   their own color. The accent tokens invert per theme (near-black on light,
-   near-white on dark), so the foreground is flipped to match. */
-.interactive[data-interactive-variant="action"][data-interactive-prominence="primary"]:not(
-    [data-disabled]
-  ) {
+/* ── Primary (action) buttons ─────────────────────────────────────────────
+   Override Opal's default blue action surface with the app's near-black
+   accent. Scoped to button elements so links keep their Opal color.
+   ───────────────────────────────────────────────────────────────────── */
+.interactive[data-interactive-variant="action"][data-interactive-prominence="primary"]:not([data-disabled]) {
   background-color: var(--color-accent-bg) !important;
   --interactive-foreground: var(--color-accent-fg);
   --interactive-foreground-icon: var(--color-accent-fg);
 }
-.interactive[data-interactive-variant="action"][data-interactive-prominence="primary"]:hover:not(
-    [data-disabled]
-  ),
-.interactive[data-interactive-variant="action"][data-interactive-prominence="primary"][data-interaction="hover"]:not(
-    [data-disabled]
-  ) {
+.interactive[data-interactive-variant="action"][data-interactive-prominence="primary"]:hover:not([data-disabled]),
+.interactive[data-interactive-variant="action"][data-interactive-prominence="primary"][data-interaction="hover"]:not([data-disabled]) {
   background-color: var(--color-accent-bg-hover) !important;
 }
-/* Disabled primary action — neutral grey, never OPAL's default blue tint
-   (matches the mock's greyed-out Save). */
+/* Disabled primary action — neutral grey, never Opal's default blue tint. */
 .interactive[data-interactive-variant="action"][data-interactive-prominence="primary"][data-disabled] {
   background-color: var(--color-bg-active) !important;
   --interactive-foreground: var(--color-text-muted);
   --interactive-foreground-icon: var(--color-text-muted);
 }
 
-/* Selected menu/select items follow the near-black accent, not OPAL's default
-   action-link blue (the mocks have no blue). */
+/* Selected menu/select items use the near-black accent text, not Opal's blue. */
 .interactive[data-interactive-variant="select-light"][data-interactive-state="selected"],
 .interactive[data-interactive-variant="select-heavy"][data-interactive-state="selected"],
 .interactive[data-interactive-variant="select-tinted"][data-interactive-state="selected"] {
@@ -418,8 +109,54 @@ textarea::placeholder {
   --interactive-foreground-icon: var(--text-05) !important;
 }
 
-/* Floating menus (typeahead, dropdowns) keep their shadow for depth but drop
-   the hard border — the mocks show no bordered popover surface. */
+/* ── Horizontal scroll containers ─────────────────────────────────────────
+   Native swipe/scroll without a visible scrollbar (e.g. mobile template
+   picker). The container still scrolls — only the chrome is hidden.
+   ───────────────────────────────────────────────────────────────────── */
+.scroll-x-hidden {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+.scroll-x-hidden::-webkit-scrollbar {
+    display: none;
+}
+
+/* ── Radix popovers ───────────────────────────────────────────────────────
+   Opal's Popover/SelectButton menus must float above modal scrims
+   (z-index 100–110). Radix sets `z-index: auto` inline on the wrapper
+   and Opal strips className/style from Popover.Content, so !important
+   is the only way to lift the menu above the modal.
+   ───────────────────────────────────────────────────────────────────── */
+[data-radix-popper-content-wrapper] {
+    z-index: 1000 !important;
+}
+
+/* Floating menus keep their shadow for depth but drop the hard border. */
 [data-radix-popper-content-wrapper] > * {
-  border-color: transparent !important;
+    border-color: transparent !important;
+}
+
+/* ── Markdown rendered inside the chat widget ─────────────────────────── */
+.markdown-chat > * { margin: 0; }
+.markdown-chat > :last-child { margin-bottom: 0; }
+.markdown-chat p { margin: 6px 0; }
+.markdown-chat ul,
+.markdown-chat ol { margin: 6px 0; padding-left: 22px; }
+.markdown-chat li { margin: 2px 0; }
+.markdown-chat h1,
+.markdown-chat h2,
+.markdown-chat h3,
+.markdown-chat h4 { margin: 10px 0 4px; font-size: 14px; font-weight: 600; }
+.markdown-chat code { background: var(--color-bg-hover); }
+.markdown-chat pre  { background: var(--color-bg-hover); padding: 8px 10px; }
+
+/* ── Inline comment highlights (CSS Custom Highlight API) ─────────────────
+   The wiki page registers Ranges under these names via paintCommentHighlights().
+   Yellow/orange are illustrative decoration — raw hex is intentional here.
+   ───────────────────────────────────────────────────────────────────── */
+::highlight(wiki-comment) {
+  background-color: rgba(255, 212, 0, 0.38);
+}
+::highlight(wiki-comment-active) {
+  background-color: rgba(255, 159, 28, 0.6);
 }
