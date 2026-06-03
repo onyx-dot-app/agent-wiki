@@ -90,8 +90,10 @@ function charsAlign(raw: string, rendered: string): boolean {
 }
 
 /** Align an element's rendered text to its raw-markdown slice by subsequence
- * walk, skipping raw-only syntax chars. Returns null if a rendered char has no
- * counterpart in the raw slice (the selection/highlight then just isn't mapped). */
+ * walk, skipping raw-only syntax chars. Rendered whitespace with no raw
+ * counterpart is tolerated (react-markdown adds newlines around block
+ * structure); a non-whitespace rendered char with no counterpart returns null
+ * (the selection/highlight then just isn't mapped). */
 function alignBlock(el: HTMLElement, body: string, starts: number[]): BlockAlign | null {
   const pos = parseSourcePos(el.getAttribute("data-sourcepos") ?? "");
   if (!pos) return null;
@@ -103,10 +105,21 @@ function alignBlock(el: HTMLElement, body: string, starts: number[]): BlockAlign
   const rawAt: number[] = new Array<number>(rendered.length);
   let j = 0;
   for (let i = 0; i < rendered.length; i++) {
-    while (j < raw.length && !charsAlign(raw[j]!, rendered[i]!)) j++;
-    if (j >= raw.length) return null; // rendered char absent from raw → unmappable
-    rawAt[i] = blockStart + j;
-    j++;
+    const ch = rendered[i]!;
+    let k = j;
+    while (k < raw.length && !charsAlign(raw[k]!, ch)) k++;
+    if (k < raw.length) {
+      rawAt[i] = blockStart + k;
+      j = k + 1;
+    } else if (/\s/.test(ch)) {
+      // Rendered whitespace with no raw counterpart: react-markdown emits
+      // extra newlines around block structure (e.g. between a list item's text
+      // and its nested sublist) that the raw slice doesn't carry. Map it to the
+      // current position without consuming raw, instead of failing the block.
+      rawAt[i] = blockStart + Math.min(j, raw.length);
+    } else {
+      return null; // a non-whitespace rendered char absent from raw (e.g. an entity)
+    }
   }
   return { el, blockStart, blockEnd, rawAt };
 }
