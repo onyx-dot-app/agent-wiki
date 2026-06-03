@@ -23,6 +23,7 @@ from app.ingest import search as ingest_search
 from app.ingest.source_tiers import is_filtered
 from app.llm.agents.common import IRRELEVANT_SENTINEL
 from app.llm.settings import _EMPTY as _EMPTY_LLM_SETTINGS, LLMSettings
+from app.wiki.utils import author_string
 
 
 @pytest.fixture(autouse=True)
@@ -194,8 +195,6 @@ def test_commit_attributed_to_onyx_ingest(
     _run(_make_push())
     assert mock_commit.call_args.kwargs["author"] == "Onyx Ingest <onyx-ingest@local>"
     # And the binding is unwound after the run — no leak into later tasks.
-    from app.wiki.utils import author_string
-
     assert author_string() == "AI Wiki Helper <ai-wiki-helper@local>"
 
 

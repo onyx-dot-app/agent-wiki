@@ -72,7 +72,6 @@ _COMMIT_MESSAGE_MAX = 80
 _INGEST_AUTHOR = "Onyx Ingest <onyx-ingest@local>"
 
 
-
 @documents_queue.task()
 def update_document_from_payload(doc_id: str, source: str, payload: dict[str, Any]) -> None:
     log.info("update_document_from_payload doc_id=%s source=%s", doc_id, source)
