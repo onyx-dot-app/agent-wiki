@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 import logging
+import posixpath
 import uuid
 from datetime import datetime, timezone
 from typing import Any, cast
@@ -450,6 +451,84 @@ def purge_invalid_triggers(*, actor: str | None = None) -> int:
                 trigger_id,
             )
     return deleted
+
+
+def _is_trigger_file(path: str) -> bool:
+    name = posixpath.basename(path)
+    return name.startswith(".trigger_") and name.endswith(".yaml")
+
+
+def repoint_scopes_for_moves(moves: list[tuple[str, str]], *, actor: str | None) -> None:
+    """Rewrite trigger scopes after a path move so they don't dangle.
+
+    A trigger's ``scope_path`` lives *inside* its committed YAML, and the
+    YAML's filename/location is derived from that scope (``compute_path``). A
+    plain ``git mv`` relocates files but never rewrites YAML content, so a
+    rename leaves trigger scopes pointing at paths that no longer exist. Fix
+    the YAML files here; the caller (``after_path_move``) reconverges the
+    Postgres cache via ``rebuild_from_filesystem`` immediately after, so this
+    only touches the on-disk source of truth.
+
+    Two cases, read off the per-file ``(old, new)`` pairs:
+      A. A trigger YAML rode along in a folder move (it's a tracked file under
+         the moved folder). It's already at ``new`` on disk but still names the
+         old scope — invert ``compute_path`` against its new location to get
+         the corrected scope and rewrite the content in place.
+      B. A ``.md`` doc moved but its sibling doc-scoped trigger YAML did *not*
+         (a single-file rename doesn't sweep sibling files). Relocate + rewrite
+         the YAML to match the doc's new path.
+    """
+    handled_ids: set[str] = set()
+
+    # Case A — trigger YAMLs that physically moved with a folder.
+    for old_p, new_p in moves:
+        if old_p == new_p or not _is_trigger_file(old_p):
+            continue
+        try:
+            data = storage.read_trigger(new_p)  # at new_p post-mv; old scope still inside
+        except Exception:
+            log.warning("repoint_scopes_for_moves: unreadable trigger %s", new_p, exc_info=True)
+            continue
+        old_scope = data.get("scope_path") or ""
+        new_dir = posixpath.dirname(new_p)
+        if storage.kind_of_scope(old_scope) == "doc":
+            base = posixpath.basename(old_scope)
+            new_scope = f"{new_dir}/{base}" if new_dir else base
+        else:
+            new_scope = new_dir
+        handled_ids.add(data["id"])
+        if new_scope == old_scope:
+            continue
+        data["scope_path"] = new_scope
+        storage.write_trigger(data, file_path=new_p, actor=actor)
+
+    # Case B — docs whose sibling doc-scoped trigger YAML stayed put.
+    moved_yaml_olds = {old_p for old_p, _ in moves if _is_trigger_file(old_p)}
+    for old_p, new_p in moves:
+        if old_p == new_p or not old_p.endswith(".md"):
+            continue
+        with session() as s:
+            triggers = [
+                _to_dict(t)
+                for t in s.scalars(select(Trigger).where(Trigger.scope_path == old_p)).all()
+            ]
+        for trig in triggers:
+            old_file_path = trig.get("file_path")
+            if (
+                trig["id"] in handled_ids
+                or not old_file_path
+                or old_file_path in moved_yaml_olds
+            ):
+                continue
+            handled_ids.add(trig["id"])
+            new_file_path = storage.compute_path(scope_path=new_p, trigger_id=trig["id"])
+            trig["scope_path"] = new_p
+            if new_file_path == old_file_path:
+                storage.write_trigger(trig, file_path=new_file_path, actor=actor)
+            else:
+                storage.move_trigger(
+                    trig, old_file_path=old_file_path, new_file_path=new_file_path, actor=actor
+                )
 
 
 def rebuild_from_filesystem() -> int:

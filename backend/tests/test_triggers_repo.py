@@ -175,3 +175,66 @@ def test_fire_counts_by_sha_empty_input(tmp_repo):
     from app.triggers import repo
 
     assert repo.fire_counts_by_sha(set()) == {}
+
+
+# --------------------------------------------------------------------------- #
+# Scope follows a path move (repoint_scopes_for_moves via after_path_move)     #
+# --------------------------------------------------------------------------- #
+
+
+def test_folder_rename_repoints_doc_scoped_trigger(tmp_repo):
+    # A folder move sweeps the doc *and* its sibling .trigger YAML; the YAML's
+    # scope_path content must be rewritten to the doc's new path.
+    from app.triggers import repo
+    from app.wiki import git as wiki_git, notify
+
+    uid = seed_user(email="a@b.com")
+    wiki_git.commit_file("proj/old/doc.md", "# Doc\n", "seed", author=None)
+    t = _create(
+        repo, owner_user_id=uid, scope_path="proj/old/doc.md", nl_description="x", message="m"
+    )
+
+    sha, moves = wiki_git.move_path("proj/old", "proj/new", "move folder", author=None)
+    notify.after_path_move(moves, sha, actor=None)
+
+    got = repo.get(t["id"])
+    assert got is not None
+    assert got["scope_path"] == "proj/new/doc.md"
+    assert got["file_path"] == f"proj/new/.trigger_{t['id']}_doc.yaml"
+
+
+def test_folder_rename_repoints_folder_scoped_trigger(tmp_repo):
+    from app.triggers import repo
+    from app.wiki import git as wiki_git, notify
+
+    uid = seed_user(email="a@b.com")
+    t = _create(repo, owner_user_id=uid, scope_path="proj/old", nl_description="x", message="m")
+
+    sha, moves = wiki_git.move_path("proj/old", "proj/new", "move folder", author=None)
+    notify.after_path_move(moves, sha, actor=None)
+
+    got = repo.get(t["id"])
+    assert got is not None
+    assert got["scope_path"] == "proj/new"
+    assert got["file_path"] == f"proj/new/.trigger_{t['id']}.yaml"
+
+
+def test_single_doc_rename_relocates_doc_scoped_trigger(tmp_repo):
+    # Renaming just the doc does NOT sweep the sibling YAML, so the trigger must
+    # be relocated + rewritten to the doc's new path (and renamed docbase).
+    from app.triggers import repo
+    from app.wiki import git as wiki_git, notify
+
+    uid = seed_user(email="a@b.com")
+    wiki_git.commit_file("notes/doc.md", "# Doc\n", "seed", author=None)
+    t = _create(
+        repo, owner_user_id=uid, scope_path="notes/doc.md", nl_description="x", message="m"
+    )
+
+    sha, moves = wiki_git.move_path("notes/doc.md", "notes/renamed.md", "rename doc", author=None)
+    notify.after_path_move(moves, sha, actor=None)
+
+    got = repo.get(t["id"])
+    assert got is not None
+    assert got["scope_path"] == "notes/renamed.md"
+    assert got["file_path"] == f"notes/.trigger_{t['id']}_renamed.yaml"
