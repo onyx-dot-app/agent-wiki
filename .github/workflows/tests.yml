@@ -10,6 +10,11 @@ concurrency:
 
 on:
   pull_request:
+    # Only run when backend code changes — there's nothing here for a
+    # frontend-only or workflow-only PR to exercise. Mirrors frontend.yml's
+    # `paths` guard. (backend/** covers deps too: pyproject.toml + uv.lock.)
+    paths:
+      - "backend/**"
   workflow_dispatch:
 
 jobs:
