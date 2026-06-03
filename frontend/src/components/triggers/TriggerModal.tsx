@@ -444,7 +444,7 @@ export function TriggerModal({ open, initial, onClose, onSaved, lockScope }: Pro
               <div style={{ display: "flex", gap: 8 }}>
                 <Button
                   type="button"
-                  variant="primary"
+                  variant="action"
                   size="sm"
                   disabled={busy || !newChannelName.trim() || !newChannelUrl.trim()}
                   onClick={() => void onAddChannel()}
