@@ -270,12 +270,14 @@ def reap_expired() -> int:
 
 
 def reset_for_tests() -> None:
-    """Drop every session — DB rows + local cache — and clear pubsub
-    state. Tests call this between cases."""
+    """Clear in-process state — the local session cache and pubsub
+    registry. Tests call this between cases (the conftest autouse
+    fixture runs it for every test, including ones with no DB
+    configured, so this must not open a DB connection). Session *rows*
+    don't need clearing here: each test runs in its own Postgres
+    schema, dropped on teardown."""
     with _local_lock:
         _local_sessions.clear()
-    with db_session() as s:
-        execute_dml(s, delete(orm.McpSession))
     from app.mcp_server import pubsub as mcp_pubsub
 
     mcp_pubsub.reset_for_tests()
