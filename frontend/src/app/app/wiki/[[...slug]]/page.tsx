@@ -19,7 +19,9 @@ import {
   SvgArrowLeft,
   SvgChevronLeft,
   SvgChevronRight,
+  SvgDocFile,
   SvgEdit,
+  SvgFolder,
   SvgFolderPlus,
   SvgPlus,
   SvgShare,
@@ -39,7 +41,6 @@ import {
 } from "@/lib/launchers";
 import { ShareDialog } from "@/components/wiki/ShareDialog";
 import { CommentsPanel } from "@/components/wiki/CommentsPanel";
-import { FolderIcon, FileIcon } from "@/components/wiki/WikiIcons";
 import { apiFetch, ApiError } from "@/lib/api";
 import { listComments } from "@/lib/comments";
 import {
@@ -470,7 +471,7 @@ function Explorer({ dir }: { dir: string }) {
             return (
               <Row
                 key={(isFile ? "f:" : "d:") + name}
-                icon={isFile ? <FileIcon /> : <FolderIcon />}
+                icon={isFile ? <SvgDocFile size={20} /> : <SvgFolder size={20} />}
                 label={name}
                 updatedAt={updated_at}
                 href={`/app/wiki/${childPath}`}
