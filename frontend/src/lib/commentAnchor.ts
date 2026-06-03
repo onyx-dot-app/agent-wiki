@@ -1,16 +1,32 @@
-/** Map a rendered-view text selection back to raw-markdown character offsets.
+/** Map between a rendered-view text selection and raw-markdown character offsets.
  *
- * The wiki page renders raw markdown via react-markdown with `sourcePos`, which
- * stamps each block element with `data-sourcepos="L:C-L:C"` (1-based source
- * line:col). We use that to find the block's char range in the raw body, then
- * locate the selected text within the block's raw slice for a precise offset.
+ * The wiki page renders raw markdown via react-markdown with `rehypeSourcePos`,
+ * which stamps every element (block *and* inline — `<p>`, `<strong>`, `<code>`,
+ * `<a>`, …) with `data-sourcepos="L:C-L:C"` (1-based source line:col). For a
+ * given element that gives us the char range in the raw body its content came
+ * from.
  *
- * v1 limits (return null — caller just doesn't offer "comment"):
- *  - selection spanning multiple blocks,
- *  - selection whose rendered text isn't a verbatim substring of the block's
- *    raw markdown (i.e. it crosses inline syntax like `code` or **bold**).
- * Plain-prose selections — the common case — map exactly. The backend's exact
- * offsets + drift take over after creation.
+ * The hard part is mapping *within* an element: the rendered text drops the
+ * markdown syntax (`**`, `` ` ``, `[`…`](url)`), so rendered char N isn't raw
+ * char N. We bridge that with `alignBlock`: a whitespace-tolerant subsequence
+ * alignment between an element's rendered text and its raw slice. Markdown only
+ * ever *adds* syntax characters, so the rendered text is a subsequence of the
+ * raw slice — walking both with two pointers and skipping the raw-only syntax
+ * chars yields, for each rendered char, the exact raw offset it came from.
+ *
+ * That single primitive runs both directions:
+ *  - `selectionToAnchor` (rendered selection → raw offsets) — anchors a new
+ *    comment, and works across inline syntax (`**bold**`) and across multiple
+ *    blocks, because each selection endpoint is resolved to an *absolute* body
+ *    offset independently via the nearest source-positioned element.
+ *  - `paintCommentHighlights` (raw offsets → rendered ranges) — repaints stored
+ *    comment spans, splitting a span across every block it overlaps.
+ *
+ * Alignment fails (→ null / skip) only when a rendered char has no counterpart
+ * in the raw slice (e.g. an HTML entity like `&lt;`); such selections just
+ * don't get the affordance, same as before. The backend stores raw code-point
+ * offsets and treats `quoted_text` as display-only, so wider/multi-block spans
+ * are fine server-side.
  */
 
 export interface CommentDraft {
@@ -31,29 +47,6 @@ function lineStartOffsets(body: string): number[] {
 function offsetOf(starts: number[], line: number, col: number): number {
   const base = starts[Math.min(line, starts.length) - 1] ?? 0;
   return base + (col - 1);
-}
-
-function countOccurrences(haystack: string, needle: string): number {
-  if (!needle) return 0;
-  let count = 0;
-  let from = 0;
-  for (;;) {
-    const i = haystack.indexOf(needle, from);
-    if (i < 0) return count;
-    count++;
-    from = i + 1;
-  }
-}
-
-/** Index of the (0-based) `nth` occurrence of `needle` in `haystack`, or -1. */
-function nthIndexOf(haystack: string, needle: string, nth: number): number {
-  let from = 0;
-  for (let k = 0; ; k++) {
-    const i = haystack.indexOf(needle, from);
-    if (i < 0) return -1;
-    if (k === nth) return i;
-    from = i + 1;
-  }
 }
 
 /** Nearest ancestor element (inclusive) carrying a `data-sourcepos` attribute. */
@@ -78,42 +71,102 @@ function parseSourcePos(
   };
 }
 
+/** A source-positioned element aligned to its raw-markdown slice. `rawAt[i]` is
+ * the absolute body offset of the raw char that rendered char `i` came from
+ * (strictly increasing). */
+interface BlockAlign {
+  el: HTMLElement;
+  blockStart: number;
+  blockEnd: number;
+  rawAt: number[];
+}
+
+/** Two chars are "the same" for alignment if equal, or both whitespace —
+ * markdown collapses/normalizes whitespace (soft breaks → space/newline), so we
+ * don't require the exact whitespace char to match. */
+function charsAlign(raw: string, rendered: string): boolean {
+  if (raw === rendered) return true;
+  return /\s/.test(raw) && /\s/.test(rendered);
+}
+
+/** Align an element's rendered text to its raw-markdown slice by subsequence
+ * walk, skipping raw-only syntax chars. Returns null if a rendered char has no
+ * counterpart in the raw slice (the selection/highlight then just isn't mapped). */
+function alignBlock(el: HTMLElement, body: string, starts: number[]): BlockAlign | null {
+  const pos = parseSourcePos(el.getAttribute("data-sourcepos") ?? "");
+  if (!pos) return null;
+  const blockStart = offsetOf(starts, pos.startLine, pos.startCol);
+  const blockEnd = offsetOf(starts, pos.endLine, pos.endCol);
+  const raw = body.slice(blockStart, Math.max(blockStart, blockEnd));
+  const rendered = el.textContent ?? "";
+
+  const rawAt: number[] = new Array<number>(rendered.length);
+  let j = 0;
+  for (let i = 0; i < rendered.length; i++) {
+    while (j < raw.length && !charsAlign(raw[j]!, rendered[i]!)) j++;
+    if (j >= raw.length) return null; // rendered char absent from raw → unmappable
+    rawAt[i] = blockStart + j;
+    j++;
+  }
+  return { el, blockStart, blockEnd, rawAt };
+}
+
+/** Count of rendered chars from the start of `block` up to a (container, offset)
+ * selection boundary — i.e. the boundary's index into `block.textContent`. */
+function renderedOffsetInBlock(block: HTMLElement, container: Node, offset: number): number {
+  const r = document.createRange();
+  r.selectNodeContents(block);
+  r.setEnd(container, offset);
+  return r.toString().length;
+}
+
+/** Absolute body offset where rendered char `i` of a block *starts*. */
+function rawStartOffset(a: BlockAlign, i: number): number {
+  if (a.rawAt.length === 0) return a.blockStart;
+  if (i >= a.rawAt.length) return a.blockEnd;
+  return a.rawAt[Math.max(0, i)]!;
+}
+
+/** Absolute body offset just past rendered char `i - 1` (an exclusive end at
+ * rendered index `i`). Excludes any trailing syntax after the last char. */
+function rawEndOffset(a: BlockAlign, i: number): number {
+  if (a.rawAt.length === 0) return a.blockEnd;
+  if (i <= 0) return a.blockStart;
+  return a.rawAt[Math.min(i, a.rawAt.length) - 1]! + 1;
+}
+
 /** Resolve the current window selection (inside `article`) to a raw-markdown
- * anchor, or null if it can't be mapped precisely. */
+ * anchor, or null if it can't be mapped. Each endpoint is resolved against the
+ * nearest source-positioned element, so selections that cross inline syntax
+ * (`**bold**`) or span multiple blocks map fine — both endpoints become
+ * absolute body offsets. */
 export function selectionToAnchor(article: HTMLElement, body: string): CommentDraft | null {
   const sel = window.getSelection();
   if (!sel || sel.isCollapsed || sel.rangeCount === 0) return null;
-  const text = sel.toString();
-  if (!text.trim()) return null;
+  if (!sel.toString().trim()) return null;
 
   const range = sel.getRangeAt(0);
   if (!article.contains(range.commonAncestorContainer)) return null;
 
-  const block = closestSourcePos(range.startContainer);
-  const endBlock = closestSourcePos(range.endContainer);
-  if (!block || block !== endBlock) return null; // single block only (v1)
-
-  const pos = parseSourcePos(block.getAttribute("data-sourcepos") ?? "");
-  if (!pos) return null;
+  const startEl = closestSourcePos(range.startContainer);
+  const endEl = closestSourcePos(range.endContainer);
+  if (!startEl || !endEl) return null;
 
   const starts = lineStartOffsets(body);
-  const blockStart = offsetOf(starts, pos.startLine, pos.startCol);
-  const blockEnd = offsetOf(starts, pos.endLine, pos.endCol);
-  const slice = body.slice(blockStart, Math.max(blockStart, blockEnd));
+  const startAlign = alignBlock(startEl, body, starts);
+  const endAlign = alignBlock(endEl, body, starts);
+  if (!startAlign || !endAlign) return null;
 
-  // Which occurrence of the selected text did the user pick? Count how many
-  // times it appears in the block's *rendered* text before the selection
-  // start, then take that same occurrence in the raw slice (aligns for prose).
-  const pre = document.createRange();
-  pre.selectNodeContents(block);
-  pre.setEnd(range.startContainer, range.startOffset);
-  const occurrence = countOccurrences(pre.toString(), text);
+  const startOffset = rawStartOffset(
+    startAlign,
+    renderedOffsetInBlock(startEl, range.startContainer, range.startOffset),
+  );
+  const endOffset = rawEndOffset(
+    endAlign,
+    renderedOffsetInBlock(endEl, range.endContainer, range.endOffset),
+  );
+  if (endOffset <= startOffset) return null;
 
-  const idx = nthIndexOf(slice, text, occurrence);
-  if (idx < 0) return null; // rendered text isn't verbatim in raw (inline syntax)
-
-  const startOffset = blockStart + idx;
-  const endOffset = startOffset + text.length;
   return { startOffset, endOffset, quotedText: body.slice(startOffset, endOffset) };
 }
 
@@ -145,27 +198,49 @@ function highlightRegistry(): HighlightLike | null {
   return reg ?? null;
 }
 
-/** Build a DOM Range over the first occurrence of `needle` within `el`'s text. */
-function rangeForText(el: Element, needle: string): Range | null {
+/** True if `el` has no source-positioned ancestor up to (but excluding)
+ * `article` — i.e. it's a top-level rendered block, not a nested inline span.
+ * Painting only top-level blocks keeps their char ranges disjoint so a span is
+ * never double-registered. */
+function isTopLevelBlock(el: HTMLElement, article: HTMLElement): boolean {
+  let p = el.parentElement;
+  while (p && p !== article) {
+    if (p.hasAttribute("data-sourcepos")) return false;
+    p = p.parentElement;
+  }
+  return true;
+}
+
+/** DOM Range over rendered offsets `[start, end)` (indices into the element's
+ * concatenated text) of `el`. */
+function rangeForRenderedSpan(el: HTMLElement, start: number, end: number): Range | null {
+  if (end <= start) return null;
   const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
-  const parts: { node: Text; start: number }[] = [];
-  let acc = "";
+  let acc = 0;
+  let startNode: Text | null = null;
+  let startOff = 0;
+  let endNode: Text | null = null;
+  let endOff = 0;
   let n = walker.nextNode();
   while (n) {
     const t = n as Text;
-    parts.push({ node: t, start: acc.length });
-    acc += t.nodeValue ?? "";
+    const len = t.length;
+    if (startNode === null && start < acc + len) {
+      startNode = t;
+      startOff = start - acc;
+    }
+    if (startNode !== null && end <= acc + len) {
+      endNode = t;
+      endOff = end - acc;
+      break;
+    }
+    acc += len;
     n = walker.nextNode();
   }
-  const idx = acc.indexOf(needle);
-  if (idx < 0) return null;
-  const end = idx + needle.length;
-  const startPart = parts.find((p) => p.start <= idx && idx < p.start + (p.node.length || 0));
-  const endPart = parts.find((p) => p.start < end && end <= p.start + (p.node.length || 0));
-  if (!startPart || !endPart) return null;
+  if (!startNode || !endNode) return null;
   const range = document.createRange();
-  range.setStart(startPart.node, idx - startPart.start);
-  range.setEnd(endPart.node, end - endPart.start);
+  range.setStart(startNode, startOff);
+  range.setEnd(endNode, endOff);
   return range;
 }
 
@@ -193,30 +268,38 @@ export function paintCommentHighlights(
   }
 
   const starts = lineStartOffsets(body);
-  const blocks = Array.from(article.querySelectorAll<HTMLElement>("[data-sourcepos]"))
-    .map((el) => {
-      const pos = parseSourcePos(el.getAttribute("data-sourcepos") ?? "");
-      if (!pos) return null;
-      const bStart = offsetOf(starts, pos.startLine, pos.startCol);
-      const bEnd = offsetOf(starts, pos.endLine, pos.endCol);
-      return { el, bStart, bEnd, size: bEnd - bStart };
-    })
-    .filter((b): b is { el: HTMLElement; bStart: number; bEnd: number; size: number } => b !== null);
+  const blocks: BlockAlign[] = [];
+  article.querySelectorAll<HTMLElement>("[data-sourcepos]").forEach((el) => {
+    if (!isTopLevelBlock(el, article)) return;
+    const a = alignBlock(el, body, starts);
+    if (a) blocks.push(a);
+  });
 
   const defaultRanges: Range[] = [];
   const activeRanges: Range[] = [];
+  let painted = 0;
   for (const t of targets) {
-    // Innermost block whose source range contains the comment's start.
-    const candidates = blocks
-      .filter((b) => b.bStart <= t.startOffset && t.startOffset < b.bEnd)
-      .sort((a, b) => a.size - b.size);
-    for (const cand of candidates) {
-      const range = rangeForText(cand.el, t.quotedText);
+    let any = false;
+    // A span can cross several blocks — paint the overlapping slice of each.
+    for (const a of blocks) {
+      if (a.blockEnd <= t.startOffset || a.blockStart >= t.endOffset) continue;
+      let lo = -1;
+      let hi = -1;
+      for (let i = 0; i < a.rawAt.length; i++) {
+        const off = a.rawAt[i]!;
+        if (off >= t.startOffset && off < t.endOffset) {
+          if (lo < 0) lo = i;
+          hi = i;
+        }
+      }
+      if (lo < 0) continue;
+      const range = rangeForRenderedSpan(a.el, lo, hi + 1);
       if (range) {
         (t.active ? activeRanges : defaultRanges).push(range);
-        break;
+        any = true;
       }
     }
+    if (any) painted += 1;
   }
 
   // Two registries: default (light) and the selected thread (strong).
@@ -225,5 +308,5 @@ export function paintCommentHighlights(
   if (activeRanges.length) reg.set(ACTIVE_HIGHLIGHT_NAME, new Ctor(...activeRanges));
   else reg.delete(ACTIVE_HIGHLIGHT_NAME);
 
-  return defaultRanges.length + activeRanges.length;
+  return painted;
 }
