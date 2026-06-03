@@ -49,3 +49,22 @@ def test_read_at_pre_rename_ref_via_resolved_path(tmp_repo):
     historical = wiki_git.path_at_ref("new.md", create_sha)
     assert historical == "old.md"
     assert wiki_git.read_file(historical, ref=create_sha) == "original body\n"
+
+
+def test_read_file_opt_returns_body_when_present(tmp_repo):
+    from app.wiki import git as wiki_git
+
+    sha = wiki_git.commit_file("a.md", "hello\n", "create", author=None)
+    assert wiki_git.read_file_opt("a.md", sha) == "hello\n"
+
+
+def test_read_file_opt_returns_none_when_absent_at_ref(tmp_repo):
+    """A path that doesn't exist at the ref returns None (no raise, no error
+    log) — the expected case for a file that's new within a diff window."""
+    from app.wiki import git as wiki_git
+
+    base_sha = wiki_git.commit_file("a.md", "x\n", "create a", author=None)
+    # b.md is added only later, so it doesn't exist at base_sha.
+    wiki_git.commit_file("b.md", "y\n", "create b", author=None)
+
+    assert wiki_git.read_file_opt("b.md", base_sha) is None
