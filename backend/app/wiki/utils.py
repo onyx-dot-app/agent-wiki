@@ -10,6 +10,9 @@ from __future__ import annotations
 
 import difflib
 import logging
+from collections.abc import Generator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
@@ -96,6 +99,29 @@ def assert_base_sha(path: str, base_sha: str | None) -> dict[str, str] | None:
 
 _FALLBACK_AUTHOR = "AI Wiki Helper <ai-wiki-helper@local>"
 
+# Explicit git author for system-initiated commits that legitimately have no
+# user in context (document ingestion from a connector, etc.). Bound by the
+# ``system_author`` context manager; consulted by ``author_string`` before it
+# degrades to ``_FALLBACK_AUTHOR``.
+_system_author_var: ContextVar[str | None] = ContextVar("system_author", default=None)
+
+
+@contextmanager
+def system_author(identity: str) -> Generator[None, None, None]:
+    """Attribute userless commits inside this block to ``identity`` instead of
+    the generic ``_FALLBACK_AUTHOR``.
+
+    ``identity`` is a full git author string (``"Name <email>"``). Used by
+    background paths that have no human principal but a known non-human actor
+    — e.g. ``"Onyx Ingest <onyx-ingest@local>"`` for connector pushes. A no-op
+    when a user *is* bound: ``author_string`` credits the user in that case.
+    """
+    token = _system_author_var.set(identity)
+    try:
+        yield
+    finally:
+        _system_author_var.reset(token)
+
 
 def author_string() -> str | None:
     """Git author for a wiki commit driven by an agent tool call.
@@ -104,14 +130,15 @@ def author_string() -> str | None:
     the current user and an agent identity are bound — so commits made
     via MCP credit the human and name the agent acting on their behalf
     (e.g. ``"Yuhong Sun via Claude Code <yuhong@onyx.app>"``). With only
-    a user bound, drops the ``via`` clause; with neither, falls back to
-    the legacy bot author so seed scripts and orphaned background paths
-    still produce a valid commit. Direct UI/API edits set their own
-    per-user author at the API seam (see ``app/api/wiki.py``).
+    a user bound, drops the ``via`` clause. With no user, uses the
+    ``system_author`` identity if one is bound (e.g. ingestion), else
+    falls back to the legacy bot author so seed scripts and orphaned
+    background paths still produce a valid commit. Direct UI/API edits
+    set their own per-user author at the API seam (see ``app/api/wiki.py``).
     """
     user = _current_user_or_none()
     if user is None:
-        return _FALLBACK_AUTHOR
+        return _system_author_var.get() or _FALLBACK_AUTHOR
     display = user.name or user.email
     agent_name = agent_activity.agent_name_var.get()
     if agent_name:
