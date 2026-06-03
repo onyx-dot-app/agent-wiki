@@ -12,7 +12,6 @@ import { useSidebarFolded } from "@onyx-ai/opal/layouts";
 import { usePathname } from "next/navigation";
 import { useRef } from "react";
 import useSWR from "swr";
-import { Wordmark } from "@/components/common/Wordmark";
 import {
   WikiSearch,
   type WikiSearchHandle,
@@ -26,6 +25,7 @@ import { StarredList } from "./StarredList";
 import { UserMenu } from "./UserMenu";
 import { NAV_ENTRIES } from "@/lib/nav/registry";
 import { useIsMobile } from "@/lib/viewport";
+import { SvgOnyxLogoTyped } from "@onyx-ai/opal/logos";
 
 function useRecentPages() {
   const { data } = useSWR(
@@ -92,7 +92,7 @@ export function AppSidebar({ folded, onFoldToggle }: AppSidebarProps) {
         ) : (
           <>
             <div className="px-1 flex items-center h-7">
-              <Wordmark />
+              <SvgOnyxLogoTyped size={28} />
             </div>
             <div className="px-1">
               <Button
