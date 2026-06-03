@@ -1,17 +1,13 @@
-"""drop the vestigial ``documents`` table
-
-The ``documents`` table (a metadata mirror of wiki page paths) had no readers
-or writers in application code — page listing builds from ``git ls-files``, not
-this table — so it was dead weight. Drop it.
+"""drop the ``documents`` table
 
 Guarded on the live inspector: ``0001_initial`` runs
-``Base.metadata.create_all`` against the *current* model registry, and the
-``Document`` model has been removed, so freshly-bootstrapped databases never
-create the table in the first place. Only existing databases carry it.
+``Base.metadata.create_all`` against the current model registry, and the
+``Document`` model is gone, so freshly-bootstrapped databases never create the
+table — the guard makes the drop a no-op there; only existing databases carry
+it. Downgrade recreates it (also guarded).
 
 Revision ID: 0024
 Revises: 0023
-Create Date: 2026-06-03 00:00:00.000000+00:00
 """
 from __future__ import annotations
 
