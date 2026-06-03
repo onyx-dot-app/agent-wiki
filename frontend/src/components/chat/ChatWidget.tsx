@@ -87,6 +87,17 @@ export function ChatWidget() {
   const preDraftingRef = useRef<{ sessionId: string | null; items: ChatItem[] } | null>(
     null,
   );
+  // Mode the widget was in before drafting force-expanded it ("closed" or
+  // "widget"). Restored when drafting ends so the doc-creation flow doesn't
+  // permanently commandeer the chat. Any manual mode change (FAB, expand
+  // toggle, close) clears it — the user's explicit choice wins over the
+  // automatic restore.
+  const preDraftingModeRef = useRef<Mode | null>(null);
+
+  const setModeManually = useCallback((m: Mode) => {
+    preDraftingModeRef.current = null;
+    setMode(m);
+  }, []);
 
   // Hydrate persisted UI state on mount.
   useEffect(() => {
@@ -105,7 +116,16 @@ export function ChatWidget() {
     }
   }, []);
 
+  // Persist effects skip their first run: on mount they'd write the
+  // defaults ("closed", 480) over the stored values before the hydrate
+  // effect's setState has re-rendered — under StrictMode's double effect
+  // pass that clobber is then read back, losing the persisted state.
+  const skipPersistModeRef = useRef(true);
   useEffect(() => {
+    if (skipPersistModeRef.current) {
+      skipPersistModeRef.current = false;
+      return;
+    }
     try {
       window.localStorage.setItem(STORAGE_KEY_MODE, mode);
     } catch {
@@ -113,7 +133,12 @@ export function ChatWidget() {
     }
   }, [mode]);
 
+  const skipPersistWidthRef = useRef(true);
   useEffect(() => {
+    if (skipPersistWidthRef.current) {
+      skipPersistWidthRef.current = false;
+      return;
+    }
     try {
       window.localStorage.setItem(STORAGE_KEY_WIDTH, String(expandedWidth));
     } catch {
@@ -196,7 +221,16 @@ export function ChatWidget() {
   // already-drafting page doesn't keep yanking the widget open.
   useEffect(() => {
     if (expandTick === 0) return;
-    setMode("expanded");
+    setMode((prev) => {
+      // Remember what the user had before the automatic expand so we can
+      // put it back when drafting ends. Only the first capture per
+      // drafting episode counts, and an already-expanded widget needs no
+      // restore.
+      if (preDraftingModeRef.current === null && prev !== "expanded") {
+        preDraftingModeRef.current = prev;
+      }
+      return "expanded";
+    });
   }, [expandTick]);
 
   // Drafting orchestration. When the wiki page raises a new drafting
@@ -274,6 +308,12 @@ export function ChatWidget() {
         setSessionId(null);
         setItems([]);
       }
+      // If drafting force-expanded the widget (and the user never
+      // touched the mode since), drop back to whatever it was before —
+      // open widget or fully collapsed.
+      const priorMode = preDraftingModeRef.current;
+      preDraftingModeRef.current = null;
+      if (priorMode !== null) setMode(priorMode);
       setError(null);
     }, 300);
     return () => window.clearTimeout(handle);
@@ -414,7 +454,7 @@ export function ChatWidget() {
   if (mode === "closed") {
     return (
       <button
-        onClick={() => setMode("widget")}
+        onClick={() => setModeManually("widget")}
         title="Open chat"
         aria-label="Open chat"
         className="fixed right-5 bottom-5 w-12 h-12 rounded-(--border-radius-12) bg-(--background-tint-inverted-00) text-(--text-inverted-05) border-none cursor-pointer shadow-(--shadow-fab) flex items-center justify-center z-[1000]"
@@ -475,14 +515,14 @@ export function ChatWidget() {
             prominence="tertiary"
             size="sm"
             tooltip={isExpanded ? "Collapse" : "Expand"}
-            onClick={() => setMode(isExpanded ? "widget" : "expanded")}
+            onClick={() => setModeManually(isExpanded ? "widget" : "expanded")}
           />
           <Button
             icon={SvgX}
             prominence="tertiary"
             size="sm"
             tooltip="Close"
-            onClick={() => setMode("closed")}
+            onClick={() => setModeManually("closed")}
           />
         </header>
 

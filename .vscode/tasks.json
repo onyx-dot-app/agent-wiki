@@ -1,0 +1,24 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      // Bring up the compose infra services (Postgres with pg_textsearch
+      // + pgmq, Redis for the task queue, OpenSearch for BM25) before
+      // the backend or any worker starts. ``--no-recreate`` keeps this
+      // idempotent when the containers are already running — without
+      // it, compose tries to recreate on any config drift and fails
+      // because the existing containers still have their ports bound.
+      "label": "Infra: ensure compose services are up",
+      "type": "shell",
+      "command": "docker compose up -d --no-recreate postgres redis opensearch",
+      "options": { "cwd": "${workspaceFolder}" },
+      "presentation": {
+        "reveal": "silent",
+        "panel": "shared",
+        "showReuseMessage": false,
+        "clear": false
+      },
+      "problemMatcher": []
+    }
+  ]
+}

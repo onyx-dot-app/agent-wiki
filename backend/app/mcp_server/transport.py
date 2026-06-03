@@ -149,7 +149,7 @@ def _route(
         raise UnknownSessionError(request_id)
 
     if method == "notifications/initialized":
-        sess.initialized = True
+        mcp_session.mark_initialized(session_id)
         return None, session_id
 
     if not sess.initialized:

@@ -8,11 +8,13 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   type KeyboardEvent,
 } from "react";
+import { createPortal } from "react-dom";
 
 import { apiFetch, ApiError } from "@/lib/api";
 
@@ -48,7 +50,16 @@ type Row =
 const DEBOUNCE_MS = 150;
 const RESULT_LIMIT = 10;
 
-export const WikiSearch = forwardRef<WikiSearchHandle>(function WikiSearch(_, ref) {
+interface WikiSearchProps {
+  // Called after a result is picked — the sidebar uses this to collapse
+  // the mobile drawer so the destination page is actually visible.
+  onNavigate?: () => void;
+}
+
+export const WikiSearch = forwardRef<WikiSearchHandle, WikiSearchProps>(function WikiSearch(
+  { onNavigate },
+  ref,
+) {
   const router = useRouter();
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<SearchHit[]>([]);
@@ -58,7 +69,12 @@ export const WikiSearch = forwardRef<WikiSearchHandle>(function WikiSearch(_, re
   const [open, setOpen] = useState(false);
   const [activeIdx, setActiveIdx] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  // Viewport position of the dropdown — the sidebar nav clips overflow
+  // (it needs overflow-hidden for its collapse animation), so the
+  // dropdown renders in a body portal, fixed-positioned under the input.
+  const [anchor, setAnchor] = useState<{ top: number; left: number } | null>(null);
   // Track the latest in-flight request so a slower response can't overwrite
   // a fresher one's results.
   const requestSeq = useRef(0);
@@ -106,13 +122,15 @@ export const WikiSearch = forwardRef<WikiSearchHandle>(function WikiSearch(_, re
     return () => clearTimeout(handle);
   }, [query]);
 
-  // Close the dropdown on outside click.
+  // Close the dropdown on outside click. The dropdown lives in a body
+  // portal, so "inside" means the input container or the dropdown itself.
   useEffect(() => {
     if (!open) return;
     function handleClick(e: MouseEvent) {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
+      const t = e.target as Node;
+      if (containerRef.current?.contains(t)) return;
+      if (dropdownRef.current?.contains(t)) return;
+      setOpen(false);
     }
     window.addEventListener("mousedown", handleClick);
     return () => window.removeEventListener("mousedown", handleClick);
@@ -133,8 +151,9 @@ export const WikiSearch = forwardRef<WikiSearchHandle>(function WikiSearch(_, re
       setQuery("");
       const path = row.kind === "folder" ? row.folder.path : row.hit.path;
       router.push(`/app/wiki/${path}`);
+      onNavigate?.();
     },
-    [router],
+    [router, onNavigate],
   );
 
   function onKeyDown(e: KeyboardEvent<HTMLInputElement>) {
@@ -163,6 +182,27 @@ export const WikiSearch = forwardRef<WikiSearchHandle>(function WikiSearch(_, re
     [showDropdown, loading, error, rows.length],
   );
 
+  // Anchor the portal dropdown under the input; re-measure on viewport
+  // resize and on any scroll (capture phase catches the sidebar's own
+  // scroll containers, not just the window).
+  useLayoutEffect(() => {
+    if (!showDropdown) {
+      setAnchor(null);
+      return;
+    }
+    function measure() {
+      const rect = containerRef.current?.getBoundingClientRect();
+      if (rect) setAnchor({ top: rect.bottom + 4, left: rect.left });
+    }
+    measure();
+    window.addEventListener("resize", measure);
+    window.addEventListener("scroll", measure, true);
+    return () => {
+      window.removeEventListener("resize", measure);
+      window.removeEventListener("scroll", measure, true);
+    };
+  }, [showDropdown]);
+
   return (
     <div ref={containerRef} className="relative w-full">
       <InputTypeIn
@@ -181,10 +221,22 @@ export const WikiSearch = forwardRef<WikiSearchHandle>(function WikiSearch(_, re
         aria-label="Search wiki"
       />
 
-      {showDropdown && (
+      {showDropdown && anchor && createPortal(
         <div
+          ref={dropdownRef}
           role="listbox"
-          className="absolute top-[calc(100%+4px)] left-0 min-w-full w-[360px] max-w-[70vw] bg-(--background-tint-00) border border-(--border-01) rounded-(--border-radius-08) shadow-(--shadow-popover) max-h-[420px] overflow-y-auto z-[40]"
+          className="fixed w-[360px] bg-(--background-tint-00) border border-(--border-01) rounded-(--border-radius-08) shadow-(--shadow-popover) overflow-y-auto z-[120]"
+          // Anchor-derived geometry stays inline — it's measured at runtime,
+          // not a design token. z-[120] must stack above the OPAL SidebarTab
+          // hit-target anchor (absolute inset-0 z-99) on the nav tabs below
+          // the search box — anything lower and the invisible anchor swallows
+          // clicks on dropdown rows that overlap a tab.
+          style={{
+            top: anchor.top,
+            left: anchor.left,
+            maxWidth: `calc(100vw - ${anchor.left}px - 12px)`,
+            maxHeight: `calc(100vh - ${anchor.top}px - 12px)`,
+          }}
         >
           {error && (
             <div className="p-3 text-[13px] text-(--status-text-error-05)">{error}</div>
@@ -224,7 +276,8 @@ export const WikiSearch = forwardRef<WikiSearchHandle>(function WikiSearch(_, re
               })}
             </ul>
           )}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );
@@ -272,21 +325,30 @@ function DocRow({ hit }: { hit: SearchHit }) {
   );
 }
 
-// Snippets come back with **match** markers around hit terms. Render those
+// Snippets come back with highlight markers around hit terms — <em>…</em>
+// from the OpenSearch highlighter, **…** from older/seed data. Render both
 // as bold spans without going through a full markdown pipeline.
 function SnippetText({ text }: { text: string }) {
-  const parts = text.split(/(\*\*[^*]+\*\*)/g);
+  // The markers can nest (e.g. **bold <em>match</em>**) — strip any
+  // leftover <em> tags inside a segment rather than rendering them.
+  const stripEm = (s: string) => s.replace(/<\/?em>/g, "");
+  const parts = text.split(/(\*\*[^*]+\*\*|<em>[^<]*<\/em>)/g);
   return (
     <>
       {parts.map((p, i) => {
-        if (p.startsWith("**") && p.endsWith("**")) {
+        const inner = p.startsWith("**")
+          ? p.slice(2, -2)
+          : p.startsWith("<em>")
+            ? p.slice(4, -5)
+            : null;
+        if (inner !== null) {
           return (
             <strong key={i} className="text-(--text-05) font-bold">
-              {p.slice(2, -2)}
+              {stripEm(inner)}
             </strong>
           );
         }
-        return <span key={i}>{p}</span>;
+        return <span key={i}>{stripEm(p)}</span>;
       })}
     </>
   );

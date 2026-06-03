@@ -278,11 +278,13 @@ def _compute_stale_paths(sess: McpSession) -> list[str]:
     """Paths the session is subscribed to that have a pending push.
 
     Implemented as a non-destructive peek at the session's pub-sub
-    queue: read every queued notification, collect the URIs that map
-    to ``wiki:///<path>``, and (importantly) put the notifications
-    back so the SSE writer still ships them. Empty when no SSE stream
-    is open or no commits have arrived since the last tool call —
-    which is the steady state for an attentive client.
+    sync queue: read every queued notification, collect the URIs that
+    map to ``wiki:///<path>``, and (importantly) put the notifications
+    back so a later SSE open still ships them. The sync queue only
+    accumulates while no SSE writer is registered (with a live stream,
+    notifications go straight to the async queue), so this is the
+    poll-based fallback for clients that aren't holding a stream open
+    — empty in the steady state for a connected, attentive client.
     """
     from app.mcp_server import pubsub as mcp_pubsub
 
@@ -306,7 +308,15 @@ def _compute_stale_paths(sess: McpSession) -> list[str]:
         pass
     finally:
         for notif in drained:
-            q.put(notif)
+            try:
+                # ``put_nowait`` — the sync queue is bounded, and a
+                # concurrent publish may have refilled it while we were
+                # peeking. Dropping the put-back is fine: these are
+                # re-read hints and the caller just received the path
+                # in ``stale_paths``.
+                q.put_nowait(notif)
+            except Exception:
+                break
     return paths
 
 

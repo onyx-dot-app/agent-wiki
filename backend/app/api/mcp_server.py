@@ -167,8 +167,20 @@ async def transport_sse(
             detail="session does not belong to this bearer",
         )
 
+    # Promote the session into the local cache and bump its expiry —
+    # subsequent publishes for ``sess_id`` will see it in
+    # ``mcp_session.all_session_ids()`` for tree-shape fan-out, and the
+    # per-request ``mcp_session.get`` calls resolve from cache instead
+    # of round-tripping to Postgres.
+    if mcp_session.adopt_local(sess_id) is None:
+        # Race: session expired between the ``get`` above and now. Treat
+        # as a fresh 404 so the client re-initializes.
+        raise HTTPException(status_code=404, detail="missing or invalid Mcp-Session-Id")
+
     # Bind an asyncio.Queue + this loop into pubsub so subsequent
     # publishes for ``sess_id`` enqueue here via call_soon_threadsafe.
+    # ``register_async_consumer`` also rehydrates the in-memory
+    # subscription index from Postgres for this session.
     queue = mcp_pubsub.register_async_consumer(sess_id)
 
     async def stream() -> AsyncIterator[bytes]:
