@@ -21,7 +21,7 @@ from __future__ import annotations
 from logging.config import fileConfig
 
 from alembic import context
-from sqlalchemy import create_engine, pool
+from sqlalchemy import create_engine, pool, text
 
 from app.config import CONFIG
 from app.db import models  # noqa: F401 — registers all tables on Base.metadata  # pyright: ignore[reportUnusedImport]
@@ -57,13 +57,12 @@ def run_migrations_offline() -> None:
 
 def run_migrations_online() -> None:
     """Run migrations against a real engine."""
-    from sqlalchemy import text
-
     connectable = create_engine(_db_url, poolclass=pool.NullPool, future=True)
 
     with connectable.connect() as connection:
-        # Ensure prerequisites exist before migrations run. In Docker the
-        # custom image + POSTGRES_DB handle this; locally it's not guaranteed.
+        # Ensure the public schema and pgmq extension exist before Alembic
+        # applies any migrations — both are prerequisites for the migration
+        # scripts and are not created automatically by PostgreSQL itself.
         connection.execute(text("CREATE SCHEMA IF NOT EXISTS public"))
         connection.execute(text("CREATE EXTENSION IF NOT EXISTS pgmq"))
         connection.commit()

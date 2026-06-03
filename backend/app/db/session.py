@@ -151,9 +151,9 @@ def init_db() -> None:
 
     engine = get_engine()
     with engine.connect() as conn:
-        # Ensure the public schema and required extensions exist before
-        # migrations run. In Docker this is handled by POSTGRES_DB + the
-        # custom image; locally it's not guaranteed.
+        # Ensure the public schema and pgmq extension exist before Alembic
+        # applies any migrations — both are prerequisites for the migration
+        # scripts and are not created automatically by PostgreSQL itself.
         conn.execute(sa.text("CREATE SCHEMA IF NOT EXISTS public"))
         conn.execute(sa.text("CREATE EXTENSION IF NOT EXISTS pgmq"))
         conn.commit()
