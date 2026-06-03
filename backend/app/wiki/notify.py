@@ -187,12 +187,15 @@ def after_path_move(
             agent_activity.delete_for_doc(old_p)
             drafts.delete(old_p)
             page_dirs.delete_all_for_page(old_p)
-    # Trigger YAMLs moved with their folder; their absolute file_path cache is
-    # stale until reconverged from disk. Best-effort — a cache rebuild failure
-    # must not abort the move's other side effects.
+    # Triggers store their scope_path inside the moved YAML (and the YAML's
+    # location is derived from it), so a git mv leaves scopes dangling. Rewrite
+    # the affected YAMLs, then reconverge the absolute file_path cache from
+    # disk. Best-effort — a trigger reconcile failure must not abort the move's
+    # other side effects.
     try:
+        triggers_repo.repoint_scopes_for_moves(moves, actor=actor)
         triggers_repo.rebuild_from_filesystem()
     except Exception:
-        log.exception("trigger cache rebuild after path move failed")
+        log.exception("trigger scope/cache reconcile after path move failed")
     if list_changed:
         mcp_pubsub.publish_list_changed()
