@@ -33,6 +33,8 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
+from app.db.crypto import EncryptedString
+
 # Default for TEXT timestamp columns. Stored as ISO-formatted strings so
 # Python-side ISO comparisons (e.g. ``expires_at > _iso(_now())``) work
 # without per-call casts. Switching these to ``TIMESTAMPTZ`` would mean
@@ -340,7 +342,8 @@ class SlackWebhook(Base):
         Text, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
     name: Mapped[str] = mapped_column(Text, nullable=False)
-    webhook_url: Mapped[str] = mapped_column(Text, nullable=False)
+    # Secret — AES-GCM encrypted at rest (bytea). See app/db/crypto.py.
+    webhook_url: Mapped[str] = mapped_column(EncryptedString(), nullable=False)
     created_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
 
     __table_args__ = (Index("idx_slack_webhooks_owner", "owner_user_id"),)

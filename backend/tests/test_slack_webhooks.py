@@ -51,6 +51,28 @@ def test_delete_is_owner_scoped(tmp_db):
     assert slack_webhooks.list_for_user("usr_1") == []
 
 
+def test_webhook_url_encrypted_at_rest(tmp_db):
+    """The raw column holds ciphertext, not the plaintext URL — but the repo
+    decrypts transparently on read."""
+    from sqlalchemy import text
+
+    from app.db.session import session
+
+    seed_user("usr_1")
+    slack_webhooks.create("usr_1", "PM Standup", _HOOK)
+
+    with session() as s:
+        raw = s.execute(text("SELECT webhook_url FROM slack_webhooks LIMIT 1")).scalar_one()
+    raw_bytes = bytes(raw)
+    assert _HOOK.encode() not in raw_bytes  # not stored in the clear
+
+    # Transparent round-trip through the EncryptedString column type.
+    assert slack_webhooks.list_for_user("usr_1")[0]["webhook_url"] == _HOOK
+    assert slack_webhooks.get_url(
+        slack_webhooks.list_for_user("usr_1")[0]["id"], owner_user_id="usr_1"
+    ) == _HOOK
+
+
 def test_owned_by_and_get_url(tmp_db):
     seed_user("usr_1")
     seed_user("usr_2", email="two@x.com")

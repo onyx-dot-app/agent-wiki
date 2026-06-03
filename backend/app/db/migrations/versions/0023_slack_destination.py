@@ -43,7 +43,8 @@ def upgrade() -> None:
                 nullable=False,
             ),
             sa.Column("name", sa.Text, nullable=False),
-            sa.Column("webhook_url", sa.Text, nullable=False),
+            # Secret — AES-GCM encrypted at rest (app/db/crypto.py:EncryptedString).
+            sa.Column("webhook_url", sa.LargeBinary, nullable=False),
             sa.Column(
                 "created_at",
                 sa.Text,
