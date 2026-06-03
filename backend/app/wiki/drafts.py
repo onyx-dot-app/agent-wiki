@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app.db.models import DocumentDraft, DocumentTemplate
 from app.db.session import session
@@ -73,6 +73,16 @@ def delete(path: str) -> bool:
             return False
         s.delete(row)
         return True
+
+
+def rename(old_path: str, new_path: str) -> None:
+    """Re-key a draft row when its page is renamed/moved. No-op if no draft
+    exists at ``old_path``. ``path`` is the PK; the move flow guarantees
+    ``new_path`` is free, so a straight key rewrite can't collide."""
+    with session() as s:
+        s.execute(
+            update(DocumentDraft).where(DocumentDraft.path == old_path).values(path=new_path)
+        )
 
 
 def clear_if_diverged(path: str, current_body: str) -> bool:

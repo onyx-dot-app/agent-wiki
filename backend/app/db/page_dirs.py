@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.db.models import PageWorkingDir
@@ -55,6 +55,18 @@ def set_for_page(
     )
     with session() as s:
         s.execute(stmt)
+
+
+def rename_page(*, old_wiki_path: str, new_wiki_path: str) -> None:
+    """Re-point every (user, machine) working-dir binding from a page's old
+    path to its new one when it's renamed/moved. The move flow guarantees
+    ``new_wiki_path`` is free, so the PK rewrite can't collide."""
+    with session() as s:
+        s.execute(
+            update(PageWorkingDir)
+            .where(PageWorkingDir.wiki_path == old_wiki_path)
+            .values(wiki_path=new_wiki_path)
+        )
 
 
 def clear(*, user_id: str, machine_id: str, wiki_path: str) -> None:
