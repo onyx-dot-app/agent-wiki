@@ -293,3 +293,25 @@ def test_parse_commit_diff_creation(doc_with_two_commits: tuple[str, str, str]) 
     assert out.is_creation is True
     assert out.hunks  # at least one
     assert all(line.kind == "add" for hunk in out.hunks for line in hunk.lines)
+
+
+def test_parse_commit_diff_pre_rename_commit_resolves_old_path(tmp_repo: None) -> None:
+    # The history panel walks commits via `git log --follow`, which includes
+    # pre-rename commits when the file lived at a different path. Querying a
+    # pre-rename commit by the file's current name must still produce a diff;
+    # parse_commit_diff resolves the historical path at that sha via path_at_ref.
+    old = "notes/old name.md"
+    new = "projects/new name.md"
+    wiki_git.commit_file(old, "alpha old gamma\n", "create", author=None)
+    edit = wiki_git.commit_file(old, "alpha new gamma\n", "edit", author=None)
+    wiki_git.move_path(old, new, "rename", author=None)
+
+    # Query the pre-rename edit by the file's *current* (post-rename) path.
+    out = parse_commit_diff(edit, new)
+    assert out.sha == edit
+    assert out.path == new
+    assert out.hunks, "pre-rename commit should still diff, not 404"
+    word_lines = [line for hunk in out.hunks for line in hunk.lines if line.kind == "word"]
+    assert word_lines and word_lines[0].word_diff is not None
+    assert word_lines[0].word_diff.removed == "old"
+    assert word_lines[0].word_diff.added == "new"

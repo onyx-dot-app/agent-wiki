@@ -231,18 +231,26 @@ def _promote_word_diff(hunk: DiffHunk) -> DiffHunk:
 def parse_commit_diff(sha: str, rel: str) -> FileDiffResponse:
     """Build a structured diff for ``sha`` vs its parent, scoped to ``rel``.
 
+    ``rel`` is the file's *current* path. The history panel lists commits via
+    ``git log --follow``, so it includes commits from before a rename, when the
+    file lived at a different name. Diffing those against the current ``rel``
+    would touch nothing ("sha does not touch path"); resolve the name the file
+    had at ``sha`` (via ``path_at_ref``) and diff that instead — same fix the
+    read-at-ref path uses.
+
     First-commit (no parent) → ``parent_sha`` is None, ``is_creation`` is
-    True, every line is an ``add``. ``rel`` not touched by ``sha`` → returns
-    an empty-hunks response; callers (the API route) should translate that
-    into 404 for end users. Unknown SHA (passes hex regex but doesn't
+    True, every line is an ``add``. ``rel`` genuinely not touched by ``sha`` →
+    returns an empty-hunks response; callers (the API route) should translate
+    that into 404 for end users. Unknown SHA (passes hex regex but doesn't
     resolve in the repo) → same empty-hunks response, same 404 at the route.
     """
+    effective_rel: str = wiki_git.path_at_ref(rel, sha) or rel
     try:
         parent = wiki_git.parent_sha(sha)
         # Pass unified=99_999 so the full doc body lands in `context`
         # lines around the hunks; the FE renders the whole file with
         # +/- highlights on changed lines instead of just hunk windows.
-        raw = wiki_git.diff_for_commit(sha, rel, unified=99_999)
+        raw = wiki_git.diff_for_commit(sha, effective_rel, unified=99_999)
     except UnknownSha:
         return FileDiffResponse(
             path=rel,
