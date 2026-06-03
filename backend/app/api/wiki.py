@@ -36,11 +36,16 @@ from app.models.file_system import (
     PutDocumentResponse,
     RebaseConflictResponse,
     RebaseRequest,
+    RecentDocsResponse,
+    RecordRecentDocRequest,
     ReindexRequest,
     ReindexResponse,
+    ReorderStarredRequest,
     SearchHitView,
     SearchResponse,
     SetDocumentDraftRequest,
+    StarDocRequest,
+    StarredDocsResponse,
 )
 from app.tasks.reindex import index_path
 from app.triggers import repo as triggers_repo
@@ -51,7 +56,9 @@ from app.wiki import (
     filesystem,
     git as wiki_git,
     notify as wiki_notify,
+    recents as wiki_recents,
     search as wiki_search,
+    starred as wiki_starred,
     templates as templates_repo,
     utils as wiki_utils,
 )
@@ -367,6 +374,86 @@ def search_documents(
         ],
         folders=[FolderHitView(path=f.path) for f in folders],
     )
+
+
+@router.get("/recents", response_model=RecentDocsResponse)
+def list_recent_docs(user: User = Depends(require_user)) -> RecentDocsResponse:
+    paths = wiki_recents.list_paths(user.id)
+    # Drop docs deleted since they were viewed; ACL changes can also
+    # revoke access after the fact, so re-filter on every read.
+    paths = [p for p in paths if filesystem.absolute(p).is_file()]
+    if not user.is_admin:
+        from app.wiki import acl as _acl
+
+        paths = _acl.filter_paths_in_python(user.id, False, paths)
+    return RecentDocsResponse(paths=paths)
+
+
+@router.post("/recents", status_code=status.HTTP_204_NO_CONTENT)
+def record_recent_doc(
+    req: RecordRecentDocRequest,
+    user: User = Depends(require_user),
+) -> None:
+    try:
+        rel = filesystem.safe_rel_path(req.path)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    require_can("read", rel, user)
+    wiki_recents.record_view(user.id, rel)
+
+
+@router.get("/starred", response_model=StarredDocsResponse)
+def list_starred_docs(user: User = Depends(require_user)) -> StarredDocsResponse:
+    paths = wiki_starred.list_paths(user.id)
+    # Same read-side filtering as recents: deletions and ACL changes
+    # after the star must hide the entry.
+    paths = [p for p in paths if filesystem.absolute(p).is_file()]
+    if not user.is_admin:
+        from app.wiki import acl as _acl
+
+        paths = _acl.filter_paths_in_python(user.id, False, paths)
+    return StarredDocsResponse(paths=paths)
+
+
+@router.post("/starred", status_code=status.HTTP_204_NO_CONTENT)
+def star_doc(
+    req: StarDocRequest,
+    user: User = Depends(require_user),
+) -> None:
+    try:
+        rel = filesystem.safe_rel_path(req.path)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    require_can("read", rel, user)
+    wiki_starred.star(user.id, rel)
+
+
+@router.delete("/starred", status_code=status.HTTP_204_NO_CONTENT)
+def unstar_doc(
+    user: User = Depends(require_user),
+    path: str = "",
+) -> None:
+    if not path:
+        raise HTTPException(status_code=400, detail="path required")
+    try:
+        rel = filesystem.safe_rel_path(path)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    # No read gate — users can always remove their own pin, even when
+    # access was revoked after they starred it.
+    wiki_starred.unstar(user.id, rel)
+
+
+@router.put("/starred", status_code=status.HTTP_204_NO_CONTENT)
+def reorder_starred_docs(
+    req: ReorderStarredRequest,
+    user: User = Depends(require_user),
+) -> None:
+    try:
+        rels = [filesystem.safe_rel_path(p) for p in req.paths]
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    wiki_starred.reorder(user.id, rels)
 
 
 @router.get("/file/history", response_model=FileHistoryResponse)

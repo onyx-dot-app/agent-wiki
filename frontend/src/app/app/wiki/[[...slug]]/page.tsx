@@ -52,6 +52,7 @@ import { rehypeSourcePos } from "@/lib/rehypeSourcePos";
 import { useRequireAuth } from "@/lib/auth";
 import { useDrafting } from "@/lib/drafting";
 import { rememberWikiPath } from "@/lib/lastViewed";
+import { recordRecentDoc } from "@/lib/recents";
 import {
   getDraftState,
   getTemplate,
@@ -123,10 +124,12 @@ export default function WikiRoute() {
   const isFile = slugPath.endsWith(".md");
 
   // Remember the most recent wiki path so the "Last viewed" landing
-  // setting has something to fall back to.
+  // setting has something to fall back to, and feed the sidebar
+  // "Recents" list when an actual doc (not a folder) is opened.
   useEffect(() => {
     rememberWikiPath("/app/wiki" + (slugPath ? "/" + slugPath : ""));
-  }, [slugPath]);
+    if (isFile) void recordRecentDoc(slugPath);
+  }, [slugPath, isFile]);
 
   if (loading || !user)
     return (

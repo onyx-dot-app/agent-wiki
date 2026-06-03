@@ -1,16 +1,14 @@
 "use client";
 
 import { SidebarTab } from "@onyx-ai/opal/components";
-import { SvgUser, SvgX } from "@onyx-ai/opal/icons";
+import { SvgX } from "@onyx-ai/opal/icons";
 import { SvgOnyxLogoTyped } from "@onyx-ai/opal/logos";
 import { usePathname } from "next/navigation";
-import { useAuth } from "@/lib/auth";
 import { ADMIN_NAV_ENTRIES } from "@/lib/nav/registry";
+import { UserMenu } from "./UserMenu";
 
 export function AdminSidebar() {
-  const { user } = useAuth();
   const pathname = usePathname();
-  const displayName = user?.name || user?.email || "";
 
   return (
     <nav className="flex flex-col h-screen w-[248px] box-border py-2 gap-4 shrink-0 sticky top-0 bg-background-tint-02 overflow-hidden">
@@ -39,14 +37,14 @@ export function AdminSidebar() {
         </div>
       </div>
 
-      {/* Footer: account + exit */}
+      {/* Footer: exit + account — same slot order as AppSidebar (panel
+          toggle above, account pinned at the very bottom) so the rows
+          don't appear to swap when entering/leaving the admin panel. */}
       <div className="flex flex-col gap-px px-2 shrink-0">
-        <SidebarTab icon={SvgUser} folded={false}>
-          {displayName || "Account"}
-        </SidebarTab>
         <SidebarTab icon={SvgX} folded={false} href="/app/wiki">
           Exit Admin Panel
         </SidebarTab>
+        <UserMenu />
       </div>
     </nav>
   );

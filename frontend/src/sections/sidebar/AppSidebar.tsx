@@ -6,7 +6,7 @@ import {
   SvgSearch,
   SvgSettings,
   SvgSidebar,
-  SvgUser,
+  SvgStar,
 } from "@onyx-ai/opal/icons";
 import { SvgOnyxLogoTyped } from "@onyx-ai/opal/logos";
 import { usePathname } from "next/navigation";
@@ -18,28 +18,55 @@ import {
 } from "@/components/wiki/WikiSearch";
 import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { RECENTS_KEY, type RecentDocsResponse } from "@/lib/recents";
+import {
+  STARRED_KEY,
+  starDoc,
+  type StarredDocsResponse,
+} from "@/lib/starred";
+import { docLabel } from "./docLabel";
+import { StarredList } from "./StarredList";
+import { UserMenu } from "./UserMenu";
 import { NAV_ENTRIES } from "@/lib/nav/registry";
 import { MOBILE_BREAKPOINT, useIsMobile } from "@/lib/viewport";
 
 const COLLAPSED_KEY = "agent-wiki:sidebar-collapsed";
 
-function useWikiPages() {
+// Recents = docs this user actually opened, newest first, served by
+// the backend (recent_doc_views table). The server already drops
+// deleted/no-longer-readable paths. Ordering is by the user's own
+// views — updates from agents/triggers never reshuffle the list.
+// recordRecentDoc() mutates RECENTS_KEY after each open, which
+// revalidates this hook.
+function useRecentPages() {
   const { data } = useSWR(
-    "/wiki",
-    (key: string) =>
-      apiFetch<{ entries: { path: string; updated_at: string }[] }>(key),
+    RECENTS_KEY,
+    (key: string) => apiFetch<RecentDocsResponse>(key),
     { revalidateOnFocus: false },
   );
-  return (data?.entries ?? [])
-    .filter((e) => e.path.endsWith(".md"))
-    .sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+  return data?.paths ?? [];
+}
+
+// Starred = docs the user pinned, in their drag-chosen order. Writes
+// in lib/starred.ts mutate STARRED_KEY optimistically.
+function useStarredPages() {
+  const { data } = useSWR(
+    STARRED_KEY,
+    (key: string) => apiFetch<StarredDocsResponse>(key),
+    { revalidateOnFocus: false },
+  );
+  return data?.paths ?? [];
 }
 
 export function AppSidebar() {
   const { user } = useAuth();
   const pathname = usePathname();
   const isMobile = useIsMobile();
-  const pages = useWikiPages();
+  const starred = useStarredPages();
+  // Starred docs are pinned in their own section — keep Recents free of
+  // duplicates.
+  const starredSet = new Set(starred);
+  const pages = useRecentPages().filter((p) => !starredSet.has(p));
 
   const [collapsed, setCollapsed] = useState<boolean>(() => {
     if (typeof window === "undefined") return false;
@@ -61,8 +88,6 @@ export function AppSidebar() {
     if (typeof window === "undefined") return;
     window.localStorage.setItem(COLLAPSED_KEY, collapsed ? "1" : "0");
   }, [collapsed]);
-
-  const displayName = user?.name || user?.email || "";
 
   return (
     <>
@@ -129,7 +154,12 @@ export function AppSidebar() {
                 onClick={expandAndFocusSearch}
               />
             ) : (
-              <WikiSearch ref={searchRef} />
+              <WikiSearch
+                ref={searchRef}
+                onNavigate={() => {
+                  if (isMobileDrawer) setCollapsed(true);
+                }}
+              />
             )}
 
             {/* Top nav */}
@@ -154,9 +184,27 @@ export function AppSidebar() {
               })}
             </div>
 
-            {/* Recents — scrollable, hidden when collapsed */}
+            {/* Starred + Recents — scrollable, hidden when collapsed */}
             {!collapsed && (
               <div className="flex-1 overflow-y-auto overflow-x-hidden">
+                {starred.length > 0 && (
+                  <>
+                    <div className="pl-2 mr-1.5 py-1 sticky top-0 bg-background-tint-02 z-10 flex items-center min-h-8">
+                      <div className="p-0.5">
+                        <Text font="secondary-body" color="text-02">
+                          Starred
+                        </Text>
+                      </div>
+                    </div>
+                    <StarredList
+                      paths={starred}
+                      pathname={pathname}
+                      onNavigate={() => {
+                        if (isMobileDrawer) setCollapsed(true);
+                      }}
+                    />
+                  </>
+                )}
                 <div className="pl-2 mr-1.5 py-1 sticky top-0 bg-background-tint-02 z-10 flex items-center min-h-8">
                   <div className="p-0.5">
                     <Text font="secondary-body" color="text-02">
@@ -165,28 +213,40 @@ export function AppSidebar() {
                   </div>
                 </div>
                 <div className="flex flex-col gap-px">
-                  {pages.map((page) => {
-                    const label = (page.path.split("/").pop() ?? page.path).replace(
-                      /\.md$/,
-                      "",
-                    );
-                    const href = `/app/wiki/${page.path}`;
+                  {pages.map((path) => {
+                    const href = `/app/wiki/${path}`;
                     const active = pathname === href;
                     return (
-                      <SidebarTab
-                        key={page.path}
-                        href={href}
-                        selected={active}
-                        folded={collapsed}
-                        icon={SvgDocFile}
-                        tooltip={undefined}
-                        nested
-                        onClick={() => {
-                          if (isMobileDrawer) setCollapsed(true);
-                        }}
-                      >
-                        {label}
-                      </SidebarTab>
+                      <div key={path} className="group/recent">
+                        <SidebarTab
+                          href={href}
+                          selected={active}
+                          folded={collapsed}
+                          icon={SvgDocFile}
+                          tooltip={undefined}
+                          nested
+                          onClick={() => {
+                            if (isMobileDrawer) setCollapsed(true);
+                          }}
+                          rightChildren={
+                            <span className="opacity-0 group-hover/recent:opacity-100">
+                              <Button
+                                icon={SvgStar}
+                                prominence="tertiary"
+                                size="sm"
+                                tooltip="Star"
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  void starDoc(path);
+                                }}
+                              />
+                            </span>
+                          }
+                        >
+                          {docLabel(path)}
+                        </SidebarTab>
+                      </div>
                     );
                   })}
                 </div>
@@ -206,14 +266,12 @@ export function AppSidebar() {
                 Admin Panel
               </SidebarTab>
             )}
-            <SidebarTab
-              icon={SvgUser}
+            <UserMenu
               folded={collapsed}
-              tooltip={collapsed ? displayName || "Account" : undefined}
-              href="/app/settings"
-            >
-              {displayName || "Account"}
-            </SidebarTab>
+              onNavigate={() => {
+                if (isMobileDrawer) setCollapsed(true);
+              }}
+            />
           </div>
         </nav>
       </div>

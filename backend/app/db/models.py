@@ -157,6 +157,84 @@ class McpJob(Base):
     )
 
 
+class McpSession(Base):
+    """Persistent MCP session row — replaces the in-memory ``_SESSIONS``
+    dict so a wiki-server restart doesn't invalidate every client's
+    ``Mcp-Session-Id``.
+
+    The session lives in Postgres but the live SSE stream and event
+    queues stay in process memory (``_queues`` / ``_async_queues`` in
+    ``app/mcp_server/pubsub.py``). On SSE reconnect the client's existing
+    ID is recognized, subscriptions rehydrate from
+    ``mcp_path_subscriptions`` / ``mcp_job_subscriptions``, and the
+    writer rebuilds its in-process queue.
+
+    Events fired *during* a restart window are lost — there is no
+    durable event log. Clients should treat the SSE channel as
+    best-effort and rely on ``list_history`` for catch-up. See
+    ``local_data/wiki/mcp-server/mcp-server.md``.
+
+    ``is_admin`` is cached at session creation to avoid an ACL DB hit on
+    every pubsub fan-out — promotion / demotion only takes effect on
+    the next reconnect.
+    """
+
+    __tablename__ = "mcp_sessions"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    user_id: Mapped[str] = mapped_column(
+        Text, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    is_admin: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("FALSE"))
+    initialized: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("FALSE"))
+    created_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
+    last_used_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
+    expires_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+    __table_args__ = (
+        Index("idx_mcp_sessions_user", "user_id"),
+        Index("idx_mcp_sessions_expires", "expires_at"),
+    )
+
+
+class McpPathSubscription(Base):
+    """Per-session wiki-path subscription. Populated by ``read_doc``
+    auto-subscribe and explicit ``resources/subscribe``; cascade-deleted
+    when the parent ``mcp_sessions`` row is removed.
+
+    The in-memory ``_subscribers_by_path`` index in
+    ``app/mcp_server/pubsub.py`` is the fast-path fan-out lookup for
+    sessions whose SSE stream is open on *this* process; these rows
+    rehydrate that index on SSE reconnect and let cross-process delivery
+    (NOTIFY bridge) resolve who's subscribed to what across replicas.
+    """
+
+    __tablename__ = "mcp_path_subscriptions"
+
+    session_id: Mapped[str] = mapped_column(
+        Text, ForeignKey("mcp_sessions.id", ondelete="CASCADE"), primary_key=True
+    )
+    rel_path: Mapped[str] = mapped_column(Text, primary_key=True)
+    created_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
+
+    __table_args__ = (Index("idx_mcp_path_subs_path", "rel_path"),)
+
+
+class McpJobSubscription(Base):
+    """Per-session ``job://<id>`` subscription. Same persistence pattern
+    as ``McpPathSubscription`` but keyed on job id."""
+
+    __tablename__ = "mcp_job_subscriptions"
+
+    session_id: Mapped[str] = mapped_column(
+        Text, ForeignKey("mcp_sessions.id", ondelete="CASCADE"), primary_key=True
+    )
+    job_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    created_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
+
+    __table_args__ = (Index("idx_mcp_job_subs_job", "job_id"),)
+
+
 # --------------------------------------------------------------------------- #
 # Coding-tool launchers                                                       #
 # See local_data/wiki/Wiki Project/Specific Features/coding_tool_launchers/.  #
@@ -253,6 +331,45 @@ class LauncherToken(Base):
     ciphertext: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
     nonce: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
     created_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
+
+
+# --------------------------------------------------------------------------- #
+# Per-user doc lists — recents and starred                                    #
+# --------------------------------------------------------------------------- #
+
+
+class RecentDocView(Base):
+    """Per-user most-recently-opened wiki docs — drives the sidebar
+    "Recents" list. One row per (user, path); ``viewed_at`` is bumped on
+    every open and stored with sub-second precision so back-to-back opens
+    keep a stable order. Pruned to a per-user cap on write
+    (``app/wiki/recents.py``)."""
+
+    __tablename__ = "recent_doc_views"
+
+    user_id: Mapped[str] = mapped_column(
+        Text, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    path: Mapped[str] = mapped_column(Text, primary_key=True)
+    viewed_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
+
+    __table_args__ = (Index("ix_recent_doc_views_user_viewed", "user_id", "viewed_at"),)
+
+
+class StarredDoc(Base):
+    """Per-user starred wiki docs — the sidebar "Starred" section.
+    User-ordered: ``sort_order`` is a 0-based position maintained by
+    ``app/wiki/starred.py`` (append on star, rewrite on drag-reorder)."""
+
+    __tablename__ = "starred_docs"
+
+    user_id: Mapped[str] = mapped_column(
+        Text, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    path: Mapped[str] = mapped_column(Text, primary_key=True)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    __table_args__ = (Index("ix_starred_docs_user_sort", "user_id", "sort_order"),)
 
 
 # --------------------------------------------------------------------------- #

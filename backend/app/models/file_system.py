@@ -77,6 +77,31 @@ class ListDocumentsResponse(BaseModel):
     entries: list[DocumentEntry]
 
 
+class RecordRecentDocRequest(BaseModel):
+    path: str
+
+
+class RecentDocsResponse(BaseModel):
+    # Newest-first paths of docs the user opened, already filtered to
+    # ones that still exist and remain readable.
+    paths: list[str]
+
+
+class StarDocRequest(BaseModel):
+    path: str
+
+
+class ReorderStarredRequest(BaseModel):
+    # The full starred list in the user's new order.
+    paths: list[str]
+
+
+class StarredDocsResponse(BaseModel):
+    # User-ordered starred doc paths, already filtered to ones that
+    # still exist and remain readable.
+    paths: list[str]
+
+
 class GetDocumentResponse(BaseModel):
     path: str
     body: str

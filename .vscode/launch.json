@@ -67,6 +67,10 @@
     },
     {
       // Next.js dev server with hot reload. Env vars come from the root .env file.
+      // internalConsole: js-debug spawns the process directly instead of typing
+      // the (very long) env+command line into a shell — terminals with editor
+      // shell-integration injection (e.g. the Python extension's interpreter
+      // activation) can mangle that paste and leave zsh stuck at `quote>`.
       "name": "Frontend",
       "type": "node",
       "request": "launch",
@@ -77,7 +81,7 @@
         "dev"
       ],
       "envFile": "${workspaceFolder}/.env",
-      "console": "integratedTerminal",
+      "console": "internalConsole",
       "consoleTitle": "Frontend Console",
       "presentation": {
         "group": "2"
@@ -89,6 +93,7 @@
       "name": "API Server",
       "type": "debugpy",
       "request": "launch",
+      "python": "${workspaceFolder}/backend/.venv/bin/python",
       "module": "uvicorn",
       "cwd": "${workspaceFolder}/backend",
       "envFile": "${workspaceFolder}/.env",
@@ -115,6 +120,7 @@
       "name": "Worker: documents",
       "type": "debugpy",
       "request": "launch",
+      "python": "${workspaceFolder}/backend/.venv/bin/python",
       "module": "app.tasks.run_worker",
       "cwd": "${workspaceFolder}/backend",
       "envFile": "${workspaceFolder}/.env",
@@ -137,6 +143,7 @@
       "name": "Worker: triggers",
       "type": "debugpy",
       "request": "launch",
+      "python": "${workspaceFolder}/backend/.venv/bin/python",
       "module": "app.tasks.run_worker",
       "cwd": "${workspaceFolder}/backend",
       "envFile": "${workspaceFolder}/.env",
@@ -160,6 +167,7 @@
       "name": "Worker: lightweight_maintenance",
       "type": "debugpy",
       "request": "launch",
+      "python": "${workspaceFolder}/backend/.venv/bin/python",
       "module": "app.tasks.run_worker",
       "cwd": "${workspaceFolder}/backend",
       "envFile": "${workspaceFolder}/.env",
@@ -183,6 +191,7 @@
       "name": "Pytest",
       "type": "debugpy",
       "request": "launch",
+      "python": "${workspaceFolder}/backend/.venv/bin/python",
       "module": "pytest",
       "cwd": "${workspaceFolder}/backend",
       "envFile": "${workspaceFolder}/.env",
