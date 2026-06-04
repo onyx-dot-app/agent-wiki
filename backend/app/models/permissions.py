@@ -56,6 +56,24 @@ class GroupMemberAddRequest(BaseModel):
     user_id: str = Field(min_length=1)
 
 
+class GroupUpdateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+
+
+class GroupShareOut(BaseModel):
+    """A page or folder shared with a group — one ACL row, group-centric."""
+
+    id: str
+    resource_kind: str
+    resource_path: str
+    permission: str
+    created_at: str
+
+
+class GroupSharesResponse(BaseModel):
+    shares: list[GroupShareOut]
+
+
 # --------------------------------------------------------------------------- #
 # Wiki ACL grants                                                             #
 # --------------------------------------------------------------------------- #

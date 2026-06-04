@@ -1,0 +1,268 @@
+/* Home / "Welcome to Onyx Wiki" landing. Colors, borders, and surfaces all
+   come from OPAL components (SelectCard, Divider, InputTypeIn, Button, Text,
+   Section). These classes are layout-only — column width, the card grids, the
+   gutter offset, and the masked markdown preview (which has no OPAL primitive). */
+
+.scroll {
+  height: 100vh;
+  overflow-y: auto;
+}
+
+/* Top header — folder chip + breadcrumb */
+.topHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+}
+
+/* Directory breadcrumb — Home › seg › seg */
+.breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.modeBox {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--border-radius-12);
+  background: var(--background-tint-03);
+  color: var(--text-05);
+}
+
+.crumb {
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--text-04);
+}
+
+.body {
+  display: flex;
+  align-items: flex-start;
+  /* Gap kept wider than the AI-input gutter icon's -28px hang so the centered
+     column can never sit close enough for that icon to overlap the sidebar. */
+  gap: 40px;
+  padding: 0 16px 64px;
+}
+
+/* Permanent directory sidebar — sticky; its list scrolls rather than growing. */
+.sidebar {
+  flex: 0 0 240px;
+  width: 240px;
+  position: sticky;
+  top: 8px;
+  align-self: flex-start;
+}
+
+.column {
+  flex: 1;
+  max-width: 672px;
+  margin: 0 auto;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* Hero */
+.hero {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px 16px 24px;
+}
+
+.heroMark {
+  display: flex;
+  color: var(--text-05);
+}
+
+.heroTitle {
+  margin: 0;
+  font-size: 24px;
+  line-height: 36px;
+  font-weight: 600;
+  letter-spacing: -0.24px;
+  color: var(--text-04);
+}
+
+.dividerWrap {
+  padding: 0 16px;
+}
+.midDividerWrap {
+  padding: 24px 16px;
+}
+
+.sectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px 4px;
+}
+
+.secHead {
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 600;
+  color: var(--text-04);
+}
+
+.secHeadLg {
+  font-size: 18px;
+  line-height: 28px;
+  font-weight: 600;
+  letter-spacing: -0.18px;
+  color: var(--text-04);
+}
+
+/* Templates strip */
+.templates {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  padding: 8px;
+}
+.templateCell {
+  display: flex;
+  min-width: 0;
+}
+
+/* "More Templates" — full-width row: label left, chevron far right (mock 319:27988). */
+.moreRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  box-sizing: border-box;
+  margin: 0 8px;
+  width: calc(100% - 16px);
+  padding: 8px;
+  border: none;
+  background: transparent;
+  border-radius: var(--border-radius-04);
+  cursor: pointer;
+}
+.moreRow:hover {
+  background: var(--background-tint-03);
+}
+.moreLabel {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-04);
+}
+.moreChevron {
+  color: var(--text-03);
+  flex: 0 0 auto;
+}
+
+/* Blank-page glyph — plain OPAL plus-circle icon, not an interactive Button. */
+.blankGlyph {
+  display: inline-flex;
+  color: var(--text-03);
+}
+
+/* AI input — box left edge aligns with the card grid (padding 8px); the octagon
+   mark hangs into the left gutter, vertically centered, out of the input flow. */
+.aiRow {
+  position: relative;
+  padding: 8px 8px;
+}
+.aiGutterIcon {
+  position: absolute;
+  left: -28px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  color: var(--text-03);
+}
+.aiInputWrap {
+  width: 100%;
+  min-width: 0;
+}
+
+/* Recent Pages grid */
+.recentGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  padding: 0 8px;
+}
+.recentCell {
+  display: flex;
+  min-width: 0;
+}
+
+/* Card body layout — fixed height with a masked, fading markdown preview. */
+.recentInner {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
+  height: 144px;
+  overflow: hidden;
+}
+
+.cardHead {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 12px;
+  overflow: hidden;
+}
+
+.cardFoot {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  padding: 4px 4px 4px 12px;
+}
+
+.cardPreview {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  overflow-wrap: break-word;
+  color: var(--text-03);
+  -webkit-mask-image: linear-gradient(to bottom, #000 62%, transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 62%, transparent 100%);
+}
+.cardPreview :global(*) {
+  font-size: 12px !important;
+  line-height: 16px !important;
+  margin: 0 0 2px !important;
+  overflow-wrap: break-word;
+}
+.cardPreview :global(h1),
+.cardPreview :global(h2),
+.cardPreview :global(h3),
+.cardPreview :global(strong) {
+  font-weight: 600;
+  color: var(--text-04);
+}
+.cardPreview :global(pre),
+.cardPreview :global(code) {
+  white-space: pre-wrap;
+}
+
+.empty {
+  padding: 8px 16px;
+  font-size: 13px;
+  color: var(--text-03);
+}
+
+@media (max-width: 720px) {
+  .column {
+    width: 100%;
+  }
+  .templates,
+  .recentGrid {
+    grid-template-columns: 1fr;
+  }
+}

@@ -85,6 +85,25 @@ def get_by_name(name: str) -> dict[str, Any] | None:
         return _to_dict(g) if g else None
 
 
+def rename(group_id: str, name: str) -> None:
+    """Rename a group. Raises ``GroupNotFoundError`` if it doesn't exist and
+    ``GroupNameTakenError`` if another group already holds the name."""
+    name = name.strip()
+    if not name:
+        raise ValueError("group name required")
+    with session() as s:
+        g = s.get(Group, group_id)
+        if g is None:
+            raise GroupNotFoundError(group_id)
+        clash = s.scalar(
+            select(Group).where(Group.name == name, Group.id != group_id)
+        )
+        if clash is not None:
+            raise GroupNameTakenError(f"group name already in use: {name!r}")
+        g.name = name
+    log.info("group renamed id=%s name=%s", group_id, name)
+
+
 def delete_group(group_id: str) -> None:
     with session() as s:
         g = s.get(Group, group_id)

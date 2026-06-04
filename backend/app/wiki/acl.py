@@ -341,6 +341,31 @@ def list_for_path(path: str) -> list[dict[str, Any]]:
     return [_entry_dict(e) for e in page_rows] + [_entry_dict(e) for e in folder_rows]
 
 
+def list_for_group(group_id: str) -> list[dict[str, Any]]:
+    """All ACL rows whose principal is ``group_id`` — the pages and folders
+    shared with the group. Ordered folders-then-pages, path-ascending.
+
+    Used by the admin group page to show (and revoke) what a group can
+    access. The inverse of ``list_for_path``'s resource-centric view.
+    """
+    with session() as s:
+        rows = list(
+            s.scalars(
+                select(AclEntry)
+                .where(
+                    AclEntry.principal_kind == "group",
+                    AclEntry.principal_id == group_id,
+                )
+                .order_by(
+                    AclEntry.resource_kind.asc(),
+                    AclEntry.resource_path.asc(),
+                    AclEntry.created_at.asc(),
+                )
+            ).all()
+        )
+    return [_entry_dict(e) for e in rows]
+
+
 def delete_all_for_path(path: str) -> None:
     """Drop every page-level ACL row keyed at ``path``. Folder rows are
     not touched (a folder grant can outlive any individual page in it).

@@ -9,6 +9,14 @@ export function lastSegment(path: string): string {
   return seg.endsWith(".md") ? seg.slice(0, -3) : seg;
 }
 
+/** Shape of a home "Recent Pages" card; the grid fetches `/wiki/recent` directly. */
+export interface RecentPage {
+  path: string;
+  title: string;
+  updated_at: string;
+  preview: string;
+}
+
 export interface WordDiff {
   prefix: string;
   removed: string;

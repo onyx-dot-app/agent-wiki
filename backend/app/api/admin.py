@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import csv
+import io
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from app.auth import User, users as users_repo
 from app.auth import groups as groups_repo
+from app.auth import invites
 from app.auth.deps import require_admin
 from app.ingest import settings as ingest_settings
 from app.ingest.settings import IngestSettings
@@ -20,12 +23,15 @@ from app.models.admin import (
     BraintrustConfigRequest,
     BraintrustView,
     IngestConfigRequest,
+    InviteUsersRequest,
+    InvitedUserView,
     IngestView,
     RegenerateKeyResponse,
     LLMConfigRequest,
     LLMView,
     OkResponse,
     UpdateUserRequest,
+    UserCounts,
     WebConfigRequest,
     WebView,
 )
@@ -44,12 +50,16 @@ log = logging.getLogger(__name__)
 
 
 def _user_view(row: dict[str, Any], groups: list[str] | None = None) -> AdminUserView:
+    is_active = bool(row["is_active"])
     return AdminUserView(
         id=row["id"],
         email=row["email"],
         name=row["name"],
         is_admin=bool(row["is_admin"]),
+        is_active=is_active,
+        status="active" if is_active else "inactive",
         created_at=row["created_at"],
+        updated_at=row["updated_at"],
         groups=groups or [],
     )
 
@@ -57,8 +67,17 @@ def _user_view(row: dict[str, Any], groups: list[str] | None = None) -> AdminUse
 @router.get("/users", response_model=AdminUserListResponse)
 def list_users(_actor: User = Depends(require_admin)) -> AdminUserListResponse:
     by_user = groups_repo.groups_by_user()
+    users = [_user_view(r, by_user.get(r["id"], [])) for r in users_repo.list_all()]
+    invited = [InvitedUserView(email=e) for e in invites.list_emails()]
+    status = users_repo.status_counts()
     return AdminUserListResponse(
-        users=[_user_view(r, by_user.get(r["id"], [])) for r in users_repo.list_all()],
+        users=users,
+        invited=invited,
+        counts=UserCounts(
+            active=status["active"],
+            inactive=status["inactive"],
+            invited=len(invited),
+        ),
     )
 
 
@@ -71,18 +90,91 @@ def update_user(
     target = users_repo.get_by_id(user_id)
     if target is None:
         raise HTTPException(status_code=404, detail="not found")
-    if not req.is_admin and bool(target["is_admin"]) and users_repo.admin_count() <= 1:
-        raise HTTPException(status_code=400, detail="cannot demote the last admin")
-    users_repo.set_admin(user_id, req.is_admin)
-    log.info(
-        "admin: %s set is_admin=%s on user %s",
-        actor.id,
-        req.is_admin,
-        user_id,
-    )
+
+    was_admin = bool(target["is_admin"])
+    was_active = bool(target["is_active"])
+    # Effective state after this PATCH (fields default to current value).
+    final_admin = req.is_admin if req.is_admin is not None else was_admin
+    final_active = req.is_active if req.is_active is not None else was_active
+
+    # Validate every guard BEFORE mutating, so a rejected request never leaves
+    # a half-applied change. Guards check the *resulting* state, so e.g.
+    # demoting + deactivating in one call doesn't false-trip the last-admin
+    # check on a stale snapshot.
+    if req.is_active is False and user_id == actor.id:
+        raise HTTPException(status_code=400, detail="cannot deactivate yourself")
+
+    # An active admin being demoted and/or deactivated must not be the last one.
+    if (was_admin and was_active) and not (final_admin and final_active):
+        if users_repo.admin_count() <= 1:
+            detail = (
+                "cannot demote the last admin"
+                if not final_admin
+                else "cannot deactivate the last admin"
+            )
+            raise HTTPException(status_code=400, detail=detail)
+
+    if req.is_admin is not None and req.is_admin != was_admin:
+        users_repo.set_admin(user_id, req.is_admin)
+        log.info(
+            "admin: %s set is_admin=%s on user %s", actor.id, req.is_admin, user_id
+        )
+
+    if req.is_active is not None and req.is_active != was_active:
+        users_repo.set_active(user_id, req.is_active)
+        log.info(
+            "admin: %s set is_active=%s on user %s", actor.id, req.is_active, user_id
+        )
+
     row = users_repo.get_by_id(user_id)
     assert row is not None
-    return _user_view(row)
+    return _user_view(row, groups_repo.groups_by_user().get(user_id, []))
+
+
+@router.put("/users/invite", response_model=AdminUserListResponse)
+def invite_users(
+    req: InviteUsersRequest,
+    actor: User = Depends(require_admin),
+) -> AdminUserListResponse:
+    added = invites.add(req.emails, invited_by_user_id=actor.id)
+    log.info("admin: %s invited %d email(s)", actor.id, len(added))
+    return list_users(actor)
+
+
+@router.delete("/users/invited", response_model=OkResponse)
+def cancel_invite(
+    email: str = Query(...),
+    actor: User = Depends(require_admin),
+) -> OkResponse:
+    invites.remove(email)
+    log.info("admin: %s cancelled invite for %s", actor.id, email.strip().lower())
+    return OkResponse()
+
+
+@router.get("/users/download")
+def download_users_csv(_actor: User = Depends(require_admin)) -> Response:
+    by_user = groups_repo.groups_by_user()
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["email", "name", "role", "status", "groups", "created_at"])
+    for r in users_repo.list_all():
+        writer.writerow(
+            [
+                r["email"],
+                r["name"] or "",
+                "admin" if r["is_admin"] else "basic",
+                "active" if r["is_active"] else "inactive",
+                "; ".join(by_user.get(r["id"], [])),
+                r["created_at"],
+            ]
+        )
+    for email in invites.list_emails():
+        writer.writerow([email, "", "basic", "invited", "", ""])
+    return Response(
+        content=buf.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="users.csv"'},
+    )
 
 
 @router.delete("/users/{user_id}", response_model=OkResponse)
@@ -152,7 +244,9 @@ def put_llm(
         model = (req.model or "").strip()
         if provider not in _ALLOWED_PROVIDERS:
             allowed = ", ".join(f"'{p}'" for p in _ALLOWED_PROVIDERS)
-            raise HTTPException(status_code=400, detail=f"provider must be one of {allowed}")
+            raise HTTPException(
+                status_code=400, detail=f"provider must be one of {allowed}"
+            )
         if not model:
             raise HTTPException(status_code=400, detail="model is required")
     else:
@@ -171,13 +265,19 @@ def put_llm(
     anthropic_key = _resolve_secret(
         "anthropic_api_key", req.anthropic_api_key, current.anthropic_api_key
     )
-    openai_key = _resolve_secret("openai_api_key", req.openai_api_key, current.openai_api_key)
-    gemini_key = _resolve_secret("gemini_api_key", req.gemini_api_key, current.gemini_api_key)
+    openai_key = _resolve_secret(
+        "openai_api_key", req.openai_api_key, current.openai_api_key
+    )
+    gemini_key = _resolve_secret(
+        "gemini_api_key", req.gemini_api_key, current.gemini_api_key
+    )
     ollama_base_url = _resolve_secret(
         "ollama_base_url", req.ollama_base_url, current.ollama_base_url
     )
 
-    new_provider_models = req.provider_models if "provider_models" in sent_fields else None
+    new_provider_models = (
+        req.provider_models if "provider_models" in sent_fields else None
+    )
 
     if "ingest_selector_model" in sent_fields:
         ingest_selector_model = (req.ingest_selector_model or "").strip()
@@ -240,7 +340,9 @@ def put_web(
         return sent
 
     serper_key = _resolve("serper_api_key", req.serper_api_key, current.serper_api_key)
-    firecrawl_key = _resolve("firecrawl_api_key", req.firecrawl_api_key, current.firecrawl_api_key)
+    firecrawl_key = _resolve(
+        "firecrawl_api_key", req.firecrawl_api_key, current.firecrawl_api_key
+    )
 
     web_settings.upsert(
         serper_api_key=serper_key,
@@ -293,7 +395,9 @@ def put_ingest(
 
 
 @router.post("/ingest/regenerate-key", response_model=RegenerateKeyResponse)
-def regenerate_ingest_key(actor: User = Depends(require_admin)) -> RegenerateKeyResponse:
+def regenerate_ingest_key(
+    actor: User = Depends(require_admin),
+) -> RegenerateKeyResponse:
     key = ingest_settings.regenerate_key()
     log.info("admin: %s regenerated ingest api_key", actor.id)
     return RegenerateKeyResponse(api_key=key)

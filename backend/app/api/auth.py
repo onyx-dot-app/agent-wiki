@@ -5,6 +5,7 @@ Session cookies are minted via Starlette's ``SessionMiddleware``
 is all that's needed to "log in", and ``request.session.clear()`` to
 log out.
 """
+
 from __future__ import annotations
 
 import logging
@@ -18,6 +19,7 @@ from app.auth import User, users as users_repo
 from app.auth.basic import authenticate
 from app.auth.deps import require_user
 from app.auth.oidc import client as oidc_client, upsert_oidc_user
+from app.auth import invites
 from app.auth.whitelist import is_allowed, is_open
 from app.config import CONFIG
 from app.models.auth import (
@@ -56,7 +58,7 @@ def signup(req: SignupRequest, request: Request) -> AuthSession:
     name = (req.name or "").strip() or None
     if not email:
         raise HTTPException(status_code=400, detail="email is required")
-    if not is_allowed(email):
+    if not is_allowed(email) and not invites.is_invited(email):
         raise HTTPException(status_code=403, detail="email not allowed")
     if users_repo.get_by_email(email) is not None:
         raise HTTPException(status_code=409, detail="account already exists")
@@ -65,6 +67,8 @@ def signup(req: SignupRequest, request: Request) -> AuthSession:
     except IntegrityError as exc:
         log.warning("signup race: account already exists for %s", email, exc_info=True)
         raise HTTPException(status_code=409, detail="account already exists") from exc
+    # Consume the invite (if any) now that the account exists.
+    invites.remove(email)
     row = users_repo.get_by_id(user_id)
     assert row is not None
     user = User(id=row["id"], email=row["email"], name=row["name"], is_admin=row["is_admin"])
@@ -110,7 +114,9 @@ async def oidc_login(request: Request) -> Response:
     )
     return cast(
         Response,
-        await client.authorize_redirect(request, redirect_uri),  # pyright: ignore[reportUnknownMemberType]
+        await client.authorize_redirect(  # pyright: ignore[reportUnknownMemberType]
+            request, redirect_uri
+        ),
     )
 
 
@@ -148,13 +154,14 @@ async def oidc_callback(request: Request) -> Response:
     if userinfo.get("email_verified") is False:
         log.warning("oidc: email not verified for %s", email)
         return RedirectResponse(url="/login?error=oidc_email_unverified")
-    if not is_allowed(email):
+    if not is_allowed(email) and not invites.is_invited(email):
         log.info("oidc: email %s not in allow list", email)
         return RedirectResponse(url="/login?error=oidc_email_not_allowed")
 
     name_raw = userinfo.get("name")
     name = name_raw if isinstance(name_raw, str) else None
     user_id = upsert_oidc_user(email=email, name=name)
+    invites.remove(email)
     row = users_repo.get_by_id(user_id)
     assert row is not None
     user = User(id=row["id"], email=row["email"], name=row["name"], is_admin=row["is_admin"])

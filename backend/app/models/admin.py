@@ -11,7 +11,14 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class UpdateUserRequest(BaseModel):
-    is_admin: bool
+    """Both optional — PATCH whichever field(s) are present."""
+
+    is_admin: bool | None = None
+    is_active: bool | None = None
+
+
+class InviteUsersRequest(BaseModel):
+    emails: list[str]
 
 
 class LLMConfigRequest(BaseModel):
@@ -65,13 +72,29 @@ class AdminUserView(BaseModel):
     email: str
     name: str | None
     is_admin: bool
+    is_active: bool
+    # "active" | "inactive" — derived from is_active for the status column.
+    status: str
     created_at: str
+    updated_at: str
     # Names of the groups this user belongs to (for the admin users table).
     groups: list[str] = Field(default_factory=list)
 
 
+class InvitedUserView(BaseModel):
+    email: str
+
+
+class UserCounts(BaseModel):
+    active: int
+    inactive: int
+    invited: int
+
+
 class AdminUserListResponse(BaseModel):
     users: list[AdminUserView]
+    invited: list[InvitedUserView] = Field(default_factory=list)
+    counts: UserCounts
 
 
 class LLMView(BaseModel):

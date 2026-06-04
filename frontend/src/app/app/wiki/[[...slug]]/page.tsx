@@ -35,6 +35,7 @@ import { TriggerModal } from "@/components/triggers/TriggerModal";
 import { DiffView } from "@/components/wiki/DiffView";
 import { HistoryPanel } from "@/components/wiki/HistoryPanel";
 import { RunAgentPanel } from "@/components/wiki/RunAgentPanel";
+import { WikiHome } from "@/components/wiki/WikiHome";
 import {
   closeSession,
   useAgentSessions,
@@ -139,13 +140,12 @@ export default function WikiRoute() {
       </main>
     );
 
-  return isFile ? (
-    <FileViewer path={slugPath} />
-  ) : isNewMode ? (
-    <NewDocView dir={slugPath} />
-  ) : (
-    <Explorer dir={slugPath} />
-  );
+  if (isFile) return <FileViewer path={slugPath} />;
+  if (isNewMode) return <NewDocView dir={slugPath} />;
+  // Wiki root with no doc open → the "Welcome to Onyx Wiki" landing.
+  // Sub-folders still render the directory explorer.
+  if (slugPath === "") return <WikiHome />;
+  return <Explorer dir={slugPath} />;
 }
 
 function Explorer({ dir }: { dir: string }) {
@@ -521,6 +521,7 @@ function Explorer({ dir }: { dir: string }) {
 
 function NewDocView({ dir }: { dir: string }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const isMobile = useIsMobile();
   const { setDrafting, requestExpand } = useDrafting();
   const [filename, setFilename] = useState("");
@@ -622,6 +623,21 @@ function NewDocView({ dir }: { dir: string }) {
     // session.
     setDrafting({ kind: "blank", path: null });
   }
+
+  // Deep-link from the home page: ``?template=<id>`` pre-applies that
+  // template once the summaries load, so the landing's template cards
+  // drop the user straight into a seeded draft.
+  const templateParam = searchParams?.get("template") ?? null;
+  const autoTemplateRef = useRef(false);
+  useEffect(() => {
+    if (autoTemplateRef.current) return;
+    if (!templateParam || !templates) return;
+    const match = templates.find((t) => t.id === templateParam);
+    if (!match) return;
+    autoTemplateRef.current = true;
+    void onPickTemplate(match);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [templateParam, templates]);
 
   async function onCreate() {
     if (!filenameValid) {

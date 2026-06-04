@@ -1,4 +1,5 @@
-/* Layout only — typography, inputs, menus, and buttons come from OPAL. */
+/* Rename / Move modals — same shell conventions as TransferModal (scrim via
+   --mask-03, --shadow-modal, radius-lg). Layout only. */
 
 .scrim {
   position: fixed;
@@ -14,12 +15,17 @@
 .dialog {
   background: var(--background-tint-01);
   border-radius: var(--border-radius-12);
-  width: min(480px, 100%);
+  width: min(440px, 100%);
   max-height: calc(100vh - 80px);
   box-shadow: var(--shadow-modal);
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+/* Wider variant for the move modal so full folder paths stay readable. */
+.dialogWide {
+  width: min(720px, 100%);
 }
 
 .header {
@@ -48,29 +54,33 @@
   flex-direction: column;
   gap: 8px;
   padding: 16px;
+  min-height: 0;
 }
 
-.anchorWrap {
-  display: block;
-  width: 100%;
-}
-
-/* Selected new-owner row — same shaded line-item treatment as the share
-   modal's grantee rows. */
-.selectedRow {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 48px;
-  padding: 6px 8px;
-  background: var(--background-tint-02);
-  border-radius: var(--border-radius-08);
-}
-.rowText {
+/* Scrollable destination folder TREE for the move modal — folders expand to
+   reveal nested subfolders. */
+.destList {
   display: flex;
   flex-direction: column;
-  min-width: 0;
+  gap: 2px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+.destRow {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  box-sizing: border-box;
+}
+/* Aligns chevron-less rows with the OPAL chevron Button's 16px footprint so
+   every folder icon lines up regardless of whether the row has a chevron. */
+.destChevronSpacer {
+  flex: 0 0 auto;
+  width: 16px;
+}
+.destTab {
   flex: 1;
+  min-width: 0;
 }
 
 .footer {

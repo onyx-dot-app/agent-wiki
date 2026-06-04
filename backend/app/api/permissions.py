@@ -22,6 +22,9 @@ from app.models.permissions import (
     GroupMemberOut,
     GroupMembersResponse,
     GroupOut,
+    GroupShareOut,
+    GroupSharesResponse,
+    GroupUpdateRequest,
     TransferOwnershipRequest,
     TransferOwnershipResponse,
 )
@@ -90,6 +93,23 @@ def get_group(
     return GroupMembersResponse(group=GroupOut(**g), members=members)
 
 
+@router.patch("/groups/{group_id}", response_model=GroupOut)
+def update_group(
+    group_id: str,
+    req: GroupUpdateRequest,
+    _actor: User = Depends(require_admin),
+) -> GroupOut:
+    try:
+        groups_repo.rename(group_id, req.name)
+    except groups_repo.GroupNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="not found") from exc
+    except groups_repo.GroupNameTakenError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    g = groups_repo.get(group_id)
+    assert g is not None
+    return GroupOut(**g)
+
+
 @router.delete("/groups/{group_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_group(
     group_id: str,
@@ -99,6 +119,19 @@ def delete_group(
         raise HTTPException(status_code=404, detail="not found")
     groups_repo.delete_group(group_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/groups/{group_id}/shares", response_model=GroupSharesResponse)
+def list_group_shares(
+    group_id: str,
+    _actor: User = Depends(require_admin),
+) -> GroupSharesResponse:
+    """Pages and folders shared with this group — for the admin group page's
+    "shared resources" section, where access can be reviewed and revoked."""
+    if groups_repo.get(group_id) is None:
+        raise HTTPException(status_code=404, detail="not found")
+    shares = [GroupShareOut(**s) for s in acl.list_for_group(group_id)]
+    return GroupSharesResponse(shares=shares)
 
 
 @router.post("/groups/{group_id}/members", status_code=status.HTTP_204_NO_CONTENT)
