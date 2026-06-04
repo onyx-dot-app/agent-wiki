@@ -246,7 +246,13 @@ def build_changes_since(*, scope_path: str, since_iso: str) -> str:
             truncated += 1
             continue
         after = _read_or_empty(path, "HEAD")
-        before = _read_or_empty(path, before_ref) if before_ref else ""
+        # The doc may have been renamed within the window; read its *before*
+        # body at the name it had at ``before_ref``, or the diff degrades to a
+        # spurious "(new file)" and hides the real edit.
+        before = ""
+        if before_ref:
+            before_path = wiki_git.path_at_ref(path, before_ref) or path
+            before = _read_or_empty(before_path, before_ref)
         entry = _change_entry(path, before, after)
         if entry is None:
             continue
