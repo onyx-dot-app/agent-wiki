@@ -13,13 +13,14 @@ import { BackLink, PageHeader } from "@/components/common/PageHeader";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { apiFetch } from "@/lib/api";
 import { useRequireAuth } from "@/lib/auth";
+import { effectiveTimezone } from "@/lib/cron";
 import { setLocalThemePreview } from "@/lib/theme-provider";
 import type { DefaultLanding, ThemeSetting, UserSettings } from "@/types";
 import styles from "./page.module.css";
 
 const DEFAULT_SETTINGS: UserSettings = {
   theme: "system",
-  timezone: "UTC",
+  timezone: null,
   default_landing: "wiki_home",
   chat_provider: null,
   chat_model: null,
@@ -163,26 +164,32 @@ function SettingsForm({
   initial: UserSettings;
   updateSettings: (partial: Partial<UserSettings>) => Promise<UserSettings>;
 }) {
+  // An unset timezone (null) means "use my local zone" — show that concretely
+  // in the form so the field never reads UTC just because nothing was chosen.
+  const initialTz = effectiveTimezone(initial.timezone);
   const [draft, setDraft] = useState<UserSettings>({
     ...DEFAULT_SETTINGS,
     ...initial,
+    timezone: initialTz,
   });
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [tzCustom, setTzCustom] = useState<boolean>(
-    !COMMON_TIMEZONES.includes(initial.timezone),
+    !COMMON_TIMEZONES.includes(initialTz),
   );
 
   // Pull future updates (e.g. another tab) back into the form.
   useEffect(() => {
-    setDraft({ ...DEFAULT_SETTINGS, ...initial });
-    setTzCustom(!COMMON_TIMEZONES.includes(initial.timezone));
+    const tz = effectiveTimezone(initial.timezone);
+    setDraft({ ...DEFAULT_SETTINGS, ...initial, timezone: tz });
+    setTzCustom(!COMMON_TIMEZONES.includes(tz));
   }, [initial]);
 
   const dirty = useMemo(() => {
+    const cmp = { ...initial, timezone: effectiveTimezone(initial.timezone) };
     return (Object.keys(draft) as (keyof UserSettings)[]).some(
-      (k) => draft[k] !== initial[k],
+      (k) => draft[k] !== cmp[k],
     );
   }, [draft, initial]);
 
@@ -248,14 +255,14 @@ function SettingsForm({
         <div className={lblClass}>Timezone</div>
         {tzCustom ? (
           <input
-            value={draft.timezone}
+            value={draft.timezone ?? ""}
             onChange={(e) => update("timezone", e.target.value)}
             placeholder="e.g. America/Los_Angeles"
             className={inputClass}
           />
         ) : (
           <select
-            value={draft.timezone}
+            value={draft.timezone ?? ""}
             onChange={(e) => {
               if (e.target.value === "__custom__") {
                 setTzCustom(true);
@@ -282,7 +289,7 @@ function SettingsForm({
                 type="button"
                 onClick={() => {
                   setTzCustom(false);
-                  if (!COMMON_TIMEZONES.includes(draft.timezone)) {
+                  if (!COMMON_TIMEZONES.includes(draft.timezone ?? "")) {
                     update("timezone", "UTC");
                   }
                 }}

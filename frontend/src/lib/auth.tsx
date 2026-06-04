@@ -15,7 +15,7 @@ import type { UserSettings, UserSettingsUpdate } from "@/types";
 
 const DEFAULT_USER_SETTINGS: UserSettings = {
   theme: "system",
-  timezone: "UTC",
+  timezone: null,
   default_landing: "wiki_home",
   chat_provider: null,
   chat_model: null,

@@ -22,7 +22,7 @@ def test_get_settings_returns_defaults_for_fresh_user(tmp_db):
     assert s is not None
     assert s == UserSettings().model_dump()
     assert s["theme"] == "system"
-    assert s["timezone"] == "UTC"
+    assert s["timezone"] is None
     assert s["default_landing"] == "wiki_home"
 
 
@@ -38,7 +38,7 @@ def test_update_settings_persists_partial(tmp_db):
     assert out is not None
     assert out["theme"] == "dark"
     # Other fields keep defaults.
-    assert out["timezone"] == "UTC"
+    assert out["timezone"] is None
 
     # Persisted across reads.
     again = users_repo.get_settings("usr_a")
@@ -88,6 +88,15 @@ def test_user_settings_accepts_iana_timezone():
     assert s.timezone == "America/Los_Angeles"
 
 
+def test_timezone_defaults_to_none_so_client_uses_local():
+    # An unset timezone is None (not "UTC"); the frontend resolves None to the
+    # browser's local zone, so times default to local rather than UTC.
+    assert UserSettings().timezone is None
+    assert UserSettings.model_validate({}).timezone is None
+    # None is explicitly valid (doesn't trip the IANA validator).
+    assert UserSettings.model_validate({"timezone": None}).timezone is None
+
+
 def test_user_settings_ignores_unknown_keys():
     """Stale JSON from an older app version shouldn't break login."""
     s = UserSettings.model_validate({"theme": "dark", "obsolete_key": True})
@@ -115,7 +124,7 @@ def test_get_settings_returns_defaults(client):
     assert resp.status_code == 200
     body = resp.json()
     assert body["theme"] == "system"
-    assert body["timezone"] == "UTC"
+    assert body["timezone"] is None
     assert body["default_landing"] == "wiki_home"
 
 
@@ -124,7 +133,7 @@ def test_put_settings_persists_partial(client):
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["theme"] == "dark"
-    assert body["timezone"] == "UTC"  # untouched
+    assert body["timezone"] is None  # untouched (resolves to local on the client)
 
     # Round-trip via GET.
     again = client.get("/api/user/settings").json()
@@ -164,4 +173,4 @@ def test_auth_me_payload_includes_settings(client):
     assert "settings" in body
     assert body["settings"]["theme"] == "dark"
     assert body["settings"]["default_landing"] == "recent"
-    assert body["settings"]["timezone"] == "UTC"
+    assert body["settings"]["timezone"] is None
