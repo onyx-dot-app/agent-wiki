@@ -515,3 +515,27 @@ def test_rebuild_from_filesystem_loads_schedule_yaml(tmp_repo):
     assert fetched["kind"] == "schedule"
     assert fetched["schedule_cron"] == "0 9 * * 1"
     assert fetched["schedule_timezone"] == "UTC"
+
+
+def test_rebuild_preserves_schedule_last_fired_at(tmp_repo):
+    # schedule_last_fired_at is runtime cursor state, never written to the YAML.
+    # A rebuild (boot, or per-move via after_path_move) must carry it across, or
+    # the cron cursor resets and the trigger re-evaluates already-fired windows.
+    from app.triggers import repo
+
+    uid = seed_user(email="a@b.com")
+    t = repo.create(
+        owner_user_id=uid,
+        scope_path="watched.md",
+        nl_description="status",
+        message="msg",
+        kind="schedule",
+        schedule_cron="0 9 * * *",
+        schedule_timezone="America/Los_Angeles",
+    )
+    repo.record_schedule_fire(t["id"], "2026-06-04T16:00:00+00:00")
+    assert repo.get(t["id"])["schedule_last_fired_at"] == "2026-06-04T16:00:00+00:00"
+
+    repo.rebuild_from_filesystem()
+
+    assert repo.get(t["id"])["schedule_last_fired_at"] == "2026-06-04T16:00:00+00:00"

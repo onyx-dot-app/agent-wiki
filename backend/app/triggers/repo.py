@@ -558,6 +558,18 @@ def rebuild_from_filesystem() -> int:
 
     fallback_now = _now_iso()
     with session() as s:
+        # schedule_last_fired_at is runtime cursor state, intentionally not
+        # stored in the YAML — so carry it across the rebuild instead of
+        # nulling it, or every rebuild (boot, and per-move via after_path_move)
+        # would reset the schedule cursor and re-evaluate fired windows.
+        preserved_last_fired: dict[str, str | None] = {
+            tid: last
+            for tid, last in s.execute(
+                select(Trigger.id, Trigger.schedule_last_fired_at).where(
+                    Trigger.schedule_last_fired_at.is_not(None)
+                )
+            ).all()
+        }
         s.execute(sa_delete(Trigger))
 
         # Triggers reference ``users.id``; the wiki may carry YAMLs from an
@@ -633,7 +645,7 @@ def rebuild_from_filesystem() -> int:
                     schedule_cron=cron_value,
                     schedule_timezone=tz_value,
                     schedule_start_at=start_at_value,
-                    schedule_last_fired_at=None,
+                    schedule_last_fired_at=preserved_last_fired.get(data["id"]),
                 )
             )
             loaded += 1
