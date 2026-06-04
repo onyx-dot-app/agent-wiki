@@ -49,10 +49,11 @@ interface Props {
 
 function authorLabel(
   authorUserId: string | null,
+  authorDisplay: string | null,
   selfId: string | undefined,
 ): string {
   if (authorUserId && authorUserId === selfId) return "You";
-  return "User";
+  return authorDisplay ?? "User";
 }
 
 /** Backend timestamps are "YYYY-MM-DD HH:MM:SS" in UTC (not ISO). Normalize so
@@ -402,7 +403,7 @@ function Comment({
     <div className={styles.comment}>
       <div className={styles.metaRow}>
         <Text font="main-ui-action" color="text-04">
-          {authorLabel(comment.author_user_id, selfId)}
+          {authorLabel(comment.author_user_id, comment.author_display, selfId)}
         </Text>
         <span
           className={styles.time}
