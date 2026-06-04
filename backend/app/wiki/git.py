@@ -163,7 +163,9 @@ def commit_file(
                         raise GitCommitLockError(rel_path) from e
                     log.info(
                         "commit_file: lock race for %s, retrying (%d/%d)",
-                        rel_path, attempt + 1, _COMMIT_RETRY_MAX,
+                        rel_path,
+                        attempt + 1,
+                        _COMMIT_RETRY_MAX,
                     )
                     time.sleep(0.05 * (attempt + 1))
                     continue
@@ -503,6 +505,42 @@ def list_paths_with_mtime(prefix: str = "") -> list[tuple[str, str]]:
             mtime[line] = current_ts
     tracked = list_paths(prefix)
     return [(p, mtime.get(p, "")) for p in tracked]
+
+
+def paths_authored_by(author_email: str, limit: int = 50) -> list[tuple[str, str]]:
+    """``(.md path, ISO author-time)`` for files this author last touched.
+
+    Newest-first by author-time, one entry per path (first sighting wins).
+    Used by the home "Recent Pages" grid to surface pages the current user
+    has actually worked on (created or edited), not every recent page.
+    """
+    sep = "\x1f"
+    # Bound the walk so a deep history isn't fully scanned on every home-page
+    # load. A path can recur across commits, so allow generous headroom over
+    # `limit` to still collect that many distinct paths.
+    out = _run(
+        [
+            "log",
+            "--max-count=%d" % (limit * 20),
+            # --author is a regex; escape so metachars in an email (".", "+")
+            # match literally and can't pull in or skip the wrong author.
+            "--author=%s" % re.escape(author_email),
+            "--name-only",
+            "--pretty=format:%s%%aI" % sep,
+        ],
+        check=False,
+    ).stdout
+    seen: dict[str, str] = {}
+    current_ts: str | None = None
+    for line in out.splitlines():
+        if line.startswith(sep):
+            current_ts = line[len(sep) :]
+            continue
+        if not line or current_ts is None:
+            continue
+        if line.endswith(".md") and line not in seen:
+            seen[line] = current_ts
+    return list(seen.items())[:limit]
 
 
 def paths_changed_in(sha: str) -> list[str]:

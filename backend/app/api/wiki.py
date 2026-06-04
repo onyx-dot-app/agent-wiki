@@ -27,6 +27,8 @@ from app.models.file_system import (
     FolderHitView,
     GetDocumentResponse,
     ListDocumentsResponse,
+    ListRecentPagesResponse,
+    RecentPageView,
     MergeRequest,
     MergeResponse,
     MovedFile,
@@ -74,6 +76,31 @@ log = logging.getLogger(__name__)
 _DEPRECATES_RE = re.compile(r"^Deprecates:\s*(.+)$", re.MULTILINE)
 _SHA_RE = re.compile(r"^[0-9a-f]{4,40}$")
 
+_FRONTMATTER_RE = re.compile(r"^---\n.*?\n---\n", re.DOTALL)
+# Preview payload cap per card — enough to fill the masked card, bounded so
+# a wide "recent" fan-out doesn't ship whole documents to the client.
+_PREVIEW_MAX_CHARS = 600
+
+
+def _title_and_preview(body: str, path: str) -> tuple[str, str]:
+    """Split a doc body into a card title + masked preview.
+
+    Title = leading ``# H1`` if the body opens with one (after any YAML
+    frontmatter), else the filename without ``.md``. Preview = the body
+    with frontmatter and that leading heading removed, capped.
+    """
+    stripped = _FRONTMATTER_RE.sub("", body, count=1).lstrip("\n")
+    title = ""
+    newline = stripped.find("\n")
+    first_line = stripped if newline == -1 else stripped[:newline]
+    if first_line.startswith("# "):
+        title = first_line[2:].strip()
+        stripped = "" if newline == -1 else stripped[newline + 1 :].lstrip("\n")
+    if not title:
+        base = path.rsplit("/", 1)[-1]
+        title = base[:-3] if base.endswith(".md") else base
+    return title, stripped[:_PREVIEW_MAX_CHARS]
+
 
 def _git_author(user: User | None) -> str | None:
     if user is None:
@@ -97,6 +124,40 @@ def list_documents(
         raw = [(p, ts) for p, ts in raw if not p.endswith(".md") or p in visible]
     entries = [DocumentEntry(path=p, updated_at=ts) for p, ts in raw]
     return ListDocumentsResponse(entries=entries)
+
+
+@router.get("/recent", response_model=ListRecentPagesResponse)
+def list_recent_pages(
+    user: User = Depends(require_user),
+    limit: int = Query(12, ge=1, le=50),
+) -> ListRecentPagesResponse:
+    """Pages the current user has worked on, with a title + masked preview.
+
+    Feeds the home-page "Recent Pages" grid. Sourced from the user's own
+    git authorship (pages they created or edited), newest-first; still
+    ACL-filtered so a page they can no longer see is dropped.
+    """
+    raw = wiki_git.paths_authored_by(user.email)
+    md = [(p, ts) for p, ts in raw if p.endswith(".md")]
+    if not user.is_admin:
+        from app.wiki import acl as _acl
+
+        visible = set(_acl.filter_paths_in_python(user.id, False, [p for p, _ in md]))
+        md = [(p, ts) for p, ts in md if p in visible]
+    # Newest first; empty timestamps sink to the bottom.
+    md.sort(key=lambda pt: pt[1], reverse=True)
+    pages: list[RecentPageView] = []
+    for path, ts in md[:limit]:
+        abs_path = filesystem.absolute(path)
+        if not abs_path.is_file():
+            continue
+        try:
+            body = abs_path.read_text()
+        except OSError:
+            continue
+        title, preview = _title_and_preview(body, path)
+        pages.append(RecentPageView(path=path, title=title, updated_at=ts, preview=preview))
+    return ListRecentPagesResponse(pages=pages)
 
 
 @router.get("/file", response_model=GetDocumentResponse)
@@ -151,9 +212,7 @@ def put_document_by_path(
     msg = f"{change_kind} {rel}"
     # Read-modify-write: only when editing an existing page from a known base.
     # New pages (and force-saves with no base_sha) commit as-is.
-    base_body = (
-        wiki_git.read_file(rel, ref=req.base_sha) if existed and req.base_sha else None
-    )
+    base_body = wiki_git.read_file(rel, ref=req.base_sha) if existed and req.base_sha else None
     try:
         # skip_acl: the write gate already ran above via require_can. ai_merge
         # is off so an unresolvable merge raises -> 409 (the conflict UI).

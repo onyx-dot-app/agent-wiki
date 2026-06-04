@@ -8,7 +8,7 @@
   align-items: flex-start;
   justify-content: center;
   padding: max(20px, min(80px, 5vh)) 16px;
-  z-index: 100;
+  z-index: var(--z-modal);
 }
 
 .dialog {

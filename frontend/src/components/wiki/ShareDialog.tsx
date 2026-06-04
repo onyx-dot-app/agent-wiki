@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
   Button,
@@ -187,6 +187,10 @@ export function ShareDialog({ path, open, onClose }: ShareDialogProps) {
         : "public-read";
   const [query, setQuery] = useState("");
   const [pickerOpen, setPickerOpen] = useState(false);
+  // The input anchors the results popover. Radix would treat the click that
+  // focuses the input as an "outside" interaction and dismiss the popover the
+  // instant it opens; this ref lets us keep it open for anchor interactions.
+  const anchorRef = useRef<HTMLDivElement>(null);
   const [transferOpen, setTransferOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -437,7 +441,7 @@ export function ShareDialog({ path, open, onClose }: ShareDialogProps) {
                 }}
               >
                 <Popover.Anchor asChild>
-                  <div className={styles.anchorWrap}>
+                  <div className={styles.anchorWrap} ref={anchorRef}>
                     <InputTypeIn
                       searchIcon
                       placeholder="Add users and groups"
@@ -459,6 +463,15 @@ export function ShareDialog({ path, open, onClose }: ShareDialogProps) {
                   }
                   onOpenAutoFocus={(e) => e.preventDefault()}
                   onCloseAutoFocus={(e) => e.preventDefault()}
+                  onInteractOutside={(e) => {
+                    // Keep the results open when the interaction is on the
+                    // input itself (the click that opened it).
+                    const target = (e.detail as { originalEvent: Event })
+                      .originalEvent.target as Node | null;
+                    if (target && anchorRef.current?.contains(target)) {
+                      e.preventDefault();
+                    }
+                  }}
                 >
                   <PopoverMenu>
                     {pickerGroups.map((g) => {
