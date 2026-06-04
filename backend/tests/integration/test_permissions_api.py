@@ -68,6 +68,31 @@ def test_member_addition_and_listing(integration):
     assert resp.json()["members"] == []
 
 
+def test_combined_demote_and_deactivate_does_not_false_400(integration):
+    # Regression: a single PATCH demoting AND deactivating another admin used
+    # to commit the demotion then false-trip the last-admin guard on a stale
+    # snapshot. With two active admins, demoting+deactivating one must succeed
+    # fully (the actor remains an active admin).
+    admin1 = integration.signup(email="admin1@x.com")  # auto-admin
+    admin2 = integration.signup(email="admin2@x.com")
+    integration.signin(user_id=admin1)
+    assert (
+        integration.client.patch(
+            f"/api/admin/users/{admin2}", json={"is_admin": True}
+        ).status_code
+        == 200
+    )
+
+    resp = integration.client.patch(
+        f"/api/admin/users/{admin2}",
+        json={"is_admin": False, "is_active": False},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["is_admin"] is False
+    assert body["is_active"] is False
+
+
 def test_admin_can_rename_group(integration):
     integration.signup(email="admin@x.com")
     gid = integration.client.post("/api/groups", json={"name": "eng"}).json()["id"]

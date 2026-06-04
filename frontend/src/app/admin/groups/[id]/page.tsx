@@ -4,7 +4,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useSWRConfig } from "swr";
 
-import { Button, Card, Divider, InputTypeIn, Text } from "@onyx-ai/opal/components";
+import {
+  Button,
+  Card,
+  Divider,
+  InputTypeIn,
+  Text,
+} from "@onyx-ai/opal/components";
 import { SvgTrash, SvgUsers } from "@onyx-ai/opal/icons";
 import { IllustrationContent, SettingsLayouts } from "@onyx-ai/opal/layouts";
 import { SvgNoResult } from "@onyx-ai/opal/illustrations";
@@ -24,7 +30,11 @@ import {
 import { useAdminUsers } from "@/lib/users";
 
 import { GroupMembersTable, type MemberRow } from "../GroupMembersTable";
-import { GroupSharesEditor, shareKey, type ShareDraft } from "../GroupSharesEditor";
+import {
+  GroupSharesEditor,
+  shareKey,
+  type ShareDraft,
+} from "../GroupSharesEditor";
 import styles from "../groups.module.css";
 
 export default function AdminEditGroupPage() {
@@ -43,7 +53,11 @@ function EditGroup() {
 
   const { group, members, isLoading, error, refresh } = useGroup(groupId);
   const { users } = useAdminUsers();
-  const { shares: serverShares, refresh: refreshShares } = useGroupShares(groupId);
+  const {
+    shares: serverShares,
+    isLoading: sharesLoading,
+    refresh: refreshShares,
+  } = useGroupShares(groupId);
   const { entries: wikiEntries } = useWikiPaths();
 
   // Editable local state, seeded once from the server.
@@ -61,7 +75,10 @@ function EditGroup() {
   const initialSharesRef = useRef<ShareDraft[]>([]);
 
   useEffect(() => {
-    if (initialized || !group) return;
+    // Wait for BOTH group and shares to load — group can arrive first, and
+    // seeding then would capture an empty share set and hide existing grants
+    // (and a save would revoke them).
+    if (initialized || !group || sharesLoading) return;
     setName(group.name);
     initialNameRef.current = group.name;
     const ids = members.map((m) => m.id);
@@ -76,10 +93,16 @@ function EditGroup() {
     setShares(drafts);
     initialSharesRef.current = drafts;
     setInitialized(true);
-  }, [initialized, group, members, serverShares]);
+  }, [initialized, group, members, serverShares, sharesLoading]);
 
   const allRows = useMemo<MemberRow[]>(
-    () => users.map((u) => ({ id: u.id, email: u.email, name: u.name, is_admin: u.is_admin })),
+    () =>
+      users.map((u) => ({
+        id: u.id,
+        email: u.email,
+        name: u.name,
+        is_admin: u.is_admin,
+      })),
     [users],
   );
 
@@ -87,12 +110,18 @@ function EditGroup() {
     if (!initialized) return false;
     if (name.trim() !== initialNameRef.current) return true;
     const initMembers = new Set(initialMemberIdsRef.current);
-    if (selectedIds.length !== initMembers.size || selectedIds.some((id) => !initMembers.has(id)))
+    if (
+      selectedIds.length !== initMembers.size ||
+      selectedIds.some((id) => !initMembers.has(id))
+    )
       return true;
-    const initByKey = new Map(initialSharesRef.current.map((s) => [shareKey(s), s.permission]));
+    const initByKey = new Map(
+      initialSharesRef.current.map((s) => [shareKey(s), s.permission]),
+    );
     const locByKey = new Map(shares.map((s) => [shareKey(s), s.permission]));
     if (initByKey.size !== locByKey.size) return true;
-    for (const [k, perm] of locByKey) if (initByKey.get(k) !== perm) return true;
+    for (const [k, perm] of locByKey)
+      if (initByKey.get(k) !== perm) return true;
     return false;
   }, [initialized, name, selectedIds, shares]);
 
@@ -105,20 +134,25 @@ function EditGroup() {
     setBusy(true);
     setError2(null);
     try {
-      if (trimmed !== initialNameRef.current) await renameGroup(groupId, trimmed);
+      if (trimmed !== initialNameRef.current)
+        await renameGroup(groupId, trimmed);
 
       const initMembers = new Set(initialMemberIdsRef.current);
       const localMembers = new Set(selectedIds);
-      for (const id of selectedIds) if (!initMembers.has(id)) await addGroupMember(groupId, id);
+      for (const id of selectedIds)
+        if (!initMembers.has(id)) await addGroupMember(groupId, id);
       for (const id of initialMemberIdsRef.current)
         if (!localMembers.has(id)) await removeGroupMember(groupId, id);
 
-      const initByKey = new Map(initialSharesRef.current.map((s) => [shareKey(s), s]));
+      const initByKey = new Map(
+        initialSharesRef.current.map((s) => [shareKey(s), s]),
+      );
       const locByKey = new Map(shares.map((s) => [shareKey(s), s]));
       // revoke removed or permission-changed
       for (const [key, init] of initByKey) {
         const loc = locByKey.get(key);
-        if ((!loc || loc.permission !== init.permission) && init.id) await revokeAcl(init.id);
+        if ((!loc || loc.permission !== init.permission) && init.id)
+          await revokeAcl(init.id);
       }
       // grant new or permission-changed
       for (const [key, loc] of locByKey) {
@@ -146,7 +180,8 @@ function EditGroup() {
 
   function onDelete() {
     if (!group) return;
-    if (!confirm(`Delete group "${group.name}"? Members aren't deleted.`)) return;
+    if (!confirm(`Delete group "${group.name}"? Members aren't deleted.`))
+      return;
     setIsDeleting(true);
     setError2(null);
     deleteGroup(groupId)
@@ -198,7 +233,12 @@ function EditGroup() {
       >
         Cancel
       </Button>
-      <Button variant="action" size="md" disabled={!dirty || busy} onClick={() => void save()}>
+      <Button
+        variant="action"
+        size="md"
+        disabled={!dirty || busy}
+        onClick={() => void save()}
+      >
         {busy ? "Saving…" : "Save Changes"}
       </Button>
     </span>
@@ -234,7 +274,11 @@ function EditGroup() {
 
         <Divider />
 
-        <GroupSharesEditor shares={shares} onChange={setShares} wikiEntries={wikiEntries} />
+        <GroupSharesEditor
+          shares={shares}
+          onChange={setShares}
+          wikiEntries={wikiEntries}
+        />
 
         {error2 && (
           <Text font="secondary-body" color="text-02">

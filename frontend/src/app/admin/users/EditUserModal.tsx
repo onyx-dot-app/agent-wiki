@@ -9,6 +9,7 @@ import {
   Popover,
   PopoverMenu,
   Text,
+  Tooltip,
 } from "@onyx-ai/opal/components";
 import { SvgCheck, SvgLogOut, SvgUsers } from "@onyx-ai/opal/icons";
 
@@ -65,7 +66,9 @@ export default function EditUserModal({
 
   const dropdownGroups = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return q ? allGroups.filter((g) => g.name.toLowerCase().includes(q)) : allGroups;
+    return q
+      ? allGroups.filter((g) => g.name.toLowerCase().includes(q))
+      : allGroups;
   }, [allGroups, search]);
 
   const joinedGroups = useMemo(
@@ -91,8 +94,12 @@ export default function EditUserModal({
     setBusy(true);
     setError(null);
     try {
-      const toAdd = [...memberIds].filter((id) => !initialMemberIdsRef.current.has(id));
-      const toRemove = [...initialMemberIdsRef.current].filter((id) => !memberIds.has(id));
+      const toAdd = [...memberIds].filter(
+        (id) => !initialMemberIdsRef.current.has(id),
+      );
+      const toRemove = [...initialMemberIdsRef.current].filter(
+        (id) => !memberIds.has(id),
+      );
       for (const gid of toAdd) await addGroupMember(gid, user.id);
       for (const gid of toRemove) await removeGroupMember(gid, user.id);
       onMutate();
@@ -112,7 +119,12 @@ export default function EditUserModal({
         if (e.target === e.currentTarget && !busy) onClose();
       }}
     >
-      <div className={styles.dialog} role="dialog" aria-modal="true" aria-label="Edit groups">
+      <div
+        className={styles.dialog}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Edit groups"
+      >
         <header className={styles.dialogHead}>
           <span className={styles.pageIcon}>
             <SvgUsers size={20} />
@@ -190,27 +202,20 @@ export default function EditUserModal({
               </Text>
             ) : (
               joinedGroups.map((g) => (
-                <button
+                <LineItemButton
                   key={g.id}
-                  type="button"
-                  className={styles.egRow}
+                  icon={SvgUsers}
+                  title={g.name}
+                  description={`${g.member_count} ${g.member_count === 1 ? "user" : "users"}`}
+                  sizePreset="main-ui"
+                  variant="section"
+                  rightChildren={
+                    <Tooltip tooltip="Remove from group" side="left">
+                      <SvgLogOut size={16} />
+                    </Tooltip>
+                  }
                   onClick={() => toggle(g.id)}
-                >
-                  <span className={styles.egRowIcon}>
-                    <SvgUsers size={18} />
-                  </span>
-                  <span className={styles.egRowText}>
-                    <Text font="main-ui-body" nowrap>
-                      {g.name}
-                    </Text>
-                    <Text font="secondary-body" color="text-03" nowrap>
-                      {`${g.member_count} ${g.member_count === 1 ? "user" : "users"}`}
-                    </Text>
-                  </span>
-                  <span className={styles.egRowRemove}>
-                    <SvgLogOut size={16} />
-                  </span>
-                </button>
+                />
               ))
             )}
           </div>
@@ -223,7 +228,12 @@ export default function EditUserModal({
         </div>
 
         <footer className={styles.dialogFoot}>
-          <Button prominence="secondary" size="md" onClick={onClose} disabled={busy}>
+          <Button
+            prominence="secondary"
+            size="md"
+            onClick={onClose}
+            disabled={busy}
+          >
             Cancel
           </Button>
           <Button

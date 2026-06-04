@@ -10,7 +10,12 @@ import {
   createTableColumns,
 } from "@onyx-ai/opal/components";
 import { Content, IllustrationContent } from "@onyx-ai/opal/layouts";
-import { SvgMinusCircle, SvgPlusCircle, SvgUser, SvgUserShield } from "@onyx-ai/opal/icons";
+import {
+  SvgMinusCircle,
+  SvgPlusCircle,
+  SvgUser,
+  SvgUserShield,
+} from "@onyx-ai/opal/icons";
 import { SvgNoResult } from "@onyx-ai/opal/illustrations";
 import type { IconProps } from "@onyx-ai/opal/types";
 
@@ -56,10 +61,15 @@ const baseColumns = [
   tc.qualifier({
     content: "icon",
     iconSize: "lg",
-    getContent:
-      (row) =>
+    getContent: (row) =>
       function RowAvatar(props: IconProps) {
-        return <Avatar label={initials(row)} size={props.size ?? 28} title={displayName(row)} />;
+        return (
+          <Avatar
+            label={initials(row)}
+            size={props.size ?? 28}
+            title={displayName(row)}
+          />
+        );
       },
   }),
   tc.column("email", { header: "Name", weight: 30, cell: nameCell }),
@@ -120,7 +130,9 @@ export function GroupMembersTable({
             variant="danger"
             icon={SvgMinusCircle}
             tooltip="Remove"
-            onClick={() => onSelectionChange(selectedIds.filter((id) => id !== row.id))}
+            onClick={() =>
+              onSelectionChange(selectedIds.filter((id) => id !== row.id))
+            }
           />
         ),
       }),

@@ -18,7 +18,9 @@ import styles from "./groups.module.css";
 function groupSub(g: Group): string {
   const parts: string[] = [];
   if (g.folder_count > 0) {
-    parts.push(`${g.folder_count} ${g.folder_count === 1 ? "folder" : "folders"}`);
+    parts.push(
+      `${g.folder_count} ${g.folder_count === 1 ? "folder" : "folders"}`,
+    );
   }
   if (g.page_count > 0) {
     parts.push(`${g.page_count} wiki ${g.page_count === 1 ? "page" : "pages"}`);

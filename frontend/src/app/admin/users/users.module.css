@@ -132,37 +132,6 @@
   max-height: 220px;
   overflow-y: auto;
 }
-.egRow {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  padding: 8px;
-  border: none;
-  background: var(--background-tint-02);
-  border-radius: var(--border-radius-08);
-  cursor: pointer;
-  text-align: left;
-}
-.egRow:hover {
-  background: var(--background-tint-02);
-}
-.egRowIcon {
-  display: inline-flex;
-  flex-shrink: 0;
-  color: var(--text-04);
-}
-.egRowText {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  flex: 1;
-}
-.egRowRemove {
-  display: inline-flex;
-  flex-shrink: 0;
-  color: var(--text-03);
-}
 .actions {
   display: flex;
   justify-content: flex-end;

@@ -43,6 +43,32 @@ export async function apiFetch<T>(
   return res.json() as Promise<T>;
 }
 
+/** Like {@link apiFetch} but for binary downloads (CSV exports, etc.):
+ * same base URL, credentials, and `{error}`-envelope handling, but resolves
+ * the body as a Blob instead of JSON. Keeps binary endpoints on the same
+ * network seam. */
+export async function apiFetchBlob(
+  path: string,
+  init?: RequestInit,
+): Promise<Blob> {
+  const isAbsolute = /^https?:\/\//i.test(path);
+  const url = isAbsolute ? path : `${BASE}${path}`;
+  const credentials: RequestCredentials =
+    init?.credentials ?? (isAbsolute ? "omit" : "include");
+  const res = await fetch(url, { ...init, credentials });
+  if (!res.ok) {
+    let message = `${res.status} ${res.statusText}`;
+    try {
+      const body = (await res.json()) as { error?: string };
+      if (body?.error) message = body.error;
+    } catch {
+      // non-JSON error body — keep the generic message
+    }
+    throw new ApiError(res.status, message);
+  }
+  return res.blob();
+}
+
 /** SSE-style streaming POST. Parses ``data: {...json}\n\n`` frames and
  * dispatches them through ``onEvent``. Pre-stream HTTP errors come back as
  * ``ApiError`` (matching ``apiFetch``). The promise resolves when the server

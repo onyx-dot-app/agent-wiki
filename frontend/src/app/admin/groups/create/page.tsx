@@ -40,7 +40,13 @@ function CreateGroup() {
   const [error, setError] = useState<string | null>(null);
 
   const allRows = useMemo<MemberRow[]>(
-    () => users.map((u) => ({ id: u.id, email: u.email, name: u.name, is_admin: u.is_admin })),
+    () =>
+      users.map((u) => ({
+        id: u.id,
+        email: u.email,
+        name: u.name,
+        is_admin: u.is_admin,
+      })),
     [users],
   );
 
@@ -81,7 +87,12 @@ function CreateGroup() {
       >
         Cancel
       </Button>
-      <Button variant="action" size="md" disabled={!name.trim() || busy} onClick={() => void create()}>
+      <Button
+        variant="action"
+        size="md"
+        disabled={!name.trim() || busy}
+        onClick={() => void create()}
+      >
         {busy ? "Creating…" : "Create"}
       </Button>
     </span>

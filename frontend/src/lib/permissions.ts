@@ -134,7 +134,9 @@ export interface WikiPathEntry {
 }
 
 export function useWikiPaths() {
-  const { data, error, isLoading } = useSWR<{ entries: WikiPathEntry[] }>("/wiki");
+  const { data, error, isLoading } = useSWR<{ entries: WikiPathEntry[] }>(
+    "/wiki",
+  );
   return {
     entries: data?.entries ?? [],
     error: error as Error | undefined,

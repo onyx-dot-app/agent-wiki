@@ -25,7 +25,11 @@ import {
 } from "@onyx-ai/opal/icons";
 import { SvgNoResult } from "@onyx-ai/opal/illustrations";
 
-import type { Permission, ResourceKind, WikiPathEntry } from "@/lib/permissions";
+import type {
+  Permission,
+  ResourceKind,
+  WikiPathEntry,
+} from "@/lib/permissions";
 import { lastSegment } from "@/lib/wiki";
 
 import styles from "./groups.module.css";
@@ -37,7 +41,10 @@ export interface ShareDraft {
   id?: string; // present for shares that already exist on the server
 }
 
-export function shareKey(s: { resource_kind: ResourceKind; resource_path: string }): string {
+export function shareKey(s: {
+  resource_kind: ResourceKind;
+  resource_path: string;
+}): string {
   return `${s.resource_kind}:${s.resource_path}`;
 }
 
@@ -52,7 +59,14 @@ const PAGE_SIZE = 10;
 const tc = createTableColumns<DocRow>();
 
 function docNameCell(label: string, row: DocRow) {
-  return <Content sizePreset="main-ui" variant="section" title={label} description={row.path} />;
+  return (
+    <Content
+      sizePreset="main-ui"
+      variant="section"
+      title={label}
+      description={row.path}
+    />
+  );
 }
 
 const docColumns = [
@@ -114,7 +128,10 @@ export function GroupSharesEditor({
   const [search, setSearch] = useState("");
 
   const docRows = useMemo(() => deriveDocRows(wikiEntries), [wikiEntries]);
-  const docById = useMemo(() => new Map(docRows.map((d) => [d.id, d])), [docRows]);
+  const docById = useMemo(
+    () => new Map(docRows.map((d) => [d.id, d])),
+    [docRows],
+  );
 
   const selectedKeys = useMemo(() => shares.map(shareKey), [shares]);
   const currentRowSelection = useMemo(
@@ -138,13 +155,20 @@ export function GroupSharesEditor({
         continue;
       }
       const doc = docById.get(key);
-      if (doc) next.push({ resource_kind: doc.kind, resource_path: doc.path, permission: "read" });
+      if (doc)
+        next.push({
+          resource_kind: doc.kind,
+          resource_path: doc.path,
+          permission: "read",
+        });
     }
     onChange([...next, ...hiddenShares]);
   }
 
   function setPermission(key: string, permission: Permission) {
-    onChange(shares.map((s) => (shareKey(s) === key ? { ...s, permission } : s)));
+    onChange(
+      shares.map((s) => (shareKey(s) === key ? { ...s, permission } : s)),
+    );
   }
 
   function removeShare(key: string) {
@@ -152,7 +176,10 @@ export function GroupSharesEditor({
   }
 
   const sharedSorted = useMemo(
-    () => [...shares].sort((a, b) => a.resource_path.localeCompare(b.resource_path)),
+    () =>
+      [...shares].sort((a, b) =>
+        a.resource_path.localeCompare(b.resource_path),
+      ),
     [shares],
   );
 
@@ -160,7 +187,9 @@ export function GroupSharesEditor({
     <div className={styles.fieldGroup}>
       <div className={styles.sectionHead}>
         <Text font="main-ui-action" color="text-04">
-          {isAdding ? "Add pages & folders" : `Shared pages & folders (${shares.length})`}
+          {isAdding
+            ? "Add pages & folders"
+            : `Shared pages & folders (${shares.length})`}
         </Text>
         {isAdding ? (
           <Button
@@ -216,7 +245,8 @@ export function GroupSharesEditor({
         </>
       ) : shares.length === 0 ? (
         <Text font="secondary-body" color="text-03">
-          Nothing shared with this group yet. Add a page or folder to grant the group access.
+          Nothing shared with this group yet. Add a page or folder to grant the
+          group access.
         </Text>
       ) : (
         <div className={styles.sharesList}>
@@ -242,7 +272,10 @@ export function GroupSharesEditor({
                     </Text>
                   )}
                 </div>
-                <PermSelect value={s.permission} onChange={(p) => setPermission(key, p)} />
+                <PermSelect
+                  value={s.permission}
+                  onChange={(p) => setPermission(key, p)}
+                />
                 <Button
                   prominence="tertiary"
                   size="sm"
@@ -273,7 +306,11 @@ function PermSelect({
     <Popover open={open} onOpenChange={setOpen}>
       <Popover.Trigger asChild>
         <span className={styles.pickerTrigger}>
-          <OpenButton variant="select-light" size="sm" icon={value === "write" ? SvgEdit : SvgEye}>
+          <OpenButton
+            variant="select-light"
+            size="sm"
+            icon={value === "write" ? SvgEdit : SvgEye}
+          >
             {label}
           </OpenButton>
         </span>
@@ -286,7 +323,9 @@ function PermSelect({
             sizePreset="main-ui"
             variant="body"
             state={value === "read" ? "selected" : "empty"}
-            rightChildren={value === "read" ? <SvgCheck size={16} /> : undefined}
+            rightChildren={
+              value === "read" ? <SvgCheck size={16} /> : undefined
+            }
             onClick={() => {
               onChange("read");
               setOpen(false);
@@ -298,7 +337,9 @@ function PermSelect({
             sizePreset="main-ui"
             variant="body"
             state={value === "write" ? "selected" : "empty"}
-            rightChildren={value === "write" ? <SvgCheck size={16} /> : undefined}
+            rightChildren={
+              value === "write" ? <SvgCheck size={16} /> : undefined
+            }
             onClick={() => {
               onChange("write");
               setOpen(false);

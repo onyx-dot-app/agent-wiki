@@ -91,29 +91,36 @@ def update_user(
     if target is None:
         raise HTTPException(status_code=404, detail="not found")
 
-    if req.is_admin is not None and req.is_admin != bool(target["is_admin"]):
-        if (
-            not req.is_admin
-            and bool(target["is_admin"])
-            and users_repo.admin_count() <= 1
-        ):
-            raise HTTPException(status_code=400, detail="cannot demote the last admin")
+    was_admin = bool(target["is_admin"])
+    was_active = bool(target["is_active"])
+    # Effective state after this PATCH (fields default to current value).
+    final_admin = req.is_admin if req.is_admin is not None else was_admin
+    final_active = req.is_active if req.is_active is not None else was_active
+
+    # Validate every guard BEFORE mutating, so a rejected request never leaves
+    # a half-applied change. Guards check the *resulting* state, so e.g.
+    # demoting + deactivating in one call doesn't false-trip the last-admin
+    # check on a stale snapshot.
+    if req.is_active is False and user_id == actor.id:
+        raise HTTPException(status_code=400, detail="cannot deactivate yourself")
+
+    # An active admin being demoted and/or deactivated must not be the last one.
+    if (was_admin and was_active) and not (final_admin and final_active):
+        if users_repo.admin_count() <= 1:
+            detail = (
+                "cannot demote the last admin"
+                if not final_admin
+                else "cannot deactivate the last admin"
+            )
+            raise HTTPException(status_code=400, detail=detail)
+
+    if req.is_admin is not None and req.is_admin != was_admin:
         users_repo.set_admin(user_id, req.is_admin)
         log.info(
             "admin: %s set is_admin=%s on user %s", actor.id, req.is_admin, user_id
         )
 
-    if req.is_active is not None and req.is_active != bool(target["is_active"]):
-        if not req.is_active and user_id == actor.id:
-            raise HTTPException(status_code=400, detail="cannot deactivate yourself")
-        if (
-            not req.is_active
-            and bool(target["is_admin"])
-            and users_repo.admin_count() <= 1
-        ):
-            raise HTTPException(
-                status_code=400, detail="cannot deactivate the last admin"
-            )
+    if req.is_active is not None and req.is_active != was_active:
         users_repo.set_active(user_id, req.is_active)
         log.info(
             "admin: %s set is_active=%s on user %s", actor.id, req.is_active, user_id
