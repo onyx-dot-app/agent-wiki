@@ -68,6 +68,90 @@ def test_member_addition_and_listing(integration):
     assert resp.json()["members"] == []
 
 
+def test_admin_can_rename_group(integration):
+    integration.signup(email="admin@x.com")
+    gid = integration.client.post("/api/groups", json={"name": "eng"}).json()["id"]
+
+    resp = integration.client.patch(f"/api/groups/{gid}", json={"name": "platform"})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["name"] == "platform"
+
+    names = [g["name"] for g in integration.client.get("/api/groups").json()["groups"]]
+    assert names == ["platform"]
+
+
+def test_rename_to_duplicate_name_returns_409(integration):
+    integration.signup(email="admin@x.com")
+    integration.client.post("/api/groups", json={"name": "eng"})
+    gid = integration.client.post("/api/groups", json={"name": "growth"}).json()["id"]
+
+    resp = integration.client.patch(f"/api/groups/{gid}", json={"name": "eng"})
+    assert resp.status_code == 409
+
+
+def test_rename_nonexistent_group_returns_404(integration):
+    integration.signup(email="admin@x.com")
+    resp = integration.client.patch("/api/groups/grp_nope", json={"name": "x"})
+    assert resp.status_code == 404
+
+
+def test_non_admin_cannot_rename_group(integration):
+    integration.signup(email="admin@x.com")
+    bob = integration.signup(email="bob@x.com")
+    integration.signin(email="admin@x.com")
+    gid = integration.client.post("/api/groups", json={"name": "eng"}).json()["id"]
+
+    integration.signin(user_id=bob)
+    assert integration.client.patch(f"/api/groups/{gid}", json={"name": "x"}).status_code == 403
+
+
+def test_group_shares_lists_granted_resources(integration):
+    integration.signup(email="admin@x.com")
+    gid = integration.client.post("/api/groups", json={"name": "eng"}).json()["id"]
+    integration.put_doc("docs/spec.md", "# Spec")
+
+    # Grant the group a page (write) and a folder (read).
+    for kind, path, perm in [
+        ("page", "docs/spec.md", "write"),
+        ("folder", "docs", "read"),
+    ]:
+        r = integration.client.post(
+            "/api/wiki/acl",
+            json={
+                "resource_kind": kind,
+                "resource_path": path,
+                "principal_kind": "group",
+                "principal_id": gid,
+                "permission": perm,
+            },
+        )
+        assert r.status_code == 201, r.text
+
+    resp = integration.client.get(f"/api/groups/{gid}/shares")
+    assert resp.status_code == 200, resp.text
+    shares = resp.json()["shares"]
+    by_path = {s["resource_path"]: s for s in shares}
+    assert by_path["docs/spec.md"]["resource_kind"] == "page"
+    assert by_path["docs/spec.md"]["permission"] == "write"
+    assert by_path["docs"]["resource_kind"] == "folder"
+    assert by_path["docs"]["permission"] == "read"
+
+
+def test_group_shares_requires_admin(integration):
+    integration.signup(email="admin@x.com")
+    bob = integration.signup(email="bob@x.com")
+    integration.signin(email="admin@x.com")
+    gid = integration.client.post("/api/groups", json={"name": "eng"}).json()["id"]
+
+    integration.signin(user_id=bob)
+    assert integration.client.get(f"/api/groups/{gid}/shares").status_code == 403
+
+
+def test_group_shares_nonexistent_group_returns_404(integration):
+    integration.signup(email="admin@x.com")
+    assert integration.client.get("/api/groups/grp_nope/shares").status_code == 404
+
+
 def test_user_sees_only_their_groups(integration):
     integration.signup(email="admin@x.com")
     alice = integration.signup(email="alice@x.com")
@@ -227,10 +311,12 @@ def test_anonymous_calls_to_permission_endpoints_return_401(integration):
     # Read paths.
     assert integration.client.get("/api/groups").status_code == 401
     assert integration.client.get("/api/groups/grp_x").status_code == 401
+    assert integration.client.get("/api/groups/grp_x/shares").status_code == 401
     assert integration.client.get("/api/wiki/acl?path=x.md").status_code == 401
 
     # Write paths.
     assert integration.client.post("/api/groups", json={"name": "x"}).status_code == 401
+    assert integration.client.patch("/api/groups/grp_x", json={"name": "x"}).status_code == 401
     assert integration.client.delete("/api/groups/grp_x").status_code == 401
     assert (
         integration.client.post("/api/groups/grp_x/members", json={"user_id": "u_x"}).status_code

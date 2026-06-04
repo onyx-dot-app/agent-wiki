@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from datetime import datetime, timezone
 from typing import Any, Iterable
 
 from sqlalchemy import func, or_, select
@@ -17,6 +18,11 @@ from app.models.user_settings import UserSettings
 log = logging.getLogger(__name__)
 
 
+def _now() -> str:
+    """UTC timestamp matching the ``YYYY-MM-DD HH:MM:SS`` column format."""
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+
 def _to_dict(u: User) -> dict[str, Any]:
     return {
         "id": u.id,
@@ -24,7 +30,9 @@ def _to_dict(u: User) -> dict[str, Any]:
         "name": u.name,
         "password_hash": u.password_hash,
         "is_admin": u.is_admin,
+        "is_active": u.is_active,
         "created_at": u.created_at,
+        "updated_at": u.updated_at,
         "settings": _settings_with_defaults(u.settings),
     }
 
@@ -89,7 +97,10 @@ def search(query: str, limit: int = 20) -> list[dict[str, Any]]:
                 )
             )
         stmt = stmt.order_by(User.email.asc()).limit(limit)
-        return [{"id": u.id, "email": u.email, "name": u.name} for u in s.scalars(stmt).all()]
+        return [
+            {"id": u.id, "email": u.email, "name": u.name}
+            for u in s.scalars(stmt).all()
+        ]
 
 
 def create(email: str, password: str, name: str | None = None) -> str:
@@ -107,7 +118,9 @@ def create(email: str, password: str, name: str | None = None) -> str:
                 is_admin=is_admin,
             )
         )
-    log.info("user created id=%s email=%s is_admin=%s", user_id, email.lower(), is_admin)
+    log.info(
+        "user created id=%s email=%s is_admin=%s", user_id, email.lower(), is_admin
+    )
     return user_id
 
 
@@ -116,11 +129,39 @@ def set_admin(user_id: str, is_admin: bool) -> None:
         u = s.get(User, user_id)
         if u is not None:
             u.is_admin = is_admin
+            u.updated_at = _now()
+
+
+def set_active(user_id: str, is_active: bool) -> None:
+    with session() as s:
+        u = s.get(User, user_id)
+        if u is not None:
+            u.is_active = is_active
+            u.updated_at = _now()
+
+
+def status_counts() -> dict[str, int]:
+    """``{active, inactive}`` counts over real accounts (invited emails are
+    counted separately, in ``app.auth.invites``)."""
+    with session() as s:
+        active = (
+            s.scalar(
+                select(func.count()).select_from(User).where(User.is_active.is_(True))
+            )
+            or 0
+        )
+        total = s.scalar(select(func.count()).select_from(User)) or 0
+    return {"active": active, "inactive": total - active}
 
 
 def admin_count() -> int:
     with session() as s:
-        return s.scalar(select(func.count()).select_from(User).where(User.is_admin.is_(True))) or 0
+        return (
+            s.scalar(
+                select(func.count()).select_from(User).where(User.is_admin.is_(True))
+            )
+            or 0
+        )
 
 
 def delete(user_id: str) -> None:
@@ -138,6 +179,7 @@ def update_name(user_id: str, name: str | None) -> dict[str, Any] | None:
         if u is None:
             return None
         u.name = name
+        u.updated_at = _now()
         s.flush()
         return _to_dict(u)
 

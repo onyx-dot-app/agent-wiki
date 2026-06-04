@@ -5,8 +5,10 @@
  *   POST   /api/groups                                — create (admin)
  *   GET    /api/groups/:id                            — group + members
  *   DELETE /api/groups/:id                            — delete (admin)
+ *   PATCH  /api/groups/:id                            — rename (admin)
  *   POST   /api/groups/:id/members                    — add (admin)
  *   DELETE /api/groups/:id/members/:user_id           — remove (admin)
+ *   GET    /api/groups/:id/shares                      — pages/folders shared with group (admin)
  *   GET    /api/wiki/acl?path=<path>                  — list grants (owner/admin)
  *   POST   /api/wiki/acl                              — create grant (owner/admin)
  *   DELETE /api/wiki/acl/:id                          — revoke (owner/admin)
@@ -41,6 +43,15 @@ export interface GroupMember {
   email: string;
   name: string | null;
   is_admin: boolean;
+}
+
+/** A page or folder shared with a group (one ACL row, group-centric). */
+export interface GroupShare {
+  id: string;
+  resource_kind: ResourceKind;
+  resource_path: string;
+  permission: Permission;
+  created_at: string;
 }
 
 export interface AclEntry {
@@ -105,6 +116,44 @@ export function createGroup(
     method: "POST",
     body: JSON.stringify({ name, description: description ?? null }),
   });
+}
+
+export function renameGroup(id: string, name: string): Promise<Group> {
+  return apiFetch<Group>(`/groups/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ name }),
+  });
+}
+
+/** All wiki paths (pages + folders), for the group sharing picker. Admin
+ * sees everything. `path` ends in ".md" for pages; folders are the parent
+ * directories. */
+export interface WikiPathEntry {
+  path: string;
+  updated_at: string;
+}
+
+export function useWikiPaths() {
+  const { data, error, isLoading } = useSWR<{ entries: WikiPathEntry[] }>("/wiki");
+  return {
+    entries: data?.entries ?? [],
+    error: error as Error | undefined,
+    isLoading,
+  };
+}
+
+/** Pages and folders shared with a group — SWR-keyed so the group page
+ * revalidates after a revoke. */
+export function useGroupShares(id: string | null) {
+  const { data, error, isLoading, mutate } = useSWR<{ shares: GroupShare[] }>(
+    id ? `/groups/${id}/shares` : null,
+  );
+  return {
+    shares: data?.shares ?? [],
+    error: error as Error | undefined,
+    isLoading,
+    refresh: mutate,
+  };
 }
 
 export function deleteGroup(id: string): Promise<void> {
