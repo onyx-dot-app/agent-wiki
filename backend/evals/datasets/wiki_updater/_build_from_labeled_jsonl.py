@@ -1,8 +1,7 @@
 """Mine wiki_updater eval cases from a Bo-style labeled ingest JSONL.
 
-Bo's eval-labeler tool (``backend/scripts/eval_labeler.html``) emits a
-JSONL file with one row per ``ingest_eval_samples`` record, augmented
-with three label columns:
+The labeler emits a JSONL file with one row per ``ingest_eval_samples``
+record, augmented with three label columns:
 
 * ``outcome`` — what production actually shipped (raw reconciler).
 * ``judge_label`` — LLM-as-judge call on the same row.
