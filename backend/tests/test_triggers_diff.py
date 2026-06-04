@@ -6,6 +6,8 @@ versions of every tracked .md), and the combined payload.
 """
 from __future__ import annotations
 
+import os
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -223,6 +225,47 @@ def test_changes_since_empty_window(repo_with_docs):
     since = _iso(datetime.now(timezone.utc) + timedelta(hours=1))
     out = diff_helper.build_changes_since(scope_path="", since_iso=since)
     assert "(no changes in this window)" in out
+
+
+@contextmanager
+def _commit_date(iso: str):
+    """Force the git committer/author date of commits made in the block, so
+    a time-windowed diff can place the window between commits deterministically."""
+    keys = ("GIT_AUTHOR_DATE", "GIT_COMMITTER_DATE")
+    prev = {k: os.environ.get(k) for k in keys}
+    for k in keys:
+        os.environ[k] = iso
+    try:
+        yield
+    finally:
+        for k in keys:
+            if prev[k] is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = prev[k]
+
+
+def test_changes_since_follows_rename(tmp_repo, tmp_config):
+    # A doc renamed mid-window must still show the edit diff, not a spurious
+    # "(new file)". The before-state has to be read at the doc's name as of the
+    # window-start ref, not its current name.
+    from app.wiki import git as wiki_git
+
+    with _commit_date("2026-01-01T00:00:00+00:00"):
+        wiki_git.commit_file("old.md", "# T\n\n- [ ] task one\n", "create", author=None)
+    with _commit_date("2026-01-01T00:10:00+00:00"):
+        wiki_git.move_path("old.md", "new.md", "rename", author=None)
+    with _commit_date("2026-01-01T00:20:00+00:00"):
+        wiki_git.commit_file("new.md", "# T\n\n- [x] task one\n", "complete", author=None)
+
+    # Window opens after the create, before the rename → before-ref is the
+    # create commit (where the doc was still "old.md").
+    out = diff_helper.build_changes_since(
+        scope_path="new.md", since_iso="2026-01-01T00:05:00+00:00"
+    )
+    assert "new.md" in out
+    assert "(new file)" not in out  # the rename no longer hides the edit
+    assert "[x] task one" in out  # the completion transition is visible
 
 
 # --------------------------------------------------------------------------- #
