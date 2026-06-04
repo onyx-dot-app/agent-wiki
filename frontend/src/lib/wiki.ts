@@ -48,6 +48,23 @@ export interface FileDiffResponse {
   is_creation: boolean;
 }
 
+/** An auto-generated draft for the home "Start writing with AI" flow. */
+export interface GeneratedDraft {
+  title: string;
+  body: string;
+}
+
+/** sessionStorage key handing a generated draft from the home input to the
+ * New Document composer (paired with the `?ai=1` query flag). */
+export const AI_DRAFT_KEY = "wiki:aiDraft";
+
+export async function generateDraft(prompt: string): Promise<GeneratedDraft> {
+  return apiFetch<GeneratedDraft>("/wiki/generate", {
+    method: "POST",
+    body: JSON.stringify({ prompt }),
+  });
+}
+
 export async function fetchFileDiff(
   path: string,
   sha: string,

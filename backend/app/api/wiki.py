@@ -25,6 +25,8 @@ from app.models.file_system import (
     FileDiffResponse,
     FileHistoryResponse,
     FolderHitView,
+    GenerateDraftRequest,
+    GenerateDraftResponse,
     GetDocumentResponse,
     ListDocumentsResponse,
     ListRecentPagesResponse,
@@ -398,6 +400,18 @@ def reindex_document_by_path(
     require_can("read", rel, user)
     index_path(rel)
     return ReindexResponse(path=rel, queued=True)
+
+
+@router.post("/generate", response_model=GenerateDraftResponse)
+def generate_draft(
+    req: GenerateDraftRequest,
+    user: User = Depends(require_user),
+) -> GenerateDraftResponse:
+    """Generate a draft (title + body) from a free-text prompt for review."""
+    from app.llm.agents import draft_generator
+
+    result = draft_generator.generate(req.prompt)
+    return GenerateDraftResponse(title=result["title"], body=result["body"])
 
 
 @router.get("/search", response_model=SearchResponse)

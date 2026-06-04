@@ -182,6 +182,12 @@
   width: 100%;
   min-width: 0;
 }
+.aiError {
+  margin: 0;
+  padding: 0 8px 4px;
+  font-size: 13px;
+  color: var(--status-text-error-05);
+}
 
 /* Recent Pages grid */
 .recentGrid {

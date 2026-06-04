@@ -48,6 +48,19 @@ class ReindexRequest(BaseModel):
     path: str = Field(min_length=1)
 
 
+class GenerateDraftRequest(BaseModel):
+    """Free-text prompt from the home "Start writing with AI" input."""
+
+    prompt: str = Field(min_length=1)
+
+
+class GenerateDraftResponse(BaseModel):
+    """An auto-generated draft for the user to review before creating."""
+
+    title: str
+    body: str
+
+
 class IngestRequest(BaseModel):
     """Inbound document push from external systems (e.g. Onyx connectors)."""
 

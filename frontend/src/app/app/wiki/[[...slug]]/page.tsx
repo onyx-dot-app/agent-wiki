@@ -65,6 +65,7 @@ import {
 import { absoluteTime, relativeTime } from "@/lib/time";
 import { useIsMobile } from "@/lib/viewport";
 import {
+  AI_DRAFT_KEY,
   type CommitInfo,
   fetchFileDiff,
   fetchFileHistory,
@@ -541,11 +542,34 @@ function NewDocView({ dir }: { dir: string }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Pop the chat widget open once on mount — the assistant can help
-  // while the user picks a template / drafts initial content.
+  // Home "Start writing with AI" hands off a generated draft via sessionStorage
+  // (paired with ?ai=1). Seed the composer with it once, then drop the flag so
+  // it doesn't re-apply on re-render or override later edits.
+  const isAiSeed = searchParams?.get("ai") === "1";
+  const aiSeededRef = useRef(false);
   useEffect(() => {
+    if (aiSeededRef.current || !isAiSeed) return;
+    aiSeededRef.current = true;
+    try {
+      const raw = sessionStorage.getItem(AI_DRAFT_KEY);
+      sessionStorage.removeItem(AI_DRAFT_KEY);
+      if (!raw) return;
+      const draft = JSON.parse(raw) as { title?: string; body?: string };
+      if (draft.title) setFilename(draft.title);
+      if (draft.body) setDraft(draft.body);
+    } catch {
+      // malformed/unavailable stash — fall back to an empty composer
+    }
+  }, [isAiSeed]);
+
+  // Pop the chat widget open once on mount — the assistant can help while the
+  // user picks a template / drafts initial content. Skip it for an AI-seeded
+  // draft: there's already content to review, so the generic "what would you
+  // like to work on" prime would be noise.
+  useEffect(() => {
+    if (isAiSeed) return;
     requestExpand();
-  }, [requestExpand]);
+  }, [requestExpand, isAiSeed]);
 
   useEffect(() => {
     let cancelled = false;

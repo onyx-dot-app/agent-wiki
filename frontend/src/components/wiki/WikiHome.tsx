@@ -24,22 +24,21 @@ import {
 } from "@onyx-ai/opal/icons";
 import { SvgOnyxLogo } from "@onyx-ai/opal/logos";
 
+import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { relativeTime } from "@/lib/time";
 import { listTemplateSummaries } from "@/lib/templates";
 import type { DocumentTemplateSummary } from "@/lib/templates";
-import type { RecentPage } from "@/lib/wiki";
+import { AI_DRAFT_KEY, generateDraft, type RecentPage } from "@/lib/wiki";
 
 import { WikiItemActionsProvider, WikiItemMenu } from "./WikiItemActions";
 import { WikiTree } from "./WikiTree";
 import styles from "./WikiHome.module.css";
 
-// Stash key for the typed "write with AI" prompt; the new-page composer
-// picks it up to seed the assistant.
-const AI_PROMPT_KEY = "wiki:aiPrompt";
-
 export function WikiHome() {
   const router = useRouter();
   const [aiPrompt, setAiPrompt] = useState("");
+  const [generating, setGenerating] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
 
   const { data: recentData } = useSWR<{ pages: RecentPage[] }>(
     "/wiki/recent?limit=12",
@@ -59,16 +58,24 @@ export function WikiHome() {
     router.push(`/app/wiki${qs}`);
   }
 
-  function onAiSubmit(e: FormEvent) {
+  async function onAiSubmit(e: FormEvent) {
     e.preventDefault();
     const prompt = aiPrompt.trim();
-    if (!prompt) return;
+    if (!prompt || generating) return;
+    setGenerating(true);
+    setAiError(null);
     try {
-      sessionStorage.setItem(AI_PROMPT_KEY, prompt);
-    } catch {
-      // sessionStorage may be unavailable (private mode).
+      // Generate a full draft up front, then drop the user into the New
+      // Document composer with it pre-filled to review and create.
+      const draft = await generateDraft(prompt);
+      sessionStorage.setItem(AI_DRAFT_KEY, JSON.stringify(draft));
+      router.push("/app/wiki?new=1&ai=1");
+    } catch (err) {
+      setAiError(
+        err instanceof Error ? err.message : "Couldn't generate a draft",
+      );
+      setGenerating(false);
     }
-    router.push("/app/wiki?new=1");
   }
 
   return (
@@ -139,7 +146,11 @@ export function WikiHome() {
             {/* Write with AI */}
             <div className={styles.aiRow}>
               <span className={styles.aiGutterIcon}>
-                <SvgOnyxOctagon size={18} />
+                {generating ? (
+                  <LoadingSpinner size={18} />
+                ) : (
+                  <SvgOnyxOctagon size={18} />
+                )}
               </span>
               <form className={styles.aiInputWrap} onSubmit={onAiSubmit}>
                 <InputTypeIn
@@ -153,13 +164,14 @@ export function WikiHome() {
                       size="sm"
                       prominence="tertiary"
                       icon={SvgArrowUp}
-                      disabled={!aiPrompt.trim()}
+                      disabled={!aiPrompt.trim() || generating}
                       aria-label="Start writing"
                     />
                   }
                 />
               </form>
             </div>
+            {aiError && <p className={styles.aiError}>{aiError}</p>}
 
             <div className={styles.midDividerWrap}>
               <Divider />
