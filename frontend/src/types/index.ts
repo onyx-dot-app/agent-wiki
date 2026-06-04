@@ -10,7 +10,7 @@ export type DefaultLanding = "wiki_home" | "recent" | "last_viewed";
 
 export interface UserSettings {
   theme: ThemeSetting;
-  timezone: string;
+  timezone: string | null;
   default_landing: DefaultLanding;
   chat_provider: string | null;
   chat_model: string | null;

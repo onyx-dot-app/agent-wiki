@@ -178,6 +178,12 @@ export function browserTimezone(): string {
   }
 }
 
+/** The timezone to render times in: the user's explicit choice, else their
+ * browser's local zone. `null`/undefined means "not chosen" → local. */
+export function effectiveTimezone(tz: string | null | undefined): string {
+  return tz ?? browserTimezone();
+}
+
 export function listTimezones(): string[] {
   try {
     if (typeof Intl.supportedValuesOf === "function") {

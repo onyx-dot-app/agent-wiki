@@ -25,7 +25,10 @@ class UserSettings(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     theme: Literal["light", "dark", "system"] = "system"
-    timezone: str = "UTC"
+    # None means "not chosen" — the frontend resolves it to the browser's local
+    # zone, so a user's times default to local rather than UTC. An explicit
+    # choice (including "UTC") is stored and honored.
+    timezone: str | None = None
     default_landing: Literal["wiki_home", "recent", "last_viewed"] = "wiki_home"
     # Preferred provider + model for chat. None = use the global agent settings.
     chat_provider: str | None = None
@@ -33,7 +36,9 @@ class UserSettings(BaseModel):
 
     @field_validator("timezone")
     @classmethod
-    def _validate_timezone(cls, value: str) -> str:
+    def _validate_timezone(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         try:
             ZoneInfo(value)
         except ZoneInfoNotFoundError as exc:

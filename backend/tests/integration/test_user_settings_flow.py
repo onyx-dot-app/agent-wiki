@@ -24,7 +24,7 @@ def test_settings_persist_across_logout_and_login(integration):
     # Defaults right after signup.
     me = integration.client.get("/api/auth/me").json()
     assert me["settings"]["theme"] == "system"
-    assert me["settings"]["timezone"] == "UTC"
+    assert me["settings"]["timezone"] is None
     assert me["settings"]["default_landing"] == "wiki_home"
 
     # Update each of the three fields.
@@ -158,7 +158,7 @@ def test_settings_isolated_between_users(integration):
     me = integration.client.get("/api/auth/me").json()
     # Bob is a new account — should see defaults, not Alice's values.
     assert me["settings"]["theme"] == "system"
-    assert me["settings"]["timezone"] == "UTC"
+    assert me["settings"]["timezone"] is None
 
     # And Bob's own update doesn't touch Alice's row.
     integration.client.put("/api/user/settings", json={"theme": "light"})
