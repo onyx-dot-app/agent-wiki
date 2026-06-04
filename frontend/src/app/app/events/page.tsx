@@ -4,6 +4,7 @@ import { Button } from "@onyx-ai/opal/components";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { PageHeader } from "@/components/common/PageHeader";
 import { useRequireAuth } from "@/lib/auth";
+import { browserTimezone } from "@/lib/cron";
 import { useEvents } from "@/lib/events";
 import { formatInTimezone, formatScopePath } from "@/lib/format";
 import { useIsMobile } from "@/lib/viewport";
@@ -11,7 +12,9 @@ import { useIsMobile } from "@/lib/viewport";
 export default function EventsPage() {
   const { user, loading } = useRequireAuth();
   const isMobile = useIsMobile();
-  const timezone = user?.settings.timezone ?? "UTC";
+  // Prefer the user's configured wiki timezone; otherwise fall back to the
+  // browser's local zone rather than UTC, so timestamps read in local time.
+  const timezone = user?.settings.timezone ?? browserTimezone();
   const { events, error, isValidating, refresh } = useEvents({
     kind: "trigger.fire",
     limit: 200,
