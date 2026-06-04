@@ -241,7 +241,7 @@ export default function TriggersPage() {
                       <>
                         {" "}
                         <span className="text-xs text-(--text-02)">
-                          · last fired{" "}
+                          · last checked{" "}
                           {formatRelative(t.schedule_last_fired_at)}
                         </span>
                       </>
