@@ -1,3 +1,5 @@
+import "./globals.css";
+
 import * as Tooltip from "@radix-ui/react-tooltip";
 import { DM_Mono, Hanken_Grotesk } from "next/font/google";
 import type { ReactNode } from "react";
@@ -7,8 +9,6 @@ import { AuthProvider } from "@/lib/auth";
 import { DraftingProvider } from "@/lib/drafting";
 import { SWRProvider } from "@/lib/swr";
 import { ThemeBootstrapScript, ThemeProvider } from "@/lib/theme-provider";
-
-import "./globals.css";
 
 const hankenGrotesk = Hanken_Grotesk({
   subsets: ["latin"],

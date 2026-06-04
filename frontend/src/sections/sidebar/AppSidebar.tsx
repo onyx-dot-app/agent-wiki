@@ -74,7 +74,9 @@ export function AppSidebar({ folded, onFoldToggle }: AppSidebarProps) {
         "flex flex-col h-full box-border py-2 gap-4 shrink-0",
         "bg-background-tint-02 overflow-hidden",
         "transition-[width] duration-200 ease-in-out",
-        effectiveFolded ? "w-[52px]" : "w-[248px]",
+        effectiveFolded
+          ? "w-(--sidebar-width-folded)"
+          : "w-(--sidebar-width-expanded)",
       ].join(" ")}
     >
       {/* Logo + toggle */}

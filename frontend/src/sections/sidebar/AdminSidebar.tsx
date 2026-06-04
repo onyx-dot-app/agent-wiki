@@ -11,7 +11,7 @@ export function AdminSidebar() {
   const pathname = usePathname();
 
   return (
-    <nav className="sticky top-0 box-border flex h-screen w-[248px] shrink-0 flex-col gap-4 overflow-hidden bg-background-tint-02 py-2">
+    <nav className="flex flex-col h-screen w-(--sidebar-width-expanded) box-border py-2 gap-4 shrink-0 sticky top-0 bg-background-tint-02 overflow-hidden">
       {/* Logo */}
       <div className="pt-3 px-3 flex items-center h-7">
         <SvgOnyxLogoTyped size={28} />
