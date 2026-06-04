@@ -1,44 +1,26 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import {
-  createContext,
-  useContext,
-  useEffect,
-  useState,
-  type FormEvent,
-} from "react";
-import { createPortal } from "react-dom";
+import { useEffect, useState, type FormEvent } from "react";
 import useSWR, { useSWRConfig } from "swr";
 
 import {
   Button,
-  Divider,
   InputTypeIn,
-  LineItemButton,
-  Popover,
   SidebarTab,
   Text,
 } from "@onyx-ai/opal/components";
 import {
-  SvgEdit,
   SvgFileText,
   SvgFolder,
-  SvgFolderIn,
   SvgFolderOpen,
   SvgFolderPlus,
-  SvgLink,
   SvgMoreHorizontal,
   SvgPlus,
-  SvgShare,
-  SvgSparkle,
-  SvgTrash,
 } from "@onyx-ai/opal/icons";
 
 import { apiFetch } from "@/lib/api";
-import { RunAgentPanel } from "./RunAgentPanel";
-import { ShareDialog } from "./ShareDialog";
-import { MoveModal, RenameModal } from "./WikiItemModals";
+import { useActiveFolder, WikiItemMenu } from "./WikiItemActions";
 import styles from "./WikiTree.module.css";
 
 interface Entry {
@@ -48,18 +30,6 @@ interface Entry {
 
 // Persist which folders are expanded so the tree restores on refresh.
 const EXPANDED_KEY = "wiki:expandedFolders";
-
-/** Per-row contextual-menu actions, provided once by WikiTree and consumed by
- * every RowMenu via context (avoids drilling through the recursive tree). */
-interface RowActions {
-  share: (path: string) => void;
-  rename: (path: string) => void;
-  move: (path: string) => void;
-  copyLink: (path: string) => void;
-  launchAgent: (path: string) => void;
-  remove: (path: string, isFolder: boolean) => void;
-}
-const ActionsContext = createContext<RowActions | null>(null);
 
 /** Direct child folders + files of `dir`, derived from the flat path list. */
 function childrenOf(entries: Entry[], dir: string) {
@@ -83,117 +53,7 @@ function childrenOf(entries: Entry[], dir: string) {
   };
 }
 
-/** Every folder path in the tree (plus root ""), for the move-destination list. */
-function collectFolders(entries: Entry[]): string[] {
-  const set = new Set<string>([""]);
-  for (const e of entries) {
-    const parts = e.path.split("/");
-    parts.pop();
-    let cur = "";
-    for (const p of parts) {
-      cur = cur ? `${cur}/${p}` : p;
-      set.add(cur);
-    }
-  }
-  return [...set].sort((a, b) => a.localeCompare(b));
-}
-
 type IconComponent = React.ComponentProps<typeof SidebarTab>["icon"];
-
-/**
- * Per-row "⋯" actions menu (contextual menu node 657:41564). Spec: 160px wide,
- * compact line items, two dividers, Delete in danger red. Folders omit
- * "Launch Agent" (it adds a doc to an agent run). The trigger stops propagation
- * so it doesn't navigate/expand the row.
- */
-function RowMenu({
-  path,
-  isFolder,
-  open,
-  onOpenChange,
-}: {
-  path: string;
-  isFolder: boolean;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-}) {
-  const actions = useContext(ActionsContext);
-  const run = (fn?: (p: string) => void) => () => {
-    onOpenChange(false);
-    fn?.(path);
-  };
-  return (
-    <div className={styles.rowMenu} data-open={open || undefined}>
-      <Popover open={open} onOpenChange={onOpenChange}>
-        <Popover.Trigger asChild>
-          <button
-            type="button"
-            className={styles.moreBtn}
-            aria-label="More actions"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <SvgMoreHorizontal size={16} />
-          </button>
-        </Popover.Trigger>
-        <Popover.Content align="start" sideOffset={4} width="fit">
-          <div className={styles.menu}>
-            <LineItemButton
-              variant="body"
-              sizePreset="main-ui"
-              icon={SvgShare}
-              title="Share"
-              onClick={run(actions?.share)}
-            />
-            <LineItemButton
-              variant="body"
-              sizePreset="main-ui"
-              icon={SvgEdit}
-              title="Rename"
-              onClick={run(actions?.rename)}
-            />
-            <LineItemButton
-              variant="body"
-              sizePreset="main-ui"
-              icon={SvgFolderIn}
-              title="Move"
-              onClick={run(actions?.move)}
-            />
-            <Divider />
-            <LineItemButton
-              variant="body"
-              sizePreset="main-ui"
-              icon={SvgLink}
-              title="Copy Link"
-              onClick={run(actions?.copyLink)}
-            />
-            {!isFolder && (
-              <LineItemButton
-                variant="body"
-                sizePreset="main-ui"
-                icon={SvgSparkle}
-                title="Launch Agent"
-                onClick={run(actions?.launchAgent)}
-              />
-            )}
-            <Divider />
-            <span className={styles.danger}>
-              <LineItemButton
-                variant="body"
-                sizePreset="main-ui"
-                icon={SvgTrash}
-                title="Delete"
-                onClick={() => {
-                  onOpenChange(false);
-                  actions?.remove(path, isFolder);
-                }}
-              />
-            </span>
-          </div>
-        </Popover.Content>
-      </Popover>
-    </div>
-  );
-}
 
 /**
  * One tree row: an OPAL SidebarTab plus the hover-/open-revealed "⋯" menu. The
@@ -205,31 +65,47 @@ function Row({
   label,
   path,
   isFolder,
+  active = false,
   onClick,
 }: {
   icon: IconComponent;
   label: string;
   path: string;
   isFolder: boolean;
+  active?: boolean;
   onClick: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   return (
     <div className={styles.rowWrap}>
-      <SidebarTab
-        variant="sidebar-light"
-        icon={icon}
-        selected={menuOpen}
-        onClick={onClick}
-      >
-        {label}
-      </SidebarTab>
-      <RowMenu
-        path={path}
-        isFolder={isFolder}
-        open={menuOpen}
-        onOpenChange={setMenuOpen}
-      />
+      <div className={styles.tab}>
+        <SidebarTab
+          variant="sidebar-light"
+          icon={icon}
+          selected={menuOpen || active}
+          onClick={onClick}
+        >
+          {label}
+        </SidebarTab>
+      </div>
+      {/* "⋯" overlays the leading file/folder icon, revealed on hover. */}
+      <div className={styles.rowMenu} data-open={menuOpen || undefined}>
+        <WikiItemMenu
+          path={path}
+          isFolder={isFolder}
+          open={menuOpen}
+          onOpenChange={setMenuOpen}
+        >
+          <button
+            type="button"
+            className={styles.moreBtn}
+            aria-label="More actions"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <SvgMoreHorizontal size={16} />
+          </button>
+        </WikiItemMenu>
+      </div>
     </div>
   );
 }
@@ -243,6 +119,8 @@ function FolderNode({
   onOpenFile,
   expanded,
   onToggle,
+  activeFolder,
+  onSetActive,
 }: {
   entries: Entry[];
   dir: string;
@@ -250,6 +128,8 @@ function FolderNode({
   onOpenFile: (path: string) => void;
   expanded: Set<string>;
   onToggle: (path: string) => void;
+  activeFolder: string;
+  onSetActive: (path: string) => void;
 }) {
   const full = dir ? `${dir}/${name}` : name;
   const open = expanded.has(full);
@@ -263,7 +143,11 @@ function FolderNode({
         label={name}
         path={full}
         isFolder
-        onClick={() => onToggle(full)}
+        active={activeFolder === full}
+        onClick={() => {
+          onSetActive(full);
+          onToggle(full);
+        }}
       />
       {open && (folders.length > 0 || files.length > 0) && (
         <div className={styles.nested}>
@@ -276,6 +160,8 @@ function FolderNode({
               onOpenFile={onOpenFile}
               expanded={expanded}
               onToggle={onToggle}
+              activeFolder={activeFolder}
+              onSetActive={onSetActive}
             />
           ))}
           {files.map((f) => (
@@ -295,10 +181,9 @@ function FolderNode({
 }
 
 /**
- * Permanent directory sidebar — a nested, expandable tree. Owns the per-row
- * contextual-menu actions (share / rename / move / copy link / launch agent /
- * delete), rendering the reused ShareDialog + RunAgentPanel and the Rename /
- * Move modals once. The list scrolls rather than the panel growing.
+ * Permanent directory sidebar — a nested, expandable tree. Per-row contextual
+ * actions come from the surrounding WikiItemActionsProvider (shared with the
+ * recent-pages grid). The list scrolls rather than the panel growing.
  */
 export function WikiTree() {
   const router = useRouter();
@@ -313,12 +198,14 @@ export function WikiTree() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Contextual-menu targets — each holds the path of the row that opened it.
-  const [sharePath, setSharePath] = useState<string | null>(null);
-  const [renamePath, setRenamePath] = useState<string | null>(null);
-  const [movePath, setMovePath] = useState<string | null>(null);
-  const [agentPath, setAgentPath] = useState<string | null>(null);
-  const [toast, setToast] = useState<string | null>(null);
+  // The folder new pages/folders are created inside ("" = wiki root). State
+  // lives in the provider so deletes can reset it. Clicking a folder row makes
+  // it active; the active row is highlighted (`selected`).
+  const { activeFolder, setActiveFolder } = useActiveFolder() ?? {
+    activeFolder: "",
+    setActiveFolder: () => {},
+  };
+  const activeLabel = activeFolder.split("/").pop() ?? "";
 
   // Expanded folders, persisted to sessionStorage so they survive a refresh.
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -344,57 +231,45 @@ export function WikiTree() {
     });
   };
 
+  // Expand a folder (idempotent) so a freshly-created child is visible.
+  const expandFolder = (path: string) => {
+    if (!path) return;
+    setExpanded((prev) => {
+      if (prev.has(path)) return prev;
+      const next = new Set(prev).add(path);
+      try {
+        sessionStorage.setItem(EXPANDED_KEY, JSON.stringify([...next]));
+      } catch {
+        // ignore persistence failure
+      }
+      return next;
+    });
+  };
+
   const refresh = () => void mutate("/wiki");
 
-  useEffect(() => {
-    if (!toast) return;
-    const t = setTimeout(() => setToast(null), 2000);
-    return () => clearTimeout(t);
-  }, [toast]);
-
-  const actions: RowActions = {
-    share: setSharePath,
-    rename: setRenamePath,
-    move: setMovePath,
-    launchAgent: setAgentPath,
-    copyLink: (path) => {
-      const encoded = path.split("/").map(encodeURIComponent).join("/");
-      const url = `${window.location.origin}/app/wiki/${encoded}`;
-      navigator.clipboard
-        .writeText(url)
-        .then(() => setToast("Link copied"))
-        .catch(() => setToast("Couldn't copy link"));
-    },
-    remove: async (path, isFolder) => {
-      const label = path.replace(/\.md$/, "").split("/").pop() ?? path;
-      const message = isFolder
-        ? `Delete folder "${label}" and everything in it? This cannot be undone.`
-        : `Delete ${label}? This cannot be undone.`;
-      if (!window.confirm(message)) return;
-      try {
-        await apiFetch(`/wiki/file?path=${encodeURIComponent(path)}`, {
-          method: "DELETE",
-        });
-        refresh();
-      } catch (e) {
-        setToast(e instanceof Error ? e.message : "Delete failed");
-      }
-    },
-  };
+  // New pages route to NewDocView for the active folder; new folders create
+  // inside it. Both fall back to the wiki root when nothing is active.
+  const newPage = () =>
+    router.push(
+      activeFolder ? `/app/wiki/${activeFolder}?new=1` : "/app/wiki?new=1",
+    );
 
   async function createFolder(e: FormEvent) {
     e.preventDefault();
-    const name = folderName.trim().replace(/\/+$/, "");
+    const name = folderName.trim().replace(/^\/+|\/+$/g, "");
     if (!name) return;
+    const path = activeFolder ? `${activeFolder}/${name}` : name;
     setBusy(true);
     setError(null);
     try {
       await apiFetch("/wiki/folder", {
         method: "POST",
-        body: JSON.stringify({ path: name }),
+        body: JSON.stringify({ path }),
       });
       setFolderName("");
       setAddingFolder(false);
+      expandFolder(activeFolder);
       refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "create failed");
@@ -404,118 +279,80 @@ export function WikiTree() {
   }
 
   return (
-    <ActionsContext.Provider value={actions}>
-      <div className={styles.panel}>
-        <div className={styles.header}>
-          <Text font="secondary-body" color="text-03">
-            Directory
-          </Text>
-          <div className={styles.actions}>
-            <Button
-              prominence="tertiary"
-              size="sm"
-              icon={SvgPlus}
-              tooltip="New page"
-              onClick={() => router.push("/app/wiki?new=1")}
-            />
-            <Button
-              prominence="tertiary"
-              size="sm"
-              icon={SvgFolderPlus}
-              tooltip="New folder"
-              onClick={() => setAddingFolder((v) => !v)}
-            />
-          </div>
-        </div>
-
-        {addingFolder && (
-          <form className={styles.folderForm} onSubmit={createFolder}>
-            <InputTypeIn
-              value={folderName}
-              onChange={(e) => setFolderName(e.target.value)}
-              placeholder="folder-name (or subdir/folder-name)"
-              aria-label="New folder name"
-              autoFocus
-            />
-          </form>
-        )}
-        {error && <div className={styles.folderError}>{error}</div>}
-
-        <div className={styles.list}>
-          {folders.map((f) => (
-            <FolderNode
-              key={f}
-              entries={entries}
-              dir=""
-              name={f}
-              onOpenFile={openFile}
-              expanded={expanded}
-              onToggle={toggleFolder}
-            />
-          ))}
-          {files.map((f) => (
-            <Row
-              key={f}
-              icon={SvgFileText}
-              label={f.replace(/\.md$/, "")}
-              path={f}
-              isFolder={false}
-              onClick={() => openFile(f)}
-            />
-          ))}
-          {folders.length === 0 && files.length === 0 && (
-            <div className={styles.empty}>
-              <Text font="secondary-body" color="text-03">
-                No pages yet
-              </Text>
-            </div>
-          )}
+    <div className={styles.panel}>
+      <div className={styles.header}>
+        <Text font="secondary-body" color="text-03">
+          Directory
+        </Text>
+        <div className={styles.actions}>
+          <Button
+            prominence="tertiary"
+            size="sm"
+            icon={SvgPlus}
+            tooltip={activeFolder ? `New page in ${activeLabel}` : "New page"}
+            onClick={newPage}
+          />
+          <Button
+            prominence="tertiary"
+            size="sm"
+            icon={SvgFolderPlus}
+            tooltip={
+              activeFolder ? `New folder in ${activeLabel}` : "New folder"
+            }
+            onClick={() => setAddingFolder((v) => !v)}
+          />
         </div>
       </div>
 
-      {/* Overlays are portaled to <body> so they escape the sticky sidebar's
-          stacking context (otherwise the page content paints over the scrim). */}
-      {typeof document !== "undefined" &&
-        createPortal(
-          <>
-            {sharePath !== null && (
-              <ShareDialog
-                path={sharePath}
-                open
-                onClose={() => setSharePath(null)}
-              />
-            )}
-            {renamePath !== null && (
-              <RenameModal
-                path={renamePath}
-                onClose={() => setRenamePath(null)}
-                onDone={() => {
-                  setRenamePath(null);
-                  refresh();
-                }}
-              />
-            )}
-            {movePath !== null && (
-              <MoveModal
-                path={movePath}
-                folders={collectFolders(entries)}
-                onClose={() => setMovePath(null)}
-                onDone={() => {
-                  setMovePath(null);
-                  refresh();
-                }}
-              />
-            )}
-            {/* RunAgentPanel renders its own scrim, so no separate backdrop. */}
-            <RunAgentPanel
-              open={agentPath !== null}
-              onClose={() => setAgentPath(null)}
-              wikiPath={agentPath}
-            />
-            {toast && <div className={styles.toast}>{toast}</div>}
-          </>,
-          document.body,
+      {addingFolder && (
+        <form className={styles.folderForm} onSubmit={createFolder}>
+          <InputTypeIn
+            value={folderName}
+            onChange={(e) => setFolderName(e.target.value)}
+            placeholder={
+              activeFolder
+                ? `folder-name (in ${activeLabel})`
+                : "folder-name (or subdir/folder-name)"
+            }
+            aria-label="New folder name"
+            autoFocus
+          />
+        </form>
+      )}
+      {error && <div className={styles.folderError}>{error}</div>}
+
+      <div className={styles.list}>
+        {folders.map((f) => (
+          <FolderNode
+            key={f}
+            entries={entries}
+            dir=""
+            name={f}
+            onOpenFile={openFile}
+            expanded={expanded}
+            onToggle={toggleFolder}
+            activeFolder={activeFolder}
+            onSetActive={setActiveFolder}
+          />
+        ))}
+        {files.map((f) => (
+          <Row
+            key={f}
+            icon={SvgFileText}
+            label={f.replace(/\.md$/, "")}
+            path={f}
+            isFolder={false}
+            onClick={() => openFile(f)}
+          />
+        ))}
+        {folders.length === 0 && files.length === 0 && (
+          <div className={styles.empty}>
+            <Text font="secondary-body" color="text-03">
+              No pages yet
+            </Text>
+          </div>
         )}
-    </ActionsContext.Provider>
+      </div>
+    </div>
   );
 }
