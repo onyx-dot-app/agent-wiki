@@ -14,7 +14,14 @@ import { diffLines } from "diff";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import useSWR from "swr";
-import { Button, SelectButton } from "@onyx-ai/opal/components";
+import {
+  Button,
+  LineItemButton,
+  OpenButton,
+  Popover,
+  PopoverMenu,
+  SelectButton,
+} from "@onyx-ai/opal/components";
 import {
   SvgArrowLeft,
   SvgChevronLeft,
@@ -524,9 +531,26 @@ function NewDocView({ dir }: { dir: string }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const isMobile = useIsMobile();
-  const { setDrafting, requestExpand } = useDrafting();
-  const [filename, setFilename] = useState("");
-  const [draft, setDraft] = useState("");
+  const { setDrafting, requestExpand, registerDraftBridge } = useDrafting();
+  // "Start writing with AI" hands a generated draft (+ the prompt) here via
+  // sessionStorage, paired with ?ai=1. Read it synchronously so the editor and
+  // the drafting chat seed on the first render (no blank→ai re-init flash).
+  const isAiSeed = searchParams?.get("ai") === "1";
+  const [aiSeed] = useState<{
+    title?: string;
+    body?: string;
+    prompt?: string;
+  } | null>(() => {
+    if (!isAiSeed || typeof window === "undefined") return null;
+    try {
+      const raw = sessionStorage.getItem(AI_DRAFT_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  });
+  const [filename, setFilename] = useState(aiSeed?.title ?? "");
+  const [draft, setDraft] = useState(aiSeed?.body ?? "");
   const [templates, setTemplates] = useState<DocumentTemplateSummary[] | null>(
     null,
   );
@@ -542,34 +566,39 @@ function NewDocView({ dir }: { dir: string }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Home "Start writing with AI" hands off a generated draft via sessionStorage
-  // (paired with ?ai=1). Seed the composer with it once, then drop the flag so
-  // it doesn't re-apply on re-render or override later edits.
-  const isAiSeed = searchParams?.get("ai") === "1";
-  const aiSeededRef = useRef(false);
+  // Destination folder for the new doc — defaults to the route's folder but is
+  // user-selectable (the AI flow lands at root, so the picker is how you place it).
+  const [destDir, setDestDir] = useState(dir);
+  const { data: tree } = useSWR<ListResponse>("/wiki");
+  const folders = useMemo(() => collectFolders(tree?.entries ?? []), [tree]);
+
+  // Drop the stash once consumed so it doesn't re-apply on remount / back-nav.
   useEffect(() => {
-    if (aiSeededRef.current || !isAiSeed) return;
-    aiSeededRef.current = true;
-    try {
-      const raw = sessionStorage.getItem(AI_DRAFT_KEY);
-      sessionStorage.removeItem(AI_DRAFT_KEY);
-      if (!raw) return;
-      const draft = JSON.parse(raw) as { title?: string; body?: string };
-      if (draft.title) setFilename(draft.title);
-      if (draft.body) setDraft(draft.body);
-    } catch {
-      // malformed/unavailable stash — fall back to an empty composer
+    if (aiSeed && typeof window !== "undefined") {
+      try {
+        sessionStorage.removeItem(AI_DRAFT_KEY);
+      } catch {
+        // ignore
+      }
     }
-  }, [isAiSeed]);
+  }, [aiSeed]);
+
+  // Bridge the editor to the drafting chat so it can live-edit this unsaved
+  // draft. Keep a ref of the latest body so the chat reads current content.
+  const draftRef = useRef(draft);
+  useEffect(() => {
+    draftRef.current = draft;
+  }, [draft]);
+  useEffect(() => {
+    registerDraftBridge({ get: () => draftRef.current, set: setDraft });
+    return () => registerDraftBridge(null);
+  }, [registerDraftBridge]);
 
   // Pop the chat widget open once on mount — the assistant can help while the
-  // user picks a template / drafts initial content. Skip it for an AI-seeded
-  // draft: there's already content to review, so the generic "what would you
-  // like to work on" prime would be noise.
+  // user drafts. For an AI-seeded draft the chat seeds with the user's prompt.
   useEffect(() => {
-    if (isAiSeed) return;
     requestExpand();
-  }, [requestExpand, isAiSeed]);
+  }, [requestExpand]);
 
   useEffect(() => {
     let cancelled = false;
@@ -601,9 +630,9 @@ function NewDocView({ dir }: { dir: string }) {
         templateName: t?.name ?? null,
       });
     } else {
-      setDrafting({ kind: "blank", path: null });
+      setDrafting({ kind: "blank", path: null, prompt: aiSeed?.prompt });
     }
-  }, [appliedTemplateId, templates, setDrafting]);
+  }, [appliedTemplateId, templates, setDrafting, aiSeed]);
   // Clear drafting on unmount (cancel, sidebar nav, …) — the chat widget
   // tears its drafting session down synchronously on null, so the collapse
   // happens in the same paint as the page change. The one exception is
@@ -672,7 +701,7 @@ function NewDocView({ dir }: { dir: string }) {
     setError(null);
     try {
       const name = filenameNoExt + ".md";
-      const fullPath = (dir ? dir + "/" : "") + name;
+      const fullPath = (destDir ? destDir + "/" : "") + name;
       await apiFetch("/wiki/file", {
         method: "PUT",
         body: JSON.stringify({ path: fullPath, body: draft }),
@@ -697,7 +726,7 @@ function NewDocView({ dir }: { dir: string }) {
     appliedTemplateBody !== null && draft === appliedTemplateBody;
   const showGallery =
     (isBlank || matchesApplied) && templates !== null && templates.length > 0;
-  const parentSlug = dir;
+  const parentSlug = destDir;
 
   return (
     <main
@@ -728,6 +757,16 @@ function NewDocView({ dir }: { dir: string }) {
           </>
         }
       />
+
+      <div className="flex shrink-0 items-center gap-2">
+        <span className="text-[13px] text-(--text-04)">Folder</span>
+        <DestinationSelect
+          value={destDir}
+          folders={folders}
+          onChange={setDestDir}
+          disabled={saving}
+        />
+      </div>
 
       <FilenameRow
         parent={parentSlug}
@@ -2651,6 +2690,72 @@ function ActiveSessionRow({
         Close
       </Button>
     </li>
+  );
+}
+
+/** Every folder path in the tree (plus root ""), for the destination picker. */
+function collectFolders(entries: DocEntry[]): string[] {
+  const set = new Set<string>([""]);
+  for (const e of entries) {
+    const parts = e.path.split("/");
+    parts.pop();
+    let cur = "";
+    for (const p of parts) {
+      cur = cur ? `${cur}/${p}` : p;
+      set.add(cur);
+    }
+  }
+  return [...set].sort((a, b) => a.localeCompare(b));
+}
+
+/** Folder picker for the new-doc destination. "" is the wiki root ("Home"). */
+function DestinationSelect({
+  value,
+  folders,
+  onChange,
+  disabled,
+}: {
+  value: string;
+  folders: string[];
+  onChange: (v: string) => void;
+  disabled: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <Popover.Trigger asChild>
+        <span className="inline-flex max-w-full">
+          <OpenButton
+            variant="select-light"
+            size="md"
+            rounding="sm"
+            disabled={disabled}
+          >
+            {value === "" ? "Home" : value}
+          </OpenButton>
+        </span>
+      </Popover.Trigger>
+      <Popover.Content width="fit" align="start" sideOffset={4}>
+        <div className="max-h-[320px] max-w-[360px] min-w-[200px] overflow-y-auto">
+          <PopoverMenu>
+            {folders.map((f) => (
+              <LineItemButton
+                key={f || "__root__"}
+                icon={SvgFolder}
+                title={f === "" ? "Home" : f}
+                sizePreset="main-ui"
+                variant="body"
+                state={value === f ? "selected" : "empty"}
+                onClick={() => {
+                  onChange(f);
+                  setOpen(false);
+                }}
+              />
+            ))}
+          </PopoverMenu>
+        </div>
+      </Popover.Content>
+    </Popover>
   );
 }
 

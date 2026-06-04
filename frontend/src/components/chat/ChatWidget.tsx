@@ -39,6 +39,7 @@ import {
 import { useDrafting, type DraftingState } from "@/lib/drafting";
 import { ChatHistoryPanel } from "@/components/chat/ChatHistoryPanel";
 import { presentTool } from "@/lib/tools";
+import { reviseDraft } from "@/lib/wiki";
 
 // Items in the chat transcript. Tool calls are first-class entries
 // (rather than a transient hint) so they stay visible in the scrollback
@@ -75,7 +76,7 @@ const MIN_EXPANDED_WIDTH = 280;
 
 export function ChatWidget() {
   const { user } = useAuth();
-  const { drafting, expandTick } = useDrafting();
+  const { drafting, expandTick, getDraftBody, applyDraftBody } = useDrafting();
   const [mode, setMode] = useState<Mode>("closed");
   const [expandedWidth, setExpandedWidth] = useState<number>(
     DEFAULT_EXPANDED_WIDTH,
@@ -274,7 +275,9 @@ export function ChatWidget() {
       ? null
       : drafting.kind === "template"
         ? `tpl:${drafting.templateId ?? "deleted"}`
-        : "blank";
+        : drafting.prompt
+          ? `ai:${drafting.prompt}`
+          : "blank";
 
   // Keep the banner in sync while drafting is active (path/template name
   // can refine on the NewDocView → FileViewer hand-off). When ``drafting``
@@ -295,26 +298,32 @@ export function ChatWidget() {
       setDraftingKey(desiredKey);
       setError(null);
       setSessionId(null);
-      // Start empty; the reducer will push items as events arrive
-      // (text_delta creates an assistant bubble, tool_call pushes a
-      // tool status line, etc.).
-      setItems([]);
-      setSending(true);
       const tidForInit =
         drafting.kind === "template" ? drafting.templateId : null;
+      const promptForInit =
+        drafting.kind === "blank" ? (drafting.prompt ?? null) : null;
+      // For the AI flow, show the user's prompt as the first turn; the reducer
+      // then pushes the assistant's reply as events arrive. Otherwise start
+      // empty (the hidden seed primes a kickoff that lands as a text_delta).
+      setItems(promptForInit ? [{ kind: "user", content: promptForInit }] : []);
+      setSending(true);
       void (async () => {
         try {
-          await streamDraftingInit(tidForInit, (raw) => {
-            const ev = raw as StreamEvent;
-            if (ev.type === "session_created") {
-              setSessionId(ev.session_id);
-            } else if (ev.type === "error") {
-              setError(ev.message);
-              setItems((prev) => markRunningToolsAsError(prev));
-            } else {
-              setItems((prev) => reduceEvent(prev, ev));
-            }
-          });
+          await streamDraftingInit(
+            tidForInit,
+            (raw) => {
+              const ev = raw as StreamEvent;
+              if (ev.type === "session_created") {
+                setSessionId(ev.session_id);
+              } else if (ev.type === "error") {
+                setError(ev.message);
+                setItems((prev) => markRunningToolsAsError(prev));
+              } else {
+                setItems((prev) => reduceEvent(prev, ev));
+              }
+            },
+            { prompt: promptForInit },
+          );
         } catch (e) {
           setError(formatError(e));
           setItems((prev) => markRunningToolsAsError(prev));
@@ -383,6 +392,34 @@ export function ChatWidget() {
       // arrives. Until then, the "…" placeholder below covers the gap.
       setItems((prev) => [...prev, { kind: "user", content: text }]);
 
+      // Unsaved new-doc drafting (kind "blank", no path) with content in the
+      // editor: live-edit it via the stateless reviser and write the result
+      // straight back to the editor — no saved-doc chat session involved.
+      const body = getDraftBody();
+      if (
+        drafting?.kind === "blank" &&
+        drafting.path === null &&
+        body !== null &&
+        body.trim() !== ""
+      ) {
+        try {
+          const res = await reviseDraft(body, text);
+          applyDraftBody(res.body);
+          setItems((prev) => [
+            ...prev,
+            {
+              kind: "assistant",
+              content: "Done — I've updated the draft in the editor.",
+            },
+          ]);
+        } catch (err) {
+          setError(formatError(err));
+        } finally {
+          setSending(false);
+        }
+        return;
+      }
+
       // Lazily create a server-side session on first send so empty
       // sessions don't pile up if the user opens and closes the widget.
       let activeId = sessionId;
@@ -436,7 +473,7 @@ export function ChatWidget() {
         }
       }
     },
-    [sessionId],
+    [sessionId, drafting, getDraftBody, applyDraftBody],
   );
 
   const onSend = useCallback(

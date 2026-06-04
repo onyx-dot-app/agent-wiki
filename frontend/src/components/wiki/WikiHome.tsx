@@ -66,9 +66,13 @@ export function WikiHome() {
     setAiError(null);
     try {
       // Generate a full draft up front, then drop the user into the New
-      // Document composer with it pre-filled to review and create.
+      // Document composer with it pre-filled to review and create. The prompt
+      // rides along so the drafting chat can show it as the first user turn.
       const draft = await generateDraft(prompt);
-      sessionStorage.setItem(AI_DRAFT_KEY, JSON.stringify(draft));
+      sessionStorage.setItem(
+        AI_DRAFT_KEY,
+        JSON.stringify({ ...draft, prompt }),
+      );
       router.push("/app/wiki?new=1&ai=1");
     } catch (err) {
       setAiError(

@@ -45,6 +45,8 @@ from app.models.file_system import (
     ReindexRequest,
     ReindexResponse,
     ReorderStarredRequest,
+    ReviseDraftRequest,
+    ReviseDraftResponse,
     SearchHitView,
     SearchResponse,
     SetDocumentDraftRequest,
@@ -412,6 +414,17 @@ def generate_draft(
 
     result = draft_generator.generate(req.prompt)
     return GenerateDraftResponse(title=result["title"], body=result["body"])
+
+
+@router.post("/revise", response_model=ReviseDraftResponse)
+def revise_draft(
+    req: ReviseDraftRequest,
+    user: User = Depends(require_user),
+) -> ReviseDraftResponse:
+    """Apply an instruction to an unsaved draft body; return the revised body."""
+    from app.llm.agents import draft_reviser
+
+    return ReviseDraftResponse(body=draft_reviser.revise(req.body, req.instruction))
 
 
 @router.get("/search", response_model=SearchResponse)

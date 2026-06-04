@@ -70,13 +70,16 @@ export function streamMessage(
 export function streamDraftingInit(
   templateId: string | null,
   onEvent: (data: unknown) => void,
-  options?: { signal?: AbortSignal },
+  options?: { signal?: AbortSignal; prompt?: string | null },
 ): Promise<void> {
   return apiStream(
     "/chat/drafting/init",
     {
       method: "POST",
-      body: JSON.stringify({ template_id: templateId }),
+      body: JSON.stringify({
+        template_id: templateId,
+        prompt: options?.prompt ?? null,
+      }),
     },
     onEvent,
     options?.signal,

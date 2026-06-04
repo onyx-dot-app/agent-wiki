@@ -65,6 +65,17 @@ export async function generateDraft(prompt: string): Promise<GeneratedDraft> {
   });
 }
 
+/** Apply an instruction to an unsaved draft body; returns the revised body. */
+export async function reviseDraft(
+  body: string,
+  instruction: string,
+): Promise<{ body: string }> {
+  return apiFetch<{ body: string }>("/wiki/revise", {
+    method: "POST",
+    body: JSON.stringify({ body, instruction }),
+  });
+}
+
 export async function fetchFileDiff(
   path: string,
   sha: string,

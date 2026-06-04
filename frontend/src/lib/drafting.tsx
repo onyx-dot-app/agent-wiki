@@ -5,9 +5,17 @@ import {
   useCallback,
   useContext,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
+
+/** Read/write access to the in-progress (unsaved) doc editor, registered by
+ *  NewDocView so the drafting chat can live-edit the draft before it's saved. */
+export interface DraftBridge {
+  get: () => string;
+  set: (body: string) => void;
+}
 
 /** Active drafting state. Discriminated on ``kind``:
  *
@@ -31,6 +39,9 @@ export type DraftingState =
   | {
       kind: "blank";
       path: string | null;
+      /** "Start writing with AI" prompt — shown as the first user turn when the
+       *  chat seeds, instead of the generic blank prime. */
+      prompt?: string;
     };
 
 interface DraftingContextValue {
@@ -42,6 +53,12 @@ interface DraftingContextValue {
   expandTick: number;
   /** Bump to fire the expand request. */
   requestExpand: () => void;
+  /** NewDocView registers its editor here (null to unregister on unmount). */
+  registerDraftBridge: (bridge: DraftBridge | null) => void;
+  /** Current unsaved draft body, or null when no editor is bridged. */
+  getDraftBody: () => string | null;
+  /** Replace the unsaved draft body. Returns false when no editor is bridged. */
+  applyDraftBody: (body: string) => boolean;
 }
 
 const DraftingContext = createContext<DraftingContextValue | null>(null);
@@ -52,9 +69,39 @@ export function DraftingProvider({ children }: { children: ReactNode }) {
 
   const requestExpand = useCallback(() => setExpandTick((t) => t + 1), []);
 
+  // A ref (not state) so registering / reading the editor doesn't re-render.
+  const draftBridge = useRef<DraftBridge | null>(null);
+  const registerDraftBridge = useCallback((b: DraftBridge | null) => {
+    draftBridge.current = b;
+  }, []);
+  const getDraftBody = useCallback(
+    () => draftBridge.current?.get() ?? null,
+    [],
+  );
+  const applyDraftBody = useCallback((body: string) => {
+    if (!draftBridge.current) return false;
+    draftBridge.current.set(body);
+    return true;
+  }, []);
+
   const value = useMemo(
-    () => ({ drafting, setDrafting, expandTick, requestExpand }),
-    [drafting, expandTick, requestExpand],
+    () => ({
+      drafting,
+      setDrafting,
+      expandTick,
+      requestExpand,
+      registerDraftBridge,
+      getDraftBody,
+      applyDraftBody,
+    }),
+    [
+      drafting,
+      expandTick,
+      requestExpand,
+      registerDraftBridge,
+      getDraftBody,
+      applyDraftBody,
+    ],
   );
 
   return (

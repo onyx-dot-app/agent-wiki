@@ -61,6 +61,20 @@ class GenerateDraftResponse(BaseModel):
     body: str
 
 
+class ReviseDraftRequest(BaseModel):
+    """Live edit of an unsaved draft from the drafting chat. ``body`` is the
+    current editor content (may be empty); ``instruction`` is what to change."""
+
+    body: str
+    instruction: str = Field(min_length=1)
+
+
+class ReviseDraftResponse(BaseModel):
+    """The full revised document body to drop back into the editor."""
+
+    body: str
+
+
 class IngestRequest(BaseModel):
     """Inbound document push from external systems (e.g. Onyx connectors)."""
 

@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 from app.auth import users as users_repo
 from app.llm.agents import draft_generator
+from app.llm.errors import LLMError
 from app.main import create_app
 from tests._auth import login_fastapi
 
@@ -79,3 +80,16 @@ def test_generate_endpoint_422_on_empty_prompt(client: TestClient) -> None:
     uid = users_repo.create(email="nik@x.com", password="hunter2-x", name="Nik")
     login_fastapi(client, uid)
     assert client.post("/api/wiki/generate", json={"prompt": ""}).status_code == 422
+
+
+@patch("app.llm.agents.draft_generator.client")
+def test_generate_endpoint_surfaces_llm_error(mock_client: MagicMock, client: TestClient) -> None:
+    # Unconfigured / failing LLM must surface a clean {error} envelope, not a 500.
+    mock_client.complete.side_effect = LLMError("not_configured", "LLM is not configured.")
+    uid = users_repo.create(email="nik@x.com", password="hunter2-x", name="Nik")
+    login_fastapi(client, uid)
+
+    resp = client.post("/api/wiki/generate", json={"prompt": "anything"})
+
+    assert resp.status_code == 503
+    assert resp.json()["error"] == "LLM is not configured."
