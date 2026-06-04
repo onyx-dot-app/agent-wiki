@@ -173,7 +173,13 @@ function EditGroup() {
       router.push("/admin/groups");
     } catch (e) {
       setError2(e instanceof Error ? e.message : "Failed to save group");
+      // A save can fail partway (some ACL grants/revokes applied, then one
+      // errors). Re-pull the server state and re-seed the baseline so a retry
+      // diffs against reality — otherwise it would re-revoke an already-gone
+      // entry (404) or re-grant an applied one. Dropping `initialized` lets the
+      // seeding effect repopulate every ref + the editable state from truth.
       await Promise.all([refresh(), refreshShares()]);
+      setInitialized(false);
       setBusy(false);
     }
   }
