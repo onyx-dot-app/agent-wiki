@@ -368,8 +368,9 @@ async def drafting_init(
         # "Start writing with AI": the prompt is the user's real first turn
         # (shown), preceded by a hidden instruction — a draft for it is already
         # in the editor, so the agent just acknowledges and offers to refine.
+        prompt = req.prompt
         await run_in_threadpool(lambda: _append(_compose_ai_followup_instruction(), hidden=True))
-        await run_in_threadpool(lambda: _append(req.prompt or "", hidden=False))
+        await run_in_threadpool(lambda: _append(prompt, hidden=False))
     else:
         seed_text = (
             _compose_drafting_seed_message(tmpl)

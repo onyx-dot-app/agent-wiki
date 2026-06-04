@@ -79,7 +79,7 @@ def test_generate_endpoint_returns_draft(mock_client: MagicMock, client: TestCli
 def test_generate_endpoint_422_on_empty_prompt(client: TestClient) -> None:
     uid = users_repo.create(email="nik@x.com", password="hunter2-x", name="Nik")
     login_fastapi(client, uid)
-    assert client.post("/api/wiki/generate", json={"prompt": ""}).status_code == 422
+    assert client.post("/api/wiki/generate", json={"prompt": ""}).status_code == 400
 
 
 @patch("app.llm.agents.draft_generator.client")

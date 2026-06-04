@@ -69,10 +69,15 @@ export function WikiHome() {
       // Document composer with it pre-filled to review and create. The prompt
       // rides along so the drafting chat can show it as the first user turn.
       const draft = await generateDraft(prompt);
-      sessionStorage.setItem(
-        AI_DRAFT_KEY,
-        JSON.stringify({ ...draft, prompt }),
-      );
+      try {
+        sessionStorage.setItem(
+          AI_DRAFT_KEY,
+          JSON.stringify({ ...draft, prompt }),
+        );
+      } catch {
+        // sessionStorage unavailable (Safari private mode / quota). Navigate
+        // anyway — NewDocView just opens an empty new-doc composer.
+      }
       router.push("/app/wiki?new=1&ai=1");
     } catch (err) {
       setAiError(

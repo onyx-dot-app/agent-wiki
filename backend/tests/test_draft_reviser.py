@@ -60,8 +60,9 @@ def test_revise_endpoint_returns_body(mock_client: MagicMock, client: TestClient
     assert resp.json()["body"] == "# Revised\n\nnew"
 
 
-def test_revise_endpoint_422_on_empty_instruction(client: TestClient) -> None:
+def test_revise_endpoint_400_on_empty_instruction(client: TestClient) -> None:
     uid = users_repo.create(email="nik@x.com", password="hunter2-x", name="Nik")
     login_fastapi(client, uid)
     resp = client.post("/api/wiki/revise", json={"body": "x", "instruction": ""})
-    assert resp.status_code == 422
+    # This app's validation handler returns 400, not FastAPI's default 422.
+    assert resp.status_code == 400
