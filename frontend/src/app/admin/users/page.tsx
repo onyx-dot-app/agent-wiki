@@ -434,13 +434,15 @@ function GroupFilter({
       }}
     >
       <Popover.Trigger asChild>
-        <FilterButton
-          icon={SvgUsers}
-          active={value !== null}
-          onClear={() => onChange(null)}
-        >
-          {value ?? "All Groups"}
-        </FilterButton>
+        <span className={styles.menuTrigger}>
+          <FilterButton
+            icon={SvgUsers}
+            active={value !== null}
+            onClear={() => onChange(null)}
+          >
+            {value ?? "All Groups"}
+          </FilterButton>
+        </span>
       </Popover.Trigger>
       <Popover.Content width="fit" align="start" sideOffset={4}>
         <PopoverMenu>
@@ -519,13 +521,15 @@ function StatusFilter({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <Popover.Trigger asChild>
-        <FilterButton
-          icon={SvgUserShield}
-          active={value !== null}
-          onClear={() => onChange(null)}
-        >
-          {value ? STATUS_LABEL[value] : "All Status"}
-        </FilterButton>
+        <span className={styles.menuTrigger}>
+          <FilterButton
+            icon={SvgUserShield}
+            active={value !== null}
+            onClear={() => onChange(null)}
+          >
+            {value ? STATUS_LABEL[value] : "All Status"}
+          </FilterButton>
+        </span>
       </Popover.Trigger>
       <Popover.Content width="fit" align="start" sideOffset={4}>
         <PopoverMenu>
