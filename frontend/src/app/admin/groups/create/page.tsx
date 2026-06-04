@@ -58,8 +58,12 @@ function CreateGroup() {
     }
     setBusy(true);
     setError(null);
+    // Tracks the created group across the try/catch: createGroup commits the
+    // row first, so if a later member/share step fails the group still exists.
+    let createdId: string | null = null;
     try {
       const g = await createGroup(trimmed);
+      createdId = g.id;
       for (const id of selectedIds) await addGroupMember(g.id, id);
       for (const s of shares) {
         await grantAcl({
@@ -72,6 +76,13 @@ function CreateGroup() {
       }
       router.push(`/admin/groups/${g.id}`);
     } catch (e) {
+      // If the group was already created, retrying here would re-POST and 409
+      // (name taken), stranding the admin with an orphan group. Send them to
+      // its edit page to finish against the real (partially-applied) state.
+      if (createdId) {
+        router.push(`/admin/groups/${createdId}`);
+        return;
+      }
       setError(e instanceof Error ? e.message : "Failed to create group");
       setBusy(false);
     }
