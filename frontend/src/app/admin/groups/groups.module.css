@@ -11,31 +11,19 @@
   min-width: 0;
 }
 
-.createCard {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 16px;
-  border-radius: var(--border-radius-12);
-  background: var(--background-tint-02);
-  margin-bottom: 16px;
-}
-.createRow {
-  display: flex;
-  gap: 8px;
-}
-
 .cards {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
-/* Group rows are subtle grey-fill surfaces, not bordered cards (per mock). */
-.card {
-  background: var(--background-tint-02);
-  border-radius: var(--border-radius-12);
-  overflow: hidden;
-  padding: 4px;
+.emptyCard {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.errorRow {
+  margin-bottom: 12px;
 }
 .cardRight {
   display: inline-flex;
@@ -44,26 +32,40 @@
   color: var(--text-04);
 }
 
-/* Detail view */
-.detailHead {
-  display: flex;
+/* Create / edit pages */
+.headerActions {
+  display: inline-flex;
   align-items: center;
-  gap: 10px;
-  margin: 4px 0;
-  color: var(--text-04);
-}
-.detailSpacer {
-  flex: 1;
-}
-.sectionTitle {
-  margin: 20px 0 8px;
-}
-.addRow {
-  display: flex;
   gap: 8px;
 }
+.fieldGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.sectionHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.nameRow {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Member picker + list (shared by create/edit) */
 .pickerTrigger {
   display: inline-flex;
+}
+.menuEmpty {
+  padding: 6px 10px;
+}
+.memberList {
+  display: flex;
+  flex-direction: column;
 }
 .memberRow {
   display: flex;
@@ -77,4 +79,62 @@
   flex-direction: column;
   min-width: 0;
   flex: 1;
+}
+
+/* Shared resources list */
+.sharesList {
+  display: flex;
+  flex-direction: column;
+}
+.shareRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border-01);
+}
+.shareIcon {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--text-04);
+}
+.shareText {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+.sharePerm {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-04);
+}
+
+/* Account-type cell in the members table */
+.acctType {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-04);
+}
+
+/* Search box inside the share-picker popover */
+.pickerSearch {
+  padding: 4px;
+}
+
+/* Delete card */
+.deleteCard {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px;
+}
+.deleteText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
 }

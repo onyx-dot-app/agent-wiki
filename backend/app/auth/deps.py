@@ -32,13 +32,16 @@ _BEARER_PREFIX = "Bearer "
 
 def current_user(request: Request) -> User | None:
     """Resolve the active user from the session cookie. Returns
-    ``None`` when there is no cookie, the signature is invalid, or
-    the user row has been deleted."""
+    ``None`` when there is no cookie, the signature is invalid, the
+    user row has been deleted, or the account is deactivated."""
     user_id = request.session.get("user_id")
     if not isinstance(user_id, str) or not user_id:
         return None
     row = users_repo.get_by_id(user_id)
     if row is None:
+        return None
+    if not row["is_active"]:
+        # A deactivated user's existing session stops authenticating.
         return None
     return User(
         id=row["id"],

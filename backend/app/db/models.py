@@ -60,8 +60,18 @@ class User(Base):
     name: Mapped[str | None] = mapped_column(Text)
     # Null when AUTH_MODE=oidc.
     password_hash: Mapped[str | None] = mapped_column(Text)
-    is_admin: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("FALSE"))
-    created_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
+    is_admin: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("FALSE")
+    )
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("TRUE")
+    )
+    created_at: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
+    )
+    updated_at: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
+    )
     # Per-user preferences (theme, timezone, etc.). Shape is enforced by the
     # ``UserSettings`` pydantic model in ``app/models/user_settings.py``;
     # the column itself is a free-form JSONB so adding a new preference
@@ -69,6 +79,21 @@ class User(Base):
     # field defaults from the pydantic model on read.
     settings: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+
+
+class InvitedUser(Base):
+    """An email that's been invited to sign up but hasn't created an account
+    yet. On signup the row is consumed (deleted) and a real ``User`` exists."""
+
+    __tablename__ = "invited_users"
+
+    email: Mapped[str] = mapped_column(Text, primary_key=True)
+    invited_by_user_id: Mapped[str | None] = mapped_column(
+        Text, ForeignKey("users.id", ondelete="SET NULL")
+    )
+    created_at: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
     )
 
 
@@ -82,7 +107,9 @@ class McpConnection(Base):
     name: Mapped[str] = mapped_column(Text, nullable=False)
     transport: Mapped[str] = mapped_column(Text, nullable=False)  # "stdio" | "http"
     config_json: Mapped[str] = mapped_column(Text, nullable=False)
-    created_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
+    created_at: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
+    )
 
 
 class McpToken(Base):
@@ -104,7 +131,9 @@ class McpToken(Base):
     )
     name: Mapped[str] = mapped_column(Text, nullable=False)
     token_hash: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
-    created_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
+    created_at: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
+    )
     last_used_at: Mapped[str | None] = mapped_column(Text)
 
     __table_args__ = (Index("idx_mcp_tokens_user", "user_id"),)
@@ -132,12 +161,16 @@ class McpJob(Base):
         Text, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
     kind: Mapped[str] = mapped_column(Text, nullable=False)  # "update_doc_nl"
-    status: Mapped[str] = mapped_column(Text, nullable=False)  # pending|running|succeeded|failed
+    status: Mapped[str] = mapped_column(
+        Text, nullable=False
+    )  # pending|running|succeeded|failed
     idempotency_key: Mapped[str | None] = mapped_column(Text)
     payload_json: Mapped[str] = mapped_column(Text, nullable=False)
     result_json: Mapped[str | None] = mapped_column(Text)
     error: Mapped[str | None] = mapped_column(Text)
-    created_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
+    created_at: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
+    )
     finished_at: Mapped[str | None] = mapped_column(Text)
 
     __table_args__ = (
@@ -258,12 +291,16 @@ class AgentSession(Base):
     working_dir: Mapped[str | None] = mapped_column(Text)
     first_turn_prompt: Mapped[str] = mapped_column(Text, nullable=False)
     cli_session_id: Mapped[str | None] = mapped_column(Text)
-    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'pending'"))
-    started_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
+    status: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'pending'")
+    )
+    started_at: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
+    )
     last_activity_at: Mapped[str] = mapped_column(
         Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
     )
-    spawn_ok_at: Mapped[str | None] = mapped_column(Text) # beacon timestamp
+    spawn_ok_at: Mapped[str | None] = mapped_column(Text)  # beacon timestamp
     closed_at: Mapped[str | None] = mapped_column(Text)
 
     __table_args__ = (
@@ -288,7 +325,9 @@ class LaunchCode(Base):
     mcp_token_id: Mapped[str] = mapped_column(
         Text, ForeignKey("mcp_tokens.id", ondelete="CASCADE"), nullable=False
     )
-    created_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
+    created_at: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
+    )
     expires_at: Mapped[str] = mapped_column(Text, nullable=False)
     consumed_at: Mapped[str | None] = mapped_column(Text)
 
@@ -306,7 +345,9 @@ class PageWorkingDir(Base):
     machine_id: Mapped[str] = mapped_column(Text, primary_key=True)
     wiki_path: Mapped[str] = mapped_column(Text, primary_key=True)
     working_dir: Mapped[str] = mapped_column(Text, nullable=False)
-    updated_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
+    updated_at: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
+    )
 
 
 class LauncherToken(Base):
@@ -332,7 +373,9 @@ class LauncherToken(Base):
     )
     ciphertext: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
     nonce: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
-    created_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
+    created_at: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -401,7 +444,9 @@ class Trigger(Base):
     # the schedule evaluator on each tick so croniter advances. DB-only —
     # not persisted to the YAML file (would commit on every fire).
     schedule_last_fired_at: Mapped[str | None] = mapped_column(Text)
-    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("TRUE"))
+    enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("TRUE")
+    )
     file_path: Mapped[str | None] = mapped_column(Text)
     last_edited_at: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
@@ -426,8 +471,12 @@ class TriggerDestination(Base):
 
     id: Mapped[str] = mapped_column(Text, primary_key=True)
     name: Mapped[str] = mapped_column(Text, nullable=False)
-    description: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
-    created_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
+    description: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("''")
+    )
+    created_at: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
+    )
 
 
 class SlackWebhook(Base):
@@ -471,9 +520,15 @@ class ChatSession(Base):
     # Sessions created to bootstrap "drafting from template" conversations
     # are hidden from the session history list (the row stays so the
     # transcript can be re-rendered if anything in code still has the id).
-    hidden: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("FALSE"))
-    created_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
-    updated_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
+    hidden: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("FALSE")
+    )
+    created_at: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
+    )
+    updated_at: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
+    )
 
     __table_args__ = (Index("idx_chat_sessions_user_updated", "user_id", "updated_at"),)
 
@@ -497,15 +552,23 @@ class ChatMessage(Base):
     )
     ordering: Mapped[int] = mapped_column(Integer, nullable=False)
     role: Mapped[str] = mapped_column(Text, nullable=False)
-    content: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
+    content: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("''")
+    )
     events_json: Mapped[str | None] = mapped_column(Text)
     # Hidden seed messages live in the LLM history (so the model has the
     # template context) but are filtered out of the rendered transcript.
-    hidden: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("FALSE"))
-    created_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
+    hidden: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("FALSE")
+    )
+    created_at: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
+    )
 
     __table_args__ = (
-        CheckConstraint("role IN ('user', 'assistant')", name="chat_messages_role_check"),
+        CheckConstraint(
+            "role IN ('user', 'assistant')", name="chat_messages_role_check"
+        ),
         Index("idx_chat_messages_session_order", "session_id", "ordering"),
     )
 
@@ -533,12 +596,18 @@ class DocumentTemplate(Base):
     # Admin-controlled ordering for the picker. Lower values render
     # first; ties fall back to ``name`` alphabetical. New rows land at
     # the end (max(sort_order) + 1) so admins decide where they live.
-    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    sort_order: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
     created_by_user_id: Mapped[str | None] = mapped_column(
         Text, ForeignKey("users.id", ondelete="SET NULL")
     )
-    created_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
-    updated_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
+    created_at: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
+    )
+    updated_at: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
+    )
 
 
 class DocumentDraft(Base):
@@ -559,7 +628,9 @@ class DocumentDraft(Base):
     created_by_user_id: Mapped[str | None] = mapped_column(
         Text, ForeignKey("users.id", ondelete="SET NULL")
     )
-    created_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
+    created_at: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -571,11 +642,15 @@ class Event(Base):
     __tablename__ = "events"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    ts: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
+    ts: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
+    )
     kind: Mapped[str] = mapped_column(Text, nullable=False)
     actor: Mapped[str | None] = mapped_column(Text)
     target: Mapped[str | None] = mapped_column(Text)
-    payload_json: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'{}'"))
+    payload_json: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'{}'")
+    )
 
     __table_args__ = (
         Index("idx_events_ts", "ts"),
@@ -597,15 +672,27 @@ class LLMSettings(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
     provider: Mapped[str] = mapped_column(Text, nullable=False)
     model: Mapped[str] = mapped_column(Text, nullable=False)
-    anthropic_api_key: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
-    openai_api_key: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
-    gemini_api_key: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
-    ollama_base_url: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
+    anthropic_api_key: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("''")
+    )
+    openai_api_key: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("''")
+    )
+    gemini_api_key: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("''")
+    )
+    ollama_base_url: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("''")
+    )
     provider_models: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, server_default=text("'{}'::jsonb")
     )
-    ingest_selector_model: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
-    updated_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
+    ingest_selector_model: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("''")
+    )
+    updated_at: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
+    )
 
     __table_args__ = (CheckConstraint("id = 1", name="llm_settings_singleton"),)
 
@@ -614,9 +701,15 @@ class WebSettings(Base):
     __tablename__ = "web_settings"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
-    serper_api_key: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
-    firecrawl_api_key: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
-    updated_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
+    serper_api_key: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("''")
+    )
+    firecrawl_api_key: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("''")
+    )
+    updated_at: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
+    )
 
     __table_args__ = (CheckConstraint("id = 1", name="web_settings_singleton"),)
 
@@ -629,7 +722,9 @@ class IngestSettings(Base):
         Integer, nullable=False, server_default=text("100000")
     )
     api_key: Mapped[str | None] = mapped_column(Text, nullable=True)
-    updated_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
+    updated_at: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
+    )
 
     __table_args__ = (CheckConstraint("id = 1", name="ingest_settings_singleton"),)
 
@@ -638,10 +733,18 @@ class BraintrustSettings(Base):
     __tablename__ = "braintrust_settings"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
-    project: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
-    api_key: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
-    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
-    updated_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
+    project: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("''")
+    )
+    api_key: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("''")
+    )
+    enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    updated_at: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
+    )
 
     __table_args__ = (CheckConstraint("id = 1", name="braintrust_settings_singleton"),)
 
@@ -662,7 +765,9 @@ class AgentActivity(Base):
     agent_name: Mapped[str | None] = mapped_column(Text)
     doc_path: Mapped[str] = mapped_column(Text, nullable=False)
     activity: Mapped[str] = mapped_column(Text, nullable=False)
-    description: Mapped[str | None] = mapped_column(Text)  # null = "N/A" in rendered frontmatter
+    description: Mapped[str | None] = mapped_column(
+        Text
+    )  # null = "N/A" in rendered frontmatter
     registered_at: Mapped[str] = mapped_column(
         Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
     )
@@ -681,7 +786,9 @@ class AgentActivity(Base):
     )
 
     __table_args__ = (
-        CheckConstraint("activity IN ('read', 'wrote')", name="agent_activity_kind_check"),
+        CheckConstraint(
+            "activity IN ('read', 'wrote')", name="agent_activity_kind_check"
+        ),
         # One row per (user, agent): a new upsert replaces the prior row
         # in place. Postgres 15+ NULLS NOT DISTINCT lets nullable
         # agent_name participate in uniqueness directly — no
@@ -753,7 +860,9 @@ class Group(Base):
     created_by_user_id: Mapped[str | None] = mapped_column(
         Text, ForeignKey("users.id", ondelete="SET NULL")
     )
-    created_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
+    created_at: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
+    )
 
 
 class GroupMember(Base):
@@ -765,7 +874,9 @@ class GroupMember(Base):
     user_id: Mapped[str] = mapped_column(
         Text, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
     )
-    added_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
+    added_at: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
+    )
 
 
 class WikiOwner(Base):
@@ -816,7 +927,9 @@ class AclEntry(Base):
     granted_by_user_id: Mapped[str | None] = mapped_column(
         Text, ForeignKey("users.id", ondelete="SET NULL")
     )
-    created_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
+    created_at: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
+    )
 
     __table_args__ = (
         CheckConstraint(
@@ -896,28 +1009,38 @@ class Comment(Base):
     )
 
     # Anchor — set on the thread root for scope='inline'; NULL otherwise.
-    scope: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'inline'"))
+    scope: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'inline'")
+    )
     anchor_sha: Mapped[str | None] = mapped_column(Text)
     start_offset: Mapped[int | None] = mapped_column(Integer)
     end_offset: Mapped[int | None] = mapped_column(Integer)
     quoted_text: Mapped[str | None] = mapped_column(Text)
 
     # Author
-    author_kind: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'user'"))
+    author_kind: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'user'")
+    )
     author_user_id: Mapped[str | None] = mapped_column(
         Text, ForeignKey("users.id", ondelete="SET NULL")
     )
 
     # Content + lifecycle
     body: Mapped[str] = mapped_column(Text, nullable=False)
-    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'open'"))
+    status: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'open'")
+    )
     resolved_by_user_id: Mapped[str | None] = mapped_column(
         Text, ForeignKey("users.id", ondelete="SET NULL")
     )
     resolved_at: Mapped[str | None] = mapped_column(Text)
 
-    created_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
-    updated_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
+    created_at: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
+    )
+    updated_at: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
+    )
 
     __table_args__ = (
         CheckConstraint(
@@ -960,7 +1083,9 @@ class IngestEvalSample(Base):
     __tablename__ = "ingest_eval_samples"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    created_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
+    created_at: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
+    )
     source_document_id: Mapped[str | None] = mapped_column(Text)
     source_type: Mapped[str | None] = mapped_column(Text)
     source_title: Mapped[str | None] = mapped_column(Text)
