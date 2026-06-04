@@ -5,6 +5,7 @@ endpoint ``POST /api/chat/messages`` lands here in Phase 4 — async
 streaming so the model worker isn't pinned to one OS thread per
 in-flight chat the way the Flask sync-worker setup is today.
 """
+
 from __future__ import annotations
 
 import json
@@ -73,7 +74,8 @@ def create_session(user: User = Depends(require_user)) -> ChatSessionOut:
 
 @router.get("/sessions/{session_id}", response_model=ChatSessionDetail)
 def get_session(
-    session_id: str, user: User = Depends(require_user),
+    session_id: str,
+    user: User = Depends(require_user),
 ) -> ChatSessionDetail:
     row = sessions_repo.get(session_id, user.id)
     if row is None:
@@ -101,7 +103,8 @@ def get_session(
 
 @router.delete("/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_session(
-    session_id: str, user: User = Depends(require_user),
+    session_id: str,
+    user: User = Depends(require_user),
 ) -> Response:
     if not sessions_repo.delete(session_id, user.id):
         raise HTTPException(status_code=404, detail="session not found")
@@ -110,7 +113,9 @@ def delete_session(
 
 @router.post("/messages")
 async def send_message(
-    req: SendChatRequest, request: Request, user: User = Depends(require_user),
+    req: SendChatRequest,
+    request: Request,
+    user: User = Depends(require_user),
 ) -> Response:
     """Run one user turn through the chat agent, streaming JSON-RPC-like
     SSE frames back to the client.
@@ -121,7 +126,9 @@ async def send_message(
     ``run_in_threadpool`` for the same reason.
     """
     sess = await run_in_threadpool(
-        sessions_repo.get, req.session_id, user.id,
+        sessions_repo.get,
+        req.session_id,
+        user.id,
     )
     if sess is None:
         raise HTTPException(status_code=404, detail="session not found")
@@ -129,7 +136,8 @@ async def send_message(
     # First turn? Used after the stream finishes to decide whether to
     # enqueue title generation.
     prior_count = await run_in_threadpool(
-        sessions_repo.count_messages, req.session_id,
+        sessions_repo.count_messages,
+        req.session_id,
     )
     is_first_turn = prior_count == 0
 
@@ -137,7 +145,10 @@ async def send_message(
     # halfway, the user's turn is still on the timeline.
     await run_in_threadpool(
         lambda: sessions_repo.append_message(
-            req.session_id, role="user", content=req.content, events=None,
+            req.session_id,
+            role="user",
+            content=req.content,
+            events=None,
         ),
     )
 
@@ -156,12 +167,15 @@ async def send_message(
         events: list[dict[str, Any]] = []
         text_parts: list[str] = []
         try:
-            with trace_flow(
-                "chat.send_message",
-                chat_session_id=session_id,
-                user_id=user_id,
-                is_first_turn=is_first_turn,
-            ), chat_agent_scope():
+            with (
+                trace_flow(
+                    "chat.send_message",
+                    chat_session_id=session_id,
+                    user_id=user_id,
+                    is_first_turn=is_first_turn,
+                ),
+                chat_agent_scope(),
+            ):
                 raw_settings = await run_in_threadpool(users_repo.get_settings, user_id)
                 user_prefs = UserSettings.model_validate(raw_settings or {})
                 gen = run_chat_stream(
@@ -230,7 +244,9 @@ async def send_message(
         "X-Accel-Buffering": "no",
     }
     return StreamingResponse(
-        stream(), media_type="text/event-stream", headers=headers,
+        stream(),
+        media_type="text/event-stream",
+        headers=headers,
     )
 
 
@@ -247,12 +263,25 @@ def _compose_blank_seed_message() -> str:
             "",
             "Reply in a very short response — just a couple of sentences total. "
             "Do not lecture or list options. Open with one short, welcoming line "
-            "like \"Great, what would you like to work on?\" and briefly mention "
+            'like "Great, what would you like to work on?" and briefly mention '
             "that I can describe topics or sections I care about (a project I "
             "want to track, recurring updates, a running list) and the wiki "
             "will fill those in and keep them updated over time. Keep the "
             "overall response short.",
         ]
+    )
+
+
+def _compose_ai_followup_instruction() -> str:
+    """Hidden turn for the "Start writing with AI" flow. The user's real prompt
+    follows this; a complete first draft for it is already in the editor."""
+    return (
+        "The user's request follows. A complete first draft for it has already "
+        "been generated and placed in the editor for them to review. When you "
+        "reply, do NOT reproduce the draft and do NOT call any tools. Just give "
+        "one short, welcoming sentence acknowledging the draft is ready in the "
+        "editor, then invite them to tell you any changes (tone, length, "
+        "sections, title). Keep it to 1-2 sentences."
     )
 
 
@@ -285,15 +314,15 @@ def _compose_drafting_seed_message(template: dict[str, Any]) -> str:
             "",
             "Reply in a very short response — just a couple of sentences total. "
             "Do not summarize, describe, or comment on the template itself. "
-            f"Open with one short sentence like \"Great, let's build out this {name} together\" "
+            f'Open with one short sentence like "Great, let\'s build out this {name} together" '
             "and then ask 1 or 2 specific guiding questions to help me start filling "
             "in the most important parts. The goal is to help me complete the doc with "
             "as little effort as possible.",
             "",
             "Also mention, in one line, that I can have future agents fill in any section "
             "later by leaving a short note in the doc itself describing what belongs there "
-            "(for example, \"This section auto-fills with new updates over time\" or "
-            "\"Log every mention of this project here with context\") — the wiki will pick "
+            '(for example, "This section auto-fills with new updates over time" or '
+            '"Log every mention of this project here with context") — the wiki will pick '
             "that up. Keep the overall response short.",
         ]
     )
@@ -326,20 +355,29 @@ async def drafting_init(
     session_id = sess["id"]
     user_id = user.id
 
-    seed_text = (
-        _compose_drafting_seed_message(tmpl)
-        if tmpl is not None
-        else _compose_blank_seed_message()
-    )
-    await run_in_threadpool(
-        lambda: sessions_repo.append_message(
+    def _append(content: str, *, hidden: bool) -> None:
+        sessions_repo.append_message(
             session_id,
             role="user",
-            content=seed_text,
+            content=content,
             events=None,
-            hidden=True,
-        ),
-    )
+            hidden=hidden,
+        )
+
+    if req.prompt is not None and tmpl is None:
+        # "Start writing with AI": the prompt is the user's real first turn
+        # (shown), preceded by a hidden instruction — a draft for it is already
+        # in the editor, so the agent just acknowledges and offers to refine.
+        prompt = req.prompt
+        await run_in_threadpool(lambda: _append(_compose_ai_followup_instruction(), hidden=True))
+        await run_in_threadpool(lambda: _append(prompt, hidden=False))
+    else:
+        seed_text = (
+            _compose_drafting_seed_message(tmpl)
+            if tmpl is not None
+            else _compose_blank_seed_message()
+        )
+        await run_in_threadpool(lambda: _append(seed_text, hidden=True))
 
     history = await run_in_threadpool(
         lambda: sessions_repo.get_messages(session_id, include_hidden=True),
@@ -353,12 +391,15 @@ async def drafting_init(
         events: list[dict[str, Any]] = []
         text_parts: list[str] = []
         try:
-            with trace_flow(
-                "chat.drafting_init",
-                chat_session_id=session_id,
-                user_id=user_id,
-                template_id=tmpl["id"] if tmpl is not None else None,
-            ), chat_agent_scope():
+            with (
+                trace_flow(
+                    "chat.drafting_init",
+                    chat_session_id=session_id,
+                    user_id=user_id,
+                    template_id=tmpl["id"] if tmpl is not None else None,
+                ),
+                chat_agent_scope(),
+            ):
                 gen = run_chat_stream(messages)
                 async for ev in iterate_in_threadpool(gen):
                     if await request.is_disconnected():
@@ -393,7 +434,8 @@ async def drafting_init(
             await run_in_threadpool(sessions_repo.touch, session_id)
         except Exception:
             log.exception(
-                "failed to persist drafting kickoff turn session_id=%s", session_id,
+                "failed to persist drafting kickoff turn session_id=%s",
+                session_id,
             )
 
     headers = {
@@ -402,5 +444,7 @@ async def drafting_init(
         "X-Accel-Buffering": "no",
     }
     return StreamingResponse(
-        stream(), media_type="text/event-stream", headers=headers,
+        stream(),
+        media_type="text/event-stream",
+        headers=headers,
     )

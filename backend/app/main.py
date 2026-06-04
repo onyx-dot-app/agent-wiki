@@ -51,6 +51,7 @@ from app.auth.deps import CurrentUserMiddleware
 import app.config as _app_config
 from app.metrics import setup_prometheus
 from app.mcp_server import pubsub as mcp_pubsub
+from app.llm.errors import LLMError
 from app.models._helpers import ErrorResponse, QueueFullErrorResponse, RequestError
 from app.tasks.queues import QueueFullError
 
@@ -59,7 +60,11 @@ log = logging.getLogger(__name__)
 
 def _on_http_exception(_request: Request, exc: Exception) -> JSONResponse:
     assert isinstance(exc, FastAPIHTTPException)
-    content = exc.detail if isinstance(exc.detail, dict) else ErrorResponse(error=str(exc.detail)).model_dump()
+    content = (
+        exc.detail
+        if isinstance(exc.detail, dict)
+        else ErrorResponse(error=str(exc.detail)).model_dump()
+    )
     return JSONResponse(status_code=exc.status_code, content=content)
 
 
@@ -100,6 +105,18 @@ def _on_request_error(_request: Request, exc: Exception) -> JSONResponse:
     )
 
 
+# LLMError.code → HTTP status, per the contract documented on the class.
+_LLM_ERROR_STATUS = {"not_configured": 503, "auth": 502, "rate_limit": 429}
+
+
+def _on_llm_error(_request: Request, exc: Exception) -> JSONResponse:
+    assert isinstance(exc, LLMError)
+    return JSONResponse(
+        status_code=_LLM_ERROR_STATUS.get(exc.code, 502),
+        content=ErrorResponse(error=exc.message).model_dump(),
+    )
+
+
 def _install_error_handlers(app: FastAPI) -> None:
     """Translate domain exceptions into the standard
     ``{"error": "..."}`` envelope the frontend's ``ApiError`` parses."""
@@ -107,6 +124,7 @@ def _install_error_handlers(app: FastAPI) -> None:
     app.add_exception_handler(RequestValidationError, _on_validation_error)
     app.add_exception_handler(PermissionDenied, _on_permission_denied)
     app.add_exception_handler(QueueFullError, _on_queue_full)
+    app.add_exception_handler(LLMError, _on_llm_error)
     app.add_exception_handler(RequestError, _on_request_error)
 
 
