@@ -155,10 +155,15 @@ def status_counts() -> dict[str, int]:
 
 
 def admin_count() -> int:
+    """Number of *active* admins. The last-admin guards (demote / delete /
+    deactivate) rely on this — an inactive admin can't log in, so counting
+    them would let the sole active admin be removed and lock everyone out."""
     with session() as s:
         return (
             s.scalar(
-                select(func.count()).select_from(User).where(User.is_admin.is_(True))
+                select(func.count())
+                .select_from(User)
+                .where(User.is_admin.is_(True), User.is_active.is_(True))
             )
             or 0
         )

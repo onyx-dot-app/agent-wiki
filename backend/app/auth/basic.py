@@ -11,6 +11,9 @@ def authenticate(email: str, password: str) -> User | None:
         return None
     if not verify_password(password, row["password_hash"]):
         return None
+    if not row["is_active"]:
+        # Deactivated accounts can't authenticate.
+        return None
     return User(
         id=row["id"],
         email=row["email"],

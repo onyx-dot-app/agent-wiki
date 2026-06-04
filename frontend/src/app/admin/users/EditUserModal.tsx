@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
   Button,
@@ -40,17 +40,28 @@ export default function EditUserModal({
   onClose: () => void;
   onMutate: () => void;
 }) {
-  const { groups: allGroups } = useGroups();
+  const { groups: allGroups, isLoading: groupsLoading } = useGroups();
 
-  const initialMemberIds = useMemo(
-    () => new Set(allGroups.filter((g) => user.groups.includes(g.name)).map((g) => g.id)),
-    [allGroups, user.groups],
-  );
-  const [memberIds, setMemberIds] = useState<Set<string>>(initialMemberIds);
+  // Seed membership ONCE groups have loaded — reading it synchronously at
+  // mount would capture an empty set while /groups is still fetching, and
+  // saving would then drop every group the user is in.
+  const [memberIds, setMemberIds] = useState<Set<string>>(new Set());
+  const [initialized, setInitialized] = useState(false);
+  const initialMemberIdsRef = useRef<Set<string>>(new Set());
   const [search, setSearch] = useState("");
   const [pickerOpen, setPickerOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (initialized || groupsLoading) return;
+    const ids = new Set(
+      allGroups.filter((g) => user.groups.includes(g.name)).map((g) => g.id),
+    );
+    setMemberIds(ids);
+    initialMemberIdsRef.current = ids;
+    setInitialized(true);
+  }, [initialized, groupsLoading, allGroups, user.groups]);
 
   const dropdownGroups = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -63,8 +74,9 @@ export default function EditUserModal({
   );
 
   const hasChanges =
-    memberIds.size !== initialMemberIds.size ||
-    [...memberIds].some((id) => !initialMemberIds.has(id));
+    initialized &&
+    (memberIds.size !== initialMemberIdsRef.current.size ||
+      [...memberIds].some((id) => !initialMemberIdsRef.current.has(id)));
 
   function toggle(groupId: string) {
     setMemberIds((prev) => {
@@ -79,8 +91,8 @@ export default function EditUserModal({
     setBusy(true);
     setError(null);
     try {
-      const toAdd = [...memberIds].filter((id) => !initialMemberIds.has(id));
-      const toRemove = [...initialMemberIds].filter((id) => !memberIds.has(id));
+      const toAdd = [...memberIds].filter((id) => !initialMemberIdsRef.current.has(id));
+      const toRemove = [...initialMemberIdsRef.current].filter((id) => !memberIds.has(id));
       for (const gid of toAdd) await addGroupMember(gid, user.id);
       for (const gid of toRemove) await removeGroupMember(gid, user.id);
       onMutate();

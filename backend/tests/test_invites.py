@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from app.auth import invites
 from app.auth import users as users_repo
+from app.auth.basic import authenticate
 from tests._seed import seed_user
 
 
@@ -49,3 +50,22 @@ def test_set_active_and_status_counts(tmp_db):
     row = users_repo.get_by_id(a)
     assert row is not None
     assert row["is_active"] is False
+
+
+def test_admin_count_excludes_inactive(tmp_db):
+    seed_user(uid="u_a", email="a@x.com", is_admin=True)
+    b = seed_user(uid="u_b", email="b@x.com", is_admin=True)
+    assert users_repo.admin_count() == 2
+
+    # A deactivated admin can't log in, so the last-admin guards must not
+    # count them — otherwise the sole active admin could be removed.
+    users_repo.set_active(b, False)
+    assert users_repo.admin_count() == 1
+
+
+def test_deactivated_user_cannot_authenticate(tmp_db):
+    uid = users_repo.create("a@x.com", "secret-pw")
+    assert authenticate("a@x.com", "secret-pw") is not None
+
+    users_repo.set_active(uid, False)
+    assert authenticate("a@x.com", "secret-pw") is None

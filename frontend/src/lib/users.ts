@@ -6,7 +6,7 @@
  */
 import useSWR from "swr";
 
-import { apiFetch } from "@/lib/api";
+import { ApiError, apiFetch } from "@/lib/api";
 
 export interface UserLite {
   id: string;
@@ -109,11 +109,23 @@ export async function cancelInvite(email: string): Promise<void> {
 
 /** Fetch the users CSV (text/csv — not JSON, so a raw fetch, not apiFetch). */
 export async function downloadUsersCsv(): Promise<void> {
+  // A binary download can't go through apiFetch<T> (it parses JSON), so this
+  // is the one hand-rolled fetch — but it mirrors apiFetch's contract:
+  // credentials included, and the {error} envelope surfaced as an ApiError.
   const base = process.env.NEXT_PUBLIC_API_BASE ?? "/api";
   const res = await fetch(`${base}/admin/users/download`, {
     credentials: "include",
   });
-  if (!res.ok) throw new Error("Failed to download users CSV");
+  if (!res.ok) {
+    let message = "Failed to download users CSV";
+    try {
+      const body = (await res.json()) as { error?: string };
+      if (body.error) message = body.error;
+    } catch {
+      /* non-JSON error body — keep the generic message */
+    }
+    throw new ApiError(res.status, message);
+  }
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
