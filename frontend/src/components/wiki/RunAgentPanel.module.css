@@ -1,26 +1,16 @@
-/* Scrim + centered dialog — matches the ShareDialog modal pattern.
-   Top-weighted (palette-style) rather than dead center so the page
-   context stays readable behind the mask. No backdrop blur. */
-.scrim {
-  position: fixed;
-  inset: 0;
-  background: var(--mask-03);
-  display: flex;
-  align-items: flex-start;
-  justify-content: center;
-  padding: clamp(24px, 14vh, 140px) 16px 24px;
-  z-index: 100;
-}
-
 .panel {
-  width: min(520px, 100%);
-  max-height: calc(100vh - 80px);
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(464px, 92vw);
   background: var(--background-tint-00);
-  border-radius: var(--border-radius-12);
-  box-shadow: var(--shadow-modal);
+  border-left: 1px solid var(--border-01);
+  box-shadow: var(--shadow-panel);
   display: flex;
   flex-direction: column;
   overflow-y: auto;
+  z-index: 100;
 }
 
 /* Header band — Figma: padding 8, gap 8, items-start */

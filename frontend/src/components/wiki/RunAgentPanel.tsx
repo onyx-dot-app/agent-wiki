@@ -220,176 +220,169 @@ export function RunAgentPanel({ open, onClose, wikiPath }: Props) {
     launchable.some((c) => c.id === selectedId);
 
   return (
-    <div
-      className={styles.scrim}
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
+    <form
+      onSubmit={onRun}
+      role="dialog"
+      aria-modal={false}
+      aria-label="Quick Launch Agent"
+      className={styles.panel}
     >
-      <form
-        onSubmit={onRun}
-        role="dialog"
-        aria-modal="true"
-        aria-label="Quick Launch Agent"
-        className={styles.panel}
-      >
-        <div className={styles.headerBand}>
-          <div className={styles.headerText}>
-            <Text font="main-content-emphasis" color="text-04">
-              Quick Launch Agent
-            </Text>
-            <Text font="secondary-body" color="text-03">
-              Start a session with your external agents
-            </Text>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            className={styles.closeBtn}
-          >
-            <SvgX />
-          </button>
+      <div className={styles.headerBand}>
+        <div className={styles.headerText}>
+          <Text font="main-content-emphasis" color="text-04">
+            Quick Launch Agent
+          </Text>
+          <Text font="secondary-body" color="text-03">
+            Start a session with your external agents
+          </Text>
         </div>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close"
+          className={styles.closeBtn}
+        >
+          <SvgX />
+        </button>
+      </div>
 
-        {wizardOpen ? (
+      {wizardOpen ? (
+        <div className={styles.contentBand}>
+          <SetupWizard
+            onDone={() => {
+              setWizardOpen(false);
+              refreshProbe();
+              void refreshCatalog();
+            }}
+            onCancel={() => setWizardOpen(false)}
+          />
+        </div>
+      ) : (
+        <>
           <div className={styles.contentBand}>
-            <SetupWizard
-              onDone={() => {
-                setWizardOpen(false);
-                refreshProbe();
-                void refreshCatalog();
-              }}
-              onCancel={() => setWizardOpen(false)}
-            />
-          </div>
-        ) : (
-          <>
-            <div className={styles.contentBand}>
-              <div className={styles.section}>
-                <Text font="main-ui-action" color="text-04">
-                  Agent to Launch
+            <div className={styles.section}>
+              <Text font="main-ui-action" color="text-04">
+                Agent to Launch
+              </Text>
+              {launchable.length === 0 ? (
+                <Text font="secondary-body" color="text-03">
+                  No launchable agents available yet.
                 </Text>
-                {launchable.length === 0 ? (
-                  <Text font="secondary-body" color="text-03">
-                    No launchable agents available yet.
-                  </Text>
-                ) : (
-                  <>
-                    <button
-                      type="button"
-                      className={styles.select}
-                      onClick={() => setPickerOpen((o) => !o)}
-                    >
-                      {SelectedIcon && (
-                        <span className={styles.selectIcon}>
-                          <SelectedIcon />
-                        </span>
-                      )}
-                      <span className={styles.selectName}>{selectedName}</span>
-                      <span className={styles.selectChevron}>
-                        <SvgChevronDown />
-                      </span>
-                    </button>
-                    {pickerOpen && launchable.length > 1 && (
-                      <div className={styles.picker}>
-                        {launchable.map((c) => (
-                          <ToolCard
-                            key={c.id}
-                            toolId={c.id}
-                            name={c.name}
-                            tagline={c.tagline}
-                            selected={c.id === selectedId}
-                            onSelect={() => {
-                              setSelectedId(c.id);
-                              setPickerOpen(false);
-                            }}
-                          />
-                        ))}
-                      </div>
-                    )}
-                  </>
-                )}
-              </div>
-
-              {selectedKind === "local_cli" && (
+              ) : (
                 <>
-                  <WorkingDirInput
-                    value={workingDir}
-                    onChange={handleWorkdirChange}
-                    remember={rememberWorkdir}
-                    onRememberChange={setRememberWorkdir}
-                    pageHasBinding={!!selected?.default_working_dir}
-                  />
-
-                  {(() => {
-                    const warning = selected?.unscoped_workdir_warning;
-                    if (!warning || workingDir.trim().length > 0) return null;
-                    const body = warning.replace(
-                      /^No directory set\s*[—-]\s*/,
-                      "",
-                    );
-                    return (
-                      <MessageCard
-                        variant="warning"
-                        title="No directory set"
-                        description={body}
-                      />
-                    );
-                  })()}
+                  <button
+                    type="button"
+                    className={styles.select}
+                    onClick={() => setPickerOpen((o) => !o)}
+                  >
+                    {SelectedIcon && (
+                      <span className={styles.selectIcon}>
+                        <SelectedIcon />
+                      </span>
+                    )}
+                    <span className={styles.selectName}>{selectedName}</span>
+                    <span className={styles.selectChevron}>
+                      <SvgChevronDown />
+                    </span>
+                  </button>
+                  {pickerOpen && launchable.length > 1 && (
+                    <div className={styles.picker}>
+                      {launchable.map((c) => (
+                        <ToolCard
+                          key={c.id}
+                          toolId={c.id}
+                          name={c.name}
+                          tagline={c.tagline}
+                          selected={c.id === selectedId}
+                          onSelect={() => {
+                            setSelectedId(c.id);
+                            setPickerOpen(false);
+                          }}
+                        />
+                      ))}
+                    </div>
+                  )}
                 </>
               )}
+            </div>
 
-              <div className={styles.divider} />
+            {selectedKind === "local_cli" && (
+              <>
+                <WorkingDirInput
+                  value={workingDir}
+                  onChange={handleWorkdirChange}
+                  remember={rememberWorkdir}
+                  onRememberChange={setRememberWorkdir}
+                  pageHasBinding={!!selected?.default_working_dir}
+                />
 
-              <div className={styles.section}>
-                <Text font="main-ui-action" color="text-04">
-                  Message
-                </Text>
-                <div className={styles.taginput}>
-                  <div className={styles.taginputBody}>
-                    {docContextOn && docLabel && (
-                      <span className={styles.chip}>
-                        <SvgFileText />
-                        <span className={styles.chipLabel}>{docLabel}</span>
-                        <button
-                          type="button"
-                          className={styles.chipClose}
-                          aria-label="Remove page context"
-                          onClick={() => setDocContextOn(false)}
-                        >
-                          <SvgX />
-                        </button>
-                      </span>
-                    )}
-                    <textarea
-                      id="run-agent-message"
-                      className={styles.taginputArea}
-                      value={message}
-                      onChange={(e) => setMessage(e.target.value)}
-                      placeholder="Add more details and tasks for the agent"
-                      rows={3}
-                      maxLength={16_384}
+                {(() => {
+                  const warning = selected?.unscoped_workdir_warning;
+                  if (!warning || workingDir.trim().length > 0) return null;
+                  const body = warning.replace(
+                    /^No directory set\s*[—-]\s*/,
+                    "",
+                  );
+                  return (
+                    <MessageCard
+                      variant="warning"
+                      title="No directory set"
+                      description={body}
                     />
-                  </div>
+                  );
+                })()}
+              </>
+            )}
+
+            <div className={styles.divider} />
+
+            <div className={styles.section}>
+              <Text font="main-ui-action" color="text-04">
+                Message
+              </Text>
+              <div className={styles.taginput}>
+                <div className={styles.taginputBody}>
+                  {docContextOn && docLabel && (
+                    <span className={styles.chip}>
+                      <SvgFileText />
+                      <span className={styles.chipLabel}>{docLabel}</span>
+                      <button
+                        type="button"
+                        className={styles.chipClose}
+                        aria-label="Remove page context"
+                        onClick={() => setDocContextOn(false)}
+                      >
+                        <SvgX />
+                      </button>
+                    </span>
+                  )}
+                  <textarea
+                    id="run-agent-message"
+                    className={styles.taginputArea}
+                    value={message}
+                    onChange={(e) => setMessage(e.target.value)}
+                    placeholder="Add more details and tasks for the agent"
+                    rows={3}
+                    maxLength={16_384}
+                  />
                 </div>
               </div>
-
-              {error && <MessageCard variant="error" title={error} />}
             </div>
 
-            <div className={styles.footerBand}>
-              <span className={styles.helper}>
-                This will launch a session in <strong>{selectedName}</strong>{" "}
-                with your message.
-              </span>
-              <Button type="submit" variant="action" disabled={!canRun || busy}>
-                {busy ? "Launching..." : "Start"}
-              </Button>
-            </div>
-          </>
-        )}
-      </form>
-    </div>
+            {error && <MessageCard variant="error" title={error} />}
+          </div>
+
+          <div className={styles.footerBand}>
+            <span className={styles.helper}>
+              This will launch a session in <strong>{selectedName}</strong> with
+              your message.
+            </span>
+            <Button type="submit" variant="action" disabled={!canRun || busy}>
+              {busy ? "Launching..." : "Start"}
+            </Button>
+          </div>
+        </>
+      )}
+    </form>
   );
 }
