@@ -186,12 +186,21 @@ function SettingsForm({
     setTzCustom(!COMMON_TIMEZONES.includes(tz));
   }, [initial]);
 
+  // The baseline the form diffs against: identical to `initial`, but with the
+  // timezone resolved the same way the field displays it. Both `dirty` and the
+  // save diff use this, so a save that didn't touch the timezone never patches
+  // it — leaving an unset (null) timezone unset rather than pinning the local
+  // zone.
+  const baseline = useMemo<UserSettings>(
+    () => ({ ...initial, timezone: effectiveTimezone(initial.timezone) }),
+    [initial],
+  );
+
   const dirty = useMemo(() => {
-    const cmp = { ...initial, timezone: effectiveTimezone(initial.timezone) };
     return (Object.keys(draft) as (keyof UserSettings)[]).some(
-      (k) => draft[k] !== cmp[k],
+      (k) => draft[k] !== baseline[k],
     );
-  }, [draft, initial]);
+  }, [draft, baseline]);
 
   function update<K extends keyof UserSettings>(
     key: K,
@@ -218,7 +227,7 @@ function SettingsForm({
     try {
       const partial: Partial<UserSettings> = {};
       (Object.keys(draft) as (keyof UserSettings)[]).forEach((k) => {
-        if (draft[k] !== initial[k]) {
+        if (draft[k] !== baseline[k]) {
           (partial as Record<string, unknown>)[k] = draft[k];
         }
       });
