@@ -534,8 +534,10 @@ def test_rebuild_preserves_schedule_last_fired_at(tmp_repo):
         schedule_timezone="America/Los_Angeles",
     )
     repo.record_schedule_fire(t["id"], "2026-06-04T16:00:00+00:00")
-    assert repo.get(t["id"])["schedule_last_fired_at"] == "2026-06-04T16:00:00+00:00"
+    before = repo.get(t["id"])
+    assert before is not None and before["schedule_last_fired_at"] == "2026-06-04T16:00:00+00:00"
 
     repo.rebuild_from_filesystem()
 
-    assert repo.get(t["id"])["schedule_last_fired_at"] == "2026-06-04T16:00:00+00:00"
+    after = repo.get(t["id"])
+    assert after is not None and after["schedule_last_fired_at"] == "2026-06-04T16:00:00+00:00"

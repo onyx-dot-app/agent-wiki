@@ -239,10 +239,11 @@ def _commit_date(iso: str):
         yield
     finally:
         for k in keys:
-            if prev[k] is None:
+            v = prev[k]
+            if v is None:
                 os.environ.pop(k, None)
             else:
-                os.environ[k] = prev[k]
+                os.environ[k] = v
 
 
 def test_changes_since_follows_rename(tmp_repo, tmp_config):
