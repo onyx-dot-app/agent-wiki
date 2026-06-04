@@ -43,16 +43,31 @@ interface RowActions {
 }
 
 const ActionsContext = createContext<RowActions | null>(null);
-export const useRowActions = () => useContext(ActionsContext);
+export function useRowActions(): RowActions {
+  const ctx = useContext(ActionsContext);
+  if (!ctx)
+    throw new Error(
+      "useRowActions must be used within WikiItemActionsProvider",
+    );
+  return ctx;
+}
 
 /** The folder new pages/folders are created inside ("" = wiki root). Lives here
- * (not in WikiTree) so deletes — owned by this provider — can reset it. */
+ * (not in WikiTree) so deletes/renames/moves — owned by this provider — can
+ * keep it coherent. */
 interface ActiveFolder {
   activeFolder: string;
   setActiveFolder: (path: string) => void;
 }
 const ActiveFolderContext = createContext<ActiveFolder | null>(null);
-export const useActiveFolder = () => useContext(ActiveFolderContext);
+export function useActiveFolder(): ActiveFolder {
+  const ctx = useContext(ActiveFolderContext);
+  if (!ctx)
+    throw new Error(
+      "useActiveFolder must be used within WikiItemActionsProvider",
+    );
+  return ctx;
+}
 
 /** Every folder path in the tree (plus root ""), for the move-destination list. */
 function collectFolders(entries: Entry[]): string[] {
@@ -91,9 +106,9 @@ export function WikiItemMenu({
   children: ReactNode;
 }) {
   const actions = useRowActions();
-  const run = (fn?: (p: string) => void) => () => {
+  const run = (fn: (p: string) => void) => () => {
     onOpenChange(false);
-    fn?.(path);
+    fn(path);
   };
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
@@ -105,21 +120,21 @@ export function WikiItemMenu({
             sizePreset="main-ui"
             icon={SvgShare}
             title="Share"
-            onClick={run(actions?.share)}
+            onClick={run(actions.share)}
           />
           <LineItemButton
             variant="body"
             sizePreset="main-ui"
             icon={SvgEdit}
             title="Rename"
-            onClick={run(actions?.rename)}
+            onClick={run(actions.rename)}
           />
           <LineItemButton
             variant="body"
             sizePreset="main-ui"
             icon={SvgFolderIn}
             title="Move"
-            onClick={run(actions?.move)}
+            onClick={run(actions.move)}
           />
           <Divider />
           <LineItemButton
@@ -127,7 +142,7 @@ export function WikiItemMenu({
             sizePreset="main-ui"
             icon={SvgLink}
             title="Copy Link"
-            onClick={run(actions?.copyLink)}
+            onClick={run(actions.copyLink)}
           />
           {!isFolder && (
             <LineItemButton
@@ -135,7 +150,7 @@ export function WikiItemMenu({
               sizePreset="main-ui"
               icon={SvgSparkle}
               title="Launch Agent"
-              onClick={run(actions?.launchAgent)}
+              onClick={run(actions.launchAgent)}
             />
           )}
           <Divider />
@@ -147,7 +162,7 @@ export function WikiItemMenu({
               title="Delete"
               onClick={() => {
                 onOpenChange(false);
-                actions?.remove(path, isFolder);
+                actions.remove(path, isFolder);
               }}
             />
           </span>
@@ -189,6 +204,17 @@ export function WikiItemActionsProvider({ children }: { children: ReactNode }) {
       (key) => typeof key === "string" && key.startsWith("/wiki/recent"),
     );
   };
+
+  // Keep the active folder pointing at the right path after a rename/move of it
+  // (or an ancestor). No-op for file renames/moves (active folder never .md).
+  const remapActiveFolder = (oldPath: string, newPath: string) =>
+    setActiveFolder((prev) =>
+      prev === oldPath
+        ? newPath
+        : prev.startsWith(`${oldPath}/`)
+          ? newPath + prev.slice(oldPath.length)
+          : prev,
+    );
 
   const actions: RowActions = {
     share: setSharePath,
@@ -246,7 +272,8 @@ export function WikiItemActionsProvider({ children }: { children: ReactNode }) {
               <RenameModal
                 path={renamePath}
                 onClose={() => setRenamePath(null)}
-                onDone={() => {
+                onDone={(newPath) => {
+                  remapActiveFolder(renamePath, newPath);
                   setRenamePath(null);
                   refresh();
                 }}
@@ -257,7 +284,8 @@ export function WikiItemActionsProvider({ children }: { children: ReactNode }) {
                 path={movePath}
                 folders={collectFolders(entries)}
                 onClose={() => setMovePath(null)}
-                onDone={() => {
+                onDone={(newPath) => {
+                  remapActiveFolder(movePath, newPath);
                   setMovePath(null);
                   refresh();
                 }}

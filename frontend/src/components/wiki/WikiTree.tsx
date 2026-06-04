@@ -201,10 +201,7 @@ export function WikiTree() {
   // The folder new pages/folders are created inside ("" = wiki root). State
   // lives in the provider so deletes can reset it. Clicking a folder row makes
   // it active; the active row is highlighted (`selected`).
-  const { activeFolder, setActiveFolder } = useActiveFolder() ?? {
-    activeFolder: "",
-    setActiveFolder: () => {},
-  };
+  const { activeFolder, setActiveFolder } = useActiveFolder();
   const activeLabel = activeFolder.split("/").pop() ?? "";
 
   // Expanded folders, persisted to sessionStorage so they survive a refresh.
