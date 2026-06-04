@@ -29,6 +29,7 @@ import { listTemplateSummaries } from "@/lib/templates";
 import type { DocumentTemplateSummary } from "@/lib/templates";
 import type { RecentPage } from "@/lib/wiki";
 
+import { WikiItemActionsProvider, WikiItemMenu } from "./WikiItemActions";
 import { WikiTree } from "./WikiTree";
 import styles from "./WikiHome.module.css";
 
@@ -82,109 +83,111 @@ export function WikiHome() {
         </div>
       </div>
 
-      <div className={styles.body}>
-        <div className={styles.sidebar}>
-          <WikiTree />
-        </div>
-
-        <div className={styles.column}>
-          {/* Hero */}
-          <div className={styles.hero}>
-            <span className={styles.heroMark}>
-              <SvgOnyxLogo size={32} />
-            </span>
-            <h1 className={styles.heroTitle}>Welcome to Onyx Wiki</h1>
-          </div>
-          <div className={styles.dividerWrap}>
-            <Divider />
+      <WikiItemActionsProvider>
+        <div className={styles.body}>
+          <div className={styles.sidebar}>
+            <WikiTree />
           </div>
 
-          {/* Start a new page */}
-          <div className={styles.sectionHeader}>
-            <span className={styles.secHead}>Start a new page</span>
-          </div>
-          <div className={styles.templates}>
-            <div className={styles.templateCell}>
-              <TemplateCard
-                title="Blank page"
-                glyph={
-                  <span className={styles.blankGlyph}>
-                    <SvgPlusCircle size={22} />
-                  </span>
-                }
-                onClick={() => startNewPage()}
-              />
+          <div className={styles.column}>
+            {/* Hero */}
+            <div className={styles.hero}>
+              <span className={styles.heroMark}>
+                <SvgOnyxLogo size={32} />
+              </span>
+              <h1 className={styles.heroTitle}>Welcome to Onyx Wiki</h1>
             </div>
-            {featured.map((t) => (
-              <div key={t.id} className={styles.templateCell}>
+            <div className={styles.dividerWrap}>
+              <Divider />
+            </div>
+
+            {/* Start a new page */}
+            <div className={styles.sectionHeader}>
+              <span className={styles.secHead}>Start a new page</span>
+            </div>
+            <div className={styles.templates}>
+              <div className={styles.templateCell}>
                 <TemplateCard
-                  title={t.name}
-                  description={t.description ?? ""}
-                  onClick={() => startNewPage(t.id)}
+                  title="Blank page"
+                  glyph={
+                    <span className={styles.blankGlyph}>
+                      <SvgPlusCircle size={22} />
+                    </span>
+                  }
+                  onClick={() => startNewPage()}
                 />
               </div>
-            ))}
-          </div>
-          <button
-            type="button"
-            className={styles.moreRow}
-            onClick={() => startNewPage()}
-          >
-            <span className={styles.moreLabel}>More Templates</span>
-            <SvgChevronRight size={18} className={styles.moreChevron} />
-          </button>
-
-          {/* Write with AI */}
-          <div className={styles.aiRow}>
-            <span className={styles.aiGutterIcon}>
-              <SvgOnyxOctagon size={18} />
-            </span>
-            <form className={styles.aiInputWrap} onSubmit={onAiSubmit}>
-              <InputTypeIn
-                value={aiPrompt}
-                onChange={(e) => setAiPrompt(e.target.value)}
-                placeholder="Start writing with AI…"
-                aria-label="Start writing with AI"
-                rightChildren={
-                  <Button
-                    type="submit"
-                    size="sm"
-                    prominence="tertiary"
-                    icon={SvgArrowUp}
-                    disabled={!aiPrompt.trim()}
-                    aria-label="Start writing"
-                  />
-                }
-              />
-            </form>
-          </div>
-
-          <div className={styles.midDividerWrap}>
-            <Divider />
-          </div>
-
-          {/* Recent Pages */}
-          <div className={styles.sectionHeader}>
-            <span className={styles.secHeadLg}>Recent Pages</span>
-          </div>
-          {recent.length === 0 ? (
-            <p className={styles.empty}>
-              No pages yet. Create one to get started.
-            </p>
-          ) : (
-            <div className={styles.recentGrid}>
-              {recent.map((p) => (
-                <div key={p.path} className={styles.recentCell}>
-                  <RecentCard
-                    page={p}
-                    onClick={() => router.push(`/app/wiki/${p.path}`)}
+              {featured.map((t) => (
+                <div key={t.id} className={styles.templateCell}>
+                  <TemplateCard
+                    title={t.name}
+                    description={t.description ?? ""}
+                    onClick={() => startNewPage(t.id)}
                   />
                 </div>
               ))}
             </div>
-          )}
+            <button
+              type="button"
+              className={styles.moreRow}
+              onClick={() => startNewPage()}
+            >
+              <span className={styles.moreLabel}>More Templates</span>
+              <SvgChevronRight size={18} className={styles.moreChevron} />
+            </button>
+
+            {/* Write with AI */}
+            <div className={styles.aiRow}>
+              <span className={styles.aiGutterIcon}>
+                <SvgOnyxOctagon size={18} />
+              </span>
+              <form className={styles.aiInputWrap} onSubmit={onAiSubmit}>
+                <InputTypeIn
+                  value={aiPrompt}
+                  onChange={(e) => setAiPrompt(e.target.value)}
+                  placeholder="Start writing with AI…"
+                  aria-label="Start writing with AI"
+                  rightChildren={
+                    <Button
+                      type="submit"
+                      size="sm"
+                      prominence="tertiary"
+                      icon={SvgArrowUp}
+                      disabled={!aiPrompt.trim()}
+                      aria-label="Start writing"
+                    />
+                  }
+                />
+              </form>
+            </div>
+
+            <div className={styles.midDividerWrap}>
+              <Divider />
+            </div>
+
+            {/* Recent Pages */}
+            <div className={styles.sectionHeader}>
+              <span className={styles.secHeadLg}>Recent Pages</span>
+            </div>
+            {recent.length === 0 ? (
+              <p className={styles.empty}>
+                No pages yet. Create one to get started.
+              </p>
+            ) : (
+              <div className={styles.recentGrid}>
+                {recent.map((p) => (
+                  <div key={p.path} className={styles.recentCell}>
+                    <RecentCard
+                      page={p}
+                      onClick={() => router.push(`/app/wiki/${p.path}`)}
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
-      </div>
+      </WikiItemActionsProvider>
     </main>
   );
 }
@@ -238,6 +241,7 @@ function RecentCard({
   page: RecentPage;
   onClick: () => void;
 }) {
+  const [menuOpen, setMenuOpen] = useState(false);
   return (
     <SelectCard
       state="empty"
@@ -264,15 +268,28 @@ function RecentCard({
               ? `Updated ${relativeTime(page.updated_at, "long")}`
               : "—"}
           </Text>
-          <Button
-            size="sm"
-            prominence="tertiary"
-            icon={SvgMoreHorizontal}
-            aria-label="More"
-            onClick={(e) => {
-              e.stopPropagation();
-            }}
-          />
+          <WikiItemMenu
+            path={page.path}
+            isFolder={false}
+            open={menuOpen}
+            onOpenChange={setMenuOpen}
+            align="end"
+          >
+            {/* Plain span trigger — OPAL Button doesn't forward ref/onClick
+                into Popover.Trigger asChild; the span anchors the popover and
+                stops the click from navigating the card. */}
+            <span
+              className={styles.menuTrigger}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <Button
+                size="sm"
+                prominence="tertiary"
+                icon={SvgMoreHorizontal}
+                aria-label="More"
+              />
+            </span>
+          </WikiItemMenu>
         </div>
       </div>
     </SelectCard>

@@ -224,6 +224,11 @@
   padding: 4px 4px 4px 12px;
 }
 
+/* Ref-forwarding wrapper for the OPAL Button inside Popover.Trigger asChild. */
+.menuTrigger {
+  display: inline-flex;
+}
+
 .cardPreview {
   flex: 1;
   min-height: 0;

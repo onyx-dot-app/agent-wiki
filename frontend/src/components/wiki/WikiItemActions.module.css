@@ -1,0 +1,35 @@
+/* Shared contextual-menu surface for wiki items (sidebar tree + recent cards).
+   Holds only the menu content + transient toast; per-surface trigger styling
+   (e.g. the tree's hover-revealed "⋯") stays with that surface. */
+
+/* Contextual menu (657:41564): fixed 160px width, line items in a column. */
+.menu {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 160px;
+  box-sizing: border-box;
+}
+
+/* Delete item — danger red (#dc2626 → --status-text-error-05) on icon + label.
+   !important to override OPAL LineItemButton's own text/icon color; scoped to
+   the single wrapped Delete item. */
+.danger,
+.danger :global(*) {
+  color: var(--status-text-error-05) !important;
+}
+
+/* Transient toast (e.g. "Link copied") — bottom-centre, auto-dismisses. */
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 32px;
+  transform: translateX(-50%);
+  z-index: var(--z-toast);
+  padding: 8px 14px;
+  border-radius: var(--border-radius-08);
+  background: var(--background-tint-04);
+  color: var(--text-05);
+  font-size: 13px;
+  box-shadow: var(--shadow-popover);
+}
