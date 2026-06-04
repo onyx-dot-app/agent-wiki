@@ -19,8 +19,9 @@ import uuid
 from typing import Any
 
 from sqlalchemy import func, select, update
+from sqlalchemy.orm import Session
 
-from app.db.models import Comment
+from app.db.models import Comment, User
 from app.db.session import execute_dml, session
 from app.models.comment import CommentAuthorKind, CommentScope, CommentStatus
 
@@ -35,7 +36,20 @@ _VALID_AUTHOR_KINDS = frozenset(k.value for k in CommentAuthorKind)
 _SETTABLE_STATUSES = frozenset({CommentStatus.OPEN.value, CommentStatus.RESOLVED.value})
 
 
-def _to_dict(c: Comment) -> dict[str, Any]:
+def _author_display(c: Comment, s: Session) -> str | None:
+    """Human label for the comment's author: the user's name (or email) for a
+    user comment, "Agent" for an agent comment. Resolved on the open session so
+    the panel can show who wrote it instead of a generic "User"."""
+    if c.author_user_id:
+        u = s.get(User, c.author_user_id)
+        if u is not None:
+            return u.name or u.email
+    if c.author_kind == CommentAuthorKind.AGENT.value:
+        return "Agent"
+    return None
+
+
+def _to_dict(c: Comment, s: Session) -> dict[str, Any]:
     return {
         "id": c.id,
         "doc_path": c.doc_path,
@@ -48,6 +62,7 @@ def _to_dict(c: Comment) -> dict[str, Any]:
         "quoted_text": c.quoted_text,
         "author_kind": c.author_kind,
         "author_user_id": c.author_user_id,
+        "author_display": _author_display(c, s),
         "body": c.body,
         "status": c.status,
         "resolved_by_user_id": c.resolved_by_user_id,
@@ -117,7 +132,7 @@ def create_thread(
         )
         s.add(c)
         s.flush()
-        result = _to_dict(c)
+        result = _to_dict(c, s)
     log.info("comment thread created id=%s doc=%s", cid, doc_path)
     return result
 
@@ -160,7 +175,7 @@ def add_reply(
         )
         s.add(c)
         s.flush()
-        return _to_dict(c)
+        return _to_dict(c, s)
 
 
 # --------------------------------------------------------------------------- #
@@ -171,7 +186,7 @@ def add_reply(
 def get(comment_id: str) -> dict[str, Any] | None:
     with session() as s:
         c = s.get(Comment, comment_id)
-        return _to_dict(c) if c else None
+        return _to_dict(c, s) if c else None
 
 
 def list_for_doc(doc_path: str) -> list[dict[str, Any]]:
@@ -184,7 +199,7 @@ def list_for_doc(doc_path: str) -> list[dict[str, Any]]:
             .where(Comment.doc_path == doc_path)
             .order_by(Comment.created_at.asc())
         ).all()
-        return [_to_dict(c) for c in rows]
+        return [_to_dict(c, s) for c in rows]
 
 
 def list_thread(thread_root_id: str) -> list[dict[str, Any]]:
@@ -194,7 +209,7 @@ def list_thread(thread_root_id: str) -> list[dict[str, Any]]:
             .where(Comment.thread_root_id == thread_root_id)
             .order_by(Comment.created_at.asc())
         ).all()
-        return [_to_dict(c) for c in rows]
+        return [_to_dict(c, s) for c in rows]
 
 
 # --------------------------------------------------------------------------- #
@@ -210,7 +225,7 @@ def edit_body(comment_id: str, body: str) -> dict[str, Any] | None:
         c.body = body
         c.updated_at = _now_text(s)
         s.flush()
-        return _to_dict(c)
+        return _to_dict(c, s)
 
 
 def set_thread_status(
@@ -238,7 +253,7 @@ def set_thread_status(
             root.resolved_by_user_id = None
             root.resolved_at = None
         s.flush()
-        return _to_dict(root)
+        return _to_dict(root, s)
 
 
 def delete(comment_id: str) -> bool:
@@ -294,7 +309,7 @@ def roots_needing_remap(doc_path: str, head_sha: str) -> list[dict[str, Any]]:
                 Comment.anchor_sha != head_sha,
             )
         ).all()
-        return [_to_dict(c) for c in rows]
+        return [_to_dict(c, s) for c in rows]
 
 
 def apply_remap(

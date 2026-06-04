@@ -54,6 +54,7 @@ export interface CommentView {
   quoted_text: string | null;
   author_kind: CommentAuthorKind;
   author_user_id: string | null;
+  author_display: string | null;
   body: string;
   status: CommentStatus;
   resolved_by_user_id: string | null;

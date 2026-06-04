@@ -81,6 +81,9 @@ class CommentView(BaseModel):
     quoted_text: str | None
     author_kind: CommentAuthorKind
     author_user_id: str | None
+    # Human label for the author (user's name/email, or "Agent"); None when the
+    # author can't be resolved. Display-only — authorization still uses the id.
+    author_display: str | None = None
     body: str
     status: CommentStatus
     resolved_by_user_id: str | None

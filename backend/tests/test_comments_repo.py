@@ -253,3 +253,33 @@ def test_orphan_all_for_doc_on_delete(tmp_db):
     got = comments.get(r2["id"])
     assert got is not None
     assert got["status"] == "orphaned"
+
+
+def test_author_display_resolves_name_then_email(tmp_db):
+    # The panel showed a generic "User"; the repo must surface the author's
+    # name (or email when unnamed) so others can be told apart.
+    named = seed_user(uid="u_named", email="n@x.com", name="Nora Dev")
+    unnamed = seed_user(uid="u_unnamed", email="bob@x.com")
+    r1 = _seed_root(named, sha="s1")
+    r2 = comments.create_thread(
+        doc_path=_DOC, body="hi", author_user_id=unnamed,
+        anchor_sha="s2", start_offset=1, end_offset=2, quoted_text="x",
+    )
+
+    # create return, get, and list (the panel path) all carry the display.
+    assert r1["author_display"] == "Nora Dev"
+    got = comments.get(r2["id"])
+    assert got is not None and got["author_display"] == "bob@x.com"
+    by_id = {c["id"]: c for c in comments.list_for_doc(_DOC)}
+    assert by_id[r1["id"]]["author_display"] == "Nora Dev"
+    assert by_id[r2["id"]]["author_display"] == "bob@x.com"
+
+
+def test_author_display_agent_comment(tmp_db):
+    c = comments.create_thread(
+        doc_path=_DOC, body="auto note", author_user_id=None,
+        anchor_sha="s3", start_offset=1, end_offset=2, quoted_text="x",
+        author_kind="agent",
+    )
+    got = comments.get(c["id"])
+    assert got is not None and got["author_display"] == "Agent"
