@@ -256,8 +256,7 @@ def test_orphan_all_for_doc_on_delete(tmp_db):
 
 
 def test_author_display_resolves_name_then_email(tmp_db):
-    # The panel showed a generic "User"; the repo must surface the author's
-    # name (or email when unnamed) so others can be told apart.
+    # author_display is the author's name, falling back to email when unnamed.
     named = seed_user(uid="u_named", email="n@x.com", name="Nora Dev")
     unnamed = seed_user(uid="u_unnamed", email="bob@x.com")
     r1 = _seed_root(named, sha="s1")
