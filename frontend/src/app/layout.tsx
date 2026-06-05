@@ -12,7 +12,7 @@ import { ThemeBootstrapScript, ThemeProvider } from "@/lib/theme-provider";
 
 const hankenGrotesk = Hanken_Grotesk({
   subsets: ["latin"],
-  variable: "--font-hanken-grotesk",
+  variable: "--font-hanken-loaded",
   display: "swap",
   fallback: [
     "-apple-system",
@@ -26,7 +26,7 @@ const hankenGrotesk = Hanken_Grotesk({
 const dmMono = DM_Mono({
   weight: "400",
   subsets: ["latin"],
-  variable: "--font-dm-mono",
+  variable: "--font-dm-mono-loaded",
   display: "swap",
   fallback: [
     "SF Mono",
