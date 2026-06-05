@@ -223,6 +223,7 @@ def search(
     user_id: str | None = None,
     is_admin: bool = False,
     apply_visibility: bool = True,
+    raise_on_error: bool = False,
 ) -> list[SearchHit]:
     client = _get_client()
     if client is None:
@@ -252,6 +253,12 @@ def search(
         c: OpenSearch = client  # type: ignore[assignment]
         resp = c.search(index=_index_name(), body=body)
     except Exception:
+        # Callers that need to tell a real backend failure (e.g. OpenSearch
+        # rejecting an oversized query) apart from a genuine no-match pass
+        # raise_on_error=True. The default swallows so search-surface callers
+        # degrade to empty results.
+        if raise_on_error:
+            raise
         log.warning("fts: search failed for query %r", query, exc_info=True)
         return []
 

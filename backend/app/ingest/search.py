@@ -25,6 +25,12 @@ log = logging.getLogger(__name__)
 _TOKEN_RE = re.compile(r"\w+")
 
 
+class IngestSearchError(Exception):
+    """The BM25 candidate search failed (backend error), as opposed to
+    returning no matches. Lets the reconciler record a distinct outcome
+    instead of silently treating the failure as ``no_candidates``."""
+
+
 def _tokens(text: str) -> set[str]:
     return {t.lower() for t in _TOKEN_RE.findall(text)}
 
@@ -41,7 +47,18 @@ def candidates(content: str, title: str | None) -> list[SearchHit]:
     Title similarity boosts the raw BM25 score before thresholding so
     pages whose titles closely match the incoming document rank higher.
     """
-    hits = fts_search(content, limit=CONFIG.ingest_bm25_limit, apply_visibility=False)
+    try:
+        hits = fts_search(
+            content,
+            limit=CONFIG.ingest_bm25_limit,
+            apply_visibility=False,
+            raise_on_error=True,
+        )
+    except Exception as exc:
+        # A backend failure (e.g. OpenSearch rejecting an oversized query) is
+        # not "no candidates" — surface it so the reconciler records it
+        # distinctly rather than silently dropping the document.
+        raise IngestSearchError(str(exc)) from exc
     if not hits:
         log.debug("ingest candidates: no BM25 hits for title=%r", title)
         return []
