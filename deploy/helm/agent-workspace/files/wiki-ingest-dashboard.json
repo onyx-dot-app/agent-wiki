@@ -504,8 +504,8 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 16,
-        "x": 8,
+        "w": 12,
+        "x": 12,
         "y": 1
       },
       "id": 11,
@@ -538,6 +538,68 @@
       "title": "Documents Ingested (24h) by Source Type",
       "type": "stat",
       "transformations": []
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Wiki page commits produced by document ingestion (ingest_outcomes_total{outcome=\"committed\"}, summed over 24h). This is what actually updated the wiki — unlike \"Documents Ingested\", which counts ingest requests received.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "green",
+            "mode": "fixed"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 8,
+        "y": 1
+      },
+      "id": 51,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "round(sum(increase(ingest_outcomes_total{outcome=\"committed\"}[24h])))",
+          "legendFormat": "Wiki Updates",
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Wiki Updates from Ingestion (24h)",
+      "type": "stat"
     },
     {
       "datasource": {
