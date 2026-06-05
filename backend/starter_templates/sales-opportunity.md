@@ -16,69 +16,36 @@ description: Living account record — qualification, calls, concerns, budget, a
 
 ## Snapshot
 
-A two-or-three-sentence read on where this deal stands and what would move it forward. Update this whenever the rest of the doc updates — it is the part executives and your manager will actually read.
+A two-or-three-sentence read on where this deal stands, how at risk it is, and what would move it forward. Update this high level summary as the rest of the document changes. This should be always a high level overview. Also do not remove this note!
 
 ## Company
 
-- **Industry:**
-- **Size:** <employees> / <revenue band>
-- **Geography:**
-- **Tech stack relevant to us:**
-- **Public context:** funding rounds, leadership changes, press, layoffs, anything that affects buying behavior
+Replace this with context you know about the company or what was mentioned in the calls which might be helpful overall context.
 
 ## Use case
 
-What are they trying to do, and what would success look like for them? Frame this in their words wherever possible.
-
-## Qualification (MEDDPICC)
-
-**M — Metrics**
-
-What is the quantifiable pain or upside? "What would you measure six months in?" If you cannot answer this, you do not yet have a deal.
-
-**E — Economic buyer**
-
-Who can actually sign? Have we met them? If not, what is the path to getting in front of them?
-
-**D — Decision criteria**
-
-What will they evaluate us on, and in what order? Functional, technical, commercial, vendor risk.
-
-**D — Decision process**
-
-What are the steps from here to a signed contract? Legal review, security review, procurement, board approval.
-
-**P — Paper process**
-
-How do contracts get signed in this org? MSA in place? Standard redlines? Who owns the paper on their side?
-
-**I — Identified pain**
-
-What is the cost of doing nothing? Is it acute (something is broken right now) or chronic (long-running drag)?
-
-**C — Champion**
-
-Who internally is selling for us? What is their motivation — career, team relief, status? Have we equipped them with the materials they need?
-
-**C — Competition**
-
-Who else are they evaluating, including build-in-house and the status quo? What is our differentiated narrative versus each?
+What is the prospect trying to do, and what would success look like for them? Frame this in their words wherever possible.
 
 ## Budget
 
 - **Stated budget:** <amount, range, or "not disclosed">
+- **Approval thresholds / procurement:** <who signs off, lead time, security questionnaire>
+
+## Timeline
+
+Key dates driving this deal — their fiscal year end, evaluation window, and the date they need to be live by. Update as they firm up.
+
+- **Target close:** <YYYY-MM-DD>
 - **Fiscal year end:** <month>
-- **Approval thresholds:** <amounts above which extra approvals kick in>
-- **Procurement signals:** quarterly close, vendor onboarding lead time, required security questionnaires
-- **Our pricing latitude:** discount ceiling, term flexibility, payment-terms flexibility — internal only
+- **Go-live needed by:** <YYYY-MM-DD>
 
 ## Key concerns and objections
 
 Living list. Each row: the concern, who raised it, current status, and our response. Move concerns to "Addressed" rather than deleting them so the call log stays consistent with this table.
 
-| Concern | Raised by | Status | Our response |
-| --- | --- | --- | --- |
-|  |  | Open / Addressed / Blocking |  |
+| Concern | Raised by | Date | Status | Our response |
+| --- | --- | --- | --- | --- |
+|  |  | <YYYY-MM-DD> | Open / Addressed / Blocking |  |
 
 ## Milestones
 

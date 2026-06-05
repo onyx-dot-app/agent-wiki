@@ -63,6 +63,12 @@ The "do not do this" notes that have bitten people before. Worth more than any o
 
 -
 
+## Update log of playbook
+
+All updates to the playbook should be tracked along with the time that the update was made, add it to the list below:
+
+- <YYYY-MM-DD> — <update summary>
+
 ## Recent incidents that hit this runbook
 
 - <YYYY-MM-DD> — <link to postmortem>

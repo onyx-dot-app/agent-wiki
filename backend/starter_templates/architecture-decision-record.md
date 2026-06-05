@@ -1,5 +1,5 @@
 ---
-name: ADR
+name: Architecture Decision Record
 description: Architecture Decision Record — short, immutable record of one decision.
 ---
 # ADR <NNNN>: <short, decisive title>
@@ -7,6 +7,8 @@ description: Architecture Decision Record — short, immutable record of one dec
 **Status:** Proposed | Accepted | Deprecated | Superseded by ADR-<NNNN>
 **Date:** <YYYY-MM-DD>
 **Deciders:** <names>
+
+Note: If you are an Agent updating this, try to track all details and updates. Do not remove information, just add updates if things change.
 
 ## Context
 

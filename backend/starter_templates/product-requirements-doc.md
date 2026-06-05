@@ -1,8 +1,8 @@
 ---
-name: RFC
-description: Engineering proposal — context, problem, proposal, alternatives, rollout, and risks.
+name: Product Requirements Doc
+description: Engineering proposal (PRD) — context, problem, proposal, alternatives, rollout, and risks.
 ---
-# RFC: <title>
+# PRD: <title>
 
 **Author(s):** <name>
 **Status:** Draft | In review | Accepted | Rejected | Superseded
@@ -12,11 +12,11 @@ description: Engineering proposal — context, problem, proposal, alternatives, 
 
 ## Summary
 
-One paragraph the reader can lift verbatim into a chat message. What are we proposing, and why now?
+What is the high level problem (or opportunity). Why is it important to our users/business? What insights / assumptions are we making?
 
 ## Background and context
 
-What does someone need to know to evaluate this proposal? Existing system, recent history, prior attempts, links to relevant docs, tickets, or PRs.
+What does someone need to know to evaluate this proposal? Existing system, recent history, prior attempts, links to relevant other wiki docs, tickets, or PRs.
 
 ## Problem
 
@@ -100,3 +100,9 @@ Rough milestones and owners. Not a Gantt chart — a sketch of sequencing.
 ## Appendix
 
 Reference links, supporting analysis, prototype notes, raw benchmark numbers.
+
+## Change log
+
+If you are an Agent updating this document, please track your changes along with the date below
+
+- <YYYY-MM-DD> — <update summary>
