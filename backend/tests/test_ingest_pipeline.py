@@ -162,6 +162,25 @@ def test_no_candidates_returns_early(mock_search):
     mock_search.assert_called_once()
 
 
+def test_candidates_raises_on_search_backend_error():
+    # A backend failure (e.g. OpenSearch rejecting an oversized query) must
+    # surface as IngestSearchError, not be swallowed into an empty result.
+    boom = RuntimeError("maxClauseCount is set to 1024")
+    with patch("app.ingest.search.fts_search", side_effect=boom):
+        with pytest.raises(ingest_search.IngestSearchError):
+            ingest_search.candidates("a very long transcript", "Big Meeting")
+
+
+@patch("app.tasks.wiki_update.wiki_git.commit_file")
+@patch("app.tasks.wiki_update.ingest_search.candidates",
+       side_effect=ingest_search.IngestSearchError("maxClauseCount is set to 1024"))
+def test_search_error_is_caught_and_does_not_commit(mock_search, mock_commit):
+    # A search failure is logged and the document dropped — it must be caught
+    # (not raised out of the task) and must never commit.
+    _run(_make_push())
+    mock_commit.assert_not_called()
+
+
 @patch("app.tasks.wiki_update.wiki_git.head_sha_for_path", return_value="headsha")
 @patch("app.wiki.utils.wiki_notify.after_doc_write")
 @patch("app.tasks.wiki_update.wiki_git.commit_file", return_value="sha123")
