@@ -11,7 +11,7 @@ description: Lightweight one-page tracker for a personal or small-team project.
 
 ## Goal
 
-One paragraph — what does "done" look like, and why does this matter?
+What is this project, why are we doing this, what does "done" look like and other high level items.
 
 ## Scope
 

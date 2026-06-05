@@ -71,8 +71,14 @@ Specific, owned, dated. Tag each as **prevent** (stops recurrence), **mitigate**
 
 ## Supporting data
 
-Graphs, log excerpts, query results. Link out rather than pasting large dumps inline.
+Include details but avoid pasting large dumps inline. Provide data for conclusions, justifications, results, etc. below.
 
 ## Lessons
 
 A short paragraph future-you would want to read before the next incident in this area.
+
+## Update log
+
+All non-trivial updates related to this incident should be tracked directly in the doc.
+
+- <YYYY-MM-DD> — <update summary>

@@ -203,8 +203,7 @@ _STARTER_TEMPLATE_DEFAULT_ORDER: tuple[str, ...] = (
     "Project tracker",
     "Meeting notes",
     "Runbook",
-    "Customer call notes",
-    "ADR",
+    "Architecture Decision Record",
 )
 
 

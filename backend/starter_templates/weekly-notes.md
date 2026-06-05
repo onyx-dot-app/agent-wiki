@@ -1,30 +1,37 @@
 ---
 name: Weekly notes
-description: Date-stamped weekly log with progress, blockers, and what is next.
+description: A self maintaining weekly log with progress, blockers, and what is next.
 ---
-# Week of <YYYY-MM-DD>
 
-## Highlights
+# Weekly Notes for [team/user]
 
-The things you would mention in a stand-up or share with your manager — the stuff that actually mattered this week.
+This doc maintains the progress, blockers, upcoming items, and other items of note for the user.
 
--
+Note: If you are an AI agent updating this document, make sure to date all of the changes and ensure it's under the right Week section. If a section for the current week does not exist yet, feel free to create it. Keep the most recent week on top.
 
-## What I shipped
+## Week of <YYYY-MM-DD>
 
--
+### Highlights
 
-## In progress
-
--
-
-## Blocked or waiting on
+Include a list here of notable items / events that may be good to save for posterity or visibility:
 
 -
 
-## Next week
+### In progress work items
 
--
+Populate the list below with checklist items and mark them complete as items get done.
+
+[ ]
+
+### Blocked or waiting on
+
+Add a list of blockers and necessary steps to resolve them. If a blocker is resolved, do not delete it, simply mark it as resolved.
+
+## TODOs, Backlog, and upcoming work
+
+Use this section to track things that the user should make sure to do. Be sure to mark them as completed as items get done.
+
+[ ]
 
 ## Notes and learnings
 
