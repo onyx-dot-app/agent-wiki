@@ -39,7 +39,13 @@ export function tokenizeMentions(
   for (const disp of displays) {
     const id = map[disp];
     if (!id) continue;
-    out = out.split(disp).join(`@[${disp.slice(1)}](mention:${id})`);
+    // Only at a start-or-whitespace `@` boundary, so we never rewrite an `@name`
+    // that's part of something else (e.g. the local part of an email address).
+    const escaped = disp.slice(1).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    out = out.replace(
+      new RegExp(`(?:^|(?<=\\s))@${escaped}(?=\\s|$)`, "g"),
+      `@[${disp.slice(1)}](mention:${id})`,
+    );
   }
   return out;
 }
