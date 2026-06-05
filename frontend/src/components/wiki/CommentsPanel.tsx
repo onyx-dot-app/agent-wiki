@@ -14,7 +14,7 @@ import {
   SvgTrash,
   SvgX,
 } from "@onyx-ai/opal/icons";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useAuth } from "@/lib/auth";
 import {
@@ -26,9 +26,15 @@ import {
   resolveThread,
 } from "@/lib/comments";
 import type { CommentDraft } from "@/lib/commentAnchor";
+import {
+  detokenizeMentions,
+  parseBody,
+  tokenizeMentions,
+} from "@/lib/commentMentions";
 import { absoluteTime, relativeTime } from "@/lib/time";
 import type { CommentThreadView, CommentView } from "@/types";
 
+import { MentionTextarea } from "./MentionTextarea";
 import styles from "./CommentsPanel.module.css";
 
 export type { CommentDraft };
@@ -250,15 +256,20 @@ function DraftComposer({
   onCancel: () => void;
 }) {
   const [body, setBody] = useState("");
+  // "@Name" → userId for every mention picked this session; used to tokenize
+  // the body on submit.
+  const mentions = useRef<Record<string, string>>({});
   return (
     <div className={styles.draft}>
       <div className={styles.quote}>{draft.quotedText}</div>
-      <textarea
-        className={styles.textarea}
+      <MentionTextarea
         placeholder="Add a comment…"
         value={body}
         autoFocus
-        onChange={(e) => setBody(e.target.value)}
+        onChange={setBody}
+        onPickMention={(d, id) => {
+          mentions.current[d] = id;
+        }}
       />
       <div className={styles.composeRow}>
         <Button prominence="tertiary" size="sm" onClick={onCancel}>
@@ -268,7 +279,9 @@ function DraftComposer({
           variant="action"
           size="sm"
           disabled={disabled || !body.trim()}
-          onClick={() => onSubmit(body.trim())}
+          onClick={() =>
+            onSubmit(tokenizeMentions(body.trim(), mentions.current))
+          }
         >
           Comment
         </Button>
@@ -307,6 +320,7 @@ function Thread({
   const { root } = thread;
   const [replyOpen, setReplyOpen] = useState(false);
   const [replyBody, setReplyBody] = useState("");
+  const replyMentions = useRef<Record<string, string>>({});
   const resolved = root.status === "resolved";
 
   // One flat conversation (Google-Docs style): the root and every reply render
@@ -341,12 +355,14 @@ function Thread({
 
       {replyOpen ? (
         <div className={styles.replyBox}>
-          <textarea
-            className={styles.textarea}
+          <MentionTextarea
             placeholder="Reply…"
             value={replyBody}
             autoFocus
-            onChange={(e) => setReplyBody(e.target.value)}
+            onChange={setReplyBody}
+            onPickMention={(d, id) => {
+              replyMentions.current[d] = id;
+            }}
           />
           <div className={styles.composeRow}>
             <Button
@@ -362,8 +378,12 @@ function Thread({
               disabled={busy || !replyBody.trim()}
               onClick={async () => {
                 // Clear/close only on success so a failed reply isn't lost.
-                if (await onReply(replyBody.trim())) {
+                const ok = await onReply(
+                  tokenizeMentions(replyBody.trim(), replyMentions.current),
+                );
+                if (ok) {
                   setReplyBody("");
+                  replyMentions.current = {};
                   setReplyOpen(false);
                 }
               }}
@@ -425,9 +445,21 @@ function Comment({
   onDelete: (id: string) => void;
 }) {
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(comment.body);
+  const [draft, setDraft] = useState("");
+  const editMentions = useRef<Record<string, string>>({});
   const [menuOpen, setMenuOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+
+  // Edit in the readable display form; (de)tokenize at the boundary so the
+  // textarea shows "@Name" while storage keeps the mention's user id. Re-seed
+  // from the current stored body each time edit opens, so a re-edit after an
+  // external change starts from fresh content.
+  const openEdit = () => {
+    const d = detokenizeMentions(comment.body);
+    setDraft(d.text);
+    editMentions.current = d.map;
+    setEditing(true);
+  };
 
   // Copy a deep-link to this comment's thread (anchors live on the root, so all
   // comments in a thread share its link). Doesn't close the menu — the swapped
@@ -496,7 +528,7 @@ function Comment({
                           variant="section"
                           onClick={() => {
                             setMenuOpen(false);
-                            setEditing(true);
+                            openEdit();
                           }}
                         />
                         <LineItemButton
@@ -522,20 +554,19 @@ function Comment({
 
       {editing ? (
         <div>
-          <textarea
-            className={styles.textarea}
+          <MentionTextarea
             value={draft}
             autoFocus
-            onChange={(e) => setDraft(e.target.value)}
+            onChange={setDraft}
+            onPickMention={(d, id) => {
+              editMentions.current[d] = id;
+            }}
           />
           <div className={styles.composeRow}>
             <Button
               prominence="tertiary"
               size="sm"
-              onClick={() => {
-                setDraft(comment.body);
-                setEditing(false);
-              }}
+              onClick={() => setEditing(false)}
             >
               Cancel
             </Button>
@@ -544,7 +575,11 @@ function Comment({
               size="sm"
               disabled={busy || !draft.trim()}
               onClick={async () => {
-                if (await onEdit(comment.id, draft.trim())) setEditing(false);
+                const next = tokenizeMentions(
+                  draft.trim(),
+                  editMentions.current,
+                );
+                if (await onEdit(comment.id, next)) setEditing(false);
               }}
             >
               Save
@@ -552,7 +587,17 @@ function Comment({
           </div>
         </div>
       ) : (
-        <div className={styles.body}>{comment.body}</div>
+        <div className={styles.body}>
+          {parseBody(comment.body).map((seg, i) =>
+            seg.kind === "mention" ? (
+              <span key={i} className={styles.mention}>
+                @{seg.name}
+              </span>
+            ) : (
+              <span key={i}>{seg.text}</span>
+            ),
+          )}
+        </div>
       )}
     </div>
   );
