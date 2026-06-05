@@ -7,12 +7,14 @@ import {
   Text,
 } from "@onyx-ai/opal/components";
 import {
+  SvgCheck,
   SvgEdit,
+  SvgLink,
   SvgMoreHorizontal,
   SvgTrash,
   SvgX,
 } from "@onyx-ai/opal/icons";
-import { useCallback, useState } from "react";
+import { type MouseEvent, useCallback, useEffect, useState } from "react";
 
 import { useAuth } from "@/lib/auth";
 import {
@@ -60,6 +62,18 @@ function authorLabel(
  * Date parses them as UTC, not local. */
 function toIso(ts: string): string {
   return ts.includes("T") ? ts : `${ts.replace(" ", "T")}Z`;
+}
+
+/** Deep-link to a specific thread: the page route reads `?comment=<id>`, opens
+ * the panel, and scrolls to the thread's anchored span. Each path segment is
+ * encoded since wiki paths contain spaces. */
+function commentLink(path: string, rootId: string): string {
+  const encoded = path
+    .split("/")
+    .filter(Boolean)
+    .map((s) => encodeURIComponent(s))
+    .join("/");
+  return `${window.location.origin}/app/wiki/${encoded}?comment=${rootId}`;
 }
 
 export function CommentsPanel({
@@ -122,10 +136,19 @@ export function CommentsPanel({
     (t) => t.root.status === "resolved",
   );
 
+  // If the active thread (clicked, or arrived via a `?comment=` deep-link) is
+  // resolved, expand the resolved section so it's actually visible — otherwise
+  // activating it would silently do nothing.
+  const activeIsResolved = resolvedThreads.some((t) => t.root.id === activeId);
+  useEffect(() => {
+    if (activeIsResolved) setShowResolved(true);
+  }, [activeIsResolved]);
+
   const renderThread = (t: CommentThreadView) => (
     <Thread
       key={t.root.id}
       thread={t}
+      path={path}
       selfId={user?.id}
       isAdmin={!!user?.is_admin}
       busy={busy}
@@ -256,6 +279,7 @@ function DraftComposer({
 
 function Thread({
   thread,
+  path,
   selfId,
   isAdmin,
   busy,
@@ -268,6 +292,7 @@ function Thread({
   onDelete,
 }: {
   thread: CommentThreadView;
+  path: string;
   selfId: string | undefined;
   isAdmin: boolean;
   busy: boolean;
@@ -282,7 +307,23 @@ function Thread({
   const { root } = thread;
   const [replyOpen, setReplyOpen] = useState(false);
   const [replyBody, setReplyBody] = useState("");
+  const [copied, setCopied] = useState(false);
   const resolved = root.status === "resolved";
+
+  // Copy a deep-link to this thread. Stop propagation so it doesn't also
+  // activate the thread (which would scroll the doc out from under the click).
+  const copyLink = (e: MouseEvent) => {
+    e.stopPropagation();
+    void navigator.clipboard
+      .writeText(commentLink(path, root.id))
+      .then(() => {
+        setCopied(true);
+        window.setTimeout(() => setCopied(false), 1500);
+      })
+      .catch(() => {
+        /* clipboard blocked — no-op */
+      });
+  };
   // One flat conversation (Google-Docs style): the root and every reply render
   // uniformly, appended in order — no nesting/indentation.
   const conversation = [root, ...thread.replies];
@@ -374,6 +415,13 @@ function Thread({
               Resolve
             </Button>
           )}
+          <Button
+            icon={copied ? SvgCheck : SvgLink}
+            prominence="tertiary"
+            size="sm"
+            tooltip={copied ? "Link copied" : "Copy link to comment"}
+            onClick={copyLink}
+          />
         </div>
       )}
     </div>
