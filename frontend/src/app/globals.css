@@ -2,16 +2,6 @@
 @import "./css/z-index.css";
 @config "../../tailwind.config.cjs";
 
-/* Re-point Opal's font variables to the actual Next.js-loaded fonts.
-   Opal's root.css sets --font-hanken-grotesk to the literal string
-   "Hanken Grotesk" in :root, which wins over Next.js's inline <style>
-   class (linked stylesheets beat inline styles in the cascade). Using
-   intermediate variable names for the Next.js loader lets us override
-   Opal's value here, after its import. */
-:root {
-  --font-hanken-grotesk: var(--font-hanken-loaded);
-  --font-dm-mono: var(--font-dm-mono-loaded);
-}
 
 /* Reserve the scrollbar gutter on the root scroll container so layout
    width stays constant whether content fits or overflows. Without this,
