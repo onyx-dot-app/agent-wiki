@@ -201,10 +201,12 @@ def _now_text(s: Any) -> str:
 _STARTER_TEMPLATE_DEFAULT_ORDER: tuple[str, ...] = (
     "Weekly notes",
     "Project tracker",
+    "Product Requirements Doc",
+    "Sales opportunity",
     "Meeting notes",
+    "Architecture Decision Record",
+    "Incident report",
     "Runbook",
-    "Customer call notes",
-    "ADR",
 )
 
 
