@@ -8,7 +8,8 @@ import { ConfirmProvider } from "@/components/common/ConfirmDialog";
 import { AuthProvider } from "@/lib/auth";
 import { DraftingProvider } from "@/lib/drafting";
 import { SWRProvider } from "@/lib/swr";
-import { ThemeBootstrapScript, ThemeProvider } from "@/lib/theme-provider";
+import { ThemeBootstrapScript } from "@/lib/theme-bootstrap-script";
+import { ThemeProvider } from "@/lib/theme-provider";
 
 const hankenGrotesk = Hanken_Grotesk({
   subsets: ["latin"],
