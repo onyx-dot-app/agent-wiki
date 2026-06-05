@@ -309,8 +309,7 @@ def _reconcile_pushed_document(push: dict[str, Any]) -> None:
         hits = ingest_search.candidates(content, title)
     except ingest_search.IngestSearchError:
         # Candidate search failed (e.g. OpenSearch rejected an oversized query).
-        # Log and drop the document — surfaced in the logs rather than silently
-        # masquerading as a genuine no-match.
+        # Log it and drop the document.
         log.warning(
             "process_pushed_document: candidate search FAILED (document dropped), doc_id=%s",
             doc_id,

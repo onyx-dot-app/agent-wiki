@@ -26,9 +26,9 @@ _TOKEN_RE = re.compile(r"\w+")
 
 
 class IngestSearchError(Exception):
-    """The BM25 candidate search failed (backend error), as opposed to
-    returning no matches. Lets the reconciler record a distinct outcome
-    instead of silently treating the failure as ``no_candidates``."""
+    """Raised when the BM25 candidate search fails at the backend (e.g.
+    OpenSearch rejecting an oversized query), as distinct from returning no
+    matches. The reconciler logs it and drops the document."""
 
 
 def _tokens(text: str) -> set[str]:
@@ -55,9 +55,9 @@ def candidates(content: str, title: str | None) -> list[SearchHit]:
             raise_on_error=True,
         )
     except Exception as exc:
-        # A backend failure (e.g. OpenSearch rejecting an oversized query) is
-        # not "no candidates" — surface it so the reconciler records it
-        # distinctly rather than silently dropping the document.
+        # Surface a backend failure (e.g. OpenSearch rejecting an oversized
+        # query) as IngestSearchError, distinct from an empty result, so the
+        # caller treats it as an error rather than a genuine no-match.
         raise IngestSearchError(str(exc)) from exc
     if not hits:
         log.debug("ingest candidates: no BM25 hits for title=%r", title)

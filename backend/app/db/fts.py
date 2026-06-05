@@ -253,10 +253,10 @@ def search(
         c: OpenSearch = client  # type: ignore[assignment]
         resp = c.search(index=_index_name(), body=body)
     except Exception:
-        # Callers that need to tell a real backend failure (e.g. OpenSearch
-        # rejecting an oversized query) apart from a genuine no-match pass
-        # raise_on_error=True. The default swallows so search-surface callers
-        # degrade to empty results.
+        # With raise_on_error, propagate so the caller can distinguish a backend
+        # failure (e.g. OpenSearch rejecting an oversized query) from a genuine
+        # no-match. Otherwise log and return [] — the search surface degrades to
+        # empty results.
         if raise_on_error:
             raise
         log.warning("fts: search failed for query %r", query, exc_info=True)
