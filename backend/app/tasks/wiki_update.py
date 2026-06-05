@@ -26,6 +26,7 @@ from typing import Any
 
 from app.config import CONFIG
 from app.ingest import eval_sample as ingest_eval_sample
+from app.ingest import intent as ingest_intent
 from app.ingest import search as ingest_search
 from app.ingest.source_tiers import is_filtered
 from app.ingest.models import WikiUpdateCandidate
@@ -308,14 +309,34 @@ def _reconcile_pushed_document(push: dict[str, Any]) -> None:
     try:
         hits = ingest_search.candidates(content, title)
     except ingest_search.IngestSearchError:
-        # Candidate search failed (e.g. OpenSearch rejected an oversized query).
-        # Log it and drop the document.
-        log.warning(
-            "process_pushed_document: candidate search FAILED (document dropped), doc_id=%s",
-            doc_id,
-            exc_info=True,
+        # The candidate search failed — almost always because the full document
+        # body exceeds OpenSearch's boolean-clause limit. Only large documents
+        # reach here, so retry with a compact query (and pay the LLM cost only
+        # when needed): an LLM-distilled update-intent when a cheap model is
+        # configured, else a deterministic bounded-terms query.
+        selector_model = get_llm_settings().ingest_selector_model
+        query = (
+            ingest_intent.generate_search_query(title=title, content=content, model=selector_model)
+            if selector_model
+            else None
         )
-        return
+        strategy = "llm-intent"
+        if not query:
+            query = ingest_search.bounded_query(content)
+            strategy = "bounded-terms"
+        log.info(
+            "process_pushed_document: oversized query, retrying via %s, doc_id=%s",
+            strategy, doc_id,
+        )
+        try:
+            hits = ingest_search.candidates(query, title)
+        except ingest_search.IngestSearchError:
+            log.warning(
+                "process_pushed_document: candidate search FAILED after %s fallback "
+                "(document dropped), doc_id=%s",
+                strategy, doc_id, exc_info=True,
+            )
+            return
     if not hits:
         log.info("process_pushed_document: no BM25 candidates above threshold, doc_id=%s", doc_id)
         ingest_outcomes_total.labels(outcome="no_candidates", wiki_path="").inc()
