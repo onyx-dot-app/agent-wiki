@@ -346,3 +346,80 @@ export function paintCommentHighlights(
 
   return painted;
 }
+
+// --------------------------------------------------------------------------- //
+// Scroll-to-anchor — bring a comment's referenced span into view on click.    //
+// --------------------------------------------------------------------------- //
+
+/** First rendered DOM Range for an anchored span, scanning top-level blocks in
+ * document order (same mapping as `paintCommentHighlights`, but stops at the
+ * first overlapping block). Null if the span maps to nothing rendered. */
+function firstRenderedRange(
+  article: HTMLElement,
+  body: string,
+  startOffset: number,
+  endOffset: number,
+): Range | null {
+  const starts = lineStartOffsets(body);
+  const els = Array.from(
+    article.querySelectorAll<HTMLElement>("[data-sourcepos]"),
+  );
+  for (const el of els) {
+    if (!isTopLevelBlock(el, article)) continue;
+    const a = alignBlock(el, body, starts);
+    if (!a) continue;
+    if (a.blockEnd <= startOffset || a.blockStart >= endOffset) continue;
+    let lo = -1;
+    let hi = -1;
+    for (let i = 0; i < a.rawAt.length; i++) {
+      const off = a.rawAt[i]!;
+      if (off >= startOffset && off < endOffset) {
+        if (lo < 0) lo = i;
+        hi = i;
+      }
+    }
+    if (lo < 0) continue;
+    const range = rangeForRenderedSpan(a.el, lo, hi + 1);
+    if (range) return range;
+  }
+  return null;
+}
+
+/** Nearest scrollable ancestor (inclusive). Defaults to `el` if none is found —
+ * the rendered article carries `overflow-y-auto`, so it's usually the scroller
+ * itself. */
+function scrollableAncestor(el: HTMLElement): HTMLElement {
+  let cur: HTMLElement | null = el;
+  while (cur) {
+    const oy = getComputedStyle(cur).overflowY;
+    if (/(auto|scroll|overlay)/.test(oy) && cur.scrollHeight > cur.clientHeight)
+      return cur;
+    cur = cur.parentElement;
+  }
+  return el;
+}
+
+/** Scroll the article's container so a comment's anchored span is centered in
+ * view. No-op (returns false) when the span maps to nothing rendered — e.g. an
+ * orphaned comment whose text was deleted. Pairs with the active highlight:
+ * the caller sets the thread active (orange) and calls this to bring it on
+ * screen. */
+export function scrollCommentIntoView(
+  article: HTMLElement,
+  body: string,
+  startOffset: number,
+  endOffset: number,
+): boolean {
+  const range = firstRenderedRange(article, body, startOffset, endOffset);
+  if (!range) return false;
+  const scroller = scrollableAncestor(article);
+  const rect = range.getBoundingClientRect();
+  const sRect = scroller.getBoundingClientRect();
+  const top =
+    scroller.scrollTop +
+    (rect.top - sRect.top) -
+    scroller.clientHeight / 2 +
+    rect.height / 2;
+  scroller.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
+  return true;
+}

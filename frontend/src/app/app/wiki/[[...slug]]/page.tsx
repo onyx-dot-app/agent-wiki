@@ -54,6 +54,7 @@ import { apiFetch, ApiError } from "@/lib/api";
 import { listComments } from "@/lib/comments";
 import {
   paintCommentHighlights,
+  scrollCommentIntoView,
   selectionToAnchor,
   type CommentDraft,
 } from "@/lib/commentAnchor";
@@ -1461,6 +1462,33 @@ function FileViewer({ path }: { path: string }) {
     // with no paint (highlights only appeared after a click). Re-run on mount.
   }, [commentThreads, body, editing, viewingSha, activeCommentId, loading]);
 
+  // Select a thread (its span gets the orange highlight) and scroll the doc to
+  // bring that span into view. Only an explicit click runs this — keying a
+  // scroll off `activeCommentId` alone would also re-scroll on every comment
+  // refetch while a thread stays selected. Deferred a frame so the layout (and
+  // the active repaint) settles before we measure the range.
+  const activateComment = useCallback(
+    (id: string | null) => {
+      setActiveCommentId(id);
+      if (!id || editing || viewingSha) return;
+      const el = articleRef.current;
+      if (!el) return;
+      const root = commentThreads.find((t) => t.root.id === id)?.root;
+      if (
+        !root ||
+        root.status === "orphaned" ||
+        root.status === "resolved" ||
+        root.start_offset === null ||
+        root.end_offset === null
+      )
+        return;
+      requestAnimationFrame(() => {
+        scrollCommentIntoView(el, body, root.start_offset!, root.end_offset!);
+      });
+    },
+    [commentThreads, body, editing, viewingSha],
+  );
+
   // On a text selection in the rendered article, offer a floating "Comment"
   // affordance anchored above the selection (render mode only).
   const onArticleMouseUp = useCallback(() => {
@@ -2440,7 +2468,7 @@ function FileViewer({ path }: { path: string }) {
               threads={commentThreads}
               onChanged={refreshComments}
               activeId={activeCommentId}
-              onActivate={setActiveCommentId}
+              onActivate={activateComment}
               onDraftConsumed={() => setCommentDraft(null)}
               onClose={() => {
                 setCommentsOpen(false);
@@ -2494,7 +2522,7 @@ function FileViewer({ path }: { path: string }) {
               threads={commentThreads}
               onChanged={refreshComments}
               activeId={activeCommentId}
-              onActivate={setActiveCommentId}
+              onActivate={activateComment}
               onDraftConsumed={() => setCommentDraft(null)}
               onClose={() => {
                 setCommentsOpen(false);
