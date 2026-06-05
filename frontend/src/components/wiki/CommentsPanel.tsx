@@ -7,12 +7,14 @@ import {
   Text,
 } from "@onyx-ai/opal/components";
 import {
+  SvgCheck,
   SvgEdit,
+  SvgLink,
   SvgMoreHorizontal,
   SvgTrash,
   SvgX,
 } from "@onyx-ai/opal/icons";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { useAuth } from "@/lib/auth";
 import {
@@ -60,6 +62,18 @@ function authorLabel(
  * Date parses them as UTC, not local. */
 function toIso(ts: string): string {
   return ts.includes("T") ? ts : `${ts.replace(" ", "T")}Z`;
+}
+
+/** Deep-link to a specific thread: the page route reads `?comment=<id>`, opens
+ * the panel, and scrolls to the thread's anchored span. Each path segment is
+ * encoded since wiki paths contain spaces. */
+function commentLink(path: string, rootId: string): string {
+  const encoded = path
+    .split("/")
+    .filter(Boolean)
+    .map((s) => encodeURIComponent(s))
+    .join("/");
+  return `${window.location.origin}/app/wiki/${encoded}?comment=${rootId}`;
 }
 
 export function CommentsPanel({
@@ -122,10 +136,19 @@ export function CommentsPanel({
     (t) => t.root.status === "resolved",
   );
 
+  // If the active thread (clicked, or arrived via a `?comment=` deep-link) is
+  // resolved, expand the resolved section so it's actually visible — otherwise
+  // activating it would silently do nothing.
+  const activeIsResolved = resolvedThreads.some((t) => t.root.id === activeId);
+  useEffect(() => {
+    if (activeIsResolved) setShowResolved(true);
+  }, [activeIsResolved]);
+
   const renderThread = (t: CommentThreadView) => (
     <Thread
       key={t.root.id}
       thread={t}
+      path={path}
       selfId={user?.id}
       isAdmin={!!user?.is_admin}
       busy={busy}
@@ -256,6 +279,7 @@ function DraftComposer({
 
 function Thread({
   thread,
+  path,
   selfId,
   isAdmin,
   busy,
@@ -268,6 +292,7 @@ function Thread({
   onDelete,
 }: {
   thread: CommentThreadView;
+  path: string;
   selfId: string | undefined;
   isAdmin: boolean;
   busy: boolean;
@@ -283,6 +308,7 @@ function Thread({
   const [replyOpen, setReplyOpen] = useState(false);
   const [replyBody, setReplyBody] = useState("");
   const resolved = root.status === "resolved";
+
   // One flat conversation (Google-Docs style): the root and every reply render
   // uniformly, appended in order — no nesting/indentation.
   const conversation = [root, ...thread.replies];
@@ -303,6 +329,7 @@ function Thread({
           <Comment
             key={c.id}
             comment={c}
+            path={path}
             canModify={isAdmin || c.author_user_id === selfId}
             selfId={selfId}
             busy={busy}
@@ -382,6 +409,7 @@ function Thread({
 
 function Comment({
   comment,
+  path,
   canModify,
   selfId,
   busy,
@@ -389,6 +417,7 @@ function Comment({
   onDelete,
 }: {
   comment: CommentView;
+  path: string;
   canModify: boolean;
   selfId: string | undefined;
   busy: boolean;
@@ -398,6 +427,22 @@ function Comment({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(comment.body);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  // Copy a deep-link to this comment's thread (anchors live on the root, so all
+  // comments in a thread share its link). Doesn't close the menu — the swapped
+  // title/icon is the "done" feedback.
+  const copyLink = () => {
+    void navigator.clipboard
+      .writeText(commentLink(path, comment.thread_root_id))
+      .then(() => {
+        setCopied(true);
+        window.setTimeout(() => setCopied(false), 1500);
+      })
+      .catch(() => {
+        /* clipboard blocked — no-op */
+      });
+  };
 
   return (
     <div className={styles.comment}>
@@ -414,9 +459,11 @@ function Comment({
           </Text>
         </span>
         <span className={styles.metaRight}>
-          {canModify && !editing && (
-            // Overflow menu (Google-Docs style) keeps Edit/Delete off the card
-            // until hovered, so comments stay compact. Forced visible while open.
+          {!editing && (
+            // Overflow menu (Google-Docs style) keeps actions off the card until
+            // hovered, so comments stay compact. Forced visible while open.
+            // "Copy link" is available to everyone (read access); Edit/Delete
+            // only to the author/admin.
             <span
               className={`${styles.kebab} ${menuOpen ? styles.kebabOpen : ""}`}
             >
@@ -434,26 +481,37 @@ function Comment({
                 <Popover.Content width="fit" align="end">
                   <Popover.Menu>
                     <LineItemButton
-                      title="Edit"
-                      icon={SvgEdit}
+                      title={copied ? "Link copied" : "Copy link"}
+                      icon={copied ? SvgCheck : SvgLink}
                       sizePreset="main-ui"
                       variant="section"
-                      onClick={() => {
-                        setMenuOpen(false);
-                        setEditing(true);
-                      }}
+                      onClick={copyLink}
                     />
-                    <LineItemButton
-                      title="Delete"
-                      color="danger"
-                      icon={SvgTrash}
-                      sizePreset="main-ui"
-                      variant="section"
-                      onClick={() => {
-                        setMenuOpen(false);
-                        onDelete(comment.id);
-                      }}
-                    />
+                    {canModify && (
+                      <>
+                        <LineItemButton
+                          title="Edit"
+                          icon={SvgEdit}
+                          sizePreset="main-ui"
+                          variant="section"
+                          onClick={() => {
+                            setMenuOpen(false);
+                            setEditing(true);
+                          }}
+                        />
+                        <LineItemButton
+                          title="Delete"
+                          color="danger"
+                          icon={SvgTrash}
+                          sizePreset="main-ui"
+                          variant="section"
+                          onClick={() => {
+                            setMenuOpen(false);
+                            onDelete(comment.id);
+                          }}
+                        />
+                      </>
+                    )}
                   </Popover.Menu>
                 </Popover.Content>
               </Popover>

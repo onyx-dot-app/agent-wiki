@@ -1338,6 +1338,8 @@ function FileViewer({ path }: { path: string }) {
   // Page owns the comment threads (so highlights render even with the panel
   // closed). Auto-open the panel once per path when a page has comments.
   const autoOpenedPathRef = useRef<string | null>(null);
+  // A `?comment=<id>` deep-link is focused once per id (reset on path change).
+  const focusedCommentRef = useRef<string | null>(null);
 
   // The history and comments side panels are mutually exclusive — every
   // path that opens one closes the other (toolbar toggles, the comments
@@ -1362,6 +1364,7 @@ function FileViewer({ path }: { path: string }) {
 
   useEffect(() => {
     autoOpenedPathRef.current = null;
+    focusedCommentRef.current = null;
     setCommentThreads([]);
     void refreshComments();
   }, [refreshComments]);
@@ -1488,6 +1491,49 @@ function FileViewer({ path }: { path: string }) {
     },
     [commentThreads, body, editing, viewingSha],
   );
+
+  // Deep-link: `?comment=<id>` opens the panel, selects that thread, and scrolls
+  // to its anchored span — the shareable-link counterpart to click-to-focus.
+  // Runs once per id (focusedCommentRef), and only once the thread is loaded.
+  // The scroll retries per-frame because on a fresh load react-markdown commits
+  // its text nodes a tick after this effect runs (same reason the highlight
+  // paint retries).
+  useEffect(() => {
+    const target = searchParams.get("comment");
+    if (!target || loading || editing || viewingSha) return;
+    if (focusedCommentRef.current === target) return;
+    const root = commentThreads.find((t) => t.root.id === target)?.root;
+    if (!root) return; // not loaded yet, or not a thread on this page
+    focusedCommentRef.current = target;
+    setActiveCommentId(target);
+    openComments();
+    if (
+      root.status === "orphaned" ||
+      root.status === "resolved" ||
+      root.start_offset === null ||
+      root.end_offset === null
+    )
+      return; // selected, but no live span to scroll to
+    const el = articleRef.current;
+    if (!el) return;
+    let raf = 0;
+    let attempts = 0;
+    const tick = () => {
+      if (scrollCommentIntoView(el, body, root.start_offset!, root.end_offset!))
+        return;
+      if (++attempts < 60) raf = requestAnimationFrame(tick);
+    };
+    tick();
+    return () => cancelAnimationFrame(raf);
+  }, [
+    searchParams,
+    commentThreads,
+    loading,
+    editing,
+    viewingSha,
+    body,
+    openComments,
+  ]);
 
   // On a text selection in the rendered article, offer a floating "Comment"
   // affordance anchored above the selection (render mode only).
