@@ -1,7 +1,7 @@
 import "./globals.css";
 
 import * as Tooltip from "@radix-ui/react-tooltip";
-import clsx from "clsx";
+import { cn } from "@onyx-ai/opal/utils";
 import { DM_Mono, Hanken_Grotesk } from "next/font/google";
 import { cookies } from "next/headers";
 import type { ReactNode } from "react";
@@ -69,7 +69,7 @@ export default async function RootLayout({
   return (
     <html
       lang="en"
-      className={clsx(
+      className={cn(
         hankenGrotesk.variable,
         dmMono.variable,
         theme === "dark" && "dark",
