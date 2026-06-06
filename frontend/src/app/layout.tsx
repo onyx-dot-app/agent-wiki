@@ -72,9 +72,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
             <ThemeProvider>
               <DraftingProvider>
                 <Tooltip.Provider delayDuration={300}>
-                  <ConfirmProvider>
-                    {children}
-                  </ConfirmProvider>
+                  <ConfirmProvider>{children}</ConfirmProvider>
                 </Tooltip.Provider>
               </DraftingProvider>
             </ThemeProvider>

@@ -71,8 +71,8 @@ export function AppSidebar({ folded, onFoldToggle }: AppSidebarProps) {
   return (
     <nav
       className={[
-        "flex flex-col h-full box-border py-2 gap-4 shrink-0",
-        "bg-background-tint-02 overflow-hidden",
+        "box-border flex h-full shrink-0 flex-col gap-4 py-2",
+        "overflow-hidden bg-background-tint-02",
         "transition-[width] duration-200 ease-in-out",
         effectiveFolded
           ? "w-(--sidebar-width-folded)"
@@ -80,7 +80,7 @@ export function AppSidebar({ folded, onFoldToggle }: AppSidebarProps) {
       ].join(" ")}
     >
       {/* Logo + toggle */}
-      <div className="flex flex-row justify-between items-start pt-3 px-2 shrink-0">
+      <div className="flex shrink-0 flex-row items-start justify-between px-2 pt-3">
         {effectiveFolded ? (
           <div className="px-1">
             <Button
@@ -93,7 +93,7 @@ export function AppSidebar({ folded, onFoldToggle }: AppSidebarProps) {
           </div>
         ) : (
           <>
-            <div className="px-1 flex items-center h-7">
+            <div className="flex h-7 items-center px-1">
               <SvgOnyxLogoTyped size={28} />
             </div>
             <div className="px-1">
@@ -110,7 +110,7 @@ export function AppSidebar({ folded, onFoldToggle }: AppSidebarProps) {
       </div>
 
       {/* Content area */}
-      <div className="flex-1 min-h-0 flex flex-col gap-3 px-2 overflow-x-hidden">
+      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-x-hidden px-2">
         {/* Search */}
         {effectiveFolded ? (
           <Button
@@ -152,10 +152,10 @@ export function AppSidebar({ folded, onFoldToggle }: AppSidebarProps) {
 
         {/* Starred + Recents — scrollable, hidden when folded */}
         {!effectiveFolded && (
-          <div className="flex-1 overflow-y-auto overflow-x-hidden">
+          <div className="flex-1 overflow-x-hidden overflow-y-auto">
             {starred.length > 0 && (
               <>
-                <div className="pl-2 mr-1.5 py-1 sticky top-0 bg-background-tint-02 z-10 flex items-center min-h-8">
+                <div className="sticky top-0 z-10 mr-1.5 flex min-h-8 items-center bg-background-tint-02 py-1 pl-2">
                   <div className="p-0.5">
                     <Text font="secondary-body" color="text-02">
                       Starred
@@ -171,7 +171,7 @@ export function AppSidebar({ folded, onFoldToggle }: AppSidebarProps) {
                 />
               </>
             )}
-            <div className="pl-2 mr-1.5 py-1 sticky top-0 bg-background-tint-02 z-10 flex items-center min-h-8">
+            <div className="sticky top-0 z-10 mr-1.5 flex min-h-8 items-center bg-background-tint-02 py-1 pl-2">
               <div className="p-0.5">
                 <Text font="secondary-body" color="text-02">
                   Recents
@@ -221,7 +221,7 @@ export function AppSidebar({ folded, onFoldToggle }: AppSidebarProps) {
       </div>
 
       {/* Footer: Admin Panel + Account */}
-      <div className="flex flex-col gap-px px-2 shrink-0">
+      <div className="flex shrink-0 flex-col gap-px px-2">
         {user?.is_admin && (
           <SidebarTab
             icon={SvgSettings}

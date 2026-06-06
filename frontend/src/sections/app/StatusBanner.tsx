@@ -11,8 +11,10 @@ import { useLLMStatus } from "@/lib/llm";
 const BANNER_HEALTH_POLL_MS = 15000;
 
 const BANNER_CLASSES = {
-  error:   "bg-(--status-error-01) border-b border-(--status-error-02) text-(--status-text-error-05)",
-  warning: "bg-(--status-warning-01) border-b border-(--status-warning-02) text-(--status-text-warning-05)",
+  error:
+    "bg-(--status-error-01) border-b border-(--status-error-02) text-(--status-text-error-05)",
+  warning:
+    "bg-(--status-warning-01) border-b border-(--status-warning-02) text-(--status-text-warning-05)",
 } as const;
 
 export function StatusBanner() {
@@ -24,7 +26,7 @@ export function StatusBanner() {
   const { status: llmStatus } = useLLMStatus({ skip });
 
   const backendUnreachable = !skip && !!healthError;
-  const backendDegraded    = !skip && health?.status === "degraded";
+  const backendDegraded = !skip && health?.status === "degraded";
 
   if (skip) return null;
   if (backendUnreachable || backendDegraded) {
@@ -42,10 +44,21 @@ export function StatusBanner() {
   return null;
 }
 
-function BannerShell({ tone, children }: { tone: "warning" | "error"; children: ReactNode }) {
+function BannerShell({
+  tone,
+  children,
+}: {
+  tone: "warning" | "error";
+  children: ReactNode;
+}) {
   return (
-    <div role="alert" className={`flex items-center gap-3 py-2.5 px-4 text-sm ${BANNER_CLASSES[tone]}`}>
-      <span aria-hidden className="text-base leading-none">⚠️</span>
+    <div
+      role="alert"
+      className={`flex items-center gap-3 px-4 py-2.5 text-sm ${BANNER_CLASSES[tone]}`}
+    >
+      <span aria-hidden className="text-base leading-none">
+        ⚠️
+      </span>
       <span className="flex-1">{children}</span>
     </div>
   );
@@ -62,12 +75,14 @@ function BackendHealthBanner({
 }) {
   return (
     <BannerShell tone="error">
-      <strong>{unreachable ? "Backend unreachable." : "Backend degraded."}</strong>{" "}
+      <strong>
+        {unreachable ? "Backend unreachable." : "Backend degraded."}
+      </strong>{" "}
       {unreachable
         ? "The frontend can't reach the backend. Some features will not work until it recovers."
         : "The backend isn't fully healthy. Background work like search indexing and scheduled triggers may be delayed until it recovers."}{" "}
       {isAdmin ? (
-        <Link href="/admin/health" className="underline font-semibold">
+        <Link href="/admin/health" className="font-semibold underline">
           View health details
         </Link>
       ) : (
@@ -84,7 +99,10 @@ function LLMSetupBanner({ isAdmin }: { isAdmin: boolean }) {
   const [dismissed, setDismissed] = useState(false);
 
   useEffect(() => {
-    if (typeof window !== "undefined" && sessionStorage.getItem("llm-banner-dismissed") === "1") {
+    if (
+      typeof window !== "undefined" &&
+      sessionStorage.getItem("llm-banner-dismissed") === "1"
+    ) {
       setDismissed(true);
     }
   }, []);
@@ -98,17 +116,21 @@ function LLMSetupBanner({ isAdmin }: { isAdmin: boolean }) {
           <strong>No language model is configured.</strong>{" "}
           {isAdmin ? (
             <>
-              AI features are disabled until you add a provider and API key on the{" "}
+              AI features are disabled until you add a provider and API key on
+              the{" "}
               <Link
                 href="/admin/language-models"
-                className="text-(--status-text-warning-05) underline font-semibold"
+                className="font-semibold text-(--status-text-warning-05) underline"
               >
                 LLM settings page
               </Link>
               .
             </>
           ) : (
-            <>AI features are disabled. Please ask a workspace admin to finish setup.</>
+            <>
+              AI features are disabled. Please ask a workspace admin to finish
+              setup.
+            </>
           )}
         </span>
         <Button
@@ -117,7 +139,8 @@ function LLMSetupBanner({ isAdmin }: { isAdmin: boolean }) {
           size="sm"
           tooltip="Dismiss"
           onClick={() => {
-            if (typeof window !== "undefined") sessionStorage.setItem("llm-banner-dismissed", "1");
+            if (typeof window !== "undefined")
+              sessionStorage.setItem("llm-banner-dismissed", "1");
             setDismissed(true);
           }}
         />

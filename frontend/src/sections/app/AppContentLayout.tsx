@@ -7,7 +7,8 @@ import { StatusBanner } from "./StatusBanner";
 import { useAppLayout } from "./AppLayoutContext";
 
 export function AppContentLayout({ children }: { children: ReactNode }) {
-  const { headerContent, actionSidebarContent, isActionSidebarOpen } = useAppLayout();
+  const { headerContent, actionSidebarContent, isActionSidebarOpen } =
+    useAppLayout();
   return (
     <>
       <RootLayout.App>
