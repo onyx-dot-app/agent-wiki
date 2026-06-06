@@ -1,6 +1,7 @@
 import "./globals.css";
 
 import * as Tooltip from "@radix-ui/react-tooltip";
+import clsx from "clsx";
 import { DM_Mono, Hanken_Grotesk } from "next/font/google";
 import { cookies } from "next/headers";
 import type { ReactNode } from "react";
@@ -9,8 +10,11 @@ import { ConfirmProvider } from "@/components/common/ConfirmDialog";
 import { AuthProvider } from "@/lib/auth";
 import { DraftingProvider } from "@/lib/drafting";
 import { SWRProvider } from "@/lib/swr";
-import { THEME_COOKIE_KEY, ThemeProvider } from "@/lib/theme-provider";
-import type { ResolvedTheme } from "@/lib/theme-provider";
+import {
+  THEME_COOKIE_KEY,
+  ThemeProvider,
+  type ResolvedTheme,
+} from "@/lib/theme-provider";
 
 const hankenGrotesk = Hanken_Grotesk({
   subsets: ["latin"],
@@ -65,7 +69,11 @@ export default async function RootLayout({
   return (
     <html
       lang="en"
-      className={`${hankenGrotesk.variable} ${dmMono.variable}${theme === "dark" ? " dark" : ""}`}
+      className={clsx(
+        hankenGrotesk.variable,
+        dmMono.variable,
+        theme === "dark" && "dark",
+      )}
       data-theme={theme}
     >
       <head />

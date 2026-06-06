@@ -95,7 +95,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     applyTheme(resolved);
     // Persist resolved theme in a cookie so the server can render the
     // correct data-theme on <html> before React hydrates.
-    document.cookie = `${THEME_COOKIE_KEY}=${resolved};path=/;max-age=${365 * 24 * 60 * 60};SameSite=Lax`;
+    document.cookie = `${THEME_COOKIE_KEY}=${resolved};path=/;max-age=${365 * 24 * 60 * 60};SameSite=Lax;Secure`;
   }, [resolved]);
 
   const value = useMemo<ThemeContextValue>(
