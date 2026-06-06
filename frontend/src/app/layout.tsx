@@ -1,15 +1,15 @@
+import "./globals.css";
+
 import * as Tooltip from "@radix-ui/react-tooltip";
 import { DM_Mono, Hanken_Grotesk } from "next/font/google";
 import type { ReactNode } from "react";
 
-import { ChatWidget } from "@/components/chat/ChatWidget";
 import { ConfirmProvider } from "@/components/common/ConfirmDialog";
 import { AuthProvider } from "@/lib/auth";
 import { DraftingProvider } from "@/lib/drafting";
 import { SWRProvider } from "@/lib/swr";
-import { ThemeBootstrapScript, ThemeProvider } from "@/lib/theme-provider";
-
-import "./globals.css";
+import { ThemeBootstrapScript } from "@/lib/theme-bootstrap-script";
+import { ThemeProvider } from "@/lib/theme-provider";
 
 const hankenGrotesk = Hanken_Grotesk({
   subsets: ["latin"],
@@ -64,6 +64,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         style={{
           margin: 0,
           boxSizing: "border-box",
+          height: "100%",
         }}
       >
         <SWRProvider>
@@ -71,10 +72,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
             <ThemeProvider>
               <DraftingProvider>
                 <Tooltip.Provider delayDuration={300}>
-                  <ConfirmProvider>
-                    {children}
-                    <ChatWidget />
-                  </ConfirmProvider>
+                  <ConfirmProvider>{children}</ConfirmProvider>
                 </Tooltip.Provider>
               </DraftingProvider>
             </ThemeProvider>

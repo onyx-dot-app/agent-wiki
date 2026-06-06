@@ -2,10 +2,28 @@
 @import "./css/z-index.css";
 @config "../../tailwind.config.cjs";
 
+/* Reserve the scrollbar gutter on the root scroll container so layout
+   width stays constant whether content fits or overflows. Without this,
+   pages that toggle between short and tall content cause a horizontal
+   shift as the scrollbar appears/disappears. */
+html,
+body {
+  height: 100%;
+  scrollbar-gutter: stable;
+}
+
+@layer base {
+  body {
+    @apply bg-background;
+    font-family: var(--font-hanken-grotesk);
+  }
+}
+
 /* Tell the browser which color scheme is active so native UI (scrollbars,
    autofill, date pickers) uses matching light/dark variants. */
 :root {
   color-scheme: light;
+  --breakpoint-content-md: 768px;
 }
 .dark {
   color-scheme: dark;
@@ -198,4 +216,20 @@
 }
 ::highlight(wiki-comment-active) {
   background-color: rgba(255, 159, 28, 0.6);
+}
+
+@utility dbg-red {
+  /* DEBUGGING UTILITIES
+  If you ever want to highlight a component for debugging purposes, just type in `className="dbg-red ..."`, and a red box should appear around it.
+  This helps with placing things properly on the screen and seeing how they look during active development.
+  */
+  border: 1px solid red;
+}
+
+@utility dbg-blue {
+  border: 1px solid blue;
+}
+
+@utility dbg-green {
+  border: 1px solid green;
 }

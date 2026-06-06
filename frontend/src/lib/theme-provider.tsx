@@ -26,18 +26,6 @@ const ThemeContext = createContext<ThemeContextValue>({
 
 const STORAGE_KEY = "agent-wiki:theme";
 
-// Inline script that runs before React hydrates so the user never sees a
-// light-mode flash before the dark-mode preference applies. Renders into
-// <head> via ``ThemeBootstrapScript``.
-//
-// Sets both ``data-theme`` attribute (our globals.css tokens) and the
-// ``.dark`` class (Opal's CSS) so both theming systems stay in sync.
-const bootstrapSource = `(()=>{try{var k=${JSON.stringify(STORAGE_KEY)};var s=localStorage.getItem(k);if(s!=='light'&&s!=='dark'&&s!=='system')s='system';var r=s;if(s==='system')r=window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';var el=document.documentElement;el.setAttribute('data-theme',r);el.classList.toggle('dark',r==='dark');}catch(e){}})();`;
-
-export function ThemeBootstrapScript() {
-  return <script dangerouslySetInnerHTML={{ __html: bootstrapSource }} />;
-}
-
 function readStoredSetting(): ThemeSetting {
   if (typeof window === "undefined") return "system";
   try {
