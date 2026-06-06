@@ -300,7 +300,7 @@ def test_missing_file_skipped(mock_search, mock_reconcile, mock_read, mock_commi
 
 
 # --------------------------------------------------------------------------- #
-# P1: oversized-query handling (LLM intent + bounded fallback)                #
+# oversized-query handling (LLM intent + bounded fallback)                    #
 # --------------------------------------------------------------------------- #
 
 
@@ -329,6 +329,16 @@ def test_generate_search_query_returns_none_on_error():
     from app.ingest import intent as ingest_intent
     with patch("app.ingest.intent.client.complete", side_effect=RuntimeError("model down")):
         assert ingest_intent.generate_search_query(title="t", content="c", model="cheap") is None
+
+
+def test_generate_search_query_strips_markdown_fence():
+    from types import SimpleNamespace
+    from app.ingest import intent as ingest_intent
+    # Many models wrap JSON in a ```json fence — must still parse.
+    payload = '```json\n{"summary": "Acme call", "candidate_updates": [], "entities": ["Acme"]}\n```'
+    with patch("app.ingest.intent.client.complete", return_value=SimpleNamespace(text=payload)):
+        q = ingest_intent.generate_search_query(title="Acme", content="...", model="cheap")
+    assert q is not None and "Acme call" in q and "Acme" in q
 
 
 def _settings_with_selector(model: str = "test-model") -> LLMSettings:

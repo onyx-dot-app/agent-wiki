@@ -43,7 +43,11 @@ def generate_search_query(*, title: str | None, content: str, model: str) -> str
                 ],
                 model=model,
             )
-        raw: Any = json.loads(result.text.strip())
+        text = result.text.strip()
+        # Some models wrap the JSON in a ```/```json code fence; strip it.
+        if text.startswith("```"):
+            text = text.split("```", 2)[1].removeprefix("json").removeprefix("JSON").strip()
+        raw: Any = json.loads(text)
         if not isinstance(raw, dict):
             raise ValueError(f"expected object, got {type(raw).__name__}")
         data = cast(dict[str, Any], raw)
