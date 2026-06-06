@@ -1,15 +1,20 @@
 import "./globals.css";
 
 import * as Tooltip from "@radix-ui/react-tooltip";
+import { cn } from "@onyx-ai/opal/utils";
 import { DM_Mono, Hanken_Grotesk } from "next/font/google";
+import { cookies } from "next/headers";
 import type { ReactNode } from "react";
 
 import { ConfirmProvider } from "@/components/common/ConfirmDialog";
 import { AuthProvider } from "@/lib/auth";
 import { DraftingProvider } from "@/lib/drafting";
 import { SWRProvider } from "@/lib/swr";
-import { ThemeBootstrapScript } from "@/lib/theme-bootstrap-script";
-import { ThemeProvider } from "@/lib/theme-provider";
+import {
+  THEME_COOKIE_KEY,
+  ThemeProvider,
+  type ResolvedTheme,
+} from "@/lib/theme-provider";
 
 const hankenGrotesk = Hanken_Grotesk({
   subsets: ["latin"],
@@ -52,14 +57,26 @@ export const viewport = {
   initialScale: 1,
 };
 
-export default function RootLayout({ children }: { children: ReactNode }) {
+export default async function RootLayout({
+  children,
+}: {
+  children: ReactNode;
+}) {
+  const cookieStore = await cookies();
+  const theme: ResolvedTheme =
+    cookieStore.get(THEME_COOKIE_KEY)?.value === "dark" ? "dark" : "light";
+
   return (
-    <html lang="en" className={`${hankenGrotesk.variable} ${dmMono.variable}`}>
-      <head>
-        {/* Sets data-theme attribute and .dark class on <html> before React
-            hydrates so dark-mode users don't see a light-mode flash. */}
-        <ThemeBootstrapScript />
-      </head>
+    <html
+      lang="en"
+      className={cn(
+        hankenGrotesk.variable,
+        dmMono.variable,
+        theme === "dark" && "dark",
+      )}
+      data-theme={theme}
+    >
+      <head />
       <body
         style={{
           margin: 0,

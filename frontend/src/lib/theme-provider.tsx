@@ -25,6 +25,9 @@ const ThemeContext = createContext<ThemeContextValue>({
 });
 
 const STORAGE_KEY = "agent-wiki:theme";
+// Separate cookie key (no colon — RFC 6265 token-safe) so the server can
+// read the resolved theme for SSR without relying on localStorage.
+export const THEME_COOKIE_KEY = "agent-wiki-theme";
 
 function readStoredSetting(): ThemeSetting {
   if (typeof window === "undefined") return "system";
@@ -90,6 +93,9 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     applyTheme(resolved);
+    // Persist resolved theme in a cookie so the server can render the
+    // correct data-theme on <html> before React hydrates.
+    document.cookie = `${THEME_COOKIE_KEY}=${resolved};path=/;max-age=${365 * 24 * 60 * 60};SameSite=Lax;Secure`;
   }, [resolved]);
 
   const value = useMemo<ThemeContextValue>(
