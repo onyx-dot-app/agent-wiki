@@ -15,6 +15,7 @@ from __future__ import annotations
 import re
 
 import logging
+from collections import Counter
 
 from app.config import CONFIG
 from app.db.fts import SearchHit, search as fts_search
@@ -29,6 +30,17 @@ class IngestSearchError(Exception):
     """Raised when the BM25 candidate search fails at the backend (e.g.
     OpenSearch rejecting an oversized query), as distinct from returning no
     matches. The reconciler logs it and drops the document."""
+
+
+def bounded_query(content: str, max_terms: int = 200) -> str:
+    """Reduce ``content`` to its most frequent terms, capped at ``max_terms``.
+
+    A deterministic fallback query that stays well under OpenSearch's boolean
+    clause limit, used when the LLM intent path is unavailable for a document
+    too large to query with its raw body.
+    """
+    counts = Counter(t for t in _TOKEN_RE.findall(content.lower()) if len(t) > 2)
+    return " ".join(term for term, _ in counts.most_common(max_terms))
 
 
 def _tokens(text: str) -> set[str]:

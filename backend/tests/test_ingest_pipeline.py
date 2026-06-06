@@ -297,3 +297,81 @@ def test_missing_file_skipped(mock_search, mock_reconcile, mock_read, mock_commi
     _run(_make_push())
     mock_reconcile.assert_not_called()
     mock_commit.assert_not_called()
+
+
+# --------------------------------------------------------------------------- #
+# oversized-query handling (LLM intent + bounded fallback)                    #
+# --------------------------------------------------------------------------- #
+
+
+def test_bounded_query_caps_terms_and_drops_short_tokens():
+    content = ("alpha beta gamma " * 50) + "to is a " + ("delta " * 5)
+    q = ingest_search.bounded_query(content, max_terms=3)
+    terms = q.split()
+    assert len(terms) <= 3
+    # short tokens (<=2 chars) are dropped
+    assert "to" not in terms and "is" not in terms and "a" not in terms
+    # most frequent content term is included
+    assert "alpha" in terms
+
+
+def test_generate_search_query_builds_from_intent_fields():
+    from types import SimpleNamespace
+    from app.ingest import intent as ingest_intent
+    payload = '{"summary": "Acme renewal call", "candidate_updates": ["renewed for $24k"], "entities": ["Acme", "$24k"]}'
+    with patch("app.ingest.intent.client.complete", return_value=SimpleNamespace(text=payload)):
+        q = ingest_intent.generate_search_query(title="Acme", content="...transcript...", model="cheap")
+    assert q is not None
+    assert "Acme renewal call" in q and "renewed for $24k" in q and "$24k" in q
+
+
+def test_generate_search_query_returns_none_on_error():
+    from app.ingest import intent as ingest_intent
+    with patch("app.ingest.intent.client.complete", side_effect=RuntimeError("model down")):
+        assert ingest_intent.generate_search_query(title="t", content="c", model="cheap") is None
+
+
+def test_generate_search_query_strips_markdown_fence():
+    from types import SimpleNamespace
+    from app.ingest import intent as ingest_intent
+    # Many models wrap JSON in a ```json fence — must still parse.
+    payload = '```json\n{"summary": "Acme call", "candidate_updates": [], "entities": ["Acme"]}\n```'
+    with patch("app.ingest.intent.client.complete", return_value=SimpleNamespace(text=payload)):
+        q = ingest_intent.generate_search_query(title="Acme", content="...", model="cheap")
+    assert q is not None and "Acme call" in q and "Acme" in q
+
+
+def _settings_with_selector(model: str = "test-model") -> LLMSettings:
+    return _EMPTY_LLM_SETTINGS.model_copy(update={"model": model, "ingest_selector_model": model})
+
+
+@patch("app.tasks.wiki_update.wiki_git.head_sha_for_path", return_value="headsha")
+@patch("app.wiki.utils.wiki_notify.after_doc_write")
+@patch("app.tasks.wiki_update.wiki_git.commit_file", return_value="sha")
+@patch("app.tasks.wiki_update.wiki_git.read_file", return_value="body")
+@patch("app.tasks.wiki_update.ingest_batch_reconciler.batch_reconcile")
+@patch("app.tasks.wiki_update.ingest_intent.generate_search_query", return_value="distilled query")
+@patch("app.tasks.wiki_update.ingest_search.candidates")
+def test_oversized_query_retries_with_llm_intent(
+    mock_search, mock_intent, mock_reconcile, mock_read, mock_commit, mock_notify, mock_head, monkeypatch
+):
+    monkeypatch.setattr("app.tasks.wiki_update.get_llm_settings", lambda: _settings_with_selector())
+    # First candidate search blows the clause limit; retry with the distilled
+    # query succeeds and the doc commits.
+    mock_search.side_effect = [ingest_search.IngestSearchError("maxClauseCount is set to 1024"), [_hit("page.md", "Page", 5.0)]]
+    mock_reconcile.return_value = (["new body"], 1)
+    _run(_make_push(content="x " * 5000))
+    mock_intent.assert_called_once()
+    assert mock_search.call_count == 2
+    mock_commit.assert_called_once()
+
+
+@patch("app.tasks.wiki_update.ingest_search.bounded_query", return_value="term1 term2")
+@patch("app.tasks.wiki_update.ingest_search.candidates")
+def test_oversized_query_falls_back_to_bounded_terms_when_no_model(mock_search, mock_bounded):
+    # No selector model configured (autouse _EMPTY settings) → no LLM call,
+    # fall back to bounded-terms query and retry.
+    mock_search.side_effect = [ingest_search.IngestSearchError("maxClauseCount is set to 1024"), []]
+    _run(_make_push(content="x " * 5000))
+    mock_bounded.assert_called_once()
+    assert mock_search.call_count == 2
