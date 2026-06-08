@@ -3,11 +3,11 @@
 import Link from "next/link";
 import { Suspense, useEffect, useState, type FormEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Button, Card, InputTypeIn } from "@onyx-ai/opal/components";
+import { Button, Card, InputTypeIn, Text } from "@onyx-ai/opal/components";
 import { Content, InputVertical } from "@onyx-ai/opal/layouts";
 import { SvgOnyxLogo } from "@onyx-ai/opal/logos";
-import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { useAuth } from "@/lib/auth";
+import { SvgSimpleLoader } from "@opal/icons";
 
 function SignupForm() {
   const { signup, config } = useAuth();
@@ -49,9 +49,9 @@ function SignupForm() {
   const loginHref = next ? `/login?next=${encodeURIComponent(next)}` : "/login";
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-background-tint-02 p-6">
+    <main className="flex min-h-screen items-center justify-center p-6">
       <div className="w-full max-w-[400px]">
-        <Card padding="lg" border="solid">
+        <Card padding="lg" border="solid" rounding="lg">
           <div className="mb-6">
             <Content
               icon={SvgOnyxLogo}
@@ -59,7 +59,7 @@ function SignupForm() {
               description="Your open source AI agent collaboration platform"
             />
           </div>
-          <form onSubmit={onSubmit} className="flex flex-col gap-3">
+          <form onSubmit={onSubmit} className="flex flex-col gap-2">
             <InputVertical title="Email" withLabel>
               <InputTypeIn
                 type="email"
@@ -105,13 +105,15 @@ function SignupForm() {
               </Button>
             </div>
           </form>
-          <p className="text--text-03) mt-5 mb-0 text-[13px]">
-            Already have an account?{" "}
-            <Link href={loginHref} className="text-text-05 underline">
-              Sign in
-            </Link>
-          </p>
         </Card>
+        <div className="flex w-full items-center justify-center">
+          <Text font="secondary-body" color="text-03">
+            Already have an account?
+          </Text>
+          <Link href={loginHref} className="underline">
+            <Text font="secondary-body">Sign in</Text>
+          </Link>
+        </div>
       </div>
     </main>
   );
@@ -121,8 +123,8 @@ export default function SignupPage() {
   return (
     <Suspense
       fallback={
-        <main className="p-8">
-          <LoadingSpinner center />
+        <main className="flex h-full items-center justify-center p-8">
+          <SvgSimpleLoader />
         </main>
       }
     >
