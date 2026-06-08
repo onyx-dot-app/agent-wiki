@@ -42,3 +42,14 @@
   border-radius: var(--border-radius-04);
   white-space: pre-wrap;
 }
+
+@keyframes chat-tool-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.toolSpinner {
+  border-top-color: var(--text-04);
+  animation: chat-tool-spin 0.7s linear infinite;
+}

@@ -534,14 +534,17 @@ export function ChatWidget() {
 
   if (mode === "closed") {
     return (
-      <button
-        onClick={() => setModeManually("widget")}
-        title="Open chat"
-        aria-label="Open chat"
-        className="fixed right-5 bottom-5 z-[1000] flex h-12 w-12 cursor-pointer items-center justify-center rounded-(--border-radius-12) border-none bg-(--background-tint-inverted-00) text-(--text-inverted-05) shadow-(--shadow-fab)"
-      >
-        <SvgBubbleText size={24} />
-      </button>
+      <div className="fixed right-5 bottom-5 z-[1000] shadow-(--shadow-fab) rounded-(--border-radius-12)">
+        <Button
+          icon={SvgBubbleText}
+          variant="action"
+          prominence="primary"
+          size="lg"
+          tooltip="Open chat"
+          onClick={() => setModeManually("widget")}
+          aria-label="Open chat"
+        />
+      </div>
     );
   }
 
@@ -637,13 +640,17 @@ export function ChatWidget() {
           >
             <div className="flex-1 whitespace-pre-wrap">{error}</div>
             {items.length > 0 && items[items.length - 1].kind === "user" && (
-              <button
-                onClick={onRetry}
-                disabled={sending}
-                className={`rounded-(--border-radius-04) border border-(--status-error-02) bg-(--background-tint-00) px-2 py-[3px] text-(--status-text-error-05) ${sending ? "cursor-not-allowed" : "cursor-pointer"} shrink-0 text-[11px] font-semibold`}
-              >
-                Retry
-              </button>
+              <div className="shrink-0">
+                <Button
+                  variant="danger"
+                  prominence="secondary"
+                  size="sm"
+                  disabled={sending}
+                  onClick={onRetry}
+                >
+                  Retry
+                </Button>
+              </div>
             )}
           </div>
         )}
@@ -667,13 +674,14 @@ export function ChatWidget() {
             disabled={sending}
             className="box-border min-w-0 flex-1 resize-none rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-00) p-2 font-[inherit] text-[13px] text-(--text-05) outline-none focus:border-(--border-05)"
           />
-          <button
+          <Button
             type="submit"
+            variant="action"
+            prominence="primary"
             disabled={sending || !input.trim()}
-            className={`rounded-(--border-radius-04) border-none bg-(--background-tint-inverted-00) px-[14px] text-(--text-inverted-05) ${sending || !input.trim() ? "cursor-not-allowed opacity-50" : "cursor-pointer"} text-[13px] font-semibold`}
           >
             Send
-          </button>
+          </Button>
         </form>
 
         <ChatHistoryPanel
@@ -916,14 +924,8 @@ function ToolStateIcon({ state }: { state: ToolState }) {
     return (
       <span
         aria-label="running"
-        className="inline-block h-[10px] w-[10px] rounded-full border-2 border-(--border-01)"
-        style={{
-          borderTopColor: "var(--text-04)",
-          animation: "chat-tool-spin 0.7s linear infinite",
-        }}
-      >
-        <style>{`@keyframes chat-tool-spin { to { transform: rotate(360deg); } }`}</style>
-      </span>
+        className={`inline-block h-[10px] w-[10px] rounded-full border-2 border-(--border-01) ${styles.toolSpinner}`}
+      />
     );
   }
   if (state === "error") {
