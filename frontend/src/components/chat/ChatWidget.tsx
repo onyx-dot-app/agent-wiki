@@ -534,7 +534,7 @@ export function ChatWidget() {
 
   if (mode === "closed") {
     return (
-      <div className="fixed right-5 bottom-5 z-[1000] shadow-(--shadow-fab) rounded-(--border-radius-12)">
+      <div className="fixed right-5 bottom-5 z-[1000] rounded-(--border-radius-12) shadow-(--shadow-fab)">
         <Button
           icon={SvgBubbleText}
           variant="action"
