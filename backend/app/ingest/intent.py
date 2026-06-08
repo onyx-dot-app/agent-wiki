@@ -24,6 +24,12 @@ log = logging.getLogger(__name__)
 # without paying full-document token cost on this cheap call.
 _INTENT_CONTENT_CHARS = 20_000
 
+# Cap the composed query's term count so it can't re-trip OpenSearch's clause
+# limit when the model echoes many distinct tokens (e.g. an ID-heavy document).
+# multi_match expands across two fields, so 200 terms ≈ 400 clauses — well under
+# the 1024 default. Matches app.ingest.search.bounded_query's cap.
+_MAX_QUERY_TERMS = 200
+
 
 def generate_search_query(*, title: str | None, content: str, model: str) -> str | None:
     """Return a compact query (summary + candidate updates + entities) distilled
@@ -63,5 +69,5 @@ def generate_search_query(*, title: str | None, content: str, model: str) -> str
         log.warning("ingest_intent: failed to generate search query", exc_info=True)
         return None
 
-    query = " ".join(p.strip() for p in parts if p.strip())
+    query = " ".join(" ".join(parts).split()[:_MAX_QUERY_TERMS])
     return query or None
