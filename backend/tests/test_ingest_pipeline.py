@@ -341,6 +341,19 @@ def test_generate_search_query_strips_markdown_fence():
     assert q is not None and "Acme call" in q and "Acme" in q
 
 
+def test_generate_search_query_caps_term_count():
+    import json as _json
+    from types import SimpleNamespace
+    from app.ingest import intent as ingest_intent
+    # Model echoes a huge entities list — the query must stay bounded so it can't
+    # re-trip the clause limit on retry.
+    payload = _json.dumps({"summary": "many ids", "candidate_updates": [], "entities": [f"id{i:05d}" for i in range(1000)]})
+    with patch("app.ingest.intent.client.complete", return_value=SimpleNamespace(text=payload)):
+        q = ingest_intent.generate_search_query(title="t", content="c", model="cheap")
+    assert q is not None
+    assert len(q.split()) <= 200
+
+
 def _settings_with_selector(model: str = "test-model") -> LLMSettings:
     return _EMPTY_LLM_SETTINGS.model_copy(update={"model": model, "ingest_selector_model": model})
 
