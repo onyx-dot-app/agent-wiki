@@ -49,11 +49,20 @@ from app.api import (
 from app.auth import PermissionDenied
 from app.auth.deps import CurrentUserMiddleware
 import app.config as _app_config
+from app.db import comment_fts
+from app.wiki import comments as _comments_repo
 from app.metrics import setup_prometheus
 from app.mcp_server import pubsub as mcp_pubsub
 from app.llm.errors import LLMError
 from app.models._helpers import ErrorResponse, QueueFullErrorResponse, RequestError
+from app.db.session import init_db
+from app.tasks.agent_activity import schedule_all_pending_cleanups
 from app.tasks.queues import QueueFullError
+from app.triggers import repo as triggers_repo
+from app.utils.logging import setup_logging
+from app.wiki.git import ensure_wiki_repo
+from app.wiki.seed import seed_if_empty
+from app.wiki.templates import seed_starter_templates_if_empty
 
 log = logging.getLogger(__name__)
 
@@ -136,14 +145,6 @@ async def _lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     without entering the context manager, so the lifespan body is
     skipped — fixtures (``tmp_db`` / ``tmp_repo``) own DB/wiki init.
     """
-    from app.db.session import init_db
-    from app.tasks.agent_activity import schedule_all_pending_cleanups
-    from app.triggers import repo as triggers_repo
-    from app.utils.logging import setup_logging
-    from app.wiki.git import ensure_wiki_repo
-    from app.wiki.seed import seed_if_empty
-    from app.wiki.templates import seed_starter_templates_if_empty
-
     setup_logging()
     log.info(
         "agent-wiki backend starting (database=%s)", _app_config.CONFIG.database_url.split("@")[-1]
@@ -157,6 +158,11 @@ async def _lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     # Starter document templates seed once on a brand-new DB; users
     # who delete a starter will not see it re-appear after a reboot.
     seed_starter_templates_if_empty()
+    # One-time backfill: index existing comments when the comment search index
+    # is empty (first boot after the feature ships, or after an index reset).
+    # The index persists across reboots, so steady-state boots skip this.
+    if comment_fts.count() == 0:
+        _comments_repo.reindex_all_inline()
     triggers_repo.purge_invalid_triggers(actor="system <system@agent-wiki>")
     triggers_repo.rebuild_from_filesystem()
     schedule_all_pending_cleanups()

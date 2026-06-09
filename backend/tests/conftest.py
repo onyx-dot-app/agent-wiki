@@ -151,6 +151,9 @@ def tmp_config(tmp_path, monkeypatch):
 
     if _opensearch_up:
         _fts.drop_index_for_tests()  # delete the per-test index
+        from app.db import comment_fts as _comment_fts
+
+        _comment_fts.drop_index_for_tests()  # and the per-test comment index
     _fts.reset_client_for_tests()
     with psycopg.connect(_BASE_URL, autocommit=True) as conn:
         conn.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(schema)))
