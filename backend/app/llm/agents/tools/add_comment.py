@@ -40,6 +40,7 @@ def handle(args: dict[str, Any]) -> Any:
     quoted = args.get("quoted_text")
     if not isinstance(quoted, str) or not quoted.strip():
         return {"error": "quoted_text is required — the exact snippet to anchor the comment to"}
+    quoted = quoted.strip()
 
     if not wiki_utils.file_exists(path):
         return {"error": f"file not found: {path}"}
@@ -52,7 +53,11 @@ def handle(args: dict[str, Any]) -> Any:
     head_sha = wiki_git.head_sha_for_path(path)
     if not head_sha:
         return {"error": f"could not resolve HEAD for {path}"}
-    page = wiki_git.read_file(path, ref="HEAD")
+    # read_file_opt returns None (rather than raising UnknownSha) if the path
+    # isn't resolvable at HEAD — e.g. its latest commit was a deletion.
+    page = wiki_git.read_file_opt(path, ref="HEAD")
+    if page is None:
+        return {"error": f"could not read {path}"}
 
     # Anchor to the quoted snippet — require an exact, unique occurrence so we
     # never guess where the comment belongs.
