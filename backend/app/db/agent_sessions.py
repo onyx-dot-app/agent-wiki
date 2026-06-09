@@ -13,7 +13,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 
 from app.config import CONFIG
 from app.db.models import AgentSession
@@ -45,6 +45,9 @@ def _to_dict(row: AgentSession) -> dict[str, Any]:
         "last_activity_at": row.last_activity_at,
         "spawn_ok_at": row.spawn_ok_at,
         "closed_at": row.closed_at,
+        "external_session_id": row.external_session_id,
+        "external_url": row.external_url,
+        "failure_reason": row.failure_reason,
     }
 
 
@@ -70,21 +73,23 @@ def create(
     working_dir: str | None,
     machine_id: str | None = None,
     cli_session_id: str | None = None,
+    status: str | None = None,
 ) -> str:
     sid = "as_" + uuid.uuid4().hex
     with session() as s:
-        s.add(
-            AgentSession(
-                id=sid,
-                user_id=user_id,
-                machine_id=machine_id,
-                tool_id=tool_id,
-                wiki_path=wiki_path,
-                working_dir=working_dir,
-                first_turn_prompt=first_turn_prompt,
-                cli_session_id=cli_session_id,
-            )
+        row = AgentSession(
+            id=sid,
+            user_id=user_id,
+            machine_id=machine_id,
+            tool_id=tool_id,
+            wiki_path=wiki_path,
+            working_dir=working_dir,
+            first_turn_prompt=first_turn_prompt,
+            cli_session_id=cli_session_id,
         )
+        if status is not None:
+            row.status = status
+        s.add(row)
     log.info("agent_session created id=%s user=%s tool=%s", sid, user_id, tool_id)
     return sid
 
@@ -98,7 +103,7 @@ def get(sid: str) -> dict[str, Any] | None:
 def list_for_user(
     user_id: str,
     *,
-    statuses: Iterable[str] = ("pending", "active", "idle"),
+    statuses: Iterable[str] = ("pending", "active", "idle", "provisioning", "ready"),
 ) -> list[dict[str, Any]]:
     statuses_t = tuple(statuses)
     with session() as s:
@@ -117,7 +122,7 @@ def list_for_page(*, user_id: str, wiki_path: str) -> list[dict[str, Any]]:
             .where(
                 AgentSession.user_id == user_id,
                 AgentSession.wiki_path == wiki_path,
-                AgentSession.status.in_(("pending", "active", "idle")),
+                AgentSession.status.in_(("pending", "active", "idle", "provisioning", "ready")),
             )
             .order_by(AgentSession.started_at.desc())
         ).all()
@@ -176,7 +181,7 @@ def touch_activity(sid: str) -> None:
             update(AgentSession)
             .where(
                 AgentSession.id == sid,
-                AgentSession.status.in_(("pending", "active", "idle")),
+                AgentSession.status.in_(("pending", "active", "idle", "provisioning", "ready")),
             )
             .values(last_activity_at=_now_iso())
         )
@@ -262,3 +267,84 @@ def evict_spawn_missed() -> int:
             )
             .values(status="failed", closed_at=now),
         )
+
+
+# --------------------------------------------------------------------------- #
+# Onyx Craft (in_app) sessions — distinct status lifecycle:                   #
+# provisioning → ready | failed. The local_cli sweepers never match these.    #
+# --------------------------------------------------------------------------- #
+
+
+def find_in_flight(
+    user_id: str,
+    *,
+    tool_id: str,
+    wiki_path: str | None,
+    statuses: Iterable[str] = ("provisioning", "ready"),
+) -> dict[str, Any] | None:
+    """Most-recent in-flight session for the launch natural key — the
+    idempotency probe that keeps a double-click from provisioning a
+    second sandbox."""
+    statuses_t = tuple(statuses)
+    with session() as s:
+        row = s.scalars(
+            select(AgentSession)
+            .where(
+                AgentSession.user_id == user_id,
+                AgentSession.tool_id == tool_id,
+                AgentSession.wiki_path == wiki_path,
+                AgentSession.status.in_(statuses_t),
+            )
+            .order_by(AgentSession.started_at.desc())
+        ).first()
+        return _to_summary(row) if row is not None else None
+
+
+def count_provisioning(user_id: str, *, tool_id: str) -> int:
+    with session() as s:
+        n = s.scalar(
+            select(func.count())
+            .select_from(AgentSession)
+            .where(
+                AgentSession.user_id == user_id,
+                AgentSession.tool_id == tool_id,
+                AgentSession.status == "provisioning",
+            )
+        )
+        return int(n or 0)
+
+
+def set_external_session(sid: str, external_session_id: str) -> None:
+    """Persist the Onyx session id the moment it exists, so a worker retry
+    never double-creates a sandbox."""
+    with session() as s:
+        s.execute(
+            update(AgentSession)
+            .where(AgentSession.id == sid)
+            .values(external_session_id=external_session_id, last_activity_at=_now_iso())
+        )
+
+
+def mark_craft_ready(sid: str, *, external_url: str) -> None:
+    now = _now_iso()
+    with session() as s:
+        updated = execute_dml(
+            s,
+            update(AgentSession)
+            .where(AgentSession.id == sid, AgentSession.status == "provisioning")
+            .values(status="ready", external_url=external_url, last_activity_at=now),
+        )
+    if updated == 0:
+        log.info("agent_session mark_craft_ready ignored id=%s (not provisioning)", sid)
+
+
+def mark_craft_failed(sid: str, *, reason: str) -> None:
+    now = _now_iso()
+    with session() as s:
+        execute_dml(
+            s,
+            update(AgentSession)
+            .where(AgentSession.id == sid, AgentSession.status == "provisioning")
+            .values(status="failed", failure_reason=reason, closed_at=now, last_activity_at=now),
+        )
+    log.info("agent_session craft failed id=%s reason=%s", sid, reason)

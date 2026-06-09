@@ -78,6 +78,8 @@ def list_sessions(
                 last_activity_at=r["last_activity_at"],
                 closed_at=r["closed_at"],
                 cli_session_id=r["cli_session_id"],
+                external_url=r["external_url"],
+                failure_reason=r["failure_reason"],
             )
             for r in rows
         ]

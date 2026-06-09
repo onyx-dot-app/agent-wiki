@@ -1,4 +1,5 @@
 """DB-backed ingest settings. Configured from /admin/ingest."""
+
 from __future__ import annotations
 
 import logging
@@ -20,26 +21,52 @@ class IngestSettings(BaseModel):
 
     max_doc_chars: int
     api_key: str | None
+    # Outbound half of the "Onyx Connection" admin page — the public Onyx
+    # origin for Craft launches. None = Craft unavailable.
+    onyx_base_url: str | None
 
 
 def get() -> IngestSettings:
     with session() as s:
         row = s.get(IngestSettingsRow, 1)
         if row is None:
-            return IngestSettings(max_doc_chars=DEFAULT_MAX_DOC_CHARS, api_key=None)
-        return IngestSettings(max_doc_chars=row.max_doc_chars, api_key=row.api_key)
+            return IngestSettings(
+                max_doc_chars=DEFAULT_MAX_DOC_CHARS, api_key=None, onyx_base_url=None
+            )
+        return IngestSettings(
+            max_doc_chars=row.max_doc_chars,
+            api_key=row.api_key,
+            onyx_base_url=row.onyx_base_url,
+        )
 
 
-def upsert(*, max_doc_chars: int) -> None:
+def get_onyx_base_url() -> str | None:
+    """The admin-configured Onyx origin, or None when not set."""
+    return get().onyx_base_url
+
+
+def upsert(*, max_doc_chars: int, onyx_base_url: str | None) -> None:
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     with session() as s:
         row = s.get(IngestSettingsRow, 1)
         if row is None:
-            s.add(IngestSettingsRow(id=1, max_doc_chars=max_doc_chars, updated_at=now))
+            s.add(
+                IngestSettingsRow(
+                    id=1,
+                    max_doc_chars=max_doc_chars,
+                    onyx_base_url=onyx_base_url,
+                    updated_at=now,
+                )
+            )
         else:
             row.max_doc_chars = max_doc_chars
+            row.onyx_base_url = onyx_base_url
             row.updated_at = now
-    log.info("ingest_settings upserted max_doc_chars=%d", max_doc_chars)
+    log.info(
+        "ingest_settings upserted max_doc_chars=%d onyx_base_url_set=%s",
+        max_doc_chars,
+        bool(onyx_base_url),
+    )
 
 
 def regenerate_key() -> str:
@@ -49,9 +76,14 @@ def regenerate_key() -> str:
     with session() as s:
         row = s.get(IngestSettingsRow, 1)
         if row is None:
-            s.add(IngestSettingsRow(
-                id=1, max_doc_chars=DEFAULT_MAX_DOC_CHARS, api_key=key, updated_at=now,
-            ))
+            s.add(
+                IngestSettingsRow(
+                    id=1,
+                    max_doc_chars=DEFAULT_MAX_DOC_CHARS,
+                    api_key=key,
+                    updated_at=now,
+                )
+            )
         else:
             row.api_key = key
             row.updated_at = now
