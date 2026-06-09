@@ -101,3 +101,20 @@ class CommentThreadView(BaseModel):
 
 class CommentListResponse(BaseModel):
     threads: list[CommentThreadView]
+
+
+class CommentSearchHit(BaseModel):
+    """A comment matched by full-text search. ``doc_path`` + ``thread_root_id``
+    let the UI deep-link to the thread via ``/app/wiki/<path>?comment=<id>``.
+    ``snippet`` is plain text (highlight tags stripped) — render as text."""
+
+    comment_id: str
+    doc_path: str
+    thread_root_id: str
+    snippet: str
+    score: float
+
+
+class CommentSearchResponse(BaseModel):
+    query: str
+    hits: list[CommentSearchHit]
