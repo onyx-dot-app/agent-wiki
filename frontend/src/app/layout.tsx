@@ -6,6 +6,7 @@ import { DM_Mono, Hanken_Grotesk } from "next/font/google";
 import { cookies } from "next/headers";
 import type { ReactNode } from "react";
 
+import { ChatWidget } from "@/components/chat/ChatWidget";
 import { ConfirmProvider } from "@/components/common/ConfirmDialog";
 import { AuthProvider } from "@/lib/auth";
 import { DraftingProvider } from "@/lib/drafting";
@@ -89,7 +90,10 @@ export default async function RootLayout({
             <ThemeProvider>
               <DraftingProvider>
                 <Tooltip.Provider delayDuration={300}>
-                  <ConfirmProvider>{children}</ConfirmProvider>
+                  <ConfirmProvider>
+                    {children}
+                    <ChatWidget />
+                  </ConfirmProvider>
                 </Tooltip.Provider>
               </DraftingProvider>
             </ThemeProvider>

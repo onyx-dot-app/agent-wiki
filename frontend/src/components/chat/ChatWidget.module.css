@@ -1,0 +1,55 @@
+.markdownP {
+  margin: 6px 0;
+}
+.markdownP:first-child {
+  margin-top: 0;
+}
+.markdownP:last-child {
+  margin-bottom: 0;
+}
+
+.markdownUl {
+  margin: 6px 0;
+  padding-left: 22px;
+  list-style-type: disc;
+}
+.markdownOl {
+  margin: 6px 0;
+  padding-left: 22px;
+  list-style-type: decimal;
+}
+.markdownLi {
+  margin: 2px 0;
+}
+
+.markdownHeading {
+  margin: 10px 0 4px;
+  font-weight: 600;
+}
+.markdownHeading:first-child {
+  margin-top: 0;
+}
+
+.markdownCode {
+  background: var(--background-tint-03);
+  padding: 0 4px;
+  border-radius: var(--border-radius-04);
+}
+
+.markdownPre {
+  background: var(--background-tint-03);
+  padding: 8px;
+  border-radius: var(--border-radius-04);
+  white-space: pre-wrap;
+}
+
+@keyframes chat-tool-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.toolSpinner {
+  border-top-color: var(--text-04);
+  animation: chat-tool-spin 0.7s linear infinite;
+}
