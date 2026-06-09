@@ -88,6 +88,7 @@ export default function AppSidebar({ folded, onFoldToggle }: AppSidebarProps) {
               prominence="tertiary"
               size="md"
               tooltip="Open Sidebar"
+              tooltipSide="right"
               onClick={onFoldToggle}
             />
           </div>
@@ -105,6 +106,7 @@ export default function AppSidebar({ folded, onFoldToggle }: AppSidebarProps) {
                 prominence="tertiary"
                 size="md"
                 tooltip="Close Sidebar"
+                tooltipSide="right"
                 onClick={onFoldToggle}
               />
             </div>
@@ -120,6 +122,7 @@ export default function AppSidebar({ folded, onFoldToggle }: AppSidebarProps) {
             icon={SvgSearch}
             prominence="tertiary"
             tooltip="Search"
+            tooltipSide="right"
             onClick={expandAndFocusSearch}
           />
         ) : (
@@ -211,6 +214,7 @@ export default function AppSidebar({ folded, onFoldToggle }: AppSidebarProps) {
                             prominence="tertiary"
                             size="sm"
                             tooltip="Star"
+                            tooltipSide="right"
                             onClick={(e) => {
                               e.preventDefault();
                               e.stopPropagation();
