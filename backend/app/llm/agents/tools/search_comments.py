@@ -25,7 +25,7 @@ MAX_LIMIT = 20
 def _thread_link(doc_path: str, thread_root_id: str) -> str:
     """`/app/wiki/<encoded path>?comment=<root>` — the shipped deep-link route."""
     encoded = "/".join(quote(seg) for seg in doc_path.split("/") if seg)
-    return f"/app/wiki/{encoded}?comment={thread_root_id}"
+    return f"/app/wiki/{encoded}?comment={quote(thread_root_id, safe='')}"
 
 
 def handle(args: dict[str, Any]) -> Any:
