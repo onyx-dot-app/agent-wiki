@@ -1,8 +1,8 @@
 """Skills registry for the chat agent.
 
 Skills group workflow-shaped tools behind a `load_skill` meta-tool. Only the
-base tools (`search_wiki`, `read_page`) plus `load_skill` are exposed to the
-model up front. When the model calls `load_skill(name)`, the handler returns
+base tools (`search_wiki`, `search_comments`, `read_page`) plus `load_skill`
+are exposed to the model up front. When the model calls `load_skill(name)`, the handler returns
 that skill's instruction markdown and the per-turn tool list assembly in the
 chat loop picks up the newly active skill on the next iteration.
 
@@ -21,7 +21,7 @@ from app.llm.agents import tools as tool_registry
 
 _DIR = Path(__file__).parent
 
-BASE_TOOL_NAMES: tuple[str, ...] = ("search_wiki", "read_page")
+BASE_TOOL_NAMES: tuple[str, ...] = ("search_wiki", "search_comments", "read_page")
 
 LOAD_SKILL_TOOL_NAME = "load_skill"
 
