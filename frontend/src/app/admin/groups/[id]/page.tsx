@@ -48,6 +48,7 @@ export default function AdminEditGroupPage() {
 function EditGroup() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
+  if (!params) return null;
   const groupId = params.id;
   const { mutate } = useSWRConfig();
 
