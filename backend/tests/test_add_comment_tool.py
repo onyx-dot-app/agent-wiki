@@ -10,6 +10,7 @@ from __future__ import annotations
 from app.auth import User
 from app.llm.agents.tools.add_comment import handle
 from app.wiki import comments, git as wiki_git
+from tests._seed import seed_user
 
 _PAGE = "guides/db.md"
 _BODY = "Intro line.\nThe connection pool size is 20.\nClosing line.\n"
@@ -20,9 +21,14 @@ def _commit(body: str = _BODY) -> None:
     wiki_git.commit_file(_PAGE, body, "seed", author=None)
 
 
-def _as_user(monkeypatch) -> None:
-    user = User(id="u_a", email="a@x.com", name=None, is_admin=True)
+def _as_user(monkeypatch) -> str:
+    """Seed a real user row (the comment FK needs it) and make the tool see it.
+    `add_comment` captured `current_user` at import, so patch that binding too."""
+    uid = seed_user(uid="u_a", email="a@x.com")
+    user = User(id=uid, email="a@x.com", name=None, is_admin=False)
     monkeypatch.setattr("app.auth.current_user", lambda: user)
+    monkeypatch.setattr("app.llm.agents.tools.add_comment.current_user", lambda: user)
+    return uid
 
 
 def test_add_comment_anchors_to_snippet(tmp_repo, monkeypatch):
@@ -38,7 +44,7 @@ def test_add_comment_anchors_to_snippet(tmp_repo, monkeypatch):
     assert len(rows) == 1
     c = rows[0]
     assert c["author_kind"] == "agent"
-    assert c["author_user_id"] is None
+    assert c["author_user_id"] == "u_a"  # attributed to the chatting user
     assert c["quoted_text"] == _SNIPPET
     start = _BODY.index(_SNIPPET)
     assert (c["start_offset"], c["end_offset"]) == (start, start + len(_SNIPPET))

@@ -4,8 +4,9 @@ Lets an agent leave an **inline** comment on a page (agent-authored discussion �
 it does not change page content). Agents can't pick character offsets, so the
 tool anchors by an exact `quoted_text` snippet: we read the page at HEAD, locate
 the snippet, and require it to appear *exactly once* (no guessing). The thread is
-stored with `author_kind="agent"` and no `author_user_id`, so it renders as
-"Agent" in the panel.
+attributed to the user driving the chat (`author_user_id = current_user()`) —
+the agent acts on their behalf, so it's their comment — with `author_kind="agent"`
+kept as provenance (the row records it was posted via an agent).
 
 Visibility/permission mirrors human commenting: read access to the page is
 enough to comment, resolved via `require_can("read", path)` against the calling
@@ -16,7 +17,7 @@ from __future__ import annotations
 from typing import Any
 from urllib.parse import quote
 
-from app.auth import PermissionDenied, require_can
+from app.auth import PermissionDenied, current_user, require_can
 from app.llm.agents.tools.errors import ToolError
 from app.models.comment import CommentAuthorKind
 from app.wiki import comments as comments_repo, git as wiki_git, utils as wiki_utils
@@ -67,10 +68,11 @@ def handle(args: dict[str, Any]) -> Any:
             "snippet so the comment anchors unambiguously"
         }
 
+    user = current_user()
     row = comments_repo.create_thread(
         doc_path=path,
         body=body.strip(),
-        author_user_id=None,
+        author_user_id=user.id if user else None,
         anchor_sha=head_sha,
         start_offset=idx,
         end_offset=idx + len(quoted),
