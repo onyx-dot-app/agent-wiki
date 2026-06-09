@@ -5,7 +5,12 @@ import { SvgX } from "@onyx-ai/opal/icons";
 import { usePathname } from "next/navigation";
 import { ADMIN_NAV_ENTRIES } from "@/lib/nav/registry";
 import UserMenu from "@/sections/sidebar/UserMenu";
-import { SidebarHeader } from "@/sections/sidebar/SidebarHeader";
+import {
+  SidebarBody,
+  SidebarFooter,
+  SidebarHeader,
+  SidebarNavList,
+} from "@/sections/sidebar/SidebarHeader";
 
 export default function AdminSidebar() {
   const pathname = usePathname();
@@ -14,9 +19,8 @@ export default function AdminSidebar() {
     <nav className="sticky top-0 box-border flex h-screen w-(--sidebar-width-expanded) shrink-0 flex-col gap-4 overflow-hidden bg-background-tint-02 py-2">
       <SidebarHeader />
 
-      {/* Nav items */}
-      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-x-hidden px-2">
-        <div className="flex flex-col gap-px">
+      <SidebarBody>
+        <SidebarNavList>
           {ADMIN_NAV_ENTRIES.map((item) => {
             const active = pathname?.startsWith(item.href) ?? false;
             return (
@@ -31,18 +35,17 @@ export default function AdminSidebar() {
               </SidebarTab>
             );
           })}
-        </div>
-      </div>
+        </SidebarNavList>
+      </SidebarBody>
 
-      {/* Footer: exit + account — same slot order as AppSidebar (panel
-          toggle above, account pinned at the very bottom) so the rows
-          don't appear to swap when entering/leaving the admin panel. */}
-      <div className="flex shrink-0 flex-col gap-px px-2">
+      {/* Footer: exit + account — same slot order as AppSidebar so the
+          rows don't appear to swap when entering/leaving the admin panel. */}
+      <SidebarFooter>
         <SidebarTab icon={SvgX} folded={false} href="/app/wiki">
           Exit Admin Panel
         </SidebarTab>
         <UserMenu />
-      </div>
+      </SidebarFooter>
     </nav>
   );
 }

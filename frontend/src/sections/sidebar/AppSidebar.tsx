@@ -23,7 +23,12 @@ import { STARRED_KEY, starDoc, type StarredDocsResponse } from "@/lib/starred";
 import { docLabel } from "@/sections/sidebar/docLabel";
 import { StarredList } from "@/sections/sidebar/StarredList";
 import UserMenu from "@/sections/sidebar/UserMenu";
-import { SidebarHeader } from "@/sections/sidebar/SidebarHeader";
+import {
+  SidebarBody,
+  SidebarFooter,
+  SidebarHeader,
+  SidebarNavList,
+} from "@/sections/sidebar/SidebarHeader";
 import { NAV_ENTRIES } from "@/lib/nav/registry";
 import { useIsMobile } from "@/lib/viewport";
 
@@ -111,8 +116,7 @@ export default function AppSidebar({ folded, onFoldToggle }: AppSidebarProps) {
         />
       )}
 
-      {/* Content area */}
-      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-x-hidden px-2">
+      <SidebarBody>
         {/* Search */}
         {effectiveFolded ? (
           <Button
@@ -132,7 +136,7 @@ export default function AppSidebar({ folded, onFoldToggle }: AppSidebarProps) {
         )}
 
         {/* Top nav */}
-        <div className="flex flex-col gap-px">
+        <SidebarNavList>
           {NAV_ENTRIES.map((item) => {
             const active = pathname?.startsWith(item.href) ?? false;
             return (
@@ -151,7 +155,7 @@ export default function AppSidebar({ folded, onFoldToggle }: AppSidebarProps) {
               </SidebarTab>
             );
           })}
-        </div>
+        </SidebarNavList>
 
         {/* Starred + Recents — scrollable, hidden when folded */}
         {!effectiveFolded && (
@@ -229,10 +233,9 @@ export default function AppSidebar({ folded, onFoldToggle }: AppSidebarProps) {
             </div>
           </div>
         )}
-      </div>
+      </SidebarBody>
 
-      {/* Footer: Admin Panel + Account */}
-      <div className="flex shrink-0 flex-col gap-px px-2">
+      <SidebarFooter>
         {user?.is_admin && (
           <SidebarTab
             icon={SvgSettings}
@@ -249,7 +252,7 @@ export default function AppSidebar({ folded, onFoldToggle }: AppSidebarProps) {
             if (isMobile) onFoldToggle();
           }}
         />
-      </div>
+      </SidebarFooter>
     </nav>
   );
 }
