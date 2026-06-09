@@ -56,7 +56,8 @@ export default function AppSidebar({ folded, onFoldToggle }: AppSidebarProps) {
   const isMobile = useIsMobile();
   const starred = useStarredPages();
   const starredSet = new Set(starred);
-  const pages = useRecentPages().filter((p) => !starredSet.has(p));
+  const recents = useRecentPages();
+  const pages = recents.filter((p) => !starredSet.has(p));
   const searchRef = useRef<WikiSearchHandle>(null);
 
   // effectiveFolded is always false on mobile — content renders expanded,
@@ -185,7 +186,7 @@ export default function AppSidebar({ folded, onFoldToggle }: AppSidebarProps) {
               </div>
             </div>
             <div className="flex flex-col gap-px">
-              {pages.length === 0 && (
+              {recents.length === 0 && (
                 <div className="px-2.5">
                   <Text font="secondary-body" color="text-01" as="p">
                     No recent pages. Create a page to get started.

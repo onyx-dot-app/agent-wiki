@@ -63,7 +63,10 @@ export default function UserMenu({
         <PopoverMenu>
           {[
             <div key="identity" className="flex flex-col p-2">
-              <Text>{displayName}</Text>
+              {user?.name && <Text>{user.name}</Text>}
+              <Text font="secondary-body" color="text-03">
+                {user?.email ?? ""}
+              </Text>
             </div>,
             null,
             <LineItemButton
