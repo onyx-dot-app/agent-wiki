@@ -15,14 +15,17 @@ import logging
 from collections import defaultdict
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
 from app.auth import User, require_can
 from app.auth.deps import require_user
+from app.db import comment_fts
 from app.db.models import Event
 from app.db.session import session
 from app.models.comment import (
     CommentListResponse,
+    CommentSearchHit,
+    CommentSearchResponse,
     CommentStatus,
     CommentThreadView,
     CommentView,
@@ -131,6 +134,37 @@ def list_comments(
     except Exception:
         log.exception("comment remap backstop failed for %s", rel_path)
     return CommentListResponse(threads=_group_threads(comments_repo.list_for_doc(rel_path)))
+
+
+@router.get("/search", response_model=CommentSearchResponse)
+def search_comments(
+    user: User = Depends(require_user),
+    q: str = "",
+    limit: int = Query(10, ge=1, le=50),
+) -> CommentSearchResponse:
+    """Full-text search across comment bodies. Cross-page; results are filtered
+    to pages the caller can read (comments inherit page read access). A hit
+    carries ``doc_path`` + ``thread_root_id`` so the UI can deep-link to the
+    thread via ``/app/wiki/<path>?comment=<id>``."""
+    query = q.strip()
+    if not query:
+        return CommentSearchResponse(query="", hits=[])
+    hits = comment_fts.search(
+        query, limit=limit, user_id=user.id, is_admin=user.is_admin
+    )
+    return CommentSearchResponse(
+        query=query,
+        hits=[
+            CommentSearchHit(
+                comment_id=h.comment_id,
+                doc_path=h.doc_path,
+                thread_root_id=h.thread_root_id,
+                snippet=h.snippet,
+                score=h.score,
+            )
+            for h in hits
+        ],
+    )
 
 
 @router.post("", response_model=CommentView, status_code=status.HTTP_201_CREATED)

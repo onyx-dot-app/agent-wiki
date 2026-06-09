@@ -1,7 +1,7 @@
 "use client";
 
 import { InputTypeIn } from "@onyx-ai/opal/components";
-import { SvgFolder } from "@onyx-ai/opal/icons";
+import { SvgBubbleText, SvgFolder } from "@onyx-ai/opal/icons";
 import { useRouter } from "next/navigation";
 import {
   forwardRef,
@@ -37,18 +37,35 @@ interface FolderHit {
   path: string;
 }
 
+interface CommentHit {
+  comment_id: string;
+  doc_path: string;
+  thread_root_id: string;
+  snippet: string;
+  score: number;
+}
+
 interface SearchResponse {
   query: string;
   hits: SearchHit[];
   folders?: FolderHit[];
 }
 
+interface CommentSearchResponse {
+  query: string;
+  hits: CommentHit[];
+}
+
 type Row =
   | { kind: "folder"; folder: FolderHit }
-  | { kind: "doc"; hit: SearchHit };
+  | { kind: "doc"; hit: SearchHit }
+  | { kind: "comment"; hit: CommentHit };
 
 const DEBOUNCE_MS = 150;
 const RESULT_LIMIT = 10;
+// Comments are secondary to docs in the dropdown — cap them lower so the
+// combined list stays scannable.
+const COMMENT_RESULT_LIMIT = 5;
 
 interface WikiSearchProps {
   // Called after a result is picked — the sidebar uses this to collapse
@@ -62,6 +79,7 @@ export const WikiSearch = forwardRef<WikiSearchHandle, WikiSearchProps>(
     const [query, setQuery] = useState("");
     const [hits, setHits] = useState<SearchHit[]>([]);
     const [folders, setFolders] = useState<FolderHit[]>([]);
+    const [comments, setComments] = useState<CommentHit[]>([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [open, setOpen] = useState(false);
@@ -92,6 +110,7 @@ export const WikiSearch = forwardRef<WikiSearchHandle, WikiSearchProps>(
       if (!trimmed) {
         setHits([]);
         setFolders([]);
+        setComments([]);
         setLoading(false);
         setError(null);
         return;
@@ -118,6 +137,18 @@ export const WikiSearch = forwardRef<WikiSearchHandle, WikiSearchProps>(
           .finally(() => {
             if (seq === requestSeq.current) setLoading(false);
           });
+        // Comment search runs alongside docs and is best-effort chrome — a
+        // failure (e.g. search backend down) silently yields no comment rows
+        // rather than surfacing an error over the doc results.
+        apiFetch<CommentSearchResponse>(
+          `/comments/search?q=${encodeURIComponent(trimmed)}&limit=${COMMENT_RESULT_LIMIT}`,
+        )
+          .then((r) => {
+            if (seq === requestSeq.current) setComments(r.hits);
+          })
+          .catch(() => {
+            if (seq === requestSeq.current) setComments([]);
+          });
       }, DEBOUNCE_MS);
       return () => clearTimeout(handle);
     }, [query]);
@@ -136,21 +167,32 @@ export const WikiSearch = forwardRef<WikiSearchHandle, WikiSearchProps>(
       return () => window.removeEventListener("mousedown", handleClick);
     }, [open]);
 
-    // Folders render first; both groups share one keyboard cursor.
+    // Folders first, then docs, then comments; all groups share one keyboard
+    // cursor.
     const rows = useMemo<Row[]>(
       () => [
         ...folders.map<Row>((f) => ({ kind: "folder", folder: f })),
         ...hits.map<Row>((h) => ({ kind: "doc", hit: h })),
+        ...comments.map<Row>((h) => ({ kind: "comment", hit: h })),
       ],
-      [folders, hits],
+      [folders, hits, comments],
     );
 
     const pick = useCallback(
       (row: Row) => {
         setOpen(false);
         setQuery("");
-        const path = row.kind === "folder" ? row.folder.path : row.hit.path;
-        router.push(`/app/wiki/${path}`);
+        if (row.kind === "comment") {
+          // Deep-link to the thread via its root id (the page handler matches
+          // `?comment=` against thread roots; a matched reply resolves to its
+          // root). Reuses the shipped click-to-focus/share-link route.
+          router.push(
+            `/app/wiki/${row.hit.doc_path}?comment=${row.hit.thread_root_id}`,
+          );
+        } else {
+          const path = row.kind === "folder" ? row.folder.path : row.hit.path;
+          router.push(`/app/wiki/${path}`);
+        }
         onNavigate?.();
       },
       [router, onNavigate],
@@ -262,7 +304,9 @@ export const WikiSearch = forwardRef<WikiSearchHandle, WikiSearchProps>(
                     const key =
                       row.kind === "folder"
                         ? `f:${row.folder.path}`
-                        : `d:${row.hit.doc_id}`;
+                        : row.kind === "doc"
+                          ? `d:${row.hit.doc_id}`
+                          : `c:${row.hit.comment_id}`;
                     return (
                       <li key={key}>
                         <button
@@ -277,8 +321,10 @@ export const WikiSearch = forwardRef<WikiSearchHandle, WikiSearchProps>(
                         >
                           {row.kind === "folder" ? (
                             <FolderRow folder={row.folder} />
-                          ) : (
+                          ) : row.kind === "doc" ? (
                             <DocRow hit={row.hit} />
+                          ) : (
+                            <CommentRow hit={row.hit} />
                           )}
                         </button>
                       </li>
@@ -333,6 +379,28 @@ function DocRow({ hit }: { hit: SearchHit }) {
         </div>
       )}
     </>
+  );
+}
+
+function CommentRow({ hit }: { hit: CommentHit }) {
+  const leaf = hit.doc_path.split("/").pop() || hit.doc_path;
+  return (
+    <div className="flex min-w-0 items-start gap-2">
+      <span className="mt-0.5 flex shrink-0 text-(--text-03)">
+        <SvgBubbleText size={16} />
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="overflow-hidden text-[13px] text-ellipsis whitespace-nowrap text-(--text-04)">
+          Comment in{" "}
+          <span className="font-semibold text-(--text-05)">{leaf}</span>
+        </div>
+        {hit.snippet && (
+          <div className="mt-1 line-clamp-2 text-xs leading-[1.4] text-(--text-04)">
+            <SnippetText text={hit.snippet} />
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 

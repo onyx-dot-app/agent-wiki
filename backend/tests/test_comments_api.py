@@ -14,6 +14,7 @@ from app.main import create_app
 from app.wiki import git as wiki_git
 from tests._auth import login_fastapi
 from tests._seed import list_events, seed_user
+from tests.conftest import needs_opensearch
 
 _PATH = "guides/setup.md"
 _BODY = "Intro line here.\nThe target sentence to comment on.\nClosing line.\n"
@@ -45,6 +46,32 @@ def _create(client: TestClient, sha: str, phrase: str = "target sentence", *, pa
 
 def test_unauthenticated_is_401(client):
     assert client.get(f"/api/comments?path={_PATH}").status_code == 401
+
+
+def test_search_empty_query_returns_empty(client):
+    uid = seed_user(email="a@x.com")
+    login_fastapi(client, uid)
+    r = client.get("/api/comments/search?q=")
+    assert r.status_code == 200
+    assert r.json() == {"query": "", "hits": []}
+
+
+@needs_opensearch
+def test_search_returns_indexed_comment(client):
+    uid = seed_user(email="a@x.com")
+    login_fastapi(client, uid)
+    sha = _commit_page()
+    _create(client, sha)  # body: "is this still accurate?"
+
+    r = client.get("/api/comments/search?q=accurate")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["query"] == "accurate"
+    assert len(data["hits"]) == 1
+    hit = data["hits"][0]
+    assert hit["doc_path"] == _PATH
+    assert hit["thread_root_id"]  # present so the UI can deep-link to the thread
+    assert "<em>" not in hit["snippet"]  # highlight tags stripped → plain text
 
 
 def test_create_then_list_as_thread(client):
