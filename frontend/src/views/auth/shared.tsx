@@ -2,7 +2,7 @@
 
 import { Suspense, type ReactNode } from "react";
 import * as Yup from "yup";
-import { Card } from "@onyx-ai/opal/components";
+import { Card, Spacer } from "@onyx-ai/opal/components";
 import { Content, InputVertical } from "@onyx-ai/opal/layouts";
 import { SvgOnyxLogo } from "@onyx-ai/opal/logos";
 import { SvgSimpleLoader } from "@onyx-ai/opal/icons";
@@ -59,19 +59,21 @@ export function AuthLayout({ children }: AuthLayoutProps) {
 
 export interface AuthCardProps {
   children: ReactNode;
+  submit: ReactNode;
 }
 
-export function AuthCard({ children }: AuthCardProps) {
+export function AuthCard({ children, submit }: AuthCardProps) {
   return (
     <Card padding="lg" border="solid" rounding="lg">
-      <div className="mb-6">
-        <Content
-          icon={SvgOnyxLogo}
-          title="Welcome to Agent Wiki"
-          description="Your open source AI agent collaboration platform"
-        />
-      </div>
-      {children}
+      <Content
+        icon={SvgOnyxLogo}
+        title="Welcome to Agent Wiki"
+        description="Your open source AI agent collaboration platform"
+      />
+      <Spacer rem={1} />
+      <div className="flex flex-col gap-2">{children}</div>
+      <Spacer rem={1} />
+      {submit}
     </Card>
   );
 }

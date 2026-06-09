@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Formik, Form } from "formik";
 import { Button, Text } from "@onyx-ai/opal/components";
+import { SvgSimpleLoader } from "@onyx-ai/opal/icons";
 import { useAuth } from "@/lib/auth";
 import {
   AuthCard,
@@ -53,57 +54,64 @@ function LoginForm() {
 
   return (
     <AuthLayout>
-      <AuthCard>
-        {oidcErrorMessage && (
-          <div className="mb-4">
-            <AuthErrorBanner message={oidcErrorMessage} />
-          </div>
-        )}
-        {isOidc ? (
-          // Full-page navigation is required for the OIDC handshake, so
-          // this uses a native <a> styled to look like the primary action button.
-          <a
-            href="/api/auth/oidc/login"
-            className="box-border block w-full rounded-(--border-radius-08) border border-(--background-tint-inverted-00) bg-(--background-tint-inverted-00) px-3.5 py-2 text-center text-[13px] leading-[1.2] font-semibold text-(--text-inverted-05) no-underline"
-          >
-            Sign in with Google
-          </a>
-        ) : (
-          <Formik<LoginValues>
-            initialValues={INITIAL_VALUES}
-            validationSchema={LOGIN_VALIDATION_SCHEMA}
-            onSubmit={async (values, { setStatus }) => {
-              setStatus(null);
-              try {
-                await login(values.email, values.password);
-                router.replace(next ?? "/");
-              } catch (err) {
-                setStatus({
-                  error: err instanceof Error ? err.message : "login failed",
-                });
-              }
-            }}
-          >
-            {({ isSubmitting, status }) => (
-              <Form className="flex flex-col gap-2">
+      {isOidc ? (
+        <AuthCard
+          submit={
+            // Full-page navigation is required for the OIDC handshake, so
+            // this uses a native <a> styled to look like the primary action button.
+            <a
+              href="/api/auth/oidc/login"
+              className="box-border block w-full rounded-(--border-radius-08) border border-(--background-tint-inverted-00) bg-(--background-tint-inverted-00) px-3.5 py-2 text-center text-[13px] leading-[1.2] font-semibold text-(--text-inverted-05) no-underline"
+            >
+              Sign in with Google
+            </a>
+          }
+        >
+          {oidcErrorMessage && <AuthErrorBanner message={oidcErrorMessage} />}
+        </AuthCard>
+      ) : (
+        <Formik<LoginValues>
+          initialValues={INITIAL_VALUES}
+          validationSchema={LOGIN_VALIDATION_SCHEMA}
+          validateOnMount
+          onSubmit={async (values, { setStatus }) => {
+            setStatus(null);
+            try {
+              await login(values.email, values.password);
+              router.replace(next ?? "/");
+            } catch (err) {
+              setStatus({
+                error: err instanceof Error ? err.message : "login failed",
+              });
+            }
+          }}
+        >
+          {({ isSubmitting, status, isValid }) => (
+            <Form>
+              <AuthCard
+                submit={
+                  <Button
+                    type="submit"
+                    width="full"
+                    disabled={isSubmitting || !isValid}
+                    icon={isSubmitting ? SvgSimpleLoader : undefined}
+                  >
+                    Sign in
+                  </Button>
+                }
+              >
+                {oidcErrorMessage && (
+                  <AuthErrorBanner message={oidcErrorMessage} />
+                )}
                 <AuthEmailField autoFocus />
                 <AuthPasswordField />
                 {status?.error && <AuthErrorBanner message={status.error} />}
-                <div className="mt-1">
-                  <Button
-                    type="submit"
-                    variant="action"
-                    width="full"
-                    disabled={isSubmitting}
-                  >
-                    {isSubmitting ? "Signing in…" : "Sign in"}
-                  </Button>
-                </div>
-              </Form>
-            )}
-          </Formik>
-        )}
-      </AuthCard>
+              </AuthCard>
+            </Form>
+          )}
+        </Formik>
+      )}
+
       {!isOidc && (
         <div className="flex w-full items-baseline justify-center">
           {config?.signup_open === false ? (
