@@ -70,8 +70,12 @@ export function AuthCard({ children, submit }: AuthCardProps) {
         title="Welcome to Agent Wiki"
         description="Your open source AI agent collaboration platform"
       />
-      <Spacer rem={1} />
-      <div className="flex flex-col gap-2">{children}</div>
+      {children != null && (
+        <>
+          <Spacer rem={1} />
+          <div className="flex flex-col gap-2">{children}</div>
+        </>
+      )}
       <Spacer rem={1} />
       {submit}
     </Card>
