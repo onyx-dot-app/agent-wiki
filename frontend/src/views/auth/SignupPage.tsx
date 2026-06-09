@@ -4,9 +4,10 @@ import Link from "next/link";
 import { useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Formik, Form } from "formik";
-import { Button, InputTypeIn, Text } from "@onyx-ai/opal/components";
+import { Button, Text } from "@onyx-ai/opal/components";
 import { InputVertical } from "@onyx-ai/opal/layouts";
 import { useAuth } from "@/lib/auth";
+import InputTypeInField from "@/components/form/InputTypeInField";
 import {
   AuthCard,
   AuthEmailField,
@@ -69,16 +70,11 @@ function SignupForm() {
             }
           }}
         >
-          {({ isSubmitting, status, values, handleChange }) => (
+          {({ isSubmitting, status }) => (
             <Form className="flex flex-col gap-2">
               <AuthEmailField autoFocus />
               <InputVertical title="Name" suffix="optional" withLabel>
-                <InputTypeIn
-                  name="name"
-                  type="text"
-                  value={values.name}
-                  onChange={handleChange}
-                />
+                <InputTypeInField name="name" type="text" />
               </InputVertical>
               <AuthPasswordField lengthHint />
               {status?.error && <AuthErrorBanner message={status.error} />}

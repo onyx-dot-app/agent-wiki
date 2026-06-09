@@ -1,5 +1,6 @@
 "use client";
 
+import { useCallback } from "react";
 import { useField } from "formik";
 
 export function useOnChangeEvent<T = any>(
@@ -7,11 +8,14 @@ export function useOnChangeEvent<T = any>(
   f?: (event: T) => void,
 ) {
   const [field, , helpers] = useField<T>(name);
-  return (event: T) => {
-    helpers.setTouched(true);
-    f?.(event);
-    field.onChange(event);
-  };
+  return useCallback(
+    (event: T) => {
+      field.onChange(event);
+      helpers.setTouched(true);
+      f?.(event);
+    },
+    [field, helpers, f],
+  );
 }
 
 export function useOnChangeValue<T = any>(
@@ -19,17 +23,23 @@ export function useOnChangeValue<T = any>(
   f?: (value: T) => void,
 ) {
   const [, , helpers] = useField<T>(name);
-  return (value: T) => {
-    helpers.setTouched(true);
-    f?.(value);
-    helpers.setValue(value);
-  };
+  return useCallback(
+    (value: T) => {
+      helpers.setValue(value);
+      helpers.setTouched(true);
+      f?.(value);
+    },
+    [helpers, f],
+  );
 }
 
 export function useOnBlurEvent<T = any>(name: string, f?: (event: T) => void) {
   const [field] = useField<T>(name);
-  return (event: T) => {
-    f?.(event);
-    field.onBlur(event);
-  };
+  return useCallback(
+    (event: T) => {
+      f?.(event);
+      field.onBlur(event);
+    },
+    [field, f],
+  );
 }

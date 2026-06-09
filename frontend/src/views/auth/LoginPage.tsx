@@ -60,9 +60,8 @@ function LoginForm() {
           </div>
         )}
         {isOidc ? (
-          // Native <a> so the browser performs a full navigation to the
-          // OIDC start endpoint. Styled to match Button variant="primary"
-          // size="md" — keep in sync with components/common/Button.tsx.
+          // Full-page navigation is required for the OIDC handshake, so
+          // this uses a native <a> styled to look like the primary action button.
           <a
             href="/api/auth/oidc/login"
             className="box-border block w-full rounded-(--border-radius-08) border border-(--background-tint-inverted-00) bg-(--background-tint-inverted-00) px-3.5 py-2 text-center text-[13px] leading-[1.2] font-semibold text-(--text-inverted-05) no-underline"
