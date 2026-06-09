@@ -11,12 +11,16 @@ import InputTypeInField from "@/components/form/InputTypeInField";
 const MIN_PASSWORD_LENGTH = 8;
 
 export const LOGIN_VALIDATION_SCHEMA = Yup.object({
-  email: Yup.string().email("Enter a valid email.").required("Email is required."),
+  email: Yup.string()
+    .email("Enter a valid email.")
+    .required("Email is required."),
   password: Yup.string().required("Password is required."),
 });
 
 export const SIGNUP_VALIDATION_SCHEMA = Yup.object({
-  email: Yup.string().email("Enter a valid email.").required("Email is required."),
+  email: Yup.string()
+    .email("Enter a valid email.")
+    .required("Email is required."),
   name: Yup.string(),
   password: Yup.string()
     .min(MIN_PASSWORD_LENGTH, "At least 8 characters.")

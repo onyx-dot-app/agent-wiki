@@ -29,7 +29,6 @@ const INITIAL_VALUES: SignupValues = {
   password: "",
 };
 
-
 function SignupForm() {
   const { signup, config } = useAuth();
   const router = useRouter();

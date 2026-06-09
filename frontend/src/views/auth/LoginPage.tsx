@@ -36,7 +36,6 @@ const INITIAL_VALUES: LoginValues = {
   password: "",
 };
 
-
 function LoginForm() {
   const { login, config } = useAuth();
   const router = useRouter();
