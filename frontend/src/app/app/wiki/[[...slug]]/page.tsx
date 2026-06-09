@@ -1499,7 +1499,7 @@ function FileViewer({ path }: { path: string }) {
   // its text nodes a tick after this effect runs (same reason the highlight
   // paint retries).
   useEffect(() => {
-    const target = searchParams.get("comment");
+    const target = searchParams?.get("comment");
     if (!target || loading || editing || viewingSha) return;
     if (focusedCommentRef.current === target) return;
     const root = commentThreads.find((t) => t.root.id === target)?.root;
