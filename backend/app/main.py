@@ -157,6 +157,14 @@ async def _lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     # Starter document templates seed once on a brand-new DB; users
     # who delete a starter will not see it re-appear after a reboot.
     seed_starter_templates_if_empty()
+    # One-time backfill: index existing comments when the comment search index
+    # is empty (first boot after the feature ships, or after an index reset).
+    # The index persists across reboots, so steady-state boots skip this.
+    from app.db import comment_fts
+    from app.wiki import comments as _comments_repo
+
+    if comment_fts.count() == 0:
+        _comments_repo.reindex_all_inline()
     triggers_repo.purge_invalid_triggers(actor="system <system@agent-wiki>")
     triggers_repo.rebuild_from_filesystem()
     schedule_all_pending_cleanups()

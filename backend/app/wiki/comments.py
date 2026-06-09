@@ -22,11 +22,49 @@ from typing import Any
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
+from app.db import comment_fts
 from app.db.models import Comment, User
 from app.db.session import execute_dml, session
 from app.models.comment import CommentAuthorKind, CommentScope, CommentStatus
+from app.wiki import comment_mentions
 
 log = logging.getLogger(__name__)
+
+
+def _index_thread(thread_root_id: str) -> None:
+    """Sync a thread to the comment search index after a change. Re-indexes
+    every comment in the thread with the thread's status (taken from the root),
+    or removes the thread from the index if its root is gone or orphaned.
+    Best-effort: never raises, so an index glitch can't fail a mutation."""
+    try:
+        with session() as s:
+            root = s.get(Comment, thread_root_id)
+            if root is None or root.status == CommentStatus.ORPHANED.value:
+                comment_fts.delete_thread(thread_root_id)
+                return
+            rows = s.scalars(
+                select(Comment).where(Comment.thread_root_id == thread_root_id)
+            ).all()
+            if not rows:
+                comment_fts.delete_thread(thread_root_id)
+                return
+            status = root.status
+            docs = [
+                comment_fts.CommentDoc(
+                    comment_id=c.id,
+                    doc_path=c.doc_path,
+                    thread_root_id=c.thread_root_id,
+                    body=comment_mentions.detokenize(c.body),
+                    author_user_id=c.author_user_id,
+                    mentioned_user_ids=comment_mentions.mentioned_ids(c.body),
+                    status=status,
+                )
+                for c in rows
+            ]
+        for doc in docs:
+            comment_fts.index_comment(doc)
+    except Exception:
+        log.warning("comment index: _index_thread failed for %s", thread_root_id, exc_info=True)
 
 # Derived from the enums in app/models/comment.py so they stay the single
 # source of truth (the DB CHECK constraints mirror the same values).
@@ -137,6 +175,7 @@ def create_thread(
         s.add(c)
         s.flush()
         result = _to_dict(c, _author_displays(s, [c]))
+    _index_thread(cid)
     log.info("comment thread created id=%s doc=%s", cid, doc_path)
     return result
 
@@ -179,7 +218,10 @@ def add_reply(
         )
         s.add(c)
         s.flush()
-        return _to_dict(c, _author_displays(s, [c]))
+        result = _to_dict(c, _author_displays(s, [c]))
+        thread_root_id = parent.thread_root_id
+    _index_thread(thread_root_id)
+    return result
 
 
 # --------------------------------------------------------------------------- #
@@ -231,7 +273,10 @@ def edit_body(comment_id: str, body: str) -> dict[str, Any] | None:
         c.body = body
         c.updated_at = _now_text(s)
         s.flush()
-        return _to_dict(c, _author_displays(s, [c]))
+        result = _to_dict(c, _author_displays(s, [c]))
+        thread_root_id = c.thread_root_id
+    _index_thread(thread_root_id)
+    return result
 
 
 def set_thread_status(
@@ -259,7 +304,9 @@ def set_thread_status(
             root.resolved_by_user_id = None
             root.resolved_at = None
         s.flush()
-        return _to_dict(root, _author_displays(s, [root]))
+        result = _to_dict(root, _author_displays(s, [root]))
+    _index_thread(thread_root_id)
+    return result
 
 
 def delete(comment_id: str) -> bool:
@@ -275,7 +322,9 @@ def delete(comment_id: str) -> bool:
         c = s.get(Comment, comment_id)
         if c is None:
             return False
-        if c.parent_id is not None:
+        is_root = c.parent_id is None
+        thread_root_id = c.thread_root_id
+        if not is_root:
             # Promote this comment's children to its parent, then delete only
             # this node (nothing references it anymore, so the cascade is a
             # no-op beyond the single row).
@@ -286,7 +335,12 @@ def delete(comment_id: str) -> bool:
                 .execution_options(synchronize_session=False)
             )
         s.delete(c)
-        return True
+    if is_root:
+        # Root delete cascades the whole thread → drop all its index docs.
+        comment_fts.delete_thread(thread_root_id)
+    else:
+        comment_fts.delete_comment(comment_id)
+    return True
 
 
 # --------------------------------------------------------------------------- #
@@ -351,29 +405,52 @@ def orphan(comment_id: str) -> None:
         if c is None:
             return
         c.status = CommentStatus.ORPHANED.value
+        thread_root_id = c.thread_root_id
+    # Orphaned threads drop out of search (their span is gone).
+    _index_thread(thread_root_id)
 
 
 def reassign_doc_path(old_path: str, new_path: str) -> int:
     """Re-key all comments from ``old_path`` to ``new_path`` (page move/rename).
     Returns the number of rows moved."""
     with session() as s:
-        return execute_dml(
+        moved = execute_dml(
             s,
             update(Comment)
             .where(Comment.doc_path == old_path)
             .values(doc_path=new_path)
             .execution_options(synchronize_session=False),
         )
+    comment_fts.reassign_doc_path(old_path, new_path)
+    return moved
 
 
 def orphan_all_for_doc(doc_path: str) -> int:
     """Orphan every still-anchored comment on a page (page deleted). Returns
     the number of rows orphaned."""
     with session() as s:
-        return execute_dml(
+        orphaned = execute_dml(
             s,
             update(Comment)
             .where(Comment.doc_path == doc_path, Comment.status != CommentStatus.ORPHANED.value)
             .values(status=CommentStatus.ORPHANED.value)
             .execution_options(synchronize_session=False),
         )
+    # Page deleted → its comments become tombstones in Postgres but leave search.
+    comment_fts.delete_for_doc(doc_path)
+    return orphaned
+
+
+def reindex_all_inline() -> None:
+    """Index every comment thread into the search index. Called at startup so
+    comments created before the feature (or while the index was down) become
+    searchable. Idempotent — re-indexing a thread is an upsert."""
+    with session() as s:
+        root_ids = s.scalars(
+            select(Comment.id).where(Comment.parent_id.is_(None))
+        ).all()
+    if not root_ids:
+        return
+    log.info("comment index: backfilling %d thread(s) at startup", len(root_ids))
+    for rid in root_ids:
+        _index_thread(rid)

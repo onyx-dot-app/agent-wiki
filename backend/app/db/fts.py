@@ -94,6 +94,12 @@ def _get_client() -> object | None:
         _client_ready = True
     return _client
 
+def get_client() -> object | None:
+    """Public accessor for the shared OpenSearch client (used by sibling
+    index modules like ``comment_fts`` so they share one connection)."""
+    return _get_client()
+
+
 def reset_client_for_tests() -> None:
     """Drop the cached client.  Call between tests that change CONFIG."""
     global _client, _client_ready
