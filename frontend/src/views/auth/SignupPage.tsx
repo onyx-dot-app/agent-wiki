@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Formik, Form } from "formik";
 import { Button, Text } from "@onyx-ai/opal/components";
 import { InputVertical } from "@onyx-ai/opal/layouts";
+import { SvgSimpleLoader } from "@onyx-ai/opal/icons";
 import { useAuth } from "@/lib/auth";
 import InputTypeInField from "@/components/form/InputTypeInField";
 import {
@@ -50,48 +51,50 @@ function SignupForm() {
 
   return (
     <AuthLayout>
-      <AuthCard>
-        <Formik<SignupValues>
-          initialValues={INITIAL_VALUES}
-          validationSchema={SIGNUP_VALIDATION_SCHEMA}
-          onSubmit={async (values, { setStatus }) => {
-            setStatus(null);
-            try {
-              await signup(
-                values.email,
-                values.password,
-                values.name || undefined,
-              );
-              router.replace(next ?? "/");
-            } catch (err) {
-              setStatus({
-                error: err instanceof Error ? err.message : "signup failed",
-              });
-            }
-          }}
-        >
-          {({ isSubmitting, status }) => (
-            <Form className="flex flex-col gap-2">
+      <Formik<SignupValues>
+        initialValues={INITIAL_VALUES}
+        validationSchema={SIGNUP_VALIDATION_SCHEMA}
+        validateOnMount
+        onSubmit={async (values, { setStatus }) => {
+          setStatus(null);
+          try {
+            await signup(
+              values.email,
+              values.password,
+              values.name || undefined,
+            );
+            router.replace(next ?? "/");
+          } catch (err) {
+            setStatus({
+              error: err instanceof Error ? err.message : "signup failed",
+            });
+          }
+        }}
+      >
+        {({ isSubmitting, status, isValid }) => (
+          <Form>
+            <AuthCard
+              submit={
+                <Button
+                  type="submit"
+                  width="full"
+                  disabled={isSubmitting || !isValid}
+                  icon={isSubmitting ? SvgSimpleLoader : undefined}
+                >
+                  Create account
+                </Button>
+              }
+            >
               <AuthEmailField autoFocus />
               <InputVertical title="Name" suffix="optional" withLabel>
                 <InputTypeInField name="name" type="text" />
               </InputVertical>
               <AuthPasswordField lengthHint />
               {status?.error && <AuthErrorBanner message={status.error} />}
-              <div className="mt-1">
-                <Button
-                  type="submit"
-                  variant="action"
-                  width="full"
-                  disabled={isSubmitting}
-                >
-                  {isSubmitting ? "Creating…" : "Create account"}
-                </Button>
-              </div>
-            </Form>
-          )}
-        </Formik>
-      </AuthCard>
+            </AuthCard>
+          </Form>
+        )}
+      </Formik>
       <div className="flex w-full items-baseline justify-center">
         <Text font="secondary-body" color="text-03">
           Already have an account?
