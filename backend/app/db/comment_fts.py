@@ -26,7 +26,9 @@ from opensearchpy import OpenSearch  # type: ignore[import-untyped]
 from opensearchpy.exceptions import NotFoundError  # type: ignore[import-untyped]
 from pydantic import BaseModel
 
+import app.config as _app_config
 from app.db import fts
+from app.wiki import acl
 
 log = logging.getLogger(__name__)
 
@@ -81,9 +83,9 @@ _MAPPING = {
 
 
 def _index_name() -> str:
-    from app.config import CONFIG
-
-    return f"{CONFIG.opensearch_index}-comments"
+    # Read the attribute at call time (not a top-level `from … import CONFIG`)
+    # so tests that monkeypatch `app.config.CONFIG` are honored.
+    return f"{_app_config.CONFIG.opensearch_index}-comments"
 
 
 def _client() -> object | None:
@@ -292,8 +294,6 @@ def search(
         )
 
     if apply_visibility and not is_admin and rows:
-        from app.wiki import acl
-
         visible = set(acl.filter_paths_in_python(user_id, is_admin, {r[1] for r in rows}))
         rows = [r for r in rows if r[1] in visible]
 
