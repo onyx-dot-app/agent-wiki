@@ -1,8 +1,8 @@
 """One-shot wiki Q&A agent backing the ``ask_nl_question`` tool.
 
-Reuses ``run_chat_loop`` with a narrowed toolset (``search_wiki`` +
-``read_page`` only — no writes). Returns a structured answer with the
-paths the agent grounded on.
+Reuses ``run_chat_loop`` with a narrowed, read-only toolset (the base tools:
+``search_wiki``, ``search_comments``, ``read_page`` — no writes). Returns a
+structured answer with the paths the agent grounded on.
 
 The MCP layer is what ultimately exposes ``ask_nl_question`` to external
 clients, but this module is MCP-agnostic — it's just a normal in-process

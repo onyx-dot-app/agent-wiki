@@ -28,7 +28,7 @@ def test_every_referenced_tool_resolves():
 def test_base_tools_resolve():
     specs = skill_registry.base_tool_specs()
     names = [s["name"] for s in specs]
-    assert names == ["search_wiki", "read_page"]
+    assert names == ["search_wiki", "search_comments", "read_page"]
 
 
 def test_load_skill_spec_lists_skills_in_enum():

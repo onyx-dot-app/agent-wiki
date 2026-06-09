@@ -1,0 +1,20 @@
+{
+  "name": "search_comments",
+  "description": "Full-text search over wiki *comments* — the discussion threads people leave on pages (decisions, feedback, questions, @mentions), kept separate from page content. Use this when the user asks what was discussed, decided, asked, or flagged about something, or wants to find a particular comment/thread. For the page content itself, use `search_wiki` instead. Returns matches with `doc_path`, `thread_root_id`, a short `snippet`, and a `link` that opens the page focused on that thread. Results are limited to comments the user can read.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "query": {
+        "type": "string",
+        "description": "Plain keywords, e.g. \"oncall rotation cadence\" or a person's name to find mentions of them."
+      },
+      "limit": {
+        "type": "integer",
+        "description": "Max results (default 10, max 20).",
+        "minimum": 1,
+        "maximum": 20
+      }
+    },
+    "required": ["query"]
+  }
+}

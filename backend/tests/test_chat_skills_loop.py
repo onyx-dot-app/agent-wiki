@@ -51,7 +51,12 @@ def test_first_turn_has_only_base_and_load_skill(script_stream):
         tool_dispatch=chat_agent._chat_dispatch,
     )
 
-    assert _tool_names(captured[0]) == {"search_wiki", "read_page", "load_skill"}
+    assert _tool_names(captured[0]) == {
+        "search_wiki",
+        "search_comments",
+        "read_page",
+        "load_skill",
+    }
 
 
 def test_load_skill_unlocks_skill_tools_on_next_turn(script_stream):

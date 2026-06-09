@@ -226,7 +226,9 @@ def run_chat_loop(
 
 
 def _chat_tools_for_turn(messages: list[Message]) -> list[dict[str, Any]]:
-    """Per-turn tool list for the chat agent: base + load_skill + active skills."""
+    """Per-turn tool list for the chat agent: base + load_skill + active skills.
+    (``search_comments`` is a base tool, so chat and the wiki-Q&A agent both
+    get it.)"""
     return [
         *skill_registry.base_tool_specs(),
         skill_registry.build_load_skill_spec(),
