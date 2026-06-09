@@ -2,20 +2,17 @@
 
 import { SidebarTab } from "@onyx-ai/opal/components";
 import { SvgX } from "@onyx-ai/opal/icons";
-import { SvgOnyxLogoTyped } from "@onyx-ai/opal/logos";
 import { usePathname } from "next/navigation";
 import { ADMIN_NAV_ENTRIES } from "@/lib/nav/registry";
 import UserMenu from "@/sections/sidebar/UserMenu";
+import { SidebarHeader } from "@/sections/sidebar/SidebarHeader";
 
 export default function AdminSidebar() {
   const pathname = usePathname();
 
   return (
     <nav className="sticky top-0 box-border flex h-screen w-(--sidebar-width-expanded) shrink-0 flex-col gap-4 overflow-hidden bg-background-tint-02 py-2">
-      {/* Logo */}
-      <div className="flex h-7 items-center px-3 pt-3">
-        <SvgOnyxLogoTyped size={28} />
-      </div>
+      <SidebarHeader />
 
       {/* Nav items */}
       <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-x-hidden px-2">

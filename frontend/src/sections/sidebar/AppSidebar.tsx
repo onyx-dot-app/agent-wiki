@@ -9,7 +9,6 @@ import {
   SvgStar,
 } from "@onyx-ai/opal/icons";
 import { useSidebarFolded } from "@onyx-ai/opal/layouts";
-import { SvgOnyxLogoTyped } from "@onyx-ai/opal/logos";
 import { usePathname } from "next/navigation";
 import { useRef } from "react";
 import useSWR from "swr";
@@ -24,6 +23,7 @@ import { STARRED_KEY, starDoc, type StarredDocsResponse } from "@/lib/starred";
 import { docLabel } from "@/sections/sidebar/docLabel";
 import { StarredList } from "@/sections/sidebar/StarredList";
 import UserMenu from "@/sections/sidebar/UserMenu";
+import { SidebarHeader } from "@/sections/sidebar/SidebarHeader";
 import { NAV_ENTRIES } from "@/lib/nav/registry";
 import { useIsMobile } from "@/lib/viewport";
 
@@ -81,8 +81,8 @@ export default function AppSidebar({ folded, onFoldToggle }: AppSidebarProps) {
       ].join(" ")}
     >
       {/* Logo + toggle */}
-      <div className="flex shrink-0 flex-row items-start justify-between px-2 pt-3">
-        {effectiveFolded ? (
+      {effectiveFolded ? (
+        <div className="flex shrink-0 flex-row items-start px-2 pt-3">
           <div className="px-1">
             <Button
               icon={SvgSidebar}
@@ -93,14 +93,10 @@ export default function AppSidebar({ folded, onFoldToggle }: AppSidebarProps) {
               onClick={onFoldToggle}
             />
           </div>
-        ) : (
-          <>
-            <div className="flex h-7 items-center gap-2 px-1">
-              <SvgOnyxLogoTyped size={28} />
-              <Text font="heading-h3" color="text-03">
-                Wiki
-              </Text>
-            </div>
+        </div>
+      ) : (
+        <SidebarHeader
+          actions={
             <div className="px-1">
               <Button
                 icon={SvgSidebar}
@@ -111,9 +107,9 @@ export default function AppSidebar({ folded, onFoldToggle }: AppSidebarProps) {
                 onClick={onFoldToggle}
               />
             </div>
-          </>
-        )}
-      </div>
+          }
+        />
+      )}
 
       {/* Content area */}
       <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-x-hidden px-2">
