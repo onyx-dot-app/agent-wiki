@@ -14,7 +14,8 @@ import {
   AuthLayout,
   AuthPageSuspense,
   AuthPasswordField,
-} from "./shared";
+  SIGNUP_VALIDATION_SCHEMA,
+} from "@/views/auth/shared";
 
 interface SignupValues {
   email: string;
@@ -27,6 +28,7 @@ const INITIAL_VALUES: SignupValues = {
   name: "",
   password: "",
 };
+
 
 function SignupForm() {
   const { signup, config } = useAuth();
@@ -51,6 +53,7 @@ function SignupForm() {
       <AuthCard>
         <Formik<SignupValues>
           initialValues={INITIAL_VALUES}
+          validationSchema={SIGNUP_VALIDATION_SCHEMA}
           onSubmit={async (values, { setStatus }) => {
             setStatus(null);
             try {

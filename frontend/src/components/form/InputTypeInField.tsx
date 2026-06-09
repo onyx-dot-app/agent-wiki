@@ -1,7 +1,7 @@
 "use client";
 
 import { useField } from "formik";
-import { InputTypeIn, type InputTypeInProps } from "@opal/components";
+import { InputTypeIn, type InputTypeInProps } from "@onyx-ai/opal/components";
 import { useOnChangeEvent, useOnBlurEvent } from "@/hooks/formHooks";
 
 export interface InputTypeInFieldProps extends Omit<InputTypeInProps, "value"> {
@@ -30,7 +30,11 @@ export default function InputTypeInField({
       onChange={onChange}
       onBlur={onBlur}
       variant={
-        isNonEditable ? inputProps.variant : hasError ? "error" : inputProps.variant
+        isNonEditable
+          ? inputProps.variant
+          : hasError
+            ? "error"
+            : inputProps.variant
       }
     />
   );

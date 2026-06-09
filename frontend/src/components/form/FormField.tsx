@@ -2,7 +2,7 @@
 
 import React, { useId, useMemo } from "react";
 import { Slot } from "@radix-ui/react-slot";
-import { cn } from "@opal/utils";
+import { cn } from "@onyx-ai/opal/utils";
 import { FieldContext, useFieldContext } from "./FieldContext";
 import type {
   APIMessageProps,

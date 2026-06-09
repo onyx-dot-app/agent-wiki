@@ -12,7 +12,8 @@ import {
   AuthLayout,
   AuthPageSuspense,
   AuthPasswordField,
-} from "./shared";
+  LOGIN_VALIDATION_SCHEMA,
+} from "@/views/auth/shared";
 
 const OIDC_ERROR_MESSAGES: Record<string, string> = {
   oidc_exchange_failed: "Couldn't complete sign-in. Try again.",
@@ -34,6 +35,7 @@ const INITIAL_VALUES: LoginValues = {
   email: "",
   password: "",
 };
+
 
 function LoginForm() {
   const { login, config } = useAuth();
@@ -71,6 +73,7 @@ function LoginForm() {
         ) : (
           <Formik<LoginValues>
             initialValues={INITIAL_VALUES}
+            validationSchema={LOGIN_VALIDATION_SCHEMA}
             onSubmit={async (values, { setStatus }) => {
               setStatus(null);
               try {

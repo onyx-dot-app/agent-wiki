@@ -2,8 +2,8 @@
 
 import React from "react";
 import { useField } from "formik";
-import { cn } from "@opal/utils";
-import { Checkbox, Tooltip } from "@opal/components";
+import { cn } from "@onyx-ai/opal/utils";
+import { Checkbox, Tooltip } from "@onyx-ai/opal/components";
 
 interface LabeledCheckboxFieldProps {
   name: string;
@@ -67,7 +67,7 @@ export const LabeledCheckboxField: React.FC<LabeledCheckboxFieldProps> = ({
         >
           <span
             className={cn(
-              "text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70",
+              "text-sm leading-none font-medium peer-disabled:cursor-not-allowed peer-disabled:opacity-70",
               labelClassName,
             )}
           >

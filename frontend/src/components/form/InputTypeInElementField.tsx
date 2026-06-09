@@ -1,13 +1,19 @@
 "use client";
 
 import { useField } from "formik";
-import { Button, InputTypeIn, type InputTypeInProps } from "@opal/components";
-import { Section } from "@opal/layouts";
-import { SvgMinusCircle } from "@opal/icons";
+import {
+  Button,
+  InputTypeIn,
+  type InputTypeInProps,
+} from "@onyx-ai/opal/components";
+import { Section } from "@onyx-ai/opal/layouts";
+import { SvgMinusCircle } from "@onyx-ai/opal/icons";
 import { useOnChangeEvent, useOnBlurEvent } from "@/hooks/formHooks";
 
-export interface InputTypeInElementFieldProps
-  extends Omit<InputTypeInProps, "value"> {
+export interface InputTypeInElementFieldProps extends Omit<
+  InputTypeInProps,
+  "value"
+> {
   name: string;
   onRemove?: () => void;
 }

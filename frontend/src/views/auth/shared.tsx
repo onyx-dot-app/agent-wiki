@@ -1,13 +1,27 @@
 "use client";
 
 import { Suspense, type ReactNode } from "react";
+import * as Yup from "yup";
 import { Card } from "@onyx-ai/opal/components";
 import { Content, InputVertical } from "@onyx-ai/opal/layouts";
 import { SvgOnyxLogo } from "@onyx-ai/opal/logos";
-import { SvgSimpleLoader } from "@opal/icons";
+import { SvgSimpleLoader } from "@onyx-ai/opal/icons";
 import InputTypeInField from "@/components/form/InputTypeInField";
 
 const MIN_PASSWORD_LENGTH = 8;
+
+export const LOGIN_VALIDATION_SCHEMA = Yup.object({
+  email: Yup.string().email("Enter a valid email.").required("Email is required."),
+  password: Yup.string().required("Password is required."),
+});
+
+export const SIGNUP_VALIDATION_SCHEMA = Yup.object({
+  email: Yup.string().email("Enter a valid email.").required("Email is required."),
+  name: Yup.string(),
+  password: Yup.string()
+    .min(MIN_PASSWORD_LENGTH, "At least 8 characters.")
+    .required("Password is required."),
+});
 
 export interface AuthPageSuspenseProps {
   children: ReactNode;
@@ -76,7 +90,7 @@ export interface AuthEmailFieldProps {
 
 export function AuthEmailField({ autoFocus }: AuthEmailFieldProps) {
   return (
-    <InputVertical title="Email" withLabel>
+    <InputVertical title="Email" withLabel="email">
       <InputTypeInField
         name="email"
         type="email"
@@ -96,7 +110,7 @@ export function AuthPasswordField({ lengthHint }: AuthPasswordFieldProps) {
     <InputVertical
       title="Password"
       subDescription={lengthHint ? "At least 8 characters" : undefined}
-      withLabel
+      withLabel="password"
     >
       <InputTypeInField
         name="password"
