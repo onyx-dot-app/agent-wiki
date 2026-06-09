@@ -13,8 +13,9 @@ outside `tests/` because runs hit real LLMs and are parameterized by
 | `app.llm.agents.ingest_selector.select_candidates`            | Ingest pre-filter: which BM25 candidates survive                                                  | precision / recall / F1                                                   |
 | External agent (Claude Code via MCP)                          | When to call `update_doc_nl(path, instruction)`                                                   | per-doc precision / recall + reused content scorers                       |
 | `app.triggers.natural_language` (delta / schedule / new-file) | Whether a wiki change/snapshot/new-file satisfies a trigger's NL "if", and what message to render | per-case match decision + no-false-fire + judge-scored reason and message |
+| `app.llm.agents.merge_conflict_update.merge`                  | 3-way merge of a user draft vs a concurrent HEAD edit against a base ancestor                      | both sides' facts present + no hallucination + conflict annotation         |
 
-Two axes per surface: **WHEN** (trigger decision) and **HOW** (output quality).
+Up to two axes per surface: **WHEN** (trigger decision) and **HOW** (output quality).
 
 ## Layout
 
@@ -76,8 +77,9 @@ Flags (all surfaces):
   `wiki_updater` produces two experiments — `<base>-process-instruction` and
   `<base>-reconcile-document` — so scorer columns stay comparable per surface.
 - `--dry-run` — deterministic stub LLM (no API keys needed); validates wiring
-- `wiki_updater` / `external_agent` also accept `--judge-models LIST` — judge
-  panel for `facts_present` / `facts_preserved`. Default panel:
+- All four judge-using surfaces (`wiki_updater`, `external_agent`, `triggers`,
+  `merge_conflict_update`) accept `--judge-models LIST` — judge panel for
+  `facts_present` / `facts_preserved`. Default panel:
   `claude-haiku-4-5, gpt-5-mini` (two judges, majority + tie→False).
 
 Runners exit with `{"out": ..., "skipped_models": [...], "braintrust_url(s)": ...}`
@@ -118,9 +120,10 @@ in mind. `wiki_path` customer + person names are hashed (the sweep only
 uses `bm25_score` + `relevant`; the path is a row label).
 
 On this dataset the sweep recommends a cutoff near 18 at
-`--min-retained 0.95` (≈57% irrelevant filtered, 98% relevant retained),
-which corroborates the production `INGEST_BM25_MIN_SCORE = 20` set in
-PR #145.
+`--min-retained 0.95` (≈57% irrelevant filtered, 98% relevant retained).
+The production code default is `INGEST_BM25_MIN_SCORE = 5` (`app/config.py`,
+set to 5 in PR #145), so the sweep recommends a stricter pre-filter than prod
+currently runs rather than corroborating it.
 
 **Refreshing scores against live OpenSearch is a separate step** (it
 needs a running cluster). The samples here were scored by piping the
@@ -162,13 +165,16 @@ file is byte-stable across runs regardless of executor scheduling.
 
 ## Configuration
 
-Provider keys are read in order:
+Each model's provider key is read from the environment:
 
 1. Per-eval: `EVAL_ANTHROPIC_API_KEY`, `EVAL_OPENAI_API_KEY`, `EVAL_GEMINI_API_KEY`
-2. Generic: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`
-3. `llm_settings` table (when `DATABASE_URL` resolves)
+2. Generic: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY` (gemini also
+   accepts `GOOGLE_API_KEY`)
 
-Models without a configured provider are reported as `skipped` and the rest run.
+A model whose provider has no env key is reported as `skipped` and the rest run
+(ollama needs no key). The `llm_settings` DB table is only the LLM client's
+default resolver for an un-overridden call, not a fallback that makes an
+env-keyless model runnable.
 
 Braintrust (`--braintrust`) reads `BRAINTRUST_API_KEY` + `BRAINTRUST_PROJECT`
 from env (or `braintrust_settings` in the DB). `BRAINTRUST_ORG` controls the
@@ -219,7 +225,7 @@ What to scan in order:
 Comparing across runs:
 
 - BT diffs experiments by their **shared `case_id`** values. The framework guarantees stable `case_id` across runs, so opening two experiments side-by-side gives a true regression view.
-- `eval_run_id` is NOT pushed to Braintrust metadata — only `provider`, `model`, `run_index`, `error`, `latency_ms`, and token counts make it onto a BT row (see `reporting.push_to_braintrust`). To trace a BT row back to a CI run, match on `case_id` + `model` + `run_index` against the JSONL artifact uploaded by the workflow; the JSONL carries the full `eval_run_id` / `harness_git_sha` / `dataset_git_sha`.
+- `eval_run_id` is NOT pushed to Braintrust metadata — only `case_id`, `provider`, `model`, `run_index`, `error`, `latency_ms`, and token counts make it onto a BT row (see `reporting.push_to_braintrust`). To trace a BT row back to a CI run, match on `case_id` + `model` + `run_index` against the JSONL artifact uploaded by the workflow; the JSONL carries the full `eval_run_id` / `harness_git_sha` / `dataset_git_sha`.
 
 ## Contributing
 
@@ -256,4 +262,4 @@ Comparing across runs:
 
 ### Cost notes
 
-A typical full nightly run (4 surfaces, 3 runs each, default judge panel) on `claude-sonnet-4-6` + `gpt-5` for subjects and `claude-haiku-4-5` + `gpt-5-mini` for judges costs roughly **$15-25** end-to-end (~10-15 min wall time at `--concurrency 8`). The selector surface is cheap (~$0.30); external_agent is the most expensive due to multi-step agent loops. Drop `--concurrency` if you hit provider rate limits; raise `--runs` to tighten bootstrap CIs at linear cost.
+The nightly workflow runs the live matrix at `--concurrency 16` under a 120-minute timeout (see `.github/workflows/evals-nightly.yml`); the largest surface (wiki_updater, ~300 cases × 2 models × 3 runs + judges) dominates wall time and can take ~20+ min on its own. Dollar cost is not measured yet (no cost aggregation exists in `reporting.py`); a rough order-of-magnitude estimate is **$15-25** end-to-end on `claude-sonnet-4-6` + `gpt-5` subjects and `claude-haiku-4-5` + `gpt-5-mini` judges, with external_agent the most expensive (multi-step agent loops). Drop `--concurrency` if you hit provider rate limits; raise `--runs` to tighten bootstrap CIs at linear cost.
