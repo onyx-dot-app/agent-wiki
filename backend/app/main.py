@@ -55,7 +55,14 @@ from app.metrics import setup_prometheus
 from app.mcp_server import pubsub as mcp_pubsub
 from app.llm.errors import LLMError
 from app.models._helpers import ErrorResponse, QueueFullErrorResponse, RequestError
+from app.db.session import init_db
+from app.tasks.agent_activity import schedule_all_pending_cleanups
 from app.tasks.queues import QueueFullError
+from app.triggers import repo as triggers_repo
+from app.utils.logging import setup_logging
+from app.wiki.git import ensure_wiki_repo
+from app.wiki.seed import seed_if_empty
+from app.wiki.templates import seed_starter_templates_if_empty
 
 log = logging.getLogger(__name__)
 
@@ -138,14 +145,6 @@ async def _lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     without entering the context manager, so the lifespan body is
     skipped — fixtures (``tmp_db`` / ``tmp_repo``) own DB/wiki init.
     """
-    from app.db.session import init_db
-    from app.tasks.agent_activity import schedule_all_pending_cleanups
-    from app.triggers import repo as triggers_repo
-    from app.utils.logging import setup_logging
-    from app.wiki.git import ensure_wiki_repo
-    from app.wiki.seed import seed_if_empty
-    from app.wiki.templates import seed_starter_templates_if_empty
-
     setup_logging()
     log.info(
         "agent-wiki backend starting (database=%s)", _app_config.CONFIG.database_url.split("@")[-1]
