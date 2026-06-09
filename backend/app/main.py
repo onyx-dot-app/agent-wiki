@@ -49,6 +49,8 @@ from app.api import (
 from app.auth import PermissionDenied
 from app.auth.deps import CurrentUserMiddleware
 import app.config as _app_config
+from app.db import comment_fts
+from app.wiki import comments as _comments_repo
 from app.metrics import setup_prometheus
 from app.mcp_server import pubsub as mcp_pubsub
 from app.llm.errors import LLMError
@@ -160,9 +162,6 @@ async def _lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     # One-time backfill: index existing comments when the comment search index
     # is empty (first boot after the feature ships, or after an index reset).
     # The index persists across reboots, so steady-state boots skip this.
-    from app.db import comment_fts
-    from app.wiki import comments as _comments_repo
-
     if comment_fts.count() == 0:
         _comments_repo.reindex_all_inline()
     triggers_repo.purge_invalid_triggers(actor="system <system@agent-wiki>")

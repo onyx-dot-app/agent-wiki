@@ -19,6 +19,8 @@ in Python by `doc_path` (comments inherit the page's read access).
 from __future__ import annotations
 
 import logging
+import re
+import threading
 
 from opensearchpy import OpenSearch  # type: ignore[import-untyped]
 from opensearchpy.exceptions import NotFoundError  # type: ignore[import-untyped]
@@ -30,8 +32,14 @@ log = logging.getLogger(__name__)
 
 # Tracks which index name we've ensured a mapping for. When CONFIG changes
 # (e.g. a new per-test index name), this differs from the current name and we
-# re-ensure — so no explicit reset hook is needed between tests.
+# re-ensure — so no explicit reset hook is needed between tests. Guarded by
+# ``_ensure_lock`` so concurrent cold-start requests don't race on create.
+_ensure_lock = threading.Lock()
 _ensured_index: str | None = None
+
+# OpenSearch highlight wraps matched terms in <em>…</em>; strip them so the
+# snippet is plain text (the surrounding fragment is otherwise unescaped source).
+_EM_TAG_RE = re.compile(r"</?em>")
 
 
 class CommentDoc(BaseModel):
@@ -48,7 +56,7 @@ class CommentSearchHit(BaseModel):
     comment_id: str
     doc_path: str
     thread_root_id: str
-    snippet: str
+    snippet: str  # plain text (highlight <em> tags stripped); render as text
     score: float
 
 
@@ -86,7 +94,11 @@ def _client() -> object | None:
     if client is None:
         return None
     idx = _index_name()
-    if _ensured_index != idx:
+    if _ensured_index == idx:
+        return client
+    with _ensure_lock:
+        if _ensured_index == idx:  # another thread ensured it while we waited
+            return client
         try:
             c: OpenSearch = client  # type: ignore[assignment]
             if not c.indices.exists(index=idx):
@@ -268,12 +280,13 @@ def search(
         thread_root_id: str = src.get("thread_root_id", "")
         hl: dict[str, list[str]] = h.get("highlight") or {}
         snippet_parts: list[str] = hl.get("body") or []
+        snippet = _EM_TAG_RE.sub("", snippet_parts[0]) if snippet_parts else ""
         rows.append(
             (
                 comment_id,
                 doc_path,
                 thread_root_id,
-                snippet_parts[0] if snippet_parts else "",
+                snippet,
                 float(h.get("_score", 0.0)),
             )
         )
