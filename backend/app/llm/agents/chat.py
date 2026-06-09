@@ -226,9 +226,13 @@ def run_chat_loop(
 
 
 def _chat_tools_for_turn(messages: list[Message]) -> list[dict[str, Any]]:
-    """Per-turn tool list for the chat agent: base + load_skill + active skills."""
+    """Per-turn tool list for the chat agent: base + comment search + load_skill
+    + active skills. ``search_comments`` is wired here (not in
+    ``BASE_TOOL_NAMES``) so it stays chat-only — the shared base tools also feed
+    the MCP-exposed ``ask_nl_question`` engine, which we don't expand yet."""
     return [
         *skill_registry.base_tool_specs(),
+        tool_registry.spec_by_name("search_comments"),
         skill_registry.build_load_skill_spec(),
         *skill_registry.specs_for_active_skills(skill_registry.active_skills(messages)),
     ]
