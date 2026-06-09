@@ -23,7 +23,7 @@ import { Button, SidebarTab } from "@onyx-ai/opal/components";
 import { SvgDocFile, SvgStarOff } from "@onyx-ai/opal/icons";
 
 import { reorderStarred, unstarDoc } from "@/lib/starred";
-import { docLabel } from "./docLabel";
+import { docLabel } from "@/sections/sidebar/docLabel";
 
 interface StarredListProps {
   paths: string[];

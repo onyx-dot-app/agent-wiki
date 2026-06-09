@@ -21,9 +21,9 @@ import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { RECENTS_KEY, type RecentDocsResponse } from "@/lib/recents";
 import { STARRED_KEY, starDoc, type StarredDocsResponse } from "@/lib/starred";
-import { docLabel } from "./docLabel";
-import { StarredList } from "./StarredList";
-import UserMenu from "./UserMenu";
+import { docLabel } from "@/sections/sidebar/docLabel";
+import { StarredList } from "@/sections/sidebar/StarredList";
+import UserMenu from "@/sections/sidebar/UserMenu";
 import { NAV_ENTRIES } from "@/lib/nav/registry";
 import { useIsMobile } from "@/lib/viewport";
 
@@ -50,7 +50,7 @@ interface AppSidebarProps {
   onFoldToggle: () => void;
 }
 
-export function AppSidebar({ folded, onFoldToggle }: AppSidebarProps) {
+export default function AppSidebar({ folded, onFoldToggle }: AppSidebarProps) {
   const { user } = useAuth();
   const pathname = usePathname();
   const isMobile = useIsMobile();
