@@ -9,6 +9,7 @@ import {
   SvgStar,
 } from "@onyx-ai/opal/icons";
 import { useSidebarFolded } from "@onyx-ai/opal/layouts";
+import { SvgOnyxLogoTyped } from "@onyx-ai/opal/logos";
 import { usePathname } from "next/navigation";
 import { useRef } from "react";
 import useSWR from "swr";
@@ -22,10 +23,9 @@ import { RECENTS_KEY, type RecentDocsResponse } from "@/lib/recents";
 import { STARRED_KEY, starDoc, type StarredDocsResponse } from "@/lib/starred";
 import { docLabel } from "./docLabel";
 import { StarredList } from "./StarredList";
-import { UserMenu } from "./UserMenu";
+import UserMenu from "./UserMenu";
 import { NAV_ENTRIES } from "@/lib/nav/registry";
 import { useIsMobile } from "@/lib/viewport";
-import { SvgOnyxLogoTyped } from "@onyx-ai/opal/logos";
 
 function useRecentPages() {
   const { data } = useSWR(
@@ -93,8 +93,11 @@ export function AppSidebar({ folded, onFoldToggle }: AppSidebarProps) {
           </div>
         ) : (
           <>
-            <div className="flex h-7 items-center px-1">
+            <div className="flex h-7 items-center gap-2 px-1">
               <SvgOnyxLogoTyped size={28} />
+              <Text font="heading-h3" color="text-03">
+                Wiki
+              </Text>
             </div>
             <div className="px-1">
               <Button
@@ -179,6 +182,13 @@ export function AppSidebar({ folded, onFoldToggle }: AppSidebarProps) {
               </div>
             </div>
             <div className="flex flex-col gap-px">
+              {pages.length === 0 && (
+                <div className="px-2.5">
+                  <Text font="secondary-body" color="text-01" as="p">
+                    No recent pages. Create a page to get started.
+                  </Text>
+                </div>
+              )}
               {pages.map((path) => {
                 const href = `/app/wiki/${path}`;
                 const active = pathname === href;

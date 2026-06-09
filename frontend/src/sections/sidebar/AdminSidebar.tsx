@@ -5,7 +5,7 @@ import { SvgX } from "@onyx-ai/opal/icons";
 import { SvgOnyxLogoTyped } from "@onyx-ai/opal/logos";
 import { usePathname } from "next/navigation";
 import { ADMIN_NAV_ENTRIES } from "@/lib/nav/registry";
-import { UserMenu } from "./UserMenu";
+import UserMenu from "./UserMenu";
 
 export function AdminSidebar() {
   const pathname = usePathname();

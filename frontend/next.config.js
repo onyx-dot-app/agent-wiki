@@ -1,6 +1,10 @@
 /** @type {import('next').NextConfig} */
+const { version } = require("./package.json");
 const nextConfig = {
   reactStrictMode: true,
+  env: {
+    NEXT_PUBLIC_APP_VERSION: version,
+  },
   output: "standalone",
   transpilePackages: ["@onyx-ai/opal"],
   async rewrites() {
