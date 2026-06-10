@@ -64,7 +64,8 @@ export function ActivitiesPanel() {
     <div className="flex h-full w-(--activities-view) flex-col rounded-(--border-radius-12) border border-(--border-01) bg-transparent">
       <div className="border-b border-(--border-01)">
         <ContentAction
-          variant="section"
+          variant="body"
+          sizePreset="main-ui"
           icon={SvgActivity}
           title="Activity History"
           padding="sm"
