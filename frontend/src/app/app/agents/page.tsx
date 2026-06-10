@@ -6,9 +6,10 @@ import useSWR from "swr";
 import { SetupWizard } from "@/components/agents/SetupWizard";
 import { ToolCard } from "@/components/agents/ToolCard";
 import { Button } from "@onyx-ai/opal/components";
+import { SvgActions } from "@onyx-ai/opal/icons";
+import { SettingsLayouts } from "@onyx-ai/opal/layouts";
 import { useConfirm } from "@/components/common/ConfirmDialog";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
-import { PageHeader } from "@/components/common/PageHeader";
 import { ApiError } from "@/lib/api";
 import {
   createToken,
@@ -21,31 +22,26 @@ import {
 import { apiFetch } from "@/lib/api";
 import { useRequireAuth } from "@/lib/auth";
 import { type ProbeResult } from "@/lib/launchers";
-import { useIsMobile } from "@/lib/viewport";
 
 export default function AgentsPage() {
   const { user, loading } = useRequireAuth();
-  const isMobile = useIsMobile();
 
-  if (loading || !user)
-    return (
-      <main className={isMobile ? "p-4" : "p-8"}>
-        <LoadingSpinner center />
-      </main>
-    );
+  if (loading || !user) return <LoadingSpinner center />;
 
   return (
-    <main className={`max-w-[880px] ${isMobile ? "px-3 py-4" : "px-8 py-6"}`}>
-      <PageHeader
+    <SettingsLayouts.Root width="lg">
+      <SettingsLayouts.Header
+        icon={SvgActions}
         title="Agents"
         description="Give your agents the ability to read and update this wiki. Generate a personal API key below, then drop it into your coding agent's MCP configuration. Each key's name becomes that agent's identity — it shows up next to its activity on wiki pages and in commit history."
       />
-
-      <EndpointBlock />
-      <TokenManager />
-      <ClientConfigHelp />
-      <CodingToolsSection />
-    </main>
+      <SettingsLayouts.Body>
+        <EndpointBlock />
+        <TokenManager />
+        <ClientConfigHelp />
+        <CodingToolsSection />
+      </SettingsLayouts.Body>
+    </SettingsLayouts.Root>
   );
 }
 

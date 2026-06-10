@@ -1,17 +1,16 @@
 "use client";
 
 import { Button } from "@onyx-ai/opal/components";
+import { SvgActivity } from "@onyx-ai/opal/icons";
+import { SettingsLayouts } from "@onyx-ai/opal/layouts";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
-import { PageHeader } from "@/components/common/PageHeader";
 import { useRequireAuth } from "@/lib/auth";
 import { effectiveTimezone } from "@/lib/cron";
 import { useEvents } from "@/lib/events";
 import { formatInTimezone, formatScopePath } from "@/lib/format";
-import { useIsMobile } from "@/lib/viewport";
 
 export default function EventsPage() {
   const { user, loading } = useRequireAuth();
-  const isMobile = useIsMobile();
   // The user's explicit timezone, else their browser's local zone.
   const timezone = effectiveTimezone(user?.settings.timezone);
   const { events, error, isValidating, refresh } = useEvents({
@@ -20,19 +19,15 @@ export default function EventsPage() {
   });
   const errorMessage = error?.message ?? null;
 
-  if (loading || !user)
-    return (
-      <main className={isMobile ? "p-4" : "p-8"}>
-        <LoadingSpinner center />
-      </main>
-    );
+  if (loading || !user) return <LoadingSpinner center />;
 
   return (
-    <main style={{ padding: isMobile ? "16px 12px" : "24px 32px" }}>
-      <PageHeader
+    <SettingsLayouts.Root width="lg">
+      <SettingsLayouts.Header
+        icon={SvgActivity}
         title="Events"
         description="Trigger fires, newest first."
-        actions={
+        rightChildren={
           <Button onClick={() => void refresh()} disabled={isValidating}>
             {isValidating ? "Refreshing…" : "Refresh"}
           </Button>
@@ -49,6 +44,7 @@ export default function EventsPage() {
         <p className="text-sm text-(--text-03)">No trigger fires yet.</p>
       )}
 
+      <SettingsLayouts.Body>
       <ul className="m-0 list-none p-0">
         {events.map((ev) => {
           const p = ev.payload as {
@@ -93,7 +89,8 @@ export default function EventsPage() {
           );
         })}
       </ul>
-    </main>
+      </SettingsLayouts.Body>
+    </SettingsLayouts.Root>
   );
 }
 

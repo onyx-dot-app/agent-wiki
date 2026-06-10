@@ -3,14 +3,13 @@
 import { useState } from "react";
 
 import { Button } from "@onyx-ai/opal/components";
-import { SvgPlus } from "@onyx-ai/opal/icons";
+import { SvgPlus, SvgWorkflow } from "@onyx-ai/opal/icons";
+import { SettingsLayouts } from "@onyx-ai/opal/layouts";
 import { useConfirm } from "@/components/common/ConfirmDialog";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
-import { PageHeader } from "@/components/common/PageHeader";
 import { TriggerHistoryModal } from "@/components/triggers/TriggerHistoryModal";
 import { TriggerModal } from "@/components/triggers/TriggerModal";
 import { useRequireAuth } from "@/lib/auth";
-import { useIsMobile } from "@/lib/viewport";
 import { describeCron } from "@/lib/cron";
 import { formatScopePath } from "@/lib/format";
 import {
@@ -47,7 +46,6 @@ function formatRelative(iso: string | null | undefined): string {
 
 export default function TriggersPage() {
   const { user, loading } = useRequireAuth();
-  const isMobile = useIsMobile();
   const { triggers, error: listSwrError, refresh } = useTriggers();
   const destinations = useTriggerDestinations();
   const { webhooks: slackWebhooks } = useSlackWebhooks();
@@ -72,12 +70,7 @@ export default function TriggersPage() {
 
   const listError = mutationError ?? listSwrError?.message ?? null;
 
-  if (loading || !user)
-    return (
-      <main className={isMobile ? "p-4" : "p-8"}>
-        <LoadingSpinner center />
-      </main>
-    );
+  if (loading || !user) return <LoadingSpinner center />;
 
   async function onToggle(t: Trigger) {
     setBusyId(t.id);
@@ -127,11 +120,12 @@ export default function TriggersPage() {
   }
 
   return (
-    <main className={isMobile ? "px-3 py-4" : "px-8 py-6"}>
-      <PageHeader
+    <SettingsLayouts.Root width="lg">
+      <SettingsLayouts.Header
+        icon={SvgWorkflow}
         title="Triggers"
         description="Triggers watch a document (or folder) and notice when something specific changes, or check on a recurring schedule. When the trigger fires, the message you wrote shows up on the Events tab so you can review it."
-        actions={
+        rightChildren={
           <Button
             variant="action"
             icon={SvgPlus}
@@ -144,7 +138,7 @@ export default function TriggersPage() {
           </Button>
         }
       />
-
+      <SettingsLayouts.Body>
       {listError && (
         <div className="mb-3 rounded-(--border-radius-04) bg-(--status-error-01) p-[10px] text-[13px] text-(--status-text-error-05)">
           {listError}
@@ -271,6 +265,7 @@ export default function TriggersPage() {
       </ul>
 
       <SlackChannelsCard />
+      </SettingsLayouts.Body>
 
       <TriggerModal
         open={modalOpen}
@@ -322,7 +317,7 @@ export default function TriggersPage() {
           }
         }}
       />
-    </main>
+    </SettingsLayouts.Root>
   );
 }
 
