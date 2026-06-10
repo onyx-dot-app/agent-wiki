@@ -16,7 +16,7 @@ interface IngestSettings {
   api_key: string | null;
 }
 
-type Provider = "anthropic" | "openai" | "gemini" | "ollama";
+type Provider = "anthropic" | "openai" | "gemini" | "ollama" | "custom";
 
 interface LLMSettings {
   provider: Provider;
@@ -25,6 +25,8 @@ interface LLMSettings {
   openai_api_key_set: boolean;
   gemini_api_key_set: boolean;
   ollama_base_url: string;
+  custom_base_url: string;
+  custom_display_name: string;
   provider_models: Record<string, string[]>;
   ingest_selector_model: string;
 }
@@ -34,16 +36,29 @@ const PROVIDER_LABEL: Record<Provider, string> = {
   openai: "OpenAI",
   gemini: "Gemini",
   ollama: "Ollama",
+  custom: "Custom",
 };
 
-const ALL_PROVIDERS: Provider[] = ["anthropic", "openai", "gemini", "ollama"];
+const ALL_PROVIDERS: Provider[] = [
+  "anthropic",
+  "openai",
+  "gemini",
+  "ollama",
+  "custom",
+];
 
 function isConfigured(p: Provider, s: LLMSettings): boolean {
   if (p === "anthropic") return s.anthropic_api_key_set;
   if (p === "openai") return s.openai_api_key_set;
   if (p === "gemini") return s.gemini_api_key_set;
   if (p === "ollama") return !!s.ollama_base_url;
+  if (p === "custom") return !!s.custom_base_url;
   return false;
+}
+
+function providerLabel(p: Provider, s: LLMSettings): string {
+  if (p === "custom") return s.custom_display_name || "Custom";
+  return PROVIDER_LABEL[p];
 }
 
 export default function AdminIngestPage() {
@@ -386,7 +401,7 @@ function SelectorModelSection({
                   <span
                     className={`shrink-0 text-[13px] font-medium ${isSelected ? "text-(--text-05)" : "text-(--text-04)"}`}
                   >
-                    {PROVIDER_LABEL[p]}
+                    {providerLabel(p, settings)}
                   </span>
                   <span
                     className={`font-mono text-[13px] ${isSelected ? "text-(--text-05)" : "text-(--text-03)"}`}

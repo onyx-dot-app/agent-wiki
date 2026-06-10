@@ -204,7 +204,7 @@ def _redact(key: str) -> str:
     return f"{key[:4]}…{key[-4:]}"
 
 
-_ALLOWED_PROVIDERS = ("anthropic", "openai", "gemini", "ollama")
+_ALLOWED_PROVIDERS = ("anthropic", "openai", "gemini", "ollama", "custom")
 
 
 def _llm_view(s: LLMSettings) -> LLMView:
@@ -218,6 +218,10 @@ def _llm_view(s: LLMSettings) -> LLMView:
         openai_api_key_hint=_redact(s.openai_api_key),
         gemini_api_key_hint=_redact(s.gemini_api_key),
         ollama_base_url=s.ollama_base_url,
+        custom_api_key_set=bool(s.custom_api_key),
+        custom_api_key_hint=_redact(s.custom_api_key),
+        custom_base_url=s.custom_base_url,
+        custom_display_name=s.custom_display_name,
         provider_models=s.provider_models,
         ingest_selector_model=s.ingest_selector_model,
     )
@@ -274,6 +278,30 @@ def put_llm(
     ollama_base_url = _resolve_secret(
         "ollama_base_url", req.ollama_base_url, current.ollama_base_url
     )
+    custom_api_key = _resolve_secret(
+        "custom_api_key", req.custom_api_key, current.custom_api_key
+    )
+    custom_base_url = (
+        _resolve_secret("custom_base_url", req.custom_base_url, current.custom_base_url)
+        .strip()
+        .rstrip("/")
+    )
+    if custom_base_url:
+        if not custom_base_url.startswith(("http://", "https://")):
+            raise HTTPException(
+                status_code=400,
+                detail="custom_base_url must start with http:// or https://",
+            )
+        if custom_base_url.endswith("/chat/completions"):
+            raise HTTPException(
+                status_code=400,
+                detail="custom_base_url should be the API base (e.g. https://host/v1) — requests append /chat/completions automatically",
+            )
+
+    if "custom_display_name" in sent_fields:
+        custom_display_name = (req.custom_display_name or "").strip()
+    else:
+        custom_display_name = current.custom_display_name
 
     new_provider_models = (
         req.provider_models if "provider_models" in sent_fields else None
@@ -291,6 +319,9 @@ def put_llm(
         openai_api_key=openai_key,
         gemini_api_key=gemini_key,
         ollama_base_url=ollama_base_url,
+        custom_api_key=custom_api_key,
+        custom_base_url=custom_base_url,
+        custom_display_name=custom_display_name,
         provider_models=new_provider_models,
         ingest_selector_model=ingest_selector_model,
     )

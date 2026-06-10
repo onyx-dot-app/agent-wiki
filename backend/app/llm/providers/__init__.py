@@ -25,6 +25,7 @@ relies on. Provider modules must:
 * Map SDK-specific exceptions to ``LLMError`` (raised by the SDK SDK,
   caught in the provider's ``stream``).
 """
+
 from __future__ import annotations
 
 from typing import Any, Iterator, Protocol
@@ -92,6 +93,7 @@ def names() -> list[str]:
 # actually compiled in. Keep imports at the bottom — each module references
 # `register` from this module.
 from app.llm.providers import anthropic as _anthropic  # noqa: E402,F401  # pyright: ignore[reportUnusedImport]
+from app.llm.providers import custom as _custom  # noqa: E402,F401  # pyright: ignore[reportUnusedImport]
 from app.llm.providers import gemini as _gemini  # noqa: E402,F401  # pyright: ignore[reportUnusedImport]
 from app.llm.providers import ollama as _ollama  # noqa: E402,F401  # pyright: ignore[reportUnusedImport]
 from app.llm.providers import openai as _openai  # noqa: E402,F401  # pyright: ignore[reportUnusedImport]

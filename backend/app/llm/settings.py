@@ -21,6 +21,9 @@ class LLMSettings(BaseModel):
     openai_api_key: str
     gemini_api_key: str
     ollama_base_url: str
+    custom_api_key: str
+    custom_base_url: str
+    custom_display_name: str
     provider_models: dict[str, list[str]]
     ingest_selector_model: str  # empty or same as model → stage 3 skipped
 
@@ -32,6 +35,9 @@ _EMPTY = LLMSettings(
     openai_api_key="",
     gemini_api_key="",
     ollama_base_url="",
+    custom_api_key="",
+    custom_base_url="",
+    custom_display_name="",
     provider_models={},
     ingest_selector_model="",
 )
@@ -49,6 +55,9 @@ def get() -> LLMSettings:
             openai_api_key=row.openai_api_key,
             gemini_api_key=row.gemini_api_key,
             ollama_base_url=row.ollama_base_url,
+            custom_api_key=row.custom_api_key,
+            custom_base_url=row.custom_base_url,
+            custom_display_name=row.custom_display_name,
             provider_models=row.provider_models or {},
             ingest_selector_model=row.ingest_selector_model or "",
         )
@@ -62,6 +71,9 @@ def upsert(
     openai_api_key: str,
     gemini_api_key: str,
     ollama_base_url: str,
+    custom_api_key: str,
+    custom_base_url: str,
+    custom_display_name: str,
     provider_models: dict[str, list[str]] | None = None,
     ingest_selector_model: str | None = None,
 ) -> None:
@@ -78,6 +90,9 @@ def upsert(
                     openai_api_key=openai_api_key,
                     gemini_api_key=gemini_api_key,
                     ollama_base_url=ollama_base_url,
+                    custom_api_key=custom_api_key,
+                    custom_base_url=custom_base_url,
+                    custom_display_name=custom_display_name,
                     provider_models=provider_models or {},
                     ingest_selector_model=ingest_selector_model or "",
                     updated_at=now,
@@ -90,6 +105,9 @@ def upsert(
             row.openai_api_key = openai_api_key
             row.gemini_api_key = gemini_api_key
             row.ollama_base_url = ollama_base_url
+            row.custom_api_key = custom_api_key
+            row.custom_base_url = custom_base_url
+            row.custom_display_name = custom_display_name
             if provider_models is not None:
                 row.provider_models = provider_models
             if ingest_selector_model is not None:
