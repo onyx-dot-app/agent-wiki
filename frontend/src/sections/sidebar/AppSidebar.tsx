@@ -25,7 +25,7 @@ import { useAuth } from "@/lib/auth";
 import { RECENTS_KEY, type RecentDocsResponse } from "@/lib/recents";
 import { STARRED_KEY, starDoc, type StarredDocsResponse } from "@/lib/starred";
 import { docLabel } from "@/sections/sidebar/docLabel";
-import { StarredList } from "@/sections/sidebar/StarredList";
+import StarredList from "@/sections/sidebar/StarredList";
 import UserMenu from "@/sections/sidebar/UserMenu";
 import { NAV_ENTRIES } from "@/lib/nav/registry";
 import { useIsMobile } from "@/lib/viewport";

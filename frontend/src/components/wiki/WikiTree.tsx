@@ -20,8 +20,9 @@ import {
 } from "@onyx-ai/opal/icons";
 
 import { apiFetch } from "@/lib/api";
-import { useActiveFolder, WikiItemMenu } from "./WikiItemActions";
-import styles from "./WikiTree.module.css";
+import { useActiveFolder } from "@/providers/WikiItemActionsProvider";
+import WikiItemMenu from "@/components/wiki/WikiItemActions";
+import styles from "@/components/wiki/WikiTree.module.css";
 
 interface Entry {
   path: string;
