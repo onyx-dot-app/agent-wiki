@@ -157,7 +157,7 @@ export default function AppSidebar({ folded, onFoldToggle }: AppSidebarProps) {
               )}
               {pages.map((path) => {
                 const href = `/app/wiki/${path}`;
-                const active = pathname === href;
+                const active = focus.matchesWikiPath(path);
                 return (
                   <div key={path} className="group/recent">
                     <SidebarTab
