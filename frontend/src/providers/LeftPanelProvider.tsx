@@ -11,15 +11,21 @@ import { useAppFocus } from "@/hooks/useAppFocus";
 
 export type LeftPanelView = "wiki-tree" | "activities" | null;
 
+const TREE_OPEN_KEY = "agent-wiki:wiki-tree-open";
+
 interface LeftPanelContextValue {
   /** What is currently rendered in the left panel. Mutual exclusion is
    *  enforced here — consumers never need to check both sources. */
   view: LeftPanelView;
+  /** Whether the wiki tree is open (persisted in localStorage). */
+  isTreeOpen: boolean;
   /** True when the user has explicitly opened the Activities panel. */
   isActivitiesOpen: boolean;
   /** True when the current route is a wiki route (drives WikiItemActionsProvider). */
   isOnWikiRoute: boolean;
-  /** Toggle the Activities panel open/closed. */
+  /** Toggle the wiki tree open/closed. Persisted in localStorage. */
+  toggleTree: () => void;
+  /** Toggle the Activities panel open/closed. Ephemeral — not persisted. */
   toggleActivities: () => void;
 }
 
@@ -39,25 +45,41 @@ interface LeftPanelProviderProps {
 export function LeftPanelProvider({ children }: LeftPanelProviderProps) {
   const focus = useAppFocus();
   const [activitiesOpen, setActivitiesOpen] = useState(false);
+  const [treeOpen, setTreeOpen] = useState<boolean>(() => {
+    if (typeof window === "undefined") return true;
+    return window.localStorage.getItem(TREE_OPEN_KEY) !== "0";
+  });
 
   const isOnWikiRoute = focus.isWiki();
 
-  // Invariant: activities takes priority; wiki-tree shows only when on a wiki
-  // route and activities is not open. Exactly one thing shows at a time.
+  function toggleTree() {
+    setTreeOpen((prev) => {
+      const next = !prev;
+      if (typeof window !== "undefined")
+        window.localStorage.setItem(TREE_OPEN_KEY, next ? "1" : "0");
+      return next;
+    });
+  }
+
+  // Invariant: activities takes priority over wiki-tree. treeOpen is never
+  // mutated by activities toggling — it persists underneath, so closing
+  // activities always restores the tree to its prior state.
   const view: LeftPanelView = activitiesOpen
     ? "activities"
-    : isOnWikiRoute
+    : isOnWikiRoute && treeOpen
       ? "wiki-tree"
       : null;
 
   const value = useMemo<LeftPanelContextValue>(
     () => ({
       view,
+      isTreeOpen: treeOpen,
       isActivitiesOpen: activitiesOpen,
       isOnWikiRoute,
+      toggleTree,
       toggleActivities: () => setActivitiesOpen((v) => !v),
     }),
-    [view, activitiesOpen, isOnWikiRoute],
+    [view, treeOpen, activitiesOpen, isOnWikiRoute],
   );
 
   return (

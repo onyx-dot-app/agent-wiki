@@ -8,6 +8,7 @@ import AppSidebar from "@/sections/sidebar/AppSidebar";
 import { WikiItemActionsProvider } from "@/providers/WikiItemActionsProvider";
 import { LeftPanelProvider, useLeftPanel } from "@/providers/LeftPanelProvider";
 import { WikiTree } from "@/components/wiki/WikiTree";
+import { WikiHeader } from "@/components/wiki/WikiHeader";
 import { useAuth } from "@/lib/auth";
 import { useHealth } from "@/lib/health";
 import { useLLMStatus } from "@/lib/llm";
@@ -92,6 +93,11 @@ function AppContent({ children }: AppContentProps) {
       )}
       <RootLayout.App>
         <StatusBanner />
+        {isOnWikiRoute && (
+          <RootLayout.Header>
+            <WikiHeader />
+          </RootLayout.Header>
+        )}
         <RootLayout.MainContent>
           <div className="mx-auto w-full max-w-(--breakpoint-content-md)">
             {children}
