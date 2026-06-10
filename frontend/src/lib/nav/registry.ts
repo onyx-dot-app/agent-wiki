@@ -44,11 +44,6 @@ export const NAV_ENTRIES = [
     icon: SvgActions,
     description: "Connect agents to read and update your wiki.",
   },
-  {
-    href: "/app/events",
-    label: "Events",
-    icon: SvgActivity,
-  },
 ] as const satisfies NavEntry[];
 
 export const ADMIN_NAV_GROUPS = [
