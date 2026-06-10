@@ -16,7 +16,6 @@ import { Section } from "@onyx-ai/opal/layouts";
 import {
   SvgArrowUp,
   SvgChevronRight,
-  SvgFolder,
   SvgMoreHorizontal,
   SvgOnyxOctagon,
   SvgPlusCircle,
@@ -85,16 +84,6 @@ export function WikiHome() {
 
   return (
     <main className={styles.scroll}>
-      {/* Top header — breadcrumb */}
-      <div className={styles.topHeader}>
-        <div className={styles.breadcrumb}>
-          <span className={styles.modeBox}>
-            <SvgFolder size={18} />
-          </span>
-          <span className={styles.crumb}>Home</span>
-        </div>
-      </div>
-
       <div className={styles.column}>
         {/* Hero */}
         <div className={styles.hero}>

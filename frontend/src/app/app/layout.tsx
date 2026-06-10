@@ -6,12 +6,12 @@ import { MessageCard } from "@onyx-ai/opal/components";
 import { markdown } from "@onyx-ai/opal/utils";
 import AppSidebar from "@/sections/sidebar/AppSidebar";
 import { WikiItemActionsProvider } from "@/providers/WikiItemActionsProvider";
-import { ActivitiesProvider } from "@/providers/ActivitiesProvider";
+import { LeftPanelProvider, useLeftPanel } from "@/providers/LeftPanelProvider";
 import { WikiTree } from "@/components/wiki/WikiTree";
+import { WikiHeader } from "@/components/wiki/WikiHeader";
 import { useAuth } from "@/lib/auth";
 import { useHealth } from "@/lib/health";
 import { useLLMStatus } from "@/lib/llm";
-import { useAppFocus } from "@/hooks/useAppFocus";
 
 const COLLAPSED_KEY = "agent-wiki:sidebar-collapsed";
 const BANNER_HEALTH_POLL_MS = 15000;
@@ -82,17 +82,22 @@ interface AppContentProps {
 }
 
 function AppContent({ children }: AppContentProps) {
-  const focus = useAppFocus();
-  const isWiki = focus.isWiki();
+  const { view, isOnWikiRoute } = useLeftPanel();
   return (
-    <WikiItemActionsProvider active={isWiki}>
-      {isWiki && (
+    <WikiItemActionsProvider active={isOnWikiRoute}>
+      {view !== null && (
         <RootLayout.LeftPanel>
-          <WikiTree />
+          {view === "wiki-tree" && <WikiTree />}
+          {view === "activities" && <ActivitiesPanel />}
         </RootLayout.LeftPanel>
       )}
       <RootLayout.App>
         <StatusBanner />
+        {isOnWikiRoute && (
+          <RootLayout.Header>
+            <WikiHeader />
+          </RootLayout.Header>
+        )}
         <RootLayout.MainContent>
           <div className="mx-auto w-full max-w-(--breakpoint-content-md)">
             {children}
@@ -100,6 +105,14 @@ function AppContent({ children }: AppContentProps) {
         </RootLayout.MainContent>
       </RootLayout.App>
     </WikiItemActionsProvider>
+  );
+}
+
+function ActivitiesPanel() {
+  return (
+    <div className="flex h-full items-center justify-center p-4">
+      <p className="text-sm text-(--text-03)">Activities coming soon.</p>
+    </div>
   );
 }
 
@@ -125,13 +138,13 @@ export default function Layout({ children }: LayoutProps) {
   }
 
   return (
-    <ActivitiesProvider>
+    <LeftPanelProvider>
       <RootLayout.Root>
         <RootLayout.Sidebar folded={folded} onFoldToggle={toggle}>
           <AppSidebar folded={folded} onFoldToggle={toggle} />
         </RootLayout.Sidebar>
         <AppContent>{children}</AppContent>
       </RootLayout.Root>
-    </ActivitiesProvider>
+    </LeftPanelProvider>
   );
 }
