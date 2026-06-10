@@ -84,7 +84,7 @@ export default function ActivitiesPanel() {
   const olderEvents = filtered.filter((ev) => !isNewActivity(ev.ts));
 
   return (
-    <div className="flex h-full w-(--activities-view) flex-col rounded-12 border border-border-01">
+    <div className="flex h-full w-(--activities-view) flex-col rounded-12 border border-border-01 p-1">
       {/* Header */}
       <Section
         flexDirection="row"
