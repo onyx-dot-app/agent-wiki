@@ -37,9 +37,12 @@ export default function AdminSidebar() {
 
         <div className="flex flex-col gap-3">
           {filteredGroups.map((group) => (
-            <div key={group.label ?? "__ungrouped"} className="flex flex-col gap-px">
+            <div
+              key={group.label ?? "__ungrouped"}
+              className="flex flex-col gap-px"
+            >
               {group.label && (
-                <div className="px-2 pb-0.5 pt-1">
+                <div className="px-2 pt-1 pb-0.5">
                   <Text font="secondary-body" color="text-02">
                     {group.label}
                   </Text>
