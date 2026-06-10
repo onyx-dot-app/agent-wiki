@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Button, Divider, InputTypeIn, Tag } from "@onyx-ai/opal/components";
 import { SvgEmpty } from "@onyx-ai/opal/illustrations";
 import { SvgActivity, SvgX } from "@onyx-ai/opal/icons";
-import { IllustrationContent } from "@onyx-ai/opal/layouts";
+import { IllustrationContent, Section } from "@onyx-ai/opal/layouts";
 import { timeAgo } from "@onyx-ai/opal/time";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import {
@@ -86,14 +86,20 @@ export default function ActivitiesPanel() {
   return (
     <div className="flex h-full w-(--activities-view) flex-col rounded-12 border border-border-01">
       {/* Header */}
-      <div className="flex shrink-0 items-center justify-between px-2 py-1">
-        <div className="flex items-center gap-2">
+      <Section
+        flexDirection="row"
+        alignItems="center"
+        justifyContent="between"
+        height="fit"
+        padding={0.5}
+      >
+        <Section flexDirection="row" alignItems="center" gap={0.5} height="fit">
           <SvgActivity size={16} />
           <span className="text-sm font-semibold text-(--text-05)">
             Activity History
           </span>
-        </div>
-        <div className="flex items-center gap-1.5">
+        </Section>
+        <Section flexDirection="row" alignItems="center" gap={0.5} height="fit">
           {unreadCount > 0 && (
             <Tag title={`${unreadCount} new`} color="blue" />
           )}
@@ -104,8 +110,8 @@ export default function ActivitiesPanel() {
             tooltip="Close"
             onClick={toggleActivities}
           />
-        </div>
-      </div>
+        </Section>
+      </Section>
 
       {/* Search — hidden when there are no events at all */}
       {!isLoading && events.length > 0 && (
