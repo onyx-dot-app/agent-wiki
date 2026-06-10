@@ -24,6 +24,8 @@ body {
 :root {
   color-scheme: light;
   --breakpoint-content-md: 768px;
+  /* agent-wiki layout tokens — not part of Opal */
+  --activities-view: 22rem;
 }
 .dark {
   color-scheme: dark;
