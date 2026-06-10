@@ -6,7 +6,7 @@ import { MessageCard } from "@onyx-ai/opal/components";
 import { markdown } from "@onyx-ai/opal/utils";
 import AppSidebar from "@/sections/sidebar/AppSidebar";
 import { WikiItemActionsProvider } from "@/providers/WikiItemActionsProvider";
-import { ActivitiesProvider, useActivities } from "@/providers/ActivitiesProvider";
+import { ActivitiesProvider } from "@/providers/ActivitiesProvider";
 import { WikiTree } from "@/components/wiki/WikiTree";
 import { useAuth } from "@/lib/auth";
 import { useHealth } from "@/lib/health";
@@ -83,13 +83,12 @@ interface AppContentProps {
 
 function AppContent({ children }: AppContentProps) {
   const focus = useAppFocus();
-  const { isOpen: activitiesOpen } = useActivities();
   const isWiki = focus.isWiki();
   return (
     <WikiItemActionsProvider active={isWiki}>
-      {(isWiki || activitiesOpen) && (
+      {isWiki && (
         <RootLayout.LeftPanel>
-          {activitiesOpen ? <ActivitiesPanel /> : <WikiTree />}
+          <WikiTree />
         </RootLayout.LeftPanel>
       )}
       <RootLayout.App>
@@ -102,10 +101,6 @@ function AppContent({ children }: AppContentProps) {
       </RootLayout.App>
     </WikiItemActionsProvider>
   );
-}
-
-function ActivitiesPanel() {
-  return <div className="h-full p-4" />;
 }
 
 interface LayoutProps {

@@ -326,6 +326,8 @@ function CopyButton({ text }: { text: string }) {
       setCopied(true);
       setTimeout(() => setCopied(false), 1200);
     } catch {
+      // Some browsers block the Clipboard API outside HTTPS — show feedback
+      // anyway so the user knows to copy manually.
       setCopied(true);
       setTimeout(() => setCopied(false), 1200);
     }

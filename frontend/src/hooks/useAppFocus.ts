@@ -10,11 +10,36 @@ export type AppFocusType =
   | "chats"
   | "none";
 
-const WIKI_PREFIX = "/app/wiki/";
+// Single source of truth for route → focus type mapping.
+// To add a new nav entry: add it here + to NAV_ENTRIES. That's it.
+const ROUTES: ReadonlyArray<{
+  href: string;
+  type: Exclude<AppFocusType, "none">;
+}> = [
+  { href: "/app/wiki", type: "wiki" },
+  { href: "/app/triggers", type: "triggers" },
+  { href: "/app/agents-and-actions", type: "agents-and-actions" },
+  { href: "/app/chats", type: "chats" },
+];
+
+function decodeWikiPath(raw: string): string {
+  return raw
+    .split("/")
+    .map((segment) => {
+      try {
+        return decodeURIComponent(segment);
+      } catch {
+        return segment;
+      }
+    })
+    .join("/");
+}
 
 export class AppFocus {
   constructor(
     public readonly type: AppFocusType,
+    /** Root href of the matched route (e.g. "/app/wiki"), null for "none". */
+    public readonly rootHref: string | null,
     /** The wiki doc path (e.g. "folder/doc.md") when type === "wiki", null otherwise. */
     public readonly wikiPath: string | null = null,
   ) {}
@@ -42,44 +67,22 @@ export class AppFocus {
 
   /** True when the given nav href matches the current focus (used for top nav tabs). */
   matchesHref(href: string): boolean {
-    switch (href) {
-      case "/app/wiki":
-        return this.isWiki();
-      case "/app/triggers":
-        return this.isTriggers();
-      case "/app/agents-and-actions":
-        return this.isAgentsAndActions();
-      case "/app/chats":
-        return this.isChats();
-      default:
-        return false;
-    }
+    return this.rootHref === href;
   }
-}
-
-function decodeWikiPath(raw: string): string {
-  return raw
-    .split("/")
-    .map((segment) => {
-      try {
-        return decodeURIComponent(segment);
-      } catch {
-        return segment;
-      }
-    })
-    .join("/");
 }
 
 export function useAppFocus(): AppFocus {
   const pathname = usePathname();
   return useMemo(() => {
-    if (pathname.startsWith(WIKI_PREFIX))
-      return new AppFocus("wiki", decodeWikiPath(pathname.slice(WIKI_PREFIX.length)));
-    if (pathname === "/app/wiki") return new AppFocus("wiki", null);
-    if (pathname.startsWith("/app/triggers")) return new AppFocus("triggers");
-    if (pathname.startsWith("/app/agents-and-actions"))
-      return new AppFocus("agents-and-actions");
-    if (pathname.startsWith("/app/chats")) return new AppFocus("chats");
-    return new AppFocus("none");
+    for (const { href, type } of ROUTES) {
+      if (pathname.startsWith(href)) {
+        const wikiPath =
+          type === "wiki" && pathname.length > href.length
+            ? decodeWikiPath(pathname.slice(href.length + 1))
+            : null;
+        return new AppFocus(type, href, wikiPath);
+      }
+    }
+    return new AppFocus("none", null);
   }, [pathname]);
 }
