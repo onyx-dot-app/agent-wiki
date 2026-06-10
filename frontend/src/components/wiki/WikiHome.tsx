@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useState, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import useSWR from "swr";
@@ -29,10 +29,7 @@ import { relativeTime } from "@/lib/time";
 import { listTemplateSummaries } from "@/lib/templates";
 import type { DocumentTemplateSummary } from "@/lib/templates";
 import { AI_DRAFT_KEY, generateDraft, type RecentPage } from "@/lib/wiki";
-import { useAppLayout } from "@/sections/app/AppLayoutContext";
-
 import { WikiItemMenu } from "./WikiItemActions";
-import { WikiTree } from "./WikiTree";
 import styles from "./WikiHome.module.css";
 
 export function WikiHome() {
@@ -40,12 +37,6 @@ export function WikiHome() {
   const [aiPrompt, setAiPrompt] = useState("");
   const [generating, setGenerating] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
-  const { setLeftPanelContent, clearLeftPanelContent } = useAppLayout();
-
-  useEffect(() => {
-    setLeftPanelContent(<WikiTree />);
-    return () => clearLeftPanelContent();
-  }, [setLeftPanelContent, clearLeftPanelContent]);
 
   const { data: recentData } = useSWR<{ pages: RecentPage[] }>(
     "/wiki/recent?limit=12",
