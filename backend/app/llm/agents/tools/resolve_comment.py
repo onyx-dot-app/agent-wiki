@@ -15,6 +15,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.auth import PermissionDenied, current_user, require_can
+from app.llm.agents.tools._links import thread_link
 from app.models.comment import CommentStatus
 from app.wiki import comments as comments_repo
 
@@ -46,4 +47,5 @@ def handle(args: dict[str, Any]) -> Any:
         "thread_root_id": root["id"],
         "doc_path": root["doc_path"],
         "status": root["status"],
+        "link": thread_link(root["doc_path"], root["id"]),
     }

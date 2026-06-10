@@ -13,16 +13,11 @@ mirrors human replying: read access to the parent's page, via
 from __future__ import annotations
 
 from typing import Any
-from urllib.parse import quote
 
 from app.auth import PermissionDenied, current_user, require_can
+from app.llm.agents.tools._links import thread_link
 from app.models.comment import CommentAuthorKind
 from app.wiki import comments as comments_repo
-
-
-def _thread_link(doc_path: str, thread_root_id: str) -> str:
-    encoded = "/".join(quote(seg) for seg in doc_path.split("/") if seg)
-    return f"/app/wiki/{encoded}?comment={quote(thread_root_id, safe='')}"
 
 
 def handle(args: dict[str, Any]) -> Any:
@@ -57,5 +52,5 @@ def handle(args: dict[str, Any]) -> Any:
         "comment_id": reply["id"],
         "thread_root_id": reply["thread_root_id"],
         "doc_path": reply["doc_path"],
-        "link": _thread_link(reply["doc_path"], reply["thread_root_id"]),
+        "link": thread_link(reply["doc_path"], reply["thread_root_id"]),
     }

@@ -79,6 +79,7 @@ def test_resolve_marks_thread_resolved(tmp_db, monkeypatch):
     out = resolve_handle({"comment_id": root["id"]})
     assert out["status"] == "resolved"
     assert out["thread_root_id"] == root["id"]
+    assert out["link"] == f"/app/wiki/guides/setup.md?comment={root['id']}"
     refreshed = comments.get(root["id"])
     assert refreshed is not None and refreshed["status"] == "resolved"
 
