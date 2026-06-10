@@ -25,6 +25,7 @@ export function useOnChangeValue<T = any>(
   return useCallback(
     (value: T) => {
       helpers.setValue(value);
+      helpers.setTouched(true);
       f?.(value);
     },
     [helpers, f],
@@ -32,13 +33,12 @@ export function useOnChangeValue<T = any>(
 }
 
 export function useOnBlurEvent<T = any>(name: string, f?: (event: T) => void) {
-  const [field, , helpers] = useField<T>(name);
+  const [field] = useField<T>(name);
   return useCallback(
     (event: T) => {
       f?.(event);
       field.onBlur(event);
-      helpers.setTouched(true);
     },
-    [field, helpers, f],
+    [field, f],
   );
 }
