@@ -91,7 +91,13 @@ function transform(node: MdastNode): void {
         next.push(...replaced);
         continue;
       }
-    } else if (child.children) {
+    } else if (
+      child.children &&
+      child.type !== "link" &&
+      child.type !== "image"
+    ) {
+      // Don't recurse into a link/image: re-linkifying its label text would nest
+      // a link inside a link (invalid `<a><a>`).
       transform(child);
     }
     next.push(child);
