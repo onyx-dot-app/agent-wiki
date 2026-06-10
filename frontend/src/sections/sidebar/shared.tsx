@@ -7,7 +7,7 @@ export function sidebarLogo(folded: boolean | undefined) {
   return (
     <div className="flex items-center gap-2 px-1">
       {folded ? (
-        <SvgOnyxLogo size={24} />
+        <SvgOnyxLogo size={28} />
       ) : (
         <>
           <SvgOnyxLogoTyped size={28} />
