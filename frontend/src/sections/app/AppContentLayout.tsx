@@ -5,6 +5,7 @@ import { RootLayout } from "@onyx-ai/opal/layouts";
 import styles from "./AppContentLayout.module.css";
 import { StatusBanner } from "./StatusBanner";
 import { useAppLayout } from "./AppLayoutContext";
+import { WikiItemActionsProvider } from "@/components/wiki/WikiItemActions";
 
 export function AppContentLayout({ children }: { children: ReactNode }) {
   const {
@@ -14,7 +15,7 @@ export function AppContentLayout({ children }: { children: ReactNode }) {
     isActionSidebarOpen,
   } = useAppLayout();
   return (
-    <>
+    <WikiItemActionsProvider>
       {leftPanelContent && (
         <RootLayout.LeftPanel>{leftPanelContent}</RootLayout.LeftPanel>
       )}
@@ -32,6 +33,6 @@ export function AppContentLayout({ children }: { children: ReactNode }) {
           {actionSidebarContent}
         </RootLayout.RightPanel>
       )}
-    </>
+    </WikiItemActionsProvider>
   );
 }

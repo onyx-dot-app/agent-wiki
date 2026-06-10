@@ -43,11 +43,7 @@ export function WikiHome() {
   const { setLeftPanelContent, clearLeftPanelContent } = useAppLayout();
 
   useEffect(() => {
-    setLeftPanelContent(
-      <WikiItemActionsProvider>
-        <WikiTree />
-      </WikiItemActionsProvider>,
-    );
+    setLeftPanelContent(<WikiTree />);
     return () => clearLeftPanelContent();
   }, [setLeftPanelContent, clearLeftPanelContent]);
 
@@ -110,8 +106,7 @@ export function WikiHome() {
         </div>
       </div>
 
-      <WikiItemActionsProvider>
-        <div className={styles.column}>
+      <div className={styles.column}>
           {/* Hero */}
           <div className={styles.hero}>
             <span className={styles.heroMark}>
@@ -213,7 +208,6 @@ export function WikiHome() {
             </div>
           )}
         </div>
-      </WikiItemActionsProvider>
     </main>
   );
 }
