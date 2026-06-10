@@ -6,12 +6,11 @@ import { MessageCard } from "@onyx-ai/opal/components";
 import { markdown } from "@onyx-ai/opal/utils";
 import AppSidebar from "@/sections/sidebar/AppSidebar";
 import { WikiItemActionsProvider } from "@/providers/WikiItemActionsProvider";
-import { ActivitiesProvider } from "@/providers/ActivitiesProvider";
+import { LeftPanelProvider, useLeftPanel } from "@/providers/LeftPanelProvider";
 import { WikiTree } from "@/components/wiki/WikiTree";
 import { useAuth } from "@/lib/auth";
 import { useHealth } from "@/lib/health";
 import { useLLMStatus } from "@/lib/llm";
-import { useAppFocus } from "@/hooks/useAppFocus";
 
 const COLLAPSED_KEY = "agent-wiki:sidebar-collapsed";
 const BANNER_HEALTH_POLL_MS = 15000;
@@ -82,13 +81,13 @@ interface AppContentProps {
 }
 
 function AppContent({ children }: AppContentProps) {
-  const focus = useAppFocus();
-  const isWiki = focus.isWiki();
+  const { view, isOnWikiRoute } = useLeftPanel();
   return (
-    <WikiItemActionsProvider active={isWiki}>
-      {isWiki && (
+    <WikiItemActionsProvider active={isOnWikiRoute}>
+      {view !== null && (
         <RootLayout.LeftPanel>
-          <WikiTree />
+          {view === "wiki-tree" && <WikiTree />}
+          {view === "activities" && <ActivitiesPanel />}
         </RootLayout.LeftPanel>
       )}
       <RootLayout.App>
@@ -101,6 +100,10 @@ function AppContent({ children }: AppContentProps) {
       </RootLayout.App>
     </WikiItemActionsProvider>
   );
+}
+
+function ActivitiesPanel() {
+  return <div className="h-full p-4" />;
 }
 
 interface LayoutProps {
@@ -125,13 +128,13 @@ export default function Layout({ children }: LayoutProps) {
   }
 
   return (
-    <ActivitiesProvider>
+    <LeftPanelProvider>
       <RootLayout.Root>
         <RootLayout.Sidebar folded={folded} onFoldToggle={toggle}>
           <AppSidebar folded={folded} onFoldToggle={toggle} />
         </RootLayout.Sidebar>
         <AppContent>{children}</AppContent>
       </RootLayout.Root>
-    </ActivitiesProvider>
+    </LeftPanelProvider>
   );
 }
