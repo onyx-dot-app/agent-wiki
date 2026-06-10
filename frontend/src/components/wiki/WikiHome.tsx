@@ -31,7 +31,7 @@ import type { DocumentTemplateSummary } from "@/lib/templates";
 import { AI_DRAFT_KEY, generateDraft, type RecentPage } from "@/lib/wiki";
 import { useAppLayout } from "@/sections/app/AppLayoutContext";
 
-import { WikiItemActionsProvider, WikiItemMenu } from "./WikiItemActions";
+import { WikiItemMenu } from "./WikiItemActions";
 import { WikiTree } from "./WikiTree";
 import styles from "./WikiHome.module.css";
 
