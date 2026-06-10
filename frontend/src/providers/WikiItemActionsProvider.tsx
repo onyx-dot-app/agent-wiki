@@ -74,9 +74,17 @@ function collectFolders(entries: Entry[]): string[] {
  * that hosts a WikiItemMenu (the directory sidebar and the recent-pages grid)
  * in this so they share one set of overlays.
  */
-export function WikiItemActionsProvider({ children }: { children: ReactNode }) {
+interface WikiItemActionsProviderProps {
+  children: ReactNode;
+  active?: boolean;
+}
+
+export function WikiItemActionsProvider({
+  children,
+  active = true,
+}: WikiItemActionsProviderProps) {
   const { mutate } = useSWRConfig();
-  const { data } = useSWR<{ entries: Entry[] }>("/wiki");
+  const { data } = useSWR<{ entries: Entry[] }>(active ? "/wiki" : null);
   const entries = data?.entries ?? [];
 
   const [sharePath, setSharePath] = useState<string | null>(null);

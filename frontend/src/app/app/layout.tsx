@@ -83,8 +83,8 @@ interface AppContentProps {
 function AppContent({ children }: AppContentProps) {
   const pathname = usePathname();
   const isWiki = pathname.startsWith("/app/wiki");
-  const inner = (
-    <>
+  return (
+    <WikiItemActionsProvider active={isWiki}>
       {isWiki && (
         <RootLayout.LeftPanel>
           <WikiTree />
@@ -98,12 +98,7 @@ function AppContent({ children }: AppContentProps) {
           </div>
         </RootLayout.MainContent>
       </RootLayout.App>
-    </>
-  );
-  return isWiki ? (
-    <WikiItemActionsProvider>{inner}</WikiItemActionsProvider>
-  ) : (
-    inner
+    </WikiItemActionsProvider>
   );
 }
 
