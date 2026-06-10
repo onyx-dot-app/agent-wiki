@@ -57,11 +57,24 @@ export class AppFocus {
   }
 }
 
+function decodeWikiPath(raw: string): string {
+  return raw
+    .split("/")
+    .map((segment) => {
+      try {
+        return decodeURIComponent(segment);
+      } catch {
+        return segment;
+      }
+    })
+    .join("/");
+}
+
 export function useAppFocus(): AppFocus {
   const pathname = usePathname();
   return useMemo(() => {
     if (pathname.startsWith(WIKI_PREFIX))
-      return new AppFocus("wiki", pathname.slice(WIKI_PREFIX.length));
+      return new AppFocus("wiki", decodeWikiPath(pathname.slice(WIKI_PREFIX.length)));
     if (pathname === "/app/wiki") return new AppFocus("wiki", null);
     if (pathname.startsWith("/app/triggers")) return new AppFocus("triggers");
     if (pathname.startsWith("/app/agents-and-actions"))
