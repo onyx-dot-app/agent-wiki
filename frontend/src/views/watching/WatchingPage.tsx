@@ -124,7 +124,9 @@ export default function WatchingPage() {
         title="Watching"
         description="Watch wiki pages for specific changes, or check on recurring schedules."
         divider
-        rightChildren={
+      />
+      <SettingsLayouts.Body>
+        <div className="mb-4 flex justify-end">
           <Button
             icon={SvgPlus}
             onClick={() => {
@@ -134,9 +136,7 @@ export default function WatchingPage() {
           >
             New trigger
           </Button>
-        }
-      />
-      <SettingsLayouts.Body>
+        </div>
         {listError && (
           <div className="mb-3 rounded-(--border-radius-04) bg-(--status-error-01) p-[10px] text-[13px] text-(--status-text-error-05)">
             {listError}
