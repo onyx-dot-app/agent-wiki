@@ -32,7 +32,10 @@ const SPACE_LINK =
 const TRAILING_TITLE = /\s+(?:"([^"]*)"|'([^']*)')\s*$/;
 
 function encodeTarget(dest: string): string {
-  return dest.replace(/ /g, "%20");
+  // encodeURI handles spaces + non-ASCII + unsafe chars while preserving path
+  // structure and `#`/`?` (so heading-anchor / query links keep working); the
+  // trailing replace restores any already-valid %XX escape it double-encoded.
+  return encodeURI(dest).replace(/%25([0-9A-Fa-f]{2})/g, "%$1");
 }
 
 function relinkify(value: string): MdastNode[] | null {
