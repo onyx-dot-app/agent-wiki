@@ -90,7 +90,7 @@ function AppContent({ children }: AppContentProps) {
         <RootLayout.LeftPanel>
           {view === "wiki-tree" && <WikiTree />}
           {view === "activities" && (
-            <div className="p-1">
+            <div className="h-full p-1">
               <ActivitiesPanel />
             </div>
           )}
