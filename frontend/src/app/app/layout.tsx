@@ -10,11 +10,16 @@ import { StatusBanner } from "@/sections/app/StatusBanner";
 
 const COLLAPSED_KEY = "agent-wiki:sidebar-collapsed";
 
-function AppContent({ children }: { children: ReactNode }) {
+interface AppContentProps {
+  children: ReactNode;
+}
+
+function AppContent({ children }: AppContentProps) {
   const pathname = usePathname();
-  return (
-    <WikiItemActionsProvider>
-      {pathname.startsWith("/app/wiki") && (
+  const isWiki = pathname.startsWith("/app/wiki");
+  const inner = (
+    <>
+      {isWiki && (
         <RootLayout.LeftPanel>
           <WikiTree />
         </RootLayout.LeftPanel>
@@ -27,7 +32,12 @@ function AppContent({ children }: { children: ReactNode }) {
           </div>
         </RootLayout.MainContent>
       </RootLayout.App>
-    </WikiItemActionsProvider>
+    </>
+  );
+  return isWiki ? (
+    <WikiItemActionsProvider>{inner}</WikiItemActionsProvider>
+  ) : (
+    inner
   );
 }
 
