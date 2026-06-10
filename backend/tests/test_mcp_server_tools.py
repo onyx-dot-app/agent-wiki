@@ -120,6 +120,7 @@ def test_tools_list_uses_mcp_shape_and_allow_list(client):
         "apply_patch",
         "move_path",
         "create_directory",
+        "add_comment",
     }
     # Tools not on the allow-list must NOT be exposed.
     assert "run_bash" not in names
@@ -278,6 +279,32 @@ def test_call_with_missing_name_is_invalid_params(client):
 # --------------------------------------------------------------------------- #
 # Search                                                                      #
 # --------------------------------------------------------------------------- #
+
+
+def test_add_comment_via_mcp(client):
+    uid = seed_user(uid="u1", email="u1@x.com")
+    wiki_git.commit_file(
+        "guide.md", "# Guide\nThe pool size is 20.\nEnd.\n", "seed", author=None
+    )
+    headers = _handshake(client, _mint(uid))
+
+    rpc = _call_tool(
+        client,
+        headers,
+        "add_comment",
+        {"path": "guide.md", "quoted_text": "The pool size is 20.", "body": "confirm?"},
+    )
+    payload, is_error = _payload_from_call_response(rpc)
+    assert is_error is False
+    assert payload["comment_id"].startswith("cmt_")
+    assert payload["doc_path"] == "guide.md"
+
+    rows = wiki_comments.list_for_doc("guide.md")
+    assert len(rows) == 1
+    # Authored by the agent, attributed to the authenticated MCP user.
+    assert rows[0]["author_kind"] == "agent"
+    assert rows[0]["author_user_id"] == uid
+    assert rows[0]["quoted_text"] == "The pool size is 20."
 
 
 @needs_opensearch
