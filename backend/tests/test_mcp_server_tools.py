@@ -120,6 +120,7 @@ def test_tools_list_uses_mcp_shape_and_allow_list(client):
         "apply_patch",
         "move_path",
         "create_directory",
+        "add_comment",
     }
     # Tools not on the allow-list must NOT be exposed.
     assert "run_bash" not in names
@@ -233,6 +234,28 @@ def test_list_history_blocked_when_user_lacks_read(client):
     assert "forbidden" in payload["error"]
 
 
+def test_add_comment_blocked_when_user_lacks_read(client):
+    """A stranger can't comment on a page they can't read — `add_comment`
+    gates on `require_can("read", path)` before it ever anchors."""
+    owner = seed_user(uid="owner", email="owner@x.com")
+    stranger = seed_user(uid="stranger", email="stranger@x.com")
+
+    wiki_git.commit_file("private.md", "# secrets\nthe secret value\n", "seed", author=None)
+    wiki_acl.set_owner("private.md", owner)
+
+    headers = _handshake(client, _mint(stranger))
+    rpc = _call_tool(
+        client,
+        headers,
+        "add_comment",
+        {"path": "private.md", "quoted_text": "the secret value", "body": "x"},
+    )
+    payload, is_error = _payload_from_call_response(rpc)
+    assert is_error is True
+    assert "forbidden" in payload["error"]
+    assert wiki_comments.list_for_doc("private.md") == []  # nothing created
+
+
 # --------------------------------------------------------------------------- #
 # Disallowed / unknown tools                                                  #
 # --------------------------------------------------------------------------- #
@@ -273,6 +296,37 @@ def test_call_with_missing_name_is_invalid_params(client):
     body = res.json()
     # JSON-RPC "Invalid params" — protocol-level, not result-level.
     assert body["error"]["code"] == -32602
+
+
+# --------------------------------------------------------------------------- #
+# add_comment (write)                                                         #
+# --------------------------------------------------------------------------- #
+
+
+def test_add_comment_via_mcp(client):
+    uid = seed_user(uid="u1", email="u1@x.com")
+    wiki_git.commit_file(
+        "guide.md", "# Guide\nThe pool size is 20.\nEnd.\n", "seed", author=None
+    )
+    headers = _handshake(client, _mint(uid))
+
+    rpc = _call_tool(
+        client,
+        headers,
+        "add_comment",
+        {"path": "guide.md", "quoted_text": "The pool size is 20.", "body": "confirm?"},
+    )
+    payload, is_error = _payload_from_call_response(rpc)
+    assert is_error is False
+    assert payload["comment_id"].startswith("cmt_")
+    assert payload["doc_path"] == "guide.md"
+
+    rows = wiki_comments.list_for_doc("guide.md")
+    assert len(rows) == 1
+    # Authored by the agent, attributed to the authenticated MCP user.
+    assert rows[0]["author_kind"] == "agent"
+    assert rows[0]["author_user_id"] == uid
+    assert rows[0]["quoted_text"] == "The pool size is 20."
 
 
 # --------------------------------------------------------------------------- #

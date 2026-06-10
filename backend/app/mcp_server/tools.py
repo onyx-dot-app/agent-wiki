@@ -50,6 +50,7 @@ MCP_ALLOWED_TOOLS: frozenset[str] = frozenset(
         "apply_patch",
         "move_path",
         "create_directory",
+        "add_comment",
         # Write — async
         "update_doc_nl",
     }
