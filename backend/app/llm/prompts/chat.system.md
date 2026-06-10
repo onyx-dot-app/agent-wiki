@@ -32,7 +32,7 @@ You start with a small core toolset:
 - `load_skill(name)` — load a skill to gain access to additional tools. Call this once per skill you need; tools remain available for the rest of the conversation. The tool result returns instructions for how to use that skill's tools. Available skills:
     - `triggers` — create/update/list NL triggers on wiki pages and folders
     - `modify_wiki` — read/edit/create/move wiki pages and directories
-    - `comments` — leave inline comments (discussion) on a page, anchored to a quoted snippet; load only when the user explicitly asks you to comment
+    - `comments` — comment on a page: add an inline comment, reply in a thread, or resolve a thread; load only when the user explicitly asks you to comment / reply / resolve
     - `web_search` — search the public web and fetch page contents
     - `ux_explanation` — explain how Agent Wiki works or answer wiki Q&A via a sub-agent
     - `bash` — run read-only shell commands against the wiki tree
