@@ -31,7 +31,11 @@ function AppContent({ children }: { children: ReactNode }) {
   );
 }
 
-export default function Layout({ children }: { children: ReactNode }) {
+interface LayoutProps {
+  children: ReactNode;
+}
+
+export default function Layout({ children }: LayoutProps) {
   const [folded, setFolded] = useState<boolean>(() => {
     if (typeof window === "undefined") return false;
     const stored = window.localStorage.getItem(COLLAPSED_KEY);
