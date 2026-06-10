@@ -2,10 +2,15 @@
 
 import { Button, Divider } from "@onyx-ai/opal/components";
 import { SvgActivity, SvgX } from "@onyx-ai/opal/icons";
-import { ContentAction } from "@onyx-ai/opal/layouts";
+import { ContentAction, Section } from "@onyx-ai/opal/layouts";
 import { timeAgo } from "@onyx-ai/opal/time";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
-import { isNewActivity, toEventIso, useEvents, type AppEvent } from "@/lib/events";
+import {
+  isNewActivity,
+  toEventIso,
+  useEvents,
+  type AppEvent,
+} from "@/lib/events";
 import { formatScopePath } from "@/lib/format";
 import { useLeftPanel } from "@/providers/LeftPanelProvider";
 
@@ -32,25 +37,29 @@ function ActivityCard({ event }: ActivityCardProps) {
           <em className="text-xs text-(--text-02)">(no path)</em>
         )}
         {p.change_kind && (
-          <span className="shrink-0 rounded-(--border-radius-04) bg-(--background-tint-03) px-1.5 py-[2px] text-[10px] font-semibold uppercase tracking-[0.3px] text-(--text-05)">
+          <span className="shrink-0 rounded-(--border-radius-04) bg-(--background-tint-03) px-1.5 py-[2px] text-[10px] font-semibold tracking-[0.3px] text-(--text-05) uppercase">
             {p.change_kind}
           </span>
         )}
       </div>
       {p.reason && (
-        <p className="mb-1.5 line-clamp-2 text-xs text-(--text-04)">{p.reason}</p>
+        <p className="mb-1.5 line-clamp-2 text-xs text-(--text-04)">
+          {p.reason}
+        </p>
       )}
       <div className="flex items-center justify-between">
         <span className="text-[11px] text-(--text-02)">
           trigger {event.target ?? "?"}
         </span>
-        <span className="text-[11px] text-(--text-02)">{timeAgo(toEventIso(event.ts))}</span>
+        <span className="text-[11px] text-(--text-02)">
+          {timeAgo(toEventIso(event.ts))}
+        </span>
       </div>
     </div>
   );
 }
 
-export function ActivitiesPanel() {
+export default function ActivitiesPanel() {
   const { toggleActivities } = useLeftPanel();
   const { events, isLoading } = useEvents(
     { kind: "trigger.fire", limit: 100 },
@@ -61,31 +70,29 @@ export function ActivitiesPanel() {
   const olderEvents = events.filter((ev) => !isNewActivity(ev.ts));
 
   return (
-    <div className="flex h-full w-(--activities-view) flex-col rounded-(--border-radius-12) border border-(--border-01) bg-transparent">
-      <div className="border-b border-(--border-01)">
-        <ContentAction
-          variant="body"
-          sizePreset="main-ui"
-          icon={SvgActivity}
-          title="Activity History"
-          padding="sm"
-          rightChildren={
-            <Button
-              icon={SvgX}
-              prominence="tertiary"
-              size="sm"
-              tooltip="Close"
-              onClick={toggleActivities}
-            />
-          }
-        />
-      </div>
+    <div className="flex h-full w-(--activities-view) flex-col rounded-12 border border-border-01">
+      <ContentAction
+        variant="body"
+        sizePreset="main-ui"
+        icon={SvgActivity}
+        title="Activity History"
+        padding="sm"
+        rightChildren={
+          <Button
+            icon={SvgX}
+            prominence="tertiary"
+            size="sm"
+            tooltip="Close"
+            onClick={toggleActivities}
+          />
+        }
+      />
 
       <div className="flex-1 overflow-y-auto py-1">
         {isLoading && <LoadingSpinner center />}
 
         {!isLoading && events.length === 0 && (
-          <p className="px-3 pt-4 text-sm text-(--text-03)">No activity yet.</p>
+          <p className="px-3 pt-4 text-sm text-text-03">No activity yet.</p>
         )}
 
         {newEvents.length > 0 && (

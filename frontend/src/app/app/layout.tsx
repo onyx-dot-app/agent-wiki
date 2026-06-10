@@ -9,7 +9,7 @@ import { WikiItemActionsProvider } from "@/providers/WikiItemActionsProvider";
 import { LeftPanelProvider, useLeftPanel } from "@/providers/LeftPanelProvider";
 import { WikiTree } from "@/components/wiki/WikiTree";
 import { WikiHeader } from "@/components/wiki/WikiHeader";
-import { ActivitiesPanel } from "@/components/wiki/ActivitiesPanel";
+import ActivitiesPanel from "@/components/wiki/ActivitiesPanel";
 import { useAuth } from "@/lib/auth";
 import { useHealth } from "@/lib/health";
 import { useLLMStatus } from "@/lib/llm";
@@ -112,7 +112,6 @@ function AppContent({ children }: AppContentProps) {
     </WikiItemActionsProvider>
   );
 }
-
 
 interface LayoutProps {
   children: ReactNode;
