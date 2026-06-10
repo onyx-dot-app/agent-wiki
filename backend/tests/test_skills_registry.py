@@ -11,6 +11,7 @@ def test_expected_skills_present():
     assert set(skill_registry.SKILLS.keys()) == {
         "triggers",
         "modify_wiki",
+        "comments",
         "web_search",
         "ux_explanation",
         "bash",

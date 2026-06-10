@@ -1,0 +1,22 @@
+{
+  "name": "add_comment",
+  "description": "Leave an inline comment on a wiki page, anchored to an exact snippet you quote from the page. This is *discussion* (a thread humans will see) — it does NOT change the page; use the modify_wiki tools to edit content. ONLY call this when the user explicitly asks you to leave / post / add a comment — never proactively or as a side effect; if you think a comment would help, suggest it and let the user decide. Provide `path`, `quoted_text` (copy the exact text from the current page body to anchor to — it must appear verbatim and exactly once), and `body` (your comment). Returns the comment id and a link to the thread.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "path": {
+        "type": "string",
+        "description": "Wiki-relative path of the page, ending in `.md`."
+      },
+      "quoted_text": {
+        "type": "string",
+        "description": "The exact snippet from the current page body to anchor the comment to. Must appear verbatim and exactly once — quote a longer span if a short one isn't unique. Read the page first if unsure of the exact text."
+      },
+      "body": {
+        "type": "string",
+        "description": "The comment text."
+      }
+    },
+    "required": ["path", "quoted_text", "body"]
+  }
+}
