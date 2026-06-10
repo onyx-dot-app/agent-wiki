@@ -12,7 +12,7 @@ import {
   SidebarWrapper,
   useSidebarFolded,
 } from "@onyx-ai/opal/layouts";
-import { SvgOnyxLogoTyped } from "@onyx-ai/opal/logos";
+import { sidebarLogo } from "@/sections/sidebar/shared";
 import { usePathname } from "next/navigation";
 import { useRef } from "react";
 import useSWR from "swr";
@@ -76,16 +76,7 @@ export default function AppSidebar({ folded, onFoldToggle }: AppSidebarProps) {
     <SidebarWrapper
       folded={folded}
       onFoldClick={onFoldToggle}
-      logo={(f) => (
-        <div className="flex items-center gap-2">
-          <SvgOnyxLogoTyped size={28} />
-          {!f && (
-            <Text font="heading-h3" color="text-03">
-              Wiki
-            </Text>
-          )}
-        </div>
-      )}
+      logo={sidebarLogo}
     >
       <SidebarLayouts.Body scrollKey="app-sidebar">
         {/* Search */}
