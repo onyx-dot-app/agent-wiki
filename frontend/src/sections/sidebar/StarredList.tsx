@@ -23,6 +23,7 @@ import { Button, SidebarTab } from "@onyx-ai/opal/components";
 import { SvgDocFile, SvgStarOff } from "@onyx-ai/opal/icons";
 import { reorderStarred, unstarDoc } from "@/lib/starred";
 import { docLabel } from "@/sections/sidebar/docLabel";
+import { useAppFocus } from "@/hooks/useAppFocus";
 
 interface StarredRowProps {
   path: string;
@@ -78,17 +79,13 @@ function StarredRow({ path, selected, onNavigate }: StarredRowProps) {
 
 interface StarredListProps {
   paths: string[];
-  pathname: string | null;
   onNavigate: () => void;
 }
 
 /** The draggable "Starred" rows. Reordering is optimistic — the SWR
  * cache is updated immediately and rolled back if the PUT fails. */
-export default function StarredList({
-  paths,
-  pathname,
-  onNavigate,
-}: StarredListProps) {
+export default function StarredList({ paths, onNavigate }: StarredListProps) {
+  const focus = useAppFocus();
   // Require a little movement before a drag starts so plain clicks
   // still navigate to the doc.
   const sensors = useSensors(
@@ -117,7 +114,7 @@ export default function StarredList({
             <StarredRow
               key={path}
               path={path}
-              selected={pathname === `/app/wiki/${path}`}
+              selected={focus.matchesWikiPath(path)}
               onNavigate={onNavigate}
             />
           ))}

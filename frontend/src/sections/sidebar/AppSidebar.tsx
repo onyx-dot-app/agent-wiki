@@ -135,7 +135,6 @@ export default function AppSidebar({ folded, onFoldToggle }: AppSidebarProps) {
                 </div>
                 <StarredList
                   paths={starred}
-                  pathname={pathname}
                   onNavigate={() => {
                     if (isMobile) onFoldToggle();
                   }}
