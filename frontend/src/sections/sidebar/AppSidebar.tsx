@@ -2,6 +2,7 @@
 
 import { Button, SidebarTab, Text } from "@onyx-ai/opal/components";
 import {
+  SvgActivity,
   SvgDocFile,
   SvgSearch,
   SvgSettings,
@@ -198,6 +199,18 @@ export default function AppSidebar({ folded, onFoldToggle }: AppSidebarProps) {
       </SidebarLayouts.Body>
 
       <SidebarLayouts.Footer>
+        <SidebarTab
+          icon={SvgActivity}
+          folded={effectiveFolded}
+          tooltip={effectiveFolded ? "Activities" : undefined}
+          href="/app/activities"
+          selected={pathname?.startsWith("/app/activities") ?? false}
+          onClick={() => {
+            if (isMobile) onFoldToggle();
+          }}
+        >
+          Activities
+        </SidebarTab>
         {user?.is_admin && (
           <SidebarTab
             icon={SvgSettings}
