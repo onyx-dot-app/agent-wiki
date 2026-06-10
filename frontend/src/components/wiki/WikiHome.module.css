@@ -40,25 +40,8 @@
   color: var(--text-04);
 }
 
-.body {
-  display: flex;
-  align-items: flex-start;
-  /* Gap kept wider than the AI-input gutter icon's -28px hang so the centered
-     column can never sit close enough for that icon to overlap the sidebar. */
-  gap: 40px;
-  padding: 0 16px 64px;
-}
-
-/* Permanent directory sidebar — sticky; its list scrolls rather than growing. */
-.sidebar {
-  flex: 0 0 240px;
-  width: 240px;
-  position: sticky;
-  top: 8px;
-  align-self: flex-start;
-}
-
 .column {
+  padding: 0 16px 64px;
   flex: 1;
   max-width: 672px;
   margin: 0 auto;
