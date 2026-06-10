@@ -142,6 +142,16 @@ export default function WikiRoute() {
     if (isFile) void recordRecentDoc(slugPath);
   }, [slugPath, isFile]);
 
+  // Tab title tracks the open doc (or folder); falls back to the app name.
+  useEffect(() => {
+    const last = slugPath.split("/").pop() ?? "";
+    const label = isFile ? last.replace(/\.md$/i, "") : last;
+    document.title = label || "agent-wiki";
+    return () => {
+      document.title = "agent-wiki";
+    };
+  }, [slugPath, isFile]);
+
   if (loading || !user)
     return (
       <main className={isMobile ? "p-4" : "p-8"}>
