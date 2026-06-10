@@ -31,7 +31,6 @@ import UserMenu from "@/sections/sidebar/UserMenu";
 import { NAV_ENTRIES } from "@/lib/nav/registry";
 import { useIsMobile } from "@/lib/viewport";
 import { useAppFocus } from "@/hooks/useAppFocus";
-import { useActivities } from "@/providers/ActivitiesProvider";
 
 function useRecentPages() {
   const { data } = useSWR(
@@ -61,7 +60,6 @@ export default function AppSidebar({ folded, onFoldToggle }: AppSidebarProps) {
   const pathname = usePathname();
   const isMobile = useIsMobile();
   const focus = useAppFocus();
-  const { isOpen: activitiesOpen, toggle: toggleActivities } = useActivities();
   const starred = useStarredPages();
   const starredSet = new Set(starred);
   const recents = useRecentPages();
@@ -204,8 +202,6 @@ export default function AppSidebar({ folded, onFoldToggle }: AppSidebarProps) {
           icon={SvgActivity}
           folded={effectiveFolded}
           tooltip={effectiveFolded ? "Activities" : undefined}
-          selected={activitiesOpen}
-          onClick={toggleActivities}
         >
           Activities
         </SidebarTab>
