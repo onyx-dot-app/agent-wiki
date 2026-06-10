@@ -89,7 +89,11 @@ function AppContent({ children }: AppContentProps) {
       {view !== null && (
         <RootLayout.LeftPanel>
           {view === "wiki-tree" && <WikiTree />}
-          {view === "activities" && <ActivitiesPanel />}
+          {view === "activities" && (
+            <div className="p-1">
+              <ActivitiesPanel />
+            </div>
+          )}
         </RootLayout.LeftPanel>
       )}
       <RootLayout.App>
