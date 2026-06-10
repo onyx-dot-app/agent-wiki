@@ -5,10 +5,14 @@ import {
   SvgDocFile,
   SvgSearch,
   SvgSettings,
-  SvgSidebar,
   SvgStar,
 } from "@onyx-ai/opal/icons";
-import { useSidebarFolded } from "@onyx-ai/opal/layouts";
+import {
+  SidebarLayouts,
+  SidebarWrapper,
+  useSidebarFolded,
+} from "@onyx-ai/opal/layouts";
+import { sidebarLogo } from "@/sections/sidebar/shared";
 import { usePathname } from "next/navigation";
 import { useRef } from "react";
 import useSWR from "swr";
@@ -20,12 +24,11 @@ import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { RECENTS_KEY, type RecentDocsResponse } from "@/lib/recents";
 import { STARRED_KEY, starDoc, type StarredDocsResponse } from "@/lib/starred";
-import { docLabel } from "./docLabel";
-import { StarredList } from "./StarredList";
-import { UserMenu } from "./UserMenu";
+import { docLabel } from "@/sections/sidebar/docLabel";
+import { StarredList } from "@/sections/sidebar/StarredList";
+import UserMenu from "@/sections/sidebar/UserMenu";
 import { NAV_ENTRIES } from "@/lib/nav/registry";
 import { useIsMobile } from "@/lib/viewport";
-import { SvgOnyxLogoTyped } from "@onyx-ai/opal/logos";
 
 function useRecentPages() {
   const { data } = useSWR(
@@ -50,13 +53,14 @@ interface AppSidebarProps {
   onFoldToggle: () => void;
 }
 
-export function AppSidebar({ folded, onFoldToggle }: AppSidebarProps) {
+export default function AppSidebar({ folded, onFoldToggle }: AppSidebarProps) {
   const { user } = useAuth();
   const pathname = usePathname();
   const isMobile = useIsMobile();
   const starred = useStarredPages();
   const starredSet = new Set(starred);
-  const pages = useRecentPages().filter((p) => !starredSet.has(p));
+  const recents = useRecentPages();
+  const pages = recents.filter((p) => !starredSet.has(p));
   const searchRef = useRef<WikiSearchHandle>(null);
 
   // effectiveFolded is always false on mobile — content renders expanded,
@@ -69,54 +73,19 @@ export function AppSidebar({ folded, onFoldToggle }: AppSidebarProps) {
   }
 
   return (
-    <nav
-      className={[
-        "box-border flex h-full shrink-0 flex-col gap-4 py-2",
-        "overflow-hidden bg-background-tint-02",
-        "transition-[width] duration-200 ease-in-out",
-        effectiveFolded
-          ? "w-(--sidebar-width-folded)"
-          : "w-(--sidebar-width-expanded)",
-      ].join(" ")}
+    <SidebarWrapper
+      folded={folded}
+      onFoldClick={onFoldToggle}
+      logo={sidebarLogo}
     >
-      {/* Logo + toggle */}
-      <div className="flex shrink-0 flex-row items-start justify-between px-2 pt-3">
-        {effectiveFolded ? (
-          <div className="px-1">
-            <Button
-              icon={SvgSidebar}
-              prominence="tertiary"
-              size="md"
-              tooltip="Open Sidebar"
-              onClick={onFoldToggle}
-            />
-          </div>
-        ) : (
-          <>
-            <div className="flex h-7 items-center px-1">
-              <SvgOnyxLogoTyped size={28} />
-            </div>
-            <div className="px-1">
-              <Button
-                icon={SvgSidebar}
-                prominence="tertiary"
-                size="md"
-                tooltip="Close Sidebar"
-                onClick={onFoldToggle}
-              />
-            </div>
-          </>
-        )}
-      </div>
-
-      {/* Content area */}
-      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-x-hidden px-2">
+      <SidebarLayouts.Body scrollKey="app-sidebar">
         {/* Search */}
         {effectiveFolded ? (
           <Button
             icon={SvgSearch}
             prominence="tertiary"
             tooltip="Search"
+            tooltipSide="right"
             onClick={expandAndFocusSearch}
           />
         ) : (
@@ -179,6 +148,13 @@ export function AppSidebar({ folded, onFoldToggle }: AppSidebarProps) {
               </div>
             </div>
             <div className="flex flex-col gap-px">
+              {recents.length === 0 && (
+                <div className="px-2.5">
+                  <Text font="secondary-body" color="text-01" as="p">
+                    No recent pages. Create a page to get started.
+                  </Text>
+                </div>
+              )}
               {pages.map((path) => {
                 const href = `/app/wiki/${path}`;
                 const active = pathname === href;
@@ -201,6 +177,7 @@ export function AppSidebar({ folded, onFoldToggle }: AppSidebarProps) {
                             prominence="tertiary"
                             size="sm"
                             tooltip="Star"
+                            tooltipSide="right"
                             onClick={(e) => {
                               e.preventDefault();
                               e.stopPropagation();
@@ -218,10 +195,9 @@ export function AppSidebar({ folded, onFoldToggle }: AppSidebarProps) {
             </div>
           </div>
         )}
-      </div>
+      </SidebarLayouts.Body>
 
-      {/* Footer: Admin Panel + Account */}
-      <div className="flex shrink-0 flex-col gap-px px-2">
+      <SidebarLayouts.Footer>
         {user?.is_admin && (
           <SidebarTab
             icon={SvgSettings}
@@ -238,7 +214,7 @@ export function AppSidebar({ folded, onFoldToggle }: AppSidebarProps) {
             if (isMobile) onFoldToggle();
           }}
         />
-      </div>
-    </nav>
+      </SidebarLayouts.Footer>
+    </SidebarWrapper>
   );
 }

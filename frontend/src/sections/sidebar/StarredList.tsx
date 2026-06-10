@@ -21,9 +21,60 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { Button, SidebarTab } from "@onyx-ai/opal/components";
 import { SvgDocFile, SvgStarOff } from "@onyx-ai/opal/icons";
-
 import { reorderStarred, unstarDoc } from "@/lib/starred";
-import { docLabel } from "./docLabel";
+import { docLabel } from "@/sections/sidebar/docLabel";
+
+interface StarredRowProps {
+  path: string;
+  selected: boolean;
+  onNavigate: () => void;
+}
+
+function StarredRow({ path, selected, onNavigate }: StarredRowProps) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: path });
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
+      className={`group/starred relative ${isDragging ? "z-10 opacity-75" : ""}`}
+      {...attributes}
+      {...listeners}
+    >
+      <SidebarTab
+        href={`/app/wiki/${path}`}
+        selected={selected}
+        icon={SvgDocFile}
+        nested
+        onClick={onNavigate}
+        rightChildren={
+          <span className="opacity-0 group-hover/starred:opacity-100">
+            <Button
+              icon={SvgStarOff}
+              prominence="tertiary"
+              size="sm"
+              tooltip="Unstar"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                void unstarDoc(path);
+              }}
+            />
+          </span>
+        }
+      >
+        {docLabel(path)}
+      </SidebarTab>
+    </div>
+  );
+}
 
 interface StarredListProps {
   paths: string[];
@@ -69,59 +120,5 @@ export function StarredList({ paths, pathname, onNavigate }: StarredListProps) {
         </div>
       </SortableContext>
     </DndContext>
-  );
-}
-
-function StarredRow({
-  path,
-  selected,
-  onNavigate,
-}: {
-  path: string;
-  selected: boolean;
-  onNavigate: () => void;
-}) {
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    transform,
-    transition,
-    isDragging,
-  } = useSortable({ id: path });
-
-  return (
-    <div
-      ref={setNodeRef}
-      style={{ transform: CSS.Transform.toString(transform), transition }}
-      className={`group/starred relative ${isDragging ? "z-10 opacity-75" : ""}`}
-      {...attributes}
-      {...listeners}
-    >
-      <SidebarTab
-        href={`/app/wiki/${path}`}
-        selected={selected}
-        icon={SvgDocFile}
-        nested
-        onClick={onNavigate}
-        rightChildren={
-          <span className="opacity-0 group-hover/starred:opacity-100">
-            <Button
-              icon={SvgStarOff}
-              prominence="tertiary"
-              size="sm"
-              tooltip="Unstar"
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                void unstarDoc(path);
-              }}
-            />
-          </span>
-        }
-      >
-        {docLabel(path)}
-      </SidebarTab>
-    </div>
   );
 }

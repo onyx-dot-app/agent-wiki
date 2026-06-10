@@ -1,15 +1,15 @@
 import {
   SvgActions,
   SvgActivity,
-  SvgDocFile,
-  SvgDownloadCloud,
+  SvgBook,
+  SvgCpu,
+  SvgFile,
   SvgGlobe,
-  SvgKey,
-  SvgLinkedDots,
-  SvgOrganization,
+  SvgHistory,
+  SvgOnyxLogo,
+  SvgUser,
   SvgUsers,
   SvgWorkflow,
-  SvgBook,
 } from "@onyx-ai/opal/icons";
 import type { IconFunctionComponent } from "@onyx-ai/opal/types";
 
@@ -18,6 +18,11 @@ export interface NavEntry {
   label: string;
   icon: IconFunctionComponent;
   description?: string;
+}
+
+export interface NavGroup {
+  label: string | null;
+  entries: NavEntry[];
 }
 
 export const NAV_ENTRIES = [
@@ -46,13 +51,41 @@ export const NAV_ENTRIES = [
   },
 ] as const satisfies NavEntry[];
 
-export const ADMIN_NAV_ENTRIES = [
-  { href: "/admin/language-models", label: "Language Models", icon: SvgKey },
-  { href: "/admin/web", label: "Web Search", icon: SvgGlobe },
-  { href: "/admin/users", label: "Users", icon: SvgUsers },
-  { href: "/admin/groups", label: "Groups", icon: SvgOrganization },
-  { href: "/admin/health", label: "Health", icon: SvgActivity },
-  { href: "/admin/braintrust", label: "Braintrust", icon: SvgLinkedDots },
-  { href: "/admin/templates", label: "Templates", icon: SvgDocFile },
-  { href: "/admin/ingest", label: "Onyx Connection", icon: SvgDownloadCloud },
-] as const satisfies NavEntry[];
+export const ADMIN_NAV_GROUPS = [
+  {
+    label: null,
+    entries: [
+      {
+        href: "/admin/language-models",
+        label: "Language Models (LLM)",
+        icon: SvgCpu,
+      },
+      { href: "/admin/web", label: "Web Search", icon: SvgGlobe },
+    ],
+  },
+  {
+    label: "Documents",
+    entries: [
+      { href: "/admin/templates", label: "Wiki Templates", icon: SvgFile },
+      {
+        href: "/admin/ingest",
+        label: "Onyx Integration",
+        icon: SvgOnyxLogo,
+      },
+    ],
+  },
+  {
+    label: "Permissions",
+    entries: [
+      { href: "/admin/users", label: "Users", icon: SvgUser },
+      { href: "/admin/groups", label: "Groups", icon: SvgUsers },
+    ],
+  },
+  {
+    label: "Statistics",
+    entries: [
+      { href: "/admin/health", label: "Status", icon: SvgActivity },
+      { href: "/admin/braintrust", label: "Usage Tracking", icon: SvgHistory },
+    ],
+  },
+] satisfies NavGroup[];

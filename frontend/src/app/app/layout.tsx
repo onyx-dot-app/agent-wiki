@@ -2,7 +2,7 @@
 
 import { useState, type ReactNode } from "react";
 import { RootLayout } from "@onyx-ai/opal/layouts";
-import { AppSidebar } from "@/sections/sidebar/AppSidebar";
+import AppSidebar from "@/sections/sidebar/AppSidebar";
 import { AppLayoutProvider } from "@/sections/app/AppLayoutContext";
 import { AppContentLayout } from "@/sections/app/AppContentLayout";
 
