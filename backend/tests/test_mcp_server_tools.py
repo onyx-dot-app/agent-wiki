@@ -234,6 +234,28 @@ def test_list_history_blocked_when_user_lacks_read(client):
     assert "forbidden" in payload["error"]
 
 
+def test_add_comment_blocked_when_user_lacks_read(client):
+    """A stranger can't comment on a page they can't read — `add_comment`
+    gates on `require_can("read", path)` before it ever anchors."""
+    owner = seed_user(uid="owner", email="owner@x.com")
+    stranger = seed_user(uid="stranger", email="stranger@x.com")
+
+    wiki_git.commit_file("private.md", "# secrets\nthe secret value\n", "seed", author=None)
+    wiki_acl.set_owner("private.md", owner)
+
+    headers = _handshake(client, _mint(stranger))
+    rpc = _call_tool(
+        client,
+        headers,
+        "add_comment",
+        {"path": "private.md", "quoted_text": "the secret value", "body": "x"},
+    )
+    payload, is_error = _payload_from_call_response(rpc)
+    assert is_error is True
+    assert "forbidden" in payload["error"]
+    assert wiki_comments.list_for_doc("private.md") == []  # nothing created
+
+
 # --------------------------------------------------------------------------- #
 # Disallowed / unknown tools                                                  #
 # --------------------------------------------------------------------------- #
@@ -277,7 +299,7 @@ def test_call_with_missing_name_is_invalid_params(client):
 
 
 # --------------------------------------------------------------------------- #
-# Search                                                                      #
+# add_comment (write)                                                         #
 # --------------------------------------------------------------------------- #
 
 
@@ -305,6 +327,11 @@ def test_add_comment_via_mcp(client):
     assert rows[0]["author_kind"] == "agent"
     assert rows[0]["author_user_id"] == uid
     assert rows[0]["quoted_text"] == "The pool size is 20."
+
+
+# --------------------------------------------------------------------------- #
+# Search                                                                      #
+# --------------------------------------------------------------------------- #
 
 
 @needs_opensearch
