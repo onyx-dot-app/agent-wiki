@@ -1,7 +1,8 @@
 "use client";
 
 import { Button, Divider } from "@onyx-ai/opal/components";
-import { SvgX } from "@onyx-ai/opal/icons";
+import { SvgActivity, SvgX } from "@onyx-ai/opal/icons";
+import { ContentAction } from "@onyx-ai/opal/layouts";
 import { timeAgo } from "@onyx-ai/opal/time";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { isNewActivity, toEventIso, useEvents, type AppEvent } from "@/lib/events";
@@ -61,14 +62,21 @@ export function ActivitiesPanel() {
 
   return (
     <div className="flex h-full w-(--activities-view) flex-col rounded-(--border-radius-12) border border-(--border-01) bg-transparent">
-      <div className="flex items-center justify-between border-b border-(--border-01) px-3 py-2">
-        <span className="text-sm font-semibold text-(--text-05)">Activities</span>
-        <Button
-          icon={SvgX}
-          prominence="tertiary"
-          size="sm"
-          tooltip="Close"
-          onClick={toggleActivities}
+      <div className="border-b border-(--border-01)">
+        <ContentAction
+          variant="section"
+          icon={SvgActivity}
+          title="Activity History"
+          padding="sm"
+          rightChildren={
+            <Button
+              icon={SvgX}
+              prominence="tertiary"
+              size="sm"
+              tooltip="Close"
+              onClick={toggleActivities}
+            />
+          }
         />
       </div>
 
