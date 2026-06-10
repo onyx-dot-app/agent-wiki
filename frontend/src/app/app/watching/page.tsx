@@ -123,8 +123,9 @@ export default function TriggersPage() {
     <SettingsLayouts.Root width="lg">
       <SettingsLayouts.Header
         icon={SvgWorkflow}
-        title="Triggers"
-        description="Triggers watch a document (or folder) and notice when something specific changes, or check on a recurring schedule. When the trigger fires, the message you wrote shows up on the Events tab so you can review it."
+        title="Watching"
+        description="Watch wiki pages for specific changes, or check on recurring schedules."
+        divider
         rightChildren={
           <Button
             variant="action"
