@@ -1,55 +1,37 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
+import { usePathname } from "next/navigation";
 import { RootLayout } from "@onyx-ai/opal/layouts";
 import AppSidebar from "@/sections/sidebar/AppSidebar";
-import { AppLayoutProvider, useAppLayout } from "@/providers/AppLayoutProvider";
 import { WikiItemActionsProvider } from "@/providers/WikiItemActionsProvider";
+import { WikiTree } from "@/components/wiki/WikiTree";
 import { StatusBanner } from "@/sections/app/StatusBanner";
 
 const COLLAPSED_KEY = "agent-wiki:sidebar-collapsed";
 
-interface AppContentProps {
-  children: ReactNode;
-}
-
-function AppContent({ children }: AppContentProps) {
-  const {
-    headerContent,
-    leftPanelContent,
-    actionSidebarContent,
-    isActionSidebarOpen,
-  } = useAppLayout();
+function AppContent({ children }: { children: ReactNode }) {
+  const pathname = usePathname();
   return (
     <WikiItemActionsProvider>
-      {leftPanelContent && (
-        <RootLayout.LeftPanel>{leftPanelContent}</RootLayout.LeftPanel>
+      {pathname.startsWith("/app/wiki") && (
+        <RootLayout.LeftPanel>
+          <WikiTree />
+        </RootLayout.LeftPanel>
       )}
       <RootLayout.App>
         <StatusBanner />
-        <RootLayout.Header>
-          <div className="flex h-14 items-center px-4">{headerContent}</div>
-        </RootLayout.Header>
         <RootLayout.MainContent>
           <div className="mx-auto w-full max-w-(--breakpoint-content-md)">
             {children}
           </div>
         </RootLayout.MainContent>
       </RootLayout.App>
-      {isActionSidebarOpen && actionSidebarContent && (
-        <RootLayout.RightPanel className="w-60 border-l border-border-01">
-          {actionSidebarContent}
-        </RootLayout.RightPanel>
-      )}
     </WikiItemActionsProvider>
   );
 }
 
-interface LayoutProps {
-  children: ReactNode;
-}
-
-export default function Layout({ children }: LayoutProps) {
+export default function Layout({ children }: { children: ReactNode }) {
   const [folded, setFolded] = useState<boolean>(() => {
     if (typeof window === "undefined") return false;
     const stored = window.localStorage.getItem(COLLAPSED_KEY);
@@ -71,9 +53,7 @@ export default function Layout({ children }: LayoutProps) {
       <RootLayout.Sidebar folded={folded} onFoldToggle={toggle}>
         <AppSidebar folded={folded} onFoldToggle={toggle} />
       </RootLayout.Sidebar>
-      <AppLayoutProvider>
-        <AppContent>{children}</AppContent>
-      </AppLayoutProvider>
+      <AppContent>{children}</AppContent>
     </RootLayout.Root>
   );
 }
