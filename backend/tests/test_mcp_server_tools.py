@@ -19,6 +19,7 @@ from app.mcp_server import session as mcp_session
 from app.mcp_server import tools as mcp_tools
 from app.wiki import acl as wiki_acl
 from tests.conftest import needs_opensearch
+from app.wiki import comments as wiki_comments
 from app.wiki import git as wiki_git
 
 from tests._seed import seed_user
@@ -282,11 +283,10 @@ def test_call_with_missing_name_is_invalid_params(client):
 @needs_opensearch
 def test_search_comments_returns_results_via_mcp(client):
     uid = seed_user(uid="u1", email="u1@x.com")
-    from app.wiki import comments
 
     # A comment indexes inline on create (no queue), so it's searchable at once.
     wiki_git.commit_file("guide.md", "# Guide\nsome text here\n", "seed", author=None)
-    comments.create_thread(
+    wiki_comments.create_thread(
         doc_path="guide.md",
         body="we chose distributed tracing for the rollout",
         author_user_id=uid,
