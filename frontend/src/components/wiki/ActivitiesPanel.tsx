@@ -60,7 +60,7 @@ export function ActivitiesPanel() {
   const olderEvents = events.filter((ev) => !isNewActivity(ev.ts));
 
   return (
-    <div className="flex h-full w-full max-w-(--activities-view) flex-col rounded-(--border-radius-12) border border-(--border-01) bg-transparent">
+    <div className="flex h-full w-(--activities-view) flex-col rounded-(--border-radius-12) border border-(--border-01) bg-transparent">
       <div className="flex items-center justify-between border-b border-(--border-01) px-3 py-2">
         <span className="text-sm font-semibold text-(--text-05)">Activities</span>
         <Button
