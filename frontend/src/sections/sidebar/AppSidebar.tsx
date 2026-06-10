@@ -5,10 +5,14 @@ import {
   SvgDocFile,
   SvgSearch,
   SvgSettings,
-  SvgSidebar,
   SvgStar,
 } from "@onyx-ai/opal/icons";
-import { useSidebarFolded } from "@onyx-ai/opal/layouts";
+import {
+  SidebarLayouts,
+  SidebarWrapper,
+  useSidebarFolded,
+} from "@onyx-ai/opal/layouts";
+import { SvgOnyxLogoTyped } from "@onyx-ai/opal/logos";
 import { usePathname } from "next/navigation";
 import { useRef } from "react";
 import useSWR from "swr";
@@ -23,12 +27,6 @@ import { STARRED_KEY, starDoc, type StarredDocsResponse } from "@/lib/starred";
 import { docLabel } from "@/sections/sidebar/docLabel";
 import { StarredList } from "@/sections/sidebar/StarredList";
 import UserMenu from "@/sections/sidebar/UserMenu";
-import {
-  SidebarBody,
-  SidebarFooter,
-  SidebarHeader,
-  SidebarNavList,
-} from "@/sections/sidebar/SidebarHeader";
 import { NAV_ENTRIES } from "@/lib/nav/registry";
 import { useIsMobile } from "@/lib/viewport";
 
@@ -75,48 +73,21 @@ export default function AppSidebar({ folded, onFoldToggle }: AppSidebarProps) {
   }
 
   return (
-    <nav
-      className={[
-        "box-border flex h-full shrink-0 flex-col gap-4 py-2",
-        "overflow-hidden bg-background-tint-02",
-        "transition-[width] duration-200 ease-in-out",
-        effectiveFolded
-          ? "w-(--sidebar-width-folded)"
-          : "w-(--sidebar-width-expanded)",
-      ].join(" ")}
-    >
-      {/* Logo + toggle */}
-      {effectiveFolded ? (
-        <div className="flex shrink-0 flex-row items-start px-2 pt-3">
-          <div className="px-1">
-            <Button
-              icon={SvgSidebar}
-              prominence="tertiary"
-              size="md"
-              tooltip="Open Sidebar"
-              tooltipSide="right"
-              onClick={onFoldToggle}
-            />
-          </div>
+    <SidebarWrapper
+      folded={folded}
+      onFoldClick={onFoldToggle}
+      logo={(f) => (
+        <div className="flex items-center gap-2">
+          <SvgOnyxLogoTyped size={28} />
+          {!f && (
+            <Text font="heading-h3" color="text-03">
+              Wiki
+            </Text>
+          )}
         </div>
-      ) : (
-        <SidebarHeader
-          actions={
-            <div className="px-1">
-              <Button
-                icon={SvgSidebar}
-                prominence="tertiary"
-                size="md"
-                tooltip="Close Sidebar"
-                tooltipSide="right"
-                onClick={onFoldToggle}
-              />
-            </div>
-          }
-        />
       )}
-
-      <SidebarBody>
+    >
+      <SidebarLayouts.Body scrollKey="app-sidebar">
         {/* Search */}
         {effectiveFolded ? (
           <Button
@@ -136,7 +107,7 @@ export default function AppSidebar({ folded, onFoldToggle }: AppSidebarProps) {
         )}
 
         {/* Top nav */}
-        <SidebarNavList>
+        <div className="flex flex-col gap-px">
           {NAV_ENTRIES.map((item) => {
             const active = pathname?.startsWith(item.href) ?? false;
             return (
@@ -155,7 +126,7 @@ export default function AppSidebar({ folded, onFoldToggle }: AppSidebarProps) {
               </SidebarTab>
             );
           })}
-        </SidebarNavList>
+        </div>
 
         {/* Starred + Recents — scrollable, hidden when folded */}
         {!effectiveFolded && (
@@ -233,9 +204,9 @@ export default function AppSidebar({ folded, onFoldToggle }: AppSidebarProps) {
             </div>
           </div>
         )}
-      </SidebarBody>
+      </SidebarLayouts.Body>
 
-      <SidebarFooter>
+      <SidebarLayouts.Footer>
         {user?.is_admin && (
           <SidebarTab
             icon={SvgSettings}
@@ -252,7 +223,7 @@ export default function AppSidebar({ folded, onFoldToggle }: AppSidebarProps) {
             if (isMobile) onFoldToggle();
           }}
         />
-      </SidebarFooter>
-    </nav>
+      </SidebarLayouts.Footer>
+    </SidebarWrapper>
   );
 }
