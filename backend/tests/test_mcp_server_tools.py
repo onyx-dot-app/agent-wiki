@@ -19,6 +19,7 @@ from app.mcp_server import session as mcp_session
 from app.mcp_server import tools as mcp_tools
 from app.wiki import acl as wiki_acl
 from tests.conftest import needs_opensearch
+from app.wiki import comments as wiki_comments
 from app.wiki import git as wiki_git
 
 from tests._seed import seed_user
@@ -110,6 +111,7 @@ def test_tools_list_uses_mcp_shape_and_allow_list(client):
     assert names >= {
         "read_doc",
         "search_wiki",
+        "search_comments",
         "list_history",
         "ask_nl_question",
         "edit_doc",
@@ -276,6 +278,30 @@ def test_call_with_missing_name_is_invalid_params(client):
 # --------------------------------------------------------------------------- #
 # Search                                                                      #
 # --------------------------------------------------------------------------- #
+
+
+@needs_opensearch
+def test_search_comments_returns_results_via_mcp(client):
+    uid = seed_user(uid="u1", email="u1@x.com")
+
+    # A comment indexes inline on create (no queue), so it's searchable at once.
+    wiki_git.commit_file("guide.md", "# Guide\nsome text here\n", "seed", author=None)
+    wiki_comments.create_thread(
+        doc_path="guide.md",
+        body="we chose distributed tracing for the rollout",
+        author_user_id=uid,
+        anchor_sha="seed",
+        start_offset=0,
+        end_offset=4,
+        quoted_text="some",
+    )
+
+    headers = _handshake(client, _mint(uid))
+    rpc = _call_tool(client, headers, "search_comments", {"query": "distributed tracing"})
+    payload, is_error = _payload_from_call_response(rpc)
+    assert is_error is False
+    paths = [r["doc_path"] for r in payload["results"]]
+    assert "guide.md" in paths
 
 
 @needs_opensearch
