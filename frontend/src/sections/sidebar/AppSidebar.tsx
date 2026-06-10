@@ -2,6 +2,7 @@
 
 import { Button, SidebarTab, Text } from "@onyx-ai/opal/components";
 import {
+  SvgActivity,
   SvgDocFile,
   SvgSearch,
   SvgSettings,
@@ -29,6 +30,7 @@ import StarredList from "@/sections/sidebar/StarredList";
 import UserMenu from "@/sections/sidebar/UserMenu";
 import { NAV_ENTRIES } from "@/lib/nav/registry";
 import { useIsMobile } from "@/lib/viewport";
+import { useAppFocus } from "@/hooks/useAppFocus";
 
 function useRecentPages() {
   const { data } = useSWR(
@@ -57,6 +59,7 @@ export default function AppSidebar({ folded, onFoldToggle }: AppSidebarProps) {
   const { user } = useAuth();
   const pathname = usePathname();
   const isMobile = useIsMobile();
+  const focus = useAppFocus();
   const starred = useStarredPages();
   const starredSet = new Set(starred);
   const recents = useRecentPages();
@@ -99,24 +102,21 @@ export default function AppSidebar({ folded, onFoldToggle }: AppSidebarProps) {
 
         {/* Top nav */}
         <div className="flex flex-col gap-px">
-          {NAV_ENTRIES.map((item) => {
-            const active = pathname?.startsWith(item.href) ?? false;
-            return (
-              <SidebarTab
-                key={item.href}
-                href={item.href}
-                selected={active}
-                folded={effectiveFolded}
-                icon={item.icon}
-                tooltip={effectiveFolded ? item.label : undefined}
-                onClick={() => {
-                  if (isMobile) onFoldToggle();
-                }}
-              >
-                {item.label}
-              </SidebarTab>
-            );
-          })}
+          {NAV_ENTRIES.map((item) => (
+            <SidebarTab
+              key={item.href}
+              href={item.href}
+              selected={focus.matchesHref(item.href)}
+              folded={effectiveFolded}
+              icon={item.icon}
+              tooltip={effectiveFolded ? item.label : undefined}
+              onClick={() => {
+                if (isMobile) onFoldToggle();
+              }}
+            >
+              {item.label}
+            </SidebarTab>
+          ))}
         </div>
 
         {/* Starred + Recents — scrollable, hidden when folded */}
@@ -157,7 +157,7 @@ export default function AppSidebar({ folded, onFoldToggle }: AppSidebarProps) {
               )}
               {pages.map((path) => {
                 const href = `/app/wiki/${path}`;
-                const active = pathname === href;
+                const active = focus.matchesWikiPath(path);
                 return (
                   <div key={path} className="group/recent">
                     <SidebarTab
@@ -198,6 +198,13 @@ export default function AppSidebar({ folded, onFoldToggle }: AppSidebarProps) {
       </SidebarLayouts.Body>
 
       <SidebarLayouts.Footer>
+        <SidebarTab
+          icon={SvgActivity}
+          folded={effectiveFolded}
+          tooltip={effectiveFolded ? "Activities" : undefined}
+        >
+          Activities
+        </SidebarTab>
         {user?.is_admin && (
           <SidebarTab
             icon={SvgSettings}

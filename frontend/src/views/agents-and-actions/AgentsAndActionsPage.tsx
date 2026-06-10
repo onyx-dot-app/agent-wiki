@@ -6,9 +6,10 @@ import useSWR from "swr";
 import { SetupWizard } from "@/components/agents/SetupWizard";
 import { ToolCard } from "@/components/agents/ToolCard";
 import { Button } from "@onyx-ai/opal/components";
+import { SvgActions } from "@onyx-ai/opal/icons";
+import { SettingsLayouts } from "@onyx-ai/opal/layouts";
 import { useConfirm } from "@/components/common/ConfirmDialog";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
-import { PageHeader } from "@/components/common/PageHeader";
 import { ApiError } from "@/lib/api";
 import {
   createToken,
@@ -21,37 +22,29 @@ import {
 import { apiFetch } from "@/lib/api";
 import { useRequireAuth } from "@/lib/auth";
 import { type ProbeResult } from "@/lib/launchers";
-import { useIsMobile } from "@/lib/viewport";
 
-export default function AgentsPage() {
+export default function AgentsAndActionsPage() {
   const { user, loading } = useRequireAuth();
-  const isMobile = useIsMobile();
 
-  if (loading || !user)
-    return (
-      <main className={isMobile ? "p-4" : "p-8"}>
-        <LoadingSpinner center />
-      </main>
-    );
+  if (loading || !user) return <LoadingSpinner center />;
 
   return (
-    <main className={`max-w-[880px] ${isMobile ? "px-3 py-4" : "px-8 py-6"}`}>
-      <PageHeader
-        title="Agents"
-        description="Give your agents the ability to read and update this wiki. Generate a personal API key below, then drop it into your coding agent's MCP configuration. Each key's name becomes that agent's identity — it shows up next to its activity on wiki pages and in commit history."
+    <SettingsLayouts.Root width="lg">
+      <SettingsLayouts.Header
+        icon={SvgActions}
+        title="Agents & Actions"
+        description="Connect agents to read and update your wiki."
+        divider
       />
-
-      <EndpointBlock />
-      <TokenManager />
-      <ClientConfigHelp />
-      <CodingToolsSection />
-    </main>
+      <SettingsLayouts.Body>
+        <EndpointBlock />
+        <TokenManager />
+        <ClientConfigHelp />
+        <CodingToolsSection />
+      </SettingsLayouts.Body>
+    </SettingsLayouts.Root>
   );
 }
-
-// --------------------------------------------------------------------------- //
-// Endpoint                                                                    //
-// --------------------------------------------------------------------------- //
 
 function EndpointBlock() {
   const [endpoint, setEndpoint] = useState("");
@@ -84,10 +77,6 @@ function EndpointBlock() {
   );
 }
 
-// --------------------------------------------------------------------------- //
-// Token list + create                                                         //
-// --------------------------------------------------------------------------- //
-
 function TokenManager() {
   const { tokens, error, isLoading, refresh } = useTokens();
   const [showCreate, setShowCreate] = useState(false);
@@ -98,7 +87,6 @@ function TokenManager() {
       <div className="mb-3 flex items-center justify-between">
         <h2 className="m-0 text-base">API keys</h2>
         <Button
-          variant="action"
           onClick={() => setShowCreate(true)}
           disabled={showCreate || reveal !== null}
         >
@@ -144,13 +132,12 @@ function TokenManager() {
   );
 }
 
-function TokenRow({
-  token,
-  onRevoked,
-}: {
+interface TokenRowProps {
   token: TokenSummary;
   onRevoked: () => void;
-}) {
+}
+
+function TokenRow({ token, onRevoked }: TokenRowProps) {
   const [busy, setBusy] = useState(false);
   const confirmDialog = useConfirm();
 
@@ -161,9 +148,8 @@ function TokenRow({
         body: "Any agent using this key will stop working.",
         confirmLabel: "Revoke",
       }))
-    ) {
+    )
       return;
-    }
     setBusy(true);
     try {
       await revokeToken(token.id);
@@ -193,13 +179,12 @@ function TokenRow({
   );
 }
 
-function CreateForm({
-  onCancel,
-  onCreated,
-}: {
+interface CreateFormProps {
   onCancel: () => void;
   onCreated: (t: CreatedToken) => void;
-}) {
+}
+
+function CreateForm({ onCancel, onCreated }: CreateFormProps) {
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -245,7 +230,7 @@ function CreateForm({
         </div>
       )}
       <div className="mt-3 flex gap-2">
-        <Button type="submit" variant="action" disabled={busy || !name.trim()}>
+        <Button type="submit" disabled={busy || !name.trim()}>
           {busy ? "Creating…" : "Create"}
         </Button>
         <Button type="button" onClick={onCancel} disabled={busy}>
@@ -256,13 +241,12 @@ function CreateForm({
   );
 }
 
-function RevealOnce({
-  token,
-  onClose,
-}: {
+interface RevealOnceProps {
   token: CreatedToken;
   onClose: () => void;
-}) {
+}
+
+function RevealOnce({ token, onClose }: RevealOnceProps) {
   return (
     <div className="mb-3 rounded-(--border-radius-04) border border-(--status-warning-02) bg-(--status-warning-01) p-[14px]">
       <div className="text-sm font-semibold text-(--status-text-warning-05)">
@@ -283,10 +267,6 @@ function RevealOnce({
     </div>
   );
 }
-
-// --------------------------------------------------------------------------- //
-// Client-config help                                                          //
-// --------------------------------------------------------------------------- //
 
 function ClientConfigHelp() {
   const [open, setOpen] = useState(false);
@@ -336,10 +316,6 @@ function ClientConfigHelp() {
   );
 }
 
-// --------------------------------------------------------------------------- //
-// Reusable bits                                                               //
-// --------------------------------------------------------------------------- //
-
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
 
@@ -350,8 +326,8 @@ function CopyButton({ text }: { text: string }) {
       setCopied(true);
       setTimeout(() => setCopied(false), 1200);
     } catch {
-      // Some browsers block clipboard outside HTTPS — show feedback
-      // anyway, the user can fall back to manual select-copy.
+      // Some browsers block the Clipboard API outside HTTPS — show feedback
+      // anyway so the user knows to copy manually.
       setCopied(true);
       setTimeout(() => setCopied(false), 1200);
     }
@@ -364,16 +340,7 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
-// --------------------------------------------------------------------------- //
-// Coding tools section                          //
-// --------------------------------------------------------------------------- //
-
 function CodingToolsSection() {
-  // SWR-driven install state — HTTP only, no iframe. Backend records
-  // helper presence via agent_session.machine_id; FE just polls the
-  // record. iframe probe stays in InstallHelperPane behind the
-  // "I've installed it" button for the first-launch case where the
-  // user has installed but never run an agent yet.
   const { data: helperInstalled } = useSWR<{
     installed: boolean;
     machine_id: string | null;
@@ -394,13 +361,9 @@ function CodingToolsSection() {
   useEffect(() => {
     if (!wizardOpen) return;
     const node = dialogRef.current;
-    if (node) {
-      node.focus();
-    }
+    if (node) node.focus();
     function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        setWizardOpen(false);
-      }
+      if (event.key === "Escape") setWizardOpen(false);
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
@@ -410,9 +373,7 @@ function CodingToolsSection() {
     <section className="mb-4 rounded-(--border-radius-08) border border-(--border-01) bg-(--background-tint-00) p-4">
       <div className="mb-1 flex items-center justify-between">
         <h2 className="m-0 text-base">Coding tools</h2>
-        <Button variant="action" onClick={() => setWizardOpen(true)}>
-          Set up tools
-        </Button>
+        <Button onClick={() => setWizardOpen(true)}>Set up tools</Button>
       </div>
 
       <p className="m-0 mb-3 text-[13px] text-(--text-03)">
@@ -420,7 +381,6 @@ function CodingToolsSection() {
         once, then start a session from any page with Run Agent.
       </p>
 
-      {/* Surface helper-install status. */}
       <div className="mb-3 text-[13px] text-(--text-03)">
         Launcher:{" "}
         {probe === null ? (
