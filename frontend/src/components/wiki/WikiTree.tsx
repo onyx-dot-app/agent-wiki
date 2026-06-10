@@ -21,8 +21,8 @@ import {
 
 import { apiFetch } from "@/lib/api";
 import { useActiveFolder } from "@/providers/WikiItemActionsProvider";
-import WikiItemMenu from "./WikiItemActions";
-import styles from "./WikiTree.module.css";
+import WikiItemMenu from "@/components/wiki/WikiItemActions";
+import styles from "@/components/wiki/WikiTree.module.css";
 
 interface Entry {
   path: string;
