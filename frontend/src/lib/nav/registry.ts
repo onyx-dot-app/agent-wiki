@@ -2,6 +2,7 @@ import {
   SvgActions,
   SvgActivity,
   SvgBook,
+  SvgBubbleText,
   SvgCpu,
   SvgFile,
   SvgGlobe,
@@ -43,6 +44,11 @@ export const NAV_ENTRIES = [
     label: "Agents & Actions",
     icon: SvgActions,
     description: "Connect agents to read and update your wiki.",
+  },
+  {
+    href: "/app/chats",
+    label: "Chats",
+    icon: SvgBubbleText,
   },
 ] as const satisfies NavEntry[];
 
