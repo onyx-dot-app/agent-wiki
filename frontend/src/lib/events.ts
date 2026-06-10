@@ -16,10 +16,13 @@ function eventsPath(opts: { kind?: string; limit?: number }): string {
   return `/events${qs.toString() ? `?${qs}` : ""}`;
 }
 
-export function useEvents(opts: { kind?: string; limit?: number } = {}) {
+export function useEvents(
+  opts: { kind?: string; limit?: number } = {},
+  swrConfig?: { refreshInterval?: number },
+) {
   const { data, error, isLoading, isValidating, mutate } = useSWR<{
     events: AppEvent[];
-  }>(eventsPath(opts));
+  }>(eventsPath(opts), swrConfig);
   return {
     events: data?.events ?? [],
     error: error as Error | undefined,

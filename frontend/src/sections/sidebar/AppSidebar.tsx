@@ -2,8 +2,8 @@
 
 import { Button, SidebarTab, Text } from "@onyx-ai/opal/components";
 import {
-  SvgActivity,
   SvgDocFile,
+  SvgNotificationBubble,
   SvgSearch,
   SvgSettings,
   SvgStar,
@@ -200,7 +200,7 @@ export default function AppSidebar({ folded, onFoldToggle }: AppSidebarProps) {
 
       <SidebarLayouts.Footer>
         <SidebarTab
-          icon={SvgActivity}
+          icon={SvgNotificationBubble}
           folded={effectiveFolded}
           tooltip={effectiveFolded ? "Activities" : undefined}
           selected={isActivitiesOpen}
