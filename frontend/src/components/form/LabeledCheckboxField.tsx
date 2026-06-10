@@ -46,18 +46,19 @@ export const LabeledCheckboxField: React.FC<LabeledCheckboxFieldProps> = ({
 
   const checkboxContent = (
     <div className="flex w-fit items-start space-x-2">
-      <Checkbox
-        id={name}
-        aria-labelledby={labelId}
-        checked={field.value}
-        onCheckedChange={(checked) => {
-          helpers.setValue(Boolean(checked));
-          onChange?.(Boolean(checked));
-        }}
-        className={cn(sizeClasses[size])}
-        disabled={disabled}
-        {...props}
-      />
+      <div className={cn(sizeClasses[size])}>
+        <Checkbox
+          id={name}
+          aria-labelledby={labelId}
+          checked={field.value}
+          onCheckedChange={(checked) => {
+            helpers.setValue(Boolean(checked));
+            onChange?.(Boolean(checked));
+          }}
+          disabled={disabled}
+          {...props}
+        />
+      </div>
       <div className="flex flex-col">
         <label
           id={labelId}

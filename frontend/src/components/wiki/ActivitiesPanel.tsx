@@ -1,8 +1,10 @@
 "use client";
 
-import { Button, Divider } from "@onyx-ai/opal/components";
+import { useState } from "react";
+import { Button, Divider, InputTypeIn, Tag } from "@onyx-ai/opal/components";
+import { SvgEmpty } from "@onyx-ai/opal/illustrations";
 import { SvgActivity, SvgX } from "@onyx-ai/opal/icons";
-import { ContentAction, Section } from "@onyx-ai/opal/layouts";
+import { IllustrationContent, Section } from "@onyx-ai/opal/layouts";
 import { timeAgo } from "@onyx-ai/opal/time";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import {
@@ -37,15 +39,13 @@ function ActivityCard({ event }: ActivityCardProps) {
           <em className="text-xs text-(--text-02)">(no path)</em>
         )}
         {p.change_kind && (
-          <span className="shrink-0 rounded-(--border-radius-04) bg-(--background-tint-03) px-1.5 py-[2px] text-[10px] font-semibold tracking-[0.3px] text-(--text-05) uppercase">
+          <span className="shrink-0 rounded-(--border-radius-04) bg-(--background-tint-03) px-1.5 py-[2px] text-[10px] font-semibold uppercase tracking-[0.3px] text-(--text-05)">
             {p.change_kind}
           </span>
         )}
       </div>
       {p.reason && (
-        <p className="mb-1.5 line-clamp-2 text-xs text-(--text-04)">
-          {p.reason}
-        </p>
+        <p className="mb-1.5 line-clamp-2 text-xs text-(--text-04)">{p.reason}</p>
       )}
       <div className="flex items-center justify-between">
         <span className="text-[11px] text-(--text-02)">
@@ -61,38 +61,87 @@ function ActivityCard({ event }: ActivityCardProps) {
 
 export default function ActivitiesPanel() {
   const { toggleActivities } = useLeftPanel();
+  const [query, setQuery] = useState("");
   const { events, isLoading } = useEvents(
     { kind: "trigger.fire", limit: 100 },
     { refreshInterval: 30_000 },
   );
 
-  const newEvents = events.filter((ev) => isNewActivity(ev.ts));
-  const olderEvents = events.filter((ev) => !isNewActivity(ev.ts));
+  const unreadCount = events.filter((ev) => isNewActivity(ev.ts)).length;
+
+  const filtered = query
+    ? events.filter((ev) => {
+        const p = ev.payload as TriggerFirePayload;
+        const haystack = [p.doc_path, p.change_kind, p.reason, ev.target]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+        return haystack.includes(query.toLowerCase());
+      })
+    : events;
+
+  const newEvents = filtered.filter((ev) => isNewActivity(ev.ts));
+  const olderEvents = filtered.filter((ev) => !isNewActivity(ev.ts));
 
   return (
     <div className="flex h-full w-(--activities-view) flex-col rounded-12 border border-border-01">
-      <ContentAction
-        variant="body"
-        sizePreset="main-ui"
-        icon={SvgActivity}
-        title="Activity History"
-        padding="sm"
-        rightChildren={
+      {/* Header */}
+      <Section
+        flexDirection="row"
+        alignItems="center"
+        justifyContent="between"
+        padding={0.5}
+      >
+        <Section flexDirection="row" alignItems="center" gap={0.5}>
+          <SvgActivity size={16} />
+          <span className="text-sm font-semibold text-(--text-05)">
+            Activity History
+          </span>
+        </Section>
+        <Section flexDirection="row" alignItems="center" gap={0.5}>
+          {unreadCount > 0 && (
+            <Tag title={`${unreadCount} new`} color="blue" />
+          )}
           <Button
             icon={SvgX}
             prominence="tertiary"
-            size="sm"
+            size="lg"
             tooltip="Close"
             onClick={toggleActivities}
           />
-        }
-      />
+        </Section>
+      </Section>
 
+      {/* Search — hidden when there are no events at all */}
+      {!isLoading && events.length > 0 && (
+        <div className="px-2 pb-2">
+          <InputTypeIn
+            searchIcon
+            placeholder="Search activity history..."
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            clearButton
+          />
+        </div>
+      )}
+
+      {/* Body */}
       <div className="flex-1 overflow-y-auto py-1">
         {isLoading && <LoadingSpinner center />}
 
         {!isLoading && events.length === 0 && (
-          <p className="px-3 pt-4 text-sm text-text-03">No activity yet.</p>
+          <div className="flex h-full items-center justify-center">
+            <IllustrationContent
+              illustration={SvgEmpty}
+              title="No activity yet."
+            />
+          </div>
+        )}
+
+        {!isLoading && events.length > 0 && filtered.length === 0 && (
+          <p className="px-3 pt-4 text-sm text-(--text-03)">
+            No matching activity.
+          </p>
         )}
 
         {newEvents.length > 0 && (
