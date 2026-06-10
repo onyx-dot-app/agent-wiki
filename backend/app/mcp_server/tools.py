@@ -40,6 +40,7 @@ MCP_ALLOWED_TOOLS: frozenset[str] = frozenset(
         # Read
         "read_doc",
         "search_wiki",
+        "search_comments",
         "list_history",
         "ask_nl_question",
         # Write — sync
