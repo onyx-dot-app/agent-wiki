@@ -2,6 +2,7 @@
 
 import {
   createContext,
+  useCallback,
   useContext,
   useMemo,
   useState,
@@ -52,14 +53,14 @@ export function LeftPanelProvider({ children }: LeftPanelProviderProps) {
 
   const isOnWikiRoute = focus.isWiki();
 
-  function toggleTree() {
+  const toggleTree = useCallback(() => {
     setTreeOpen((prev) => {
       const next = !prev;
       if (typeof window !== "undefined")
         window.localStorage.setItem(TREE_OPEN_KEY, next ? "1" : "0");
       return next;
     });
-  }
+  }, []);
 
   // Invariant: activities takes priority over wiki-tree. treeOpen is never
   // mutated by activities toggling — it persists underneath, so closing
@@ -79,7 +80,7 @@ export function LeftPanelProvider({ children }: LeftPanelProviderProps) {
       toggleTree,
       toggleActivities: () => setActivitiesOpen((v) => !v),
     }),
-    [view, treeOpen, activitiesOpen, isOnWikiRoute],
+    [view, treeOpen, activitiesOpen, isOnWikiRoute, toggleTree],
   );
 
   return (

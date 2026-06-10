@@ -109,7 +109,11 @@ function AppContent({ children }: AppContentProps) {
 }
 
 function ActivitiesPanel() {
-  return <div className="h-full p-4" />;
+  return (
+    <div className="flex h-full items-center justify-center p-4">
+      <p className="text-sm text-(--text-03)">Activities coming soon.</p>
+    </div>
+  );
 }
 
 interface LayoutProps {

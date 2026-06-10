@@ -11,7 +11,8 @@ function segmentLabel(segment: string): string {
 }
 
 export function WikiHeader() {
-  const { isTreeOpen, toggleTree } = useLeftPanel();
+  const { view, toggleTree } = useLeftPanel();
+  const treeVisible = view === "wiki-tree";
   const { wikiPath } = useAppFocus();
 
   const segments = wikiPath ? wikiPath.split("/") : [];
@@ -28,7 +29,7 @@ export function WikiHeader() {
       <Button
         icon={SvgFolder}
         prominence="tertiary"
-        tooltip={isTreeOpen ? "Collapse tree" : "Expand tree"}
+        tooltip={treeVisible ? "Collapse tree" : "Expand tree"}
         onClick={toggleTree}
       />
       <nav className="flex flex-wrap items-center gap-1.5 text-sm">
