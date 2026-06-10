@@ -3,10 +3,10 @@ import {
   SvgActivity,
   SvgBook,
   SvgCpu,
-  SvgFiles,
+  SvgFile,
   SvgGlobe,
   SvgHistory,
-  SvgOnyxOctagon,
+  SvgOnyxLogo,
   SvgUser,
   SvgUsers,
   SvgWorkflow,
@@ -55,15 +55,23 @@ export const ADMIN_NAV_GROUPS = [
   {
     label: null,
     entries: [
-      { href: "/admin/language-models", label: "Language Models (LLM)", icon: SvgCpu },
+      {
+        href: "/admin/language-models",
+        label: "Language Models (LLM)",
+        icon: SvgCpu,
+      },
       { href: "/admin/web", label: "Web Search", icon: SvgGlobe },
     ],
   },
   {
     label: "Documents",
     entries: [
-      { href: "/admin/templates", label: "Wiki Templates", icon: SvgFiles },
-      { href: "/admin/ingest", label: "Onyx Integration", icon: SvgOnyxOctagon },
+      { href: "/admin/templates", label: "Wiki Templates", icon: SvgFile },
+      {
+        href: "/admin/ingest",
+        label: "Onyx Integration",
+        icon: SvgOnyxLogo,
+      },
     ],
   },
   {
