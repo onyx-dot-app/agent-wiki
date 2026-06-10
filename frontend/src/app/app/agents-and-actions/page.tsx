@@ -32,8 +32,9 @@ export default function AgentsPage() {
     <SettingsLayouts.Root width="lg">
       <SettingsLayouts.Header
         icon={SvgActions}
-        title="Agents"
-        description="Give your agents the ability to read and update this wiki. Generate a personal API key below, then drop it into your coding agent's MCP configuration. Each key's name becomes that agent's identity — it shows up next to its activity on wiki pages and in commit history."
+        title="Agents & Actions"
+        description="Connect agents to read and update your wiki."
+        divider
       />
       <SettingsLayouts.Body>
         <EndpointBlock />

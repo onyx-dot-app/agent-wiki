@@ -44,8 +44,8 @@ export const NAV_ENTRIES = [
     icon: SvgActivity,
   },
   {
-    href: "/app/agents",
-    label: "Agents",
+    href: "/app/agents-and-actions",
+    label: "Agents & Actions",
     icon: SvgActions,
     description: "Connect agents to read and update your wiki.",
   },
