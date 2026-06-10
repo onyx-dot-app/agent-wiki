@@ -33,8 +33,8 @@ export const NAV_ENTRIES = [
     icon: SvgBook,
   },
   {
-    href: "/app/watching",
-    label: "Watching",
+    href: "/app/triggers",
+    label: "Triggers",
     icon: SvgWorkflow,
     description:
       "Watch wiki pages for specific changes, or check on recurring schedules.",

@@ -44,7 +44,7 @@ function formatRelative(iso: string | null | undefined): string {
   return new Date(iso).toLocaleDateString();
 }
 
-export default function WatchingPage() {
+export default function TriggersPage() {
   const { user, loading } = useRequireAuth();
   const { triggers, error: listSwrError, refresh } = useTriggers();
   const destinations = useTriggerDestinations();
@@ -121,7 +121,7 @@ export default function WatchingPage() {
     <SettingsLayouts.Root width="lg">
       <SettingsLayouts.Header
         icon={SvgWorkflow}
-        title="Watching"
+        title="Triggers"
         description="Watch wiki pages for specific changes, or check on recurring schedules."
         divider
       />

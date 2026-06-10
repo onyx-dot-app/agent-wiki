@@ -1,16 +1,17 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
-import { usePathname } from "next/navigation";
 import { RootLayout } from "@onyx-ai/opal/layouts";
 import { MessageCard } from "@onyx-ai/opal/components";
 import { markdown } from "@onyx-ai/opal/utils";
 import AppSidebar from "@/sections/sidebar/AppSidebar";
 import { WikiItemActionsProvider } from "@/providers/WikiItemActionsProvider";
+import { ActivitiesProvider, useActivities } from "@/providers/ActivitiesProvider";
 import { WikiTree } from "@/components/wiki/WikiTree";
 import { useAuth } from "@/lib/auth";
 import { useHealth } from "@/lib/health";
 import { useLLMStatus } from "@/lib/llm";
+import { useAppFocus } from "@/hooks/useAppFocus";
 
 const COLLAPSED_KEY = "agent-wiki:sidebar-collapsed";
 const BANNER_HEALTH_POLL_MS = 15000;
@@ -81,13 +82,14 @@ interface AppContentProps {
 }
 
 function AppContent({ children }: AppContentProps) {
-  const pathname = usePathname();
-  const isWiki = pathname.startsWith("/app/wiki");
+  const focus = useAppFocus();
+  const { isOpen: activitiesOpen } = useActivities();
+  const isWiki = focus.isWiki();
   return (
     <WikiItemActionsProvider active={isWiki}>
-      {isWiki && (
+      {(isWiki || activitiesOpen) && (
         <RootLayout.LeftPanel>
-          <WikiTree />
+          {activitiesOpen ? <ActivitiesPanel /> : <WikiTree />}
         </RootLayout.LeftPanel>
       )}
       <RootLayout.App>
@@ -100,6 +102,10 @@ function AppContent({ children }: AppContentProps) {
       </RootLayout.App>
     </WikiItemActionsProvider>
   );
+}
+
+function ActivitiesPanel() {
+  return <div className="h-full p-4" />;
 }
 
 interface LayoutProps {
@@ -124,11 +130,13 @@ export default function Layout({ children }: LayoutProps) {
   }
 
   return (
-    <RootLayout.Root>
-      <RootLayout.Sidebar folded={folded} onFoldToggle={toggle}>
-        <AppSidebar folded={folded} onFoldToggle={toggle} />
-      </RootLayout.Sidebar>
-      <AppContent>{children}</AppContent>
-    </RootLayout.Root>
+    <ActivitiesProvider>
+      <RootLayout.Root>
+        <RootLayout.Sidebar folded={folded} onFoldToggle={toggle}>
+          <AppSidebar folded={folded} onFoldToggle={toggle} />
+        </RootLayout.Sidebar>
+        <AppContent>{children}</AppContent>
+      </RootLayout.Root>
+    </ActivitiesProvider>
   );
 }
