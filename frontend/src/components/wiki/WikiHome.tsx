@@ -107,107 +107,107 @@ export function WikiHome() {
       </div>
 
       <div className={styles.column}>
-          {/* Hero */}
-          <div className={styles.hero}>
-            <span className={styles.heroMark}>
-              <SvgOnyxLogo size={32} />
-            </span>
-            <h1 className={styles.heroTitle}>Welcome to Onyx Wiki</h1>
-          </div>
-          <div className={styles.dividerWrap}>
-            <Divider />
-          </div>
+        {/* Hero */}
+        <div className={styles.hero}>
+          <span className={styles.heroMark}>
+            <SvgOnyxLogo size={32} />
+          </span>
+          <h1 className={styles.heroTitle}>Welcome to Onyx Wiki</h1>
+        </div>
+        <div className={styles.dividerWrap}>
+          <Divider />
+        </div>
 
-          {/* Start a new page */}
-          <div className={styles.sectionHeader}>
-            <span className={styles.secHead}>Start a new page</span>
+        {/* Start a new page */}
+        <div className={styles.sectionHeader}>
+          <span className={styles.secHead}>Start a new page</span>
+        </div>
+        <div className={styles.templates}>
+          <div className={styles.templateCell}>
+            <TemplateCard
+              title="Blank page"
+              glyph={
+                <span className={styles.blankGlyph}>
+                  <SvgPlusCircle size={22} />
+                </span>
+              }
+              onClick={() => startNewPage()}
+            />
           </div>
-          <div className={styles.templates}>
-            <div className={styles.templateCell}>
+          {featured.map((t) => (
+            <div key={t.id} className={styles.templateCell}>
               <TemplateCard
-                title="Blank page"
-                glyph={
-                  <span className={styles.blankGlyph}>
-                    <SvgPlusCircle size={22} />
-                  </span>
-                }
-                onClick={() => startNewPage()}
+                title={t.name}
+                description={t.description ?? ""}
+                onClick={() => startNewPage(t.id)}
               />
             </div>
-            {featured.map((t) => (
-              <div key={t.id} className={styles.templateCell}>
-                <TemplateCard
-                  title={t.name}
-                  description={t.description ?? ""}
-                  onClick={() => startNewPage(t.id)}
+          ))}
+        </div>
+        <button
+          type="button"
+          className={styles.moreRow}
+          onClick={() => startNewPage()}
+        >
+          <span className={styles.moreLabel}>More Templates</span>
+          <SvgChevronRight size={18} className={styles.moreChevron} />
+        </button>
+
+        {/* Write with AI */}
+        <div className={styles.aiRow}>
+          <span className={styles.aiGutterIcon}>
+            {generating ? (
+              <LoadingSpinner size={18} />
+            ) : (
+              <SvgOnyxOctagon size={18} />
+            )}
+          </span>
+          <form className={styles.aiInputWrap} onSubmit={onAiSubmit}>
+            <InputTypeIn
+              value={aiPrompt}
+              onChange={(e) => setAiPrompt(e.target.value)}
+              placeholder="Start writing with AI…"
+              aria-label="Start writing with AI"
+              rightChildren={
+                <Button
+                  type="submit"
+                  size="sm"
+                  prominence="tertiary"
+                  icon={SvgArrowUp}
+                  disabled={!aiPrompt.trim() || generating}
+                  aria-label="Start writing"
+                />
+              }
+            />
+          </form>
+        </div>
+        {aiError && <p className={styles.aiError}>{aiError}</p>}
+
+        <div className={styles.midDividerWrap}>
+          <Divider />
+        </div>
+
+        {/* Recent Pages */}
+        <div className={styles.sectionHeader}>
+          <span className={styles.secHeadLg}>Recent Pages</span>
+        </div>
+        {recent.length === 0 ? (
+          <p className={styles.empty}>
+            No pages yet. Create one to get started.
+          </p>
+        ) : (
+          <div className={styles.recentGrid}>
+            {recent.map((p) => (
+              <div key={p.path} className={styles.recentCell}>
+                <RecentCard
+                  page={p}
+                  onClick={() => router.push(`/app/wiki/${p.path}`)}
                 />
               </div>
             ))}
           </div>
-          <button
-            type="button"
-            className={styles.moreRow}
-            onClick={() => startNewPage()}
-          >
-            <span className={styles.moreLabel}>More Templates</span>
-            <SvgChevronRight size={18} className={styles.moreChevron} />
-          </button>
-
-          {/* Write with AI */}
-          <div className={styles.aiRow}>
-            <span className={styles.aiGutterIcon}>
-              {generating ? (
-                <LoadingSpinner size={18} />
-              ) : (
-                <SvgOnyxOctagon size={18} />
-              )}
-            </span>
-            <form className={styles.aiInputWrap} onSubmit={onAiSubmit}>
-              <InputTypeIn
-                value={aiPrompt}
-                onChange={(e) => setAiPrompt(e.target.value)}
-                placeholder="Start writing with AI…"
-                aria-label="Start writing with AI"
-                rightChildren={
-                  <Button
-                    type="submit"
-                    size="sm"
-                    prominence="tertiary"
-                    icon={SvgArrowUp}
-                    disabled={!aiPrompt.trim() || generating}
-                    aria-label="Start writing"
-                  />
-                }
-              />
-            </form>
-          </div>
-          {aiError && <p className={styles.aiError}>{aiError}</p>}
-
-          <div className={styles.midDividerWrap}>
-            <Divider />
-          </div>
-
-          {/* Recent Pages */}
-          <div className={styles.sectionHeader}>
-            <span className={styles.secHeadLg}>Recent Pages</span>
-          </div>
-          {recent.length === 0 ? (
-            <p className={styles.empty}>
-              No pages yet. Create one to get started.
-            </p>
-          ) : (
-            <div className={styles.recentGrid}>
-              {recent.map((p) => (
-                <div key={p.path} className={styles.recentCell}>
-                  <RecentCard
-                    page={p}
-                    onClick={() => router.push(`/app/wiki/${p.path}`)}
-                  />
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+        )}
+      </div>
     </main>
   );
 }
