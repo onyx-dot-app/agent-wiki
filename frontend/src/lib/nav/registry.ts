@@ -39,15 +39,15 @@ export const NAV_ENTRIES = [
       "Watch wiki pages for specific changes, or check on recurring schedules.",
   },
   {
-    href: "/app/events",
-    label: "Events",
-    icon: SvgActivity,
-  },
-  {
     href: "/app/agents-and-actions",
     label: "Agents & Actions",
     icon: SvgActions,
     description: "Connect agents to read and update your wiki.",
+  },
+  {
+    href: "/app/events",
+    label: "Events",
+    icon: SvgActivity,
   },
 ] as const satisfies NavEntry[];
 
