@@ -1,0 +1,18 @@
+{
+  "name": "reply_comment",
+  "description": "Reply to an existing comment thread on a wiki page. This is *discussion* (it does NOT change the page). ONLY call this when the user explicitly asks you to reply / respond to a comment — never proactively. Pass the `comment_id` of any comment in the target thread (e.g. from a `search_comments` result) and your `body`. The reply inherits the thread's anchor, so no snippet is needed. Returns the new comment id and a link to the thread.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "comment_id": {
+        "type": "string",
+        "description": "Id of a comment in the thread to reply to (e.g. the `thread_root_id` or `comment_id` from a search_comments hit)."
+      },
+      "body": {
+        "type": "string",
+        "description": "The reply text."
+      }
+    },
+    "required": ["comment_id", "body"]
+  }
+}

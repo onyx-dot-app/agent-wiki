@@ -15,17 +15,12 @@ user (`current_user()`), the same principal the chat request authenticated as.
 from __future__ import annotations
 
 from typing import Any
-from urllib.parse import quote
 
 from app.auth import PermissionDenied, current_user, require_can
+from app.llm.agents.tools._links import thread_link
 from app.llm.agents.tools.errors import ToolError
 from app.models.comment import CommentAuthorKind
 from app.wiki import comments as comments_repo, git as wiki_git, utils as wiki_utils
-
-
-def _thread_link(doc_path: str, thread_root_id: str) -> str:
-    encoded = "/".join(quote(seg) for seg in doc_path.split("/") if seg)
-    return f"/app/wiki/{encoded}?comment={quote(thread_root_id, safe='')}"
 
 
 def handle(args: dict[str, Any]) -> Any:
@@ -87,5 +82,5 @@ def handle(args: dict[str, Any]) -> Any:
     return {
         "comment_id": row["id"],
         "doc_path": path,
-        "link": _thread_link(path, row["thread_root_id"]),
+        "link": thread_link(path, row["thread_root_id"]),
     }

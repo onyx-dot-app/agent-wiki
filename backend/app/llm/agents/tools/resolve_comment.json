@@ -1,0 +1,14 @@
+{
+  "name": "resolve_comment",
+  "description": "Mark a comment thread as resolved (done). ONLY call this when the user explicitly asks you to resolve a comment — never on your own judgment that a thread looks handled. Resolving dismisses someone's feedback, so it's the most sensitive comment action; it is reversible (a human can reopen). Pass the `comment_id` of any comment in the thread (e.g. from a `search_comments` result); the whole thread is resolved.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "comment_id": {
+        "type": "string",
+        "description": "Id of any comment in the thread to resolve (e.g. the `thread_root_id` or `comment_id` from a search_comments hit)."
+      }
+    },
+    "required": ["comment_id"]
+  }
+}

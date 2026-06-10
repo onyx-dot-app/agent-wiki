@@ -64,8 +64,8 @@ SKILLS: dict[str, Skill] = {
     ),
     "comments": Skill(
         name="comments",
-        description="leave inline comments (agent-authored discussion) on wiki pages",
-        tool_names=("add_comment",),
+        description="comment on wiki pages — add inline comments, reply in threads, resolve threads",
+        tool_names=("add_comment", "reply_comment", "resolve_comment"),
         instructions=_load_md("comments"),
     ),
     "web_search": Skill(

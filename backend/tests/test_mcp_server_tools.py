@@ -121,6 +121,8 @@ def test_tools_list_uses_mcp_shape_and_allow_list(client):
         "move_path",
         "create_directory",
         "add_comment",
+        "reply_comment",
+        "resolve_comment",
     }
     # Tools not on the allow-list must NOT be exposed.
     assert "run_bash" not in names
@@ -299,7 +301,7 @@ def test_call_with_missing_name_is_invalid_params(client):
 
 
 # --------------------------------------------------------------------------- #
-# add_comment (write)                                                         #
+# Comment write tools (add / reply / resolve)                                 #
 # --------------------------------------------------------------------------- #
 
 
@@ -327,6 +329,57 @@ def test_add_comment_via_mcp(client):
     assert rows[0]["author_kind"] == "agent"
     assert rows[0]["author_user_id"] == uid
     assert rows[0]["quoted_text"] == "The pool size is 20."
+
+
+def test_reply_comment_via_mcp(client):
+    uid = seed_user(uid="u1", email="u1@x.com")
+    wiki_git.commit_file("guide.md", "# Guide\nbody\n", "seed", author=None)
+    root = wiki_comments.create_thread(
+        doc_path="guide.md",
+        body="is this current?",
+        author_user_id=uid,
+        anchor_sha="seed",
+        start_offset=0,
+        end_offset=4,
+        quoted_text="Guid",
+    )
+    headers = _handshake(client, _mint(uid))
+
+    rpc = _call_tool(
+        client, headers, "reply_comment", {"comment_id": root["id"], "body": "yes, confirmed"}
+    )
+    payload, is_error = _payload_from_call_response(rpc)
+    assert is_error is False
+    assert payload["thread_root_id"] == root["id"]
+
+    thread = wiki_comments.list_thread(root["id"])
+    assert len(thread) == 2
+    reply = next(c for c in thread if c["parent_id"])
+    assert reply["author_kind"] == "agent"
+    assert reply["author_user_id"] == uid
+
+
+def test_resolve_comment_via_mcp(client):
+    uid = seed_user(uid="u1", email="u1@x.com")
+    wiki_git.commit_file("guide.md", "# Guide\nbody\n", "seed", author=None)
+    root = wiki_comments.create_thread(
+        doc_path="guide.md",
+        body="needs review",
+        author_user_id=uid,
+        anchor_sha="seed",
+        start_offset=0,
+        end_offset=4,
+        quoted_text="Guid",
+    )
+    headers = _handshake(client, _mint(uid))
+
+    rpc = _call_tool(client, headers, "resolve_comment", {"comment_id": root["id"]})
+    payload, is_error = _payload_from_call_response(rpc)
+    assert is_error is False
+    assert payload["status"] == "resolved"
+
+    refreshed = wiki_comments.get(root["id"])
+    assert refreshed is not None and refreshed["status"] == "resolved"
 
 
 # --------------------------------------------------------------------------- #
