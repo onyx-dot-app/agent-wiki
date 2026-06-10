@@ -7,14 +7,13 @@ export function useOnChangeEvent<T = any>(
   name: string,
   f?: (event: T) => void,
 ) {
-  const [field, , helpers] = useField<T>(name);
+  const [field] = useField<T>(name);
   return useCallback(
     (event: T) => {
       field.onChange(event);
-      helpers.setTouched(true);
       f?.(event);
     },
-    [field, helpers, f],
+    [field, f],
   );
 }
 
