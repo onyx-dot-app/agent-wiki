@@ -4,25 +4,14 @@ import { Button, Divider } from "@onyx-ai/opal/components";
 import { SvgX } from "@onyx-ai/opal/icons";
 import { timeAgo } from "@onyx-ai/opal/time";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
-import { useEvents, type AppEvent } from "@/lib/events";
+import { isNewActivity, toEventIso, useEvents, type AppEvent } from "@/lib/events";
 import { formatScopePath } from "@/lib/format";
 import { useLeftPanel } from "@/providers/LeftPanelProvider";
-
-const NEW_CUTOFF_MS = 24 * 60 * 60 * 1000;
 
 interface TriggerFirePayload {
   doc_path?: string;
   change_kind?: string;
   reason?: string;
-}
-
-// SQLite's datetime('now') omits the T and Z; treat as UTC.
-function toIso(ts: string): string {
-  return ts.includes("T") ? ts : `${ts.replace(" ", "T")}Z`;
-}
-
-function isNew(ts: string): boolean {
-  return Date.now() - new Date(toIso(ts)).getTime() < NEW_CUTOFF_MS;
 }
 
 interface ActivityCardProps {
@@ -54,7 +43,7 @@ function ActivityCard({ event }: ActivityCardProps) {
         <span className="text-[11px] text-(--text-02)">
           trigger {event.target ?? "?"}
         </span>
-        <span className="text-[11px] text-(--text-02)">{timeAgo(toIso(event.ts))}</span>
+        <span className="text-[11px] text-(--text-02)">{timeAgo(toEventIso(event.ts))}</span>
       </div>
     </div>
   );
@@ -67,8 +56,8 @@ export function ActivitiesPanel() {
     { refreshInterval: 30_000 },
   );
 
-  const newEvents = events.filter((ev) => isNew(ev.ts));
-  const olderEvents = events.filter((ev) => !isNew(ev.ts));
+  const newEvents = events.filter((ev) => isNewActivity(ev.ts));
+  const olderEvents = events.filter((ev) => !isNewActivity(ev.ts));
 
   return (
     <div className="flex h-full flex-col rounded-(--border-radius-12) border border-(--border-01) bg-transparent">

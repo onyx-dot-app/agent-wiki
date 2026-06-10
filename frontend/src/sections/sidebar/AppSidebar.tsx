@@ -2,6 +2,7 @@
 
 import { Button, SidebarTab, Text } from "@onyx-ai/opal/components";
 import {
+  SvgActivity,
   SvgDocFile,
   SvgNotificationBubble,
   SvgSearch,
@@ -32,6 +33,7 @@ import { NAV_ENTRIES } from "@/lib/nav/registry";
 import { useIsMobile } from "@/lib/viewport";
 import { useAppFocus } from "@/hooks/useAppFocus";
 import { useLeftPanel } from "@/providers/LeftPanelProvider";
+import { isNewActivity, useEvents } from "@/lib/events";
 
 function useRecentPages() {
   const { data } = useSWR(
@@ -62,6 +64,11 @@ export default function AppSidebar({ folded, onFoldToggle }: AppSidebarProps) {
   const isMobile = useIsMobile();
   const focus = useAppFocus();
   const { isActivitiesOpen, toggleActivities } = useLeftPanel();
+  const { events: activityEvents } = useEvents(
+    { kind: "trigger.fire", limit: 100 },
+    { refreshInterval: 30_000 },
+  );
+  const hasNewActivities = activityEvents.some((ev) => isNewActivity(ev.ts));
   const starred = useStarredPages();
   const starredSet = new Set(starred);
   const recents = useRecentPages();
@@ -200,11 +207,16 @@ export default function AppSidebar({ folded, onFoldToggle }: AppSidebarProps) {
 
       <SidebarLayouts.Footer>
         <SidebarTab
-          icon={SvgNotificationBubble}
+          icon={SvgActivity}
           folded={effectiveFolded}
           tooltip={effectiveFolded ? "Activities" : undefined}
           selected={isActivitiesOpen}
           onClick={toggleActivities}
+          rightChildren={
+            hasNewActivities ? (
+              <SvgNotificationBubble size={14} />
+            ) : undefined
+          }
         >
           Activities
         </SidebarTab>
