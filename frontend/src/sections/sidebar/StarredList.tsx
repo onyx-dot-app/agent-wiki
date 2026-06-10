@@ -84,7 +84,11 @@ interface StarredListProps {
 
 /** The draggable "Starred" rows. Reordering is optimistic — the SWR
  * cache is updated immediately and rolled back if the PUT fails. */
-export function StarredList({ paths, pathname, onNavigate }: StarredListProps) {
+export default function StarredList({
+  paths,
+  pathname,
+  onNavigate,
+}: StarredListProps) {
   // Require a little movement before a drag starts so plain clicks
   // still navigate to the doc.
   const sensors = useSensors(

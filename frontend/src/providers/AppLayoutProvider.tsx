@@ -9,14 +9,11 @@ import {
   type ReactNode,
 } from "react";
 
-interface AppLayoutState {
+interface AppLayoutContextValue {
   headerContent: ReactNode;
   leftPanelContent: ReactNode | null;
   actionSidebarContent: ReactNode | null;
   isActionSidebarOpen: boolean;
-}
-
-interface AppLayoutContextValue extends AppLayoutState {
   setHeaderContent: (node: ReactNode) => void;
   clearHeaderContent: () => void;
   setLeftPanelContent: (node: ReactNode) => void;
@@ -27,7 +24,11 @@ interface AppLayoutContextValue extends AppLayoutState {
 
 const AppLayoutContext = createContext<AppLayoutContextValue | null>(null);
 
-export function AppLayoutProvider({ children }: { children: ReactNode }) {
+export interface AppLayoutProviderProps {
+  children: ReactNode;
+}
+
+export function AppLayoutProvider({ children }: AppLayoutProviderProps) {
   const [headerContent, setHeaderContent] = useState<ReactNode>(null);
   const [leftPanelContent, setLeftPanelContent] = useState<ReactNode | null>(
     null,

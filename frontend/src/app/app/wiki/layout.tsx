@@ -2,7 +2,7 @@
 
 import { useEffect, type ReactNode } from "react";
 import { WikiTree } from "@/components/wiki/WikiTree";
-import { useAppLayout } from "@/sections/app/AppLayoutContext";
+import { useAppLayout } from "@/providers/AppLayoutProvider";
 
 export default function WikiLayout({ children }: { children: ReactNode }) {
   const { setLeftPanelContent, clearLeftPanelContent } = useAppLayout();
