@@ -138,8 +138,12 @@ class WebView(BaseModel):
 
 
 class IngestView(BaseModel):
+    """The raw ingest key is show-once via RegenerateKeyResponse — reads
+    only ever get set/hint."""
+
     max_doc_chars: int
-    api_key: str | None
+    api_key_set: bool
+    api_key_hint: str
 
 
 class RegenerateKeyResponse(BaseModel):
