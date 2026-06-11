@@ -322,10 +322,11 @@ def test_gemini_preflight_ok(monkeypatch: pytest.MonkeyPatch) -> None:
     assert result["auth_present"] is True
     assert result["models_endpoint"] == "ok"
     assert result["completion"] == "ok"
-    assert ctor == {"api_key": "sk-gemini-test"}
-    assert fake.models.completion_kwargs["config"]["http_options"]["timeout"] == int(
-        PREFLIGHT_TIMEOUT_SECONDS * 1000
-    )
+    assert ctor == {
+        "api_key": "sk-gemini-test",
+        "http_options": {"timeout": 10000},
+    }
+    assert fake.models.completion_kwargs["config"] == {"max_output_tokens": 1}
 
 
 def test_gemini_preflight_completion_error(monkeypatch: pytest.MonkeyPatch) -> None:
