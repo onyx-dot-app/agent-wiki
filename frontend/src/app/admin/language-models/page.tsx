@@ -723,6 +723,7 @@ function CustomProviderForm({
           custom_base_url: null,
           custom_api_key: null,
           custom_display_name: "",
+          provider_models: { ...settings.provider_models, custom: [] },
         }),
       });
       onSaved();

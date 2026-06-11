@@ -19,21 +19,18 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    op.execute(
-        sa.text(
-            "ALTER TABLE llm_settings ADD COLUMN IF NOT EXISTS custom_api_key TEXT NOT NULL DEFAULT ''"
-        )
-    )
-    op.execute(
-        sa.text(
-            "ALTER TABLE llm_settings ADD COLUMN IF NOT EXISTS custom_base_url TEXT NOT NULL DEFAULT ''"
-        )
-    )
-    op.execute(
-        sa.text(
-            "ALTER TABLE llm_settings ADD COLUMN IF NOT EXISTS custom_display_name TEXT NOT NULL DEFAULT ''"
-        )
-    )
+    # Guarded adds: the 0001 bootstrap creates the full current schema via
+    # create_all, so fresh installs already have these columns.
+    bind = op.get_bind()
+    insp = sa.inspect(bind)
+    cols = {c["name"] for c in insp.get_columns("llm_settings")}
+
+    for name in ("custom_api_key", "custom_base_url", "custom_display_name"):
+        if name not in cols:
+            op.add_column(
+                "llm_settings",
+                sa.Column(name, sa.Text, nullable=False, server_default=sa.text("''")),
+            )
 
 
 def downgrade() -> None:
