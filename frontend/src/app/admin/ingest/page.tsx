@@ -180,7 +180,7 @@ function IngestForm() {
                       ? settings.api_key_hint
                       : "No key yet — click Regenerate"
                 }
-                className={`box-border w-full flex-1 rounded-(--border-radius-04) border border-(--border-01) px-[10px] py-2 text-sm${freshKey ? "font-mono" : ""}`}
+                className={`box-border w-full flex-1 rounded-(--border-radius-04) border border-(--border-01) px-[10px] py-2 text-sm ${freshKey ? "font-mono" : ""}`}
               />
               {freshKey && keyVisible && (
                 <Button
