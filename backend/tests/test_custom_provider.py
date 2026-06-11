@@ -430,3 +430,95 @@ def test_stream_wraps_tools_in_chat_completions_envelope(
             },
         }
     ]
+
+
+# --------------------------------------------------------------------------- #
+# Preflight (test_connection)                                                 #
+# --------------------------------------------------------------------------- #
+
+
+class _FakePreflightClient:
+    def __init__(self, models_exc: Exception | None, completion_exc: Exception | None):
+        outer = self
+
+        class _Models:
+            def list(self) -> list[object]:
+                if models_exc is not None:
+                    raise models_exc
+                return []
+
+        class _Completions:
+            def create(self, **kwargs: object) -> object:
+                outer.completion_kwargs = kwargs
+                if completion_exc is not None:
+                    raise completion_exc
+                return object()
+
+        class _Chat:
+            completions = _Completions()
+
+        self.models = _Models()
+        self.chat = _Chat()
+        self.completion_kwargs: dict[str, object] = {}
+
+
+def _patch_preflight_client(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    models_exc: Exception | None = None,
+    completion_exc: Exception | None = None,
+) -> tuple[_FakePreflightClient, dict[str, object]]:
+    fake = _FakePreflightClient(models_exc, completion_exc)
+    ctor_kwargs: dict[str, object] = {}
+
+    def factory(**kwargs: object) -> _FakePreflightClient:
+        ctor_kwargs.update(kwargs)
+        return fake
+
+    monkeypatch.setattr(custom_provider, "OpenAI", factory)
+    return fake, ctor_kwargs
+
+
+def test_preflight_all_ok(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake, ctor = _patch_preflight_client(monkeypatch)
+    result = custom_provider.test_connection(
+        _settings(custom_api_key="sk-x"), model="m-1"
+    )
+    assert result["ok"] is True
+    assert result["models_endpoint"] == "ok"
+    assert result["completion"] == "ok"
+    assert result["auth_present"] is True
+    assert result["model"] == "m-1"
+    assert fake.completion_kwargs["model"] == "m-1"
+    assert fake.completion_kwargs["max_tokens"] == 1
+    assert ctor["max_retries"] == 0
+
+
+def test_preflight_models_endpoint_missing_is_nonfatal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = httpx.Request("GET", "https://example.test/v1/models")
+    response = httpx.Response(status_code=404, request=request)
+    nf = openai.NotFoundError("nope", response=response, body=None)
+    _patch_preflight_client(monkeypatch, models_exc=nf)
+    result = custom_provider.test_connection(_settings(), model="m-1")
+    assert result["ok"] is True
+    assert result["models_endpoint"] != "ok"
+    assert "model name" in result["models_endpoint"]
+    assert result["completion"] == "ok"
+
+
+def test_preflight_completion_failure_reports_translated_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = httpx.Request("POST", "https://example.test/v1/chat/completions")
+    response = httpx.Response(status_code=401, request=request)
+    auth = openai.AuthenticationError("bad key", response=response, body=None)
+    _, ctor = _patch_preflight_client(monkeypatch, completion_exc=auth)
+    result = custom_provider.test_connection(
+        _settings(custom_api_key=""), model="m-1"
+    )
+    assert result["ok"] is False
+    assert "rejected the API key" in result["completion"]
+    assert result["auth_present"] is False
+    assert ctor["api_key"] == "EMPTY"

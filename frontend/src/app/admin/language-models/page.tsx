@@ -591,6 +591,15 @@ function ProviderForm({
   );
 }
 
+interface CustomTestResult {
+  ok: boolean;
+  base_url: string;
+  auth_present: boolean;
+  model: string;
+  models_endpoint: string;
+  completion: string;
+}
+
 function CustomProviderForm({
   settings,
   configured,
@@ -610,7 +619,26 @@ function CustomProviderForm({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<CustomTestResult | null>(null);
   const confirmDialog = useConfirm();
+
+  async function onTest() {
+    setTesting(true);
+    setTestResult(null);
+    setError(null);
+    try {
+      const r = await apiFetch<CustomTestResult>("/admin/llm/custom/test", {
+        method: "POST",
+        body: JSON.stringify({ model: models[0] ?? null }),
+      });
+      setTestResult(r);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "test failed");
+    } finally {
+      setTesting(false);
+    }
+  }
 
   function addModel() {
     const m = newModel.trim();
@@ -757,6 +785,45 @@ function CustomProviderForm({
           </div>
         </div>
       </div>
+
+      <div className="flex items-center gap-2">
+        <Button
+          type="button"
+          variant="default"
+          size="sm"
+          disabled={testing || !configured}
+          onClick={() => void onTest()}
+        >
+          {testing ? "Testing…" : "Test connection"}
+        </Button>
+        <span className="text-xs text-(--text-03)">
+          Tests the saved configuration.
+        </span>
+      </div>
+      {testResult && (
+        <div className="flex flex-col gap-1 font-mono text-xs">
+          <div
+            className={
+              testResult.ok
+                ? "text-(--status-text-success-05)"
+                : "text-(--status-text-error-05)"
+            }
+          >
+            {testResult.ok
+              ? `✓ ${testResult.model} responded`
+              : `✗ ${testResult.completion}`}
+          </div>
+          <div className="text-(--text-03)">
+            {testResult.models_endpoint === "ok"
+              ? "✓ /models reachable"
+              : `• /models: ${testResult.models_endpoint}`}
+          </div>
+          <div className="text-(--text-03)">
+            {testResult.auth_present ? "auth: key sent" : "auth: keyless"} ·{" "}
+            {testResult.base_url}
+          </div>
+        </div>
+      )}
 
       <FormMessages error={error} saved={saved} />
       <FormActions saving={saving} configured={configured} onClear={onClear} />

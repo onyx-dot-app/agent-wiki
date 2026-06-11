@@ -140,3 +140,64 @@ def test_available_omits_custom_without_models(client, admin):
     _configure_custom(client, provider_models={"custom": []})
     providers = client.get("/api/llm/available").json()["providers"]
     assert all(p["provider"] != "custom" for p in providers)
+
+
+def test_preflight_unconfigured_is_400(client, admin):
+    r = client.post("/api/admin/llm/custom/test", json={})
+    assert r.status_code == 400
+    assert "not configured" in r.json()["error"]
+
+
+def test_preflight_without_any_model_is_400(client, admin):
+    _put(client, custom_base_url="https://gw.example.com/v1")
+    r = client.post("/api/admin/llm/custom/test", json={})
+    assert r.status_code == 400
+    assert "model" in r.json()["error"]
+
+
+def test_preflight_falls_back_to_first_saved_model(client, admin, monkeypatch):
+    _configure_custom(client)
+    seen: dict[str, str] = {}
+
+    def fake_test(settings, *, model):
+        seen["model"] = model
+        return {
+            "ok": True,
+            "base_url": settings.custom_base_url,
+            "auth_present": True,
+            "model": model,
+            "models_endpoint": "ok",
+            "completion": "ok",
+        }
+
+    import app.api.admin as admin_api
+
+    monkeypatch.setattr(admin_api.custom_provider, "test_connection", fake_test)
+    r = client.post("/api/admin/llm/custom/test", json={})
+    assert r.status_code == 200
+    assert r.json()["ok"] is True
+    assert seen["model"] == "deepseek-chat"
+
+
+def test_preflight_explicit_model_wins(client, admin, monkeypatch):
+    _configure_custom(client)
+    seen: dict[str, str] = {}
+
+    def fake_test(settings, *, model):
+        seen["model"] = model
+        return {
+            "ok": False,
+            "base_url": settings.custom_base_url,
+            "auth_present": True,
+            "model": model,
+            "models_endpoint": "ok",
+            "completion": "Custom provider rejected the API key.",
+        }
+
+    import app.api.admin as admin_api
+
+    monkeypatch.setattr(admin_api.custom_provider, "test_connection", fake_test)
+    r = client.post("/api/admin/llm/custom/test", json={"model": "other-model"})
+    assert r.status_code == 200
+    assert r.json()["ok"] is False
+    assert seen["model"] == "other-model"
