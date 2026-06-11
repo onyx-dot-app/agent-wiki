@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Button, Divider, InputTypeIn, Tag } from "@onyx-ai/opal/components";
+import { Button, Divider, InputTypeIn, Tag, Text } from "@onyx-ai/opal/components";
 import { SvgEmpty } from "@onyx-ai/opal/illustrations";
 import { SvgActivity, SvgX } from "@onyx-ai/opal/icons";
 import { IllustrationContent, Section } from "@onyx-ai/opal/layouts";
@@ -140,9 +140,9 @@ export default function ActivitiesPanel() {
         )}
 
         {!isLoading && events.length > 0 && filtered.length === 0 && (
-          <p className="px-3 pt-4 text-sm text-(--text-03)">
-            No matching activity.
-          </p>
+          <div className="px-3 pt-4">
+            <Text font="secondary-body" color="text-03">No matching activity.</Text>
+          </div>
         )}
 
         {newEvents.length > 0 && (
