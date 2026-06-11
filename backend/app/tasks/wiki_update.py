@@ -40,6 +40,7 @@ from app.metrics import (
     ingest_batch_reconciler_duration_seconds,
     ingest_bm25_score_by_outcome,
     ingest_document_chars,
+    ingest_document_results_total,
     ingest_llm_calls_per_doc,
     ingest_outcomes_total,
     ingest_queue_depth,
@@ -405,6 +406,7 @@ def _reconcile_pushed_document(push: dict[str, Any]) -> None:
     consecutive_irrelevant = 0
     irrelevant = 0
     committed = 0
+    no_change = 0
     stopped_early = False
 
     for c, result in zip(readable, batch_results):
@@ -465,6 +467,7 @@ def _reconcile_pushed_document(push: dict[str, Any]) -> None:
                 continue
             if commit_result is None:
                 # Concurrent edit produced identical content — treat as no_change.
+                no_change += 1
                 ingest_outcomes_total.labels(outcome="no_change", wiki_path=c.hit.path).inc()
                 ingest_bm25_score_by_outcome.labels(outcome="no_change").observe(c.hit.score)
                 continue
@@ -490,6 +493,7 @@ def _reconcile_pushed_document(push: dict[str, Any]) -> None:
                     log.warning("ingest_eval_sample: failed to log committed sample", exc_info=True)
         else:
             consecutive_irrelevant = 0
+            no_change += 1
             ingest_outcomes_total.labels(outcome="no_change", wiki_path=c.hit.path).inc()
             ingest_bm25_score_by_outcome.labels(outcome="no_change").observe(c.hit.score)
             if CONFIG.ingest_eval_logging:
@@ -509,6 +513,10 @@ def _reconcile_pushed_document(push: dict[str, Any]) -> None:
                     log.warning("ingest_eval_sample: failed to log no_change sample", exc_info=True)
 
     ingest_llm_calls_per_doc.observe(llm_calls)
+    # Per-document terminal outcome, priority committed > no_change > irrelevant.
+    # The catch-all is irrelevant (e.g. all candidates were skipped on error).
+    doc_result = "committed" if committed else "no_change" if no_change else "irrelevant"
+    ingest_document_results_total.labels(result=doc_result).inc()
     log.info(
         "process_pushed_document: done doc_id=%s source=%s candidates=%d "
         "llm_calls=%d committed=%d irrelevant=%d stopped_early=%s duration_ms=%d",

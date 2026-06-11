@@ -12,7 +12,7 @@
       "collapsed": false,
       "gridPos": {
         "x": 0,
-        "y": 5,
+        "y": 9,
         "w": 24,
         "h": 1
       },
@@ -51,7 +51,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 6,
+        "y": 10,
         "w": 4,
         "h": 4
       },
@@ -107,7 +107,7 @@
       },
       "gridPos": {
         "x": 4,
-        "y": 6,
+        "y": 10,
         "w": 4,
         "h": 4
       },
@@ -163,7 +163,7 @@
       },
       "gridPos": {
         "x": 8,
-        "y": 6,
+        "y": 10,
         "w": 4,
         "h": 4
       },
@@ -219,7 +219,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 6,
+        "y": 10,
         "w": 4,
         "h": 4
       },
@@ -275,7 +275,7 @@
       },
       "gridPos": {
         "x": 16,
-        "y": 6,
+        "y": 10,
         "w": 4,
         "h": 4
       },
@@ -331,7 +331,7 @@
       },
       "gridPos": {
         "x": 20,
-        "y": 6,
+        "y": 10,
         "w": 4,
         "h": 4
       },
@@ -504,9 +504,9 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 15,
-        "x": 9,
-        "y": 1
+        "w": 24,
+        "x": 0,
+        "y": 5
       },
       "id": 11,
       "options": {
@@ -544,7 +544,7 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "Wiki page commits produced by document ingestion (ingest_outcomes_total{outcome=\"committed\"}, summed over 24h). This is what actually updated the wiki — unlike \"Documents Ingested\", which counts ingest requests received.",
+      "description": "Wiki page commits produced by document ingestion (ingest_outcomes_total{outcome=\"committed\"}, summed over 24h). This is what actually updated the wiki \u2014 unlike \"Documents Ingested\", which counts ingest requests received.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -606,6 +606,106 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
+      "description": "Per-document terminal outcome over the last 24h (ingest_document_results_total), one count per ingested document. Priority: a document is 'committed' if it produced any wiki commit, else 'no_change' if any candidate resolved to no-change, else 'irrelevant'. Unlike \"Wiki Updates\", which counts page commits \u2014 one document can update several pages.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "mappings": [],
+          "unit": "short",
+          "custom": {}
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "committed"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "green",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "no_change"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "blue",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "irrelevant"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "orange",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 15,
+        "x": 9,
+        "y": 1
+      },
+      "id": 52,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "last"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sort_desc(round(sum(increase(ingest_document_results_total[24h])) by (result)))",
+          "legendFormat": "{{result}}",
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Document Update Results (24h)",
+      "type": "stat",
+      "transformations": []
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -624,7 +724,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 10
+        "y": 14
       },
       "id": 4,
       "options": {
@@ -682,7 +782,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 10
+        "y": 14
       },
       "id": 5,
       "options": {
@@ -730,7 +830,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 18
+        "y": 22
       },
       "id": 9,
       "options": {
@@ -792,7 +892,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 18
+        "y": 22
       },
       "id": 17,
       "options": {
@@ -873,7 +973,7 @@
         "h": 8,
         "w": 6,
         "x": 0,
-        "y": 26
+        "y": 30
       },
       "id": 6,
       "options": {
@@ -954,7 +1054,7 @@
         "h": 8,
         "w": 6,
         "x": 18,
-        "y": 26
+        "y": 30
       },
       "id": 15,
       "options": {
@@ -1035,7 +1135,7 @@
         "h": 8,
         "w": 6,
         "x": 6,
-        "y": 26
+        "y": 30
       },
       "id": 16,
       "options": {
@@ -1116,7 +1216,7 @@
         "h": 8,
         "w": 6,
         "x": 12,
-        "y": 26
+        "y": 30
       },
       "id": 106,
       "options": {
@@ -1197,7 +1297,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 35
+        "y": 39
       },
       "id": 7,
       "options": {
@@ -1278,7 +1378,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 35
+        "y": 39
       },
       "id": 10,
       "options": {
@@ -1356,7 +1456,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 35
+        "y": 39
       },
       "id": 12,
       "options": {
@@ -1409,7 +1509,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 43
+        "y": 47
       },
       "id": 8,
       "options": {
@@ -1477,7 +1577,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 43
+        "y": 47
       },
       "id": 13,
       "options": {
@@ -1553,7 +1653,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 43
+        "y": 47
       },
       "id": 14,
       "options": {
@@ -1589,7 +1689,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 59
+        "y": 63
       },
       "id": 102,
       "title": "Top Wiki Pages by Outcome",
@@ -1655,7 +1755,7 @@
         "h": 10,
         "w": 8,
         "x": 0,
-        "y": 60
+        "y": 64
       },
       "id": 103,
       "targets": [
@@ -1756,7 +1856,7 @@
         "h": 10,
         "w": 8,
         "x": 8,
-        "y": 60
+        "y": 64
       },
       "id": 104,
       "targets": [
@@ -1857,7 +1957,7 @@
         "h": 10,
         "w": 8,
         "x": 16,
-        "y": 60
+        "y": 64
       },
       "id": 105,
       "targets": [
@@ -1921,7 +2021,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 51
+        "y": 55
       },
       "id": 107,
       "options": {
@@ -1989,7 +2089,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 51
+        "y": 55
       },
       "id": 108,
       "options": {
@@ -2065,7 +2165,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 51
+        "y": 55
       },
       "id": 109,
       "options": {
@@ -2102,7 +2202,7 @@
       "collapsed": false,
       "gridPos": {
         "x": 0,
-        "y": 205,
+        "y": 209,
         "w": 24,
         "h": 1
       },
@@ -2121,7 +2221,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 214,
+        "y": 218,
         "w": 12,
         "h": 8
       },
@@ -2163,7 +2263,7 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 214,
+        "y": 218,
         "w": 12,
         "h": 8
       },
@@ -2205,7 +2305,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 226,
+        "y": 230,
         "w": 8,
         "h": 8
       },
@@ -2247,7 +2347,7 @@
       },
       "gridPos": {
         "x": 8,
-        "y": 226,
+        "y": 230,
         "w": 8,
         "h": 8
       },
@@ -2302,7 +2402,7 @@
       },
       "gridPos": {
         "x": 16,
-        "y": 226,
+        "y": 230,
         "w": 8,
         "h": 8
       },
@@ -2369,7 +2469,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 206
+        "y": 210
       },
       "id": 127,
       "options": {
@@ -2429,7 +2529,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 206
+        "y": 210
       },
       "id": 128,
       "options": {
