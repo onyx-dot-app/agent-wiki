@@ -13,6 +13,7 @@ Differences from cloud providers:
 * Tool-call arguments come back as a dict already (no JSON-string
   reassembly).
 """
+
 from __future__ import annotations
 
 import logging
@@ -22,7 +23,11 @@ from typing import Any, Iterator, cast
 from ollama import Client
 
 from app.llm.errors import LLMError
-from app.llm.providers._common import stringify_tool_result
+from app.llm.providers._common import (
+    PREFLIGHT_TIMEOUT_SECONDS,
+    run_preflight,
+    stringify_tool_result,
+)
 from app.llm.settings import LLMSettings
 
 log = logging.getLogger(__name__)
@@ -44,6 +49,26 @@ class OllamaProvider:
         # to the SDK default (localhost). Nothing to validate here — model
         # presence is checked upstream in client.stream.
         return
+
+    def test_connection(self, settings: LLMSettings, *, model: str) -> dict[str, Any]:
+        """Preflight the saved Ollama config without touching the cached client."""
+        client = (
+            Client(host=settings.ollama_base_url, timeout=PREFLIGHT_TIMEOUT_SECONDS)
+            if settings.ollama_base_url
+            else Client(timeout=PREFLIGHT_TIMEOUT_SECONDS)
+        )
+        return run_preflight(
+            base_url=settings.ollama_base_url,
+            auth_present=False,
+            model=model,
+            listing=lambda: cast(Any, client).list(),
+            completion=lambda: cast(Any, client).chat(
+                model=model,
+                messages=[{"role": "user", "content": "ping"}],
+                options={"num_predict": 1},
+            ),
+            translate=_translate_error,
+        )
 
     def stream(
         self,
@@ -79,7 +104,10 @@ class OllamaProvider:
 
         log.info(
             "llm request provider=ollama model=%s tools=%d max_tokens=%d msgs=%d",
-            model, len(tools or []), max_tokens, len(ollama_messages),
+            model,
+            len(tools or []),
+            max_tokens,
+            len(ollama_messages),
         )
         client = _client(settings.ollama_base_url)
         try:
@@ -127,7 +155,10 @@ class OllamaProvider:
                     }
             log.info(
                 "llm done provider=ollama model=%s stop=%s tokens=%d/%d",
-                model, stop_reason, usage["input_tokens"], usage["output_tokens"],
+                model,
+                stop_reason,
+                usage["input_tokens"],
+                usage["output_tokens"],
             )
             yield {"type": "done", "stop_reason": stop_reason, "usage": usage}
         except LLMError:

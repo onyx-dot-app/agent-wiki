@@ -11,7 +11,12 @@ import openai
 from openai import OpenAI
 
 from app.llm.errors import LLMError
-from app.llm.providers._common import safe_json_loads, stringify_tool_result
+from app.llm.providers._common import (
+    PREFLIGHT_TIMEOUT_SECONDS,
+    run_preflight,
+    safe_json_loads,
+    stringify_tool_result,
+)
 from app.llm.providers._openai_errors import translate_openai_error
 from app.llm.settings import LLMSettings
 
@@ -41,45 +46,6 @@ def _create_stream(client: OpenAI, kwargs: dict[str, Any]) -> Any:
     return completions.create(**kwargs)
 
 
-_PREFLIGHT_TIMEOUT_SECONDS = 10.0
-
-
-def test_connection(settings: LLMSettings, *, model: str) -> dict[str, Any]:
-    """Preflight the saved gateway config: GET /models when the gateway has it,
-    plus a 1-token completion. Diagnostics are redacted — the key never leaves."""
-    client = OpenAI(
-        api_key=settings.custom_api_key or _KEYLESS_API_KEY,
-        base_url=settings.custom_base_url,
-        timeout=_PREFLIGHT_TIMEOUT_SECONDS,
-        max_retries=0,
-    )
-    result: dict[str, Any] = {
-        "base_url": settings.custom_base_url,
-        "auth_present": bool(settings.custom_api_key),
-        "model": model,
-    }
-    try:
-        cast(Any, client).models.list()
-        result["models_endpoint"] = "ok"
-    except Exception as exc:
-        # Non-fatal: plenty of gateways don't implement /models.
-        result["models_endpoint"] = translate_openai_error(
-            exc, provider_label=_PROVIDER_LABEL
-        ).message
-    try:
-        cast(Any, client.chat).completions.create(
-            model=model,
-            messages=[{"role": "user", "content": "ping"}],
-            max_tokens=1,
-        )
-        result["completion"] = "ok"
-        result["ok"] = True
-    except Exception as exc:
-        result["completion"] = translate_openai_error(exc, provider_label=_PROVIDER_LABEL).message
-        result["ok"] = False
-    return result
-
-
 class CustomProvider:
     name = "custom"
 
@@ -89,6 +55,27 @@ class CustomProvider:
                 "not_configured",
                 "Custom provider base URL is not set. An admin needs to add it on the admin page.",
             )
+
+    def test_connection(self, settings: LLMSettings, *, model: str) -> dict[str, Any]:
+        """Preflight the saved gateway config without touching the cached client."""
+        client = OpenAI(
+            api_key=settings.custom_api_key or _KEYLESS_API_KEY,
+            base_url=settings.custom_base_url,
+            timeout=PREFLIGHT_TIMEOUT_SECONDS,
+            max_retries=0,
+        )
+        return run_preflight(
+            base_url=settings.custom_base_url,
+            auth_present=bool(settings.custom_api_key),
+            model=model,
+            listing=lambda: cast(Any, client).models.list(),
+            completion=lambda: cast(Any, client.chat).completions.create(
+                model=model,
+                messages=[{"role": "user", "content": "ping"}],
+                max_tokens=1,
+            ),
+            translate=lambda exc: translate_openai_error(exc, provider_label=_PROVIDER_LABEL),
+        )
 
     def stream(
         self,

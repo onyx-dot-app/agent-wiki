@@ -1,4 +1,5 @@
 """Anthropic provider — Messages API streaming."""
+
 from __future__ import annotations
 
 import json
@@ -9,7 +10,12 @@ from typing import Any, Iterator, cast
 from anthropic import Anthropic
 
 from app.llm.errors import LLMError
-from app.llm.providers._common import safe_json_loads, split_system
+from app.llm.providers._common import (
+    PREFLIGHT_TIMEOUT_SECONDS,
+    run_preflight,
+    safe_json_loads,
+    split_system,
+)
 from app.llm.settings import LLMSettings
 
 log = logging.getLogger(__name__)
@@ -33,6 +39,26 @@ class AnthropicProvider:
                 "not_configured",
                 "Anthropic API key is not set. An admin needs to add it on the admin page.",
             )
+
+    def test_connection(self, settings: LLMSettings, *, model: str) -> dict[str, Any]:
+        """Preflight the saved Anthropic config without touching the cached client."""
+        client = Anthropic(
+            api_key=settings.anthropic_api_key,
+            timeout=PREFLIGHT_TIMEOUT_SECONDS,
+            max_retries=0,
+        )
+        return run_preflight(
+            base_url="",
+            auth_present=bool(settings.anthropic_api_key),
+            model=model,
+            listing=lambda: cast(Any, client).models.list(),
+            completion=lambda: cast(Any, client.messages).create(
+                model=model,
+                max_tokens=1,
+                messages=[{"role": "user", "content": "ping"}],
+            ),
+            translate=_translate_error,
+        )
 
     def stream(
         self,
@@ -67,7 +93,10 @@ class AnthropicProvider:
 
         log.info(
             "llm request provider=anthropic model=%s tools=%d max_tokens=%d msgs=%d",
-            model, len(tools or []), max_tokens, len(convo),
+            model,
+            len(tools or []),
+            max_tokens,
+            len(convo),
         )
         client = _client(settings.anthropic_api_key)
         try:
@@ -109,7 +138,10 @@ class AnthropicProvider:
             out_tok = cast(int, getattr(final.usage, "output_tokens", 0))
             log.info(
                 "llm done provider=anthropic model=%s stop=%s tokens=%d/%d",
-                model, getattr(final, "stop_reason", "") or "", in_tok, out_tok,
+                model,
+                getattr(final, "stop_reason", "") or "",
+                in_tok,
+                out_tok,
             )
             yield {
                 "type": "done",

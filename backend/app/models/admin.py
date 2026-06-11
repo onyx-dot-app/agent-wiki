@@ -42,9 +42,9 @@ class LLMConfigRequest(BaseModel):
     ingest_selector_model: str | None = None
 
 
-class CustomProviderTestRequest(BaseModel):
-    """Model to preflight; empty/absent falls back to the first saved custom
-    model, then the active model."""
+class ProviderTestRequest(BaseModel):
+    """Model to preflight; empty/absent falls back to the first saved model
+    for that provider, then the active model."""
 
     # `model` is a real field, so silence pydantic's ``model_*`` namespace warning.
     model_config = ConfigDict(protected_namespaces=())
@@ -136,8 +136,8 @@ class LLMView(BaseModel):
     ingest_selector_model: str
 
 
-class CustomProviderTestResult(BaseModel):
-    """Redacted preflight diagnostics — never includes the key."""
+class ProviderTestResult(BaseModel):
+    """Redacted preflight diagnostics for any provider — never includes credentials."""
 
     model_config = ConfigDict(protected_namespaces=())
 

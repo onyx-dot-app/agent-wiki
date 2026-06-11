@@ -15,17 +15,15 @@ from app.auth import invites
 from app.auth.deps import require_admin
 from app.ingest import settings as ingest_settings
 from app.ingest.settings import IngestSettings
+from app.llm.errors import LLMError
 from app.llm import providers as llm_providers
 from app.llm import settings as llm_settings
-from app.llm.providers import custom as custom_provider
 from app.llm.settings import LLMSettings
 from app.models.admin import (
     AdminUserListResponse,
     AdminUserView,
     BraintrustConfigRequest,
     BraintrustView,
-    CustomProviderTestRequest,
-    CustomProviderTestResult,
     IngestConfigRequest,
     InviteUsersRequest,
     InvitedUserView,
@@ -34,6 +32,8 @@ from app.models.admin import (
     LLMConfigRequest,
     LLMView,
     OkResponse,
+    ProviderTestRequest,
+    ProviderTestResult,
     UpdateUserRequest,
     UserCounts,
     WebConfigRequest,
@@ -329,22 +329,32 @@ def put_llm(
     return _llm_view(llm_settings.get())
 
 
-@router.post("/llm/custom/test", response_model=CustomProviderTestResult)
-def test_custom_llm(
-    req: CustomProviderTestRequest,
+@router.post("/llm/{provider_name}/test", response_model=ProviderTestResult)
+def test_llm_provider(
+    provider_name: str,
+    req: ProviderTestRequest,
     _actor: User = Depends(require_admin),
-) -> CustomProviderTestResult:
-    """Preflight the SAVED custom-provider config. Interactive diagnostics —
+) -> ProviderTestResult:
+    """Preflight the SAVED provider config. Interactive diagnostics —
     bounded by the provider's preflight timeout, so it stays inline rather
     than going through a task queue."""
+    provider = llm_providers.get(provider_name)
+    if provider is None:
+        raise HTTPException(status_code=404, detail=f"unknown provider '{provider_name}'")
     s = llm_settings.get()
-    if not s.custom_base_url:
-        raise HTTPException(status_code=400, detail="custom provider is not configured")
-    saved_models = s.provider_models.get("custom", [])
-    model = (req.model or "").strip() or (saved_models[0] if saved_models else "") or s.model
+    try:
+        provider.check_configured(s)
+    except LLMError as exc:
+        raise HTTPException(status_code=400, detail=exc.message) from exc
+    saved_models = s.provider_models.get(provider_name, [])
+    model = (
+        (req.model or "").strip()
+        or (saved_models[0] if saved_models else "")
+        or (s.model if s.provider == provider_name else "")
+    )
     if not model:
         raise HTTPException(status_code=400, detail="add a model name before testing")
-    return CustomProviderTestResult(**custom_provider.test_connection(s, model=model))
+    return ProviderTestResult(**provider.test_connection(s, model=model))
 
 
 # --------------------------------------------------------------------------- #

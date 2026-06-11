@@ -145,7 +145,7 @@ def test_available_omits_custom_without_models(client, admin):
 def test_preflight_unconfigured_is_400(client, admin):
     r = client.post("/api/admin/llm/custom/test", json={})
     assert r.status_code == 400
-    assert "not configured" in r.json()["error"]
+    assert "base URL" in r.json()["error"]
 
 
 def test_preflight_without_any_model_is_400(client, admin):
@@ -170,9 +170,9 @@ def test_preflight_falls_back_to_first_saved_model(client, admin, monkeypatch):
             "completion": "ok",
         }
 
-    import app.api.admin as admin_api
-
-    monkeypatch.setattr(admin_api.custom_provider, "test_connection", fake_test)
+    provider = llm_providers.get("custom")
+    assert provider is not None
+    monkeypatch.setattr(provider, "test_connection", fake_test)
     r = client.post("/api/admin/llm/custom/test", json={})
     assert r.status_code == 200
     assert r.json()["ok"] is True
@@ -194,10 +194,48 @@ def test_preflight_explicit_model_wins(client, admin, monkeypatch):
             "completion": "Custom provider rejected the API key.",
         }
 
-    import app.api.admin as admin_api
-
-    monkeypatch.setattr(admin_api.custom_provider, "test_connection", fake_test)
+    provider = llm_providers.get("custom")
+    assert provider is not None
+    monkeypatch.setattr(provider, "test_connection", fake_test)
     r = client.post("/api/admin/llm/custom/test", json={"model": "other-model"})
     assert r.status_code == 200
     assert r.json()["ok"] is False
     assert seen["model"] == "other-model"
+
+
+def test_preflight_unknown_provider_is_404(client, admin):
+    r = client.post("/api/admin/llm/custom-bogus/test", json={})
+    assert r.status_code == 404
+    assert "unknown provider" in r.json()["error"]
+
+
+def test_preflight_builtin_provider_dispatches_via_registry(client, admin, monkeypatch):
+    _put(
+        client,
+        provider="anthropic",
+        model="claude-3-5-haiku-latest",
+        anthropic_api_key="sk-ant-test",
+        provider_models={"anthropic": ["claude-3-5-haiku-latest"]},
+    )
+    seen: dict[str, str] = {}
+
+    def fake_test(settings, *, model):
+        seen["model"] = model
+        return {
+            "ok": True,
+            "base_url": "",
+            "auth_present": bool(settings.anthropic_api_key),
+            "model": model,
+            "models_endpoint": "ok",
+            "completion": "ok",
+        }
+
+    provider = llm_providers.get("anthropic")
+    assert provider is not None
+    monkeypatch.setattr(provider, "test_connection", fake_test)
+
+    r = client.post("/api/admin/llm/anthropic/test", json={})
+
+    assert r.status_code == 200
+    assert r.json()["ok"] is True
+    assert seen["model"] == "claude-3-5-haiku-latest"

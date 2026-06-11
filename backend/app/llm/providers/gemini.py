@@ -9,6 +9,7 @@ differs from Anthropic/OpenAI in two notable ways:
   so we resolve the name by walking earlier assistant turns
   (see ``tool_call_id_to_name``).
 """
+
 from __future__ import annotations
 
 import logging
@@ -19,6 +20,8 @@ from google import genai
 
 from app.llm.errors import LLMError
 from app.llm.providers._common import (
+    PREFLIGHT_TIMEOUT_SECONDS,
+    run_preflight,
     split_system,
     stringify_tool_result,
     tool_call_id_to_name,
@@ -45,6 +48,28 @@ class GeminiProvider:
                 "not_configured",
                 "Gemini API key is not set. An admin needs to add it on the admin page.",
             )
+
+    def test_connection(self, settings: LLMSettings, *, model: str) -> dict[str, Any]:
+        """Preflight the saved Gemini config without touching the cached client."""
+        client = genai.Client(api_key=settings.gemini_api_key)
+        return run_preflight(
+            base_url="",
+            auth_present=bool(settings.gemini_api_key),
+            model=model,
+            listing=lambda: cast(Any, client.models).list(),
+            completion=lambda: cast(Any, client.models).generate_content(
+                model=model,
+                contents=cast(Any, "ping"),
+                config=cast(
+                    Any,
+                    {
+                        "max_output_tokens": 1,
+                        "http_options": {"timeout": int(PREFLIGHT_TIMEOUT_SECONDS * 1000)},
+                    },
+                ),
+            ),
+            translate=_translate_error,
+        )
 
     def stream(
         self,
@@ -81,7 +106,10 @@ class GeminiProvider:
 
         log.info(
             "llm request provider=gemini model=%s tools=%d max_tokens=%d msgs=%d",
-            model, len(tools or []), max_tokens, len(convo),
+            model,
+            len(tools or []),
+            max_tokens,
+            len(convo),
         )
         client = _client(settings.gemini_api_key)
         try:
@@ -127,7 +155,10 @@ class GeminiProvider:
                     }
             log.info(
                 "llm done provider=gemini model=%s stop=%s tokens=%d/%d",
-                model, stop_reason, usage["input_tokens"], usage["output_tokens"],
+                model,
+                stop_reason,
+                usage["input_tokens"],
+                usage["output_tokens"],
             )
             yield {"type": "done", "stop_reason": stop_reason, "usage": usage}
         except LLMError:
@@ -152,18 +183,14 @@ def _content_for(m: dict[str, Any], id_to_name: dict[str, str]) -> dict[str, Any
             response_obj = {"result": stringify_tool_result(content)}
         return {
             "role": "user",
-            "parts": [
-                {"function_response": {"name": name, "response": response_obj}}
-            ],
+            "parts": [{"function_response": {"name": name, "response": response_obj}}],
         }
     if role == "assistant" and m.get("tool_calls"):
         parts: list[dict[str, Any]] = []
         if m.get("content"):
             parts.append({"text": m["content"]})
         for tc in m["tool_calls"]:
-            parts.append(
-                {"function_call": {"name": tc["name"], "args": tc["arguments"]}}
-            )
+            parts.append({"function_call": {"name": tc["name"], "args": tc["arguments"]}})
         return {"role": "model", "parts": parts}
     if role == "assistant":
         return {"role": "model", "parts": [{"text": m["content"] or ""}]}

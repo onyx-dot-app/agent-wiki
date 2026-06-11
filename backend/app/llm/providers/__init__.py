@@ -60,6 +60,14 @@ class Provider(Protocol):
         """
         ...
 
+    def test_connection(self, settings: LLMSettings, *, model: str) -> dict[str, Any]:
+        """Preflight the provider's SAVED credentials: a cheap listing probe when
+        the backend has one (non-fatal if unsupported) plus a minimal 1-token
+        completion against ``model``. Returns a redacted diagnostics dict (keys:
+        ok, base_url, auth_present, model, models_endpoint, completion) — NEVER
+        credentials."""
+        ...
+
     def stream(
         self,
         messages: list[dict[str, Any]],

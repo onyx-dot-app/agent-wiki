@@ -481,9 +481,7 @@ def _patch_preflight_client(
 
 def test_preflight_all_ok(monkeypatch: pytest.MonkeyPatch) -> None:
     fake, ctor = _patch_preflight_client(monkeypatch)
-    result = custom_provider.test_connection(
-        _settings(custom_api_key="sk-x"), model="m-1"
-    )
+    result = custom_provider.PROVIDER.test_connection(_settings(custom_api_key="sk-x"), model="m-1")
     assert result["ok"] is True
     assert result["models_endpoint"] == "ok"
     assert result["completion"] == "ok"
@@ -501,7 +499,7 @@ def test_preflight_models_endpoint_missing_is_nonfatal(
     response = httpx.Response(status_code=404, request=request)
     nf = openai.NotFoundError("nope", response=response, body=None)
     _patch_preflight_client(monkeypatch, models_exc=nf)
-    result = custom_provider.test_connection(_settings(), model="m-1")
+    result = custom_provider.PROVIDER.test_connection(_settings(), model="m-1")
     assert result["ok"] is True
     assert result["models_endpoint"] != "ok"
     assert "model name" in result["models_endpoint"]
@@ -515,9 +513,7 @@ def test_preflight_completion_failure_reports_translated_error(
     response = httpx.Response(status_code=401, request=request)
     auth = openai.AuthenticationError("bad key", response=response, body=None)
     _, ctor = _patch_preflight_client(monkeypatch, completion_exc=auth)
-    result = custom_provider.test_connection(
-        _settings(custom_api_key=""), model="m-1"
-    )
+    result = custom_provider.PROVIDER.test_connection(_settings(custom_api_key=""), model="m-1")
     assert result["ok"] is False
     assert "rejected the API key" in result["completion"]
     assert result["auth_present"] is False
