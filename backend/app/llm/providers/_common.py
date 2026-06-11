@@ -5,10 +5,16 @@ interface; they're translation utilities that more than one provider
 needs. If something here grows beyond translation glue, give it a
 proper home.
 """
+
 from __future__ import annotations
 
 import json
-from typing import Any, cast
+from typing import Any, Callable, cast
+
+from app.llm.errors import LLMError
+
+
+PREFLIGHT_TIMEOUT_SECONDS = 10.0
 
 
 def safe_json_loads(s: str) -> dict[str, Any]:
@@ -79,3 +85,34 @@ def stringify_tool_result(content: Any) -> str:
         return json.dumps(content)
     except (TypeError, ValueError):
         return str(content)
+
+
+def run_preflight(
+    *,
+    base_url: str,
+    auth_present: bool,
+    model: str,
+    listing: Callable[[], object],
+    completion: Callable[[], object],
+    translate: Callable[[Exception], LLMError],
+) -> dict[str, Any]:
+    """Shared preflight scaffold: non-fatal listing probe + decisive 1-token
+    completion. Failures surface as translated messages — never credentials."""
+    result: dict[str, Any] = {
+        "base_url": base_url,
+        "auth_present": auth_present,
+        "model": model,
+    }
+    try:
+        listing()
+        result["models_endpoint"] = "ok"
+    except Exception as exc:
+        result["models_endpoint"] = translate(exc).message
+    try:
+        completion()
+        result["completion"] = "ok"
+        result["ok"] = True
+    except Exception as exc:
+        result["completion"] = translate(exc).message
+        result["ok"] = False
+    return result

@@ -15,6 +15,7 @@ from app.auth import invites
 from app.auth.deps import require_admin
 from app.ingest import settings as ingest_settings
 from app.ingest.settings import IngestSettings
+from app.llm.errors import LLMError
 from app.llm import providers as llm_providers
 from app.llm import settings as llm_settings
 from app.llm.settings import LLMSettings
@@ -31,6 +32,8 @@ from app.models.admin import (
     LLMConfigRequest,
     LLMView,
     OkResponse,
+    ProviderTestRequest,
+    ProviderTestResult,
     UpdateUserRequest,
     UserCounts,
     WebConfigRequest,
@@ -117,15 +120,11 @@ def update_user(
 
     if req.is_admin is not None and req.is_admin != was_admin:
         users_repo.set_admin(user_id, req.is_admin)
-        log.info(
-            "admin: %s set is_admin=%s on user %s", actor.id, req.is_admin, user_id
-        )
+        log.info("admin: %s set is_admin=%s on user %s", actor.id, req.is_admin, user_id)
 
     if req.is_active is not None and req.is_active != was_active:
         users_repo.set_active(user_id, req.is_active)
-        log.info(
-            "admin: %s set is_active=%s on user %s", actor.id, req.is_active, user_id
-        )
+        log.info("admin: %s set is_active=%s on user %s", actor.id, req.is_active, user_id)
 
     row = users_repo.get_by_id(user_id)
     assert row is not None
@@ -328,6 +327,34 @@ def put_llm(
     return _llm_view(llm_settings.get())
 
 
+@router.post("/llm/{provider_name}/test", response_model=ProviderTestResult)
+def test_llm_provider(
+    provider_name: str,
+    req: ProviderTestRequest,
+    _actor: User = Depends(require_admin),
+) -> ProviderTestResult:
+    """Preflight the SAVED provider config. Interactive diagnostics —
+    bounded by the provider's preflight timeout, so it stays inline rather
+    than going through a task queue."""
+    provider = llm_providers.get(provider_name)
+    if provider is None:
+        raise HTTPException(status_code=404, detail=f"unknown provider '{provider_name}'")
+    s = llm_settings.get()
+    try:
+        provider.check_configured(s)
+    except LLMError as exc:
+        raise HTTPException(status_code=400, detail=exc.message) from exc
+    saved_models = s.provider_models.get(provider_name, [])
+    model = (
+        (req.model or "").strip()
+        or (saved_models[0] if saved_models else "")
+        or (s.model if s.provider == provider_name else "")
+    )
+    if not model:
+        raise HTTPException(status_code=400, detail="add a model name before testing")
+    return ProviderTestResult.model_validate(provider.test_connection(s, model=model))
+
+
 # --------------------------------------------------------------------------- #
 # Web search / crawl settings (Serper + Firecrawl)
 # --------------------------------------------------------------------------- #
@@ -365,9 +392,7 @@ def put_web(
         return sent
 
     serper_key = _resolve("serper_api_key", req.serper_api_key, current.serper_api_key)
-    firecrawl_key = _resolve(
-        "firecrawl_api_key", req.firecrawl_api_key, current.firecrawl_api_key
-    )
+    firecrawl_key = _resolve("firecrawl_api_key", req.firecrawl_api_key, current.firecrawl_api_key)
 
     web_settings.upsert(
         serper_api_key=serper_key,

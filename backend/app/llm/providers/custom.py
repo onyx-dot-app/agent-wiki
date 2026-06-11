@@ -11,7 +11,12 @@ import openai
 from openai import OpenAI
 
 from app.llm.errors import LLMError
-from app.llm.providers._common import safe_json_loads, stringify_tool_result
+from app.llm.providers._common import (
+    PREFLIGHT_TIMEOUT_SECONDS,
+    run_preflight,
+    safe_json_loads,
+    stringify_tool_result,
+)
 from app.llm.providers._openai_errors import translate_openai_error
 from app.llm.settings import LLMSettings
 
@@ -19,6 +24,7 @@ log = logging.getLogger(__name__)
 
 StreamEvent = dict[str, Any]
 
+_PROVIDER_LABEL = "Custom provider"
 _KEYLESS_API_KEY = "EMPTY"  # vLLM/LM Studio allow keyless mode; the SDK still needs a value.
 
 
@@ -49,6 +55,27 @@ class CustomProvider:
                 "not_configured",
                 "Custom provider base URL is not set. An admin needs to add it on the admin page.",
             )
+
+    def test_connection(self, settings: LLMSettings, *, model: str) -> dict[str, Any]:
+        """Preflight the saved gateway config without touching the cached client."""
+        client = OpenAI(
+            api_key=settings.custom_api_key or _KEYLESS_API_KEY,
+            base_url=settings.custom_base_url,
+            timeout=PREFLIGHT_TIMEOUT_SECONDS,
+            max_retries=0,
+        )
+        return run_preflight(
+            base_url=settings.custom_base_url,
+            auth_present=bool(settings.custom_api_key),
+            model=model,
+            listing=lambda: cast(Any, client).models.list(),
+            completion=lambda: cast(Any, client.chat).completions.create(
+                model=model,
+                messages=[{"role": "user", "content": "ping"}],
+                max_tokens=1,
+            ),
+            translate=lambda exc: translate_openai_error(exc, provider_label=_PROVIDER_LABEL),
+        )
 
     def stream(
         self,
@@ -160,7 +187,7 @@ class CustomProvider:
             raise
         except Exception as exc:
             log.exception("llm provider error provider=custom model=%s", model)
-            raise translate_openai_error(exc, provider_label="Custom provider") from exc
+            raise translate_openai_error(exc, provider_label=_PROVIDER_LABEL) from exc
 
 
 def _cc_message(m: dict[str, Any]) -> dict[str, Any]:

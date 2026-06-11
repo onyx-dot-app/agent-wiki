@@ -42,6 +42,16 @@ class LLMConfigRequest(BaseModel):
     ingest_selector_model: str | None = None
 
 
+class ProviderTestRequest(BaseModel):
+    """Model to preflight; empty/absent falls back to the first saved model
+    for that provider, then the active model."""
+
+    # `model` is a real field, so silence pydantic's ``model_*`` namespace warning.
+    model_config = ConfigDict(protected_namespaces=())
+
+    model: str | None = None
+
+
 class WebConfigRequest(BaseModel):
     serper_api_key: str | None = None
     firecrawl_api_key: str | None = None
@@ -124,6 +134,20 @@ class LLMView(BaseModel):
     custom_display_name: str
     provider_models: dict[str, list[str]]
     ingest_selector_model: str
+
+
+class ProviderTestResult(BaseModel):
+    """Redacted preflight diagnostics for any provider — never includes credentials."""
+
+    model_config = ConfigDict(protected_namespaces=())
+
+    ok: bool
+    base_url: str
+    auth_present: bool
+    model: str
+    # "ok" or a translated, redaction-safe error message.
+    models_endpoint: str
+    completion: str
 
 
 class WebView(BaseModel):

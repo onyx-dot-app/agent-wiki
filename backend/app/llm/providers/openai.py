@@ -1,4 +1,5 @@
 """OpenAI provider — Responses API streaming (NOT Chat Completions)."""
+
 from __future__ import annotations
 
 import json
@@ -9,7 +10,12 @@ from typing import Any, Iterator, cast
 from openai import OpenAI
 
 from app.llm.errors import LLMError
-from app.llm.providers._common import safe_json_loads, split_system
+from app.llm.providers._common import (
+    PREFLIGHT_TIMEOUT_SECONDS,
+    run_preflight,
+    safe_json_loads,
+    split_system,
+)
 from app.llm.providers._openai_errors import translate_openai_error
 from app.llm.settings import LLMSettings
 
@@ -33,6 +39,26 @@ class OpenAIProvider:
                 "not_configured",
                 "OpenAI API key is not set. An admin needs to add it on the admin page.",
             )
+
+    def test_connection(self, settings: LLMSettings, *, model: str) -> dict[str, Any]:
+        """Preflight the saved OpenAI config without touching the cached client."""
+        client = OpenAI(
+            api_key=settings.openai_api_key,
+            timeout=PREFLIGHT_TIMEOUT_SECONDS,
+            max_retries=0,
+        )
+        return run_preflight(
+            base_url="",
+            auth_present=bool(settings.openai_api_key),
+            model=model,
+            listing=lambda: cast(Any, client).models.list(),
+            completion=lambda: cast(Any, client.responses).create(
+                model=model,
+                input="ping",
+                max_output_tokens=16,
+            ),
+            translate=lambda exc: translate_openai_error(exc, provider_label="OpenAI"),
+        )
 
     def stream(
         self,
@@ -72,7 +98,10 @@ class OpenAIProvider:
 
         log.info(
             "llm request provider=openai model=%s tools=%d max_tokens=%d items=%d",
-            model, len(tools or []), max_tokens, len(input_items),
+            model,
+            len(tools or []),
+            max_tokens,
+            len(input_items),
         )
         client = _client(settings.openai_api_key)
         try:
@@ -117,7 +146,10 @@ class OpenAIProvider:
                     status = getattr(resp, "status", "") or ""
                     log.info(
                         "llm done provider=openai model=%s status=%s tokens=%d/%d",
-                        model, status, in_tok, out_tok,
+                        model,
+                        status,
+                        in_tok,
+                        out_tok,
                     )
                     yield {
                         "type": "done",

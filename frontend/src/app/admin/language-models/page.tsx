@@ -585,9 +585,104 @@ function ProviderForm({
         </div>
       </div>
 
+      <TestConnection
+        provider={provider}
+        model={knownModels.find((m) => selectedModels.has(m)) ?? null}
+        configured={configured}
+      />
+
       <FormMessages error={error} saved={saved} />
       <FormActions saving={saving} configured={configured} onClear={onClear} />
     </form>
+  );
+}
+
+interface ProviderTestResult {
+  ok: boolean;
+  base_url: string;
+  auth_present: boolean;
+  model: string;
+  models_endpoint: string;
+  completion: string;
+}
+
+function TestConnection({
+  provider,
+  model,
+  configured,
+}: {
+  provider: Provider;
+  model: string | null;
+  configured: boolean;
+}) {
+  const [testing, setTesting] = useState(false);
+  const [result, setResult] = useState<ProviderTestResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function onTest() {
+    setTesting(true);
+    setResult(null);
+    setError(null);
+    try {
+      const r = await apiFetch<ProviderTestResult>(
+        `/admin/llm/${provider}/test`,
+        {
+          method: "POST",
+          body: JSON.stringify({ model }),
+        },
+      );
+      setResult(r);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "test failed");
+    } finally {
+      setTesting(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center gap-2">
+        <Button
+          type="button"
+          variant="default"
+          size="sm"
+          disabled={testing || !configured}
+          onClick={() => void onTest()}
+        >
+          {testing ? "Testing…" : "Test connection"}
+        </Button>
+        <span className="text-xs text-(--text-03)">
+          Tests the saved configuration.
+        </span>
+      </div>
+      {error && (
+        <div className="text-[13px] text-(--status-text-error-05)">{error}</div>
+      )}
+      {result && (
+        <div className="flex flex-col gap-1 font-mono text-xs">
+          <div
+            className={
+              result.ok
+                ? "text-(--status-text-success-05)"
+                : "text-(--status-text-error-05)"
+            }
+          >
+            {result.ok
+              ? `✓ ${result.model} responded`
+              : `✗ ${result.completion}`}
+          </div>
+          <div className="text-(--text-03)">
+            {result.models_endpoint === "ok"
+              ? "✓ models endpoint reachable"
+              : `• models endpoint: ${result.models_endpoint}`}
+          </div>
+          <div className="text-(--text-03)">
+            {result.auth_present ? "auth: key sent" : "auth: keyless"}
+            {result.base_url ? ` · ${result.base_url}` : ""}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -757,6 +852,12 @@ function CustomProviderForm({
           </div>
         </div>
       </div>
+
+      <TestConnection
+        provider="custom"
+        model={models[0] ?? null}
+        configured={configured}
+      />
 
       <FormMessages error={error} saved={saved} />
       <FormActions saving={saving} configured={configured} onClear={onClear} />
