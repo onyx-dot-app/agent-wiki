@@ -9,41 +9,17 @@ import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { BackLink, PageHeader } from "@/components/common/PageHeader";
 import { RequireAdmin } from "@/components/RequireAdmin";
 import { apiFetch } from "@/lib/api";
+import {
+  ALL_PROVIDERS,
+  isConfigured,
+  providerLabel,
+  type LLMSettings,
+} from "@/lib/llm";
 import { useIsMobile } from "@/lib/viewport";
 
 interface IngestSettings {
   max_doc_chars: number;
   api_key: string | null;
-}
-
-type Provider = "anthropic" | "openai" | "gemini" | "ollama";
-
-interface LLMSettings {
-  provider: Provider;
-  model: string;
-  anthropic_api_key_set: boolean;
-  openai_api_key_set: boolean;
-  gemini_api_key_set: boolean;
-  ollama_base_url: string;
-  provider_models: Record<string, string[]>;
-  ingest_selector_model: string;
-}
-
-const PROVIDER_LABEL: Record<Provider, string> = {
-  anthropic: "Anthropic",
-  openai: "OpenAI",
-  gemini: "Gemini",
-  ollama: "Ollama",
-};
-
-const ALL_PROVIDERS: Provider[] = ["anthropic", "openai", "gemini", "ollama"];
-
-function isConfigured(p: Provider, s: LLMSettings): boolean {
-  if (p === "anthropic") return s.anthropic_api_key_set;
-  if (p === "openai") return s.openai_api_key_set;
-  if (p === "gemini") return s.gemini_api_key_set;
-  if (p === "ollama") return !!s.ollama_base_url;
-  return false;
 }
 
 export default function AdminIngestPage() {
@@ -386,7 +362,7 @@ function SelectorModelSection({
                   <span
                     className={`shrink-0 text-[13px] font-medium ${isSelected ? "text-(--text-05)" : "text-(--text-04)"}`}
                   >
-                    {PROVIDER_LABEL[p]}
+                    {providerLabel(p, settings)}
                   </span>
                   <span
                     className={`font-mono text-[13px] ${isSelected ? "text-(--text-05)" : "text-(--text-03)"}`}

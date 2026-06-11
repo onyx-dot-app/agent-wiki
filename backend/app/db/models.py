@@ -684,6 +684,15 @@ class LLMSettings(Base):
     ollama_base_url: Mapped[str] = mapped_column(
         Text, nullable=False, server_default=text("''")
     )
+    custom_api_key: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("''")
+    )
+    custom_base_url: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("''")
+    )
+    custom_display_name: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("''")
+    )
     provider_models: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, server_default=text("'{}'::jsonb")
     )

@@ -1,6 +1,11 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import {
+  useEffect,
+  useState,
+  type FormEvent,
+  type InputHTMLAttributes,
+} from "react";
 import { mutate as globalMutate } from "swr";
 
 import { Button } from "@onyx-ai/opal/components";
@@ -10,12 +15,16 @@ import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { BackLink, PageHeader } from "@/components/common/PageHeader";
 import { RequireAdmin } from "@/components/RequireAdmin";
 import { apiFetch } from "@/lib/api";
+import {
+  ALL_PROVIDERS,
+  isConfigured,
+  providerLabel,
+  type LLMSettings,
+  type Provider,
+} from "@/lib/llm";
 import { useIsMobile } from "@/lib/viewport";
 
-type Provider = "anthropic" | "openai" | "gemini" | "ollama";
-
 interface ProviderMeta {
-  label: string;
   defaultModel: string;
   keyLabel: string;
   keyPlaceholder: string;
@@ -24,36 +33,36 @@ interface ProviderMeta {
 
 const PROVIDER_META: Record<Provider, ProviderMeta> = {
   anthropic: {
-    label: "Anthropic",
     defaultModel: "claude-sonnet-4-6",
     keyLabel: "API key",
     keyPlaceholder: "sk-ant-…",
     initial: "A",
   },
   openai: {
-    label: "OpenAI",
     defaultModel: "gpt-5.5",
     keyLabel: "API key",
     keyPlaceholder: "sk-…",
     initial: "O",
   },
   gemini: {
-    label: "Gemini",
     defaultModel: "gemini-3.1-pro-preview",
     keyLabel: "API key",
     keyPlaceholder: "AIza…",
     initial: "G",
   },
   ollama: {
-    label: "Ollama",
     defaultModel: "llama3.1",
     keyLabel: "Base URL",
     keyPlaceholder: "http://localhost:11434",
     initial: "L",
   },
+  custom: {
+    defaultModel: "",
+    keyLabel: "API key",
+    keyPlaceholder: "sk-…",
+    initial: "C",
+  },
 };
-
-const ALL_PROVIDERS: Provider[] = ["anthropic", "openai", "gemini", "ollama"];
 
 const PROVIDER_MODELS: Record<Provider, string[]> = {
   anthropic: [
@@ -65,34 +74,15 @@ const PROVIDER_MODELS: Record<Provider, string[]> = {
   openai: ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.2"],
   gemini: ["gemini-3.1-pro-preview", "gemini-3-flash-preview"],
   ollama: ["llama3.1", "llama3.2", "mistral", "phi3", "qwen2.5", "deepseek-r1"],
+  custom: [],
 };
-
-interface LLMSettings {
-  provider: Provider;
-  model: string;
-  anthropic_api_key_set: boolean;
-  openai_api_key_set: boolean;
-  gemini_api_key_set: boolean;
-  anthropic_api_key_hint: string;
-  openai_api_key_hint: string;
-  gemini_api_key_hint: string;
-  ollama_base_url: string;
-  provider_models: Record<string, string[]>;
-}
-
-function isConfigured(p: Provider, s: LLMSettings): boolean {
-  if (p === "anthropic") return s.anthropic_api_key_set;
-  if (p === "openai") return s.openai_api_key_set;
-  if (p === "gemini") return s.gemini_api_key_set;
-  if (p === "ollama") return !!s.ollama_base_url;
-  return false;
-}
 
 function keyHint(p: Provider, s: LLMSettings): string {
   if (p === "anthropic") return s.anthropic_api_key_hint;
   if (p === "openai") return s.openai_api_key_hint;
   if (p === "gemini") return s.gemini_api_key_hint;
   if (p === "ollama") return s.ollama_base_url || "http://localhost:11434";
+  if (p === "custom") return s.custom_base_url;
   return "";
 }
 
@@ -268,7 +258,7 @@ function AgentModelSection({
             PROVIDER_META[settings.provider as Provider] ? (
               <>
                 <span className="text-sm font-medium">
-                  {PROVIDER_META[settings.provider as Provider].label}
+                  {providerLabel(settings.provider as Provider, settings)}
                 </span>
                 <span className="ml-2 text-sm text-(--text-03)">
                   {settings.model || "—"}
@@ -314,7 +304,7 @@ function AgentModelSection({
                   <span
                     className={`shrink-0 text-[13px] font-medium ${isSelected ? "text-(--text-05)" : "text-(--text-04)"}`}
                   >
-                    {PROVIDER_META[p].label}
+                    {providerLabel(p, settings)}
                   </span>
                   <span
                     className={`font-mono text-[13px] ${isSelected ? "text-(--text-05)" : "text-(--text-03)"}`}
@@ -388,7 +378,9 @@ function ProviderCard({
 
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <span className="text-sm font-medium">{meta.label}</span>
+            <span className="text-sm font-medium">
+              {providerLabel(provider, settings)}
+            </span>
             {isActive && (
               <span className="rounded-full border border-(--border-01) bg-(--background-tint-03) px-[6px] py-[2px] text-[11px] font-semibold text-(--text-05)">
                 Agent
@@ -421,12 +413,20 @@ function ProviderCard({
       {/* Expanded form */}
       {expanded && (
         <div className="border-t border-(--border-01) bg-(--background-tint-00) p-4">
-          <ProviderForm
-            provider={provider}
-            settings={settings}
-            configured={configured}
-            onSaved={onSaved}
-          />
+          {provider === "custom" ? (
+            <CustomProviderForm
+              settings={settings}
+              configured={configured}
+              onSaved={onSaved}
+            />
+          ) : (
+            <ProviderForm
+              provider={provider}
+              settings={settings}
+              configured={configured}
+              onSaved={onSaved}
+            />
+          )}
         </div>
       )}
     </div>
@@ -439,7 +439,8 @@ function ProviderForm({
   configured,
   onSaved,
 }: {
-  provider: Provider;
+  // Custom routes to CustomProviderForm — encode that in the type.
+  provider: Exclude<Provider, "custom">;
   settings: LLMSettings;
   configured: boolean;
   onSaved: () => void;
@@ -508,7 +509,7 @@ function ProviderForm({
   async function onClear() {
     if (
       !(await confirmDialog({
-        title: `Remove ${meta.label} credentials?`,
+        title: `Remove ${providerLabel(provider, settings)} credentials?`,
         confirmLabel: "Remove",
       }))
     )
@@ -533,22 +534,19 @@ function ProviderForm({
 
   return (
     <form onSubmit={onSubmit} className="flex flex-col gap-4">
-      <label>
-        <div className={lblClass}>{meta.keyLabel}</div>
-        <input
-          type={isOllama ? "text" : "password"}
-          value={keyValue}
-          onChange={(e) => setKeyValue(e.target.value)}
-          placeholder={
-            configured
-              ? isOllama
-                ? currentHint
-                : "leave blank to keep current"
-              : meta.keyPlaceholder
-          }
-          className={inputClass}
-        />
-      </label>
+      <Field
+        label={meta.keyLabel}
+        type={isOllama ? "text" : "password"}
+        value={keyValue}
+        onChange={(e) => setKeyValue(e.target.value)}
+        placeholder={
+          configured
+            ? isOllama
+              ? currentHint
+              : "leave blank to keep current"
+            : meta.keyPlaceholder
+        }
+      />
 
       <div>
         <div className="mb-2 flex items-baseline justify-between">
@@ -587,6 +585,208 @@ function ProviderForm({
         </div>
       </div>
 
+      <FormMessages error={error} saved={saved} />
+      <FormActions saving={saving} configured={configured} onClear={onClear} />
+    </form>
+  );
+}
+
+function CustomProviderForm({
+  settings,
+  configured,
+  onSaved,
+}: {
+  settings: LLMSettings;
+  configured: boolean;
+  onSaved: () => void;
+}) {
+  const [baseUrl, setBaseUrl] = useState(settings.custom_base_url);
+  const [keyValue, setKeyValue] = useState("");
+  const [displayName, setDisplayName] = useState(settings.custom_display_name);
+  const [models, setModels] = useState<string[]>(
+    () => settings.provider_models["custom"] ?? [],
+  );
+  const [newModel, setNewModel] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+  const confirmDialog = useConfirm();
+
+  function addModel() {
+    const m = newModel.trim();
+    if (!m || models.includes(m)) return;
+    setModels((prev) => [...prev, m]);
+    setNewModel("");
+  }
+
+  async function onSubmit(e: FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    setError(null);
+    setSaved(false);
+    try {
+      const body: Record<string, unknown> = {
+        custom_display_name: displayName.trim(),
+        provider_models: { ...settings.provider_models, custom: models },
+      };
+      // Empty string means "keep current" server-side; only send a real URL.
+      if (baseUrl.trim()) body.custom_base_url = baseUrl.trim();
+      if (keyValue) body.custom_api_key = keyValue;
+      await apiFetch("/admin/llm", {
+        method: "PUT",
+        body: JSON.stringify(body),
+      });
+      setKeyValue("");
+      setSaved(true);
+      onSaved();
+      void globalMutate("/llm/status");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "failed to save");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function onClear() {
+    if (
+      !(await confirmDialog({
+        title: "Remove custom provider credentials?",
+        confirmLabel: "Remove",
+      }))
+    )
+      return;
+    setSaving(true);
+    setError(null);
+    try {
+      await apiFetch("/admin/llm", {
+        method: "PUT",
+        body: JSON.stringify({
+          custom_base_url: null,
+          custom_api_key: null,
+          custom_display_name: "",
+          provider_models: { ...settings.provider_models, custom: [] },
+        }),
+      });
+      onSaved();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "failed to remove");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <form onSubmit={onSubmit} className="flex flex-col gap-4">
+      <Field
+        label="Base URL"
+        type="text"
+        value={baseUrl}
+        onChange={(e) => setBaseUrl(e.target.value)}
+        placeholder="https://openrouter.ai/api/v1"
+        hint="Any OpenAI-compatible endpoint. Requests go to /chat/completions under this URL."
+      />
+
+      <Field
+        label="API key (optional)"
+        type="password"
+        value={keyValue}
+        onChange={(e) => setKeyValue(e.target.value)}
+        placeholder={
+          settings.custom_api_key_set ? "leave blank to keep current" : "sk-…"
+        }
+      />
+
+      <Field
+        label="Display name (optional)"
+        type="text"
+        value={displayName}
+        onChange={(e) => setDisplayName(e.target.value)}
+        placeholder="Custom"
+      />
+
+      <div>
+        <div className="mb-2 flex items-baseline justify-between">
+          <div className={lblClass}>Models</div>
+          <div className="text-xs text-(--text-03)">
+            Add at least one model name
+          </div>
+        </div>
+        <div className="flex flex-col gap-1.5">
+          {models.map((id) => (
+            <div
+              key={id}
+              className="flex items-center justify-between rounded-(--border-radius-08) border border-(--border-01) bg-(--background-tint-00) py-[6px] pr-2 pl-3"
+            >
+              <span className="font-mono text-[13px] text-(--text-05)">
+                {id}
+              </span>
+              <Button
+                type="button"
+                variant="default"
+                size="sm"
+                onClick={() =>
+                  setModels((prev) => prev.filter((m) => m !== id))
+                }
+              >
+                Remove
+              </Button>
+            </div>
+          ))}
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={newModel}
+              onChange={(e) => setNewModel(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  addModel();
+                }
+              }}
+              placeholder="deepseek-chat"
+              className={inputClass}
+            />
+            <Button
+              type="button"
+              variant="default"
+              size="sm"
+              onClick={addModel}
+            >
+              Add
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      <FormMessages error={error} saved={saved} />
+      <FormActions saving={saving} configured={configured} onClear={onClear} />
+    </form>
+  );
+}
+
+function Field({
+  label,
+  hint,
+  ...inputProps
+}: { label: string; hint?: string } & InputHTMLAttributes<HTMLInputElement>) {
+  return (
+    <label>
+      <div className={lblClass}>{label}</div>
+      <input className={inputClass} {...inputProps} />
+      {hint && <div className="mt-1 text-xs text-(--text-03)">{hint}</div>}
+    </label>
+  );
+}
+
+function FormMessages({
+  error,
+  saved,
+}: {
+  error: string | null;
+  saved: boolean;
+}) {
+  return (
+    <>
       {error && (
         <div className="text-[13px] text-(--status-text-error-05)">{error}</div>
       )}
@@ -595,23 +795,36 @@ function ProviderForm({
           Saved.
         </div>
       )}
-      <div className="flex gap-2">
-        <Button type="submit" variant="action" size="sm" disabled={saving}>
-          {saving ? "Saving…" : "Save"}
+    </>
+  );
+}
+
+function FormActions({
+  saving,
+  configured,
+  onClear,
+}: {
+  saving: boolean;
+  configured: boolean;
+  onClear: () => void;
+}) {
+  return (
+    <div className="flex gap-2">
+      <Button type="submit" variant="action" size="sm" disabled={saving}>
+        {saving ? "Saving…" : "Save"}
+      </Button>
+      {configured && (
+        <Button
+          type="button"
+          variant="danger"
+          size="sm"
+          disabled={saving}
+          onClick={onClear}
+        >
+          Remove
         </Button>
-        {configured && (
-          <Button
-            type="button"
-            variant="danger"
-            size="sm"
-            disabled={saving}
-            onClick={onClear}
-          >
-            Remove
-          </Button>
-        )}
-      </div>
-    </form>
+      )}
+    </div>
   );
 }
 

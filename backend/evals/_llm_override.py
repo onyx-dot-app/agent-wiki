@@ -73,6 +73,9 @@ def build_settings(provider: str, model: str) -> LLMSettings:
         openai_api_key=_env_key("openai") if provider == "openai" else "",
         gemini_api_key=_env_key("gemini") if provider == "gemini" else "",
         ollama_base_url=os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434"),
+        custom_api_key="",
+        custom_base_url="",
+        custom_display_name="",
         provider_models={},
         ingest_selector_model="",
     )

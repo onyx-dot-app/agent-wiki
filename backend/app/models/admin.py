@@ -34,6 +34,10 @@ class LLMConfigRequest(BaseModel):
     openai_api_key: str | None = None
     gemini_api_key: str | None = None
     ollama_base_url: str | None = None
+    custom_api_key: str | None = None
+    custom_base_url: str | None = None
+    # Plain set-on-sent (not a secret) — "" clears, unlike the key fields.
+    custom_display_name: str | None = None
     provider_models: dict[str, list[str]] | None = None
     ingest_selector_model: str | None = None
 
@@ -114,6 +118,10 @@ class LLMView(BaseModel):
     gemini_api_key_hint: str
     # Ollama doesn't have an API key — surface the base URL directly.
     ollama_base_url: str
+    custom_api_key_set: bool
+    custom_api_key_hint: str
+    custom_base_url: str
+    custom_display_name: str
     provider_models: dict[str, list[str]]
     ingest_selector_model: str
 

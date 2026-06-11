@@ -15,6 +15,7 @@ from app.auth import invites
 from app.auth.deps import require_admin
 from app.ingest import settings as ingest_settings
 from app.ingest.settings import IngestSettings
+from app.llm import providers as llm_providers
 from app.llm import settings as llm_settings
 from app.llm.settings import LLMSettings
 from app.models.admin import (
@@ -204,9 +205,6 @@ def _redact(key: str) -> str:
     return f"{key[:4]}…{key[-4:]}"
 
 
-_ALLOWED_PROVIDERS = ("anthropic", "openai", "gemini", "ollama")
-
-
 def _llm_view(s: LLMSettings) -> LLMView:
     return LLMView(
         provider=s.provider,
@@ -218,9 +216,29 @@ def _llm_view(s: LLMSettings) -> LLMView:
         openai_api_key_hint=_redact(s.openai_api_key),
         gemini_api_key_hint=_redact(s.gemini_api_key),
         ollama_base_url=s.ollama_base_url,
+        custom_api_key_set=bool(s.custom_api_key),
+        custom_api_key_hint=_redact(s.custom_api_key),
+        custom_base_url=s.custom_base_url,
+        custom_display_name=s.custom_display_name,
         provider_models=s.provider_models,
         ingest_selector_model=s.ingest_selector_model,
     )
+
+
+def _normalize_custom_base_url(raw: str) -> str:
+    url = raw.strip().rstrip("/")
+    if url:
+        if not url.startswith(("http://", "https://")):
+            raise HTTPException(
+                status_code=400,
+                detail="custom_base_url must start with http:// or https://",
+            )
+        if url.endswith("/chat/completions"):
+            raise HTTPException(
+                status_code=400,
+                detail="custom_base_url should be the API base (e.g. https://host/v1) — requests append /chat/completions automatically",
+            )
+    return url
 
 
 @router.get("/llm", response_model=LLMView)
@@ -242,11 +260,10 @@ def put_llm(
     if "provider" in sent_fields or "model" in sent_fields:
         provider = (req.provider or "").strip().lower()
         model = (req.model or "").strip()
-        if provider not in _ALLOWED_PROVIDERS:
-            allowed = ", ".join(f"'{p}'" for p in _ALLOWED_PROVIDERS)
-            raise HTTPException(
-                status_code=400, detail=f"provider must be one of {allowed}"
-            )
+        allowed = llm_providers.names()
+        if provider not in allowed:
+            allowed_str = ", ".join(f"'{p}'" for p in allowed)
+            raise HTTPException(status_code=400, detail=f"provider must be one of {allowed_str}")
         if not model:
             raise HTTPException(status_code=400, detail="model is required")
     else:
@@ -265,19 +282,22 @@ def put_llm(
     anthropic_key = _resolve_secret(
         "anthropic_api_key", req.anthropic_api_key, current.anthropic_api_key
     )
-    openai_key = _resolve_secret(
-        "openai_api_key", req.openai_api_key, current.openai_api_key
-    )
-    gemini_key = _resolve_secret(
-        "gemini_api_key", req.gemini_api_key, current.gemini_api_key
-    )
+    openai_key = _resolve_secret("openai_api_key", req.openai_api_key, current.openai_api_key)
+    gemini_key = _resolve_secret("gemini_api_key", req.gemini_api_key, current.gemini_api_key)
     ollama_base_url = _resolve_secret(
         "ollama_base_url", req.ollama_base_url, current.ollama_base_url
     )
-
-    new_provider_models = (
-        req.provider_models if "provider_models" in sent_fields else None
+    custom_api_key = _resolve_secret("custom_api_key", req.custom_api_key, current.custom_api_key)
+    custom_base_url = _normalize_custom_base_url(
+        _resolve_secret("custom_base_url", req.custom_base_url, current.custom_base_url)
     )
+
+    if "custom_display_name" in sent_fields:
+        custom_display_name = (req.custom_display_name or "").strip()
+    else:
+        custom_display_name = current.custom_display_name
+
+    new_provider_models = req.provider_models if "provider_models" in sent_fields else None
 
     if "ingest_selector_model" in sent_fields:
         ingest_selector_model = (req.ingest_selector_model or "").strip()
@@ -291,6 +311,9 @@ def put_llm(
         openai_api_key=openai_key,
         gemini_api_key=gemini_key,
         ollama_base_url=ollama_base_url,
+        custom_api_key=custom_api_key,
+        custom_base_url=custom_base_url,
+        custom_display_name=custom_display_name,
         provider_models=new_provider_models,
         ingest_selector_model=ingest_selector_model,
     )

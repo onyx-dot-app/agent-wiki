@@ -52,6 +52,7 @@ def available(_user: User = Depends(require_user)) -> AvailableProvidersResponse
         ("openai", bool(s.openai_api_key)),
         ("gemini", bool(s.gemini_api_key)),
         ("ollama", bool(s.ollama_base_url)),
+        ("custom", bool(s.custom_base_url)),
     ]
     for name, has_creds in checks:
         if not has_creds:
@@ -62,6 +63,18 @@ def available(_user: User = Depends(require_user)) -> AvailableProvidersResponse
         try:
             p.check_configured(s)
         except LLMError:
+            continue
+        if name == "custom":
+            # Free-text models only — no built-in catalog; hide until ≥1 model saved.
+            models = s.provider_models.get("custom", [])
+            if not models:
+                continue
+            result.append(AvailableProvider(
+                provider=name,
+                label=s.custom_display_name or "Custom",
+                default_model=models[0],
+                models=models,
+            ))
             continue
         label, default_model = _PROVIDER_LABELS.get(name, (name, ""))
         saved = s.provider_models.get(name, [])

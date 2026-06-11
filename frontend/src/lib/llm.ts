@@ -16,3 +16,54 @@ export function useLLMStatus(opts: { skip?: boolean } = {}) {
     refresh: mutate,
   };
 }
+
+export type Provider = "anthropic" | "openai" | "gemini" | "ollama" | "custom";
+
+export const ALL_PROVIDERS: Provider[] = [
+  "anthropic",
+  "openai",
+  "gemini",
+  "ollama",
+  "custom",
+];
+
+export const PROVIDER_LABELS: Record<Provider, string> = {
+  anthropic: "Anthropic",
+  openai: "OpenAI",
+  gemini: "Gemini",
+  ollama: "Ollama",
+  custom: "Custom",
+};
+
+// Shape of GET /admin/llm (LLMView) — shared by the admin pages that render it.
+export interface LLMSettings {
+  provider: Provider;
+  model: string;
+  anthropic_api_key_set: boolean;
+  openai_api_key_set: boolean;
+  gemini_api_key_set: boolean;
+  anthropic_api_key_hint: string;
+  openai_api_key_hint: string;
+  gemini_api_key_hint: string;
+  ollama_base_url: string;
+  custom_api_key_set: boolean;
+  custom_api_key_hint: string;
+  custom_base_url: string;
+  custom_display_name: string;
+  provider_models: Record<string, string[]>;
+  ingest_selector_model: string;
+}
+
+export function isConfigured(p: Provider, s: LLMSettings): boolean {
+  if (p === "anthropic") return s.anthropic_api_key_set;
+  if (p === "openai") return s.openai_api_key_set;
+  if (p === "gemini") return s.gemini_api_key_set;
+  if (p === "ollama") return !!s.ollama_base_url;
+  if (p === "custom") return !!s.custom_base_url;
+  return false;
+}
+
+export function providerLabel(p: Provider, s: LLMSettings): string {
+  if (p === "custom") return s.custom_display_name || PROVIDER_LABELS.custom;
+  return PROVIDER_LABELS[p];
+}
