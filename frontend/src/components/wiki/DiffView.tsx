@@ -3,6 +3,8 @@ import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
+import { remarkBareSpaceLinks } from "@/lib/remarkBareSpaceLinks";
+
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { absoluteTime, relativeTime } from "@/lib/time";
 import type { FileDiffResponse } from "@/lib/wiki";
@@ -122,7 +124,7 @@ export function DiffView({
           </div>
         ) : (
           <article className={`${styles.doc} markdown`}>
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+            <ReactMarkdown remarkPlugins={[remarkGfm, remarkBareSpaceLinks]}>
               {body ?? ""}
             </ReactMarkdown>
           </article>

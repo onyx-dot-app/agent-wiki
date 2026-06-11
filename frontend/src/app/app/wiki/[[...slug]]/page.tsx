@@ -59,6 +59,7 @@ import {
   type CommentDraft,
 } from "@/lib/commentAnchor";
 import { rehypeSourcePos } from "@/lib/rehypeSourcePos";
+import { remarkBareSpaceLinks } from "@/lib/remarkBareSpaceLinks";
 import { useRequireAuth } from "@/lib/auth";
 import { useDrafting } from "@/lib/drafting";
 import { rememberWikiPath } from "@/lib/lastViewed";
@@ -1387,7 +1388,7 @@ function FileViewer({ path }: { path: string }) {
   const renderedBody = useMemo(
     () => (
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={[remarkGfm, remarkBareSpaceLinks]}
         rehypePlugins={[rehypeSourcePos]}
       >
         {body}

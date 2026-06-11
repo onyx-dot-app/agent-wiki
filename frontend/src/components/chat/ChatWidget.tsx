@@ -11,6 +11,8 @@ import {
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
+import { remarkBareSpaceLinks } from "@/lib/remarkBareSpaceLinks";
+
 import styles from "./ChatWidget.module.css";
 
 import { Button } from "@onyx-ai/opal/components";
@@ -888,7 +890,7 @@ function Bubble({
       >
         {renderMarkdown ? (
           <ReactMarkdown
-            remarkPlugins={[remarkGfm]}
+            remarkPlugins={[remarkGfm, remarkBareSpaceLinks]}
             components={markdownComponents}
           >
             {content}
