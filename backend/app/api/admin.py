@@ -198,10 +198,12 @@ def delete_user(user_id: str, actor: User = Depends(require_admin)) -> OkRespons
 
 
 def _redact(key: str) -> str:
+    """First4…last4 only when the value is long enough that the hint can't
+    reconstruct it; fixed width below that so neither content nor length leak."""
     if not key:
         return ""
-    if len(key) <= 8:
-        return "•" * len(key)
+    if len(key) < 16:
+        return "••••••••"
     return f"{key[:4]}…{key[-4:]}"
 
 
@@ -390,7 +392,11 @@ _MAX_DOC_CHARS = 5_000_000
 
 
 def _ingest_view(s: IngestSettings) -> IngestView:
-    return IngestView(max_doc_chars=s.max_doc_chars, api_key=s.api_key)
+    return IngestView(
+        max_doc_chars=s.max_doc_chars,
+        api_key_set=bool(s.api_key),
+        api_key_hint=_redact(s.api_key or ""),
+    )
 
 
 @router.get("/ingest", response_model=IngestView)

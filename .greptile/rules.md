@@ -8,6 +8,17 @@ Use explicit type annotations for variables to enhance code clarity, especially 
 
 Prefer consistency with existing patterns, fix issues in code you touch, avoid tacking new features onto muddy interfaces, fail loudly instead of silently swallowing errors, keep code strictly typed, preserve clear state boundaries, remove duplicate or dead logic, break up overly long functions, avoid hidden import-time side effects, respect module boundaries, and favor correctness-by-construction over relying on callers to use an API correctly.
 
+## CRITICAL — Secrets Never Leave the Server
+
+API keys, tokens, and credentials must never appear in API responses, logs, traces, exception messages, or URLs. Any violation is a blocking finding regardless of severity elsewhere in the PR.
+
+- Response models expose credentials only as `*_set: bool` and `*_hint` (redacted) fields — never the raw value. A raw credential field in any read endpoint's response model is a blocking finding.
+- Show-once is the only exception: an endpoint that creates or rotates a credential may return it exactly once in that response; every subsequent read returns only set/hint.
+- Redaction must not reconstruct the secret: a first4…last4 hint is acceptable only for values long enough that it reveals a small fraction (≥16 chars); shorter values get fixed-width masking that reveals neither content nor length.
+- No credential values in `log.*` calls at any level, in tracing spans, in error/exception text returned to clients, or interpolated into URLs.
+- Flag any new code path that serializes a stored credential (`model_dump`, `JSONResponse`, f-string, `repr` in logs) outside the provider/SDK call that consumes it.
+- Frontend: credential inputs are write-only; never store a fetched raw credential in component state except the show-once response, and never render one outside that flow.
+
 ## TODOs
 
 Whenever a TODO is added, there must be an associated name or ticket in the form `TODO(name): ...` or `TODO(1234): ...`.
