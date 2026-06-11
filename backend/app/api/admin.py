@@ -120,15 +120,11 @@ def update_user(
 
     if req.is_admin is not None and req.is_admin != was_admin:
         users_repo.set_admin(user_id, req.is_admin)
-        log.info(
-            "admin: %s set is_admin=%s on user %s", actor.id, req.is_admin, user_id
-        )
+        log.info("admin: %s set is_admin=%s on user %s", actor.id, req.is_admin, user_id)
 
     if req.is_active is not None and req.is_active != was_active:
         users_repo.set_active(user_id, req.is_active)
-        log.info(
-            "admin: %s set is_active=%s on user %s", actor.id, req.is_active, user_id
-        )
+        log.info("admin: %s set is_active=%s on user %s", actor.id, req.is_active, user_id)
 
     row = users_repo.get_by_id(user_id)
     assert row is not None
@@ -354,7 +350,7 @@ def test_llm_provider(
     )
     if not model:
         raise HTTPException(status_code=400, detail="add a model name before testing")
-    return ProviderTestResult(**provider.test_connection(s, model=model))
+    return ProviderTestResult.model_validate(provider.test_connection(s, model=model))
 
 
 # --------------------------------------------------------------------------- #
@@ -394,9 +390,7 @@ def put_web(
         return sent
 
     serper_key = _resolve("serper_api_key", req.serper_api_key, current.serper_api_key)
-    firecrawl_key = _resolve(
-        "firecrawl_api_key", req.firecrawl_api_key, current.firecrawl_api_key
-    )
+    firecrawl_key = _resolve("firecrawl_api_key", req.firecrawl_api_key, current.firecrawl_api_key)
 
     web_settings.upsert(
         serper_api_key=serper_key,

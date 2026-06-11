@@ -51,7 +51,10 @@ class GeminiProvider:
 
     def test_connection(self, settings: LLMSettings, *, model: str) -> dict[str, Any]:
         """Preflight the saved Gemini config without touching the cached client."""
-        client = genai.Client(api_key=settings.gemini_api_key)
+        client = genai.Client(
+            api_key=settings.gemini_api_key,
+            http_options=cast(Any, {"timeout": int(PREFLIGHT_TIMEOUT_SECONDS * 1000)}),
+        )
         return run_preflight(
             base_url="",
             auth_present=bool(settings.gemini_api_key),
@@ -60,13 +63,7 @@ class GeminiProvider:
             completion=lambda: cast(Any, client.models).generate_content(
                 model=model,
                 contents=cast(Any, "ping"),
-                config=cast(
-                    Any,
-                    {
-                        "max_output_tokens": 1,
-                        "http_options": {"timeout": int(PREFLIGHT_TIMEOUT_SECONDS * 1000)},
-                    },
-                ),
+                config=cast(Any, {"max_output_tokens": 1}),
             ),
             translate=_translate_error,
         )
