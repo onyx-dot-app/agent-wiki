@@ -33,7 +33,7 @@ import { NAV_ENTRIES } from "@/lib/nav/registry";
 import { useIsMobile } from "@/lib/viewport";
 import { useAppFocus } from "@/hooks/useAppFocus";
 import { useLeftPanel } from "@/providers/LeftPanelProvider";
-import { isNewActivity, useEvents } from "@/lib/events";
+import { isNewActivity, useEvents } from "@/lib/activities";
 
 function useRecentPages() {
   const { data } = useSWR(

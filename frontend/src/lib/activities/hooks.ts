@@ -1,24 +1,5 @@
 import useSWR from "swr";
-
-export const NEW_ACTIVITY_CUTOFF_MS = 24 * 60 * 60 * 1000;
-
-// SQLite's datetime('now') omits the T and Z; treat as UTC.
-export function toEventIso(ts: string): string {
-  return ts.includes("T") ? ts : `${ts.replace(" ", "T")}Z`;
-}
-
-export function isNewActivity(ts: string): boolean {
-  return Date.now() - new Date(toEventIso(ts)).getTime() < NEW_ACTIVITY_CUTOFF_MS;
-}
-
-export interface AppEvent {
-  id: number;
-  ts: string;
-  kind: string;
-  actor: string | null;
-  target: string | null;
-  payload: Record<string, unknown>;
-}
+import type { AppEvent } from "./types";
 
 function eventsPath(opts: { kind?: string; limit?: number }): string {
   const qs = new URLSearchParams();

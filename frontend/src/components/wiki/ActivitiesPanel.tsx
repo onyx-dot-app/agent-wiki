@@ -1,10 +1,16 @@
 "use client";
 
 import { useState } from "react";
-import { Button, Divider, InputTypeIn, Tag, Text } from "@onyx-ai/opal/components";
-import { SvgEmpty } from "@onyx-ai/opal/illustrations";
+import {
+  Button,
+  Divider,
+  InputTypeIn,
+  Tag,
+  Text,
+} from "@onyx-ai/opal/components";
+import { SvgEmpty, SvgNotFound } from "@onyx-ai/opal/illustrations";
 import { SvgActivity, SvgX } from "@onyx-ai/opal/icons";
-import { IllustrationContent, Section } from "@onyx-ai/opal/layouts";
+import { Content, IllustrationContent, Section } from "@onyx-ai/opal/layouts";
 import { timeAgo } from "@onyx-ai/opal/time";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import {
@@ -12,7 +18,7 @@ import {
   toEventIso,
   useEvents,
   type AppEvent,
-} from "@/lib/events";
+} from "@/lib/activities";
 import { formatScopePath } from "@/lib/format";
 import { useLeftPanel } from "@/providers/LeftPanelProvider";
 
@@ -39,13 +45,15 @@ function ActivityCard({ event }: ActivityCardProps) {
           <em className="text-xs text-(--text-02)">(no path)</em>
         )}
         {p.change_kind && (
-          <span className="shrink-0 rounded-(--border-radius-04) bg-(--background-tint-03) px-1.5 py-[2px] text-[10px] font-semibold uppercase tracking-[0.3px] text-(--text-05)">
+          <span className="shrink-0 rounded-(--border-radius-04) bg-(--background-tint-03) px-1.5 py-[2px] text-[10px] font-semibold tracking-[0.3px] text-(--text-05) uppercase">
             {p.change_kind}
           </span>
         )}
       </div>
       {p.reason && (
-        <p className="mb-1.5 line-clamp-2 text-xs text-(--text-04)">{p.reason}</p>
+        <p className="mb-1.5 line-clamp-2 text-xs text-(--text-04)">
+          {p.reason}
+        </p>
       )}
       <div className="flex items-center justify-between">
         <span className="text-[11px] text-(--text-02)">
@@ -93,15 +101,20 @@ export default function ActivitiesPanel() {
         height="fit"
         padding={0.5}
       >
-        <Section flexDirection="row" alignItems="center" gap={0.5} height="fit">
-          <SvgActivity size={16} />
-          <span className="text-sm font-semibold text-(--text-05)">
-            Activity History
-          </span>
-        </Section>
-        <Section flexDirection="row" alignItems="center" gap={0.5} height="fit">
+        <Content
+          icon={SvgActivity}
+          title="Activity History"
+          variant="section"
+          sizePreset="main-ui"
+        />
+        <Section
+          flexDirection="row"
+          justifyContent="end"
+          gap={0.5}
+          height="fit"
+        >
           {unreadCount > 0 && (
-            <Tag title={`${unreadCount} new`} color="blue" />
+            <Tag title={`${unreadCount} new`} color="blue" size="md" />
           )}
           <Button
             icon={SvgX}
@@ -140,8 +153,11 @@ export default function ActivitiesPanel() {
         )}
 
         {!isLoading && events.length > 0 && filtered.length === 0 && (
-          <div className="px-3 pt-4">
-            <Text font="secondary-body" color="text-03">No matching activity.</Text>
+          <div className="flex h-full items-center justify-center">
+            <IllustrationContent
+              illustration={SvgNotFound}
+              title="No matching activity found."
+            />
           </div>
         )}
 
