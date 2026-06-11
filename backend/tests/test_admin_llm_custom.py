@@ -7,6 +7,7 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
+from app.llm import providers as llm_providers
 from app.main import create_app
 
 from tests._auth import login_fastapi
@@ -61,6 +62,16 @@ def test_put_custom_persists_and_redacts(client, admin):
 def test_custom_is_allowed_provider(client, admin):
     r = _put(client, provider="custom", model="m")
     assert r.status_code == 200
+
+
+def test_allowlist_matches_registry() -> None:
+    assert set(llm_providers.names()) == {
+        "anthropic",
+        "openai",
+        "gemini",
+        "ollama",
+        "custom",
+    }
 
 
 def test_base_url_scheme_validated(client, admin):

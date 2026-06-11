@@ -1,4 +1,5 @@
 """Tests for app/llm/settings.py — DB-backed LLM configuration."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -38,6 +39,14 @@ def test_get_returns_empty_defaults_when_no_row(tmp_db):
     assert s.openai_api_key == ""
     assert s.gemini_api_key == ""
     assert s.ollama_base_url == ""
+
+
+def test_provider_models_defaults_to_empty_dict_not_none(tmp_db) -> None:
+    assert llm_settings.get().provider_models == {}
+
+    _upsert(provider="openai", model="gpt-4o")
+
+    assert llm_settings.get().provider_models == {}
 
 
 def test_upsert_then_get_round_trip(tmp_db):

@@ -1,6 +1,11 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import {
+  useEffect,
+  useState,
+  type FormEvent,
+  type InputHTMLAttributes,
+} from "react";
 import { mutate as globalMutate } from "swr";
 
 import { Button } from "@onyx-ai/opal/components";
@@ -10,12 +15,16 @@ import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { BackLink, PageHeader } from "@/components/common/PageHeader";
 import { RequireAdmin } from "@/components/RequireAdmin";
 import { apiFetch } from "@/lib/api";
+import {
+  ALL_PROVIDERS,
+  isConfigured,
+  providerLabel,
+  type LLMSettings,
+  type Provider,
+} from "@/lib/llm";
 import { useIsMobile } from "@/lib/viewport";
 
-type Provider = "anthropic" | "openai" | "gemini" | "ollama" | "custom";
-
 interface ProviderMeta {
-  label: string;
   defaultModel: string;
   keyLabel: string;
   keyPlaceholder: string;
@@ -24,49 +33,36 @@ interface ProviderMeta {
 
 const PROVIDER_META: Record<Provider, ProviderMeta> = {
   anthropic: {
-    label: "Anthropic",
     defaultModel: "claude-sonnet-4-6",
     keyLabel: "API key",
     keyPlaceholder: "sk-ant-…",
     initial: "A",
   },
   openai: {
-    label: "OpenAI",
     defaultModel: "gpt-5.5",
     keyLabel: "API key",
     keyPlaceholder: "sk-…",
     initial: "O",
   },
   gemini: {
-    label: "Gemini",
     defaultModel: "gemini-3.1-pro-preview",
     keyLabel: "API key",
     keyPlaceholder: "AIza…",
     initial: "G",
   },
   ollama: {
-    label: "Ollama",
     defaultModel: "llama3.1",
     keyLabel: "Base URL",
     keyPlaceholder: "http://localhost:11434",
     initial: "L",
   },
   custom: {
-    label: "Custom",
     defaultModel: "",
     keyLabel: "API key",
     keyPlaceholder: "sk-…",
     initial: "C",
   },
 };
-
-const ALL_PROVIDERS: Provider[] = [
-  "anthropic",
-  "openai",
-  "gemini",
-  "ollama",
-  "custom",
-];
 
 const PROVIDER_MODELS: Record<Provider, string[]> = {
   anthropic: [
@@ -81,32 +77,6 @@ const PROVIDER_MODELS: Record<Provider, string[]> = {
   custom: [],
 };
 
-interface LLMSettings {
-  provider: Provider;
-  model: string;
-  anthropic_api_key_set: boolean;
-  openai_api_key_set: boolean;
-  gemini_api_key_set: boolean;
-  anthropic_api_key_hint: string;
-  openai_api_key_hint: string;
-  gemini_api_key_hint: string;
-  ollama_base_url: string;
-  custom_api_key_set: boolean;
-  custom_api_key_hint: string;
-  custom_base_url: string;
-  custom_display_name: string;
-  provider_models: Record<string, string[]>;
-}
-
-function isConfigured(p: Provider, s: LLMSettings): boolean {
-  if (p === "anthropic") return s.anthropic_api_key_set;
-  if (p === "openai") return s.openai_api_key_set;
-  if (p === "gemini") return s.gemini_api_key_set;
-  if (p === "ollama") return !!s.ollama_base_url;
-  if (p === "custom") return !!s.custom_base_url;
-  return false;
-}
-
 function keyHint(p: Provider, s: LLMSettings): string {
   if (p === "anthropic") return s.anthropic_api_key_hint;
   if (p === "openai") return s.openai_api_key_hint;
@@ -114,11 +84,6 @@ function keyHint(p: Provider, s: LLMSettings): string {
   if (p === "ollama") return s.ollama_base_url || "http://localhost:11434";
   if (p === "custom") return s.custom_base_url;
   return "";
-}
-
-function providerLabel(p: Provider, s: LLMSettings): string {
-  if (p === "custom") return s.custom_display_name || "Custom";
-  return PROVIDER_META[p].label;
 }
 
 export default function AdminLLMPage() {
@@ -474,7 +439,8 @@ function ProviderForm({
   configured,
   onSaved,
 }: {
-  provider: Provider;
+  // Custom routes to CustomProviderForm — encode that in the type.
+  provider: Exclude<Provider, "custom">;
   settings: LLMSettings;
   configured: boolean;
   onSaved: () => void;
@@ -543,7 +509,7 @@ function ProviderForm({
   async function onClear() {
     if (
       !(await confirmDialog({
-        title: `Remove ${meta.label} credentials?`,
+        title: `Remove ${providerLabel(provider, settings)} credentials?`,
         confirmLabel: "Remove",
       }))
     )
@@ -568,22 +534,19 @@ function ProviderForm({
 
   return (
     <form onSubmit={onSubmit} className="flex flex-col gap-4">
-      <label>
-        <div className={lblClass}>{meta.keyLabel}</div>
-        <input
-          type={isOllama ? "text" : "password"}
-          value={keyValue}
-          onChange={(e) => setKeyValue(e.target.value)}
-          placeholder={
-            configured
-              ? isOllama
-                ? currentHint
-                : "leave blank to keep current"
-              : meta.keyPlaceholder
-          }
-          className={inputClass}
-        />
-      </label>
+      <Field
+        label={meta.keyLabel}
+        type={isOllama ? "text" : "password"}
+        value={keyValue}
+        onChange={(e) => setKeyValue(e.target.value)}
+        placeholder={
+          configured
+            ? isOllama
+              ? currentHint
+              : "leave blank to keep current"
+            : meta.keyPlaceholder
+        }
+      />
 
       <div>
         <div className="mb-2 flex items-baseline justify-between">
@@ -622,30 +585,8 @@ function ProviderForm({
         </div>
       </div>
 
-      {error && (
-        <div className="text-[13px] text-(--status-text-error-05)">{error}</div>
-      )}
-      {saved && (
-        <div className="text-[13px] text-(--status-text-success-05)">
-          Saved.
-        </div>
-      )}
-      <div className="flex gap-2">
-        <Button type="submit" variant="action" size="sm" disabled={saving}>
-          {saving ? "Saving…" : "Save"}
-        </Button>
-        {configured && (
-          <Button
-            type="button"
-            variant="danger"
-            size="sm"
-            disabled={saving}
-            onClick={onClear}
-          >
-            Remove
-          </Button>
-        )}
-      </div>
+      <FormMessages error={error} saved={saved} />
+      <FormActions saving={saving} configured={configured} onClear={onClear} />
     </form>
   );
 }
@@ -736,44 +677,32 @@ function CustomProviderForm({
 
   return (
     <form onSubmit={onSubmit} className="flex flex-col gap-4">
-      <label>
-        <div className={lblClass}>Base URL</div>
-        <input
-          type="text"
-          value={baseUrl}
-          onChange={(e) => setBaseUrl(e.target.value)}
-          placeholder="https://openrouter.ai/api/v1"
-          className={inputClass}
-        />
-        <div className="mt-1 text-xs text-(--text-03)">
-          Any OpenAI-compatible endpoint. Requests go to /chat/completions under
-          this URL.
-        </div>
-      </label>
+      <Field
+        label="Base URL"
+        type="text"
+        value={baseUrl}
+        onChange={(e) => setBaseUrl(e.target.value)}
+        placeholder="https://openrouter.ai/api/v1"
+        hint="Any OpenAI-compatible endpoint. Requests go to /chat/completions under this URL."
+      />
 
-      <label>
-        <div className={lblClass}>API key (optional)</div>
-        <input
-          type="password"
-          value={keyValue}
-          onChange={(e) => setKeyValue(e.target.value)}
-          placeholder={
-            settings.custom_api_key_set ? "leave blank to keep current" : "sk-…"
-          }
-          className={inputClass}
-        />
-      </label>
+      <Field
+        label="API key (optional)"
+        type="password"
+        value={keyValue}
+        onChange={(e) => setKeyValue(e.target.value)}
+        placeholder={
+          settings.custom_api_key_set ? "leave blank to keep current" : "sk-…"
+        }
+      />
 
-      <label>
-        <div className={lblClass}>Display name (optional)</div>
-        <input
-          type="text"
-          value={displayName}
-          onChange={(e) => setDisplayName(e.target.value)}
-          placeholder="Custom"
-          className={inputClass}
-        />
-      </label>
+      <Field
+        label="Display name (optional)"
+        type="text"
+        value={displayName}
+        onChange={(e) => setDisplayName(e.target.value)}
+        placeholder="Custom"
+      />
 
       <div>
         <div className="mb-2 flex items-baseline justify-between">
@@ -829,6 +758,35 @@ function CustomProviderForm({
         </div>
       </div>
 
+      <FormMessages error={error} saved={saved} />
+      <FormActions saving={saving} configured={configured} onClear={onClear} />
+    </form>
+  );
+}
+
+function Field({
+  label,
+  hint,
+  ...inputProps
+}: { label: string; hint?: string } & InputHTMLAttributes<HTMLInputElement>) {
+  return (
+    <label>
+      <div className={lblClass}>{label}</div>
+      <input className={inputClass} {...inputProps} />
+      {hint && <div className="mt-1 text-xs text-(--text-03)">{hint}</div>}
+    </label>
+  );
+}
+
+function FormMessages({
+  error,
+  saved,
+}: {
+  error: string | null;
+  saved: boolean;
+}) {
+  return (
+    <>
       {error && (
         <div className="text-[13px] text-(--status-text-error-05)">{error}</div>
       )}
@@ -837,23 +795,36 @@ function CustomProviderForm({
           Saved.
         </div>
       )}
-      <div className="flex gap-2">
-        <Button type="submit" variant="action" size="sm" disabled={saving}>
-          {saving ? "Saving…" : "Save"}
+    </>
+  );
+}
+
+function FormActions({
+  saving,
+  configured,
+  onClear,
+}: {
+  saving: boolean;
+  configured: boolean;
+  onClear: () => void;
+}) {
+  return (
+    <div className="flex gap-2">
+      <Button type="submit" variant="action" size="sm" disabled={saving}>
+        {saving ? "Saving…" : "Save"}
+      </Button>
+      {configured && (
+        <Button
+          type="button"
+          variant="danger"
+          size="sm"
+          disabled={saving}
+          onClick={onClear}
+        >
+          Remove
         </Button>
-        {configured && (
-          <Button
-            type="button"
-            variant="danger"
-            size="sm"
-            disabled={saving}
-            onClick={onClear}
-          >
-            Remove
-          </Button>
-        )}
-      </div>
-    </form>
+      )}
+    </div>
   );
 }
 

@@ -7,27 +7,29 @@ import logging
 from functools import lru_cache
 from typing import Any, Iterator, cast
 
+import openai
 from openai import OpenAI
 
 from app.llm.errors import LLMError
 from app.llm.providers._common import safe_json_loads, stringify_tool_result
+from app.llm.providers._openai_errors import translate_openai_error
 from app.llm.settings import LLMSettings
 
 log = logging.getLogger(__name__)
 
 StreamEvent = dict[str, Any]
 
+_KEYLESS_API_KEY = "EMPTY"  # vLLM/LM Studio allow keyless mode; the SDK still needs a value.
+
 
 @lru_cache(maxsize=4)
 def _client(api_key: str, base_url: str) -> OpenAI:
     """Cached OpenAI client for compat gateways."""
-    return OpenAI(api_key=api_key or "EMPTY", base_url=base_url)
+    return OpenAI(api_key=api_key or _KEYLESS_API_KEY, base_url=base_url)
 
 
 def _create_stream(client: OpenAI, kwargs: dict[str, Any]) -> Any:
     """Retry once for gateways that reject stream usage metadata."""
-    import openai
-
     completions = cast(Any, client.chat).completions
     try:
         return completions.create(**kwargs, stream_options={"include_usage": True})
@@ -158,7 +160,7 @@ class CustomProvider:
             raise
         except Exception as exc:
             log.exception("llm provider error provider=custom model=%s", model)
-            raise _translate_error(exc) from exc
+            raise translate_openai_error(exc, provider_label="Custom provider") from exc
 
 
 def _cc_message(m: dict[str, Any]) -> dict[str, Any]:
@@ -198,35 +200,6 @@ def _cc_tool(tool: dict[str, Any]) -> dict[str, Any]:
             "parameters": tool["input_schema"],
         },
     }
-
-
-def _translate_error(exc: Exception) -> LLMError:
-    import openai
-
-    if isinstance(exc, openai.AuthenticationError):
-        return LLMError(
-            "auth",
-            "Custom provider rejected the API key. An admin needs to update it on the admin page.",
-        )
-    if isinstance(exc, openai.PermissionDeniedError):
-        return LLMError("auth", "Custom provider denied access for the configured API key.")
-    if isinstance(exc, openai.RateLimitError):
-        return LLMError("rate_limit", "Custom provider rate limit hit. Please retry in a moment.")
-    if isinstance(exc, openai.APIConnectionError):
-        return LLMError(
-            "network",
-            "Could not reach the Custom provider. Check the backend's network access.",
-        )
-    if isinstance(exc, openai.NotFoundError):
-        return LLMError(
-            "config",
-            "Custom provider returned 'not found' — usually a bad model name. Check the configured model.",
-        )
-    if isinstance(exc, openai.BadRequestError):
-        return LLMError("bad_request", f"Custom provider rejected the request: {exc}")
-    if isinstance(exc, openai.APIStatusError):
-        return LLMError("provider", f"Custom provider error: {exc}")
-    return LLMError("unknown", "Unexpected error talking to Custom provider.")
 
 
 PROVIDER = CustomProvider()
