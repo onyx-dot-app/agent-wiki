@@ -6,9 +6,11 @@ email here, then embeds the canonical token `@[Display Name](mention:<user_id>)`
 in the comment/reply body where the mention should appear.
 
 Case-insensitive substring match on name/email (same lookup the share
-typeahead uses). Returns only public-safe fields. Any signed-in user may
-search — the chat request is already authenticated as a real user — so there's
-no per-page ACL gate here (a user id isn't page-scoped).
+typeahead uses) — you can search *by* email, but the result only carries `id`
+and `name`: that's all the mention token needs, and keeping emails out of the
+model's context avoids them leaking back into chat or trace payloads. Any
+signed-in user may search — the chat request is already authenticated as a real
+user — so there's no per-page ACL gate here (a user id isn't page-scoped).
 """
 from __future__ import annotations
 
@@ -33,8 +35,4 @@ def handle(args: dict[str, Any]) -> Any:
     limit = max(1, min(limit, _MAX_LIMIT))
 
     rows = users_repo.search(query.strip(), limit)
-    return {
-        "users": [
-            {"id": r["id"], "name": r.get("name"), "email": r["email"]} for r in rows
-        ]
-    }
+    return {"users": [{"id": r["id"], "name": r.get("name")} for r in rows]}

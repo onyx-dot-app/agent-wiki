@@ -22,13 +22,20 @@ def _seed_all() -> None:
 def test_finds_by_name(tmp_db):
     _seed_all()
     out = handle({"query": "Nik"})
-    assert out["users"] == [{"id": "u_nik", "name": "Nik Garza", "email": "nik@onyx.app"}]
+    assert out["users"] == [{"id": "u_nik", "name": "Nik Garza"}]
 
 
 def test_finds_by_email_fragment(tmp_db):
     _seed_all()
+    # Searchable by email even though the result never carries it back.
     out = handle({"query": "bo@"})
     assert [u["id"] for u in out["users"]] == ["u_bo"]
+
+
+def test_result_omits_email(tmp_db):
+    _seed_all()
+    out = handle({"query": "Nik"})
+    assert out["users"] and all("email" not in u for u in out["users"])
 
 
 def test_returns_multiple_matches(tmp_db):
