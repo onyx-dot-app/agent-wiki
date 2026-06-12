@@ -1,0 +1,20 @@
+{
+  "name": "find_user",
+  "description": "Look up wiki users by name or email. Use this to resolve a person to their user id when you need to @mention them in a comment or reply — you can't guess the id. Returns matching users with `id`, `name`, and `email`. Once you have the id, include the token `@[Display Name](mention:<user_id>)` in the comment/reply `body` where the mention should appear (a bare \"@Nik\" is plain text — it won't link or notify). If several people match, pick the right one (ask the user if it's ambiguous).",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "query": {
+        "type": "string",
+        "description": "A name or email (or part of one) to search for, e.g. \"Nik\" or \"nik@\"."
+      },
+      "limit": {
+        "type": "integer",
+        "description": "Max results to return (default 10, max 20).",
+        "minimum": 1,
+        "maximum": 20
+      }
+    },
+    "required": ["query"]
+  }
+}

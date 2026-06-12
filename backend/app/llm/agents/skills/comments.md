@@ -8,9 +8,22 @@ Tools:
 - `reply_comment(comment_id, body)` — reply in an existing thread (no anchor
   needed; it inherits the thread's).
 - `resolve_comment(comment_id)` — mark a thread resolved (done).
+- `find_user(query)` — look up a person's user id by name/email, to @mention them.
 
 To target an existing thread (reply/resolve), get its `comment_id` from a
 `search_comments` result.
+
+Mentioning someone (@mentions):
+- A real mention is a token in the body: `@[Display Name](mention:<user_id>)`.
+  The UI renders it as a chip and it's what lets the person be notified — a bare
+  "@Nik" is just text and does nothing.
+- So to ping someone, first `find_user("Nik")` to get their `id`, then put the
+  token in `body` where the mention belongs, e.g.
+  `body="@[Nik Garza](mention:u_ab12cd) — can you confirm the rollout date?"`.
+  Use the exact `name` and `id` that `find_user` returned.
+- If `find_user` returns more than one match, choose the one the user means; if
+  it's genuinely ambiguous, ask rather than guessing. If it returns nothing,
+  say so instead of inventing an id.
 
 How to anchor a new comment:
 - `quoted_text` must be copied **verbatim** from the current page body and must
