@@ -25,6 +25,7 @@ relies on. Provider modules must:
 * Map SDK-specific exceptions to ``LLMError`` (raised by the SDK SDK,
   caught in the provider's ``stream``).
 """
+
 from __future__ import annotations
 
 from typing import Any, Iterator, Protocol
@@ -57,6 +58,14 @@ class Provider(Protocol):
         ``client.stream`` calls this before invoking ``stream`` so the
         not-configured error has a friendly admin-page-pointing message.
         """
+        ...
+
+    def test_connection(self, settings: LLMSettings, *, model: str) -> dict[str, Any]:
+        """Preflight the provider's SAVED credentials: a cheap listing probe when
+        the backend has one (non-fatal if unsupported) plus a minimal 1-token
+        completion against ``model``. Returns a redacted diagnostics dict (keys:
+        ok, base_url, auth_present, model, models_endpoint, completion) — NEVER
+        credentials."""
         ...
 
     def stream(
@@ -92,6 +101,7 @@ def names() -> list[str]:
 # actually compiled in. Keep imports at the bottom — each module references
 # `register` from this module.
 from app.llm.providers import anthropic as _anthropic  # noqa: E402,F401  # pyright: ignore[reportUnusedImport]
+from app.llm.providers import custom as _custom  # noqa: E402,F401  # pyright: ignore[reportUnusedImport]
 from app.llm.providers import gemini as _gemini  # noqa: E402,F401  # pyright: ignore[reportUnusedImport]
 from app.llm.providers import ollama as _ollama  # noqa: E402,F401  # pyright: ignore[reportUnusedImport]
 from app.llm.providers import openai as _openai  # noqa: E402,F401  # pyright: ignore[reportUnusedImport]

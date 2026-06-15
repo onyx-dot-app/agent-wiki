@@ -10,7 +10,7 @@
       },
       "body": {
         "type": "string",
-        "description": "The reply text."
+        "description": "The reply text. To @mention a person, resolve their id with find_user and include the token `@[Display Name](mention:<user_id>)` here — a bare \"@Name\" won't link or notify."
       }
     },
     "required": ["comment_id", "body"]

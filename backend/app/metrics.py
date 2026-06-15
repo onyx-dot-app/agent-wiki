@@ -62,6 +62,14 @@ ingest_outcomes_total = Counter(
     ["outcome", "wiki_path"],  # committed, no_change, irrelevant, filtered, no_candidates
 )
 
+ingest_document_results_total = Counter(
+    "ingest_document_results_total",
+    "Per-document terminal outcome of ingest reconciliation, one increment per "
+    "document. A document is 'committed' if any candidate page was committed, "
+    "else 'no_change' if any candidate resolved to no-change, else 'irrelevant'.",
+    ["result"],  # committed, no_change, irrelevant
+)
+
 ingest_document_chars = Histogram(
     "ingest_document_chars",
     "Size of the incoming document in characters, by source type",

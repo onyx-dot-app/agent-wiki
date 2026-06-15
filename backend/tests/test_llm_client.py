@@ -44,6 +44,9 @@ def _upsert(**overrides: Any) -> None:
         "openai_api_key": "",
         "gemini_api_key": "",
         "ollama_base_url": "",
+        "custom_api_key": "",
+        "custom_base_url": "",
+        "custom_display_name": "",
     }
     base.update(overrides)
     llm_settings.upsert(**base)

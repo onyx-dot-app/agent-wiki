@@ -9,41 +9,18 @@ import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { BackLink, PageHeader } from "@/components/common/PageHeader";
 import { RequireAdmin } from "@/components/RequireAdmin";
 import { apiFetch } from "@/lib/api";
+import {
+  ALL_PROVIDERS,
+  isConfigured,
+  providerLabel,
+  type LLMSettings,
+} from "@/lib/llm";
 import { useIsMobile } from "@/lib/viewport";
 
 interface IngestSettings {
   max_doc_chars: number;
-  api_key: string | null;
-}
-
-type Provider = "anthropic" | "openai" | "gemini" | "ollama";
-
-interface LLMSettings {
-  provider: Provider;
-  model: string;
-  anthropic_api_key_set: boolean;
-  openai_api_key_set: boolean;
-  gemini_api_key_set: boolean;
-  ollama_base_url: string;
-  provider_models: Record<string, string[]>;
-  ingest_selector_model: string;
-}
-
-const PROVIDER_LABEL: Record<Provider, string> = {
-  anthropic: "Anthropic",
-  openai: "OpenAI",
-  gemini: "Gemini",
-  ollama: "Ollama",
-};
-
-const ALL_PROVIDERS: Provider[] = ["anthropic", "openai", "gemini", "ollama"];
-
-function isConfigured(p: Provider, s: LLMSettings): boolean {
-  if (p === "anthropic") return s.anthropic_api_key_set;
-  if (p === "openai") return s.openai_api_key_set;
-  if (p === "gemini") return s.gemini_api_key_set;
-  if (p === "ollama") return !!s.ollama_base_url;
-  return false;
+  api_key_set: boolean;
+  api_key_hint: string;
 }
 
 export default function AdminIngestPage() {
@@ -67,6 +44,8 @@ function IngestForm() {
   const [llmSettings, setLlmSettings] = useState<LLMSettings | null>(null);
   const [maxDocChars, setMaxDocChars] = useState("");
   const [keyVisible, setKeyVisible] = useState(false);
+  // Raw key exists client-side only in the regenerate response — show-once.
+  const [freshKey, setFreshKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -117,7 +96,7 @@ function IngestForm() {
 
   async function regenerateKey() {
     if (
-      settings?.api_key &&
+      (settings?.api_key_set || freshKey) &&
       !(await confirmDialog({
         title: "Regenerate the API key?",
         body: "The old key will stop working immediately.",
@@ -135,7 +114,8 @@ function IngestForm() {
           method: "POST",
         },
       );
-      setSettings((prev) => (prev ? { ...prev, api_key: r.api_key } : prev));
+      setFreshKey(r.api_key);
+      setSettings((prev) => (prev ? { ...prev, api_key_set: true } : prev));
       setKeyVisible(true);
       setSaved(
         "New API key generated. Copy it now — it will be masked after you leave this page.",
@@ -192,25 +172,31 @@ function IngestForm() {
               <input
                 readOnly
                 type={keyVisible ? "text" : "password"}
-                value={settings.api_key ?? ""}
+                value={freshKey ?? ""}
                 placeholder={
-                  settings.api_key ? undefined : "No key yet — click Regenerate"
+                  freshKey
+                    ? undefined
+                    : settings.api_key_set
+                      ? settings.api_key_hint
+                      : "No key yet — click Regenerate"
                 }
-                className={`box-border w-full flex-1 rounded-(--border-radius-04) border border-(--border-01) px-[10px] py-2 text-sm${settings.api_key ? "font-mono" : ""}`}
+                className={`box-border w-full flex-1 rounded-(--border-radius-04) border border-(--border-01) px-[10px] py-2 text-sm ${freshKey ? "font-mono" : ""}`}
               />
-              {settings.api_key && keyVisible && (
+              {freshKey && keyVisible && (
                 <Button
                   type="button"
                   variant="default"
                   size="sm"
-                  onClick={() => void copyToClipboard(settings.api_key ?? "")}
+                  onClick={() => void copyToClipboard(freshKey)}
                 >
                   Copy
                 </Button>
               )}
               <Button
                 type="button"
-                variant={settings.api_key ? "default" : "action"}
+                variant={
+                  settings.api_key_set || freshKey ? "default" : "action"
+                }
                 size="sm"
                 disabled={saving}
                 onClick={() => void regenerateKey()}
@@ -386,7 +372,7 @@ function SelectorModelSection({
                   <span
                     className={`shrink-0 text-[13px] font-medium ${isSelected ? "text-(--text-05)" : "text-(--text-04)"}`}
                   >
-                    {PROVIDER_LABEL[p]}
+                    {providerLabel(p, settings)}
                   </span>
                   <span
                     className={`font-mono text-[13px] ${isSelected ? "text-(--text-05)" : "text-(--text-03)"}`}

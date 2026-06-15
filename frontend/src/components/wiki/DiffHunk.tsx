@@ -2,6 +2,8 @@ import type { JSX } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
+import { remarkBareSpaceLinks } from "@/lib/remarkBareSpaceLinks";
+
 import type { DiffHunk as DiffHunkData, DiffLine, WordDiff } from "@/lib/wiki";
 
 import styles from "./DiffHunk.module.css";
@@ -151,7 +153,7 @@ export function DiffHunk({ hunk }: { hunk: DiffHunkData }) {
         if (entry.kind === "context") {
           return (
             <div key={idx} className={`${styles.context} markdown`}>
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              <ReactMarkdown remarkPlugins={[remarkGfm, remarkBareSpaceLinks]}>
                 {entry.text}
               </ReactMarkdown>
             </div>
@@ -161,7 +163,7 @@ export function DiffHunk({ hunk }: { hunk: DiffHunkData }) {
         return (
           <div key={idx} className={cls}>
             <div className={`${styles.blockContent} markdown`}>
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              <ReactMarkdown remarkPlugins={[remarkGfm, remarkBareSpaceLinks]}>
                 {entry.text}
               </ReactMarkdown>
             </div>

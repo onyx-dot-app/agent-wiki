@@ -4,6 +4,8 @@ import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+
+import { remarkBareSpaceLinks } from "@/lib/remarkBareSpaceLinks";
 import useSWR from "swr";
 import {
   Button,
@@ -254,7 +256,7 @@ function RecentCard({
             {page.title}
           </Text>
           <div className={styles.cardPreview}>
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+            <ReactMarkdown remarkPlugins={[remarkGfm, remarkBareSpaceLinks]}>
               {page.preview}
             </ReactMarkdown>
           </div>

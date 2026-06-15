@@ -15,6 +15,8 @@ from app.auth import invites
 from app.auth.deps import require_admin
 from app.ingest import settings as ingest_settings
 from app.ingest.settings import IngestSettings
+from app.llm.errors import LLMError
+from app.llm import providers as llm_providers
 from app.llm import settings as llm_settings
 from app.llm.settings import LLMSettings
 from app.models.admin import (
@@ -30,6 +32,8 @@ from app.models.admin import (
     LLMConfigRequest,
     LLMView,
     OkResponse,
+    ProviderTestRequest,
+    ProviderTestResult,
     UpdateUserRequest,
     UserCounts,
     WebConfigRequest,
@@ -116,15 +120,11 @@ def update_user(
 
     if req.is_admin is not None and req.is_admin != was_admin:
         users_repo.set_admin(user_id, req.is_admin)
-        log.info(
-            "admin: %s set is_admin=%s on user %s", actor.id, req.is_admin, user_id
-        )
+        log.info("admin: %s set is_admin=%s on user %s", actor.id, req.is_admin, user_id)
 
     if req.is_active is not None and req.is_active != was_active:
         users_repo.set_active(user_id, req.is_active)
-        log.info(
-            "admin: %s set is_active=%s on user %s", actor.id, req.is_active, user_id
-        )
+        log.info("admin: %s set is_active=%s on user %s", actor.id, req.is_active, user_id)
 
     row = users_repo.get_by_id(user_id)
     assert row is not None
@@ -197,14 +197,13 @@ def delete_user(user_id: str, actor: User = Depends(require_admin)) -> OkRespons
 
 
 def _redact(key: str) -> str:
+    """First4…last4 only when the value is long enough that the hint can't
+    reconstruct it; fixed width below that so neither content nor length leak."""
     if not key:
         return ""
-    if len(key) <= 8:
-        return "•" * len(key)
+    if len(key) < 16:
+        return "••••••••"
     return f"{key[:4]}…{key[-4:]}"
-
-
-_ALLOWED_PROVIDERS = ("anthropic", "openai", "gemini", "ollama")
 
 
 def _llm_view(s: LLMSettings) -> LLMView:
@@ -218,9 +217,29 @@ def _llm_view(s: LLMSettings) -> LLMView:
         openai_api_key_hint=_redact(s.openai_api_key),
         gemini_api_key_hint=_redact(s.gemini_api_key),
         ollama_base_url=s.ollama_base_url,
+        custom_api_key_set=bool(s.custom_api_key),
+        custom_api_key_hint=_redact(s.custom_api_key),
+        custom_base_url=s.custom_base_url,
+        custom_display_name=s.custom_display_name,
         provider_models=s.provider_models,
         ingest_selector_model=s.ingest_selector_model,
     )
+
+
+def _normalize_custom_base_url(raw: str) -> str:
+    url = raw.strip().rstrip("/")
+    if url:
+        if not url.startswith(("http://", "https://")):
+            raise HTTPException(
+                status_code=400,
+                detail="custom_base_url must start with http:// or https://",
+            )
+        if url.endswith("/chat/completions"):
+            raise HTTPException(
+                status_code=400,
+                detail="custom_base_url should be the API base (e.g. https://host/v1) — requests append /chat/completions automatically",
+            )
+    return url
 
 
 @router.get("/llm", response_model=LLMView)
@@ -242,11 +261,10 @@ def put_llm(
     if "provider" in sent_fields or "model" in sent_fields:
         provider = (req.provider or "").strip().lower()
         model = (req.model or "").strip()
-        if provider not in _ALLOWED_PROVIDERS:
-            allowed = ", ".join(f"'{p}'" for p in _ALLOWED_PROVIDERS)
-            raise HTTPException(
-                status_code=400, detail=f"provider must be one of {allowed}"
-            )
+        allowed = llm_providers.names()
+        if provider not in allowed:
+            allowed_str = ", ".join(f"'{p}'" for p in allowed)
+            raise HTTPException(status_code=400, detail=f"provider must be one of {allowed_str}")
         if not model:
             raise HTTPException(status_code=400, detail="model is required")
     else:
@@ -265,19 +283,22 @@ def put_llm(
     anthropic_key = _resolve_secret(
         "anthropic_api_key", req.anthropic_api_key, current.anthropic_api_key
     )
-    openai_key = _resolve_secret(
-        "openai_api_key", req.openai_api_key, current.openai_api_key
-    )
-    gemini_key = _resolve_secret(
-        "gemini_api_key", req.gemini_api_key, current.gemini_api_key
-    )
+    openai_key = _resolve_secret("openai_api_key", req.openai_api_key, current.openai_api_key)
+    gemini_key = _resolve_secret("gemini_api_key", req.gemini_api_key, current.gemini_api_key)
     ollama_base_url = _resolve_secret(
         "ollama_base_url", req.ollama_base_url, current.ollama_base_url
     )
-
-    new_provider_models = (
-        req.provider_models if "provider_models" in sent_fields else None
+    custom_api_key = _resolve_secret("custom_api_key", req.custom_api_key, current.custom_api_key)
+    custom_base_url = _normalize_custom_base_url(
+        _resolve_secret("custom_base_url", req.custom_base_url, current.custom_base_url)
     )
+
+    if "custom_display_name" in sent_fields:
+        custom_display_name = (req.custom_display_name or "").strip()
+    else:
+        custom_display_name = current.custom_display_name
+
+    new_provider_models = req.provider_models if "provider_models" in sent_fields else None
 
     if "ingest_selector_model" in sent_fields:
         ingest_selector_model = (req.ingest_selector_model or "").strip()
@@ -291,6 +312,9 @@ def put_llm(
         openai_api_key=openai_key,
         gemini_api_key=gemini_key,
         ollama_base_url=ollama_base_url,
+        custom_api_key=custom_api_key,
+        custom_base_url=custom_base_url,
+        custom_display_name=custom_display_name,
         provider_models=new_provider_models,
         ingest_selector_model=ingest_selector_model,
     )
@@ -301,6 +325,34 @@ def put_llm(
         model,
     )
     return _llm_view(llm_settings.get())
+
+
+@router.post("/llm/{provider_name}/test", response_model=ProviderTestResult)
+def test_llm_provider(
+    provider_name: str,
+    req: ProviderTestRequest,
+    _actor: User = Depends(require_admin),
+) -> ProviderTestResult:
+    """Preflight the SAVED provider config. Interactive diagnostics —
+    bounded by the provider's preflight timeout, so it stays inline rather
+    than going through a task queue."""
+    provider = llm_providers.get(provider_name)
+    if provider is None:
+        raise HTTPException(status_code=404, detail=f"unknown provider '{provider_name}'")
+    s = llm_settings.get()
+    try:
+        provider.check_configured(s)
+    except LLMError as exc:
+        raise HTTPException(status_code=400, detail=exc.message) from exc
+    saved_models = s.provider_models.get(provider_name, [])
+    model = (
+        (req.model or "").strip()
+        or (saved_models[0] if saved_models else "")
+        or (s.model if s.provider == provider_name else "")
+    )
+    if not model:
+        raise HTTPException(status_code=400, detail="add a model name before testing")
+    return ProviderTestResult.model_validate(provider.test_connection(s, model=model))
 
 
 # --------------------------------------------------------------------------- #
@@ -340,9 +392,7 @@ def put_web(
         return sent
 
     serper_key = _resolve("serper_api_key", req.serper_api_key, current.serper_api_key)
-    firecrawl_key = _resolve(
-        "firecrawl_api_key", req.firecrawl_api_key, current.firecrawl_api_key
-    )
+    firecrawl_key = _resolve("firecrawl_api_key", req.firecrawl_api_key, current.firecrawl_api_key)
 
     web_settings.upsert(
         serper_api_key=serper_key,
@@ -367,7 +417,11 @@ _MAX_DOC_CHARS = 5_000_000
 
 
 def _ingest_view(s: IngestSettings) -> IngestView:
-    return IngestView(max_doc_chars=s.max_doc_chars, api_key=s.api_key)
+    return IngestView(
+        max_doc_chars=s.max_doc_chars,
+        api_key_set=bool(s.api_key),
+        api_key_hint=_redact(s.api_key or ""),
+    )
 
 
 @router.get("/ingest", response_model=IngestView)

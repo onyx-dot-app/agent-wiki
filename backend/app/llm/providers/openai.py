@@ -1,4 +1,5 @@
 """OpenAI provider — Responses API streaming (NOT Chat Completions)."""
+
 from __future__ import annotations
 
 import json
@@ -9,7 +10,13 @@ from typing import Any, Iterator, cast
 from openai import OpenAI
 
 from app.llm.errors import LLMError
-from app.llm.providers._common import safe_json_loads, split_system
+from app.llm.providers._common import (
+    PREFLIGHT_TIMEOUT_SECONDS,
+    run_preflight,
+    safe_json_loads,
+    split_system,
+)
+from app.llm.providers._openai_errors import translate_openai_error
 from app.llm.settings import LLMSettings
 
 log = logging.getLogger(__name__)
@@ -32,6 +39,26 @@ class OpenAIProvider:
                 "not_configured",
                 "OpenAI API key is not set. An admin needs to add it on the admin page.",
             )
+
+    def test_connection(self, settings: LLMSettings, *, model: str) -> dict[str, Any]:
+        """Preflight the saved OpenAI config without touching the cached client."""
+        client = OpenAI(
+            api_key=settings.openai_api_key,
+            timeout=PREFLIGHT_TIMEOUT_SECONDS,
+            max_retries=0,
+        )
+        return run_preflight(
+            base_url="",
+            auth_present=bool(settings.openai_api_key),
+            model=model,
+            listing=lambda: cast(Any, client).models.list(),
+            completion=lambda: cast(Any, client.responses).create(
+                model=model,
+                input="ping",
+                max_output_tokens=16,
+            ),
+            translate=lambda exc: translate_openai_error(exc, provider_label="OpenAI"),
+        )
 
     def stream(
         self,
@@ -71,7 +98,10 @@ class OpenAIProvider:
 
         log.info(
             "llm request provider=openai model=%s tools=%d max_tokens=%d items=%d",
-            model, len(tools or []), max_tokens, len(input_items),
+            model,
+            len(tools or []),
+            max_tokens,
+            len(input_items),
         )
         client = _client(settings.openai_api_key)
         try:
@@ -116,7 +146,10 @@ class OpenAIProvider:
                     status = getattr(resp, "status", "") or ""
                     log.info(
                         "llm done provider=openai model=%s status=%s tokens=%d/%d",
-                        model, status, in_tok, out_tok,
+                        model,
+                        status,
+                        in_tok,
+                        out_tok,
                     )
                     yield {
                         "type": "done",
@@ -134,7 +167,7 @@ class OpenAIProvider:
             raise
         except Exception as exc:
             log.exception("llm provider error provider=openai model=%s", model)
-            raise _translate_error(exc) from exc
+            raise translate_openai_error(exc, provider_label="OpenAI") from exc
 
 
 def _input_items_for(m: dict[str, Any]) -> list[dict[str, Any]]:
@@ -145,9 +178,7 @@ def _input_items_for(m: dict[str, Any]) -> list[dict[str, Any]]:
     """
     role = m["role"]
     if role == "tool":
-        content = (
-            m["content"] if isinstance(m["content"], str) else json.dumps(m["content"])
-        )
+        content = m["content"] if isinstance(m["content"], str) else json.dumps(m["content"])
         return [
             {
                 "type": "function_call_output",
@@ -170,31 +201,6 @@ def _input_items_for(m: dict[str, Any]) -> list[dict[str, Any]]:
             )
         return items
     return [{"role": role, "content": m["content"]}]
-
-
-def _translate_error(exc: Exception) -> LLMError:
-    import openai
-
-    if isinstance(exc, openai.AuthenticationError):
-        return LLMError(
-            "auth", "OpenAI rejected the API key. An admin needs to update it on the admin page."
-        )
-    if isinstance(exc, openai.PermissionDeniedError):
-        return LLMError("auth", "OpenAI denied access for the configured API key.")
-    if isinstance(exc, openai.RateLimitError):
-        return LLMError("rate_limit", "OpenAI rate limit hit. Please retry in a moment.")
-    if isinstance(exc, openai.APIConnectionError):
-        return LLMError("network", "Could not reach OpenAI. Check the backend's network access.")
-    if isinstance(exc, openai.NotFoundError):
-        return LLMError(
-            "config",
-            "OpenAI returned 'not found' — usually a bad model name. Check the configured model.",
-        )
-    if isinstance(exc, openai.BadRequestError):
-        return LLMError("bad_request", f"OpenAI rejected the request: {exc}")
-    if isinstance(exc, openai.APIStatusError):
-        return LLMError("provider", f"OpenAI error: {exc}")
-    return LLMError("unknown", "Unexpected error talking to OpenAI.")
 
 
 PROVIDER = OpenAIProvider()
