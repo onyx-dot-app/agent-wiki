@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
-import { RootLayout } from "@onyx-ai/opal/layouts";
+import { RootLayout, SidebarStateProvider } from "@onyx-ai/opal/layouts";
 import { MessageCard } from "@onyx-ai/opal/components";
 import { markdown } from "@onyx-ai/opal/utils";
 import AppSidebar from "@/sections/sidebar/AppSidebar";
@@ -118,7 +118,7 @@ interface LayoutProps {
 }
 
 export default function Layout({ children }: LayoutProps) {
-  const [folded, setFolded] = useState<boolean>(() => {
+  const [defaultFolded] = useState<boolean>(() => {
     if (typeof window === "undefined") return false;
     const stored = window.localStorage.getItem(COLLAPSED_KEY);
     if (stored === "1") return true;
@@ -126,22 +126,19 @@ export default function Layout({ children }: LayoutProps) {
     return window.innerWidth < 724;
   });
 
-  function toggle() {
-    setFolded((prev) => {
-      const next = !prev;
-      window.localStorage.setItem(COLLAPSED_KEY, next ? "1" : "0");
-      return next;
-    });
-  }
-
   return (
     <LeftPanelProvider>
-      <RootLayout.Root>
-        <RootLayout.Sidebar folded={folded} onFoldToggle={toggle}>
-          <AppSidebar folded={folded} onFoldToggle={toggle} />
-        </RootLayout.Sidebar>
-        <AppContent>{children}</AppContent>
-      </RootLayout.Root>
+      <SidebarStateProvider
+        defaultFolded={defaultFolded}
+        onFoldedChange={(folded) => {
+          window.localStorage.setItem(COLLAPSED_KEY, folded ? "1" : "0");
+        }}
+      >
+        <RootLayout.Root>
+          <AppSidebar />
+          <AppContent>{children}</AppContent>
+        </RootLayout.Root>
+      </SidebarStateProvider>
     </LeftPanelProvider>
   );
 }

@@ -1,8 +1,8 @@
 "use client";
 
-import { InputTypeIn, SidebarTab, Text } from "@onyx-ai/opal/components";
+import { InputTypeIn, SidebarTab } from "@onyx-ai/opal/components";
 import { SvgX } from "@onyx-ai/opal/icons";
-import { SidebarLayouts, SidebarWrapper } from "@onyx-ai/opal/layouts";
+import { SidebarLayouts } from "@onyx-ai/opal/layouts";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
 import { ADMIN_NAV_GROUPS } from "@/lib/nav/registry";
@@ -22,49 +22,37 @@ export default function AdminSidebar() {
   })).filter((group) => group.entries.length > 0);
 
   return (
-    <SidebarWrapper logo={sidebarLogo}>
+    <SidebarLayouts.Root>
+      <SidebarLayouts.Header logo={sidebarLogo}>
+        <InputTypeIn
+          variant="internal"
+          searchIcon
+          clearButton
+          placeholder="Search…"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+      </SidebarLayouts.Header>
       <SidebarLayouts.Body scrollKey="admin-sidebar">
-        <div className="relative w-full">
-          <InputTypeIn
-            variant="internal"
-            searchIcon
-            clearButton
-            placeholder="Search…"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
-        </div>
 
-        <div className="flex flex-col gap-3">
-          {filteredGroups.map((group) => (
-            <div
-              key={group.label ?? "__ungrouped"}
-              className="flex flex-col gap-px"
-            >
-              {group.label && (
-                <div className="px-2 pt-1 pb-0.5">
-                  <Text font="secondary-body" color="text-02">
-                    {group.label}
-                  </Text>
-                </div>
-              )}
-              {group.entries.map((item) => {
-                const active = pathname?.startsWith(item.href) ?? false;
-                return (
-                  <SidebarTab
-                    key={item.href}
-                    href={item.href}
-                    selected={active}
-                    folded={false}
-                    icon={item.icon}
-                  >
-                    {item.label}
-                  </SidebarTab>
-                );
-              })}
-            </div>
-          ))}
-        </div>
+        {filteredGroups.map((group) => (
+          <SidebarLayouts.Section
+            key={group.label ?? "__ungrouped"}
+            title={group.label ?? undefined}
+          >
+            {group.entries.map((item) => (
+              <SidebarTab
+                key={item.href}
+                href={item.href}
+                selected={pathname?.startsWith(item.href) ?? false}
+                folded={false}
+                icon={item.icon}
+              >
+                {item.label}
+              </SidebarTab>
+            ))}
+          </SidebarLayouts.Section>
+        ))}
       </SidebarLayouts.Body>
 
       {/* Footer: exit + account — same slot order as AppSidebar so the
@@ -75,6 +63,6 @@ export default function AdminSidebar() {
         </SidebarTab>
         <UserMenu />
       </SidebarLayouts.Footer>
-    </SidebarWrapper>
+    </SidebarLayouts.Root>
   );
 }
