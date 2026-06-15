@@ -985,7 +985,7 @@ class UpdatePolicy(Base):
     setting; clearing every field deletes it (see ``app/wiki/update_policy.py``).
 
     Two independent settings, each resolved most-granular-wins by walking the
-    doc and its ancestor folders (``update_policy.resolve_for_doc``):
+    path and its ancestor folders (``update_policy.resolve_for_path``):
 
     - ``ingestion_auto_update_disabled`` — tri-state. ``NULL`` inherits from a
       broader scope; ``True`` keeps connector/ingest reconciliation from

@@ -140,6 +140,25 @@ Search and listing endpoints filter through
   `local_data/wiki/permissions/permissions.md` and the export warning in
   `local_data/wiki/running-locally.md`.
 
+### Update policy — `app/wiki/update_policy.py` (`update_policies` table)
+
+Per-page / per-folder control over how the wiki auto-updates, Postgres-only and
+path-keyed like the ACL tables. One row per `path` (a `.md` page, a folder, or
+`""` for root) with two fields, both resolved **most-granular-wins** via
+`update_policy.resolve_for_path(path)` (walks the path + ancestor folders, the
+closest scope that sets a field wins):
+
+- `ingestion_auto_update_disabled` (tri-state) — when set, connector/ingest
+  reconciliation skips the page. Ingestion-scoped: it does not gate the NL
+  updater, direct agent writes, or human edits.
+- `update_instruction` — author guidance for the updater LLM on *how* to edit.
+
+Don't read/write `update_policies` directly — go through
+`app/wiki/update_policy.py` (`get` / `set_policy` / `delete` / `resolve_for_path`).
+Manage over HTTP via `GET/PUT/DELETE /api/update-policy`, gated by
+`require_can("read"|"write", path)`. Design: the wiki page
+`Engineering Projects/Agent Wiki Project/design/Update Policy.md`.
+
 ### Database — SQLAlchemy 2.0 ORM, small repo modules
 
 Schema lives in `app/db/models.py` as `DeclarativeBase` subclasses with
