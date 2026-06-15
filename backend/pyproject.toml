@@ -23,7 +23,12 @@ dependencies = [
     "opensearch-py>=2.4",  # BM25 full-text search
     "prometheus_client>=0.21",
     "prometheus-fastapi-instrumentator>=7.1",
-    "fastapi>=0.110",
+    # Pin FastAPI <0.137: 0.137's lazy router inclusion puts `_IncludedRouter`
+    # objects in `app.routes`, which prometheus-fastapi-instrumentator's route
+    # walker (get_route_name) can't read (AttributeError: no `.path`). uv.lock is
+    # gitignored, so CI resolves fresh — without this bound it floats to the
+    # broken 0.137 set. Remove once the instrumentator handles lazy includes.
+    "fastapi>=0.110,<0.137",
     "uvicorn[standard]>=0.27",  # ASGI server — production entry via Dockerfile CMD
     "itsdangerous>=2.1", # Starlette SessionMiddleware signs the session cookie
 ]

@@ -42,6 +42,7 @@ from app.api import (
     permissions,
     templates,
     triggers,
+    update_policy,
     user,
     users,
     webhooks,
@@ -217,6 +218,7 @@ def create_app() -> FastAPI:
     app.include_router(templates.admin_router, prefix="/api/admin/templates")
     app.include_router(templates.router, prefix="/api/templates")
     app.include_router(permissions.router, prefix="/api")
+    app.include_router(update_policy.router, prefix="/api")
     app.include_router(launchers.router, prefix="/api")
     app.include_router(installer.router, prefix="/api")
     app.include_router(agent_sessions.router, prefix="/api/agent-sessions")
