@@ -972,6 +972,55 @@ class AclEntry(Base):
 
 
 # --------------------------------------------------------------------------- #
+# Update policy — per-page / per-folder control over auto-updates (PG-only)   #
+# --------------------------------------------------------------------------- #
+
+
+class UpdatePolicy(Base):
+    """Per-page / per-folder control over how the wiki auto-updates.
+
+    **Postgres-only** governance metadata keyed by path — like ``acl_entries``
+    it is never written to the wiki git repo. One row per scope: a ``.md`` page,
+    a folder, or ``""`` (the wiki root). A row exists only while it carries a
+    setting; clearing every field deletes it (see ``app/wiki/update_policy.py``).
+
+    Two independent settings, each resolved most-granular-wins by walking the
+    doc and its ancestor folders (``update_policy.resolve_for_doc``):
+
+    - ``ingestion_auto_update_disabled`` — tri-state. ``NULL`` inherits from a
+      broader scope; ``True`` keeps connector/ingest reconciliation from
+      touching the page; ``False`` explicitly re-enables it, so a page can opt
+      back in under a disabled folder. Ingestion-only — it does not gate the NL
+      updater, direct agent writes, or human edits.
+    - ``update_instruction`` — free-text guidance injected into the updater LLM
+      prompts. ``NULL``/empty means none.
+    """
+
+    __tablename__ = "update_policies"
+
+    path: Mapped[str] = mapped_column(Text, primary_key=True)
+    kind: Mapped[str] = mapped_column(Text, nullable=False)  # "page" | "folder"
+    ingestion_auto_update_disabled: Mapped[bool | None] = mapped_column(Boolean)
+    update_instruction: Mapped[str | None] = mapped_column(Text)
+    updated_by_user_id: Mapped[str | None] = mapped_column(
+        Text, ForeignKey("users.id", ondelete="SET NULL")
+    )
+    created_at: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
+    )
+    updated_at: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "kind IN ('page', 'folder')",
+            name="update_policies_kind_check",
+        ),
+    )
+
+
+# --------------------------------------------------------------------------- #
 # Comments — human discussion anchored to wiki pages (Postgres-only)          #
 # --------------------------------------------------------------------------- #
 
