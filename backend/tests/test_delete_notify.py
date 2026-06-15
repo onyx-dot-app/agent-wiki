@@ -14,7 +14,7 @@ from app.db import page_dirs
 from app.db.models import DocumentTemplate
 from app.db.session import session
 from app.main import create_app
-from app.wiki import agent_activity, drafts, notify
+from app.wiki import agent_activity, drafts, notify, update_policy
 from app.wiki import git as wiki_git
 
 from tests._auth import login_fastapi
@@ -46,6 +46,15 @@ def test_after_doc_delete_drops_page_scoped_state(tmp_repo):
     assert agent_activity.list_for_doc("a.md") == []
     assert drafts.get("a.md") is None
     assert page_dirs.get_for_page(user_id=user, machine_id="m1", wiki_path="a.md") is None
+
+
+def test_after_doc_delete_drops_update_policy(tmp_repo):
+    update_policy.set_policy("a.md", ingestion_auto_update_disabled=True)
+    sha = wiki_git.commit_file("a.md", "# A\n", "seed", author=None)
+
+    notify.after_doc_delete("a.md", sha, actor=None)
+
+    assert update_policy.get("a.md") is None
 
 
 def test_delete_folder_fans_out_to_nested_pages(tmp_repo):

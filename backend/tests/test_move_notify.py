@@ -10,7 +10,7 @@ from __future__ import annotations
 from app.db import page_dirs
 from app.db.models import DocumentTemplate
 from app.db.session import session
-from app.wiki import agent_activity, drafts, notify
+from app.wiki import agent_activity, drafts, notify, update_policy
 from app.wiki import git as wiki_git
 
 from tests._seed import seed_user
@@ -88,6 +88,16 @@ def test_after_path_move_out_of_md_space_clears_activity_and_drafts(tmp_repo):
     assert drafts.get("a.md") is None
     # No-TTL working-dir binding must be dropped too, or a future a.md inherits it.
     assert page_dirs.get_for_page(user_id=user, machine_id="m1", wiki_path="a.md") is None
+
+
+def test_after_path_move_repoints_update_policy(tmp_repo):
+    update_policy.set_policy("a.md", ingestion_auto_update_disabled=True)
+    sha = wiki_git.commit_file("a.md", "body\n", "seed", author=None)
+
+    notify.after_path_move([("a.md", "b.md")], sha, actor=None)
+
+    assert update_policy.get("a.md") is None
+    assert update_policy.get("b.md") is not None
 
 
 def test_after_path_move_reconverges_trigger_cache(tmp_repo, monkeypatch):

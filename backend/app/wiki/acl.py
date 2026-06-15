@@ -44,6 +44,7 @@ from sqlalchemy import (
 from app.auth import groups as groups_repo
 from app.db.models import AclEntry, WikiOwner
 from app.db.session import session
+from app.wiki.filesystem import common_folder_rename
 
 log = logging.getLogger(__name__)
 
@@ -735,7 +736,7 @@ def on_path_moved(moves: list[tuple[str, str]]) -> None:
         # directory yields one tuple per nested file all sharing the
         # same prefix swap, so this catches it without the caller having
         # to tell us.
-        old_prefix, new_prefix = _common_folder_rename(moves)
+        old_prefix, new_prefix = common_folder_rename(moves)
         if old_prefix is not None and new_prefix is not None:
             # Folder ACL at the renamed folder itself.
             s.execute(
@@ -760,39 +761,6 @@ def on_path_moved(moves: list[tuple[str, str]]) -> None:
                     )
                 )
             )
-
-
-def _common_folder_rename(
-    moves: list[tuple[str, str]],
-) -> tuple[str | None, str | None]:
-    """If every move shares a common (old_prefix, new_prefix) directory
-    swap, return it; else (None, None). Used to catch directory renames
-    so we can rewrite folder-level ACLs in one query."""
-    if not moves:
-        return None, None
-    first_old, first_new = moves[0]
-    if "/" not in first_old or "/" not in first_new:
-        return None, None
-    old_prefix = first_old.rsplit("/", 1)[0]
-    new_prefix = first_new.rsplit("/", 1)[0]
-    while old_prefix and new_prefix:
-        suffix_old = first_old[len(old_prefix) :]
-        suffix_new = first_new[len(new_prefix) :]
-        if suffix_old != suffix_new:
-            return None, None
-        if all(
-            o.startswith(old_prefix + "/")
-            and n.startswith(new_prefix + "/")
-            and o[len(old_prefix) :] == n[len(new_prefix) :]
-            for o, n in moves
-        ):
-            return old_prefix, new_prefix
-        # Walk up one level and retry — handles nested rename detection.
-        if "/" not in old_prefix or "/" not in new_prefix:
-            return None, None
-        old_prefix = old_prefix.rsplit("/", 1)[0]
-        new_prefix = new_prefix.rsplit("/", 1)[0]
-    return None, None
 
 
 # Re-export for type-stability of ``Document`` import — keeps pyright happy

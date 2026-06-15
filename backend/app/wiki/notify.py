@@ -36,7 +36,7 @@ from app.mcp_server import pubsub as mcp_pubsub
 from app.tasks.reindex import index_path
 from app.tasks.triggers import fan_out_trigger_eval
 from app.triggers import repo as triggers_repo
-from app.wiki import acl, agent_activity, comments, drafts
+from app.wiki import acl, agent_activity, comments, drafts, update_policy
 from app.wiki.comment_remap import remap_comments
 from app.models.wiki import ChangeKind
 
@@ -125,6 +125,7 @@ def after_doc_delete(rel_path: str, sha: str, actor: str | None) -> None:
         return
     fts.delete_document(rel_path)
     acl.on_page_deleted(rel_path)
+    update_policy.on_page_deleted(rel_path)
     # The body is gone, so there's nothing to re-anchor against — orphan the
     # page's comments (keeps them as tombstones) rather than dropping them.
     comments.orphan_all_for_doc(rel_path)
@@ -171,6 +172,7 @@ def after_path_move(
     tree shape changed once, even if many paths moved).
     """
     acl.on_path_moved(moves)
+    update_policy.on_path_moved(moves)
     list_changed = False
     for old_p, new_p in moves:
         old_is_md = old_p.endswith(".md")
