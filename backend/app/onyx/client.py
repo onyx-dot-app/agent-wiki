@@ -174,6 +174,14 @@ class OnyxClient:
     # Connect-Onyx account link                                          #
     # ----------------------------------------------------------------- #
 
+    def whoami(self) -> dict[str, Any]:
+        """Identify the PAT's owner — validates the token (401/403 → OnyxAuthError)
+        and returns the user record (notably ``email``). Used to verify a
+        pasted PAT at connect time."""
+        resp = self._request("GET", "/api/me", what="whoami")
+        body: dict[str, Any] = resp.json()
+        return body
+
     def revoke_pat(self) -> None:
         """Best-effort revoke of this client's own PAT on disconnect."""
         self._request("DELETE", "/api/connect/agent-wiki", what="revoke connection")

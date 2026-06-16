@@ -5,6 +5,14 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 
+class CraftConnectRequest(BaseModel):
+    """Manual-PAT connect (v0): the user pastes an Onyx Personal Access Token.
+    We validate it against the configured Onyx instance and store it as that
+    user's credential. Capped to bound abuse; real PATs are ~250 chars."""
+
+    pat: str = Field(..., min_length=8, max_length=1024)
+
+
 class CraftLaunchRequest(BaseModel):
     wiki_path: str | None = None
     # Same cap as the CLI launch path — bounds first_turn_prompt padding.

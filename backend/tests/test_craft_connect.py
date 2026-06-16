@@ -12,7 +12,7 @@ from app.db.session import init_db
 from app.ingest import settings as ingest_settings
 from app.main import create_app
 from app.onyx import connections
-from app.onyx.client import OnyxError, validate_onyx_base_url
+from app.onyx.client import OnyxAuthError, OnyxError, validate_onyx_base_url
 
 from tests._auth import login_fastapi
 from tests._seed import seed_user
@@ -54,7 +54,67 @@ def test_craft_routes_dark_when_disabled(client, tmp_config, monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
-# Connect start → Onyx authorize redirect                                     #
+# Manual-PAT connect (v0)                                                     #
+# --------------------------------------------------------------------------- #
+
+
+def _patch_onyx_client(monkeypatch, *, email: str | None = None, error: Exception | None = None):
+    """Patch app.api.craft.OnyxClient so whoami() returns/raises as configured."""
+
+    class Fake:
+        def __init__(self, base_url: str, pat: str):
+            self.pat = pat
+
+        def whoami(self) -> dict:
+            if error is not None:
+                raise error
+            return {"email": email}
+
+    monkeypatch.setattr("app.api.craft.OnyxClient", Fake)
+
+
+def test_connect_with_valid_pat_stores_connection(client, monkeypatch):
+    _configure_onyx()
+    uid = seed_user()
+    login_fastapi(client, uid)
+    _patch_onyx_client(monkeypatch, email="nik@onyx.app")
+
+    res = client.post("/api/craft/connect", json={"pat": "onyx_pat_" + "z" * 40})
+    assert res.status_code == 200
+    body = res.json()
+    assert body["connected"] is True
+    assert body["onyx_user_email"] == "nik@onyx.app"
+    assert "z" * 40 not in (body["token_display"] or "")
+
+    stored = connections.status(uid)
+    assert stored is not None and stored["onyx_user_email"] == "nik@onyx.app"
+    # Stored PAT must round-trip (decrypts) and be usable by the launcher.
+    full = connections.get_with_pat(uid, onyx_base_url=ONYX)
+    assert full is not None and full["onyx_pat"] == "onyx_pat_" + "z" * 40
+
+
+def test_connect_with_invalid_pat_rejected(client, monkeypatch):
+    _configure_onyx()
+    uid = seed_user()
+    login_fastapi(client, uid)
+    _patch_onyx_client(monkeypatch, error=OnyxAuthError("401"))
+
+    res = client.post("/api/craft/connect", json={"pat": "onyx_pat_bad"})
+    assert res.status_code == 401
+    assert res.json()["error"] == "invalid_onyx_pat"
+    assert connections.status(uid) is None
+
+
+def test_connect_requires_available(client, tmp_config, monkeypatch):
+    # No onyx_base_url configured → 404 even with a would-be-valid PAT.
+    uid = seed_user()
+    login_fastapi(client, uid)
+    _patch_onyx_client(monkeypatch, email="nik@onyx.app")
+    assert client.post("/api/craft/connect", json={"pat": "onyx_pat_x"}).status_code == 404
+
+
+# --------------------------------------------------------------------------- #
+# Connect start → Onyx authorize redirect (dormant redirect-mint flow)        #
 # --------------------------------------------------------------------------- #
 
 

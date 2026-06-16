@@ -4,9 +4,17 @@ Routes mounted under ``/api/craft`` from ``app.main:create_app``:
 
 - ``POST /api/craft/launch``            — idempotent launch (enqueues the worker)
 - ``GET  /api/craft/connect``           — connection status for the current user
-- ``GET  /api/craft/connect/start``     — browser redirect into the Onyx consent
-- ``GET  /api/craft/connect/callback``  — code+state return leg
+- ``POST /api/craft/connect``           — manual-PAT connect (v0): validate + store
 - ``DELETE /api/craft/connect``         — disconnect (best-effort revoke on Onyx)
+- ``GET  /api/craft/connect/start``     — redirect-mint connect (dormant; awaits Onyx Phase 1)
+- ``GET  /api/craft/connect/callback``  — redirect-mint return leg (dormant)
+
+Connect (v0) is **manual PAT paste**: the user mints an Onyx Personal Access
+Token and pastes it; we validate via ``GET /api/me`` and store it per-user.
+Each user's PAT means their Craft runs execute as them, so their Onyx
+knowledge ACLs + LLM access are respected. The redirect-mint flow
+(``connect/start`` + ``connect/callback``) is the future no-copy-paste UX and
+stays dormant until the Onyx ``/connect/agent-wiki`` endpoints ship.
 
 All gated on ``CONFIG.craft_enabled`` AND an admin-configured Onyx base URL
 (``ingest_settings.onyx_base_url``) — availability is computed, not a toggle,
@@ -28,10 +36,15 @@ from app.db import agent_sessions as sessions_repo
 from app.ingest import settings as ingest_settings
 from app.launchers import prompt_builder
 from app.launchers.registry import get_registry
-from app.models.craft import CraftConnectStatus, CraftLaunchRequest, CraftLaunchResponse
+from app.models.craft import (
+    CraftConnectRequest,
+    CraftConnectStatus,
+    CraftLaunchRequest,
+    CraftLaunchResponse,
+)
 from app.onyx import connect as connect_flow
 from app.onyx import connections
-from app.onyx.client import OnyxClient, OnyxError, exchange_connect_code
+from app.onyx.client import OnyxAuthError, OnyxClient, OnyxError, exchange_connect_code
 from app.tasks.craft import attachment_filename, craft_launch
 from app.wiki import acl as wiki_acl
 from app.wiki import filesystem as wiki_fs
@@ -150,6 +163,39 @@ def get_connect_status(
         token_display=row["token_display"] if connected and row else None,
         expires_at=row["expires_at"] if connected and row else None,
         connect_url=_connect_start_url(return_to),
+    )
+
+
+@router.post("/connect", response_model=CraftConnectStatus)
+def connect_with_pat(
+    req: CraftConnectRequest,
+    user: User = Depends(require_user),
+) -> CraftConnectStatus:
+    """Manual-PAT connect (v0). Validate the pasted token against the
+    configured Onyx instance, then store it as this user's credential."""
+    base = _require_available()
+    pat = req.pat.strip()
+    client = OnyxClient(base, pat)  # also re-validates the base URL
+    try:
+        me = client.whoami()
+    except OnyxAuthError as exc:
+        raise HTTPException(status_code=401, detail="invalid_onyx_pat") from exc
+    except OnyxError as exc:
+        raise HTTPException(status_code=502, detail="onyx_unreachable") from exc
+    connections.upsert(
+        user_id=user.id,
+        onyx_pat=pat,
+        onyx_user_email=me.get("email"),
+        expires_at=None,  # manual PATs carry no expiry hint; re-connect on 401
+        onyx_base_url=base,
+    )
+    row = connections.status(user.id)
+    return CraftConnectStatus(
+        connected=True,
+        onyx_user_email=row["onyx_user_email"] if row else me.get("email"),
+        token_display=row["token_display"] if row else None,
+        expires_at=row["expires_at"] if row else None,
+        connect_url=None,
     )
 
 
