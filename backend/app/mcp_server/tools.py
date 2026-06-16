@@ -53,6 +53,7 @@ MCP_ALLOWED_TOOLS: frozenset[str] = frozenset(
         "add_comment",
         "reply_comment",
         "resolve_comment",
+        "set_update_policy",
         # Write — async
         "update_doc_nl",
     }
