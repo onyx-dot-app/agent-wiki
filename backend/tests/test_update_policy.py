@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+
 from app.wiki import update_policy
 
 
@@ -65,6 +67,47 @@ def test_disabled_paths_batch(tmp_db):
 
 def test_disabled_paths_empty(tmp_db):
     assert update_policy.disabled_paths([]) == set()
+
+
+def test_count_ingest_enabled_pages(tmp_db):
+    # No policy at all -> every page is enabled (no enumeration).
+    assert update_policy.count_ingest_enabled_pages(10, lambda prefix: []) == 10
+
+    update_policy.set_policy("team", ingestion_auto_update_disabled=True)  # folder off
+    update_policy.set_policy("team/keep.md", ingestion_auto_update_disabled=False)  # re-enabled
+    update_policy.set_policy("solo.md", ingestion_auto_update_disabled=True)  # page off
+
+    pages = {"team/": ["team/a.md", "team/b.md", "team/keep.md"]}
+
+    # total=10; disabled = team/a, team/b (inherit), solo.md = 3; keep.md re-enabled.
+    enabled = update_policy.count_ingest_enabled_pages(10, lambda prefix: pages.get(prefix, []))
+    assert enabled == 7
+
+
+def test_count_ingest_enabled_pages_never_negative(tmp_db):
+    # A disabled page-scope row can reference a path not in the index (stale or
+    # pre-index): subtracting it plus a cascading root disable could exceed
+    # total_pages. The gauge must clamp to 0, never go negative.
+    update_policy.set_policy("", ingestion_auto_update_disabled=True)  # root: all off
+    update_policy.set_policy("ghost.md", ingestion_auto_update_disabled=True)  # not indexed
+    # Index reports 1 page; naive subtraction (root page + ghost) would be -1.
+    enabled = update_policy.count_ingest_enabled_pages(
+        1, lambda prefix: ["only.md"] if prefix == "" else []
+    )
+    assert enabled == 0
+
+
+def test_count_ingest_enabled_pages_propagates_lookup_failure(tmp_db):
+    # A disabled folder scope whose page listing fails (e.g. OpenSearch search
+    # endpoint down) must propagate, not silently return total_pages as if the
+    # folder were empty — the collector logs a warning and falls back to total.
+    update_policy.set_policy("team", ingestion_auto_update_disabled=True)
+
+    def boom(_prefix: str) -> list[str]:
+        raise RuntimeError("search endpoint down")
+
+    with pytest.raises(RuntimeError):
+        update_policy.count_ingest_enabled_pages(10, boom)
 
 
 def test_resolve_for_paths_batch(tmp_db):

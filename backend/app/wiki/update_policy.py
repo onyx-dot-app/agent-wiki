@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict
@@ -253,3 +253,48 @@ def disabled_paths(paths: Iterable[str]) -> set[str]:
         for p, r in resolve_for_paths(paths).items()
         if r.ingestion_auto_update_disabled
     }
+
+
+def _disabled_true_scopes() -> list[str]:
+    """Paths that *explicitly* disable ingestion auto-update (the True rows).
+
+    Small — only managed scopes, not pages. Drives the auto-update-enabled
+    metric without enumerating every wiki page.
+    """
+    with session() as s:
+        rows = s.execute(
+            select(UpdatePolicy.path).where(
+                UpdatePolicy.ingestion_auto_update_disabled.is_(True)
+            )
+        ).scalars().all()
+    return list(rows)
+
+
+def count_ingest_enabled_pages(
+    total_pages: int, list_pages_under: Callable[[str], list[str]]
+) -> int:
+    """Number of pages with ingestion auto-update **enabled** (effective).
+
+    Driven by the small set of explicitly-disabled scopes, not by enumerating
+    every page: only the protected subtrees are listed (via
+    ``list_pages_under(prefix)``, injected to keep the search index out of this
+    module), then resolved most-granular-wins so re-enabled children are counted
+    back as enabled. Pages under no disabled scope are enabled by definition.
+
+    Clamped to ``[0, total_pages]``: a disabled *page* scope is counted even if
+    that path isn't indexed (a stale or pre-index policy row), so the subtracted
+    set can exceed ``total_pages`` when the policy table and the index disagree —
+    the gauge must never read negative.
+    """
+    scopes = _disabled_true_scopes()
+    if not scopes:
+        return total_pages
+    candidates: set[str] = set()
+    for scope in scopes:
+        if kind_for_path(scope) == "page":
+            candidates.add(scope)
+        else:
+            candidates.update(list_pages_under(f"{scope}/" if scope else ""))
+    if not candidates:
+        return total_pages
+    return max(0, total_pages - len(disabled_paths(candidates)))
