@@ -103,6 +103,31 @@
   gap: 8px;
 }
 
+/* Small "Inherited / Set here" status line + reset affordance. */
+.origin {
+  display: block;
+  font-size: 12px;
+  color: var(--text-03);
+  margin-top: 2px;
+}
+.linkBtn {
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text-04);
+  text-decoration: underline;
+  cursor: pointer;
+}
+.linkBtn:hover {
+  color: var(--text-05);
+}
+.linkBtn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .muted {
   font-size: 13px;
   color: var(--text-03);

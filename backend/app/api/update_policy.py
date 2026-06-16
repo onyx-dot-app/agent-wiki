@@ -6,6 +6,7 @@ Thin HTTP layer over ``app/wiki/update_policy.py``. Reads/writes are gated by
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
@@ -14,7 +15,7 @@ from app.auth.deps import require_user
 from app.models.update_policy import (
     EffectivePolicy,
     ExplicitPolicy,
-    SetUpdatePolicyRequest,
+    PatchUpdatePolicyRequest,
     UpdatePolicyResponse,
 )
 from app.wiki import update_policy as policy_repo
@@ -53,18 +54,21 @@ def get_update_policy(
     return _build_response(norm)
 
 
-@router.put("/update-policy", response_model=UpdatePolicyResponse)
-def put_update_policy(
-    req: SetUpdatePolicyRequest, user: User = Depends(require_user)
+@router.patch("/update-policy", response_model=UpdatePolicyResponse)
+def patch_update_policy(
+    req: PatchUpdatePolicyRequest, user: User = Depends(require_user)
 ) -> UpdatePolicyResponse:
     norm = _normalize(req.path)
     require_can("write", norm, user)
-    policy_repo.set_policy(
-        norm,
-        ingestion_auto_update_disabled=req.ingestion_auto_update_disabled,
-        update_instruction=req.update_instruction,
-        actor_user_id=user.id,
-    )
+    # Patch only the fields actually present in the body; omitted fields keep
+    # their inherited state (``model_fields_set`` distinguishes "omitted" from an
+    # explicit ``null`` clear).
+    patch: dict[str, Any] = {}
+    if "ingestion_auto_update_disabled" in req.model_fields_set:
+        patch["ingestion_auto_update_disabled"] = req.ingestion_auto_update_disabled
+    if "update_instruction" in req.model_fields_set:
+        patch["update_instruction"] = req.update_instruction
+    policy_repo.set_policy(norm, actor_user_id=user.id, **patch)
     return _build_response(norm)
 
 

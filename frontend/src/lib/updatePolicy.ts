@@ -25,9 +25,13 @@ export interface UpdatePolicyResponse {
   effective: EffectivePolicy;
 }
 
-export interface SetUpdatePolicyInput {
-  ingestion_auto_update_disabled: boolean | null;
-  update_instruction: string | null;
+// Partial update: include only the field(s) you want to change. Omitted fields
+// keep their (possibly inherited) state; sending a field as `null` clears it
+// back to inherit. So toggling auto-update never disturbs the instruction, and
+// vice versa.
+export interface UpdatePolicyPatch {
+  ingestion_auto_update_disabled?: boolean | null;
+  update_instruction?: string | null;
 }
 
 export function getUpdatePolicy(path: string): Promise<UpdatePolicyResponse> {
@@ -36,14 +40,12 @@ export function getUpdatePolicy(path: string): Promise<UpdatePolicyResponse> {
   );
 }
 
-// PUT is full desired-state: both fields are sent every time, so callers pass
-// the complete intended policy (a missing field clears it on the server).
-export function setUpdatePolicy(
+export function patchUpdatePolicy(
   path: string,
-  input: SetUpdatePolicyInput,
+  patch: UpdatePolicyPatch,
 ): Promise<UpdatePolicyResponse> {
   return apiFetch<UpdatePolicyResponse>("/update-policy", {
-    method: "PUT",
-    body: JSON.stringify({ path, ...input }),
+    method: "PATCH",
+    body: JSON.stringify({ path, ...patch }),
   });
 }

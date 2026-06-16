@@ -1,5 +1,5 @@
-"""HTTP tests for /api/update-policy — CRUD round-trip, folder cascade, and
-the require_can write gate."""
+"""HTTP tests for /api/update-policy — PATCH partial semantics, folder cascade,
+and the require_can write gate."""
 from __future__ import annotations
 
 
@@ -13,11 +13,11 @@ def _strip_everyone(integration, path: str) -> None:
             assert r.status_code == 204
 
 
-def test_put_get_delete_roundtrip(integration):
+def test_patch_get_delete_roundtrip(integration):
     integration.signup(email="admin@x.com")  # auto-admin (first user)
     integration.put_doc("guide.md", "# Guide\n\nbody")
 
-    resp = integration.client.put(
+    resp = integration.client.patch(
         "/api/update-policy",
         json={
             "path": "guide.md",
@@ -43,11 +43,59 @@ def test_put_get_delete_roundtrip(integration):
     assert body["effective"]["ingestion_auto_update_disabled"] is False
 
 
+def test_patch_one_field_preserves_the_other(integration):
+    integration.signup(email="admin@x.com")
+    integration.put_doc("guide.md", "# Guide")
+
+    # Set only the instruction — disable stays inherited (no explicit value).
+    resp = integration.client.patch(
+        "/api/update-policy",
+        json={"path": "guide.md", "update_instruction": "Keep it terse."},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["explicit"]["ingestion_auto_update_disabled"] is None
+
+    # Now disable — the instruction must survive (not clobbered to null).
+    resp = integration.client.patch(
+        "/api/update-policy",
+        json={"path": "guide.md", "ingestion_auto_update_disabled": True},
+    )
+    body = resp.json()
+    assert body["explicit"]["ingestion_auto_update_disabled"] is True
+    assert body["explicit"]["update_instruction"] == "Keep it terse."
+
+
+def test_patch_null_resets_field_to_inherited(integration):
+    integration.signup(email="admin@x.com")
+    integration.put_doc("team/guide.md", "# Guide")
+    # Folder disables ingestion; page overrides to enabled.
+    integration.client.patch(
+        "/api/update-policy",
+        json={"path": "team", "ingestion_auto_update_disabled": True},
+    )
+    integration.client.patch(
+        "/api/update-policy",
+        json={"path": "team/guide.md", "ingestion_auto_update_disabled": False},
+    )
+    resp = integration.client.get("/api/update-policy?path=team/guide.md")
+    assert resp.json()["effective"]["ingestion_auto_update_disabled"] is False
+
+    # Reset the page's override to inherited (null) -> falls back to the folder.
+    resp = integration.client.patch(
+        "/api/update-policy",
+        json={"path": "team/guide.md", "ingestion_auto_update_disabled": None},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["explicit"] is None  # both fields empty -> row removed
+    assert body["effective"]["ingestion_auto_update_disabled"] is True  # folder again
+
+
 def test_folder_policy_shows_in_doc_effective(integration):
     integration.signup(email="admin@x.com")
     integration.put_doc("team/guide.md", "# Guide")
 
-    resp = integration.client.put(
+    resp = integration.client.patch(
         "/api/update-policy",
         json={"path": "team", "ingestion_auto_update_disabled": True},
     )
@@ -66,7 +114,7 @@ def test_non_writer_forbidden(integration):
     _strip_everyone(integration, "secret.md")
 
     integration.signup(email="bob@x.com")  # session is now bob (non-admin)
-    resp = integration.client.put(
+    resp = integration.client.patch(
         "/api/update-policy",
         json={"path": "secret.md", "ingestion_auto_update_disabled": True},
     )
@@ -78,7 +126,7 @@ def test_non_admin_writer_allowed(integration):
     integration.put_doc("open.md", "# Open")  # default-public: everyone read+write
     integration.signup(email="carol@x.com")  # non-admin, has everyone write
 
-    resp = integration.client.put(
+    resp = integration.client.patch(
         "/api/update-policy",
         json={"path": "open.md", "update_instruction": "be brief"},
     )
