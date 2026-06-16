@@ -9,7 +9,7 @@ from typing import Any
 
 from app.wiki import utils as wiki_utils
 from app.llm.agents.tools.errors import ToolError
-from app.wiki import agent_activity, git as wiki_git
+from app.wiki import agent_activity, git as wiki_git, update_policy
 
 
 def handle(args: dict[str, Any]) -> Any:
@@ -54,10 +54,16 @@ def handle(args: dict[str, Any]) -> Any:
         wiki_utils.mark_doc_read(path)
         agents = [r.model_dump() for r in agent_activity.list_for_doc(path)]
 
-    return {
+    result: dict[str, Any] = {
         "path": path,
         "body": body,
         "sha": sha or head_sha,
         "is_head": is_head,
         "agents": agents,
     }
+    # Surface the page's effective update instruction (incl. inherited from a
+    # parent folder) so an agent editing this page can follow it.
+    instruction = update_policy.resolve_for_path(path).update_instruction
+    if instruction:
+        result["update_instruction"] = instruction
+    return result

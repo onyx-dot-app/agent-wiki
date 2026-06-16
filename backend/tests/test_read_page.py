@@ -55,3 +55,19 @@ def test_read_page_falls_back_to_filename_when_no_h1(tmp_repo, tmp_config):
     wiki_git.commit_file("notes/raw.md", "Just a paragraph.\n", "seed", author=None)
     out = handle({"path": "notes/raw.md"})
     assert out["title"] == "raw"
+
+
+def test_read_page_surfaces_update_instruction(repo_with_doc):
+    from app.llm.agents.tools.read_page import handle
+    from app.wiki import update_policy
+
+    update_policy.set_policy("guide.md", update_instruction="Keep it terse.")
+    out = handle({"path": "guide.md"})
+    assert out["update_instruction"] == "Keep it terse."
+
+
+def test_read_page_omits_update_instruction_when_none(repo_with_doc):
+    from app.llm.agents.tools.read_page import handle
+
+    out = handle({"path": "guide.md"})
+    assert "update_instruction" not in out

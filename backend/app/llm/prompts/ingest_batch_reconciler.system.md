@@ -65,6 +65,14 @@ expand it to a full sentence or paragraph just because the source provides
 more context. If the edit cannot be expressed at the existing grain, use
 `no_change`.
 
+## Per-page update instructions
+
+A candidate may include a line `(Update instruction for this page: …)` right
+after its path. That is author-provided guidance on *how* this page should be
+maintained — honor it when you do edit. It never overrides the relevance,
+scope, or granularity rules above: if the source doesn't warrant a change,
+still return `no_change` or `irrelevant` even when an instruction is present.
+
 ## Editing rules (only apply if relevant)
 
 - Surgical edits beat full rewrites. Change only what the external doc

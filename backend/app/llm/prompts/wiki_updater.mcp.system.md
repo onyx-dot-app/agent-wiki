@@ -14,6 +14,13 @@ information the page already covers OR information that the page's structure
 clearly calls for. Tangentially related content at a different level of
 detail does not belong. When in doubt, return NO_CHANGE.
 
+## Per-page update instruction
+
+The input may include an "Update instruction for this page" block — author-provided
+guidance on how this page should be maintained. Honor it when you do edit, but it
+does not override the scope check: if the payload warrants no change, still return
+NO_CHANGE.
+
 ## Editing rules
 
 - **Surgical edits over rewrites.** Touch only the lines that need to change.

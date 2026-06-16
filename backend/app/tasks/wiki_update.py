@@ -348,15 +348,16 @@ def _reconcile_pushed_document(push: dict[str, Any]) -> None:
     url: str = str(push.get("url") or _meta.get("url") or "")
 
     # Read all candidate bodies upfront — needed by both the selector and the
-    # main reconciler loop. Skip unreadable files early so the selector sees
-    # the same set the reconciler will act on. Drop pages whose update policy
-    # disables ingestion auto-update *before* any LLM call, so a protected page
-    # is never rewritten by a connector push.
-    # Resolve every candidate's ingestion-disable in one query, not per-hit.
-    disabled = update_policy.disabled_paths([hit.path for hit in hits])
+    # main reconciler loop. Skip unreadable files early so the selector sees the
+    # same set the reconciler will act on. Resolve every candidate's update
+    # policy in one query: drop pages whose policy disables ingestion
+    # auto-update *before* any LLM call, and carry each kept page's resolved
+    # update instruction onto its candidate for the reconciler prompt.
+    policies = update_policy.resolve_for_paths([hit.path for hit in hits])
     readable: list[WikiUpdateCandidate] = []
     for hit in hits:
-        if hit.path in disabled:
+        policy = policies.get(hit.path)
+        if policy is not None and policy.ingestion_auto_update_disabled:
             ingest_outcomes_total.labels(
                 outcome="ingestion_auto_update_disabled", wiki_path=hit.path
             ).inc()
@@ -366,9 +367,17 @@ def _reconcile_pushed_document(push: dict[str, Any]) -> None:
             )
             continue
         try:
-            readable.append(WikiUpdateCandidate(hit=hit, body=wiki_git.read_file(hit.path)))
+            body = wiki_git.read_file(hit.path)
         except Exception:
             log.debug("process_pushed_document: skipping unreadable %s", hit.path)
+            continue
+        readable.append(
+            WikiUpdateCandidate(
+                hit=hit,
+                body=body,
+                update_instruction=policy.update_instruction if policy else None,
+            )
+        )
 
     if not readable:
         ingest_outcomes_total.labels(outcome="no_candidates", wiki_path="").inc()

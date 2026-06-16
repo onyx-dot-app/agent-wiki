@@ -38,13 +38,13 @@ def _stub_llm_settings(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
-def _stub_ingest_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The candidate loop calls update_policy.disabled_paths, which opens a DB
-    session. These unit tests mock git/search and run without a DB, so default
-    to 'none disabled'. The policy-specific test overrides this."""
+def _stub_resolve_policies(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The candidate loop calls update_policy.resolve_for_paths, which opens a DB
+    session. These unit tests mock git/search and run without a DB, so default to
+    "no policy" (enabled, no instruction). Policy-specific tests override this."""
     monkeypatch.setattr(
-        "app.tasks.wiki_update.update_policy.disabled_paths",
-        lambda paths: set(),
+        "app.tasks.wiki_update.update_policy.resolve_for_paths",
+        lambda paths: {},
     )
 
 
@@ -261,14 +261,40 @@ def test_ingestion_disabled_skips_candidate_before_llm(
     # A page whose policy disables ingestion auto-update must be dropped before
     # any LLM call — the reconciler never sees it and nothing commits.
     monkeypatch.setattr("app.tasks.wiki_update.get_llm_settings", lambda: _settings_with_model())
+    from app.wiki.update_policy import ResolvedPolicy
+
     monkeypatch.setattr(
-        "app.tasks.wiki_update.update_policy.disabled_paths",
-        lambda paths: {"page.md"},
+        "app.tasks.wiki_update.update_policy.resolve_for_paths",
+        lambda paths: {"page.md": ResolvedPolicy(ingestion_auto_update_disabled=True)},
     )
     mock_search.return_value = [_hit("page.md", "Page", 5.0)]
     _run(_make_push())
     mock_reconcile.assert_not_called()
     mock_commit.assert_not_called()
+
+
+@patch("app.tasks.wiki_update.wiki_git.head_sha_for_path", return_value="headsha")
+@patch("app.wiki.utils.wiki_notify.after_doc_write")
+@patch("app.tasks.wiki_update.wiki_git.commit_file", return_value="sha123")
+@patch("app.tasks.wiki_update.wiki_git.read_file", return_value="old body")
+@patch("app.tasks.wiki_update.ingest_batch_reconciler.batch_reconcile")
+@patch("app.tasks.wiki_update.ingest_search.candidates")
+def test_update_instruction_passed_to_reconciler(
+    mock_search, mock_reconcile, mock_read, mock_commit, mock_notify, mock_head, monkeypatch
+):
+    # The resolved per-page instruction rides onto the candidate the reconciler sees.
+    monkeypatch.setattr("app.tasks.wiki_update.get_llm_settings", lambda: _settings_with_model())
+    from app.wiki.update_policy import ResolvedPolicy
+
+    monkeypatch.setattr(
+        "app.tasks.wiki_update.update_policy.resolve_for_paths",
+        lambda paths: {"page.md": ResolvedPolicy(update_instruction="Keep it terse.")},
+    )
+    mock_search.return_value = [_hit("page.md", "Page", 5.0)]
+    mock_reconcile.return_value = (["new body"], 1)
+    _run(_make_push())
+    candidates = mock_reconcile.call_args.kwargs["candidates"]
+    assert candidates[0].update_instruction == "Keep it terse."
 
 
 @patch("app.wiki.utils.wiki_notify.after_doc_write")

@@ -5,6 +5,8 @@ set_policy.
 """
 from __future__ import annotations
 
+from typing import Any
+
 from app.wiki import update_policy
 
 
@@ -63,6 +65,86 @@ def test_disabled_paths_batch(tmp_db):
 
 def test_disabled_paths_empty(tmp_db):
     assert update_policy.disabled_paths([]) == set()
+
+
+def test_resolve_for_paths_batch(tmp_db):
+    update_policy.set_policy("a", update_instruction="folder rule")
+    update_policy.set_policy("a/p.md", ingestion_auto_update_disabled=True)
+    res = update_policy.resolve_for_paths(["a/p.md", "a/q.md", "c.md"])
+    # a/p.md: own disable + inherited instruction
+    assert res["a/p.md"].ingestion_auto_update_disabled is True
+    assert res["a/p.md"].update_instruction == "folder rule"
+    # a/q.md: inherits the folder instruction, enabled by default
+    assert res["a/q.md"].ingestion_auto_update_disabled is False
+    assert res["a/q.md"].update_instruction == "folder rule"
+    # c.md: nothing applies
+    assert res["c.md"].ingestion_auto_update_disabled is False
+    assert res["c.md"].update_instruction is None
+
+
+def test_nl_updater_injects_inherited_instruction(tmp_db, monkeypatch):
+    from app.llm.agents import nl_updater
+    from app.llm.client import CompletionResult
+
+    update_policy.set_policy("team", update_instruction="Keep it terse.")  # folder
+    captured: dict[str, Any] = {}
+
+    def fake_complete(*, messages, **kwargs):
+        captured["messages"] = messages
+        return CompletionResult(text="NO_CHANGE", tool_calls=[], stop_reason="end_turn")
+
+    monkeypatch.setattr(nl_updater.client, "complete", fake_complete)
+    nl_updater.process_instruction(
+        wiki_path="team/page.md", current_body="# P", payload={"instruction": "x"},
+        source="test",
+    )
+    user_msg = captured["messages"][1]["content"]
+    assert "Update instruction for this page" in user_msg
+    assert "Keep it terse." in user_msg  # inherited from the folder
+
+
+def test_nl_updater_omits_section_when_no_policy(tmp_db, monkeypatch):
+    from app.llm.agents import nl_updater
+    from app.llm.client import CompletionResult
+
+    captured: dict[str, Any] = {}
+
+    def fake_complete(*, messages, **kwargs):
+        captured["messages"] = messages
+        return CompletionResult(text="NO_CHANGE", tool_calls=[], stop_reason="end_turn")
+
+    monkeypatch.setattr(nl_updater.client, "complete", fake_complete)
+    nl_updater.process_instruction(
+        wiki_path="a/page.md", current_body="# A", payload={"instruction": "x"},
+        source="test",
+    )
+    assert "Update instruction for this page" not in captured["messages"][1]["content"]
+
+
+def test_nl_updater_proceeds_when_policy_store_unavailable(monkeypatch):
+    """No DB (offline eval): an unreachable policy store must not fail the update."""
+    from sqlalchemy.exc import OperationalError
+
+    from app.llm.agents import nl_updater
+    from app.llm.client import CompletionResult
+
+    def boom(_path):
+        raise OperationalError("SELECT 1", {}, Exception("could not connect"))
+
+    monkeypatch.setattr(nl_updater.update_policy, "resolve_for_path", boom)
+    captured: dict[str, Any] = {}
+
+    def fake_complete(*, messages, **kwargs):
+        captured["messages"] = messages
+        return CompletionResult(text="NO_CHANGE", tool_calls=[], stop_reason="end_turn")
+
+    monkeypatch.setattr(nl_updater.client, "complete", fake_complete)
+    result = nl_updater.process_instruction(
+        wiki_path="a/page.md", current_body="# A", payload={"instruction": "x"},
+        source="test",
+    )
+    assert result is None
+    assert "Update instruction for this page" not in captured["messages"][1]["content"]
 
 
 def test_fields_resolve_independently(tmp_db):

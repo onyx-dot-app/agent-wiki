@@ -189,27 +189,11 @@ def _scope_chain(norm: str) -> list[str]:
     return chain
 
 
-def resolve_for_path(path: str) -> ResolvedPolicy:
-    """Effective policy for ``path``: most-granular scope that sets a field wins.
-
-    ``path`` may be a doc or a folder. Walks the path and its ancestor folders,
-    closest first, and resolves each field independently — so a page can
-    re-enable ingestion under a disabled folder, and a folder instruction
-    applies until a nearer scope overrides it.
-    """
-    candidates = _scope_chain(normalize_path(path))
-
-    with session() as s:
-        rows = (
-            s.execute(select(UpdatePolicy).where(UpdatePolicy.path.in_(candidates)))
-            .scalars()
-            .all()
-        )
-    by_path = {r.path: r for r in rows}
-
+def _resolve_chain(chain: list[str], by_path: dict[str, UpdatePolicy]) -> ResolvedPolicy:
+    """Resolve one scope chain (closest first) against pre-fetched rows."""
     disabled: bool | None = None
     instruction: str | None = None
-    for scope in candidates:  # closest first
+    for scope in chain:
         row = by_path.get(scope)
         if row is None:
             continue
@@ -219,33 +203,23 @@ def resolve_for_path(path: str) -> ResolvedPolicy:
             instruction = row.update_instruction
         if disabled is not None and instruction is not None:
             break
-
     return ResolvedPolicy(
         ingestion_auto_update_disabled=bool(disabled),
         update_instruction=instruction,
     )
 
 
-def is_ingest_disabled(path: str) -> bool:
-    """Convenience: is connector/ingest auto-update disabled for ``path``?"""
-    return resolve_for_path(path).ingestion_auto_update_disabled
+def resolve_for_paths(paths: Iterable[str]) -> dict[str, ResolvedPolicy]:
+    """Effective policy for many paths in a single query.
 
-
-def disabled_paths(paths: Iterable[str]) -> set[str]:
-    """Subset of ``paths`` whose effective policy disables ingestion auto-update.
-
-    One query for all paths and their ancestor folders, then resolve each in
-    Python — collapses N per-candidate lookups to a single round-trip. Keyed by
-    the *input* path strings so callers can test membership directly.
+    Fetches the union of every path's scope chain once, then resolves each path
+    most-granular-wins (each field independently). Keyed by the *input* path
+    strings. Use this on the ingest hot path instead of per-candidate calls.
     """
-    chains: dict[str, list[str]] = {}
-    scopes: set[str] = set()
-    for p in paths:
-        chain = _scope_chain(normalize_path(p))
-        chains[p] = chain
-        scopes.update(chain)
+    chains = {p: _scope_chain(normalize_path(p)) for p in paths}
+    scopes = {scope for chain in chains.values() for scope in chain}
     if not scopes:
-        return set()
+        return {}
 
     with session() as s:
         rows = (
@@ -254,13 +228,28 @@ def disabled_paths(paths: Iterable[str]) -> set[str]:
             .all()
         )
     by_path = {r.path: r for r in rows}
+    return {orig: _resolve_chain(chain, by_path) for orig, chain in chains.items()}
 
-    out: set[str] = set()
-    for orig, chain in chains.items():
-        for scope in chain:  # closest first
-            row = by_path.get(scope)
-            if row is not None and row.ingestion_auto_update_disabled is not None:
-                if row.ingestion_auto_update_disabled:
-                    out.add(orig)
-                break
-    return out
+
+def resolve_for_path(path: str) -> ResolvedPolicy:
+    """Effective policy for a single ``path`` (convenience over
+    :func:`resolve_for_paths`): most-granular scope that sets a field wins,
+    walking the path then its ancestor folders, each field resolved
+    independently — so a page can re-enable ingestion under a disabled folder.
+    """
+    return resolve_for_paths([path]).get(path, ResolvedPolicy())
+
+
+def is_ingest_disabled(path: str) -> bool:
+    """Convenience: is connector/ingest auto-update disabled for ``path``?"""
+    return resolve_for_path(path).ingestion_auto_update_disabled
+
+
+def disabled_paths(paths: Iterable[str]) -> set[str]:
+    """Subset of ``paths`` whose effective policy disables ingestion auto-update
+    (one query, via :func:`resolve_for_paths`). Keyed by the input path strings."""
+    return {
+        p
+        for p, r in resolve_for_paths(paths).items()
+        if r.ingestion_auto_update_disabled
+    }

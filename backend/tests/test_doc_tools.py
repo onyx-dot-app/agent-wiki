@@ -314,3 +314,34 @@ def test_multi_edit_rejects_no_op(repo_with_doc):
         }
     )
     assert "error" in out
+
+
+# --------------------------------------------------------------------------- #
+# read_doc surfaces the page's update instruction                             #
+# --------------------------------------------------------------------------- #
+
+
+def test_read_doc_surfaces_own_update_instruction(repo_with_doc):
+    from app.llm.agents.tools.read_doc import handle
+    from app.wiki import update_policy
+
+    update_policy.set_policy("guide.md", update_instruction="Keep it terse.")
+    out = handle({"path": "guide.md"})
+    assert out["update_instruction"] == "Keep it terse."
+
+
+def test_read_doc_surfaces_inherited_update_instruction(repo_with_doc):
+    from app.llm.agents.tools.read_doc import handle
+    from app.wiki import git as wiki_git, update_policy
+
+    wiki_git.commit_file("team/sub.md", "# Sub\n", "seed", author=None)
+    update_policy.set_policy("team", update_instruction="folder rule")
+    out = handle({"path": "team/sub.md"})
+    assert out["update_instruction"] == "folder rule"  # inherited from the folder
+
+
+def test_read_doc_omits_update_instruction_when_none(repo_with_doc):
+    from app.llm.agents.tools.read_doc import handle
+
+    out = handle({"path": "guide.md"})
+    assert "update_instruction" not in out
