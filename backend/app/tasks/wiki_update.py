@@ -352,9 +352,11 @@ def _reconcile_pushed_document(push: dict[str, Any]) -> None:
     # the same set the reconciler will act on. Drop pages whose update policy
     # disables ingestion auto-update *before* any LLM call, so a protected page
     # is never rewritten by a connector push.
+    # Resolve every candidate's ingestion-disable in one query, not per-hit.
+    disabled = update_policy.disabled_paths([hit.path for hit in hits])
     readable: list[WikiUpdateCandidate] = []
     for hit in hits:
-        if update_policy.is_ingest_disabled(hit.path):
+        if hit.path in disabled:
             ingest_outcomes_total.labels(
                 outcome="ingestion_auto_update_disabled", wiki_path=hit.path
             ).inc()

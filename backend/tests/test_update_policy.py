@@ -51,6 +51,20 @@ def test_instruction_closest_scope_wins(tmp_db):
     assert update_policy.resolve_for_path("a/other.md").update_instruction == "folder rule"
 
 
+def test_disabled_paths_batch(tmp_db):
+    update_policy.set_policy("a", ingestion_auto_update_disabled=True)  # folder off
+    update_policy.set_policy("a/on.md", ingestion_auto_update_disabled=False)  # re-enabled
+    update_policy.set_policy("b.md", ingestion_auto_update_disabled=True)
+    result = update_policy.disabled_paths(["a/off.md", "a/on.md", "b.md", "c.md"])
+    # a/off.md inherits the folder disable; a/on.md overrides; b.md is explicit;
+    # c.md has no policy.
+    assert result == {"a/off.md", "b.md"}
+
+
+def test_disabled_paths_empty(tmp_db):
+    assert update_policy.disabled_paths([]) == set()
+
+
 def test_fields_resolve_independently(tmp_db):
     update_policy.set_policy("a", ingestion_auto_update_disabled=True)
     update_policy.set_policy("a/page.md", update_instruction="terse")

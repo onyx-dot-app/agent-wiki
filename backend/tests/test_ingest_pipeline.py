@@ -39,12 +39,12 @@ def _stub_llm_settings(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture(autouse=True)
 def _stub_ingest_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The candidate loop calls update_policy.is_ingest_disabled, which opens a
-    DB session. These unit tests mock git/search and run without a DB, so
-    default to 'not disabled'. The policy-specific test overrides this."""
+    """The candidate loop calls update_policy.disabled_paths, which opens a DB
+    session. These unit tests mock git/search and run without a DB, so default
+    to 'none disabled'. The policy-specific test overrides this."""
     monkeypatch.setattr(
-        "app.tasks.wiki_update.update_policy.is_ingest_disabled",
-        lambda path: False,
+        "app.tasks.wiki_update.update_policy.disabled_paths",
+        lambda paths: set(),
     )
 
 
@@ -262,8 +262,8 @@ def test_ingestion_disabled_skips_candidate_before_llm(
     # any LLM call — the reconciler never sees it and nothing commits.
     monkeypatch.setattr("app.tasks.wiki_update.get_llm_settings", lambda: _settings_with_model())
     monkeypatch.setattr(
-        "app.tasks.wiki_update.update_policy.is_ingest_disabled",
-        lambda path: path == "page.md",
+        "app.tasks.wiki_update.update_policy.disabled_paths",
+        lambda paths: {"page.md"},
     )
     mock_search.return_value = [_hit("page.md", "Page", 5.0)]
     _run(_make_push())
