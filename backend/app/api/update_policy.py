@@ -44,7 +44,7 @@ def _build_response(path: str) -> UpdatePolicyResponse:
     )
 
 
-@router.get("/update-policy")
+@router.get("/update-policy", response_model=UpdatePolicyResponse)
 def get_update_policy(
     path: str, user: User = Depends(require_user)
 ) -> UpdatePolicyResponse:
@@ -53,7 +53,7 @@ def get_update_policy(
     return _build_response(norm)
 
 
-@router.put("/update-policy")
+@router.put("/update-policy", response_model=UpdatePolicyResponse)
 def put_update_policy(
     req: SetUpdatePolicyRequest, user: User = Depends(require_user)
 ) -> UpdatePolicyResponse:
@@ -68,7 +68,7 @@ def put_update_policy(
     return _build_response(norm)
 
 
-@router.delete("/update-policy")
+@router.delete("/update-policy", response_model=UpdatePolicyResponse)
 def delete_update_policy(
     path: str, user: User = Depends(require_user)
 ) -> UpdatePolicyResponse:
