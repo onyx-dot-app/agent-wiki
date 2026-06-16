@@ -341,6 +341,7 @@ def _reconcile_pushed_document(push: dict[str, Any]) -> None:
     if not hits:
         log.info("process_pushed_document: no BM25 candidates above threshold, doc_id=%s", doc_id)
         ingest_outcomes_total.labels(outcome="no_candidates", wiki_path="").inc()
+        ingest_document_results_total.labels(result="no_candidates").inc()
         return
 
     source_label = source_type or "external"
@@ -381,6 +382,7 @@ def _reconcile_pushed_document(push: dict[str, Any]) -> None:
 
     if not readable:
         ingest_outcomes_total.labels(outcome="no_candidates", wiki_path="").inc()
+        ingest_document_results_total.labels(result="no_candidates").inc()
         return
 
     # Stage 3: weak-model pre-filter (skipped when selector_model is unset or

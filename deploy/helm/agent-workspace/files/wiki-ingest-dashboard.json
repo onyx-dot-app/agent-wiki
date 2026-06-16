@@ -665,7 +665,7 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "Per-document terminal outcome over the last 24h (ingest_document_results_total), one count per ingested document. Priority: a document is 'committed' if it produced any wiki commit, else 'no_change' if any candidate resolved to no-change, else 'irrelevant'. Unlike \"Wiki Updates\", which counts page commits \u2014 one document can update several pages.",
+      "description": "Per-document terminal outcome over the last 24h (ingest_document_results_total), one count per ingested document. Priority: a document is 'committed' if it produced any wiki commit, else 'no_change' if any candidate resolved to no-change, else 'irrelevant'. 'search filtered out' (no_candidates) means search returned no usable candidate page (no BM25 hit above threshold, or none readable). These tiles together account for every ingested document, so they sum to \"Documents Ingested\". Unlike \"Wiki Updates\", which counts page commits \u2014 one document can update several pages.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -718,6 +718,25 @@
                   "fixedColor": "orange",
                   "mode": "fixed"
                 }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "no_candidates"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "purple",
+                  "mode": "fixed"
+                }
+              },
+              {
+                "id": "displayName",
+                "value": "search filtered out"
               }
             ]
           }
