@@ -20,6 +20,13 @@ The wiki is kept up to date via 3 different pathways:
 - External systems can push information/documents to the wiki via API and a built-in agent will find the right pages and make the updates.
 - Human users can directly edit the wiki.
 
+### Update Policy
+Not every page should be rewritten automatically. Any page — or a whole folder — can carry an **update policy**, edited from its *Update Policy* panel:
+- **Auto-update** — turn it off to keep connector/ingestion pushes from rewriting the page (or everything under a folder).
+- **Update instructions** — free-text guidance the updater agent honors when it does edit (e.g. "keep entries terse", "never touch the SLA table").
+
+Policies inherit down the tree: a setting on a folder applies to every page beneath it, and a more specific page or subfolder overrides its parent. Like permissions, they're stored per-path (not in the page body), so guidance never leaks into the wiki content.
+
 ### Triggers
 The wiki changes constantly, but most updates aren't interesting to most people. Triggers let a user say, in plain English, what they care about — "fire when this project's status flips from green to yellow", "fire when a new design doc lands under `projects/`" — scoped to a specific file or directory. Every commit under the scope is evaluated by an LLM against the description; on a match, a second LLM pass renders the owner's notification template into a concrete message about what actually changed.
 
