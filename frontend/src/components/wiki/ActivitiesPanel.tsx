@@ -96,23 +96,19 @@ export default function ActivitiesPanel() {
       {/* Header */}
       <Section
         flexDirection="row"
-        alignItems="center"
         justifyContent="between"
         height="fit"
-        padding={0.5}
+        gap={0.25}
       >
-        <Content
-          icon={SvgActivity}
-          title="Activity History"
-          variant="section"
-          sizePreset="main-ui"
-        />
-        <Section
-          flexDirection="row"
-          justifyContent="end"
-          gap={0.5}
-          height="fit"
-        >
+        <div className="p-2">
+          <Content
+            icon={SvgActivity}
+            title="Activity History"
+            variant="section"
+            sizePreset="main-ui"
+          />
+        </div>
+        <Section flexDirection="row" justifyContent="end" width="fit">
           {unreadCount > 0 && (
             <Tag title={`${unreadCount} new`} color="blue" size="md" />
           )}
