@@ -104,7 +104,6 @@ export default function AppSidebar() {
       </SidebarLayouts.Header>
 
       <SidebarLayouts.Body scrollKey="app-sidebar">
-
         {starred.length > 0 && (
           <SidebarLayouts.Section title="Starred">
             <StarredList paths={starred} onNavigate={closeMobile} />

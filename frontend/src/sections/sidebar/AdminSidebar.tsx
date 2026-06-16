@@ -34,7 +34,6 @@ export default function AdminSidebar() {
         />
       </SidebarLayouts.Header>
       <SidebarLayouts.Body scrollKey="admin-sidebar">
-
         {filteredGroups.map((group) => (
           <SidebarLayouts.Section
             key={group.label ?? "__ungrouped"}
