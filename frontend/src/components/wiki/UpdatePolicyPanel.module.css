@@ -110,22 +110,11 @@
   color: var(--text-03);
   margin-top: 2px;
 }
-.linkBtn {
-  border: none;
-  background: none;
-  padding: 0;
-  font: inherit;
-  font-size: 12px;
-  color: var(--text-04);
-  text-decoration: underline;
-  cursor: pointer;
-}
-.linkBtn:hover {
-  color: var(--text-05);
-}
-.linkBtn:disabled {
-  opacity: 0.5;
-  cursor: default;
+.originRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
 }
 
 .muted {

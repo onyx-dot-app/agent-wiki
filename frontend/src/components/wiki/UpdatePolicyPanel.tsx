@@ -134,27 +134,27 @@ export function UpdatePolicyPanel({ path, onClose, fullHeight }: Props) {
                   Onyx will periodically scan ingested data sources and update
                   relevant wiki content.
                 </span>
-                <span className={styles.origin}>
-                  {disableSetHere ? (
-                    <>
-                      Set on this {kind} ·{" "}
-                      <button
-                        type="button"
-                        className={styles.linkBtn}
-                        disabled={saving}
-                        onClick={() =>
-                          save({ ingestion_auto_update_disabled: null })
-                        }
-                      >
-                        Reset to inherited
-                      </button>
-                    </>
-                  ) : effDisabled ? (
-                    "Inherited — off (from a parent folder)"
-                  ) : (
-                    "Inherited — on (default)"
-                  )}
-                </span>
+                {disableSetHere ? (
+                  <div className={styles.originRow}>
+                    <span className={styles.origin}>Set on this {kind}</span>
+                    <Button
+                      prominence="tertiary"
+                      size="sm"
+                      disabled={saving}
+                      onClick={() =>
+                        save({ ingestion_auto_update_disabled: null })
+                      }
+                    >
+                      Reset to inherited
+                    </Button>
+                  </div>
+                ) : (
+                  <span className={styles.origin}>
+                    {effDisabled
+                      ? "Inherited — off (from a parent folder)"
+                      : "Inherited — on (default)"}
+                  </span>
+                )}
               </div>
               <Switch
                 checked={switchOn}

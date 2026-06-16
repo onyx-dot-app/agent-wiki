@@ -91,6 +91,23 @@ def test_patch_null_resets_field_to_inherited(integration):
     assert body["effective"]["ingestion_auto_update_disabled"] is True  # folder again
 
 
+def test_empty_patch_is_noop_and_preserves_audit(integration):
+    integration.signup(email="admin@x.com")
+    integration.put_doc("open.md", "# Open")  # default-public: everyone write
+    set_by_admin = integration.client.patch(
+        "/api/update-policy",
+        json={"path": "open.md", "update_instruction": "x"},
+    ).json()
+    admin_id = set_by_admin["explicit"]["updated_by_user_id"]
+
+    integration.signup(email="carol@x.com")  # now carol (non-admin, can write)
+    # Empty patch (only path) must not touch the row — otherwise updated_by would
+    # flip to carol even though no policy field changed.
+    resp = integration.client.patch("/api/update-policy", json={"path": "open.md"})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["explicit"]["updated_by_user_id"] == admin_id
+
+
 def test_folder_policy_shows_in_doc_effective(integration):
     integration.signup(email="admin@x.com")
     integration.put_doc("team/guide.md", "# Guide")
