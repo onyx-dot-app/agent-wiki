@@ -101,3 +101,42 @@ def test_kind_inferred_from_path(tmp_db):
     assert page is not None and page["kind"] == "page"
     assert folder is not None and folder["kind"] == "folder"
     assert root is not None and root["kind"] == "folder"
+
+
+# --------------------------------------------------------------------------- #
+# Lifecycle — policy follows page/folder move + drops on delete               #
+# --------------------------------------------------------------------------- #
+
+
+def test_on_path_moved_rekeys_page(tmp_db):
+    update_policy.set_policy(
+        "a.md", ingestion_auto_update_disabled=True, update_instruction="x"
+    )
+    update_policy.on_path_moved([("a.md", "b.md")])
+    assert update_policy.get("a.md") is None
+    moved = update_policy.get("b.md")
+    assert moved is not None
+    assert moved["ingestion_auto_update_disabled"] is True
+    assert moved["update_instruction"] == "x"
+    assert moved["kind"] == "page"
+
+
+def test_on_path_moved_folder_rename_carries_subtree(tmp_db):
+    update_policy.set_policy("proj", update_instruction="folder rule")
+    update_policy.set_policy("proj/sub", ingestion_auto_update_disabled=True)
+    update_policy.set_policy("proj/x.md", ingestion_auto_update_disabled=True)
+    # A directory rename surfaces as one move pair per nested file.
+    update_policy.on_path_moved([("proj/x.md", "work/x.md")])
+    assert update_policy.get("proj") is None
+    assert update_policy.get("proj/sub") is None
+    assert update_policy.get("proj/x.md") is None
+    work = update_policy.get("work")
+    assert work is not None and work["update_instruction"] == "folder rule"
+    assert update_policy.get("work/sub") is not None
+    assert update_policy.get("work/x.md") is not None
+
+
+def test_on_page_deleted_drops_row(tmp_db):
+    update_policy.set_policy("a.md", ingestion_auto_update_disabled=True)
+    update_policy.on_page_deleted("a.md")
+    assert update_policy.get("a.md") is None

@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import select
+from sqlalchemy import func, select, update
 
 from app.db.models import UpdatePolicy
 from app.db.session import session
@@ -128,6 +128,55 @@ def delete(path: str) -> bool:
             return False
         s.delete(row)
         return True
+
+
+def on_page_deleted(path: str) -> None:
+    """Drop the policy row for a deleted page (mirrors ``acl.on_page_deleted``).
+
+    Called per ``.md`` page from ``app.wiki.notify.after_doc_delete``. Folder
+    policy rows are left alone — a folder grant can outlive any single page in
+    it, matching the ACL convention.
+    """
+    delete(path)
+
+
+def on_path_moved(moves: list[tuple[str, str]]) -> None:
+    """Re-key policy rows so a page/folder policy follows a move/rename.
+
+    For each ``(old, new)`` pair the exact row at ``old`` is repointed to
+    ``new`` (page rows). When the pairs describe a directory rename, the
+    folder's own row and every row nested under it are repointed too — so
+    renaming ``a`` to ``b`` carries ``a`` and ``a/sub`` along. Mirrors
+    ``acl.on_path_moved``; the row volume is tiny in practice.
+    """
+    if not moves:
+        return
+    with session() as s:
+        for old_p, new_p in moves:
+            s.execute(
+                update(UpdatePolicy)
+                .where(UpdatePolicy.path == old_p)
+                .values(path=new_p)
+            )
+        old_prefix, new_prefix = filesystem.common_folder_rename(moves)
+        if old_prefix is not None and new_prefix is not None:
+            # The renamed folder's own policy row.
+            s.execute(
+                update(UpdatePolicy)
+                .where(UpdatePolicy.path == old_prefix)
+                .values(path=new_prefix)
+            )
+            # Policy rows nested under the renamed folder.
+            s.execute(
+                update(UpdatePolicy)
+                .where(UpdatePolicy.path.like(old_prefix + "/%"))
+                .values(
+                    path=func.concat(
+                        new_prefix,
+                        func.substr(UpdatePolicy.path, len(old_prefix) + 1),
+                    )
+                )
+            )
 
 
 def resolve_for_path(path: str) -> ResolvedPolicy:
