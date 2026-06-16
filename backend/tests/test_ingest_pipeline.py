@@ -37,6 +37,17 @@ def _stub_llm_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
+@pytest.fixture(autouse=True)
+def _stub_ingest_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The candidate loop calls update_policy.is_ingest_disabled, which opens a
+    DB session. These unit tests mock git/search and run without a DB, so
+    default to 'not disabled'. The policy-specific test overrides this."""
+    monkeypatch.setattr(
+        "app.tasks.wiki_update.update_policy.is_ingest_disabled",
+        lambda path: False,
+    )
+
+
 def _settings_with_model(model: str = "test-model") -> LLMSettings:
     return _EMPTY_LLM_SETTINGS.model_copy(update={"model": model})
 
@@ -238,6 +249,25 @@ def test_irrelevant_does_not_commit(mock_search, mock_reconcile, mock_read, mock
     mock_search.return_value = [_hit("page.md", "Page", 5.0)]
     mock_reconcile.return_value = ([IRRELEVANT_SENTINEL], 1)
     _run(_make_push())
+    mock_commit.assert_not_called()
+
+
+@patch("app.tasks.wiki_update.wiki_git.commit_file")
+@patch("app.tasks.wiki_update.ingest_batch_reconciler.batch_reconcile")
+@patch("app.tasks.wiki_update.ingest_search.candidates")
+def test_ingestion_disabled_skips_candidate_before_llm(
+    mock_search, mock_reconcile, mock_commit, monkeypatch
+):
+    # A page whose policy disables ingestion auto-update must be dropped before
+    # any LLM call — the reconciler never sees it and nothing commits.
+    monkeypatch.setattr("app.tasks.wiki_update.get_llm_settings", lambda: _settings_with_model())
+    monkeypatch.setattr(
+        "app.tasks.wiki_update.update_policy.is_ingest_disabled",
+        lambda path: path == "page.md",
+    )
+    mock_search.return_value = [_hit("page.md", "Page", 5.0)]
+    _run(_make_push())
+    mock_reconcile.assert_not_called()
     mock_commit.assert_not_called()
 
 
