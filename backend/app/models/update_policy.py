@@ -30,11 +30,14 @@ class UpdatePolicyResponse(BaseModel):
     effective: EffectivePolicy
 
 
-class SetUpdatePolicyRequest(BaseModel):
-    """Full desired state for a path (PUT semantics).
+class PatchUpdatePolicyRequest(BaseModel):
+    """Partial update for a path (PATCH semantics).
 
-    Both fields default to ``null`` = inherit/clear. When the resulting row
-    carries no setting it is removed.
+    Only fields present in the request body are changed; omitted fields are left
+    as-is, so setting one field never disturbs the other's inherited state. A
+    field sent as ``null`` clears it (back to inherit); when the row ends up with
+    no setting it is removed. The router keys off ``model_fields_set`` to tell
+    "omitted" from an explicit ``null``.
     """
 
     path: str

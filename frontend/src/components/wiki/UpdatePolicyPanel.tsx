@@ -7,7 +7,7 @@ import { useEffect, useState } from "react";
 import { ApiError } from "@/lib/api";
 import {
   getUpdatePolicy,
-  setUpdatePolicy,
+  patchUpdatePolicy,
   type UpdatePolicyResponse,
 } from "@/lib/updatePolicy";
 
@@ -31,17 +31,12 @@ export function UpdatePolicyPanel({ path, onClose, fullHeight }: Props) {
 
   const [loading, setLoading] = useState(true);
   const [loaded, setLoaded] = useState(false); // first fetch succeeded
-  const [disabled, setDisabled] = useState(false); // effective ingestion-disable
-  const [instruction, setInstruction] = useState(""); // this path's own (explicit)
+  const [policy, setPolicy] = useState<UpdatePolicyResponse | null>(null);
+  const [pendingOn, setPendingOn] = useState<boolean | null>(null); // optimistic toggle
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  function applyResponse(r: UpdatePolicyResponse) {
-    setDisabled(r.effective.ingestion_auto_update_disabled);
-    setInstruction(r.explicit?.update_instruction ?? "");
-  }
 
   useEffect(() => {
     let alive = true;
@@ -52,7 +47,7 @@ export function UpdatePolicyPanel({ path, onClose, fullHeight }: Props) {
     getUpdatePolicy(path)
       .then((r) => {
         if (alive) {
-          applyResponse(r);
+          setPolicy(r);
           setLoaded(true);
         }
       })
@@ -67,43 +62,40 @@ export function UpdatePolicyPanel({ path, onClose, fullHeight }: Props) {
     };
   }, [path]);
 
-  // The toggle reads as "Auto-Update Wiki" — ON means ingestion auto-update is
-  // enabled, i.e. NOT disabled. Saves instantly (settings-switch feel).
-  async function onToggle(on: boolean) {
-    const prev = disabled;
-    setDisabled(!on);
+  // Effective = what's actually in force (incl. inheritance); explicit = the row
+  // set on exactly this path. A field is "set here" only when explicit carries a
+  // value for it; otherwise it's inherited from an ancestor / the default.
+  const effDisabled = policy?.effective.ingestion_auto_update_disabled ?? false;
+  const disableSetHere =
+    policy?.explicit?.ingestion_auto_update_disabled != null;
+  const ownInstruction = policy?.explicit?.update_instruction ?? "";
+  const effInstruction = policy?.effective.update_instruction ?? "";
+
+  async function save(
+    patch: Parameters<typeof patchUpdatePolicy>[1],
+    after?: () => void,
+  ) {
     setSaving(true);
     setError(null);
     try {
-      const r = await setUpdatePolicy(path, {
-        ingestion_auto_update_disabled: !on,
-        update_instruction: instruction || null,
-      });
-      applyResponse(r);
+      setPolicy(await patchUpdatePolicy(path, patch));
+      after?.();
     } catch (e) {
-      setDisabled(prev); // revert optimistic flip
       setError(errorMessage(e));
     } finally {
       setSaving(false);
+      setPendingOn(null);
     }
   }
 
-  async function saveInstruction() {
-    setSaving(true);
-    setError(null);
-    try {
-      const r = await setUpdatePolicy(path, {
-        ingestion_auto_update_disabled: disabled,
-        update_instruction: draft.trim() || null,
-      });
-      applyResponse(r);
-      setEditing(false);
-    } catch (e) {
-      setError(errorMessage(e));
-    } finally {
-      setSaving(false);
-    }
+  // "Auto-Update Wiki" ON = ingestion auto-update enabled (NOT disabled).
+  // Patches only the disable field, so the instruction's inheritance is untouched.
+  function onToggle(on: boolean) {
+    setPendingOn(on);
+    void save({ ingestion_auto_update_disabled: !on });
   }
+
+  const switchOn = pendingOn ?? !effDisabled;
 
   return (
     <div className={`${styles.panel} ${fullHeight ? styles.fullHeight : ""}`}>
@@ -142,9 +134,30 @@ export function UpdatePolicyPanel({ path, onClose, fullHeight }: Props) {
                   Onyx will periodically scan ingested data sources and update
                   relevant wiki content.
                 </span>
+                {disableSetHere ? (
+                  <div className={styles.originRow}>
+                    <span className={styles.origin}>Set on this {kind}</span>
+                    <Button
+                      prominence="tertiary"
+                      size="sm"
+                      disabled={saving}
+                      onClick={() =>
+                        save({ ingestion_auto_update_disabled: null })
+                      }
+                    >
+                      Reset to inherited
+                    </Button>
+                  </div>
+                ) : (
+                  <span className={styles.origin}>
+                    {effDisabled
+                      ? "Inherited — off (from a parent folder)"
+                      : "Inherited — on (default)"}
+                  </span>
+                )}
               </div>
               <Switch
-                checked={!disabled}
+                checked={switchOn}
                 disabled={saving}
                 onCheckedChange={onToggle}
               />
@@ -166,15 +179,24 @@ export function UpdatePolicyPanel({ path, onClose, fullHeight }: Props) {
                   size="sm"
                   tooltip="Edit instructions"
                   onClick={() => {
-                    setDraft(instruction);
+                    setDraft(ownInstruction);
                     setEditing(true);
                   }}
                 />
               )}
             </div>
 
-            {!editing && instruction && (
-              <div className={styles.instruction}>{instruction}</div>
+            {!editing && ownInstruction && (
+              <div className={styles.instruction}>{ownInstruction}</div>
+            )}
+            {!editing && !ownInstruction && effInstruction && (
+              // No instruction of its own — show the one inherited from a parent.
+              <div className={styles.instruction}>
+                <span className={styles.origin}>
+                  Inherited from a parent folder
+                </span>
+                {effInstruction}
+              </div>
             )}
 
             {editing && (
@@ -199,7 +221,12 @@ export function UpdatePolicyPanel({ path, onClose, fullHeight }: Props) {
                     variant="action"
                     size="sm"
                     disabled={saving}
-                    onClick={() => void saveInstruction()}
+                    onClick={() =>
+                      void save(
+                        { update_instruction: draft.trim() || null },
+                        () => setEditing(false),
+                      )
+                    }
                   >
                     {saving ? "Saving…" : "Save"}
                   </Button>

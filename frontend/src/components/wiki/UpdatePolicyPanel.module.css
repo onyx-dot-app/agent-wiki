@@ -103,6 +103,20 @@
   gap: 8px;
 }
 
+/* Small "Inherited / Set here" status line + reset affordance. */
+.origin {
+  display: block;
+  font-size: 12px;
+  color: var(--text-03);
+  margin-top: 2px;
+}
+.originRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
 .muted {
   font-size: 13px;
   color: var(--text-03);
