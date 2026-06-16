@@ -70,8 +70,11 @@ ingest_document_results_total = Counter(
     "ingest_document_results_total",
     "Per-document terminal outcome of ingest reconciliation, one increment per "
     "document. A document is 'committed' if any candidate page was committed, "
-    "else 'no_change' if any candidate resolved to no-change, else 'irrelevant'.",
-    ["result"],  # committed, no_change, irrelevant
+    "else 'no_change' if any candidate resolved to no-change, else 'irrelevant'. "
+    "'no_candidates' is recorded when search yields no usable candidate page "
+    "(no BM25 hit above threshold, or none readable), so this metric accounts "
+    "for every ingested document, not just those that reached reconciliation.",
+    ["result"],  # committed, no_change, irrelevant, no_candidates
 )
 
 ingest_document_chars = Histogram(

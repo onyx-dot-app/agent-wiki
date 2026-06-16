@@ -167,10 +167,31 @@ def test_filtered_source_drops_silently(mock_search, monkeypatch):
     mock_search.assert_not_called()
 
 
+def _doc_result_count(result: str) -> float:
+    from prometheus_client import REGISTRY
+    return REGISTRY.get_sample_value(
+        "ingest_document_results_total", {"result": result}
+    ) or 0.0
+
+
 @patch("app.tasks.wiki_update.ingest_search.candidates", return_value=[])
 def test_no_candidates_returns_early(mock_search):
+    # No BM25 hit -> the doc still gets a per-document terminal result so the
+    # "search filtered out" tile accounts for it (panel reconciles to ingested).
+    before = _doc_result_count("no_candidates")
     _run(_make_push())
     mock_search.assert_called_once()
+    assert _doc_result_count("no_candidates") - before == 1.0
+
+
+@patch("app.tasks.wiki_update.wiki_git.read_file", side_effect=OSError("unreadable"))
+@patch("app.tasks.wiki_update.ingest_search.candidates")
+def test_no_readable_candidates_records_search_filtered_out(mock_search, mock_read):
+    # Hits exist but none are readable -> also recorded as no_candidates.
+    mock_search.return_value = [_hit("page.md", "Page", 5.0)]
+    before = _doc_result_count("no_candidates")
+    _run(_make_push())
+    assert _doc_result_count("no_candidates") - before == 1.0
 
 
 def test_candidates_raises_on_search_backend_error():
