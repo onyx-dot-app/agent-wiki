@@ -1,12 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import {
-  Button,
-  Divider,
-  InputTypeIn,
-  Tag,
-} from "@onyx-ai/opal/components";
+import { Button, Divider, InputTypeIn, Tag } from "@onyx-ai/opal/components";
 import { SvgEmpty, SvgNotFound } from "@onyx-ai/opal/illustrations";
 import { SvgActivity, SvgX } from "@onyx-ai/opal/icons";
 import { Content, IllustrationContent, Section } from "@onyx-ai/opal/layouts";

@@ -6,5 +6,7 @@ export function toEventIso(ts: string): string {
 }
 
 export function isNewActivity(ts: string): boolean {
-  return Date.now() - new Date(toEventIso(ts)).getTime() < NEW_ACTIVITY_CUTOFF_MS;
+  return (
+    Date.now() - new Date(toEventIso(ts)).getTime() < NEW_ACTIVITY_CUTOFF_MS
+  );
 }
