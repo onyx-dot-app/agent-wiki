@@ -118,7 +118,6 @@ function FolderNode({
   dir,
   name,
   onOpenFile,
-  onOpenFolder,
   expanded,
   onToggle,
   activeFolder,
@@ -128,7 +127,6 @@ function FolderNode({
   dir: string;
   name: string;
   onOpenFile: (path: string) => void;
-  onOpenFolder: (path: string) => void;
   expanded: Set<string>;
   onToggle: (path: string) => void;
   activeFolder: string;
@@ -148,7 +146,7 @@ function FolderNode({
         isFolder
         active={activeFolder === full}
         onClick={() => {
-          onOpenFolder(full);
+          onOpenFile(full); // navigate the main view to the folder listing
           onSetActive(full);
           onToggle(full);
         }}
@@ -162,7 +160,6 @@ function FolderNode({
               dir={full}
               name={f}
               onOpenFile={onOpenFile}
-              onOpenFolder={onOpenFolder}
               expanded={expanded}
               onToggle={onToggle}
               activeFolder={activeFolder}
@@ -196,10 +193,9 @@ export function WikiTree() {
   const { data } = useSWR<{ entries: Entry[] }>("/wiki");
   const entries = data?.entries ?? [];
   const { folders, files } = childrenOf(entries, "");
+  // Navigates to a page or a folder — the same /app/wiki/<path> route renders
+  // both (a folder shows its directory listing).
   const openFile = (path: string) => router.push(`/app/wiki/${path}`);
-  // Clicking a folder also navigates the main view to its folder listing (the
-  // same route renders the directory). It still expands inline in the tree.
-  const openFolder = (path: string) => router.push(`/app/wiki/${path}`);
 
   const [addingFolder, setAddingFolder] = useState(false);
   const [folderName, setFolderName] = useState("");
@@ -334,7 +330,6 @@ export function WikiTree() {
             dir=""
             name={f}
             onOpenFile={openFile}
-            onOpenFolder={openFolder}
             expanded={expanded}
             onToggle={toggleFolder}
             activeFolder={activeFolder}
