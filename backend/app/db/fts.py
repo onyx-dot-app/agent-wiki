@@ -202,6 +202,33 @@ def count_documents() -> int | None:
         log.warning("fts: count_documents failed", exc_info=True)
         return None
 
+
+def paths_under(prefix: str) -> list[str]:
+    """Indexed page paths under a folder ``prefix`` (e.g. ``"team/"``).
+
+    ``path`` is a keyword field, so a prefix term matches the stored value.
+    ``prefix=""`` matches every page. Bounded to the first 10k matches (the
+    realistic ceiling).
+
+    Returns ``[]`` only when OpenSearch isn't configured. A backend error
+    (e.g. the search endpoint is down while ``count`` still answers) **raises**
+    rather than returning ``[]`` — an empty result must mean "genuinely no
+    pages here", so callers can't mistake a partial outage for an empty folder.
+    """
+    client = _get_client()
+    if client is None:
+        return []
+    c: OpenSearch = client  # type: ignore[assignment]
+    resp = c.search(
+        index=_index_name(),
+        body={
+            "size": 10_000,
+            "query": {"prefix": {"path": prefix}},
+            "_source": ["path"],
+        },
+    )
+    return [h["_source"]["path"] for h in resp["hits"]["hits"]]
+
 def delete_document(doc_id: str) -> None:
     """Remove a page from the index.  ``doc_id`` is the path when called
     from ``app.wiki.notify`` (the only callers)."""

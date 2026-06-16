@@ -11,12 +11,16 @@ Ingest pipeline metrics must be updated manually at each pipeline stage.
 """
 from __future__ import annotations
 
+import logging
+
 from fastapi import FastAPI
 from prometheus_client import Counter, Gauge, Histogram, REGISTRY
 from prometheus_client.core import GaugeMetricFamily  # type: ignore[import-untyped]
 from prometheus_fastapi_instrumentator import Instrumentator
 
 from app.db import fts
+
+log = logging.getLogger(__name__)
 
 # --------------------------------------------------------------------------- #
 # Ingest pipeline                                                              #
@@ -99,6 +103,26 @@ class _WikiPagesCollector:
         yield g
 
 REGISTRY.register(_WikiPagesCollector())
+
+
+class _WikiAutoUpdateCollector:
+    def collect(self):
+        from app.wiki import update_policy
+
+        total = fts.count_documents() or 0
+        try:
+            enabled = update_policy.count_ingest_enabled_pages(total, fts.paths_under)
+        except Exception:
+            log.warning("metrics: auto-update-enabled count failed", exc_info=True)
+            enabled = total
+        g = GaugeMetricFamily(
+            "wiki_pages_auto_update_enabled",
+            "Wiki pages with ingestion auto-update enabled (effective policy)",
+        )
+        g.add_metric([], enabled)
+        yield g
+
+REGISTRY.register(_WikiAutoUpdateCollector())
 
 ingest_selector_candidates_filtered = Histogram(
     "ingest_selector_candidates_filtered",
