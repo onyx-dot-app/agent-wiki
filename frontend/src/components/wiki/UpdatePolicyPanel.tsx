@@ -30,6 +30,7 @@ export function UpdatePolicyPanel({ path, onClose, fullHeight }: Props) {
   const kind = path.endsWith(".md") ? "page" : "folder";
 
   const [loading, setLoading] = useState(true);
+  const [loaded, setLoaded] = useState(false); // first fetch succeeded
   const [disabled, setDisabled] = useState(false); // effective ingestion-disable
   const [instruction, setInstruction] = useState(""); // this path's own (explicit)
   const [editing, setEditing] = useState(false);
@@ -45,11 +46,15 @@ export function UpdatePolicyPanel({ path, onClose, fullHeight }: Props) {
   useEffect(() => {
     let alive = true;
     setLoading(true);
+    setLoaded(false);
     setError(null);
     setEditing(false);
     getUpdatePolicy(path)
       .then((r) => {
-        if (alive) applyResponse(r);
+        if (alive) {
+          applyResponse(r);
+          setLoaded(true);
+        }
       })
       .catch((e) => {
         if (alive) setError(errorMessage(e));
@@ -120,6 +125,12 @@ export function UpdatePolicyPanel({ path, onClose, fullHeight }: Props) {
       <div className={styles.scroll}>
         {loading ? (
           <div className={styles.muted}>Loading…</div>
+        ) : !loaded ? (
+          // Load failed: never render the card — its default values would
+          // overwrite a real policy if the user interacted with it.
+          <div className={styles.error}>
+            {error ?? "Couldn't load the update policy."}
+          </div>
         ) : (
           <div className={styles.card}>
             <div className={styles.row}>
@@ -197,7 +208,8 @@ export function UpdatePolicyPanel({ path, onClose, fullHeight }: Props) {
             )}
           </div>
         )}
-        {error && <div className={styles.error}>{error}</div>}
+        {/* Save errors sit below the card; load errors render in the slot above. */}
+        {loaded && error && <div className={styles.error}>{error}</div>}
       </div>
     </div>
   );
