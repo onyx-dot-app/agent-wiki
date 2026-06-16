@@ -357,7 +357,7 @@ function Explorer({ dir }: { dir: string }) {
 
   return (
     <main
-      className={`h-screen overflow-y-auto ${isMobile ? "px-3 py-4" : "px-8 py-6"}`}
+      className={`h-full overflow-y-auto ${isMobile ? "px-3 py-4" : "px-8 py-6"}`}
     >
       <PageHeader
         title={
@@ -766,7 +766,7 @@ function NewDocView({ dir }: { dir: string }) {
 
   return (
     <main
-      className={`box-border flex h-screen flex-col gap-3 ${isMobile ? "px-3 py-4" : "px-8 py-6"}`}
+      className={`box-border flex h-full flex-col gap-3 ${isMobile ? "px-3 py-4" : "px-8 py-6"}`}
     >
       <PageHeader
         title="New document"
@@ -2191,7 +2191,7 @@ function FileViewer({ path }: { path: string }) {
 
   return (
     <main
-      className={`box-border flex h-screen min-h-0 flex-col ${isMobile ? "px-3 py-4" : "px-8 py-6"}`}
+      className={`box-border flex h-full min-h-0 flex-col ${isMobile ? "px-3 py-4" : "px-8 py-6"}`}
     >
       <header
         className={`mb-4 flex flex-wrap items-center ${isMobile ? "gap-2" : "gap-3"}`}
