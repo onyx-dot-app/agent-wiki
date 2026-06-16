@@ -150,9 +150,15 @@ def _reconcile_batch(
     batch: list[WikiUpdateCandidate],
     model: str,
 ) -> list[str | None]:
-    candidate_text = "\n\n".join(
-        f"[{i + 1}] {c.hit.path}\n{c.body}" for i, c in enumerate(batch)
-    )
+    def _fmt(i: int, c: WikiUpdateCandidate) -> str:
+        header = f"[{i + 1}] {c.hit.path}"
+        # Per-page update instruction (from the page's update policy) constrains
+        # *how* to edit this candidate; it never forces an edit.
+        if c.update_instruction:
+            header += f"\n(Update instruction for this page: {c.update_instruction})"
+        return f"{header}\n{c.body}"
+
+    candidate_text = "\n\n".join(_fmt(i, c) for i, c in enumerate(batch))
 
     system = load_prompt("ingest_batch_reconciler.system")
     user = load_prompt("ingest_batch_reconciler.input").format(

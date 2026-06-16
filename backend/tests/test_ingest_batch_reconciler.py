@@ -334,3 +334,37 @@ def test_reconcile_passes_tool_to_client(mock_client, _mock_prompt):
     call_kwargs = mock_client.complete.call_args.kwargs
     assert call_kwargs.get("tools") is not None
     assert call_kwargs["tools"][0]["name"] == "submit_results"
+
+
+# --------------------------------------------------------------------------- #
+# Per-page update instruction rendering (real prompt)                          #
+# --------------------------------------------------------------------------- #
+
+
+@patch("app.llm.agents.ingest_batch_reconciler.client")
+def test_update_instruction_rendered_in_prompt(mock_client):
+    # Real load_prompt so the {candidates} block is actually rendered.
+    mock_client.complete.return_value = _llm_response(
+        {"results": [{"candidate_index": 1, "action": "no_change"}]}
+    )
+    cand = WikiUpdateCandidate(
+        hit=_hit("page.md"), body="body", update_instruction="Keep it terse."
+    )
+    batch_reconcile(
+        title="T", url="", content="doc", source="s", candidates=[cand], model="m"
+    )
+    user_msg = mock_client.complete.call_args.kwargs["messages"][1]["content"]
+    assert "Update instruction for this page: Keep it terse." in user_msg
+
+
+@patch("app.llm.agents.ingest_batch_reconciler.client")
+def test_no_instruction_line_when_absent(mock_client):
+    mock_client.complete.return_value = _llm_response(
+        {"results": [{"candidate_index": 1, "action": "no_change"}]}
+    )
+    batch_reconcile(
+        title="T", url="", content="doc", source="s",
+        candidates=[_candidate("page.md")], model="m",
+    )
+    user_msg = mock_client.complete.call_args.kwargs["messages"][1]["content"]
+    assert "Update instruction for this page" not in user_msg
