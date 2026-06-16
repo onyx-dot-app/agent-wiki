@@ -71,7 +71,7 @@ const PROVIDER_MODELS: Record<Provider, string[]> = {
     "claude-opus-4-6",
     "claude-haiku-4-5",
   ],
-  openai: ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.2"],
+  openai: ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano", "gpt-5.2"],
   gemini: ["gemini-3.1-pro-preview", "gemini-3-flash-preview"],
   ollama: ["llama3.1", "llama3.2", "mistral", "phi3", "qwen2.5", "deepseek-r1"],
   custom: [],
