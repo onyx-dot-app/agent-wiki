@@ -146,6 +146,7 @@ function FolderNode({
         isFolder
         active={activeFolder === full}
         onClick={() => {
+          onOpenFile(full); // navigate the main view to the folder listing
           onSetActive(full);
           onToggle(full);
         }}
@@ -192,6 +193,8 @@ export function WikiTree() {
   const { data } = useSWR<{ entries: Entry[] }>("/wiki");
   const entries = data?.entries ?? [];
   const { folders, files } = childrenOf(entries, "");
+  // Navigates to a page or a folder — the same /app/wiki/<path> route renders
+  // both (a folder shows its directory listing).
   const openFile = (path: string) => router.push(`/app/wiki/${path}`);
 
   const [addingFolder, setAddingFolder] = useState(false);
