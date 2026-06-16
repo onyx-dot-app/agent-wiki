@@ -31,6 +31,9 @@ class CraftConnectStatus(BaseModel):
     onyx_user_email: str | None = None
     token_display: str | None = None
     expires_at: str | None = None
-    # Where the frontend sends the browser to (re)connect. Present whenever
-    # Craft is available, connected or not.
+    # The configured Onyx origin — lets the FE link the user to where they
+    # mint a PAT ({base}/... Settings → Accounts & Access). Present whenever
+    # Craft is available (i.e. the endpoint didn't 404).
+    onyx_base_url: str | None = None
+    # Dormant redirect-mint URL (future no-copy-paste connect); unused in v0.
     connect_url: str | None = None

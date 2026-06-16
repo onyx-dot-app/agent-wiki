@@ -162,6 +162,7 @@ def get_connect_status(
         onyx_user_email=row["onyx_user_email"] if connected and row else None,
         token_display=row["token_display"] if connected and row else None,
         expires_at=row["expires_at"] if connected and row else None,
+        onyx_base_url=base,
         connect_url=_connect_start_url(return_to),
     )
 
@@ -195,6 +196,7 @@ def connect_with_pat(
         onyx_user_email=row["onyx_user_email"] if row else me.get("email"),
         token_display=row["token_display"] if row else None,
         expires_at=row["expires_at"] if row else None,
+        onyx_base_url=base,
         connect_url=None,
     )
 

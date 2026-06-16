@@ -21,6 +21,7 @@ interface IngestSettings {
   max_doc_chars: number;
   api_key_set: boolean;
   api_key_hint: string;
+  onyx_base_url: string | null;
 }
 
 export default function AdminIngestPage() {
@@ -50,6 +51,7 @@ function IngestForm() {
   const [saved, setSaved] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [baseUrl, setBaseUrl] = useState("");
+  const [onyxBaseUrl, setOnyxBaseUrl] = useState("");
   const confirmDialog = useConfirm();
 
   useEffect(() => {
@@ -64,6 +66,7 @@ function IngestForm() {
       ]);
       setSettings(ingest);
       setMaxDocChars(String(ingest.max_doc_chars));
+      setOnyxBaseUrl(ingest.onyx_base_url ?? "");
       setLlmSettings(llm);
     } catch (e) {
       setError(e instanceof Error ? e.message : "failed to load");
@@ -83,9 +86,13 @@ function IngestForm() {
     try {
       const r = await apiFetch<IngestSettings>("/admin/ingest", {
         method: "PUT",
-        body: JSON.stringify({ max_doc_chars: Number(maxDocChars) }),
+        body: JSON.stringify({
+          max_doc_chars: Number(maxDocChars),
+          onyx_base_url: onyxBaseUrl.trim() || null,
+        }),
       });
       setSettings(r);
+      setOnyxBaseUrl(r.onyx_base_url ?? "");
       setSaved("Saved.");
     } catch (e) {
       setError(e instanceof Error ? e.message : "failed to save");
@@ -137,7 +144,9 @@ function IngestForm() {
 
   if (!settings || !llmSettings) return <LoadingSpinner />;
 
-  const dirty = maxDocChars !== String(settings.max_doc_chars);
+  const dirty =
+    maxDocChars !== String(settings.max_doc_chars) ||
+    (onyxBaseUrl.trim() || "") !== (settings.onyx_base_url ?? "");
 
   return (
     <div className="flex flex-col gap-6">
@@ -208,9 +217,31 @@ function IngestForm() {
         </div>
       </section>
 
-      {/* Max doc size */}
+      {/* Outbound: the Onyx instance this wiki calls (Craft launches). */}
       <form onSubmit={onSubmit} className="flex flex-col gap-3">
-        <h3 className="m-0 text-sm font-semibold">Ingest settings</h3>
+        <h3 className="m-0 text-sm font-semibold">Onyx instance</h3>
+        <label>
+          <div className="mb-1 text-[13px] font-medium">
+            Onyx instance URL{" "}
+            <span className="font-normal text-(--text-03)">
+              — enables launching Onyx Craft from wiki pages
+            </span>
+          </div>
+          <input
+            type="url"
+            inputMode="url"
+            value={onyxBaseUrl}
+            onChange={(e) => setOnyxBaseUrl(e.target.value)}
+            placeholder="https://your-onyx.example.com"
+            className="box-border w-full rounded-(--border-radius-04) border border-(--border-01) px-[10px] py-2 font-mono text-sm"
+          />
+          <div className="mt-1.5 text-xs text-(--text-03)">
+            The public origin of your Onyx deployment (no trailing slash). Users
+            then connect their own Onyx token under Agents → Onyx Craft.
+          </div>
+        </label>
+
+        <h3 className="m-0 mt-2 text-sm font-semibold">Ingest settings</h3>
         <label>
           <div className="mb-1 text-[13px] font-medium">
             Max document size (characters)
