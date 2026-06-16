@@ -52,7 +52,7 @@ from app.mcp_server import jobs as mcp_jobs
 from app.mcp_server import pubsub as mcp_pubsub
 from app.auth import UserMissingError, load_user, set_current_user
 from app.tasks.queues import documents_queue
-from app.wiki import agent_activity, git as wiki_git
+from app.wiki import agent_activity, git as wiki_git, update_policy
 from app.models.wiki import ChangeKind, CommitMaxRetriesError
 
 
@@ -349,9 +349,22 @@ def _reconcile_pushed_document(push: dict[str, Any]) -> None:
 
     # Read all candidate bodies upfront — needed by both the selector and the
     # main reconciler loop. Skip unreadable files early so the selector sees
-    # the same set the reconciler will act on.
+    # the same set the reconciler will act on. Drop pages whose update policy
+    # disables ingestion auto-update *before* any LLM call, so a protected page
+    # is never rewritten by a connector push.
+    # Resolve every candidate's ingestion-disable in one query, not per-hit.
+    disabled = update_policy.disabled_paths([hit.path for hit in hits])
     readable: list[WikiUpdateCandidate] = []
     for hit in hits:
+        if hit.path in disabled:
+            ingest_outcomes_total.labels(
+                outcome="ingestion_auto_update_disabled", wiki_path=hit.path
+            ).inc()
+            log.debug(
+                "process_pushed_document: ingestion auto-update disabled for %s, skipping",
+                hit.path,
+            )
+            continue
         try:
             readable.append(WikiUpdateCandidate(hit=hit, body=wiki_git.read_file(hit.path)))
         except Exception:

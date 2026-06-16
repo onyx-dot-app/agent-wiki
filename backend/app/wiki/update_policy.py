@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
+from collections.abc import Iterable
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict
@@ -179,6 +180,15 @@ def on_path_moved(moves: list[tuple[str, str]]) -> None:
             )
 
 
+def _scope_chain(norm: str) -> list[str]:
+    """The path itself then its ancestor folders, closest first (root last)."""
+    chain: list[str] = [norm]
+    for parent in filesystem.parent_dirs(norm):
+        if parent not in chain:
+            chain.append(parent)
+    return chain
+
+
 def resolve_for_path(path: str) -> ResolvedPolicy:
     """Effective policy for ``path``: most-granular scope that sets a field wins.
 
@@ -187,11 +197,7 @@ def resolve_for_path(path: str) -> ResolvedPolicy:
     re-enable ingestion under a disabled folder, and a folder instruction
     applies until a nearer scope overrides it.
     """
-    norm = normalize_path(path)
-    candidates: list[str] = [norm]
-    for parent in filesystem.parent_dirs(norm):
-        if parent not in candidates:
-            candidates.append(parent)
+    candidates = _scope_chain(normalize_path(path))
 
     with session() as s:
         rows = (
@@ -223,3 +229,38 @@ def resolve_for_path(path: str) -> ResolvedPolicy:
 def is_ingest_disabled(path: str) -> bool:
     """Convenience: is connector/ingest auto-update disabled for ``path``?"""
     return resolve_for_path(path).ingestion_auto_update_disabled
+
+
+def disabled_paths(paths: Iterable[str]) -> set[str]:
+    """Subset of ``paths`` whose effective policy disables ingestion auto-update.
+
+    One query for all paths and their ancestor folders, then resolve each in
+    Python — collapses N per-candidate lookups to a single round-trip. Keyed by
+    the *input* path strings so callers can test membership directly.
+    """
+    chains: dict[str, list[str]] = {}
+    scopes: set[str] = set()
+    for p in paths:
+        chain = _scope_chain(normalize_path(p))
+        chains[p] = chain
+        scopes.update(chain)
+    if not scopes:
+        return set()
+
+    with session() as s:
+        rows = (
+            s.execute(select(UpdatePolicy).where(UpdatePolicy.path.in_(scopes)))
+            .scalars()
+            .all()
+        )
+    by_path = {r.path: r for r in rows}
+
+    out: set[str] = set()
+    for orig, chain in chains.items():
+        for scope in chain:  # closest first
+            row = by_path.get(scope)
+            if row is not None and row.ingestion_auto_update_disabled is not None:
+                if row.ingestion_auto_update_disabled:
+                    out.add(orig)
+                break
+    return out
