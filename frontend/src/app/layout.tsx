@@ -3,7 +3,6 @@ import "./globals.css";
 import * as Tooltip from "@radix-ui/react-tooltip";
 import { cn } from "@onyx-ai/opal/utils";
 import { DM_Mono, Hanken_Grotesk } from "next/font/google";
-import { cookies } from "next/headers";
 import type { ReactNode } from "react";
 
 import { ChatWidget } from "@/components/chat/ChatWidget";
@@ -11,11 +10,7 @@ import { ConfirmProvider } from "@/components/common/ConfirmDialog";
 import { AuthProvider } from "@/lib/auth";
 import { DraftingProvider } from "@/lib/drafting";
 import { SWRProvider } from "@/lib/swr";
-import {
-  THEME_COOKIE_KEY,
-  ThemeProvider,
-  type ResolvedTheme,
-} from "@/lib/theme-provider";
+import { ThemeProvider } from "@/lib/theme-provider";
 
 const hankenGrotesk = Hanken_Grotesk({
   subsets: ["latin"],
@@ -58,24 +53,16 @@ export const viewport = {
   initialScale: 1,
 };
 
-export default async function RootLayout({
+export default function RootLayout({
   children,
 }: {
   children: ReactNode;
 }) {
-  const cookieStore = await cookies();
-  const theme: ResolvedTheme =
-    cookieStore.get(THEME_COOKIE_KEY)?.value === "dark" ? "dark" : "light";
-
   return (
     <html
       lang="en"
-      className={cn(
-        hankenGrotesk.variable,
-        dmMono.variable,
-        theme === "dark" && "dark",
-      )}
-      data-theme={theme}
+      className={cn(hankenGrotesk.variable, dmMono.variable)}
+      suppressHydrationWarning
     >
       <head />
       <body

@@ -1,128 +1,30 @@
 "use client";
 
-import {
-  createContext,
-  useContext,
-  useEffect,
-  useMemo,
-  useState,
-  type ReactNode,
-} from "react";
-
+import { ThemeProvider as NextThemesProvider, useTheme } from "next-themes";
+import { useEffect, type ReactNode } from "react";
 import { useAuth } from "@/lib/auth";
 
 export type ThemeSetting = "light" | "dark" | "system";
 export type ResolvedTheme = "light" | "dark";
 
-interface ThemeContextValue {
-  setting: ThemeSetting;
-  resolved: ResolvedTheme;
-}
-
-const ThemeContext = createContext<ThemeContextValue>({
-  setting: "system",
-  resolved: "light",
-});
-
-const STORAGE_KEY = "agent-wiki:theme";
-// Separate cookie key (no colon — RFC 6265 token-safe) so the server can
-// read the resolved theme for SSR without relying on localStorage.
-export const THEME_COOKIE_KEY = "agent-wiki-theme";
-
-function readStoredSetting(): ThemeSetting {
-  if (typeof window === "undefined") return "system";
-  try {
-    const v = window.localStorage.getItem(STORAGE_KEY);
-    if (v === "light" || v === "dark" || v === "system") return v;
-  } catch {
-    /* ignore */
-  }
-  return "system";
-}
-
-function applyTheme(resolved: ResolvedTheme) {
-  if (typeof document !== "undefined") {
-    document.documentElement.setAttribute("data-theme", resolved);
-    document.documentElement.classList.toggle("dark", resolved === "dark");
-  }
-}
-
-function resolveSystem(): ResolvedTheme {
-  if (typeof window === "undefined") return "light";
-  return window.matchMedia("(prefers-color-scheme: dark)").matches
-    ? "dark"
-    : "light";
+function ThemeSync() {
+  const { user } = useAuth();
+  const { setTheme } = useTheme();
+  useEffect(() => {
+    if (user?.settings?.theme) setTheme(user.settings.theme);
+  }, [user?.settings?.theme, setTheme]);
+  return null;
 }
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const { user } = useAuth();
-  // Pre-auth render: lazy-init from localStorage so the inline bootstrap
-  // and React's first paint agree.
-  const [setting, setSetting] = useState<ThemeSetting>(readStoredSetting);
-  const [systemTheme, setSystemTheme] = useState<ResolvedTheme>(() =>
-    resolveSystem(),
-  );
-
-  // Once the user logs in, prefer the server-side preference.
-  const userSetting = user?.settings?.theme ?? null;
-  useEffect(() => {
-    if (userSetting && userSetting !== setting) {
-      setSetting(userSetting);
-    }
-  }, [userSetting, setting]);
-
-  // Persist locally so logged-out routes (login, signup) keep the choice.
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(STORAGE_KEY, setting);
-    } catch {
-      /* ignore */
-    }
-  }, [setting]);
-
-  // Track OS preference when the user has chosen "system".
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const mq = window.matchMedia("(prefers-color-scheme: dark)");
-    const onChange = () => setSystemTheme(mq.matches ? "dark" : "light");
-    mq.addEventListener("change", onChange);
-    return () => mq.removeEventListener("change", onChange);
-  }, []);
-
-  const resolved: ResolvedTheme = setting === "system" ? systemTheme : setting;
-
-  useEffect(() => {
-    applyTheme(resolved);
-    // Persist resolved theme in a cookie so the server can render the
-    // correct data-theme on <html> before React hydrates.
-    document.cookie = `${THEME_COOKIE_KEY}=${resolved};path=/;max-age=${365 * 24 * 60 * 60};SameSite=Lax;Secure`;
-  }, [resolved]);
-
-  const value = useMemo<ThemeContextValue>(
-    () => ({ setting, resolved }),
-    [setting, resolved],
-  );
-
   return (
-    <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>
+    <NextThemesProvider
+      attribute="class"
+      defaultTheme="system"
+      enableColorScheme
+    >
+      <ThemeSync />
+      {children}
+    </NextThemesProvider>
   );
 }
-
-export function useTheme(): ThemeContextValue {
-  return useContext(ThemeContext);
-}
-
-// Direct setter used by the settings page when it eagerly applies the
-// new value before the round-trip completes (so "Save" feels instant).
-export function setLocalThemePreview(setting: ThemeSetting) {
-  try {
-    window.localStorage.setItem(STORAGE_KEY, setting);
-  } catch {
-    /* ignore */
-  }
-  const resolved = setting === "system" ? resolveSystem() : setting;
-  applyTheme(resolved);
-}
-
-// Re-export the storage key for tests / explicit cleanup.
-export const THEME_STORAGE_KEY = STORAGE_KEY;

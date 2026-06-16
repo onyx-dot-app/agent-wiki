@@ -104,7 +104,7 @@ function AppContent({ children }: AppContentProps) {
           </RootLayout.Header>
         )}
         <RootLayout.MainContent>
-          <div className="mx-auto w-full max-w-(--breakpoint-content-md)">
+          <div className="mx-auto w-full max-w-[768px]">
             {children}
           </div>
         </RootLayout.MainContent>
