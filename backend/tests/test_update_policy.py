@@ -122,12 +122,14 @@ def test_nl_updater_omits_section_when_no_policy(tmp_db, monkeypatch):
 
 
 def test_nl_updater_proceeds_when_policy_store_unavailable(monkeypatch):
-    """No DB (offline eval): the advisory policy lookup must not fail the update."""
+    """No DB (offline eval): an unreachable policy store must not fail the update."""
+    from sqlalchemy.exc import OperationalError
+
     from app.llm.agents import nl_updater
     from app.llm.client import CompletionResult
 
     def boom(_path):
-        raise RuntimeError("no database")
+        raise OperationalError("SELECT 1", {}, Exception("could not connect"))
 
     monkeypatch.setattr(nl_updater.update_policy, "resolve_for_path", boom)
     captured: dict[str, Any] = {}

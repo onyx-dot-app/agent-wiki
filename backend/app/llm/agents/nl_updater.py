@@ -9,6 +9,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from sqlalchemy.exc import OperationalError
+
 from app.llm import client
 from app.llm.agents.common import NO_CHANGE_SENTINEL, strip_outer_fence
 from app.llm.prompts import load_prompt
@@ -33,9 +35,12 @@ def process_instruction(wiki_path: str, current_body: str, payload: dict[str, An
     # rather than failing the update.
     try:
         instruction = update_policy.resolve_for_path(wiki_path).update_instruction
-    except Exception:
+    except OperationalError:
+        # DB unreachable (e.g. the offline eval harness with no DB). The
+        # instruction is advisory, so proceed without it rather than fail the
+        # update. Other exceptions are real bugs and propagate.
         log.warning(
-            "nl_updater: update policy lookup failed for %s; proceeding without it",
+            "nl_updater: update policy DB unreachable for %s; proceeding without it",
             wiki_path,
             exc_info=True,
         )
