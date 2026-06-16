@@ -20,7 +20,7 @@ The wiki is kept up to date via 3 different pathways:
 - External systems can push information/documents to the wiki via API and a built-in agent will find the right pages and make the updates.
 - Human users can directly edit the wiki.
 
-### Update policy
+### Update Policy
 Not every page should be rewritten automatically. Any page — or a whole folder — can carry an **update policy**, edited from its *Update Policy* panel:
 - **Auto-update** — turn it off to keep connector/ingestion pushes from rewriting the page (or everything under a folder).
 - **Update instructions** — free-text guidance the updater agent honors when it does edit (e.g. "keep entries terse", "never touch the SLA table").
