@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
-import { RootLayout } from "@onyx-ai/opal/layouts";
+import { RootLayout, SidebarStateProvider } from "@onyx-ai/opal/layouts";
 import { MessageCard } from "@onyx-ai/opal/components";
 import { markdown } from "@onyx-ai/opal/utils";
 import AppSidebar from "@/sections/sidebar/AppSidebar";
@@ -9,6 +9,7 @@ import { WikiItemActionsProvider } from "@/providers/WikiItemActionsProvider";
 import { LeftPanelProvider, useLeftPanel } from "@/providers/LeftPanelProvider";
 import { WikiTree } from "@/components/wiki/WikiTree";
 import { WikiHeader } from "@/components/wiki/WikiHeader";
+import ActivitiesPanel from "@/components/wiki/ActivitiesPanel";
 import { useAuth } from "@/lib/auth";
 import { useHealth } from "@/lib/health";
 import { useLLMStatus } from "@/lib/llm";
@@ -88,7 +89,11 @@ function AppContent({ children }: AppContentProps) {
       {view !== null && (
         <RootLayout.LeftPanel>
           {view === "wiki-tree" && <WikiTree />}
-          {view === "activities" && <ActivitiesPanel />}
+          {view === "activities" && (
+            <div className="h-full p-1">
+              <ActivitiesPanel />
+            </div>
+          )}
         </RootLayout.LeftPanel>
       )}
       <RootLayout.App>
@@ -99,20 +104,10 @@ function AppContent({ children }: AppContentProps) {
           </RootLayout.Header>
         )}
         <RootLayout.MainContent>
-          <div className="mx-auto w-full max-w-(--breakpoint-content-md)">
-            {children}
-          </div>
+          <div className="mx-auto w-full max-w-[768px]">{children}</div>
         </RootLayout.MainContent>
       </RootLayout.App>
     </WikiItemActionsProvider>
-  );
-}
-
-function ActivitiesPanel() {
-  return (
-    <div className="flex h-full items-center justify-center p-4">
-      <p className="text-sm text-(--text-03)">Activities coming soon.</p>
-    </div>
   );
 }
 
@@ -121,7 +116,7 @@ interface LayoutProps {
 }
 
 export default function Layout({ children }: LayoutProps) {
-  const [folded, setFolded] = useState<boolean>(() => {
+  const [defaultFolded] = useState<boolean>(() => {
     if (typeof window === "undefined") return false;
     const stored = window.localStorage.getItem(COLLAPSED_KEY);
     if (stored === "1") return true;
@@ -129,22 +124,19 @@ export default function Layout({ children }: LayoutProps) {
     return window.innerWidth < 724;
   });
 
-  function toggle() {
-    setFolded((prev) => {
-      const next = !prev;
-      window.localStorage.setItem(COLLAPSED_KEY, next ? "1" : "0");
-      return next;
-    });
-  }
-
   return (
     <LeftPanelProvider>
-      <RootLayout.Root>
-        <RootLayout.Sidebar folded={folded} onFoldToggle={toggle}>
-          <AppSidebar folded={folded} onFoldToggle={toggle} />
-        </RootLayout.Sidebar>
-        <AppContent>{children}</AppContent>
-      </RootLayout.Root>
+      <SidebarStateProvider
+        defaultFolded={defaultFolded}
+        onFoldedChange={(folded) => {
+          window.localStorage.setItem(COLLAPSED_KEY, folded ? "1" : "0");
+        }}
+      >
+        <RootLayout.Root>
+          <AppSidebar />
+          <AppContent>{children}</AppContent>
+        </RootLayout.Root>
+      </SidebarStateProvider>
     </LeftPanelProvider>
   );
 }

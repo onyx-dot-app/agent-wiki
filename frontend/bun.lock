@@ -9,7 +9,7 @@
         "@dnd-kit/modifiers": "^7.0.0",
         "@dnd-kit/sortable": "^8.0.0",
         "@dnd-kit/utilities": "^3.2.2",
-        "@onyx-ai/opal": "0.1.9",
+        "@onyx-ai/opal": "^0.1.12",
         "@radix-ui/react-popover": "^1.1.6",
         "@radix-ui/react-separator": "^1.1.0",
         "@radix-ui/react-slot": "^1.2.4",
@@ -19,6 +19,7 @@
         "diff": "^9.0.0",
         "formik": "^2.2.9",
         "next": "^16.2.7",
+        "next-themes": "^0.4.6",
         "react": "^19.2.7",
         "react-dom": "^19.2.7",
         "react-markdown": "^9.0.1",
@@ -177,7 +178,7 @@
 
     "@nolyfill/is-core-module": ["@nolyfill/is-core-module@1.0.39", "", {}, "sha512-nn5ozdjYQpUCZlWGuxcJY/KpxkWQs4DcbMCmKojjyrYDEAGy4Ce19NN4v5MduafTwJlbKc99UA8YhSVqq9yPZA=="],
 
-    "@onyx-ai/opal": ["@onyx-ai/opal@0.1.9", "", { "dependencies": { "clsx": "^2.0.0", "copy-to-clipboard": "^3.3.3", "tailwind-merge": "^2.0.0" }, "peerDependencies": { "@dnd-kit/core": "^6.0.0", "@dnd-kit/modifiers": "^7.0.0 || ^8.0.0", "@dnd-kit/sortable": "^8.0.0", "@dnd-kit/utilities": "^3.0.0", "@radix-ui/react-popover": "^1.0.0", "@radix-ui/react-separator": "^1.0.0", "@radix-ui/react-slot": "^1.0.0", "@radix-ui/react-tabs": "^1.0.0", "@radix-ui/react-tooltip": "^1.0.0", "@tanstack/react-table": "^8.0.0", "formik": "^2.0.0", "next": ">=14.0.0", "react": "^18.0.0 || ^19.0.0", "react-dom": "^18.0.0 || ^19.0.0", "react-markdown": "^9.0.0", "rehype-sanitize": "^6.0.0", "remark-gfm": "^4.0.0" } }, "sha512-T7maKH8NXQPIS+dnwVPphFYYexcs7G5XICgmFE4ToGRaV6ibUroseIrvZQix4lfRZ0e05L9MwMySiOWv97CKfQ=="],
+    "@onyx-ai/opal": ["@onyx-ai/opal@0.1.12", "", { "dependencies": { "clsx": "^2.0.0", "copy-to-clipboard": "^3.3.3", "tailwind-merge": "^2.0.0" }, "peerDependencies": { "@dnd-kit/core": "^6.0.0", "@dnd-kit/modifiers": "^7.0.0 || ^8.0.0", "@dnd-kit/sortable": "^8.0.0", "@dnd-kit/utilities": "^3.0.0", "@radix-ui/react-popover": "^1.0.0", "@radix-ui/react-separator": "^1.0.0", "@radix-ui/react-slot": "^1.0.0", "@radix-ui/react-tabs": "^1.0.0", "@radix-ui/react-tooltip": "^1.0.0", "@tanstack/react-table": "^8.0.0", "formik": "^2.0.0", "next": ">=14.0.0", "react": "^18.0.0 || ^19.0.0", "react-dom": "^18.0.0 || ^19.0.0", "react-markdown": "^9.0.0", "rehype-sanitize": "^6.0.0", "remark-gfm": "^4.0.0" } }, "sha512-rFWg1X//v5hB5gC94hLCAQwj8iC9WbzukKRJJcJie7qW0AkcBG64RmDjS9p5ae5At9D9YvswjLeBbajtDZer1A=="],
 
     "@pkgjs/parseargs": ["@pkgjs/parseargs@0.11.0", "", {}, "sha512-+1VkjdD0QBLPodGrJUeqarH8VAIvQODIbwh9XpP5Syisf7YoQgsJKPNFoqqLQlu+VQ/tVSshMR6loPMn8U+dPg=="],
 
@@ -896,6 +897,8 @@
     "natural-compare": ["natural-compare@1.4.0", "", {}, "sha512-OWND8ei3VtNC9h7V60qff3SVobHr996CTwgxubgyQYEpg290h9J0buyECNNJexkFm5sOajh5G116RYA1c8ZMSw=="],
 
     "next": ["next@16.2.7", "", { "dependencies": { "@next/env": "16.2.7", "@swc/helpers": "0.5.15", "baseline-browser-mapping": "^2.9.19", "caniuse-lite": "^1.0.30001579", "postcss": "8.4.31", "styled-jsx": "5.1.6" }, "optionalDependencies": { "@next/swc-darwin-arm64": "16.2.7", "@next/swc-darwin-x64": "16.2.7", "@next/swc-linux-arm64-gnu": "16.2.7", "@next/swc-linux-arm64-musl": "16.2.7", "@next/swc-linux-x64-gnu": "16.2.7", "@next/swc-linux-x64-musl": "16.2.7", "@next/swc-win32-arm64-msvc": "16.2.7", "@next/swc-win32-x64-msvc": "16.2.7", "sharp": "^0.34.5" }, "peerDependencies": { "@opentelemetry/api": "^1.1.0", "@playwright/test": "^1.51.1", "babel-plugin-react-compiler": "*", "react": "^18.2.0 || 19.0.0-rc-de68d2f4-20241204 || ^19.0.0", "react-dom": "^18.2.0 || 19.0.0-rc-de68d2f4-20241204 || ^19.0.0", "sass": "^1.3.0" }, "optionalPeers": ["@opentelemetry/api", "@playwright/test", "babel-plugin-react-compiler", "sass"], "bin": { "next": "dist/bin/next" } }, "sha512-eMJxgjRzBaj3olkP4cBamHDXL79A8FC6u1GcsO1D1Tsx8bw/LLXUJCaoajVxtnhD3A1IJqIT8IcRJjgBIPJq4w=="],
+
+    "next-themes": ["next-themes@0.4.6", "", { "peerDependencies": { "react": "^16.8 || ^17 || ^18 || ^19 || ^19.0.0-rc", "react-dom": "^16.8 || ^17 || ^18 || ^19 || ^19.0.0-rc" } }, "sha512-pZvgD5L0IEvX5/9GWyHMf3m8BKiVQwsCMHfoFosXtXBMnaS0ZnIJ9ST4b4NqLVKDEm8QBxoNNGNaBv2JNF6XNA=="],
 
     "node-exports-info": ["node-exports-info@1.6.0", "", { "dependencies": { "array.prototype.flatmap": "^1.3.3", "es-errors": "^1.3.0", "object.entries": "^1.1.9", "semver": "^6.3.1" } }, "sha512-pyFS63ptit/P5WqUkt+UUfe+4oevH+bFeIiPPdfb0pFeYEu/1ELnJu5l+5EcTKYL5M7zaAa7S8ddywgXypqKCw=="],
 

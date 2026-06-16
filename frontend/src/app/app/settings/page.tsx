@@ -14,7 +14,7 @@ import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { apiFetch } from "@/lib/api";
 import { useRequireAuth } from "@/lib/auth";
 import { effectiveTimezone } from "@/lib/cron";
-import { setLocalThemePreview } from "@/lib/theme-provider";
+import { useTheme } from "next-themes";
 import type { DefaultLanding, ThemeSetting, UserSettings } from "@/types";
 import styles from "./page.module.css";
 
@@ -196,6 +196,8 @@ function SettingsForm({
     [initial],
   );
 
+  const { setTheme } = useTheme();
+
   const dirty = useMemo(() => {
     return (Object.keys(draft) as (keyof UserSettings)[]).some(
       (k) => draft[k] !== baseline[k],
@@ -215,7 +217,7 @@ function SettingsForm({
     update("theme", theme);
     // Apply immediately so the user sees the change without waiting for
     // the round-trip — Save still needs to hit the server to persist.
-    setLocalThemePreview(theme);
+    setTheme(theme);
   }
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
@@ -236,7 +238,7 @@ function SettingsForm({
     } catch (e) {
       setError(e instanceof Error ? e.message : "failed to save");
       // Revert the optimistic theme apply if the server rejected.
-      setLocalThemePreview(initial.theme);
+      setTheme(initial.theme);
     } finally {
       setSaving(false);
     }

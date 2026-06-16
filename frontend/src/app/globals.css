@@ -19,14 +19,9 @@ body {
   }
 }
 
-/* Tell the browser which color scheme is active so native UI (scrollbars,
-   autofill, date pickers) uses matching light/dark variants. */
 :root {
-  color-scheme: light;
-  --breakpoint-content-md: 768px;
-}
-.dark {
-  color-scheme: dark;
+  /* agent-wiki layout tokens — not part of Opal */
+  --activities-view: 22rem;
 }
 
 /* ── Shadow tokens ────────────────────────────────────────────────────────

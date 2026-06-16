@@ -1,13 +1,5 @@
 import useSWR from "swr";
-
-export interface AppEvent {
-  id: number;
-  ts: string;
-  kind: string;
-  actor: string | null;
-  target: string | null;
-  payload: Record<string, unknown>;
-}
+import type { AppEvent } from "./types";
 
 function eventsPath(opts: { kind?: string; limit?: number }): string {
   const qs = new URLSearchParams();
@@ -16,10 +8,13 @@ function eventsPath(opts: { kind?: string; limit?: number }): string {
   return `/events${qs.toString() ? `?${qs}` : ""}`;
 }
 
-export function useEvents(opts: { kind?: string; limit?: number } = {}) {
+export function useEvents(
+  opts: { kind?: string; limit?: number } = {},
+  swrConfig?: { refreshInterval?: number },
+) {
   const { data, error, isLoading, isValidating, mutate } = useSWR<{
     events: AppEvent[];
-  }>(eventsPath(opts));
+  }>(eventsPath(opts), swrConfig);
   return {
     events: data?.events ?? [],
     error: error as Error | undefined,
