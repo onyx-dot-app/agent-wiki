@@ -50,6 +50,7 @@ import {
 } from "@/lib/launchers";
 import { ShareDialog } from "@/components/wiki/ShareDialog";
 import { CommentsPanel } from "@/components/wiki/CommentsPanel";
+import { UpdatePolicyPanel } from "@/components/wiki/UpdatePolicyPanel";
 import { apiFetch, ApiError } from "@/lib/api";
 import { listComments } from "@/lib/comments";
 import {
@@ -1337,6 +1338,7 @@ function FileViewer({ path }: { path: string }) {
   // Comments (render-mode). `commentDraft` is a pending text selection being
   // composed; `selTool` is the floating "Comment" affordance shown on select.
   const [commentsOpen, setCommentsOpen] = useState(false);
+  const [policyOpen, setPolicyOpen] = useState(false);
   const [commentDraft, setCommentDraft] = useState<CommentDraft | null>(null);
   const [commentThreads, setCommentThreads] = useState<CommentThreadView[]>([]);
   const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
@@ -1357,6 +1359,7 @@ function FileViewer({ path }: { path: string }) {
   // auto-open, the selection "💬 Comment" tool).
   const openComments = useCallback(() => {
     setHistoryOpen(false);
+    setPolicyOpen(false);
     setCommentsOpen(true);
   }, []);
 
@@ -1826,8 +1829,9 @@ function FileViewer({ path }: { path: string }) {
       return;
     }
     setHistoryOpen(true);
-    // Mutual exclusion with the comments panel (see ``openComments``).
+    // Mutual exclusion with the comments + policy panels (see ``openComments``).
     setCommentsOpen(false);
+    setPolicyOpen(false);
     setCommentDraft(null);
     // Opening history: show the newest commit's diff immediately rather
     // than leaving the rendered body up until the user clicks a row.
@@ -2219,6 +2223,21 @@ function FileViewer({ path }: { path: string }) {
               >
                 Comments
               </SelectButton>
+              <SelectButton
+                state={policyOpen ? "selected" : "empty"}
+                onClick={() => {
+                  if (policyOpen) {
+                    setPolicyOpen(false);
+                    return;
+                  }
+                  setHistoryOpen(false);
+                  setCommentsOpen(false);
+                  setCommentDraft(null);
+                  setPolicyOpen(true);
+                }}
+              >
+                Update Policy
+              </SelectButton>
             </div>
             <Button variant="action" onClick={startEdit}>
               Edit
@@ -2533,6 +2552,12 @@ function FileViewer({ path }: { path: string }) {
               }}
             />
           )}
+          {policyOpen && !isMobile && (
+            <UpdatePolicyPanel
+              path={path}
+              onClose={() => setPolicyOpen(false)}
+            />
+          )}
         </div>
       )}
       {historyOpen && isMobile && (
@@ -2585,6 +2610,22 @@ function FileViewer({ path }: { path: string }) {
                 setCommentsOpen(false);
                 setCommentDraft(null);
               }}
+              fullHeight
+            />
+          </div>
+        </>
+      )}
+      {policyOpen && isMobile && (
+        <>
+          <div
+            onClick={() => setPolicyOpen(false)}
+            aria-hidden
+            className="fixed inset-0 z-[60] bg-(--mask-03)"
+          />
+          <div className="fixed top-0 right-0 bottom-0 z-[70] flex w-[min(360px,100vw)] shadow-(--shadow-panel)">
+            <UpdatePolicyPanel
+              path={path}
+              onClose={() => setPolicyOpen(false)}
               fullHeight
             />
           </div>

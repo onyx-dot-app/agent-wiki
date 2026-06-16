@@ -1,0 +1,115 @@
+/* Same chrome as CommentsPanel/HistoryPanel: a 400px rounded tint-01 card with
+   a titled header row, so the side panels read as one family. */
+.panel {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  width: 400px;
+  min-height: 0;
+  background: var(--background-tint-01);
+  border-radius: var(--border-radius-12);
+  padding: 8px;
+  gap: 8px;
+}
+
+.fullHeight {
+  width: 100%;
+  height: 100%;
+  border-radius: 0;
+}
+
+.headerRow {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  flex-shrink: 0;
+}
+.headerTitle {
+  flex: 1;
+  min-width: 0;
+}
+
+.scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 4px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* One floating card holding both controls, matching the mockup. */
+.card {
+  border: 1px solid var(--border-01);
+  border-radius: var(--border-radius-12);
+  padding: 16px;
+  background: var(--background-tint-00);
+  box-shadow: var(--shadow-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.row {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 12px;
+}
+.rowText {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.desc {
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--text-03);
+}
+
+.instruction {
+  font-size: 13px;
+  color: var(--text-05);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.textarea {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  min-height: 96px;
+  font: inherit;
+  font-size: 13px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-01);
+  border-radius: var(--border-radius-04);
+  background: var(--background-tint-00);
+  color: var(--text-05);
+}
+.textarea:focus {
+  outline: none;
+  border-color: var(--border-05);
+}
+
+.composeRow {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.muted {
+  font-size: 13px;
+  color: var(--text-03);
+  padding: 8px 4px;
+}
+.error {
+  color: var(--status-text-error-05);
+  font-size: 12px;
+  padding: 4px 0;
+}
