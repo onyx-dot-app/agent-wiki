@@ -203,6 +203,7 @@ function Explorer({ dir }: { dir: string }) {
   const [dragSource, setDragSource] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const [sharePath, setSharePath] = useState<string | null>(null);
+  const [policyOpen, setPolicyOpen] = useState(false);
 
   const { subdirs, files } = useMemo(() => {
     const prefix = dir ? dir + "/" : "";
@@ -385,6 +386,9 @@ function Explorer({ dir }: { dir: string }) {
             >
               Trigger
             </Button>
+            <Button prominence="tertiary" onClick={() => setPolicyOpen(true)}>
+              Update Policy
+            </Button>
             <Button
               prominence="tertiary"
               icon={SvgFolderPlus}
@@ -535,6 +539,25 @@ function Explorer({ dir }: { dir: string }) {
       </ul>
       {sharePath && (
         <ShareDialog path={sharePath} open onClose={() => setSharePath(null)} />
+      )}
+      {policyOpen && (
+        // Folder policy applies to every page under this folder. Shown as a
+        // right-side drawer (the folder listing isn't a flex row like the page
+        // view), reusing the same panel — ``dir`` is the folder path ("" = root).
+        <>
+          <div
+            onClick={() => setPolicyOpen(false)}
+            aria-hidden
+            className="fixed inset-0 z-[60] bg-(--mask-03)"
+          />
+          <div className="fixed top-0 right-0 bottom-0 z-[70] flex w-[min(400px,100vw)] shadow-(--shadow-panel)">
+            <UpdatePolicyPanel
+              path={dir}
+              onClose={() => setPolicyOpen(false)}
+              fullHeight
+            />
+          </div>
+        </>
       )}
     </main>
   );
