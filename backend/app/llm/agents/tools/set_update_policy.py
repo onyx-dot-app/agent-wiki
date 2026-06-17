@@ -29,6 +29,15 @@ def handle(args: dict[str, Any]) -> Any:
         return {"error": str(exc)}
 
     kind = update_policy.kind_for_path(norm)
+
+    # Permission first — checking page existence before auth would let a caller
+    # without access distinguish "file not found" from "forbidden" and so
+    # enumerate private pages. Only reveal existence once write is confirmed.
+    try:
+        require_can("write", norm)
+    except PermissionDenied as exc:
+        return {"error": str(exc)}
+
     # A page policy must target an existing page; folder/root policies may be set
     # ahead of their children (future pages inherit them).
     if kind == "page" and not wiki_utils.file_exists(norm):
@@ -52,11 +61,6 @@ def handle(args: dict[str, Any]) -> Any:
             "error": "provide at least one of `ingestion_auto_update_disabled` "
             "or `update_instruction` to change"
         }
-
-    try:
-        require_can("write", norm)
-    except PermissionDenied as exc:
-        return {"error": str(exc)}
 
     user = current_user()
     update_policy.set_policy(norm, actor_user_id=user.id if user else None, **patch)

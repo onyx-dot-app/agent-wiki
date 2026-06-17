@@ -91,6 +91,25 @@ def test_requires_a_setting(tmp_repo, monkeypatch):
     assert update_policy.get(_PAGE) is None
 
 
+def test_denies_before_revealing_existence(tmp_repo, monkeypatch):
+    # A private folder (Alice-only). Bob lacks write, so a set on a *nonexistent*
+    # child must return "forbidden", never "file not found" — otherwise the
+    # not-found vs forbidden split would let Bob enumerate private pages.
+    alice = seed_user(uid="u_alice", email="alice@x.com")
+    acl.grant(
+        resource_kind="folder",
+        resource_path="private",
+        principal_kind="user",
+        principal_id=alice,
+        permission="write",
+        granted_by_user_id=alice,
+    )
+    _as_user(monkeypatch, uid="u_bob")
+    out = handle({"path": "private/ghost.md", "ingestion_auto_update_disabled": True})
+    assert "error" in out
+    assert "not found" not in out["error"].lower()
+
+
 def test_denies_unauthorized_user(tmp_repo, monkeypatch):
     # Page private to Alice; Bob can't write its policy.
     wiki_git.commit_file(_PAGE, "# Spec\n", "seed")
