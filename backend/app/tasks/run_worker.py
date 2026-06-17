@@ -1,8 +1,8 @@
 """Entry point for a worker container.
 
 Run with: ``python -m app.tasks.run_worker <queue>`` where ``<queue>`` is
-one of ``documents``, ``triggers``, ``lightweight_maintenance``. Each
-queue gets its own worker process — see ``app/tasks/queues.py`` for the
+one of ``documents``, ``triggers``, ``lightweight_maintenance``, ``craft``.
+Each queue gets its own worker process — see ``app/tasks/queues.py`` for the
 queue rationale.
 
 We import every task module up front (regardless of which queue we're
@@ -80,6 +80,9 @@ _CONCURRENCY = {
     "documents": 1,
     "triggers": 4,
     "lightweight_maintenance": 4,
+    # Craft launches are network-bound (provisioning blocks on Onyx); a few
+    # in parallel is fine, no shared provider lock to serialize on.
+    "craft": 4,
 }
 
 # Per-queue Prometheus port. Distinct ports so all three workers can run on
@@ -90,6 +93,7 @@ _METRICS_PORT = {
     "documents": 9091,
     "triggers": 9092,
     "lightweight_maintenance": 9093,
+    "craft": 9094,
 }
 
 
@@ -100,7 +104,13 @@ def main() -> None:
 
     setup_logging()
     verify_secret_key()
-    start_http_server(_METRICS_PORT[args.queue])
+    # Metrics are observability, not a hard dependency: a taken port (e.g.
+    # another local stack on the same host) must not stop the worker consuming.
+    port = _METRICS_PORT[args.queue]
+    try:
+        start_http_server(port)
+    except OSError as e:
+        log.warning("metrics server not started on :%d (%s)", port, e)
     _wait_for_db()
     queue = QUEUES[args.queue]
     concurrency = _CONCURRENCY[args.queue]

@@ -28,6 +28,7 @@ import {
   SvgChevronRight,
   SvgDocFile,
   SvgEdit,
+  SvgExternalLink,
   SvgFolder,
   SvgFolderPlus,
   SvgHistory,
@@ -44,6 +45,7 @@ import { TriggerModal } from "@/components/triggers/TriggerModal";
 import { DiffView } from "@/components/wiki/DiffView";
 import { HistoryPanel } from "@/components/wiki/HistoryPanel";
 import { RunAgentPanel } from "@/components/wiki/RunAgentPanel";
+import { craftFailureMessage } from "@/components/wiki/CraftNotifier";
 import { WikiHome } from "@/components/wiki/WikiHome";
 import {
   closeSession,
@@ -1598,7 +1600,14 @@ function FileViewer({ path }: { path: string }) {
   const { sessions: agentSessions, refresh: refreshSessions } =
     useAgentSessions(path);
   const activeSessions = agentSessions.filter(
-    (s) => s.status === "active" || s.status === "idle",
+    (s) =>
+      s.status === "active" ||
+      s.status === "idle" ||
+      // Onyx Craft (in_app) lifecycle states worth surfacing on the page.
+      (s.tool_id === "onyx-craft" &&
+        (s.status === "provisioning" ||
+          s.status === "ready" ||
+          s.status === "failed")),
   );
 
   const handleCloseSession = useCallback(
@@ -2770,14 +2779,42 @@ function ActiveSessionRow({
 
       <span className="shrink-0 font-medium text-(--text-05)">{s.tool_id}</span>
 
-      <span className="flex-1" />
+      {s.tool_id === "onyx-craft" && s.status === "failed" ? (
+        <span
+          className="min-w-0 grow overflow-hidden text-ellipsis text-(--status-text-error-05)"
+          title={craftFailureMessage(s.failure_reason)}
+        >
+          {craftFailureMessage(s.failure_reason)}
+        </span>
+      ) : (
+        <>
+          <span className="flex-1" />
+          <span
+            className="shrink-0 text-[11px] text-(--text-02)"
+            title={`Started ${absoluteTime(s.started_at)}`}
+          >
+            started {relativeTime(s.started_at, "short")}
+          </span>
+        </>
+      )}
 
-      <span
-        className="shrink-0 text-[11px] text-(--text-02)"
-        title={`Started ${absoluteTime(s.started_at)}`}
-      >
-        started {relativeTime(s.started_at, "short")}
-      </span>
+      {s.tool_id === "onyx-craft" && s.status === "ready" && s.external_url && (
+        <Button
+          type="button"
+          variant="default"
+          size="sm"
+          icon={SvgExternalLink}
+          onClick={() =>
+            window.open(
+              s.external_url as string,
+              "_blank",
+              "noopener,noreferrer",
+            )
+          }
+        >
+          Open Craft
+        </Button>
+      )}
 
       <Button type="button" variant="default" size="sm" onClick={onClose}>
         Close

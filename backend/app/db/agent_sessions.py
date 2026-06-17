@@ -122,7 +122,9 @@ def list_for_page(*, user_id: str, wiki_path: str) -> list[dict[str, Any]]:
             .where(
                 AgentSession.user_id == user_id,
                 AgentSession.wiki_path == wiki_path,
-                AgentSession.status.in_(("pending", "active", "idle", "provisioning", "ready")),
+                AgentSession.status.in_(
+                    ("pending", "active", "idle", "provisioning", "ready", "failed")
+                ),
             )
             .order_by(AgentSession.started_at.desc())
         ).all()
