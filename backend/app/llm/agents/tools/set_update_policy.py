@@ -63,9 +63,11 @@ def handle(args: dict[str, Any]) -> Any:
         }
 
     user = current_user()
-    update_policy.set_policy(norm, actor_user_id=user.id if user else None, **patch)
-
-    explicit_row = update_policy.get(norm)
+    # Use set_policy's returned row directly — re-fetching would add a query and
+    # open a TOCTOU window where a concurrent write disagrees with what we wrote.
+    explicit_row = update_policy.set_policy(
+        norm, actor_user_id=user.id if user else None, **patch
+    )
     explicit = (
         {
             "ingestion_auto_update_disabled": explicit_row["ingestion_auto_update_disabled"],
