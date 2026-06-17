@@ -7,6 +7,10 @@ import { markdown } from "@onyx-ai/opal/utils";
 import AppSidebar from "@/sections/sidebar/AppSidebar";
 import { WikiItemActionsProvider } from "@/providers/WikiItemActionsProvider";
 import { LeftPanelProvider, useLeftPanel } from "@/providers/LeftPanelProvider";
+import {
+  WikiHeaderActionsProvider,
+  useRightPanelHost,
+} from "@/providers/WikiHeaderActionsProvider";
 import { WikiTree } from "@/components/wiki/WikiTree";
 import { WikiHeader } from "@/components/wiki/WikiHeader";
 import ActivitiesPanel from "@/components/wiki/ActivitiesPanel";
@@ -82,32 +86,49 @@ interface AppContentProps {
   children: ReactNode;
 }
 
+// Full-height right column. Wiki routes portal their side panels (History /
+// Comments / Update Policy) into this host instead of squeezing the document
+// column. We use Opal's `RootLayout.RightPanel` for the panel chrome: with no
+// slot-context provider it renders inline as a flex-row sibling of the app
+// (Root is a flex row), so it docks at the far right and is zero-width when
+// empty. Its children are a stable host div (portal target), so the panel never
+// re-renders itself into a loop the way teleporting live content would.
+function RightPanelHost() {
+  const host = useRightPanelHost();
+  return (
+    <RootLayout.RightPanel>
+      <div ref={host?.setEl} className="flex h-full" />
+    </RootLayout.RightPanel>
+  );
+}
+
 function AppContent({ children }: AppContentProps) {
   const { view, isOnWikiRoute } = useLeftPanel();
   return (
-    <WikiItemActionsProvider active={isOnWikiRoute}>
-      {view !== null && (
-        <RootLayout.LeftPanel>
-          {view === "wiki-tree" && <WikiTree />}
-          {view === "activities" && (
-            <div className="h-full p-1">
-              <ActivitiesPanel />
-            </div>
-          )}
-        </RootLayout.LeftPanel>
-      )}
-      <RootLayout.App>
-        <StatusBanner />
-        {isOnWikiRoute && (
-          <RootLayout.Header>
-            <WikiHeader />
-          </RootLayout.Header>
+    <WikiHeaderActionsProvider>
+      <WikiItemActionsProvider active={isOnWikiRoute}>
+        {view !== null && (
+          <RootLayout.LeftPanel>
+            {view === "wiki-tree" && <WikiTree />}
+            {view === "activities" && (
+              <div className="h-full p-1">
+                <ActivitiesPanel />
+              </div>
+            )}
+          </RootLayout.LeftPanel>
         )}
-        <RootLayout.MainContent>
-          <div className="mx-auto w-full max-w-[768px]">{children}</div>
-        </RootLayout.MainContent>
-      </RootLayout.App>
-    </WikiItemActionsProvider>
+        <RootLayout.App>
+          <StatusBanner />
+          {isOnWikiRoute && (
+            <RootLayout.Header>
+              <WikiHeader />
+            </RootLayout.Header>
+          )}
+          <RootLayout.MainContent>{children}</RootLayout.MainContent>
+        </RootLayout.App>
+        <RightPanelHost />
+      </WikiItemActionsProvider>
+    </WikiHeaderActionsProvider>
   );
 }
 

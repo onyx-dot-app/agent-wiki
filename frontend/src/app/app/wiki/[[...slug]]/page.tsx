@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import {
   useCallback,
@@ -10,6 +9,7 @@ import {
   useState,
   type FormEvent,
 } from "react";
+import { createPortal } from "react-dom";
 import { diffLines } from "diff";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -23,21 +23,23 @@ import {
   SelectButton,
 } from "@onyx-ai/opal/components";
 import {
-  SvgArrowLeft,
+  SvgBubbleText,
   SvgChevronLeft,
   SvgChevronRight,
   SvgDocFile,
   SvgEdit,
   SvgFolder,
   SvgFolderPlus,
+  SvgHistory,
   SvgPlus,
   SvgShare,
+  SvgShield,
+  SvgSparkle,
   SvgTrash,
   SvgWorkflow,
 } from "@onyx-ai/opal/icons";
 import { useConfirm } from "@/components/common/ConfirmDialog";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
-import { PageHeader } from "@/components/common/PageHeader";
 import { TriggerModal } from "@/components/triggers/TriggerModal";
 import { DiffView } from "@/components/wiki/DiffView";
 import { HistoryPanel } from "@/components/wiki/HistoryPanel";
@@ -62,6 +64,10 @@ import {
 import { rehypeSourcePos } from "@/lib/rehypeSourcePos";
 import { remarkBareSpaceLinks } from "@/lib/remarkBareSpaceLinks";
 import { useRequireAuth } from "@/lib/auth";
+import {
+  useHeaderActionsHost,
+  useRightPanelHost,
+} from "@/providers/WikiHeaderActionsProvider";
 import { useDrafting } from "@/lib/drafting";
 import { rememberWikiPath } from "@/lib/lastViewed";
 import { recordRecentDoc } from "@/lib/recents";
@@ -172,6 +178,7 @@ export default function WikiRoute() {
 function Explorer({ dir }: { dir: string }) {
   const router = useRouter();
   const isMobile = useIsMobile();
+  const host = useHeaderActionsHost();
   const {
     data,
     error: listError,
@@ -246,8 +253,6 @@ function Explorer({ dir }: { dir: string }) {
       files: fileList.sort(cmp),
     };
   }, [entries, dir, sort]);
-
-  const segments = dir ? dir.split("/") : [];
 
   async function onCreate(e: FormEvent) {
     e.preventDefault();
@@ -355,60 +360,46 @@ function Explorer({ dir }: { dir: string }) {
     }
   }
 
+  // Folder-level actions portal into the single pinned header as icon buttons;
+  // the breadcrumb there is the shared one (WikiHeader), so this view renders
+  // no header of its own.
+  const headerActions = (
+    <>
+      <Button
+        icon={SvgWorkflow}
+        prominence="tertiary"
+        tooltip="Trigger"
+        onClick={() => setTriggerModalOpen(true)}
+      />
+      <Button
+        icon={SvgShield}
+        prominence="tertiary"
+        tooltip="Update Policy"
+        onClick={() => setPolicyOpen(true)}
+      />
+      <Button
+        icon={SvgFolderPlus}
+        prominence="tertiary"
+        tooltip="New folder"
+        onClick={() => {
+          setNewName("");
+          setCreating((v) => (v === "folder" ? null : "folder"));
+        }}
+      />
+      <Button
+        icon={SvgPlus}
+        variant="action"
+        tooltip="New document"
+        onClick={() => router.push(`/app/wiki/${dir}?new=1`)}
+      />
+    </>
+  );
+
   return (
     <main
-      className={`h-screen overflow-y-auto ${isMobile ? "px-3 py-4" : "px-8 py-6"}`}
+      className={`h-full overflow-y-auto ${isMobile ? "px-3 py-4" : "px-8 py-6"}`}
     >
-      <PageHeader
-        title={
-          <Breadcrumbs
-            segments={segments}
-            onDropToCrumb={(crumbPath) => {
-              if (dragSource && crumbPath !== dir)
-                onMove(dragSource, crumbPath);
-              setDragSource(null);
-              setDropTarget(null);
-            }}
-            dropTarget={dropTarget}
-            onCrumbDragOver={(crumbPath) => setDropTarget(crumbPath)}
-            onCrumbDragLeave={() => setDropTarget(null)}
-            currentDir={dir}
-          />
-        }
-        actions={
-          <>
-            {/* Same language as the doc-view header: quiet ghost buttons
-                with a single solid CTA (New document). */}
-            <Button
-              prominence="tertiary"
-              icon={SvgWorkflow}
-              onClick={() => setTriggerModalOpen(true)}
-            >
-              Trigger
-            </Button>
-            <Button prominence="tertiary" onClick={() => setPolicyOpen(true)}>
-              Update Policy
-            </Button>
-            <Button
-              prominence="tertiary"
-              icon={SvgFolderPlus}
-              onClick={() => {
-                setNewName("");
-                setCreating((v) => (v === "folder" ? null : "folder"));
-              }}
-            >
-              New folder
-            </Button>
-            <Button
-              variant="action"
-              icon={SvgPlus}
-              onClick={() => router.push(`/app/wiki/${dir}?new=1`)}
-            >
-              New document
-            </Button>
-          </>
-        }
-      />
+      {host?.el && createPortal(headerActions, host.el)}
 
       <TriggerModal
         open={triggerModalOpen}
@@ -567,6 +558,7 @@ function NewDocView({ dir }: { dir: string }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const isMobile = useIsMobile();
+  const host = useHeaderActionsHost();
   const { setDrafting, requestExpand, registerDraftBridge } = useDrafting();
   // "Start writing with AI" hands a generated draft (+ the prompt) here via
   // sessionStorage, paired with ?ai=1. Read it synchronously so the editor and
@@ -764,35 +756,31 @@ function NewDocView({ dir }: { dir: string }) {
     (isBlank || matchesApplied) && templates !== null && templates.length > 0;
   const parentSlug = destDir;
 
+  // Cancel / Create portal into the single pinned header; the breadcrumb there
+  // shows the destination folder, so this view renders no header of its own.
+  const headerActions = (
+    <>
+      <Button onClick={() => router.push(`/app/wiki/${dir}`)} disabled={saving}>
+        Cancel
+      </Button>
+      <Button
+        variant="action"
+        onClick={() => void onCreate()}
+        disabled={!canCreate}
+        tooltip={
+          !filenameValid && !saving ? "Give the file a name first." : undefined
+        }
+      >
+        {saving ? "Creating…" : "Create"}
+      </Button>
+    </>
+  );
+
   return (
     <main
-      className={`box-border flex h-screen flex-col gap-3 ${isMobile ? "px-3 py-4" : "px-8 py-6"}`}
+      className={`box-border flex h-full flex-col gap-3 ${isMobile ? "px-3 py-4" : "px-8 py-6"}`}
     >
-      <PageHeader
-        title="New document"
-        actions={
-          <>
-            <Button
-              onClick={() => router.push(`/app/wiki/${dir}`)}
-              disabled={saving}
-            >
-              Cancel
-            </Button>
-            <Button
-              variant="action"
-              onClick={() => void onCreate()}
-              disabled={!canCreate}
-              title={
-                !filenameValid && !saving
-                  ? "Give the file a name first."
-                  : undefined
-              }
-            >
-              {saving ? "Creating…" : "Create"}
-            </Button>
-          </>
-        }
-      />
+      {host?.el && createPortal(headerActions, host.el)}
 
       <div className="flex shrink-0 items-center gap-2">
         <span className="text-[13px] text-(--text-04)">Folder</span>
@@ -1259,83 +1247,12 @@ function Row({
   );
 }
 
-function Breadcrumbs({
-  segments,
-  onDropToCrumb,
-  onCrumbDragOver,
-  onCrumbDragLeave,
-  dropTarget,
-  currentDir,
-}: {
-  segments: string[];
-  onDropToCrumb?: (crumbPath: string) => void;
-  onCrumbDragOver?: (crumbPath: string) => void;
-  onCrumbDragLeave?: () => void;
-  dropTarget?: string | null;
-  currentDir?: string;
-}) {
-  // Use a sentinel for the root crumb so we can track its drop state without
-  // collision with a real path of "".
-  const ROOT = "__root__";
-  const crumbs = [{ label: "Wiki", href: "/app/wiki", path: "" }];
-  segments.forEach((seg, i) => {
-    const path = segments.slice(0, i + 1).join("/");
-    crumbs.push({ label: seg, href: `/app/wiki/${path}`, path });
-  });
-  return (
-    <nav className="flex flex-wrap items-center gap-1.5 text-sm">
-      {crumbs.map((c, i) => {
-        const last = i === crumbs.length - 1;
-        const targetKey = c.path === "" ? ROOT : c.path;
-        const droppable = onDropToCrumb && c.path !== currentDir;
-        const active = !!droppable && dropTarget === targetKey;
-        const dropHandlers: Record<string, unknown> = droppable
-          ? {
-              onDragOver: (e: React.DragEvent) => {
-                e.preventDefault();
-                e.dataTransfer.dropEffect = "move";
-                onCrumbDragOver?.(targetKey);
-              },
-              onDragLeave: () => onCrumbDragLeave?.(),
-              onDrop: (e: React.DragEvent) => {
-                e.preventDefault();
-                onDropToCrumb?.(c.path);
-              },
-            }
-          : {};
-        const activeClass = active
-          ? "bg-(--background-tint-03) outline outline-2 outline-(--background-tint-inverted-00) rounded-(--border-radius-04) py-[2px] px-[6px]"
-          : "";
-        return (
-          <span key={c.href} className="flex items-center gap-1.5">
-            {i > 0 && <span className="text-(--text-02)">/</span>}
-            {last ? (
-              <span
-                className={`font-semibold ${activeClass}`}
-                {...dropHandlers}
-              >
-                {c.label}
-              </span>
-            ) : (
-              <Link
-                href={c.href}
-                className={`text-(--text-05) underline ${activeClass}`}
-                {...dropHandlers}
-              >
-                {c.label}
-              </Link>
-            )}
-          </span>
-        );
-      })}
-    </nav>
-  );
-}
-
 function FileViewer({ path }: { path: string }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const isMobile = useIsMobile();
+  const host = useHeaderActionsHost();
+  const rightHost = useRightPanelHost();
   const { setDrafting, requestExpand } = useDrafting();
   const [body, setBody] = useState("");
   const [draft, setDraft] = useState("");
@@ -1390,7 +1307,13 @@ function FileViewer({ path }: { path: string }) {
     try {
       const t = await listComments(path);
       setCommentThreads(t);
-      if (t.length > 0 && autoOpenedPathRef.current !== path) {
+      // Auto-open once per page only when something needs attention — i.e. an
+      // unresolved thread (open or orphaned, matching the panel's main list).
+      // A page whose comments are all resolved stays closed.
+      const hasUnresolved = t.some(
+        (thread) => thread.root.status !== "resolved",
+      );
+      if (hasUnresolved && autoOpenedPathRef.current !== path) {
         autoOpenedPathRef.current = path;
         openComments();
       }
@@ -1883,7 +1806,6 @@ function FileViewer({ path }: { path: string }) {
 
   const segments = path.split("/");
   const parentSlug = segments.slice(0, -1).join("/");
-  const backHref = parentSlug ? `/app/wiki/${parentSlug}` : "/app/wiki";
   const currentBasename = segments[segments.length - 1] ?? path;
   const currentBasenameNoExt = currentBasename.replace(/\.md$/i, "");
   const trimmedFilename = filenameDraft.trim().replace(/^\/+|\/+$/g, "");
@@ -2189,99 +2111,81 @@ function FileViewer({ path }: { path: string }) {
     }).catch(() => {});
   }
 
+  // Page actions live in the single pinned header (WikiHeader), not a second
+  // header inside the scroll area — they portal into its right-aligned slot.
+  // The panel toggles are icon SelectButtons so the open panel shows the
+  // selected tint; the others are tertiary icon Buttons with the lone solid
+  // CTA (Edit). Editing swaps in labelled Cancel / Save for clarity.
+  const headerActions = editing ? (
+    <>
+      <Button onClick={onCancel} disabled={saving}>
+        Cancel
+      </Button>
+      <Button variant="action" onClick={onSave} disabled={saving || !dirty}>
+        {saving ? "Saving…" : "Save"}
+      </Button>
+    </>
+  ) : !loading && !error ? (
+    <>
+      <Button
+        icon={SvgSparkle}
+        prominence="tertiary"
+        tooltip="Run Agent"
+        onClick={() => setRunAgentOpen(true)}
+      />
+      <Button
+        icon={SvgWorkflow}
+        prominence="tertiary"
+        tooltip="Trigger"
+        onClick={() => setTriggerModalOpen(true)}
+      />
+      <Button
+        icon={SvgShare}
+        prominence="tertiary"
+        tooltip="Share"
+        onClick={() => setShareOpen(true)}
+      />
+      <SelectButton
+        icon={SvgHistory}
+        state={historyOpen ? "selected" : "empty"}
+        tooltip="History"
+        onClick={toggleHistory}
+      />
+      <SelectButton
+        icon={SvgBubbleText}
+        state={commentsOpen ? "selected" : "empty"}
+        tooltip="Comments"
+        onClick={() => (commentsOpen ? setCommentsOpen(false) : openComments())}
+      />
+      <SelectButton
+        icon={SvgShield}
+        state={policyOpen ? "selected" : "empty"}
+        tooltip="Update Policy"
+        onClick={() => {
+          if (policyOpen) {
+            setPolicyOpen(false);
+            return;
+          }
+          setHistoryOpen(false);
+          setCommentsOpen(false);
+          setCommentDraft(null);
+          setPolicyOpen(true);
+        }}
+      />
+      <Button
+        icon={SvgEdit}
+        variant="action"
+        tooltip="Edit"
+        onClick={startEdit}
+      />
+    </>
+  ) : null;
+
   return (
     <main
-      className={`box-border flex h-screen min-h-0 flex-col ${isMobile ? "px-3 py-4" : "px-8 py-6"}`}
+      className={`box-border flex h-full min-h-0 flex-col ${isMobile ? "px-3 py-4" : "px-8 py-6"}`}
     >
-      <header
-        className={`mb-4 flex flex-wrap items-center ${isMobile ? "gap-2" : "gap-3"}`}
-      >
-        <Link
-          href={backHref}
-          title="Back"
-          aria-label="Back"
-          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-(--border-radius-08) border border-(--border-01) text-(--text-04) no-underline"
-        >
-          <SvgArrowLeft size={18} />
-        </Link>
-        <Breadcrumbs segments={segments} />
-        <div className="flex-1" />
-        {!editing && !loading && !error && (
-          <>
-            {/* Ghost buttons: transparent at rest, tint-02 on hover — the
-                one solid CTA in the header is Edit. The two panel toggles
-                are SelectButtons so the open panel shows the selected tint;
-                empty-state SelectButton hovers identically to a tertiary
-                Button, so the row reads as one style. */}
-            <div className="flex gap-2">
-              <Button
-                prominence="tertiary"
-                onClick={() => setRunAgentOpen(true)}
-              >
-                Run Agent
-              </Button>
-              <Button
-                prominence="tertiary"
-                icon={SvgWorkflow}
-                onClick={() => setTriggerModalOpen(true)}
-              >
-                Trigger
-              </Button>
-            </div>
-            <div className="flex gap-2">
-              <Button prominence="tertiary" onClick={() => setShareOpen(true)}>
-                Share
-              </Button>
-              <SelectButton
-                state={historyOpen ? "selected" : "empty"}
-                onClick={toggleHistory}
-              >
-                History
-              </SelectButton>
-              <SelectButton
-                state={commentsOpen ? "selected" : "empty"}
-                onClick={() =>
-                  commentsOpen ? setCommentsOpen(false) : openComments()
-                }
-              >
-                Comments
-              </SelectButton>
-              <SelectButton
-                state={policyOpen ? "selected" : "empty"}
-                onClick={() => {
-                  if (policyOpen) {
-                    setPolicyOpen(false);
-                    return;
-                  }
-                  setHistoryOpen(false);
-                  setCommentsOpen(false);
-                  setCommentDraft(null);
-                  setPolicyOpen(true);
-                }}
-              >
-                Update Policy
-              </SelectButton>
-            </div>
-            <Button variant="action" onClick={startEdit}>
-              Edit
-            </Button>
-          </>
-        )}
-        {editing && (
-          <>
-            <Button onClick={onCancel} disabled={saving}>
-              Cancel
-            </Button>
-            <Button
-              variant="action"
-              onClick={onSave}
-              disabled={saving || !dirty}
-            >
-              {saving ? "Saving…" : "Save"}
-            </Button>
-          </>
-        )}
-      </header>
+      {host?.el && headerActions && createPortal(headerActions, host.el)}
 
       {!editing && (
         <ActiveAgentsBar
@@ -2477,111 +2381,151 @@ function FileViewer({ path }: { path: string }) {
       {loading && <LoadingSpinner />}
 
       {!loading && !error && (
-        <div className="flex min-h-0 flex-1 gap-4">
-          <div className="flex min-w-0 flex-1 flex-col gap-3">
-            {editing ? (
-              <>
-                <FilenameRow
-                  parent={parentSlug}
-                  value={filenameDraft}
-                  onChange={setFilenameDraft}
-                  disabled={saving}
-                />
-                {(() => {
-                  // Cards visible while the body is still "empty enough"
-                  // to discard without losing user work: truly blank, or
-                  // still verbatim equal to the template the user just
-                  // applied (so they can keep swapping templates).
-                  const isBlank = draft.trim() === "";
-                  const matchesApplied =
-                    appliedTemplateBody !== null &&
-                    draft === appliedTemplateBody;
-                  const showGallery =
-                    (isBlank || matchesApplied) &&
-                    templates !== null &&
-                    templates.length > 0;
-                  if (!showGallery) return null;
-                  return (
-                    <TemplateGallery
-                      templates={templates!}
-                      activeId={matchesApplied ? appliedTemplateId : null}
-                      applyingId={applyingTemplateId}
-                      blankActive={isBlank && appliedTemplateId === null}
-                      onPick={(t) => void onPickTemplate(t)}
-                      onBlank={() => void onPickBlank()}
+        <>
+          {editing || (viewingVersion && diffData) ? (
+            // Editor / diff: fixed-height, capped + centered column with its own
+            // internal scroll (you edit against a pinned viewport, not a growing
+            // page).
+            <div className="flex min-h-0 flex-1 justify-center">
+              <div className="flex w-full max-w-[768px] min-w-0 flex-col gap-3">
+                {editing ? (
+                  <>
+                    <FilenameRow
+                      parent={parentSlug}
+                      value={filenameDraft}
+                      onChange={setFilenameDraft}
+                      disabled={saving}
                     />
-                  );
-                })()}
-                <textarea
-                  value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
-                  spellCheck={false}
-                  placeholder="Start typing, or pick a template above…"
-                  className="box-border min-h-0 w-full flex-1 resize-none rounded-(--border-radius-08) border border-(--border-01) p-4 font-mono text-sm leading-[1.6] outline-none"
-                />
-              </>
-            ) : viewingVersion && diffData ? (
-              <div className="flex min-h-0 flex-1 overflow-hidden">
-                <DiffView
-                  data={diffData}
-                  commit={
-                    commits?.find((c) => c.sha === viewingSha) ?? undefined
-                  }
-                  loadBody={async () => {
-                    const sha = viewingSha;
-                    if (!sha) return "";
-                    const r = await apiFetch<FileResponse>(
-                      `/wiki/file?path=${encodeURIComponent(
-                        path,
-                      )}&ref=${encodeURIComponent(sha)}`,
-                    );
-                    return r.body;
-                  }}
-                />
+                    {(() => {
+                      // Cards visible while the body is still "empty enough"
+                      // to discard without losing user work: truly blank, or
+                      // still verbatim equal to the template the user just
+                      // applied (so they can keep swapping templates).
+                      const isBlank = draft.trim() === "";
+                      const matchesApplied =
+                        appliedTemplateBody !== null &&
+                        draft === appliedTemplateBody;
+                      const showGallery =
+                        (isBlank || matchesApplied) &&
+                        templates !== null &&
+                        templates.length > 0;
+                      if (!showGallery) return null;
+                      return (
+                        <TemplateGallery
+                          templates={templates!}
+                          activeId={matchesApplied ? appliedTemplateId : null}
+                          applyingId={applyingTemplateId}
+                          blankActive={isBlank && appliedTemplateId === null}
+                          onPick={(t) => void onPickTemplate(t)}
+                          onBlank={() => void onPickBlank()}
+                        />
+                      );
+                    })()}
+                    <textarea
+                      value={draft}
+                      onChange={(e) => setDraft(e.target.value)}
+                      spellCheck={false}
+                      placeholder="Start typing, or pick a template above…"
+                      className="box-border min-h-0 w-full flex-1 resize-none rounded-(--border-radius-08) border border-(--border-01) p-4 font-mono text-sm leading-[1.6] outline-none"
+                    />
+                  </>
+                ) : (
+                  <div className="flex min-h-0 flex-1 overflow-hidden">
+                    <DiffView
+                      data={diffData!}
+                      commit={
+                        commits?.find((c) => c.sha === viewingSha) ?? undefined
+                      }
+                      loadBody={async () => {
+                        const sha = viewingSha;
+                        if (!sha) return "";
+                        const r = await apiFetch<FileResponse>(
+                          `/wiki/file?path=${encodeURIComponent(
+                            path,
+                          )}&ref=${encodeURIComponent(sha)}`,
+                        );
+                        return r.body;
+                      }}
+                    />
+                  </div>
+                )}
               </div>
-            ) : (
+            </div>
+          ) : (
+            // Render mode: the whole main-content area scrolls with the
+            // scrollbar flush at the far right edge (the negative margin cancels
+            // <main>'s horizontal padding, re-applied inside so the text keeps
+            // its gutter); the article text stays capped + centered.
+            <div
+              className={`min-h-0 flex-1 overflow-y-auto ${isMobile ? "-mx-3 px-3" : "-mx-8 px-8"}`}
+            >
               <article
                 ref={articleRef}
-                className="markdown min-h-0 flex-1 overflow-y-auto"
+                className="markdown mx-auto w-full max-w-[768px]"
                 onMouseUp={onArticleMouseUp}
               >
                 {renderedBody}
               </article>
+            </div>
+          )}
+          {/* Desktop side panels dock at the app's right edge (full height,
+              beside the header) by portaling into the shell's right-panel host,
+              so they never eat into the reading column above. Mobile keeps the
+              fixed sheet rendered below. */}
+          {historyOpen &&
+            !isMobile &&
+            rightHost?.el &&
+            createPortal(
+              <div className="flex h-full w-[400px] border-l border-(--border-01)">
+                <HistoryPanel
+                  commits={commits}
+                  error={historyError}
+                  headSha={headSha}
+                  viewingSha={viewingSha}
+                  onPick={onPickCommit}
+                  onClose={closeHistory}
+                  fullHeight
+                />
+              </div>,
+              rightHost.el,
             )}
-          </div>
-          {historyOpen && !isMobile && (
-            <HistoryPanel
-              commits={commits}
-              error={historyError}
-              headSha={headSha}
-              viewingSha={viewingSha}
-              onPick={onPickCommit}
-              onClose={closeHistory}
-            />
-          )}
-          {commentsOpen && !isMobile && (
-            <CommentsPanel
-              path={path}
-              headSha={headSha}
-              draft={commentDraft}
-              threads={commentThreads}
-              onChanged={refreshComments}
-              activeId={activeCommentId}
-              onActivate={activateComment}
-              onDraftConsumed={() => setCommentDraft(null)}
-              onClose={() => {
-                setCommentsOpen(false);
-                setCommentDraft(null);
-              }}
-            />
-          )}
-          {policyOpen && !isMobile && (
-            <UpdatePolicyPanel
-              path={path}
-              onClose={() => setPolicyOpen(false)}
-            />
-          )}
-        </div>
+          {commentsOpen &&
+            !isMobile &&
+            rightHost?.el &&
+            createPortal(
+              <div className="flex h-full w-[400px] border-l border-(--border-01)">
+                <CommentsPanel
+                  path={path}
+                  headSha={headSha}
+                  draft={commentDraft}
+                  threads={commentThreads}
+                  onChanged={refreshComments}
+                  activeId={activeCommentId}
+                  onActivate={activateComment}
+                  onDraftConsumed={() => setCommentDraft(null)}
+                  onClose={() => {
+                    setCommentsOpen(false);
+                    setCommentDraft(null);
+                  }}
+                  fullHeight
+                />
+              </div>,
+              rightHost.el,
+            )}
+          {policyOpen &&
+            !isMobile &&
+            rightHost?.el &&
+            createPortal(
+              <div className="flex h-full w-[400px] border-l border-(--border-01)">
+                <UpdatePolicyPanel
+                  path={path}
+                  onClose={() => setPolicyOpen(false)}
+                  fullHeight
+                />
+              </div>,
+              rightHost.el,
+            )}
+        </>
       )}
       {historyOpen && isMobile && (
         // Mobile: render history as a fixed slide-in sheet over the
