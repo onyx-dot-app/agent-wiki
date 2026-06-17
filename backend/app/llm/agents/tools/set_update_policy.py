@@ -47,15 +47,15 @@ def handle(args: dict[str, Any]) -> Any:
     # intent to set; an empty string (or null) for the instruction clears it.
     patch: dict[str, Any] = {}
     if "ingestion_auto_update_disabled" in args:
-        v = args["ingestion_auto_update_disabled"]
-        if v is not None and not isinstance(v, bool):
+        disabled = args["ingestion_auto_update_disabled"]
+        if disabled is not None and not isinstance(disabled, bool):
             return {"error": "ingestion_auto_update_disabled must be a boolean"}
-        patch["ingestion_auto_update_disabled"] = v
+        patch["ingestion_auto_update_disabled"] = disabled
     if "update_instruction" in args:
-        v = args["update_instruction"]
-        if v is not None and not isinstance(v, str):
+        instruction = args["update_instruction"]
+        if instruction is not None and not isinstance(instruction, str):
             return {"error": "update_instruction must be a string"}
-        patch["update_instruction"] = v
+        patch["update_instruction"] = instruction
     if not patch:
         return {
             "error": "provide at least one of `ingestion_auto_update_disabled` "
