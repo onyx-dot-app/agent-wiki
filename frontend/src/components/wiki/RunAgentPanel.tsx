@@ -8,7 +8,9 @@ import { WorkingDirInput } from "@/components/agents/WorkingDirInput";
 import { Button, MessageCard, Text } from "@onyx-ai/opal/components";
 import { SvgChevronDown, SvgFileText, SvgX } from "@onyx-ai/opal/icons";
 import { SvgClaude, SvgOnyxLogo, SvgOpenai } from "@onyx-ai/opal/logos";
+import { ConnectOnyxCraft } from "@/components/agents/ConnectOnyxCraft";
 import { ApiError } from "@/lib/api";
+import { craftLaunch, useCraftConnect } from "@/lib/craft";
 import {
   launch,
   probeHelper,
@@ -50,6 +52,7 @@ export function RunAgentPanel({ open, onClose, wikiPath }: Props) {
     wikiPath,
   });
   const { refresh: refreshSessions } = useAgentSessions(wikiPath ?? undefined);
+  const { status: craftStatus, refresh: refreshCraft } = useCraftConnect();
   const launchable = useMemo(
     () => launchers.filter((c) => c.available_for_launch),
     [launchers],
@@ -163,16 +166,40 @@ export function RunAgentPanel({ open, onClose, wikiPath }: Props) {
   const selected = launchers.find((c) => c.id === selectedId);
   const selectedName = selected?.name ?? "your agent";
   const selectedKind = selected?.kind;
+  const isCraft = selectedKind === "in_app";
+  const craftConnected = craftStatus?.connected ?? false;
   const docLabel = docName(wikiPath);
   const SelectedIcon = agentIcon(selectedId);
 
   async function onRun(e: FormEvent) {
     e.preventDefault();
     if (!selectedId) return;
-    // Only local_cli tools require the localhost helper. in_app
-    // (e.g. onyx-craft) and web_handoff tools launch through the
-    // backend directly — gating them on the probe result would trap
-    // the user in a wizard loop they can never escape.
+
+    // Onyx Craft (in_app): launch server-side as the connected user — no
+    // localhost helper, no agentwiki:// dispatch. Surfaces in the bar + bell.
+    if (isCraft) {
+      if (!craftConnected) return; // Start stays disabled until connected
+      setBusy(true);
+      setError(null);
+      try {
+        await craftLaunch({
+          wiki_path: docContextOn ? wikiPath : null,
+          message,
+        });
+        onClose();
+        await refreshSessions();
+        await refreshCatalog();
+      } catch (err) {
+        setError(
+          err instanceof ApiError ? err.message : "Failed to launch Craft",
+        );
+        setBusy(false);
+      }
+      return;
+    }
+
+    // Only local_cli tools require the localhost helper. Gating them on the
+    // probe result would trap the user in a wizard loop they can never escape.
     const selectedTool = launchable.find((c) => c.id === selectedId);
     if (selectedTool?.kind === "local_cli" && probe?.acked === false) {
       setWizardOpen(true);
@@ -217,7 +244,8 @@ export function RunAgentPanel({ open, onClose, wikiPath }: Props) {
   const canRun =
     message.trim().length > 0 &&
     selectedId !== null &&
-    launchable.some((c) => c.id === selectedId);
+    launchable.some((c) => c.id === selectedId) &&
+    (!isCraft || craftConnected);
 
   return (
     <form
@@ -334,6 +362,19 @@ export function RunAgentPanel({ open, onClose, wikiPath }: Props) {
               </>
             )}
 
+            {isCraft && !craftConnected && (
+              <div className={styles.section}>
+                <Text font="main-ui-action" color="text-04">
+                  Connect Onyx
+                </Text>
+                <Text font="secondary-body" color="text-03">
+                  Craft runs as you, with your Onyx knowledge and model access.
+                  Connect your account to launch.
+                </Text>
+                <ConnectOnyxCraft onConnected={() => void refreshCraft()} />
+              </div>
+            )}
+
             <div className={styles.divider} />
 
             <div className={styles.section}>
@@ -374,8 +415,14 @@ export function RunAgentPanel({ open, onClose, wikiPath }: Props) {
 
           <div className={styles.footerBand}>
             <span className={styles.helper}>
-              This will launch a session in <strong>{selectedName}</strong> with
-              your message.
+              {isCraft ? (
+                <>This will start an Onyx Craft build with your message.</>
+              ) : (
+                <>
+                  This will launch a session in <strong>{selectedName}</strong>{" "}
+                  with your message.
+                </>
+              )}
             </span>
             <Button type="submit" variant="action" disabled={!canRun || busy}>
               {busy ? "Launching..." : "Start"}
