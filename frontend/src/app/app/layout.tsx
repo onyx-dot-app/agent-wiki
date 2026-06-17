@@ -104,7 +104,7 @@ function AppContent({ children }: AppContentProps) {
           </RootLayout.Header>
         )}
         <RootLayout.MainContent>
-          <div className="mx-auto w-full max-w-[768px]">{children}</div>
+          <div className="mx-auto h-full w-full max-w-[768px]">{children}</div>
         </RootLayout.MainContent>
       </RootLayout.App>
     </WikiItemActionsProvider>
