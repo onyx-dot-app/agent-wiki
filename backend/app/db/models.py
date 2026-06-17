@@ -672,21 +672,16 @@ class LLMSettings(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
     provider: Mapped[str] = mapped_column(Text, nullable=False)
     model: Mapped[str] = mapped_column(Text, nullable=False)
-    anthropic_api_key: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=text("''")
-    )
-    openai_api_key: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=text("''")
-    )
-    gemini_api_key: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=text("''")
-    )
+    # Secrets — AES-GCM encrypted at rest (app/db/crypto.py:EncryptedString).
+    # No server_default: bytea can't carry a text '' default; every upsert path
+    # supplies all four key columns explicitly before the session commits.
+    anthropic_api_key: Mapped[str] = mapped_column(EncryptedString(), nullable=False)
+    openai_api_key: Mapped[str] = mapped_column(EncryptedString(), nullable=False)
+    gemini_api_key: Mapped[str] = mapped_column(EncryptedString(), nullable=False)
     ollama_base_url: Mapped[str] = mapped_column(
         Text, nullable=False, server_default=text("''")
     )
-    custom_api_key: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=text("''")
-    )
+    custom_api_key: Mapped[str] = mapped_column(EncryptedString(), nullable=False)
     custom_base_url: Mapped[str] = mapped_column(
         Text, nullable=False, server_default=text("''")
     )
@@ -710,12 +705,9 @@ class WebSettings(Base):
     __tablename__ = "web_settings"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
-    serper_api_key: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=text("''")
-    )
-    firecrawl_api_key: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=text("''")
-    )
+    # Secrets — AES-GCM encrypted at rest (app/db/crypto.py:EncryptedString).
+    serper_api_key: Mapped[str] = mapped_column(EncryptedString(), nullable=False)
+    firecrawl_api_key: Mapped[str] = mapped_column(EncryptedString(), nullable=False)
     updated_at: Mapped[str] = mapped_column(
         Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
     )
@@ -730,7 +722,8 @@ class IngestSettings(Base):
     max_doc_chars: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default=text("100000")
     )
-    api_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Secret — AES-GCM encrypted at rest (app/db/crypto.py:EncryptedString).
+    api_key: Mapped[str | None] = mapped_column(EncryptedString(), nullable=True)
     updated_at: Mapped[str] = mapped_column(
         Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
     )
@@ -745,9 +738,8 @@ class BraintrustSettings(Base):
     project: Mapped[str] = mapped_column(
         Text, nullable=False, server_default=text("''")
     )
-    api_key: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=text("''")
-    )
+    # Secret — AES-GCM encrypted at rest (app/db/crypto.py:EncryptedString).
+    api_key: Mapped[str] = mapped_column(EncryptedString(), nullable=False)
     enabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false")
     )
