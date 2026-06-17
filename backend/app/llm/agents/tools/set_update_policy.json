@@ -1,0 +1,22 @@
+{
+  "name": "set_update_policy",
+  "description": "Set the update policy for a wiki page or folder — how Onyx auto-maintains it. Two independent settings, both inherited folder→page (a folder's policy applies to everything beneath it; a page or subfolder overrides its parent): (1) `ingestion_auto_update_disabled` — when true, connector/ingestion pushes will NOT rewrite this page (or anything under this folder); set false to (re-)enable. (2) `update_instruction` — free-text guidance the updater agent follows when it does edit this page/folder (e.g. \"keep entries terse\", \"never touch the SLA table\"); pass an empty string to clear it. PATCH semantics: only the settings you include change — omit a setting to leave it as-is. `path` is a page (ending in `.md`), a folder, or \"\" for the wiki root. Requires write permission on the path. Returns the resulting `explicit` policy set on this path and the `effective` policy after inheritance. ONLY call this when the user asks to change how a page/folder is auto-updated — never as a side effect of editing content.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "path": {
+        "type": "string",
+        "description": "Wiki-relative path: a page ending in `.md`, a folder, or \"\" for the wiki root. A page must already exist; a folder policy may be set ahead of its children (future pages inherit it)."
+      },
+      "ingestion_auto_update_disabled": {
+        "type": "boolean",
+        "description": "true = block connector/ingestion auto-update for this page (or everything under this folder); false = allow it. Omit to leave unchanged."
+      },
+      "update_instruction": {
+        "type": "string",
+        "description": "Guidance the updater agent follows when editing this page/folder. Pass an empty string to clear it (so it inherits any ancestor instruction). Omit to leave unchanged."
+      }
+    },
+    "required": ["path"]
+  }
+}
