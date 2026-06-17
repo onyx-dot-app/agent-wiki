@@ -673,8 +673,8 @@ class LLMSettings(Base):
     provider: Mapped[str] = mapped_column(Text, nullable=False)
     model: Mapped[str] = mapped_column(Text, nullable=False)
     # Secrets — AES-GCM encrypted at rest (app/db/crypto.py:EncryptedString).
-    # No server_default: the ``bytea`` storage can't carry a text '' default;
-    # ``upsert`` always supplies a value (same shape as SlackWebhook.webhook_url).
+    # No server_default: bytea can't carry a text '' default; every upsert path
+    # supplies all four key columns explicitly before the session commits.
     anthropic_api_key: Mapped[str] = mapped_column(EncryptedString(), nullable=False)
     openai_api_key: Mapped[str] = mapped_column(EncryptedString(), nullable=False)
     gemini_api_key: Mapped[str] = mapped_column(EncryptedString(), nullable=False)
