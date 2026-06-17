@@ -150,6 +150,9 @@ async def _lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     log.info(
         "agent-wiki backend starting (database=%s)", _app_config.CONFIG.database_url.split("@")[-1]
     )
+    # Guard before init_db: a misconfigured prod must fail fast rather than
+    # encrypt live data under the public default SECRET_KEY.
+    _app_config.verify_secret_key()
     init_db()
     ensure_wiki_repo()
     # Seed-on-empty runs after the repo is initialized so writes go
