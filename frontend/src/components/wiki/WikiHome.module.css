@@ -3,8 +3,11 @@
    Section). These classes are layout-only — column width, the card grids, the
    gutter offset, and the masked markdown preview (which has no OPAL primitive). */
 
+/* Fill the RootLayout main slot (which sits below the pinned header), not the
+   whole viewport — otherwise this scroller + the slot's own overflow stack into
+   two scrollbars. */
 .scroll {
-  height: 100vh;
+  height: 100%;
   overflow-y: auto;
 }
 
