@@ -1,8 +1,8 @@
 """Craft integration: agent_sessions external fields, user_onyx_connections,
 craft_connect_states, notifications, ingest_settings.onyx_base_url
 
-Revision ID: 0029
-Revises: 0028
+Revision ID: 0030
+Revises: 4322ff468239
 Create Date: 2026-06-09 00:00:00.000000
 """
 
@@ -12,8 +12,8 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects.postgresql import JSONB
 
-revision: str = "0029"
-down_revision: str = "0028"
+revision: str = "0030"
+down_revision: str = "4322ff468239"
 branch_labels = None
 depends_on = None
 
