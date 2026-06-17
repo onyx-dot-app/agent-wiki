@@ -5,6 +5,7 @@ import { Button } from "@onyx-ai/opal/components";
 import { SvgFolder } from "@onyx-ai/opal/icons";
 import { useAppFocus } from "@/hooks/useAppFocus";
 import { useLeftPanel } from "@/providers/LeftPanelProvider";
+import { useHeaderActionsHost } from "@/providers/WikiHeaderActionsProvider";
 
 function segmentLabel(segment: string): string {
   return segment.replace(/\.md$/, "").replace(/_/g, " ");
@@ -14,6 +15,7 @@ export function WikiHeader() {
   const { view, toggleTree } = useLeftPanel();
   const treeVisible = view === "wiki-tree";
   const { wikiPath } = useAppFocus();
+  const host = useHeaderActionsHost();
 
   const segments = wikiPath ? wikiPath.split("/") : [];
   const crumbs: Array<{ label: string; href: string }> = [
@@ -54,6 +56,10 @@ export function WikiHeader() {
           );
         })}
       </nav>
+      {/* Page-level actions portal here from the active wiki route (see
+          WikiHeaderActionsProvider). Pushed right by the flex spacer. */}
+      <div className="flex-1" />
+      <div ref={host?.setEl} className="flex items-center gap-1" />
     </div>
   );
 }
