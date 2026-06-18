@@ -42,6 +42,11 @@ class Config(BaseModel):
     # `True` when the app is served over HTTPS — toggles SESSION_COOKIE_SECURE.
     secure_cookies: bool
 
+    # `True` only in local dev / CI. Production must leave it false (the
+    # default) — it's the opt-in that downgrades verify_secret_key() from
+    # fatal to a warning.
+    dev_mode: bool
+
     # Ingest pipeline tuning
     ingest_bm25_min_score: float
     ingest_bm25_title_boost: float
@@ -146,6 +151,7 @@ def load_config() -> Config:
         ingest_eval_logging=os.environ.get("INGEST_EVAL_LOGGING", "false").lower()
         in {"1", "true", "yes"},
         secure_cookies=os.environ.get("SECURE_COOKIES", "false").lower() in {"1", "true", "yes"},
+        dev_mode=os.environ.get("DEV_MODE", "false").lower() in {"1", "true", "yes"},
         launchers_enabled=os.environ.get("LAUNCHERS_ENABLED", "false").lower()
         in {"1", "true", "yes"},
         launch_code_ttl_seconds=_positive_int("LAUNCH_CODE_TTL_SECONDS", 60),
@@ -171,9 +177,9 @@ def verify_secret_key(config: Config | None = None) -> None:
     SECRET_KEY signs session cookies and derives the AES key that encrypts the
     secret columns at rest (app/db/crypto.py). The built-in default is public,
     so on a real deployment it makes cookies forgeable and the at-rest
-    encryption worthless. ``secure_cookies`` (HTTPS) is the production signal:
-    when it's on, a default/empty key is fatal; otherwise (local dev) it's a
-    warning so the dev loop keeps working.
+    encryption worthless. Production (``dev_mode`` off, the default) treats a
+    default/empty key as fatal; local dev / CI opt out with ``DEV_MODE=true``
+    so the dev loop keeps working.
 
     Called at startup before init_db() so a misconfigured prod fails fast
     rather than encrypting live data under the public default key.
@@ -187,6 +193,6 @@ def verify_secret_key(config: Config | None = None) -> None:
         "cookies forgeable and encrypted secrets readable. Generate one with "
         "`openssl rand -hex 32` and set SECRET_KEY."
     )
-    if cfg.secure_cookies:
+    if not cfg.dev_mode:
         raise ValueError(message)
-    log.warning("%s Allowed because SECURE_COOKIES is off (dev mode).", message)
+    log.warning("%s Allowed because DEV_MODE is set.", message)
