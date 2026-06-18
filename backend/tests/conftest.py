@@ -113,6 +113,7 @@ def tmp_config(tmp_path, monkeypatch):
         oidc_redirect_uri="",
         secure_cookies=False,
         dev_mode=True,
+        encryption_key_secret="",
         ingest_bm25_min_score=1.0,
         ingest_bm25_title_boost=2.0,
         ingest_bm25_limit=20,
