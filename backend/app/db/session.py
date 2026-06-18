@@ -23,7 +23,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Generator, cast
 
-from sqlalchemy import Engine, Executable, create_engine
+from sqlalchemy import Engine, Executable, create_engine, text
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -168,3 +168,14 @@ def init_db() -> None:
                 sa.text("SELECT pg_advisory_unlock(:lock_key)"),
                 {"lock_key": _MIGRATION_ADVISORY_LOCK},
             )
+
+
+def advisory_xact_lock(s: Session, key: int) -> None:
+    """Take a transaction-scoped Postgres advisory lock on ``s``'s transaction.
+
+    Serialises writers that would otherwise race; the lock releases
+    automatically when the transaction commits or rolls back. Keeps the raw
+    advisory-lock SQL in this DB seam rather than in caller code (see
+    ``rebuild_from_filesystem``).
+    """
+    s.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": key})

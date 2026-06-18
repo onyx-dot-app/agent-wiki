@@ -32,10 +32,10 @@ from typing import Any, cast
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from croniter import croniter
-from sqlalchemy import delete as sa_delete, or_, select, text
+from sqlalchemy import delete as sa_delete, or_, select
 
 from app.db.models import Event, Trigger
-from app.db.session import session
+from app.db.session import advisory_xact_lock, session
 from app.slack import webhooks as slack_webhooks
 from app.triggers import destinations as destinations_repo
 from app.triggers import storage
@@ -570,7 +570,7 @@ def rebuild_from_filesystem() -> int:
         # makes a second caller wait for this one to commit instead of racing
         # the delete-all + re-insert into a triggers_pkey UniqueViolation. It
         # releases automatically when this transaction ends (commit or rollback).
-        s.execute(text("SELECT pg_advisory_xact_lock(:k)"), {"k": _REBUILD_ADVISORY_LOCK})
+        advisory_xact_lock(s, _REBUILD_ADVISORY_LOCK)
 
         # schedule_last_fired_at is runtime cursor state, intentionally not
         # stored in the YAML — so carry it across the rebuild instead of

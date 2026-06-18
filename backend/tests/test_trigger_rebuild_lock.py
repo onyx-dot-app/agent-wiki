@@ -21,12 +21,6 @@ from app.triggers.repo import _REBUILD_ADVISORY_LOCK, rebuild_from_filesystem
 
 def test_rebuild_blocks_while_advisory_lock_is_held(tmp_repo: object) -> None:
     engine = get_engine()
-    # Hold the rebuild lock (session-scoped) on a dedicated connection. Session
-    # and xact advisory locks share one key space, so the rebuild's
-    # pg_advisory_xact_lock on the same key must wait for us to release it.
-    holder = engine.connect().execution_options(isolation_level="AUTOCOMMIT")
-    holder.execute(text("SELECT pg_advisory_lock(:k)"), {"k": _REBUILD_ADVISORY_LOCK})
-
     done = threading.Event()
     errors: list[BaseException] = []
 
@@ -38,16 +32,21 @@ def test_rebuild_blocks_while_advisory_lock_is_held(tmp_repo: object) -> None:
         finally:
             done.set()
 
-    worker = threading.Thread(target=run)
-    worker.start()
-    try:
-        # Blocked on the held lock — must not complete yet.
-        assert not done.wait(timeout=1.5), "rebuild did not wait on the advisory lock"
+    # Hold the rebuild lock (session-scoped) on a dedicated connection. Session
+    # and xact advisory locks share one key space, so the rebuild's
+    # pg_advisory_xact_lock on the same key must wait for us to release it. The
+    # `with` guarantees the connection (and thus the lock) is cleaned up.
+    with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as holder:
+        holder.execute(text("SELECT pg_advisory_lock(:k)"), {"k": _REBUILD_ADVISORY_LOCK})
+        worker = threading.Thread(target=run)
+        worker.start()
+        try:
+            # Blocked on the held lock — must not complete yet.
+            assert not done.wait(timeout=1.5), "rebuild did not wait on the advisory lock"
 
-        # Release the lock; the rebuild should now proceed and finish.
-        holder.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": _REBUILD_ADVISORY_LOCK})
-        assert done.wait(timeout=10.0), "rebuild did not complete after lock release"
-        assert not errors, f"rebuild raised: {errors}"
-    finally:
-        holder.close()
-        worker.join(timeout=5)
+            # Release the lock; the rebuild should now proceed and finish.
+            holder.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": _REBUILD_ADVISORY_LOCK})
+            assert done.wait(timeout=10.0), "rebuild did not complete after lock release"
+            assert not errors, f"rebuild raised: {errors}"
+        finally:
+            worker.join(timeout=5)
