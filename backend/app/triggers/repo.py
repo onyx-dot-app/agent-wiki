@@ -32,7 +32,7 @@ from typing import Any, cast
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from croniter import croniter
-from sqlalchemy import delete as sa_delete, or_, select
+from sqlalchemy import delete as sa_delete, or_, select, text
 
 from app.db.models import Event, Trigger
 from app.db.session import session
@@ -41,6 +41,14 @@ from app.triggers import destinations as destinations_repo
 from app.triggers import storage
 
 log = logging.getLogger(__name__)
+
+# Serialises concurrent rebuild_from_filesystem() callers. The rebuild clears
+# the triggers cache and re-inserts every row; two callers racing that (the boot
+# lifespan vs. an after_path_move, or overlapping backend processes) collide on
+# triggers_pkey with a UniqueViolation. A Postgres advisory lock makes the
+# second caller wait — same approach init_db() uses for concurrent migrations.
+# "trig" in ASCII; distinct from the migration lock key.
+_REBUILD_ADVISORY_LOCK = 0x74726967
 
 ALLOWED_KINDS = {"delta", "schedule"}
 
@@ -558,6 +566,12 @@ def rebuild_from_filesystem() -> int:
 
     fallback_now = _now_iso()
     with session() as s:
+        # Serialise concurrent rebuilds: a transaction-scoped advisory lock
+        # makes a second caller wait for this one to commit instead of racing
+        # the delete-all + re-insert into a triggers_pkey UniqueViolation. It
+        # releases automatically when this transaction ends (commit or rollback).
+        s.execute(text("SELECT pg_advisory_xact_lock(:k)"), {"k": _REBUILD_ADVISORY_LOCK})
+
         # schedule_last_fired_at is runtime cursor state, intentionally not
         # stored in the YAML — so carry it across the rebuild instead of
         # nulling it, or every rebuild (boot, and per-move via after_path_move)
