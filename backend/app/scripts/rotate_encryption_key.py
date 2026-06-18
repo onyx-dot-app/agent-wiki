@@ -1,21 +1,56 @@
 """Re-encrypt every ``EncryptedString`` column from an old key to the current one.
 
-Run during a maintenance window after pointing ``ENCRYPTION_KEY_SECRET`` at a new
-value (and before the app reads any of these columns under the new key)::
+WHAT IT DOES
+    For each secret column it reads the raw ``nonce || ciphertext`` bytes — via a
+    Core table typed as ``LargeBinary`` so the ``EncryptedString`` decorator's
+    auto-encrypt/decrypt is bypassed — decrypts with the OLD key, re-encrypts with
+    the NEW (currently-active) key, and writes the bytes back. NULLs are skipped.
+    The target columns are discovered from the ORM (every ``EncryptedString``
+    column), so a newly added secret column is rotated automatically.
 
-    OLD_ENCRYPTION_KEY_SECRET=<previous-secret> python -m app.scripts.rotate_encryption_key
+    - NEW key  = the active key in this process: ``ENCRYPTION_KEY_SECRET`` if set,
+      else ``SECRET_KEY``.
+    - OLD key  = ``OLD_ENCRYPTION_KEY_SECRET`` (required): whatever the data is
+      *currently* encrypted under — the previous ``ENCRYPTION_KEY_SECRET``, or
+      ``SECRET_KEY`` if you're introducing a dedicated encryption key for the
+      first time (the "split").
 
-For each secret column it reads the raw ``nonce || ciphertext`` bytes — via a
-Core table typed as ``LargeBinary`` so the ``EncryptedString`` decorator's
-auto-encrypt/decrypt is bypassed — decrypts with the old key, re-encrypts with
-the current key, and writes the bytes back. NULLs are skipped.
+WHY ORDER MATTERS — RUN IT IN A MAINTENANCE WINDOW
+    At any instant there is exactly ONE active key, and a process can only decrypt
+    data that is under *its* key. A rotation flips two things that cannot be made
+    atomic: the *data* (old -> new, done by this script) and the *running
+    processes* (old -> new, done by restarting them with the new key). Whenever
+    those two disagree, reads of the secret columns fail with ``InvalidTag`` and
+    LLM / Slack-webhook features break.
 
-``launcher_tokens`` are intentionally not rotated: they self-heal by re-minting
-when their ciphertext fails to decrypt (see ``app/db/launcher_tokens.py``).
+    In particular, do NOT just "set the new key and restart the app, then rotate":
+    the moment the app comes up on the new key it can't read the still-old data.
+    Instead, take a short window where no app process is reading these columns:
 
-The "old" secret is whatever the active key was before the change — i.e. the
-previous ``ENCRYPTION_KEY_SECRET``, or ``SECRET_KEY`` if a dedicated encryption
-key is being introduced for the first time.
+        1. Put the NEW value in the secret store, but do NOT restart the app yet
+           (running pods keep the OLD key in memory and keep working).
+        2. Stop / scale the backend + workers to zero (no live readers).
+        3. Run this script with OLD_ENCRYPTION_KEY_SECRET=<old> and the env's
+           ENCRYPTION_KEY_SECRET=<new>:
+
+               OLD_ENCRYPTION_KEY_SECRET=<old> ENCRYPTION_KEY_SECRET=<new> \\
+                   python -m app.scripts.rotate_encryption_key
+
+        4. Start the backend + workers back up on the NEW key.
+
+    The dataset is tiny (singleton settings tables + a handful of webhooks), so
+    the script is sub-second and the window is short — but it IS a brief outage of
+    LLM/Slack features, not a seamless rotation. (A seamless option would require
+    try-new-then-old "dual-key" decryption during a grace period; not implemented.)
+
+NOTES
+    - ``ENCRYPTION_KEY_SECRET``, when set, must be >= 32 chars (enforced by
+      ``app.config.verify_secret_key`` at startup).
+    - A wrong OLD key raises ``InvalidTag`` and that table's transaction rolls
+      back — a bad key fails loudly rather than corrupting data. Safe to re-run.
+    - ``launcher_tokens`` are intentionally NOT rotated: they self-heal by
+      re-minting when their ciphertext fails to decrypt (see
+      ``app/db/launcher_tokens.py``).
 """
 from __future__ import annotations
 
