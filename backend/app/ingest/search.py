@@ -19,7 +19,13 @@ from collections import Counter
 
 from app.config import CONFIG
 from app.db.fts import SearchHit, search as fts_search
-from app.metrics import ingest_bm25_hits, ingest_bm25_passed, ingest_bm25_score
+from app.metrics import (
+    ingest_bm25_hits,
+    ingest_bm25_passed,
+    ingest_bm25_score,
+    ingest_bm25_score_by_outcome,
+    ingest_outcomes_total,
+)
 
 log = logging.getLogger(__name__)
 
@@ -91,6 +97,18 @@ def candidates(content: str, title: str | None) -> list[SearchHit]:
         )
         if score >= CONFIG.ingest_bm25_min_score:
             boosted.append(hit.model_copy(update={"score": score}))
+        else:
+            # Candidate page surfaced by BM25 but below the score threshold —
+            # dropped here, before the selector/reconciler ever see it. Record
+            # it as a per-pair outcome so the Ingest Outcomes breakdown accounts
+            # for this earliest filter stage (and the score-by-outcome histogram
+            # covers the drops too).
+            ingest_outcomes_total.labels(
+                outcome="filtered_by_bm25_score", wiki_path=hit.path
+            ).inc()
+            ingest_bm25_score_by_outcome.labels(
+                outcome="filtered_by_bm25_score"
+            ).observe(score)
 
     ingest_bm25_hits.observe(len(hits))
     ingest_bm25_passed.observe(len(boosted))
