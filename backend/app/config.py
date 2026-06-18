@@ -15,6 +15,10 @@ log = logging.getLogger(__name__)
 # override it — see verify_secret_key().
 DEV_SECRET_KEY = "dev-secret"
 
+# Minimum length for an explicitly-set ENCRYPTION_KEY_SECRET (`openssl rand
+# -hex 32` yields 64). Below this it's too weak to derive an at-rest key from.
+_MIN_ENCRYPTION_KEY_LEN = 32
+
 # Load the repo-root .env so non-Docker launchers (python -m app.main, pytest,
 # task workers) get the same env as `flask run` and docker compose. Search
 # upward from this file rather than relying on CWD.
@@ -44,7 +48,8 @@ class Config(BaseModel):
 
     # Dedicated secret for at-rest column encryption (app/db/crypto.py). Empty =
     # fall back to ``secret_key`` (the historical behavior), so existing
-    # ciphertext keeps decrypting. Set it to rotate the encryption key
+    # ciphertext keeps decrypting. When set it must be a real key (>= 32 chars,
+    # enforced in verify_secret_key()). Set it to rotate the encryption key
     # independently of the cookie-signing key — see app/scripts/rotate_encryption_key.py.
     encryption_key_secret: str
 
@@ -179,27 +184,42 @@ CONFIG = load_config()
 
 
 def verify_secret_key(config: Config | None = None) -> None:
-    """Refuse to start a production deployment on the default/empty SECRET_KEY.
+    """Validate the secrets that protect cookies and at-rest encryption.
 
-    SECRET_KEY signs session cookies and derives the AES key that encrypts the
-    secret columns at rest (app/db/crypto.py). The built-in default is public,
-    so on a real deployment it makes cookies forgeable and the at-rest
-    encryption worthless. Production (``dev_mode`` off, the default) treats a
-    default/empty key as fatal; local dev / CI opt out with ``DEV_MODE=true``
-    so the dev loop keeps working.
+    SECRET_KEY signs session cookies and (by default) derives the AES key that
+    encrypts the secret columns at rest (app/db/crypto.py); the built-in default
+    is public, so it must not be used on a real deployment. ENCRYPTION_KEY_SECRET
+    is optional, but when set it derives the at-rest key, so a weak value
+    silently undermines encryption even when SECRET_KEY is fine — require it to
+    be long enough to be a real key.
 
-    Called at startup before init_db() so a misconfigured prod fails fast
-    rather than encrypting live data under the public default key.
+    Production (``dev_mode`` off, the default) treats a violation as fatal;
+    local dev / CI opt out with ``DEV_MODE=true``. Called at startup before
+    init_db() so a misconfigured prod fails fast rather than encrypting live
+    data under a weak/public key.
     """
     cfg = config or CONFIG
-    if cfg.secret_key and cfg.secret_key != DEV_SECRET_KEY:
-        return
-    message = (
+
+    def _enforce(ok: bool, message: str) -> None:
+        if ok:
+            return
+        if not cfg.dev_mode:
+            raise ValueError(message)
+        log.warning("%s Allowed because DEV_MODE is set.", message)
+
+    _enforce(
+        bool(cfg.secret_key) and cfg.secret_key != DEV_SECRET_KEY,
         "SECRET_KEY is unset or the built-in default. It signs session cookies "
         "and derives the at-rest encryption key, so the public default makes "
         "cookies forgeable and encrypted secrets readable. Generate one with "
-        "`openssl rand -hex 32` and set SECRET_KEY."
+        "`openssl rand -hex 32` and set SECRET_KEY.",
     )
-    if not cfg.dev_mode:
-        raise ValueError(message)
-    log.warning("%s Allowed because DEV_MODE is set.", message)
+    # Optional (falls back to SECRET_KEY), but if an operator sets it, a short
+    # value would silently weaken at-rest encryption — hold it to a real key.
+    _enforce(
+        not cfg.encryption_key_secret
+        or len(cfg.encryption_key_secret) >= _MIN_ENCRYPTION_KEY_LEN,
+        f"ENCRYPTION_KEY_SECRET is set but shorter than {_MIN_ENCRYPTION_KEY_LEN} "
+        "characters; it derives the at-rest encryption key. Generate one with "
+        "`openssl rand -hex 32`.",
+    )
