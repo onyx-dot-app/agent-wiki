@@ -100,13 +100,31 @@ def test_after_path_move_repoints_update_policy(tmp_repo):
     assert update_policy.get("b.md") is not None
 
 
-def test_after_path_move_reconverges_trigger_cache(tmp_repo, monkeypatch):
-    # Reconvergence lives in the hook (not the API route) so the agent-tool
-    # move path — which also calls after_path_move — picks it up too.
+def test_after_path_move_patches_cache_without_full_rebuild(tmp_repo, monkeypatch):
+    # The move hook re-points trigger cache rows in step (repoint_scopes_for_moves);
+    # a clean move must NOT fall back to the whole-table rebuild_from_filesystem.
+    # (Correct repointing of scope_path/file_path is asserted end-to-end in
+    # test_triggers_repo.py.)
     calls: list[int] = []
-    monkeypatch.setattr(
-        notify.triggers_repo, "rebuild_from_filesystem", lambda: calls.append(1)
-    )
+    monkeypatch.setattr(notify.triggers_repo, "rebuild_from_filesystem", lambda: calls.append(1))
+    sha = wiki_git.commit_file("a.md", "body\n", "seed", author=None)
+
+    notify.after_path_move([("a.md", "b.md")], sha, actor=None)
+
+    assert calls == []
+
+
+def test_after_path_move_falls_back_to_rebuild_when_repoint_raises(tmp_repo, monkeypatch):
+    # A partial repoint failure must not leave the cache stale — fall back to a
+    # full reconverge. Reconvergence lives in the hook (not the API route) so the
+    # agent-tool move path, which also calls after_path_move, gets it too.
+    calls: list[int] = []
+
+    def boom(*_a: object, **_k: object) -> None:
+        raise RuntimeError("repoint failed")
+
+    monkeypatch.setattr(notify.triggers_repo, "repoint_scopes_for_moves", boom)
+    monkeypatch.setattr(notify.triggers_repo, "rebuild_from_filesystem", lambda: calls.append(1))
     sha = wiki_git.commit_file("a.md", "body\n", "seed", author=None)
 
     notify.after_path_move([("a.md", "b.md")], sha, actor=None)

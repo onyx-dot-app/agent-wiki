@@ -32,9 +32,9 @@ from typing import Any, cast
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from croniter import croniter
-from sqlalchemy import delete as sa_delete, or_, select
+from sqlalchemy import delete as sa_delete, or_, select, update as sa_update
 
-from app.db.models import Event, Trigger
+from app.db.models import Event, Trigger, User
 from app.db.session import advisory_xact_lock, session
 from app.slack import webhooks as slack_webhooks
 from app.triggers import destinations as destinations_repo
@@ -466,6 +466,23 @@ def _is_trigger_file(path: str) -> bool:
     return name.startswith(".trigger_") and name.endswith(".yaml")
 
 
+def _recache_path(trigger_id: str, *, scope_path: str, file_path: str) -> None:
+    """Sync one trigger's cached ``scope_path``/``file_path`` after a move.
+
+    The YAML (source of truth) is already rewritten by the caller; this patches
+    just that cache row instead of reconverging the whole table. A no-op if the
+    id isn't cached (e.g. an orphaned-owner trigger the rebuild never loaded).
+    ``last_edited_at`` is left untouched — a relocation isn't a content edit,
+    matching what the full rebuild (which reads it from the YAML) preserves.
+    """
+    with session() as s:
+        s.execute(
+            sa_update(Trigger)
+            .where(Trigger.id == trigger_id)
+            .values(scope_path=scope_path, file_path=file_path)
+        )
+
+
 def repoint_scopes_for_moves(moves: list[tuple[str, str]], *, actor: str | None) -> None:
     """Rewrite trigger scopes after a path move so they don't dangle.
 
@@ -473,9 +490,10 @@ def repoint_scopes_for_moves(moves: list[tuple[str, str]], *, actor: str | None)
     YAML's filename/location is derived from that scope (``compute_path``). A
     plain ``git mv`` relocates files but never rewrites YAML content, so a
     rename leaves trigger scopes pointing at paths that no longer exist. Fix
-    the YAML files here; the caller (``after_path_move``) reconverges the
-    Postgres cache via ``rebuild_from_filesystem`` immediately after, so this
-    only touches the on-disk source of truth.
+    the YAML files here and patch the affected Postgres cache rows in step
+    (``scope_path``/``file_path`` are the only columns a move changes), so the
+    caller doesn't need a full ``rebuild_from_filesystem`` on the happy path —
+    the work is proportional to the triggers that actually moved.
 
     Two cases, read off the per-file ``(old, new)`` pairs:
       A. A trigger YAML rode along in a folder move (it's a tracked file under
@@ -505,10 +523,12 @@ def repoint_scopes_for_moves(moves: list[tuple[str, str]], *, actor: str | None)
         else:
             new_scope = new_dir
         handled_ids.add(data["id"])
-        if new_scope == old_scope:
-            continue
-        data["scope_path"] = new_scope
-        storage.write_trigger(data, file_path=new_p, actor=actor)
+        if new_scope != old_scope:
+            data["scope_path"] = new_scope
+            storage.write_trigger(data, file_path=new_p, actor=actor)
+        # The YAML physically moved to new_p, so the cached file_path is stale
+        # even when the scope string is unchanged — always re-point the row.
+        _recache_path(data["id"], scope_path=new_scope, file_path=new_p)
 
     # Case B — docs whose sibling doc-scoped trigger YAML stayed put.
     moved_yaml_olds = {old_p for old_p, _ in moves if _is_trigger_file(old_p)}
@@ -537,12 +557,11 @@ def repoint_scopes_for_moves(moves: list[tuple[str, str]], *, actor: str | None)
                 storage.move_trigger(
                     trig, old_file_path=old_file_path, new_file_path=new_file_path, actor=actor
                 )
+            _recache_path(trig["id"], scope_path=new_p, file_path=new_file_path)
 
 
 def rebuild_from_filesystem() -> int:
     """Repopulate the cache from on-disk trigger files. Returns count loaded."""
-    from app.db.models import User
-
     parsed: list[tuple[str, dict[str, Any]]] = []
     skipped = 0
     for file_path in storage.list_all_files():
