@@ -325,6 +325,11 @@ def _reconcile_pushed_document(push: dict[str, Any]) -> None:
             try:
                 body = wiki_git.read_file(hit.path)
             except Exception:
+                log.warning(
+                    "ingest_eval_sample: failed to read %s for filtered_by_bm25_score sample",
+                    hit.path,
+                    exc_info=True,
+                )
                 continue
             try:
                 ingest_eval_sample.log_sample(
@@ -345,9 +350,11 @@ def _reconcile_pushed_document(push: dict[str, Any]) -> None:
                 )
 
     t_start = time.monotonic()
+    used_fallback = False
     try:
         search_result = ingest_search.candidates(content, title)
     except ingest_search.IngestSearchError:
+        used_fallback = True
         # The candidate search failed — almost always because the full document
         # body exceeds OpenSearch's boolean-clause limit. Only large documents
         # reach here, so retry with a compact query (and pay the LLM cost only
@@ -377,7 +384,11 @@ def _reconcile_pushed_document(push: dict[str, Any]) -> None:
             )
             return
 
-    _record_bm25_drops(search_result.dropped)
+    # Only record BM25 drops from the primary, full-content search. The fallback
+    # scores against a lossy summary query, so its below-threshold pages aren't
+    # comparable to the document and would mislabel the eval rows.
+    if not used_fallback:
+        _record_bm25_drops(search_result.dropped)
     hits = search_result.passed
     if not hits:
         log.info("process_pushed_document: no BM25 candidates above threshold, doc_id=%s", doc_id)

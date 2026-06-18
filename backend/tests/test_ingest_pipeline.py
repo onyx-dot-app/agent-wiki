@@ -452,6 +452,26 @@ def test_selector_drop_eval_logged(
     assert rows[0]["wiki_path"] == "page.md"
 
 
+@patch("app.tasks.wiki_update.ingest_search.bounded_query", return_value="term")
+@patch("app.tasks.wiki_update.ingest_search.candidates")
+def test_fallback_bm25_drops_not_recorded(mock_search, mock_bounded, tmp_repo, monkeypatch):
+    # The oversized-query fallback scores against a lossy summary, so its drops
+    # must NOT be recorded — no filtered_by_bm25_score metric and no eval row.
+    wiki_git.commit_file("low.md", "# Low\nbody\n", "seed", author=None)
+    monkeypatch.setattr(
+        "app.tasks.wiki_update.CONFIG",
+        CONFIG.model_copy(update={"ingest_eval_logging": True}),
+    )
+    mock_search.side_effect = [
+        ingest_search.IngestSearchError("maxClauseCount is set to 1024"),
+        _cs([], [_hit("low.md", "Low", 2.0)]),
+    ]
+    before = _outcome_count("filtered_by_bm25_score", "low.md")
+    _run(_make_push(content="x " * 5000))
+    assert _outcome_count("filtered_by_bm25_score", "low.md") - before == 0.0
+    assert _eval_rows("filtered_by_bm25_score") == []
+
+
 # --------------------------------------------------------------------------- #
 # oversized-query handling (LLM intent + bounded fallback)                    #
 # --------------------------------------------------------------------------- #
