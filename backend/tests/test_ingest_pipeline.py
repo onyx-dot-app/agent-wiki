@@ -23,6 +23,7 @@ from app.ingest import search as ingest_search
 from app.ingest.source_tiers import is_filtered
 from app.llm.agents.common import IRRELEVANT_SENTINEL
 from app.llm.settings import _EMPTY as _EMPTY_LLM_SETTINGS, LLMSettings
+from app.wiki import git as wiki_git
 from app.wiki.utils import author_string
 
 
@@ -84,10 +85,17 @@ def _hit(path: str, title: str | None, score: float) -> SearchHit:
     return SearchHit(doc_id=path, path=path, title=title, snippet="", score=score)
 
 
+def _cs(
+    passed: list[SearchHit], dropped: list[SearchHit] | None = None
+) -> ingest_search.CandidateSearch:
+    """Build a CandidateSearch for mocking ingest_search.candidates()."""
+    return ingest_search.CandidateSearch(passed=passed, dropped=dropped or [])
+
+
 def test_candidates_empty_when_no_fts_results():
     with patch("app.ingest.search.fts_search", return_value=[]):
         result = ingest_search.candidates("some content", "Some Title")
-    assert result == []
+    assert result.passed == [] and result.dropped == []
 
 
 def _outcome_count(outcome: str, wiki_path: str) -> float:
@@ -97,17 +105,15 @@ def _outcome_count(outcome: str, wiki_path: str) -> float:
     ) or 0.0
 
 
-def test_candidates_drops_below_min_score(monkeypatch):
+def test_candidates_partitions_on_min_score(monkeypatch):
     monkeypatch.setattr(ingest_search, "CONFIG", CONFIG.model_copy(update={"ingest_bm25_min_score": 5.0}))
     hits = [_hit("a.md", "Alpha", 3.0), _hit("b.md", "Beta", 6.0)]
-    before = _outcome_count("filtered_by_bm25_score", "a.md")
     with patch("app.ingest.search.fts_search", return_value=hits):
         result = ingest_search.candidates("content", None)
-    assert len(result) == 1
-    assert result[0].path == "b.md"
-    # The below-threshold candidate is recorded as its own outcome so the
-    # Ingest Outcomes breakdown accounts for BM25-score drops.
-    assert _outcome_count("filtered_by_bm25_score", "a.md") - before == 1.0
+    # candidates() is pure: it partitions passed/dropped and emits no drop
+    # outcome metric — that's the caller's post-process.
+    assert [h.path for h in result.passed] == ["b.md"]
+    assert [h.path for h in result.dropped] == ["a.md"]
 
 
 def test_candidates_sorted_descending_by_score(monkeypatch):
@@ -115,7 +121,7 @@ def test_candidates_sorted_descending_by_score(monkeypatch):
     hits = [_hit("low.md", None, 1.0), _hit("high.md", None, 5.0), _hit("mid.md", None, 3.0)]
     with patch("app.ingest.search.fts_search", return_value=hits):
         result = ingest_search.candidates("content", None)
-    assert [h.path for h in result] == ["high.md", "mid.md", "low.md"]
+    assert [h.path for h in result.passed] == ["high.md", "mid.md", "low.md"]
 
 
 def test_title_boost_raises_score(monkeypatch):
@@ -124,8 +130,8 @@ def test_title_boost_raises_score(monkeypatch):
     hits = [_hit("deploy.md", "deploy guide", 2.0), _hit("other.md", "unrelated", 2.0)]
     with patch("app.ingest.search.fts_search", return_value=hits):
         result = ingest_search.candidates("content", "deploy guide")
-    assert result[0].path == "deploy.md"
-    assert result[0].score > result[1].score
+    assert result.passed[0].path == "deploy.md"
+    assert result.passed[0].score > result.passed[1].score
 
 
 def test_title_boost_zero_when_no_incoming_title(monkeypatch):
@@ -134,7 +140,7 @@ def test_title_boost_zero_when_no_incoming_title(monkeypatch):
     with patch("app.ingest.search.fts_search", return_value=hits):
         result = ingest_search.candidates("content", None)
     # no boost applied — sorted purely by BM25 score
-    assert result[0].path == "b.md"
+    assert result.passed[0].path == "b.md"
 
 
 def test_title_boost_threshold_interaction(monkeypatch):
@@ -143,7 +149,7 @@ def test_title_boost_threshold_interaction(monkeypatch):
     hits = [_hit("a.md", "deploy guide", 3.0)]
     with patch("app.ingest.search.fts_search", return_value=hits):
         result = ingest_search.candidates("content", "deploy guide")
-    assert len(result) == 1
+    assert len(result.passed) == 1
 
 
 # --------------------------------------------------------------------------- #
@@ -171,7 +177,7 @@ def _run(push: dict[str, Any]) -> None:
         process_pushed_document(push)
 
 
-@patch("app.tasks.wiki_update.ingest_search.candidates", return_value=[])
+@patch("app.tasks.wiki_update.ingest_search.candidates", return_value=_cs([]))
 def test_filtered_source_drops_silently(mock_search, monkeypatch):
     monkeypatch.setattr("app.ingest.source_tiers.FILTERED_SOURCES", frozenset({"git_commit"}))
     _run(_make_push(source="git_commit"))
@@ -185,7 +191,7 @@ def _doc_result_count(result: str) -> float:
     ) or 0.0
 
 
-@patch("app.tasks.wiki_update.ingest_search.candidates", return_value=[])
+@patch("app.tasks.wiki_update.ingest_search.candidates", return_value=_cs([]))
 def test_no_candidates_returns_early(mock_search):
     # No BM25 hit -> the doc still gets a per-document terminal result so the
     # "search filtered out" tile accounts for it (panel reconciles to ingested).
@@ -199,7 +205,7 @@ def test_no_candidates_returns_early(mock_search):
 @patch("app.tasks.wiki_update.ingest_search.candidates")
 def test_no_readable_candidates_records_search_filtered_out(mock_search, mock_read):
     # Hits exist but none are readable -> also recorded as no_candidates.
-    mock_search.return_value = [_hit("page.md", "Page", 5.0)]
+    mock_search.return_value = _cs([_hit("page.md", "Page", 5.0)])
     before = _doc_result_count("no_candidates")
     _run(_make_push())
     assert _doc_result_count("no_candidates") - before == 1.0
@@ -232,7 +238,7 @@ def test_search_error_is_caught_and_does_not_commit(mock_search, mock_commit):
 @patch("app.tasks.wiki_update.ingest_search.candidates")
 def test_new_body_commits(mock_search, mock_reconcile, mock_read, mock_commit, mock_notify, mock_head, monkeypatch):
     monkeypatch.setattr("app.tasks.wiki_update.get_llm_settings", lambda: _settings_with_model())
-    mock_search.return_value = [_hit("page.md", "Page", 5.0)]
+    mock_search.return_value = _cs([_hit("page.md", "Page", 5.0)])
     mock_reconcile.return_value = (["new body"], 1)
     _run(_make_push())
     mock_commit.assert_called_once()
@@ -252,7 +258,7 @@ def test_commit_attributed_to_onyx_ingest(
     # otherwise fall back to "AI Wiki Helper". process_pushed_document binds the
     # Onyx Ingest identity for the run instead.
     monkeypatch.setattr("app.tasks.wiki_update.get_llm_settings", lambda: _settings_with_model())
-    mock_search.return_value = [_hit("page.md", "Page", 5.0)]
+    mock_search.return_value = _cs([_hit("page.md", "Page", 5.0)])
     mock_reconcile.return_value = (["new body"], 1)
     _run(_make_push())
     assert mock_commit.call_args.kwargs["author"] == "Onyx Ingest <onyx-ingest@local>"
@@ -266,7 +272,7 @@ def test_commit_attributed_to_onyx_ingest(
 @patch("app.tasks.wiki_update.ingest_search.candidates")
 def test_no_change_does_not_commit(mock_search, mock_reconcile, mock_read, mock_commit, monkeypatch):
     monkeypatch.setattr("app.tasks.wiki_update.get_llm_settings", lambda: _settings_with_model())
-    mock_search.return_value = [_hit("page.md", "Page", 5.0)]
+    mock_search.return_value = _cs([_hit("page.md", "Page", 5.0)])
     mock_reconcile.return_value = ([None], 1)
     _run(_make_push())
     mock_commit.assert_not_called()
@@ -278,7 +284,7 @@ def test_no_change_does_not_commit(mock_search, mock_reconcile, mock_read, mock_
 @patch("app.tasks.wiki_update.ingest_search.candidates")
 def test_irrelevant_does_not_commit(mock_search, mock_reconcile, mock_read, mock_commit, monkeypatch):
     monkeypatch.setattr("app.tasks.wiki_update.get_llm_settings", lambda: _settings_with_model())
-    mock_search.return_value = [_hit("page.md", "Page", 5.0)]
+    mock_search.return_value = _cs([_hit("page.md", "Page", 5.0)])
     mock_reconcile.return_value = ([IRRELEVANT_SENTINEL], 1)
     _run(_make_push())
     mock_commit.assert_not_called()
@@ -299,7 +305,7 @@ def test_ingestion_disabled_skips_candidate_before_llm(
         "app.tasks.wiki_update.update_policy.resolve_for_paths",
         lambda paths: {"page.md": ResolvedPolicy(ingestion_auto_update_disabled=True)},
     )
-    mock_search.return_value = [_hit("page.md", "Page", 5.0)]
+    mock_search.return_value = _cs([_hit("page.md", "Page", 5.0)])
     _run(_make_push())
     mock_reconcile.assert_not_called()
     mock_commit.assert_not_called()
@@ -322,7 +328,7 @@ def test_update_instruction_passed_to_reconciler(
         "app.tasks.wiki_update.update_policy.resolve_for_paths",
         lambda paths: {"page.md": ResolvedPolicy(update_instruction="Keep it terse.")},
     )
-    mock_search.return_value = [_hit("page.md", "Page", 5.0)]
+    mock_search.return_value = _cs([_hit("page.md", "Page", 5.0)])
     mock_reconcile.return_value = (["new body"], 1)
     _run(_make_push())
     candidates = mock_reconcile.call_args.kwargs["candidates"]
@@ -338,7 +344,7 @@ def test_n_consecutive_irrelevant_stops_loop(mock_search, mock_reconcile, mock_r
     monkeypatch.setattr("app.tasks.wiki_update.CONFIG", CONFIG.model_copy(update={"ingest_irrelevant_stop_n": 2}))
     monkeypatch.setattr("app.tasks.wiki_update.get_llm_settings", lambda: _settings_with_model())
     # 5 candidates — first two are IRRELEVANT, rest would commit but never reached
-    mock_search.return_value = [_hit(f"p{i}.md", f"P{i}", float(5 - i)) for i in range(5)]
+    mock_search.return_value = _cs([_hit(f"p{i}.md", f"P{i}", float(5 - i)) for i in range(5)])
     mock_reconcile.return_value = ([IRRELEVANT_SENTINEL, IRRELEVANT_SENTINEL, "new", "new", "new"], 1)
     _run(_make_push())
     mock_commit.assert_not_called()
@@ -353,7 +359,7 @@ def test_no_change_resets_irrelevant_counter(mock_search, mock_reconcile, mock_r
     monkeypatch.setattr("app.tasks.wiki_update.CONFIG", CONFIG.model_copy(update={"ingest_irrelevant_stop_n": 2}))
     monkeypatch.setattr("app.tasks.wiki_update.get_llm_settings", lambda: _settings_with_model())
     # IRRELEVANT, NO_CHANGE (resets counter), IRRELEVANT — should NOT stop early
-    mock_search.return_value = [_hit(f"p{i}.md", None, float(5 - i)) for i in range(3)]
+    mock_search.return_value = _cs([_hit(f"p{i}.md", None, float(5 - i)) for i in range(3)])
     mock_reconcile.return_value = ([IRRELEVANT_SENTINEL, None, IRRELEVANT_SENTINEL], 1)
     _run(_make_push())
     mock_commit.assert_not_called()
@@ -369,7 +375,7 @@ def test_commit_resets_irrelevant_counter(mock_search, mock_reconcile, mock_read
     monkeypatch.setattr("app.tasks.wiki_update.CONFIG", CONFIG.model_copy(update={"ingest_irrelevant_stop_n": 2}))
     monkeypatch.setattr("app.tasks.wiki_update.get_llm_settings", lambda: _settings_with_model())
     # IRRELEVANT, new body (resets counter), IRRELEVANT — should NOT stop early
-    mock_search.return_value = [_hit(f"p{i}.md", None, float(5 - i)) for i in range(3)]
+    mock_search.return_value = _cs([_hit(f"p{i}.md", None, float(5 - i)) for i in range(3)])
     mock_reconcile.return_value = ([IRRELEVANT_SENTINEL, "new body", IRRELEVANT_SENTINEL], 1)
     _run(_make_push())
     mock_commit.assert_called_once()
@@ -381,10 +387,69 @@ def test_commit_resets_irrelevant_counter(mock_search, mock_reconcile, mock_read
 @patch("app.tasks.wiki_update.ingest_search.candidates")
 def test_missing_file_skipped(mock_search, mock_reconcile, mock_read, mock_commit, monkeypatch):
     monkeypatch.setattr("app.tasks.wiki_update.get_llm_settings", lambda: _settings_with_model())
-    mock_search.return_value = [_hit("missing.md", None, 5.0)]
+    mock_search.return_value = _cs([_hit("missing.md", None, 5.0)])
     _run(_make_push())
     mock_reconcile.assert_not_called()
     mock_commit.assert_not_called()
+
+
+def _eval_rows(outcome: str) -> list[dict[str, Any]]:
+    from sqlalchemy import select as sa_select
+
+    from app.db.models import IngestEvalSample
+    from app.db.session import session
+
+    with session() as s:
+        return [
+            {"wiki_path": r.wiki_path, "source_document_id": r.source_document_id}
+            for r in s.execute(
+                sa_select(IngestEvalSample).where(IngestEvalSample.outcome == outcome)
+            ).scalars().all()
+        ]
+
+
+@patch("app.tasks.wiki_update.ingest_search.candidates")
+def test_bm25_drop_recorded_and_eval_logged(mock_search, tmp_repo, monkeypatch):
+    # The post-process records a below-threshold candidate: the
+    # filtered_by_bm25_score outcome metric + an eval row (body read here).
+    wiki_git.commit_file("low.md", "# Low\nbody\n", "seed", author=None)
+    monkeypatch.setattr(
+        "app.tasks.wiki_update.CONFIG",
+        CONFIG.model_copy(update={"ingest_eval_logging": True}),
+    )
+    mock_search.return_value = _cs([], [_hit("low.md", "Low", 2.0)])
+    before = _outcome_count("filtered_by_bm25_score", "low.md")
+    _run(_make_push())
+    assert _outcome_count("filtered_by_bm25_score", "low.md") - before == 1.0
+    rows = _eval_rows("filtered_by_bm25_score")
+    assert len(rows) == 1
+    assert rows[0]["wiki_path"] == "low.md"
+    assert rows[0]["source_document_id"] == "doc-abc"
+
+
+@patch("app.tasks.wiki_update.ingest_batch_reconciler.batch_reconcile", return_value=([], 0))
+@patch("app.tasks.wiki_update.ingest_selector.select_candidates", return_value=[])
+@patch("app.tasks.wiki_update.ingest_search.candidates")
+def test_selector_drop_eval_logged(
+    mock_search, mock_select, mock_reconcile, tmp_repo, monkeypatch
+):
+    # The selector drops the only candidate; that (doc, page) pair is eval-logged.
+    wiki_git.commit_file("page.md", "# Page\nbody\n", "seed", author=None)
+    monkeypatch.setattr(
+        "app.tasks.wiki_update.get_llm_settings",
+        lambda: _EMPTY_LLM_SETTINGS.model_copy(
+            update={"model": "main", "ingest_selector_model": "sel"}
+        ),
+    )
+    monkeypatch.setattr(
+        "app.tasks.wiki_update.CONFIG",
+        CONFIG.model_copy(update={"ingest_eval_logging": True}),
+    )
+    mock_search.return_value = _cs([_hit("page.md", "Page", 6.0)])
+    _run(_make_push())
+    rows = _eval_rows("filtered_by_selector")
+    assert len(rows) == 1
+    assert rows[0]["wiki_path"] == "page.md"
 
 
 # --------------------------------------------------------------------------- #
@@ -459,7 +524,7 @@ def test_oversized_query_retries_with_llm_intent(
     monkeypatch.setattr("app.tasks.wiki_update.get_llm_settings", lambda: _settings_with_selector())
     # First candidate search blows the clause limit; retry with the distilled
     # query succeeds and the doc commits.
-    mock_search.side_effect = [ingest_search.IngestSearchError("maxClauseCount is set to 1024"), [_hit("page.md", "Page", 5.0)]]
+    mock_search.side_effect = [ingest_search.IngestSearchError("maxClauseCount is set to 1024"), _cs([_hit("page.md", "Page", 5.0)])]
     mock_reconcile.return_value = (["new body"], 1)
     _run(_make_push(content="x " * 5000))
     mock_intent.assert_called_once()
@@ -472,7 +537,7 @@ def test_oversized_query_retries_with_llm_intent(
 def test_oversized_query_falls_back_to_bounded_terms_when_no_model(mock_search, mock_bounded):
     # No selector model configured (autouse _EMPTY settings) → no LLM call,
     # fall back to bounded-terms query and retry.
-    mock_search.side_effect = [ingest_search.IngestSearchError("maxClauseCount is set to 1024"), []]
+    mock_search.side_effect = [ingest_search.IngestSearchError("maxClauseCount is set to 1024"), _cs([])]
     _run(_make_push(content="x " * 5000))
     mock_bounded.assert_called_once()
     assert mock_search.call_count == 2

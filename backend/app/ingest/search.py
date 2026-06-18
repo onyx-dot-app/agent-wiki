@@ -17,15 +17,11 @@ import re
 import logging
 from collections import Counter
 
+from pydantic import BaseModel
+
 from app.config import CONFIG
 from app.db.fts import SearchHit, search as fts_search
-from app.metrics import (
-    ingest_bm25_hits,
-    ingest_bm25_passed,
-    ingest_bm25_score,
-    ingest_bm25_score_by_outcome,
-    ingest_outcomes_total,
-)
+from app.metrics import ingest_bm25_hits, ingest_bm25_passed, ingest_bm25_score
 
 log = logging.getLogger(__name__)
 
@@ -59,11 +55,25 @@ def _jaccard(a: set[str], b: set[str]) -> float:
     return len(a & b) / len(a | b)
 
 
-def candidates(content: str, title: str | None) -> list[SearchHit]:
-    """Return BM25 candidates above the score threshold, most relevant first.
+class CandidateSearch(BaseModel):
+    """Result of a BM25 candidate search: pages above the score threshold
+    (`passed`, most relevant first) and those below it (`dropped`), both with
+    title-boosted scores. Pure data — the caller decides what to do with the
+    drops (outcome metric, eval logging) via a post-process step, so this
+    module stays free of git/DB/metadata concerns."""
 
-    Title similarity boosts the raw BM25 score before thresholding so
-    pages whose titles closely match the incoming document rank higher.
+    passed: list[SearchHit]
+    dropped: list[SearchHit]
+
+
+def candidates(content: str, title: str | None) -> CandidateSearch:
+    """Return the BM25 candidates split into `passed`/`dropped` by the score
+    threshold, most relevant first.
+
+    Title similarity boosts the raw BM25 score before thresholding so pages
+    whose titles closely match the incoming document rank higher. Emits only
+    search telemetry (hits/passed/raw-score); per-drop outcome accounting is the
+    caller's post-process (see ``wiki_update``).
     """
     try:
         hits = fts_search(
@@ -79,11 +89,12 @@ def candidates(content: str, title: str | None) -> list[SearchHit]:
         raise IngestSearchError(str(exc)) from exc
     if not hits:
         log.debug("ingest candidates: no BM25 hits for title=%r", title)
-        return []
+        return CandidateSearch(passed=[], dropped=[])
 
     query_title_tokens: set[str] = _tokens(title) if title else set()
 
     boosted: list[SearchHit] = []
+    dropped: list[SearchHit] = []
     for hit in hits:
         raw_score = hit.score
         score = raw_score
@@ -95,20 +106,11 @@ def candidates(content: str, title: str | None) -> list[SearchHit]:
             "ingest candidate: path=%r raw_bm25=%.3f boosted=%.3f threshold=%.3f pass=%s",
             hit.path, raw_score, score, CONFIG.ingest_bm25_min_score, score >= CONFIG.ingest_bm25_min_score,
         )
+        scored = hit.model_copy(update={"score": score})
         if score >= CONFIG.ingest_bm25_min_score:
-            boosted.append(hit.model_copy(update={"score": score}))
+            boosted.append(scored)
         else:
-            # Candidate page surfaced by BM25 but below the score threshold —
-            # dropped here, before the selector/reconciler ever see it. Record
-            # it as a per-pair outcome so the Ingest Outcomes breakdown accounts
-            # for this earliest filter stage (and the score-by-outcome histogram
-            # covers the drops too).
-            ingest_outcomes_total.labels(
-                outcome="filtered_by_bm25_score", wiki_path=hit.path
-            ).inc()
-            ingest_bm25_score_by_outcome.labels(
-                outcome="filtered_by_bm25_score"
-            ).observe(score)
+            dropped.append(scored)
 
     ingest_bm25_hits.observe(len(hits))
     ingest_bm25_passed.observe(len(boosted))
@@ -117,4 +119,4 @@ def candidates(content: str, title: str | None) -> list[SearchHit]:
         title, len(hits), len(boosted), CONFIG.ingest_bm25_min_score,
     )
     boosted.sort(key=lambda h: h.score, reverse=True)
-    return boosted
+    return CandidateSearch(passed=boosted, dropped=dropped)
