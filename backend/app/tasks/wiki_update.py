@@ -306,10 +306,55 @@ def _reconcile_pushed_document(push: dict[str, Any]) -> None:
         ingest_outcomes_total.labels(outcome="filtered", wiki_path="").inc()
         return
 
+    _meta: dict[str, Any] = push.get("metadata") or {}
+    url: str = str(push.get("url") or _meta.get("url") or "")
+
+    def _record_bm25_drops(dropped: list[ingest_search.SearchHit]) -> None:
+        # Post-process the candidates the BM25 score threshold dropped: the
+        # per-pair outcome metric, and (when eval logging is on) an eval row —
+        # reading the page body here since this path never reads it otherwise.
+        for hit in dropped:
+            ingest_outcomes_total.labels(
+                outcome="filtered_by_bm25_score", wiki_path=hit.path
+            ).inc()
+            ingest_bm25_score_by_outcome.labels(
+                outcome="filtered_by_bm25_score"
+            ).observe(hit.score)
+            if not CONFIG.ingest_eval_logging:
+                continue
+            try:
+                body = wiki_git.read_file(hit.path)
+            except Exception:
+                log.warning(
+                    "ingest_eval_sample: failed to read %s for filtered_by_bm25_score sample",
+                    hit.path,
+                    exc_info=True,
+                )
+                continue
+            try:
+                ingest_eval_sample.log_sample(
+                    source_document_id=push.get("source_document_id"),
+                    source_type=source_type,
+                    source_title=title,
+                    source_url=url if url else None,
+                    source_content=content,
+                    wiki_path=hit.path,
+                    wiki_body_before=body,
+                    outcome="filtered_by_bm25_score",
+                    commit_sha=None,
+                )
+            except Exception:
+                log.warning(
+                    "ingest_eval_sample: failed to log filtered_by_bm25_score sample",
+                    exc_info=True,
+                )
+
     t_start = time.monotonic()
+    used_fallback = False
     try:
-        hits = ingest_search.candidates(content, title)
+        search_result = ingest_search.candidates(content, title)
     except ingest_search.IngestSearchError:
+        used_fallback = True
         # The candidate search failed — almost always because the full document
         # body exceeds OpenSearch's boolean-clause limit. Only large documents
         # reach here, so retry with a compact query (and pay the LLM cost only
@@ -330,7 +375,7 @@ def _reconcile_pushed_document(push: dict[str, Any]) -> None:
             strategy, doc_id,
         )
         try:
-            hits = ingest_search.candidates(query, title)
+            search_result = ingest_search.candidates(query, title)
         except ingest_search.IngestSearchError:
             log.warning(
                 "process_pushed_document: candidate search FAILED after %s fallback "
@@ -338,6 +383,13 @@ def _reconcile_pushed_document(push: dict[str, Any]) -> None:
                 strategy, doc_id, exc_info=True,
             )
             return
+
+    # Only record BM25 drops from the primary, full-content search. The fallback
+    # scores against a lossy summary query, so its below-threshold pages aren't
+    # comparable to the document and would mislabel the eval rows.
+    if not used_fallback:
+        _record_bm25_drops(search_result.dropped)
+    hits = search_result.passed
     if not hits:
         log.info("process_pushed_document: no BM25 candidates above threshold, doc_id=%s", doc_id)
         ingest_outcomes_total.labels(outcome="no_candidates", wiki_path="").inc()
@@ -345,8 +397,6 @@ def _reconcile_pushed_document(push: dict[str, Any]) -> None:
         return
 
     source_label = source_type or "external"
-    _meta: dict[str, Any] = push.get("metadata") or {}
-    url: str = str(push.get("url") or _meta.get("url") or "")
 
     # Read all candidate bodies upfront — needed by both the selector and the
     # main reconciler loop. Skip unreadable files early so the selector sees the
@@ -409,6 +459,24 @@ def _reconcile_pushed_document(push: dict[str, Any]) -> None:
                 ).inc()
                 ingest_bm25_score_by_outcome.labels(outcome="filtered_by_selector").observe(c.hit.score)
                 log.debug("process_pushed_document: filtered_by_selector path=%s", c.hit.path)
+                if CONFIG.ingest_eval_logging:
+                    try:
+                        ingest_eval_sample.log_sample(
+                            source_document_id=push.get("source_document_id"),
+                            source_type=source_type,
+                            source_title=title,
+                            source_url=url if url else None,
+                            source_content=content,
+                            wiki_path=c.hit.path,
+                            wiki_body_before=c.body,
+                            outcome="filtered_by_selector",
+                            commit_sha=None,
+                        )
+                    except Exception:
+                        log.warning(
+                            "ingest_eval_sample: failed to log filtered_by_selector sample",
+                            exc_info=True,
+                        )
 
     # Stage 4: batch reconcile with the main model — one call decides and
     # produces new bodies for all candidates. Skipped when model is unset.
