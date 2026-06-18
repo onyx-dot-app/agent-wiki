@@ -63,7 +63,10 @@ ingest_outcomes_total = Counter(
     # wiki_path cardinality is bounded by the number of pages in the wiki git repo
     # (a finite set). Stale series from renamed/deleted pages expire with TSDB retention.
     # Add a recording rule to cap top-N if the wiki grows beyond ~500 pages.
-    ["outcome", "wiki_path"],  # committed, no_change, irrelevant, filtered, no_candidates
+    # committed, no_change, irrelevant, no_candidates, filtered (source type),
+    # filtered_by_bm25_score (below BM25 threshold), filtered_by_selector,
+    # ingestion_auto_update_disabled
+    ["outcome", "wiki_path"],
 )
 
 ingest_document_results_total = Counter(

@@ -90,13 +90,24 @@ def test_candidates_empty_when_no_fts_results():
     assert result == []
 
 
+def _outcome_count(outcome: str, wiki_path: str) -> float:
+    from prometheus_client import REGISTRY
+    return REGISTRY.get_sample_value(
+        "ingest_outcomes_total", {"outcome": outcome, "wiki_path": wiki_path}
+    ) or 0.0
+
+
 def test_candidates_drops_below_min_score(monkeypatch):
     monkeypatch.setattr(ingest_search, "CONFIG", CONFIG.model_copy(update={"ingest_bm25_min_score": 5.0}))
     hits = [_hit("a.md", "Alpha", 3.0), _hit("b.md", "Beta", 6.0)]
+    before = _outcome_count("filtered_by_bm25_score", "a.md")
     with patch("app.ingest.search.fts_search", return_value=hits):
         result = ingest_search.candidates("content", None)
     assert len(result) == 1
     assert result[0].path == "b.md"
+    # The below-threshold candidate is recorded as its own outcome so the
+    # Ingest Outcomes breakdown accounts for BM25-score drops.
+    assert _outcome_count("filtered_by_bm25_score", "a.md") - before == 1.0
 
 
 def test_candidates_sorted_descending_by_score(monkeypatch):
