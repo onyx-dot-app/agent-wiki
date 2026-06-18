@@ -42,6 +42,12 @@ class Config(BaseModel):
     # `True` when the app is served over HTTPS — toggles SESSION_COOKIE_SECURE.
     secure_cookies: bool
 
+    # Dedicated secret for at-rest column encryption (app/db/crypto.py). Empty =
+    # fall back to ``secret_key`` (the historical behavior), so existing
+    # ciphertext keeps decrypting. Set it to rotate the encryption key
+    # independently of the cookie-signing key — see app/db/rotate_encryption_key.py.
+    encryption_key_secret: str
+
     # `True` only in local dev / CI. Production must leave it false (the
     # default) — it's the opt-in that downgrades verify_secret_key() from
     # fatal to a warning.
@@ -152,6 +158,7 @@ def load_config() -> Config:
         in {"1", "true", "yes"},
         secure_cookies=os.environ.get("SECURE_COOKIES", "false").lower() in {"1", "true", "yes"},
         dev_mode=os.environ.get("DEV_MODE", "false").lower() in {"1", "true", "yes"},
+        encryption_key_secret=os.environ.get("ENCRYPTION_KEY_SECRET", ""),
         launchers_enabled=os.environ.get("LAUNCHERS_ENABLED", "false").lower()
         in {"1", "true", "yes"},
         launch_code_ttl_seconds=_positive_int("LAUNCH_CODE_TTL_SECONDS", 60),
