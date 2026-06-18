@@ -22,6 +22,7 @@ import time
 from prometheus_client import start_http_server
 from sqlalchemy import text
 
+from app.config import verify_secret_key
 from app.tasks.queues import QUEUES
 from app.tasks.queue import run_consumer
 from app.utils.logging import setup_logging
@@ -97,6 +98,7 @@ def main() -> None:
     args = parser.parse_args()
 
     setup_logging()
+    verify_secret_key()
     start_http_server(_METRICS_PORT[args.queue])
     _wait_for_db()
     queue = QUEUES[args.queue]

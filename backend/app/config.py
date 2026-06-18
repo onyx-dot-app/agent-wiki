@@ -2,11 +2,18 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 
 from dotenv import load_dotenv
 from pydantic import BaseModel, ConfigDict, field_validator
+
+log = logging.getLogger(__name__)
+
+# Built-in fallback used only for local dev. A production deployment must
+# override it — see verify_secret_key().
+DEV_SECRET_KEY = "dev-secret"
 
 # Load the repo-root .env so non-Docker launchers (python -m app.main, pytest,
 # task workers) get the same env as `flask run` and docker compose. Search
@@ -34,6 +41,11 @@ class Config(BaseModel):
 
     # `True` when the app is served over HTTPS — toggles SESSION_COOKIE_SECURE.
     secure_cookies: bool
+
+    # `True` only in local dev / CI. Production must leave it false (the
+    # default) — it's the opt-in that downgrades verify_secret_key() from
+    # fatal to a warning.
+    dev_mode: bool
 
     # Ingest pipeline tuning
     ingest_bm25_min_score: float
@@ -117,7 +129,7 @@ def _resolve_wiki_dir() -> str:
 
 def load_config() -> Config:
     return Config(
-        secret_key=os.environ.get("SECRET_KEY", "dev-secret"),
+        secret_key=os.environ.get("SECRET_KEY", DEV_SECRET_KEY),
         wiki_dir=_resolve_wiki_dir(),
         database_url=os.environ.get(
             "DATABASE_URL",
@@ -139,6 +151,7 @@ def load_config() -> Config:
         ingest_eval_logging=os.environ.get("INGEST_EVAL_LOGGING", "false").lower()
         in {"1", "true", "yes"},
         secure_cookies=os.environ.get("SECURE_COOKIES", "false").lower() in {"1", "true", "yes"},
+        dev_mode=os.environ.get("DEV_MODE", "false").lower() in {"1", "true", "yes"},
         launchers_enabled=os.environ.get("LAUNCHERS_ENABLED", "false").lower()
         in {"1", "true", "yes"},
         launch_code_ttl_seconds=_positive_int("LAUNCH_CODE_TTL_SECONDS", 60),
@@ -156,3 +169,30 @@ def load_config() -> Config:
 
 
 CONFIG = load_config()
+
+
+def verify_secret_key(config: Config | None = None) -> None:
+    """Refuse to start a production deployment on the default/empty SECRET_KEY.
+
+    SECRET_KEY signs session cookies and derives the AES key that encrypts the
+    secret columns at rest (app/db/crypto.py). The built-in default is public,
+    so on a real deployment it makes cookies forgeable and the at-rest
+    encryption worthless. Production (``dev_mode`` off, the default) treats a
+    default/empty key as fatal; local dev / CI opt out with ``DEV_MODE=true``
+    so the dev loop keeps working.
+
+    Called at startup before init_db() so a misconfigured prod fails fast
+    rather than encrypting live data under the public default key.
+    """
+    cfg = config or CONFIG
+    if cfg.secret_key and cfg.secret_key != DEV_SECRET_KEY:
+        return
+    message = (
+        "SECRET_KEY is unset or the built-in default. It signs session cookies "
+        "and derives the at-rest encryption key, so the public default makes "
+        "cookies forgeable and encrypted secrets readable. Generate one with "
+        "`openssl rand -hex 32` and set SECRET_KEY."
+    )
+    if not cfg.dev_mode:
+        raise ValueError(message)
+    log.warning("%s Allowed because DEV_MODE is set.", message)
