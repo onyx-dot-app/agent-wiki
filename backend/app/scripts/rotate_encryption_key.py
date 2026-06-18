@@ -3,7 +3,7 @@
 Run during a maintenance window after pointing ``ENCRYPTION_KEY_SECRET`` at a new
 value (and before the app reads any of these columns under the new key)::
 
-    OLD_ENCRYPTION_KEY_SECRET=<previous-secret> python -m app.db.rotate_encryption_key
+    OLD_ENCRYPTION_KEY_SECRET=<previous-secret> python -m app.scripts.rotate_encryption_key
 
 For each secret column it reads the raw ``nonce || ciphertext`` bytes — via a
 Core table typed as ``LargeBinary`` so the ``EncryptedString`` decorator's

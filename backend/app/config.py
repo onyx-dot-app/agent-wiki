@@ -45,7 +45,7 @@ class Config(BaseModel):
     # Dedicated secret for at-rest column encryption (app/db/crypto.py). Empty =
     # fall back to ``secret_key`` (the historical behavior), so existing
     # ciphertext keeps decrypting. Set it to rotate the encryption key
-    # independently of the cookie-signing key — see app/db/rotate_encryption_key.py.
+    # independently of the cookie-signing key — see app/scripts/rotate_encryption_key.py.
     encryption_key_secret: str
 
     # `True` only in local dev / CI. Production must leave it false (the

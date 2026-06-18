@@ -14,8 +14,8 @@ historical default). Splitting the encryption secret from the cookie-signing
 key lets it rotate independently. Changing the active key makes existing
 ciphertext undecryptable (a read raises ``cryptography``'s ``InvalidTag``
 rather than returning garbage), so rotate it with
-``app/db/rotate_encryption_key.py``, which re-encrypts every column from the
-old key to the new one. ``launcher_tokens`` instead re-mints on a key change;
+``app/scripts/rotate_encryption_key.py``, which re-encrypts every column from
+the old key to the new one. ``launcher_tokens`` instead re-mints on a key change;
 it can, a webhook can't.
 """
 from __future__ import annotations

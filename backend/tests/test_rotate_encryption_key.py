@@ -6,7 +6,7 @@ from cryptography.exceptions import InvalidTag
 from sqlalchemy import Column, Integer, LargeBinary, MetaData, Table, select
 
 from app.db import crypto
-from app.db.rotate_encryption_key import rotate
+from app.scripts.rotate_encryption_key import rotate
 from app.db.session import session
 from app.llm import settings as llm_settings
 
