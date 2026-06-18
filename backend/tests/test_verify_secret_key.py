@@ -10,10 +10,10 @@ import logging
 
 import pytest
 
-from app.config import CONFIG, DEV_SECRET_KEY, verify_secret_key
+from app.config import CONFIG, DEV_SECRET_KEY, Config, verify_secret_key
 
 
-def _cfg(*, secret_key: str, secure_cookies: bool):
+def _cfg(*, secret_key: str, secure_cookies: bool) -> Config:
     return CONFIG.model_copy(update={"secret_key": secret_key, "secure_cookies": secure_cookies})
 
 
@@ -30,6 +30,12 @@ def test_rejects_empty_key_in_production() -> None:
 def test_warns_but_allows_default_key_in_dev(caplog: pytest.LogCaptureFixture) -> None:
     with caplog.at_level(logging.WARNING):
         verify_secret_key(_cfg(secret_key=DEV_SECRET_KEY, secure_cookies=False))
+    assert any("SECRET_KEY" in r.message for r in caplog.records)
+
+
+def test_warns_but_allows_empty_key_in_dev(caplog: pytest.LogCaptureFixture) -> None:
+    with caplog.at_level(logging.WARNING):
+        verify_secret_key(_cfg(secret_key="", secure_cookies=False))
     assert any("SECRET_KEY" in r.message for r in caplog.records)
 
 
