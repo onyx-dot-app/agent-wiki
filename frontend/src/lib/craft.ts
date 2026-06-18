@@ -22,9 +22,8 @@ export interface CraftLaunchResponse {
 /** Connection status for the current user. `data` is undefined while the
  * feature is dark (the endpoint 404s) — callers treat that as "unavailable". */
 export function useCraftConnect() {
-  const { data, error, isLoading, mutate } = useSWR<CraftConnectStatus>(
-    "/craft/connect",
-  );
+  const { data, error, isLoading, mutate } =
+    useSWR<CraftConnectStatus>("/craft/connect");
   return { status: data ?? null, error, isLoading, refresh: mutate };
 }
 

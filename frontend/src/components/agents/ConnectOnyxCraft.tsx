@@ -64,7 +64,9 @@ export function ConnectOnyxCraft({ onConnected }: Props) {
       await disconnectCraft();
       await refresh();
     } catch (caught) {
-      setErr(caught instanceof ApiError ? caught.message : "Failed to disconnect.");
+      setErr(
+        caught instanceof ApiError ? caught.message : "Failed to disconnect.",
+      );
     } finally {
       setBusy(false);
     }
@@ -82,7 +84,12 @@ export function ConnectOnyxCraft({ onConnected }: Props) {
             {status.token_display ? ` · ${status.token_display}` : ""}
           </div>
         </div>
-        <Button size="sm" variant="danger" onClick={onDisconnect} disabled={busy}>
+        <Button
+          size="sm"
+          variant="danger"
+          onClick={onDisconnect}
+          disabled={busy}
+        >
           {busy ? "…" : "Disconnect"}
         </Button>
       </div>
