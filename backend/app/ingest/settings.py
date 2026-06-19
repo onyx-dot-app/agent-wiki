@@ -20,14 +20,22 @@ class IngestSettings(BaseModel):
 
     max_doc_chars: int
     api_key: str | None
+    # Outbound half of the "Onyx Connection" admin page — the public Onyx
+    # origin for Craft launches. None = Craft unavailable.
+    onyx_base_url: str | None
 
 
 def get() -> IngestSettings:
     with session() as s:
         row = s.get(IngestSettingsRow, 1)
         if row is None:
-            return IngestSettings(max_doc_chars=DEFAULT_MAX_DOC_CHARS, api_key=None)
-        return IngestSettings(max_doc_chars=row.max_doc_chars, api_key=row.api_key)
+            return IngestSettings(max_doc_chars=DEFAULT_MAX_DOC_CHARS, api_key=None, onyx_base_url=None)
+        return IngestSettings(max_doc_chars=row.max_doc_chars, api_key=row.api_key, onyx_base_url=row.onyx_base_url)
+
+
+def get_onyx_base_url() -> str | None:
+    """The admin-configured Onyx origin, or None when not set."""
+    return get().onyx_base_url
 
 
 def upsert(*, max_doc_chars: int) -> None:
