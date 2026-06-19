@@ -47,13 +47,27 @@ export function CraftNotifier() {
     for (const s of craft) {
       const prev = lastStatus.current.get(s.id);
       lastStatus.current.set(s.id, s.status);
+      // Fire on any un-announced arrival at a terminal state. We don't require
+      // prev==="provisioning": if the tab was backgrounded during provisioning
+      // (SWR pauses polling while hidden) the session first surfaces as ready,
+      // and the user still needs the toast. The `prev === s.status` skip + the
+      // priming pass keep this from re-announcing a state we've already shown.
       if (prev === s.status) continue;
-      if (s.status === "ready" && prev === "provisioning") {
+      if (s.status === "ready") {
+        const url = s.external_url;
         toast.success("Craft is ready", {
-          description: "Open it from the active agents bar or the bell.",
+          description: "Your build is ready to open.",
+          duration: 15000,
+          action: url
+            ? {
+                label: "Open Craft",
+                onClick: () =>
+                  window.open(url, "_blank", "noopener,noreferrer"),
+              }
+            : undefined,
         });
         resolved = true;
-      } else if (s.status === "failed" && prev === "provisioning") {
+      } else if (s.status === "failed") {
         toast.error("Craft launch failed", {
           description: craftFailureMessage(s.failure_reason),
         });

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useState, useSyncExternalStore } from "react";
-import { MessageCard, Text } from "@onyx-ai/opal/components";
+import { Button, MessageCard, Text } from "@onyx-ai/opal/components";
 import { cn } from "@onyx-ai/opal/utils";
 
 import { toast, toastStore, MAX_VISIBLE_TOASTS } from "@/hooks/useToast";
@@ -37,6 +37,22 @@ function ExpandedDetails({ message }: ExpandedDetailsProps) {
       <Text font="secondary-body" color="text-03" as="p">
         {message}
       </Text>
+    </div>
+  );
+}
+
+function ToastAction({
+  label,
+  onClick,
+}: {
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <div className="px-3 pb-2">
+      <Button type="button" size="sm" variant="action" onClick={onClick}>
+        {label}
+      </Button>
     </div>
   );
 }
@@ -124,7 +140,17 @@ function ToastContainer() {
               padding="xs"
               onClose={t.dismissible ? () => handleClose(t.id) : undefined}
               bottomChildren={
-                isExpanded ? <ExpandedDetails message={t.message} /> : undefined
+                isExpanded ? (
+                  <ExpandedDetails message={t.message} />
+                ) : t.action ? (
+                  <ToastAction
+                    label={t.action.label}
+                    onClick={() => {
+                      t.action?.onClick();
+                      handleClose(t.id);
+                    }}
+                  />
+                ) : undefined
               }
             />
           </div>

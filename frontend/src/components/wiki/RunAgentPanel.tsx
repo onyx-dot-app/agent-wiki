@@ -11,6 +11,7 @@ import { SvgClaude, SvgOnyxLogo, SvgOpenai } from "@onyx-ai/opal/logos";
 import { ConnectOnyxCraft } from "@/components/agents/ConnectOnyxCraft";
 import { ApiError } from "@/lib/api";
 import { craftLaunch, useCraftConnect } from "@/lib/craft";
+import { toast } from "@/hooks/useToast";
 import {
   launch,
   probeHelper,
@@ -185,6 +186,12 @@ export function RunAgentPanel({ open, onClose, wikiPath }: Props) {
         await craftLaunch({
           wiki_path: docContextOn ? wikiPath : null,
           message,
+        });
+        // Immediate feedback: the panel closes on launch, so confirm via toast.
+        // The "ready" toast (with the Open Craft link) fires from CraftNotifier.
+        toast.success("Craft build started", {
+          description:
+            "Provisioning a sandbox — you'll get a link when it's ready.",
         });
         onClose();
         await refreshSessions();

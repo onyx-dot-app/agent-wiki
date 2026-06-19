@@ -6,12 +6,19 @@ import { useEffect, useSyncExternalStore } from "react";
 
 export type ToastLevel = "success" | "error" | "warning" | "info" | "default";
 
+/** Optional call-to-action rendered as a button inside the toast. */
+export interface ToastAction {
+  label: string;
+  onClick: () => void;
+}
+
 export interface ToastOptions {
   message: string;
   level?: ToastLevel;
   description?: string;
   duration?: number; // ms – default 4000, Infinity = persistent
   dismissible?: boolean; // default true (shows close button)
+  action?: ToastAction;
 }
 
 export interface Toast extends ToastOptions {
