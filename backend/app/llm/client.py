@@ -43,6 +43,7 @@ from pydantic import BaseModel, Field
 
 from app.llm import providers
 from app.llm.errors import LLMError
+from app.llm.redact import scrub_secrets
 from app.llm.settings import get as get_llm_settings
 from app.tracing import start_llm_span, to_openai_message_shape
 
@@ -89,7 +90,7 @@ class CompletionResult(BaseModel):
 
 
 def _debug_dump(label: str, obj: Any) -> None:
-    """Pretty-print ``obj`` to the log at DEBUG, untruncated.
+    """Pretty-print ``obj`` to the log at DEBUG, untruncated (secrets scrubbed).
 
     Skips serialization entirely when DEBUG isn't enabled — no cost on the
     hot path. Use for full LLM payloads (messages, tools, responses).
@@ -100,7 +101,7 @@ def _debug_dump(label: str, obj: Any) -> None:
         rendered = json.dumps(obj, indent=2, ensure_ascii=False, default=str)
     except (TypeError, ValueError):
         rendered = repr(obj)
-    log.debug("%s\n%s", label, rendered)
+    log.debug("%s\n%s", label, scrub_secrets(rendered))
 
 
 def stream(

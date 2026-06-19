@@ -22,6 +22,7 @@ from app.llm import client
 from app.llm.agents import skills as skill_registry
 from app.llm.agents import tools as tool_registry
 from app.llm.prompts import load_prompt
+from app.llm.redact import scrub_secrets
 from app.tracing import start_tool_span
 from app.wiki import agent_activity
 
@@ -34,14 +35,17 @@ CHAT_AGENT_NAME = "Wiki AI Assistant"
 
 
 def _debug_dump(label: str, obj: Any) -> None:
-    """Pretty-print ``obj`` to the log at DEBUG, untruncated."""
+    """Pretty-print ``obj`` to the log at DEBUG, untruncated (secrets scrubbed).
+
+    Tool-call arguments and tool results pass through here, so scrub before
+    logging — same as app/llm/client._debug_dump."""
     if not log.isEnabledFor(logging.DEBUG):
         return
     try:
         rendered = json.dumps(obj, indent=2, ensure_ascii=False, default=str)
     except (TypeError, ValueError):
         rendered = repr(obj)
-    log.debug("%s\n%s", label, rendered)
+    log.debug("%s\n%s", label, scrub_secrets(rendered))
 
 Message = dict[str, Any]
 ToolDispatch = Callable[[str, dict[str, Any]], Any]
