@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import useSWR from "swr";
 
+import { ConnectOnyxCraft } from "@/components/agents/ConnectOnyxCraft";
 import { SetupWizard } from "@/components/agents/SetupWizard";
 import { ToolCard } from "@/components/agents/ToolCard";
 import { Button } from "@onyx-ai/opal/components";
@@ -21,6 +22,7 @@ import {
 } from "@/lib/agents";
 import { apiFetch } from "@/lib/api";
 import { useRequireAuth } from "@/lib/auth";
+import { useCraftConnect } from "@/lib/craft";
 import { type ProbeResult } from "@/lib/launchers";
 
 export default function AgentsAndActionsPage() {
@@ -41,10 +43,38 @@ export default function AgentsAndActionsPage() {
         <TokenManager />
         <ClientConfigHelp />
         <CodingToolsSection />
+        <OnyxCraftSection />
       </SettingsLayouts.Body>
     </SettingsLayouts.Root>
   );
 }
+
+// --------------------------------------------------------------------------- //
+// Onyx Craft connection                                                       //
+// --------------------------------------------------------------------------- //
+
+function OnyxCraftSection() {
+  // Hidden while loading and when the feature is dark (status endpoint 404s).
+  // A non-dark error (500/timeout) still renders so the feature doesn't
+  // silently vanish — ConnectOnyxCraft surfaces the error instead.
+  const { isUnavailable, isLoading } = useCraftConnect();
+  if (isLoading || isUnavailable) return null;
+
+  return (
+    <section className="mb-4 rounded-(--border-radius-08) border border-(--border-01) bg-(--background-tint-00) p-4">
+      <h2 className="m-0 mb-1 text-base">Onyx Craft</h2>
+      <p className="m-0 mb-3 text-[13px] text-(--text-03)">
+        Connect your Onyx account to launch Craft builds from any wiki page with
+        Run Agent. The build runs as you, with your knowledge and model access.
+      </p>
+      <ConnectOnyxCraft />
+    </section>
+  );
+}
+
+// --------------------------------------------------------------------------- //
+// Endpoint                                                                    //
+// --------------------------------------------------------------------------- //
 
 function EndpointBlock() {
   const [endpoint, setEndpoint] = useState("");
