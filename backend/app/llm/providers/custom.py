@@ -167,12 +167,17 @@ class CustomProvider:
             out_tok = int(getattr(usage, "completion_tokens", 0) or 0)
             details = getattr(usage, "completion_tokens_details", None)
             reason_tok = int(getattr(details, "reasoning_tokens", 0) or 0)
+            # Chat Completions reports cached prompt tokens under
+            # prompt_tokens_details; prompt_tokens INCLUDES them (like OpenAI).
+            in_details = getattr(usage, "prompt_tokens_details", None)
+            cached_tok = int(getattr(in_details, "cached_tokens", 0) or 0)
             log.info(
-                "llm done provider=custom model=%s stop=%s tokens=%d/%d",
+                "llm done provider=custom model=%s stop=%s tokens=%d/%d cached=%d",
                 model,
                 stop_reason,
                 in_tok,
                 out_tok,
+                cached_tok,
             )
             yield {
                 "type": "done",
@@ -181,6 +186,8 @@ class CustomProvider:
                     "input_tokens": in_tok,
                     "output_tokens": out_tok,
                     "reasoning_tokens": reason_tok,
+                    "cached_input_tokens": cached_tok,
+                    "uncached_input_tokens": max(0, in_tok - cached_tok),
                 },
             }
         except LLMError:

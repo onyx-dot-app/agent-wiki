@@ -143,13 +143,19 @@ class OpenAIProvider:
                     out_tok = getattr(usage, "output_tokens", 0) if usage else 0
                     details = getattr(usage, "output_tokens_details", None) if usage else None
                     reason_tok = getattr(details, "reasoning_tokens", 0) if details else 0
+                    # OpenAI's input_tokens INCLUDES cached tokens; the cached
+                    # portion is reported under input_tokens_details. Uncached =
+                    # input_tokens - cached.
+                    in_details = getattr(usage, "input_tokens_details", None) if usage else None
+                    cached_tok = getattr(in_details, "cached_tokens", 0) if in_details else 0
                     status = getattr(resp, "status", "") or ""
                     log.info(
-                        "llm done provider=openai model=%s status=%s tokens=%d/%d",
+                        "llm done provider=openai model=%s status=%s tokens=%d/%d cached=%d",
                         model,
                         status,
                         in_tok,
                         out_tok,
+                        cached_tok or 0,
                     )
                     yield {
                         "type": "done",
@@ -161,6 +167,8 @@ class OpenAIProvider:
                             "input_tokens": in_tok,
                             "output_tokens": out_tok,
                             "reasoning_tokens": reason_tok or 0,
+                            "cached_input_tokens": cached_tok or 0,
+                            "uncached_input_tokens": max(0, (in_tok or 0) - (cached_tok or 0)),
                         },
                     }
         except LLMError:

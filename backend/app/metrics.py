@@ -158,7 +158,21 @@ _TOKEN_BUCKETS = [128, 256, 512, 1024, 2048, 4096, 8192, 16384]
 
 ingest_selector_input_tokens = Histogram(
     "ingest_selector_input_tokens",
-    "Input tokens per selector batch call",
+    "Input tokens per selector batch call (provider-raw; _count drives call counts)",
+    buckets=_TOKEN_BUCKETS,
+)
+
+# Provider-consistent prompt-cache split of selector input tokens: cached =
+# served from the prompt cache, uncached = processed fresh. Sum ≈ total input.
+ingest_selector_cached_input_tokens = Histogram(
+    "ingest_selector_cached_input_tokens",
+    "Cached (prompt-cache hit) input tokens per selector batch call",
+    buckets=_TOKEN_BUCKETS,
+)
+
+ingest_selector_uncached_input_tokens = Histogram(
+    "ingest_selector_uncached_input_tokens",
+    "Uncached (freshly processed) input tokens per selector batch call",
     buckets=_TOKEN_BUCKETS,
 )
 
@@ -170,7 +184,19 @@ ingest_selector_output_tokens = Histogram(
 
 ingest_reconciler_input_tokens = Histogram(
     "ingest_reconciler_input_tokens",
-    "Input tokens per reconciler batch call",
+    "Input tokens per reconciler batch call (provider-raw; _count drives call counts)",
+    buckets=_TOKEN_BUCKETS,
+)
+
+ingest_reconciler_cached_input_tokens = Histogram(
+    "ingest_reconciler_cached_input_tokens",
+    "Cached (prompt-cache hit) input tokens per reconciler batch call",
+    buckets=_TOKEN_BUCKETS,
+)
+
+ingest_reconciler_uncached_input_tokens = Histogram(
+    "ingest_reconciler_uncached_input_tokens",
+    "Uncached (freshly processed) input tokens per reconciler batch call",
     buckets=_TOKEN_BUCKETS,
 )
 
