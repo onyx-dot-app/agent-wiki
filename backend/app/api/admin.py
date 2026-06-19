@@ -39,6 +39,7 @@ from app.models.admin import (
     WebConfigRequest,
     WebView,
 )
+from app.onyx.client import validate_onyx_base_url
 from app.tracing import settings as braintrust_settings
 from app.tracing.settings import BraintrustSettings
 from app.web import settings as web_settings
@@ -421,6 +422,7 @@ def _ingest_view(s: IngestSettings) -> IngestView:
         max_doc_chars=s.max_doc_chars,
         api_key_set=bool(s.api_key),
         api_key_hint=_redact(s.api_key or ""),
+        onyx_base_url=s.onyx_base_url,
     )
 
 
@@ -439,11 +441,23 @@ def put_ingest(
             status_code=400,
             detail=f"max_doc_chars must be between {_MIN_DOC_CHARS} and {_MAX_DOC_CHARS}",
         )
-    ingest_settings.upsert(max_doc_chars=req.max_doc_chars)
+    # Omitted (None) preserves the stored URL; an explicit empty string clears
+    # it. Otherwise validate and set. Avoids a max_doc_chars-only PUT wiping it.
+    if req.onyx_base_url is None:
+        onyx_base_url = ingest_settings.get().onyx_base_url
+    else:
+        onyx_base_url = req.onyx_base_url.strip() or None
+        if onyx_base_url is not None:
+            try:
+                validate_onyx_base_url(onyx_base_url)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+    ingest_settings.upsert(max_doc_chars=req.max_doc_chars, onyx_base_url=onyx_base_url)
     log.info(
-        "admin: %s updated ingest settings max_doc_chars=%d",
+        "admin: %s updated ingest settings max_doc_chars=%d onyx_base_url_set=%s",
         actor.id,
         req.max_doc_chars,
+        bool(onyx_base_url),
     )
     return _ingest_view(ingest_settings.get())
 

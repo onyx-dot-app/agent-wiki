@@ -119,6 +119,7 @@ def tmp_config(tmp_path, monkeypatch):
         ingest_bm25_limit=20,
         ingest_irrelevant_stop_n=2,
         ingest_eval_logging=False,
+        craft_enabled=True,
         launchers_enabled=True,
         launch_code_ttl_seconds=60,
         agent_session_idle_seconds=300,
@@ -135,6 +136,7 @@ def tmp_config(tmp_path, monkeypatch):
     # earlier local runs.
     monkeypatch.setattr("app.api.launchers.CONFIG", cfg)
     monkeypatch.setattr("app.api.agent_sessions.CONFIG", cfg)
+    monkeypatch.setattr("app.api.craft.CONFIG", cfg)
 
     # Reset the lazy OpenSearch client so it re-reads CONFIG on next use.
     from app.db import fts as _fts

@@ -38,16 +38,17 @@ def get_onyx_base_url() -> str | None:
     return get().onyx_base_url
 
 
-def upsert(*, max_doc_chars: int) -> None:
+def upsert(*, max_doc_chars: int, onyx_base_url: str | None) -> None:
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     with session() as s:
         row = s.get(IngestSettingsRow, 1)
         if row is None:
-            s.add(IngestSettingsRow(id=1, max_doc_chars=max_doc_chars, updated_at=now))
+            s.add(IngestSettingsRow(id=1, max_doc_chars=max_doc_chars, onyx_base_url=onyx_base_url, updated_at=now))
         else:
             row.max_doc_chars = max_doc_chars
+            row.onyx_base_url = onyx_base_url
             row.updated_at = now
-    log.info("ingest_settings upserted max_doc_chars=%d", max_doc_chars)
+    log.info("ingest_settings upserted max_doc_chars=%d onyx_base_url_set=%s", max_doc_chars, bool(onyx_base_url))
 
 
 def regenerate_key() -> str:
