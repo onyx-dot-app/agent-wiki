@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useState } from "react";
 
 import { Button } from "@onyx-ai/opal/components";
 import { ApiError } from "@/lib/api";
@@ -39,10 +39,9 @@ export function ConnectOnyxCraft({ onConnected }: Props) {
   if (error) return null;
   if (isLoading || !status) return null;
 
-  async function onConnect(e: FormEvent) {
-    e.preventDefault();
+  async function onConnect() {
     const trimmed = pat.trim();
-    if (!trimmed) return;
+    if (!trimmed || busy) return;
     setBusy(true);
     setErr(null);
     try {
@@ -85,6 +84,7 @@ export function ConnectOnyxCraft({ onConnected }: Props) {
           </div>
         </div>
         <Button
+          type="button"
           size="sm"
           variant="danger"
           onClick={onDisconnect}
@@ -101,10 +101,10 @@ export function ConnectOnyxCraft({ onConnected }: Props) {
     : undefined;
 
   return (
-    <form
-      onSubmit={onConnect}
-      className="rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-01) p-3"
-    >
+    // Not a <form>: this drops into surfaces that are already inside a form
+    // (the Run Agent panel), and a nested form submits the outer one — which
+    // reloads the page and drops the connect. Submit via button + Enter key.
+    <div className="rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-01) p-3">
       <label className="text-[13px] text-(--text-04)">
         Onyx Personal Access Token
         <input
@@ -112,6 +112,12 @@ export function ConnectOnyxCraft({ onConnected }: Props) {
           autoComplete="off"
           value={pat}
           onChange={(e) => setPat(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              void onConnect();
+            }
+          }}
           placeholder="onyx_pat_…"
           className="mt-1 box-border w-full rounded-(--border-radius-04) border border-(--border-01) px-[10px] py-2 font-mono text-sm"
           maxLength={1024}
@@ -140,10 +146,15 @@ export function ConnectOnyxCraft({ onConnected }: Props) {
         </div>
       )}
       <div className="mt-3">
-        <Button type="submit" variant="action" disabled={busy || !pat.trim()}>
+        <Button
+          type="button"
+          variant="action"
+          onClick={() => void onConnect()}
+          disabled={busy || !pat.trim()}
+        >
           {busy ? "Connecting…" : "Connect Onyx"}
         </Button>
       </div>
-    </form>
+    </div>
   );
 }
