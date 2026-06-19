@@ -302,6 +302,13 @@ class AgentSession(Base):
     )
     spawn_ok_at: Mapped[str | None] = mapped_column(Text)  # beacon timestamp
     closed_at: Mapped[str | None] = mapped_column(Text)
+    # in_app (Onyx Craft) launches only; local_cli rows leave these null.
+    # Craft rows use the extra ``status`` values 'provisioning' | 'ready' —
+    # distinct from the local_cli lifecycle so the idle/spawn sweepers
+    # (which filter on pending/active/idle) never touch them.
+    external_session_id: Mapped[str | None] = mapped_column(Text)
+    external_url: Mapped[str | None] = mapped_column(Text)
+    failure_reason: Mapped[str | None] = mapped_column(Text)
 
     __table_args__ = (
         Index("idx_agent_sessions_user_status", "user_id", "status"),
@@ -724,6 +731,10 @@ class IngestSettings(Base):
     )
     # Secret — AES-GCM encrypted at rest (app/db/crypto.py:EncryptedString).
     api_key: Mapped[str | None] = mapped_column(EncryptedString(), nullable=True)
+    # Outbound half of the admin "Onyx Connection" page: the public Onyx
+    # origin used for Craft build-API calls, connect redirects, and
+    # "Open Craft" deep links. Null = Craft launches unavailable.
+    onyx_base_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     updated_at: Mapped[str] = mapped_column(
         Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
     )
@@ -1146,3 +1157,91 @@ class IngestEvalSample(Base):
     diff: Mapped[str | None] = mapped_column(Text)
     outcome: Mapped[str] = mapped_column(Text, nullable=False)
     commit_sha: Mapped[str | None] = mapped_column(Text)
+
+
+# --------------------------------------------------------------------------- #
+# Onyx Craft integration — per-user Onyx connection (encrypted PAT), the      #
+# single-use connect-handshake state, and the general notification center.   #
+# See local_data/wiki + "Engineering Projects/Craft Integration" on the wiki. #
+# --------------------------------------------------------------------------- #
+
+
+class UserOnyxConnection(Base):
+    """One per user: the Onyx PAT minted by "Connect Onyx".
+
+    The PAT is AES-GCM encrypted at rest via ``EncryptedString``. There is
+    no refresh token — Onyx PATs don't refresh; on expiry or a 401 the row
+    is dropped and the user re-connects.
+    """
+
+    __tablename__ = "user_onyx_connections"
+
+    user_id: Mapped[str] = mapped_column(
+        Text, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    onyx_pat: Mapped[str] = mapped_column(EncryptedString(), nullable=False)
+    # Masked form for display (e.g. "onyx_pat_abc1…xyz9") — never the raw token.
+    token_display: Mapped[str] = mapped_column(Text, nullable=False)
+    onyx_user_email: Mapped[str | None] = mapped_column(Text)
+    expires_at: Mapped[str | None] = mapped_column(Text)
+    # The Onyx origin this PAT was minted against. If the admin re-points
+    # onyx_base_url at a different instance, stored PATs are invalid there —
+    # the mismatch surfaces as needs_onyx_connect.
+    onyx_base_url: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
+    updated_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
+
+
+class CraftConnectState(Base):
+    """Single-use CSRF/PKCE state for the Connect-Onyx handshake.
+
+    Mirrors ``LaunchCode``: minted at /connect/start, consumed exactly once
+    at /connect/callback, short TTL. The PKCE ``code_verifier`` lives only
+    here server-side — it never rides a browser-visible URL.
+    """
+
+    __tablename__ = "craft_connect_states"
+
+    state: Mapped[str] = mapped_column(Text, primary_key=True)
+    user_id: Mapped[str] = mapped_column(
+        Text, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    # AES-GCM encrypted at rest (app/db/crypto.py:EncryptedString) — same
+    # treatment as the PAT, since it's a single-use secret.
+    code_verifier: Mapped[str] = mapped_column(EncryptedString(), nullable=False)
+    # Relative path to bounce the browser back to after the callback.
+    return_to: Mapped[str | None] = mapped_column(Text)
+    expires_at: Mapped[str] = mapped_column(Text, nullable=False)
+    consumed_at: Mapped[str | None] = mapped_column(Text)
+
+
+class Notification(Base):
+    """Persistent per-user notification (header bell / inbox).
+
+    General subsystem — Craft launch outcomes are the first producer.
+    ``data`` is normalized to ``{}`` (never null) so the dedup unique index
+    is a plain column tuple; ``dismissed`` is the read flag. Follows Onyx's
+    notification semantics: re-creating an existing undismissed
+    (user, type, data) bumps ``last_shown``; a dismissed one is left alone.
+    """
+
+    __tablename__ = "notifications"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(
+        Text, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    notif_type: Mapped[str] = mapped_column(Text, nullable=False)
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    dismissed: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("FALSE"))
+    first_shown: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
+    last_shown: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
+    data: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "notif_type", "data", name="uq_notifications_user_type_data"),
+        Index("idx_notifications_user_dismissed", "user_id", "dismissed"),
+    )
