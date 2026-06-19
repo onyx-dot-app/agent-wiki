@@ -56,6 +56,7 @@ from app.tasks.queue import QueueFullError, TaskQueue
 __all__ = [
     "QueueFullError",
     "QUEUES",
+    "craft_queue",
     "documents_queue",
     "lightweight_maintenance_queue",
     "triggers_queue",
@@ -69,6 +70,11 @@ def _make(name: str) -> TaskQueue:
 documents_queue = _make("documents")
 triggers_queue = _make("triggers")
 lightweight_maintenance_queue = _make("lightweight_maintenance")
+# craft_queue — outbound Onyx Craft launches. Each task BLOCKS on Onyx
+# sandbox provisioning (~10-60s of external HTTP), which violates the
+# lightweight queue's sub-second/no-HTTP contract and would starve
+# documents_queue's LLM work — hence its own queue + worker.
+craft_queue = _make("craft")
 
 # Map queue-name → instance, used by run_worker.py to launch the right
 # consumer per worker container.
@@ -76,4 +82,5 @@ QUEUES = {
     "documents": documents_queue,
     "triggers": triggers_queue,
     "lightweight_maintenance": lightweight_maintenance_queue,
+    "craft": craft_queue,
 }

@@ -14,6 +14,7 @@ from app.auth import groups as groups_repo
 from app.auth import invites
 from app.auth.deps import require_admin
 from app.ingest import settings as ingest_settings
+from app.onyx.client import validate_onyx_base_url
 from app.ingest.settings import IngestSettings
 from app.llm.errors import LLMError
 from app.llm import providers as llm_providers
@@ -421,6 +422,7 @@ def _ingest_view(s: IngestSettings) -> IngestView:
         max_doc_chars=s.max_doc_chars,
         api_key_set=bool(s.api_key),
         api_key_hint=_redact(s.api_key or ""),
+        onyx_base_url=s.onyx_base_url,
     )
 
 
@@ -439,11 +441,18 @@ def put_ingest(
             status_code=400,
             detail=f"max_doc_chars must be between {_MIN_DOC_CHARS} and {_MAX_DOC_CHARS}",
         )
-    ingest_settings.upsert(max_doc_chars=req.max_doc_chars)
+    onyx_base_url = (req.onyx_base_url or "").strip() or None
+    if onyx_base_url is not None:
+        try:
+            validate_onyx_base_url(onyx_base_url)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    ingest_settings.upsert(max_doc_chars=req.max_doc_chars, onyx_base_url=onyx_base_url)
     log.info(
-        "admin: %s updated ingest settings max_doc_chars=%d",
+        "admin: %s updated ingest settings max_doc_chars=%d onyx_base_url_set=%s",
         actor.id,
         req.max_doc_chars,
+        bool(onyx_base_url),
     )
     return _ingest_view(ingest_settings.get())
 

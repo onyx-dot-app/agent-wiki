@@ -76,6 +76,12 @@ class Config(BaseModel):
     # external_url, Sentry system.url-prefix, Mattermost SiteURL).
     public_base_url: str
 
+    # Onyx Craft launches (Run Agent → Onyx Craft). Kill-switch only —
+    # the Onyx base URL itself is admin-configured in the DB
+    # (ingest_settings.onyx_base_url, the "Onyx Connection" admin page).
+    # The feature is live only when BOTH this flag and that URL are set.
+    craft_enabled: bool
+
     # Coding-tool launchers (Run Agent button) — see
     # local_data/wiki/Wiki Project/Specific Features/coding_tool_launchers/.
     launchers_enabled: bool
@@ -164,6 +170,7 @@ def load_config() -> Config:
         secure_cookies=os.environ.get("SECURE_COOKIES", "false").lower() in {"1", "true", "yes"},
         dev_mode=os.environ.get("DEV_MODE", "false").lower() in {"1", "true", "yes"},
         encryption_key_secret=os.environ.get("ENCRYPTION_KEY_SECRET", ""),
+        craft_enabled=os.environ.get("CRAFT_ENABLED", "false").lower() in {"1", "true", "yes"},
         launchers_enabled=os.environ.get("LAUNCHERS_ENABLED", "false").lower()
         in {"1", "true", "yes"},
         launch_code_ttl_seconds=_positive_int("LAUNCH_CODE_TTL_SECONDS", 60),
@@ -217,8 +224,7 @@ def verify_secret_key(config: Config | None = None) -> None:
     # Optional (falls back to SECRET_KEY), but if an operator sets it, a short
     # value would silently weaken at-rest encryption — hold it to a real key.
     _enforce(
-        not cfg.encryption_key_secret
-        or len(cfg.encryption_key_secret) >= _MIN_ENCRYPTION_KEY_LEN,
+        not cfg.encryption_key_secret or len(cfg.encryption_key_secret) >= _MIN_ENCRYPTION_KEY_LEN,
         f"ENCRYPTION_KEY_SECRET is set but shorter than {_MIN_ENCRYPTION_KEY_LEN} "
         "characters; it derives the at-rest encryption key. Generate one with "
         "`openssl rand -hex 32`.",

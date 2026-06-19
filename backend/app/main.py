@@ -29,6 +29,7 @@ from app.api import (
     auth,
     chat,
     comments,
+    craft,
     documents,
     wiki,
     events,
@@ -39,6 +40,7 @@ from app.api import (
     mcp_connections,
     mcp_server,
     mcp_tokens,
+    notifications,
     permissions,
     templates,
     triggers,
@@ -223,6 +225,8 @@ def create_app() -> FastAPI:
     app.include_router(permissions.router, prefix="/api")
     app.include_router(update_policy.router, prefix="/api")
     app.include_router(launchers.router, prefix="/api")
+    app.include_router(craft.router, prefix="/api/craft")
+    app.include_router(notifications.router, prefix="/api/notifications")
     app.include_router(installer.router, prefix="/api")
     app.include_router(agent_sessions.router, prefix="/api/agent-sessions")
     app.include_router(triggers.router, prefix="/api/triggers")

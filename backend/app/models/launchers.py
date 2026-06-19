@@ -121,6 +121,10 @@ class AgentSessionSummary(BaseModel):
     last_activity_at: str
     closed_at: str | None
     cli_session_id: str | None
+    # in_app (Onyx Craft) sessions only — the "Open Craft" deep link and
+    # the structured failure taxonomy value. Null on local_cli rows.
+    external_url: str | None = None
+    failure_reason: str | None = None
 
 
 class AgentSessionList(BaseModel):
