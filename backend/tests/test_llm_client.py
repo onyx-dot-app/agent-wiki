@@ -130,10 +130,17 @@ def _a_tool_use_events(*, index, id, name, arg_chunks):
     return events
 
 
-def _a_final(*, stop_reason="end_turn", input_tokens=10, output_tokens=20):
+def _a_final(
+    *, stop_reason="end_turn", input_tokens=10, output_tokens=20, cache_read=0, cache_write=0
+):
     return SimpleNamespace(
         stop_reason=stop_reason,
-        usage=SimpleNamespace(input_tokens=input_tokens, output_tokens=output_tokens),
+        usage=SimpleNamespace(
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cache_read_input_tokens=cache_read,
+            cache_creation_input_tokens=cache_write,
+        ),
     )
 
 
@@ -157,12 +164,16 @@ def _o_text_delta(text):
     return SimpleNamespace(type="response.output_text.delta", delta=text)
 
 
-def _o_completed(*, status="completed", input_tokens=10, output_tokens=20):
+def _o_completed(*, status="completed", input_tokens=10, output_tokens=20, cached=0):
     return SimpleNamespace(
         type="response.completed",
         response=SimpleNamespace(
             status=status,
-            usage=SimpleNamespace(input_tokens=input_tokens, output_tokens=output_tokens),
+            usage=SimpleNamespace(
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                input_tokens_details=SimpleNamespace(cached_tokens=cached),
+            ),
         ),
     )
 
@@ -461,7 +472,13 @@ def test_anthropic_stream_yields_text_deltas_then_done(
     assert events[-1] == {
         "type": "done",
         "stop_reason": "end_turn",
-        "usage": {"input_tokens": 12, "output_tokens": 34, "reasoning_tokens": 0},
+        "usage": {
+            "input_tokens": 12,
+            "output_tokens": 34,
+            "reasoning_tokens": 0,
+            "cached_input_tokens": 0,
+            "uncached_input_tokens": 12,
+        },
     }
 
 
@@ -516,7 +533,24 @@ def test_anthropic_complete_drains_stream_into_dict(
         "input_tokens": 12,
         "output_tokens": 34,
         "reasoning_tokens": 0,
+        "cached_input_tokens": 0,
+        "uncached_input_tokens": 12,
     }
+
+
+def test_anthropic_usage_splits_cached_and_uncached(
+    configure_anthropic, fake_anthropic
+):
+    # Anthropic's input_tokens excludes cache; cache reads/writes are separate.
+    # cached = cache_read; uncached = input_tokens + cache_write.
+    fake_anthropic(
+        _a_text_block_events(["ok"], index=0),
+        _a_final(input_tokens=10, output_tokens=5, cache_read=200, cache_write=50),
+    )
+    out = llm_client.complete([{"role": "user", "content": "hi"}])
+    assert out.usage.input_tokens == 10
+    assert out.usage.cached_input_tokens == 200
+    assert out.usage.uncached_input_tokens == 60  # 10 fresh + 50 cache write
 
 
 # --------------------------------------------------------------------------- #
@@ -686,7 +720,13 @@ def test_openai_stream_yields_text_deltas(configure_openai, fake_openai):
         {
             "type": "done",
             "stop_reason": "completed",
-            "usage": {"input_tokens": 7, "output_tokens": 11, "reasoning_tokens": 0},
+            "usage": {
+                "input_tokens": 7,
+                "output_tokens": 11,
+                "reasoning_tokens": 0,
+                "cached_input_tokens": 0,
+                "uncached_input_tokens": 7,
+            },
         },
     ]
 
@@ -748,5 +788,20 @@ def test_openai_complete_handles_missing_usage(configure_openai, fake_openai):
 
     out = llm_client.complete([{"role": "user", "content": "hi"}])
 
-    assert out.usage.model_dump() == {"input_tokens": 0, "output_tokens": 0, "reasoning_tokens": 0}
+    assert out.usage.model_dump() == {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "reasoning_tokens": 0,
+        "cached_input_tokens": 0,
+        "uncached_input_tokens": 0,
+    }
     assert out.text == "ok"
+
+
+def test_openai_usage_splits_cached_and_uncached(configure_openai, fake_openai):
+    # OpenAI's input_tokens INCLUDES cached; uncached = input_tokens - cached.
+    fake_openai([_o_text_delta("ok"), _o_completed(input_tokens=100, output_tokens=5, cached=80)])
+    out = llm_client.complete([{"role": "user", "content": "hi"}])
+    assert out.usage.input_tokens == 100
+    assert out.usage.cached_input_tokens == 80
+    assert out.usage.uncached_input_tokens == 20

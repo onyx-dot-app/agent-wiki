@@ -62,11 +62,21 @@ class ToolCall(BaseModel):
 
 
 class Usage(BaseModel):
-    """Token counts reported by the provider for a single completion."""
+    """Token counts reported by the provider for a single completion.
+
+    ``input_tokens`` is the provider's raw input count (kept as-is for
+    back-compat; note providers disagree on whether it includes cached tokens).
+    For a provider-consistent prompt-cache view, use the normalized pair:
+    ``cached_input_tokens`` (input served from the prompt cache) and
+    ``uncached_input_tokens`` (input processed fresh). Their sum is the total
+    input the model saw, across every provider.
+    """
 
     input_tokens: int = 0
     output_tokens: int = 0
     reasoning_tokens: int = 0
+    cached_input_tokens: int = 0
+    uncached_input_tokens: int = 0
 
 
 class CompletionResult(BaseModel):

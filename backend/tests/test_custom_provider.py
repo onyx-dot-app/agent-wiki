@@ -263,7 +263,13 @@ def test_stream_uses_usage_only_final_chunk(monkeypatch: pytest.MonkeyPatch) -> 
     assert events[-1] == {
         "type": "done",
         "stop_reason": "",
-        "usage": {"input_tokens": 11, "output_tokens": 7, "reasoning_tokens": 3},
+        "usage": {
+            "input_tokens": 11,
+            "output_tokens": 7,
+            "reasoning_tokens": 3,
+            "cached_input_tokens": 0,
+            "uncached_input_tokens": 11,
+        },
     }
 
 
@@ -289,7 +295,13 @@ def test_stream_emits_exactly_one_done_with_verbatim_stop_reason_and_usage_defau
     assert len(done_events) == 1
     assert done_events[0]["stop_reason"] == "gateway_stop"
     usage_dict = done_events[0]["usage"]
-    assert usage_dict == {"input_tokens": 4, "output_tokens": 6, "reasoning_tokens": 0}
+    assert usage_dict == {
+        "input_tokens": 4,
+        "output_tokens": 6,
+        "reasoning_tokens": 0,
+        "cached_input_tokens": 0,
+        "uncached_input_tokens": 4,
+    }
     assert all(isinstance(value, int) for value in usage_dict.values())
 
 

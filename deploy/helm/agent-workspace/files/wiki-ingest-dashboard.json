@@ -52,7 +52,7 @@
       "gridPos": {
         "x": 0,
         "y": 10,
-        "w": 4,
+        "w": 3,
         "h": 4
       },
       "id": 125,
@@ -106,9 +106,9 @@
         }
       },
       "gridPos": {
-        "x": 4,
+        "x": 3,
         "y": 10,
-        "w": 4,
+        "w": 3,
         "h": 4
       },
       "id": 126,
@@ -162,9 +162,9 @@
         }
       },
       "gridPos": {
-        "x": 8,
+        "x": 6,
         "y": 10,
-        "w": 4,
+        "w": 3,
         "h": 4
       },
       "id": 121,
@@ -179,11 +179,67 @@
       },
       "targets": [
         {
-          "expr": "sum(increase(ingest_selector_input_tokens_sum[24h]))",
+          "expr": "sum(increase(ingest_selector_uncached_input_tokens_sum[24h]))",
           "refId": "A"
         }
       ],
-      "title": "Selector Input Tokens",
+      "title": "Selector Input (uncached)",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "blue",
+            "mode": "fixed"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 10
+              },
+              {
+                "color": "red",
+                "value": 100
+              }
+            ]
+          },
+          "unit": "short"
+        }
+      },
+      "gridPos": {
+        "x": 9,
+        "y": 10,
+        "w": 3,
+        "h": 4
+      },
+      "id": 130,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(ingest_selector_cached_input_tokens_sum[24h]))",
+          "refId": "A"
+        }
+      ],
+      "title": "Selector Input (cached)",
       "type": "stat"
     },
     {
@@ -220,7 +276,7 @@
       "gridPos": {
         "x": 12,
         "y": 10,
-        "w": 4,
+        "w": 3,
         "h": 4
       },
       "id": 122,
@@ -274,9 +330,9 @@
         }
       },
       "gridPos": {
-        "x": 16,
+        "x": 15,
         "y": 10,
-        "w": 4,
+        "w": 3,
         "h": 4
       },
       "id": 123,
@@ -291,11 +347,11 @@
       },
       "targets": [
         {
-          "expr": "sum(increase(ingest_reconciler_input_tokens_sum[24h]))",
+          "expr": "sum(increase(ingest_reconciler_uncached_input_tokens_sum[24h]))",
           "refId": "A"
         }
       ],
-      "title": "Reconciler Input Tokens",
+      "title": "Reconciler Input (uncached)",
       "type": "stat"
     },
     {
@@ -330,9 +386,65 @@
         }
       },
       "gridPos": {
-        "x": 20,
+        "x": 18,
         "y": 10,
-        "w": 4,
+        "w": 3,
+        "h": 4
+      },
+      "id": 131,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(ingest_reconciler_cached_input_tokens_sum[24h]))",
+          "refId": "A"
+        }
+      ],
+      "title": "Reconciler Input (cached)",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "blue",
+            "mode": "fixed"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 10
+              },
+              {
+                "color": "red",
+                "value": 100
+              }
+            ]
+          },
+          "unit": "short"
+        }
+      },
+      "gridPos": {
+        "x": 21,
+        "y": 10,
+        "w": 3,
         "h": 4
       },
       "id": 124,

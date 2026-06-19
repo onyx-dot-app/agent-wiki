@@ -145,10 +145,15 @@ class GeminiProvider:
                             }
                 meta = getattr(chunk, "usage_metadata", None)
                 if meta is not None:
+                    prompt_tok = getattr(meta, "prompt_token_count", 0) or 0
+                    # Gemini's prompt_token_count INCLUDES cached context tokens.
+                    cached_tok = getattr(meta, "cached_content_token_count", 0) or 0
                     usage = {
-                        "input_tokens": getattr(meta, "prompt_token_count", 0) or 0,
+                        "input_tokens": prompt_tok,
                         "output_tokens": getattr(meta, "candidates_token_count", 0) or 0,
                         "reasoning_tokens": getattr(meta, "thoughts_token_count", 0) or 0,
+                        "cached_input_tokens": cached_tok,
+                        "uncached_input_tokens": max(0, prompt_tok - cached_tok),
                     }
             log.info(
                 "llm done provider=gemini model=%s stop=%s tokens=%d/%d",

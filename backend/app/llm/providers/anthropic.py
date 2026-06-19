@@ -136,12 +136,19 @@ class AnthropicProvider:
                 final = cast(Any, s.get_final_message())
             in_tok = cast(int, getattr(final.usage, "input_tokens", 0))
             out_tok = cast(int, getattr(final.usage, "output_tokens", 0))
+            # Anthropic's input_tokens EXCLUDES cached tokens; cache reads/writes
+            # are separate. Uncached = fresh input + cache writes (writes are
+            # full-price fresh input); cached = cache reads.
+            cache_read = cast(int, getattr(final.usage, "cache_read_input_tokens", 0) or 0)
+            cache_write = cast(int, getattr(final.usage, "cache_creation_input_tokens", 0) or 0)
             log.info(
-                "llm done provider=anthropic model=%s stop=%s tokens=%d/%d",
+                "llm done provider=anthropic model=%s stop=%s tokens=%d/%d cache_read=%d cache_write=%d",
                 model,
                 getattr(final, "stop_reason", "") or "",
                 in_tok,
                 out_tok,
+                cache_read,
+                cache_write,
             )
             yield {
                 "type": "done",
@@ -150,6 +157,8 @@ class AnthropicProvider:
                     "input_tokens": in_tok,
                     "output_tokens": out_tok,
                     "reasoning_tokens": 0,
+                    "cached_input_tokens": cache_read,
+                    "uncached_input_tokens": in_tok + cache_write,
                 },
             }
         except LLMError:

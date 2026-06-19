@@ -152,6 +152,9 @@ class OllamaProvider:
                         "input_tokens": in_tok,
                         "output_tokens": out_tok,
                         "reasoning_tokens": 0,
+                        # Ollama has no prompt cache: all input is uncached.
+                        "cached_input_tokens": 0,
+                        "uncached_input_tokens": in_tok,
                     }
             log.info(
                 "llm done provider=ollama model=%s stop=%s tokens=%d/%d",

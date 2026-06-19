@@ -16,7 +16,13 @@ from app.ingest.models import WikiUpdateCandidate
 from app.llm import client
 from app.llm.agents.common import batch_by_chars
 from app.llm.prompts import load_prompt
-from app.metrics import ingest_selector_calls_per_doc, ingest_selector_input_tokens, ingest_selector_output_tokens
+from app.metrics import (
+    ingest_selector_cached_input_tokens,
+    ingest_selector_calls_per_doc,
+    ingest_selector_input_tokens,
+    ingest_selector_output_tokens,
+    ingest_selector_uncached_input_tokens,
+)
 from app.tracing import trace_flow
 
 log = logging.getLogger(__name__)
@@ -104,6 +110,8 @@ def _select_batch(
         return batch
     try:
         ingest_selector_input_tokens.observe(result.usage.input_tokens)
+        ingest_selector_cached_input_tokens.observe(result.usage.cached_input_tokens)
+        ingest_selector_uncached_input_tokens.observe(result.usage.uncached_input_tokens)
         ingest_selector_output_tokens.observe(result.usage.output_tokens)
     except Exception:
         log.warning("ingest_selector: could not observe token usage", exc_info=True)
