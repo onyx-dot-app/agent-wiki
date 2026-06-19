@@ -36,6 +36,39 @@ body {
   --shadow-fab: 0 6px 20px var(--shadow-03);
   --shadow-modal: 0 24px 60px var(--shadow-03);
   --shadow-panel: -4px 0 24px var(--shadow-02);
+  --toast-width: 24rem;
+}
+
+/* ── Toast animations ─────────────────────────────────────────────────────
+   Defined globally (not in a CSS Module) so the animation names survive —
+   CSS Modules scope @keyframes, leaving a module-scoped `animation:` ref
+   pointing at a name that doesn't exist. Used by ToastContainer.
+   ───────────────────────────────────────────────────────────────────── */
+@keyframes fade-in-scale {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+@keyframes fade-out-scale {
+  from {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.96) translateY(8px);
+  }
+}
+.animate-fade-in-scale {
+  animation: fade-in-scale 0.2s ease-out;
+}
+.animate-fade-out-scale {
+  animation: fade-out-scale 0.2s ease-in forwards;
 }
 
 /* ── Primary (action) buttons ─────────────────────────────────────────────
