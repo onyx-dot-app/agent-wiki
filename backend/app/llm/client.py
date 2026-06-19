@@ -37,13 +37,13 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 from typing import Any, Iterator
 
 from pydantic import BaseModel, Field
 
 from app.llm import providers
 from app.llm.errors import LLMError
+from app.llm.redact import scrub_secrets
 from app.llm.settings import get as get_llm_settings
 from app.tracing import start_llm_span, to_openai_message_shape
 
@@ -79,43 +79,6 @@ class CompletionResult(BaseModel):
     usage: Usage = Field(default_factory=Usage)
 
 
-_REDACTED = "[redacted]"
-
-# Values under a secret-ish JSON key — "api_key": "...", "authorization": "...".
-# Matches the rendered JSON, so it catches secrets nested anywhere (message
-# content, tool args, tool results). Numbers (e.g. "input_tokens": 5) are
-# unquoted and don't match.
-_KEYED_SECRET_RE = re.compile(
-    r'("[a-z_]*(?:api[_-]?key|secret|token|password|authorization)[a-z_]*"\s*:\s*")[^"]+(")',
-    re.IGNORECASE,
-)
-# Recognizable credential token shapes — conservative, prefix-anchored so we
-# don't mangle ordinary prose. Keep the prefix for debuggability, redact the body.
-_TOKEN_RES = [
-    re.compile(r"(sk-ant-)[A-Za-z0-9_\-]{12,}"),  # Anthropic
-    re.compile(r"(sk-(?:proj-)?)[A-Za-z0-9_\-]{16,}"),  # OpenAI
-    re.compile(r"(AIza)[A-Za-z0-9_\-]{20,}"),  # Google / Gemini
-    re.compile(r"(AKIA)[0-9A-Z]{16}"),  # AWS access key id
-    re.compile(r"(xox[baprs]-)[A-Za-z0-9-]{8,}"),  # Slack
-    re.compile(r"(gh[pousr]_)[A-Za-z0-9]{20,}"),  # GitHub
-    re.compile(r"(Bearer\s+)[A-Za-z0-9._\-]{8,}", re.IGNORECASE),  # bearer tokens
-]
-
-
-def _scrub_secrets(text: str) -> str:
-    """Mask credentials in a debug payload before it hits the log.
-
-    DEBUG dumps the full LLM message history + tool defs/args/results, any of
-    which can carry a secret (a key pasted into a prompt, a tool result holding
-    a config value). This best-effort scrub catches secret-keyed JSON fields and
-    well-known token shapes; it is not a guarantee, so DEBUG remains an
-    operator-only level."""
-    text = _KEYED_SECRET_RE.sub(rf"\1{_REDACTED}\2", text)
-    for pat in _TOKEN_RES:
-        text = pat.sub(rf"\1{_REDACTED}", text)
-    return text
-
-
 def _debug_dump(label: str, obj: Any) -> None:
     """Pretty-print ``obj`` to the log at DEBUG, untruncated (secrets scrubbed).
 
@@ -128,7 +91,7 @@ def _debug_dump(label: str, obj: Any) -> None:
         rendered = json.dumps(obj, indent=2, ensure_ascii=False, default=str)
     except (TypeError, ValueError):
         rendered = repr(obj)
-    log.debug("%s\n%s", label, _scrub_secrets(rendered))
+    log.debug("%s\n%s", label, scrub_secrets(rendered))
 
 
 def stream(
