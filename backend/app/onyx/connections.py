@@ -81,6 +81,8 @@ def get_with_pat(user_id: str, *, onyx_base_url: str) -> dict[str, Any] | None:
             if row.onyx_base_url != onyx_base_url:
                 return None
             if row.expires_at is not None and row.expires_at <= _now_iso():
+                log.info("onyx connection expired user=%s; dropping row", user_id)
+                s.delete(row)
                 return None
             return {
                 "user_id": row.user_id,
@@ -114,7 +116,15 @@ def status(user_id: str) -> dict[str, Any] | None:
             .mappings()
             .first()
         )
-        return dict(row) if row is not None else None
+    if row is None:
+        return None
+    data = dict(row)
+    expires_at = data.get("expires_at")
+    if expires_at is not None and expires_at <= _now_iso():
+        log.info("onyx connection expired user=%s; dropping row", user_id)
+        remove(user_id)
+        return None
+    return data
 
 
 def remove(user_id: str) -> bool:

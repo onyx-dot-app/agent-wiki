@@ -113,6 +113,27 @@ def test_connect_requires_available(client, tmp_config, monkeypatch):
     assert client.post("/api/craft/connect", json={"pat": "onyx_pat_x"}).status_code == 404
 
 
+def test_connect_status_drops_expired_connection(client):
+    _configure_onyx()
+    uid = seed_user()
+    login_fastapi(client, uid)
+    # Seed an expired connection (expires_at strictly in the past).
+    connections.upsert(
+        user_id=uid,
+        onyx_pat="onyx_pat_" + "d" * 40,
+        onyx_user_email="nik@onyx.app",
+        expires_at="2000-01-01 00:00:00",
+        onyx_base_url=ONYX,
+    )
+
+    res = client.get("/api/craft/connect")
+    assert res.status_code == 200
+    body = res.json()
+    assert body["connected"] is False
+    # The expired row is removed so the user is prompted to reconnect.
+    assert connections.status(uid) is None
+
+
 # --------------------------------------------------------------------------- #
 # Connect start → Onyx authorize redirect (dormant redirect-mint flow)        #
 # --------------------------------------------------------------------------- #
