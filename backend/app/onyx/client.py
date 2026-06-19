@@ -110,21 +110,32 @@ class OnyxClient:
     # Build API                                                          #
     # ----------------------------------------------------------------- #
 
-    def create_build_session(self, *, name: str | None) -> str:
-        """Create a Craft build session; blocks until the sandbox is up.
-        Returns the session id."""
+    def create_build_session(self) -> str:
+        """Create (or reuse) the user's empty Craft build session; blocks until
+        the sandbox is up. Returns the session id. The create endpoint has no
+        name field, so the session is unnamed here — call set_session_name."""
         resp = self._request(
             "POST",
             "/api/build/sessions",
             what="create build session",
             timeout=_CREATE_TIMEOUT_S,
-            json={"name": name},
+            json={},
         )
         body: dict[str, Any] = resp.json()
         session_id = body.get("id")
         if not isinstance(session_id, str) or not session_id:
             raise OnyxError("create build session: response missing id")
         return session_id
+
+    def set_session_name(self, session_id: str, *, name: str) -> None:
+        """Set the session's display name. Without this, Onyx lists the build
+        as ``Session <id>``; the create endpoint accepts no name."""
+        self._request(
+            "PUT",
+            f"/api/build/sessions/{session_id}/name",
+            what="set session name",
+            json={"name": name},
+        )
 
     def upload_attachment(self, session_id: str, *, filename: str, content: bytes) -> None:
         """Drop a file into the session sandbox's attachments/ dir."""

@@ -104,8 +104,12 @@ def craft_launch(agent_session_id: str) -> None:
     try:
         external_id: str | None = row["external_session_id"]
         if not external_id:
-            external_id = client.create_build_session(name=_page_title(wiki_path))
+            external_id = client.create_build_session()
             sessions_repo.set_external_session(sid, external_id)
+            # Name it after the wiki page so Onyx doesn't list it as "Session <id>".
+            title = _page_title(wiki_path)
+            if title:
+                client.set_session_name(external_id, name=title)
 
         if wiki_path is not None:
             try:
