@@ -138,26 +138,6 @@ services:
       opensearch:
         condition: service_healthy
 
-  worker-craft:
-    profiles: ["app"]
-    build: ./backend
-    command: ["python", "-m", "app.tasks.run_worker", "craft"]
-    env_file: .env
-    environment:
-      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/agent_wiki
-      - REDIS_URL=redis://redis:6379/0
-      - OPENSEARCH_URL=http://opensearch:9200
-      - WIKI_DIR=/data/wiki
-    volumes:
-      - ./local_data:/data
-    depends_on:
-      backend:
-        condition: service_started
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-
   worker-lightweight-maintenance:
     profiles: ["app"]
     build: ./backend
