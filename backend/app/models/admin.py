@@ -59,6 +59,9 @@ class WebConfigRequest(BaseModel):
 
 class IngestConfigRequest(BaseModel):
     max_doc_chars: int
+    # Outbound Onyx origin for Craft launches. Omit to preserve the stored
+    # value; an explicit empty string clears it.
+    onyx_base_url: str | None = None
 
 
 class BraintrustConfigRequest(BaseModel):
@@ -168,6 +171,7 @@ class IngestView(BaseModel):
     max_doc_chars: int
     api_key_set: bool
     api_key_hint: str
+    onyx_base_url: str | None
 
 
 class RegenerateKeyResponse(BaseModel):
