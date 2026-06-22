@@ -151,6 +151,9 @@ def call_for_mcp(
     )
     _maybe_auto_subscribe(sess, name, arguments, payload, is_error)
     payload.setdefault("stale_paths", _compute_stale_paths(sess))
+    guidance = _guidance_for(payload)
+    if guidance is not None:
+        payload["guidance"] = guidance
     return payload, is_error
 
 
@@ -323,6 +326,34 @@ def _compute_stale_paths(sess: McpSession) -> list[str]:
             except Exception:
                 break
     return paths
+
+
+def _guidance_for(payload: dict[str, Any]) -> str | None:
+    """Short, actionable next-step hint for a tool result — only when there's
+    something concrete to act on.
+
+    Returns ``None`` when nothing needs saying, so results don't carry a nudge
+    on every call (a constant nudge just trains clients to ignore the field).
+    The hint rides a tool call the agent already made — the one place an MCP
+    server can steer the next action without a dedicated trigger.
+    """
+    hints: list[str] = []
+
+    stale = payload.get("stale_paths")
+    if isinstance(stale, list) and stale:
+        joined = ", ".join(str(p) for p in cast("list[object]", stale))
+        hints.append(
+            f"Pages you relied on changed since you last read them ({joined}); "
+            "re-read them before continuing."
+        )
+
+    broken = payload.get("broken_links")
+    if isinstance(broken, list) and broken:
+        hints.append("This edit left broken markdown links — fix or remove them.")
+
+    if not hints:
+        return None
+    return " ".join(hints)
 
 
 def to_mcp_content(payload: dict[str, Any]) -> list[dict[str, Any]]:
