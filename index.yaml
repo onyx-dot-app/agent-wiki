@@ -3,6 +3,17 @@ entries:
   agent-workspace:
   - apiVersion: v2
     appVersion: 0.1.0
+    created: "2026-06-22T18:32:51.146856828Z"
+    description: Self-updating wiki for AI agents (FastAPI + Postgres 17 + Redis +
+      Next.js).
+    digest: ee849750e9c24d2669c64861e4fef29a1f9a605df3806b583a1b43877044206a
+    name: agent-workspace
+    type: application
+    urls:
+    - https://github.com/onyx-dot-app/agent-wiki/releases/download/agent-workspace-0.3.26/agent-workspace-0.3.26.tgz
+    version: 0.3.26
+  - apiVersion: v2
+    appVersion: 0.1.0
     created: "2026-06-22T17:50:37.807542448Z"
     description: Self-updating wiki for AI agents (FastAPI + Postgres 17 + Redis +
       Next.js).
@@ -326,4 +337,4 @@ entries:
     urls:
     - https://github.com/onyx-dot-app/agent-wiki/releases/download/agent-workspace-0.1.0/agent-workspace-0.1.0.tgz
     version: 0.1.0
-generated: "2026-06-22T17:50:37.80786516Z"
+generated: "2026-06-22T18:32:51.147086184Z"
