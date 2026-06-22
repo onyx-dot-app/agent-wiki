@@ -126,7 +126,6 @@ def post_launch(req: CraftLaunchRequest, user: User = Depends(require_user)) -> 
         raise HTTPException(status_code=429, detail="rate_limited")
 
     seed = prompt_builder.build_craft_seed_prompt(
-        wiki_path=wiki_path,
         attachment_filename=attachment_filename(wiki_path) if wiki_path else None,
         user_message=req.message,
     )

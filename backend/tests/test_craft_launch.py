@@ -153,8 +153,9 @@ def test_launch_happy_path(client, connected_user, monkeypatch):
     assert calls[2][1] == ("bs_123", "Page One")
     upload_args = calls[3][1]
     assert upload_args == ("bs_123", "Page_One.md")
+    # Seed = one-line attachment pointer + the user's message (no guardrail).
     seed_content = calls[5][1][1]
-    assert "PAGE_ATTACHMENT: attachments/Page_One.md" in seed_content
+    assert "attachments/Page_One.md" in seed_content
     assert "build a dashboard" in seed_content
 
     page = notifications_repo.list_for_user(connected_user)
