@@ -396,10 +396,17 @@ def test_anthropic_translates_tool_result_message(configure_anthropic, fake_anth
             },
         ],
     }
+    # The final block of a multi-message conversation carries the auto-tail
+    # cache breakpoint (see test_anthropic_caches_conversation_tail).
     assert msgs[2] == {
         "role": "user",
         "content": [
-            {"type": "tool_result", "tool_use_id": "tu_1", "content": "result text"}
+            {
+                "type": "tool_result",
+                "tool_use_id": "tu_1",
+                "content": "result text",
+                "cache_control": {"type": "ephemeral"},
+            }
         ],
     }
 
@@ -478,6 +485,47 @@ def test_anthropic_passes_max_tokens(configure_anthropic, fake_anthropic):
     fake = fake_anthropic(_a_text_block_events(["ok"]), _a_final())
     llm_client.complete([{"role": "user", "content": "hi"}], max_tokens=512)
     assert fake.calls[0]["max_tokens"] == 512
+
+
+def test_anthropic_single_message_has_no_tail_breakpoint(
+    configure_anthropic, fake_anthropic
+):
+    """A single-shot call only caches the system prompt — there's no prior
+    turn to reread, so the auto-tail breakpoint would be a wasted cache write."""
+    fake = fake_anthropic(_a_text_block_events(["ok"]), _a_final())
+    llm_client.complete([{"role": "user", "content": "hi"}])
+    assert fake.calls[0]["messages"] == [{"role": "user", "content": "hi"}]
+
+
+def test_anthropic_caches_conversation_tail(configure_anthropic, fake_anthropic):
+    """Multi-turn conversations with no explicit marks get an auto-tail cache
+    breakpoint on the last block, so the growing history is read back instead
+    of reprocessed. A string-content tail is promoted to a text block to carry
+    the marker."""
+    fake = fake_anthropic(_a_text_block_events(["ok"]), _a_final())
+
+    llm_client.complete(
+        [
+            {"role": "user", "content": "first"},
+            {"role": "assistant", "content": "reply"},
+            {"role": "user", "content": "second"},
+        ]
+    )
+
+    msgs = fake.calls[0]["messages"]
+    # Earlier turns are untouched; only the final block carries the breakpoint.
+    assert msgs[0] == {"role": "user", "content": "first"}
+    assert msgs[1] == {"role": "assistant", "content": "reply"}
+    assert msgs[-1] == {
+        "role": "user",
+        "content": [
+            {
+                "type": "text",
+                "text": "second",
+                "cache_control": {"type": "ephemeral"},
+            }
+        ],
+    }
 
 
 # --------------------------------------------------------------------------- #
