@@ -11,6 +11,7 @@ import { AuthProvider } from "@/lib/auth";
 import { DraftingProvider } from "@/lib/drafting";
 import { SWRProvider } from "@/lib/swr";
 import { ThemeProvider } from "@/lib/theme-provider";
+import { ToastContainer } from "@/providers/ToastProvider";
 
 const hankenGrotesk = Hanken_Grotesk({
   subsets: ["latin"],
@@ -76,6 +77,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
                   <ConfirmProvider>
                     {children}
                     <ChatWidget />
+                    <ToastContainer />
                   </ConfirmProvider>
                 </Tooltip.Provider>
               </DraftingProvider>

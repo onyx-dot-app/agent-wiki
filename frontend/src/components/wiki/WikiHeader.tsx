@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { Button } from "@onyx-ai/opal/components";
 import { SvgFolder } from "@onyx-ai/opal/icons";
+import { NotificationBell } from "@/components/common/NotificationBell";
+import { CraftNotifier } from "@/components/wiki/CraftNotifier";
 import { useAppFocus } from "@/hooks/useAppFocus";
 import { useLeftPanel } from "@/providers/LeftPanelProvider";
 import { useHeaderActionsHost } from "@/providers/WikiHeaderActionsProvider";
@@ -60,6 +62,8 @@ export function WikiHeader() {
           WikiHeaderActionsProvider). Pushed right by the flex spacer. */}
       <div className="flex-1" />
       <div ref={host?.setEl} className="flex items-center gap-1" />
+      <NotificationBell />
+      <CraftNotifier />
     </div>
   );
 }
