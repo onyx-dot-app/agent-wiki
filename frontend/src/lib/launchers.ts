@@ -48,7 +48,10 @@ export type AgentSessionStatus =
   | "active"
   | "idle"
   | "closed"
-  | "failed";
+  | "failed"
+  // Onyx Craft (in_app) lifecycle.
+  | "provisioning"
+  | "ready";
 
 export interface AgentSessionSummary {
   id: string;
@@ -60,6 +63,9 @@ export interface AgentSessionSummary {
   last_activity_at: string;
   closed_at: string | null;
   cli_session_id: string | null;
+  // onyx-craft only: the "Open Craft" deep link + the failure-taxonomy reason.
+  external_url: string | null;
+  failure_reason: string | null;
 }
 
 export interface AgentSessionList {
