@@ -121,6 +121,8 @@ def batch_reconcile(
     candidate_budget = max(_RECONCILER_BUDGET_CHARS - len(content), 0)
     batches = batch_by_chars(candidates, candidate_budget)
 
+    # Worth caching the incoming doc only when sibling batches will reread it.
+    cache_doc = len(batches) > 1
     results: list[str | None] = []
     for batch in batches:
         results.extend(
@@ -131,6 +133,7 @@ def batch_reconcile(
                 source=source,
                 batch=batch,
                 model=model,
+                cache_doc=cache_doc,
             )
         )
 
@@ -154,6 +157,7 @@ def _reconcile_batch(
     source: str,
     batch: list[WikiUpdateCandidate],
     model: str,
+    cache_doc: bool,
 ) -> list[str | None]:
     def _format_candidate(index: int, c: WikiUpdateCandidate) -> str:
         header = f"[{index + 1}] {c.hit.path}"
@@ -168,22 +172,35 @@ def _reconcile_batch(
     )
 
     system = load_prompt("ingest_batch_reconciler.system")
-    user = load_prompt("ingest_batch_reconciler.input").format(
+    doc = load_prompt("ingest_batch_reconciler.doc").format(
         title=title or "(no title)",
         url=url or "",
         source=source,
         content=content,
+    )
+    candidates = load_prompt("ingest_batch_reconciler.candidates").format(
         candidates=candidate_text,
         n=len(batch),
     )
 
+    if cache_doc:
+        # The incoming doc is identical across this document's batches; mark it
+        # as a cache breakpoint so the sibling batches read it back instead of
+        # reprocessing it. The per-batch candidates stay after the breakpoint,
+        # uncached (they vary, so caching them would only cost write premium).
+        convo: list[dict[str, Any]] = [
+            {"role": "user", "content": doc, "cache": True},
+            {"role": "user", "content": candidates},
+        ]
+    else:
+        # Single batch: nothing rereads the doc, so a breakpoint would just pay
+        # the ~1.25x write premium for a cache that's never read. One message.
+        convo = [{"role": "user", "content": f"{doc.rstrip()}\n\n{candidates}"}]
+
     try:
         with trace_flow("agent.ingest_batch_reconciler"):
             result = client.complete(
-                messages=[
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": user},
-                ],
+                messages=[{"role": "system", "content": system}, *convo],
                 model=model,
                 tools=[_SUBMIT_TOOL],
                 max_tokens=_RECONCILER_MAX_TOKENS,

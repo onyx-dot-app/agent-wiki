@@ -1,8 +1,3 @@
-Incoming document:
-Title: {title}
-
-{content}
-
 ---
 
 Candidate wiki pages:

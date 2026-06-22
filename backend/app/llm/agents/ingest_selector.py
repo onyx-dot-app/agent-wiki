@@ -56,9 +56,15 @@ def select_candidates(
     candidate_budget = max(_SELECTOR_BUDGET_CHARS - min(len(content), _SELECTOR_CONTENT_CHARS), 0)
     batches = batch_by_chars(candidates, candidate_budget)
 
+    # Worth caching the incoming doc only when sibling batches will reread it.
+    cache_doc = len(batches) > 1
     selected: list[WikiUpdateCandidate] = []
     for batch in batches:
-        selected.extend(_select_batch(title=title, content=content, batch=batch, model=model))
+        selected.extend(
+            _select_batch(
+                title=title, content=content, batch=batch, model=model, cache_doc=cache_doc
+            )
+        )
 
     ingest_selector_calls_per_doc.observe(len(batches))
     log.info(
@@ -78,25 +84,36 @@ def _select_batch(
     content: str,
     batch: list[WikiUpdateCandidate],
     model: str,
+    cache_doc: bool,
 ) -> list[WikiUpdateCandidate]:
     candidate_text = "\n\n".join(
         f"[{i + 1}] {c.hit.path}\n{c.body}" for i, c in enumerate(batch)
     )
 
     system = load_prompt("ingest_selector.system")
-    user = load_prompt("ingest_selector.input").format(
+    doc = load_prompt("ingest_selector.doc").format(
         title=title or "(no title)",
         content=content[:_SELECTOR_CONTENT_CHARS],
-        candidates=candidate_text,
     )
+    candidates = load_prompt("ingest_selector.candidates").format(candidates=candidate_text)
+
+    if cache_doc:
+        # Same incoming doc across this document's batches; cache it so the
+        # sibling batches read it back. The per-batch candidates (which vary)
+        # stay after the breakpoint, uncached.
+        convo: list[dict[str, Any]] = [
+            {"role": "user", "content": doc, "cache": True},
+            {"role": "user", "content": candidates},
+        ]
+    else:
+        # Single batch: no reread, so a breakpoint would only cost the write
+        # premium. Send one message.
+        convo = [{"role": "user", "content": f"{doc.rstrip()}\n\n{candidates}"}]
 
     try:
         with trace_flow("agent.ingest_selector"):
             result = client.complete(
-                messages=[
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": user},
-                ],
+                messages=[{"role": "system", "content": system}, *convo],
                 model=model,
             )
         text = result.text.strip()
