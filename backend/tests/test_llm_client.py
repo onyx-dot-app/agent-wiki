@@ -443,6 +443,37 @@ def test_anthropic_translates_tools_argument(configure_anthropic, fake_anthropic
     ]
 
 
+def test_anthropic_explicit_cache_marker_breakpoints_that_block(
+    configure_anthropic, fake_anthropic
+):
+    """A message tagged ``cache: True`` gets the breakpoint; the trailing
+    (volatile) message does not — explicit marks suppress the auto-tail so the
+    ingest stages cache the doc, not the per-batch candidates."""
+    fake = fake_anthropic(_a_text_block_events(["ok"]), _a_final())
+
+    llm_client.complete(
+        [
+            {"role": "system", "content": "instructions"},
+            {"role": "user", "content": "the incoming document", "cache": True},
+            {"role": "user", "content": "the candidates"},
+        ]
+    )
+
+    msgs = fake.calls[0]["messages"]
+    assert msgs[0] == {
+        "role": "user",
+        "content": [
+            {
+                "type": "text",
+                "text": "the incoming document",
+                "cache_control": {"type": "ephemeral"},
+            }
+        ],
+    }
+    # Trailing message is untouched — no stray breakpoint on volatile content.
+    assert msgs[1] == {"role": "user", "content": "the candidates"}
+
+
 def test_anthropic_passes_max_tokens(configure_anthropic, fake_anthropic):
     fake = fake_anthropic(_a_text_block_events(["ok"]), _a_final())
     llm_client.complete([{"role": "user", "content": "hi"}], max_tokens=512)

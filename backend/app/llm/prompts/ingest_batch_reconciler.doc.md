@@ -5,7 +5,3 @@ Document URL: {url}
 --- Incoming document ---
 {content}
 --- End ---
-
---- Candidate wiki pages ({n} total) ---
-{candidates}
---- End ---

@@ -70,10 +70,20 @@ class AnthropicProvider:
         settings: LLMSettings,
     ) -> Iterator[StreamEvent]:
         system, convo = split_system(messages)
+        anthropic_messages = [_message(m) for m in convo]
+        # Explicit per-message cache breakpoints (the system breakpoint below
+        # caches tools+system). A caller marks a message with ``cache: True``
+        # when it knows a prefix will be reread — e.g. the ingest stages tag
+        # the incoming-document message so the candidate batches that follow
+        # read it from cache instead of reprocessing it every batch. Content
+        # after the marked block (the per-batch candidates) stays uncached.
+        for i, m in enumerate(convo):
+            if m.get("cache"):
+                _mark_block_ephemeral(anthropic_messages[i])
         kwargs: dict[str, Any] = {
             "model": model,
             "max_tokens": max_tokens,
-            "messages": [_message(m) for m in convo],
+            "messages": anthropic_messages,
         }
         if system is not None:
             # Cache the (usually large, stable) system prompt so multi-turn
@@ -166,6 +176,24 @@ class AnthropicProvider:
         except Exception as exc:
             log.exception("llm provider error provider=anthropic model=%s", model)
             raise _translate_error(exc) from exc
+
+
+def _mark_block_ephemeral(message: dict[str, Any]) -> None:
+    """Add a cache breakpoint to the final content block of ``message``.
+
+    Everything rendered up to and including this block becomes a cacheable
+    prefix, so a later call sharing that prefix reads it back instead of
+    reprocessing it. A string ``content`` is promoted to a single text block
+    so the marker has somewhere to live."""
+    content = message["content"]
+    if isinstance(content, str):
+        if not content:
+            return  # don't emit an empty text block
+        message["content"] = [
+            {"type": "text", "text": content, "cache_control": {"type": "ephemeral"}}
+        ]
+    elif content:
+        content[-1] = {**content[-1], "cache_control": {"type": "ephemeral"}}
 
 
 def _message(m: dict[str, Any]) -> dict[str, Any]:
