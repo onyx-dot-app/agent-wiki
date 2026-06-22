@@ -19,7 +19,7 @@ from app.onyx.client import (
     OnyxUnreachableError,
 )
 from app.tasks.craft import attachment_filename
-from app.tasks.queues import craft_queue
+from app.tasks.queues import triggers_queue
 from app.wiki import acl as wiki_acl
 from app.wiki import git as wiki_git
 
@@ -137,7 +137,7 @@ def test_launch_rate_limited_per_user(client, connected_user):
 def test_launch_happy_path(client, connected_user, monkeypatch):
     wiki_git.commit_file(PAGE, "# Page One\nbody\n", "seed", author=None)
     calls = _fake_client(monkeypatch)
-    with craft_queue.immediate_mode():
+    with triggers_queue.immediate_mode():
         res = _launch(client)
     assert res.status_code == 200
     sid = res.json()["agent_session_id"]
@@ -168,7 +168,7 @@ def test_launch_happy_path(client, connected_user, monkeypatch):
 def test_launch_idempotent_for_same_page(client, connected_user, monkeypatch):
     wiki_git.commit_file(PAGE, "# Page One\n", "seed", author=None)
     calls = _fake_client(monkeypatch)
-    with craft_queue.immediate_mode():
+    with triggers_queue.immediate_mode():
         first = _launch(client)
         second = _launch(client)
     assert first.json()["agent_session_id"] == second.json()["agent_session_id"]
@@ -178,7 +178,7 @@ def test_launch_idempotent_for_same_page(client, connected_user, monkeypatch):
 def test_seed_send_skipped_when_session_has_messages(client, connected_user, monkeypatch):
     wiki_git.commit_file(PAGE, "# Page One\n", "seed", author=None)
     calls = _fake_client(monkeypatch, message_count=1)
-    with craft_queue.immediate_mode():
+    with triggers_queue.immediate_mode():
         res = _launch(client)
     assert res.status_code == 200
     assert "send" not in [c[0] for c in calls]
@@ -206,7 +206,7 @@ def test_launch_failure_taxonomy(
 ):
     wiki_git.commit_file(PAGE, "# Page One\n", "seed", author=None)
     _fake_client(monkeypatch, create_error=error)
-    with craft_queue.immediate_mode():
+    with triggers_queue.immediate_mode():
         res = _launch(client)
     assert res.status_code == 200  # the launch itself succeeded; the task failed
 

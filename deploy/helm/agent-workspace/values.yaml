@@ -112,15 +112,13 @@ worker:
   # co-schedule, AND the per-queue periodic-task scheduler runs in-process
   # (running multiple replicas would double-fire the cron tasks).
   replicaCount: 1
-  # Redis Stream queues, one consumer process each. Match
-  # `backend/app/tasks/queues.py:QUEUES`. To add one, register the queue in
-  # code AND add its metrics port to worker-deployment.yaml's $metricsPorts.
-  # The craft worker idles until an admin configures the Onyx base URL.
+  # Three Redis Stream queues, one consumer process each. Match
+  # `backend/app/tasks/queues.py:QUEUES`. Don't add a fourth without
+  # corresponding code.
   queues:
     - documents
     - triggers
     - lightweight_maintenance
-    - craft
   resources:
     requests:
       cpu: 100m

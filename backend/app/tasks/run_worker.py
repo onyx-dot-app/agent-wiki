@@ -1,7 +1,7 @@
 """Entry point for a worker container.
 
 Run with: ``python -m app.tasks.run_worker <queue>`` where ``<queue>`` is
-one of ``documents``, ``triggers``, ``lightweight_maintenance``, ``craft``.
+one of ``documents``, ``triggers``, or ``lightweight_maintenance``.
 Each queue gets its own worker process — see ``app/tasks/queues.py`` for the
 queue rationale.
 
@@ -80,9 +80,6 @@ _CONCURRENCY = {
     "documents": 1,
     "triggers": 4,
     "lightweight_maintenance": 4,
-    # Craft launches are network-bound (provisioning blocks on Onyx); a few
-    # in parallel is fine, no shared provider lock to serialize on.
-    "craft": 4,
 }
 
 # Per-queue Prometheus port. Distinct ports so all three workers can run on
@@ -93,7 +90,6 @@ _METRICS_PORT = {
     "documents": 9091,
     "triggers": 9092,
     "lightweight_maintenance": 9093,
-    "craft": 9094,
 }
 
 

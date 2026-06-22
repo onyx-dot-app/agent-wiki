@@ -37,7 +37,7 @@ from app.onyx.client import (
     OnyxError,
     OnyxUnreachableError,
 )
-from app.tasks.queues import craft_queue
+from app.tasks.queues import triggers_queue
 from app.wiki import git as wiki_git
 
 log = logging.getLogger(__name__)
@@ -76,7 +76,8 @@ def _fail(sid: str, *, user_id: str, wiki_path: str | None, reason: str) -> None
     )
 
 
-@craft_queue.task()
+# Long-running (~10-60s on Onyx sandbox provisioning).
+@triggers_queue.task()
 def craft_launch(agent_session_id: str) -> None:
     row = sessions_repo.get(agent_session_id)
     if row is None:
