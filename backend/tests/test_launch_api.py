@@ -73,12 +73,12 @@ def test_catalog_available_for_launch_flag(client):
     by_id = {x["id"]: x for x in res.json()["launchers"]}
     assert by_id["claude-code"]["available_for_launch"] is True
     assert by_id["codex"]["available_for_launch"] is True
-    # craft_enabled is True in tmp_config, but no onyx_base_url is set yet.
+    # onyx-craft has no onyx_base_url configured yet.
     assert by_id["onyx-craft"]["available_for_launch"] is False
 
 
 def test_catalog_craft_launchable_when_configured(client):
-    """onyx-craft flips launchable once Craft is enabled AND a base URL is set."""
+    """onyx-craft flips launchable once an admin configures a base URL."""
     from app.ingest import settings as ingest_settings
 
     uid = seed_user()
@@ -87,22 +87,6 @@ def test_catalog_craft_launchable_when_configured(client):
     res = client.get("/api/launchers")
     by_id = {x["id"]: x for x in res.json()["launchers"]}
     assert by_id["onyx-craft"]["available_for_launch"] is True
-
-
-def test_catalog_craft_dark_when_disabled(client, monkeypatch, tmp_config):
-    """With a base URL set but CRAFT_ENABLED off, onyx-craft stays dark."""
-    from app.ingest import settings as ingest_settings
-
-    uid = seed_user()
-    login_fastapi(client, uid)
-    ingest_settings.upsert(max_doc_chars=100_000, onyx_base_url="https://onyx.example.com")
-    monkeypatch.setattr(
-        "app.api.launchers.CONFIG",
-        tmp_config.model_copy(update={"craft_enabled": False}),
-    )
-    res = client.get("/api/launchers")
-    by_id = {x["id"]: x for x in res.json()["launchers"]}
-    assert by_id["onyx-craft"]["available_for_launch"] is False
 
 
 def test_catalog_with_machine_id_includes_default_workdir(client):

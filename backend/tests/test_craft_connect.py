@@ -42,17 +42,6 @@ def test_craft_routes_dark_without_base_url(client):
     assert res.status_code == 404
 
 
-def test_craft_routes_dark_when_disabled(client, tmp_config, monkeypatch):
-    _configure_onyx()
-    monkeypatch.setattr(
-        "app.api.craft.CONFIG", tmp_config.model_copy(update={"craft_enabled": False})
-    )
-    uid = seed_user()
-    login_fastapi(client, uid)
-    assert client.get("/api/craft/connect").status_code == 404
-    assert client.post("/api/craft/launch", json={"message": "x"}).status_code == 404
-
-
 # --------------------------------------------------------------------------- #
 # Manual-PAT connect (v0)                                                     #
 # --------------------------------------------------------------------------- #

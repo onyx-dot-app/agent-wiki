@@ -16,9 +16,9 @@ knowledge ACLs + LLM access are respected. The redirect-mint flow
 (``connect/start`` + ``connect/callback``) is the future no-copy-paste UX and
 stays dormant until the Onyx ``/connect/agent-wiki`` endpoints ship.
 
-All gated on ``CONFIG.craft_enabled`` AND an admin-configured Onyx base URL
-(``ingest_settings.onyx_base_url``) — availability is computed, not a toggle,
-so the feature merges dark. See "Engineering Projects/Craft Integration".
+Gated on an admin-configured Onyx base URL (``ingest_settings.onyx_base_url``,
+the "Onyx Connection" admin page) — availability is computed from config, not a
+deploy flag, so the feature merges dark. See "Engineering Projects/Craft Integration".
 """
 
 from __future__ import annotations
@@ -62,8 +62,6 @@ _MAX_PROVISIONING_PER_USER = 3
 
 def _require_available() -> str:
     """404 when the feature is dark; otherwise the Onyx origin."""
-    if not CONFIG.craft_enabled:
-        raise HTTPException(status_code=404, detail="craft launches disabled")
     base = ingest_settings.get_onyx_base_url()
     if not base:
         raise HTTPException(status_code=404, detail="onyx connection not configured")
