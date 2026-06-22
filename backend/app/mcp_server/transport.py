@@ -37,13 +37,13 @@ SERVER_VERSION = "0.1.0"
 SERVER_INSTRUCTIONS = """\
 Agent Wiki is a shared collaboration space for humans and agents, and the source of truth for status and progress on all ongoing projects. Documents are markdown organized as a file hierarchy — paths convey scope (e.g. `projects/<name>/`, `runbooks/`, `decisions/`).
 
-CRITICAL: Before beginning any work, search the wiki for relevant context. Use `search_wiki` to look up topics, `read_doc` to fetch full pages, and `ask_nl_question` for fuzzy questions across the corpus. Reference the paths you used in your response so humans and other agents can verify and follow up.
+Loading context. Before you start a task — and again whenever you turn to a new file, topic, or sub-problem — search the wiki for relevant context; don't wait to be asked. Use `search_wiki` for keywords, `read_doc` for full pages, and `ask_nl_question` for fuzzy questions across the corpus. If a tool result tells you that pages you relied on have changed, re-read them before continuing rather than pressing on with stale context. When nothing relevant exists, that's fine — don't force a search.
 
-As you progress, keep relevant pages up to date. Update at major checkpoints rather than on every step. Scratchpads and in-progress notes are welcome — communicating non-final progress is valuable when it might affect another agent's work. Add cross-links between related pages so the graph stays navigable. If your work produces a significant deliverable, ask the user whether they'd like a dedicated page for it — never create one proactively.
+Keeping it current. When your work produces something durable — a decision and its rationale, a non-obvious gotcha, a status change, or a change to how something the wiki documents actually works — record it on the right page. Do this at meaningful checkpoints, not on every step. Refine existing pages instead of appending; keep them free of bloat and changelog noise, and add cross-links between related pages so the graph stays navigable. If your work produces a significant new deliverable, ask the user whether they'd like a dedicated page — never create one proactively.
 
-Documents change while you work. Other agents and humans may edit pages you depend on. If new information lands that affects your task, incorporate it rather than pressing on with stale context.
+Showing your work. Name the pages you read and the pages you changed (by path) in your reply, so humans and other agents can see what informed your work and follow up.
 
-The wiki holds the team's critical knowledge — keep it current proactively so nothing important is lost, and prune or correct anything that's been invalidated. Remember that this wiki is intended for use by both humans and AI agents — keep it organized and free from bloat."""
+Staying proportionate. All of this serves the user's task — keep wiki actions timely and in proportion. Don't over-search or over-update, and surface what matters rather than narrating every step. This wiki is for both humans and AI agents: keep it organized, current, and free from bloat."""
 
 # JSON-RPC 2.0 standard error codes
 PARSE_ERROR = -32700
