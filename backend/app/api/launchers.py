@@ -60,13 +60,13 @@ def _check_flag() -> None:
 
 def _entry_available(m: Manifest) -> bool:
     """Frontend filters the Run-Agent picker by this flag. local_cli tools
-    are always launchable; onyx-craft (in_app) is launchable only when Craft
-    is enabled AND an admin has configured the Onyx instance URL — otherwise
-    the launch endpoint would 404."""
+    are always launchable; onyx-craft (in_app) is launchable only once an
+    admin has configured the Onyx instance URL — otherwise the launch
+    endpoint would 404."""
     if m.kind == "local_cli":
         return True
     if m.id == "onyx-craft":
-        return CONFIG.craft_enabled and bool(ingest_settings.get_onyx_base_url())
+        return bool(ingest_settings.get_onyx_base_url())
     return False
 
 
