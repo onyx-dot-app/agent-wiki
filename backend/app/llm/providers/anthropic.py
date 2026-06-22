@@ -71,15 +71,27 @@ class AnthropicProvider:
     ) -> Iterator[StreamEvent]:
         system, convo = split_system(messages)
         anthropic_messages = [_message(m) for m in convo]
-        # Explicit per-message cache breakpoints (the system breakpoint below
-        # caches tools+system). A caller marks a message with ``cache: True``
-        # when it knows a prefix will be reread — e.g. the ingest stages tag
-        # the incoming-document message so the candidate batches that follow
-        # read it from cache instead of reprocessing it every batch. Content
-        # after the marked block (the per-batch candidates) stays uncached.
-        for i, m in enumerate(convo):
-            if m.get("cache"):
+        # Second-tier cache breakpoints on the conversation (the system
+        # breakpoint below caches tools+system). Two ways to place them:
+        #
+        #  * Explicit: a caller marks specific messages with ``cache: True``
+        #    when it knows a prefix will be reread (e.g. the ingest stages tag
+        #    the incoming-document message so the candidate batches that follow
+        #    read it from cache instead of reprocessing it every batch).
+        #  * Automatic: with no explicit marks, a multi-iteration agent loop
+        #    re-sends the whole growing history each call, so we breakpoint the
+        #    tail and iteration N+1 reads everything through iteration N.
+        #
+        # Explicit marks win — a caller that placed them doesn't want a stray
+        # tail breakpoint on volatile trailing content (e.g. per-batch
+        # candidates). Single-message calls with no mark get nothing: no prior
+        # turn to reread, so the write would just be wasted.
+        explicit = [i for i, m in enumerate(convo) if m.get("cache")]
+        if explicit:
+            for i in explicit:
                 _mark_block_ephemeral(anthropic_messages[i])
+        elif len(anthropic_messages) > 1:
+            _mark_block_ephemeral(anthropic_messages[-1])
         kwargs: dict[str, Any] = {
             "model": model,
             "max_tokens": max_tokens,
