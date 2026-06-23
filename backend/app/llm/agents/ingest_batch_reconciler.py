@@ -44,7 +44,11 @@ _SUBMIT_TOOL: dict[str, Any] = {
         "properties": {
             "results": {
                 "type": "array",
-                "description": "One entry per candidate wiki page, in order.",
+                "description": (
+                    "One entry only for candidates you are editing or marking "
+                    "no_change, ordered by candidate number. Omit irrelevant "
+                    "candidates — a candidate with no entry is treated as irrelevant."
+                ),
                 "items": {
                     "type": "object",
                     "properties": {
