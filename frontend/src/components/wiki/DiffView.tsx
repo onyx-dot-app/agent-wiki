@@ -52,7 +52,6 @@ function ChangeNavigator({
           type="button"
           className={styles.navBtn}
           onClick={onPrev}
-          disabled={current <= 0}
           aria-label="Previous change"
         >
           <SvgChevronUp size={16} />
@@ -61,7 +60,6 @@ function ChangeNavigator({
           type="button"
           className={styles.navBtn}
           onClick={onNext}
-          disabled={current >= total - 1}
           aria-label="Next change"
         >
           <SvgChevronDown size={16} />
@@ -117,9 +115,10 @@ export function DiffView({
   const goToChange = useCallback(
     (i: number) => {
       if (total === 0) return;
-      const clamped = Math.max(0, Math.min(total - 1, i));
-      setCurrent(clamped);
-      scrollToChange(clamped);
+      // Wrap around so next past the last change returns to the first.
+      const wrapped = ((i % total) + total) % total;
+      setCurrent(wrapped);
+      scrollToChange(wrapped);
     },
     [total, scrollToChange],
   );
