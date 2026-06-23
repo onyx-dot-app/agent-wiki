@@ -152,7 +152,7 @@ def load_config() -> Config:
         max_queue_size=_positive_int("MAX_QUEUE_SIZE", 1000),
         ingest_bm25_min_score=_positive_float("INGEST_BM25_MIN_SCORE", 5.0),
         ingest_bm25_title_boost=_positive_float("INGEST_BM25_TITLE_BOOST", 2.0),
-        ingest_bm25_limit=_positive_int("INGEST_BM25_LIMIT", 20),
+        ingest_bm25_limit=_positive_int("INGEST_BM25_LIMIT", 100),
         ingest_irrelevant_stop_n=_positive_int("INGEST_IRRELEVANT_STOP_N", 2),
         auth_mode=os.environ.get("AUTH_MODE", "basic"),
         oidc_issuer=os.environ.get("OIDC_ISSUER", ""),
