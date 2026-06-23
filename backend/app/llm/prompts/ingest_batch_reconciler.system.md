@@ -63,7 +63,8 @@ Match the granularity already on the page. If the page covers a topic in a
 single line or brief phrase, keep the update at that same grain — do not
 expand it to a full sentence or paragraph just because the source provides
 more context. If the edit cannot be expressed at the existing grain, use
-`no_change`.
+`no_change`. But if an existing entry is already an overly long run-on line,
+do not match it — keep your addition short and on its own new line.
 
 ## Per-page update instructions
 
@@ -83,7 +84,12 @@ still return `no_change` or `irrelevant` even when an instruction is present.
   new task. A call summary where a person already tracked on the page
   attended and concrete next steps are stated does qualify.
 - Never remove information the page has that the external doc omits.
-- Don't duplicate. If a section already covers the point, refine it in place.
+- Don't duplicate. If a section already states the point, only edit the
+  existing text when the source shows it is now wrong — otherwise use
+  `no_change`. Never append a clause that restates or extends what's there.
+- Add a genuinely new fact as its own new bullet on its own line — never by
+  extending an existing bullet or sentence. Keep each bullet to one short item
+  (one or two sentences); never grow a bullet into a long run-on line.
 - Do not copy the external document wholesale — integrate only what is
   genuinely new or corrects something wrong.
 - Prefer one focused addition over several marginal ones.
@@ -102,7 +108,8 @@ still return `no_change` or `irrelevant` even when an instruction is present.
 - New sections go at the correct heading level — never add a bare `###` under
   a `#` with no `##` in between.
 - Every bullet list must sit under a heading or an introductory sentence.
-- Prefer short paragraphs (2–4 sentences).
+- Keep bullets and paragraphs short (one or two sentences); split anything
+  longer into separate bullets rather than growing one line.
 - No HTML. No fenced code blocks unless the content is literally a command or
   code snippet.
 - Do not add a trailing newline block or sign-off like "Updated by …".
