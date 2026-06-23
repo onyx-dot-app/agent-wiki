@@ -91,13 +91,22 @@
   scroll-margin: 24px 0;
 }
 
-/* The <del> is red strikethrough, the <ins> is green underline. */
+/* Highlight scoped to just the changed words, reusing the block-band status
+   tokens. clone keeps the background intact where the span wraps lines. */
 .wordRemoved {
+  background: var(--status-error-01);
   color: var(--status-text-error-05);
   text-decoration: line-through;
+  border-radius: 3px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
 }
 
 .wordAdded {
+  background: var(--status-success-01);
   color: var(--status-text-success-05);
   text-decoration: underline;
+  border-radius: 3px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
 }
