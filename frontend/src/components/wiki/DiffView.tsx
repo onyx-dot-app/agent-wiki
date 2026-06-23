@@ -97,11 +97,21 @@ export function DiffView({
   const metaLine = metaPieces.join(" · ");
   const metaTitle = commit?.ts ? absoluteTime(commit.ts) : undefined;
 
-  const scrollToChange = useCallback((i: number, behavior: ScrollBehavior) => {
-    const el = bodyRef.current?.querySelector<HTMLElement>(
+  // Center change `i` in the scroll body. We set scrollTop directly rather
+  // than scrollIntoView: smooth scrolling no-ops inside this nested overflow
+  // container, and scrollIntoView there is unreliable.
+  const scrollToChange = useCallback((i: number) => {
+    const container = bodyRef.current;
+    const el = container?.querySelector<HTMLElement>(
       `[data-change-index="${i}"]`,
     );
-    el?.scrollIntoView({ block: "center", behavior });
+    if (!container || !el) return;
+    const cRect = container.getBoundingClientRect();
+    const eRect = el.getBoundingClientRect();
+    const elTop = eRect.top - cRect.top + container.scrollTop;
+    const target = elTop - (container.clientHeight - eRect.height) / 2;
+    const max = container.scrollHeight - container.clientHeight;
+    container.scrollTop = Math.max(0, Math.min(max, target));
   }, []);
 
   const goToChange = useCallback(
@@ -109,7 +119,7 @@ export function DiffView({
       if (total === 0) return;
       const clamped = Math.max(0, Math.min(total - 1, i));
       setCurrent(clamped);
-      scrollToChange(clamped, "smooth");
+      scrollToChange(clamped);
     },
     [total, scrollToChange],
   );
@@ -124,8 +134,18 @@ export function DiffView({
   // commit click lands you on the change, not the top of the file.
   useLayoutEffect(() => {
     if (mode !== "diff") return;
-    const raf = requestAnimationFrame(() => scrollToChange(0, "auto"));
-    return () => cancelAnimationFrame(raf);
+    let cancelled = false;
+    const jump = () => {
+      if (!cancelled) scrollToChange(0);
+    };
+    const raf = requestAnimationFrame(jump);
+    // Re-run once web fonts settle — their metrics shift line positions, so a
+    // first-frame jump can land short on a freshly loaded, content-heavy diff.
+    void document.fonts?.ready.then(() => requestAnimationFrame(jump));
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(raf);
+    };
   }, [data, mode, scrollToChange]);
 
   async function pickMode(next: Mode) {
