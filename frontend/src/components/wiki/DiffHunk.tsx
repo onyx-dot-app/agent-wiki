@@ -4,67 +4,29 @@ import remarkGfm from "remark-gfm";
 
 import { remarkBareSpaceLinks } from "@/lib/remarkBareSpaceLinks";
 
-import type { DiffHunk as DiffHunkData, DiffLine, WordDiff } from "@/lib/wiki";
+import type { WordDiff } from "@/lib/wiki";
 
+import type { AnnotatedEntry } from "./diffEntries";
 import styles from "./DiffHunk.module.css";
-
-type BlockKind = "context" | "add" | "remove";
-
-interface BlockEntry {
-  kind: BlockKind;
-  text: string;
-}
-
-interface WordEntry {
-  kind: "word";
-  line: DiffLine;
-}
-
-type Entry = BlockEntry | WordEntry;
-
-function groupEntries(lines: DiffLine[]): Entry[] {
-  const out: Entry[] = [];
-  let current: BlockEntry | null = null;
-  const flush = () => {
-    if (current) {
-      out.push(current);
-      current = null;
-    }
-  };
-  for (const line of lines) {
-    if (line.kind === "word") {
-      flush();
-      out.push({ kind: "word", line });
-      continue;
-    }
-    const text = line.text ?? "";
-    if (current && current.kind === line.kind) {
-      current.text += "\n" + text;
-    } else {
-      flush();
-      current = { kind: line.kind, text };
-    }
-  }
-  flush();
-  return out;
-}
 
 const HEADING_RE = /^(#{1,6})\s+(.*)$/;
 const LIST_RE = /^(\s*)([-*+])\s+(.*)$/;
 const ORDERED_LIST_RE = /^(\s*)(\d+\.)\s+(.*)$/;
 const BLOCKQUOTE_RE = /^(>+)\s*(.*)$/;
 
-function WordChips({ w }: { w: WordDiff | null }) {
+/** Wraps the changed run inside a line. Carries the navigator scroll anchor
+    so jumping lands on the changed words, not the top of a wrapped line. */
+function WordChips({ w, anchor }: { w: WordDiff | null; anchor?: number }) {
   if (!w) return null;
   return (
-    <>
+    <span className={styles.wordChange} data-change-index={anchor}>
       {w.removed ? <del className={styles.wordRemoved}>{w.removed}</del> : null}
       {w.added ? <ins className={styles.wordAdded}>{w.added}</ins> : null}
-    </>
+    </span>
   );
 }
 
-function WordLine({ w }: { w: WordDiff | null }) {
+function WordLine({ w, anchor }: { w: WordDiff | null; anchor?: number }) {
   if (!w) return null;
 
   const headingMatch = HEADING_RE.exec(w.prefix);
@@ -75,7 +37,7 @@ function WordLine({ w }: { w: WordDiff | null }) {
     return (
       <Tag>
         {headingPrefixText}
-        <WordChips w={w} />
+        <WordChips w={w} anchor={anchor} />
         {w.suffix}
       </Tag>
     );
@@ -90,7 +52,7 @@ function WordLine({ w }: { w: WordDiff | null }) {
         <li>
           {indent}
           {listPrefixText}
-          <WordChips w={w} />
+          <WordChips w={w} anchor={anchor} />
           {w.suffix}
         </li>
       </ul>
@@ -106,7 +68,7 @@ function WordLine({ w }: { w: WordDiff | null }) {
         <li>
           {indent}
           {listPrefixText}
-          <WordChips w={w} />
+          <WordChips w={w} anchor={anchor} />
           {w.suffix}
         </li>
       </ol>
@@ -120,7 +82,7 @@ function WordLine({ w }: { w: WordDiff | null }) {
       <blockquote>
         <p>
           {quotePrefixText}
-          <WordChips w={w} />
+          <WordChips w={w} anchor={anchor} />
           {w.suffix}
         </p>
       </blockquote>
@@ -130,23 +92,23 @@ function WordLine({ w }: { w: WordDiff | null }) {
   return (
     <p>
       {w.prefix}
-      <WordChips w={w} />
+      <WordChips w={w} anchor={anchor} />
       {w.suffix}
     </p>
   );
 }
 
-export function DiffHunk({ hunk }: { hunk: DiffHunkData }) {
-  const entries = groupEntries(hunk.lines);
+export function DiffHunk({ entries }: { entries: AnnotatedEntry[] }) {
   return (
     <section className={styles.hunk}>
-      {entries.map((entry, idx) => {
+      {entries.map(({ entry, changeIndex }, idx) => {
+        const anchor = changeIndex ?? undefined;
         if (entry.kind === "word") {
+          // Single-line edits render inline (no full-line band) so only the
+          // changed words are highlighted, not the whole line.
           return (
-            <div key={idx} className={styles.add}>
-              <div className={`${styles.blockContent} markdown`}>
-                <WordLine w={entry.line.word_diff} />
-              </div>
+            <div key={idx} className={`${styles.wordLine} markdown`}>
+              <WordLine w={entry.line.word_diff} anchor={anchor} />
             </div>
           );
         }
@@ -161,7 +123,7 @@ export function DiffHunk({ hunk }: { hunk: DiffHunkData }) {
         }
         const cls = entry.kind === "add" ? styles.add : styles.remove;
         return (
-          <div key={idx} className={cls}>
+          <div key={idx} className={cls} data-change-index={anchor}>
             <div className={`${styles.blockContent} markdown`}>
               <ReactMarkdown remarkPlugins={[remarkGfm, remarkBareSpaceLinks]}>
                 {entry.text}

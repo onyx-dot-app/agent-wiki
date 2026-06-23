@@ -1,5 +1,13 @@
 import { SelectButton, Text } from "@onyx-ai/opal/components";
-import { useState } from "react";
+import { SvgChevronDown, SvgChevronUp } from "@onyx-ai/opal/icons";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -10,6 +18,7 @@ import { absoluteTime, relativeTime } from "@/lib/time";
 import type { FileDiffResponse } from "@/lib/wiki";
 
 import { DiffHunk } from "./DiffHunk";
+import { annotateHunks } from "./diffEntries";
 import styles from "./DiffView.module.css";
 
 interface CommitMeta {
@@ -20,6 +29,47 @@ interface CommitMeta {
 }
 
 type Mode = "diff" | "doc";
+
+/** Floating pill (Figma 283:22157): change position + prev/next steppers. */
+function ChangeNavigator({
+  current,
+  total,
+  onPrev,
+  onNext,
+}: {
+  current: number;
+  total: number;
+  onPrev: () => void;
+  onNext: () => void;
+}) {
+  return (
+    <div className={styles.navigator}>
+      <Text font="secondary-mono" color="text-03" nowrap>
+        {`${current + 1} / ${total}`}
+      </Text>
+      <div className={styles.navArrows}>
+        <button
+          type="button"
+          className={styles.navBtn}
+          onClick={onPrev}
+          disabled={current <= 0}
+          aria-label="Previous change"
+        >
+          <SvgChevronUp size={16} />
+        </button>
+        <button
+          type="button"
+          className={styles.navBtn}
+          onClick={onNext}
+          disabled={current >= total - 1}
+          aria-label="Next change"
+        >
+          <SvgChevronDown size={16} />
+        </button>
+      </div>
+    </div>
+  );
+}
 
 export function DiffView({
   data,
@@ -34,6 +84,10 @@ export function DiffView({
   const [body, setBody] = useState<string | null>(null);
   const [bodyError, setBodyError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [current, setCurrent] = useState(0);
+  const bodyRef = useRef<HTMLDivElement>(null);
+
+  const { perHunk, total } = useMemo(() => annotateHunks(data.hunks), [data]);
 
   const shaShort = data.sha.slice(0, 7);
   const authorLabel = commit?.author ?? "?";
@@ -42,6 +96,37 @@ export function DiffView({
   if (timeLabel) metaPieces.push(timeLabel);
   const metaLine = metaPieces.join(" · ");
   const metaTitle = commit?.ts ? absoluteTime(commit.ts) : undefined;
+
+  const scrollToChange = useCallback((i: number, behavior: ScrollBehavior) => {
+    const el = bodyRef.current?.querySelector<HTMLElement>(
+      `[data-change-index="${i}"]`,
+    );
+    el?.scrollIntoView({ block: "center", behavior });
+  }, []);
+
+  const goToChange = useCallback(
+    (i: number) => {
+      if (total === 0) return;
+      const clamped = Math.max(0, Math.min(total - 1, i));
+      setCurrent(clamped);
+      scrollToChange(clamped, "smooth");
+    },
+    [total, scrollToChange],
+  );
+
+  // New commit selected → back to diff mode at the first change.
+  useEffect(() => {
+    setMode("diff");
+    setCurrent(0);
+  }, [data]);
+
+  // Once the diff for a new commit has painted, jump to the first change so a
+  // commit click lands you on the change, not the top of the file.
+  useLayoutEffect(() => {
+    if (mode !== "diff") return;
+    const raf = requestAnimationFrame(() => scrollToChange(0, "auto"));
+    return () => cancelAnimationFrame(raf);
+  }, [data, mode, scrollToChange]);
 
   async function pickMode(next: Mode) {
     if (next === mode) return;
@@ -101,7 +186,7 @@ export function DiffView({
           </SelectButton>
         </div>
       </div>
-      <div className={styles.body}>
+      <div className={styles.body} ref={bodyRef}>
         {mode === "diff" ? (
           data.hunks.length === 0 ? (
             <div className={styles.empty}>
@@ -110,7 +195,9 @@ export function DiffView({
               </Text>
             </div>
           ) : (
-            data.hunks.map((hunk, idx) => <DiffHunk key={idx} hunk={hunk} />)
+            perHunk.map((entries, idx) => (
+              <DiffHunk key={idx} entries={entries} />
+            ))
           )
         ) : loading ? (
           <div className={styles.empty}>
@@ -130,6 +217,14 @@ export function DiffView({
           </article>
         )}
       </div>
+      {mode === "diff" && total > 0 ? (
+        <ChangeNavigator
+          current={current}
+          total={total}
+          onPrev={() => goToChange(current - 1)}
+          onNext={() => goToChange(current + 1)}
+        />
+      ) : null}
     </div>
   );
 }
