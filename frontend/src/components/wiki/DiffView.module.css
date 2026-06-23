@@ -109,8 +109,7 @@
 .navigator {
   position: absolute;
   right: 16px;
-  top: 50%;
-  transform: translateY(-50%);
+  bottom: 16px;
   z-index: 2;
   display: flex;
   align-items: center;
