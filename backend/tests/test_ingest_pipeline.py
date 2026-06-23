@@ -13,7 +13,7 @@ Covers:
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -288,6 +288,51 @@ def test_irrelevant_does_not_commit(mock_search, mock_reconcile, mock_read, mock
     mock_reconcile.return_value = ([IRRELEVANT_SENTINEL], 1)
     _run(_make_push())
     mock_commit.assert_not_called()
+
+
+@patch("app.tasks.wiki_update.ingest_eval_sample.log_sample")
+@patch("app.llm.client.complete")
+@patch("app.tasks.wiki_update.wiki_git.read_file", return_value="body")
+@patch("app.tasks.wiki_update.ingest_search.candidates")
+def test_omitted_candidate_recorded_as_irrelevant(
+    mock_search, mock_read, mock_complete, mock_log, monkeypatch
+):
+    # The reconciler now omits irrelevant candidates from its tool call (only
+    # edit/no_change are emitted). This drives the real _parse_tool_results +
+    # post-process: an omitted candidate must still land as an `irrelevant`
+    # outcome — same metric + eval row as an explicit irrelevant — so DB logging
+    # and accounting stay correct.
+    monkeypatch.setattr("app.tasks.wiki_update.get_llm_settings", lambda: _settings_with_model())
+    monkeypatch.setattr(
+        "app.tasks.wiki_update.CONFIG",
+        CONFIG.model_copy(update={"ingest_eval_logging": True}),
+    )
+    from app.llm.client import ToolCall
+
+    mock_search.return_value = _cs([_hit("kept.md", "Kept", 6.0), _hit("omitted.md", "Omitted", 5.0)])
+    # Model reports only candidate 1 (no_change); candidate 2 is omitted entirely.
+    resp = MagicMock()
+    resp.text = ""
+    resp.tool_calls = [
+        ToolCall(
+            id="c1",
+            name="submit_results",
+            arguments={"results": [{"candidate_index": 1, "action": "no_change"}]},
+        )
+    ]
+    resp.usage.input_tokens = 100
+    resp.usage.output_tokens = 10
+    resp.usage.cached_input_tokens = 0
+    resp.usage.uncached_input_tokens = 100
+    mock_complete.return_value = resp
+
+    before = _outcome_count("irrelevant", "omitted.md")
+    _run(_make_push())
+
+    assert _outcome_count("irrelevant", "omitted.md") - before == 1.0
+    logged = {(c.kwargs["wiki_path"], c.kwargs["outcome"]) for c in mock_log.call_args_list}
+    assert ("omitted.md", "irrelevant") in logged
+    assert ("kept.md", "no_change") in logged
 
 
 @patch("app.tasks.wiki_update.wiki_git.commit_file")
