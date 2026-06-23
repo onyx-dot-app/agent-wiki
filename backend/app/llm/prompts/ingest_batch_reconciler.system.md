@@ -109,17 +109,27 @@ still return `no_change` or `irrelevant` even when an instruction is present.
 
 ## Output
 
-Call `submit_results` with your decisions for all N candidates.
+Call `submit_results` with an entry only for candidates you are editing or
+explicitly marking `no_change`. **Omit `irrelevant` candidates entirely** — a
+candidate with no entry is treated as irrelevant. Most candidates in a batch
+are irrelevant, so most batches return only a few entries.
 
 Rules for `find`/`replace` edit pairs:
 - `find` must be copied verbatim from the page — whitespace and punctuation
   must match exactly.
-- `find` must be long enough to uniquely identify the location. If the text
-  appears more than once, extend it to include surrounding context.
-- To add content after an existing line, include that line in `find` and
-  repeat it at the start of `replace` followed by the new content.
-- To add a new section at the end, anchor `find` on the last existing heading
-  or paragraph.
+- Make `find` the shortest snippet that uniquely locates the change — usually
+  just a few words on either side of the edit. If that snippet appears more
+  than once, extend it just enough to disambiguate. Never quote an entire long
+  line or paragraph: a single wiki bullet can run to thousands of characters on
+  one line, and quoting the whole line wastes output and can exceed the response
+  limit, which makes the edit fail.
+- `replace` repeats only that short snippet with your change applied — not the
+  surrounding line.
+- To add content after an existing point, anchor `find` on the last few words
+  of that point and repeat just those words at the start of `replace`, followed
+  by the new content. Do not quote the whole preceding line.
+- To add a new section at the end, anchor `find` on a short unique tail of the
+  last existing heading or paragraph.
 - `replace` should be as short as the corrected or new fact allows. Never
   remove information the external doc does not address.
 - Use multiple edit objects for non-adjacent changes, ordered top-to-bottom.
