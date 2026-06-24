@@ -511,6 +511,35 @@ class SlackWebhook(Base):
     __table_args__ = (Index("idx_slack_webhooks_owner", "owner_user_id"),)
 
 
+class DestinationConfig(Base):
+    """A user-owned, named, typed delivery target a trigger can fire to.
+
+    Generalizes ``slack_webhooks`` beyond Slack: ``type`` is a
+    ``trigger_destinations`` catalog slug (``slack``, ``webhook``, …),
+    ``config_json`` holds the non-secret per-type settings, and ``secret`` is
+    the optional encrypted credential (an incoming-webhook URL, a signing
+    secret, …). Private to ``owner_user_id`` — only the owner's triggers may
+    reference one, and the secret never reaches the wiki git repo.
+    """
+
+    __tablename__ = "destination_configs"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    owner_user_id: Mapped[str] = mapped_column(
+        Text, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    type: Mapped[str] = mapped_column(Text, nullable=False)  # trigger_destinations slug
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    config_json: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+    # Optional secret — AES-GCM encrypted at rest (bytea). See app/db/crypto.py.
+    secret: Mapped[str | None] = mapped_column(EncryptedString())
+    created_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
+
+    __table_args__ = (Index("idx_destination_configs_owner", "owner_user_id"),)
+
+
 # --------------------------------------------------------------------------- #
 # Chat sessions — persisted conversations with the in-app ChatUI              #
 # --------------------------------------------------------------------------- #
