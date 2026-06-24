@@ -34,16 +34,21 @@ type Mode = "diff" | "doc";
 function ChangeNavigator({
   current,
   total,
+  top,
   onPrev,
   onNext,
 }: {
   current: number;
   total: number;
+  top: number | null;
   onPrev: () => void;
   onNext: () => void;
 }) {
   return (
-    <div className={styles.navigator}>
+    <div
+      className={styles.navigator}
+      style={top !== null ? { top: `${top}px` } : undefined}
+    >
       <Text font="secondary-mono" color="text-03" nowrap>
         {`${current + 1} / ${total}`}
       </Text>
@@ -83,7 +88,10 @@ export function DiffView({
   const [bodyError, setBodyError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [current, setCurrent] = useState(0);
+  const [navTop, setNavTop] = useState<number | null>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
+  const viewRef = useRef<HTMLDivElement>(null);
+  const currentRef = useRef(0);
 
   const { perHunk, total } = useMemo(() => annotateHunks(data.hunks), [data]);
 
@@ -112,21 +120,39 @@ export function DiffView({
     container.scrollTop = Math.max(0, Math.min(max, target));
   }, []);
 
+  // Park the navigator vertically beside the current change, clamped inside
+  // the view so it stays visible when the change scrolls toward an edge.
+  const updateNavPosition = useCallback(() => {
+    const view = viewRef.current;
+    const el = bodyRef.current?.querySelector<HTMLElement>(
+      `[data-change-index="${currentRef.current}"]`,
+    );
+    if (!view || !el) return;
+    const vRect = view.getBoundingClientRect();
+    const eRect = el.getBoundingClientRect();
+    const center = eRect.top + eRect.height / 2 - vRect.top;
+    const margin = 28;
+    setNavTop(Math.max(margin, Math.min(vRect.height - margin, center)));
+  }, []);
+
   const goToChange = useCallback(
     (i: number) => {
       if (total === 0) return;
       // Wrap around so next past the last change returns to the first.
       const wrapped = ((i % total) + total) % total;
+      currentRef.current = wrapped;
       setCurrent(wrapped);
       scrollToChange(wrapped);
+      updateNavPosition();
     },
-    [total, scrollToChange],
+    [total, scrollToChange, updateNavPosition],
   );
 
   // New commit selected → back to diff mode at the first change.
   useEffect(() => {
     setMode("diff");
     setCurrent(0);
+    currentRef.current = 0;
   }, [data]);
 
   // Once the diff for a new commit has painted, jump to the first change so a
@@ -135,7 +161,9 @@ export function DiffView({
     if (mode !== "diff") return;
     let cancelled = false;
     const jump = () => {
-      if (!cancelled) scrollToChange(0);
+      if (cancelled) return;
+      scrollToChange(0);
+      updateNavPosition();
     };
     const raf = requestAnimationFrame(jump);
     // Re-run once web fonts settle — their metrics shift line positions, so a
@@ -145,7 +173,23 @@ export function DiffView({
       cancelled = true;
       cancelAnimationFrame(raf);
     };
-  }, [data, mode, scrollToChange]);
+  }, [data, mode, scrollToChange, updateNavPosition]);
+
+  // Keep the navigator beside the active change while the diff is scrolled.
+  useEffect(() => {
+    const container = bodyRef.current;
+    if (mode !== "diff" || !container) return;
+    let raf = 0;
+    const onScroll = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(updateNavPosition);
+    };
+    container.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      container.removeEventListener("scroll", onScroll);
+      cancelAnimationFrame(raf);
+    };
+  }, [data, mode, total, updateNavPosition]);
 
   async function pickMode(next: Mode) {
     if (next === mode) return;
@@ -165,7 +209,7 @@ export function DiffView({
   }
 
   return (
-    <div className={styles.view}>
+    <div className={styles.view} ref={viewRef}>
       <div className={styles.header}>
         <div className={styles.headerInfo}>
           <Text
@@ -214,9 +258,11 @@ export function DiffView({
               </Text>
             </div>
           ) : (
-            perHunk.map((entries, idx) => (
-              <DiffHunk key={idx} entries={entries} />
-            ))
+            <div className={styles.diffContent}>
+              {perHunk.map((entries, idx) => (
+                <DiffHunk key={idx} entries={entries} />
+              ))}
+            </div>
           )
         ) : loading ? (
           <div className={styles.empty}>
@@ -240,6 +286,7 @@ export function DiffView({
         <ChangeNavigator
           current={current}
           total={total}
+          top={navTop}
           onPrev={() => goToChange(current - 1)}
           onNext={() => goToChange(current + 1)}
         />

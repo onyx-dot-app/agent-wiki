@@ -104,12 +104,19 @@
   color: var(--text-03);
 }
 
+/* Right gutter keeps the diff content clear of the floating navigator so the
+   selector sits in whitespace, never over the text. */
+.diffContent {
+  padding-right: 150px;
+}
+
 /* Floating change navigator (Figma 283:22157) — pinned to the diff viewport
    (not the scrolling body) so it stays put while you step through changes. */
 .navigator {
   position: absolute;
   right: 16px;
-  bottom: 16px;
+  top: 50%;
+  transform: translateY(-50%);
   z-index: 2;
   display: flex;
   align-items: center;
