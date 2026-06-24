@@ -69,6 +69,7 @@ def _to_dict(row: UpdatePolicy) -> dict[str, Any]:
         "kind": row.kind,
         "ingestion_auto_update_disabled": row.ingestion_auto_update_disabled,
         "update_instruction": row.update_instruction,
+        "warn_update_threshold": row.warn_update_threshold,
         "updated_by_user_id": row.updated_by_user_id,
         "created_at": row.created_at,
         "updated_at": row.updated_at,
@@ -82,18 +83,36 @@ def get(path: str) -> dict[str, Any] | None:
         return _to_dict(row) if row is not None else None
 
 
+def resolve_warn_threshold(path: str) -> int:
+    """Effective too-frequent-update warning threshold for ``path``.
+
+    The page's own ``warn_update_threshold`` if set, else the wiki-wide default
+    (``app_settings.warn_update_threshold_default``). Per-page only — unlike the
+    two cascaded fields, this does not walk ancestor folders. ``0`` means
+    warnings are off for the page.
+    """
+    from app.app_settings import settings as app_settings
+
+    with session() as s:
+        row = s.get(UpdatePolicy, normalize_path(path))
+        if row is not None and row.warn_update_threshold is not None:
+            return row.warn_update_threshold
+    return app_settings.get().warn_update_threshold_default
+
+
 def set_policy(
     path: str,
     *,
     ingestion_auto_update_disabled: bool | None | _UnsetType = _UNSET,
     update_instruction: str | None | _UnsetType = _UNSET,
+    warn_update_threshold: int | None | _UnsetType = _UNSET,
     actor_user_id: str | None = None,
 ) -> dict[str, Any] | None:
     """Upsert the policy for ``path`` with patch semantics.
 
     Only fields passed (not ``_UNSET``) are changed. An empty-string
     ``update_instruction`` clears it. When the row ends up carrying no setting
-    (both fields NULL/empty) it is deleted and ``None`` is returned.
+    (every field NULL/empty) it is deleted and ``None`` is returned.
     """
     norm = normalize_path(path)
     with session() as s:
@@ -106,8 +125,14 @@ def set_policy(
             row.ingestion_auto_update_disabled = ingestion_auto_update_disabled
         if not isinstance(update_instruction, _UnsetType):
             row.update_instruction = update_instruction or None
+        if not isinstance(warn_update_threshold, _UnsetType):
+            row.warn_update_threshold = warn_update_threshold
 
-        if row.ingestion_auto_update_disabled is None and not row.update_instruction:
+        if (
+            row.ingestion_auto_update_disabled is None
+            and not row.update_instruction
+            and row.warn_update_threshold is None
+        ):
             if existed:
                 s.delete(row)
             return None

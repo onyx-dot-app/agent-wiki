@@ -87,6 +87,16 @@ def after_doc_write(
         acl.on_page_created(rel_path, owner_user_id=owner_user_id)
     index_path(rel_path)
     fan_out_trigger_eval(rel_path, sha, change_kind, actor)
+    # Ingestion churn → check the page's 24h update frequency against the
+    # owner's threshold + the admin cap (enqueues a lightweight task). Imported
+    # lazily: update_frequency → wiki.utils → tools → wiki.notify would cycle
+    # at module load.
+    from app.wiki import utils as wiki_utils
+
+    if actor == wiki_utils.INGEST_AUTHOR:
+        from app.tasks.update_frequency import check_update_frequency
+
+        check_update_frequency(rel_path)
     # Drift any comments anchored to this page onto the new body. A no-op on
     # CREATE (no comments yet); the real work is on EDIT.
     _remap_comments_safe(rel_path)

@@ -73,6 +73,11 @@ export const ADMIN_NAV_GROUPS = [
         label: "Onyx Integration",
         icon: SvgOnyxLogo,
       },
+      {
+        href: "/admin/app-settings",
+        label: "Auto-Update Health",
+        icon: SvgActivity,
+      },
     ],
   },
   {

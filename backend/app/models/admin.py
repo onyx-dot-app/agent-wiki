@@ -75,6 +75,18 @@ class BraintrustConfigRequest(BaseModel):
     enabled: bool = False
 
 
+class AppSettingsConfigRequest(BaseModel):
+    """Wiki-wide auto-update health knobs. ``0`` disables either knob."""
+
+    warn_update_threshold_default: int = Field(ge=0)
+    auto_update_cap: int = Field(ge=0)
+
+
+class AppSettingsView(BaseModel):
+    warn_update_threshold_default: int
+    auto_update_cap: int
+
+
 class OkResponse(BaseModel):
     ok: bool = True
 

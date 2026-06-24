@@ -15,6 +15,9 @@ export interface ExplicitPolicy {
   kind: "page" | "folder";
   ingestion_auto_update_disabled: boolean | null;
   update_instruction: string | null;
+  // Owner-set per-page warning threshold (auto-updates/24h); null = inherit
+  // the global default; 0 = warnings off for this page.
+  warn_update_threshold: number | null;
   updated_by_user_id: string | null;
   created_at: string;
   updated_at: string;
@@ -32,6 +35,7 @@ export interface UpdatePolicyResponse {
 export interface UpdatePolicyPatch {
   ingestion_auto_update_disabled?: boolean | null;
   update_instruction?: string | null;
+  warn_update_threshold?: number | null;
 }
 
 export function getUpdatePolicy(path: string): Promise<UpdatePolicyResponse> {

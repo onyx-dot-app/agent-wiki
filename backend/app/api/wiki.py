@@ -15,6 +15,7 @@ from app.llm.agents import merge_conflict_update
 from app.models.file_system import (
     ActivityRowView,
     AutoUpdateCountResponse,
+    UpdateHealthResponse,
     CommitView,
     CreateFolderRequest,
     CreateFolderResponse,
@@ -603,6 +604,47 @@ def auto_update_count(
         rel, author=wiki_utils.INGEST_AUTHOR_EMAIL, since_iso=since
     )
     return AutoUpdateCountResponse(path=rel, hours=hours, count=count)
+
+
+@router.get("/update-health", response_model=UpdateHealthResponse)
+def update_health(
+    user: User = Depends(require_user),
+    path: str = "",
+) -> UpdateHealthResponse:
+    """Auto-update health for a page: 24h ingestion-update count vs the page's
+    warning threshold and the admin cap, plus whether the viewer (owner/admin)
+    should see the too-frequent-update banner."""
+    from app.app_settings import settings as app_settings
+    from app.wiki import acl as _acl
+
+    try:
+        rel = update_policy_repo.normalize_path(path)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    require_can("read", rel, user)
+
+    since = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+    count = wiki_git.count_commits_since(
+        rel, author=wiki_utils.INGEST_AUTHOR_EMAIL, since_iso=since
+    )
+    threshold = update_policy_repo.resolve_warn_threshold(rel)
+    cap = app_settings.get().auto_update_cap
+    auto_disabled = update_policy_repo.resolve_for_path(rel).ingestion_auto_update_disabled
+    over_threshold = threshold > 0 and count >= threshold
+
+    is_owner_or_admin = user.is_admin or _acl.get_owner(rel) == user.id
+    show_banner = (over_threshold or auto_disabled) and is_owner_or_admin
+
+    return UpdateHealthResponse(
+        path=rel,
+        hours=24,
+        count=count,
+        threshold=threshold,
+        cap=cap,
+        over_threshold=over_threshold,
+        auto_disabled=auto_disabled,
+        show_banner=show_banner,
+    )
 
 
 @router.get("/file/diff", response_model=FileDiffResponse)

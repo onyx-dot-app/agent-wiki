@@ -226,6 +226,20 @@ class AutoUpdateCountResponse(BaseModel):
     count: int
 
 
+class UpdateHealthResponse(BaseModel):
+    """Auto-update health for a page — drives the in-page too-frequent-update
+    banner and surfaces the resolved threshold/cap to the owner."""
+
+    path: str
+    hours: int
+    count: int
+    threshold: int  # effective per-page warning threshold (0 = off)
+    cap: int  # admin global hard cap (0 = off)
+    over_threshold: bool
+    auto_disabled: bool  # ingestion auto-update currently off for this page
+    show_banner: bool  # the viewer (owner/admin) should see the banner
+
+
 class WordDiff(BaseModel):
     """A 1-remove/1-add line collapsed into one rendered row.
 

@@ -19,7 +19,10 @@ from app.llm.errors import LLMError
 from app.llm import providers as llm_providers
 from app.llm import settings as llm_settings
 from app.llm.settings import LLMSettings
+from app.app_settings import settings as app_settings
 from app.models.admin import (
+    AppSettingsConfigRequest,
+    AppSettingsView,
     AdminUserListResponse,
     AdminUserView,
     BraintrustConfigRequest,
@@ -488,6 +491,36 @@ def _braintrust_view(s: BraintrustSettings) -> BraintrustView:
 @router.get("/braintrust", response_model=BraintrustView)
 def get_braintrust(_actor: User = Depends(require_admin)) -> BraintrustView:
     return _braintrust_view(braintrust_settings.get())
+
+
+def _app_settings_view(s: app_settings.AppSettings) -> AppSettingsView:
+    return AppSettingsView(
+        warn_update_threshold_default=s.warn_update_threshold_default,
+        auto_update_cap=s.auto_update_cap,
+    )
+
+
+@router.get("/app-settings", response_model=AppSettingsView)
+def get_app_settings(_actor: User = Depends(require_admin)) -> AppSettingsView:
+    return _app_settings_view(app_settings.get())
+
+
+@router.put("/app-settings", response_model=AppSettingsView)
+def put_app_settings(
+    req: AppSettingsConfigRequest,
+    actor: User = Depends(require_admin),
+) -> AppSettingsView:
+    app_settings.upsert(
+        warn_update_threshold_default=req.warn_update_threshold_default,
+        auto_update_cap=req.auto_update_cap,
+    )
+    log.info(
+        "admin: %s updated app settings warn_default=%d auto_update_cap=%d",
+        actor.id,
+        req.warn_update_threshold_default,
+        req.auto_update_cap,
+    )
+    return _app_settings_view(app_settings.get())
 
 
 @router.put("/braintrust", response_model=BraintrustView)

@@ -68,6 +68,8 @@ def patch_update_policy(
         patch["ingestion_auto_update_disabled"] = req.ingestion_auto_update_disabled
     if "update_instruction" in req.model_fields_set:
         patch["update_instruction"] = req.update_instruction
+    if "warn_update_threshold" in req.model_fields_set:
+        patch["warn_update_threshold"] = req.warn_update_threshold
     # Nothing to change — don't touch the row (would falsify updated_by/_at).
     if not patch:
         return _build_response(norm)

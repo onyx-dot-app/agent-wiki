@@ -44,6 +44,8 @@ export function UpdatePolicyPanel({
   const [pendingOn, setPendingOn] = useState<boolean | null>(null); // optimistic toggle
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
+  const [warnEditing, setWarnEditing] = useState(false);
+  const [warnDraft, setWarnDraft] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Ingestion auto-update count + the window it covers. Loaded separately so a
@@ -59,6 +61,7 @@ export function UpdatePolicyPanel({
     setLoaded(false);
     setError(null);
     setEditing(false);
+    setWarnEditing(false);
     setAutoUpdate(null);
     getUpdatePolicy(path)
       .then((r) => {
@@ -93,6 +96,8 @@ export function UpdatePolicyPanel({
     policy?.explicit?.ingestion_auto_update_disabled != null;
   const ownInstruction = policy?.explicit?.update_instruction ?? "";
   const effInstruction = policy?.effective.update_instruction ?? "";
+  // Per-page warning threshold (null = use the workspace default; 0 = off).
+  const ownThreshold = policy?.explicit?.warn_update_threshold ?? null;
 
   async function save(
     patch: Parameters<typeof patchUpdatePolicy>[1],
@@ -277,6 +282,77 @@ export function UpdatePolicyPanel({
                     Update History
                   </Button>
                 )}
+              </div>
+            )}
+
+            {kind === "page" && (
+              <div className={styles.row}>
+                <div className={styles.rowText}>
+                  <Text font="main-content-emphasis" color="text-04">
+                    Frequent-update warning
+                  </Text>
+                  <span className={styles.desc}>
+                    {ownThreshold == null
+                      ? "Warn the owner using the workspace default."
+                      : ownThreshold === 0
+                        ? "Warnings are off for this page."
+                        : `Warn the owner after ${ownThreshold} auto-updates / day.`}
+                  </span>
+                </div>
+                {!warnEditing && (
+                  <Button
+                    icon={SvgEdit}
+                    prominence="tertiary"
+                    size="sm"
+                    tooltip="Set warning threshold"
+                    onClick={() => {
+                      setWarnDraft(
+                        ownThreshold == null ? "" : String(ownThreshold),
+                      );
+                      setWarnEditing(true);
+                    }}
+                  />
+                )}
+              </div>
+            )}
+
+            {kind === "page" && warnEditing && (
+              <div className={styles.warnEdit}>
+                <input
+                  type="number"
+                  min={0}
+                  className={styles.warnInput}
+                  value={warnDraft}
+                  autoFocus
+                  placeholder="default"
+                  onChange={(e) => setWarnDraft(e.target.value)}
+                />
+                <span className={styles.desc}>auto-updates / day</span>
+                <span className={styles.warnSpacer} />
+                <Button
+                  prominence="tertiary"
+                  size="sm"
+                  disabled={saving}
+                  onClick={() => setWarnEditing(false)}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  variant="action"
+                  size="sm"
+                  disabled={saving}
+                  onClick={() =>
+                    void save(
+                      {
+                        warn_update_threshold:
+                          warnDraft.trim() === "" ? null : Number(warnDraft),
+                      },
+                      () => setWarnEditing(false),
+                    )
+                  }
+                >
+                  {saving ? "Saving…" : "Save"}
+                </Button>
               </div>
             )}
           </div>

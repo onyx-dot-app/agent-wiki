@@ -20,6 +20,7 @@ class ExplicitPolicy(BaseModel):
     kind: Literal["page", "folder"]
     ingestion_auto_update_disabled: bool | None = None
     update_instruction: str | None = None
+    warn_update_threshold: int | None = None
     updated_by_user_id: str | None = None
     created_at: str | None = None
     updated_at: str | None = None
@@ -43,3 +44,4 @@ class PatchUpdatePolicyRequest(BaseModel):
     path: str
     ingestion_auto_update_disabled: bool | None = None
     update_instruction: str | None = None
+    warn_update_threshold: int | None = None
