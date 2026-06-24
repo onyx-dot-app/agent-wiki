@@ -1158,7 +1158,7 @@ class IngestEvalSample(Base):
     diff: Mapped[str | None] = mapped_column(Text)
     outcome: Mapped[str] = mapped_column(Text, nullable=False)
     # Title-boosted BM25 score of the candidate page against the source document.
-    # Nullable: rows written before this column existed have no score.
+    # None when no score was recorded for the row.
     bm25_score: Mapped[float | None] = mapped_column(Float)
     commit_sha: Mapped[str | None] = mapped_column(Text)
 
