@@ -66,6 +66,9 @@ class Config(BaseModel):
 
     # Opt-in eval logging — captures reconciler inputs/outputs to ingest_eval_samples
     ingest_eval_logging: bool
+    # Retention for ingest_eval_samples, in days; rows older than this are pruned
+    # by the daily retention sweep. 0 disables pruning (keep forever).
+    ingest_eval_retention_days: int
     # Public-facing wiki origin (e.g. "https://dev-wiki.onyx.app" or
     # "http://localhost:3088"). REQUIRED — set via the PUBLIC_BASE_URL
     # env var. Single source of truth for the browser-facing URL the
@@ -127,6 +130,19 @@ def _positive_int(name: str, default: int) -> int:
     return value
 
 
+def _nonneg_int(name: str, default: int) -> int:
+    raw = os.environ.get(name)
+    if raw is None or raw == "":
+        return default
+    try:
+        value = int(raw)
+    except ValueError as e:
+        raise ValueError(f"{name} must be an integer, got {raw!r}") from e
+    if value < 0:
+        raise ValueError(f"{name} must be >= 0, got {value}")
+    return value
+
+
 def _resolve_wiki_dir() -> str:
     # Anchor relative paths against the repo root so the resolved location
     # doesn't depend on which directory the process was launched from
@@ -161,6 +177,7 @@ def load_config() -> Config:
         oidc_redirect_uri=os.environ.get("OIDC_REDIRECT_URI", ""),
         ingest_eval_logging=os.environ.get("INGEST_EVAL_LOGGING", "false").lower()
         in {"1", "true", "yes"},
+        ingest_eval_retention_days=_nonneg_int("INGEST_EVAL_RETENTION_DAYS", 180),
         secure_cookies=os.environ.get("SECURE_COOKIES", "false").lower() in {"1", "true", "yes"},
         dev_mode=os.environ.get("DEV_MODE", "false").lower() in {"1", "true", "yes"},
         encryption_key_secret=os.environ.get("ENCRYPTION_KEY_SECRET", ""),

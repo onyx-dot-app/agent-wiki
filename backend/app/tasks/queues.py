@@ -45,6 +45,9 @@ Queues:
     - Agent-activity expiration cleanup
       (``cleanup_expired_activity``) — a single ``DELETE`` enqueued
       with a delay equal to the row's ``expires_at``.
+    - ingest_eval_samples retention
+      (``prune_ingest_eval_samples``) — a daily, per-run-bounded indexed
+      ``DELETE`` of rows past ``INGEST_EVAL_RETENTION_DAYS``.
 
 Each consumer runs as a separate worker container — see
 ``docker-compose.yml`` (``worker-documents``, ``worker-triggers``,
