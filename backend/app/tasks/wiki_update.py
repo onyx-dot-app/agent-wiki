@@ -68,11 +68,6 @@ _DEBOUNCE_SECONDS = int(os.environ.get("MCP_NL_DEBOUNCE_SECONDS", "30"))
 # instruction may be long, but we only want a quick handle.
 _COMMIT_MESSAGE_MAX = 80
 
-# Git author for connector-pushed ingestion commits — these have no human
-# user, so without this they'd fall back to the generic "AI Wiki Helper".
-# The originating connector + URL still ride in the commit message.
-_INGEST_AUTHOR = "Onyx Ingest <onyx-ingest@local>"
-
 
 @documents_queue.task()
 def update_document_from_payload(doc_id: str, source: str, payload: dict[str, Any]) -> None:
@@ -263,7 +258,7 @@ def process_pushed_document(push: dict[str, Any]) -> None:
     ``Onyx Ingest`` author for the run so its commits surface under that name in
     history instead of the generic fallback, then delegate to the reconciler.
     """
-    with wiki_utils.system_author(_INGEST_AUTHOR):
+    with wiki_utils.system_author(wiki_utils.INGEST_AUTHOR):
         _reconcile_pushed_document(push)
 
 

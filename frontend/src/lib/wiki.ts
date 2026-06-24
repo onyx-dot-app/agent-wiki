@@ -154,6 +154,21 @@ export async function fetchFileHistory(
   );
 }
 
+export interface AutoUpdateCount {
+  path: string;
+  hours: number;
+  count: number;
+}
+
+/** Count of ingestion auto-updates to a page/folder in the last 24h. */
+export async function fetchAutoUpdateCount(
+  path: string,
+): Promise<AutoUpdateCount> {
+  return apiFetch<AutoUpdateCount>(
+    `/wiki/auto-update-count?path=${encodeURIComponent(path)}`,
+  );
+}
+
 /**
  * Pull the originating source URL + title out of a commit body.
  *

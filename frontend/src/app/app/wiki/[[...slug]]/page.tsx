@@ -2529,6 +2529,7 @@ function FileViewer({ path }: { path: string }) {
                 <UpdatePolicyPanel
                   path={path}
                   onClose={() => setPolicyOpen(false)}
+                  onShowHistory={toggleHistory}
                   fullHeight
                 />
               </div>,
@@ -2602,6 +2603,7 @@ function FileViewer({ path }: { path: string }) {
             <UpdatePolicyPanel
               path={path}
               onClose={() => setPolicyOpen(false)}
+              onShowHistory={toggleHistory}
               fullHeight
             />
           </div>
