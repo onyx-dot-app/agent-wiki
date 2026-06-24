@@ -22,6 +22,7 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     CheckConstraint,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -1156,6 +1157,9 @@ class IngestEvalSample(Base):
     wiki_body_before: Mapped[str] = mapped_column(Text, nullable=False)
     diff: Mapped[str | None] = mapped_column(Text)
     outcome: Mapped[str] = mapped_column(Text, nullable=False)
+    # Title-boosted BM25 score of the candidate page against the source document.
+    # Nullable: rows written before this column existed have no score.
+    bm25_score: Mapped[float | None] = mapped_column(Float)
     commit_sha: Mapped[str | None] = mapped_column(Text)
 
 

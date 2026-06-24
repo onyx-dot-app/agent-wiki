@@ -262,7 +262,11 @@ def search(
     if client is None:
         return []
 
-    fetch_size = min(limit * 5, 200)
+    # Over-fetch 5x (capped) when visibility filtering may drop hits, so we
+    # still have ``limit`` survivors. With no visibility filter (e.g. ingest),
+    # fetch exactly ``limit`` — this lets ingest request a wide candidate set
+    # without the 200-doc cap silently truncating it.
+    fetch_size = limit if not apply_visibility else min(limit * 5, 200)
     body = {
         "query": {
             "multi_match": {
