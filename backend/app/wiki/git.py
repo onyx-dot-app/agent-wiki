@@ -27,6 +27,14 @@ log = logging.getLogger(__name__)
 
 _SHA_LINE_RE = re.compile(r"^[0-9a-f]{40}$")
 
+# Git identity for connector-pushed ingestion commits. Lives here (a leaf
+# module) rather than in ``app/wiki/utils.py`` so the ingest task can read it
+# without dragging in utils' heavy import chain. Bound on the ingest path via
+# ``utils.system_author(INGEST_AUTHOR)``; the email is what callers filter on
+# when counting ingestion commits (``count_commits_since``).
+INGEST_AUTHOR_EMAIL = "onyx-ingest@local"
+INGEST_AUTHOR = f"Onyx Ingest <{INGEST_AUTHOR_EMAIL}>"
+
 
 class CommitInfo(BaseModel):
     """One commit in a path's history (newest first)."""

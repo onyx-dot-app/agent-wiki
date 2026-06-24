@@ -99,13 +99,6 @@ def assert_base_sha(path: str, base_sha: str | None) -> dict[str, str] | None:
 
 _FALLBACK_AUTHOR = "AI Wiki Helper <ai-wiki-helper@local>"
 
-# Git identity for connector-pushed ingestion commits — these have no human
-# user, so without this they'd fall back to ``_FALLBACK_AUTHOR``. Bound via
-# ``system_author(INGEST_AUTHOR)`` on the ingest path; the email is what
-# callers filter on when counting ingestion commits (see git.count_commits_since).
-INGEST_AUTHOR_EMAIL = "onyx-ingest@local"
-INGEST_AUTHOR = f"Onyx Ingest <{INGEST_AUTHOR_EMAIL}>"
-
 # Explicit git author for system-initiated commits that legitimately have no
 # user in context (document ingestion from a connector, etc.). Bound by the
 # ``system_author`` context manager; consulted by ``author_string`` before it

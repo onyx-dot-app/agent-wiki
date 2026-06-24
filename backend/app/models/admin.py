@@ -62,6 +62,9 @@ class IngestConfigRequest(BaseModel):
     # Outbound Onyx origin for Craft launches. Omit to preserve the stored
     # value; an explicit empty string clears it.
     onyx_base_url: str | None = None
+    # Auto-update health knobs. 0 disables either.
+    warn_update_threshold_default: int = Field(ge=0)
+    auto_update_cap: int = Field(ge=0)
 
 
 class BraintrustConfigRequest(BaseModel):
@@ -172,6 +175,8 @@ class IngestView(BaseModel):
     api_key_set: bool
     api_key_hint: str
     onyx_base_url: str | None
+    warn_update_threshold_default: int
+    auto_update_cap: int
 
 
 class RegenerateKeyResponse(BaseModel):

@@ -423,6 +423,8 @@ def _ingest_view(s: IngestSettings) -> IngestView:
         api_key_set=bool(s.api_key),
         api_key_hint=_redact(s.api_key or ""),
         onyx_base_url=s.onyx_base_url,
+        warn_update_threshold_default=s.warn_update_threshold_default,
+        auto_update_cap=s.auto_update_cap,
     )
 
 
@@ -452,12 +454,20 @@ def put_ingest(
                 validate_onyx_base_url(onyx_base_url)
             except ValueError as exc:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
-    ingest_settings.upsert(max_doc_chars=req.max_doc_chars, onyx_base_url=onyx_base_url)
+    ingest_settings.upsert(
+        max_doc_chars=req.max_doc_chars,
+        onyx_base_url=onyx_base_url,
+        warn_update_threshold_default=req.warn_update_threshold_default,
+        auto_update_cap=req.auto_update_cap,
+    )
     log.info(
-        "admin: %s updated ingest settings max_doc_chars=%d onyx_base_url_set=%s",
+        "admin: %s updated ingest settings max_doc_chars=%d onyx_base_url_set=%s "
+        "warn_default=%d auto_update_cap=%d",
         actor.id,
         req.max_doc_chars,
         bool(onyx_base_url),
+        req.warn_update_threshold_default,
+        req.auto_update_cap,
     )
     return _ingest_view(ingest_settings.get())
 

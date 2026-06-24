@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.auth import User, require_can
 from app.auth.deps import require_user
+from app.ingest import settings as ingest_settings
 from app.llm.agents import merge_conflict_update
 from app.models.file_system import (
     ActivityRowView,
@@ -58,6 +59,7 @@ from app.models.file_system import (
 from app.tasks.reindex import index_path
 from app.triggers import repo as triggers_repo
 from app.wiki import (
+    acl as _acl,
     agent_activity,
     diff as wiki_diff,
     drafts as wiki_drafts,
@@ -71,6 +73,7 @@ from app.wiki import (
     update_policy as update_policy_repo,
     utils as wiki_utils,
 )
+from app.models.update_policy import UpdateHealthResponse
 from app.models.wiki import ChangeKind, CommitMaxRetriesError
 
 router = APIRouter()
@@ -122,8 +125,6 @@ def list_documents(
 ) -> ListDocumentsResponse:
     raw = wiki_git.list_paths_with_mtime(prefix)
     if not user.is_admin:
-        from app.wiki import acl as _acl
-
         md_paths = [p for p, _ in raw if p.endswith(".md")]
         visible = set(_acl.filter_paths_in_python(user.id, False, md_paths))
         # Keep non-md paths (folders, .gitkeep) so the explorer can render
@@ -147,8 +148,6 @@ def list_recent_pages(
     raw = wiki_git.paths_authored_by(user.email)
     md = [(p, ts) for p, ts in raw if p.endswith(".md")]
     if not user.is_admin:
-        from app.wiki import acl as _acl
-
         visible = set(_acl.filter_paths_in_python(user.id, False, [p for p, _ in md]))
         md = [(p, ts) for p, ts in md if p in visible]
     # Newest first; empty timestamps sink to the bottom.
@@ -472,8 +471,6 @@ def list_recent_docs(user: User = Depends(require_user)) -> RecentDocsResponse:
     # revoke access after the fact, so re-filter on every read.
     paths = [p for p in paths if filesystem.absolute(p).is_file()]
     if not user.is_admin:
-        from app.wiki import acl as _acl
-
         paths = _acl.filter_paths_in_python(user.id, False, paths)
     return RecentDocsResponse(paths=paths)
 
@@ -498,8 +495,6 @@ def list_starred_docs(user: User = Depends(require_user)) -> StarredDocsResponse
     # after the star must hide the entry.
     paths = [p for p in paths if filesystem.absolute(p).is_file()]
     if not user.is_admin:
-        from app.wiki import acl as _acl
-
         paths = _acl.filter_paths_in_python(user.id, False, paths)
     return StarredDocsResponse(paths=paths)
 
@@ -600,9 +595,47 @@ def auto_update_count(
     require_can("read", rel, user)
     since = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
     count = wiki_git.count_commits_since(
-        rel, author=wiki_utils.INGEST_AUTHOR_EMAIL, since_iso=since
+        rel, author=wiki_git.INGEST_AUTHOR_EMAIL, since_iso=since
     )
     return AutoUpdateCountResponse(path=rel, hours=hours, count=count)
+
+
+@router.get("/update-health", response_model=UpdateHealthResponse)
+def update_health(
+    user: User = Depends(require_user),
+    path: str = "",
+) -> UpdateHealthResponse:
+    """Auto-update health for a page: 24h ingestion-update count vs the page's
+    warning threshold and the admin cap, plus whether the viewer (owner/admin)
+    should see the too-frequent-update banner."""
+    try:
+        rel = update_policy_repo.normalize_path(path)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    require_can("read", rel, user)
+
+    since = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+    count = wiki_git.count_commits_since(
+        rel, author=wiki_git.INGEST_AUTHOR_EMAIL, since_iso=since
+    )
+    threshold = update_policy_repo.resolve_warn_threshold(rel)
+    cap = ingest_settings.get().auto_update_cap
+    auto_disabled = update_policy_repo.resolve_for_path(rel).ingestion_auto_update_disabled
+    over_threshold = threshold > 0 and count >= threshold
+
+    is_owner_or_admin = user.is_admin or _acl.get_owner(rel) == user.id
+    show_banner = (over_threshold or auto_disabled) and is_owner_or_admin
+
+    return UpdateHealthResponse(
+        path=rel,
+        hours=24,
+        count=count,
+        threshold=threshold,
+        cap=cap,
+        over_threshold=over_threshold,
+        auto_disabled=auto_disabled,
+        show_banner=show_banner,
+    )
 
 
 @router.get("/file/diff", response_model=FileDiffResponse)

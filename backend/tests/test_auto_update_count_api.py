@@ -11,7 +11,6 @@ from fastapi.testclient import TestClient
 from app.auth import users as users_repo
 from app.main import create_app
 from app.wiki import git as wiki_git
-from app.wiki import utils as wiki_utils
 from tests._auth import login_fastapi
 
 HUMAN_AUTHOR = "Nik <nik@x.com>"
@@ -25,7 +24,7 @@ def client(tmp_db: None, tmp_repo: None) -> TestClient:
 def _seed(client: TestClient) -> None:
     uid = users_repo.create(email="nik@x.com", password="hunter2-x", name="Nik")
     login_fastapi(client, uid)
-    ingest = wiki_utils.INGEST_AUTHOR
+    ingest = wiki_git.INGEST_AUTHOR
     # team/a.md: two ingest updates + one human edit (human must not count).
     wiki_git.commit_file("team/a.md", "a1\n", "ingest", author=ingest)
     wiki_git.commit_file("team/a.md", "a2\n", "ingest", author=ingest)
@@ -68,7 +67,7 @@ def test_author_match_is_anchored_not_substring(client: TestClient) -> None:
     wiki_git.commit_file(
         "team/a.md", "x\n", "edit", author="Imposter <onyx-ingest@localhost>"
     )
-    wiki_git.commit_file("team/a.md", "y\n", "ingest", author=wiki_utils.INGEST_AUTHOR)
+    wiki_git.commit_file("team/a.md", "y\n", "ingest", author=wiki_git.INGEST_AUTHOR)
     body = client.get("/api/wiki/auto-update-count?path=team/a.md").json()
     assert body["count"] == 1
 
@@ -79,7 +78,7 @@ def test_window_excludes_commits_before_since(client: TestClient) -> None:
     future = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
     assert (
         wiki_git.count_commits_since(
-            "team/a.md", author=wiki_utils.INGEST_AUTHOR_EMAIL, since_iso=future
+            "team/a.md", author=wiki_git.INGEST_AUTHOR_EMAIL, since_iso=future
         )
         == 0
     )

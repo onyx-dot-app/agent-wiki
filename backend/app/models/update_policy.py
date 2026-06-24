@@ -20,6 +20,7 @@ class ExplicitPolicy(BaseModel):
     kind: Literal["page", "folder"]
     ingestion_auto_update_disabled: bool | None = None
     update_instruction: str | None = None
+    warn_update_threshold: int | None = None
     updated_by_user_id: str | None = None
     created_at: str | None = None
     updated_at: str | None = None
@@ -28,6 +29,20 @@ class ExplicitPolicy(BaseModel):
 class UpdatePolicyResponse(BaseModel):
     explicit: ExplicitPolicy | None = None
     effective: EffectivePolicy
+
+
+class UpdateHealthResponse(BaseModel):
+    """Auto-update health for a page — drives the in-page too-frequent-update
+    banner and surfaces the resolved threshold/cap to the owner."""
+
+    path: str
+    hours: int
+    count: int
+    threshold: int  # effective per-page warning threshold (0 = off)
+    cap: int  # admin global hard cap (0 = off)
+    over_threshold: bool
+    auto_disabled: bool  # ingestion auto-update currently off for this page
+    show_banner: bool  # the viewer (owner/admin) should see the banner
 
 
 class PatchUpdatePolicyRequest(BaseModel):
@@ -43,3 +58,4 @@ class PatchUpdatePolicyRequest(BaseModel):
     path: str
     ingestion_auto_update_disabled: bool | None = None
     update_instruction: str | None = None
+    warn_update_threshold: int | None = None

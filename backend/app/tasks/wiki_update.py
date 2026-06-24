@@ -258,7 +258,7 @@ def process_pushed_document(push: dict[str, Any]) -> None:
     ``Onyx Ingest`` author for the run so its commits surface under that name in
     history instead of the generic fallback, then delegate to the reconciler.
     """
-    with wiki_utils.system_author(wiki_utils.INGEST_AUTHOR):
+    with wiki_utils.system_author(wiki_git.INGEST_AUTHOR):
         _reconcile_pushed_document(push)
 
 

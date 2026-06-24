@@ -35,8 +35,9 @@ from app.db import fts, page_dirs
 from app.mcp_server import pubsub as mcp_pubsub
 from app.tasks.reindex import index_path
 from app.tasks.triggers import fan_out_trigger_eval
+from app.tasks.update_frequency import check_update_frequency
 from app.triggers import repo as triggers_repo
-from app.wiki import acl, agent_activity, comments, drafts, update_policy
+from app.wiki import acl, agent_activity, comments, drafts, git as wiki_git, update_policy
 from app.wiki.comment_remap import remap_comments
 from app.models.wiki import ChangeKind
 
@@ -87,6 +88,10 @@ def after_doc_write(
         acl.on_page_created(rel_path, owner_user_id=owner_user_id)
     index_path(rel_path)
     fan_out_trigger_eval(rel_path, sha, change_kind, actor)
+    # Ingestion churn → check the page's 24h update frequency against the
+    # owner's threshold + the admin cap (enqueues a lightweight task).
+    if actor == wiki_git.INGEST_AUTHOR:
+        check_update_frequency(rel_path)
     # Drift any comments anchored to this page onto the new body. A no-op on
     # CREATE (no comments yet); the real work is on EDIT.
     _remap_comments_safe(rel_path)
