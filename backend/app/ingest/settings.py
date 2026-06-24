@@ -15,6 +15,10 @@ log = logging.getLogger(__name__)
 DEFAULT_MAX_DOC_CHARS = 100_000
 
 
+DEFAULT_WARN_UPDATE_THRESHOLD = 10
+DEFAULT_AUTO_UPDATE_CAP = 200
+
+
 class IngestSettings(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -23,14 +27,31 @@ class IngestSettings(BaseModel):
     # Outbound half of the "Onyx Connection" admin page — the public Onyx
     # origin for Craft launches. None = Craft unavailable.
     onyx_base_url: str | None
+    # Auto-update health knobs (see "Taming Bad-Behaved Wikis"): the default
+    # per-page warning threshold owners can override, and a hard cap above which
+    # a page's ingestion auto-update is turned off. 0 = off.
+    warn_update_threshold_default: int
+    auto_update_cap: int
 
 
 def get() -> IngestSettings:
     with session() as s:
         row = s.get(IngestSettingsRow, 1)
         if row is None:
-            return IngestSettings(max_doc_chars=DEFAULT_MAX_DOC_CHARS, api_key=None, onyx_base_url=None)
-        return IngestSettings(max_doc_chars=row.max_doc_chars, api_key=row.api_key, onyx_base_url=row.onyx_base_url)
+            return IngestSettings(
+                max_doc_chars=DEFAULT_MAX_DOC_CHARS,
+                api_key=None,
+                onyx_base_url=None,
+                warn_update_threshold_default=DEFAULT_WARN_UPDATE_THRESHOLD,
+                auto_update_cap=DEFAULT_AUTO_UPDATE_CAP,
+            )
+        return IngestSettings(
+            max_doc_chars=row.max_doc_chars,
+            api_key=row.api_key,
+            onyx_base_url=row.onyx_base_url,
+            warn_update_threshold_default=row.warn_update_threshold_default,
+            auto_update_cap=row.auto_update_cap,
+        )
 
 
 def get_onyx_base_url() -> str | None:
@@ -38,17 +59,35 @@ def get_onyx_base_url() -> str | None:
     return get().onyx_base_url
 
 
-def upsert(*, max_doc_chars: int, onyx_base_url: str | None) -> None:
+def upsert(
+    *,
+    max_doc_chars: int,
+    onyx_base_url: str | None,
+    warn_update_threshold_default: int | None = None,
+    auto_update_cap: int | None = None,
+) -> None:
+    """Upsert the connection fields, and the auto-update health knobs when
+    provided. The two health knobs are ``None`` => leave unchanged (a new row
+    falls back to the column defaults), so connection-only callers don't reset
+    them."""
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     with session() as s:
         row = s.get(IngestSettingsRow, 1)
         if row is None:
-            s.add(IngestSettingsRow(id=1, max_doc_chars=max_doc_chars, onyx_base_url=onyx_base_url, updated_at=now))
-        else:
-            row.max_doc_chars = max_doc_chars
-            row.onyx_base_url = onyx_base_url
-            row.updated_at = now
-    log.info("ingest_settings upserted max_doc_chars=%d onyx_base_url_set=%s", max_doc_chars, bool(onyx_base_url))
+            row = IngestSettingsRow(id=1)
+            s.add(row)
+        row.max_doc_chars = max_doc_chars
+        row.onyx_base_url = onyx_base_url
+        if warn_update_threshold_default is not None:
+            row.warn_update_threshold_default = warn_update_threshold_default
+        if auto_update_cap is not None:
+            row.auto_update_cap = auto_update_cap
+        row.updated_at = now
+    log.info(
+        "ingest_settings upserted max_doc_chars=%d onyx_base_url_set=%s",
+        max_doc_chars,
+        bool(onyx_base_url),
+    )
 
 
 def regenerate_key() -> str:

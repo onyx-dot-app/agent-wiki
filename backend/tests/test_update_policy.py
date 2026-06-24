@@ -55,6 +55,25 @@ def test_instruction_closest_scope_wins(tmp_db):
     assert update_policy.resolve_for_path("a/other.md").update_instruction == "folder rule"
 
 
+def test_warn_update_threshold_round_trips(tmp_db):
+    update_policy.set_policy("a/page.md", warn_update_threshold=25)
+    row = update_policy.get("a/page.md")
+    assert row is not None and row["warn_update_threshold"] == 25
+    # Independent of the other fields — setting the disable later keeps it.
+    update_policy.set_policy("a/page.md", ingestion_auto_update_disabled=True)
+    row = update_policy.get("a/page.md")
+    assert row is not None
+    assert row["warn_update_threshold"] == 25
+    assert row["ingestion_auto_update_disabled"] is True
+
+
+def test_warn_update_threshold_clearing_can_delete_row(tmp_db):
+    update_policy.set_policy("a/page.md", warn_update_threshold=5)
+    # Clearing the only field set on the row deletes it entirely.
+    assert update_policy.set_policy("a/page.md", warn_update_threshold=None) is None
+    assert update_policy.get("a/page.md") is None
+
+
 def test_disabled_paths_batch(tmp_db):
     update_policy.set_policy("a", ingestion_auto_update_disabled=True)  # folder off
     update_policy.set_policy("a/on.md", ingestion_auto_update_disabled=False)  # re-enabled

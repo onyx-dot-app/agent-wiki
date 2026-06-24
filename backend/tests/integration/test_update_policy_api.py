@@ -43,6 +43,25 @@ def test_patch_get_delete_roundtrip(integration):
     assert body["effective"]["ingestion_auto_update_disabled"] is False
 
 
+def test_patch_warn_threshold_set_and_rejects_negative(integration):
+    integration.signup(email="admin@x.com")
+    integration.put_doc("guide.md", "# Guide")
+
+    ok = integration.client.patch(
+        "/api/update-policy",
+        json={"path": "guide.md", "warn_update_threshold": 25},
+    )
+    assert ok.status_code == 200, ok.text
+    assert ok.json()["explicit"]["warn_update_threshold"] == 25
+
+    # Negative threshold is rejected by the ge=0 constraint.
+    bad = integration.client.patch(
+        "/api/update-policy",
+        json={"path": "guide.md", "warn_update_threshold": -1},
+    )
+    assert bad.status_code in (400, 422), bad.text
+
+
 def test_patch_one_field_preserves_the_other(integration):
     integration.signup(email="admin@x.com")
     integration.put_doc("guide.md", "# Guide")
