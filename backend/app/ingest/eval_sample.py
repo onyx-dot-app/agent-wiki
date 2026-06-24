@@ -1,12 +1,14 @@
 """Opt-in logging of ingest candidate decisions to the ingest_eval_samples table.
 
 Enabled via INGEST_EVAL_LOGGING=true. Each row captures the source document, a
-candidate wiki page, the unified diff of any edit, and the outcome — one row per
-(document, candidate page) pair. Besides the reconciler verdicts
-(committed/no_change/irrelevant) it also records pre-reconciler drops:
-``filtered_by_selector`` (weak-model selector) and ``filtered_by_bm25_score``
-(below the BM25 score threshold). Intended for human review and building a
-regression test suite.
+candidate wiki page, its title-boosted BM25 score, the unified diff of any edit,
+and the outcome — one row per (document, candidate page) pair. Besides the
+reconciler verdicts (committed/no_change/irrelevant) it also records
+pre-reconciler drops: ``filtered_by_selector`` (weak-model selector),
+``filtered_by_bm25_score`` (below the BM25 score threshold), and
+``filtered_by_search_rank`` (a real search hit that fell outside the top-N
+candidate cap — only captured when eval logging is on, since it widens the
+search fetch). Intended for human review and building a regression test suite.
 """
 from __future__ import annotations
 
@@ -35,7 +37,9 @@ def log_sample(
         "irrelevant",
         "filtered_by_selector",
         "filtered_by_bm25_score",
+        "filtered_by_search_rank",
     ],
+    bm25_score: float | None,
     commit_sha: str | None,
 ) -> None:
     diff = wiki_git.diff_for_commit(commit_sha, wiki_path) if commit_sha is not None else None
@@ -50,5 +54,6 @@ def log_sample(
             wiki_body_before=wiki_body_before,
             diff=diff,
             outcome=outcome,
+            bm25_score=bm25_score,
             commit_sha=commit_sha,
         ))

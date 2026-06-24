@@ -86,10 +86,14 @@ def _hit(path: str, title: str | None, score: float) -> SearchHit:
 
 
 def _cs(
-    passed: list[SearchHit], dropped: list[SearchHit] | None = None
+    passed: list[SearchHit],
+    dropped: list[SearchHit] | None = None,
+    rank_dropped: list[SearchHit] | None = None,
 ) -> ingest_search.CandidateSearch:
     """Build a CandidateSearch for mocking ingest_search.candidates()."""
-    return ingest_search.CandidateSearch(passed=passed, dropped=dropped or [])
+    return ingest_search.CandidateSearch(
+        passed=passed, dropped=dropped or [], rank_dropped=rank_dropped or []
+    )
 
 
 def test_candidates_empty_when_no_fts_results():
@@ -152,6 +156,30 @@ def test_title_boost_threshold_interaction(monkeypatch):
     assert len(result.passed) == 1
 
 
+def test_candidates_no_rank_dropped_without_fetch_limit(monkeypatch):
+    # Default fetch: fts_search is asked for exactly the top-N cap, so there's
+    # no tail beyond it — rank_dropped is empty (production behavior unchanged).
+    monkeypatch.setattr(ingest_search, "CONFIG", CONFIG.model_copy(update={"ingest_bm25_min_score": 0.0, "ingest_bm25_limit": 2}))
+    hits = [_hit("a.md", None, 9.0), _hit("b.md", None, 8.0)]
+    with patch("app.ingest.search.fts_search", return_value=hits) as m:
+        result = ingest_search.candidates("content", None)
+    assert m.call_args.kwargs["limit"] == 2
+    assert result.rank_dropped == []
+
+
+def test_candidates_rank_dropped_beyond_cap(monkeypatch):
+    # A wider fetch_limit pulls hits beyond the top-N cap; the top-N still go to
+    # the pipeline, the rest land in rank_dropped (most relevant first).
+    monkeypatch.setattr(ingest_search, "CONFIG", CONFIG.model_copy(update={"ingest_bm25_min_score": 0.0, "ingest_bm25_limit": 2}))
+    hits = [_hit("a.md", None, 9.0), _hit("b.md", None, 8.0), _hit("c.md", None, 7.0), _hit("d.md", None, 6.0)]
+    with patch("app.ingest.search.fts_search", return_value=hits) as m:
+        result = ingest_search.candidates("content", None, fetch_limit=10)
+    # fetch_limit is passed through to the search backend.
+    assert m.call_args.kwargs["limit"] == 10
+    assert [h.path for h in result.passed] == ["a.md", "b.md"]
+    assert [h.path for h in result.rank_dropped] == ["c.md", "d.md"]
+
+
 # --------------------------------------------------------------------------- #
 # process_pushed_document                                                      #
 # --------------------------------------------------------------------------- #
@@ -192,12 +220,18 @@ def _doc_result_count(result: str) -> float:
 
 
 @patch("app.tasks.wiki_update.ingest_search.candidates", return_value=_cs([]))
-def test_no_candidates_returns_early(mock_search):
+def test_no_candidates_returns_early(mock_search, monkeypatch):
     # No BM25 hit -> the doc still gets a per-document terminal result so the
     # "search filtered out" tile accounts for it (panel reconciles to ingested).
+    monkeypatch.setattr(
+        "app.tasks.wiki_update.CONFIG",
+        CONFIG.model_copy(update={"ingest_eval_logging": False}),
+    )
     before = _doc_result_count("no_candidates")
     _run(_make_push())
     mock_search.assert_called_once()
+    # Eval logging off: the candidate fetch is not widened.
+    assert mock_search.call_args.kwargs["fetch_limit"] is None
     assert _doc_result_count("no_candidates") - before == 1.0
 
 
@@ -446,7 +480,11 @@ def _eval_rows(outcome: str) -> list[dict[str, Any]]:
 
     with session() as s:
         return [
-            {"wiki_path": r.wiki_path, "source_document_id": r.source_document_id}
+            {
+                "wiki_path": r.wiki_path,
+                "source_document_id": r.source_document_id,
+                "bm25_score": r.bm25_score,
+            }
             for r in s.execute(
                 sa_select(IngestEvalSample).where(IngestEvalSample.outcome == outcome)
             ).scalars().all()
@@ -470,6 +508,28 @@ def test_bm25_drop_recorded_and_eval_logged(mock_search, tmp_repo, monkeypatch):
     assert len(rows) == 1
     assert rows[0]["wiki_path"] == "low.md"
     assert rows[0]["source_document_id"] == "doc-abc"
+    assert rows[0]["bm25_score"] == 2.0
+
+
+@patch("app.tasks.wiki_update.ingest_search.candidates")
+def test_rank_drop_recorded_and_eval_logged(mock_search, tmp_repo, monkeypatch):
+    # A real search hit beyond the top-N cap is recorded as
+    # filtered_by_search_rank, with its BM25 score, when eval logging widens the
+    # fetch. The fetch is widened via fetch_limit=EVAL_WIDE_FETCH_LIMIT.
+    wiki_git.commit_file("tail.md", "# Tail\nbody\n", "seed", author=None)
+    monkeypatch.setattr(
+        "app.tasks.wiki_update.CONFIG",
+        CONFIG.model_copy(update={"ingest_eval_logging": True}),
+    )
+    mock_search.return_value = _cs([], rank_dropped=[_hit("tail.md", "Tail", 1.5)])
+    before = _outcome_count("filtered_by_search_rank", "tail.md")
+    _run(_make_push())
+    assert mock_search.call_args.kwargs["fetch_limit"] == ingest_search.EVAL_WIDE_FETCH_LIMIT
+    assert _outcome_count("filtered_by_search_rank", "tail.md") - before == 1.0
+    rows = _eval_rows("filtered_by_search_rank")
+    assert len(rows) == 1
+    assert rows[0]["wiki_path"] == "tail.md"
+    assert rows[0]["bm25_score"] == 1.5
 
 
 @patch("app.tasks.wiki_update.ingest_batch_reconciler.batch_reconcile", return_value=([], 0))

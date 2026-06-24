@@ -22,7 +22,7 @@ from __future__ import annotations
 import logging
 import os
 import time
-from typing import Any
+from typing import Any, Literal
 
 from app.config import CONFIG
 from app.ingest import eval_sample as ingest_eval_sample
@@ -309,25 +309,26 @@ def _reconcile_pushed_document(push: dict[str, Any]) -> None:
     _meta: dict[str, Any] = push.get("metadata") or {}
     url: str = str(push.get("url") or _meta.get("url") or "")
 
-    def _record_bm25_drops(dropped: list[ingest_search.SearchHit]) -> None:
-        # Post-process the candidates the BM25 score threshold dropped: the
-        # per-pair outcome metric, and (when eval logging is on) an eval row —
-        # reading the page body here since this path never reads it otherwise.
+    def _record_search_drops(
+        dropped: list[ingest_search.SearchHit],
+        outcome: Literal["filtered_by_bm25_score", "filtered_by_search_rank"],
+    ) -> None:
+        # Post-process candidates dropped before the reconciler — by the BM25
+        # score threshold (``filtered_by_bm25_score``) or by the top-N candidate
+        # cap (``filtered_by_search_rank``): the per-pair outcome metric, and
+        # (when eval logging is on) an eval row — reading the page body here
+        # since this path never reads it otherwise.
         for hit in dropped:
-            ingest_outcomes_total.labels(
-                outcome="filtered_by_bm25_score", wiki_path=hit.path
-            ).inc()
-            ingest_bm25_score_by_outcome.labels(
-                outcome="filtered_by_bm25_score"
-            ).observe(hit.score)
+            ingest_outcomes_total.labels(outcome=outcome, wiki_path=hit.path).inc()
+            ingest_bm25_score_by_outcome.labels(outcome=outcome).observe(hit.score)
             if not CONFIG.ingest_eval_logging:
                 continue
             try:
                 body = wiki_git.read_file(hit.path)
             except Exception:
                 log.warning(
-                    "ingest_eval_sample: failed to read %s for filtered_by_bm25_score sample",
-                    hit.path,
+                    "ingest_eval_sample: failed to read %s for %s sample",
+                    hit.path, outcome,
                     exc_info=True,
                 )
                 continue
@@ -340,19 +341,24 @@ def _reconcile_pushed_document(push: dict[str, Any]) -> None:
                     source_content=content,
                     wiki_path=hit.path,
                     wiki_body_before=body,
-                    outcome="filtered_by_bm25_score",
+                    outcome=outcome,
+                    bm25_score=hit.score,
                     commit_sha=None,
                 )
             except Exception:
                 log.warning(
-                    "ingest_eval_sample: failed to log filtered_by_bm25_score sample",
+                    "ingest_eval_sample: failed to log %s sample", outcome,
                     exc_info=True,
                 )
 
     t_start = time.monotonic()
     used_fallback = False
+    # Widen the candidate fetch only when eval logging is on, so we can record
+    # real search hits beyond the top-N cap (filtered_by_search_rank). The kept
+    # set the pipeline acts on is unchanged either way.
+    fetch_limit = ingest_search.EVAL_WIDE_FETCH_LIMIT if CONFIG.ingest_eval_logging else None
     try:
-        search_result = ingest_search.candidates(content, title)
+        search_result = ingest_search.candidates(content, title, fetch_limit=fetch_limit)
     except ingest_search.IngestSearchError:
         used_fallback = True
         # The candidate search failed — almost always because the full document
@@ -384,11 +390,14 @@ def _reconcile_pushed_document(push: dict[str, Any]) -> None:
             )
             return
 
-    # Only record BM25 drops from the primary, full-content search. The fallback
-    # scores against a lossy summary query, so its below-threshold pages aren't
-    # comparable to the document and would mislabel the eval rows.
+    # Only record search drops from the primary, full-content search. The
+    # fallback scores against a lossy summary query, so its below-threshold /
+    # below-rank pages aren't comparable to the document and would mislabel the
+    # eval rows. rank_dropped is non-empty only when eval logging widened the
+    # fetch, so it's a no-op otherwise.
     if not used_fallback:
-        _record_bm25_drops(search_result.dropped)
+        _record_search_drops(search_result.dropped, "filtered_by_bm25_score")
+        _record_search_drops(search_result.rank_dropped, "filtered_by_search_rank")
     hits = search_result.passed
     if not hits:
         log.info("process_pushed_document: no BM25 candidates above threshold, doc_id=%s", doc_id)
@@ -470,6 +479,7 @@ def _reconcile_pushed_document(push: dict[str, Any]) -> None:
                             wiki_path=c.hit.path,
                             wiki_body_before=c.body,
                             outcome="filtered_by_selector",
+                            bm25_score=c.hit.score,
                             commit_sha=None,
                         )
                     except Exception:
@@ -523,6 +533,7 @@ def _reconcile_pushed_document(push: dict[str, Any]) -> None:
                         wiki_path=c.hit.path,
                         wiki_body_before=c.body,
                         outcome="irrelevant",
+                        bm25_score=c.hit.score,
                         commit_sha=None,
                     )
                 except Exception:
@@ -579,6 +590,7 @@ def _reconcile_pushed_document(push: dict[str, Any]) -> None:
                         wiki_path=c.hit.path,
                         wiki_body_before=c.body,
                         outcome="committed",
+                        bm25_score=c.hit.score,
                         commit_sha=sha,
                     )
                 except Exception:
@@ -599,6 +611,7 @@ def _reconcile_pushed_document(push: dict[str, Any]) -> None:
                         wiki_path=c.hit.path,
                         wiki_body_before=c.body,
                         outcome="no_change",
+                        bm25_score=c.hit.score,
                         commit_sha=None,
                     )
                 except Exception:
