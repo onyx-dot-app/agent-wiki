@@ -1,7 +1,12 @@
 .view {
+  position: relative;
   display: flex;
   flex-direction: column;
   min-height: 0;
+  /* Let the flex item shrink to its container; otherwise wide, non-wrapping
+     content (code blocks, tables) expands the view past the pane and the
+     floating navigator gets clipped. The body scrolls the overflow instead. */
+  min-width: 0;
 }
 
 .header {
@@ -101,4 +106,50 @@
   padding: 24px;
   text-align: center;
   color: var(--text-03);
+}
+
+/* Right gutter keeps the diff content clear of the floating navigator so the
+   selector sits in whitespace, never over the text. */
+.diffContent {
+  padding-right: 128px;
+}
+
+/* Floating change navigator (Figma 283:22157) — pinned to the diff viewport
+   (not the scrolling body) so it stays put while you step through changes. */
+.navigator {
+  position: absolute;
+  right: 16px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 6px 6px 10px;
+  background: var(--background-tint-00);
+  border-radius: var(--radius-12);
+  box-shadow: var(--shadow-sm);
+}
+
+.navArrows {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.navBtn {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--text-04);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border-radius: var(--radius-08);
+  cursor: pointer;
+}
+
+.navBtn:hover {
+  background: var(--background-tint-03);
 }

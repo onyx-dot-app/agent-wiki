@@ -76,14 +76,37 @@
   color: currentColor;
 }
 
-/* Inline word edits — render the swap inside an `.add` block (green
-   container with the same quote indent + radius + padding). The
-   <del> is red strikethrough, the <ins> is green text. */
+/* Single-line edits render as a plain line (matching .context inset) with
+   only the changed words highlighted — no full-line band — so it's clear
+   exactly where the change is. */
+.wordLine {
+  padding: 0 12px;
+  color: var(--text-05);
+}
+
+/* Inline anchor wrapping the changed words; the navigator scrolls here so a
+   jump lands on the change itself, even mid-paragraph. scroll-margin keeps it
+   off the floating navigator when centered. */
+.wordChange {
+  scroll-margin: 24px 0;
+}
+
+/* Highlight scoped to just the changed words, reusing the block-band status
+   tokens. clone keeps the background intact where the span wraps lines. */
 .wordRemoved {
+  background: var(--status-error-01);
   color: var(--status-text-error-05);
   text-decoration: line-through;
+  border-radius: 3px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
 }
 
 .wordAdded {
+  background: var(--status-success-01);
   color: var(--status-text-success-05);
+  text-decoration: underline;
+  border-radius: 3px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
 }
