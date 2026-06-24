@@ -54,6 +54,11 @@ def test_existing_plaintext_is_encrypted_in_place(tmp_db: object) -> None:
         custom_api_key="",
         custom_base_url="",
         custom_display_name="",
+        bedrock_aws_region="",
+        bedrock_endpoint_url="",
+        bedrock_aws_access_key_id="",
+        bedrock_aws_secret_access_key="",
+        bedrock_aws_session_token="",
     )
     _rewind_to_text_with_plaintext()
 

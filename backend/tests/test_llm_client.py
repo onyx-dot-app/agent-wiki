@@ -47,6 +47,11 @@ def _upsert(**overrides: Any) -> None:
         "custom_api_key": "",
         "custom_base_url": "",
         "custom_display_name": "",
+        "bedrock_aws_region": "",
+        "bedrock_endpoint_url": "",
+        "bedrock_aws_access_key_id": "",
+        "bedrock_aws_secret_access_key": "",
+        "bedrock_aws_session_token": "",
     }
     base.update(overrides)
     llm_settings.upsert(**base)

@@ -1,4 +1,5 @@
 """rotate_encryption_key: re-encrypt secret columns from an old key to the new one."""
+
 from __future__ import annotations
 
 import pytest
@@ -34,6 +35,11 @@ def test_rotate_reencrypts_under_new_key(tmp_db: object, monkeypatch: pytest.Mon
         custom_api_key="",
         custom_base_url="",
         custom_display_name="",
+        bedrock_aws_region="",
+        bedrock_endpoint_url="",
+        bedrock_aws_access_key_id="",
+        bedrock_aws_secret_access_key="",
+        bedrock_aws_session_token="",
     )
 
     old_secret = crypto.active_key_secret()
