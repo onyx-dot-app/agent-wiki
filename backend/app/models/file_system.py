@@ -217,6 +217,15 @@ class FileHistoryResponse(BaseModel):
     commits: list[CommitView]
 
 
+class AutoUpdateCountResponse(BaseModel):
+    """Count of ingestion auto-update commits for a page or folder within a
+    recent window — drives the Update Policy panel's activity line."""
+
+    path: str
+    hours: int
+    count: int
+
+
 class WordDiff(BaseModel):
     """A 1-remove/1-add line collapsed into one rendered row.
 

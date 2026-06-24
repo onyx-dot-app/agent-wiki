@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import re
 import subprocess
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
@@ -13,6 +14,7 @@ from app.auth.deps import require_user
 from app.llm.agents import merge_conflict_update
 from app.models.file_system import (
     ActivityRowView,
+    AutoUpdateCountResponse,
     CommitView,
     CreateFolderRequest,
     CreateFolderResponse,
@@ -66,6 +68,7 @@ from app.wiki import (
     search as wiki_search,
     starred as wiki_starred,
     templates as templates_repo,
+    update_policy as update_policy_repo,
     utils as wiki_utils,
 )
 from app.models.wiki import ChangeKind, CommitMaxRetriesError
@@ -577,6 +580,29 @@ def file_history(
         if r.sha not in deprecated
     ]
     return FileHistoryResponse(path=rel, head_sha=head_sha, commits=visible)
+
+
+@router.get("/auto-update-count", response_model=AutoUpdateCountResponse)
+def auto_update_count(
+    user: User = Depends(require_user),
+    path: str = "",
+    hours: int = Query(24, ge=1, le=8760),
+) -> AutoUpdateCountResponse:
+    """How many ingestion auto-updates touched a page/folder in the last
+    ``hours``. Counts only commits authored by ``Onyx Ingest`` — human and
+    other-agent edits are excluded."""
+    try:
+        # Same normalization as /update-policy (the panel passes the same
+        # path): "" / "/" mean the wiki root, which scopes the whole repo.
+        rel = update_policy_repo.normalize_path(path)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    require_can("read", rel, user)
+    since = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+    count = wiki_git.count_commits_since(
+        rel, author=wiki_utils.INGEST_AUTHOR_EMAIL, since_iso=since
+    )
+    return AutoUpdateCountResponse(path=rel, hours=hours, count=count)
 
 
 @router.get("/file/diff", response_model=FileDiffResponse)

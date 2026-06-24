@@ -1,7 +1,7 @@
 "use client";
 
 import { Button, Switch, Text } from "@onyx-ai/opal/components";
-import { SvgEdit, SvgX } from "@onyx-ai/opal/icons";
+import { SvgEdit, SvgHistory, SvgX } from "@onyx-ai/opal/icons";
 import { useEffect, useState } from "react";
 
 import { ApiError } from "@/lib/api";
@@ -10,6 +10,7 @@ import {
   patchUpdatePolicy,
   type UpdatePolicyResponse,
 } from "@/lib/updatePolicy";
+import { fetchAutoUpdateCount } from "@/lib/wiki";
 
 import styles from "./UpdatePolicyPanel.module.css";
 
@@ -17,6 +18,9 @@ interface Props {
   path: string;
   onClose: () => void;
   fullHeight?: boolean;
+  // When set, the activity row shows an "Update History" link that calls this.
+  // Omit on surfaces with no history view (e.g. the folder explorer drawer).
+  onShowHistory?: () => void;
 }
 
 function errorMessage(e: unknown): string {
@@ -26,7 +30,12 @@ function errorMessage(e: unknown): string {
   return e instanceof Error ? e.message : "Something went wrong.";
 }
 
-export function UpdatePolicyPanel({ path, onClose, fullHeight }: Props) {
+export function UpdatePolicyPanel({
+  path,
+  onClose,
+  fullHeight,
+  onShowHistory,
+}: Props) {
   const kind = path.endsWith(".md") ? "page" : "folder";
 
   const [loading, setLoading] = useState(true);
@@ -37,6 +46,12 @@ export function UpdatePolicyPanel({ path, onClose, fullHeight }: Props) {
   const [draft, setDraft] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Ingestion auto-update count + the window it covers. Loaded separately so a
+  // failure here never blocks the policy card — null just hides the activity row.
+  const [autoUpdate, setAutoUpdate] = useState<{
+    count: number;
+    hours: number;
+  } | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -44,6 +59,7 @@ export function UpdatePolicyPanel({ path, onClose, fullHeight }: Props) {
     setLoaded(false);
     setError(null);
     setEditing(false);
+    setAutoUpdate(null);
     getUpdatePolicy(path)
       .then((r) => {
         if (alive) {
@@ -56,6 +72,13 @@ export function UpdatePolicyPanel({ path, onClose, fullHeight }: Props) {
       })
       .finally(() => {
         if (alive) setLoading(false);
+      });
+    fetchAutoUpdateCount(path)
+      .then((r) => {
+        if (alive) setAutoUpdate({ count: r.count, hours: r.hours });
+      })
+      .catch(() => {
+        // Non-fatal: leave the activity row hidden.
       });
     return () => {
       alive = false;
@@ -231,6 +254,29 @@ export function UpdatePolicyPanel({ path, onClose, fullHeight }: Props) {
                     {saving ? "Saving…" : "Save"}
                   </Button>
                 </div>
+              </div>
+            )}
+
+            {autoUpdate !== null && (
+              <div className={`${styles.row} ${styles.activityRow}`}>
+                <div className={styles.rowText}>
+                  <Text font="main-content-emphasis" color="text-04">
+                    {`${autoUpdate.count} Auto Update${autoUpdate.count === 1 ? "" : "s"}`}
+                  </Text>
+                  <span className={styles.desc}>
+                    {`in the past ${autoUpdate.hours} hour${autoUpdate.hours === 1 ? "" : "s"}`}
+                  </span>
+                </div>
+                {onShowHistory && (
+                  <Button
+                    icon={SvgHistory}
+                    prominence="tertiary"
+                    size="sm"
+                    onClick={onShowHistory}
+                  >
+                    Update History
+                  </Button>
+                )}
               </div>
             )}
           </div>

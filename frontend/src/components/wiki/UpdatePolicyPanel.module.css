@@ -72,6 +72,14 @@
   color: var(--text-03);
 }
 
+/* The 24h auto-update count sits at the foot of the card, fenced off from the
+   settings above by a hairline and centered against its "Update History" link. */
+.activityRow {
+  align-items: center;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-01);
+}
+
 .instruction {
   font-size: 13px;
   color: var(--text-05);

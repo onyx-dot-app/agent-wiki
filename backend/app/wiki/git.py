@@ -415,6 +415,32 @@ def commits_between(base_sha: str, head_sha: str, rel_path: str) -> list[str]:
     return [s for s in out.splitlines() if s]
 
 
+def count_commits_since(rel_path: str, *, author: str, since_iso: str) -> int:
+    """Number of commits since ``since_iso`` by ``author`` that touched
+    ``rel_path``.
+
+    ``rel_path`` may be a single ``.md`` file or a folder — git's pathspec
+    counts every commit touching anything beneath a folder, so a folder count
+    aggregates its pages. Empty path scopes the whole repo. ``author`` is a
+    bare email; we anchor it as ``<email>$`` so git's ``--author`` regex matches
+    that exact identity rather than substring-matching it (e.g. so
+    ``onyx-ingest@local`` can't match ``onyx-ingest@localhost``). ``since_iso``
+    is any timestamp git ``--since`` accepts (filters by commit date)."""
+    author_pattern = f"<{author}>$"
+    out = _run(
+        [
+            "log",
+            f"--since={since_iso}",
+            f"--author={author_pattern}",
+            "--pretty=format:%H",
+            "--",
+            rel_path or ".",
+        ],
+        check=False,
+    ).stdout
+    return sum(1 for line in out.splitlines() if line.strip())
+
+
 def list_paths(prefix: str = "") -> list[str]:
     """List tracked files under a path prefix."""
     out = _run(["ls-files", "-z", prefix or "."]).stdout
