@@ -169,6 +169,24 @@ export async function fetchAutoUpdateCount(
   );
 }
 
+export interface UpdateHealth {
+  path: string;
+  hours: number;
+  count: number;
+  threshold: number;
+  cap: number;
+  over_threshold: boolean;
+  auto_disabled: boolean;
+  show_banner: boolean;
+}
+
+/** Auto-update health for a page — drives the too-frequent-update banner. */
+export async function fetchUpdateHealth(path: string): Promise<UpdateHealth> {
+  return apiFetch<UpdateHealth>(
+    `/wiki/update-health?path=${encodeURIComponent(path)}`,
+  );
+}
+
 /**
  * Pull the originating source URL + title out of a commit body.
  *

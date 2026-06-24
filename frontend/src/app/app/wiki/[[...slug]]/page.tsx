@@ -54,6 +54,7 @@ import {
 } from "@/lib/launchers";
 import { ShareDialog } from "@/components/wiki/ShareDialog";
 import { CommentsPanel } from "@/components/wiki/CommentsPanel";
+import { UpdateHealthBanner } from "@/components/wiki/UpdateHealthBanner";
 import { UpdatePolicyPanel } from "@/components/wiki/UpdatePolicyPanel";
 import { apiFetch, ApiError } from "@/lib/api";
 import { listComments } from "@/lib/comments";
@@ -2468,6 +2469,12 @@ function FileViewer({ path }: { path: string }) {
             <div
               className={`min-h-0 flex-1 overflow-y-auto ${isMobile ? "-mx-3 px-3" : "-mx-8 px-8"}`}
             >
+              <div className="mx-auto w-full max-w-[768px]">
+                <UpdateHealthBanner
+                  path={path}
+                  onOpenPolicy={() => setPolicyOpen(true)}
+                />
+              </div>
               <article
                 ref={articleRef}
                 className="markdown mx-auto w-full max-w-[768px]"

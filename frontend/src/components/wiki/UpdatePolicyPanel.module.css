@@ -111,6 +111,31 @@
   gap: 8px;
 }
 
+/* Inline editor for the per-page warning threshold. */
+.warnEdit {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.warnSpacer {
+  flex: 1;
+}
+.warnInput {
+  width: 72px;
+  box-sizing: border-box;
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 8px;
+  border: 1px solid var(--border-01);
+  border-radius: var(--border-radius-04);
+  background: var(--background-tint-00);
+  color: var(--text-05);
+}
+.warnInput:focus {
+  outline: none;
+  border-color: var(--border-05);
+}
+
 /* Small "Inherited / Set here" status line + reset affordance. */
 .origin {
   display: block;

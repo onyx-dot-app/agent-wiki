@@ -22,6 +22,8 @@ interface IngestSettings {
   api_key_set: boolean;
   api_key_hint: string;
   onyx_base_url: string | null;
+  warn_update_threshold_default: number;
+  auto_update_cap: number;
 }
 
 export default function AdminIngestPage() {
@@ -44,6 +46,8 @@ function IngestForm() {
   const [settings, setSettings] = useState<IngestSettings | null>(null);
   const [llmSettings, setLlmSettings] = useState<LLMSettings | null>(null);
   const [maxDocChars, setMaxDocChars] = useState("");
+  const [warnDefault, setWarnDefault] = useState("");
+  const [autoCap, setAutoCap] = useState("");
   const [keyVisible, setKeyVisible] = useState(false);
   // Raw key exists client-side only in the regenerate response — show-once.
   const [freshKey, setFreshKey] = useState<string | null>(null);
@@ -67,6 +71,8 @@ function IngestForm() {
       setSettings(ingest);
       setMaxDocChars(String(ingest.max_doc_chars));
       setOnyxBaseUrl(ingest.onyx_base_url ?? "");
+      setWarnDefault(String(ingest.warn_update_threshold_default));
+      setAutoCap(String(ingest.auto_update_cap));
       setLlmSettings(llm);
     } catch (e) {
       setError(e instanceof Error ? e.message : "failed to load");
@@ -89,10 +95,14 @@ function IngestForm() {
         body: JSON.stringify({
           max_doc_chars: Number(maxDocChars),
           onyx_base_url: onyxBaseUrl.trim() || null,
+          warn_update_threshold_default: Number(warnDefault),
+          auto_update_cap: Number(autoCap),
         }),
       });
       setSettings(r);
       setOnyxBaseUrl(r.onyx_base_url ?? "");
+      setWarnDefault(String(r.warn_update_threshold_default));
+      setAutoCap(String(r.auto_update_cap));
       setSaved("Saved.");
     } catch (e) {
       setError(e instanceof Error ? e.message : "failed to save");
@@ -146,7 +156,9 @@ function IngestForm() {
 
   const dirty =
     maxDocChars !== String(settings.max_doc_chars) ||
-    (onyxBaseUrl.trim() || "") !== (settings.onyx_base_url ?? "");
+    (onyxBaseUrl.trim() || "") !== (settings.onyx_base_url ?? "") ||
+    warnDefault !== String(settings.warn_update_threshold_default) ||
+    autoCap !== String(settings.auto_update_cap);
 
   return (
     <div className="flex flex-col gap-6">
@@ -252,6 +264,38 @@ function IngestForm() {
             max={5000000}
             value={maxDocChars}
             onChange={(e) => setMaxDocChars(e.target.value)}
+            className="box-border w-[160px] rounded-(--border-radius-04) border border-(--border-01) px-[10px] py-2 text-sm"
+          />
+        </label>
+
+        <h3 className="m-0 mt-2 text-sm font-semibold">Auto-update health</h3>
+        <div className="text-[13px] text-(--text-03)">
+          Guardrails for pages that auto-update too often. The warning threshold
+          is the per-page default owners can override; any page exceeding the
+          cap has its auto-update turned off automatically. Set either to 0 to
+          disable it.
+        </div>
+        <label>
+          <div className="mb-1 text-[13px] font-medium">
+            Default warning threshold (updates / 24h)
+          </div>
+          <input
+            type="number"
+            min={0}
+            value={warnDefault}
+            onChange={(e) => setWarnDefault(e.target.value)}
+            className="box-border w-[160px] rounded-(--border-radius-04) border border-(--border-01) px-[10px] py-2 text-sm"
+          />
+        </label>
+        <label>
+          <div className="mb-1 text-[13px] font-medium">
+            Auto-update cap (updates / 24h)
+          </div>
+          <input
+            type="number"
+            min={0}
+            value={autoCap}
+            onChange={(e) => setAutoCap(e.target.value)}
             className="box-border w-[160px] rounded-(--border-radius-04) border border-(--border-01) px-[10px] py-2 text-sm"
           />
         </label>
