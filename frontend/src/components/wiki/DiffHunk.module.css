@@ -38,14 +38,19 @@
   padding: 2px 8px;
 }
 
+/* Connect runs of the same kind, and connect a remove block directly above
+   the add block that replaces it, so a replacement reads as one unit (old
+   over new) rather than two unrelated cards. */
 .add + .add,
-.remove + .remove {
+.remove + .remove,
+.remove + .add {
   margin-top: 0;
   border-top-left-radius: 0;
   border-top-right-radius: 0;
 }
 .add:has(+ .add),
-.remove:has(+ .remove) {
+.remove:has(+ .remove),
+.remove:has(+ .add) {
   margin-bottom: 0;
   border-bottom-left-radius: 0;
   border-bottom-right-radius: 0;
