@@ -736,6 +736,15 @@ class IngestSettings(Base):
     # origin used for Craft build-API calls, connect redirects, and
     # "Open Craft" deep links. Null = Craft launches unavailable.
     onyx_base_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Auto-update health knobs (see "Taming Bad-Behaved Wikis"): the default
+    # per-page warning threshold owners override via update_policies, and a hard
+    # cap above which a page's ingestion auto-update is turned off. 0 = off.
+    warn_update_threshold_default: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("10")
+    )
+    auto_update_cap: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("200")
+    )
     updated_at: Mapped[str] = mapped_column(
         Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
     )
@@ -1006,6 +1015,11 @@ class UpdatePolicy(Base):
     kind: Mapped[str] = mapped_column(Text, nullable=False)  # "page" | "folder"
     ingestion_auto_update_disabled: Mapped[bool | None] = mapped_column(Boolean)
     update_instruction: Mapped[str | None] = mapped_column(Text)
+    # Owner-set per-page warning threshold: notify the owner once a page is
+    # auto-updated more than this many times in 24h. ``NULL`` inherits the
+    # global default (``ingest_settings.warn_update_threshold_default``). Per-page
+    # only — not part of the most-granular-wins cascade above.
+    warn_update_threshold: Mapped[int | None] = mapped_column(Integer)
     updated_by_user_id: Mapped[str | None] = mapped_column(
         Text, ForeignKey("users.id", ondelete="SET NULL")
     )
