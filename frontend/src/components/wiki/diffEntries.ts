@@ -55,21 +55,24 @@ export function groupEntries(lines: DiffLine[]): Entry[] {
   return out;
 }
 
-/** Group every hunk and number each contiguous run of changes. A run is a
-    maximal stretch of non-context entries — e.g. a remove block followed by
-    an add block (a replacement) is one change, as is a lone word-diff line. */
+/** Group every hunk and number the changes. Each change entry is its own
+    change, EXCEPT an add block directly after a remove block — that's the
+    "new" half of a replacement, so it stays part of the remove's change.
+    The change index marks the entry the navigator scrolls to. */
 export function annotateHunks(hunks: DiffHunk[]): {
   perHunk: AnnotatedEntry[][];
   total: number;
 } {
   let changeIndex = 0;
   const perHunk = hunks.map((hunk) => {
-    let prevWasChange = false;
+    let prevKind: Entry["kind"] = "context";
     return groupEntries(hunk.lines).map((entry) => {
       const isChange = entry.kind !== "context";
-      const startsRun = isChange && !prevWasChange;
-      prevWasChange = isChange;
-      return { entry, changeIndex: startsRun ? changeIndex++ : null };
+      const continuesReplacement =
+        entry.kind === "add" && prevKind === "remove";
+      const startsChange = isChange && !continuesReplacement;
+      prevKind = entry.kind;
+      return { entry, changeIndex: startsChange ? changeIndex++ : null };
     });
   });
   return { perHunk, total: changeIndex };
