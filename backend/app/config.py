@@ -177,7 +177,7 @@ def load_config() -> Config:
         oidc_redirect_uri=os.environ.get("OIDC_REDIRECT_URI", ""),
         ingest_eval_logging=os.environ.get("INGEST_EVAL_LOGGING", "false").lower()
         in {"1", "true", "yes"},
-        ingest_eval_retention_days=_nonneg_int("INGEST_EVAL_RETENTION_DAYS", 90),
+        ingest_eval_retention_days=_nonneg_int("INGEST_EVAL_RETENTION_DAYS", 180),
         secure_cookies=os.environ.get("SECURE_COOKIES", "false").lower() in {"1", "true", "yes"},
         dev_mode=os.environ.get("DEV_MODE", "false").lower() in {"1", "true", "yes"},
         encryption_key_secret=os.environ.get("ENCRYPTION_KEY_SECRET", ""),

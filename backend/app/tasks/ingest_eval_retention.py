@@ -31,12 +31,12 @@ def prune_ingest_eval_samples() -> None:
     days = CONFIG.ingest_eval_retention_days
     if days <= 0:
         return
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
     deleted = eval_sample.delete_older_than(cutoff)
     if deleted:
         log.info(
             "ingest_eval retention: deleted %d rows older than %s (%dd)",
-            deleted, cutoff, days,
+            deleted, cutoff.isoformat(timespec="seconds"), days,
         )
     if deleted >= eval_sample.RETENTION_BATCH:
         # Hit the per-sweep cap — a backlog remains; the next daily run continues.

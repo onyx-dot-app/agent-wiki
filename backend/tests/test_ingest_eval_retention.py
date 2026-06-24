@@ -31,7 +31,7 @@ def test_delete_older_than_removes_old_keeps_recent(tmp_db):
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     _seed("old.md", "2020-01-01 00:00:00")
     _seed("new.md", now)
-    deleted = eval_sample.delete_older_than("2021-01-01 00:00:00")
+    deleted = eval_sample.delete_older_than(datetime(2021, 1, 1, tzinfo=timezone.utc))
     assert deleted == 1
     assert _paths() == {"new.md"}
 
@@ -39,7 +39,7 @@ def test_delete_older_than_removes_old_keeps_recent(tmp_db):
 def test_delete_older_than_respects_limit(tmp_db):
     for i in range(5):
         _seed(f"{i}.md", "2020-01-01 00:00:00")
-    deleted = eval_sample.delete_older_than("2021-01-01 00:00:00", limit=2)
+    deleted = eval_sample.delete_older_than(datetime(2021, 1, 1, tzinfo=timezone.utc), limit=2)
     assert deleted == 2
     assert len(_paths()) == 3
 

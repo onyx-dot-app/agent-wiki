@@ -13,6 +13,7 @@ search fetch). Intended for human review and building a regression test suite.
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from typing import Literal
 
 from sqlalchemy import delete, select
@@ -66,19 +67,21 @@ def log_sample(
         ))
 
 
-def delete_older_than(cutoff: str, *, limit: int = RETENTION_BATCH) -> int:
+def delete_older_than(cutoff: datetime, *, limit: int = RETENTION_BATCH) -> int:
     """Delete up to ``limit`` rows whose ``created_at`` is before ``cutoff``.
 
-    ``cutoff`` is a ``YYYY-MM-DD HH:MM:SS`` UTC string — the same fixed-width
-    format the column stores — so the lexicographic ``<`` comparison is also
-    chronological and rides the ``created_at`` index. Bounded by ``limit`` so a
-    single sweep stays quick even against a backlog; callers run it on a
-    schedule that drains the rest. Returns the number of rows deleted.
+    ``cutoff`` is a UTC ``datetime``; it is formatted to the fixed-width
+    ``YYYY-MM-DD HH:MM:SS`` string the column stores so the lexicographic
+    ``<`` comparison is also chronological and rides the ``created_at`` index.
+    Bounded by ``limit`` so a single sweep stays quick even against a backlog;
+    callers run it on a schedule that drains the rest. Returns the number of
+    rows deleted.
     """
+    cutoff_str = cutoff.strftime("%Y-%m-%d %H:%M:%S")
     with session() as s:
         ids = s.scalars(
             select(IngestEvalSample.id)
-            .where(IngestEvalSample.created_at < cutoff)
+            .where(IngestEvalSample.created_at < cutoff_str)
             .order_by(IngestEvalSample.created_at)
             .limit(limit)
         ).all()
