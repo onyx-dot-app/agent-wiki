@@ -119,6 +119,7 @@ def tmp_config(tmp_path, monkeypatch):
         ingest_bm25_limit=20,
         ingest_irrelevant_stop_n=2,
         ingest_eval_logging=False,
+        ingest_eval_retention_days=90,
         launchers_enabled=True,
         launch_code_ttl_seconds=60,
         agent_session_idle_seconds=300,

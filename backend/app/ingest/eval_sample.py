@@ -15,11 +15,18 @@ from __future__ import annotations
 import logging
 from typing import Literal
 
+from sqlalchemy import delete, select
+
 from app.db.models import IngestEvalSample
 from app.db.session import session
 from app.wiki import git as wiki_git
 
 log = logging.getLogger(__name__)
+
+# Max rows a single retention sweep deletes — keeps the lightweight-maintenance
+# DELETE bounded and quick. The daily schedule drains any larger backlog over
+# successive runs.
+RETENTION_BATCH = 50_000
 
 
 def log_sample(
@@ -57,3 +64,25 @@ def log_sample(
             bm25_score=bm25_score,
             commit_sha=commit_sha,
         ))
+
+
+def delete_older_than(cutoff: str, *, limit: int = RETENTION_BATCH) -> int:
+    """Delete up to ``limit`` rows whose ``created_at`` is before ``cutoff``.
+
+    ``cutoff`` is a ``YYYY-MM-DD HH:MM:SS`` UTC string — the same fixed-width
+    format the column stores — so the lexicographic ``<`` comparison is also
+    chronological and rides the ``created_at`` index. Bounded by ``limit`` so a
+    single sweep stays quick even against a backlog; callers run it on a
+    schedule that drains the rest. Returns the number of rows deleted.
+    """
+    with session() as s:
+        ids = s.scalars(
+            select(IngestEvalSample.id)
+            .where(IngestEvalSample.created_at < cutoff)
+            .order_by(IngestEvalSample.created_at)
+            .limit(limit)
+        ).all()
+        if not ids:
+            return 0
+        s.execute(delete(IngestEvalSample).where(IngestEvalSample.id.in_(ids)))
+        return len(ids)
