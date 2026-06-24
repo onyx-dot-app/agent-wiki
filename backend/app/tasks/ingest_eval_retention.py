@@ -24,7 +24,9 @@ from app.tasks.queues import lightweight_maintenance_queue
 log = logging.getLogger(__name__)
 
 
-@lightweight_maintenance_queue.periodic_task(crontab(hour="3", minute="0"))
+# 11:00 UTC == 03:00 PST (UTC-8). The scheduler evaluates cron in UTC and does
+# not follow DST, so this lands at 03:00 Pacific in winter and 04:00 in summer.
+@lightweight_maintenance_queue.periodic_task(crontab(hour="11", minute="0"))
 def prune_ingest_eval_samples() -> None:
     days = CONFIG.ingest_eval_retention_days
     if days <= 0:

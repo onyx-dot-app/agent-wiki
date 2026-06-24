@@ -26,7 +26,7 @@ log = logging.getLogger(__name__)
 # Max rows a single retention sweep deletes — keeps the lightweight-maintenance
 # DELETE bounded and quick. The daily schedule drains any larger backlog over
 # successive runs.
-RETENTION_BATCH = 50_000
+RETENTION_BATCH = 100_000
 
 
 def log_sample(
