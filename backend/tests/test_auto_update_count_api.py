@@ -60,6 +60,19 @@ def test_root_path_counts_whole_repo(client: TestClient) -> None:
     assert body["count"] == 4  # all four ingest commits, no human edit
 
 
+def test_author_match_is_anchored_not_substring(client: TestClient) -> None:
+    uid = users_repo.create(email="nik@x.com", password="hunter2-x", name="Nik")
+    login_fastapi(client, uid)
+    # A lookalike whose email merely contains the ingest email as a prefix must
+    # not be counted — the match is anchored to the exact <email>.
+    wiki_git.commit_file(
+        "team/a.md", "x\n", "edit", author="Imposter <onyx-ingest@localhost>"
+    )
+    wiki_git.commit_file("team/a.md", "y\n", "ingest", author=wiki_utils.INGEST_AUTHOR)
+    body = client.get("/api/wiki/auto-update-count?path=team/a.md").json()
+    assert body["count"] == 1
+
+
 def test_window_excludes_commits_before_since(client: TestClient) -> None:
     _seed(client)
     # The window is committer-date based; a since in the future matches nothing.

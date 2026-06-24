@@ -46,9 +46,12 @@ export function UpdatePolicyPanel({
   const [draft, setDraft] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // 24h ingestion auto-update count. Loaded separately so a failure here never
-  // blocks the policy card — null just hides the activity row.
-  const [autoUpdateCount, setAutoUpdateCount] = useState<number | null>(null);
+  // Ingestion auto-update count + the window it covers. Loaded separately so a
+  // failure here never blocks the policy card — null just hides the activity row.
+  const [autoUpdate, setAutoUpdate] = useState<{
+    count: number;
+    hours: number;
+  } | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -56,7 +59,7 @@ export function UpdatePolicyPanel({
     setLoaded(false);
     setError(null);
     setEditing(false);
-    setAutoUpdateCount(null);
+    setAutoUpdate(null);
     getUpdatePolicy(path)
       .then((r) => {
         if (alive) {
@@ -72,7 +75,7 @@ export function UpdatePolicyPanel({
       });
     fetchAutoUpdateCount(path)
       .then((r) => {
-        if (alive) setAutoUpdateCount(r.count);
+        if (alive) setAutoUpdate({ count: r.count, hours: r.hours });
       })
       .catch(() => {
         // Non-fatal: leave the activity row hidden.
@@ -254,13 +257,15 @@ export function UpdatePolicyPanel({
               </div>
             )}
 
-            {autoUpdateCount !== null && (
+            {autoUpdate !== null && (
               <div className={`${styles.row} ${styles.activityRow}`}>
                 <div className={styles.rowText}>
                   <Text font="main-content-emphasis" color="text-04">
-                    {`${autoUpdateCount} Auto Update${autoUpdateCount === 1 ? "" : "s"}`}
+                    {`${autoUpdate.count} Auto Update${autoUpdate.count === 1 ? "" : "s"}`}
                   </Text>
-                  <span className={styles.desc}>in the past 24 hours</span>
+                  <span className={styles.desc}>
+                    {`in the past ${autoUpdate.hours} hour${autoUpdate.hours === 1 ? "" : "s"}`}
+                  </span>
                 </div>
                 {onShowHistory && (
                   <Button

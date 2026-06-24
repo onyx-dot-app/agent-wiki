@@ -422,14 +422,16 @@ def count_commits_since(rel_path: str, *, author: str, since_iso: str) -> int:
     ``rel_path`` may be a single ``.md`` file or a folder — git's pathspec
     counts every commit touching anything beneath a folder, so a folder count
     aggregates its pages. Empty path scopes the whole repo. ``author`` is a
-    git ``--author`` regex matched against the commit's author name+email;
-    pass an email for a precise match. ``since_iso`` is any timestamp git
-    ``--since`` accepts (filters by commit date)."""
+    bare email; we anchor it as ``<email>$`` so git's ``--author`` regex matches
+    that exact identity rather than substring-matching it (e.g. so
+    ``onyx-ingest@local`` can't match ``onyx-ingest@localhost``). ``since_iso``
+    is any timestamp git ``--since`` accepts (filters by commit date)."""
+    author_pattern = f"<{author}>$"
     out = _run(
         [
             "log",
             f"--since={since_iso}",
-            f"--author={author}",
+            f"--author={author_pattern}",
             "--pretty=format:%H",
             "--",
             rel_path or ".",
