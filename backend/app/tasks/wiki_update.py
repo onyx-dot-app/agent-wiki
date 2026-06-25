@@ -52,6 +52,7 @@ from app.metrics import (
 from app.mcp_server import jobs as mcp_jobs
 from app.mcp_server import pubsub as mcp_pubsub
 from app.auth import UserMissingError, load_user, set_current_user
+from app.tasks import update_frequency
 from app.tasks.queues import documents_queue
 from app.wiki import agent_activity, constants as wiki_constants, git as wiki_git, update_policy
 from app.models.wiki import ChangeKind, CommitMaxRetriesError
@@ -432,7 +433,8 @@ def _reconcile_pushed_document(push: dict[str, Any]) -> None:
                 hit.path,
             )
             continue
-        if cap > 0 and len(wiki_git.ingest_update_times_24h(hit.path)) >= cap:
+        cap_count = len(wiki_git.ingest_update_times_24h(hit.path)) if cap > 0 else 0
+        if cap > 0 and cap_count >= cap:
             ingest_outcomes_total.labels(
                 outcome="auto_update_cap_exceeded", wiki_path=hit.path
             ).inc()
@@ -441,6 +443,10 @@ def _reconcile_pushed_document(push: dict[str, Any]) -> None:
                 hit.path,
                 cap,
             )
+            # Record the (deduped) activity event from here, where we actually
+            # block a push — so it fires even for pages already over the cap when
+            # an admin set/lowered it (which have no future crossing commit).
+            update_frequency.record_auto_update_capped(hit.path, cap_count, cap)
             continue
         try:
             body = wiki_git.read_file(hit.path)

@@ -28,6 +28,12 @@ interface FrequentUpdatesPayload {
   threshold?: number;
 }
 
+interface AutoUpdateCappedPayload {
+  doc_path?: string;
+  count?: number;
+  cap?: number;
+}
+
 // Searchable text for an event regardless of kind.
 function eventHaystack(event: AppEvent): string {
   const p = event.payload as TriggerFirePayload & FrequentUpdatesPayload;
@@ -52,8 +58,8 @@ function FrequentUpdatesCard({ event }: ActivityCardProps) {
         <span className="truncate font-mono text-xs text-(--text-04)">
           {p.doc_path ? formatScopePath(p.doc_path) : "(no path)"}
         </span>
-        <span className="shrink-0 rounded-(--border-radius-04) bg-(--status-warning-01) px-1.5 py-[2px] text-[10px] font-semibold tracking-[0.3px] text-(--status-text-warning-05) uppercase">
-          Frequent
+        <span className="shrink-0">
+          <Tag title="Frequent" color="amber" />
         </span>
       </div>
       <p className="mb-1.5 line-clamp-2 text-xs text-(--text-04)">
@@ -69,9 +75,37 @@ function FrequentUpdatesCard({ event }: ActivityCardProps) {
   );
 }
 
+function AutoUpdateCappedCard({ event }: ActivityCardProps) {
+  const p = event.payload as AutoUpdateCappedPayload;
+  return (
+    <div className={cardClass}>
+      <div className="mb-1 flex items-start justify-between gap-2">
+        <span className="truncate font-mono text-xs text-(--text-04)">
+          {p.doc_path ? formatScopePath(p.doc_path) : "(no path)"}
+        </span>
+        <span className="shrink-0">
+          <Tag title="Capped" color="red" />
+        </span>
+      </div>
+      <p className="mb-1.5 line-clamp-2 text-xs text-(--text-04)">
+        Auto-update paused — hit the limit of {p.cap ?? "?"} updates in 24
+        hours.
+      </p>
+      <div className="flex items-center justify-end">
+        <span className="text-[11px] text-(--text-02)">
+          {timeAgo(toEventIso(event.ts))}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 function ActivityCard({ event }: ActivityCardProps) {
   if (event.kind === "wiki.frequent_updates") {
     return <FrequentUpdatesCard event={event} />;
+  }
+  if (event.kind === "wiki.auto_update_capped") {
+    return <AutoUpdateCappedCard event={event} />;
   }
   const p = event.payload as TriggerFirePayload;
   return (
