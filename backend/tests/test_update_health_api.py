@@ -4,6 +4,8 @@ client-side too-frequent-update banner."""
 
 from __future__ import annotations
 
+from datetime import datetime
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -40,6 +42,22 @@ def test_returns_count_threshold_and_cap(client: TestClient) -> None:
     assert body["threshold_24h"] == 2  # explicit per-page value
     assert "cap_24h" in body  # admin cap, for the slider max
     assert body["can_manage"] is True  # first user is admin → can act on the warning
+    assert body["cap_resets_at"] is None  # not over the cap
+
+
+def test_cap_resets_at_set_when_over_cap(client: TestClient) -> None:
+    uid = users_repo.create(email="o@x.com", password="hunter2-x", name="O")
+    login_fastapi(client, uid)
+    ingest_settings.upsert(max_doc_chars=100_000, onyx_base_url=None, auto_update_cap=2)
+    for i in range(3):
+        wiki_git.commit_file(PATH, f"b{i}\n", "ingest", author=wiki_constants.INGEST_AUTHOR)
+
+    body = client.get(f"/api/wiki/update-health?path={PATH}").json()
+    assert body["count_24h"] == 3
+    assert body["cap_24h"] == 2
+    # Over the cap → a resume time is returned (ISO-8601, ~24h out).
+    assert body["cap_resets_at"] is not None
+    datetime.fromisoformat(body["cap_resets_at"])
 
 
 def test_can_manage_true_for_non_admin_owner(client: TestClient) -> None:

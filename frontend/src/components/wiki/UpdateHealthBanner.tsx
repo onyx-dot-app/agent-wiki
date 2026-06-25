@@ -28,12 +28,24 @@ export function UpdateHealthBanner({ path, onOpenPolicy }: Props) {
   // back under the cap. The cap is admin-controlled, so there's no owner action
   // and no "Review settings" CTA — this banner is purely informational.
   if (health.cap_24h > 0 && health.count_24h >= health.cap_24h) {
+    const resumes = health.cap_resets_at
+      ? new Date(health.cap_resets_at).toLocaleString(undefined, {
+          dateStyle: "medium",
+          timeStyle: "short",
+        })
+      : null;
+    const description =
+      `This page hit the workspace limit of ${health.cap_24h} auto-updates in 24 hours, ` +
+      (resumes
+        ? `so it won't auto-update until around ${resumes}. `
+        : "so automatic updates are paused until the rate drops. ") +
+      "The limit is set by an admin.";
     return (
       <div className="mb-3">
         <MessageCard
           variant="error"
           title="Auto-update paused — update limit reached"
-          description={`This page hit the workspace limit of ${health.cap_24h} auto-updates in 24 hours, so automatic updates are paused until the rate drops. The limit is set by an admin.`}
+          description={description}
         />
       </div>
     );

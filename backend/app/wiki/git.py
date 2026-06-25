@@ -16,12 +16,14 @@ import tempfile
 import time
 from contextlib import contextmanager
 from collections.abc import Generator
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import quote, unquote
 
 from pydantic import BaseModel
 
 from app.config import CONFIG
+from app.wiki import constants
 
 log = logging.getLogger(__name__)
 
@@ -439,6 +441,33 @@ def count_commits_since(rel_path: str, *, author: str, since_iso: str) -> int:
         check=False,
     ).stdout
     return sum(1 for line in out.splitlines() if line.strip())
+
+
+_INGEST_WINDOW_HOURS = 24
+
+
+def ingest_update_times_24h(rel_path: str) -> list[int]:
+    """Committer unix timestamps of ``Onyx Ingest`` auto-update commits to
+    ``rel_path`` in the trailing 24h, oldest first.
+
+    ``len(...)`` is the rolling update count; the timestamps let callers work
+    out when an over-cap page drops back under the cap (the oldest updates age
+    out of the 24h window)."""
+    since = (
+        datetime.now(timezone.utc) - timedelta(hours=_INGEST_WINDOW_HOURS)
+    ).isoformat()
+    out = _run(
+        [
+            "log",
+            f"--since={since}",
+            f"--author=<{constants.INGEST_AUTHOR_EMAIL}>$",
+            "--pretty=format:%ct",
+            "--",
+            rel_path or ".",
+        ],
+        check=False,
+    ).stdout
+    return sorted(int(line) for line in out.splitlines() if line.strip())
 
 
 def list_paths(prefix: str = "") -> list[str]:

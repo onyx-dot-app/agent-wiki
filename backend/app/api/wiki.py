@@ -59,7 +59,6 @@ from app.triggers import repo as triggers_repo
 from app.wiki import (
     acl,
     agent_activity,
-    constants as wiki_constants,
     diff as wiki_diff,
     drafts as wiki_drafts,
     filesystem,
@@ -599,19 +598,29 @@ def update_health(
         raise HTTPException(status_code=400, detail=str(e)) from e
     require_can("read", rel, user)
 
-    since = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
-    count = wiki_git.count_commits_since(
-        rel, author=wiki_constants.INGEST_AUTHOR_EMAIL, since_iso=since
-    )
+    times = wiki_git.ingest_update_times_24h(rel)
+    count = len(times)
+    cap = ingest_settings.get().auto_update_cap
+    # When over the cap, the page resumes once enough of the oldest in-window
+    # updates age out for the count to drop back under the cap: the
+    # (count - cap + 1)-th oldest update (index count - cap) leaves the window
+    # 24h after it landed.
+    cap_resets_at: str | None = None
+    if cap > 0 and count >= cap:
+        reset = datetime.fromtimestamp(times[count - cap], tz=timezone.utc) + timedelta(
+            hours=24
+        )
+        cap_resets_at = reset.isoformat()
     return UpdateHealthResponse(
         path=rel,
         count_24h=count,
         threshold_24h=update_policy_repo.resolve_warn_threshold(rel),
-        cap_24h=ingest_settings.get().auto_update_cap,
+        cap_24h=cap,
         auto_update_disabled=update_policy_repo.resolve_for_path(
             rel
         ).ingestion_auto_update_disabled,
         can_manage=acl.can(user.id, user.is_admin, "write", rel),
+        cap_resets_at=cap_resets_at,
     )
 
 
