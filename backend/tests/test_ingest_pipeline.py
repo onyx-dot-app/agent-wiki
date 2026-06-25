@@ -20,6 +20,7 @@ import pytest
 from app.config import CONFIG
 from app.db.fts import SearchHit
 from app.ingest import search as ingest_search
+from app.ingest.settings import IngestSettings
 from app.ingest.source_tiers import is_filtered
 from app.llm.agents.common import IRRELEVANT_SENTINEL
 from app.llm.settings import _EMPTY as _EMPTY_LLM_SETTINGS, LLMSettings
@@ -47,6 +48,27 @@ def _stub_resolve_policies(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "app.tasks.wiki_update.update_policy.resolve_for_paths",
         lambda paths: {},
+    )
+
+
+def _ingest_settings(*, auto_update_cap: int) -> IngestSettings:
+    return IngestSettings(
+        max_doc_chars=100_000,
+        api_key=None,
+        onyx_base_url=None,
+        warn_update_threshold_default=10,
+        auto_update_cap=auto_update_cap,
+    )
+
+
+@pytest.fixture(autouse=True)
+def _stub_ingest_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The candidate loop reads the admin cap via ingest_settings.get() (a DB
+    read). Default to cap=0 (no cap) so the no-DB unit tests are unaffected;
+    cap-specific tests override."""
+    monkeypatch.setattr(
+        "app.tasks.wiki_update.ingest_settings.get",
+        lambda: _ingest_settings(auto_update_cap=0),
     )
 
 
@@ -384,6 +406,28 @@ def test_ingestion_disabled_skips_candidate_before_llm(
     monkeypatch.setattr(
         "app.tasks.wiki_update.update_policy.resolve_for_paths",
         lambda paths: {"page.md": ResolvedPolicy(ingestion_auto_update_disabled=True)},
+    )
+    mock_search.return_value = _cs([_hit("page.md", "Page", 5.0)])
+    _run(_make_push())
+    mock_reconcile.assert_not_called()
+    mock_commit.assert_not_called()
+
+
+@patch("app.tasks.wiki_update.wiki_git.commit_file")
+@patch("app.tasks.wiki_update.ingest_batch_reconciler.batch_reconcile")
+@patch("app.tasks.wiki_update.ingest_search.candidates")
+def test_over_cap_skips_candidate_before_llm(
+    mock_search, mock_reconcile, mock_commit, monkeypatch
+):
+    # A page that already hit the admin cap in the trailing 24h is dropped before
+    # any LLM call — the reconciler never sees it and nothing commits (no tokens).
+    monkeypatch.setattr(
+        "app.tasks.wiki_update.ingest_settings.get",
+        lambda: _ingest_settings(auto_update_cap=3),
+    )
+    monkeypatch.setattr(
+        "app.tasks.wiki_update.wiki_git.ingest_update_times_24h",
+        lambda _: [1, 2, 3],  # 3 updates in window >= cap 3
     )
     mock_search.return_value = _cs([_hit("page.md", "Page", 5.0)])
     _run(_make_push())
