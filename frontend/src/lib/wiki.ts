@@ -1,3 +1,5 @@
+import useSWR from "swr";
+
 import { apiFetch } from "@/lib/api";
 
 /** Last path segment as a display name — drops a trailing `.md`. Shared by the
@@ -162,11 +164,23 @@ export interface UpdateHealth {
   auto_update_disabled: boolean;
 }
 
-/** Auto-update health for a page — drives the too-frequent-update banner. */
-export async function fetchUpdateHealth(path: string): Promise<UpdateHealth> {
-  return apiFetch<UpdateHealth>(
-    `/wiki/update-health?path=${encodeURIComponent(path)}`,
-  );
+/** Auto-update health as a live SWR subscription. Polls so the 24h count and
+ * the too-frequent-update banner reflect ingestion writes without a manual
+ * reload — the count moves slowly, so a coarser interval than the doc body's
+ * is plenty. Pass `null` to disable (no path selected). */
+export function useUpdateHealth(path: string | null) {
+  const key = path
+    ? `/wiki/update-health?path=${encodeURIComponent(path)}`
+    : null;
+  const { data, error, isLoading, mutate } = useSWR<UpdateHealth>(key, {
+    refreshInterval: 15_000,
+  });
+  return {
+    health: data ?? null,
+    error: error as Error | undefined,
+    isLoading,
+    refresh: mutate,
+  };
 }
 
 /**
