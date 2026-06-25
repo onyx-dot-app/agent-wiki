@@ -114,6 +114,11 @@ export function UpdatePolicyPanel({
     setError(null);
     try {
       setPolicy(await patchUpdatePolicy(path, patch));
+      // Any policy change can move the health facts (auto-update on/off, the
+      // threshold), so revalidate the shared update-health cache now instead of
+      // waiting for the poll — the page-view banner reuses the same key and
+      // updates in lockstep.
+      void refreshHealth();
       after?.();
     } catch (e) {
       setError(errorMessage(e));
