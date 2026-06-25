@@ -10,9 +10,10 @@ from fastapi.testclient import TestClient
 from app.auth import users as users_repo
 from app.ingest import settings as ingest_settings
 from app.main import create_app
+from app.wiki import acl
+from app.wiki import constants as wiki_constants
 from app.wiki import git as wiki_git
 from app.wiki import update_policy
-from app.wiki import utils as wiki_utils
 from tests._auth import login_fastapi
 
 PATH = "team/page.md"
@@ -31,13 +32,48 @@ def test_returns_count_threshold_and_cap(client: TestClient) -> None:
     uid = users_repo.create(email="o@x.com", password="hunter2-x", name="O")
     login_fastapi(client, uid)
     for i in range(3):
-        wiki_git.commit_file(PATH, f"b{i}\n", "ingest", author=wiki_utils.INGEST_AUTHOR)
+        wiki_git.commit_file(PATH, f"b{i}\n", "ingest", author=wiki_constants.INGEST_AUTHOR)
     update_policy.set_policy(PATH, warn_update_threshold=2)
 
     body = client.get(f"/api/wiki/update-health?path={PATH}").json()
     assert body["count_24h"] == 3
     assert body["threshold_24h"] == 2  # explicit per-page value
     assert "cap_24h" in body  # admin cap, for the slider max
+    assert body["can_manage"] is True  # first user is admin → can act on the warning
+
+
+def test_can_manage_true_for_non_admin_owner(client: TestClient) -> None:
+    # The page owner (not just admins) can act on the warning, so the banner
+    # shows for them too.
+    users_repo.create(email="admin@x.com", password="hunter2-x", name="Admin")  # first = admin
+    owner = users_repo.create(email="owner@x.com", password="hunter2-x", name="Owner")
+    wiki_git.commit_file(PATH, "b\n", "ingest", author=wiki_constants.INGEST_AUTHOR)
+    acl.set_owner(PATH, owner)
+    login_fastapi(client, owner)
+
+    body = client.get(f"/api/wiki/update-health?path={PATH}").json()
+    assert body["can_manage"] is True
+
+
+def test_can_manage_false_for_non_owner_reader(client: TestClient) -> None:
+    # The banner + its "Review settings" CTA only render when can_manage is true,
+    # so a reader who can't change the policy never sees them.
+    owner = users_repo.create(email="owner@x.com", password="hunter2-x", name="Owner")
+    reader = users_repo.create(email="reader@x.com", password="hunter2-x", name="Read")
+    wiki_git.commit_file(PATH, "b\n", "ingest", author=wiki_constants.INGEST_AUTHOR)
+    acl.set_owner(PATH, owner)
+    acl.grant(
+        resource_kind="page",
+        resource_path=PATH,
+        principal_kind="everyone",
+        principal_id=None,
+        permission="read",
+        granted_by_user_id=owner,
+    )
+    login_fastapi(client, reader)
+
+    body = client.get(f"/api/wiki/update-health?path={PATH}").json()
+    assert body["can_manage"] is False
 
 
 def test_threshold_falls_back_to_workspace_default(client: TestClient) -> None:

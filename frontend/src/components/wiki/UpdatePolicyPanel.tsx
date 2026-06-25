@@ -54,9 +54,12 @@ export function UpdatePolicyPanel({
   // failure here never blocks the policy card — null hides the activity row +
   // slider.
   const { health, refresh: refreshHealth } = useUpdateHealth(path);
-  // Seed the slider from the effective threshold once per page. Tracking the
-  // health's own path (not a poll tick) keeps a 15s revalidation from yanking
-  // the thumb mid-drag while still re-seeding when the panel switches pages.
+  // Seed the slider from the effective threshold once per page, keyed on the
+  // health's own path. This (rather than nulling on a path change) is what
+  // re-seeds when the panel switches pages, and it survives the shared SWR
+  // cache being already warm from the page-view banner — nulling sliderVal here
+  // would race this effect and leave the slider permanently hidden. A 15s
+  // revalidation for the same path is a no-op, so it never yanks the thumb.
   const seededFor = useRef<string | null>(null);
   useEffect(() => {
     if (health && seededFor.current !== health.path) {
@@ -71,7 +74,6 @@ export function UpdatePolicyPanel({
     setLoaded(false);
     setError(null);
     setEditing(false);
-    setSliderVal(null);
     getUpdatePolicy(path)
       .then((r) => {
         if (alive) {

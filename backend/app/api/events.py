@@ -6,11 +6,11 @@ import logging
 from typing import Any, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 from app.auth import User
 from app.auth.deps import require_user
-from app.db.models import Event as EventRow, Trigger
+from app.db.models import Event as EventRow, Trigger, WikiOwner
 from app.db.session import session
 from app.models.event import Event, EventListResponse
 
@@ -44,10 +44,21 @@ def list_events(
     limit: int = Query(100, ge=1, le=500),
     kind: str | None = None,
 ) -> EventListResponse:
+    # The activity feed shows two families of events keyed on ``target``:
+    # trigger fires (target = a trigger the user owns) and page-scoped events
+    # like ``wiki.frequent_updates`` (target = a page the user owns).
     owned_trigger_ids = select(Trigger.id).where(Trigger.owner_user_id == user.id)
+    owned_page_paths = select(WikiOwner.path).where(
+        WikiOwner.owner_user_id == user.id
+    )
     stmt = (
         select(EventRow)
-        .where(EventRow.target.in_(owned_trigger_ids))
+        .where(
+            or_(
+                EventRow.target.in_(owned_trigger_ids),
+                EventRow.target.in_(owned_page_paths),
+            )
+        )
         .order_by(EventRow.id.desc())
         .limit(limit)
     )

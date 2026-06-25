@@ -162,6 +162,7 @@ export interface UpdateHealth {
   threshold_24h: number;
   cap_24h: number;
   auto_update_disabled: boolean;
+  can_manage: boolean;
 }
 
 /** Auto-update health as a live SWR subscription. Polls so the 24h count and

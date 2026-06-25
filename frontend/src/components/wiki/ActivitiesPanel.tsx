@@ -22,14 +22,60 @@ interface TriggerFirePayload {
   reason?: string;
 }
 
+interface FrequentUpdatesPayload {
+  doc_path?: string;
+  count?: number;
+  threshold?: number;
+}
+
+// Searchable text for an event regardless of kind.
+function eventHaystack(event: AppEvent): string {
+  const p = event.payload as TriggerFirePayload & FrequentUpdatesPayload;
+  return [p.doc_path, p.change_kind, p.reason, event.target, event.kind]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+}
+
 interface ActivityCardProps {
   event: AppEvent;
 }
 
+const cardClass =
+  "mx-3 my-1.5 rounded-(--border-radius-08) border border-(--border-01) bg-(--background-tint-00) px-3 py-2.5";
+
+function FrequentUpdatesCard({ event }: ActivityCardProps) {
+  const p = event.payload as FrequentUpdatesPayload;
+  return (
+    <div className={cardClass}>
+      <div className="mb-1 flex items-start justify-between gap-2">
+        <span className="truncate font-mono text-xs text-(--text-04)">
+          {p.doc_path ? formatScopePath(p.doc_path) : "(no path)"}
+        </span>
+        <span className="shrink-0 rounded-(--border-radius-04) bg-(--status-warning-01) px-1.5 py-[2px] text-[10px] font-semibold tracking-[0.3px] text-(--status-text-warning-05) uppercase">
+          Frequent
+        </span>
+      </div>
+      <p className="mb-1.5 line-clamp-2 text-xs text-(--text-04)">
+        Auto-updated {p.count ?? "?"} times in the past 24 hours
+        {p.threshold ? ` (warns at ${p.threshold}).` : "."}
+      </p>
+      <div className="flex items-center justify-end">
+        <span className="text-[11px] text-(--text-02)">
+          {timeAgo(toEventIso(event.ts))}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 function ActivityCard({ event }: ActivityCardProps) {
+  if (event.kind === "wiki.frequent_updates") {
+    return <FrequentUpdatesCard event={event} />;
+  }
   const p = event.payload as TriggerFirePayload;
   return (
-    <div className="mx-3 my-1.5 rounded-(--border-radius-08) border border-(--border-01) bg-(--background-tint-00) px-3 py-2.5">
+    <div className={cardClass}>
       <div className="mb-1 flex items-start justify-between gap-2">
         {p.doc_path ? (
           <span className="truncate font-mono text-xs text-(--text-04)">
@@ -65,21 +111,14 @@ export default function ActivitiesPanel() {
   const { toggleActivities } = useLeftPanel();
   const [query, setQuery] = useState("");
   const { events, isLoading } = useEvents(
-    { kind: "trigger.fire", limit: 100 },
+    { limit: 100 },
     { refreshInterval: 30_000 },
   );
 
   const unreadCount = events.filter((ev) => isNewActivity(ev.ts)).length;
 
   const filtered = query
-    ? events.filter((ev) => {
-        const p = ev.payload as TriggerFirePayload;
-        const haystack = [p.doc_path, p.change_kind, p.reason, ev.target]
-          .filter(Boolean)
-          .join(" ")
-          .toLowerCase();
-        return haystack.includes(query.toLowerCase());
-      })
+    ? events.filter((ev) => eventHaystack(ev).includes(query.toLowerCase()))
     : events;
 
   const newEvents = filtered.filter((ev) => isNewActivity(ev.ts));
