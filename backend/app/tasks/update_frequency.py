@@ -2,14 +2,19 @@
 
 Part of "Taming Bad-Behaved Wikis" (see the wiki design page). After an
 ingestion auto-update commits a page, ``after_doc_write`` enqueues
-``check_update_frequency`` here. It counts the page's ingestion updates in a
-**sliding 24h window** (``git log --since=now-24h`` by the ``Onyx Ingest``
-author) and, on the commit that crosses the page's warning threshold, records a
-``wiki.frequent_updates`` event so it shows in the owner's Activities panel.
+``check_update_frequency`` here. It counts the page's ingestion updates in the
+**sliding 24h window** and, on the commit that crosses the page's (owner-set)
+warning threshold, records a ``wiki.frequent_updates`` activity event — advisory
+only; the page keeps updating.
 
-Advisory only — it does not block or disable anything. (Enforcing the admin cap
-by pausing over-cap ingestion is a follow-up PR.) The event is recorded once
-per crossing (when ``count == threshold``) so a hot page doesn't spam the feed.
+The admin **cap** is enforced separately, in the ingest pipeline
+(``tasks/wiki_update.py``): an over-cap page is excluded before any LLM call.
+That exclusion point calls ``record_auto_update_capped`` here to log a
+``wiki.auto_update_capped`` event — meaning "an update was actually blocked",
+deduped to once per over-cap episode (24h window) so a hot page doesn't flood
+the feed. Recording on exclusion (rather than the crossing commit) also covers
+pages that were already over the cap when an admin set/lowered it.
+
 All work here is a git read + one Postgres insert — no LLM, no wiki commit.
 """
 from __future__ import annotations
@@ -17,6 +22,9 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime, timedelta, timezone
+from typing import Any
+
+from sqlalchemy import select
 
 from app.db.models import Event
 from app.db.session import session
@@ -27,9 +35,55 @@ from app.wiki import update_policy
 
 log = logging.getLogger(__name__)
 
-_WINDOW_HOURS = 24
-
 EVENT_FREQUENT_UPDATES = "wiki.frequent_updates"
+EVENT_AUTO_UPDATE_CAPPED = "wiki.auto_update_capped"
+
+_CAP_EVENT_DEDUP_HOURS = 24
+
+
+def _record_event(kind: str, path: str, payload: dict[str, Any]) -> None:
+    with session() as s:
+        s.add(
+            Event(
+                kind=kind,
+                actor=wiki_constants.INGEST_AUTHOR,
+                target=path,
+                payload_json=json.dumps(payload),
+            )
+        )
+
+
+def record_auto_update_capped(path: str, count: int, cap: int) -> None:
+    """Log a ``wiki.auto_update_capped`` event for a page the ingest pipeline
+    just excluded for hitting the cap.
+
+    Deduped: skips if a capped event for this page already exists within the
+    trailing ``_CAP_EVENT_DEDUP_HOURS``, so a page that stays over the cap (every
+    push blocked) logs once per episode, not once per blocked push."""
+    cutoff = (
+        datetime.now(timezone.utc) - timedelta(hours=_CAP_EVENT_DEDUP_HOURS)
+    ).strftime("%Y-%m-%d %H:%M:%S")
+    with session() as s:
+        recent = s.scalar(
+            select(Event.id)
+            .where(
+                Event.kind == EVENT_AUTO_UPDATE_CAPPED,
+                Event.target == path,
+                Event.ts >= cutoff,
+            )
+            .limit(1)
+        )
+        if recent is not None:
+            return
+        s.add(
+            Event(
+                kind=EVENT_AUTO_UPDATE_CAPPED,
+                actor=wiki_constants.INGEST_AUTHOR,
+                target=path,
+                payload_json=json.dumps({"doc_path": path, "count": count, "cap": cap}),
+            )
+        )
+    log.info("auto-update capped: %s at %d updates/24h (cap %d)", path, count, cap)
 
 
 @lightweight_maintenance_queue.task()
@@ -40,10 +94,9 @@ def check_update_frequency(path: str) -> None:
 def _check_update_frequency_inline(path: str) -> None:
     if not path.endswith(".md"):
         return
-    since = (datetime.now(timezone.utc) - timedelta(hours=_WINDOW_HOURS)).isoformat()
-    count = wiki_git.count_commits_since(
-        path, author=wiki_constants.INGEST_AUTHOR_EMAIL, since_iso=since
-    )
+    # Same rolling 24h window as the cap exclusion and update-health, so all
+    # three agree on the count.
+    count = len(wiki_git.ingest_update_times_24h(path))
     if count == 0:
         return
     # Warnings are moot when the page's auto-update is off (no ingestion to
@@ -58,14 +111,8 @@ def _check_update_frequency_inline(path: str) -> None:
     if threshold > 0 and count != threshold:
         return
     log.info("frequent-updates: %s at %d updates/24h (threshold %d)", path, count, threshold)
-    with session() as s:
-        s.add(
-            Event(
-                kind=EVENT_FREQUENT_UPDATES,
-                actor=wiki_constants.INGEST_AUTHOR,
-                target=path,
-                payload_json=json.dumps(
-                    {"doc_path": path, "count": count, "threshold": threshold}
-                ),
-            )
-        )
+    _record_event(
+        EVENT_FREQUENT_UPDATES,
+        path,
+        {"doc_path": path, "count": count, "threshold": threshold},
+    )

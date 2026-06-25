@@ -413,14 +413,16 @@ def test_ingestion_disabled_skips_candidate_before_llm(
     mock_commit.assert_not_called()
 
 
+@patch("app.tasks.wiki_update.update_frequency.record_auto_update_capped")
 @patch("app.tasks.wiki_update.wiki_git.commit_file")
 @patch("app.tasks.wiki_update.ingest_batch_reconciler.batch_reconcile")
 @patch("app.tasks.wiki_update.ingest_search.candidates")
 def test_over_cap_skips_candidate_before_llm(
-    mock_search, mock_reconcile, mock_commit, monkeypatch
+    mock_search, mock_reconcile, mock_commit, mock_capped, monkeypatch
 ):
     # A page that already hit the admin cap in the trailing 24h is dropped before
     # any LLM call — the reconciler never sees it and nothing commits (no tokens).
+    # The exclusion logs the (deduped) capped activity event.
     monkeypatch.setattr(
         "app.tasks.wiki_update.ingest_settings.get",
         lambda: _ingest_settings(auto_update_cap=3),
@@ -433,6 +435,7 @@ def test_over_cap_skips_candidate_before_llm(
     _run(_make_push())
     mock_reconcile.assert_not_called()
     mock_commit.assert_not_called()
+    mock_capped.assert_called_once_with("page.md", 3, 3)
 
 
 @patch("app.tasks.wiki_update.wiki_git.head_sha_for_path", return_value="headsha")

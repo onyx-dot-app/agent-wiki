@@ -9,8 +9,10 @@ from __future__ import annotations
 import pytest
 
 from app.tasks.update_frequency import (
+    EVENT_AUTO_UPDATE_CAPPED,
     EVENT_FREQUENT_UPDATES,
     _check_update_frequency_inline,
+    record_auto_update_capped,
 )
 from app.wiki import constants as wiki_constants
 from app.wiki import git as wiki_git
@@ -34,6 +36,10 @@ def _ingest_commit_and_check(n: int) -> None:
 
 def _events() -> list[dict]:
     return [e for e in list_events(EVENT_FREQUENT_UPDATES) if e["target"] == PATH]
+
+
+def _capped() -> list[dict]:
+    return [e for e in list_events(EVENT_AUTO_UPDATE_CAPPED) if e["target"] == PATH]
 
 
 def test_below_threshold_records_nothing() -> None:
@@ -69,3 +75,22 @@ def test_threshold_zero_warns_every_update() -> None:
     for n in range(3):
         _ingest_commit_and_check(n)
     assert len(_events()) == 3
+
+
+# The cap event is recorded from the ingest pipeline's exclusion point (see
+# tests/test_ingest_pipeline.py) via record_auto_update_capped, which dedups.
+def test_record_auto_update_capped_inserts() -> None:
+    record_auto_update_capped(PATH, count=6, cap=5)
+    caps = _capped()
+    assert len(caps) == 1
+    assert caps[0]["payload"]["count"] == 6
+    assert caps[0]["payload"]["cap"] == 5
+
+
+def test_record_auto_update_capped_dedups_within_window() -> None:
+    # While a page stays over the cap, every blocked push calls this; it should
+    # log once per episode, not once per push.
+    record_auto_update_capped(PATH, count=6, cap=5)
+    record_auto_update_capped(PATH, count=7, cap=5)
+    record_auto_update_capped(PATH, count=8, cap=5)
+    assert len(_capped()) == 1
