@@ -2,7 +2,7 @@
 
 import { Button, Switch, Text } from "@onyx-ai/opal/components";
 import { SvgEdit, SvgHistory, SvgX } from "@onyx-ai/opal/icons";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { ApiError } from "@/lib/api";
 import {
@@ -10,7 +10,7 @@ import {
   patchUpdatePolicy,
   type UpdatePolicyResponse,
 } from "@/lib/updatePolicy";
-import { fetchUpdateHealth, type UpdateHealth } from "@/lib/wiki";
+import { useUpdateHealth } from "@/lib/wiki";
 
 import styles from "./UpdatePolicyPanel.module.css";
 
@@ -49,23 +49,21 @@ export function UpdatePolicyPanel({
   const [sliderVal, setSliderVal] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Auto-update health (24h count, effective threshold, cap). Loaded separately
-  // so a failure here never blocks the policy card — null hides the activity row
-  // + slider.
-  const [health, setHealth] = useState<UpdateHealth | null>(null);
-
-  function loadHealth(p: string, alive: () => boolean) {
-    fetchUpdateHealth(p)
-      .then((r) => {
-        if (alive()) {
-          setHealth(r);
-          setSliderVal(r.threshold_24h);
-        }
-      })
-      .catch(() => {
-        // Non-fatal: leave the activity row + slider hidden.
-      });
-  }
+  // Auto-update health (24h count, effective threshold, cap) as a live poll, so
+  // the count + slider reflect ingestion writes without reopening the panel. A
+  // failure here never blocks the policy card — null hides the activity row +
+  // slider.
+  const { health, refresh: refreshHealth } = useUpdateHealth(path);
+  // Seed the slider from the effective threshold once per page. Tracking the
+  // health's own path (not a poll tick) keeps a 15s revalidation from yanking
+  // the thumb mid-drag while still re-seeding when the panel switches pages.
+  const seededFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (health && seededFor.current !== health.path) {
+      seededFor.current = health.path;
+      setSliderVal(health.threshold_24h);
+    }
+  }, [health]);
 
   useEffect(() => {
     let alive = true;
@@ -73,7 +71,6 @@ export function UpdatePolicyPanel({
     setLoaded(false);
     setError(null);
     setEditing(false);
-    setHealth(null);
     setSliderVal(null);
     getUpdatePolicy(path)
       .then((r) => {
@@ -88,7 +85,6 @@ export function UpdatePolicyPanel({
       .finally(() => {
         if (alive) setLoading(false);
       });
-    loadHealth(path, () => alive);
     return () => {
       alive = false;
     };
@@ -126,12 +122,13 @@ export function UpdatePolicyPanel({
   }
 
   // Persist the slider's value as the page's explicit threshold (or clear it
-  // back to the default), then refresh health so the effective value shown is
-  // accurate.
+  // back to the default), then revalidate health and re-seed the slider so the
+  // effective value shown is accurate (notably when clearing to the default).
   function saveThreshold(value: number | null) {
-    void save({ warn_update_threshold: value }, () =>
-      loadHealth(path, () => true),
-    );
+    void save({ warn_update_threshold: value }, async () => {
+      const fresh = await refreshHealth();
+      if (fresh) setSliderVal(fresh.threshold_24h);
+    });
   }
 
   // "Auto-Update Wiki" ON = ingestion auto-update enabled (NOT disabled).
