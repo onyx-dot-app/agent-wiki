@@ -22,6 +22,7 @@ from sqlalchemy import func, select, update
 
 from app.db.models import UpdatePolicy
 from app.db.session import session
+from app.ingest import settings as ingest_settings
 from app.wiki import filesystem
 
 log = logging.getLogger(__name__)
@@ -81,6 +82,21 @@ def get(path: str) -> dict[str, Any] | None:
     with session() as s:
         row = s.get(UpdatePolicy, normalize_path(path))
         return _to_dict(row) if row is not None else None
+
+
+def resolve_warn_threshold(path: str) -> int:
+    """Effective too-frequent-update warning threshold for ``path``.
+
+    The page's own ``warn_update_threshold`` if set, else the wiki-wide default
+    (``ingest_settings.warn_update_threshold_default``). Per-page only — unlike
+    the two cascaded fields, this does not walk ancestor folders. ``0`` means
+    warnings are off for the page.
+    """
+    with session() as s:
+        row = s.get(UpdatePolicy, normalize_path(path))
+        if row is not None and row.warn_update_threshold is not None:
+            return row.warn_update_threshold
+    return ingest_settings.get().warn_update_threshold_default
 
 
 def set_policy(

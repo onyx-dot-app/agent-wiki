@@ -14,7 +14,6 @@ from app.auth.deps import require_user
 from app.llm.agents import merge_conflict_update
 from app.models.file_system import (
     ActivityRowView,
-    AutoUpdateCountResponse,
     CommitView,
     CreateFolderRequest,
     CreateFolderResponse,
@@ -71,6 +70,8 @@ from app.wiki import (
     update_policy as update_policy_repo,
     utils as wiki_utils,
 )
+from app.ingest import settings as ingest_settings
+from app.models.update_policy import UpdateHealthResponse
 from app.models.wiki import ChangeKind, CommitMaxRetriesError
 
 router = APIRouter()
@@ -582,27 +583,33 @@ def file_history(
     return FileHistoryResponse(path=rel, head_sha=head_sha, commits=visible)
 
 
-@router.get("/auto-update-count", response_model=AutoUpdateCountResponse)
-def auto_update_count(
+@router.get("/update-health", response_model=UpdateHealthResponse)
+def update_health(
     user: User = Depends(require_user),
     path: str = "",
-    hours: int = Query(24, ge=1, le=8760),
-) -> AutoUpdateCountResponse:
-    """How many ingestion auto-updates touched a page/folder in the last
-    ``hours``. Counts only commits authored by ``Onyx Ingest`` — human and
-    other-agent edits are excluded."""
+) -> UpdateHealthResponse:
+    """Auto-update health facts for a page: the 24h ingestion-update count, the
+    page's resolved warning threshold, and the admin cap. The client decides
+    what to surface (threshold slider value/max, too-frequent-update banner)."""
     try:
-        # Same normalization as /update-policy (the panel passes the same
-        # path): "" / "/" mean the wiki root, which scopes the whole repo.
         rel = update_policy_repo.normalize_path(path)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     require_can("read", rel, user)
-    since = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+
+    since = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
     count = wiki_git.count_commits_since(
         rel, author=wiki_utils.INGEST_AUTHOR_EMAIL, since_iso=since
     )
-    return AutoUpdateCountResponse(path=rel, hours=hours, count=count)
+    return UpdateHealthResponse(
+        path=rel,
+        count_24h=count,
+        threshold_24h=update_policy_repo.resolve_warn_threshold(rel),
+        cap_24h=ingest_settings.get().auto_update_cap,
+        auto_update_disabled=update_policy_repo.resolve_for_path(
+            rel
+        ).ingestion_auto_update_disabled,
+    )
 
 
 @router.get("/file/diff", response_model=FileDiffResponse)
