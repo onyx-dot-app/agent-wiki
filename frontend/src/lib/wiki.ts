@@ -154,18 +154,18 @@ export async function fetchFileHistory(
   );
 }
 
-export interface AutoUpdateCount {
+export interface UpdateHealth {
   path: string;
-  hours: number;
-  count: number;
+  count_24h: number;
+  threshold_24h: number;
+  cap_24h: number;
+  auto_update_disabled: boolean;
 }
 
-/** Count of ingestion auto-updates to a page/folder in the last 24h. */
-export async function fetchAutoUpdateCount(
-  path: string,
-): Promise<AutoUpdateCount> {
-  return apiFetch<AutoUpdateCount>(
-    `/wiki/auto-update-count?path=${encodeURIComponent(path)}`,
+/** Auto-update health for a page — drives the too-frequent-update banner. */
+export async function fetchUpdateHealth(path: string): Promise<UpdateHealth> {
+  return apiFetch<UpdateHealth>(
+    `/wiki/update-health?path=${encodeURIComponent(path)}`,
   );
 }
 

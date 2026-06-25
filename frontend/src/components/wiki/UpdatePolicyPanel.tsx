@@ -10,7 +10,7 @@ import {
   patchUpdatePolicy,
   type UpdatePolicyResponse,
 } from "@/lib/updatePolicy";
-import { fetchAutoUpdateCount } from "@/lib/wiki";
+import { fetchUpdateHealth, type UpdateHealth } from "@/lib/wiki";
 
 import styles from "./UpdatePolicyPanel.module.css";
 
@@ -44,14 +44,28 @@ export function UpdatePolicyPanel({
   const [pendingOn, setPendingOn] = useState<boolean | null>(null); // optimistic toggle
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
+  // Live slider value while dragging the per-page warning threshold; null until
+  // health loads (then seeded with the effective threshold).
+  const [sliderVal, setSliderVal] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Ingestion auto-update count + the window it covers. Loaded separately so a
-  // failure here never blocks the policy card — null just hides the activity row.
-  const [autoUpdate, setAutoUpdate] = useState<{
-    count: number;
-    hours: number;
-  } | null>(null);
+  // Auto-update health (24h count, effective threshold, cap). Loaded separately
+  // so a failure here never blocks the policy card — null hides the activity row
+  // + slider.
+  const [health, setHealth] = useState<UpdateHealth | null>(null);
+
+  function loadHealth(p: string, alive: () => boolean) {
+    fetchUpdateHealth(p)
+      .then((r) => {
+        if (alive()) {
+          setHealth(r);
+          setSliderVal(r.threshold_24h);
+        }
+      })
+      .catch(() => {
+        // Non-fatal: leave the activity row + slider hidden.
+      });
+  }
 
   useEffect(() => {
     let alive = true;
@@ -59,7 +73,8 @@ export function UpdatePolicyPanel({
     setLoaded(false);
     setError(null);
     setEditing(false);
-    setAutoUpdate(null);
+    setHealth(null);
+    setSliderVal(null);
     getUpdatePolicy(path)
       .then((r) => {
         if (alive) {
@@ -73,13 +88,7 @@ export function UpdatePolicyPanel({
       .finally(() => {
         if (alive) setLoading(false);
       });
-    fetchAutoUpdateCount(path)
-      .then((r) => {
-        if (alive) setAutoUpdate({ count: r.count, hours: r.hours });
-      })
-      .catch(() => {
-        // Non-fatal: leave the activity row hidden.
-      });
+    loadHealth(path, () => alive);
     return () => {
       alive = false;
     };
@@ -93,6 +102,11 @@ export function UpdatePolicyPanel({
     policy?.explicit?.ingestion_auto_update_disabled != null;
   const ownInstruction = policy?.explicit?.update_instruction ?? "";
   const effInstruction = policy?.effective.update_instruction ?? "";
+  // Per-page warning threshold: explicit value set on this page (null = using
+  // the workspace default). The slider's max is the admin cap.
+  const ownThreshold = policy?.explicit?.warn_update_threshold ?? null;
+  const thresholdSetHere = ownThreshold != null;
+  const sliderMax = health && health.cap_24h > 0 ? health.cap_24h : 100;
 
   async function save(
     patch: Parameters<typeof patchUpdatePolicy>[1],
@@ -109,6 +123,15 @@ export function UpdatePolicyPanel({
       setSaving(false);
       setPendingOn(null);
     }
+  }
+
+  // Persist the slider's value as the page's explicit threshold (or clear it
+  // back to the default), then refresh health so the effective value shown is
+  // accurate.
+  function saveThreshold(value: number | null) {
+    void save({ warn_update_threshold: value }, () =>
+      loadHealth(path, () => true),
+    );
   }
 
   // "Auto-Update Wiki" ON = ingestion auto-update enabled (NOT disabled).
@@ -257,15 +280,13 @@ export function UpdatePolicyPanel({
               </div>
             )}
 
-            {autoUpdate !== null && (
+            {health !== null && (
               <div className={`${styles.row} ${styles.activityRow}`}>
                 <div className={styles.rowText}>
                   <Text font="main-content-emphasis" color="text-04">
-                    {`${autoUpdate.count} Auto Update${autoUpdate.count === 1 ? "" : "s"}`}
+                    {`${health.count_24h} Auto Update${health.count_24h === 1 ? "" : "s"}`}
                   </Text>
-                  <span className={styles.desc}>
-                    {`in the past ${autoUpdate.hours} hour${autoUpdate.hours === 1 ? "" : "s"}`}
-                  </span>
+                  <span className={styles.desc}>in the past 24 hours</span>
                 </div>
                 {onShowHistory && (
                   <Button
@@ -279,6 +300,57 @@ export function UpdatePolicyPanel({
                 )}
               </div>
             )}
+
+            {kind === "page" &&
+              !effDisabled &&
+              health !== null &&
+              sliderVal !== null && (
+                <div className={styles.warnRow}>
+                  <div className={styles.warnHeader}>
+                    <Text font="main-content-emphasis" color="text-04">
+                      Warn after
+                    </Text>
+                    <span className={styles.warnValue}>
+                      {sliderVal === 0
+                        ? "Every auto-update"
+                        : `${sliderVal} update${sliderVal === 1 ? "" : "s"} / day`}
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    className={styles.slider}
+                    min={0}
+                    max={sliderMax}
+                    step={1}
+                    value={sliderVal}
+                    disabled={saving}
+                    onChange={(e) => setSliderVal(Number(e.target.value))}
+                    onPointerUp={() => saveThreshold(sliderVal)}
+                    onKeyUp={() => saveThreshold(sliderVal)}
+                  />
+                  <div className={styles.warnScale}>
+                    <span>0</span>
+                    <span>{sliderMax}</span>
+                  </div>
+                  {thresholdSetHere ? (
+                    <div className={styles.originRow}>
+                      <span className={styles.origin}>Set on this page</span>
+                      <Button
+                        prominence="tertiary"
+                        size="sm"
+                        disabled={saving}
+                        onClick={() => saveThreshold(null)}
+                      >
+                        Use workspace default
+                      </Button>
+                    </div>
+                  ) : (
+                    <span className={styles.origin}>
+                      Using the workspace default
+                    </span>
+                  )}
+                </div>
+              )}
           </div>
         )}
         {/* Save errors sit below the card; load errors render in the slot above. */}

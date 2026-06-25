@@ -111,6 +111,52 @@
   gap: 8px;
 }
 
+/* Per-page warning-threshold slider (0 → admin cap). */
+.warnRow {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.warnHeader {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.warnValue {
+  font-size: 13px;
+  color: var(--text-05);
+}
+.slider {
+  width: 100%;
+  accent-color: var(--text-04);
+  cursor: pointer;
+}
+.slider:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.warnScale {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--text-03);
+}
+.linkBtn {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text-link, var(--text-04));
+  cursor: pointer;
+  text-decoration: underline;
+}
+.linkBtn:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
 /* Small "Inherited / Set here" status line + reset affordance. */
 .origin {
   display: block;

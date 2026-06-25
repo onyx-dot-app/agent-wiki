@@ -31,6 +31,18 @@ class UpdatePolicyResponse(BaseModel):
     effective: EffectivePolicy
 
 
+class UpdateHealthResponse(BaseModel):
+    """Auto-update health facts for a page over a sliding trailing-24h window —
+    the raw numbers; the client decides what to surface (slider value/max,
+    too-frequent-update banner)."""
+
+    path: str
+    count_24h: int  # ingestion auto-updates in the last 24h
+    threshold_24h: int  # per-page warning threshold, updates/24h (0 = every update)
+    cap_24h: int  # admin global cap, updates/24h (slider max; 0 = no cap)
+    auto_update_disabled: bool  # effective: ingestion auto-update is off here
+
+
 class PatchUpdatePolicyRequest(BaseModel):
     """Partial update for a path (PATCH semantics).
 
