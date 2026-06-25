@@ -41,6 +41,7 @@ class UpdateHealthResponse(BaseModel):
     threshold_24h: int  # per-page warning threshold, updates/24h (0 = every update)
     cap_24h: int  # admin global cap, updates/24h (slider max; 0 = no cap)
     auto_update_disabled: bool  # effective: ingestion auto-update is off here
+    can_manage: bool  # viewer has write access — may act on the warning
 
 
 class PatchUpdatePolicyRequest(BaseModel):

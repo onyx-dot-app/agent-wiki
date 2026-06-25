@@ -52,7 +52,7 @@ from app.mcp_server import jobs as mcp_jobs
 from app.mcp_server import pubsub as mcp_pubsub
 from app.auth import UserMissingError, load_user, set_current_user
 from app.tasks.queues import documents_queue
-from app.wiki import agent_activity, git as wiki_git, update_policy
+from app.wiki import agent_activity, constants as wiki_constants, git as wiki_git, update_policy
 from app.models.wiki import ChangeKind, CommitMaxRetriesError
 
 
@@ -258,7 +258,7 @@ def process_pushed_document(push: dict[str, Any]) -> None:
     ``Onyx Ingest`` author for the run so its commits surface under that name in
     history instead of the generic fallback, then delegate to the reconciler.
     """
-    with wiki_utils.system_author(wiki_utils.INGEST_AUTHOR):
+    with wiki_utils.system_author(wiki_constants.INGEST_AUTHOR):
         _reconcile_pushed_document(push)
 
 

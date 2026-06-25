@@ -38,6 +38,7 @@ _TASK_MODULES = (
     "app.tasks.periodic",
     "app.tasks.reindex",
     "app.tasks.triggers",
+    "app.tasks.update_frequency",
 )
 for _mod in _TASK_MODULES:
     importlib.import_module(_mod)

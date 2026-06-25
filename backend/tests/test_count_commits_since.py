@@ -7,11 +7,11 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from app.wiki import constants as wiki_constants
 from app.wiki import git as wiki_git
-from app.wiki import utils as wiki_utils
 
-INGEST = wiki_utils.INGEST_AUTHOR
-EMAIL = wiki_utils.INGEST_AUTHOR_EMAIL
+INGEST = wiki_constants.INGEST_AUTHOR
+EMAIL = wiki_constants.INGEST_AUTHOR_EMAIL
 HUMAN_AUTHOR = "Nik <nik@x.com>"
 
 

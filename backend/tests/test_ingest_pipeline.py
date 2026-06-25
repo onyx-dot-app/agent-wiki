@@ -23,6 +23,7 @@ from app.ingest import search as ingest_search
 from app.ingest.source_tiers import is_filtered
 from app.llm.agents.common import IRRELEVANT_SENTINEL
 from app.llm.settings import _EMPTY as _EMPTY_LLM_SETTINGS, LLMSettings
+from app.wiki import constants as wiki_constants
 from app.wiki import git as wiki_git
 from app.wiki.utils import author_string
 
@@ -295,7 +296,7 @@ def test_commit_attributed_to_onyx_ingest(
     mock_search.return_value = _cs([_hit("page.md", "Page", 5.0)])
     mock_reconcile.return_value = (["new body"], 1)
     _run(_make_push())
-    assert mock_commit.call_args.kwargs["author"] == "Onyx Ingest <onyx-ingest@local>"
+    assert mock_commit.call_args.kwargs["author"] == wiki_constants.INGEST_AUTHOR
     # And the binding is unwound after the run — no leak into later tasks.
     assert author_string() == "AI Wiki Helper <ai-wiki-helper@local>"
 

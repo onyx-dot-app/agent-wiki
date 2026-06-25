@@ -57,7 +57,9 @@ from app.models.file_system import (
 from app.tasks.reindex import index_path
 from app.triggers import repo as triggers_repo
 from app.wiki import (
+    acl,
     agent_activity,
+    constants as wiki_constants,
     diff as wiki_diff,
     drafts as wiki_drafts,
     filesystem,
@@ -599,7 +601,7 @@ def update_health(
 
     since = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
     count = wiki_git.count_commits_since(
-        rel, author=wiki_utils.INGEST_AUTHOR_EMAIL, since_iso=since
+        rel, author=wiki_constants.INGEST_AUTHOR_EMAIL, since_iso=since
     )
     return UpdateHealthResponse(
         path=rel,
@@ -609,6 +611,7 @@ def update_health(
         auto_update_disabled=update_policy_repo.resolve_for_path(
             rel
         ).ingestion_auto_update_disabled,
+        can_manage=acl.can(user.id, user.is_admin, "write", rel),
     )
 
 
