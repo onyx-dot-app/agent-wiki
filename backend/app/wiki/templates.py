@@ -51,6 +51,8 @@ def _to_dict(t: DocumentTemplate) -> dict[str, Any]:
         "body": t.body,
         "description": t.description,
         "system_prompt": t.system_prompt,
+        "ingestion_auto_update_disabled": t.ingestion_auto_update_disabled,
+        "update_instruction": t.update_instruction,
         "sort_order": t.sort_order,
         "created_by_user_id": t.created_by_user_id,
         "created_at": t.created_at,
@@ -81,6 +83,8 @@ def create(
     body: str,
     description: str | None,
     system_prompt: str | None,
+    ingestion_auto_update_disabled: bool | None = None,
+    update_instruction: str | None = None,
     created_by_user_id: str | None,
 ) -> dict[str, Any]:
     template_id = str(uuid.uuid4())
@@ -98,6 +102,8 @@ def create(
                 body=body,
                 description=description,
                 system_prompt=system_prompt,
+                ingestion_auto_update_disabled=ingestion_auto_update_disabled,
+                update_instruction=update_instruction,
                 sort_order=next_order,
                 created_by_user_id=created_by_user_id,
             )
@@ -119,6 +125,8 @@ def update(
     body: str,
     description: str | None,
     system_prompt: str | None,
+    ingestion_auto_update_disabled: bool | None = None,
+    update_instruction: str | None = None,
 ) -> dict[str, Any] | None:
     with session() as s:
         t = s.get(DocumentTemplate, template_id)
@@ -128,6 +136,8 @@ def update(
         t.body = body
         t.description = description
         t.system_prompt = system_prompt
+        t.ingestion_auto_update_disabled = ingestion_auto_update_disabled
+        t.update_instruction = update_instruction
         t.updated_at = _now_text(s)
         try:
             s.flush()

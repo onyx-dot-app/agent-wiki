@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import re
 import subprocess
+from typing import Any
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -115,6 +116,29 @@ def _git_author(user: User | None) -> str | None:
     if user is None:
         return None
     return f"{user.name or user.email} <{user.email}>"
+
+
+def _seed_template_policy(rel: str, actor_user_id: str) -> None:
+    """Seed a new page's update policy from the template it was created from.
+
+    The new-doc draft records which template a page is being written from; if
+    that template carries a default policy (auto-update off, scope/update
+    instruction), apply it to the page's ``update_policies`` row. Only fields
+    the template actually sets are written — the rest stay inherited.
+    """
+    draft = wiki_drafts.get(rel)
+    if not draft or not draft.get("template_id"):
+        return
+    tmpl = templates_repo.get(draft["template_id"])
+    if tmpl is None:
+        return
+    patch: dict[str, Any] = {}
+    if tmpl.get("ingestion_auto_update_disabled") is not None:
+        patch["ingestion_auto_update_disabled"] = tmpl["ingestion_auto_update_disabled"]
+    if tmpl.get("update_instruction"):
+        patch["update_instruction"] = tmpl["update_instruction"]
+    if patch:
+        update_policy_repo.set_policy(rel, actor_user_id=actor_user_id, **patch)
 
 
 @router.get("", response_model=ListDocumentsResponse)
@@ -243,6 +267,10 @@ def put_document_by_path(
     else:
         sha = result.sha
         body_to_commit = result.new_body
+    # On first create, seed the page's update policy from its template (before
+    # the draft row may be cleared below).
+    if not existed:
+        _seed_template_policy(rel, user.id)
     # Drafting state: if the saved body diverges from the template
     # snapshot, the user has made it their own — clear the row so the
     # chat banner drops and the template's system prompt stops applying.

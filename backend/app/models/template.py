@@ -12,6 +12,9 @@ class DocumentTemplateView(BaseModel):
     body: str
     description: str | None
     system_prompt: str | None
+    # Default update policy applied to a page created from this template.
+    ingestion_auto_update_disabled: bool | None = None
+    update_instruction: str | None = None
     sort_order: int
     created_at: str
     updated_at: str
@@ -25,6 +28,8 @@ class DocumentTemplateSummary(BaseModel):
     id: str
     name: str
     description: str | None
+    # Surfaced so the picker can flag e.g. "auto-update off" before selection.
+    ingestion_auto_update_disabled: bool | None = None
 
 
 class DocumentTemplateListResponse(BaseModel):
@@ -40,6 +45,8 @@ class CreateDocumentTemplateRequest(BaseModel):
     body: str = Field(min_length=1)
     description: str | None = None
     system_prompt: str | None = None
+    ingestion_auto_update_disabled: bool | None = None
+    update_instruction: str | None = None
 
 
 class UpdateDocumentTemplateRequest(BaseModel):
@@ -47,6 +54,8 @@ class UpdateDocumentTemplateRequest(BaseModel):
     body: str = Field(min_length=1)
     description: str | None = None
     system_prompt: str | None = None
+    ingestion_auto_update_disabled: bool | None = None
+    update_instruction: str | None = None
 
 
 class ReorderDocumentTemplatesRequest(BaseModel):

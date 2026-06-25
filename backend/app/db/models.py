@@ -601,6 +601,12 @@ class DocumentTemplate(Base):
     body: Mapped[str] = mapped_column(Text, nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
     system_prompt: Mapped[str | None] = mapped_column(Text)
+    # Default update policy seeded onto a page created from this template
+    # (applied to its update_policies row). NULL = leave to the inherited
+    # default. Lets a template (e.g. "Meeting notes") start with auto-update
+    # off, or carry scope guidance for the updater.
+    ingestion_auto_update_disabled: Mapped[bool | None] = mapped_column(Boolean)
+    update_instruction: Mapped[str | None] = mapped_column(Text)
     # Admin-controlled ordering for the picker. Lower values render
     # first; ties fall back to ``name`` alphabetical. New rows land at
     # the end (max(sort_order) + 1) so admins decide where they live.
