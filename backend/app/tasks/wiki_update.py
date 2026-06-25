@@ -28,6 +28,7 @@ from app.config import CONFIG
 from app.ingest import eval_sample as ingest_eval_sample
 from app.ingest import intent as ingest_intent
 from app.ingest import search as ingest_search
+from app.ingest import settings as ingest_settings
 from app.ingest.source_tiers import is_filtered
 from app.ingest.models import WikiUpdateCandidate
 from app.llm.agents import ingest_batch_reconciler, ingest_selector, nl_updater
@@ -409,6 +410,16 @@ def _reconcile_pushed_document(push: dict[str, Any]) -> None:
     # auto-update *before* any LLM call, and carry each kept page's resolved
     # update instruction onto its candidate for the reconciler prompt.
     policies = update_policy.resolve_for_paths([hit.path for hit in hits])
+    # Admin hard cap: pages that already hit the cap in the trailing 24h are
+    # dropped here, before any LLM call, so a runaway page stops burning tokens.
+    # Dynamic — no persisted disable; a page resumes on its own once its rolling
+    # window falls back under the cap. 0 disables the cap.
+    #
+    # The count is a per-hit git read, only when cap > 0 — in line with the
+    # per-hit read_file below and fine for today's small candidate sets. If
+    # candidate sets grow, give ingest_update_times_24h a multi-path sibling and
+    # batch the cap reads like resolve_for_paths above.
+    cap = ingest_settings.get().auto_update_cap
     readable: list[WikiUpdateCandidate] = []
     for hit in hits:
         policy = policies.get(hit.path)
@@ -419,6 +430,16 @@ def _reconcile_pushed_document(push: dict[str, Any]) -> None:
             log.debug(
                 "process_pushed_document: ingestion auto-update disabled for %s, skipping",
                 hit.path,
+            )
+            continue
+        if cap > 0 and len(wiki_git.ingest_update_times_24h(hit.path)) >= cap:
+            ingest_outcomes_total.labels(
+                outcome="auto_update_cap_exceeded", wiki_path=hit.path
+            ).inc()
+            log.info(
+                "process_pushed_document: %s hit the %d/24h auto-update cap, skipping",
+                hit.path,
+                cap,
             )
             continue
         try:
