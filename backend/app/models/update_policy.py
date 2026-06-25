@@ -42,6 +42,9 @@ class UpdateHealthResponse(BaseModel):
     cap_24h: int  # admin global cap, updates/24h (slider max; 0 = no cap)
     auto_update_disabled: bool  # effective: ingestion auto-update is off here
     can_manage: bool  # viewer has write access — may act on the warning
+    # When over the cap, ISO-8601/UTC time the page drops back under it and
+    # auto-update resumes; None when not over the cap.
+    cap_resets_at: str | None = None
 
 
 class PatchUpdatePolicyRequest(BaseModel):

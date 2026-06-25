@@ -163,6 +163,8 @@ export interface UpdateHealth {
   cap_24h: number;
   auto_update_disabled: boolean;
   can_manage: boolean;
+  // When over the cap, ISO-8601/UTC time auto-update resumes; null otherwise.
+  cap_resets_at: string | null;
 }
 
 /** Auto-update health as a live SWR subscription. Polls so the 24h count and
