@@ -21,8 +21,8 @@ def test_defaults_exposed(client: TestClient) -> None:
     admin = users_repo.create(email="admin@x.com", password="hunter2-x", name="A")
     login_fastapi(client, admin)  # first user is auto-admin
     got = client.get("/api/admin/ingest").json()
-    assert got["warn_update_threshold_default"] == 10
-    assert got["auto_update_cap"] == 200
+    assert got["warn_update_threshold_default"] == 30
+    assert got["auto_update_cap"] == 100
 
 
 def test_put_round_trips_health_knobs(client: TestClient) -> None:

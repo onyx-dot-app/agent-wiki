@@ -740,10 +740,10 @@ class IngestSettings(Base):
     # per-page warning threshold owners override via update_policies, and a hard
     # cap above which a page's ingestion auto-update is turned off. 0 = off.
     warn_update_threshold_default: Mapped[int] = mapped_column(
-        Integer, nullable=False, server_default=text("10")
+        Integer, nullable=False, server_default=text("30")
     )
     auto_update_cap: Mapped[int] = mapped_column(
-        Integer, nullable=False, server_default=text("200")
+        Integer, nullable=False, server_default=text("100")
     )
     updated_at: Mapped[str] = mapped_column(
         Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
