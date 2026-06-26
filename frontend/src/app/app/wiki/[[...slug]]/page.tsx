@@ -928,6 +928,15 @@ function TemplateStrip({
   const CARD_WIDTH = 200;
   const STEP = CARD_WIDTH + 8; // card width + gap
 
+  // The "Blank" template is the empty-start entry point — route the blank card
+  // through it (so its auto-update policy applies) when present, and drop it
+  // from the list so it isn't shown twice. Falls back to a plain blank page
+  // when no Blank template is seeded.
+  const blankTemplate = templates.find((t) => t.name === "Blank");
+  const rest = templates.filter((t) => t.name !== "Blank");
+  const blankCardActive =
+    blankActive || (blankTemplate != null && activeId === blankTemplate.id);
+
   return (
     <div className="relative">
       <div
@@ -939,12 +948,12 @@ function TemplateStrip({
           <TemplateCard
             title="Blank document"
             description="Empty file — just start typing."
-            active={blankActive}
+            active={blankCardActive}
             busy={false}
-            onClick={onBlank}
+            onClick={() => (blankTemplate ? onPick(blankTemplate) : onBlank())}
           />
         </div>
-        {templates.map((t) => (
+        {rest.map((t) => (
           <div key={t.id} className="w-[200px] shrink-0 snap-start">
             <TemplateCard
               title={t.name}

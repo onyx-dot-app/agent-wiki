@@ -46,7 +46,13 @@ export function WikiHome() {
     "templates:summaries",
     listTemplateSummaries,
   );
-  const featured = (templates ?? []).slice(0, 2);
+  // The "Blank" template is the empty-start entry point (carries an auto-update
+  // policy); route the blank card through it when present, and keep it out of
+  // the featured row so it isn't shown twice.
+  const blankTemplate = (templates ?? []).find((t) => t.name === "Blank");
+  const featured = (templates ?? [])
+    .filter((t) => t.name !== "Blank")
+    .slice(0, 2);
 
   function startNewPage(templateId?: string) {
     const qs = templateId
@@ -111,7 +117,7 @@ export function WikiHome() {
                   <SvgPlusCircle size={22} />
                 </span>
               }
-              onClick={() => startNewPage()}
+              onClick={() => startNewPage(blankTemplate?.id)}
             />
           </div>
           {featured.map((t) => (
