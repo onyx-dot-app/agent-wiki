@@ -2,7 +2,7 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 
-import { Button } from "@onyx-ai/opal/components";
+import { Button, InputTypeIn } from "@onyx-ai/opal/components";
 import { SvgChevronDown, SvgChevronUp } from "@onyx-ai/opal/icons";
 import { useConfirm } from "@/components/common/ConfirmDialog";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
@@ -307,22 +307,19 @@ function TemplateModal({
 
         <label>
           <div className={lblClass}>Name *</div>
-          <input
+          <InputTypeIn
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="e.g. Project brief, RFC, Meeting notes"
-            required
-            className={inputClass}
           />
         </label>
 
         <label>
           <div className={lblClass}>Description</div>
-          <input
+          <InputTypeIn
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             placeholder="Optional. Shown in the picker."
-            className={inputClass}
           />
         </label>
 
