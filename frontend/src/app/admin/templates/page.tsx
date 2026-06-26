@@ -116,7 +116,12 @@ function TemplatesList() {
                   </div>
                 )}
                 <div className="mt-1 text-xs text-(--text-02)">
-                  {t.system_prompt ? "Has chat prompt" : "No chat prompt"} •
+                  {t.ingestion_auto_update_disabled == null
+                    ? "Auto-update: default"
+                    : t.ingestion_auto_update_disabled
+                      ? "Auto-update: off"
+                      : "Auto-update: on"}{" "}
+                  • {t.system_prompt ? "Has chat prompt" : "No chat prompt"} •
                   Updated {t.updated_at}
                 </div>
               </div>
@@ -236,6 +241,18 @@ function TemplateModal({
   const [systemPrompt, setSystemPrompt] = useState(
     initial?.system_prompt ?? "",
   );
+  // Default auto-update for pages created from this template: "default" leaves
+  // it to the workspace default; "on"/"off" set it explicitly.
+  const [autoUpdate, setAutoUpdate] = useState<"default" | "on" | "off">(
+    initial == null || initial.ingestion_auto_update_disabled == null
+      ? "default"
+      : initial.ingestion_auto_update_disabled
+        ? "off"
+        : "on",
+  );
+  const [updateInstruction, setUpdateInstruction] = useState(
+    initial?.update_instruction ?? "",
+  );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -257,6 +274,9 @@ function TemplateModal({
         body,
         description: description.trim() || null,
         system_prompt: systemPrompt.trim() || null,
+        ingestion_auto_update_disabled:
+          autoUpdate === "default" ? null : autoUpdate === "off",
+        update_instruction: updateInstruction.trim() || null,
       };
       if (initial) {
         await updateTemplate(initial.id, payload);
@@ -326,6 +346,38 @@ function TemplateModal({
             placeholder="Optional. Appended to the chat agent's default prompt while the user is drafting from this template."
             rows={5}
             className={`${inputClass} resize-y font-mono`}
+          />
+        </label>
+
+        <label>
+          <div className={lblClass}>Auto-update default</div>
+          <select
+            value={autoUpdate}
+            onChange={(e) =>
+              setAutoUpdate(e.target.value as "default" | "on" | "off")
+            }
+            className={inputClass}
+          >
+            <option value="default">Use workspace default</option>
+            <option value="on">On — keep pages current from ingestion</option>
+            <option value="off">
+              Off — pages start with auto-update disabled
+            </option>
+          </select>
+          <div className="mt-1 text-xs text-(--text-02)">
+            Applied to a page when it's created from this template. e.g. set
+            "off" for meeting notes that shouldn't be rewritten by ingestion.
+          </div>
+        </label>
+
+        <label>
+          <div className={lblClass}>Update instructions</div>
+          <textarea
+            value={updateInstruction}
+            onChange={(e) => setUpdateInstruction(e.target.value)}
+            placeholder="Optional. Scope/how-to guidance for the updater, seeded onto pages made from this template (e.g. 'Only track decisions and owners; ignore status chatter')."
+            rows={4}
+            className={`${inputClass} resize-y`}
           />
         </label>
 

@@ -949,6 +949,9 @@ function TemplateStrip({
             <TemplateCard
               title={t.name}
               description={t.description}
+              note={
+                t.ingestion_auto_update_disabled ? "Auto-update off" : undefined
+              }
               active={activeId === t.id}
               busy={applyingId === t.id}
               onClick={() => onPick(t)}
@@ -992,12 +995,14 @@ function StripArrow({
 function TemplateCard({
   title,
   description,
+  note,
   active,
   busy,
   onClick,
 }: {
   title: string;
   description: string | null;
+  note?: string;
   active: boolean;
   busy: boolean;
   onClick: () => void;
@@ -1027,6 +1032,7 @@ function TemplateCard({
           {description}
         </div>
       )}
+      {note && <div className="text-[11px] text-(--text-02)">{note}</div>}
     </button>
   );
 }
