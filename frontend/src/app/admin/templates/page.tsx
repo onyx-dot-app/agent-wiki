@@ -2,7 +2,7 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 
-import { Button, InputTypeIn } from "@onyx-ai/opal/components";
+import { Button, InputTypeIn, Switch } from "@onyx-ai/opal/components";
 import { SvgChevronDown, SvgChevronUp } from "@onyx-ai/opal/icons";
 import { useConfirm } from "@/components/common/ConfirmDialog";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
@@ -237,14 +237,11 @@ function TemplateModal({
   const [name, setName] = useState(initial?.name ?? "");
   const [body, setBody] = useState(initial?.body ?? "");
   const [description, setDescription] = useState(initial?.description ?? "");
-  // Default auto-update for pages created from this template: "default" leaves
-  // it to the workspace default; "on"/"off" set it explicitly.
-  const [autoUpdate, setAutoUpdate] = useState<"default" | "on" | "off">(
-    initial == null || initial.ingestion_auto_update_disabled == null
-      ? "default"
-      : initial.ingestion_auto_update_disabled
-        ? "off"
-        : "on",
+  // Whether pages created from this template start with ingestion auto-update
+  // on. New templates default to off (disabled) — a template author opts a page
+  // into auto-update deliberately.
+  const [autoUpdateOn, setAutoUpdateOn] = useState<boolean>(
+    initial == null ? false : initial.ingestion_auto_update_disabled !== true,
   );
   const [updateInstruction, setUpdateInstruction] = useState(
     initial?.update_instruction ?? "",
@@ -272,8 +269,7 @@ function TemplateModal({
         // System prompt is no longer editable here; preserve any stored value
         // (e.g. from a seed template) rather than clearing it on edit.
         system_prompt: initial?.system_prompt ?? null,
-        ingestion_auto_update_disabled:
-          autoUpdate === "default" ? null : autoUpdate === "off",
+        ingestion_auto_update_disabled: !autoUpdateOn,
         update_instruction: updateInstruction.trim() || null,
       };
       if (initial) {
@@ -333,29 +329,17 @@ function TemplateModal({
           />
         </label>
 
-        <label>
-          <div className={lblClass}>Auto-update default</div>
-          <select
-            value={autoUpdate}
-            onChange={(e) =>
-              setAutoUpdate(e.target.value as "default" | "on" | "off")
-            }
-            className={inputClass}
-          >
-            <option value="default">
-              Don't set — pages inherit the default (auto-update on unless a
-              parent folder disables it)
-            </option>
-            <option value="on">On — keep pages current from ingestion</option>
-            <option value="off">
-              Off — pages start with auto-update disabled
-            </option>
-          </select>
-          <div className="mt-1 text-xs text-(--text-02)">
-            Applied to a page when it's created from this template. e.g. set
-            "off" for meeting notes that shouldn't be rewritten by ingestion.
+        <div>
+          <div className="flex items-center justify-between gap-3">
+            <div className={lblClass}>Auto-update</div>
+            <Switch checked={autoUpdateOn} onCheckedChange={setAutoUpdateOn} />
           </div>
-        </label>
+          <div className="mt-1 text-xs text-(--text-02)">
+            Pages created from this template start with ingestion auto-update{" "}
+            {autoUpdateOn ? "on" : "off"}. Leave it off for pages that shouldn't
+            be rewritten by ingestion (e.g. meeting notes).
+          </div>
+        </div>
 
         <label>
           <div className={lblClass}>Update instructions</div>
