@@ -98,3 +98,41 @@ def test_write_doc_without_template_defaults_to_blank(
     )
     assert out.get("created") is True
     assert update_policy.resolve_for_path("team/freeform.md").ingestion_auto_update_disabled is True
+
+
+def test_write_doc_sets_update_instruction_at_create(tmp_db, tmp_repo, monkeypatch) -> None:
+    # The agent scopes the page at creation via update_instruction (+ overrides
+    # any template default).
+    _as_user(monkeypatch)
+    out = write_doc(
+        {
+            "path": "team/scoped.md",
+            "body": "# Scoped\n\nx\n",
+            "commit_message": "c",
+            "update_instruction": "Only track decisions and owners.",
+            "ingestion_auto_update_disabled": False,
+        }
+    )
+    assert out.get("created") is True
+    eff = update_policy.resolve_for_path("team/scoped.md")
+    assert eff.update_instruction == "Only track decisions and owners."
+    assert eff.ingestion_auto_update_disabled is False  # explicit override of Blank default
+
+
+def test_create_instruction_overrides_template(tmp_db, tmp_repo, monkeypatch) -> None:
+    _as_user(monkeypatch)
+    t = _template(update_instruction="template default instruction")
+    out = write_doc(
+        {
+            "path": "team/override.md",
+            "body": "# O\n\nx\n",
+            "commit_message": "c",
+            "template_id": t["id"],
+            "update_instruction": "agent override instruction",
+        }
+    )
+    assert out.get("created") is True
+    assert (
+        update_policy.resolve_for_path("team/override.md").update_instruction
+        == "agent override instruction"
+    )

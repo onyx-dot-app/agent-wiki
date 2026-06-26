@@ -9,11 +9,35 @@ from typing import Any
 
 from app.auth import current_user
 from app.wiki import templates as templates_repo
+from app.wiki import update_policy
 from app.wiki import utils as wiki_utils
 from app.wiki import git as wiki_git
 from app.llm.agents.tools.errors import ToolError
 from app.llm.errors import LLMError
 from app.models.wiki import ChangeKind, CommitMaxRetriesError
+
+
+def _seed_create_policy(
+    path: str,
+    template_id: str | None,
+    update_instruction: str | None,
+    auto_update_disabled: bool | None,
+) -> None:
+    """Set a new page's update policy. Seed from the template the agent picked
+    (else the Blank default), then apply the agent's explicit overrides — which
+    win, since the update instruction is how the agent scopes the page."""
+    user = current_user()
+    actor = user.id if user else None
+    tid = template_id or templates_repo.blank_template_id()
+    if tid:
+        templates_repo.apply_policy_to_page(path, tid, actor)
+    overrides: dict[str, Any] = {}
+    if isinstance(update_instruction, str):
+        overrides["update_instruction"] = update_instruction or None
+    if isinstance(auto_update_disabled, bool):
+        overrides["ingestion_auto_update_disabled"] = auto_update_disabled
+    if overrides:
+        update_policy.set_policy(path, actor_user_id=actor, **overrides)
 
 
 def handle(args: dict[str, Any]) -> Any:
@@ -32,6 +56,13 @@ def handle(args: dict[str, Any]) -> Any:
         template_id = args.get("template_id")
         if template_id is not None and not isinstance(template_id, str):
             raise ToolError("template_id must be a string when provided")
+        # Create-time policy overrides — the agent's chance to scope the page.
+        update_instruction = args.get("update_instruction")
+        if update_instruction is not None and not isinstance(update_instruction, str):
+            raise ToolError("update_instruction must be a string when provided")
+        auto_update_disabled = args.get("ingestion_auto_update_disabled")
+        if auto_update_disabled is not None and not isinstance(auto_update_disabled, bool):
+            raise ToolError("ingestion_auto_update_disabled must be a boolean when provided")
 
         existed = wiki_utils.file_exists(path)
         # Validate a create-from-template id up front — before any commit — so a
@@ -100,15 +131,9 @@ def handle(args: dict[str, Any]) -> Any:
             )
             if result is None:
                 raise RuntimeError("commit_and_fan_out returned None on a no-base commit")
-            # Every new page starts from a template: use the one the agent
-            # picked, else default to the Blank template, so the page gets a
-            # deliberate update policy (Blank = auto-update off).
-            tid = template_id or templates_repo.blank_template_id()
-            if tid:
-                user = current_user()
-                templates_repo.apply_policy_to_page(
-                    path, tid, user.id if user else None
-                )
+            _seed_create_policy(
+                path, template_id, update_instruction, auto_update_disabled
+            )
             return {
                 "path": path,
                 "sha": result.sha,
