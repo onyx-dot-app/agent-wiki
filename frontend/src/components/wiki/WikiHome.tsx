@@ -119,6 +119,11 @@ export function WikiHome() {
               <TemplateCard
                 title={t.name}
                 description={t.description ?? ""}
+                note={
+                  t.ingestion_auto_update_disabled
+                    ? "Auto-update off"
+                    : undefined
+                }
                 onClick={() => startNewPage(t.id)}
               />
             </div>
@@ -195,11 +200,13 @@ export function WikiHome() {
 function TemplateCard({
   title,
   description,
+  note,
   glyph,
   onClick,
 }: {
   title: string;
   description?: string;
+  note?: string;
   glyph?: React.ReactNode;
   onClick: () => void;
 }) {
@@ -224,11 +231,20 @@ function TemplateCard({
         </Text>
         {glyph ? (
           glyph
-        ) : description ? (
-          <Text font="secondary-body" color="text-03">
-            {description}
-          </Text>
-        ) : null}
+        ) : (
+          <>
+            {description ? (
+              <Text font="secondary-body" color="text-03">
+                {description}
+              </Text>
+            ) : null}
+            {note ? (
+              <Text font="secondary-body" color="text-02">
+                {note}
+              </Text>
+            ) : null}
+          </>
+        )}
       </Section>
     </SelectCard>
   );

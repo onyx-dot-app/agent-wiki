@@ -2,7 +2,7 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 
-import { Button } from "@onyx-ai/opal/components";
+import { Button, InputTypeIn, Switch } from "@onyx-ai/opal/components";
 import { SvgChevronDown, SvgChevronUp } from "@onyx-ai/opal/icons";
 import { useConfirm } from "@/components/common/ConfirmDialog";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
@@ -26,7 +26,7 @@ export default function AdminTemplatesPage() {
         <BackLink />
         <PageHeader
           title="Document templates"
-          description="Define named starting points users can pick when creating a new wiki page. Each template can supply an optional chat system prompt that guides the in-app assistant while the user is still drafting the initial version."
+          description="Define named starting points users can pick when creating a new wiki page. Each template can set a default update policy (auto-update on/off and update instructions) applied to pages created from it."
         />
         <TemplatesList />
       </main>
@@ -116,8 +116,12 @@ function TemplatesList() {
                   </div>
                 )}
                 <div className="mt-1 text-xs text-(--text-02)">
-                  {t.system_prompt ? "Has chat prompt" : "No chat prompt"} •
-                  Updated {t.updated_at}
+                  {t.ingestion_auto_update_disabled == null
+                    ? "Auto-update: default"
+                    : t.ingestion_auto_update_disabled
+                      ? "Auto-update: off"
+                      : "Auto-update: on"}{" "}
+                  • Updated {t.updated_at}
                 </div>
               </div>
               <Button size="sm" onClick={() => setEditing(t)}>
@@ -233,8 +237,14 @@ function TemplateModal({
   const [name, setName] = useState(initial?.name ?? "");
   const [body, setBody] = useState(initial?.body ?? "");
   const [description, setDescription] = useState(initial?.description ?? "");
-  const [systemPrompt, setSystemPrompt] = useState(
-    initial?.system_prompt ?? "",
+  // Whether pages created from this template start with ingestion auto-update
+  // on. New templates default to off (disabled) — a template author opts a page
+  // into auto-update deliberately.
+  const [autoUpdateOn, setAutoUpdateOn] = useState<boolean>(
+    initial == null ? false : initial.ingestion_auto_update_disabled !== true,
+  );
+  const [updateInstruction, setUpdateInstruction] = useState(
+    initial?.update_instruction ?? "",
   );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -256,7 +266,11 @@ function TemplateModal({
         name: name.trim(),
         body,
         description: description.trim() || null,
-        system_prompt: systemPrompt.trim() || null,
+        // System prompt is no longer editable here; preserve any stored value
+        // (e.g. from a seed template) rather than clearing it on edit.
+        system_prompt: initial?.system_prompt ?? null,
+        ingestion_auto_update_disabled: !autoUpdateOn,
+        update_instruction: updateInstruction.trim() || null,
       };
       if (initial) {
         await updateTemplate(initial.id, payload);
@@ -287,22 +301,19 @@ function TemplateModal({
 
         <label>
           <div className={lblClass}>Name *</div>
-          <input
+          <InputTypeIn
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="e.g. Project brief, RFC, Meeting notes"
-            required
-            className={inputClass}
           />
         </label>
 
         <label>
           <div className={lblClass}>Description</div>
-          <input
+          <InputTypeIn
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             placeholder="Optional. Shown in the picker."
-            className={inputClass}
           />
         </label>
 
@@ -318,14 +329,26 @@ function TemplateModal({
           />
         </label>
 
+        <div>
+          <div className="flex items-center justify-between gap-3">
+            <div className={lblClass}>Auto-update</div>
+            <Switch checked={autoUpdateOn} onCheckedChange={setAutoUpdateOn} />
+          </div>
+          <div className="mt-1 text-xs text-(--text-02)">
+            Pages created from this template start with ingestion auto-update{" "}
+            {autoUpdateOn ? "on" : "off"}. Leave it off for pages that shouldn't
+            be rewritten by ingestion (e.g. meeting notes).
+          </div>
+        </div>
+
         <label>
-          <div className={lblClass}>Chat system prompt</div>
+          <div className={lblClass}>Update instructions</div>
           <textarea
-            value={systemPrompt}
-            onChange={(e) => setSystemPrompt(e.target.value)}
-            placeholder="Optional. Appended to the chat agent's default prompt while the user is drafting from this template."
-            rows={5}
-            className={`${inputClass} resize-y font-mono`}
+            value={updateInstruction}
+            onChange={(e) => setUpdateInstruction(e.target.value)}
+            placeholder="Optional. Scope/how-to guidance for the updater, seeded onto pages made from this template (e.g. 'Only track decisions and owners; ignore status chatter')."
+            rows={4}
+            className={`${inputClass} resize-y`}
           />
         </label>
 

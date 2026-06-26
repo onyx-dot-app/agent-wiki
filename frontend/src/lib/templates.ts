@@ -8,6 +8,9 @@ export interface DocumentTemplate {
   body: string;
   description: string | null;
   system_prompt: string | null;
+  // Default update policy applied to a page created from this template.
+  ingestion_auto_update_disabled: boolean | null;
+  update_instruction: string | null;
   sort_order: number;
   created_at: string;
   updated_at: string;
@@ -17,6 +20,7 @@ export interface DocumentTemplateSummary {
   id: string;
   name: string;
   description: string | null;
+  ingestion_auto_update_disabled: boolean | null;
 }
 
 export interface CreateTemplateInput {
@@ -24,6 +28,8 @@ export interface CreateTemplateInput {
   body: string;
   description?: string | null;
   system_prompt?: string | null;
+  ingestion_auto_update_disabled?: boolean | null;
+  update_instruction?: string | null;
 }
 
 export type UpdateTemplateInput = CreateTemplateInput;
