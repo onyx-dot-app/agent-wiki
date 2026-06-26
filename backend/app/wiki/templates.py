@@ -220,6 +220,7 @@ def _now_text(s: Any) -> str:
 # from the templates admin page after seeding — this only sets the
 # initial position on a brand-new database.
 _STARTER_TEMPLATE_DEFAULT_ORDER: tuple[str, ...] = (
+    "Blank",
     "Weekly notes",
     "Project tracker",
     "Product Requirements Doc",
