@@ -118,18 +118,26 @@ def _git_author(user: User | None) -> str | None:
     return f"{user.name or user.email} <{user.email}>"
 
 
-def _seed_template_policy(rel: str, actor_user_id: str) -> None:
+def _seed_template_policy(
+    rel: str, actor_user_id: str, template_id: str | None = None
+) -> None:
     """Seed a new page's update policy from the template it was created from.
 
-    The new-doc draft records which template a page is being written from; if
-    that template carries a default policy (auto-update off, scope/update
+    If that template carries a default policy (auto-update off, scope/update
     instruction), apply it to the page's ``update_policies`` row. Only fields
     the template actually sets are written — the rest stay inherited.
+
+    ``template_id`` comes from the create request (the reliable source — the
+    new-doc UI records its draft *after* the create commits). Falls back to the
+    page's new-doc draft when not supplied.
     """
-    draft = wiki_drafts.get(rel)
-    if not draft or not draft.get("template_id"):
+    tid = template_id
+    if tid is None:
+        draft = wiki_drafts.get(rel)
+        tid = draft.get("template_id") if draft else None
+    if not tid:
         return
-    tmpl = templates_repo.get(draft["template_id"])
+    tmpl = templates_repo.get(tid)
     if tmpl is None:
         return
     patch: dict[str, Any] = {}
@@ -270,7 +278,7 @@ def put_document_by_path(
     # On first create, seed the page's update policy from its template (before
     # the draft row may be cleared below).
     if not existed:
-        _seed_template_policy(rel, user.id)
+        _seed_template_policy(rel, user.id, req.template_id)
     # Drafting state: if the saved body diverges from the template
     # snapshot, the user has made it their own — clear the row so the
     # chat banner drops and the template's system prompt stops applying.

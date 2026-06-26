@@ -735,7 +735,13 @@ function NewDocView({ dir }: { dir: string }) {
       const fullPath = (destDir ? destDir + "/" : "") + name;
       await apiFetch("/wiki/file", {
         method: "PUT",
-        body: JSON.stringify({ path: fullPath, body: draft }),
+        body: JSON.stringify({
+          path: fullPath,
+          body: draft,
+          // Seeds the new page's update policy from the template; the draft
+          // recorded below lands after the commit, too late for that.
+          ...(appliedTemplateId ? { template_id: appliedTemplateId } : {}),
+        }),
       });
       // If a template was applied, record the draft row so the chat
       // banner + template system prompt persist on the saved doc.
