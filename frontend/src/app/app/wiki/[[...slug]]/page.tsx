@@ -680,16 +680,20 @@ function NewDocView({ dir }: { dir: string }) {
   const trimmedFilename = filename.trim().replace(/^\/+|\/+$/g, "");
   const filenameNoExt = trimmedFilename.replace(/\.md$/i, "");
   const filenameValid = !!filenameNoExt && !filenameNoExt.includes("/");
-  const canCreate = filenameValid && !saving;
+  // Block Create while a template's body is still loading, so it can't be
+  // saved before the template (and its policy) is applied.
+  const canCreate = filenameValid && !saving && applyingTemplateId === null;
 
   async function onPickTemplate(template: DocumentTemplateSummary) {
     setApplyingTemplateId(template.id);
+    // Set the applied id synchronously — the create request seeds the page's
+    // policy from it, so it must be set before the (async) body load, not after.
+    setAppliedTemplateId(template.id);
     setError(null);
     try {
       const full = await getTemplate(template.id);
       setDraft(full.body);
       setAppliedTemplateBody(full.body);
-      setAppliedTemplateId(template.id);
     } catch (e) {
       setError(e instanceof Error ? e.message : "failed to apply template");
     } finally {

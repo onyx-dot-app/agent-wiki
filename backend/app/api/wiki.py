@@ -248,6 +248,12 @@ def put_document_by_path(
         # a new page is always allowed for an authenticated user; the
         # creator becomes the owner and gets full rights.
         require_can("write", rel, user)
+    # Validate an explicit create-from-template id up front — before any
+    # commit — so a stale/deleted template_id fails the request instead of
+    # silently creating a page with no policy applied.
+    if not existed and req.template_id is not None:
+        if templates_repo.get(req.template_id) is None:
+            raise HTTPException(status_code=404, detail="template not found")
     author = _git_author(user)
     change_kind = ChangeKind.EDIT if existed else ChangeKind.CREATE
     msg = f"{change_kind} {rel}"
