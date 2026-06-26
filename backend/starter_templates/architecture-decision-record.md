@@ -1,6 +1,7 @@
 ---
 name: Architecture Decision Record
 description: Architecture Decision Record — short, immutable record of one decision.
+ingestion_auto_update_disabled: true
 ---
 # ADR <NNNN>: <short, decisive title>
 
