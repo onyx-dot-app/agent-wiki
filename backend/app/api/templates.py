@@ -35,6 +35,8 @@ def _view(row: dict[str, Any]) -> DocumentTemplateView:
         body=row["body"],
         description=row["description"],
         system_prompt=row["system_prompt"],
+        ingestion_auto_update_disabled=row["ingestion_auto_update_disabled"],
+        update_instruction=row["update_instruction"],
         sort_order=row["sort_order"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
@@ -46,6 +48,7 @@ def _summary(row: dict[str, Any]) -> DocumentTemplateSummary:
         id=row["id"],
         name=row["name"],
         description=row["description"],
+        ingestion_auto_update_disabled=row["ingestion_auto_update_disabled"],
     )
 
 
@@ -105,6 +108,8 @@ def create_template(
             body=req.body,
             description=(req.description or None),
             system_prompt=(req.system_prompt or None),
+            ingestion_auto_update_disabled=req.ingestion_auto_update_disabled,
+            update_instruction=(req.update_instruction or None),
             created_by_user_id=actor.id,
         )
     except templates_repo.TemplateNameTaken as exc:
@@ -127,12 +132,22 @@ def update_template(
     if not req.body:
         raise HTTPException(status_code=400, detail="body is required")
     try:
+        # Patch only the policy fields actually present in the body; omitted
+        # fields keep their stored value (``model_fields_set`` distinguishes
+        # "omitted" from an explicit ``null`` clear), so a client that doesn't
+        # send them can't silently wipe a template's policy.
+        policy: dict[str, Any] = {}
+        if "ingestion_auto_update_disabled" in req.model_fields_set:
+            policy["ingestion_auto_update_disabled"] = req.ingestion_auto_update_disabled
+        if "update_instruction" in req.model_fields_set:
+            policy["update_instruction"] = req.update_instruction or None
         row = templates_repo.update(
             template_id,
             name=name,
             body=req.body,
             description=(req.description or None),
             system_prompt=(req.system_prompt or None),
+            **policy,
         )
     except templates_repo.TemplateNameTaken as exc:
         raise HTTPException(
