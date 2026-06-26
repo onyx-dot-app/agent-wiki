@@ -1,6 +1,9 @@
 ---
 name: Product Requirements Doc
 description: Engineering proposal (PRD) — context, problem, proposal, alternatives, rollout, and risks.
+update_instruction: >-
+  Record each change as a dated entry in the Change log section; don't rewrite
+  prior entries.
 ---
 # PRD: <title>
 
@@ -102,7 +105,5 @@ Rough milestones and owners. Not a Gantt chart — a sketch of sequencing.
 Reference links, supporting analysis, prototype notes, raw benchmark numbers.
 
 ## Change log
-
-If you are an Agent updating this document, please track your changes along with the date below
 
 - <YYYY-MM-DD> — <update summary>

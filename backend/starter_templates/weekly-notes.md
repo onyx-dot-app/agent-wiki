@@ -1,13 +1,15 @@
 ---
 name: Weekly notes
 description: A self maintaining weekly log with progress, blockers, and what is next.
+update_instruction: >-
+  Date all changes and place them under the correct Week section. If a section
+  for the current week does not exist yet, create it. Keep the most recent week
+  on top.
 ---
 
 # Weekly Notes for [team/user]
 
 This doc maintains the progress, blockers, upcoming items, and other items of note for the user.
-
-Note: If you are an AI agent updating this document, make sure to date all of the changes and ensure it's under the right Week section. If a section for the current week does not exist yet, feel free to create it. Keep the most recent week on top.
 
 ## Week of <YYYY-MM-DD>
 

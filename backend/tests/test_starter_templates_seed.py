@@ -28,6 +28,26 @@ def test_iter_starter_templates_parses_every_bundled_file():
         assert row["body"].strip(), f"empty body for {row['name']!r}"
 
 
+def test_starter_template_policies_parse_and_seed(tmp_db):
+    """The bundled point-in-time records seed with ingestion auto-update off,
+    and the self-maintaining ones carry an update instruction."""
+    from app.wiki.templates import list_all, seed_starter_templates_if_empty
+
+    if not seed_starter_templates_if_empty():
+        pytest.skip("no bundled starter templates available in this environment")
+    by_name = {r["name"]: r for r in list_all()}
+
+    for name in ("Architecture Decision Record", "Incident report"):
+        if name in by_name:
+            assert by_name[name]["ingestion_auto_update_disabled"] is True
+
+    for name in ("Weekly notes", "Meeting notes", "Product Requirements Doc"):
+        if name in by_name:
+            assert by_name[name]["update_instruction"], (
+                f"{name} should carry an update instruction"
+            )
+
+
 def test_seed_starter_templates_if_empty_inserts_all(tmp_db):
     from app.wiki.templates import (
         count,

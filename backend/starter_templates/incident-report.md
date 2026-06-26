@@ -1,6 +1,7 @@
 ---
 name: Incident report
 description: Postmortem template — timeline, impact, root cause, and action items.
+ingestion_auto_update_disabled: true
 ---
 # Incident <YYYY-MM-DD>: <short summary>
 

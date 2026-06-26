@@ -1,13 +1,16 @@
 ---
 name: Meeting notes
 description: A self-populating overview of a meeting — attendees, decisions, and action items.
+update_instruction: >-
+  Fill in the sections from the meeting's discussion or transcript and keep
+  attribution where it matters. Keep the action items current — mark them
+  complete as they get done rather than deleting them — and move any open
+  question to Decisions once it is resolved.
 ---
 
 # <Meeting title> — <YYYY-MM-DD>
 
 This doc captures the discussion, decisions, and follow-ups for a single meeting.
-
-Note: If you are an AI agent updating this document, fill in the sections from the meeting's discussion or transcript and keep attribution where it matters. After the meeting, keep the action items current — mark them complete as they get done rather than deleting them — and move any open question to Decisions once it is resolved.
 
 **Attendees:**
 **Recording:** <link if available>

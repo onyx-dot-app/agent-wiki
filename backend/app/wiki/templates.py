@@ -292,6 +292,10 @@ def iter_starter_templates() -> list[dict[str, Any]]:
                 "name": meta["name"].strip(),
                 "description": meta.get("description"),
                 "system_prompt": meta.get("system_prompt"),
+                "ingestion_auto_update_disabled": meta.get(
+                    "ingestion_auto_update_disabled"
+                ),
+                "update_instruction": meta.get("update_instruction"),
                 "body": body,
             }
         )
@@ -333,6 +337,8 @@ def write_starter_templates(*, skip_existing: bool) -> int:
                 body=row["body"],
                 description=row["description"],
                 system_prompt=row["system_prompt"],
+                ingestion_auto_update_disabled=row["ingestion_auto_update_disabled"],
+                update_instruction=row["update_instruction"],
                 created_by_user_id=None,
             )
         except TemplateNameTaken:
