@@ -130,6 +130,12 @@ function TemplatesList() {
               <Button
                 size="sm"
                 variant="danger"
+                disabled={t.name === "Blank"}
+                tooltip={
+                  t.name === "Blank"
+                    ? "The Blank template is the default for new pages and can't be deleted."
+                    : undefined
+                }
                 onClick={async () => {
                   if (
                     !(await confirmDialog({
