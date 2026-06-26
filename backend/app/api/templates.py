@@ -153,6 +153,8 @@ def update_template(
         raise HTTPException(
             status_code=409, detail="a template with that name already exists",
         ) from exc
+    except templates_repo.ProtectedTemplateError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     if row is None:
         raise HTTPException(status_code=404, detail="not found")
     log.info("admin: %s updated template %s", actor.id, template_id)
@@ -163,7 +165,11 @@ def update_template(
 def delete_template(
     template_id: str, actor: User = Depends(require_admin),
 ) -> OkResponse:
-    if not templates_repo.delete(template_id):
+    try:
+        deleted = templates_repo.delete(template_id)
+    except templates_repo.ProtectedTemplateError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if not deleted:
         raise HTTPException(status_code=404, detail="not found")
     log.info("admin: %s deleted template %s", actor.id, template_id)
     return OkResponse()
