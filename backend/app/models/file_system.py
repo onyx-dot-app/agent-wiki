@@ -33,6 +33,10 @@ class PutDocumentRequest(BaseModel):
     path: str = Field(min_length=1)
     body: str = ""
     base_sha: str | None = None
+    # On create, the template the page was started from — seeds the page's
+    # update policy from that template (auto-update default + update
+    # instruction). Ignored when editing an existing page.
+    template_id: str | None = None
 
 
 class CreateFolderRequest(BaseModel):

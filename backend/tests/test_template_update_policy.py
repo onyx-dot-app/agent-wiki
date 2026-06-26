@@ -72,6 +72,42 @@ def test_page_created_from_template_inherits_policy(client: TestClient) -> None:
     assert eff.update_instruction == "Only meeting facts."
 
 
+def test_create_with_template_id_seeds_policy(client: TestClient) -> None:
+    # The real new-doc flow records its draft *after* the create commits, so the
+    # create request carries template_id directly — no prior draft.
+    uid = users_repo.create(email="o@x.com", password="hunter2-x", name="O")
+    login_fastapi(client, uid)
+    t = _make_template(
+        uid,
+        ingestion_auto_update_disabled=True,
+        update_instruction="Only meeting facts.",
+    )
+    path = "team/from-create.md"
+    assert (
+        client.put(
+            "/api/wiki/file",
+            json={"path": path, "body": "# Notes\n\nx\n", "template_id": t["id"]},
+        ).status_code
+        == 200
+    )
+
+    eff = update_policy.resolve_for_path(path)
+    assert eff.ingestion_auto_update_disabled is True
+    assert eff.update_instruction == "Only meeting facts."
+
+
+def test_create_with_unknown_template_id_404s(client: TestClient) -> None:
+    # A stale/deleted template_id must fail the request, not silently create a
+    # page with no policy.
+    uid = users_repo.create(email="o@x.com", password="hunter2-x", name="O")
+    login_fastapi(client, uid)
+    resp = client.put(
+        "/api/wiki/file",
+        json={"path": "team/x.md", "body": "# x\n", "template_id": "nope"},
+    )
+    assert resp.status_code == 404
+
+
 def test_update_omitting_policy_fields_preserves_them(client: TestClient) -> None:
     # The current frontend PUTs name/body/etc. without the policy fields; that
     # must not wipe a template's stored policy.
