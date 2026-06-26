@@ -26,7 +26,7 @@ export default function AdminTemplatesPage() {
         <BackLink />
         <PageHeader
           title="Document templates"
-          description="Define named starting points users can pick when creating a new wiki page. Each template can supply an optional chat system prompt that guides the in-app assistant while the user is still drafting the initial version."
+          description="Define named starting points users can pick when creating a new wiki page. Each template can set a default update policy (auto-update on/off and update instructions) applied to pages created from it."
         />
         <TemplatesList />
       </main>
@@ -121,8 +121,7 @@ function TemplatesList() {
                     : t.ingestion_auto_update_disabled
                       ? "Auto-update: off"
                       : "Auto-update: on"}{" "}
-                  • {t.system_prompt ? "Has chat prompt" : "No chat prompt"} •
-                  Updated {t.updated_at}
+                  • Updated {t.updated_at}
                 </div>
               </div>
               <Button size="sm" onClick={() => setEditing(t)}>
@@ -238,9 +237,6 @@ function TemplateModal({
   const [name, setName] = useState(initial?.name ?? "");
   const [body, setBody] = useState(initial?.body ?? "");
   const [description, setDescription] = useState(initial?.description ?? "");
-  const [systemPrompt, setSystemPrompt] = useState(
-    initial?.system_prompt ?? "",
-  );
   // Default auto-update for pages created from this template: "default" leaves
   // it to the workspace default; "on"/"off" set it explicitly.
   const [autoUpdate, setAutoUpdate] = useState<"default" | "on" | "off">(
@@ -273,7 +269,9 @@ function TemplateModal({
         name: name.trim(),
         body,
         description: description.trim() || null,
-        system_prompt: systemPrompt.trim() || null,
+        // System prompt is no longer editable here; preserve any stored value
+        // (e.g. from a seed template) rather than clearing it on edit.
+        system_prompt: initial?.system_prompt ?? null,
         ingestion_auto_update_disabled:
           autoUpdate === "default" ? null : autoUpdate === "off",
         update_instruction: updateInstruction.trim() || null,
@@ -336,17 +334,6 @@ function TemplateModal({
         </label>
 
         <label>
-          <div className={lblClass}>Chat system prompt</div>
-          <textarea
-            value={systemPrompt}
-            onChange={(e) => setSystemPrompt(e.target.value)}
-            placeholder="Optional. Appended to the chat agent's default prompt while the user is drafting from this template."
-            rows={5}
-            className={`${inputClass} resize-y font-mono`}
-          />
-        </label>
-
-        <label>
           <div className={lblClass}>Auto-update default</div>
           <select
             value={autoUpdate}
@@ -355,7 +342,10 @@ function TemplateModal({
             }
             className={inputClass}
           >
-            <option value="default">Use workspace default</option>
+            <option value="default">
+              Don't set — pages inherit the default (auto-update on unless a
+              parent folder disables it)
+            </option>
             <option value="on">On — keep pages current from ingestion</option>
             <option value="off">
               Off — pages start with auto-update disabled
