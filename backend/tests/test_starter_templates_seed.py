@@ -81,8 +81,9 @@ def test_seed_is_idempotent_when_table_populated(tmp_db):
     assert templates_repo.seed_starter_templates_if_empty() is True
     rows_before = templates_repo.list_all()
 
-    # Delete one starter — it must stay deleted.
-    victim = rows_before[0]
+    # Delete one starter — it must stay deleted. Skip Blank, which is
+    # delete-protected (it's the default new pages start from).
+    victim = next(r for r in rows_before if r["name"] != "Blank")
     assert templates_repo.delete(victim["id"]) is True
 
     re_seeded = templates_repo.seed_starter_templates_if_empty()

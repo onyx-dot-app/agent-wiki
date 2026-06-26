@@ -22,15 +22,27 @@ def _seed_create_policy(
     template_id: str | None,
     update_instruction: str | None,
     auto_update_disabled: bool | None,
-) -> None:
+) -> str | None:
     """Set a new page's update policy. Seed from the template the agent picked
     (else the Blank default), then apply the agent's explicit overrides — which
-    win, since the update instruction is how the agent scopes the page."""
+    win, since the update instruction is how the agent scopes the page.
+
+    Returns a warning string if a *requested* template vanished between
+    validation and here (the page is already committed, so the create still
+    succeeds, but its template policy wasn't applied) — else None."""
     user = current_user()
     actor = user.id if user else None
+    warning: str | None = None
     tid = template_id or templates_repo.blank_template_id()
-    if tid:
-        templates_repo.apply_policy_to_page(path, tid, actor)
+    if tid and not templates_repo.apply_policy_to_page(path, tid, actor):
+        # The template was deleted after the up-front check; don't pretend the
+        # policy applied. Only warn for an explicitly requested template — the
+        # Blank-default being absent is an expected no-op.
+        if template_id:
+            warning = (
+                "template was deleted before its policy could be applied; the page "
+                "uses the default update policy — set it with set_update_policy"
+            )
     overrides: dict[str, Any] = {}
     if isinstance(update_instruction, str):
         overrides["update_instruction"] = update_instruction or None
@@ -38,6 +50,7 @@ def _seed_create_policy(
         overrides["ingestion_auto_update_disabled"] = auto_update_disabled
     if overrides:
         update_policy.set_policy(path, actor_user_id=actor, **overrides)
+    return warning
 
 
 def handle(args: dict[str, Any]) -> Any:
@@ -131,15 +144,18 @@ def handle(args: dict[str, Any]) -> Any:
             )
             if result is None:
                 raise RuntimeError("commit_and_fan_out returned None on a no-base commit")
-            _seed_create_policy(
+            warning = _seed_create_policy(
                 path, template_id, update_instruction, auto_update_disabled
             )
-            return {
+            out: dict[str, Any] = {
                 "path": path,
                 "sha": result.sha,
                 "created": True,
                 "diff": wiki_utils.unified_diff("", body, path),
                 "broken_links": wiki_utils.broken_links(path, body),
             }
+            if warning:
+                out["warning"] = warning
+            return out
     except ToolError as exc:
         return {"error": str(exc)}

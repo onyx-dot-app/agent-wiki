@@ -136,3 +136,26 @@ def test_create_instruction_overrides_template(tmp_db, tmp_repo, monkeypatch) ->
         update_policy.resolve_for_path("team/override.md").update_instruction
         == "agent override instruction"
     )
+
+
+def test_write_doc_warns_when_template_vanishes_post_validation(
+    tmp_db, tmp_repo, monkeypatch
+) -> None:
+    # Template passes up-front validation but is gone by the post-commit seed
+    # (race). The create still succeeds, but the tool surfaces a warning rather
+    # than silently returning success with the default policy.
+    _as_user(monkeypatch)
+    t = _template(ingestion_auto_update_disabled=True)
+    monkeypatch.setattr(
+        "app.wiki.templates.apply_policy_to_page", lambda *a, **k: False
+    )
+    out = write_doc(
+        {
+            "path": "team/raced.md",
+            "body": "# R\n\nx\n",
+            "commit_message": "c",
+            "template_id": t["id"],
+        }
+    )
+    assert out.get("created") is True
+    assert "warning" in out and "template was deleted" in out["warning"]
