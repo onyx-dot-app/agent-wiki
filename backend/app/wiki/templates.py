@@ -166,6 +166,22 @@ def delete(template_id: str) -> bool:
         return True
 
 
+_BLANK_TEMPLATE_NAME = "Blank"
+
+
+def blank_template_id() -> str | None:
+    """Id of the bundled empty-start ``Blank`` template, or None if absent.
+
+    The default a new page starts from when the caller didn't pick a template,
+    so every page begins from a template (Blank carries auto-update off)."""
+    with session() as s:
+        return s.scalar(
+            select(DocumentTemplate.id).where(
+                DocumentTemplate.name == _BLANK_TEMPLATE_NAME
+            )
+        )
+
+
 def apply_policy_to_page(
     path: str, template_id: str, actor_user_id: str | None
 ) -> bool:

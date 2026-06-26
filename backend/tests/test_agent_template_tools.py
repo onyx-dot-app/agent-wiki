@@ -77,3 +77,24 @@ def test_write_doc_unknown_template_id_errors(tmp_db, tmp_repo, monkeypatch) -> 
     )
     assert out.get("error") == "template_not_found"
     assert not wiki_utils.file_exists("team/m.md")  # nothing created
+
+
+def test_write_doc_without_template_defaults_to_blank(
+    tmp_db, tmp_repo, monkeypatch
+) -> None:
+    # No template_id → fall back to the Blank template, so the page still gets a
+    # deliberate policy (Blank = auto-update off).
+    _as_user(monkeypatch)
+    templates_repo.create(
+        name="Blank",
+        body="",
+        description="Start from an empty page.",
+        system_prompt=None,
+        ingestion_auto_update_disabled=True,
+        created_by_user_id=None,
+    )
+    out = write_doc(
+        {"path": "team/freeform.md", "body": "# Freeform\n\nx\n", "commit_message": "c"}
+    )
+    assert out.get("created") is True
+    assert update_policy.resolve_for_path("team/freeform.md").ingestion_auto_update_disabled is True

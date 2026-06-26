@@ -26,7 +26,7 @@
       },
       "template_id": {
         "type": "string",
-        "description": "Optional, CREATE only. A template id from `list_templates`. Seeds the new page's update policy (auto-update default + update instruction) from that template. Ignored when overwriting an existing page; an unknown id returns `template_not_found`."
+        "description": "Optional, CREATE only. A template id from `list_templates`. Seeds the new page's update policy (auto-update default + update instruction) from that template. When omitted, the page defaults to the `Blank` template (auto-update off) — so pick a more specific template with `list_templates` when one fits. Ignored when overwriting an existing page; an unknown id returns `template_not_found`."
       }
     },
     "required": ["path", "body", "commit_message"]

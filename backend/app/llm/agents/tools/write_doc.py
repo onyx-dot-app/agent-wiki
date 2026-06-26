@@ -100,11 +100,14 @@ def handle(args: dict[str, Any]) -> Any:
             )
             if result is None:
                 raise RuntimeError("commit_and_fan_out returned None on a no-base commit")
-            # Seed the new page's update policy from its template (validated above).
-            if template_id:
+            # Every new page starts from a template: use the one the agent
+            # picked, else default to the Blank template, so the page gets a
+            # deliberate update policy (Blank = auto-update off).
+            tid = template_id or templates_repo.blank_template_id()
+            if tid:
                 user = current_user()
                 templates_repo.apply_policy_to_page(
-                    path, template_id, user.id if user else None
+                    path, tid, user.id if user else None
                 )
             return {
                 "path": path,
