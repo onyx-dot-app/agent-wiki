@@ -3,6 +3,8 @@ created from it (app/wiki/templates.py + put_document_by_path seeding)."""
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -18,7 +20,7 @@ def client(tmp_db: None, tmp_repo: None) -> TestClient:
     return TestClient(create_app())
 
 
-def _make_template(uid: str, **policy: object) -> dict:
+def _make_template(uid: str | None, **policy: Any) -> dict[str, Any]:
     return templates_repo.create(
         name="Meeting notes",
         body="# Notes\n",
@@ -68,6 +70,28 @@ def test_page_created_from_template_inherits_policy(client: TestClient) -> None:
     eff = update_policy.resolve_for_path(path)
     assert eff.ingestion_auto_update_disabled is True
     assert eff.update_instruction == "Only meeting facts."
+
+
+def test_update_omitting_policy_fields_preserves_them(client: TestClient) -> None:
+    # The current frontend PUTs name/body/etc. without the policy fields; that
+    # must not wipe a template's stored policy.
+    admin = users_repo.create(email="a@x.com", password="hunter2-x", name="A")
+    login_fastapi(client, admin)  # first user is auto-admin
+    t = _make_template(
+        admin,
+        ingestion_auto_update_disabled=True,
+        update_instruction="Only facts.",
+    )
+    resp = client.put(
+        f"/api/admin/templates/{t['id']}",
+        json={"name": "Meeting notes", "body": "# Notes\n", "system_prompt": None},
+    )
+    assert resp.status_code == 200
+
+    got = templates_repo.get(t["id"])
+    assert got is not None
+    assert got["ingestion_auto_update_disabled"] is True  # preserved
+    assert got["update_instruction"] == "Only facts."  # preserved
 
 
 def test_template_without_policy_seeds_nothing(client: TestClient) -> None:
