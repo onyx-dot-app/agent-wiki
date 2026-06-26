@@ -48,13 +48,25 @@ function TemplatesList() {
   if (error)
     return <div className="text-(--status-text-error-05)">{error.message}</div>;
 
+  // Blank is the system default new pages fall back to — pinned first and
+  // undeletable, so there's nothing to manage here. Hide it from the list, but
+  // keep it in the reorder payload (reorder requires every current id).
+  const blankTemplates = templates.filter(
+    (t) => t.name === BLANK_TEMPLATE_NAME,
+  );
+  const visibleTemplates = templates.filter(
+    (t) => t.name !== BLANK_TEMPLATE_NAME,
+  );
+
   async function move(index: number, direction: -1 | 1) {
     const target = index + direction;
-    if (target < 0 || target >= templates.length) return;
-    const next = [...templates];
-    const [moved] = next.splice(index, 1);
-    next.splice(target, 0, moved);
-    const ids = next.map((t) => t.id);
+    if (target < 0 || target >= visibleTemplates.length) return;
+    const nextVisible = [...visibleTemplates];
+    const [moved] = nextVisible.splice(index, 1);
+    nextVisible.splice(target, 0, moved);
+    // Keep Blank pinned at the front; only the visible templates reorder.
+    const nextOrder = [...blankTemplates, ...nextVisible];
+    const ids = nextOrder.map((t) => t.id);
     // Optimistic update so the row jumps immediately; SWR returns the
     // authoritative list on success.
     setReordering(moved.id);
@@ -71,7 +83,7 @@ function TemplatesList() {
         }
       },
       {
-        optimisticData: { templates: next },
+        optimisticData: { templates: nextOrder },
         rollbackOnError: true,
         revalidate: false,
       },
@@ -90,13 +102,13 @@ function TemplatesList() {
           {reorderError}
         </div>
       )}
-      {templates.length === 0 ? (
+      {visibleTemplates.length === 0 ? (
         <div className="rounded-(--border-radius-08) border border-dashed border-(--border-01) p-6 text-center text-(--text-03)">
           No templates yet. Click "New template" to define the first one.
         </div>
       ) : (
         <ul className="m-0 flex list-none flex-col gap-2 p-0">
-          {templates.map((t, i) => (
+          {visibleTemplates.map((t, i) => (
             <li
               key={t.id}
               className="flex items-center gap-3 rounded-(--border-radius-08) border border-(--border-01) bg-(--background-tint-00) px-4 py-3"
@@ -104,7 +116,7 @@ function TemplatesList() {
               <ReorderHandle
                 disabled={reordering !== null}
                 canUp={i > 0}
-                canDown={i < templates.length - 1}
+                canDown={i < visibleTemplates.length - 1}
                 onUp={() => void move(i, -1)}
                 onDown={() => void move(i, 1)}
               />
@@ -130,12 +142,6 @@ function TemplatesList() {
               <Button
                 size="sm"
                 variant="danger"
-                disabled={t.name === "Blank"}
-                tooltip={
-                  t.name === "Blank"
-                    ? "The Blank template is the default for new pages and can't be deleted."
-                    : undefined
-                }
                 onClick={async () => {
                   if (
                     !(await confirmDialog({
@@ -376,6 +382,11 @@ function TemplateModal({
     </div>
   );
 }
+
+// The Blank template is a system default (empty body, auto-update off). It's
+// hidden from this management list — there's nothing to edit and it can't be
+// deleted — but still backs the new-doc picker's "Blank" card.
+const BLANK_TEMPLATE_NAME = "Blank";
 
 const inputClass =
   "w-full py-2 px-[10px] box-border border border-(--border-01) rounded-(--border-radius-04) text-sm";
