@@ -29,6 +29,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.db.models import DocumentTemplate
 from app.db.session import session
+from app.wiki import update_policy
 
 log = logging.getLogger(__name__)
 
@@ -194,8 +195,6 @@ def apply_policy_to_page(
     tmpl = get(template_id)
     if tmpl is None:
         return False
-    from app.wiki import update_policy
-
     patch: dict[str, Any] = {}
     if tmpl.get("ingestion_auto_update_disabled") is not None:
         patch["ingestion_auto_update_disabled"] = tmpl["ingestion_auto_update_disabled"]
