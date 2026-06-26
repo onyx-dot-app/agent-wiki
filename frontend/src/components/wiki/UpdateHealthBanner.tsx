@@ -52,13 +52,16 @@ export function UpdateHealthBanner({ path, onOpenPolicy }: Props) {
   }
 
   // Advisory frequency warning (threshold 0 = every update). The owner can act
-  // on it — raise the threshold or turn off auto-update — so it keeps the CTA.
+  // on it, so it keeps the CTA + a short decision-tree of remedies: is the
+  // churn expected (raise the threshold) or not (narrow what auto-update does,
+  // or the page's scope)?
   if (health.count_24h > 0 && health.count_24h >= health.threshold_24h) {
     const description =
       `Auto-updated ${health.count_24h} times in the past 24 hours` +
       (health.threshold_24h > 0
-        ? `, above the warning threshold of ${health.threshold_24h}.`
-        : ".");
+        ? `, above the warning threshold of ${health.threshold_24h}. `
+        : ". ") +
+      "Check whether this is expected, then:";
     return (
       <div className="mb-3">
         <MessageCard
@@ -69,6 +72,22 @@ export function UpdateHealthBanner({ path, onOpenPolicy }: Props) {
             <Button size="sm" onClick={onOpenPolicy}>
               Review settings
             </Button>
+          }
+          bottomChildren={
+            <ul className="m-0 flex list-disc flex-col gap-1 pl-4 text-[13px] text-(--text-03)">
+              <li>
+                If this rate is expected, raise the warning threshold so it
+                stops flagging.
+              </li>
+              <li>
+                If auto-update is changing the wrong things, add update
+                instructions telling it what to keep or ignore.
+              </li>
+              <li>
+                If the page simply covers too much, narrow its scope — tighten
+                what it&apos;s about, or split it into focused pages.
+              </li>
+            </ul>
           }
         />
       </div>
