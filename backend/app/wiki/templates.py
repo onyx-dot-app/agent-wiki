@@ -166,6 +166,30 @@ def delete(template_id: str) -> bool:
         return True
 
 
+def apply_policy_to_page(
+    path: str, template_id: str, actor_user_id: str | None
+) -> bool:
+    """Seed a page's update policy from a template (auto-update default +
+    update instruction). Returns False if the template doesn't exist.
+
+    Only the fields the template actually sets are written; the rest stay
+    inherited. Shared by the new-doc create path (``api/wiki.py``) and the
+    agent ``write_doc`` tool."""
+    tmpl = get(template_id)
+    if tmpl is None:
+        return False
+    from app.wiki import update_policy
+
+    patch: dict[str, Any] = {}
+    if tmpl.get("ingestion_auto_update_disabled") is not None:
+        patch["ingestion_auto_update_disabled"] = tmpl["ingestion_auto_update_disabled"]
+    if tmpl.get("update_instruction"):
+        patch["update_instruction"] = tmpl["update_instruction"]
+    if patch:
+        update_policy.set_policy(path, actor_user_id=actor_user_id, **patch)
+    return True
+
+
 class ReorderMismatch(Exception):
     """Raised when ``reorder`` is called with a set of ids that does not
     exactly match the current ``document_templates`` rows."""

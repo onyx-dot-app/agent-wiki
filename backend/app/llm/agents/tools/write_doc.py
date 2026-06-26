@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.auth import current_user
+from app.wiki import templates as templates_repo
 from app.wiki import utils as wiki_utils
 from app.wiki import git as wiki_git
 from app.llm.agents.tools.errors import ToolError
@@ -27,8 +29,18 @@ def handle(args: dict[str, Any]) -> Any:
             raise ToolError("commit_message is required")
         if base_sha is not None and not isinstance(base_sha, str):
             raise ToolError("base_sha must be a string when provided")
+        template_id = args.get("template_id")
+        if template_id is not None and not isinstance(template_id, str):
+            raise ToolError("template_id must be a string when provided")
 
         existed = wiki_utils.file_exists(path)
+        # Validate a create-from-template id up front — before any commit — so a
+        # bad id fails the call instead of creating a page with no policy.
+        if not existed and template_id and templates_repo.get(template_id) is None:
+            return {
+                "error": "template_not_found",
+                "message": "template_id does not match any template; call list_templates.",
+            }
         if existed:
             # Full-body overwrite requires base_sha so we can 3-way merge
             # if a concurrent commit landed between when the agent read the
@@ -88,6 +100,12 @@ def handle(args: dict[str, Any]) -> Any:
             )
             if result is None:
                 raise RuntimeError("commit_and_fan_out returned None on a no-base commit")
+            # Seed the new page's update policy from its template (validated above).
+            if template_id:
+                user = current_user()
+                templates_repo.apply_policy_to_page(
+                    path, template_id, user.id if user else None
+                )
             return {
                 "path": path,
                 "sha": result.sha,
