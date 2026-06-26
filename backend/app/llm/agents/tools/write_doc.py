@@ -7,11 +7,50 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.auth import current_user
+from app.wiki import templates as templates_repo
+from app.wiki import update_policy
 from app.wiki import utils as wiki_utils
 from app.wiki import git as wiki_git
 from app.llm.agents.tools.errors import ToolError
 from app.llm.errors import LLMError
 from app.models.wiki import ChangeKind, CommitMaxRetriesError
+
+
+def _seed_create_policy(
+    path: str,
+    template_id: str | None,
+    update_instruction: str | None,
+    auto_update_disabled: bool | None,
+) -> str | None:
+    """Set a new page's update policy. Seed from the template the agent picked
+    (else the Blank default), then apply the agent's explicit overrides — which
+    win, since the update instruction is how the agent scopes the page.
+
+    Returns a warning string if a *requested* template vanished between
+    validation and here (the page is already committed, so the create still
+    succeeds, but its template policy wasn't applied) — else None."""
+    user = current_user()
+    actor = user.id if user else None
+    warning: str | None = None
+    tid = template_id or templates_repo.blank_template_id()
+    if tid and not templates_repo.apply_policy_to_page(path, tid, actor):
+        # The template was deleted after the up-front check; don't pretend the
+        # policy applied. Only warn for an explicitly requested template — the
+        # Blank-default being absent is an expected no-op.
+        if template_id:
+            warning = (
+                "template was deleted before its policy could be applied; the page "
+                "uses the default update policy — set it with set_update_policy"
+            )
+    overrides: dict[str, Any] = {}
+    if isinstance(update_instruction, str):
+        overrides["update_instruction"] = update_instruction or None
+    if isinstance(auto_update_disabled, bool):
+        overrides["ingestion_auto_update_disabled"] = auto_update_disabled
+    if overrides:
+        update_policy.set_policy(path, actor_user_id=actor, **overrides)
+    return warning
 
 
 def handle(args: dict[str, Any]) -> Any:
@@ -27,8 +66,25 @@ def handle(args: dict[str, Any]) -> Any:
             raise ToolError("commit_message is required")
         if base_sha is not None and not isinstance(base_sha, str):
             raise ToolError("base_sha must be a string when provided")
+        template_id = args.get("template_id")
+        if template_id is not None and not isinstance(template_id, str):
+            raise ToolError("template_id must be a string when provided")
+        # Create-time policy overrides — the agent's chance to scope the page.
+        update_instruction = args.get("update_instruction")
+        if update_instruction is not None and not isinstance(update_instruction, str):
+            raise ToolError("update_instruction must be a string when provided")
+        auto_update_disabled = args.get("ingestion_auto_update_disabled")
+        if auto_update_disabled is not None and not isinstance(auto_update_disabled, bool):
+            raise ToolError("ingestion_auto_update_disabled must be a boolean when provided")
 
         existed = wiki_utils.file_exists(path)
+        # Validate a create-from-template id up front — before any commit — so a
+        # bad id fails the call instead of creating a page with no policy.
+        if not existed and template_id and templates_repo.get(template_id) is None:
+            return {
+                "error": "template_not_found",
+                "message": "template_id does not match any template; call list_templates.",
+            }
         if existed:
             # Full-body overwrite requires base_sha so we can 3-way merge
             # if a concurrent commit landed between when the agent read the
@@ -88,12 +144,18 @@ def handle(args: dict[str, Any]) -> Any:
             )
             if result is None:
                 raise RuntimeError("commit_and_fan_out returned None on a no-base commit")
-            return {
+            warning = _seed_create_policy(
+                path, template_id, update_instruction, auto_update_disabled
+            )
+            out: dict[str, Any] = {
                 "path": path,
                 "sha": result.sha,
                 "created": True,
                 "diff": wiki_utils.unified_diff("", body, path),
                 "broken_links": wiki_utils.broken_links(path, body),
             }
+            if warning:
+                out["warning"] = warning
+            return out
     except ToolError as exc:
         return {"error": str(exc)}

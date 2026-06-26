@@ -29,6 +29,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.db.models import DocumentTemplate
 from app.db.session import session
+from app.wiki import update_policy
 
 log = logging.getLogger(__name__)
 
@@ -38,6 +39,11 @@ log = logging.getLogger(__name__)
 STARTER_TEMPLATES_DIR = (
     Path(__file__).resolve().parents[2] / "starter_templates"
 )
+
+# The empty-start template a new page defaults to when no template is picked.
+# It's the create-time default, so it can't be deleted or renamed (which would
+# break the by-name lookup) — admins may still edit its body/policy.
+_BLANK_TEMPLATE_NAME = "Blank"
 
 
 class _UnsetType:
@@ -49,6 +55,10 @@ _UNSET = _UnsetType()
 
 class TemplateNameTaken(Exception):
     """Raised when a template name conflicts with an existing row."""
+
+
+class ProtectedTemplateError(Exception):
+    """Raised when deleting or renaming a template the app depends on."""
 
 
 def _to_dict(t: DocumentTemplate) -> dict[str, Any]:
@@ -139,6 +149,11 @@ def update(
         t = s.get(DocumentTemplate, template_id)
         if t is None:
             return None
+        if t.name == _BLANK_TEMPLATE_NAME and name != _BLANK_TEMPLATE_NAME:
+            raise ProtectedTemplateError(
+                f"the {_BLANK_TEMPLATE_NAME!r} template can't be renamed — it's "
+                "the default new pages start from"
+            )
         t.name = name
         t.body = body
         t.description = description
@@ -162,8 +177,48 @@ def delete(template_id: str) -> bool:
         t = s.get(DocumentTemplate, template_id)
         if t is None:
             return False
+        if t.name == _BLANK_TEMPLATE_NAME:
+            raise ProtectedTemplateError(
+                f"the {_BLANK_TEMPLATE_NAME!r} template can't be deleted — it's "
+                "the default new pages start from"
+            )
         s.delete(t)
         return True
+
+
+def blank_template_id() -> str | None:
+    """Id of the bundled empty-start ``Blank`` template, or None if absent.
+
+    The default a new page starts from when the caller didn't pick a template,
+    so every page begins from a template (Blank carries auto-update off)."""
+    with session() as s:
+        return s.scalar(
+            select(DocumentTemplate.id).where(
+                DocumentTemplate.name == _BLANK_TEMPLATE_NAME
+            )
+        )
+
+
+def apply_policy_to_page(
+    path: str, template_id: str, actor_user_id: str | None
+) -> bool:
+    """Seed a page's update policy from a template (auto-update default +
+    update instruction). Returns False if the template doesn't exist.
+
+    Only the fields the template actually sets are written; the rest stay
+    inherited. Shared by the new-doc create path (``api/wiki.py``) and the
+    agent ``write_doc`` tool."""
+    tmpl = get(template_id)
+    if tmpl is None:
+        return False
+    patch: dict[str, Any] = {}
+    if tmpl.get("ingestion_auto_update_disabled") is not None:
+        patch["ingestion_auto_update_disabled"] = tmpl["ingestion_auto_update_disabled"]
+    if tmpl.get("update_instruction"):
+        patch["update_instruction"] = tmpl["update_instruction"]
+    if patch:
+        update_policy.set_policy(path, actor_user_id=actor_user_id, **patch)
+    return True
 
 
 class ReorderMismatch(Exception):

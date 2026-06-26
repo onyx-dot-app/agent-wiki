@@ -1,0 +1,8 @@
+{
+  "name": "list_templates",
+  "description": "List the wiki's document templates — the named starting points for a new page. Call this BEFORE `write_doc` when creating a page, to pick the right structure AND see the update policy a page made from it would inherit. Returns each template's `id`, `name`, `description`, full markdown `body` (adapt it as the new page's scaffolding), `auto_update_disabled` (whether connector/ingestion will auto-maintain pages from it), and `update_instruction` (guidance the updater follows). To create a page from a template: take its `body` here, write the adapted body via `write_doc` passing that template's `id` as `template_id` — which seeds the new page's update policy from the template. Use `set_update_policy` afterwards to override the policy if needed. Returns `{templates: [...]}`.",
+  "input_schema": {
+    "type": "object",
+    "properties": {}
+  }
+}

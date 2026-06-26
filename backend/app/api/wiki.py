@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 import re
 import subprocess
-from typing import Any
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -137,16 +136,7 @@ def _seed_template_policy(
         tid = draft.get("template_id") if draft else None
     if not tid:
         return
-    tmpl = templates_repo.get(tid)
-    if tmpl is None:
-        return
-    patch: dict[str, Any] = {}
-    if tmpl.get("ingestion_auto_update_disabled") is not None:
-        patch["ingestion_auto_update_disabled"] = tmpl["ingestion_auto_update_disabled"]
-    if tmpl.get("update_instruction"):
-        patch["update_instruction"] = tmpl["update_instruction"]
-    if patch:
-        update_policy_repo.set_policy(rel, actor_user_id=actor_user_id, **patch)
+    templates_repo.apply_policy_to_page(rel, tid, actor_user_id)
 
 
 @router.get("", response_model=ListDocumentsResponse)

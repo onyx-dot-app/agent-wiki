@@ -103,3 +103,11 @@ reportMissingTypeArgument = "none"
 reportUntypedFunctionDecorator = "none"
 reportPrivateUsage = "none"
 reportUnusedFunction = "none"
+
+[tool.uv]
+# Some transitive deps (e.g. greenlet) publish releases missing Linux wheels;
+# require Linux x86_64 so the lock can only resolve to versions installable in
+# CI / Docker (which run on Linux), regardless of the resolving host's platform.
+required-environments = [
+    "sys_platform == 'linux' and platform_machine == 'x86_64'",
+]

@@ -143,3 +143,34 @@ def test_template_without_policy_seeds_nothing(client: TestClient) -> None:
     eff = update_policy.resolve_for_path(path)
     assert eff.ingestion_auto_update_disabled is False
     assert eff.update_instruction is None
+
+
+def test_blank_template_cannot_be_deleted(client: TestClient) -> None:
+    admin = users_repo.create(email="a@x.com", password="hunter2-x", name="A")
+    login_fastapi(client, admin)  # first user is auto-admin
+    t = templates_repo.create(
+        name="Blank", body="", description=None, system_prompt=None,
+        ingestion_auto_update_disabled=True, created_by_user_id=admin,
+    )
+    resp = client.delete(f"/api/admin/templates/{t['id']}")
+    assert resp.status_code == 409
+    assert templates_repo.get(t["id"]) is not None  # still there
+
+
+def test_blank_template_cannot_be_renamed_but_can_be_edited(client: TestClient) -> None:
+    admin = users_repo.create(email="a@x.com", password="hunter2-x", name="A")
+    login_fastapi(client, admin)
+    t = templates_repo.create(
+        name="Blank", body="", description=None, system_prompt=None,
+        ingestion_auto_update_disabled=True, created_by_user_id=admin,
+    )
+    # Rename away from "Blank" is blocked.
+    renamed = client.put(
+        f"/api/admin/templates/{t['id']}", json={"name": "Empty", "body": "x"}
+    )
+    assert renamed.status_code == 409
+    # Editing its body while keeping the name still works.
+    edited = client.put(
+        f"/api/admin/templates/{t['id']}", json={"name": "Blank", "body": "# scaffold\n"}
+    )
+    assert edited.status_code == 200

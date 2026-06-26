@@ -59,6 +59,7 @@ SKILLS: dict[str, Skill] = {
             "create_directory",
             "update_doc_nl",
             "list_history",
+            "list_templates",
             "set_update_policy",
         ),
         instructions=_load_md("modify_wiki"),
