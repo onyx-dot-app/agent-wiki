@@ -31,6 +31,7 @@ def _upsert(**overrides: Any) -> None:
         "bedrock_aws_access_key_id": "",
         "bedrock_aws_secret_access_key": "",
         "bedrock_aws_session_token": "",
+        "bedrock_aws_bearer_token": "",
     }
     base.update(overrides)
     llm_settings.upsert(**base)

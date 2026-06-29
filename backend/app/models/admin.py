@@ -43,6 +43,7 @@ class LLMConfigRequest(BaseModel):
     bedrock_aws_access_key_id: str | None = None
     bedrock_aws_secret_access_key: str | None = None
     bedrock_aws_session_token: str | None = None
+    bedrock_aws_bearer_token: str | None = None
     provider_models: dict[str, list[str]] | None = None
     ingest_selector_model: str | None = None
 
@@ -152,6 +153,8 @@ class LLMView(BaseModel):
     bedrock_aws_secret_access_key_set: bool
     bedrock_aws_secret_access_key_hint: str
     bedrock_aws_session_token_set: bool
+    bedrock_aws_bearer_token_set: bool
+    bedrock_aws_bearer_token_hint: str
     provider_models: dict[str, list[str]]
     ingest_selector_model: str
 

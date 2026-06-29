@@ -65,7 +65,7 @@ const PROVIDER_META: Record<Provider, ProviderMeta> = {
     initial: "C",
   },
   bedrock: {
-    defaultModel: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+    defaultModel: "us.anthropic.claude-sonnet-4-6",
     keyLabel: "Access key ID",
     keyPlaceholder: "AKIA…",
     initial: "B",
@@ -84,9 +84,9 @@ const PROVIDER_MODELS: Record<Provider, string[]> = {
   ollama: ["llama3.1", "llama3.2", "mistral", "phi3", "qwen2.5", "deepseek-r1"],
   custom: [],
   bedrock: [
-    "anthropic.claude-3-5-sonnet-20241022-v2:0",
-    "anthropic.claude-3-5-haiku-20241022-v1:0",
-    "anthropic.claude-3-5-sonnet-20240620-v1:0",
+    "us.anthropic.claude-sonnet-4-6",
+    "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+    "us.anthropic.claude-opus-4-8",
   ],
 };
 
@@ -912,6 +912,7 @@ function BedrockProviderForm({
   const [accessKeyId, setAccessKeyId] = useState("");
   const [secretAccessKey, setSecretAccessKey] = useState("");
   const [sessionToken, setSessionToken] = useState("");
+  const [bearerToken, setBearerToken] = useState("");
   const [models, setModels] = useState<string[]>(
     () => settings.provider_models["bedrock"] ?? PROVIDER_MODELS.bedrock,
   );
@@ -939,6 +940,7 @@ function BedrockProviderForm({
       if (accessKeyId) body.bedrock_aws_access_key_id = accessKeyId;
       if (secretAccessKey) body.bedrock_aws_secret_access_key = secretAccessKey;
       if (sessionToken) body.bedrock_aws_session_token = sessionToken;
+      if (bearerToken) body.bedrock_aws_bearer_token = bearerToken;
       await apiFetch("/admin/llm", {
         method: "PUT",
         body: JSON.stringify(body),
@@ -946,6 +948,7 @@ function BedrockProviderForm({
       setAccessKeyId("");
       setSecretAccessKey("");
       setSessionToken("");
+      setBearerToken("");
       setSaved(true);
       onSaved();
       void globalMutate("/llm/status");
@@ -975,6 +978,7 @@ function BedrockProviderForm({
           bedrock_aws_access_key_id: null,
           bedrock_aws_secret_access_key: null,
           bedrock_aws_session_token: null,
+          bedrock_aws_bearer_token: null,
           provider_models: { ...settings.provider_models, bedrock: [] },
         }),
       });
@@ -995,6 +999,19 @@ function BedrockProviderForm({
         onChange={(e) => setRegion(e.target.value)}
         placeholder="us-gov-west-1"
         hint="GovCloud regions (us-gov-west-1 / us-gov-east-1) route to the GovCloud partition automatically."
+      />
+
+      <Field
+        label="Bedrock API key (optional)"
+        type="password"
+        value={bearerToken}
+        onChange={(e) => setBearerToken(e.target.value)}
+        placeholder={
+          settings.bedrock_aws_bearer_token_set
+            ? "leave blank to keep current"
+            : "a Bedrock API key (alternative to AWS access keys)"
+        }
+        hint="Use this OR the AWS access key + secret below — not both."
       />
 
       <Field
@@ -1045,7 +1062,7 @@ function BedrockProviderForm({
       <ModelListEditor
         models={models}
         setModels={setModels}
-        placeholder="us-gov.anthropic.claude-3-5-sonnet-20240620-v1:0"
+        placeholder="us.anthropic.claude-sonnet-4-6"
         hint="Bedrock model IDs enabled in your account"
       />
 

@@ -4,14 +4,16 @@ One provider for every Bedrock model family (Claude, Nova, Llama, …) via the
 unified Converse API. GovCloud is the same provider with a ``us-gov-*`` region:
 boto3 derives the GovCloud partition endpoint from the region name; an optional
 endpoint override covers FIPS / PrivateLink. Auth is boto3-native — static
-access keys (+ optional session token) or, with no keys, the default credential
-chain (instance/IAM role). Message/tool/stream translation lives in
+access keys (+ optional session token), a Bedrock API key (bearer token), or —
+with no creds — the default chain (instance/IAM role). Message/tool/stream
+translation lives in
 ``_converse.py``; this module owns the SDK client and error mapping.
 """
 
 from __future__ import annotations
 
 import logging
+import os
 from functools import lru_cache
 from typing import Any, Iterator
 
@@ -35,6 +37,17 @@ def _make_client(service: str, **kwargs: Any) -> Any:
     """``boto3.client`` behind an ``Any`` boundary — botocore is untyped, so the
     unavoidable Unknown is confined to this one seam."""
     return boto3.client(service, **kwargs)  # pyright: ignore
+
+
+def _apply_bedrock_auth_env(bearer_token: str) -> None:
+    """A Bedrock API key (bearer token) reaches botocore only through the
+    AWS_BEARER_TOKEN_BEDROCK env var. Settings are a singleton, so the value is
+    stable; set it when configured and clear it otherwise, so a later switch to
+    access-key / IAM auth is not shadowed by a stale token."""
+    if bearer_token:
+        os.environ["AWS_BEARER_TOKEN_BEDROCK"] = bearer_token
+    else:
+        os.environ.pop("AWS_BEARER_TOKEN_BEDROCK", None)
 
 
 @lru_cache(maxsize=4)
@@ -71,6 +84,7 @@ class BedrockProvider:
     def test_connection(self, settings: LLMSettings, *, model: str) -> dict[str, Any]:
         """Preflight the saved config: a non-fatal model-listing probe (control
         plane) plus a decisive 1-token ``converse`` against ``model``."""
+        _apply_bedrock_auth_env(settings.bedrock_aws_bearer_token)
         region = settings.bedrock_aws_region
         cfg: Any = BotoConfig(
             connect_timeout=PREFLIGHT_TIMEOUT_SECONDS,
@@ -94,7 +108,9 @@ class BedrockProvider:
         )
         return run_preflight(
             base_url=display_endpoint,
-            auth_present=bool(settings.bedrock_aws_access_key_id),
+            auth_present=bool(
+                settings.bedrock_aws_access_key_id or settings.bedrock_aws_bearer_token
+            ),
             model=model,
             listing=lambda: control.list_foundation_models(),
             completion=lambda: runtime.converse(
@@ -122,6 +138,7 @@ class BedrockProvider:
             max_tokens,
             len(request["messages"]),
         )
+        _apply_bedrock_auth_env(settings.bedrock_aws_bearer_token)
         client = _client(
             settings.bedrock_aws_access_key_id,
             settings.bedrock_aws_secret_access_key,

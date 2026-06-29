@@ -59,6 +59,7 @@ def test_existing_plaintext_is_encrypted_in_place(tmp_db: object) -> None:
         bedrock_aws_access_key_id="",
         bedrock_aws_secret_access_key="",
         bedrock_aws_session_token="",
+        bedrock_aws_bearer_token="",
     )
     _rewind_to_text_with_plaintext()
 

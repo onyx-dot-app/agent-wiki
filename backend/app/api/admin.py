@@ -229,6 +229,8 @@ def _llm_view(s: LLMSettings) -> LLMView:
         bedrock_aws_secret_access_key_set=bool(s.bedrock_aws_secret_access_key),
         bedrock_aws_secret_access_key_hint=_redact(s.bedrock_aws_secret_access_key),
         bedrock_aws_session_token_set=bool(s.bedrock_aws_session_token),
+        bedrock_aws_bearer_token_set=bool(s.bedrock_aws_bearer_token),
+        bedrock_aws_bearer_token_hint=_redact(s.bedrock_aws_bearer_token),
         provider_models=s.provider_models,
         ingest_selector_model=s.ingest_selector_model,
     )
@@ -341,6 +343,11 @@ def put_llm(
         req.bedrock_aws_session_token,
         current.bedrock_aws_session_token,
     )
+    bedrock_bearer_token = _resolve_secret(
+        "bedrock_aws_bearer_token",
+        req.bedrock_aws_bearer_token,
+        current.bedrock_aws_bearer_token,
+    )
 
     new_provider_models = req.provider_models if "provider_models" in sent_fields else None
 
@@ -364,6 +371,7 @@ def put_llm(
         bedrock_aws_access_key_id=bedrock_access_key_id,
         bedrock_aws_secret_access_key=bedrock_secret_access_key,
         bedrock_aws_session_token=bedrock_session_token,
+        bedrock_aws_bearer_token=bedrock_bearer_token,
         provider_models=new_provider_models,
         ingest_selector_model=ingest_selector_model,
     )

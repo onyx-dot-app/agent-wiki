@@ -713,6 +713,7 @@ class LLMSettings(Base):
     bedrock_aws_access_key_id: Mapped[str] = mapped_column(EncryptedString(), nullable=False)
     bedrock_aws_secret_access_key: Mapped[str] = mapped_column(EncryptedString(), nullable=False)
     bedrock_aws_session_token: Mapped[str] = mapped_column(EncryptedString(), nullable=False)
+    bedrock_aws_bearer_token: Mapped[str] = mapped_column(EncryptedString(), nullable=False)
     provider_models: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, server_default=text("'{}'::jsonb")
     )

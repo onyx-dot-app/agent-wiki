@@ -40,6 +40,7 @@ def test_rotate_reencrypts_under_new_key(tmp_db: object, monkeypatch: pytest.Mon
         bedrock_aws_access_key_id="",
         bedrock_aws_secret_access_key="",
         bedrock_aws_session_token="",
+        bedrock_aws_bearer_token="",
     )
 
     old_secret = crypto.active_key_secret()

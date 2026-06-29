@@ -65,6 +65,8 @@ export interface LLMSettings {
   bedrock_aws_secret_access_key_set: boolean;
   bedrock_aws_secret_access_key_hint: string;
   bedrock_aws_session_token_set: boolean;
+  bedrock_aws_bearer_token_set: boolean;
+  bedrock_aws_bearer_token_hint: string;
   provider_models: Record<string, string[]>;
   ingest_selector_model: string;
 }

@@ -32,7 +32,7 @@ _PROVIDER_LABELS = {
     "openai": ("OpenAI", "gpt-5.5"),
     "gemini": ("Gemini", "gemini-3.1-pro-preview"),
     "ollama": ("Ollama", "llama3.1"),
-    "bedrock": ("Amazon Bedrock", "anthropic.claude-3-5-sonnet-20241022-v2:0"),
+    "bedrock": ("Amazon Bedrock", "us.anthropic.claude-sonnet-4-6"),
 }
 
 _PROVIDER_DEFAULT_MODELS: dict[str, list[str]] = {
@@ -43,9 +43,9 @@ _PROVIDER_DEFAULT_MODELS: dict[str, list[str]] = {
     # Starting points only — admins set their account's exact model IDs (incl.
     # GovCloud `us-gov.` inference profiles) via the editable per-provider list.
     "bedrock": [
-        "anthropic.claude-3-5-sonnet-20241022-v2:0",
-        "anthropic.claude-3-5-haiku-20241022-v1:0",
-        "anthropic.claude-3-5-sonnet-20240620-v1:0",
+        "us.anthropic.claude-sonnet-4-6",
+        "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+        "us.anthropic.claude-opus-4-8",
     ],
 }
 
