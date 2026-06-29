@@ -222,6 +222,15 @@ def _llm_view(s: LLMSettings) -> LLMView:
         custom_api_key_hint=_redact(s.custom_api_key),
         custom_base_url=s.custom_base_url,
         custom_display_name=s.custom_display_name,
+        bedrock_aws_region=s.bedrock_aws_region,
+        bedrock_endpoint_url=s.bedrock_endpoint_url,
+        bedrock_aws_access_key_id_set=bool(s.bedrock_aws_access_key_id),
+        bedrock_aws_access_key_id_hint=_redact(s.bedrock_aws_access_key_id),
+        bedrock_aws_secret_access_key_set=bool(s.bedrock_aws_secret_access_key),
+        bedrock_aws_secret_access_key_hint=_redact(s.bedrock_aws_secret_access_key),
+        bedrock_aws_session_token_set=bool(s.bedrock_aws_session_token),
+        bedrock_aws_bearer_token_set=bool(s.bedrock_aws_bearer_token),
+        bedrock_aws_bearer_token_hint=_redact(s.bedrock_aws_bearer_token),
         provider_models=s.provider_models,
         ingest_selector_model=s.ingest_selector_model,
     )
@@ -240,6 +249,16 @@ def _normalize_custom_base_url(raw: str) -> str:
                 status_code=400,
                 detail="custom_base_url should be the API base (e.g. https://host/v1) — requests append /chat/completions automatically",
             )
+    return url
+
+
+def _normalize_bedrock_endpoint(raw: str) -> str:
+    url = raw.strip().rstrip("/")
+    if url and not url.startswith(("http://", "https://")):
+        raise HTTPException(
+            status_code=400,
+            detail="bedrock_endpoint_url must start with http:// or https://",
+        )
     return url
 
 
@@ -299,6 +318,37 @@ def put_llm(
     else:
         custom_display_name = current.custom_display_name
 
+    # Region + endpoint aren't secrets, but they follow the same blank=keep /
+    # null=clear convention as the other URL fields (ollama/custom_base_url).
+    bedrock_aws_region = _resolve_secret(
+        "bedrock_aws_region", req.bedrock_aws_region, current.bedrock_aws_region
+    ).strip()
+    bedrock_endpoint_url = _normalize_bedrock_endpoint(
+        _resolve_secret(
+            "bedrock_endpoint_url", req.bedrock_endpoint_url, current.bedrock_endpoint_url
+        )
+    )
+    bedrock_access_key_id = _resolve_secret(
+        "bedrock_aws_access_key_id",
+        req.bedrock_aws_access_key_id,
+        current.bedrock_aws_access_key_id,
+    )
+    bedrock_secret_access_key = _resolve_secret(
+        "bedrock_aws_secret_access_key",
+        req.bedrock_aws_secret_access_key,
+        current.bedrock_aws_secret_access_key,
+    )
+    bedrock_session_token = _resolve_secret(
+        "bedrock_aws_session_token",
+        req.bedrock_aws_session_token,
+        current.bedrock_aws_session_token,
+    )
+    bedrock_bearer_token = _resolve_secret(
+        "bedrock_aws_bearer_token",
+        req.bedrock_aws_bearer_token,
+        current.bedrock_aws_bearer_token,
+    )
+
     new_provider_models = req.provider_models if "provider_models" in sent_fields else None
 
     if "ingest_selector_model" in sent_fields:
@@ -316,6 +366,12 @@ def put_llm(
         custom_api_key=custom_api_key,
         custom_base_url=custom_base_url,
         custom_display_name=custom_display_name,
+        bedrock_aws_region=bedrock_aws_region,
+        bedrock_endpoint_url=bedrock_endpoint_url,
+        bedrock_aws_access_key_id=bedrock_access_key_id,
+        bedrock_aws_secret_access_key=bedrock_secret_access_key,
+        bedrock_aws_session_token=bedrock_session_token,
+        bedrock_aws_bearer_token=bedrock_bearer_token,
         provider_models=new_provider_models,
         ingest_selector_model=ingest_selector_model,
     )

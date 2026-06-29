@@ -71,6 +71,7 @@ def test_allowlist_matches_registry() -> None:
         "gemini",
         "ollama",
         "custom",
+        "bedrock",
     }
 
 

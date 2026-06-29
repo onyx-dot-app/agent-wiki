@@ -29,6 +29,12 @@ class LLMSettings(BaseModel):
     custom_api_key: str = ""
     custom_base_url: str = ""
     custom_display_name: str = ""
+    bedrock_aws_region: str = ""
+    bedrock_endpoint_url: str = ""
+    bedrock_aws_access_key_id: str = ""
+    bedrock_aws_secret_access_key: str = ""
+    bedrock_aws_session_token: str = ""
+    bedrock_aws_bearer_token: str = ""
     provider_models: dict[str, list[str]] = Field(default_factory=dict)
     ingest_selector_model: str = ""  # empty or same as model → stage 3 skipped
 
@@ -55,6 +61,12 @@ def upsert(
     custom_api_key: str,
     custom_base_url: str,
     custom_display_name: str,
+    bedrock_aws_region: str,
+    bedrock_endpoint_url: str,
+    bedrock_aws_access_key_id: str,
+    bedrock_aws_secret_access_key: str,
+    bedrock_aws_session_token: str,
+    bedrock_aws_bearer_token: str,
     provider_models: dict[str, list[str]] | None = None,
     ingest_selector_model: str | None = None,
 ) -> None:
@@ -73,6 +85,12 @@ def upsert(
         row.custom_api_key = custom_api_key
         row.custom_base_url = custom_base_url
         row.custom_display_name = custom_display_name
+        row.bedrock_aws_region = bedrock_aws_region
+        row.bedrock_endpoint_url = bedrock_endpoint_url
+        row.bedrock_aws_access_key_id = bedrock_aws_access_key_id
+        row.bedrock_aws_secret_access_key = bedrock_aws_secret_access_key
+        row.bedrock_aws_session_token = bedrock_aws_session_token
+        row.bedrock_aws_bearer_token = bedrock_aws_bearer_token
         if provider_models is not None:
             row.provider_models = provider_models
         if ingest_selector_model is not None:

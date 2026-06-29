@@ -32,6 +32,7 @@ _PROVIDER_LABELS = {
     "openai": ("OpenAI", "gpt-5.5"),
     "gemini": ("Gemini", "gemini-3.1-pro-preview"),
     "ollama": ("Ollama", "llama3.1"),
+    "bedrock": ("Amazon Bedrock", "us.anthropic.claude-sonnet-4-6"),
 }
 
 _PROVIDER_DEFAULT_MODELS: dict[str, list[str]] = {
@@ -39,6 +40,13 @@ _PROVIDER_DEFAULT_MODELS: dict[str, list[str]] = {
     "openai": ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano", "gpt-5.2"],
     "gemini": ["gemini-3.1-pro-preview", "gemini-3-flash-preview"],
     "ollama": ["llama3.1", "llama3.2", "mistral", "phi3", "qwen2.5", "deepseek-r1"],
+    # Starting points only — admins set their account's exact model IDs (incl.
+    # GovCloud `us-gov.` inference profiles) via the editable per-provider list.
+    "bedrock": [
+        "us.anthropic.claude-sonnet-4-6",
+        "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+        "us.anthropic.claude-opus-4-8",
+    ],
 }
 
 
@@ -53,6 +61,7 @@ def available(_user: User = Depends(require_user)) -> AvailableProvidersResponse
         ("gemini", bool(s.gemini_api_key)),
         ("ollama", bool(s.ollama_base_url)),
         ("custom", bool(s.custom_base_url)),
+        ("bedrock", bool(s.bedrock_aws_region)),
     ]
     for name, has_creds in checks:
         if not has_creds:

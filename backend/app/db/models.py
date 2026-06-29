@@ -702,6 +702,18 @@ class LLMSettings(Base):
     custom_display_name: Mapped[str] = mapped_column(
         Text, nullable=False, server_default=text("''")
     )
+    # AWS Bedrock (Converse API). Region + optional endpoint are config (Text);
+    # the AWS credentials are AES-GCM encrypted at rest like the other secrets.
+    bedrock_aws_region: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("''")
+    )
+    bedrock_endpoint_url: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("''")
+    )
+    bedrock_aws_access_key_id: Mapped[str] = mapped_column(EncryptedString(), nullable=False)
+    bedrock_aws_secret_access_key: Mapped[str] = mapped_column(EncryptedString(), nullable=False)
+    bedrock_aws_session_token: Mapped[str] = mapped_column(EncryptedString(), nullable=False)
+    bedrock_aws_bearer_token: Mapped[str] = mapped_column(EncryptedString(), nullable=False)
     provider_models: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, server_default=text("'{}'::jsonb")
     )

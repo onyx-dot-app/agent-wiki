@@ -3,8 +3,10 @@
 import {
   useEffect,
   useState,
+  type Dispatch,
   type FormEvent,
   type InputHTMLAttributes,
+  type SetStateAction,
 } from "react";
 import { mutate as globalMutate } from "swr";
 
@@ -62,6 +64,12 @@ const PROVIDER_META: Record<Provider, ProviderMeta> = {
     keyPlaceholder: "sk-…",
     initial: "C",
   },
+  bedrock: {
+    defaultModel: "us.anthropic.claude-sonnet-4-6",
+    keyLabel: "Access key ID",
+    keyPlaceholder: "AKIA…",
+    initial: "B",
+  },
 };
 
 const PROVIDER_MODELS: Record<Provider, string[]> = {
@@ -75,6 +83,11 @@ const PROVIDER_MODELS: Record<Provider, string[]> = {
   gemini: ["gemini-3.1-pro-preview", "gemini-3-flash-preview"],
   ollama: ["llama3.1", "llama3.2", "mistral", "phi3", "qwen2.5", "deepseek-r1"],
   custom: [],
+  bedrock: [
+    "us.anthropic.claude-sonnet-4-6",
+    "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+    "us.anthropic.claude-opus-4-8",
+  ],
 };
 
 function keyHint(p: Provider, s: LLMSettings): string {
@@ -83,6 +96,7 @@ function keyHint(p: Provider, s: LLMSettings): string {
   if (p === "gemini") return s.gemini_api_key_hint;
   if (p === "ollama") return s.ollama_base_url || "http://localhost:11434";
   if (p === "custom") return s.custom_base_url;
+  if (p === "bedrock") return s.bedrock_aws_region;
   return "";
 }
 
@@ -419,6 +433,12 @@ function ProviderCard({
               configured={configured}
               onSaved={onSaved}
             />
+          ) : provider === "bedrock" ? (
+            <BedrockProviderForm
+              settings={settings}
+              configured={configured}
+              onSaved={onSaved}
+            />
           ) : (
             <ProviderForm
               provider={provider}
@@ -439,8 +459,8 @@ function ProviderForm({
   configured,
   onSaved,
 }: {
-  // Custom routes to CustomProviderForm — encode that in the type.
-  provider: Exclude<Provider, "custom">;
+  // Custom + bedrock route to their own multi-field forms — encode that here.
+  provider: Exclude<Provider, "custom" | "bedrock">;
   settings: LLMSettings;
   configured: boolean;
   onSaved: () => void;
@@ -686,6 +706,74 @@ function TestConnection({
   );
 }
 
+// Free-add list of model IDs, shared by the providers without a fixed catalog
+// (custom OpenAI-compatible gateways and Bedrock).
+function ModelListEditor({
+  models,
+  setModels,
+  placeholder,
+  hint,
+}: {
+  models: string[];
+  setModels: Dispatch<SetStateAction<string[]>>;
+  placeholder: string;
+  hint: string;
+}) {
+  const [newModel, setNewModel] = useState("");
+
+  function addModel() {
+    const m = newModel.trim();
+    if (!m || models.includes(m)) return;
+    setModels((prev) => [...prev, m]);
+    setNewModel("");
+  }
+
+  return (
+    <div>
+      <div className="mb-2 flex items-baseline justify-between">
+        <div className={lblClass}>Models</div>
+        <div className="text-xs text-(--text-03)">{hint}</div>
+      </div>
+      <div className="flex flex-col gap-1.5">
+        {models.map((id) => (
+          <div
+            key={id}
+            className="flex items-center justify-between rounded-(--border-radius-08) border border-(--border-01) bg-(--background-tint-00) py-[6px] pr-2 pl-3"
+          >
+            <span className="font-mono text-[13px] text-(--text-05)">{id}</span>
+            <Button
+              type="button"
+              variant="default"
+              size="sm"
+              onClick={() => setModels((prev) => prev.filter((m) => m !== id))}
+            >
+              Remove
+            </Button>
+          </div>
+        ))}
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={newModel}
+            onChange={(e) => setNewModel(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                addModel();
+              }
+            }}
+            placeholder={placeholder}
+            className={inputClass}
+          />
+          <Button type="button" variant="default" size="sm" onClick={addModel}>
+            Add
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function CustomProviderForm({
   settings,
   configured,
@@ -701,18 +789,10 @@ function CustomProviderForm({
   const [models, setModels] = useState<string[]>(
     () => settings.provider_models["custom"] ?? [],
   );
-  const [newModel, setNewModel] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const confirmDialog = useConfirm();
-
-  function addModel() {
-    const m = newModel.trim();
-    if (!m || models.includes(m)) return;
-    setModels((prev) => [...prev, m]);
-    setNewModel("");
-  }
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -799,62 +879,195 @@ function CustomProviderForm({
         placeholder="Custom"
       />
 
-      <div>
-        <div className="mb-2 flex items-baseline justify-between">
-          <div className={lblClass}>Models</div>
-          <div className="text-xs text-(--text-03)">
-            Add at least one model name
-          </div>
-        </div>
-        <div className="flex flex-col gap-1.5">
-          {models.map((id) => (
-            <div
-              key={id}
-              className="flex items-center justify-between rounded-(--border-radius-08) border border-(--border-01) bg-(--background-tint-00) py-[6px] pr-2 pl-3"
-            >
-              <span className="font-mono text-[13px] text-(--text-05)">
-                {id}
-              </span>
-              <Button
-                type="button"
-                variant="default"
-                size="sm"
-                onClick={() =>
-                  setModels((prev) => prev.filter((m) => m !== id))
-                }
-              >
-                Remove
-              </Button>
-            </div>
-          ))}
-          <div className="flex gap-2">
-            <input
-              type="text"
-              value={newModel}
-              onChange={(e) => setNewModel(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  addModel();
-                }
-              }}
-              placeholder="deepseek-chat"
-              className={inputClass}
-            />
-            <Button
-              type="button"
-              variant="default"
-              size="sm"
-              onClick={addModel}
-            >
-              Add
-            </Button>
-          </div>
-        </div>
-      </div>
+      <ModelListEditor
+        models={models}
+        setModels={setModels}
+        placeholder="deepseek-chat"
+        hint="Add at least one model name"
+      />
 
       <TestConnection
         provider="custom"
+        model={models[0] ?? null}
+        configured={configured}
+      />
+
+      <FormMessages error={error} saved={saved} />
+      <FormActions saving={saving} configured={configured} onClear={onClear} />
+    </form>
+  );
+}
+
+function BedrockProviderForm({
+  settings,
+  configured,
+  onSaved,
+}: {
+  settings: LLMSettings;
+  configured: boolean;
+  onSaved: () => void;
+}) {
+  const [region, setRegion] = useState(settings.bedrock_aws_region);
+  const [endpoint, setEndpoint] = useState(settings.bedrock_endpoint_url);
+  const [accessKeyId, setAccessKeyId] = useState("");
+  const [secretAccessKey, setSecretAccessKey] = useState("");
+  const [sessionToken, setSessionToken] = useState("");
+  const [bearerToken, setBearerToken] = useState("");
+  const [models, setModels] = useState<string[]>(
+    () => settings.provider_models["bedrock"] ?? PROVIDER_MODELS.bedrock,
+  );
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+  const confirmDialog = useConfirm();
+
+  async function onSubmit(e: FormEvent) {
+    e.preventDefault();
+    if (!region.trim() && !configured) {
+      setError("AWS region is required (e.g. us-gov-west-1).");
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    setSaved(false);
+    try {
+      const body: Record<string, unknown> = {
+        provider_models: { ...settings.provider_models, bedrock: models },
+      };
+      // Blank means "keep current" server-side; only send real values.
+      if (region.trim()) body.bedrock_aws_region = region.trim();
+      if (endpoint.trim()) body.bedrock_endpoint_url = endpoint.trim();
+      if (accessKeyId) body.bedrock_aws_access_key_id = accessKeyId;
+      if (secretAccessKey) body.bedrock_aws_secret_access_key = secretAccessKey;
+      if (sessionToken) body.bedrock_aws_session_token = sessionToken;
+      if (bearerToken) body.bedrock_aws_bearer_token = bearerToken;
+      await apiFetch("/admin/llm", {
+        method: "PUT",
+        body: JSON.stringify(body),
+      });
+      setAccessKeyId("");
+      setSecretAccessKey("");
+      setSessionToken("");
+      setBearerToken("");
+      setSaved(true);
+      onSaved();
+      void globalMutate("/llm/status");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "failed to save");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function onClear() {
+    if (
+      !(await confirmDialog({
+        title: "Remove Amazon Bedrock credentials?",
+        confirmLabel: "Remove",
+      }))
+    )
+      return;
+    setSaving(true);
+    setError(null);
+    try {
+      await apiFetch("/admin/llm", {
+        method: "PUT",
+        body: JSON.stringify({
+          bedrock_aws_region: null,
+          bedrock_endpoint_url: null,
+          bedrock_aws_access_key_id: null,
+          bedrock_aws_secret_access_key: null,
+          bedrock_aws_session_token: null,
+          bedrock_aws_bearer_token: null,
+          provider_models: { ...settings.provider_models, bedrock: [] },
+        }),
+      });
+      onSaved();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "failed to remove");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <form onSubmit={onSubmit} className="flex flex-col gap-4">
+      <Field
+        label="AWS region"
+        type="text"
+        value={region}
+        onChange={(e) => setRegion(e.target.value)}
+        placeholder="us-gov-west-1"
+        hint="GovCloud regions (us-gov-west-1 / us-gov-east-1) route to the GovCloud partition automatically."
+      />
+
+      <Field
+        label="Bedrock API key (optional)"
+        type="password"
+        value={bearerToken}
+        onChange={(e) => setBearerToken(e.target.value)}
+        placeholder={
+          settings.bedrock_aws_bearer_token_set
+            ? "leave blank to keep current"
+            : "a Bedrock API key (alternative to AWS access keys)"
+        }
+        hint="Use this OR the AWS access key + secret below — not both."
+      />
+
+      <Field
+        label="Access key ID (optional)"
+        type="password"
+        value={accessKeyId}
+        onChange={(e) => setAccessKeyId(e.target.value)}
+        placeholder={
+          settings.bedrock_aws_access_key_id_set
+            ? "leave blank to keep current"
+            : "AKIA…  (blank = use the instance/IAM role)"
+        }
+      />
+
+      <Field
+        label="Secret access key (optional)"
+        type="password"
+        value={secretAccessKey}
+        onChange={(e) => setSecretAccessKey(e.target.value)}
+        placeholder={
+          settings.bedrock_aws_secret_access_key_set
+            ? "leave blank to keep current"
+            : "…"
+        }
+      />
+
+      <Field
+        label="Session token (optional)"
+        type="password"
+        value={sessionToken}
+        onChange={(e) => setSessionToken(e.target.value)}
+        placeholder={
+          settings.bedrock_aws_session_token_set
+            ? "leave blank to keep current"
+            : "for temporary credentials"
+        }
+      />
+
+      <Field
+        label="Endpoint URL (optional)"
+        type="text"
+        value={endpoint}
+        onChange={(e) => setEndpoint(e.target.value)}
+        placeholder="https://bedrock-runtime-fips.us-gov-west-1.amazonaws.com"
+        hint="Only for a FIPS or private (PrivateLink) endpoint; blank derives it from the region."
+      />
+
+      <ModelListEditor
+        models={models}
+        setModels={setModels}
+        placeholder="us.anthropic.claude-sonnet-4-6"
+        hint="Bedrock model IDs enabled in your account"
+      />
+
+      <TestConnection
+        provider="bedrock"
         model={models[0] ?? null}
         configured={configured}
       />
