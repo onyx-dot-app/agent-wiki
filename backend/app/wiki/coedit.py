@@ -114,6 +114,13 @@ def get_active_session(path: str) -> SessionRow | None:
         return _session_row(row) if row is not None else None
 
 
+def get_session(session_id: int) -> SessionRow | None:
+    """Look up a session by id, regardless of status (active or closed)."""
+    with session() as s:
+        row = s.get(CoeditSession, session_id)
+        return _session_row(row) if row is not None else None
+
+
 def open_session(path: str, *, base_sha: str | None, initial_buffer: str = "") -> SessionRow:
     """Get-or-create the active session for ``path``.
 

@@ -574,6 +574,13 @@ def _emit_pg_notify(payload: dict[str, Any]) -> None:
         log.exception("mcp pubsub: NOTIFY %s failed (local delivery still occurred)", NOTIFY_CHANNEL)
 
 
+def emit_external(payload: dict[str, Any]) -> None:
+    """Public entry for non-MCP publishers (co-editing) to ride the same
+    cross-process NOTIFY bus. ``payload["kind"]`` is routed by
+    ``_dispatch_notify_payload`` on the receiving side."""
+    _emit_pg_notify(payload)
+
+
 def start_listener() -> None:
     """Start the LISTEN thread — call once from the web process at
     startup (``app/main.py:create_app``).
@@ -673,6 +680,12 @@ def _dispatch_notify_payload(raw: str) -> None:
             payload["job_id"],
             _build_job_update(payload["job_id"], payload["status"]),
         )
+    elif kind == "coedit":
+        # Co-editing rides the same bus; deliver to local co-edit connections.
+        # Lazy import keeps the MCP module free of a co-edit dependency.
+        from app.wiki import coedit_channel
+
+        coedit_channel.handle_remote(payload)
 
 
 # --------------------------------------------------------------------------- #
