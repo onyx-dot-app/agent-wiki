@@ -1,18 +1,19 @@
 """Co-editing live channel — SSE down, HTTP POST up (cookie-authed humans).
 
 Thin HTTP layer: gate by page permission, drive the ``app/wiki/coedit.py`` store
-and the ``app/wiki/coedit_channel.py`` broadcast layer. Edit ops land in a
-follow-up (build-order step 3); this PR establishes the channel + presence.
+and the ``app/wiki/coedit_channel.py`` broadcast layer. Synchronous throughout
+(no asyncio) — the SSE stream is a plain sync generator, one threadpool thread
+per open connection. Edit ops land in a follow-up (build-order step 3); this PR
+establishes the channel + presence.
 """
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import Iterator
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
 from app.auth import User, require_can
@@ -23,8 +24,7 @@ from app.models.coedit import (
     LeaveRequest,
     ParticipantOut,
 )
-from app.wiki import coedit, coedit_channel
-from app.wiki import git
+from app.wiki import coedit, coedit_channel, git
 
 router = APIRouter()
 log = logging.getLogger(__name__)
@@ -46,7 +46,7 @@ def _participants_out(session_id: int) -> list[ParticipantOut]:
 
 
 @router.post("/join")
-async def join(req: JoinRequest, user: User = Depends(require_user)) -> JoinResponse:
+def join(req: JoinRequest, user: User = Depends(require_user)) -> JoinResponse:
     """Open (or join) the live session for a page and return its buffer.
 
     Joining is editing, so it requires write. A fresh session is seeded from the
@@ -69,7 +69,7 @@ async def join(req: JoinRequest, user: User = Depends(require_user)) -> JoinResp
 
 
 @router.post("/leave")
-async def leave(req: LeaveRequest, user: User = Depends(require_user)) -> dict[str, bool]:
+def leave(req: LeaveRequest, user: User = Depends(require_user)) -> dict[str, bool]:
     """Explicitly leave a session (e.g. closing the editor)."""
     coedit.leave(req.session_id, user.id)
     coedit_channel.broadcast_presence(req.session_id)
@@ -77,16 +77,15 @@ async def leave(req: LeaveRequest, user: User = Depends(require_user)) -> dict[s
 
 
 @router.get("/stream")
-async def stream(
-    session_id: int,
-    request: Request,
-    user: User = Depends(require_user),
-) -> StreamingResponse:
+def stream(session_id: int, user: User = Depends(require_user)) -> StreamingResponse:
     """Long-lived SSE stream of session frames (presence now, ops later).
 
-    The connection is the presence heartbeat: each keepalive tick refreshes the
-    participant's ``last_seen_at``, and on disconnect we fire ``leave`` once the
-    user's last connection for the session closes.
+    A plain sync generator: it blocks on the connection's queue, emitting a
+    keepalive every ``_SSE_HEARTBEAT_SECONDS`` of silence. The connection is the
+    presence heartbeat — each keepalive refreshes ``last_seen_at``. When the
+    client disconnects, Starlette closes the generator (``GeneratorExit`` at the
+    next yield, at most one heartbeat later), and the ``finally`` block fires
+    ``leave`` once the user's last connection for the session closes.
     """
     sess = coedit.get_session(session_id)
     if sess is None or sess.status != "active":
@@ -95,26 +94,29 @@ async def stream(
     require_can("read", sess.path, user)
 
     coedit.join(session_id, user.id)
-    conn_id, queue = coedit_channel.connect(session_id, user.id)
+    conn_id, q = coedit_channel.connect(session_id, user.id)
     coedit_channel.broadcast_presence(session_id)
 
-    async def gen() -> AsyncIterator[bytes]:
+    def gen() -> Iterator[bytes]:
         try:
             # Prime the stream with the current roster so a joiner doesn't wait
             # for the next change to render presence.
-            yield _sse({"type": "presence", "session_id": session_id,
-                        "participants": [p.model_dump() for p in coedit.list_participants(session_id)]})
+            yield _sse(
+                {
+                    "type": "presence",
+                    "session_id": session_id,
+                    "participants": [
+                        p.model_dump() for p in coedit.list_participants(session_id)
+                    ],
+                }
+            )
             while True:
-                if await request.is_disconnected():
-                    break
-                frame = await coedit_channel.drain(queue, _SSE_HEARTBEAT_SECONDS)
+                frame = coedit_channel.drain(q, _SSE_HEARTBEAT_SECONDS)
                 if frame is None:
                     coedit.touch(session_id, user.id)
                     yield b": keepalive\n\n"
                     continue
                 yield _sse(frame)
-        except asyncio.CancelledError:
-            raise
         finally:
             coedit_channel.disconnect(conn_id)
             # Only mark the user gone when their last connection closes, so a

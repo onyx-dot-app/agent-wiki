@@ -6,17 +6,19 @@ the session. Cross-process delivery rides the existing ``wiki_commit``
 LISTEN/NOTIFY bus in ``app/mcp_server/pubsub.py`` (a ``coedit`` payload kind), so
 participants connected to different app servers still see each other.
 
-This module is ephemeral by design: connection state (queues, loops) lives in
-process memory and nothing here is persisted. Durable session/participant state
-lives in ``app/wiki/coedit.py``. Frames are plain JSON-serializable dicts.
+Synchronous by design (no asyncio): one thread-per-connection, a thread-safe
+``queue.Queue`` per connection, mirroring ``pubsub``'s sync ``_queues`` /
+``drain_blocking`` path. Connection state is in-process and ephemeral — nothing
+here is persisted; durable session/participant state lives in
+``app/wiki/coedit.py``. Frames are plain JSON-serializable dicts.
 
 See ``Engineering Projects/Agent Wiki Project/design/Co-Editing.md``.
 """
 
 from __future__ import annotations
 
-import asyncio
 import logging
+import queue
 import threading
 import uuid
 from typing import Any
@@ -28,33 +30,25 @@ log = logging.getLogger(__name__)
 Frame = dict[str, Any]
 
 # Per-connection registry, keyed by an opaque connection id (one per open SSE
-# stream). Parallel dicts rather than a class, mirroring ``pubsub``'s
-# ``_async_queues`` / ``_async_loops`` style for the same runtime state.
-_queues: dict[str, asyncio.Queue[Frame]] = {}
-_loops: dict[str, asyncio.AbstractEventLoop] = {}
+# stream). Parallel dicts rather than a class, mirroring ``pubsub``'s sync
+# ``_queues`` style for the same runtime state.
+_queues: dict[str, queue.Queue[Frame]] = {}
 _session_of: dict[str, int] = {}  # conn_id -> coedit_session_id
 _user_of: dict[str, str] = {}  # conn_id -> user_id
 _conns_by_session: dict[int, set[str]] = {}  # coedit_session_id -> {conn_id}
 _lock = threading.Lock()
 
 
-def connect(coedit_session_id: int, user_id: str) -> tuple[str, asyncio.Queue[Frame]]:
-    """Register a live connection for a session. Returns its id + queue.
-
-    Must be called from inside the running event loop of the SSE handler — the
-    loop is captured so cross-thread publishers (the LISTEN listener, sync
-    request handlers) can hand frames in via ``call_soon_threadsafe``.
-    """
+def connect(coedit_session_id: int, user_id: str) -> tuple[str, queue.Queue[Frame]]:
+    """Register a live connection for a session. Returns its id + queue."""
     conn_id = uuid.uuid4().hex
-    loop = asyncio.get_running_loop()
-    queue: asyncio.Queue[Frame] = asyncio.Queue()
+    q: queue.Queue[Frame] = queue.Queue()
     with _lock:
-        _queues[conn_id] = queue
-        _loops[conn_id] = loop
+        _queues[conn_id] = q
         _session_of[conn_id] = coedit_session_id
         _user_of[conn_id] = user_id
         _conns_by_session.setdefault(coedit_session_id, set()).add(conn_id)
-    return conn_id, queue
+    return conn_id, q
 
 
 def disconnect(conn_id: str) -> None:
@@ -62,7 +56,6 @@ def disconnect(conn_id: str) -> None:
     with _lock:
         sid = _session_of.pop(conn_id, None)
         _queues.pop(conn_id, None)
-        _loops.pop(conn_id, None)
         _user_of.pop(conn_id, None)
         if sid is not None:
             conns = _conns_by_session.get(sid)
@@ -85,18 +78,18 @@ def user_still_connected(coedit_session_id: int, user_id: str) -> bool:
         )
 
 
-async def drain(queue: asyncio.Queue[Frame], timeout: float) -> Frame | None:
-    """Await the next frame up to ``timeout`` seconds; ``None`` on timeout so
+def drain(q: queue.Queue[Frame], timeout: float) -> Frame | None:
+    """Block up to ``timeout`` seconds for the next frame; ``None`` on timeout so
     the SSE writer can emit a heartbeat."""
     try:
-        return await asyncio.wait_for(queue.get(), timeout)
-    except asyncio.TimeoutError:
+        return q.get(timeout=timeout)
+    except queue.Empty:
         return None
 
 
 def publish(coedit_session_id: int, frame: Frame) -> None:
-    """Deliver ``frame`` to every connection in the session, on this process
-    and (via NOTIFY) on every other."""
+    """Deliver ``frame`` to every connection in the session, on this process and
+    (via NOTIFY) on every other."""
     _deliver_local(coedit_session_id, frame)
     pubsub.emit_external(
         {"kind": "coedit", "coedit_session_id": coedit_session_id, "frame": frame}
@@ -125,23 +118,21 @@ def broadcast_presence(coedit_session_id: int) -> None:
 
 
 def _deliver_local(coedit_session_id: int, frame: Frame) -> None:
+    # ``queue.Queue`` is thread-safe, so a plain ``put_nowait`` works from any
+    # thread (the LISTEN listener, a request handler) — no event loop, no
+    # cross-thread scheduling dance.
     with _lock:
-        conn_ids = list(_conns_by_session.get(coedit_session_id, ()))
-        targets = [(cid, _queues.get(cid), _loops.get(cid)) for cid in conn_ids]
-    for cid, queue, loop in targets:
-        if queue is None or loop is None:
-            continue
-        try:
-            loop.call_soon_threadsafe(queue.put_nowait, frame)
-        except RuntimeError:
-            # Loop already closed (connection tearing down) — drop the frame.
-            log.debug("coedit: dropping frame for dead connection %s", cid)
+        targets = [
+            _queues.get(cid) for cid in _conns_by_session.get(coedit_session_id, ())
+        ]
+    for q in targets:
+        if q is not None:
+            q.put_nowait(frame)
 
 
 def reset_for_tests() -> None:
     with _lock:
         _queues.clear()
-        _loops.clear()
         _session_of.clear()
         _user_of.clear()
         _conns_by_session.clear()
