@@ -73,6 +73,23 @@ def test_set_buffer_cas_stale_is_rejected(users):
     assert current.buffer_text == "v1"
 
 
+def test_set_buffer_concurrent_writers_one_wins(users):
+    # Two writers both read version 0 and race to apply a patch. The atomic
+    # conditional UPDATE means exactly one swap lands; the loser is rejected
+    # (None) and must rebase. No lost update — the winner's text survives.
+    s = coedit.open_session(_PATH, base_sha=None, initial_buffer="v0")
+    first = coedit.set_buffer(s.id, base_version=0, buffer_text="from-A")
+    second = coedit.set_buffer(s.id, base_version=0, buffer_text="from-B")
+
+    winners = [r for r in (first, second) if r is not None]
+    assert len(winners) == 1
+    assert winners[0].version == 1
+    current = coedit.get_active_session(_PATH)
+    assert current is not None
+    assert current.version == 1
+    assert current.buffer_text == winners[0].buffer_text
+
+
 def test_set_buffer_on_closed_session_returns_none(users):
     s = coedit.open_session(_PATH, base_sha=None)
     coedit.close_session(s.id)
@@ -88,8 +105,10 @@ def test_participants_join_touch_leave(users):
     assert [r.user_id for r in rows] == ["usr_a", "usr_b"]
     assert {r.user_display for r in rows} == {"Ada", "Bo"}
 
-    # join is idempotent — refreshes last_seen, no duplicate row.
+    # join on an existing participant is idempotent (refreshes last_seen, no
+    # duplicate row); touch does the same without re-adding.
     before = next(r for r in coedit.list_participants(s.id) if r.user_id == "usr_a")
+    coedit.join(s.id, "usr_a")
     coedit.touch(s.id, "usr_a")
     after = next(r for r in coedit.list_participants(s.id) if r.user_id == "usr_a")
     assert after.last_seen_at >= before.last_seen_at

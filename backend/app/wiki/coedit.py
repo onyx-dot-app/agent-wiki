@@ -23,7 +23,7 @@ import logging
 from datetime import datetime, timezone
 
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 
 from app.db.models import CoeditParticipant, CoeditSession, User
@@ -162,15 +162,26 @@ def set_buffer(session_id: int, *, base_version: int, buffer_text: str) -> Sessi
     Returns the updated row, or ``None`` if the session is gone/closed or the
     version moved underneath the caller (stale — the caller must rebase its
     patch onto the current buffer and retry).
+
+    The compare and the swap are a single conditional ``UPDATE`` so they are
+    atomic: two concurrent callers based on the same version can't both win
+    (the version predicate is re-checked inside the write, not in Python), so
+    there is no lost-update window.
     """
+    now = _iso(_now())
     with session() as s:
-        sess = s.get(CoeditSession, session_id)
-        if sess is None or sess.status != "active" or sess.version != base_version:
-            return None
-        sess.buffer_text = buffer_text
-        sess.version = base_version + 1
-        sess.updated_at = _iso(_now())
-        return _session_row(sess)
+        sess = s.scalars(
+            update(CoeditSession)
+            .where(
+                CoeditSession.id == session_id,
+                CoeditSession.version == base_version,
+                CoeditSession.status == "active",
+            )
+            .values(buffer_text=buffer_text, version=base_version + 1, updated_at=now)
+            .returning(CoeditSession)
+            .execution_options(synchronize_session=False)
+        ).one_or_none()
+        return _session_row(sess) if sess is not None else None
 
 
 def mark_checkpointed(session_id: int, *, base_sha: str) -> None:
