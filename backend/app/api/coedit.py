@@ -94,8 +94,11 @@ def stream(session_id: int, user: User = Depends(require_user)) -> StreamingResp
     require_can("write", sess.path, user)
 
     coedit.join(session_id, user.id)
-    conn_id, q = coedit_channel.connect(session_id, user.id)
+    # Announce the new participant to existing connections *before* registering
+    # this one — otherwise the broadcast lands in our own queue and gen() would
+    # emit it on top of the inline initial roster below (a duplicate frame).
     coedit_channel.broadcast_presence(session_id)
+    conn_id, q = coedit_channel.connect(session_id, user.id)
 
     def gen() -> Iterator[bytes]:
         try:
