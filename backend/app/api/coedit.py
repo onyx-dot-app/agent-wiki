@@ -98,7 +98,7 @@ def stream(session_id: int, user: User = Depends(require_user)) -> StreamingResp
     # this one — otherwise the broadcast lands in our own queue and gen() would
     # emit it on top of the inline initial roster below (a duplicate frame).
     coedit_channel.broadcast_presence(session_id)
-    conn_id, q = coedit_channel.connect(session_id, user.id)
+    conn = coedit_channel.connect(session_id, user.id)
 
     def gen() -> Iterator[bytes]:
         try:
@@ -114,14 +114,14 @@ def stream(session_id: int, user: User = Depends(require_user)) -> StreamingResp
                 }
             )
             while True:
-                frame = coedit_channel.drain(q, _SSE_HEARTBEAT_SECONDS)
+                frame = coedit_channel.drain(conn.queue, _SSE_HEARTBEAT_SECONDS)
                 if frame is None:
                     coedit.touch(session_id, user.id)
                     yield b": keepalive\n\n"
                     continue
                 yield _sse(frame)
         finally:
-            coedit_channel.disconnect(conn_id)
+            coedit_channel.disconnect(conn.id)
             # Only mark the user gone when their last connection closes, so a
             # second tab doesn't evict them.
             if not coedit_channel.user_still_connected(session_id, user.id):

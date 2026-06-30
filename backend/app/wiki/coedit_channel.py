@@ -23,12 +23,24 @@ import threading
 import uuid
 from typing import Any
 
+from pydantic import BaseModel, ConfigDict
+
 from app.realtime import bus
 from app.wiki import coedit
 
 log = logging.getLogger(__name__)
 
 Frame = dict[str, Any]
+
+
+class Connection(BaseModel):
+    """Handle for one live SSE connection: its opaque id (for ``disconnect``)
+    and the queue the stream generator drains."""
+
+    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
+
+    id: str
+    queue: queue.Queue[Frame]
 
 # Per-connection registry, keyed by an opaque connection id (one per open SSE
 # stream). Parallel dicts rather than a class, mirroring ``pubsub``'s sync
@@ -40,8 +52,8 @@ _conns_by_session: dict[int, set[str]] = {}  # coedit_session_id -> {conn_id}
 _lock = threading.Lock()
 
 
-def connect(coedit_session_id: int, user_id: str) -> tuple[str, queue.Queue[Frame]]:
-    """Register a live connection for a session. Returns its id + queue."""
+def connect(coedit_session_id: int, user_id: str) -> Connection:
+    """Register a live connection for a session. Returns its handle."""
     conn_id = uuid.uuid4().hex
     q: queue.Queue[Frame] = queue.Queue()
     with _lock:
@@ -49,7 +61,7 @@ def connect(coedit_session_id: int, user_id: str) -> tuple[str, queue.Queue[Fram
         _session_of[conn_id] = coedit_session_id
         _user_of[conn_id] = user_id
         _conns_by_session.setdefault(coedit_session_id, set()).add(conn_id)
-    return conn_id, q
+    return Connection(id=conn_id, queue=q)
 
 
 def disconnect(conn_id: str) -> None:
