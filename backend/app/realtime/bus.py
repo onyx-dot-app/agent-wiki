@@ -24,6 +24,10 @@ import threading
 from collections.abc import Callable
 from typing import Any
 
+import psycopg
+from sqlalchemy import text
+
+from app.config import CONFIG
 from app.db.session import session as db_session
 
 log = logging.getLogger(__name__)
@@ -64,8 +68,6 @@ def emit(payload: dict[str, Any]) -> None:
     inlined and single-quote-escaped (only the JSON could contain a quote).
     """
     try:
-        from sqlalchemy import text
-
         literal = json.dumps({**payload, "origin": _PROCESS_ORIGIN}).replace("'", "''")
         with db_session() as s:
             s.execute(text(f"NOTIFY {CHANNEL}, '{literal}'"))
@@ -125,10 +127,6 @@ def _listener_loop() -> None:
     connection in autocommit mode held open across many notifications — outside
     the ORM session scope.
     """
-    import psycopg
-
-    from app.config import CONFIG
-
     while not _listener_stop.is_set():
         try:
             with psycopg.connect(CONFIG.database_url, autocommit=True) as conn:

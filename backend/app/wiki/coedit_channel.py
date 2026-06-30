@@ -24,6 +24,7 @@ import uuid
 from typing import Any
 
 from app.realtime import bus
+from app.wiki import coedit
 
 log = logging.getLogger(__name__)
 
@@ -105,8 +106,6 @@ bus.register("coedit", handle_remote)
 
 def broadcast_presence(coedit_session_id: int) -> None:
     """Push the current participant roster to the session."""
-    from app.wiki import coedit
-
     participants = coedit.list_participants(coedit_session_id)
     publish(
         coedit_session_id,
