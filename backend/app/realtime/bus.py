@@ -28,9 +28,9 @@ from app.db.session import session as db_session
 
 log = logging.getLogger(__name__)
 
-# Channel name is kept as ``wiki_commit`` so the bus interoperates with NOTIFYs
-# emitted before the bus was extracted out of the MCP pubsub module.
-CHANNEL = "wiki_commit"
+# Single Postgres LISTEN/NOTIFY channel shared by every consumer; the bus
+# routes each payload to a handler by its ``kind``.
+CHANNEL = "realtime_bus"
 
 # Per-process tag stamped into every payload. The listener drops payloads
 # carrying our own tag — the originating process already delivered locally.
@@ -98,7 +98,7 @@ def start_listener() -> None:
     (``app/main.py``'s lifespan).
 
     The thread holds a single dedicated psycopg connection running
-    ``LISTEN wiki_commit;`` and routes incoming notifications to registered
+    ``LISTEN realtime_bus;`` and routes incoming notifications to registered
     handlers. Self-emitted notifications are skipped via the origin tag.
     """
     global _listener_thread

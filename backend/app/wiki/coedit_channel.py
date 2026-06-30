@@ -2,15 +2,15 @@
 
 Browser clients open one SSE connection per co-edit session (cookie-authed) and
 the server pushes session frames (e.g. presence) to every connection in the
-session. Cross-process delivery rides the existing ``wiki_commit``
-LISTEN/NOTIFY bus in ``app/mcp_server/pubsub.py`` (a ``coedit`` payload kind), so
-participants connected to different app servers still see each other.
+session. Cross-process delivery rides the shared realtime bus
+(``app/realtime/bus.py``, Postgres LISTEN/NOTIFY) under a ``coedit`` payload
+kind, so participants connected to different app servers still see each other.
 
-One thread per connection with a thread-safe ``queue.Queue``, mirroring
-``pubsub``'s sync ``_queues`` / ``drain_blocking`` path. Connection state is
-in-process and ephemeral — nothing
-here is persisted; durable session/participant state lives in
-``app/wiki/coedit.py``. Frames are plain JSON-serializable dicts.
+One thread per connection with a thread-safe ``queue.Queue``, mirroring the MCP
+pubsub's sync ``_queues`` / ``drain_blocking`` path. Connection state is
+in-process and ephemeral — nothing here is persisted; durable
+session/participant state lives in ``app/wiki/coedit.py``. Frames are plain
+JSON-serializable dicts.
 
 See ``Engineering Projects/Agent Wiki Project/design/Co-Editing.md``.
 """
