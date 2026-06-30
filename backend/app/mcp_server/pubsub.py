@@ -1,4 +1,4 @@
-"""Persistent subscription registry + in-memory delivery + Postgres LISTEN/NOTIFY bridge.
+"""Persistent subscription registry + in-memory delivery + cross-process bus handlers.
 
 Three concerns, separated:
 
@@ -17,11 +17,12 @@ Three concerns, separated:
    bounded sync queue, drained at stream open (and peeked by the
    ``stale_paths`` tool for poll-based clients).
 
-3. **Cross-process delivery via Postgres LISTEN/NOTIFY**
-   (``NOTIFY wiki_commit``). The worker process commits, a web
-   process owns the SSE stream; the same notification is emitted on
-   the channel and the listener thread on each replica re-publishes
-   locally (self-originated payloads are skipped via an origin tag).
+3. **Cross-process delivery via the shared realtime bus**
+   (``app/realtime/bus.py``, Postgres LISTEN/NOTIFY). The worker
+   process commits, a web process owns the SSE stream; ``publish_*``
+   emits on the bus, and the handlers registered here (``_on_update``
+   etc.) re-publish locally on every other replica. Self-originated
+   payloads are skipped by the bus via an origin tag.
 
 Fan-out on every publish (originating or relayed) targets
 ``db_subscribers(rel) ∩ (live ∪ parked)`` — the subscription tables
@@ -45,9 +46,7 @@ auto-subscribe.
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
-import secrets
 import threading
 from queue import Empty, Full, Queue
 from typing import Any
@@ -58,16 +57,9 @@ from sqlalchemy import delete, select
 from app.db import models as orm
 from app.db.session import execute_dml, session as db_session
 from app.models.wiki import ChangeKind
+from app.realtime import bus
 
 log = logging.getLogger(__name__)
-
-NOTIFY_CHANNEL = "wiki_commit"
-
-# Per-process tag stamped into every NOTIFY payload. The LISTEN bridge
-# drops payloads carrying our own tag — local delivery already happened
-# in-process at publish time, so re-publishing the echo would hand every
-# subscriber on the originating replica a duplicate SSE frame.
-_PROCESS_ORIGIN = secrets.token_hex(8)
 
 
 class Notification(BaseModel):
@@ -397,14 +389,14 @@ def publish_doc_update(rel: str, sha: str, change_kind: ChangeKind) -> None:
     have lost read access to ``rel`` since their last successful read.
     """
     _publish_local(rel, _build_update(rel, sha, change_kind))
-    _emit_pg_notify({"kind": "update", "rel": rel, "sha": sha, "change_kind": change_kind})
+    bus.emit({"kind": "update", "rel": rel, "sha": sha, "change_kind": change_kind})
 
 
 def publish_doc_delete(rel: str, sha: str) -> None:
     """Same shape as ``publish_doc_update`` but with ``changeKind="delete"``;
     subscribers can re-issue ``read_doc`` to confirm and unsubscribe."""
     _publish_local(rel, _build_update(rel, sha, ChangeKind.DELETE))
-    _emit_pg_notify({"kind": "delete", "rel": rel, "sha": sha})
+    bus.emit({"kind": "delete", "rel": rel, "sha": sha})
 
 
 def publish_job_update(job_id: str, status: str) -> None:
@@ -413,7 +405,7 @@ def publish_job_update(job_id: str, status: str) -> None:
     ``running`` / ``succeeded`` / ``failed``.
     """
     _publish_local_job(job_id, _build_job_update(job_id, status))
-    _emit_pg_notify({"kind": "job_update", "job_id": job_id, "status": status})
+    bus.emit({"kind": "job_update", "job_id": job_id, "status": status})
 
 
 def publish_list_changed() -> None:
@@ -432,7 +424,7 @@ def publish_list_changed() -> None:
 
     for session_id in mcp_session.all_session_ids():
         _deliver(session_id, notif)
-    _emit_pg_notify({"kind": "list_changed"})
+    bus.emit({"kind": "list_changed"})
 
 
 # --------------------------------------------------------------------------- #
@@ -543,149 +535,48 @@ def _publish_local_job(job_id: str, notif: Notification) -> None:
 
 
 # --------------------------------------------------------------------------- #
-# Postgres LISTEN/NOTIFY bridge — opt-in (only the web process arms it)       #
+# Cross-process delivery — handlers on the shared realtime bus                #
 # --------------------------------------------------------------------------- #
+#
+# The bus (app/realtime/bus.py) owns the single LISTEN/NOTIFY connection and
+# routes each incoming payload to the handler registered for its ``kind``.
+# Handlers see cross-process payloads only — a process never dispatches its own
+# echo — and re-publish them to this replica's local subscribers.
 
 
-_listener_thread: threading.Thread | None = None
-_listener_stop = threading.Event()
-
-
-def _emit_pg_notify(payload: dict[str, Any]) -> None:
-    """``NOTIFY wiki_commit, '<json>'`` so other replicas / the worker
-    fan out to their local subscribers too. Best-effort; transient
-    connection errors are swallowed and logged.
-
-    Postgres' ``NOTIFY`` syntax doesn't accept parameter bindings — the
-    payload literal has to be inlined into the SQL. We single-quote-
-    escape it (doubling apostrophes) since the JSON itself is the only
-    thing that could contain a quote.
-    """
-    try:
-        from sqlalchemy import text
-
-        literal = json.dumps({**payload, "origin": _PROCESS_ORIGIN}).replace("'", "''")
-        with db_session() as s:
-            s.execute(text(f"NOTIFY {NOTIFY_CHANNEL}, '{literal}'"))
-    except Exception:
-        # Don't let a NOTIFY hiccup take down the originating commit —
-        # local delivery already happened, and the cross-process pipe
-        # is not load-bearing for correctness.
-        log.exception("mcp pubsub: NOTIFY %s failed (local delivery still occurred)", NOTIFY_CHANNEL)
-
-
-def emit_external(payload: dict[str, Any]) -> None:
-    """Public entry for non-MCP publishers (co-editing) to ride the same
-    cross-process NOTIFY bus. ``payload["kind"]`` is routed by
-    ``_dispatch_notify_payload`` on the receiving side."""
-    _emit_pg_notify(payload)
-
-
-def start_listener() -> None:
-    """Start the LISTEN thread — call once from the web process at
-    startup (``app/main.py:create_app``).
-
-    The thread holds a single dedicated psycopg connection running
-    ``LISTEN wiki_commit;`` and re-publishes incoming notifications
-    locally. Self-emitted notifications (recognized via the
-    ``_PROCESS_ORIGIN`` tag in the payload) are skipped — the local
-    publish already happened in-process at emit time, so re-publishing
-    the echo would deliver duplicates.
-    """
-    global _listener_thread
-    if _listener_thread is not None and _listener_thread.is_alive():
-        return
-
-    _listener_stop.clear()
-    _listener_thread = threading.Thread(
-        target=_listener_loop,
-        name="mcp-pubsub-listener",
-        daemon=True,
+def _on_update(payload: dict[str, Any]) -> None:
+    _publish_local(
+        payload["rel"],
+        _build_update(payload["rel"], payload["sha"], payload["change_kind"]),
     )
-    _listener_thread.start()
 
 
-def stop_listener() -> None:
-    """Signal the listener to exit. Mostly for tests + clean shutdown."""
-    _listener_stop.set()
+def _on_delete(payload: dict[str, Any]) -> None:
+    _publish_local(
+        payload["rel"],
+        _build_update(payload["rel"], payload["sha"], ChangeKind.DELETE),
+    )
 
 
-def _listener_loop() -> None:
-    """Block on the LISTEN connection, dispatch notifications back
-    through ``_publish_local`` / ``publish_list_changed``.
+def _on_list_changed(payload: dict[str, Any]) -> None:
+    notif = Notification(method="notifications/resources/list_changed", params={})
+    from app.mcp_server import session as mcp_session
 
-    Uses raw psycopg (not SQLAlchemy) because LISTEN/NOTIFY needs a
-    dedicated connection in autocommit mode held open across many
-    notifications — outside the ORM session scope.
-    """
-    import psycopg
-
-    from app.config import CONFIG
-
-    while not _listener_stop.is_set():
-        try:
-            with psycopg.connect(CONFIG.database_url, autocommit=True) as conn:
-                conn.execute(f"LISTEN {NOTIFY_CHANNEL}")
-                # ``notifies(timeout=...)`` is a generator that STOPS
-                # once the timeout elapses (it is not a per-item poll
-                # interval). Re-enter it on the same connection — tearing
-                # the connection down between timeouts would open a
-                # re-LISTEN gap where NOTIFYs are silently lost, and
-                # would churn one Postgres connection per second while
-                # idle.
-                while not _listener_stop.is_set():
-                    for notify in conn.notifies(timeout=1.0):
-                        if _listener_stop.is_set():
-                            break
-                        _dispatch_notify_payload(notify.payload)
-        except Exception:
-            log.exception("mcp pubsub: LISTEN loop crashed; restarting in 5s")
-            _listener_stop.wait(5.0)
+    for session_id in mcp_session.all_session_ids():
+        _deliver(session_id, notif)
 
 
-def _dispatch_notify_payload(raw: str) -> None:
-    """Translate a NOTIFY payload back into a local publish. Same shape
-    we emit in ``_emit_pg_notify``."""
-    try:
-        payload = json.loads(raw)
-    except (ValueError, TypeError):
-        log.warning("mcp pubsub: malformed NOTIFY payload %r", raw)
-        return
-    if payload.get("origin") == _PROCESS_ORIGIN:
-        # Our own echo — local delivery already happened at publish time.
-        return
-    kind = payload.get("kind")
-    if kind == "update":
-        _publish_local(
-            payload["rel"],
-            _build_update(payload["rel"], payload["sha"], payload["change_kind"]),
-        )
-    elif kind == "delete":
-        _publish_local(
-            payload["rel"],
-            _build_update(payload["rel"], payload["sha"], ChangeKind.DELETE),
-        )
-    elif kind == "list_changed":
-        # Same as ``publish_list_changed`` but skip the re-NOTIFY (we
-        # got here from one).
-        notif = Notification(
-            method="notifications/resources/list_changed", params={}
-        )
-        from app.mcp_server import session as mcp_session
+def _on_job_update(payload: dict[str, Any]) -> None:
+    _publish_local_job(
+        payload["job_id"],
+        _build_job_update(payload["job_id"], payload["status"]),
+    )
 
-        for session_id in mcp_session.all_session_ids():
-            _deliver(session_id, notif)
-    elif kind == "job_update":
-        _publish_local_job(
-            payload["job_id"],
-            _build_job_update(payload["job_id"], payload["status"]),
-        )
-    elif kind == "coedit":
-        # Co-editing rides the same bus; deliver to local co-edit connections.
-        # Lazy import keeps the MCP module free of a co-edit dependency.
-        from app.wiki import coedit_channel
 
-        coedit_channel.handle_remote(payload)
+bus.register("update", _on_update)
+bus.register("delete", _on_delete)
+bus.register("list_changed", _on_list_changed)
+bus.register("job_update", _on_job_update)
 
 
 # --------------------------------------------------------------------------- #

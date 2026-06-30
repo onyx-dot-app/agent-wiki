@@ -56,7 +56,7 @@ import app.config as _app_config
 from app.db import comment_fts
 from app.wiki import comments as _comments_repo
 from app.metrics import setup_prometheus
-from app.mcp_server import pubsub as mcp_pubsub
+from app.realtime import bus
 from app.llm.errors import LLMError
 from app.models._helpers import ErrorResponse, QueueFullErrorResponse, RequestError
 from app.db.session import init_db
@@ -173,14 +173,14 @@ async def _lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     triggers_repo.purge_invalid_triggers(actor="system <system@agent-wiki>")
     triggers_repo.rebuild_from_filesystem()
     schedule_all_pending_cleanups()
-    # Cross-process MCP pub-sub bridge: the worker process commits docs,
-    # the web process owns the SSE stream — Postgres LISTEN/NOTIFY
-    # ferries update events between them.
-    mcp_pubsub.start_listener()
+    # Cross-process realtime bus: the worker process commits docs, the web
+    # process owns the SSE stream — Postgres LISTEN/NOTIFY ferries events
+    # (MCP doc/job updates, co-edit frames) between them.
+    bus.start_listener()
 
     yield
 
-    mcp_pubsub.stop_listener()
+    bus.stop_listener()
 
 
 def create_app() -> FastAPI:

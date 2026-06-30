@@ -23,7 +23,7 @@ import threading
 import uuid
 from typing import Any
 
-from app.mcp_server import pubsub
+from app.realtime import bus
 
 log = logging.getLogger(__name__)
 
@@ -91,15 +91,16 @@ def publish(coedit_session_id: int, frame: Frame) -> None:
     """Deliver ``frame`` to every connection in the session, on this process and
     (via NOTIFY) on every other."""
     _deliver_local(coedit_session_id, frame)
-    pubsub.emit_external(
-        {"kind": "coedit", "coedit_session_id": coedit_session_id, "frame": frame}
-    )
+    bus.emit({"kind": "coedit", "coedit_session_id": coedit_session_id, "frame": frame})
 
 
 def handle_remote(payload: dict[str, Any]) -> None:
-    """Called by the pubsub LISTEN listener for a ``coedit`` NOTIFY from another
-    process — local delivery only (no re-emit)."""
+    """Bus handler for a ``coedit`` NOTIFY from another process — local delivery
+    only (no re-emit)."""
     _deliver_local(int(payload["coedit_session_id"]), payload["frame"])
+
+
+bus.register("coedit", handle_remote)
 
 
 def broadcast_presence(coedit_session_id: int) -> None:

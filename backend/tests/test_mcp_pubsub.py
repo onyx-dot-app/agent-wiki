@@ -29,6 +29,7 @@ from fastapi.responses import StreamingResponse
 from app.auth import User
 from app.mcp_server import pubsub as mcp_pubsub
 from app.mcp_server import session as mcp_session
+from app.realtime import bus
 from app.models.wiki import ChangeKind
 
 # Per-test pubsub/session reset is handled by the autouse ``_reset_mcp_state``
@@ -205,15 +206,11 @@ def test_dispatch_skips_self_originated_notify(tmp_repo):
     payload = {"kind": "update", "rel": "page.md", "sha": "sha1", "change_kind": "edit"}
 
     # Self-originated → dropped, nothing delivered.
-    mcp_pubsub._dispatch_notify_payload(
-        json.dumps({**payload, "origin": mcp_pubsub._PROCESS_ORIGIN})
-    )
+    bus._dispatch(json.dumps({**payload, "origin": bus._PROCESS_ORIGIN}))
     assert mcp_pubsub.drain_blocking(sess_id, timeout=0.05) is None
 
     # Foreign origin (another replica / the worker) → delivered.
-    mcp_pubsub._dispatch_notify_payload(
-        json.dumps({**payload, "origin": "some-other-process"})
-    )
+    bus._dispatch(json.dumps({**payload, "origin": "some-other-process"}))
     notif = mcp_pubsub.drain_blocking(sess_id, timeout=1.0)
     assert notif is not None
     assert notif.params["uri"] == "wiki:///page.md"

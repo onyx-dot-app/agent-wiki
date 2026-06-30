@@ -35,7 +35,7 @@ import pytest
 from psycopg import sql
 
 from app.config import Config
-from app.mcp_server import pubsub as _mcp_pubsub
+from app.realtime import bus as _bus
 from app.mcp_server import session as _mcp_session
 
 # --------------------------------------------------------------------------- #
@@ -61,11 +61,11 @@ needs_opensearch = pytest.mark.skipif(
 )
 
 # Suppress the cross-process Postgres LISTEN bridge in tests. ``create_app``'s
-# lifespan calls ``mcp_pubsub.start_listener`` (app/main.py), which would
-# open a connection on the shared test DB and receive every NOTIFY emitted
-# by every other xdist worker. Tests exercise in-process delivery directly,
-# so the listener has no value and only adds cross-worker noise.
-_mcp_pubsub.start_listener = lambda: None  # type: ignore[assignment]
+# lifespan calls ``bus.start_listener`` (app/main.py), which would open a
+# connection on the shared test DB and receive every NOTIFY emitted by every
+# other xdist worker. Tests exercise in-process delivery directly, so the
+# listener has no value and only adds cross-worker noise.
+_bus.start_listener = lambda: None  # type: ignore[assignment]
 
 _BASE_URL = os.environ.get(
     "TEST_DATABASE_URL",
