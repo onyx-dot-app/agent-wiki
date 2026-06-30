@@ -88,8 +88,10 @@ def stream(session_id: int, user: User = Depends(require_user)) -> StreamingResp
     sess = coedit.get_session(session_id)
     if sess is None or sess.status != "active":
         raise HTTPException(status_code=404, detail="no active session")
-    # Still need read access to the underlying page to watch it being edited.
-    require_can("read", sess.path, user)
+    # Opening the stream makes the user a session participant (roster +
+    # heartbeat + commit attribution), so it requires write — symmetric with
+    # POST /join. Read-only observation would be a separate non-participant path.
+    require_can("write", sess.path, user)
 
     coedit.join(session_id, user.id)
     conn_id, q = coedit_channel.connect(session_id, user.id)

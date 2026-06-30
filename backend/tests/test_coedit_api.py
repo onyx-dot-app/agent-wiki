@@ -70,6 +70,22 @@ def test_join_without_write_is_forbidden(client):
     assert client.post("/api/coedit/join", json={"path": _PATH}).status_code == 403
 
 
+def test_stream_requires_write(client):
+    # Opening the stream is editing (it joins the roster), so a non-writer is
+    # rejected — symmetric with /join. require_can raises before the response
+    # starts streaming, so this returns 403 without hanging.
+    owner = users_repo.create(email="owner@x.com", password="hunter2-x", name="Owner")
+    other = users_repo.create(email="other@x.com", password="hunter2-x", name="Other")
+    _seed_page()
+    acl.set_owner(_PATH, owner)  # owner-only page
+
+    login_fastapi(client, owner)
+    sid = client.post("/api/coedit/join", json={"path": _PATH}).json()["session_id"]
+
+    login_fastapi(client, other)
+    assert client.get(f"/api/coedit/stream?session_id={sid}").status_code == 403
+
+
 def test_leave_removes_participant(client):
     uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
     login_fastapi(client, uid)
