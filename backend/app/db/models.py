@@ -846,6 +846,80 @@ class AgentActivity(Base):
 
 
 # --------------------------------------------------------------------------- #
+# Co-editing — live shared editing sessions (the Postgres editing buffer)     #
+# --------------------------------------------------------------------------- #
+#
+# One live session per page (path-keyed): multiple humans join the same
+# session and converge on a single server-authoritative buffer. A single-user
+# edit is just a 1-participant session, which is how the per-user draft will
+# eventually fold into this model. The session periodically checkpoints to git
+# through ``commit_and_fan_out`` — ``base_sha`` is the HEAD it last merged
+# against, the merge base for the checkpoint 3-way merge. This store is the
+# editing *buffer* only; git stays the source of truth for committed pages.
+
+
+class CoeditSession(Base):
+    __tablename__ = "coedit_sessions"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    # Canonical wiki-relative path (no leading slash), per
+    # ``app.wiki.filesystem.safe_rel_path``. At most one *active* session per
+    # path (enforced by the partial unique index below).
+    path: Mapped[str] = mapped_column(Text, nullable=False)
+    # Server-authoritative buffer text — the live document everyone is editing.
+    buffer_text: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
+    # Monotonic version, bumped on every applied edit. Clients tag each patch
+    # with the version it was based on; the server rebases a stale patch onto
+    # the current buffer before applying.
+    version: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default=text("0"))
+    # Git HEAD the buffer was last checkpointed against — the merge base for the
+    # checkpoint 3-way merge. Null until the session is seeded from a page's
+    # HEAD (or, for a brand-new page, until the first checkpoint).
+    base_sha: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'active'"))
+    created_at: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
+    )
+    updated_at: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
+    )
+    last_checkpoint_at: Mapped[str | None] = mapped_column(Text)
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('active', 'closed')", name="coedit_sessions_status_check"
+        ),
+        # At most one active session per page. A partial unique index lets
+        # closed sessions accumulate as history without blocking a fresh one.
+        Index(
+            "idx_coedit_sessions_active_path",
+            "path",
+            unique=True,
+            postgresql_where=text("status = 'active'"),
+        ),
+    )
+
+
+class CoeditParticipant(Base):
+    __tablename__ = "coedit_participants"
+
+    session_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("coedit_sessions.id", ondelete="CASCADE"), primary_key=True
+    )
+    user_id: Mapped[str] = mapped_column(
+        Text, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    joined_at: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
+    )
+    last_seen_at: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
+    )
+
+    __table_args__ = (Index("idx_coedit_participants_user", "user_id"),)
+
+
+# --------------------------------------------------------------------------- #
 # Cron state — per-(queue, task) last-fired timestamp so the periodic         #
 # scheduler can survive restarts without silently dropping or stampeding      #
 # missed fires. See app/tasks/queue.py:_run_periodic_scheduler.               #

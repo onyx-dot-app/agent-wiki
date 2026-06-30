@@ -163,7 +163,9 @@ def start_llm_span(
         import braintrust
         from braintrust.span_types import SpanTypeAttribute
 
-        span_cm: Any = braintrust.start_span(
+        # braintrust's start_span member typing varies across SDK versions; the
+        # ignore keeps the check stable whatever version CI resolves.
+        span_cm: Any = braintrust.start_span(  # pyright: ignore[reportUnknownMemberType]
             name=f"llm:{provider}",
             type=SpanTypeAttribute.LLM,
             input=to_openai_message_shape(messages),
@@ -197,7 +199,9 @@ def start_tool_span(
         import braintrust
         from braintrust.span_types import SpanTypeAttribute
 
-        span_cm: Any = braintrust.start_span(
+        # braintrust's start_span member typing varies across SDK versions; the
+        # ignore keeps the check stable whatever version CI resolves.
+        span_cm: Any = braintrust.start_span(  # pyright: ignore[reportUnknownMemberType]
             name=f"tool:{name}",
             type=SpanTypeAttribute.TOOL,
             input=arguments,
