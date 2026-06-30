@@ -1,14 +1,14 @@
 """Live channel for co-editing — the SSE-down + POST-up transport.
 
 Browser clients open one SSE connection per co-edit session (cookie-authed) and
-the server pushes frames — presence now, edit ops later — to every connection in
-the session. Cross-process delivery rides the existing ``wiki_commit``
+the server pushes session frames (e.g. presence) to every connection in the
+session. Cross-process delivery rides the existing ``wiki_commit``
 LISTEN/NOTIFY bus in ``app/mcp_server/pubsub.py`` (a ``coedit`` payload kind), so
 participants connected to different app servers still see each other.
 
-Synchronous by design (no asyncio): one thread-per-connection, a thread-safe
-``queue.Queue`` per connection, mirroring ``pubsub``'s sync ``_queues`` /
-``drain_blocking`` path. Connection state is in-process and ephemeral — nothing
+One thread per connection with a thread-safe ``queue.Queue``, mirroring
+``pubsub``'s sync ``_queues`` / ``drain_blocking`` path. Connection state is
+in-process and ephemeral — nothing
 here is persisted; durable session/participant state lives in
 ``app/wiki/coedit.py``. Frames are plain JSON-serializable dicts.
 

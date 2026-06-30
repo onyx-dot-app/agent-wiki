@@ -1,10 +1,8 @@
 """Co-editing live channel — SSE down, HTTP POST up (cookie-authed humans).
 
 Thin HTTP layer: gate by page permission, drive the ``app/wiki/coedit.py`` store
-and the ``app/wiki/coedit_channel.py`` broadcast layer. Synchronous throughout
-(no asyncio) — the SSE stream is a plain sync generator, one threadpool thread
-per open connection. Edit ops land in a follow-up (build-order step 3); this PR
-establishes the channel + presence.
+and the ``app/wiki/coedit_channel.py`` broadcast layer. The SSE stream is a
+plain sync generator, one threadpool thread per open connection.
 """
 
 from __future__ import annotations
@@ -78,7 +76,7 @@ def leave(req: LeaveRequest, user: User = Depends(require_user)) -> dict[str, bo
 
 @router.get("/stream")
 def stream(session_id: int, user: User = Depends(require_user)) -> StreamingResponse:
-    """Long-lived SSE stream of session frames (presence now, ops later).
+    """Long-lived SSE stream of session frames (presence).
 
     A plain sync generator: it blocks on the connection's queue, emitting a
     keepalive every ``_SSE_HEARTBEAT_SECONDS`` of silence. The connection is the
