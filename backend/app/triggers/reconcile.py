@@ -60,8 +60,18 @@ def reconcile_legacy_slack_triggers() -> int:
     """Mirror every stored Slack channel into ``destination_configs``, then
     rewrite trigger YAML still on the legacy single-destination shape into the
     destination-config shape. Returns the number of files rewritten."""
+    by_owner: dict[str, list[str]] = {}
     for hook in slack_webhooks.list_all():
-        _mirror_config_id(hook["id"], hook["owner_user_id"])
+        by_owner.setdefault(hook["owner_user_id"], []).append(hook["id"])
+    for owner, hook_ids in by_owner.items():
+        # One config listing per owner; steady-state boots create nothing.
+        mirrored = {
+            cast(dict[str, Any], c.get("config") or {}).get(_SOURCE_KEY)
+            for c in dest_configs.list_for_user(owner)
+        }
+        for hook_id in hook_ids:
+            if hook_id not in mirrored:
+                _mirror_config_id(hook_id, owner)
 
     rewritten = 0
     for file_path in storage.list_all_files():
