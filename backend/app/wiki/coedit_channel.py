@@ -134,6 +134,32 @@ def broadcast_presence(coedit_session_id: int) -> None:
     )
 
 
+def broadcast_cursor(
+    coedit_session_id: int,
+    *,
+    user_id: str,
+    user_display: str,
+    anchor: int,
+    head: int,
+    typing: bool,
+) -> None:
+    """Broadcast a participant's live cursor/selection — an ephemeral frame,
+    never persisted. A collapsed selection (anchor == head) is a caret; a range
+    is a selection highlight. Peers shift these offsets client-side as ops land."""
+    publish(
+        coedit_session_id,
+        {
+            "type": "cursor",
+            "session_id": coedit_session_id,
+            "user_id": user_id,
+            "user_display": user_display,
+            "anchor": anchor,
+            "head": head,
+            "typing": typing,
+        },
+    )
+
+
 def broadcast_op(
     coedit_session_id: int,
     version: int,

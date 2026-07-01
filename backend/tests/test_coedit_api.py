@@ -150,6 +150,31 @@ def test_op_malformed_change_is_rejected(client):
     assert resp.status_code == 400
 
 
+def test_cursor_broadcasts_and_returns_ok(client):
+    sid = _login_and_join(client)
+    resp = client.post(
+        "/api/coedit/cursor",
+        json={"session_id": sid, "anchor": 0, "head": 5, "typing": True},
+    )
+    assert resp.status_code == 200
+    assert resp.json() == {"ok": True}
+
+
+def test_cursor_requires_write(client):
+    owner = users_repo.create(email="owner@x.com", password="hunter2-x", name="Owner")
+    other = users_repo.create(email="other@x.com", password="hunter2-x", name="Other")
+    _seed_page()
+    acl.set_owner(_PATH, owner)  # owner-only
+    login_fastapi(client, owner)
+    sid = client.post("/api/coedit/join", json={"path": _PATH}).json()["session_id"]
+
+    login_fastapi(client, other)
+    resp = client.post(
+        "/api/coedit/cursor", json={"session_id": sid, "anchor": 0, "head": 0, "typing": False}
+    )
+    assert resp.status_code == 403
+
+
 def test_op_requires_write(client):
     owner = users_repo.create(email="owner@x.com", password="hunter2-x", name="Owner")
     other = users_repo.create(email="other@x.com", password="hunter2-x", name="Other")

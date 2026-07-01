@@ -79,6 +79,23 @@ def test_broadcast_op_oversized_falls_back_to_resync():
     assert frame == {"type": "resync", "session_id": 4, "version": 5}
 
 
+def test_broadcast_cursor_delivers_selection_frame():
+    coedit_channel.reset_for_tests()
+    conn = coedit_channel.connect(6, "usr_a")
+    coedit_channel.broadcast_cursor(
+        6, user_id="usr_a", user_display="Ada", anchor=3, head=10, typing=True
+    )
+    assert coedit_channel.drain(conn.queue, 0.5) == {
+        "type": "cursor",
+        "session_id": 6,
+        "user_id": "usr_a",
+        "user_display": "Ada",
+        "anchor": 3,
+        "head": 10,
+        "typing": True,
+    }
+
+
 def test_handle_remote_delivers_locally():
     coedit_channel.reset_for_tests()
     conn = coedit_channel.connect(9, "usr_a")

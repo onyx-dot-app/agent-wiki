@@ -17,6 +17,7 @@ from fastapi.responses import StreamingResponse
 from app.auth import User, require_can
 from app.auth.deps import require_user
 from app.models.coedit import (
+    CursorRequest,
     JoinRequest,
     JoinResponse,
     LeaveRequest,
@@ -106,6 +107,25 @@ def op(req: OpRequest, user: User = Depends(require_user)) -> OpResponse:
     coedit.touch(req.session_id, user.id)
     coedit_channel.broadcast_op(req.session_id, out.version, req.changes, user.id)
     return OpResponse(version=out.version)
+
+
+@router.post("/cursor")
+def cursor(req: CursorRequest, user: User = Depends(require_user)) -> dict[str, bool]:
+    """Broadcast the caller's live cursor/selection to the session (ephemeral).
+
+    High-frequency + throttled client-side; deliberately does not touch the DB
+    (no last_seen write) — the SSE heartbeat covers liveness.
+    """
+    _require_active(req.session_id, user, "write")
+    coedit_channel.broadcast_cursor(
+        req.session_id,
+        user_id=user.id,
+        user_display=user.name or user.email,
+        anchor=req.anchor,
+        head=req.head,
+        typing=req.typing,
+    )
+    return {"ok": True}
 
 
 @router.get("/session")
