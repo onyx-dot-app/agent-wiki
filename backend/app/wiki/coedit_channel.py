@@ -17,6 +17,7 @@ See ``Engineering Projects/Agent Wiki Project/design/Co-Editing.md``.
 
 from __future__ import annotations
 
+import json
 import logging
 import queue
 import threading
@@ -31,6 +32,12 @@ from app.wiki import coedit
 log = logging.getLogger(__name__)
 
 Frame = dict[str, Any]
+
+# Postgres NOTIFY payloads are capped at 8000 bytes. An op frame carrying the
+# raw changes could exceed that (a big paste), so above this threshold we fall
+# back to a small "resync" signal and let clients re-fetch the buffer. Headroom
+# left under 8000 for the bus envelope (kind/session_id/origin wrapper).
+_MAX_OP_FRAME_BYTES = 7000
 
 
 class Connection(BaseModel):
@@ -127,6 +134,30 @@ def broadcast_presence(coedit_session_id: int) -> None:
             "participants": [p.model_dump() for p in participants],
         },
     )
+
+
+def broadcast_op(
+    coedit_session_id: int,
+    version: int,
+    changes: list[dict[str, Any]],
+    author_user_id: str,
+) -> None:
+    """Broadcast an applied edit op to the session's other connections.
+
+    Normally the op frame carries the changes so peers apply them directly. If
+    the frame would exceed the NOTIFY payload cap (a large paste), fall back to
+    a ``resync`` signal — peers re-fetch the buffer via ``GET /coedit/session``.
+    """
+    frame: Frame = {
+        "type": "op",
+        "session_id": coedit_session_id,
+        "version": version,
+        "changes": changes,
+        "author": author_user_id,
+    }
+    if len(json.dumps(frame)) > _MAX_OP_FRAME_BYTES:
+        frame = {"type": "resync", "session_id": coedit_session_id, "version": version}
+    publish(coedit_session_id, frame)
 
 
 def _deliver_local(coedit_session_id: int, frame: Frame) -> None:

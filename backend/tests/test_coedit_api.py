@@ -97,3 +97,70 @@ def test_leave_removes_participant(client):
     resp = client.post("/api/coedit/leave", json={"session_id": sid})
     assert resp.status_code == 200
     assert coedit.list_participants(sid) == []
+
+
+def _login_and_join(client, email="ada@x.com") -> int:
+    uid = users_repo.create(email=email, password="hunter2-x", name="Ada")
+    login_fastapi(client, uid)
+    _seed_page("hello world")
+    return client.post("/api/coedit/join", json={"path": _PATH}).json()["session_id"]
+
+
+def test_op_applies_and_returns_version(client):
+    sid = _login_and_join(client)  # buffer seeded as "hello world"
+    resp = client.post(
+        "/api/coedit/op",
+        json={"session_id": sid, "base_version": 0, "changes": [{"from": 0, "to": 5, "insert": "hi"}]},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["version"] == 1
+    # GET /session reflects the applied edit.
+    state = client.get(f"/api/coedit/session?session_id={sid}").json()
+    assert state["version"] == 1
+    assert state["buffer"] == "hi world"
+
+
+def test_op_stale_base_version_is_409(client):
+    sid = _login_and_join(client)
+    client.post("/api/coedit/op", json={"session_id": sid, "base_version": 0, "changes": [{"from": 0, "to": 0, "insert": "x"}]})
+    resp = client.post(
+        "/api/coedit/op",
+        json={"session_id": sid, "base_version": 0, "changes": [{"from": 0, "to": 0, "insert": "y"}]},
+    )
+    assert resp.status_code == 409
+
+
+def test_op_out_of_bounds_is_422(client):
+    sid = _login_and_join(client)
+    resp = client.post(
+        "/api/coedit/op",
+        json={"session_id": sid, "base_version": 0, "changes": [{"from": 0, "to": 9999, "insert": "x"}]},
+    )
+    assert resp.status_code == 422
+
+
+def test_op_malformed_change_is_rejected(client):
+    # Missing 'to' fails Change request-body validation → the app's handler
+    # returns 400 (semantic out-of-bounds is the 422 case above).
+    sid = _login_and_join(client)
+    resp = client.post(
+        "/api/coedit/op",
+        json={"session_id": sid, "base_version": 0, "changes": [{"from": 0, "insert": "x"}]},
+    )
+    assert resp.status_code == 400
+
+
+def test_op_requires_write(client):
+    owner = users_repo.create(email="owner@x.com", password="hunter2-x", name="Owner")
+    other = users_repo.create(email="other@x.com", password="hunter2-x", name="Other")
+    _seed_page()
+    acl.set_owner(_PATH, owner)  # owner-only
+    login_fastapi(client, owner)
+    sid = client.post("/api/coedit/join", json={"path": _PATH}).json()["session_id"]
+
+    login_fastapi(client, other)
+    resp = client.post(
+        "/api/coedit/op",
+        json={"session_id": sid, "base_version": 0, "changes": [{"from": 0, "to": 0, "insert": "x"}]},
+    )
+    assert resp.status_code == 403

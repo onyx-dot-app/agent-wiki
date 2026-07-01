@@ -20,6 +20,8 @@ from app.models.coedit import (
     JoinRequest,
     JoinResponse,
     LeaveRequest,
+    OpRequest,
+    OpResponse,
     ParticipantOut,
 )
 from app.wiki import coedit, coedit_channel, git
@@ -72,6 +74,57 @@ def leave(req: LeaveRequest, user: User = Depends(require_user)) -> dict[str, bo
     coedit.leave(req.session_id, user.id)
     coedit_channel.broadcast_presence(req.session_id)
     return {"ok": True}
+
+
+def _require_active(session_id: int, user: User, action: str) -> coedit.SessionRow:
+    sess = coedit.get_session(session_id)
+    if sess is None or sess.status != "active":
+        raise HTTPException(status_code=404, detail="no active session")
+    require_can(action, sess.path, user)
+    return sess
+
+
+@router.post("/op")
+def op(req: OpRequest, user: User = Depends(require_user)) -> OpResponse:
+    """Apply an edit op to the session buffer and broadcast it.
+
+    409 if ``base_version`` is stale (the client re-syncs via GET /session and
+    re-applies); 422 if the op is out of bounds / overlapping.
+    """
+    _require_active(req.session_id, user, "write")
+    try:
+        out = coedit.apply_op(
+            req.session_id,
+            base_version=req.base_version,
+            changes=req.changes,
+            author_user_id=user.id,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+    if out is None:
+        raise HTTPException(status_code=409, detail="stale base_version; re-sync and retry")
+    coedit.touch(req.session_id, user.id)
+    coedit_channel.broadcast_op(
+        req.session_id,
+        out.version,
+        [c.model_dump(by_alias=True) for c in req.changes],
+        user.id,
+    )
+    return OpResponse(version=out.version)
+
+
+@router.get("/session")
+def session_state(session_id: int, user: User = Depends(require_user)) -> JoinResponse:
+    """Current buffer + version + roster — a read-only snapshot for a client to
+    re-sync after a stale op or a `resync` frame (no join side effects)."""
+    sess = _require_active(session_id, user, "read")
+    return JoinResponse(
+        session_id=sess.id,
+        buffer=sess.buffer_text,
+        version=sess.version,
+        base_sha=sess.base_sha,
+        participants=_participants_out(sess.id),
+    )
 
 
 @router.get("/stream")
