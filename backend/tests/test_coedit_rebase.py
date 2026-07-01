@@ -83,7 +83,7 @@ def test_rebase_folds_clean_agent_commit(repo):
         _PATH, "one\ntwo\nthree\nfour\nFIVE\n", "agent edit", author="Agent <a@x.com>"
     )
 
-    assert coedit_rebase.rebase_session(sess.id, new_sha) == "applied"
+    assert coedit_rebase.rebase_session(sess.id, new_sha) == coedit_rebase.RebaseOutcome.APPLIED
 
     st = coedit.get_session(sess.id)
     assert st is not None
@@ -96,7 +96,7 @@ def test_rebase_folds_clean_agent_commit(repo):
 def test_rebase_skips_when_already_based_on_head(repo):
     sha = _seed("x\n")
     sess = coedit.open_session(_PATH, base_sha=sha, initial_buffer="x\n")
-    assert coedit_rebase.rebase_session(sess.id, sha) == "skip"
+    assert coedit_rebase.rebase_session(sess.id, sha) == coedit_rebase.RebaseOutcome.SKIP
 
 
 def _seed_conflict(uid) -> tuple[int, str]:
@@ -113,7 +113,7 @@ def _seed_conflict(uid) -> tuple[int, str]:
 def test_rebase_session_reports_conflict_and_leaves_buffer(repo):
     uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
     sid, new_sha = _seed_conflict(uid)
-    assert coedit_rebase.rebase_session(sid, new_sha) == "conflict"
+    assert coedit_rebase.rebase_session(sid, new_sha) == coedit_rebase.RebaseOutcome.CONFLICT
     # Overlap is deferred to the checkpoint — the buffer is left as the human had it.
     st = coedit.get_session(sid)
     assert st is not None and st.buffer_text == "ONE\ntwo\n"
@@ -180,4 +180,4 @@ def test_rebase_raced_op_is_skipped(repo, monkeypatch):
     sess = coedit.open_session(_PATH, base_sha=sha, initial_buffer="a\nb\n")
     coedit.join(sess.id, uid)
     new_sha = wiki_git.commit_file(_PATH, "a\nB\n", "agent edit", author="Agent <a@x.com>")
-    assert coedit_rebase.rebase_session(sess.id, new_sha) == "raced"
+    assert coedit_rebase.rebase_session(sess.id, new_sha) == coedit_rebase.RebaseOutcome.RACED

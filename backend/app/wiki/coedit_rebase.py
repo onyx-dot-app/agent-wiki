@@ -21,6 +21,7 @@ See ``Engineering Projects/Agent Wiki Project/design/Co-Editing.md``.
 from __future__ import annotations
 
 import logging
+from enum import Enum
 
 from app.wiki import coedit, coedit_channel
 from app.wiki import git as wiki_git
@@ -28,22 +29,26 @@ from app.wiki import git as wiki_git
 log = logging.getLogger(__name__)
 
 
-def rebase_session(session_id: int, head_sha: str) -> str:
-    """Fold the commit at ``head_sha`` into the session's live buffer.
+class RebaseOutcome(str, Enum):
+    """Result of ``rebase_session``."""
 
-    Returns a short status string: ``"skip"`` (gone, closed, or already based on
-    ``head_sha``), ``"applied"`` (clean fold, resync sent), ``"noop"`` (buffer
-    already matched; only ``base_sha`` advanced), ``"conflict"`` (overlap — the
-    caller resolves it, see ``app/tasks/coedit_rebase.py``), or ``"raced"`` (a
-    human op landed mid-merge; skipped — the checkpoint merge is the backstop).
+    SKIP = "skip"  # session gone, closed, or already based on head_sha
+    APPLIED = "applied"  # clean fold; buffer replaced, resync sent
+    NOOP = "noop"  # buffer already matched the merge; only base_sha advanced
+    CONFLICT = "conflict"  # overlap — caller enqueues a checkpoint to resolve
+    RACED = "raced"  # a human op landed mid-merge; skipped (checkpoint is backstop)
+
+
+def rebase_session(session_id: int, head_sha: str) -> RebaseOutcome:
+    """Fold the commit at ``head_sha`` into the session's live buffer.
 
     Pure domain logic: it does not enqueue anything, so this module stays free of
     the tasks layer (the trigger + the on-conflict checkpoint enqueue live in
-    ``app/tasks/coedit_rebase.py``).
+    ``app/tasks/coedit_rebase.py``, which acts on a ``CONFLICT`` outcome).
     """
     sess = coedit.get_session(session_id)
     if sess is None or sess.status != "active" or sess.base_sha == head_sha:
-        return "skip"
+        return RebaseOutcome.SKIP
 
     base_body = wiki_git.read_file_opt(sess.path, ref=sess.base_sha) if sess.base_sha else ""
     current_body = wiki_git.read_file_opt(sess.path, ref=head_sha)
@@ -52,7 +57,7 @@ def rebase_session(session_id: int, head_sha: str) -> str:
         # Overlap: leave the buffer alone; the caller hands it to the checkpoint
         # engine's AI-merge, which resolves + commits + syncs the buffer back.
         log.info("coedit live-rebase: conflict on %s", sess.path)
-        return "conflict"
+        return RebaseOutcome.CONFLICT
 
     res = coedit.reconcile_onto(
         session_id,
@@ -62,8 +67,8 @@ def rebase_session(session_id: int, head_sha: str) -> str:
         checkpointed=False,
     )
     if res is None:
-        return "raced"
+        return RebaseOutcome.RACED
     if not res.changed:
-        return "noop"
+        return RebaseOutcome.NOOP
     coedit_channel.broadcast_resync(session_id, res.session.version)
-    return "applied"
+    return RebaseOutcome.APPLIED
