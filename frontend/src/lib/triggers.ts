@@ -4,14 +4,23 @@ import { apiFetch } from "@/lib/api";
 
 export type TriggerKind = "delta" | "schedule";
 
+export interface TriggerAction {
+  destination_config_id: string | null;
+  message: string | null;
+}
+
+export interface TriggerActionInput {
+  destination_config_id?: string | null;
+  message: string;
+}
+
 export interface Trigger {
   id: string;
   owner_user_id: string;
   scope_path: string;
   kind: TriggerKind;
   nl_description: string;
-  message: string | null;
-  destination_config_id: string | null;
+  actions: TriggerAction[];
   enabled: boolean;
   created_at: string;
   last_edited_at: string;
@@ -33,8 +42,7 @@ export interface TriggerCommit {
 export interface TriggerCreateInput {
   scope_path: string;
   nl_description: string;
-  message: string;
-  destination_config_id?: string | null;
+  actions: TriggerActionInput[];
   enabled?: boolean;
   kind?: TriggerKind;
   schedule_cron?: string | null;
@@ -45,8 +53,7 @@ export interface TriggerCreateInput {
 export interface TriggerUpdateInput {
   scope_path?: string;
   nl_description?: string;
-  message?: string;
-  destination_config_id?: string | null;
+  actions?: TriggerActionInput[];
   enabled?: boolean;
   schedule_cron?: string | null;
   schedule_timezone?: string | null;
@@ -96,8 +103,7 @@ export async function getTriggerHistory(id: string): Promise<TriggerCommit[]> {
 export interface TriggerVersion {
   scope_path: string;
   nl_description: string;
-  message: string | null;
-  destination_config_id: string | null;
+  actions: TriggerAction[];
   enabled: boolean;
   sha: string;
   path: string;

@@ -1,0 +1,5 @@
+{
+  "name": "get_destination_configs",
+  "description": "List the current user's destination configs — the delivery targets (e.g. Slack channels) a trigger action can point at via `destination_config_id`. Call this before creating or updating a trigger that should deliver anywhere other than the event log.",
+  "input_schema": { "type": "object", "properties": {} }
+}

@@ -1,6 +1,6 @@
 {
   "name": "update_trigger",
-  "description": "Update an existing trigger. Pass only the fields you want to change; omitted fields are left alone. The same three-part shape applies: `trigger_nl_condition` is the **if** condition, `trigger_fire_message` is what to deliver, `destination` is where (a destination id from `get_trigger_destinations`). Use `enabled` to disable/re-enable a trigger without deleting it. Only call if the user is specifically asking for a trigger update.",
+  "description": "Update an existing trigger. Pass only the fields you want to change; omitted fields are left alone. `trigger_nl_condition` is the **if** condition; `actions` REPLACES the whole delivery list when passed (each entry: a message, plus an optional `destination_config_id` from `get_destination_configs`). Use `enabled` to disable/re-enable a trigger without deleting it. Only call if the user is specifically asking for a trigger update.",
   "input_schema": {
     "type": "object",
     "properties": {
@@ -16,13 +16,18 @@
         "type": "string",
         "description": "New **if condition**. Omit to keep current."
       },
-      "trigger_fire_message": {
-        "type": "string",
-        "description": "New **fire message** body delivered on fire. This can be natural language and pull in information from the relevant document(s). Omit to keep current."
-      },
-      "destination": {
-        "type": "string",
-        "description": "New **destination** id from `get_trigger_destinations` (e.g. `event_log`). Omit to keep current."
+      "actions": {
+        "type": "array",
+        "minItems": 1,
+        "description": "New delivery list — replaces ALL current actions. Each entry: `message` (required) and optional `destination_config_id`. Omit to keep current.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "message": { "type": "string" },
+            "destination_config_id": { "type": "string" }
+          },
+          "required": ["message"]
+        }
       },
       "enabled": {
         "type": "boolean",

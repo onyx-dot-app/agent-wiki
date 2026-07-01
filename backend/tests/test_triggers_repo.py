@@ -7,9 +7,9 @@ import pytest
 from tests._seed import insert_event, seed_user
 
 
-def _create(repo, *, owner_user_id, scope_path, nl_description, **kw):
-    """Test shorthand — supplies the now-required ``message`` field."""
-    kw.setdefault("message", "default message")
+def _create(repo, *, owner_user_id, scope_path, nl_description, message="default message", **kw):
+    """Test shorthand — wraps a single message into the required actions list."""
+    kw.setdefault("actions", [{"message": message}])
     return repo.create(
         owner_user_id=owner_user_id,
         scope_path=scope_path,
@@ -33,8 +33,7 @@ def test_create_and_get(tmp_repo):
     assert t["scope_path"] == "projects/foo.md"
     assert t["enabled"] is True
     assert t["kind"] == "delta"
-    assert t["message"] == "status changed"
-    assert t["destination_config_id"] is None
+    assert t["actions"] == [{"destination_config_id": None, "message": "status changed"}]
 
     fetched = repo.get(t["id"])
     assert fetched == t
@@ -72,17 +71,17 @@ def test_update_partial(tmp_repo):
     assert updated["nl_description"] == "changed"
     assert updated["scope_path"] == "a.md"
     assert updated["enabled"] is True
-    assert updated["message"] == "m"
+    assert updated["actions"][0]["message"] == "m"
 
-    re_msg = repo.update(t["id"], message="m2")
+    re_msg = repo.update(t["id"], actions=[{"message": "m2"}])
     assert re_msg is not None
-    assert re_msg["message"] == "m2"
+    assert re_msg["actions"][0]["message"] == "m2"
     assert re_msg["nl_description"] == "changed"
 
     toggled = repo.update(t["id"], enabled=False)
     assert toggled is not None
     assert toggled["enabled"] is False
-    assert toggled["message"] == "m2"
+    assert toggled["actions"][0]["message"] == "m2"
 
 
 def test_update_with_no_fields_returns_current(tmp_repo):
@@ -127,7 +126,7 @@ def test_create_rejects_missing_message(tmp_repo):
             owner_user_id=uid,
             scope_path="a.md",
             nl_description="x",
-            message="",
+            actions=[{"message": ""}],
         )
 
 
@@ -140,8 +139,7 @@ def test_create_rejects_unowned_destination_config(tmp_repo):
             owner_user_id=uid,
             scope_path="a.md",
             nl_description="x",
-            message="m",
-            destination_config_id="dst_nonexistent",
+            actions=[{"message": "m", "destination_config_id": "dst_nonexistent"}],
         )
 
 
@@ -151,7 +149,7 @@ def test_update_rejects_empty_message(tmp_repo):
     uid = seed_user(email="a@b.com")
     t = _create(repo, owner_user_id=uid, scope_path="a.md", nl_description="x")
     with pytest.raises(ValueError, match="message"):
-        repo.update(t["id"], message="")
+        repo.update(t["id"], actions=[{"message": ""}])
 
 
 def test_fire_counts_by_sha_tallies_only_matching_fires(tmp_repo):
@@ -246,3 +244,68 @@ def test_parse_actions_reads_legacy_single_destination_blob():
 
     legacy = {"message": "hi", "destination": "slack"}
     assert _parse_actions(legacy) == [{"destination_config_id": None, "message": "hi"}]
+
+
+def test_create_multi_action_round_trip(tmp_repo):
+    from app.triggers import destination_configs as dest_configs
+    from app.triggers import repo
+
+    uid = seed_user(email="a@b.com")
+    cfg = dest_configs.create(uid, type="slack", name="PM", secret="https://hooks.slack.com/x")
+    t = _create(
+        repo,
+        owner_user_id=uid,
+        scope_path="a.md",
+        nl_description="x",
+        actions=[
+            {"message": "to the log"},
+            {"message": "to slack", "destination_config_id": cfg["id"]},
+        ],
+    )
+    assert t["actions"] == [
+        {"destination_config_id": None, "message": "to the log"},
+        {"destination_config_id": cfg["id"], "message": "to slack"},
+    ]
+    fetched = repo.get(t["id"])
+    assert fetched is not None
+    assert fetched["actions"] == t["actions"]
+
+
+def test_update_replaces_whole_actions_list(tmp_repo):
+    from app.triggers import repo
+
+    uid = seed_user(email="a@b.com")
+    t = _create(
+        repo,
+        owner_user_id=uid,
+        scope_path="a.md",
+        nl_description="x",
+        actions=[{"message": "one"}, {"message": "two"}],
+    )
+    updated = repo.update(t["id"], actions=[{"message": "only"}])
+    assert updated is not None
+    assert updated["actions"] == [{"destination_config_id": None, "message": "only"}]
+
+
+def test_create_rejects_empty_actions_list(tmp_repo):
+    from app.triggers import repo
+
+    uid = seed_user(email="a@b.com")
+    with pytest.raises(ValueError, match="actions"):
+        repo.create(owner_user_id=uid, scope_path="a.md", nl_description="x", actions=[])
+
+
+def test_create_rejects_unowned_config_in_second_action(tmp_repo):
+    from app.triggers import repo
+
+    uid = seed_user(email="a@b.com")
+    with pytest.raises(ValueError, match="destination_config_id"):
+        repo.create(
+            owner_user_id=uid,
+            scope_path="a.md",
+            nl_description="x",
+            actions=[
+                {"message": "fine"},
+                {"message": "bad", "destination_config_id": "dst_nonexistent"},
+            ],
+        )

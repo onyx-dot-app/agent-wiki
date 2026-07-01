@@ -13,10 +13,9 @@ Format (every trigger has a firing condition plus a list of actions):
     null for event-log-only fires. ``message`` is the body rendered on fire.
 
 Actions live as ``{"actions": [...]}`` in the ``action_json`` column and the
-``actions`` block in the YAML file. Create/update and the HTTP layer are
-single-action for now: they take one ``message``/``destination_config_id`` and
-build a one-element list. ``_to_dict`` projects the first action back to those
-flat keys. A legacy single-destination blob reads as one event-log action.
+``actions`` block in the YAML file. Create/update take the full actions list
+and validate every entry (non-empty message, owned destination config). A
+legacy single-destination blob reads as one event-log action.
 """
 
 from __future__ import annotations
@@ -72,10 +71,28 @@ def _actions_json(actions: list[dict[str, Any]]) -> dict[str, Any]:
     return {"actions": actions}
 
 
-def _one_action(
-    *, message: str | None, destination_config_id: str | None
-) -> list[dict[str, Any]]:
-    return [{"destination_config_id": destination_config_id, "message": message}]
+def _validate_actions(actions: object, *, owner_user_id: str) -> list[dict[str, Any]]:
+    """Normalize an authored actions list: at least one action, every message
+    non-empty, every destination config null or owned by the trigger owner."""
+    if not isinstance(actions, list) or not actions:
+        raise ValueError("actions is required and must be a non-empty list")
+    out: list[dict[str, Any]] = []
+    for action in cast(list[object], actions):
+        if not isinstance(action, dict):
+            raise ValueError(f"each action must be an object; got {action!r}")
+        a = cast(dict[str, Any], action)
+        message = a.get("message")
+        if not isinstance(message, str) or not message.strip():
+            raise ValueError("each action requires a non-empty message")
+        out.append(
+            {
+                "destination_config_id": _validate_destination_config(
+                    a.get("destination_config_id"), owner_user_id=owner_user_id
+                ),
+                "message": message.strip(),
+            }
+        )
+    return out
 
 
 def _validate_schedule_fields(
@@ -154,17 +171,13 @@ def _first_message(data: dict[str, Any]) -> object:
 
 
 def _to_dict(t: Trigger) -> dict[str, Any]:
-    actions = _parse_actions(t.action_json)
-    first = actions[0]
     return {
         "id": t.id,
         "owner_user_id": t.owner_user_id,
         "scope_path": t.scope_path,
         "kind": t.kind,
         "nl_description": t.nl_description,
-        "actions": actions,
-        "message": first.get("message"),
-        "destination_config_id": first.get("destination_config_id"),
+        "actions": _parse_actions(t.action_json),
         "enabled": t.enabled,
         "created_at": t.created_at,
         "last_edited_at": t.last_edited_at,
@@ -185,8 +198,7 @@ def create(
     owner_user_id: str,
     scope_path: str,
     nl_description: str,
-    message: str,
-    destination_config_id: object = None,
+    actions: object,
     kind: str = "delta",
     enabled: bool = True,
     actor: str | None = None,
@@ -200,9 +212,7 @@ def create(
         raise ValueError(
             "nl_description (the firing condition) is required and must be a non-empty string"
         )
-    if not message.strip():
-        raise ValueError("message (the fire message) is required and must be a non-empty string")
-    config_id = _validate_destination_config(destination_config_id, owner_user_id=owner_user_id)
+    validated_actions = _validate_actions(actions, owner_user_id=owner_user_id)
     cron_value, tz_value, start_at_value = _validate_schedule_fields(
         kind=kind,
         schedule_cron=schedule_cron,
@@ -213,14 +223,13 @@ def create(
     trigger_id = "trg_" + uuid.uuid4().hex[:12]
     created_at = _now_iso()
     file_path = storage.compute_path(scope_path=scope_path, trigger_id=trigger_id)
-    actions = _one_action(message=message.strip(), destination_config_id=config_id)
     row_dict = {
         "id": trigger_id,
         "owner_user_id": owner_user_id,
         "scope_path": scope_path,
         "kind": kind,
         "nl_description": nl_description,
-        "actions": actions,
+        "actions": validated_actions,
         "enabled": enabled,
         "created_at": created_at,
         "schedule_cron": cron_value,
@@ -237,7 +246,7 @@ def create(
                 scope_path=scope_path,
                 kind=kind,
                 nl_description=nl_description,
-                action_json=_actions_json(actions),
+                action_json=_actions_json(validated_actions),
                 enabled=enabled,
                 file_path=file_path,
                 created_at=created_at,
@@ -280,8 +289,7 @@ def update(
     *,
     scope_path: str | None = None,
     nl_description: str | None = None,
-    message: str | None = None,
-    destination_config_id: object = _UNSET,
+    actions: object = _UNSET,
     enabled: bool | None = None,
     actor: str | None = None,
     schedule_cron: str | None = None,
@@ -299,14 +307,8 @@ def update(
         if not nl_description.strip():
             raise ValueError("nl_description must be a non-empty string")
         new["nl_description"] = nl_description.strip()
-    if message is not None:
-        if not message.strip():
-            raise ValueError("message must be a non-empty string")
-        new["message"] = message.strip()
-    if destination_config_id is not _UNSET:
-        new["destination_config_id"] = _validate_destination_config(
-            destination_config_id, owner_user_id=existing["owner_user_id"]
-        )
+    if actions is not _UNSET:
+        new["actions"] = _validate_actions(actions, owner_user_id=existing["owner_user_id"])
     if enabled is not None:
         new["enabled"] = enabled
     if schedule_cron is not None:
@@ -318,14 +320,11 @@ def update(
     if schedule_start_at is not _UNSET:
         new["schedule_start_at"] = cast(str | None, schedule_start_at)
 
-    # Invariant: a saved trigger must always have both a firing condition
-    # and a fire message.
+    # Invariant: a saved trigger always has a firing condition.
     if not (isinstance(new.get("nl_description"), str) and new["nl_description"].strip()):
         raise ValueError(
             "nl_description (the firing condition) is required and must be a non-empty string"
         )
-    if not (isinstance(new.get("message"), str) and new["message"].strip()):
-        raise ValueError("message (the fire message) is required and must be a non-empty string")
 
     cron_value, tz_value, start_at_value = _validate_schedule_fields(
         kind=new.get("kind", "delta"),
@@ -340,8 +339,7 @@ def update(
     if (
         new["scope_path"] == existing["scope_path"]
         and new["nl_description"] == existing["nl_description"]
-        and new["message"] == existing["message"]
-        and new.get("destination_config_id") == existing.get("destination_config_id")
+        and new["actions"] == existing["actions"]
         and new["enabled"] == existing["enabled"]
         and new.get("schedule_cron") == existing.get("schedule_cron")
         and new.get("schedule_timezone") == existing.get("schedule_timezone")
@@ -349,9 +347,6 @@ def update(
     ):
         return existing
 
-    new["actions"] = _one_action(
-        message=new["message"], destination_config_id=new.get("destination_config_id")
-    )
     new_file_path = storage.compute_path(scope_path=new["scope_path"], trigger_id=trigger_id)
     old_file_path = existing.get("file_path")
     if old_file_path and new_file_path != old_file_path:

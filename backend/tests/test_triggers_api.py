@@ -29,15 +29,16 @@ def test_create_then_list(client):
         json={
             "scope_path": "projects/foo.md",
             "nl_description": "fire on status flip",
-            "message": "status flipped",
+            "actions": [{"message": "status flipped"}],
         },
     )
     assert res.status_code == 201, res.json()
     body = res.json()
     assert body["id"].startswith("trg_")
     assert body["enabled"] is True
-    assert body["message"] == "status flipped"
-    assert body["destination_config_id"] is None
+    assert body["actions"] == [
+        {"destination_config_id": None, "message": "status flipped"}
+    ]
 
     res = client.get("/api/triggers")
     assert res.status_code == 200
@@ -51,11 +52,11 @@ def test_create_validation_errors(client):
     login_fastapi(client, uid)
 
     # missing scope_path
-    res = client.post("/api/triggers", json={"nl_description": "x", "message": "m"})
+    res = client.post("/api/triggers", json={"nl_description": "x", "actions": [{"message": "m"}]})
     assert res.status_code == 400
 
     # missing nl_description
-    res = client.post("/api/triggers", json={"scope_path": "a.md", "message": "m"})
+    res = client.post("/api/triggers", json={"scope_path": "a.md", "actions": [{"message": "m"}]})
     assert res.status_code == 400
 
     # missing message
@@ -65,22 +66,22 @@ def test_create_validation_errors(client):
     # path traversal
     res = client.post(
         "/api/triggers",
-        json={"scope_path": "../escape", "nl_description": "x", "message": "m"},
+        json={"scope_path": "../escape", "nl_description": "x", "actions": [{"message": "m"}]},
     )
     assert res.status_code == 400
 
     # unsupported kind
     res = client.post(
         "/api/triggers",
-        json={"scope_path": "a.md", "nl_description": "x", "message": "m", "kind": "schedule"},
+        json={"scope_path": "a.md", "nl_description": "x", "actions": [{"message": "m"}], "kind": "schedule"},
     )
     assert res.status_code == 400
 
     # unowned destination config
     res = client.post(
         "/api/triggers",
-        json={"scope_path": "a.md", "nl_description": "x", "message": "m",
-              "destination_config_id": "dst_nonexistent"},
+        json={"scope_path": "a.md", "nl_description": "x",
+              "actions": [{"message": "m", "destination_config_id": "dst_nonexistent"}]},
     )
     assert res.status_code == 400
 
@@ -90,10 +91,10 @@ def test_owner_isolation_on_list(client):
     b = seed_user("usr_b", "b@x.com")
 
     login_fastapi(client, a)
-    client.post("/api/triggers", json={"scope_path": "a.md", "nl_description": "x", "message": "m"})
+    client.post("/api/triggers", json={"scope_path": "a.md", "nl_description": "x", "actions": [{"message": "m"}]})
 
     login_fastapi(client, b)
-    client.post("/api/triggers", json={"scope_path": "b.md", "nl_description": "y", "message": "m"})
+    client.post("/api/triggers", json={"scope_path": "b.md", "nl_description": "y", "actions": [{"message": "m"}]})
     rows = client.get("/api/triggers").json()["triggers"]
     assert {r["scope_path"] for r in rows} == {"b.md"}
 
@@ -103,7 +104,7 @@ def test_update_disable_then_re_enable(client):
     login_fastapi(client, uid)
     tid = client.post(
         "/api/triggers",
-        json={"scope_path": "a.md", "nl_description": "orig", "message": "m"},
+        json={"scope_path": "a.md", "nl_description": "orig", "actions": [{"message": "m"}]},
     ).json()["id"]
 
     res = client.put(f"/api/triggers/{tid}", json={"enabled": False})
@@ -112,18 +113,19 @@ def test_update_disable_then_re_enable(client):
 
     res = client.put(
         f"/api/triggers/{tid}",
-        json={"enabled": True, "nl_description": "new", "message": "m2"},
+        json={"enabled": True, "nl_description": "new", "actions": [{"message": "m2"}]},
     )
     body = res.json()
     assert body["enabled"] is True
     assert body["nl_description"] == "new"
-    assert body["message"] == "m2"
+    assert body["actions"][0]["message"] == "m2"
 
-    # destination config updates: null clears it, an unowned id is rejected.
-    res = client.put(f"/api/triggers/{tid}", json={"destination_config_id": None})
+    # action updates: a plain action is fine, an unowned config id is rejected.
+    res = client.put(f"/api/triggers/{tid}", json={"actions": [{"message": "m3"}]})
     assert res.status_code == 200
     res = client.put(
-        f"/api/triggers/{tid}", json={"destination_config_id": "dst_nonexistent"}
+        f"/api/triggers/{tid}",
+        json={"actions": [{"message": "m3", "destination_config_id": "dst_nonexistent"}]},
     )
     assert res.status_code == 400
 
@@ -134,7 +136,7 @@ def test_cannot_modify_anothers_trigger(client):
 
     login_fastapi(client, a)
     tid = client.post(
-        "/api/triggers", json={"scope_path": "a.md", "nl_description": "x", "message": "m"}
+        "/api/triggers", json={"scope_path": "a.md", "nl_description": "x", "actions": [{"message": "m"}]}
     ).json()["id"]
 
     login_fastapi(client, b)
@@ -146,7 +148,7 @@ def test_delete_then_404(client):
     uid = seed_user(email="a@b.com")
     login_fastapi(client, uid)
     tid = client.post(
-        "/api/triggers", json={"scope_path": "a.md", "nl_description": "x", "message": "m"}
+        "/api/triggers", json={"scope_path": "a.md", "nl_description": "x", "actions": [{"message": "m"}]}
     ).json()["id"]
 
     assert client.delete(f"/api/triggers/{tid}").status_code == 204
@@ -183,7 +185,7 @@ def test_create_blocks_when_scope_path_unreadable(client):
         json={
             "scope_path": "private/secret.md",
             "nl_description": "fire",
-            "message": "msg",
+            "actions": [{"message": "msg"}],
         },
     )
     assert res.status_code == 403
@@ -208,7 +210,7 @@ def test_update_blocks_when_rebinding_to_unreadable_scope(client):
     login_fastapi(client, other)
     tid = client.post(
         "/api/triggers",
-        json={"scope_path": "public.md", "nl_description": "x", "message": "m"},
+        json={"scope_path": "public.md", "nl_description": "x", "actions": [{"message": "m"}]},
     ).json()["id"]
 
     res = client.put(
@@ -262,7 +264,7 @@ def test_create_allowed_when_user_has_explicit_read_grant(client):
         json={
             "scope_path": "private/secret.md",
             "nl_description": "fire",
-            "message": "msg",
+            "actions": [{"message": "msg"}],
         },
     )
     assert res.status_code == 201, res.json()
@@ -280,7 +282,7 @@ def test_create_allowed_for_admin_on_private_scope(client):
         json={
             "scope_path": "private/secret.md",
             "nl_description": "fire",
-            "message": "msg",
+            "actions": [{"message": "msg"}],
         },
     )
     assert res.status_code == 201, res.json()
@@ -308,7 +310,7 @@ def test_create_allowed_via_folder_grant(client):
         json={
             "scope_path": "private/secret.md",
             "nl_description": "fire",
-            "message": "msg",
+            "actions": [{"message": "msg"}],
         },
     )
     assert res.status_code == 201, res.json()
@@ -338,7 +340,7 @@ def test_update_blocks_when_existing_scope_unreadable(client):
         json={
             "scope_path": "private/secret.md",
             "nl_description": "x",
-            "message": "m",
+            "actions": [{"message": "m"}],
         },
     ).json()["id"]
 
@@ -371,7 +373,7 @@ def test_update_allowed_when_user_has_explicit_grant(client):
         json={
             "scope_path": "private/secret.md",
             "nl_description": "x",
-            "message": "m",
+            "actions": [{"message": "m"}],
         },
     ).json()["id"]
     res = client.put(f"/api/triggers/{tid}", json={"enabled": False})

@@ -25,6 +25,9 @@ def as_user(tmp_repo, monkeypatch):
         "app.llm.agents.tools.create_trigger.current_user", lambda: FakeUser()
     )
     monkeypatch.setattr(
+        "app.llm.agents.tools.get_destination_configs.current_user", lambda: FakeUser()
+    )
+    monkeypatch.setattr(
         "app.llm.agents.tools.update_trigger.current_user", lambda: FakeUser()
     )
     return uid
@@ -35,14 +38,14 @@ def as_user(tmp_repo, monkeypatch):
 # --------------------------------------------------------------------------- #
 
 
-def test_create_trigger_requires_message(as_user):
+def test_create_trigger_requires_actions(as_user):
     from app.llm.agents.tools.create_trigger import handle
 
     out = handle(
         {"scope_path": "guide.md", "trigger_nl_condition": "fire on rewrite"}
     )
     assert "error" in out
-    assert "trigger_fire_message" in out["error"]
+    assert "actions" in out["error"]
 
 
 def test_create_trigger_defaults_to_event_log(as_user):
@@ -52,13 +55,12 @@ def test_create_trigger_defaults_to_event_log(as_user):
         {
             "scope_path": "guide.md",
             "trigger_nl_condition": "fire on rewrite",
-            "trigger_fire_message": "Guide rewritten",
+            "actions": [{"message": "Guide rewritten"}],
         }
     )
     assert "error" not in out, out
     t = out["trigger"]
-    assert t["message"] == "Guide rewritten"
-    assert t["destination_config_id"] is None
+    assert t["actions"] == [{"destination_config_id": None, "message": "Guide rewritten"}]
 
 
 # --------------------------------------------------------------------------- #
@@ -74,7 +76,7 @@ def _seed_trigger(uid: str, **kw) -> str:
         owner_user_id=uid,
         scope_path="guide.md",
         nl_description="orig",
-        message="orig msg",
+        actions=[{"message": "orig msg"}],
     )
     args.update(kw)
     return repo.create(**args)["id"]
@@ -85,14 +87,14 @@ def test_update_trigger_changes_individual_fields(as_user):
 
     tid = _seed_trigger(as_user)
 
-    out = handle({"trigger_id": tid, "trigger_fire_message": "new msg"})
+    out = handle({"trigger_id": tid, "actions": [{"message": "new msg"}]})
     assert "error" not in out, out
-    assert out["trigger"]["message"] == "new msg"
+    assert out["trigger"]["actions"][0]["message"] == "new msg"
     assert out["trigger"]["nl_description"] == "orig"
 
     out = handle({"trigger_id": tid, "trigger_nl_condition": "new cond"})
     assert out["trigger"]["nl_description"] == "new cond"
-    assert out["trigger"]["message"] == "new msg"
+    assert out["trigger"]["actions"][0]["message"] == "new msg"
 
     out = handle({"trigger_id": tid, "enabled": False})
     assert out["trigger"]["enabled"] is False
@@ -106,7 +108,7 @@ def test_update_trigger_rejects_other_users_trigger(as_user, monkeypatch):
     other_id = seed_user(uid="usr_2", email="b@x.com")
     other_trigger = _seed_trigger(other_id)
 
-    out = handle({"trigger_id": other_trigger, "trigger_fire_message": "hijack"})
+    out = handle({"trigger_id": other_trigger, "actions": [{"message": "hijack"}]})
     assert "error" in out
     assert "do not own" in out["error"]
 
@@ -145,7 +147,7 @@ def test_create_trigger_blocks_unreadable_scope(as_user):
         {
             "scope_path": "private/secret.md",
             "trigger_nl_condition": "fire",
-            "trigger_fire_message": "msg",
+            "actions": [{"message": "msg"}],
         }
     )
     assert "error" in out
@@ -187,7 +189,7 @@ def test_create_trigger_allowed_with_explicit_grant(as_user):
         {
             "scope_path": "private/secret.md",
             "trigger_nl_condition": "fire",
-            "trigger_fire_message": "msg",
+            "actions": [{"message": "msg"}],
         }
     )
     assert "error" not in out, out
@@ -217,3 +219,51 @@ def test_update_trigger_blocks_when_existing_scope_unreadable(as_user):
     out = handle({"trigger_id": tid, "enabled": False})
     assert "error" in out
     assert "read access" in out["error"]
+
+
+def test_create_trigger_multi_action_via_tool(as_user):
+    from app.llm.agents.tools.create_trigger import handle
+    from app.triggers import destination_configs as dest_configs
+
+    cfg = dest_configs.create(
+        as_user, type="slack", name="PM", secret="https://hooks.slack.com/x"
+    )
+    out = handle(
+        {
+            "scope_path": "guide.md",
+            "trigger_nl_condition": "fire on rewrite",
+            "actions": [
+                {"message": "to the log"},
+                {"message": "to slack", "destination_config_id": cfg["id"]},
+            ],
+        }
+    )
+    assert "error" not in out, out
+    assert out["trigger"]["actions"] == [
+        {"destination_config_id": None, "message": "to the log"},
+        {"destination_config_id": cfg["id"], "message": "to slack"},
+    ]
+
+
+def test_get_destination_configs_lists_own_only(as_user):
+    from app.llm.agents.tools.get_destination_configs import handle
+    from app.triggers import destination_configs as dest_configs
+
+    from tests._seed import seed_user
+
+    dest_configs.create(as_user, type="slack", name="Mine", secret="https://hooks.slack.com/a")
+    other = seed_user(uid="usr_other", email="other@x.com")
+    dest_configs.create(other, type="slack", name="Theirs", secret="https://hooks.slack.com/b")
+
+    out = handle({})
+    names = [c["name"] for c in out["destination_configs"]]
+    assert names == ["Mine"]
+
+
+def test_update_trigger_rejects_non_list_actions(as_user):
+    from app.llm.agents.tools.update_trigger import handle
+
+    tid = _seed_trigger(as_user)
+    out = handle({"trigger_id": tid, "actions": "not a list"})
+    assert "error" in out
+    assert "array" in out["error"]
