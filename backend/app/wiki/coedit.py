@@ -23,7 +23,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 
@@ -192,6 +192,20 @@ def set_buffer(session_id: int, *, base_version: int, buffer_text: str) -> Sessi
         return _session_row(sess) if sess is not None else None
 
 
+class Change(BaseModel):
+    """One range-replacement edit: replace the half-open range ``[from, to)``
+    with ``insert``. Offsets are **UTF-16 code units** (JS / CodeMirror string
+    positions). ``from`` is a Python keyword, so the field is ``from_`` aliased
+    to ``from`` on the wire. This is the shared op shape — the HTTP request
+    model (`app/models/coedit.py`) reuses it so FastAPI validates the body."""
+
+    model_config = ConfigDict(populate_by_name=True, frozen=True)
+
+    from_: int = Field(alias="from", ge=0)
+    to: int = Field(ge=0)
+    insert: str = ""
+
+
 class OpRow(BaseModel):
     """One logged edit op from `coedit_ops`."""
 
@@ -202,54 +216,38 @@ class OpRow(BaseModel):
     created_at: str
 
 
-def _apply_changes(text: str, changes: list[dict[str, Any]]) -> str:
+def _apply_changes(text: str, changes: list[Change]) -> str:
     """Apply range-replacement ``changes`` to ``text``.
 
-    Each change is ``{"from": int, "to": int, "insert": str}`` — replace the
-    half-open range ``[from, to)`` with ``insert``. Offsets are relative to the
-    *original* ``text`` (as the client saw it), and changes are expected
-    non-overlapping; we apply them right-to-left (highest ``from`` first) so an
-    earlier change's length delta never shifts a later change's offsets.
+    Structural validity (fields present, ``from``/``to`` are ints ``≥ 0``) is
+    guaranteed by the ``Change`` type; this enforces the *semantic* rules that
+    need the buffer: each range in-bounds, ranges non-overlapping, and no
+    surrogate-pair split. Changes apply right-to-left (highest ``from`` first)
+    so an earlier change's length delta never shifts a later change's offsets.
 
-    **Offsets are UTF-16 code-unit indices**, matching JS / CodeMirror string
-    positions (where an astral char like an emoji counts as 2). We therefore
-    slice in UTF-16 space, *not* Python code points — otherwise any document
-    containing an emoji or other non-BMP character would slice at the wrong
-    place. Raises ``ValueError`` on an out-of-bounds range, overlapping ranges,
-    or a range that splits a surrogate pair.
+    **Offsets are UTF-16 code units** (JS / CodeMirror positions; an astral char
+    like an emoji counts as 2), so we slice in UTF-16 space, not Python code
+    points — otherwise a document with an emoji would slice at the wrong place.
+    Raises ``ValueError`` on an out-of-bounds range, overlapping ranges, or a
+    range that splits a surrogate pair.
     """
     # 2 bytes per UTF-16 code unit → unit offset N is byte offset 2N.
     buf = bytearray(text.encode("utf-16-le"))
     n_units = len(buf) // 2
 
-    # Parse first, so a malformed change surfaces as ValueError (not KeyError /
-    # TypeError) — the whole function's error contract is ValueError.
-    parsed: list[tuple[int, int, str]] = []
-    for ch in changes:
-        if "from" not in ch or "to" not in ch:
-            raise ValueError(f"change missing 'from'/'to': {ch!r}")
-        try:
-            frm, to = int(ch["from"]), int(ch["to"])
-        except (TypeError, ValueError) as e:
-            raise ValueError(f"change has non-integer 'from'/'to': {ch!r}") from e
-        parsed.append((frm, to, str(ch.get("insert", ""))))
-
-    # Validate up front — bounds + non-overlap — rather than trust the caller's
-    # unenforced "non-overlapping" contract. Overlapping ranges would apply onto
-    # an already-mutated buffer and silently corrupt it.
-    parsed.sort(key=lambda t: (t[0], t[1]))
+    # Validate bounds + non-overlap up front — overlapping ranges would apply
+    # onto an already-mutated buffer and silently corrupt it.
+    ordered = sorted(changes, key=lambda c: (c.from_, c.to))
     prev_to = 0
-    for frm, to, _ in parsed:
-        if not (0 <= frm <= to <= n_units):
-            raise ValueError(f"change range [{frm},{to}) out of bounds for length {n_units}")
-        if frm < prev_to:
-            raise ValueError(f"overlapping change: [{frm},{to}) intrudes on a prior range ending at {prev_to}")
-        prev_to = to
+    for c in ordered:
+        if not (0 <= c.from_ <= c.to <= n_units):
+            raise ValueError(f"change range [{c.from_},{c.to}) out of bounds for length {n_units}")
+        if c.from_ < prev_to:
+            raise ValueError(f"overlapping change: [{c.from_},{c.to}) intrudes on a prior range ending at {prev_to}")
+        prev_to = c.to
 
-    # Apply right-to-left so an earlier change's length delta never shifts a
-    # later change's (original-text) offsets.
-    for frm, to, insert in reversed(parsed):
-        buf[2 * frm : 2 * to] = insert.encode("utf-16-le")
+    for c in reversed(ordered):
+        buf[2 * c.from_ : 2 * c.to] = c.insert.encode("utf-16-le")
     try:
         return bytes(buf).decode("utf-16-le")
     except UnicodeDecodeError as e:
@@ -260,7 +258,7 @@ def apply_op(
     session_id: int,
     *,
     base_version: int,
-    changes: list[dict[str, Any]],
+    changes: list[Change],
     author_user_id: str,
 ) -> SessionRow | None:
     """Apply an edit op to the buffer and log it, atomically.
@@ -307,7 +305,7 @@ def apply_op(
                 seq=new_version,
                 author_user_id=author_user_id,
                 base_version=base_version,
-                op_payload={"changes": changes},
+                op_payload={"changes": [c.model_dump(by_alias=True) for c in changes]},
             )
         )
         return _session_row(row)
