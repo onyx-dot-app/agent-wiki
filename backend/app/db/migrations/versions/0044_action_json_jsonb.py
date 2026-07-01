@@ -29,7 +29,10 @@ depends_on: str | Sequence[str] | None = None
 
 def _column_type() -> str:
     cols = sa.inspect(op.get_bind()).get_columns("triggers")
-    return str(next(c["type"] for c in cols if c["name"] == "action_json")).lower()
+    col = next((c for c in cols if c["name"] == "action_json"), None)
+    if col is None:
+        raise RuntimeError("triggers.action_json column not found")
+    return str(col["type"]).lower()
 
 
 def upgrade() -> None:
