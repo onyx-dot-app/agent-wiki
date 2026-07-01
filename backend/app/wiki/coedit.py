@@ -219,7 +219,7 @@ class OpRow(BaseModel):
     """One logged edit op from `coedit_ops`."""
 
     seq: int  # the session version this op produced
-    author_user_id: str | None  # None = system/merge-origin (folded agent commit)
+    author_user_id: str
     base_version: int
     changes: list[dict[str, Any]]
     created_at: str
@@ -263,75 +263,51 @@ def _apply_changes(text: str, changes: list[Change]) -> str:
         raise ValueError("change split a UTF-16 surrogate pair") from e
 
 
-def _utf16_len(s: str) -> int:
-    """Length of ``s`` in UTF-16 code units (an astral char counts as 2) — the
-    offset unit used by ``Change``."""
-    return len(s.encode("utf-16-le")) // 2
-
-
-def _diff_to_change(old: str, new: str) -> Change | None:
-    """Express ``old`` → ``new`` as a single range-replacement ``Change``, or
-    ``None`` if identical.
-
-    Trims the common prefix and suffix (walking Python code points, so a
-    surrogate pair is never split) and replaces the differing middle. Coarse —
-    one change spanning the whole differing region, not a minimal edit script —
-    but correct: applying it to ``old`` yields ``new``. Offsets are converted to
-    UTF-16 code units to match ``Change`` / ``_apply_changes``.
-    """
-    if old == new:
-        return None
-    max_pre = min(len(old), len(new))
-    pre = 0
-    while pre < max_pre and old[pre] == new[pre]:
-        pre += 1
-    max_suf = min(len(old), len(new)) - pre
-    suf = 0
-    while suf < max_suf and old[len(old) - 1 - suf] == new[len(new) - 1 - suf]:
-        suf += 1
-    return Change.model_validate(
-        {
-            "from": _utf16_len(old[:pre]),
-            "to": _utf16_len(old[: len(old) - suf]),
-            "insert": new[pre : len(new) - suf],
-        }
-    )
-
-
 def reconcile_onto(
     session_id: int,
     *,
     base_version: int,
-    old_buffer: str,
     merged_text: str,
     new_base_sha: str,
     checkpointed: bool,
-) -> tuple[SessionRow, Change | None] | None:
-    """Fold externally-merged content into the session buffer under a version CAS.
+) -> tuple[SessionRow, bool] | None:
+    """Reconcile the session buffer onto an external commit under a version CAS.
 
     Shared by live-rebase (a clean inbound agent commit folded in;
     ``checkpointed=False``) and the checkpoint sync (the committed AI-merged
-    result written back; ``checkpointed=True``). ``old_buffer`` is what the
-    caller read at ``base_version``; the version CAS guarantees it's unchanged,
-    so the diff against ``merged_text`` is valid.
+    result written back; ``checkpointed=True``). This is **not** a co-edit op —
+    an agent's change never enters the session op stream / ``coedit_ops``; it's a
+    buffer resync driven by a git commit. Participants are told to refetch (a
+    ``resync`` frame), not sent an op.
 
-    Returns ``(row, change)``. ``change`` is ``None`` when the buffer already
-    equals ``merged_text`` — only ``base_sha`` (and, if ``checkpointed``,
-    ``checkpointed_version``) advance, with no version bump and no op logged.
-    Otherwise the buffer is replaced, ``version`` bumps, and the delta is logged
-    as a system op (``author_user_id=None``). Returns ``None`` if a concurrent op
-    moved the version (the caller falls back).
+    Returns ``(row, changed)`` where ``changed`` is False when the buffer already
+    equals ``merged_text`` — then only ``base_sha`` (and, if ``checkpointed``,
+    ``checkpointed_version``) advance, no version bump. When it differs, the
+    buffer is replaced and ``version`` bumps so any stale in-flight human op is
+    rejected. Returns ``None`` if a concurrent op moved the version (caller falls
+    back).
     """
-    change = _diff_to_change(old_buffer, merged_text)
     now = _iso(_now())
-    new_version = base_version + 1 if change is not None else base_version
-    values: dict[str, Any] = {"base_sha": new_base_sha, "updated_at": now}
-    if change is not None:
-        values["buffer_text"] = merged_text
-        values["version"] = new_version
-    if checkpointed:
-        values["checkpointed_version"] = new_version
     with session() as s:
+        # Read the buffer at exactly base_version under the CAS to decide whether
+        # it changed (the version predicate guarantees it hasn't moved since).
+        current = s.execute(
+            select(CoeditSession.buffer_text).where(
+                CoeditSession.id == session_id,
+                CoeditSession.version == base_version,
+                CoeditSession.status == "active",
+            )
+        ).scalar_one_or_none()
+        if current is None:
+            return None
+        changed = merged_text != current
+        new_version = base_version + 1 if changed else base_version
+        values: dict[str, Any] = {"base_sha": new_base_sha, "updated_at": now}
+        if changed:
+            values["buffer_text"] = merged_text
+            values["version"] = new_version
+        if checkpointed:
+            values["checkpointed_version"] = new_version
         row = s.scalars(
             update(CoeditSession)
             .where(
@@ -345,18 +321,7 @@ def reconcile_onto(
         ).one_or_none()
         if row is None:
             return None
-        result = _session_row(row)
-        if change is not None:
-            s.add(
-                CoeditOp(
-                    session_id=session_id,
-                    seq=new_version,
-                    author_user_id=None,
-                    base_version=base_version,
-                    op_payload={"changes": [change.model_dump(by_alias=True)]},
-                )
-            )
-        return result, change
+        return _session_row(row), changed
 
 
 def apply_op(

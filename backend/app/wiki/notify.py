@@ -101,7 +101,7 @@ def after_doc_write(
     # Fold this commit into any open co-edit session for the page (skip for a
     # session's own checkpoint commit — trigger_coedit_rebase=False).
     if trigger_coedit_rebase:
-        coedit_rebase_trigger.on_wiki_commit(rel_path, sha, actor)
+        coedit_rebase_trigger.on_wiki_commit(rel_path, sha)
     if change_kind == ChangeKind.CREATE:
         mcp_pubsub.publish_list_changed()
 

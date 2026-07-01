@@ -1,6 +1,6 @@
 """Live-rebase: folding an inbound agent commit into an open co-edit session
-(app/wiki/coedit_rebase.py), plus the repo primitives it uses
-(_diff_to_change, reconcile_onto). DB + real git (tmp_repo).
+(app/wiki/coedit_rebase.py), plus the reconcile_onto repo primitive it uses.
+DB + real git (tmp_repo).
 """
 from __future__ import annotations
 
@@ -29,56 +29,31 @@ def repo(tmp_repo):
     return tmp_repo
 
 
-# --- _diff_to_change (pure, UTF-16) ---------------------------------------- #
-
-
-def test_diff_to_change_identical_is_none():
-    assert coedit._diff_to_change("abc", "abc") is None
-
-
-def test_diff_to_change_replaces_middle():
-    c = coedit._diff_to_change("hello world", "hello brave world")
-    assert c is not None
-    assert (c.from_, c.to, c.insert) == (6, 6, "brave ")
-    assert coedit._apply_changes("hello world", [c]) == "hello brave world"
-
-
-def test_diff_to_change_utf16_offsets_with_emoji():
-    old, new = "a😀b", "a😀XYZb"  # emoji = 2 UTF-16 units; insert before trailing b
-    c = coedit._diff_to_change(old, new)
-    assert c is not None
-    assert (c.from_, c.to, c.insert) == (3, 3, "XYZ")
-    assert coedit._apply_changes(old, [c]) == new
-
-
 # --- reconcile_onto -------------------------------------------------------- #
 
 
-def test_reconcile_onto_folds_and_logs_system_op(tmp_db):
-    users_repo.create(email="a@x.com", password="hunter2-x", name="A")
+def test_reconcile_onto_folds_without_logging_a_session_op(tmp_db):
+    # An agent's change reconciles into the buffer but is NOT a co-edit op — it
+    # never enters coedit_ops / the session op stream.
     s = coedit.open_session(_PATH, base_sha="sha0", initial_buffer="hello world")
     res = coedit.reconcile_onto(
-        s.id, base_version=0, old_buffer="hello world",
-        merged_text="HELLO world", new_base_sha="sha1", checkpointed=False,
+        s.id, base_version=0, merged_text="HELLO world", new_base_sha="sha1", checkpointed=False,
     )
     assert res is not None
-    row, change = res
+    row, changed = res
+    assert changed is True
     assert row.version == 1 and row.buffer_text == "HELLO world" and row.base_sha == "sha1"
-    assert change is not None
-    ops = coedit.ops_since(s.id, 0)
-    assert len(ops) == 1 and ops[0].author_user_id is None  # system/merge-origin
+    assert coedit.ops_since(s.id, 0) == []  # no op logged for the fold
 
 
 def test_reconcile_onto_no_change_advances_base_only(tmp_db):
     s = coedit.open_session(_PATH, base_sha="sha0", initial_buffer="hi")
     res = coedit.reconcile_onto(
-        s.id, base_version=0, old_buffer="hi",
-        merged_text="hi", new_base_sha="sha1", checkpointed=False,
+        s.id, base_version=0, merged_text="hi", new_base_sha="sha1", checkpointed=False,
     )
     assert res is not None
-    row, change = res
-    assert change is None and row.version == 0 and row.base_sha == "sha1"
-    assert coedit.ops_since(s.id, 0) == []  # nothing logged
+    row, changed = res
+    assert changed is False and row.version == 0 and row.base_sha == "sha1"
 
 
 def test_reconcile_onto_stale_version_returns_none(tmp_db):
@@ -87,8 +62,7 @@ def test_reconcile_onto_stale_version_returns_none(tmp_db):
     coedit.apply_op(s.id, base_version=0, changes=[_ch(0, 2, "yo")], author_user_id=seed_uid)
     # Caller still on version 0 — the CAS misses.
     res = coedit.reconcile_onto(
-        s.id, base_version=0, old_buffer="hi",
-        merged_text="X", new_base_sha="sha1", checkpointed=False,
+        s.id, base_version=0, merged_text="X", new_base_sha="sha1", checkpointed=False,
     )
     assert res is None
 
@@ -109,7 +83,7 @@ def test_rebase_folds_clean_agent_commit(repo):
         _PATH, "one\ntwo\nthree\nfour\nFIVE\n", "agent edit", author="Agent <a@x.com>"
     )
 
-    assert coedit_rebase.rebase_session(sess.id, new_sha, "Agent") == "applied"
+    assert coedit_rebase.rebase_session(sess.id, new_sha) == "applied"
 
     st = coedit.get_session(sess.id)
     assert st is not None
@@ -122,7 +96,7 @@ def test_rebase_folds_clean_agent_commit(repo):
 def test_rebase_skips_when_already_based_on_head(repo):
     sha = _seed("x\n")
     sess = coedit.open_session(_PATH, base_sha=sha, initial_buffer="x\n")
-    assert coedit_rebase.rebase_session(sess.id, sha, None) == "skip"
+    assert coedit_rebase.rebase_session(sess.id, sha) == "skip"
 
 
 def test_rebase_conflict_enqueues_checkpoint(repo, monkeypatch):
@@ -139,7 +113,7 @@ def test_rebase_conflict_enqueues_checkpoint(repo, monkeypatch):
     coedit.apply_op(sess.id, base_version=0, changes=[_ch(0, 3, "ONE")], author_user_id=uid)
     new_sha = wiki_git.commit_file(_PATH, "XXX\ntwo\n", "agent edit", author="Agent <a@x.com>")
 
-    assert coedit_rebase.rebase_session(sess.id, new_sha, "Agent") == "conflict"
+    assert coedit_rebase.rebase_session(sess.id, new_sha) == "conflict"
     assert calls == [sess.id]  # handed to the checkpoint's AI-merge, not folded
 
 
@@ -188,4 +162,4 @@ def test_rebase_raced_op_is_skipped(repo, monkeypatch):
     sess = coedit.open_session(_PATH, base_sha=sha, initial_buffer="a\nb\n")
     coedit.join(sess.id, uid)
     new_sha = wiki_git.commit_file(_PATH, "a\nB\n", "agent edit", author="Agent <a@x.com>")
-    assert coedit_rebase.rebase_session(sess.id, new_sha, "Agent") == "raced"
+    assert coedit_rebase.rebase_session(sess.id, new_sha) == "raced"

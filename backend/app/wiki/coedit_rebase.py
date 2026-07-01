@@ -28,11 +28,11 @@ from app.wiki import git as wiki_git
 log = logging.getLogger(__name__)
 
 
-def rebase_session(session_id: int, head_sha: str, actor: str | None) -> str:
+def rebase_session(session_id: int, head_sha: str) -> str:
     """Fold the commit at ``head_sha`` into the session's live buffer.
 
     Returns a short status string (for logging/tests): ``"skip"`` (gone, closed,
-    or already based on ``head_sha``), ``"applied"`` (clean fold broadcast),
+    or already based on ``head_sha``), ``"applied"`` (clean fold, resync sent),
     ``"noop"`` (buffer already matched; only ``base_sha`` advanced),
     ``"conflict"`` (overlap → checkpoint enqueued), or ``"raced"`` (a human op
     landed mid-merge; skipped — the checkpoint merge is the backstop).
@@ -56,15 +56,14 @@ def rebase_session(session_id: int, head_sha: str, actor: str | None) -> str:
     res = coedit.reconcile_onto(
         session_id,
         base_version=sess.version,
-        old_buffer=sess.buffer_text,
         merged_text=mr.merged,
         new_base_sha=head_sha,
         checkpointed=False,
     )
     if res is None:
         return "raced"
-    row, change = res
-    if change is None:
+    row, changed = res
+    if not changed:
         return "noop"
-    coedit_channel.broadcast_op(session_id, row.version, [change], author_user_id=actor or "agent")
+    coedit_channel.broadcast_resync(session_id, row.version)
     return "applied"

@@ -22,14 +22,14 @@ log = logging.getLogger(__name__)
 
 
 @lightweight_maintenance_queue.task()
-def rebase_coedit_session(session_id: int, head_sha: str, actor: str | None = None) -> None:
-    rebase_session(session_id, head_sha, actor)
+def rebase_coedit_session(session_id: int, head_sha: str) -> None:
+    rebase_session(session_id, head_sha)
 
 
-def on_wiki_commit(rel_path: str, sha: str, actor: str | None) -> None:
+def on_wiki_commit(rel_path: str, sha: str) -> None:
     """Enqueue a live-rebase if an active session exists for ``rel_path`` and the
     commit is external to it (its ``base_sha`` hasn't already advanced to ``sha``,
     which is the case for the session's own checkpoint commit)."""
     sess = coedit.get_active_session(rel_path)
     if sess is not None and sess.base_sha != sha:
-        rebase_coedit_session(sess.id, sha, actor)
+        rebase_coedit_session(sess.id, sha)
