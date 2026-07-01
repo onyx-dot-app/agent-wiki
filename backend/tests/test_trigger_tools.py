@@ -258,3 +258,12 @@ def test_get_destination_configs_lists_own_only(as_user):
     out = handle({})
     names = [c["name"] for c in out["destination_configs"]]
     assert names == ["Mine"]
+
+
+def test_update_trigger_rejects_non_list_actions(as_user):
+    from app.llm.agents.tools.update_trigger import handle
+
+    tid = _seed_trigger(as_user)
+    out = handle({"trigger_id": tid, "actions": "not a list"})
+    assert "error" in out
+    assert "array" in out["error"]

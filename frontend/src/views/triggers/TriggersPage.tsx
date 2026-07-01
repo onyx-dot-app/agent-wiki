@@ -242,7 +242,10 @@ export default function TriggersPage() {
                 {t.actions
                   .filter((a) => a.message)
                   .map((a, i) => (
-                    <div key={i} className="mt-[6px] flex items-baseline gap-2">
+                    <div
+                      key={`${a.destination_config_id ?? "event_log"}-${a.message}-${i}`}
+                      className="mt-[6px] flex items-baseline gap-2"
+                    >
                       <span className={sentenceTagCn}>THEN SEND</span>
                       <span className="min-w-0 flex-1">{a.message}</span>
                     </div>

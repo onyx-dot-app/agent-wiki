@@ -48,7 +48,10 @@ def handle(args: dict[str, Any]) -> Any:
         kwargs["nl_description"] = nl.strip()
 
     if "actions" in args:
-        kwargs["actions"] = args["actions"]
+        actions = args["actions"]
+        if not isinstance(actions, list) or not actions:
+            return {"error": "actions must be a non-empty array of {message, destination_config_id}"}
+        kwargs["actions"] = actions
 
     if "enabled" in args:
         enabled = args["enabled"]
