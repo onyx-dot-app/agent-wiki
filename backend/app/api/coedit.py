@@ -26,6 +26,7 @@ from app.models.coedit import (
     OpResponse,
     ParticipantOut,
 )
+from app.tasks.coedit_checkpoint import checkpoint_coedit_session
 from app.wiki import coedit, coedit_channel, git
 
 router = APIRouter()
@@ -72,12 +73,17 @@ def join(req: JoinRequest, user: User = Depends(require_user)) -> JoinResponse:
 
 def _checkpoint_if_last_left(session_id: int) -> None:
     """Enqueue a final checkpoint when the last participant has left, so the
-    session's buffer lands in git without waiting for the periodic scan."""
+    session's buffer lands in git without waiting for the periodic scan.
+
+    Best-effort: the participant row is already gone, so a failed enqueue (e.g.
+    a full queue) must not fail the leave. The periodic scan is the backstop —
+    the session is dirty, so it's recovered (checkpointed + closed) once idle."""
     if coedit.list_participants(session_id):
         return
-    from app.tasks.coedit_checkpoint import checkpoint_coedit_session
-
-    checkpoint_coedit_session(session_id)
+    try:
+        checkpoint_coedit_session(session_id)
+    except Exception:
+        log.exception("coedit: checkpoint enqueue failed on last-leave for session %s", session_id)
 
 
 @router.post("/leave")
@@ -150,8 +156,6 @@ def checkpoint(req: CheckpointRequest, user: User = Depends(require_user)) -> di
     queued rather than blocking on the git write.
     """
     _require_active(req.session_id, user, "write")
-    from app.tasks.coedit_checkpoint import checkpoint_coedit_session
-
     checkpoint_coedit_session(req.session_id)
     return {"queued": True}
 
