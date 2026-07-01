@@ -948,6 +948,42 @@ class CoeditParticipant(Base):
     __table_args__ = (Index("idx_coedit_participants_user", "user_id"),)
 
 
+class CoeditOp(Base):
+    """Append-only log of edit operations applied to a co-edit session.
+
+    Passive record — convergence is snapshot + CAS on ``coedit_sessions``, so
+    this log is written alongside each applied op but nothing reads it on the
+    hot path. It enables late-joiner catch-up ("ops since version N"),
+    per-author within-session history, and is the substrate a future OT/CRDT
+    upgrade would build on. ``seq`` is the session ``version`` the op produced
+    (unique per session); ``base_version`` is the version it was applied onto.
+    ``op_payload`` is the wire op — a list of ``{from, to, insert}`` range
+    changes — kept as a generic envelope so it survives an engine change.
+    """
+
+    __tablename__ = "coedit_ops"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    session_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("coedit_sessions.id", ondelete="CASCADE"), nullable=False
+    )
+    seq: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    author_user_id: Mapped[str] = mapped_column(
+        Text, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    base_version: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    op_payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
+    )
+
+    __table_args__ = (
+        # One op per produced version, in order — also the lookup for
+        # "ops since version N" catch-up.
+        UniqueConstraint("session_id", "seq", name="idx_coedit_ops_session_seq"),
+    )
+
+
 # --------------------------------------------------------------------------- #
 # Cron state — per-(queue, task) last-fired timestamp so the periodic         #
 # scheduler can survive restarts without silently dropping or stampeding      #
