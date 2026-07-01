@@ -64,8 +64,15 @@ def seed_trigger(
     schedule_timezone: str | None = None,
     schedule_start_at: str | None = None,
     schedule_last_fired_at: str | None = None,
+    slack_webhook_id: str | None = None,
 ) -> str:
-    action_json = json.dumps({"message": message, "destination": destination})
+    action_json = json.dumps(
+        {
+            "actions": [
+                {"type": destination, "message": message, "slack_webhook_id": slack_webhook_id}
+            ]
+        }
+    )
     with session() as s:
         s.add(
             Trigger(

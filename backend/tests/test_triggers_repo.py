@@ -238,3 +238,15 @@ def test_single_doc_rename_relocates_doc_scoped_trigger(tmp_repo):
     assert got is not None
     assert got["scope_path"] == "notes/renamed.md"
     assert got["file_path"] == f"notes/.trigger_{t['id']}_renamed.yaml"
+
+
+def test_parse_actions_reads_legacy_single_destination_blob():
+    """A pre-multi-action ``action_json`` blob loads as one action."""
+    import json
+
+    from app.triggers.repo import _parse_actions
+
+    legacy = json.dumps({"message": "hi", "destination": "slack"})
+    assert _parse_actions(legacy) == [
+        {"type": "slack", "message": "hi", "slack_webhook_id": None}
+    ]

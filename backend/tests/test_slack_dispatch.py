@@ -13,7 +13,7 @@ from app.models.wiki import ChangeKind
 from app.slack import client as slack_client
 from app.slack import webhooks as slack_webhooks
 from app.tasks.triggers import _record_fire
-from app.triggers.engine import TriggerRecord
+from app.triggers.engine import TriggerAction, TriggerRecord
 
 from tests._seed import list_events, seed_user
 
@@ -28,9 +28,11 @@ def _trigger(*, destination: str, slack_webhook_id: str | None = None) -> Trigge
         scope_path="projects/foo.md",
         kind="delta",
         nl_description="fire when status changes",
-        message="status changed",
-        destination=destination,
-        slack_webhook_id=slack_webhook_id,
+        actions=[
+            TriggerAction(
+                type=destination, message="status changed", slack_webhook_id=slack_webhook_id
+            )
+        ],
         enabled=True,
         file_path=None,
         created_at=None,
@@ -41,13 +43,13 @@ def _trigger(*, destination: str, slack_webhook_id: str | None = None) -> Trigge
 def _fire(trigger: TriggerRecord, *, message: str = "Status flipped to done") -> None:
     _record_fire(
         trigger=trigger,
+        action=trigger.actions[0],
         doc_path="projects/foo.md",
         sha="abc123",
         change_kind=ChangeKind.EDIT,
         reason="status flipped",
         instruction="say what changed",
         rendered_message=message,
-        destination=trigger.destination,
         actor="U <u@x.com>",
     )
 

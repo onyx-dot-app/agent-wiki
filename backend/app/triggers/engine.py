@@ -39,24 +39,31 @@ from app.triggers.natural_language import render_message as nl_render_message
 from app.triggers.natural_language import (
     render_snapshot_message as nl_render_snapshot_message,
 )
-from app.triggers.repo import _parse_action  # pyright: ignore[reportPrivateUsage]
+from app.triggers.repo import _parse_actions  # pyright: ignore[reportPrivateUsage]
 from app.wiki.filesystem import parent_dirs
 
 log = logging.getLogger(__name__)
 
 
+class TriggerAction(BaseModel):
+    """One delivery action: a destination ``type`` plus the message to render
+    and, for slack, the channel to post to."""
+
+    type: str
+    message: str | None = None
+    slack_webhook_id: str | None = None
+
+
 class TriggerRecord(BaseModel):
-    """Eval-side view of a trigger row. ``message`` and ``destination`` are
-    parsed from ``Trigger.action_json``; raw column shape is hidden."""
+    """Eval-side view of a trigger row. ``actions`` is parsed from
+    ``Trigger.action_json``. The raw column shape is hidden."""
 
     id: str
     owner_user_id: str
     scope_path: str
     kind: str
     nl_description: str
-    message: str | None
-    destination: str
-    slack_webhook_id: str | None = None
+    actions: list[TriggerAction]
     enabled: bool
     file_path: str | None
     created_at: str | None
@@ -68,16 +75,13 @@ class TriggerRecord(BaseModel):
 
 
 def _to_record(t: Trigger) -> TriggerRecord:
-    action = _parse_action(t.action_json)
     return TriggerRecord(
         id=t.id,
         owner_user_id=t.owner_user_id,
         scope_path=t.scope_path,
         kind=t.kind,
         nl_description=t.nl_description,
-        message=action.get("message"),
-        destination=action["destination"],
-        slack_webhook_id=t.slack_webhook_id,
+        actions=[TriggerAction(**a) for a in _parse_actions(t.action_json)],
         enabled=t.enabled,
         file_path=t.file_path,
         created_at=t.created_at,

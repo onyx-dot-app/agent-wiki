@@ -6,19 +6,19 @@ If the DB write fails after the file commit, ``rebuild_from_filesystem``
 will re-converge the cache; the inverse (file fails after the row) leaves
 nothing behind because the row write is the second step.
 
-Format (every trigger has these three fields plus the standard scope/kind/enabled):
-  * **if** — ``nl_description``: natural-language firing condition.
-  * **message** — the notification body to deliver when the trigger fires.
-  * **destination** — slug of a row in ``trigger_destinations``. Defaults to
-    ``"event_log"`` (record the fire to the events table; no outbound
-    dispatch). New destinations are added by migration as their dispatchers
-    come online — see ``app/triggers/destinations.py``.
+Format (every trigger has a firing condition plus a list of actions):
+  * **if**: ``nl_description``, the natural-language firing condition.
+  * **actions**: a list of ``{type, message, slack_webhook_id}``. ``type`` is a
+    slug from ``trigger_destinations`` (``event_log`` records the fire to the
+    events table, ``slack`` posts to the action's channel). ``message`` is the
+    body rendered on fire.
 
-``message`` and ``destination`` are stored together in the ``action_json``
-column (and the ``action`` block in the YAML file). The repo layer exposes
-them as flat dict keys for callers. Legacy rows where ``destination`` is
-``None`` (predating the destinations catalog) are read as ``"event_log"``
-so callers don't need to special-case the migration boundary.
+Actions live as ``{"actions": [...]}`` in the ``action_json`` column and the
+``actions`` block in the YAML file. Create/update and the HTTP layer are
+single-action for now: they take one ``message``/``destination``/
+``slack_webhook_id`` and build a one-element list. ``_to_dict`` projects the
+first action back to those flat keys. An old single-destination blob reads as
+one action.
 """
 
 from __future__ import annotations
@@ -93,8 +93,15 @@ def _validate_slack_webhook(
     return wid
 
 
-def _action_payload(*, message: str, destination: object) -> str:
-    return json.dumps({"message": message, "destination": destination})
+def _actions_json(actions: list[dict[str, Any]]) -> str:
+    """Serialize the actions list into the ``action_json`` column."""
+    return json.dumps({"actions": actions})
+
+
+def _one_action(
+    *, message: str | None, destination: str, slack_webhook_id: str | None
+) -> list[dict[str, Any]]:
+    return [{"type": destination, "message": message, "slack_webhook_id": slack_webhook_id}]
 
 
 def _validate_schedule_fields(
@@ -149,22 +156,50 @@ def _validate_schedule_fields(
     return None, None, None
 
 
-def _parse_action(raw: str) -> dict[str, Any]:
-    """Parse the ``action_json`` column."""
-    return cast(dict[str, Any], json.loads(raw))
+def _parse_actions(raw: str) -> list[dict[str, Any]]:
+    """Actions stored in ``action_json``. An old single-destination blob
+    (``{"message":.., "destination":..}``) reads as one action."""
+    parsed = cast(dict[str, Any], json.loads(raw))
+    raw_actions = parsed.get("actions")
+    if isinstance(raw_actions, list) and raw_actions:
+        return [
+            {
+                "type": a.get("type"),
+                "message": a.get("message"),
+                "slack_webhook_id": a.get("slack_webhook_id"),
+            }
+            for a in cast(list[dict[str, Any]], raw_actions)
+        ]
+    return [
+        {
+            "type": parsed.get("destination"),
+            "message": parsed.get("message"),
+            "slack_webhook_id": parsed.get("slack_webhook_id"),
+        }
+    ]
+
+
+def _first_message(data: dict[str, Any]) -> object:
+    """The first action's message from a parsed trigger dict."""
+    actions = data.get("actions")
+    if isinstance(actions, list) and actions:
+        return cast(dict[str, Any], actions[0]).get("message")
+    return None
 
 
 def _to_dict(t: Trigger) -> dict[str, Any]:
-    action = _parse_action(t.action_json)
+    actions = _parse_actions(t.action_json)
+    first = actions[0]
     return {
         "id": t.id,
         "owner_user_id": t.owner_user_id,
         "scope_path": t.scope_path,
         "kind": t.kind,
         "nl_description": t.nl_description,
-        "message": action.get("message"),
-        "destination": action["destination"],
-        "slack_webhook_id": t.slack_webhook_id,
+        "actions": actions,
+        "message": first.get("message"),
+        "destination": first["type"],
+        "slack_webhook_id": first.get("slack_webhook_id"),
         "enabled": t.enabled,
         "created_at": t.created_at,
         "last_edited_at": t.last_edited_at,
@@ -219,15 +254,16 @@ def create(
     trigger_id = "trg_" + uuid.uuid4().hex[:12]
     created_at = _now_iso()
     file_path = storage.compute_path(scope_path=scope_path, trigger_id=trigger_id)
+    actions = _one_action(
+        message=message.strip(), destination=destination_id, slack_webhook_id=webhook_id
+    )
     row_dict = {
         "id": trigger_id,
         "owner_user_id": owner_user_id,
         "scope_path": scope_path,
         "kind": kind,
         "nl_description": nl_description,
-        "message": message.strip(),
-        "destination": destination_id,
-        "slack_webhook_id": webhook_id,
+        "actions": actions,
         "enabled": enabled,
         "created_at": created_at,
         "schedule_cron": cron_value,
@@ -244,8 +280,7 @@ def create(
                 scope_path=scope_path,
                 kind=kind,
                 nl_description=nl_description,
-                action_json=_action_payload(message=message.strip(), destination=destination_id),
-                slack_webhook_id=webhook_id,
+                action_json=_actions_json(actions),
                 enabled=enabled,
                 file_path=file_path,
                 created_at=created_at,
@@ -366,6 +401,11 @@ def update(
     ):
         return existing
 
+    new["actions"] = _one_action(
+        message=new["message"],
+        destination=new["destination"],
+        slack_webhook_id=new.get("slack_webhook_id"),
+    )
     new_file_path = storage.compute_path(scope_path=new["scope_path"], trigger_id=trigger_id)
     old_file_path = existing.get("file_path")
     if old_file_path and new_file_path != old_file_path:
@@ -384,10 +424,7 @@ def update(
             return None
         t.scope_path = new["scope_path"]
         t.nl_description = new["nl_description"]
-        t.action_json = _action_payload(
-            message=new["message"] or "", destination=new["destination"]
-        )
-        t.slack_webhook_id = new.get("slack_webhook_id")
+        t.action_json = _actions_json(new["actions"])
         t.enabled = new["enabled"]
         t.file_path = new_file_path
         t.last_edited_at = _now_iso()
@@ -440,7 +477,7 @@ def purge_invalid_triggers(*, actor: str | None = None) -> int:
             log.warning("purge_invalid_triggers: skip unreadable %s", file_path, exc_info=True)
             continue
         if _is_nonempty_string(data.get("nl_description")) and _is_nonempty_string(
-            data.get("message")
+            _first_message(data)
         ):
             continue
         trigger_id = data.get("id") or "?"
@@ -573,7 +610,7 @@ def rebuild_from_filesystem() -> int:
             continue
         if not (
             _is_nonempty_string(data.get("nl_description"))
-            and _is_nonempty_string(data.get("message"))
+            and _is_nonempty_string(_first_message(data))
         ):
             log.warning(
                 "rebuild_from_filesystem: skip %s (missing required field)",
@@ -640,10 +677,14 @@ def rebuild_from_filesystem() -> int:
                 skipped += 1
                 continue
 
-            action_payload = _action_payload(
-                message=data.get("message") or "",
-                destination=_validate_destination(data.get("destination")),
-            )
+            actions_payload = [
+                {
+                    "type": _validate_destination(a.get("type")),
+                    "message": a.get("message"),
+                    "slack_webhook_id": a.get("slack_webhook_id"),
+                }
+                for a in data["actions"]
+            ]
             created_at = data.get("created_at") or fallback_now
             last_edited = data.get("last_edited_at") or created_at
             try:
@@ -668,9 +709,7 @@ def rebuild_from_filesystem() -> int:
                     scope_path=data["scope_path"],
                     kind=data["kind"],
                     nl_description=data["nl_description"],
-                    action_json=action_payload,
-                    # The Slack channel link the UI resolves to a channel name.
-                    slack_webhook_id=data.get("slack_webhook_id"),
+                    action_json=_actions_json(actions_payload),
                     enabled=bool(data.get("enabled", True)),
                     file_path=file_path,
                     created_at=created_at,

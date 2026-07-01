@@ -51,6 +51,7 @@ from app.triggers import destinations as destinations_repo
 from app.triggers import diff as diff_helper
 from app.triggers import repo as triggers_repo
 from app.triggers.engine import (
+    TriggerAction,
     TriggerRecord,
     evaluate_delta,
     evaluate_new_file_in_dir,
@@ -131,9 +132,6 @@ def fan_out_trigger_eval(
     fired = 0
     skipped_acl = 0
     for trigger in triggers:
-        instruction = trigger.message or ""
-        destination = trigger.destination
-
         # Re-check the owner's read access at fire-time. The trigger may have
         # been created when the owner had access and then revoked; we don't
         # want a rendered message (which embeds doc body excerpts) landing in
@@ -146,46 +144,50 @@ def fan_out_trigger_eval(
             )
             continue
 
-        if change_kind == ChangeKind.CREATE and trigger.scope_path != doc_path:
-            assert new_file_payload is not None
-            new_file_result = evaluate_new_file_in_dir(
-                trigger, instruction, new_file_payload
-            )
-            if not new_file_result.triggered:
-                continue
-            rendered = new_file_result.message
-            reason = "new file under directory scope"
-            log.info(
-                "trigger fired (new-file-in-dir) id=%s doc=%s",
-                trigger.id, doc_path,
-            )
-        else:
-            match = evaluate_delta(trigger, delta_payload)
-            if not match.matched:
-                continue
-            reason = match.reason
-            rendered = (
-                render_delta_message(instruction, delta_payload, reason=reason)
-                if instruction
-                else ""
-            )
-            log.info(
-                "trigger fired id=%s doc=%s reason=%s",
-                trigger.id, doc_path, reason,
-            )
+        # Each action renders its own message and dispatches to its own
+        # destination. The firing condition is the trigger's, shared by all.
+        for action in trigger.actions:
+            instruction = action.message or ""
+            if change_kind == ChangeKind.CREATE and trigger.scope_path != doc_path:
+                assert new_file_payload is not None
+                new_file_result = evaluate_new_file_in_dir(
+                    trigger, instruction, new_file_payload
+                )
+                if not new_file_result.triggered:
+                    continue
+                rendered = new_file_result.message
+                reason = "new file under directory scope"
+                log.info(
+                    "trigger fired (new-file-in-dir) id=%s doc=%s",
+                    trigger.id, doc_path,
+                )
+            else:
+                match = evaluate_delta(trigger, delta_payload)
+                if not match.matched:
+                    continue
+                reason = match.reason
+                rendered = (
+                    render_delta_message(instruction, delta_payload, reason=reason)
+                    if instruction
+                    else ""
+                )
+                log.info(
+                    "trigger fired id=%s doc=%s reason=%s",
+                    trigger.id, doc_path, reason,
+                )
 
-        fired += 1
-        _record_fire(
-            trigger=trigger,
-            doc_path=doc_path,
-            sha=sha,
-            change_kind=change_kind,
-            reason=reason,
-            instruction=instruction,
-            rendered_message=rendered,
-            destination=destination,
-            actor=actor,
-        )
+            fired += 1
+            _record_fire(
+                trigger=trigger,
+                action=action,
+                doc_path=doc_path,
+                sha=sha,
+                change_kind=change_kind,
+                reason=reason,
+                instruction=instruction,
+                rendered_message=rendered,
+                actor=actor,
+            )
     log.info(
         "fan_out_trigger_eval %s: %d/%d fired (%d skipped on owner ACL)",
         doc_path, fired, len(triggers), skipped_acl,
@@ -259,27 +261,28 @@ def _evaluate_one_schedule(
     if not match.matched:
         return False
 
-    instruction = trigger.message or ""
-    rendered = (
-        render_schedule_message(instruction, payload, reason=match.reason)
-        if instruction
-        else ""
-    )
     log.info(
         "schedule trigger fired id=%s scope=%s reason=%s",
         trigger.id, trigger.scope_path, match.reason,
     )
-    _record_fire(
-        trigger=trigger,
-        doc_path=trigger.scope_path,
-        sha="",
-        change_kind=ChangeKind.SCHEDULE,
-        reason=match.reason,
-        instruction=instruction,
-        rendered_message=rendered,
-        destination=trigger.destination,
-        actor=None,
-    )
+    for action in trigger.actions:
+        instruction = action.message or ""
+        rendered = (
+            render_schedule_message(instruction, payload, reason=match.reason)
+            if instruction
+            else ""
+        )
+        _record_fire(
+            trigger=trigger,
+            action=action,
+            doc_path=trigger.scope_path,
+            sha="",
+            change_kind=ChangeKind.SCHEDULE,
+            reason=match.reason,
+            instruction=instruction,
+            rendered_message=rendered,
+            actor=None,
+        )
     return True
 
 
@@ -312,13 +315,13 @@ def _read_at(ref: str, rel_path: str) -> str:
 def _record_fire(
     *,
     trigger: TriggerRecord,
+    action: TriggerAction,
     doc_path: str,
     sha: str,
     change_kind: ChangeKind,
     reason: str,
     instruction: str,
     rendered_message: str,
-    destination: object,
     actor: str | None,
 ) -> None:
     """Record a ``trigger.fire`` row, then dispatch outbound if configured.
@@ -338,7 +341,7 @@ def _record_fire(
             "reason": reason,
             "message": rendered_message,
             "message_instruction": instruction,
-            "destination": destination,
+            "destination": action.type,
         }
     )
     with session() as s:
@@ -351,17 +354,21 @@ def _record_fire(
             )
         )
 
-    if destination == destinations_repo.SLACK_ID:
-        _dispatch_to_slack(trigger=trigger, rendered_message=rendered_message)
-    elif destination != destinations_repo.EVENT_LOG_ID:
+    if action.type == destinations_repo.SLACK_ID:
+        _dispatch_to_slack(
+            trigger=trigger, action=action, rendered_message=rendered_message
+        )
+    elif action.type != destinations_repo.EVENT_LOG_ID:
         log.warning(
             "trigger %s has destination=%r but no outbound dispatcher is "
             "wired up; recorded to events only",
-            trigger.id, destination,
+            trigger.id, action.type,
         )
 
 
-def _dispatch_to_slack(*, trigger: TriggerRecord, rendered_message: str) -> None:
+def _dispatch_to_slack(
+    *, trigger: TriggerRecord, action: TriggerAction, rendered_message: str
+) -> None:
     """POST a fire's rendered message to the trigger's Slack channel.
 
     Resolves ``trigger.slack_webhook_id`` to its owner's webhook URL. No-op
@@ -369,7 +376,7 @@ def _dispatch_to_slack(*, trigger: TriggerRecord, rendered_message: str) -> None
     Failures are logged and swallowed — the fire is already recorded in the
     events table, so an unreachable Slack must not fail the task or lose it.
     """
-    if not trigger.slack_webhook_id:
+    if not action.slack_webhook_id:
         log.info(
             "trigger %s targets slack but has no channel set; recorded to events only",
             trigger.id,
@@ -377,12 +384,12 @@ def _dispatch_to_slack(*, trigger: TriggerRecord, rendered_message: str) -> None
         return
 
     webhook_url = slack_webhooks.get_url(
-        trigger.slack_webhook_id, owner_user_id=trigger.owner_user_id
+        action.slack_webhook_id, owner_user_id=trigger.owner_user_id
     )
     if not webhook_url:
         log.info(
             "trigger %s slack channel %s missing/not owned; recorded to events only",
-            trigger.id, trigger.slack_webhook_id,
+            trigger.id, action.slack_webhook_id,
         )
         return
 
@@ -392,6 +399,6 @@ def _dispatch_to_slack(*, trigger: TriggerRecord, rendered_message: str) -> None
 
     try:
         slack_client.post_message(webhook_url=webhook_url, text=rendered_message)
-        log.info("trigger %s dispatched to slack channel %s", trigger.id, trigger.slack_webhook_id)
+        log.info("trigger %s dispatched to slack channel %s", trigger.id, action.slack_webhook_id)
     except slack_client.SlackApiError:
         log.exception("trigger %s slack dispatch failed", trigger.id)
