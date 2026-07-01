@@ -231,6 +231,25 @@ def test_apply_op_concurrent_one_wins(users):
     assert winners[0].version == 1
 
 
+def test_apply_op_rejects_overlapping_changes(users):
+    s = coedit.open_session(_PATH, base_sha=None, initial_buffer="abcdef")
+    with pytest.raises(ValueError):
+        coedit.apply_op(
+            s.id,
+            base_version=0,
+            changes=[{"from": 0, "to": 3, "insert": "X"}, {"from": 2, "to": 4, "insert": "Y"}],
+            author_user_id="usr_a",
+        )
+
+
+def test_apply_op_rejects_malformed_change(users):
+    s = coedit.open_session(_PATH, base_sha=None, initial_buffer="abc")
+    with pytest.raises(ValueError):
+        coedit.apply_op(
+            s.id, base_version=0, changes=[{"from": 0, "insert": "x"}], author_user_id="usr_a"
+        )
+
+
 def test_apply_op_uses_utf16_offsets_with_emoji(users):
     # 'a'=unit 0, 😀=units 1-2 (astral → 2 UTF-16 units), 'b'=unit 3.
     # Replacing [3,4) must hit 'b' → "a😀!". Code-point slicing (len 3) would

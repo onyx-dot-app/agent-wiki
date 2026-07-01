@@ -215,17 +215,41 @@ def _apply_changes(text: str, changes: list[dict[str, Any]]) -> str:
     positions (where an astral char like an emoji counts as 2). We therefore
     slice in UTF-16 space, *not* Python code points — otherwise any document
     containing an emoji or other non-BMP character would slice at the wrong
-    place. Raises ``ValueError`` on an out-of-bounds range or a range that
-    splits a surrogate pair.
+    place. Raises ``ValueError`` on an out-of-bounds range, overlapping ranges,
+    or a range that splits a surrogate pair.
     """
     # 2 bytes per UTF-16 code unit → unit offset N is byte offset 2N.
     buf = bytearray(text.encode("utf-16-le"))
     n_units = len(buf) // 2
-    for ch in sorted(changes, key=lambda c: int(c["from"]), reverse=True):
-        frm, to = int(ch["from"]), int(ch["to"])
+
+    # Parse first, so a malformed change surfaces as ValueError (not KeyError /
+    # TypeError) — the whole function's error contract is ValueError.
+    parsed: list[tuple[int, int, str]] = []
+    for ch in changes:
+        if "from" not in ch or "to" not in ch:
+            raise ValueError(f"change missing 'from'/'to': {ch!r}")
+        try:
+            frm, to = int(ch["from"]), int(ch["to"])
+        except (TypeError, ValueError) as e:
+            raise ValueError(f"change has non-integer 'from'/'to': {ch!r}") from e
+        parsed.append((frm, to, str(ch.get("insert", ""))))
+
+    # Validate up front — bounds + non-overlap — rather than trust the caller's
+    # unenforced "non-overlapping" contract. Overlapping ranges would apply onto
+    # an already-mutated buffer and silently corrupt it.
+    parsed.sort(key=lambda t: (t[0], t[1]))
+    prev_to = 0
+    for frm, to, _ in parsed:
         if not (0 <= frm <= to <= n_units):
             raise ValueError(f"change range [{frm},{to}) out of bounds for length {n_units}")
-        buf[2 * frm : 2 * to] = str(ch.get("insert", "")).encode("utf-16-le")
+        if frm < prev_to:
+            raise ValueError(f"overlapping change: [{frm},{to}) intrudes on a prior range ending at {prev_to}")
+        prev_to = to
+
+    # Apply right-to-left so an earlier change's length delta never shifts a
+    # later change's (original-text) offsets.
+    for frm, to, insert in reversed(parsed):
+        buf[2 * frm : 2 * to] = insert.encode("utf-16-le")
     try:
         return bytes(buf).decode("utf-16-le")
     except UnicodeDecodeError as e:
