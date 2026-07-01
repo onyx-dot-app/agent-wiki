@@ -321,6 +321,7 @@ def reconcile_onto(
             values["version"] = new_version
         if checkpointed:
             values["checkpointed_version"] = new_version
+            values["last_checkpoint_at"] = now
         row = s.scalars(
             update(CoeditSession)
             .where(

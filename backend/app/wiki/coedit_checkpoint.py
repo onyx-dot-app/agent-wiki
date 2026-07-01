@@ -109,10 +109,16 @@ def checkpoint_session(session_id: int) -> str | None:
             checkpointed=True,
         )
         if res is None:
-            # A human op landed during the commit; record the checkpoint against
-            # the version we committed so we don't loop — the newer buffer is
-            # dirty and the next checkpoint reconciles it.
-            coedit.mark_checkpointed(session_id, base_sha=result.sha, version=sess.version)
+            # A human op raced in during the commit, so the buffer moved past
+            # what we committed. Leave base_sha / checkpointed_version untouched:
+            # the session stays dirty and the next checkpoint does a proper 3-way
+            # merge (base=old, current=HEAD, incoming=newer buffer) that preserves
+            # the folded-in agent edit. Advancing base_sha to result.sha here
+            # would make that next merge base==current and drop the agent's edit.
+            log.info(
+                "coedit checkpoint: concurrent op during commit of %s; reconciling next checkpoint",
+                path,
+            )
         elif res.changed:
             # The commit-time merge folded in a concurrent agent commit; tell
             # participants to reload the merged buffer.

@@ -78,6 +78,32 @@ def test_checkpoint_syncs_merged_buffer_and_doesnt_drop_agent_edit(repo):
     assert wiki_git.read_file(_PATH) == merged
 
 
+def test_checkpoint_raced_fallback_leaves_session_dirty(repo, monkeypatch):
+    # If a human op races in during the commit (reconcile CAS misses), the
+    # fallback must NOT advance base_sha / checkpointed_version — that would make
+    # the next checkpoint's merge base==current and drop the agent's edit. Leaving
+    # the session dirty at its old base lets the next checkpoint 3-way merge
+    # preserve both. Here we assert that invariant.
+    uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
+    doc = "one\ntwo\nthree\nfour\nfive\n"
+    sha = _seed_page(doc)
+    sess = coedit.open_session(_PATH, base_sha=sha, initial_buffer=doc)
+    coedit.join(sess.id, uid)
+    coedit.apply_op(sess.id, base_version=0, changes=[_ch(0, 3, "ONE")], author_user_id=uid)
+    wiki_git.commit_file(
+        _PATH, "one\ntwo\nthree\nfour\nFIVE\n", "agent edit", author="Agent <a@x.com>"
+    )
+
+    # Simulate the race: reconcile_onto's CAS misses.
+    monkeypatch.setattr(coedit, "reconcile_onto", lambda *a, **k: None)
+    coedit_checkpoint.checkpoint_session(sess.id)
+
+    st = coedit.get_active_session(_PATH)
+    assert st is not None
+    assert st.base_sha == sha  # NOT advanced past the buffer's ancestor
+    assert st.version > st.checkpointed_version  # still dirty → next checkpoint reconciles
+
+
 def test_checkpoint_is_noop_when_clean(repo):
     uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
     sha = _seed_page("hello world")
