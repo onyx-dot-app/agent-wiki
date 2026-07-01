@@ -38,6 +38,16 @@ def _to_dict(w: SlackWebhook) -> dict[str, Any]:
     }
 
 
+def list_all() -> list[dict[str, Any]]:
+    """id/owner/name of every stored webhook across all owners. The secret URL
+    is deliberately not selected. Reconcile-only: no HTTP surface exposes this."""
+    with session() as s:
+        rows = s.execute(
+            select(SlackWebhook.id, SlackWebhook.owner_user_id, SlackWebhook.name)
+        ).all()
+        return [{"id": r.id, "owner_user_id": r.owner_user_id, "name": r.name} for r in rows]
+
+
 def list_for_user(user_id: str) -> list[dict[str, Any]]:
     """A user's webhooks, newest first."""
     with session() as s:
