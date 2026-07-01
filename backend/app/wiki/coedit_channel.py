@@ -27,6 +27,7 @@ from pydantic import BaseModel, ConfigDict
 
 from app.realtime import bus
 from app.wiki import coedit
+from app.wiki.coedit import Change
 
 log = logging.getLogger(__name__)
 
@@ -136,7 +137,7 @@ def broadcast_presence(coedit_session_id: int) -> None:
 def broadcast_op(
     coedit_session_id: int,
     version: int,
-    changes: list[coedit.Change],
+    changes: list[Change],
     author_user_id: str,
 ) -> None:
     """Broadcast an applied edit op to the session's other connections.
