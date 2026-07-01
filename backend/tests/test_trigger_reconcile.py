@@ -86,3 +86,21 @@ def test_reconcile_warns_when_webhook_missing(tmp_repo, caplog):
     warning = next(r for r in caplog.records if "wh_deleted" in r.getMessage())
     assert path in warning.getMessage()
     assert "usr_1" in warning.getMessage()
+
+
+def test_reconcile_mirrors_unattached_channels(tmp_repo):
+    """A stored Slack channel with no trigger referencing it still gets a
+    destination config, so it stays visible in the destinations UI."""
+    seed_user("usr_1")
+    slack_webhooks.create("usr_1", "Unattached", _HOOK)
+
+    reconcile_legacy_slack_triggers()
+
+    configs = dest_configs.list_for_user("usr_1")
+    assert [c["name"] for c in configs] == ["Unattached"]
+    assert configs[0]["type"] == "slack"
+    assert dest_configs.get_secret(configs[0]["id"], owner_user_id="usr_1") == _HOOK
+
+    # Idempotent: a second pass creates no duplicate.
+    reconcile_legacy_slack_triggers()
+    assert len(dest_configs.list_for_user("usr_1")) == 1

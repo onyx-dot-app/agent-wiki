@@ -38,6 +38,14 @@ def _to_dict(w: SlackWebhook) -> dict[str, Any]:
     }
 
 
+def list_all() -> list[dict[str, Any]]:
+    """Every stored webhook across all owners. Reconcile-only: no HTTP
+    surface exposes this."""
+    with session() as s:
+        rows = s.scalars(select(SlackWebhook)).all()
+        return [_to_dict(w) for w in rows]
+
+
 def list_for_user(user_id: str) -> list[dict[str, Any]]:
     """A user's webhooks, newest first."""
     with session() as s:
