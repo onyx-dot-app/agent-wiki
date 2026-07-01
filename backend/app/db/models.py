@@ -901,6 +901,12 @@ class CoeditSession(Base):
     # with the version it was based on; the server rebases a stale patch onto
     # the current buffer before applying.
     version: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default=text("0"))
+    # The ``version`` at the last checkpoint — the buffer is "dirty" (has
+    # uncommitted edits) when ``version > checkpointed_version``. Lets the
+    # checkpoint worker skip clean sessions instead of re-committing them.
+    checkpointed_version: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, server_default=text("0")
+    )
     # Git HEAD the buffer was last checkpointed against — the merge base for the
     # checkpoint 3-way merge. Null until the session is seeded from a page's
     # HEAD (or, for a brand-new page, until the first checkpoint).

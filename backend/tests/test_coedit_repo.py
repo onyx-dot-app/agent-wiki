@@ -127,10 +127,11 @@ def test_participants_join_touch_leave(users):
 
 def test_mark_checkpointed(users):
     s = coedit.open_session(_PATH, base_sha="sha1")
-    coedit.mark_checkpointed(s.id, base_sha="sha2")
+    coedit.mark_checkpointed(s.id, base_sha="sha2", version=3)
     fetched = coedit.get_active_session(_PATH)
     assert fetched is not None
     assert fetched.base_sha == "sha2"
+    assert fetched.checkpointed_version == 3
     assert fetched.last_checkpoint_at is not None
 
 

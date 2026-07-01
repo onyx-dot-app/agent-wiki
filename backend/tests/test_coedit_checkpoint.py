@@ -1,0 +1,89 @@
+"""Checkpoint engine (app/wiki/coedit_checkpoint.py) — commits a session's live
+buffer to git via the merge gateway, with last-editor author + co-author
+trailers. DB + real git (the ``tmp_repo`` fixture).
+"""
+from __future__ import annotations
+
+import pytest
+
+from app.auth import users as users_repo
+from app.wiki import coedit, coedit_checkpoint
+from app.wiki import git as wiki_git
+
+_PATH = "guides/setup.md"
+
+
+def _seed_page(body: str) -> str:
+    return wiki_git.commit_file(_PATH, body, "seed", author="Seed <seed@x.com>")
+
+
+def _ch(frm: int, to: int, insert: str) -> coedit.Change:
+    return coedit.Change.model_validate({"from": frm, "to": to, "insert": insert})
+
+
+@pytest.fixture
+def repo(tmp_repo):
+    return tmp_repo
+
+
+def test_checkpoint_commits_buffer_and_attributes_last_editor(repo):
+    uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
+    sha = _seed_page("hello world")
+    sess = coedit.open_session(_PATH, base_sha=sha, initial_buffer="hello world")
+    coedit.join(sess.id, uid)
+    coedit.apply_op(sess.id, base_version=0, changes=[_ch(0, 5, "hi")], author_user_id=uid)
+
+    new_sha = coedit_checkpoint.checkpoint_session(sess.id)
+
+    assert new_sha is not None
+    assert wiki_git.read_file(_PATH) == "hi world"
+    st = coedit.get_active_session(_PATH)
+    assert st is not None
+    assert st.checkpointed_version == 1
+    assert st.base_sha == new_sha
+    # git author is the last editor.
+    assert wiki_git.history(_PATH)[0].author == "Ada"
+
+
+def test_checkpoint_is_noop_when_clean(repo):
+    uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
+    sha = _seed_page("hello world")
+    sess = coedit.open_session(_PATH, base_sha=sha, initial_buffer="hello world")
+    coedit.join(sess.id, uid)
+    coedit.apply_op(sess.id, base_version=0, changes=[_ch(0, 5, "hi")], author_user_id=uid)
+    assert coedit_checkpoint.checkpoint_session(sess.id) is not None
+    # Nothing new since the last checkpoint → no second commit.
+    assert coedit_checkpoint.checkpoint_session(sess.id) is None
+
+
+def test_checkpoint_merges_concurrent_agent_commit(repo):
+    # Distant, non-overlapping edits so git merge-file resolves cleanly (no LLM):
+    # the buffer edits the first line, the agent edits the last, lines apart.
+    uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
+    doc = "one\ntwo\nthree\nfour\nfive\n"
+    sha = _seed_page(doc)
+    sess = coedit.open_session(_PATH, base_sha=sha, initial_buffer=doc)
+    coedit.join(sess.id, uid)
+    # Human edits the first line in the buffer ("one" → "ONE")...
+    coedit.apply_op(sess.id, base_version=0, changes=[_ch(0, 3, "ONE")], author_user_id=uid)
+    # ...while an agent commits a change to the last line out of band.
+    wiki_git.commit_file(
+        _PATH, "one\ntwo\nthree\nfour\nFIVE\n", "agent edit", author="Agent <a@x.com>"
+    )
+
+    coedit_checkpoint.checkpoint_session(sess.id)
+
+    # 3-way merge keeps both non-overlapping edits.
+    assert wiki_git.read_file(_PATH) == "ONE\ntwo\nthree\nfour\nFIVE\n"
+
+
+def test_commit_message_credits_other_participants_as_coauthors(repo):
+    a = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
+    b = users_repo.create(email="bo@x.com", password="hunter2-x", name="Bo")
+    sess = coedit.open_session(_PATH, base_sha=None)
+    coedit.join(sess.id, a)
+    coedit.join(sess.id, b)
+    # Bo is the primary author (git author); Ada is credited as a co-author.
+    msg = coedit_checkpoint._commit_message(sess.id, primary_author_id=b)
+    assert "Co-authored-by: Ada <ada@x.com>" in msg
+    assert "bo@x.com" not in msg
