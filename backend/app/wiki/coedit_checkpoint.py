@@ -23,7 +23,7 @@ import logging
 from app.auth import User, set_current_user
 from app.auth import users as users_repo
 from app.models.wiki import ChangeKind
-from app.wiki import coedit
+from app.wiki import coedit, coedit_channel
 from app.wiki import git as wiki_git
 from app.wiki.utils import commit_and_fan_out
 
@@ -90,10 +90,36 @@ def checkpoint_session(session_id: int) -> str | None:
             ai_merge=True,
             skip_acl=True,
             record_activity=False,
+            # This is the session's own commit — don't fold it back into the
+            # session as an inbound rebase (we sync the merged result below).
+            trigger_coedit_rebase=False,
         )
 
     if result is not None:
-        coedit.mark_checkpointed(session_id, base_sha=result.sha, version=sess.version)
+        # Sync the committed content back into the buffer. When the commit-time
+        # 3-way merge folded in a concurrent agent/ingest commit, result.new_body
+        # differs from the buffer we committed; writing it back (and broadcasting
+        # the delta) keeps the live buffer == git and stops a later checkpoint
+        # from re-committing the pre-merge buffer and dropping the agent's edit.
+        res = coedit.reconcile_onto(
+            session_id,
+            base_version=sess.version,
+            old_buffer=sess.buffer_text,
+            merged_text=result.new_body,
+            new_base_sha=result.sha,
+            checkpointed=True,
+        )
+        if res is None:
+            # A human op landed during the commit; record the checkpoint against
+            # the version we committed so we don't loop — the newer buffer is
+            # dirty and the next checkpoint reconciles it.
+            coedit.mark_checkpointed(session_id, base_sha=result.sha, version=sess.version)
+        else:
+            row, change = res
+            if change is not None:
+                coedit_channel.broadcast_op(
+                    session_id, row.version, [change], author_user_id="agent"
+                )
         return result.sha
 
     # None = the merge produced exactly the current HEAD (buffer already matches

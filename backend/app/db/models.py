@@ -974,8 +974,11 @@ class CoeditOp(Base):
         BigInteger, ForeignKey("coedit_sessions.id", ondelete="CASCADE"), nullable=False
     )
     seq: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    author_user_id: Mapped[str] = mapped_column(
-        Text, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    # Null = a system/merge-origin op: a folded inbound agent commit
+    # (live-rebase) or a checkpoint's AI-merged result synced back into the
+    # buffer. Human ops always carry the editor's id.
+    author_user_id: Mapped[str | None] = mapped_column(
+        Text, ForeignKey("users.id", ondelete="CASCADE"), nullable=True
     )
     base_version: Mapped[int] = mapped_column(BigInteger, nullable=False)
     op_payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)

@@ -33,6 +33,7 @@ import logging
 
 from app.db import fts, page_dirs
 from app.mcp_server import pubsub as mcp_pubsub
+from app.tasks import coedit_rebase as coedit_rebase_trigger
 from app.tasks.reindex import index_path
 from app.tasks.triggers import fan_out_trigger_eval
 from app.tasks.update_frequency import check_update_frequency
@@ -63,6 +64,7 @@ def after_doc_write(
     actor: str | None,
     *,
     owner_user_id: str | None = None,
+    trigger_coedit_rebase: bool = True,
 ) -> None:
     """Run reindex + trigger fan-out + MCP pub-sub for a wiki ``.md`` write.
 
@@ -96,6 +98,10 @@ def after_doc_write(
     # CREATE (no comments yet); the real work is on EDIT.
     _remap_comments_safe(rel_path)
     mcp_pubsub.publish_doc_update(rel_path, sha, change_kind)
+    # Fold this commit into any open co-edit session for the page (skip for a
+    # session's own checkpoint commit — trigger_coedit_rebase=False).
+    if trigger_coedit_rebase:
+        coedit_rebase_trigger.on_wiki_commit(rel_path, sha, actor)
     if change_kind == ChangeKind.CREATE:
         mcp_pubsub.publish_list_changed()
 

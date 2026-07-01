@@ -47,6 +47,37 @@ def test_checkpoint_commits_buffer_and_attributes_last_editor(repo):
     assert wiki_git.history(_PATH)[0].author == "Ada"
 
 
+def test_checkpoint_syncs_merged_buffer_and_doesnt_drop_agent_edit(repo):
+    # When the checkpoint's 3-way merge folds in a concurrent agent commit, the
+    # merged result must be written back into the buffer — otherwise a later
+    # checkpoint would re-commit the pre-merge buffer and silently drop the
+    # agent's edit.
+    uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
+    doc = "one\ntwo\nthree\nfour\nfive\n"
+    sha = _seed_page(doc)
+    sess = coedit.open_session(_PATH, base_sha=sha, initial_buffer=doc)
+    coedit.join(sess.id, uid)
+    # Human edits the first line in the buffer; agent commits a distant change.
+    coedit.apply_op(sess.id, base_version=0, changes=[_ch(0, 3, "ONE")], author_user_id=uid)
+    wiki_git.commit_file(
+        _PATH, "one\ntwo\nthree\nfour\nFIVE\n", "agent edit", author="Agent <a@x.com>"
+    )
+
+    coedit_checkpoint.checkpoint_session(sess.id)
+
+    merged = "ONE\ntwo\nthree\nfour\nFIVE\n"
+    assert wiki_git.read_file(_PATH) == merged
+    st = coedit.get_active_session(_PATH)
+    assert st is not None
+    assert st.buffer_text == merged  # buffer synced to the merged result
+    assert st.checkpointed_version == st.version  # clean
+
+    # A second checkpoint is a clean no-op — the agent's edit is retained, not
+    # dropped by re-committing a stale buffer.
+    assert coedit_checkpoint.checkpoint_session(sess.id) is None
+    assert wiki_git.read_file(_PATH) == merged
+
+
 def test_checkpoint_is_noop_when_clean(repo):
     uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
     sha = _seed_page("hello world")
