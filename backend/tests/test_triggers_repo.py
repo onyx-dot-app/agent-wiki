@@ -34,7 +34,7 @@ def test_create_and_get(tmp_repo):
     assert t["enabled"] is True
     assert t["kind"] == "delta"
     assert t["message"] == "status changed"
-    assert t["destination"] == "event_log"
+    assert t["destination_config_id"] is None
 
     fetched = repo.get(t["id"])
     assert fetched == t
@@ -131,17 +131,17 @@ def test_create_rejects_missing_message(tmp_repo):
         )
 
 
-def test_create_rejects_unknown_destination(tmp_repo):
+def test_create_rejects_unowned_destination_config(tmp_repo):
     from app.triggers import repo
 
     uid = seed_user(email="a@b.com")
-    with pytest.raises(ValueError, match="destination"):
+    with pytest.raises(ValueError, match="destination_config_id"):
         repo.create(
             owner_user_id=uid,
             scope_path="a.md",
             nl_description="x",
             message="m",
-            destination="no_such_destination",
+            destination_config_id="dst_nonexistent",
         )
 
 
@@ -238,3 +238,13 @@ def test_single_doc_rename_relocates_doc_scoped_trigger(tmp_repo):
     assert got is not None
     assert got["scope_path"] == "notes/renamed.md"
     assert got["file_path"] == f"notes/.trigger_{t['id']}_renamed.yaml"
+
+
+def test_parse_actions_reads_legacy_single_destination_blob():
+    """A pre-multi-action ``action_json`` blob loads as one action."""
+    import json
+
+    from app.triggers.repo import _parse_actions
+
+    legacy = json.dumps({"message": "hi", "destination": "slack"})
+    assert _parse_actions(legacy) == [{"destination_config_id": None, "message": "hi"}]

@@ -57,7 +57,7 @@ def seed_trigger(
     scope_path: str,
     nl_description: str = "fire when status changes",
     message: str | None = None,
-    destination: str = "event_log",
+    destination_config_id: str | None = None,
     enabled: bool = True,
     kind: str = "delta",
     schedule_cron: str | None = None,
@@ -65,7 +65,9 @@ def seed_trigger(
     schedule_start_at: str | None = None,
     schedule_last_fired_at: str | None = None,
 ) -> str:
-    action_json = json.dumps({"message": message, "destination": destination})
+    action_json = json.dumps(
+        {"actions": [{"destination_config_id": destination_config_id, "message": message}]}
+    )
     with session() as s:
         s.add(
             Trigger(

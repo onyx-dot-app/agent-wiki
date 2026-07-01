@@ -62,19 +62,13 @@ def serialize(trigger: dict[str, Any]) -> str:
         "scope_path": trigger["scope_path"],
         "kind": trigger["kind"],
         "nl_description": trigger["nl_description"],
-        "message": trigger.get("message"),
-        "destination": trigger.get("destination"),
+        "actions": _serialize_actions(trigger["actions"]),
         "enabled": bool(trigger["enabled"]),
         "created_at": trigger.get("created_at"),
     }
-    # Slack channel reference — emitted only for slack-destination triggers so
-    # other YAMLs stay clean. It's an opaque id (not the secret webhook URL,
-    # which lives only on the slack_webhooks row), so it's safe in the repo.
-    if trigger.get("slack_webhook_id") is not None:
-        payload["slack_webhook_id"] = trigger["slack_webhook_id"]
     # Schedule fields are emitted only when the trigger is schedule-kind, so
     # delta YAMLs stay clean. ``schedule_last_fired_at`` is intentionally
-    # *never* written — it's runtime state, and persisting it would commit
+    # *never* written: it's runtime state, and persisting it would commit
     # to the wiki repo on every fire.
     for key in ("schedule_cron", "schedule_timezone", "schedule_start_at"):
         value = trigger.get(key)
@@ -83,21 +77,54 @@ def serialize(trigger: dict[str, Any]) -> str:
     return yaml.safe_dump(payload, sort_keys=False)
 
 
+def _serialize_actions(actions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """One YAML entry per action. ``destination_config_id`` references a
+    ``destination_configs`` row and is absent for event-log actions."""
+    out: list[dict[str, Any]] = []
+    for action in actions:
+        entry: dict[str, Any] = {}
+        if action.get("destination_config_id") is not None:
+            entry["destination_config_id"] = action["destination_config_id"]
+        entry["message"] = action.get("message")
+        out.append(entry)
+    return out
+
+
 def parse(yaml_text: str) -> dict[str, Any]:
-    """Parse a trigger YAML file. Optional fields default to ``None`` so
-    old or hand-written files without them still load.
+    """Parse a trigger YAML file into the canonical ``actions``-list shape.
+
+    Files written before destination configs carried a single ``message`` /
+    ``destination`` / ``slack_webhook_id`` at the top level. Those load as one
+    event-log action here; the reconcile maps any slack channel to its
+    destination config and rewrites the file.
     """
     data: object = yaml.safe_load(yaml_text)
     if not isinstance(data, dict) or "id" not in data:
         raise ValueError("invalid trigger file: missing 'id'")
     typed = cast(dict[str, Any], data)
-    typed.setdefault("message", None)
-    typed.setdefault("destination", None)
-    typed.setdefault("slack_webhook_id", None)
+    typed["actions"] = _parse_actions(typed)
+    for legacy in ("message", "destination", "slack_webhook_id"):
+        typed.pop(legacy, None)
     typed.setdefault("schedule_cron", None)
     typed.setdefault("schedule_timezone", None)
     typed.setdefault("schedule_start_at", None)
     return typed
+
+
+def _parse_actions(data: dict[str, Any]) -> list[dict[str, Any]]:
+    """Read the ``actions`` list, or synthesize one event-log action from a
+    legacy single-destination file (the reconcile fixes slack mappings)."""
+    raw = data.get("actions")
+    if isinstance(raw, list):
+        return [_normalize_action(a) for a in cast(list[dict[str, Any]], raw)]
+    return [{"destination_config_id": None, "message": data.get("message")}]
+
+
+def _normalize_action(action: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "destination_config_id": action.get("destination_config_id"),
+        "message": action.get("message"),
+    }
 
 
 def write_trigger(trigger: dict[str, Any], *, file_path: str, actor: str | None) -> str:

@@ -17,14 +17,12 @@ import {
   type FrequencyPreset,
 } from "@/lib/cron";
 import {
-  createSlackWebhook,
+  createDestinationConfig,
   createTrigger,
-  getTriggerDestinations,
   updateTrigger,
-  useSlackWebhooks,
+  useDestinationConfigs,
   type Trigger,
   type TriggerCreateInput,
-  type TriggerDestination,
   type TriggerKind,
 } from "@/lib/triggers";
 
@@ -36,14 +34,6 @@ interface Props {
   /** Lock the scope_path input so callers (e.g. doc page) can pin it. */
   lockScope?: boolean;
 }
-
-const FALLBACK_DESTINATIONS: TriggerDestination[] = [
-  {
-    id: "event_log",
-    name: "Event Log",
-    description: "Tracked in the event log only.",
-  },
-];
 
 const EXAMPLE_IF = "the document is updated with a release version";
 const EXAMPLE_SEND =
@@ -60,13 +50,10 @@ export function TriggerModal({
   const [scopePath, setScopePath] = useState("");
   const [ifText, setIfText] = useState("");
   const [sendText, setSendText] = useState("");
-  const [destinations, setDestinations] = useState<TriggerDestination[]>(
-    FALLBACK_DESTINATIONS,
+  const { configs, refresh: refreshConfigs } = useDestinationConfigs();
+  const [destinationConfigId, setDestinationConfigId] = useState<string | null>(
+    null,
   );
-  const [destination, setDestination] = useState(FALLBACK_DESTINATIONS[0].id);
-  const { webhooks: slackWebhooks, refresh: refreshSlackWebhooks } =
-    useSlackWebhooks();
-  const [slackWebhookId, setSlackWebhookId] = useState<string | null>(null);
   const [addingChannel, setAddingChannel] = useState(false);
   const [newChannelName, setNewChannelName] = useState("");
   const [newChannelUrl, setNewChannelUrl] = useState("");
@@ -85,8 +72,7 @@ export function TriggerModal({
     setScopePath(initial?.scope_path ?? "");
     setIfText(initial?.nl_description ?? "");
     setSendText(initial?.message ?? "");
-    setDestination(initial?.destination ?? FALLBACK_DESTINATIONS[0].id);
-    setSlackWebhookId(initial?.slack_webhook_id ?? null);
+    setDestinationConfigId(initial?.destination_config_id ?? null);
     setAddingChannel(false);
     setNewChannelName("");
     setNewChannelUrl("");
@@ -105,32 +91,12 @@ export function TriggerModal({
     initial?.scope_path,
     initial?.nl_description,
     initial?.message,
-    initial?.destination,
-    initial?.slack_webhook_id,
+    initial?.destination_config_id,
     initial?.kind,
     initial?.schedule_cron,
     initial?.schedule_timezone,
     initial?.schedule_start_at,
   ]);
-
-  useEffect(() => {
-    if (!open) return;
-    let cancelled = false;
-    getTriggerDestinations()
-      .then((rows) => {
-        if (cancelled || rows.length === 0) return;
-        setDestinations(rows);
-        setDestination((cur) =>
-          rows.some((r) => r.id === cur) ? cur : rows[0].id,
-        );
-      })
-      .catch(() => {
-        // Keep fallback list silently.
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [open]);
 
   if (!open) return null;
 
@@ -148,8 +114,7 @@ export function TriggerModal({
         scope_path: scopePath.trim(),
         nl_description: nl,
         message: msg,
-        destination,
-        slack_webhook_id: destination === "slack" ? slackWebhookId : null,
+        destination_config_id: destinationConfigId,
         kind,
       };
       if (kind === "schedule") {
@@ -170,8 +135,7 @@ export function TriggerModal({
           scope_path: scopePath.trim(),
           nl_description: nl,
           message: msg,
-          destination,
-          slack_webhook_id: destination === "slack" ? slackWebhookId : null,
+          destination_config_id: destinationConfigId,
           schedule_cron: kind === "schedule" ? computedCron : null,
           schedule_timezone: kind === "schedule" ? tz : null,
           schedule_start_at:
@@ -193,27 +157,18 @@ export function TriggerModal({
     scopePath.trim() &&
     ifText.trim() &&
     sendText.trim() &&
-    (kind === "delta" || (computedCron && tz)) &&
-    (destination !== "slack" || Boolean(slackWebhookId));
-  const selectedDest = destinations.find((d) => d.id === destination);
-  const destDescription =
-    destination === "slack" ? "" : (selectedDest?.description ?? "");
+    (kind === "delta" || (computedCron && tz));
+  const selectedConfig = configs.find((c) => c.id === destinationConfigId);
+  const destDescription = selectedConfig
+    ? ""
+    : "Tracked in the event log only.";
 
-  // The "TO" select value encodes a slack channel as ``slack:<id>`` so one
-  // control can pick Event Log or any of the user's channels.
-  const destSelectValue =
-    destination === "slack" && slackWebhookId
-      ? `slack:${slackWebhookId}`
-      : destination;
+  // The "TO" select encodes event-log as an empty value and any destination
+  // config by its id.
+  const destSelectValue = destinationConfigId ?? "";
 
   function onPickDestination(value: string) {
-    if (value.startsWith("slack:")) {
-      setDestination("slack");
-      setSlackWebhookId(value.slice("slack:".length));
-    } else {
-      setDestination(value);
-      setSlackWebhookId(null);
-    }
+    setDestinationConfigId(value === "" ? null : value);
   }
 
   async function onAddChannel() {
@@ -223,10 +178,13 @@ export function TriggerModal({
     setBusy(true);
     setError(null);
     try {
-      const created = await createSlackWebhook(name, url);
-      await refreshSlackWebhooks();
-      setDestination("slack");
-      setSlackWebhookId(created.id);
+      const created = await createDestinationConfig({
+        type: "slack",
+        name,
+        secret: url,
+      });
+      await refreshConfigs();
+      setDestinationConfigId(created.id);
       setAddingChannel(false);
       setNewChannelName("");
       setNewChannelUrl("");
@@ -360,27 +318,16 @@ export function TriggerModal({
             disabled={busy}
             className="box-border w-full cursor-pointer rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-00) px-[10px] py-2 text-sm outline-none"
           >
-            {destinations
-              .filter((d) => d.id !== "slack")
-              .map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.name}
-                </option>
-              ))}
-            {slackWebhooks.map((w) => (
-              <option key={w.id} value={`slack:${w.id}`}>
-                Slack · {w.name}
+            <option value="">Event log</option>
+            {configs.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.type} · {c.name}
               </option>
             ))}
           </select>
           {destDescription && (
             <span className="text-xs leading-[1.4] text-(--text-03)">
               {destDescription}
-            </span>
-          )}
-          {destination === "slack" && !slackWebhookId && (
-            <span className="text-xs leading-[1.4] text-(--status-text-error-05)">
-              Pick a Slack channel, or add one below.
             </span>
           )}
           {!addingChannel ? (

@@ -37,7 +37,7 @@ def test_create_then_list(client):
     assert body["id"].startswith("trg_")
     assert body["enabled"] is True
     assert body["message"] == "status flipped"
-    assert body["destination"] == "event_log"
+    assert body["destination_config_id"] is None
 
     res = client.get("/api/triggers")
     assert res.status_code == 200
@@ -76,11 +76,11 @@ def test_create_validation_errors(client):
     )
     assert res.status_code == 400
 
-    # unknown destination id
+    # unowned destination config
     res = client.post(
         "/api/triggers",
         json={"scope_path": "a.md", "nl_description": "x", "message": "m",
-              "destination": "no_such_destination"},
+              "destination_config_id": "dst_nonexistent"},
     )
     assert res.status_code == 400
 
@@ -119,11 +119,11 @@ def test_update_disable_then_re_enable(client):
     assert body["nl_description"] == "new"
     assert body["message"] == "m2"
 
-    # destination updates: known ids are ok, unknown ones rejected.
-    res = client.put(f"/api/triggers/{tid}", json={"destination": "event_log"})
+    # destination config updates: null clears it, an unowned id is rejected.
+    res = client.put(f"/api/triggers/{tid}", json={"destination_config_id": None})
     assert res.status_code == 200
     res = client.put(
-        f"/api/triggers/{tid}", json={"destination": "no_such_destination"}
+        f"/api/triggers/{tid}", json={"destination_config_id": "dst_nonexistent"}
     )
     assert res.status_code == 400
 

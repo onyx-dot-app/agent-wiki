@@ -37,7 +37,7 @@ class _FakeResp(BaseModel):
 
 
 def _record(**overrides):
-    from app.triggers.engine import TriggerRecord
+    from app.triggers.engine import TriggerAction, TriggerRecord
 
     base = TriggerRecord(
         id="trg_x",
@@ -45,8 +45,7 @@ def _record(**overrides):
         scope_path="a.md",
         kind="schedule",
         nl_description="x",
-        message="m",
-        destination="event_log",
+        actions=[TriggerAction(message="m")],
         enabled=True,
         file_path=None,
         created_at=None,

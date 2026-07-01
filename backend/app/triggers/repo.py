@@ -6,19 +6,17 @@ If the DB write fails after the file commit, ``rebuild_from_filesystem``
 will re-converge the cache; the inverse (file fails after the row) leaves
 nothing behind because the row write is the second step.
 
-Format (every trigger has these three fields plus the standard scope/kind/enabled):
-  * **if** — ``nl_description``: natural-language firing condition.
-  * **message** — the notification body to deliver when the trigger fires.
-  * **destination** — slug of a row in ``trigger_destinations``. Defaults to
-    ``"event_log"`` (record the fire to the events table; no outbound
-    dispatch). New destinations are added by migration as their dispatchers
-    come online — see ``app/triggers/destinations.py``.
+Format (every trigger has a firing condition plus a list of actions):
+  * **if**: ``nl_description``, the natural-language firing condition.
+  * **actions**: a list of ``{destination_config_id, message}``.
+    ``destination_config_id`` references a ``destination_configs`` row, or is
+    null for event-log-only fires. ``message`` is the body rendered on fire.
 
-``message`` and ``destination`` are stored together in the ``action_json``
-column (and the ``action`` block in the YAML file). The repo layer exposes
-them as flat dict keys for callers. Legacy rows where ``destination`` is
-``None`` (predating the destinations catalog) are read as ``"event_log"``
-so callers don't need to special-case the migration boundary.
+Actions live as ``{"actions": [...]}`` in the ``action_json`` column and the
+``actions`` block in the YAML file. Create/update and the HTTP layer are
+single-action for now: they take one ``message``/``destination_config_id`` and
+build a one-element list. ``_to_dict`` projects the first action back to those
+flat keys. A legacy single-destination blob reads as one event-log action.
 """
 
 from __future__ import annotations
@@ -36,8 +34,7 @@ from sqlalchemy import delete as sa_delete, or_, select, update as sa_update
 
 from app.db.models import Event, Trigger, User
 from app.db.session import advisory_xact_lock, session
-from app.slack import webhooks as slack_webhooks
-from app.triggers import destinations as destinations_repo
+from app.triggers import destination_configs as dest_configs
 from app.triggers import storage
 
 log = logging.getLogger(__name__)
@@ -52,49 +49,33 @@ _REBUILD_ADVISORY_LOCK = 0x74726967
 
 ALLOWED_KINDS = {"delta", "schedule"}
 
-# Default destination for new triggers — fires go to the events table.
-DEFAULT_DESTINATION = destinations_repo.EVENT_LOG_ID
 
-
-def _validate_destination(destination: object) -> str:
-    """Coerce + validate a destination value into a known slug.
-
-    Returns the canonical slug. Raises ``ValueError`` if the value isn't a
-    string or doesn't match a row in ``trigger_destinations``.
-    """
-    if destination is None:
-        return destinations_repo.EVENT_LOG_ID
-    if not isinstance(destination, str) or not destination.strip():
-        raise ValueError(f"destination must be a destination id string; got {destination!r}")
-    slug = destination.strip()
-    if not destinations_repo.exists(slug):
-        raise ValueError(
-            f"destination {slug!r} not found — call get_trigger_destinations to list available ids"
-        )
-    return slug
-
-
-def _validate_slack_webhook(
-    *, destination: str, slack_webhook_id: object, owner_user_id: str
+def _validate_destination_config(
+    destination_config_id: object, *, owner_user_id: str
 ) -> str | None:
-    """Resolve the Slack channel reference for a trigger.
-
-    A ``slack`` destination requires a ``slack_webhook_id`` that the owner
-    actually owns. Any other destination must not carry one (we null it so a
-    destination flip doesn't leave a dangling reference).
-    """
-    if destination != destinations_repo.SLACK_ID:
+    """None means event-log only. Otherwise the id must reference a
+    destination config the owner owns."""
+    if destination_config_id is None:
         return None
-    if not isinstance(slack_webhook_id, str) or not slack_webhook_id.strip():
-        raise ValueError("a Slack destination requires slack_webhook_id (the channel to post to)")
-    wid = slack_webhook_id.strip()
-    if not slack_webhooks.owned_by(wid, owner_user_id):
-        raise ValueError(f"slack_webhook_id {wid!r} not found")
-    return wid
+    if not isinstance(destination_config_id, str) or not destination_config_id.strip():
+        raise ValueError(
+            f"destination_config_id must be a string or null; got {destination_config_id!r}"
+        )
+    cid = destination_config_id.strip()
+    if not dest_configs.owned_by(cid, owner_user_id):
+        raise ValueError(f"destination_config_id {cid!r} not found")
+    return cid
 
 
-def _action_payload(*, message: str, destination: object) -> str:
-    return json.dumps({"message": message, "destination": destination})
+def _actions_json(actions: list[dict[str, Any]]) -> str:
+    """Serialize the actions list into the ``action_json`` column."""
+    return json.dumps({"actions": actions})
+
+
+def _one_action(
+    *, message: str | None, destination_config_id: str | None
+) -> list[dict[str, Any]]:
+    return [{"destination_config_id": destination_config_id, "message": message}]
 
 
 def _validate_schedule_fields(
@@ -149,22 +130,42 @@ def _validate_schedule_fields(
     return None, None, None
 
 
-def _parse_action(raw: str) -> dict[str, Any]:
-    """Parse the ``action_json`` column."""
-    return cast(dict[str, Any], json.loads(raw))
+def _parse_actions(raw: str) -> list[dict[str, Any]]:
+    """Actions stored in ``action_json``. A legacy single-destination blob
+    reads as one event-log action."""
+    parsed = cast(dict[str, Any], json.loads(raw))
+    raw_actions = parsed.get("actions")
+    if isinstance(raw_actions, list) and raw_actions:
+        return [
+            {
+                "destination_config_id": a.get("destination_config_id"),
+                "message": a.get("message"),
+            }
+            for a in cast(list[dict[str, Any]], raw_actions)
+        ]
+    return [{"destination_config_id": None, "message": parsed.get("message")}]
+
+
+def _first_message(data: dict[str, Any]) -> object:
+    """The first action's message from a parsed trigger dict."""
+    actions = data.get("actions")
+    if isinstance(actions, list) and actions:
+        return cast(dict[str, Any], actions[0]).get("message")
+    return None
 
 
 def _to_dict(t: Trigger) -> dict[str, Any]:
-    action = _parse_action(t.action_json)
+    actions = _parse_actions(t.action_json)
+    first = actions[0]
     return {
         "id": t.id,
         "owner_user_id": t.owner_user_id,
         "scope_path": t.scope_path,
         "kind": t.kind,
         "nl_description": t.nl_description,
-        "message": action.get("message"),
-        "destination": action["destination"],
-        "slack_webhook_id": t.slack_webhook_id,
+        "actions": actions,
+        "message": first.get("message"),
+        "destination_config_id": first.get("destination_config_id"),
         "enabled": t.enabled,
         "created_at": t.created_at,
         "last_edited_at": t.last_edited_at,
@@ -186,8 +187,7 @@ def create(
     scope_path: str,
     nl_description: str,
     message: str,
-    destination: object = None,
-    slack_webhook_id: object = None,
+    destination_config_id: object = None,
     kind: str = "delta",
     enabled: bool = True,
     actor: str | None = None,
@@ -203,12 +203,7 @@ def create(
         )
     if not message.strip():
         raise ValueError("message (the fire message) is required and must be a non-empty string")
-    destination_id = _validate_destination(destination)
-    webhook_id = _validate_slack_webhook(
-        destination=destination_id,
-        slack_webhook_id=slack_webhook_id,
-        owner_user_id=owner_user_id,
-    )
+    config_id = _validate_destination_config(destination_config_id, owner_user_id=owner_user_id)
     cron_value, tz_value, start_at_value = _validate_schedule_fields(
         kind=kind,
         schedule_cron=schedule_cron,
@@ -219,15 +214,14 @@ def create(
     trigger_id = "trg_" + uuid.uuid4().hex[:12]
     created_at = _now_iso()
     file_path = storage.compute_path(scope_path=scope_path, trigger_id=trigger_id)
+    actions = _one_action(message=message.strip(), destination_config_id=config_id)
     row_dict = {
         "id": trigger_id,
         "owner_user_id": owner_user_id,
         "scope_path": scope_path,
         "kind": kind,
         "nl_description": nl_description,
-        "message": message.strip(),
-        "destination": destination_id,
-        "slack_webhook_id": webhook_id,
+        "actions": actions,
         "enabled": enabled,
         "created_at": created_at,
         "schedule_cron": cron_value,
@@ -244,8 +238,7 @@ def create(
                 scope_path=scope_path,
                 kind=kind,
                 nl_description=nl_description,
-                action_json=_action_payload(message=message.strip(), destination=destination_id),
-                slack_webhook_id=webhook_id,
+                action_json=_actions_json(actions),
                 enabled=enabled,
                 file_path=file_path,
                 created_at=created_at,
@@ -289,8 +282,7 @@ def update(
     scope_path: str | None = None,
     nl_description: str | None = None,
     message: str | None = None,
-    destination: object = _UNSET,
-    slack_webhook_id: object = _UNSET,
+    destination_config_id: object = _UNSET,
     enabled: bool | None = None,
     actor: str | None = None,
     schedule_cron: str | None = None,
@@ -312,17 +304,10 @@ def update(
         if not message.strip():
             raise ValueError("message must be a non-empty string")
         new["message"] = message.strip()
-    if destination is not _UNSET:
-        new["destination"] = _validate_destination(destination)
-    if slack_webhook_id is not _UNSET:
-        new["slack_webhook_id"] = slack_webhook_id
-    # Re-resolve the channel reference against the *final* destination: a flip
-    # to slack requires a webhook, a flip away from slack nulls it.
-    new["slack_webhook_id"] = _validate_slack_webhook(
-        destination=new["destination"],
-        slack_webhook_id=new.get("slack_webhook_id"),
-        owner_user_id=existing["owner_user_id"],
-    )
+    if destination_config_id is not _UNSET:
+        new["destination_config_id"] = _validate_destination_config(
+            destination_config_id, owner_user_id=existing["owner_user_id"]
+        )
     if enabled is not None:
         new["enabled"] = enabled
     if schedule_cron is not None:
@@ -357,8 +342,7 @@ def update(
         new["scope_path"] == existing["scope_path"]
         and new["nl_description"] == existing["nl_description"]
         and new["message"] == existing["message"]
-        and new["destination"] == existing["destination"]
-        and new.get("slack_webhook_id") == existing.get("slack_webhook_id")
+        and new.get("destination_config_id") == existing.get("destination_config_id")
         and new["enabled"] == existing["enabled"]
         and new.get("schedule_cron") == existing.get("schedule_cron")
         and new.get("schedule_timezone") == existing.get("schedule_timezone")
@@ -366,6 +350,9 @@ def update(
     ):
         return existing
 
+    new["actions"] = _one_action(
+        message=new["message"], destination_config_id=new.get("destination_config_id")
+    )
     new_file_path = storage.compute_path(scope_path=new["scope_path"], trigger_id=trigger_id)
     old_file_path = existing.get("file_path")
     if old_file_path and new_file_path != old_file_path:
@@ -384,10 +371,7 @@ def update(
             return None
         t.scope_path = new["scope_path"]
         t.nl_description = new["nl_description"]
-        t.action_json = _action_payload(
-            message=new["message"] or "", destination=new["destination"]
-        )
-        t.slack_webhook_id = new.get("slack_webhook_id")
+        t.action_json = _actions_json(new["actions"])
         t.enabled = new["enabled"]
         t.file_path = new_file_path
         t.last_edited_at = _now_iso()
@@ -440,7 +424,7 @@ def purge_invalid_triggers(*, actor: str | None = None) -> int:
             log.warning("purge_invalid_triggers: skip unreadable %s", file_path, exc_info=True)
             continue
         if _is_nonempty_string(data.get("nl_description")) and _is_nonempty_string(
-            data.get("message")
+            _first_message(data)
         ):
             continue
         trigger_id = data.get("id") or "?"
@@ -573,7 +557,7 @@ def rebuild_from_filesystem() -> int:
             continue
         if not (
             _is_nonempty_string(data.get("nl_description"))
-            and _is_nonempty_string(data.get("message"))
+            and _is_nonempty_string(_first_message(data))
         ):
             log.warning(
                 "rebuild_from_filesystem: skip %s (missing required field)",
@@ -640,10 +624,13 @@ def rebuild_from_filesystem() -> int:
                 skipped += 1
                 continue
 
-            action_payload = _action_payload(
-                message=data.get("message") or "",
-                destination=_validate_destination(data.get("destination")),
-            )
+            actions_payload = [
+                {
+                    "destination_config_id": a.get("destination_config_id"),
+                    "message": a.get("message"),
+                }
+                for a in data["actions"]
+            ]
             created_at = data.get("created_at") or fallback_now
             last_edited = data.get("last_edited_at") or created_at
             try:
@@ -668,9 +655,7 @@ def rebuild_from_filesystem() -> int:
                     scope_path=data["scope_path"],
                     kind=data["kind"],
                     nl_description=data["nl_description"],
-                    action_json=action_payload,
-                    # The Slack channel link the UI resolves to a channel name.
-                    slack_webhook_id=data.get("slack_webhook_id"),
+                    action_json=_actions_json(actions_payload),
                     enabled=bool(data.get("enabled", True)),
                     file_path=file_path,
                     created_at=created_at,

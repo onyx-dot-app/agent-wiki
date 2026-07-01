@@ -440,6 +440,9 @@ class Trigger(Base):
     scope_path: Mapped[str] = mapped_column(Text, nullable=False)
     kind: Mapped[str] = mapped_column(Text, nullable=False)  # "delta" | "schedule"
     nl_description: Mapped[str] = mapped_column(Text, nullable=False)
+    # ``{"actions": [{"type", "message", "slack_webhook_id"}, ...]}``. ``type``
+    # is a ``trigger_destinations`` slug. The slack channel id (when any) lives
+    # inside the action. The wiki YAML is the source of truth for this shape.
     action_json: Mapped[str] = mapped_column(Text, nullable=False)
     schedule_cron: Mapped[str | None] = mapped_column(Text)
     # IANA timezone name (e.g. "America/Los_Angeles") that ``schedule_cron``
@@ -458,18 +461,13 @@ class Trigger(Base):
     file_path: Mapped[str | None] = mapped_column(Text)
     last_edited_at: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
-    # When ``action_json.destination == "slack"``, the specific user-owned
-    # Slack channel this trigger posts to (FK ``slack_webhooks.id``). Null for
-    # ``event_log`` triggers. Not a secret — the webhook URL itself lives only
-    # on the ``slack_webhooks`` row — so this id is safe to persist to the YAML.
-    slack_webhook_id: Mapped[str | None] = mapped_column(Text)
 
 
 class TriggerDestination(Base):
     """Catalog of where a trigger fire can be delivered.
 
-    The ``id`` is a stable slug (e.g. ``"event_log"``) referenced from each
-    trigger's ``action_json.destination``. ``name`` and ``description`` are
+    The ``id`` is a stable slug (e.g. ``"event_log"``) referenced by each
+    trigger action's ``type``. ``name`` and ``description`` are
     surfaced to the user — including via the ``get_trigger_destinations``
     agent tool. Seeded by migration ``0004``; new destinations are added by
     follow-up migrations as outbound dispatchers come online.
@@ -492,9 +490,9 @@ class SlackWebhook(Base):
 
     Each row is a delivery target a user can point a trigger at: a human
     ``name`` (e.g. "PM Standup") and the secret ``webhook_url``. Webhooks
-    are private to ``owner_user_id``; a trigger references one via
-    ``Trigger.slack_webhook_id`` and only the owner's triggers may use it.
-    The URL is a secret and lives **only** here — never in the wiki git repo.
+    are private to ``owner_user_id``. A slack trigger action references one
+    via its ``slack_webhook_id`` and only the owner's triggers may use it.
+    The URL is a secret and lives **only** here, never in the wiki git repo.
     """
 
     __tablename__ = "slack_webhooks"

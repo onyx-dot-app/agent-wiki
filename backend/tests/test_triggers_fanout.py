@@ -29,7 +29,6 @@ def _seed_user_and_trigger(
     scope_path: str,
     tid: str = "trg_1",
     message: str = "tell me when status changes",
-    destination: str = "event_log",
 ) -> None:
     seed_user(uid="usr_1", email="u@x.com", is_admin=True)
     seed_trigger(
@@ -37,7 +36,6 @@ def _seed_user_and_trigger(
         owner_user_id="usr_1",
         scope_path=scope_path,
         message=message,
-        destination=destination,
     )
 
 
@@ -93,7 +91,7 @@ def test_fan_out_records_event_on_match_with_rendered_message(tmp_db, monkeypatc
     # is preserved alongside it for audit / re-render later.
     assert payload["message"] == "projects/foo.md flipped from green to yellow."
     assert payload["message_instruction"] == "tell me when status flips"
-    assert payload["destination"] == "event_log"
+    assert payload["destination_type"] == "event_log"
 
     # Render saw the same payload + reason the matcher produced.
     assert captured["instruction"] == "tell me when status flips"
@@ -315,3 +313,72 @@ def test_fan_out_doc_scope_create_uses_two_phase_flow(tmp_db, monkeypatch):
 
     rows = list_events(kind="trigger.fire")
     assert len(rows) == 1
+
+
+def test_fan_out_dispatches_each_action(tmp_db, monkeypatch):
+    """A multi-action trigger fires once per action: each renders its own
+    message and dispatches to its own destination config."""
+    import json
+
+    from app.db.models import Trigger
+    from app.db.session import session
+    from app.slack import client as slack_client
+    from app.tasks import triggers as trig_task
+    from app.triggers import destination_configs as dest_configs
+    from app.triggers import engine
+
+    seed_user(uid="usr_1", email="u@x.com", is_admin=True)
+    cfg = dest_configs.create(
+        "usr_1",
+        type="slack",
+        name="PM Standup",
+        secret="https://hooks.slack.com/services/EXAMPLE",
+    )
+    action_json = json.dumps(
+        {
+            "actions": [
+                {"destination_config_id": None, "message": "log this"},
+                {"destination_config_id": cfg["id"], "message": "ping slack"},
+            ]
+        }
+    )
+    with session() as s:
+        s.add(
+            Trigger(
+                id="trg_multi",
+                owner_user_id="usr_1",
+                scope_path="projects/foo.md",
+                kind="delta",
+                nl_description="fire when status changes",
+                action_json=action_json,
+                enabled=True,
+            )
+        )
+
+    _patch_io(monkeypatch, before="status: green\n", after="status: yellow\n")
+    monkeypatch.setattr(
+        engine, "nl_matches", lambda *a, **kw: MatchResult(matched=True, reason="changed")
+    )
+    monkeypatch.setattr(
+        engine,
+        "nl_render_message",
+        lambda instruction, payload, *, reason: f"rendered:{instruction}",
+    )
+    posts: list[dict] = []
+    monkeypatch.setattr(
+        slack_client,
+        "post_message",
+        lambda *, webhook_url, text: posts.append({"webhook_url": webhook_url, "text": text}),
+    )
+
+    trig_task.fan_out_trigger_eval("projects/foo.md", "deadbeef", "edit", None)
+
+    fires = list_events(kind="trigger.fire")
+    assert sorted(f["payload"]["destination_type"] for f in fires) == ["event_log", "slack"]
+    by_type = {f["payload"]["destination_type"]: f["payload"]["message"] for f in fires}
+    assert by_type["event_log"] == "rendered:log this"
+    assert by_type["slack"] == "rendered:ping slack"
+
+    # Only the slack action posts, with its own rendered message.
+    assert len(posts) == 1
+    assert posts[0]["text"] == "rendered:ping slack"

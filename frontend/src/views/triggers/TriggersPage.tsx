@@ -13,13 +13,12 @@ import { useRequireAuth } from "@/lib/auth";
 import { describeCron } from "@/lib/cron";
 import { formatScopePath } from "@/lib/format";
 import {
-  createSlackWebhook,
-  deleteSlackWebhook,
+  createDestinationConfig,
+  deleteDestinationConfig,
   deleteTrigger,
   getTriggerVersion,
   updateTrigger,
-  useSlackWebhooks,
-  useTriggerDestinations,
+  useDestinationConfigs,
   useTriggers,
   type Trigger,
 } from "@/lib/triggers";
@@ -47,18 +46,11 @@ function formatRelative(iso: string | null | undefined): string {
 export default function TriggersPage() {
   const { user, loading } = useRequireAuth();
   const { triggers, error: listSwrError, refresh } = useTriggers();
-  const destinations = useTriggerDestinations();
-  const { webhooks: slackWebhooks } = useSlackWebhooks();
+  const { configs } = useDestinationConfigs();
   const destinationLabel = (t: Trigger) => {
-    if (t.destination === "slack") {
-      const ch = slackWebhooks.find((w) => w.id === t.slack_webhook_id);
-      return ch ? `Slack · ${ch.name}` : "Slack · (channel removed)";
-    }
-    return (
-      destinations.find((d) => d.id === t.destination)?.name ??
-      t.destination ??
-      "—"
-    );
+    if (!t.destination_config_id) return "Event log";
+    const cfg = configs.find((c) => c.id === t.destination_config_id);
+    return cfg ? `${cfg.type} · ${cfg.name}` : "(destination removed)";
   };
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -262,7 +254,7 @@ export default function TriggersPage() {
           ))}
         </ul>
 
-        <SlackChannelsCard />
+        <DestinationsCard />
       </SettingsLayouts.Body>
 
       <TriggerModal
@@ -299,7 +291,7 @@ export default function TriggersPage() {
               scope_path: version.scope_path,
               nl_description: version.nl_description,
               message: version.message,
-              destination: version.destination,
+              destination_config_id: version.destination_config_id,
               enabled: version.enabled,
               kind: version.kind ?? historyFor.kind,
               schedule_cron: version.schedule_cron,
@@ -319,8 +311,8 @@ export default function TriggersPage() {
   );
 }
 
-function SlackChannelsCard() {
-  const { webhooks, error, isLoading, refresh } = useSlackWebhooks();
+function DestinationsCard() {
+  const { configs, error, isLoading, refresh } = useDestinationConfigs();
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState("");
   const [url, setUrl] = useState("");
@@ -333,13 +325,19 @@ function SlackChannelsCard() {
     setBusy(true);
     setFormError(null);
     try {
-      await createSlackWebhook(name.trim(), url.trim());
+      await createDestinationConfig({
+        type: "slack",
+        name: name.trim(),
+        secret: url.trim(),
+      });
       await refresh();
       setAdding(false);
       setName("");
       setUrl("");
     } catch (e) {
-      setFormError(e instanceof ApiError ? e.message : "failed to add channel");
+      setFormError(
+        e instanceof ApiError ? e.message : "failed to add destination",
+      );
     } finally {
       setBusy(false);
     }
@@ -349,13 +347,13 @@ function SlackChannelsCard() {
     if (
       !(await confirmDialog({
         title: `Delete "${label}"?`,
-        body: "Triggers posting to it will stop delivering to Slack.",
+        body: "Triggers pointing at it will stop delivering there.",
         confirmLabel: "Delete",
       }))
     )
       return;
     try {
-      await deleteSlackWebhook(id);
+      await deleteDestinationConfig(id);
       await refresh();
     } catch (e) {
       alert(e instanceof ApiError ? e.message : "failed to delete");
@@ -365,22 +363,22 @@ function SlackChannelsCard() {
   return (
     <section className="mt-[28px] rounded-(--border-radius-08) border border-(--border-01) bg-(--background-tint-01) p-4">
       <div className="mb-1 flex items-center justify-between">
-        <h2 className="m-0 text-base">Slack channels</h2>
+        <h2 className="m-0 text-base">Destinations</h2>
         {!adding && (
           <Button size="sm" onClick={() => setAdding(true)}>
-            + Add channel
+            + Add Slack channel
           </Button>
         )}
       </div>
       <p className="mt-0 mb-3 text-[13px] text-(--text-03)">
-        Incoming webhooks you can point a trigger at. Create one in Slack (Apps
-        → Incoming Webhooks), then pick it as a trigger&apos;s destination.
-        Private to you.
+        Delivery targets you can point a trigger at. Create a Slack incoming
+        webhook (Apps &rarr; Incoming Webhooks), then pick it as a
+        trigger&apos;s destination. Private to you.
       </p>
 
       {error && (
         <div className="mb-2 text-[13px] text-(--status-text-error-05)">
-          {error.message || "Failed to load channels."}
+          {error.message || "Failed to load destinations."}
         </div>
       )}
 
@@ -389,7 +387,7 @@ function SlackChannelsCard() {
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="Channel name (e.g. PM Standup)"
+            placeholder="Name (e.g. PM Standup)"
             disabled={busy}
             maxLength={80}
             className="box-border w-full rounded-(--border-radius-04) border border-(--border-01) px-[10px] py-2 text-sm"
@@ -421,33 +419,34 @@ function SlackChannelsCard() {
         </div>
       )}
 
-      {isLoading && webhooks.length === 0 && !error && <LoadingSpinner />}
+      {isLoading && configs.length === 0 && !error && <LoadingSpinner />}
 
-      {!isLoading && webhooks.length === 0 && !adding && (
+      {!isLoading && configs.length === 0 && !adding && (
         <p className="m-0 text-sm text-(--text-03)">
-          No channels yet — add one to deliver trigger fires to Slack.
+          No destinations yet &mdash; add one to deliver trigger fires to Slack.
         </p>
       )}
 
-      {webhooks.length > 0 && (
+      {configs.length > 0 && (
         <ul className="m-0 list-none p-0">
-          {webhooks.map((w) => (
+          {configs.map((c) => (
             <li
-              key={w.id}
+              key={c.id}
               className="mt-2 flex items-center gap-3 rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-00) px-3 py-[10px]"
             >
               <div className="min-w-0 flex-1">
                 <div className="text-sm font-medium text-(--text-05)">
-                  {w.name}
+                  {c.name}
                 </div>
                 <div className="mt-[2px] font-mono text-xs text-(--text-03)">
-                  {w.webhook_url_hint}
+                  {c.type}
+                  {c.has_secret ? " · secret set" : ""}
                 </div>
               </div>
               <Button
                 size="sm"
                 variant="danger"
-                onClick={() => void onDelete(w.id, w.name)}
+                onClick={() => void onDelete(c.id, c.name)}
               >
                 Delete
               </Button>
