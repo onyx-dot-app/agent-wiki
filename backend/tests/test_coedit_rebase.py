@@ -1,5 +1,5 @@
 """Live-rebase: folding an inbound agent commit into an open co-edit session
-(app/wiki/coedit_rebase.py), plus the reconcile_onto repo primitive it uses.
+(app/wiki/coedit_rebase.py), plus the rebase_onto repo primitive it uses.
 DB + real git (tmp_repo).
 """
 from __future__ import annotations
@@ -30,14 +30,14 @@ def repo(tmp_repo):
     return tmp_repo
 
 
-# --- reconcile_onto -------------------------------------------------------- #
+# --- rebase_onto -------------------------------------------------------- #
 
 
-def test_reconcile_onto_folds_without_logging_a_session_op(tmp_db):
+def test_rebase_onto_folds_without_logging_a_session_op(tmp_db):
     # An agent's change reconciles into the buffer but is NOT a co-edit op — it
     # never enters coedit_ops / the session op stream.
     s = coedit.open_session(_PATH, base_sha="sha0", initial_buffer="hello world")
-    res = coedit.reconcile_onto(
+    res = coedit.rebase_onto(
         s.id, base_version=0, merged_text="HELLO world", new_base_sha="sha1", checkpointed=False,
     )
     assert res is not None
@@ -47,21 +47,21 @@ def test_reconcile_onto_folds_without_logging_a_session_op(tmp_db):
     assert coedit.ops_since(s.id, 0) == []  # no op logged for the fold
 
 
-def test_reconcile_onto_no_change_advances_base_only(tmp_db):
+def test_rebase_onto_no_change_advances_base_only(tmp_db):
     s = coedit.open_session(_PATH, base_sha="sha0", initial_buffer="hi")
-    res = coedit.reconcile_onto(
+    res = coedit.rebase_onto(
         s.id, base_version=0, merged_text="hi", new_base_sha="sha1", checkpointed=False,
     )
     assert res is not None
     assert res.changed is False and res.session.version == 0 and res.session.base_sha == "sha1"
 
 
-def test_reconcile_onto_stale_version_returns_none(tmp_db):
+def test_rebase_onto_stale_version_returns_none(tmp_db):
     seed_uid = users_repo.create(email="a@x.com", password="hunter2-x", name="A")
     s = coedit.open_session(_PATH, base_sha="sha0", initial_buffer="hi")
     coedit.apply_op(s.id, base_version=0, changes=[_ch(0, 2, "yo")], author_user_id=seed_uid)
     # Caller still on version 0 — the CAS misses.
-    res = coedit.reconcile_onto(
+    res = coedit.rebase_onto(
         s.id, base_version=0, merged_text="X", new_base_sha="sha1", checkpointed=False,
     )
     assert res is None
@@ -174,7 +174,7 @@ def test_checkpoint_commit_does_not_self_trigger_rebase(repo, monkeypatch):
 
 def test_rebase_raced_op_is_skipped(repo, monkeypatch):
     # A human op landing mid-merge makes the CAS miss; we skip (checkpoint backstop).
-    monkeypatch.setattr(coedit, "reconcile_onto", lambda *a, **k: None)
+    monkeypatch.setattr(coedit, "rebase_onto", lambda *a, **k: None)
     uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
     sha = _seed("a\nb\n")
     sess = coedit.open_session(_PATH, base_sha=sha, initial_buffer="a\nb\n")

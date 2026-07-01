@@ -59,7 +59,7 @@ def rebase_session(session_id: int, head_sha: str) -> RebaseOutcome:
         log.info("coedit live-rebase: conflict on %s", sess.path)
         return RebaseOutcome.CONFLICT
 
-    res = coedit.reconcile_onto(
+    res = coedit.rebase_onto(
         session_id,
         base_version=sess.version,
         merged_text=mr.merged,

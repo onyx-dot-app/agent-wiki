@@ -101,7 +101,7 @@ def checkpoint_session(session_id: int) -> str | None:
         # differs from the buffer we committed; writing it back (and broadcasting
         # the delta) keeps the live buffer == git and stops a later checkpoint
         # from re-committing the pre-merge buffer and dropping the agent's edit.
-        res = coedit.reconcile_onto(
+        res = coedit.rebase_onto(
             session_id,
             base_version=sess.version,
             merged_text=result.new_body,

@@ -66,8 +66,8 @@ class SessionRow(BaseModel):
     last_checkpoint_at: str | None
 
 
-class ReconcileResult(BaseModel):
-    """Outcome of a successful ``reconcile_onto`` (a raced CAS returns ``None``).
+class RebaseWrite(BaseModel):
+    """Outcome of a successful ``rebase_onto`` (a raced CAS returns ``None``).
 
     ``changed`` is False when the buffer already equalled the merged text — only
     ``base_sha`` (and, if checkpointed, ``checkpointed_version``) advanced, no
@@ -277,15 +277,15 @@ def _apply_changes(text: str, changes: list[Change]) -> str:
         raise ValueError("change split a UTF-16 surrogate pair") from e
 
 
-def reconcile_onto(
+def rebase_onto(
     session_id: int,
     *,
     base_version: int,
     merged_text: str,
     new_base_sha: str,
     checkpointed: bool,
-) -> ReconcileResult | None:
-    """Reconcile the session buffer onto an external commit under a version CAS.
+) -> RebaseWrite | None:
+    """Rebase the session buffer onto an external commit under a version CAS.
 
     Shared by live-rebase (a clean inbound agent commit folded in;
     ``checkpointed=False``) and the checkpoint sync (the committed AI-merged
@@ -294,7 +294,7 @@ def reconcile_onto(
     buffer resync driven by a git commit. Participants are told to refetch (a
     ``resync`` frame), not sent an op.
 
-    Returns a ``ReconcileResult``; ``changed`` is False when the buffer already
+    Returns a ``RebaseWrite``; ``changed`` is False when the buffer already
     equals ``merged_text`` (only ``base_sha`` / ``checkpointed_version`` advance,
     no version bump). When it differs, the buffer is replaced and ``version``
     bumps so any stale in-flight human op is rejected. Returns ``None`` if a
@@ -335,7 +335,7 @@ def reconcile_onto(
         ).one_or_none()
         if row is None:
             return None
-        return ReconcileResult(session=_session_row(row), changed=changed)
+        return RebaseWrite(session=_session_row(row), changed=changed)
 
 
 def apply_op(

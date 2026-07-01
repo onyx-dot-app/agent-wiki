@@ -94,8 +94,8 @@ def test_checkpoint_raced_fallback_leaves_session_dirty(repo, monkeypatch):
         _PATH, "one\ntwo\nthree\nfour\nFIVE\n", "agent edit", author="Agent <a@x.com>"
     )
 
-    # Simulate the race: reconcile_onto's CAS misses.
-    monkeypatch.setattr(coedit, "reconcile_onto", lambda *a, **k: None)
+    # Simulate the race: rebase_onto's CAS misses.
+    monkeypatch.setattr(coedit, "rebase_onto", lambda *a, **k: None)
     coedit_checkpoint.checkpoint_session(sess.id)
 
     st = coedit.get_active_session(_PATH)
