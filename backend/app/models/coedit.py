@@ -23,7 +23,8 @@ class OpRequest(BaseModel):
     session_id: int
     base_version: int
     # Range changes ({from,to,insert}); FastAPI validates each via Change, so a
-    # malformed op is a 422 before it reaches the repo.
+    # malformed op is a 400 (the app's RequestValidationError handler) before it
+    # reaches the repo.
     changes: list[Change]
 
 
