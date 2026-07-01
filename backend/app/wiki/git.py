@@ -407,6 +407,14 @@ def parent_sha(sha: str) -> str | None:
     return out or None
 
 
+def is_ancestor(ancestor: str, descendant: str) -> bool:
+    """True if ``ancestor`` is an ancestor of ``descendant`` (or the same commit).
+
+    ``git merge-base --is-ancestor`` exits 0 when it is, 1 when not; any other
+    exit (bad SHA, etc.) is treated as "not an ancestor"."""
+    return _run(["merge-base", "--is-ancestor", ancestor, descendant], check=False).returncode == 0
+
+
 def commits_between(base_sha: str, head_sha: str, rel_path: str) -> list[str]:
     """SHAs reachable from head_sha but not base_sha that touched rel_path,
     newest first. Excludes base_sha itself."""

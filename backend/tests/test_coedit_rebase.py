@@ -99,6 +99,23 @@ def test_rebase_skips_when_already_based_on_head(repo):
     assert coedit_rebase.rebase_session(sess.id, sha) == coedit_rebase.RebaseOutcome.SKIP
 
 
+def test_rebase_skips_stale_ancestor_head(repo):
+    # A stale task carrying an older head_sha than the session's (already
+    # advanced) base_sha must not "rebase backwards" and revert committed edits.
+    old_sha = _seed("one\ntwo\n")
+    sess = coedit.open_session(_PATH, base_sha=old_sha, initial_buffer="one\ntwo\n")
+    # base_sha advances to a descendant (e.g. a checkpoint committed ONE).
+    new_sha = wiki_git.commit_file(_PATH, "ONE\ntwo\n", "checkpoint", author="A <a@x.com>")
+    coedit.rebase_onto(
+        sess.id, base_version=0, merged_text="ONE\ntwo\n", new_base_sha=new_sha, checkpointed=True
+    )
+    # The late task still carries old_sha (an ancestor of the current base_sha).
+    assert coedit_rebase.rebase_session(sess.id, old_sha) == coedit_rebase.RebaseOutcome.SKIP
+    # Buffer untouched — the human's committed "ONE" edit is not reverted.
+    st = coedit.get_session(sess.id)
+    assert st is not None and st.buffer_text == "ONE\ntwo\n" and st.base_sha == new_sha
+
+
 def _seed_conflict(uid) -> tuple[int, str]:
     # Human and agent both edit the first line → overlap. Returns (session_id, agent_sha).
     doc = "one\ntwo\n"

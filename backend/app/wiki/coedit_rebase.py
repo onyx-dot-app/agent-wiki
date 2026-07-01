@@ -49,6 +49,13 @@ def rebase_session(session_id: int, head_sha: str) -> RebaseOutcome:
     sess = coedit.get_session(session_id)
     if sess is None or sess.status != "active" or sess.base_sha == head_sha:
         return RebaseOutcome.SKIP
+    # A stale task can carry a head_sha the session has already moved past: a
+    # concurrent checkpoint, or a later commit's rebase, may have advanced
+    # base_sha to a descendant of head_sha. Rebasing "onto" an ancestor would
+    # merge the buffer against older content and revert already-committed edits,
+    # so skip when head_sha is an ancestor of (already contained in) base_sha.
+    if sess.base_sha is not None and wiki_git.is_ancestor(head_sha, sess.base_sha):
+        return RebaseOutcome.SKIP
 
     base_body = wiki_git.read_file_opt(sess.path, ref=sess.base_sha) if sess.base_sha else ""
     current_body = wiki_git.read_file_opt(sess.path, ref=head_sha)
