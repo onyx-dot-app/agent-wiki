@@ -163,6 +163,7 @@ def commit_and_fan_out(
     ai_merge: bool = False,
     max_retries: int = _MERGE_MAX_RETRIES,
     record_activity: bool = True,
+    trigger_coedit_rebase: bool = True,
 ) -> CommitResult | None:
     """The single write gateway: commit ``body`` to ``path``, fan out to triggers.
 
@@ -210,6 +211,7 @@ def commit_and_fan_out(
         return _commit_resolved(
             path, body, message, change_kind, activity_ttl,
             old_body=_read_head_or_empty(path), record_activity=record_activity,
+            trigger_coedit_rebase=trigger_coedit_rebase,
         )
 
     # Read-modify-write: 3-way merge against concurrent changes, retrying when
@@ -246,6 +248,7 @@ def commit_and_fan_out(
                     path, merged, message, change_kind, activity_ttl,
                     old_body=current, record_activity=record_activity,
                     expected_head=head_sha,
+                    trigger_coedit_rebase=trigger_coedit_rebase,
                 )
             except (wiki_git.GitNothingToCommitError, wiki_git.GitHeadMovedError):
                 # A concurrent writer committed in the window between our
@@ -283,6 +286,7 @@ def _commit_resolved(
     old_body: str,
     record_activity: bool = True,
     expected_head: str | None = None,
+    trigger_coedit_rebase: bool = True,
 ) -> CommitResult:
     """Commit ``body``, record activity, and run the reindex + trigger fan-out.
 
@@ -338,6 +342,7 @@ def _commit_resolved(
         change_kind,
         author,
         owner_user_id=user.id if (user is not None and change_kind == ChangeKind.CREATE) else None,
+        trigger_coedit_rebase=trigger_coedit_rebase,
     )
     return CommitResult(sha=sha, old_body=old_body, new_body=body)
 

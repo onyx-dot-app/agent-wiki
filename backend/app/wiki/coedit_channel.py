@@ -160,6 +160,17 @@ def broadcast_cursor(
     )
 
 
+def broadcast_resync(coedit_session_id: int, version: int) -> None:
+    """Tell the session its buffer was replaced out from under the op stream —
+    peers re-fetch via ``GET /coedit/session``.
+
+    Used when an inbound agent/ingest commit is reconciled into the buffer
+    (live-rebase) or a checkpoint syncs its merged result back. The change is a
+    git commit, not a co-edit op, so it doesn't carry a per-keystroke delta —
+    participants reload the buffer at the new ``version``."""
+    publish(coedit_session_id, {"type": "resync", "session_id": coedit_session_id, "version": version})
+
+
 def broadcast_op(
     coedit_session_id: int,
     version: int,

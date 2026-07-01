@@ -66,6 +66,20 @@ class SessionRow(BaseModel):
     last_checkpoint_at: str | None
 
 
+class RebaseWrite(BaseModel):
+    """Outcome of a successful ``rebase_onto`` (a raced CAS returns ``None``).
+
+    ``changed`` is False when the buffer already equalled the merged text — only
+    ``base_sha`` (and, if checkpointed, ``checkpointed_version``) advanced, no
+    version bump. ``session`` is the post-write row.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    session: SessionRow
+    changed: bool
+
+
 class ParticipantRow(BaseModel):
     """A `coedit_participants` row joined with the user's display name."""
 
@@ -261,6 +275,67 @@ def _apply_changes(text: str, changes: list[Change]) -> str:
         return bytes(buf).decode("utf-16-le")
     except UnicodeDecodeError as e:
         raise ValueError("change split a UTF-16 surrogate pair") from e
+
+
+def rebase_onto(
+    session_id: int,
+    *,
+    base_version: int,
+    merged_text: str,
+    new_base_sha: str,
+    checkpointed: bool,
+) -> RebaseWrite | None:
+    """Rebase the session buffer onto an external commit under a version CAS.
+
+    Shared by live-rebase (a clean inbound agent commit folded in;
+    ``checkpointed=False``) and the checkpoint sync (the committed AI-merged
+    result written back; ``checkpointed=True``). This is **not** a co-edit op —
+    an agent's change never enters the session op stream / ``coedit_ops``; it's a
+    buffer resync driven by a git commit. Participants are told to refetch (a
+    ``resync`` frame), not sent an op.
+
+    Returns a ``RebaseWrite``; ``changed`` is False when the buffer already
+    equals ``merged_text`` (only ``base_sha`` / ``checkpointed_version`` advance,
+    no version bump). When it differs, the buffer is replaced and ``version``
+    bumps so any stale in-flight human op is rejected. Returns ``None`` if a
+    concurrent op moved the version (caller falls back).
+    """
+    now = _iso(_now())
+    with session() as s:
+        # Read the buffer at exactly base_version under the CAS to decide whether
+        # it changed (the version predicate guarantees it hasn't moved since).
+        current = s.execute(
+            select(CoeditSession.buffer_text).where(
+                CoeditSession.id == session_id,
+                CoeditSession.version == base_version,
+                CoeditSession.status == "active",
+            )
+        ).scalar_one_or_none()
+        if current is None:
+            return None
+        changed = merged_text != current
+        new_version = base_version + 1 if changed else base_version
+        values: dict[str, Any] = {"base_sha": new_base_sha, "updated_at": now}
+        if changed:
+            values["buffer_text"] = merged_text
+            values["version"] = new_version
+        if checkpointed:
+            values["checkpointed_version"] = new_version
+            values["last_checkpoint_at"] = now
+        row = s.scalars(
+            update(CoeditSession)
+            .where(
+                CoeditSession.id == session_id,
+                CoeditSession.version == base_version,
+                CoeditSession.status == "active",
+            )
+            .values(**values)
+            .returning(CoeditSession)
+            .execution_options(synchronize_session=False)
+        ).one_or_none()
+        if row is None:
+            return None
+        return RebaseWrite(session=_session_row(row), changed=changed)
 
 
 def apply_op(

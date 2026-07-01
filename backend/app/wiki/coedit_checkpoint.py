@@ -23,7 +23,7 @@ import logging
 from app.auth import User, set_current_user
 from app.auth import users as users_repo
 from app.models.wiki import ChangeKind
-from app.wiki import coedit
+from app.wiki import coedit, coedit_channel
 from app.wiki import git as wiki_git
 from app.wiki.utils import commit_and_fan_out
 
@@ -90,10 +90,39 @@ def checkpoint_session(session_id: int) -> str | None:
             ai_merge=True,
             skip_acl=True,
             record_activity=False,
+            # This is the session's own commit — don't fold it back into the
+            # session as an inbound rebase (we sync the merged result below).
+            trigger_coedit_rebase=False,
         )
 
     if result is not None:
-        coedit.mark_checkpointed(session_id, base_sha=result.sha, version=sess.version)
+        # Sync the committed content back into the buffer. When the commit-time
+        # 3-way merge folded in a concurrent agent/ingest commit, result.new_body
+        # differs from the buffer we committed; writing it back (and broadcasting
+        # the delta) keeps the live buffer == git and stops a later checkpoint
+        # from re-committing the pre-merge buffer and dropping the agent's edit.
+        res = coedit.rebase_onto(
+            session_id,
+            base_version=sess.version,
+            merged_text=result.new_body,
+            new_base_sha=result.sha,
+            checkpointed=True,
+        )
+        if res is None:
+            # A human op raced in during the commit, so the buffer moved past
+            # what we committed. Leave base_sha / checkpointed_version untouched:
+            # the session stays dirty and the next checkpoint does a proper 3-way
+            # merge (base=old, current=HEAD, incoming=newer buffer) that preserves
+            # the folded-in agent edit. Advancing base_sha to result.sha here
+            # would make that next merge base==current and drop the agent's edit.
+            log.info(
+                "coedit checkpoint: concurrent op during commit of %s; reconciling next checkpoint",
+                path,
+            )
+        elif res.changed:
+            # The commit-time merge folded in a concurrent agent commit; tell
+            # participants to reload the merged buffer.
+            coedit_channel.broadcast_resync(session_id, res.session.version)
         return result.sha
 
     # None = the merge produced exactly the current HEAD (buffer already matches
