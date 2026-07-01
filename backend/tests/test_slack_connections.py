@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 
 import sqlalchemy as sa
 
+from app.db.models import SlackConnectState
 from app.db.session import session
 from app.slack import connect_state, connections
 
@@ -43,9 +44,16 @@ def test_upsert_get_and_masking(tmp_db):
 def test_token_is_ciphertext_at_rest(tmp_db):
     seed_user("usr_1")
     _connect()
+    # A LargeBinary-typed shadow of the table reads the stored bytes without
+    # the EncryptedString decorator transparently decrypting them.
+    raw_tbl = sa.table(
+        "user_slack_connections",
+        sa.column("user_id", sa.Text),
+        sa.column("bot_token", sa.LargeBinary),
+    )
     with session() as s:
         raw = s.execute(
-            sa.text("SELECT bot_token FROM user_slack_connections WHERE user_id = 'usr_1'")
+            sa.select(raw_tbl.c.bot_token).where(raw_tbl.c.user_id == "usr_1")
         ).scalar_one()
     assert _TOKEN.encode() not in bytes(raw)
 
@@ -105,10 +113,9 @@ def test_state_expires(tmp_db):
     state = connect_state.mint_state(user_id="usr_1", return_to=None)
     past = (datetime.now(timezone.utc) - timedelta(seconds=1)).strftime("%Y-%m-%d %H:%M:%S")
     with session() as s:
-        s.execute(
-            sa.text("UPDATE slack_connect_states SET expires_at = :e WHERE state = :st"),
-            {"e": past, "st": state},
-        )
+        row = s.get(SlackConnectState, state)
+        assert row is not None
+        row.expires_at = past
     assert connect_state.consume_state(state, user_id="usr_1") is None
 
 

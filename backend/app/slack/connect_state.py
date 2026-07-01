@@ -25,7 +25,7 @@ _STATE_TTL_SECONDS = 600
 
 
 def _iso(dt: datetime) -> str:
-    return dt.strftime("%Y-%m-%d %H:%M:%S")
+    return dt.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _now_iso() -> str:
