@@ -422,6 +422,32 @@ def close_session(session_id: int) -> None:
             sess.updated_at = _iso(_now())
 
 
+def close_if_clean(session_id: int) -> bool:
+    """Close the session only if it's clean (``version == checkpointed_version``).
+    Returns True if it closed.
+
+    Atomic, to avoid orphaning a late edit: after a checkpoint commits, an op can
+    still land (the session is ``active`` until this runs) and re-dirty the
+    buffer. The conditional ``UPDATE`` closes only when nothing new arrived — if
+    an op bumped ``version`` in the window, it matches no row and the session
+    stays active, so the periodic scan re-checkpoints the new edit rather than
+    sealing it in a closed session.
+    """
+    with session() as s:
+        closed = s.scalars(
+            update(CoeditSession)
+            .where(
+                CoeditSession.id == session_id,
+                CoeditSession.status == "active",
+                CoeditSession.version == CoeditSession.checkpointed_version,
+            )
+            .values(status="closed", updated_at=_iso(_now()))
+            .returning(CoeditSession.id)
+            .execution_options(synchronize_session=False)
+        ).one_or_none()
+        return closed is not None
+
+
 def rename_path(old_path: str, new_path: str) -> None:
     """Re-point sessions when a page moves (called from the move lifecycle)."""
     with session() as s:

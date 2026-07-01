@@ -190,6 +190,24 @@ def test_due_excludes_session_clean_since_last_checkpoint(users):
     assert _due_ids(idle_seconds=0, max_interval_seconds=0) == set()
 
 
+def test_close_if_clean_closes_a_clean_session(users):
+    s = coedit.open_session(_PATH, base_sha=None, initial_buffer="hi")
+    coedit.apply_op(s.id, base_version=0, changes=[_ch(0, 2, "yo")], author_user_id="usr_a")
+    coedit.mark_checkpointed(s.id, base_sha="sha", version=1)  # version == checkpointed
+    assert coedit.close_if_clean(s.id) is True
+    assert coedit.get_active_session(_PATH) is None
+
+
+def test_close_if_clean_skips_a_dirty_session(users):
+    # A late op after the checkpoint (version > checkpointed_version) must not be
+    # sealed in a closed session — close_if_clean leaves it active for the scan.
+    s = coedit.open_session(_PATH, base_sha=None, initial_buffer="hi")
+    coedit.apply_op(s.id, base_version=0, changes=[_ch(0, 2, "yo")], author_user_id="usr_a")
+    assert coedit.close_if_clean(s.id) is False
+    active = coedit.get_active_session(_PATH)
+    assert active is not None and active.id == s.id
+
+
 def test_close_frees_path_for_new_session(users):
     first = coedit.open_session(_PATH, base_sha=None)
     coedit.close_session(first.id)

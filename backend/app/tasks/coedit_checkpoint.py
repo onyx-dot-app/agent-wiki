@@ -45,10 +45,12 @@ def checkpoint_coedit_session(session_id: int) -> None:
     """Commit a session's buffer, then close it if everyone has since left.
 
     Re-checks participants after committing so a rejoin during the (brief)
-    enqueue window keeps the session open."""
+    enqueue window keeps the session open. Closes only if still clean, so a late
+    op landing after the checkpoint isn't sealed in a closed session (see
+    ``close_if_clean``)."""
     checkpoint_session(session_id)
     if not coedit.list_participants(session_id):
-        coedit.close_session(session_id)
+        coedit.close_if_clean(session_id)
 
 
 @documents_queue.periodic_task(crontab(minute="*"))
