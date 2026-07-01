@@ -1,6 +1,6 @@
 """Trigger destinations repo.
 
-A *destination* is the catalog row a trigger's ``action_json.destination``
+A *destination* is the catalog row a destination config's ``type``
 points at — i.e. where a fire is delivered. The seeded ``event_log``
 destination means "record the fire to the events table; don't dispatch
 outbound." Future destinations (webhook, agent message, …) get added by

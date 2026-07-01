@@ -318,8 +318,6 @@ def test_fan_out_doc_scope_create_uses_two_phase_flow(tmp_db, monkeypatch):
 def test_fan_out_dispatches_each_action(tmp_db, monkeypatch):
     """A multi-action trigger fires once per action: each renders its own
     message and dispatches to its own destination config."""
-    import json
-
     from app.db.models import Trigger
     from app.db.session import session
     from app.slack import client as slack_client
@@ -334,14 +332,12 @@ def test_fan_out_dispatches_each_action(tmp_db, monkeypatch):
         name="PM Standup",
         secret="https://hooks.slack.com/services/EXAMPLE",
     )
-    action_json = json.dumps(
-        {
-            "actions": [
-                {"destination_config_id": None, "message": "log this"},
-                {"destination_config_id": cfg["id"], "message": "ping slack"},
-            ]
-        }
-    )
+    action_json = {
+        "actions": [
+            {"destination_config_id": None, "message": "log this"},
+            {"destination_config_id": cfg["id"], "message": "ping slack"},
+        ]
+    }
     with session() as s:
         s.add(
             Trigger(

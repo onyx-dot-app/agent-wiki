@@ -65,9 +65,9 @@ def seed_trigger(
     schedule_start_at: str | None = None,
     schedule_last_fired_at: str | None = None,
 ) -> str:
-    action_json = json.dumps(
-        {"actions": [{"destination_config_id": destination_config_id, "message": message}]}
-    )
+    action_json = {
+        "actions": [{"destination_config_id": destination_config_id, "message": message}]
+    }
     with session() as s:
         s.add(
             Trigger(

@@ -67,9 +67,9 @@ def _validate_destination_config(
     return cid
 
 
-def _actions_json(actions: list[dict[str, Any]]) -> str:
-    """Serialize the actions list into the ``action_json`` column."""
-    return json.dumps({"actions": actions})
+def _actions_json(actions: list[dict[str, Any]]) -> dict[str, Any]:
+    """The ``action_json`` column value wrapping the actions list."""
+    return {"actions": actions}
 
 
 def _one_action(
@@ -130,10 +130,9 @@ def _validate_schedule_fields(
     return None, None, None
 
 
-def _parse_actions(raw: str) -> list[dict[str, Any]]:
+def _parse_actions(parsed: dict[str, Any]) -> list[dict[str, Any]]:
     """Actions stored in ``action_json``. A legacy single-destination blob
     reads as one event-log action."""
-    parsed = cast(dict[str, Any], json.loads(raw))
     raw_actions = parsed.get("actions")
     if isinstance(raw_actions, list) and raw_actions:
         return [
