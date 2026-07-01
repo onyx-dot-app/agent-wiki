@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 
+from app.wiki.coedit import Change
+
 
 class JoinRequest(BaseModel):
     path: str
@@ -15,6 +17,19 @@ class JoinRequest(BaseModel):
 
 class LeaveRequest(BaseModel):
     session_id: int
+
+
+class OpRequest(BaseModel):
+    session_id: int
+    base_version: int
+    # Range changes ({from,to,insert}); FastAPI validates each via Change, so a
+    # malformed op is a 400 (the app's RequestValidationError handler) before it
+    # reaches the repo.
+    changes: list[Change]
+
+
+class OpResponse(BaseModel):
+    version: int  # the session version this op produced
 
 
 class ParticipantOut(BaseModel):

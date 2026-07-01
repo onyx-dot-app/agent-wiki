@@ -6,7 +6,7 @@ puts and gets — no event loop.
 """
 from __future__ import annotations
 
-from app.wiki import coedit_channel
+from app.wiki import coedit, coedit_channel
 
 
 def test_connect_publish_delivers_to_connection():
@@ -50,6 +50,33 @@ def test_user_still_connected_tracks_multiple_tabs():
     assert coedit_channel.user_still_connected(5, "usr_a") is True
     coedit_channel.disconnect(c2.id)
     assert coedit_channel.user_still_connected(5, "usr_a") is False
+
+
+def _change(frm: int, to: int, insert: str) -> coedit.Change:
+    return coedit.Change.model_validate({"from": frm, "to": to, "insert": insert})
+
+
+def test_broadcast_op_delivers_op_frame():
+    coedit_channel.reset_for_tests()
+    conn = coedit_channel.connect(4, "usr_a")
+    coedit_channel.broadcast_op(4, 3, [_change(0, 1, "x")], "usr_a")
+    frame = coedit_channel.drain(conn.queue, 0.5)
+    assert frame == {
+        "type": "op",
+        "session_id": 4,
+        "version": 3,
+        "changes": [{"from": 0, "to": 1, "insert": "x"}],
+        "author": "usr_a",
+    }
+
+
+def test_broadcast_op_oversized_falls_back_to_resync():
+    coedit_channel.reset_for_tests()
+    conn = coedit_channel.connect(4, "usr_a")
+    big = "z" * 8000  # payload exceeds the NOTIFY cap → resync signal instead
+    coedit_channel.broadcast_op(4, 5, [_change(0, 0, big)], "usr_a")
+    frame = coedit_channel.drain(conn.queue, 0.5)
+    assert frame == {"type": "resync", "session_id": 4, "version": 5}
 
 
 def test_handle_remote_delivers_locally():

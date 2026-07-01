@@ -27,6 +27,7 @@ from pydantic import BaseModel, ConfigDict
 
 from app.realtime import bus
 from app.wiki import coedit
+from app.wiki.coedit import Change
 
 log = logging.getLogger(__name__)
 
@@ -100,11 +101,15 @@ def drain(q: queue.Queue[Frame], timeout: float) -> Frame | None:
         return None
 
 
+def _bus_payload(coedit_session_id: int, frame: Frame) -> dict[str, Any]:
+    return {"kind": "coedit", "coedit_session_id": coedit_session_id, "frame": frame}
+
+
 def publish(coedit_session_id: int, frame: Frame) -> None:
     """Deliver ``frame`` to every connection in the session, on this process and
     (via NOTIFY) on every other."""
     _deliver_local(coedit_session_id, frame)
-    bus.emit({"kind": "coedit", "coedit_session_id": coedit_session_id, "frame": frame})
+    bus.emit(_bus_payload(coedit_session_id, frame))
 
 
 def handle_remote(payload: dict[str, Any]) -> None:
@@ -127,6 +132,31 @@ def broadcast_presence(coedit_session_id: int) -> None:
             "participants": [p.model_dump() for p in participants],
         },
     )
+
+
+def broadcast_op(
+    coedit_session_id: int,
+    version: int,
+    changes: list[Change],
+    author_user_id: str,
+) -> None:
+    """Broadcast an applied edit op to the session's other connections.
+
+    Normally the op frame carries the changes so peers apply them directly. If
+    the serialized payload would exceed the bus's NOTIFY cap (a large paste),
+    fall back to a ``resync`` signal — peers re-fetch the buffer via
+    ``GET /coedit/session`` instead of us dropping the update.
+    """
+    frame: Frame = {
+        "type": "op",
+        "session_id": coedit_session_id,
+        "version": version,
+        "changes": [c.model_dump(by_alias=True) for c in changes],
+        "author": author_user_id,
+    }
+    if not bus.payload_fits(_bus_payload(coedit_session_id, frame)):
+        frame = {"type": "resync", "session_id": coedit_session_id, "version": version}
+    publish(coedit_session_id, frame)
 
 
 def _deliver_local(coedit_session_id: int, frame: Frame) -> None:
