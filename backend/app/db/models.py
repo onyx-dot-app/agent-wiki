@@ -1394,6 +1394,21 @@ class CraftConnectState(Base):
     consumed_at: Mapped[str | None] = mapped_column(Text)
 
 
+class SlackAppSettings(Base):
+    """Singleton row: the agent-wiki Slack app's OAuth credentials, configured
+    from /admin/slack. The connect flow is dark until both are set."""
+
+    __tablename__ = "slack_app_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
+    client_id: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
+    # Secret — AES-GCM encrypted at rest (app/db/crypto.py:EncryptedString).
+    client_secret: Mapped[str] = mapped_column(EncryptedString(), nullable=False)
+    updated_at: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
+    )
+
+
 class UserSlackConnection(Base):
     """One per user per Slack workspace: the bot token saved by "Connect
     Slack". Follows ``UserOnyxConnection``: the token is AES-GCM encrypted at

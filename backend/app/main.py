@@ -49,6 +49,7 @@ from app.api import (
     user,
     users,
     webhooks,
+    slack_connect,
 )
 from app.auth import PermissionDenied
 from app.auth.deps import CurrentUserMiddleware
@@ -229,6 +230,7 @@ def create_app() -> FastAPI:
     app.include_router(update_policy.router, prefix="/api")
     app.include_router(launchers.router, prefix="/api")
     app.include_router(craft.router, prefix="/api/craft")
+    app.include_router(slack_connect.router, prefix="/api/connectors/slack")
     app.include_router(notifications.router, prefix="/api/notifications")
     app.include_router(installer.router, prefix="/api")
     app.include_router(agent_sessions.router, prefix="/api/agent-sessions")
