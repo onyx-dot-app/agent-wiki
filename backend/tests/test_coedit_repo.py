@@ -16,7 +16,10 @@ _PATH = "guides/setup.md"
 
 
 def _ch(frm: int, to: int, insert: str = "") -> coedit.Change:
-    return coedit.Change(from_=frm, to=to, insert=insert)
+    # Build via model_validate so the aliased "from" field is set by its wire
+    # name — Change(from_=...) isn't expressible (the constructor param is the
+    # alias "from", a keyword).
+    return coedit.Change.model_validate({"from": frm, "to": to, "insert": insert})
 
 
 @pytest.fixture
