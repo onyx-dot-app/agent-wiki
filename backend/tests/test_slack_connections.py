@@ -124,3 +124,51 @@ def test_mint_clears_prior_state(tmp_db):
     first = connect_state.mint_state(user_id="usr_1", return_to=None)
     connect_state.mint_state(user_id="usr_1", return_to=None)
     assert connect_state.consume_state(first, user_id="usr_1") is None
+
+
+def _corrupt_stored_token(user_id: str) -> None:
+    """Overwrite the ciphertext so any decrypt raises InvalidTag, simulating a
+    rotated encryption key."""
+    raw_tbl = sa.table(
+        "user_slack_connections",
+        sa.column("user_id", sa.Text),
+        sa.column("bot_token", sa.LargeBinary),
+    )
+    with session() as s:
+        s.execute(
+            sa.update(raw_tbl)
+            .where(raw_tbl.c.user_id == user_id)
+            .values(bot_token=b"\x00" * 40)
+        )
+
+
+def test_undecryptable_token_reads_as_not_connected(tmp_db):
+    seed_user("usr_1")
+    _connect()
+    _corrupt_stored_token("usr_1")
+
+    # Status reads never touch the token column, so they still work.
+    assert connections.get("usr_1", "T123") is not None
+    assert len(connections.list_for_user("usr_1")) == 1
+
+    # Resolving the token drops the stale row and reads as not-connected.
+    assert connections.get_bot_token("usr_1", "T123") is None
+    assert connections.get("usr_1", "T123") is None
+
+    # Re-connecting after the drop works.
+    _connect()
+    assert connections.get_bot_token("usr_1", "T123") == _TOKEN
+
+
+def test_upsert_and_delete_survive_undecryptable_token(tmp_db):
+    seed_user("usr_1")
+    _connect()
+    _corrupt_stored_token("usr_1")
+
+    # Overwriting never reads the old ciphertext.
+    _connect()
+    assert connections.get_bot_token("usr_1", "T123") == _TOKEN
+
+    _corrupt_stored_token("usr_1")
+    assert connections.delete_connection("usr_1", "T123") is True
+    assert connections.list_for_user("usr_1") == []

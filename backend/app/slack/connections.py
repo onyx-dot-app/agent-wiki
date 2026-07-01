@@ -14,6 +14,7 @@ from typing import Any
 
 from cryptography.exceptions import InvalidTag
 from sqlalchemy import delete, select
+from sqlalchemy.orm import defer
 
 from app.db.models import UserSlackConnection
 from app.db.session import session
@@ -24,6 +25,12 @@ log = logging.getLogger(__name__)
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+
+# Read paths that don't need the token defer its column so the row loads
+# without decrypting — an undecryptable token (key rotation) must read as
+# "not connected", not raise from every status call.
+_DEFER_TOKEN = defer(UserSlackConnection.bot_token)
 
 
 def _to_dict(c: UserSlackConnection) -> dict[str, Any]:
@@ -51,7 +58,9 @@ def upsert(
 ) -> None:
     now = _now_iso()
     with session() as s:
-        row = s.get(UserSlackConnection, (user_id, team_id))
+        # Deferred token: the old value is overwritten, never read, so a
+        # re-connect still works after a key rotation.
+        row = s.get(UserSlackConnection, (user_id, team_id), options=[_DEFER_TOKEN])
         if row is None:
             s.add(
                 UserSlackConnection(
@@ -79,20 +88,22 @@ def upsert(
 def list_for_user(user_id: str) -> list[dict[str, Any]]:
     with session() as s:
         rows = s.scalars(
-            select(UserSlackConnection).where(UserSlackConnection.user_id == user_id)
+            select(UserSlackConnection)
+            .options(_DEFER_TOKEN)
+            .where(UserSlackConnection.user_id == user_id)
         ).all()
         return [_to_dict(c) for c in rows]
 
 
 def get(user_id: str, team_id: str) -> dict[str, Any] | None:
     with session() as s:
-        row = s.get(UserSlackConnection, (user_id, team_id))
+        row = s.get(UserSlackConnection, (user_id, team_id), options=[_DEFER_TOKEN])
         return _to_dict(row) if row else None
 
 
 def delete_connection(user_id: str, team_id: str) -> bool:
     with session() as s:
-        row = s.get(UserSlackConnection, (user_id, team_id))
+        row = s.get(UserSlackConnection, (user_id, team_id), options=[_DEFER_TOKEN])
         if row is None:
             return False
         s.delete(row)
