@@ -8,7 +8,8 @@ import pytest
 
 from app.auth import users as users_repo
 from app.models.wiki import ChangeKind
-from app.tasks.queues import lightweight_maintenance_queue
+from app.tasks import coedit_rebase as coedit_rebase_task
+from app.tasks.queues import documents_queue, lightweight_maintenance_queue
 from app.wiki import coedit, coedit_checkpoint, coedit_rebase
 from app.wiki import git as wiki_git
 from app.wiki.utils import commit_and_fan_out
@@ -40,9 +41,9 @@ def test_reconcile_onto_folds_without_logging_a_session_op(tmp_db):
         s.id, base_version=0, merged_text="HELLO world", new_base_sha="sha1", checkpointed=False,
     )
     assert res is not None
-    row, changed = res
-    assert changed is True
-    assert row.version == 1 and row.buffer_text == "HELLO world" and row.base_sha == "sha1"
+    assert res.changed is True
+    assert res.session.version == 1
+    assert res.session.buffer_text == "HELLO world" and res.session.base_sha == "sha1"
     assert coedit.ops_since(s.id, 0) == []  # no op logged for the fold
 
 
@@ -52,8 +53,7 @@ def test_reconcile_onto_no_change_advances_base_only(tmp_db):
         s.id, base_version=0, merged_text="hi", new_base_sha="sha1", checkpointed=False,
     )
     assert res is not None
-    row, changed = res
-    assert changed is False and row.version == 0 and row.base_sha == "sha1"
+    assert res.changed is False and res.session.version == 0 and res.session.base_sha == "sha1"
 
 
 def test_reconcile_onto_stale_version_returns_none(tmp_db):
@@ -99,22 +99,40 @@ def test_rebase_skips_when_already_based_on_head(repo):
     assert coedit_rebase.rebase_session(sess.id, sha) == "skip"
 
 
-def test_rebase_conflict_enqueues_checkpoint(repo, monkeypatch):
-    calls: list[int] = []
-    monkeypatch.setattr(
-        "app.tasks.coedit_checkpoint.checkpoint_coedit_session", lambda sid: calls.append(sid)
-    )
-    uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
+def _seed_conflict(uid) -> tuple[int, str]:
+    # Human and agent both edit the first line → overlap. Returns (session_id, agent_sha).
     doc = "one\ntwo\n"
     sha = _seed(doc)
     sess = coedit.open_session(_PATH, base_sha=sha, initial_buffer=doc)
     coedit.join(sess.id, uid)
-    # Human and agent both edit the first line → overlap.
     coedit.apply_op(sess.id, base_version=0, changes=[_ch(0, 3, "ONE")], author_user_id=uid)
     new_sha = wiki_git.commit_file(_PATH, "XXX\ntwo\n", "agent edit", author="Agent <a@x.com>")
+    return sess.id, new_sha
 
-    assert coedit_rebase.rebase_session(sess.id, new_sha) == "conflict"
-    assert calls == [sess.id]  # handed to the checkpoint's AI-merge, not folded
+
+def test_rebase_session_reports_conflict_and_leaves_buffer(repo):
+    uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
+    sid, new_sha = _seed_conflict(uid)
+    assert coedit_rebase.rebase_session(sid, new_sha) == "conflict"
+    # Overlap is deferred to the checkpoint — the buffer is left as the human had it.
+    st = coedit.get_session(sid)
+    assert st is not None and st.buffer_text == "ONE\ntwo\n"
+
+
+def test_conflict_hands_off_to_checkpoint_by_name(repo, monkeypatch):
+    # The task (not the engine) enqueues the checkpoint on conflict, by name, so
+    # no import of app.tasks.coedit_checkpoint is needed (would be circular).
+    calls: list[int] = []
+    monkeypatch.setitem(
+        documents_queue.handlers, "checkpoint_coedit_session", lambda sid: calls.append(sid)
+    )
+    uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
+    sid, new_sha = _seed_conflict(uid)
+
+    with lightweight_maintenance_queue.immediate_mode(), documents_queue.immediate_mode():
+        coedit_rebase_task.rebase_coedit_session(sid, new_sha)
+
+    assert calls == [sid]
 
 
 def test_agent_commit_through_gateway_triggers_live_rebase(repo):

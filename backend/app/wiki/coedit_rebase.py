@@ -31,11 +31,15 @@ log = logging.getLogger(__name__)
 def rebase_session(session_id: int, head_sha: str) -> str:
     """Fold the commit at ``head_sha`` into the session's live buffer.
 
-    Returns a short status string (for logging/tests): ``"skip"`` (gone, closed,
-    or already based on ``head_sha``), ``"applied"`` (clean fold, resync sent),
-    ``"noop"`` (buffer already matched; only ``base_sha`` advanced),
-    ``"conflict"`` (overlap → checkpoint enqueued), or ``"raced"`` (a human op
-    landed mid-merge; skipped — the checkpoint merge is the backstop).
+    Returns a short status string: ``"skip"`` (gone, closed, or already based on
+    ``head_sha``), ``"applied"`` (clean fold, resync sent), ``"noop"`` (buffer
+    already matched; only ``base_sha`` advanced), ``"conflict"`` (overlap — the
+    caller resolves it, see ``app/tasks/coedit_rebase.py``), or ``"raced"`` (a
+    human op landed mid-merge; skipped — the checkpoint merge is the backstop).
+
+    Pure domain logic: it does not enqueue anything, so this module stays free of
+    the tasks layer (the trigger + the on-conflict checkpoint enqueue live in
+    ``app/tasks/coedit_rebase.py``).
     """
     sess = coedit.get_session(session_id)
     if sess is None or sess.status != "active" or sess.base_sha == head_sha:
@@ -45,12 +49,9 @@ def rebase_session(session_id: int, head_sha: str) -> str:
     current_body = wiki_git.read_file_opt(sess.path, ref=head_sha)
     mr = wiki_git.merge_content(base_body or "", current_body or "", sess.buffer_text)
     if not mr.clean:
-        # Overlap: the checkpoint engine's AI-merge resolves it, commits, and
-        # syncs the merged buffer back to participants. Enqueue now.
-        from app.tasks.coedit_checkpoint import checkpoint_coedit_session
-
-        checkpoint_coedit_session(session_id)
-        log.info("coedit live-rebase: conflict on %s → checkpoint enqueued", sess.path)
+        # Overlap: leave the buffer alone; the caller hands it to the checkpoint
+        # engine's AI-merge, which resolves + commits + syncs the buffer back.
+        log.info("coedit live-rebase: conflict on %s", sess.path)
         return "conflict"
 
     res = coedit.reconcile_onto(
@@ -62,8 +63,7 @@ def rebase_session(session_id: int, head_sha: str) -> str:
     )
     if res is None:
         return "raced"
-    row, changed = res
-    if not changed:
+    if not res.changed:
         return "noop"
-    coedit_channel.broadcast_resync(session_id, row.version)
+    coedit_channel.broadcast_resync(session_id, res.session.version)
     return "applied"

@@ -113,12 +113,10 @@ def checkpoint_session(session_id: int) -> str | None:
             # the version we committed so we don't loop — the newer buffer is
             # dirty and the next checkpoint reconciles it.
             coedit.mark_checkpointed(session_id, base_sha=result.sha, version=sess.version)
-        else:
-            row, changed = res
-            if changed:
-                # The commit-time merge folded in a concurrent agent commit;
-                # tell participants to reload the merged buffer.
-                coedit_channel.broadcast_resync(session_id, row.version)
+        elif res.changed:
+            # The commit-time merge folded in a concurrent agent commit; tell
+            # participants to reload the merged buffer.
+            coedit_channel.broadcast_resync(session_id, res.session.version)
         return result.sha
 
     # None = the merge produced exactly the current HEAD (buffer already matches

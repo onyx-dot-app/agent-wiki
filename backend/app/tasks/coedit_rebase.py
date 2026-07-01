@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import logging
 
-from app.tasks.queues import lightweight_maintenance_queue
+from app.tasks.queues import documents_queue, lightweight_maintenance_queue
 from app.wiki import coedit
 from app.wiki.coedit_rebase import rebase_session
 
@@ -23,7 +23,11 @@ log = logging.getLogger(__name__)
 
 @lightweight_maintenance_queue.task()
 def rebase_coedit_session(session_id: int, head_sha: str) -> None:
-    rebase_session(session_id, head_sha)
+    if rebase_session(session_id, head_sha) == "conflict":
+        # Overlap → hand to the checkpoint engine's AI-merge (documents_queue).
+        # Enqueue by name rather than importing checkpoint_coedit_session: the
+        # import would be circular (checkpoint → wiki.utils → notify → here).
+        documents_queue.enqueue("checkpoint_coedit_session", (session_id,), {})
 
 
 def on_wiki_commit(rel_path: str, sha: str) -> None:

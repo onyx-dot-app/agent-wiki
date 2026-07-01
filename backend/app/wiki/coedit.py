@@ -66,6 +66,20 @@ class SessionRow(BaseModel):
     last_checkpoint_at: str | None
 
 
+class ReconcileResult(BaseModel):
+    """Outcome of a successful ``reconcile_onto`` (a raced CAS returns ``None``).
+
+    ``changed`` is False when the buffer already equalled the merged text — only
+    ``base_sha`` (and, if checkpointed, ``checkpointed_version``) advanced, no
+    version bump. ``session`` is the post-write row.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    session: SessionRow
+    changed: bool
+
+
 class ParticipantRow(BaseModel):
     """A `coedit_participants` row joined with the user's display name."""
 
@@ -270,7 +284,7 @@ def reconcile_onto(
     merged_text: str,
     new_base_sha: str,
     checkpointed: bool,
-) -> tuple[SessionRow, bool] | None:
+) -> ReconcileResult | None:
     """Reconcile the session buffer onto an external commit under a version CAS.
 
     Shared by live-rebase (a clean inbound agent commit folded in;
@@ -280,12 +294,11 @@ def reconcile_onto(
     buffer resync driven by a git commit. Participants are told to refetch (a
     ``resync`` frame), not sent an op.
 
-    Returns ``(row, changed)`` where ``changed`` is False when the buffer already
-    equals ``merged_text`` — then only ``base_sha`` (and, if ``checkpointed``,
-    ``checkpointed_version``) advance, no version bump. When it differs, the
-    buffer is replaced and ``version`` bumps so any stale in-flight human op is
-    rejected. Returns ``None`` if a concurrent op moved the version (caller falls
-    back).
+    Returns a ``ReconcileResult``; ``changed`` is False when the buffer already
+    equals ``merged_text`` (only ``base_sha`` / ``checkpointed_version`` advance,
+    no version bump). When it differs, the buffer is replaced and ``version``
+    bumps so any stale in-flight human op is rejected. Returns ``None`` if a
+    concurrent op moved the version (caller falls back).
     """
     now = _iso(_now())
     with session() as s:
@@ -321,7 +334,7 @@ def reconcile_onto(
         ).one_or_none()
         if row is None:
             return None
-        return _session_row(row), changed
+        return ReconcileResult(session=_session_row(row), changed=changed)
 
 
 def apply_op(
