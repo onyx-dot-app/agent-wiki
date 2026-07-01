@@ -45,7 +45,7 @@ def test_create_trigger_requires_message(as_user):
     assert "trigger_fire_message" in out["error"]
 
 
-def test_create_trigger_default_destination_is_event_log(as_user):
+def test_create_trigger_defaults_to_event_log(as_user):
     from app.llm.agents.tools.create_trigger import handle
 
     out = handle(
@@ -58,22 +58,7 @@ def test_create_trigger_default_destination_is_event_log(as_user):
     assert "error" not in out, out
     t = out["trigger"]
     assert t["message"] == "Guide rewritten"
-    assert t["destination"] == "event_log"
-
-
-def test_create_trigger_rejects_unknown_destination(as_user):
-    from app.llm.agents.tools.create_trigger import handle
-
-    out = handle(
-        {
-            "scope_path": "guide.md",
-            "trigger_nl_condition": "fire on rewrite",
-            "trigger_fire_message": "x",
-            "destination": "no_such_destination",
-        }
-    )
-    assert "error" in out
-    assert "destination" in out["error"]
+    assert t["destination_config_id"] is None
 
 
 # --------------------------------------------------------------------------- #
@@ -111,25 +96,6 @@ def test_update_trigger_changes_individual_fields(as_user):
 
     out = handle({"trigger_id": tid, "enabled": False})
     assert out["trigger"]["enabled"] is False
-
-
-def test_update_trigger_rejects_unknown_destination(as_user):
-    from app.llm.agents.tools.update_trigger import handle
-
-    tid = _seed_trigger(as_user)
-    out = handle({"trigger_id": tid, "destination": "no_such_destination"})
-    assert "error" in out
-    assert "destination" in out["error"]
-
-
-def test_update_trigger_accepts_explicit_null_destination(as_user):
-    """``null`` is a legacy alias for ``event_log`` — it normalizes, doesn't error."""
-    from app.llm.agents.tools.update_trigger import handle
-
-    tid = _seed_trigger(as_user)
-    out = handle({"trigger_id": tid, "destination": None})
-    assert "error" not in out, out
-    assert out["trigger"]["destination"] == "event_log"
 
 
 def test_update_trigger_rejects_other_users_trigger(as_user, monkeypatch):

@@ -34,7 +34,7 @@ def test_create_and_get(tmp_repo):
     assert t["enabled"] is True
     assert t["kind"] == "delta"
     assert t["message"] == "status changed"
-    assert t["destination"] == "event_log"
+    assert t["destination_config_id"] is None
 
     fetched = repo.get(t["id"])
     assert fetched == t
@@ -131,17 +131,17 @@ def test_create_rejects_missing_message(tmp_repo):
         )
 
 
-def test_create_rejects_unknown_destination(tmp_repo):
+def test_create_rejects_unowned_destination_config(tmp_repo):
     from app.triggers import repo
 
     uid = seed_user(email="a@b.com")
-    with pytest.raises(ValueError, match="destination"):
+    with pytest.raises(ValueError, match="destination_config_id"):
         repo.create(
             owner_user_id=uid,
             scope_path="a.md",
             nl_description="x",
             message="m",
-            destination="no_such_destination",
+            destination_config_id="dst_nonexistent",
         )
 
 
@@ -247,6 +247,4 @@ def test_parse_actions_reads_legacy_single_destination_blob():
     from app.triggers.repo import _parse_actions
 
     legacy = json.dumps({"message": "hi", "destination": "slack"})
-    assert _parse_actions(legacy) == [
-        {"type": "slack", "message": "hi", "slack_webhook_id": None}
-    ]
+    assert _parse_actions(legacy) == [{"destination_config_id": None, "message": "hi"}]

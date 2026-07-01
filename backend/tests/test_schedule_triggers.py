@@ -45,7 +45,7 @@ def _record(**overrides):
         scope_path="a.md",
         kind="schedule",
         nl_description="x",
-        actions=[TriggerAction(type="event_log", message="m")],
+        actions=[TriggerAction(message="m")],
         enabled=True,
         file_path=None,
         created_at=None,

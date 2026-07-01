@@ -1,9 +1,8 @@
-"""Tests for the Slack dispatch branch in ``_record_fire``.
+"""Slack dispatch in ``_record_fire``.
 
-A fire is *always* recorded to the events table; Slack delivery is an
-additive outbound POST that only happens when the destination is ``slack``
-and the trigger references a webhook the owner still owns — and a Slack
-failure must never lose the recorded event.
+A fire is always recorded to the events table. Slack delivery is an additive
+outbound POST that only happens when the action's destination config resolves
+to a slack secret, and a Slack failure must never lose the recorded event.
 """
 from __future__ import annotations
 
@@ -11,8 +10,8 @@ import pytest
 
 from app.models.wiki import ChangeKind
 from app.slack import client as slack_client
-from app.slack import webhooks as slack_webhooks
 from app.tasks.triggers import _record_fire
+from app.triggers import destination_configs as dest_configs
 from app.triggers.engine import TriggerAction, TriggerRecord
 
 from tests._seed import list_events, seed_user
@@ -21,7 +20,7 @@ _HOOK = "https://hooks.slack.com/services/EXAMPLE"
 _OWNER = "usr_1"
 
 
-def _trigger(*, destination: str, slack_webhook_id: str | None = None) -> TriggerRecord:
+def _trigger(*, destination_config_id: str | None) -> TriggerRecord:
     return TriggerRecord(
         id="trg_1",
         owner_user_id=_OWNER,
@@ -29,9 +28,7 @@ def _trigger(*, destination: str, slack_webhook_id: str | None = None) -> Trigge
         kind="delta",
         nl_description="fire when status changes",
         actions=[
-            TriggerAction(
-                type=destination, message="status changed", slack_webhook_id=slack_webhook_id
-            )
+            TriggerAction(destination_config_id=destination_config_id, message="status changed")
         ],
         enabled=True,
         file_path=None,
@@ -72,14 +69,19 @@ def _last_fire() -> dict:
     return fires[0]  # newest first
 
 
-def test_slack_destination_records_event_and_posts(tmp_db, _captured_post):
-    seed_user(_OWNER)
-    wh = slack_webhooks.create(_OWNER, "PM Standup", _HOOK)
+def _slack_config(owner: str = _OWNER, *, secret: str | None = _HOOK) -> str:
+    return dest_configs.create(owner, type="slack", name="PM Standup", secret=secret)["id"]
 
-    _fire(_trigger(destination="slack", slack_webhook_id=wh["id"]))
+
+def test_slack_config_records_event_and_posts(tmp_db, _captured_post):
+    seed_user(_OWNER)
+    cid = _slack_config()
+
+    _fire(_trigger(destination_config_id=cid))
 
     payload = _last_fire()["payload"]
-    assert payload["destination"] == "slack"
+    assert payload["destination_type"] == "slack"
+    assert payload["destination_config_id"] == cid
     assert payload["message"] == "Status flipped to done"
 
     assert len(_captured_post) == 1
@@ -87,46 +89,47 @@ def test_slack_destination_records_event_and_posts(tmp_db, _captured_post):
     assert _captured_post[0]["text"] == "Status flipped to done"
 
 
-def test_slack_without_channel_records_but_does_not_post(tmp_db, _captured_post):
+def test_event_log_records_but_does_not_post(tmp_db, _captured_post):
     seed_user(_OWNER)
 
-    _fire(_trigger(destination="slack", slack_webhook_id=None))
+    _fire(_trigger(destination_config_id=None))
 
-    assert _last_fire()["payload"]["destination"] == "slack"
-    assert _captured_post == []  # no channel → recorded only
-
-
-def test_slack_channel_not_owned_records_but_does_not_post(tmp_db, _captured_post):
-    seed_user(_OWNER)
-    seed_user("usr_other", email="other@x.com")
-    other_wh = slack_webhooks.create("usr_other", "Theirs", _HOOK)
-
-    # trg owner is _OWNER but references another user's webhook → must not post.
-    _fire(_trigger(destination="slack", slack_webhook_id=other_wh["id"]))
-
-    assert _last_fire()["payload"]["destination"] == "slack"
+    assert _last_fire()["payload"]["destination_type"] == "event_log"
     assert _captured_post == []
 
 
-def test_event_log_destination_never_posts(tmp_db, _captured_post):
+def test_slack_config_without_secret_records_but_does_not_post(tmp_db, _captured_post):
     seed_user(_OWNER)
+    cid = _slack_config(secret=None)
 
-    _fire(_trigger(destination="event_log"))
+    _fire(_trigger(destination_config_id=cid))
 
-    assert _last_fire()["payload"]["destination"] == "event_log"
+    assert _last_fire()["payload"]["destination_type"] == "slack"
+    assert _captured_post == []
+
+
+def test_config_not_owned_records_but_does_not_post(tmp_db, _captured_post):
+    seed_user(_OWNER)
+    seed_user("usr_other", email="other@x.com")
+    other_cid = _slack_config("usr_other")
+
+    # trg owner is _OWNER but references another user's config, so it must not post.
+    _fire(_trigger(destination_config_id=other_cid))
+
+    assert _last_fire()["payload"]["destination_type"] == "unknown"
     assert _captured_post == []
 
 
 def test_slack_failure_still_records_event(tmp_db, monkeypatch):
     seed_user(_OWNER)
-    wh = slack_webhooks.create(_OWNER, "PM Standup", _HOOK)
+    cid = _slack_config()
 
     def boom(*, webhook_url: str, text: str) -> None:
         raise slack_client.SlackApiError("slack is down")
 
     monkeypatch.setattr(slack_client, "post_message", boom)
 
-    # Must not raise — the fire is already recorded before dispatch.
-    _fire(_trigger(destination="slack", slack_webhook_id=wh["id"]))
+    # Must not raise: the fire is recorded before dispatch.
+    _fire(_trigger(destination_config_id=cid))
 
-    assert _last_fire()["payload"]["destination"] == "slack"
+    assert _last_fire()["payload"]["destination_type"] == "slack"

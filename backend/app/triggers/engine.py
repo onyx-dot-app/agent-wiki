@@ -46,12 +46,11 @@ log = logging.getLogger(__name__)
 
 
 class TriggerAction(BaseModel):
-    """One delivery action: a destination ``type`` plus the message to render
-    and, for slack, the channel to post to."""
+    """One delivery action: the message to render plus the destination config to
+    deliver it to. ``destination_config_id`` is None for event-log-only fires."""
 
-    type: str
+    destination_config_id: str | None = None
     message: str | None = None
-    slack_webhook_id: str | None = None
 
 
 class TriggerRecord(BaseModel):

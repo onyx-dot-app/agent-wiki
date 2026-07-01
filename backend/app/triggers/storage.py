@@ -78,19 +78,14 @@ def serialize(trigger: dict[str, Any]) -> str:
 
 
 def _serialize_actions(actions: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """One YAML entry per action, stable key order, empty optionals dropped.
-
-    ``slack_webhook_id`` is an opaque channel reference, not the secret webhook
-    URL (that lives only on the slack_webhooks row), so it's safe in the repo.
-    """
+    """One YAML entry per action. ``destination_config_id`` references a
+    ``destination_configs`` row and is absent for event-log actions."""
     out: list[dict[str, Any]] = []
     for action in actions:
-        entry: dict[str, Any] = {
-            "type": action["type"],
-            "message": action.get("message"),
-        }
-        if action.get("slack_webhook_id") is not None:
-            entry["slack_webhook_id"] = action["slack_webhook_id"]
+        entry: dict[str, Any] = {}
+        if action.get("destination_config_id") is not None:
+            entry["destination_config_id"] = action["destination_config_id"]
+        entry["message"] = action.get("message")
         out.append(entry)
     return out
 
@@ -98,9 +93,10 @@ def _serialize_actions(actions: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def parse(yaml_text: str) -> dict[str, Any]:
     """Parse a trigger YAML file into the canonical ``actions``-list shape.
 
-    Files written before multi-action carried a single ``message`` /
-    ``destination`` / ``slack_webhook_id`` at the top level. Those load as a
-    one-element action list so old triggers keep firing until rewritten.
+    Files written before destination configs carried a single ``message`` /
+    ``destination`` / ``slack_webhook_id`` at the top level. Those load as one
+    event-log action here; the reconcile maps any slack channel to its
+    destination config and rewrites the file.
     """
     data: object = yaml.safe_load(yaml_text)
     if not isinstance(data, dict) or "id" not in data:
@@ -116,25 +112,18 @@ def parse(yaml_text: str) -> dict[str, Any]:
 
 
 def _parse_actions(data: dict[str, Any]) -> list[dict[str, Any]]:
-    """Read the ``actions`` list, or synthesize one action from the legacy
-    single-destination fields."""
+    """Read the ``actions`` list, or synthesize one event-log action from a
+    legacy single-destination file (the reconcile fixes slack mappings)."""
     raw = data.get("actions")
     if isinstance(raw, list):
         return [_normalize_action(a) for a in cast(list[dict[str, Any]], raw)]
-    return [
-        {
-            "type": data.get("destination"),
-            "message": data.get("message"),
-            "slack_webhook_id": data.get("slack_webhook_id"),
-        }
-    ]
+    return [{"destination_config_id": None, "message": data.get("message")}]
 
 
 def _normalize_action(action: dict[str, Any]) -> dict[str, Any]:
     return {
-        "type": action.get("type"),
+        "destination_config_id": action.get("destination_config_id"),
         "message": action.get("message"),
-        "slack_webhook_id": action.get("slack_webhook_id"),
     }
 
 

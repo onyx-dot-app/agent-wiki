@@ -18,7 +18,6 @@ def handle(args: dict[str, Any]) -> Any:
     raw_scope = args.get("scope_path", "")
     nl = args.get("trigger_nl_condition")
     message = args.get("trigger_fire_message")
-    destination = args.get("destination", triggers_repo.DEFAULT_DESTINATION)
 
     if not isinstance(nl, str) or not nl.strip():
         return {"error": "trigger_nl_condition is required"}
@@ -41,7 +40,6 @@ def handle(args: dict[str, Any]) -> Any:
             scope_path=scope,
             nl_description=nl.strip(),
             message=message.strip(),
-            destination=destination,
             actor=wiki_utils.author_string(),
         )
     except ValueError as exc:

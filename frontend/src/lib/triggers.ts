@@ -11,8 +11,7 @@ export interface Trigger {
   kind: TriggerKind;
   nl_description: string;
   message: string | null;
-  destination: string | null;
-  slack_webhook_id: string | null;
+  destination_config_id: string | null;
   enabled: boolean;
   created_at: string;
   last_edited_at: string;
@@ -35,8 +34,7 @@ export interface TriggerCreateInput {
   scope_path: string;
   nl_description: string;
   message: string;
-  destination?: string | null;
-  slack_webhook_id?: string | null;
+  destination_config_id?: string | null;
   enabled?: boolean;
   kind?: TriggerKind;
   schedule_cron?: string | null;
@@ -48,8 +46,7 @@ export interface TriggerUpdateInput {
   scope_path?: string;
   nl_description?: string;
   message?: string;
-  destination?: string | null;
-  slack_webhook_id?: string | null;
+  destination_config_id?: string | null;
   enabled?: boolean;
   schedule_cron?: string | null;
   schedule_timezone?: string | null;
@@ -100,7 +97,7 @@ export interface TriggerVersion {
   scope_path: string;
   nl_description: string;
   message: string | null;
-  destination: string | null;
+  destination_config_id: string | null;
   enabled: boolean;
   sha: string;
   path: string;
@@ -137,37 +134,42 @@ export function useTriggerDestinations() {
   return data?.destinations ?? [];
 }
 
-// ---- Slack channels (per-user named webhooks) ----
+// ---- Destination configs (per-user typed delivery targets) ----
 
-export interface SlackWebhook {
+export interface DestinationConfig {
   id: string;
+  type: string;
   name: string;
-  webhook_url_hint: string;
+  has_secret: boolean;
   created_at: string | null;
 }
 
-export function useSlackWebhooks() {
+export function useDestinationConfigs() {
   const { data, error, isLoading, mutate } = useSWR<{
-    webhooks: SlackWebhook[];
-  }>("/triggers/slack-webhooks");
+    configs: DestinationConfig[];
+  }>("/triggers/destination-configs");
   return {
-    webhooks: data?.webhooks ?? [],
+    configs: data?.configs ?? [],
     error: error as Error | undefined,
     isLoading,
     refresh: mutate,
   };
 }
 
-export function createSlackWebhook(
-  name: string,
-  webhook_url: string,
-): Promise<SlackWebhook> {
-  return apiFetch<SlackWebhook>("/triggers/slack-webhooks", {
+export function createDestinationConfig(input: {
+  type: string;
+  name: string;
+  secret?: string | null;
+  config?: Record<string, unknown>;
+}): Promise<DestinationConfig> {
+  return apiFetch<DestinationConfig>("/triggers/destination-configs", {
     method: "POST",
-    body: JSON.stringify({ name, webhook_url }),
+    body: JSON.stringify(input),
   });
 }
 
-export function deleteSlackWebhook(id: string): Promise<void> {
-  return apiFetch<void>(`/triggers/slack-webhooks/${id}`, { method: "DELETE" });
+export function deleteDestinationConfig(id: string): Promise<void> {
+  return apiFetch<void>(`/triggers/destination-configs/${id}`, {
+    method: "DELETE",
+  });
 }

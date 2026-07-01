@@ -62,6 +62,7 @@ from app.models._helpers import ErrorResponse, QueueFullErrorResponse, RequestEr
 from app.db.session import init_db
 from app.tasks.agent_activity import schedule_all_pending_cleanups
 from app.tasks.queues import QueueFullError
+from app.triggers import reconcile as triggers_reconcile
 from app.triggers import repo as triggers_repo
 from app.utils.logging import setup_logging
 from app.wiki.git import ensure_wiki_repo
@@ -171,6 +172,7 @@ async def _lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     if comment_fts.count() == 0:
         _comments_repo.reindex_all_inline()
     triggers_repo.purge_invalid_triggers(actor="system <system@agent-wiki>")
+    triggers_reconcile.reconcile_legacy_slack_triggers()
     triggers_repo.rebuild_from_filesystem()
     schedule_all_pending_cleanups()
     # Cross-process realtime bus: the worker process commits docs, the web

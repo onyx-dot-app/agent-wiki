@@ -3,16 +3,16 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any
+from typing import Any, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 
 from app.auth import User, require_can
 from app.auth.deps import require_user
-from app.models.slack import (
-    CreateSlackWebhookRequest,
-    SlackWebhookListResponse,
-    SlackWebhookView,
+from app.models.destination_config import (
+    CreateDestinationConfigRequest,
+    DestinationConfigListResponse,
+    DestinationConfigView,
 )
 from app.models.trigger import (
     CreateTriggerRequest,
@@ -25,7 +25,7 @@ from app.models.trigger import (
     TriggerView,
     UpdateTriggerRequest,
 )
-from app.slack import webhooks as slack_webhooks
+from app.triggers import destination_configs as dest_configs
 from app.triggers import destinations as destinations_repo
 from app.triggers import repo as triggers_repo
 from app.triggers import storage as triggers_storage
@@ -41,19 +41,12 @@ def _git_author(user: User) -> str:
     return f"{user.name or user.email} <{user.email}>"
 
 
-def _mask_url(url: str) -> str:
-    """Show only enough of a webhook URL to recognize it (last path segment)."""
-    tail = url.rstrip("/").rsplit("/", 1)[-1]
-    if len(tail) <= 4:
-        return "…" + tail
-    return "…/" + tail[:4] + "…" + tail[-4:]
-
-
-def _webhook_view(row: dict[str, Any]) -> SlackWebhookView:
-    return SlackWebhookView(
+def _config_view(row: dict[str, Any]) -> DestinationConfigView:
+    return DestinationConfigView(
         id=row["id"],
+        type=row["type"],
         name=row["name"],
-        webhook_url_hint=_mask_url(row["webhook_url"]),
+        has_secret=bool(row.get("has_secret")),
         created_at=row.get("created_at"),
     )
 
@@ -91,31 +84,39 @@ def list_destinations(
     )
 
 
-@router.get("/slack-webhooks", response_model=SlackWebhookListResponse)
-def list_slack_webhooks(user: User = Depends(require_user)) -> SlackWebhookListResponse:
-    """The caller's own Slack channels (named webhooks). URLs are masked."""
-    rows = slack_webhooks.list_for_user(user.id)
-    return SlackWebhookListResponse(webhooks=[_webhook_view(r) for r in rows])
+@router.get("/destination-configs", response_model=DestinationConfigListResponse)
+def list_destination_configs(
+    user: User = Depends(require_user),
+) -> DestinationConfigListResponse:
+    """The caller's own destination configs. Secrets are never returned."""
+    rows = dest_configs.list_for_user(user.id)
+    return DestinationConfigListResponse(configs=[_config_view(r) for r in rows])
 
 
 @router.post(
-    "/slack-webhooks",
-    response_model=SlackWebhookView,
+    "/destination-configs",
+    response_model=DestinationConfigView,
     status_code=status.HTTP_201_CREATED,
 )
-def create_slack_webhook(
-    req: CreateSlackWebhookRequest, user: User = Depends(require_user)
-) -> SlackWebhookView:
+def create_destination_config(
+    req: CreateDestinationConfigRequest, user: User = Depends(require_user)
+) -> DestinationConfigView:
     try:
-        row = slack_webhooks.create(user.id, req.name, req.webhook_url)
+        row = dest_configs.create(
+            user.id, type=req.type, name=req.name, config=req.config, secret=req.secret
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return _webhook_view(row)
+    return _config_view(row)
 
 
-@router.delete("/slack-webhooks/{webhook_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_slack_webhook(webhook_id: str, user: User = Depends(require_user)) -> Response:
-    if not slack_webhooks.delete(webhook_id, user.id):
+@router.delete(
+    "/destination-configs/{config_id}", status_code=status.HTTP_204_NO_CONTENT
+)
+def delete_destination_config(
+    config_id: str, user: User = Depends(require_user)
+) -> Response:
+    if not dest_configs.delete(config_id, user.id):
         raise HTTPException(status_code=404, detail="not found")
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -144,8 +145,7 @@ def create_trigger(
             scope_path=scope_path,
             nl_description=req.nl_description.strip(),
             message=req.message.strip(),
-            destination=req.destination,
-            slack_webhook_id=req.slack_webhook_id,
+            destination_config_id=req.destination_config_id,
             kind=req.kind,
             enabled=req.enabled,
             actor=_git_author(user),
@@ -204,11 +204,8 @@ def update_trigger(
             raise HTTPException(status_code=400, detail="message cannot be empty")
         kwargs["message"] = msg
 
-    if "destination" in sent_fields:
-        kwargs["destination"] = req.destination
-
-    if "slack_webhook_id" in sent_fields:
-        kwargs["slack_webhook_id"] = req.slack_webhook_id
+    if "destination_config_id" in sent_fields:
+        kwargs["destination_config_id"] = req.destination_config_id
 
     if "enabled" in sent_fields:
         kwargs["enabled"] = req.enabled
@@ -294,11 +291,12 @@ def trigger_version(
         log.exception("failed to read trigger %s at %s", trigger_id, sha)
         raise HTTPException(status_code=500, detail="failed to read version") from exc
 
+    first_action = cast(dict[str, Any], (data.get("actions") or [{}])[0])
     return TriggerVersionResponse(
         scope_path=data.get("scope_path"),
         nl_description=data.get("nl_description"),
-        message=data.get("message"),
-        destination=data.get("destination"),
+        message=first_action.get("message"),
+        destination_config_id=first_action.get("destination_config_id"),
         enabled=bool(data.get("enabled", True)),
         sha=sha,
         path=path,

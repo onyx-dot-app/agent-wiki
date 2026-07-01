@@ -1,12 +1,14 @@
-"""trigger action list + drop slack_webhook_id column
+"""drop the trigger slack_webhook_id column
 
-Folds each trigger's single ``{message, destination}`` blob plus its
-``slack_webhook_id`` column into the ``action_json`` actions list
-(``{"actions": [{type, message, slack_webhook_id}]}``), then drops the
-now-redundant column. The channel id lives inside the action.
+The Slack channel a trigger posts to now lives in the ``destination_configs``
+registry, referenced from ``action_json`` by ``destination_config_id``. Folding
+existing Slack channels into that registry and rewriting the trigger YAML is
+done in application code (``app/triggers/reconcile.py``), because it touches the
+wiki git repo and encrypted secrets. This migration only drops the column.
 
-Guarded on whether the column exists: a schema built fresh from the current
-models never has it, an upgraded database does.
+Guarded on the column existing: ``0001_initial`` builds a fresh schema from the
+current models (which no longer declare it) while ``0023`` adds it on the
+upgrade path, mirroring ``0023``'s own guard.
 
 Revision ID: 0041
 Revises: 0040
@@ -15,8 +17,7 @@ Create Date: 2026-07-01 00:00:00.000000+00:00
 
 from __future__ import annotations
 
-import json
-from typing import Any, Sequence
+from typing import Sequence
 
 import sqlalchemy as sa
 from alembic import op
@@ -28,71 +29,16 @@ branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 
-_triggers = sa.table(
-    "triggers",
-    sa.column("id", sa.Text),
-    sa.column("action_json", sa.Text),
-    sa.column("slack_webhook_id", sa.Text),
-)
-
-
-def _load(raw: object) -> dict[str, Any]:
-    if not isinstance(raw, str) or not raw:
-        return {}
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError:
-        return {}
-    return data if isinstance(data, dict) else {}
+def _has_slack_webhook_id() -> bool:
+    cols = {c["name"] for c in sa.inspect(op.get_bind()).get_columns("triggers")}
+    return "slack_webhook_id" in cols
 
 
 def upgrade() -> None:
-    bind = op.get_bind()
-    columns = {c["name"] for c in sa.inspect(bind).get_columns("triggers")}
-    if "slack_webhook_id" not in columns:
-        return
-
-    rows = bind.execute(
-        sa.select(_triggers.c.id, _triggers.c.action_json, _triggers.c.slack_webhook_id)
-    ).all()
-    for row in rows:
-        data = _load(row.action_json)
-        if "actions" in data:
-            continue
-        new_json = json.dumps(
-            {
-                "actions": [
-                    {
-                        "type": data.get("destination"),
-                        "message": data.get("message"),
-                        "slack_webhook_id": row.slack_webhook_id,
-                    }
-                ]
-            }
-        )
-        bind.execute(
-            sa.update(_triggers).where(_triggers.c.id == row.id).values(action_json=new_json)
-        )
-
-    op.drop_column("triggers", "slack_webhook_id")
+    if _has_slack_webhook_id():
+        op.drop_column("triggers", "slack_webhook_id")
 
 
 def downgrade() -> None:
-    bind = op.get_bind()
-    columns = {c["name"] for c in sa.inspect(bind).get_columns("triggers")}
-    if "slack_webhook_id" not in columns:
+    if not _has_slack_webhook_id():
         op.add_column("triggers", sa.Column("slack_webhook_id", sa.Text, nullable=True))
-
-    rows = bind.execute(sa.select(_triggers.c.id, _triggers.c.action_json)).all()
-    for row in rows:
-        data = _load(row.action_json)
-        actions = data.get("actions")
-        first = actions[0] if isinstance(actions, list) and actions else {}
-        old_json = json.dumps(
-            {"message": first.get("message"), "destination": first.get("type")}
-        )
-        bind.execute(
-            sa.update(_triggers)
-            .where(_triggers.c.id == row.id)
-            .values(action_json=old_json, slack_webhook_id=first.get("slack_webhook_id"))
-        )

@@ -57,10 +57,6 @@ def handle(args: dict[str, Any]) -> Any:
             return {"error": "trigger_fire_message cannot be empty"}
         kwargs["message"] = msg.strip()
 
-    destination = args.get("destination", _UNSET)
-    if destination is not _UNSET:
-        kwargs["destination"] = destination
-
     if "enabled" in args:
         enabled = args["enabled"]
         if not isinstance(enabled, bool):

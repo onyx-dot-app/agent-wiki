@@ -22,9 +22,9 @@ class TriggerAction(BaseModel):
 
 
 class CreateTriggerRequest(BaseModel):
-    """``destination`` is a slug from the ``trigger_destinations`` table
-    (default ``"event_log"``). Validation against the destinations
-    catalog happens in the repo for a single source of truth.
+    """``destination_config_id`` references a destination config the caller
+    owns (GET /triggers/destination-configs), or is null for event-log-only
+    fires. Ownership is validated in the repo.
 
     For ``kind="schedule"`` triggers, ``schedule_cron`` and
     ``schedule_timezone`` are required and ``schedule_start_at`` is
@@ -34,10 +34,7 @@ class CreateTriggerRequest(BaseModel):
     scope_path: str = Field(min_length=1)
     nl_description: str = Field(min_length=1)
     message: str = Field(min_length=1)
-    destination: str | None = None
-    # Required when ``destination == "slack"``: the id of one of the caller's
-    # Slack channels (see GET /triggers/slack-webhooks). Ignored otherwise.
-    slack_webhook_id: str | None = None
+    destination_config_id: str | None = None
     kind: str = "delta"
     enabled: bool = True
     schedule_cron: str | None = None
@@ -51,8 +48,7 @@ class UpdateTriggerRequest(BaseModel):
     scope_path: str | None = None
     nl_description: str | None = None
     message: str | None = None
-    destination: str | None = None
-    slack_webhook_id: str | None = None
+    destination_config_id: str | None = None
     enabled: bool | None = None
     schedule_cron: str | None = None
     schedule_timezone: str | None = None
@@ -65,7 +61,7 @@ class UpdateTriggerRequest(BaseModel):
 
 
 class TriggerView(BaseModel):
-    """API view of a trigger row. ``message`` and ``destination`` are
+    """API view of a trigger row. ``message`` and ``destination_config_id`` are
     flattened from ``Trigger.action_json``. Schedule fields are only
     populated for ``kind="schedule"`` triggers."""
 
@@ -75,8 +71,7 @@ class TriggerView(BaseModel):
     kind: str
     nl_description: str
     message: str | None
-    destination: str
-    slack_webhook_id: str | None = None
+    destination_config_id: str | None = None
     enabled: bool
     created_at: str | None
     last_edited_at: str | None
@@ -121,7 +116,7 @@ class TriggerVersionResponse(BaseModel):
     scope_path: str | None
     nl_description: str | None
     message: str | None
-    destination: str | None
+    destination_config_id: str | None
     enabled: bool
     sha: str
     path: str
