@@ -6,7 +6,7 @@ in-memory frames in ``app/wiki/coedit_channel.py`` (the wire shape).
 
 from __future__ import annotations
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.wiki.coedit import Change
 
@@ -30,6 +30,17 @@ class OpRequest(BaseModel):
 
 class OpResponse(BaseModel):
     version: int  # the session version this op produced
+
+
+class CursorRequest(BaseModel):
+    """A participant's live cursor/selection. ``anchor``/``head`` are UTF-16
+    offsets (like Change); a collapsed selection (anchor == head) is a caret,
+    otherwise it's a highlighted range. Ephemeral — never persisted."""
+
+    session_id: int
+    anchor: int = Field(ge=0)
+    head: int = Field(ge=0)
+    typing: bool = False
 
 
 class ParticipantOut(BaseModel):
