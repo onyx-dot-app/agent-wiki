@@ -283,7 +283,11 @@ class IntegrationHarness:
         """POST /api/triggers; return the new trigger id."""
         resp = self.client.post(
             "/api/triggers",
-            json={"scope_path": scope_path, "nl_description": condition, "message": message},
+            json={
+                "scope_path": scope_path,
+                "nl_description": condition,
+                "actions": [{"message": message}],
+            },
         )
         assert resp.status_code == 201, resp.text
         return resp.json()["id"]

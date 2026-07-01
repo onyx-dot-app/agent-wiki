@@ -13,10 +13,6 @@ from app.triggers import repo as triggers_repo
 from app.triggers import storage as triggers_storage
 from app.wiki import acl as wiki_acl
 
-# Sentinel mirroring the one in triggers.repo so we can distinguish
-# "destination omitted" from "destination explicitly set to null".
-_UNSET = object()
-
 
 def handle(args: dict[str, Any]) -> Any:
     user = current_user()
@@ -51,11 +47,8 @@ def handle(args: dict[str, Any]) -> Any:
             return {"error": "trigger_nl_condition cannot be empty"}
         kwargs["nl_description"] = nl.strip()
 
-    if "trigger_fire_message" in args:
-        msg = args["trigger_fire_message"]
-        if not isinstance(msg, str) or not msg.strip():
-            return {"error": "trigger_fire_message cannot be empty"}
-        kwargs["message"] = msg.strip()
+    if "actions" in args:
+        kwargs["actions"] = args["actions"]
 
     if "enabled" in args:
         enabled = args["enabled"]

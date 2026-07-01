@@ -1,6 +1,6 @@
 {
   "name": "create_trigger",
-  "description": "Create a natural-language trigger for the current user. A trigger has three parts: an **if** condition (`trigger_nl_condition` — when to fire), a **fire message** (`trigger_fire_message` — what to deliver when it fires), and a **destination** (where to deliver — a destination id from `get_trigger_destinations`, defaulting to `event_log`). Only call this after the user has explicitly asked to create a trigger — do not create speculatively. If the user wants to send the fire somewhere specific, call `get_trigger_destinations` first to see the available ids.",
+  "description": "Create a natural-language trigger for the current user. A trigger has an **if** condition (`trigger_nl_condition` — when to fire) and a list of **actions** (what to deliver and where when it fires). Each action carries its own message; a fire delivers every action. Only call this after the user has explicitly asked to create a trigger — do not create speculatively. To deliver somewhere specific (e.g. a Slack channel), call `get_destination_configs` first and use one of the returned ids; omit `destination_config_id` to record to the event log.",
   "input_schema": {
     "type": "object",
     "properties": {
@@ -12,15 +12,26 @@
         "type": "string",
         "description": "**If condition.** Plain-language description of when the trigger should fire (e.g. \"when the auth flow's session-timeout policy changes\"). Evaluated by an LLM against the diff, so be specific about what kind of change matters."
       },
-      "trigger_fire_message": {
-        "type": "string",
-        "description": "**What message to send.** The notification body delivered when the trigger fires (e.g. \"Auth: session timeout policy changed — please review\"). Will appear in the destination."
-      },
-      "destination": {
-        "type": "string",
-        "description": "**Where to send it.** A destination id from `get_trigger_destinations` (e.g. `event_log`). Optional — defaults to `event_log`, which records the fire in the events table without sending it externally."
+      "actions": {
+        "type": "array",
+        "minItems": 1,
+        "description": "**What to deliver, and where.** One entry per delivery. Most triggers have exactly one.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "message": {
+              "type": "string",
+              "description": "The notification body delivered when the trigger fires (e.g. \"Auth: session timeout policy changed — please review\")."
+            },
+            "destination_config_id": {
+              "type": "string",
+              "description": "A destination config id from `get_destination_configs` (the user's own delivery targets). Omit to record the fire in the event log only."
+            }
+          },
+          "required": ["message"]
+        }
       }
     },
-    "required": ["scope_path", "trigger_nl_condition", "trigger_fire_message"]
+    "required": ["scope_path", "trigger_nl_condition", "actions"]
   }
 }

@@ -48,8 +48,10 @@ export default function TriggersPage() {
   const { triggers, error: listSwrError, refresh } = useTriggers();
   const { configs } = useDestinationConfigs();
   const destinationLabel = (t: Trigger) => {
-    if (!t.destination_config_id) return "Event log";
-    const cfg = configs.find((c) => c.id === t.destination_config_id);
+    if (t.actions.length > 1) return `${t.actions.length} destinations`;
+    const configId = t.actions[0]?.destination_config_id;
+    if (!configId) return "Event log";
+    const cfg = configs.find((c) => c.id === configId);
     return cfg ? `${cfg.type} · ${cfg.name}` : "(destination removed)";
   };
   const [mutationError, setMutationError] = useState<string | null>(null);
@@ -237,12 +239,14 @@ export default function TriggersPage() {
                   <span className={sentenceTagCn}>IF</span>
                   <span className="min-w-0 flex-1">{t.nl_description}</span>
                 </div>
-                {t.message && (
-                  <div className="mt-[6px] flex items-baseline gap-2">
-                    <span className={sentenceTagCn}>THEN SEND</span>
-                    <span className="min-w-0 flex-1">{t.message}</span>
-                  </div>
-                )}
+                {t.actions
+                  .filter((a) => a.message)
+                  .map((a, i) => (
+                    <div key={i} className="mt-[6px] flex items-baseline gap-2">
+                      <span className={sentenceTagCn}>THEN SEND</span>
+                      <span className="min-w-0 flex-1">{a.message}</span>
+                    </div>
+                  ))}
                 <div className="mt-[6px] flex items-baseline gap-2">
                   <span className={sentenceTagCn}>TO</span>
                   <span className="min-w-0 flex-1 text-(--text-04)">
@@ -290,8 +294,7 @@ export default function TriggersPage() {
               ...historyFor,
               scope_path: version.scope_path,
               nl_description: version.nl_description,
-              message: version.message,
-              destination_config_id: version.destination_config_id,
+              actions: version.actions,
               enabled: version.enabled,
               kind: version.kind ?? historyFor.kind,
               schedule_cron: version.schedule_cron,

@@ -1,19 +1,23 @@
 """HTTP shapes for /api/triggers."""
 from __future__ import annotations
 
-from typing import Any, Literal
-
 from pydantic import BaseModel, Field
 
 
-# --------------------------------------------------------------------------- #
-# Forward-compatibility schemas (kept for the typed surface)                  #
-# --------------------------------------------------------------------------- #
+class TriggerActionShape(BaseModel):
+    """One authored delivery action: the message to render on fire and the
+    destination config it goes to (null = event-log only)."""
+
+    destination_config_id: str | None = None
+    message: str = Field(min_length=1)
 
 
-class TriggerAction(BaseModel):
-    kind: Literal["webhook", "http", "agent_message"]
-    config: dict[str, Any]
+class TriggerActionView(BaseModel):
+    """Read-side action. Tolerates a null message so historical YAML versions
+    render instead of failing validation."""
+
+    destination_config_id: str | None = None
+    message: str | None = None
 
 
 # --------------------------------------------------------------------------- #
@@ -22,9 +26,10 @@ class TriggerAction(BaseModel):
 
 
 class CreateTriggerRequest(BaseModel):
-    """``destination_config_id`` references a destination config the caller
-    owns (GET /triggers/destination-configs), or is null for event-log-only
-    fires. Ownership is validated in the repo.
+    """``actions`` is the delivery list; each entry's ``destination_config_id``
+    must reference a destination config the caller owns (GET
+    /triggers/destination-configs) or be null for event-log-only fires.
+    Ownership is validated in the repo.
 
     For ``kind="schedule"`` triggers, ``schedule_cron`` and
     ``schedule_timezone`` are required and ``schedule_start_at`` is
@@ -33,8 +38,7 @@ class CreateTriggerRequest(BaseModel):
 
     scope_path: str = Field(min_length=1)
     nl_description: str = Field(min_length=1)
-    message: str = Field(min_length=1)
-    destination_config_id: str | None = None
+    actions: list[TriggerActionShape] = Field(min_length=1)
     kind: str = "delta"
     enabled: bool = True
     schedule_cron: str | None = None
@@ -47,8 +51,7 @@ class UpdateTriggerRequest(BaseModel):
 
     scope_path: str | None = None
     nl_description: str | None = None
-    message: str | None = None
-    destination_config_id: str | None = None
+    actions: list[TriggerActionShape] | None = None
     enabled: bool | None = None
     schedule_cron: str | None = None
     schedule_timezone: str | None = None
@@ -61,17 +64,16 @@ class UpdateTriggerRequest(BaseModel):
 
 
 class TriggerView(BaseModel):
-    """API view of a trigger row. ``message`` and ``destination_config_id`` are
-    flattened from ``Trigger.action_json``. Schedule fields are only
-    populated for ``kind="schedule"`` triggers."""
+    """API view of a trigger row. ``actions`` comes from
+    ``Trigger.action_json``. Schedule fields are only populated for
+    ``kind="schedule"`` triggers."""
 
     id: str
     owner_user_id: str
     scope_path: str
     kind: str
     nl_description: str
-    message: str | None
-    destination_config_id: str | None = None
+    actions: list[TriggerActionView]
     enabled: bool
     created_at: str | None
     last_edited_at: str | None
@@ -115,8 +117,7 @@ class TriggerVersionResponse(BaseModel):
 
     scope_path: str | None
     nl_description: str | None
-    message: str | None
-    destination_config_id: str | None
+    actions: list[TriggerActionView]
     enabled: bool
     sha: str
     path: str

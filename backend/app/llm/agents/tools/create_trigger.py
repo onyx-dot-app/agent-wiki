@@ -17,12 +17,10 @@ def handle(args: dict[str, Any]) -> Any:
 
     raw_scope = args.get("scope_path", "")
     nl = args.get("trigger_nl_condition")
-    message = args.get("trigger_fire_message")
+    actions = args.get("actions")
 
     if not isinstance(nl, str) or not nl.strip():
         return {"error": "trigger_nl_condition is required"}
-    if not isinstance(message, str) or not message.strip():
-        return {"error": "trigger_fire_message is required"}
 
     if not isinstance(raw_scope, str):
         return {"error": "scope_path must be a string"}
@@ -39,7 +37,7 @@ def handle(args: dict[str, Any]) -> Any:
             owner_user_id=user.id,
             scope_path=scope,
             nl_description=nl.strip(),
-            message=message.strip(),
+            actions=actions,
             actor=wiki_utils.author_string(),
         )
     except ValueError as exc:

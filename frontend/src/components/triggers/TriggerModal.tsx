@@ -71,8 +71,9 @@ export function TriggerModal({
     if (!open) return;
     setScopePath(initial?.scope_path ?? "");
     setIfText(initial?.nl_description ?? "");
-    setSendText(initial?.message ?? "");
-    setDestinationConfigId(initial?.destination_config_id ?? null);
+    const firstAction = initial?.actions?.[0];
+    setSendText(firstAction?.message ?? "");
+    setDestinationConfigId(firstAction?.destination_config_id ?? null);
     setAddingChannel(false);
     setNewChannelName("");
     setNewChannelUrl("");
@@ -90,8 +91,7 @@ export function TriggerModal({
     initial?.id,
     initial?.scope_path,
     initial?.nl_description,
-    initial?.message,
-    initial?.destination_config_id,
+    initial?.actions,
     initial?.kind,
     initial?.schedule_cron,
     initial?.schedule_timezone,
@@ -113,8 +113,7 @@ export function TriggerModal({
       const baseInput: TriggerCreateInput = {
         scope_path: scopePath.trim(),
         nl_description: nl,
-        message: msg,
-        destination_config_id: destinationConfigId,
+        actions: [{ destination_config_id: destinationConfigId, message: msg }],
         kind,
       };
       if (kind === "schedule") {
@@ -134,8 +133,9 @@ export function TriggerModal({
         saved = await updateTrigger(initial.id, {
           scope_path: scopePath.trim(),
           nl_description: nl,
-          message: msg,
-          destination_config_id: destinationConfigId,
+          actions: [
+            { destination_config_id: destinationConfigId, message: msg },
+          ],
           schedule_cron: kind === "schedule" ? computedCron : null,
           schedule_timezone: kind === "schedule" ? tz : null,
           schedule_start_at:

@@ -16,6 +16,7 @@ from app.models.destination_config import (
 )
 from app.models.trigger import (
     CreateTriggerRequest,
+    TriggerActionView,
     TriggerCommit,
     TriggerDestinationsResponse,
     TriggerDestinationView,
@@ -144,8 +145,7 @@ def create_trigger(
             owner_user_id=user.id,
             scope_path=scope_path,
             nl_description=req.nl_description.strip(),
-            message=req.message.strip(),
-            destination_config_id=req.destination_config_id,
+            actions=[a.model_dump() for a in req.actions],
             kind=req.kind,
             enabled=req.enabled,
             actor=_git_author(user),
@@ -198,14 +198,8 @@ def update_trigger(
             raise HTTPException(status_code=400, detail="nl_description cannot be empty")
         kwargs["nl_description"] = nl
 
-    if "message" in sent_fields:
-        msg = (req.message or "").strip()
-        if not msg:
-            raise HTTPException(status_code=400, detail="message cannot be empty")
-        kwargs["message"] = msg
-
-    if "destination_config_id" in sent_fields:
-        kwargs["destination_config_id"] = req.destination_config_id
+    if "actions" in sent_fields:
+        kwargs["actions"] = [a.model_dump() for a in (req.actions or [])]
 
     if "enabled" in sent_fields:
         kwargs["enabled"] = req.enabled
@@ -291,12 +285,13 @@ def trigger_version(
         log.exception("failed to read trigger %s at %s", trigger_id, sha)
         raise HTTPException(status_code=500, detail="failed to read version") from exc
 
-    first_action = cast(dict[str, Any], (data.get("actions") or [{}])[0])
     return TriggerVersionResponse(
         scope_path=data.get("scope_path"),
         nl_description=data.get("nl_description"),
-        message=first_action.get("message"),
-        destination_config_id=first_action.get("destination_config_id"),
+        actions=[
+            TriggerActionView.model_validate(a)
+            for a in cast(list[dict[str, Any]], data.get("actions") or [])
+        ],
         enabled=bool(data.get("enabled", True)),
         sha=sha,
         path=path,

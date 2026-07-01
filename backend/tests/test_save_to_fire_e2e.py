@@ -65,7 +65,7 @@ def _seed_trigger(*, owner_user_id, scope_path, nl="fire when status changes"):
         owner_user_id=owner_user_id,
         scope_path=scope_path,
         nl_description=nl,
-        message="status changed",
+        actions=[{"message": "status changed"}],
     )
 
 

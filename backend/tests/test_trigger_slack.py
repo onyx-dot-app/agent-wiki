@@ -21,8 +21,7 @@ def _create(owner: str, *, destination_config_id: str | None = None) -> dict[str
         owner_user_id=owner,
         scope_path="a.md",
         nl_description="fire",
-        message="m",
-        destination_config_id=destination_config_id,
+        actions=[{"message": "m", "destination_config_id": destination_config_id}],
     )
 
 
@@ -34,7 +33,7 @@ def test_trigger_with_owned_config(tmp_repo):
     seed_user("usr_1")
     cid = _slack_config("usr_1")
     t = _create("usr_1", destination_config_id=cid)
-    assert t["destination_config_id"] == cid
+    assert t["actions"][0]["destination_config_id"] == cid
 
 
 def test_trigger_rejects_unowned_config(tmp_repo):
@@ -49,9 +48,9 @@ def test_flip_to_event_log_clears_config(tmp_repo):
     seed_user("usr_1")
     cid = _slack_config("usr_1")
     t = _create("usr_1", destination_config_id=cid)
-    updated = triggers_repo.update(str(t["id"]), destination_config_id=None)
+    updated = triggers_repo.update(str(t["id"]), actions=[{"message": "m"}])
     assert updated is not None
-    assert updated["destination_config_id"] is None
+    assert updated["actions"][0]["destination_config_id"] is None
 
 
 def test_rebuild_preserves_destination_config_id(tmp_repo):
@@ -61,4 +60,4 @@ def test_rebuild_preserves_destination_config_id(tmp_repo):
     triggers_repo.rebuild_from_filesystem()
     rebuilt = triggers_repo.get(str(t["id"]))
     assert rebuilt is not None
-    assert rebuilt["destination_config_id"] == cid
+    assert rebuilt["actions"][0]["destination_config_id"] == cid
