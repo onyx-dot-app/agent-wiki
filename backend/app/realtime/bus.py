@@ -40,6 +40,11 @@ CHANNEL = "realtime_bus"
 # carrying our own tag — the originating process already delivered locally.
 _PROCESS_ORIGIN = secrets.token_hex(8)
 
+# Postgres caps a NOTIFY payload at 8000 bytes and errors on longer ones. Only
+# matters for unusually large payloads (e.g. a multi-KB paste); normal messages
+# are tiny. Publishers that can overflow (co-edit ops) check ``payload_fits``.
+MAX_PAYLOAD_BYTES = 8000
+
 Handler = Callable[[dict[str, Any]], None]
 _handlers: dict[str, Handler] = {}
 _handlers_lock = threading.Lock()
@@ -68,11 +73,24 @@ def emit(payload: dict[str, Any]) -> None:
     inlined and single-quote-escaped (only the JSON could contain a quote).
     """
     try:
-        literal = json.dumps({**payload, "origin": _PROCESS_ORIGIN}).replace("'", "''")
+        literal = _serialized(payload)
         with db_session() as s:
             s.execute(text(f"NOTIFY {CHANNEL}, '{literal}'"))
     except Exception:
         log.exception("realtime bus: NOTIFY %s failed (local delivery still occurred)", CHANNEL)
+
+
+def _serialized(payload: dict[str, Any]) -> str:
+    """The exact NOTIFY literal ``emit`` sends: envelope + origin tag, with
+    apostrophes doubled for inlining into the SQL string."""
+    return json.dumps({**payload, "origin": _PROCESS_ORIGIN}).replace("'", "''")
+
+
+def payload_fits(payload: dict[str, Any]) -> bool:
+    """True if ``payload`` fits under the NOTIFY byte cap once fully serialized
+    (envelope, origin tag, and quote-escaping included). Publishers that can
+    produce large payloads check this and fall back rather than overflow."""
+    return len(_serialized(payload).encode("utf-8")) < MAX_PAYLOAD_BYTES
 
 
 def _dispatch(raw: str) -> None:

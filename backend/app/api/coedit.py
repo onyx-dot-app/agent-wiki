@@ -104,12 +104,7 @@ def op(req: OpRequest, user: User = Depends(require_user)) -> OpResponse:
     if out is None:
         raise HTTPException(status_code=409, detail="stale base_version; re-sync and retry")
     coedit.touch(req.session_id, user.id)
-    coedit_channel.broadcast_op(
-        req.session_id,
-        out.version,
-        [c.model_dump(by_alias=True) for c in req.changes],
-        user.id,
-    )
+    coedit_channel.broadcast_op(req.session_id, out.version, req.changes, user.id)
     return OpResponse(version=out.version)
 
 
