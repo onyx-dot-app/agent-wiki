@@ -21,12 +21,13 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
+from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 
-from app.db.models import CoeditParticipant, CoeditSession, User
+from app.db.models import CoeditOp, CoeditParticipant, CoeditSession, User
 from app.db.session import session
 
 log = logging.getLogger(__name__)
@@ -189,6 +190,146 @@ def set_buffer(session_id: int, *, base_version: int, buffer_text: str) -> Sessi
             .execution_options(synchronize_session=False)
         ).one_or_none()
         return _session_row(sess) if sess is not None else None
+
+
+class Change(BaseModel):
+    """One range-replacement edit: replace the half-open range ``[from, to)``
+    with ``insert``. Offsets are **UTF-16 code units** (JS / CodeMirror string
+    positions). ``from`` is a Python keyword, so the field is ``from_`` aliased
+    to ``from`` on the wire. This is the shared op shape — the HTTP request
+    model (`app/models/coedit.py`) reuses it so FastAPI validates the body."""
+
+    model_config = ConfigDict(populate_by_name=True, frozen=True)
+
+    from_: int = Field(alias="from", ge=0)
+    to: int = Field(ge=0)
+    insert: str = ""
+
+
+class OpRow(BaseModel):
+    """One logged edit op from `coedit_ops`."""
+
+    seq: int  # the session version this op produced
+    author_user_id: str
+    base_version: int
+    changes: list[dict[str, Any]]
+    created_at: str
+
+
+def _apply_changes(text: str, changes: list[Change]) -> str:
+    """Apply range-replacement ``changes`` to ``text``.
+
+    Structural validity (fields present, ``from``/``to`` are ints ``≥ 0``) is
+    guaranteed by the ``Change`` type; this enforces the *semantic* rules that
+    need the buffer: each range in-bounds, ranges non-overlapping, and no
+    surrogate-pair split. Changes apply right-to-left (highest ``from`` first)
+    so an earlier change's length delta never shifts a later change's offsets.
+
+    **Offsets are UTF-16 code units** (JS / CodeMirror positions; an astral char
+    like an emoji counts as 2), so we slice in UTF-16 space, not Python code
+    points — otherwise a document with an emoji would slice at the wrong place.
+    Raises ``ValueError`` on an out-of-bounds range, overlapping ranges, or a
+    range that splits a surrogate pair.
+    """
+    # 2 bytes per UTF-16 code unit → unit offset N is byte offset 2N.
+    buf = bytearray(text.encode("utf-16-le"))
+    n_units = len(buf) // 2
+
+    # Validate bounds + non-overlap up front — overlapping ranges would apply
+    # onto an already-mutated buffer and silently corrupt it.
+    ordered = sorted(changes, key=lambda c: (c.from_, c.to))
+    prev_to = 0
+    for c in ordered:
+        if not (0 <= c.from_ <= c.to <= n_units):
+            raise ValueError(f"change range [{c.from_},{c.to}) out of bounds for length {n_units}")
+        if c.from_ < prev_to:
+            raise ValueError(f"overlapping change: [{c.from_},{c.to}) intrudes on a prior range ending at {prev_to}")
+        prev_to = c.to
+
+    for c in reversed(ordered):
+        buf[2 * c.from_ : 2 * c.to] = c.insert.encode("utf-16-le")
+    try:
+        return bytes(buf).decode("utf-16-le")
+    except UnicodeDecodeError as e:
+        raise ValueError("change split a UTF-16 surrogate pair") from e
+
+
+def apply_op(
+    session_id: int,
+    *,
+    base_version: int,
+    changes: list[Change],
+    author_user_id: str,
+) -> SessionRow | None:
+    """Apply an edit op to the buffer and log it, atomically.
+
+    Applies ``changes`` to the buffer as of ``base_version`` and compare-and-
+    swaps the version to ``base_version + 1`` — so if another op landed first
+    this returns ``None`` (stale; the caller must re-sync and re-apply). On
+    success, appends a `coedit_ops` row in the same transaction. Raises
+    ``ValueError`` if a change is out of bounds for the current buffer.
+    """
+    now = _iso(_now())
+    with session() as s:
+        # Read the buffer at exactly base_version (also confirms active). If the
+        # version has moved, the caller is stale — nothing to apply onto.
+        current = s.execute(
+            select(CoeditSession.buffer_text).where(
+                CoeditSession.id == session_id,
+                CoeditSession.status == "active",
+                CoeditSession.version == base_version,
+            )
+        ).scalar_one_or_none()
+        if current is None:
+            return None
+        new_buffer = _apply_changes(current, changes)
+        new_version = base_version + 1
+        # Re-check the version inside the write (CAS) to close the gap between
+        # the read above and this update.
+        row = s.scalars(
+            update(CoeditSession)
+            .where(
+                CoeditSession.id == session_id,
+                CoeditSession.version == base_version,
+                CoeditSession.status == "active",
+            )
+            .values(buffer_text=new_buffer, version=new_version, updated_at=now)
+            .returning(CoeditSession)
+            .execution_options(synchronize_session=False)
+        ).one_or_none()
+        if row is None:
+            return None
+        s.add(
+            CoeditOp(
+                session_id=session_id,
+                seq=new_version,
+                author_user_id=author_user_id,
+                base_version=base_version,
+                op_payload={"changes": [c.model_dump(by_alias=True) for c in changes]},
+            )
+        )
+        return _session_row(row)
+
+
+def ops_since(session_id: int, after_version: int) -> list[OpRow]:
+    """Logged ops with ``seq > after_version``, oldest first — for a late
+    joiner (or a reconnecting client) to catch up incrementally."""
+    with session() as s:
+        rows = s.scalars(
+            select(CoeditOp)
+            .where(CoeditOp.session_id == session_id, CoeditOp.seq > after_version)
+            .order_by(CoeditOp.seq.asc())
+        ).all()
+        return [
+            OpRow(
+                seq=o.seq,
+                author_user_id=o.author_user_id,
+                base_version=o.base_version,
+                changes=list(o.op_payload.get("changes", [])),
+                created_at=o.created_at,
+            )
+            for o in rows
+        ]
 
 
 def mark_checkpointed(session_id: int, *, base_sha: str) -> None:

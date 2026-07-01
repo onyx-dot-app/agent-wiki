@@ -15,6 +15,13 @@ from tests._seed import count_rows, seed_user
 _PATH = "guides/setup.md"
 
 
+def _ch(frm: int, to: int, insert: str = "") -> coedit.Change:
+    # Build via model_validate so the aliased "from" field is set by its wire
+    # name — Change(from_=...) isn't expressible (the constructor param is the
+    # alias "from", a keyword).
+    return coedit.Change.model_validate({"from": frm, "to": to, "insert": insert})
+
+
 @pytest.fixture
 def users(tmp_db):
     seed_user("usr_a", "a@x.com", name="Ada")
@@ -158,3 +165,100 @@ def test_rename_path(users):
     moved = coedit.get_active_session("guides/renamed.md")
     assert moved is not None
     assert moved.id == s.id
+
+
+# --------------------------------------------------------------------------- #
+# apply_op — range-change application + version CAS + op log                   #
+# --------------------------------------------------------------------------- #
+
+
+def test_apply_op_applies_change_bumps_version_and_logs(users):
+    s = coedit.open_session(_PATH, base_sha=None, initial_buffer="hello world")
+    out = coedit.apply_op(s.id, base_version=0, changes=[_ch(0, 5, "hi")], author_user_id="usr_a")
+    assert out is not None
+    assert out.version == 1
+    assert out.buffer_text == "hi world"
+    logged = coedit.ops_since(s.id, 0)
+    assert [o.seq for o in logged] == [1]
+    assert logged[0].base_version == 0
+    assert logged[0].author_user_id == "usr_a"
+    assert logged[0].changes == [{"from": 0, "to": 5, "insert": "hi"}]
+
+
+def test_apply_op_multiple_changes_apply_right_to_left(users):
+    s = coedit.open_session(_PATH, base_sha=None, initial_buffer="abcdef")
+    out = coedit.apply_op(
+        s.id, base_version=0, changes=[_ch(0, 1, "X"), _ch(4, 6, "Y")], author_user_id="usr_a"
+    )
+    assert out is not None
+    assert out.buffer_text == "XbcdY"
+
+
+def test_apply_op_stale_base_version_rejected(users):
+    s = coedit.open_session(_PATH, base_sha=None, initial_buffer="v0")
+    assert coedit.apply_op(s.id, base_version=0, changes=[_ch(2, 2, "!")], author_user_id="usr_a") is not None
+    # Caller still on version 0 — rejected, buffer untouched.
+    stale = coedit.apply_op(s.id, base_version=0, changes=[_ch(0, 0, "X")], author_user_id="usr_a")
+    assert stale is None
+    current = coedit.get_active_session(_PATH)
+    assert current is not None
+    assert current.version == 1
+    assert current.buffer_text == "v0!"
+
+
+def test_apply_op_out_of_bounds_raises(users):
+    s = coedit.open_session(_PATH, base_sha=None, initial_buffer="short")
+    with pytest.raises(ValueError):
+        coedit.apply_op(s.id, base_version=0, changes=[_ch(0, 999, "x")], author_user_id="usr_a")
+
+
+def test_apply_op_concurrent_one_wins(users):
+    s = coedit.open_session(_PATH, base_sha=None, initial_buffer="v0")
+    a = coedit.apply_op(s.id, base_version=0, changes=[_ch(0, 0, "A")], author_user_id="usr_a")
+    b = coedit.apply_op(s.id, base_version=0, changes=[_ch(0, 0, "B")], author_user_id="usr_b")
+    winners = [r for r in (a, b) if r is not None]
+    assert len(winners) == 1
+    assert winners[0].version == 1
+
+
+def test_apply_op_rejects_overlapping_changes(users):
+    s = coedit.open_session(_PATH, base_sha=None, initial_buffer="abcdef")
+    with pytest.raises(ValueError):
+        coedit.apply_op(
+            s.id, base_version=0, changes=[_ch(0, 3, "X"), _ch(2, 4, "Y")], author_user_id="usr_a"
+        )
+
+
+def test_change_rejects_malformed_input():
+    # Missing 'to' / negative offset are rejected at the type boundary
+    # (pydantic ValidationError is a ValueError subclass).
+    with pytest.raises(ValueError):
+        coedit.Change.model_validate({"from": 0, "insert": "x"})
+    with pytest.raises(ValueError):
+        coedit.Change.model_validate({"from": -1, "to": 0})
+
+
+def test_apply_op_uses_utf16_offsets_with_emoji(users):
+    # 'a'=unit 0, 😀=units 1-2 (astral → 2 UTF-16 units), 'b'=unit 3.
+    # Replacing [3,4) must hit 'b' → "a😀!". Code-point slicing (len 3) would
+    # instead append, giving "a😀b!", so this pins the UTF-16 contract.
+    s = coedit.open_session(_PATH, base_sha=None, initial_buffer="a😀b")
+    out = coedit.apply_op(s.id, base_version=0, changes=[_ch(3, 4, "!")], author_user_id="usr_a")
+    assert out is not None
+    assert out.buffer_text == "a😀!"
+
+
+def test_apply_op_can_insert_astral_char(users):
+    s = coedit.open_session(_PATH, base_sha=None, initial_buffer="ab")
+    out = coedit.apply_op(s.id, base_version=0, changes=[_ch(1, 1, "🎉")], author_user_id="usr_a")
+    assert out is not None
+    assert out.buffer_text == "a🎉b"
+
+
+def test_ops_since_returns_ops_after_version(users):
+    s = coedit.open_session(_PATH, base_sha=None, initial_buffer="")
+    coedit.apply_op(s.id, base_version=0, changes=[_ch(0, 0, "a")], author_user_id="usr_a")
+    coedit.apply_op(s.id, base_version=1, changes=[_ch(1, 1, "b")], author_user_id="usr_a")
+    assert [o.seq for o in coedit.ops_since(s.id, 0)] == [1, 2]
+    assert [o.seq for o in coedit.ops_since(s.id, 1)] == [2]
+    assert coedit.ops_since(s.id, 2) == []
