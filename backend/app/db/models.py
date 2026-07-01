@@ -1394,6 +1394,47 @@ class CraftConnectState(Base):
     consumed_at: Mapped[str | None] = mapped_column(Text)
 
 
+class UserSlackConnection(Base):
+    """One per user per Slack workspace: the bot token saved by "Connect
+    Slack". Follows ``UserOnyxConnection``: the token is AES-GCM encrypted at
+    rest, there is no refresh flow, and on a decrypt failure or revocation the
+    row is dropped and the user re-connects."""
+
+    __tablename__ = "user_slack_connections"
+
+    user_id: Mapped[str] = mapped_column(
+        Text, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    team_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    team_name: Mapped[str | None] = mapped_column(Text)
+    # The connecting user's own Slack id, for DM-yourself delivery and
+    # attribution.
+    slack_user_id: Mapped[str] = mapped_column(Text, nullable=False)
+    bot_token: Mapped[str] = mapped_column(EncryptedString(), nullable=False)
+    # Masked form for display — never the raw token.
+    token_display: Mapped[str] = mapped_column(Text, nullable=False)
+    scope: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
+    updated_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
+
+
+class SlackConnectState(Base):
+    """Single-use CSRF state for the Connect-Slack handshake. Mirrors
+    ``CraftConnectState`` minus PKCE: Slack's OAuth v2 authenticates the
+    exchange with the client secret, so no code_verifier is stored."""
+
+    __tablename__ = "slack_connect_states"
+
+    state: Mapped[str] = mapped_column(Text, primary_key=True)
+    user_id: Mapped[str] = mapped_column(
+        Text, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    # Relative path to bounce the browser back to after the callback.
+    return_to: Mapped[str | None] = mapped_column(Text)
+    expires_at: Mapped[str] = mapped_column(Text, nullable=False)
+    consumed_at: Mapped[str | None] = mapped_column(Text)
+
+
 class Notification(Base):
     """Persistent per-user notification (header bell / inbox).
 
