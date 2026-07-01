@@ -62,3 +62,27 @@ def test_reconcile_migrates_event_log_trigger(tmp_repo):
     data = storage.read_trigger(path)
     assert data["actions"] == [{"destination_config_id": None, "message": "hi"}]
     assert dest_configs.list_for_user("usr_1") == []
+
+
+def test_reconcile_warns_when_webhook_missing(tmp_repo, caplog):
+    """A slack trigger whose source webhook is gone degrades to event-log only,
+    loudly: the drop is logged with the file, owner, and webhook id."""
+    import logging
+
+    seed_user("usr_1")
+    path = ".trigger_trg_gone.yaml"
+    _write_legacy(path, {
+        "id": "trg_gone", "owner_user_id": "usr_1", "scope_path": "a.md",
+        "kind": "delta", "nl_description": "fire", "message": "hi",
+        "destination": "slack", "slack_webhook_id": "wh_deleted", "enabled": True,
+    })
+
+    with caplog.at_level(logging.WARNING, logger="app.triggers.reconcile"):
+        assert reconcile_legacy_slack_triggers() == 1
+
+    data = storage.read_trigger(path)
+    assert data["actions"] == [{"destination_config_id": None, "message": "hi"}]
+    assert dest_configs.list_for_user("usr_1") == []
+    warning = next(r for r in caplog.records if "wh_deleted" in r.getMessage())
+    assert path in warning.getMessage()
+    assert "usr_1" in warning.getMessage()

@@ -77,6 +77,14 @@ def reconcile_legacy_slack_triggers() -> int:
             and isinstance(owner, str)
         ):
             config_id = _mirror_config_id(webhook_id, owner)
+            if config_id is None:
+                # The trigger degrades to event-log only. Name the drop so
+                # operators can find affected triggers after the migration.
+                log.warning(
+                    "reconcile: %s (owner %s) referenced slack webhook %s which no "
+                    "longer exists; trigger falls back to event-log only",
+                    file_path, owner, webhook_id,
+                )
 
         reshaped = {
             k: v
