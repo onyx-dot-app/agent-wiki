@@ -136,6 +136,66 @@ def test_checkpoint_merges_concurrent_agent_commit(repo):
     assert wiki_git.read_file(_PATH) == "ONE\ntwo\nthree\nfour\nFIVE\n"
 
 
+def test_amend_head_replaces_tip_and_enforces_cas(repo):
+    sha1 = wiki_git.commit_file(_PATH, "one\n", "c1", author="A <a@x.com>")
+    n = len(wiki_git.history(_PATH))
+    sha2 = wiki_git.amend_head(_PATH, "ONE\n", "c1 amended", author="A <a@x.com>", expected_head=sha1)
+    assert sha2 != sha1
+    assert wiki_git.read_file(_PATH) == "ONE\n"
+    assert len(wiki_git.history(_PATH)) == n  # replaced the tip, didn't add a commit
+    # CAS: HEAD moved on, so amending against the stale expected_head is refused.
+    wiki_git.commit_file(_PATH, "two\n", "c2", author="A <a@x.com>")
+    with pytest.raises(wiki_git.GitHeadMovedError):
+        wiki_git.amend_head(_PATH, "x\n", "m", author="A <a@x.com>", expected_head=sha2)
+
+
+def test_consecutive_checkpoints_collapse_via_amend(repo):
+    uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
+    sha = _seed_page("v0\n")
+    sess = coedit.open_session(_PATH, base_sha=sha, initial_buffer="v0\n")
+    coedit.join(sess.id, uid)
+
+    coedit.apply_op(sess.id, base_version=0, changes=[_ch(1, 2, "1")], author_user_id=uid)
+    sha1 = coedit_checkpoint.checkpoint_session(sess.id)
+    n1 = len(wiki_git.history(_PATH))
+
+    coedit.apply_op(sess.id, base_version=1, changes=[_ch(1, 2, "2")], author_user_id=uid)
+    sha2 = coedit_checkpoint.checkpoint_session(sess.id)
+    n2 = len(wiki_git.history(_PATH))
+
+    # Second checkpoint amended the tip in place — same commit count, new SHA.
+    assert n2 == n1
+    assert sha2 is not None and sha2 != sha1
+    assert wiki_git.read_file(_PATH) == "v2\n"
+    st = coedit.get_active_session(_PATH)
+    assert st is not None and st.base_sha == sha2 and st.checkpointed_version == st.version
+
+
+def test_external_commit_breaks_run_starts_new_commit(repo):
+    # Distant, non-overlapping edits so the merge is clean (no LLM).
+    uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
+    sha = _seed_page("one\ntwo\nthree\nfour\nfive\n")
+    sess = coedit.open_session(_PATH, base_sha=sha, initial_buffer="one\ntwo\nthree\nfour\nfive\n")
+    coedit.join(sess.id, uid)
+
+    coedit.apply_op(sess.id, base_version=0, changes=[_ch(0, 3, "ONE")], author_user_id=uid)
+    coedit_checkpoint.checkpoint_session(sess.id)  # our tip: "ONE\ntwo\nthree\nfour\nfive\n"
+    # An external agent commits between checkpoints (last line) → run broken.
+    wiki_git.commit_file(
+        _PATH, "ONE\ntwo\nthree\nfour\nFIVE\n", "agent edit", author="Agent <a@x.com>"
+    )
+    n_before = len(wiki_git.history(_PATH))
+
+    # Human edits a distant line (third) → next checkpoint 3-way merges, new commit.
+    coedit.apply_op(sess.id, base_version=1, changes=[_ch(8, 13, "THREE")], author_user_id=uid)
+    coedit_checkpoint.checkpoint_session(sess.id)
+    n_after = len(wiki_git.history(_PATH))
+
+    # HEAD wasn't ours → a NEW commit (not an amend), and the merge kept both edits.
+    assert n_after == n_before + 1
+    assert wiki_git.read_file(_PATH) == "ONE\ntwo\nTHREE\nfour\nFIVE\n"
+
+
 def test_task_checkpoints_then_closes_when_empty(repo):
     uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
     sha = _seed_page("hello world")

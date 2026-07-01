@@ -184,6 +184,73 @@ def commit_file(
 _COMMIT_RETRY_MAX = 3
 
 
+def commit_message_of(sha: str) -> str:
+    """Full commit message (subject + body) of ``sha``, or ``""`` if unknown."""
+    res = _run(["log", "-1", "--format=%B", sha], check=False)
+    return res.stdout.rstrip("\n") if res.returncode == 0 else ""
+
+
+def amend_head(
+    rel_path: str,
+    body: str,
+    message: str,
+    author: str | None = None,
+    *,
+    expected_head: str,
+) -> str:
+    """Amend the tip commit in place with ``body`` at ``rel_path``; return the SHA.
+
+    Unlike :func:`commit_file` this **rewrites** HEAD (``git commit --amend``)
+    instead of adding a commit — the co-edit checkpoint uses it to collapse a run
+    of same-session checkpoints into one evolving commit. ``git commit --amend``
+    only ever touches the branch tip, so this is valid only when our last
+    checkpoint is still HEAD (nothing else committed since); the caller checks
+    that (a ``Coedit-session`` trailer on HEAD) before calling.
+
+    ``expected_head`` is a required CAS: under :func:`commit_lock` we re-check the
+    repo HEAD and raise ``GitHeadMovedError`` if anything advanced it (an agent /
+    another session), so we never amend a commit that isn't the one we intended.
+    The caller falls back to a normal commit on that error.
+
+    Returns the amended SHA, or the unchanged HEAD SHA when ``body`` already
+    matches the tip's content (nothing to amend).
+
+    Amending rewrites history — deliberately confined to provisional co-edit
+    checkpoint tips; see the Co-Editing design.
+    """
+    full = Path(CONFIG.wiki_dir) / rel_path
+    full.parent.mkdir(parents=True, exist_ok=True)
+    with commit_lock():
+        current_head = _run(["rev-parse", "HEAD"], check=False).stdout.strip()
+        if current_head != expected_head:
+            raise GitHeadMovedError(rel_path, current_head)
+        full.write_text(body)
+        _run(["add", rel_path])
+        if _run(["diff", "--cached", "--quiet"], check=False).returncode == 0:
+            log.debug("amend_head no-op (no diff) %s sha=%s", rel_path, current_head[:8])
+            return current_head
+        env_args = ["--author", author] if author else []
+        for attempt in range(_COMMIT_RETRY_MAX + 1):
+            try:
+                _run(["commit", "--amend", "-m", message, *env_args])
+                break
+            except subprocess.CalledProcessError as e:
+                out = ((e.stderr or "") + (e.stdout or "")).lower()
+                if "cannot lock ref" in out or ("unable to create" in out and ".lock" in out):
+                    if attempt >= _COMMIT_RETRY_MAX:
+                        raise GitCommitLockError(rel_path) from e
+                    log.info(
+                        "amend_head: lock race for %s, retrying (%d/%d)",
+                        rel_path, attempt + 1, _COMMIT_RETRY_MAX,
+                    )
+                    time.sleep(0.05 * (attempt + 1))
+                    continue
+                raise
+        sha = _run(["rev-parse", "HEAD"]).stdout.strip()
+    log.debug("amend_head %s sha=%s author=%s", rel_path, sha[:8], author or "default")
+    return sha
+
+
 def move_and_commit(
     old_rel_path: str,
     new_rel_path: str,
@@ -398,6 +465,14 @@ def _numstat_by_sha(rel_path: str, limit: int) -> dict[str, tuple[int, int]]:
 def head_sha_for_path(rel_path: str) -> str | None:
     """SHA of the most recent commit that touched ``rel_path``, or None."""
     out = _run(["log", "-n1", "--pretty=format:%H", "--", rel_path], check=False).stdout.strip()
+    return out or None
+
+
+def head_sha() -> str | None:
+    """SHA at the repo tip (``HEAD``), or None on an empty repo. Unlike
+    :func:`head_sha_for_path` this is the branch tip regardless of which path the
+    last commit touched — it's what ``git commit --amend`` would rewrite."""
+    out = _run(["rev-parse", "HEAD"], check=False).stdout.strip()
     return out or None
 
 

@@ -25,9 +25,17 @@ from app.auth import users as users_repo
 from app.models.wiki import ChangeKind
 from app.wiki import coedit, coedit_channel
 from app.wiki import git as wiki_git
-from app.wiki.utils import commit_and_fan_out
+from app.wiki import notify as wiki_notify
+from app.wiki.utils import author_string, commit_and_fan_out
 
 log = logging.getLogger(__name__)
+
+
+def _tip_is_ours(head_sha: str, session_id: int) -> bool:
+    """True if the repo tip is *this* session's own checkpoint commit — it
+    carries our ``Coedit-session`` trailer, which means nothing else has
+    committed since, so the next checkpoint can amend it in place (5c)."""
+    return f"Coedit-session: {session_id}" in wiki_git.commit_message_of(head_sha).splitlines()
 
 
 def _user(user_id: str) -> User | None:
@@ -50,94 +58,105 @@ def _commit_message(session_id: int, *, primary_author_id: str | None) -> str:
         u = users_repo.get_by_id(p.user_id)
         if u is not None:
             trailers.append(f"Co-authored-by: {u['name'] or u['email']} <{u['email']}>")
-    if trailers:
-        lines.append("")
-        lines.extend(trailers)
+    # Tag the commit with the session id so the next checkpoint recognizes this
+    # tip as ours and amends it in place (collapse) rather than stacking (5c).
+    trailers.append(f"Coedit-session: {session_id}")
+    lines.append("")
+    lines.extend(trailers)
     return "\n".join(lines)
 
 
 def checkpoint_session(session_id: int) -> str | None:
     """Commit a dirty session's buffer to git; return the new sha (or None).
 
-    No-op (returns None) when the session is gone, clean
-    (``version == checkpointed_version``), or the merge collapses to the current
-    HEAD. Reconciles concurrent agent/ingest commits via the gateway's 3-way +
-    AI merge. Idempotent: after a successful commit the session is marked clean.
+    Collapses a run of same-session checkpoints into one commit by amending the
+    tip when it's still ours (5c); commits anew when an external commit broke the
+    run, reconciling it via the gateway's 3-way + AI merge. No-op (returns None)
+    when the session is gone, clean (``version == checkpointed_version``), or the
+    merge collapses to the current HEAD. Idempotent: after a successful commit the
+    session is marked clean.
     """
     sess = coedit.get_session(session_id)
     if sess is None or sess.version == sess.checkpointed_version:
         return None  # gone or nothing new to commit
 
     path = sess.path
-    # Merge base = the page content at the last checkpoint. None when the
-    # session was opened on a not-yet-existing page (→ create).
-    base_body = wiki_git.read_file_opt(path, ref=sess.base_sha) if sess.base_sha else None
-    change_kind = ChangeKind.EDIT if sess.base_sha else ChangeKind.CREATE
-
     primary_id = coedit.last_op_author(session_id)
     author = _user(primary_id) if primary_id else None
     message = _commit_message(session_id, primary_author_id=primary_id)
 
+    # Collapse (5c): if the repo tip is *this session's* last checkpoint (nothing
+    # committed since), amend it in place so a run of checkpoints stays one
+    # commit. If anything else committed — an agent, another session — the tip
+    # isn't ours (or HEAD moves under the amend's CAS), so we commit anew through
+    # the merge gateway, which starts a fresh run.
+    head = wiki_git.head_sha()
+    committed_body = sess.buffer_text
+    new_sha: str | None = None
+
     # System-initiated write: the editors' write permission was already enforced
     # when they joined/POSTed ops, so skip the ACL gate; not "agent activity".
     with set_current_user(author):
-        result = commit_and_fan_out(
-            path,
-            sess.buffer_text,
-            message,
-            change_kind=change_kind,
-            base_body=base_body,
-            ai_merge=True,
-            skip_acl=True,
-            record_activity=False,
-            # This is the session's own commit — don't fold it back into the
-            # session as an inbound rebase (we sync the merged result below).
-            trigger_coedit_rebase=False,
-        )
+        if head is not None and _tip_is_ours(head, session_id):
+            try:
+                amended = wiki_git.amend_head(
+                    path, sess.buffer_text, message,
+                    author=author_string(), expected_head=head,
+                )
+                # Amending needs no merge (nothing committed since our tip); run
+                # the same post-write fan-out a normal commit would, unless the
+                # buffer already matched the tip (amend_head returned it unchanged).
+                if amended != head:
+                    wiki_notify.after_doc_write(
+                        path, amended, ChangeKind.EDIT, author_string(),
+                        trigger_coedit_rebase=False,
+                    )
+                new_sha = amended
+            except wiki_git.GitHeadMovedError:
+                new_sha = None  # an external commit landed under us → new commit
 
-    if result is not None:
-        # Sync the committed content back into the buffer. When the commit-time
-        # 3-way merge folded in a concurrent agent/ingest commit, result.new_body
-        # differs from the buffer we committed; writing it back (and broadcasting
-        # the delta) keeps the live buffer == git and stops a later checkpoint
-        # from re-committing the pre-merge buffer and dropping the agent's edit.
-        res = coedit.rebase_onto(
-            session_id,
-            base_version=sess.version,
-            merged_text=result.new_body,
-            new_base_sha=result.sha,
-            checkpointed=True,
-        )
-        if res is None:
-            # A human op raced in during the commit, so the buffer moved past
-            # what we committed. Leave base_sha / checkpointed_version untouched:
-            # the session stays dirty and the next checkpoint does a proper 3-way
-            # merge (base=old, current=HEAD, incoming=newer buffer) that preserves
-            # the folded-in agent edit. Advancing base_sha to result.sha here
-            # would make that next merge base==current and drop the agent's edit.
-            log.info(
-                "coedit checkpoint: concurrent op during commit of %s; reconciling next checkpoint",
-                path,
+        if new_sha is None:
+            # New commit: first checkpoint of a run, or an external commit broke
+            # the run. Reconcile any such commit via the gateway's 3-way + AI merge.
+            base_body = wiki_git.read_file_opt(path, ref=sess.base_sha) if sess.base_sha else None
+            change_kind = ChangeKind.EDIT if sess.base_sha else ChangeKind.CREATE
+            result = commit_and_fan_out(
+                path, sess.buffer_text, message,
+                change_kind=change_kind, base_body=base_body, ai_merge=True,
+                skip_acl=True, record_activity=False, trigger_coedit_rebase=False,
             )
-        elif res.changed:
-            # The commit-time merge folded in a concurrent agent commit; tell
-            # participants to reload the merged buffer.
-            coedit_channel.broadcast_resync(session_id, res.session.version)
-        return result.sha
+            if result is None:
+                # No-op merge (buffer already matches HEAD content). Mark clean
+                # against current HEAD so we don't re-attempt this version forever.
+                head2 = wiki_git.head_sha_for_path(path)
+                if head2 is not None:
+                    coedit.mark_checkpointed(session_id, base_sha=head2, version=sess.version)
+                else:
+                    log.warning(
+                        "coedit checkpoint: no-op merge but no HEAD for %s (session %s); left dirty",
+                        path, session_id,
+                    )
+                return None
+            new_sha, committed_body = result.sha, result.new_body
 
-    # None = the merge produced exactly the current HEAD (buffer already matches
-    # committed content). Still mark clean against current HEAD so we don't
-    # re-attempt this version forever.
-    head = wiki_git.head_sha_for_path(path)
-    if head is not None:
-        coedit.mark_checkpointed(session_id, base_sha=head, version=sess.version)
-    else:
-        # Shouldn't happen — a no-op merge implies HEAD exists. Surface it rather
-        # than silently leaving the session dirty and re-entering this path on
-        # every future trigger.
-        log.warning(
-            "coedit checkpoint: no-op merge but no HEAD for %s (session %s); left dirty",
+    # Sync the committed content back into the buffer + advance base_sha /
+    # checkpointed_version. When the merge folded in a concurrent agent commit,
+    # committed_body differs from the buffer we started with, so participants get
+    # a resync. If a human op raced in during the commit, the version CAS misses
+    # (res is None) and we leave the session dirty for the next checkpoint — never
+    # advancing base_sha past content the buffer doesn't have.
+    res = coedit.rebase_onto(
+        session_id,
+        base_version=sess.version,
+        merged_text=committed_body,
+        new_base_sha=new_sha,
+        checkpointed=True,
+    )
+    if res is None:
+        log.info(
+            "coedit checkpoint: concurrent op during commit of %s; reconciling next checkpoint",
             path,
-            session_id,
         )
-    return None
+    elif res.changed:
+        coedit_channel.broadcast_resync(session_id, res.session.version)
+    return new_sha
