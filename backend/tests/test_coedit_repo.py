@@ -127,11 +127,23 @@ def test_participants_join_touch_leave(users):
 
 def test_mark_checkpointed(users):
     s = coedit.open_session(_PATH, base_sha="sha1")
-    coedit.mark_checkpointed(s.id, base_sha="sha2")
+    coedit.mark_checkpointed(s.id, base_sha="sha2", version=3)
     fetched = coedit.get_active_session(_PATH)
     assert fetched is not None
     assert fetched.base_sha == "sha2"
+    assert fetched.checkpointed_version == 3
     assert fetched.last_checkpoint_at is not None
+
+
+def test_mark_checkpointed_never_regresses(users):
+    s = coedit.open_session(_PATH, base_sha=None)
+    coedit.mark_checkpointed(s.id, base_sha="sha6", version=6)
+    # A slower concurrent checkpoint at a lower version must not roll it back.
+    coedit.mark_checkpointed(s.id, base_sha="sha5", version=5)
+    fetched = coedit.get_active_session(_PATH)
+    assert fetched is not None
+    assert fetched.checkpointed_version == 6
+    assert fetched.base_sha == "sha6"
 
 
 def test_close_frees_path_for_new_session(users):

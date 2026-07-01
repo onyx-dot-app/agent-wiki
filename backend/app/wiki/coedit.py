@@ -58,6 +58,7 @@ class SessionRow(BaseModel):
     path: str
     buffer_text: str
     version: int
+    checkpointed_version: int
     base_sha: str | None
     status: str
     created_at: str
@@ -81,6 +82,7 @@ def _session_row(s: CoeditSession) -> SessionRow:
         path=s.path,
         buffer_text=s.buffer_text,
         version=s.version,
+        checkpointed_version=s.checkpointed_version,
         base_sha=s.base_sha,
         status=s.status,
         created_at=s.created_at,
@@ -332,13 +334,40 @@ def ops_since(session_id: int, after_version: int) -> list[OpRow]:
         ]
 
 
-def mark_checkpointed(session_id: int, *, base_sha: str) -> None:
-    """Record that the buffer was committed to git at ``base_sha``."""
+def mark_checkpointed(session_id: int, *, base_sha: str, version: int) -> None:
+    """Record that the buffer at ``version`` was committed to git at ``base_sha``.
+
+    Advancing ``checkpointed_version`` to ``version`` is what marks the session
+    clean — a later edit bumps ``version`` past it, making it dirty again.
+    Conditional UPDATE (only advances) so a slow in-flight checkpoint can't
+    regress the watermark past what a faster concurrent one already recorded.
+    """
     with session() as s:
-        sess = s.get(CoeditSession, session_id)
-        if sess is not None:
-            sess.base_sha = base_sha
-            sess.last_checkpoint_at = _iso(_now())
+        s.execute(
+            update(CoeditSession)
+            .where(
+                CoeditSession.id == session_id,
+                CoeditSession.checkpointed_version < version,
+            )
+            .values(
+                base_sha=base_sha,
+                checkpointed_version=version,
+                last_checkpoint_at=_iso(_now()),
+            )
+            .execution_options(synchronize_session=False)
+        )
+
+
+def last_op_author(session_id: int) -> str | None:
+    """The user who applied the most recent op (highest seq), or None if the
+    session has no logged ops yet. Used to attribute a checkpoint commit."""
+    with session() as s:
+        return s.scalars(
+            select(CoeditOp.author_user_id)
+            .where(CoeditOp.session_id == session_id)
+            .order_by(CoeditOp.seq.desc())
+            .limit(1)
+        ).first()
 
 
 def close_session(session_id: int) -> None:
