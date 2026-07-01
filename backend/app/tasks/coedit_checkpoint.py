@@ -21,12 +21,23 @@ from app.wiki.coedit_checkpoint import checkpoint_session
 
 log = logging.getLogger(__name__)
 
-# Commit a session ~after it settles, and never let a continuously-edited
-# session go uncommitted longer than the cap. The periodic scan is minute-
-# granular, so these are effectively "within a minute of going idle / of the
-# cap"; the on-last-leave path commits promptly without waiting for the scan.
-_IDLE_SECONDS = 20
-_MAX_INTERVAL_SECONDS = 120
+# Keep git history proportional to editing *sessions*, not keystrokes. The
+# live buffer in Postgres is the durable "stash"; git commits only mark real
+# boundaries, so history stays at ~one commit per session. The primary trigger
+# is on-last-leave; these timers are coarse backstops, not autosave.
+#
+# Idle: no *edit* for this long → flush and commit. Catches a session that
+# never formally closes (a tab left open keeps the SSE alive, so leave never
+# fires) once editing has clearly stopped.
+#
+# Max-interval: the only timer that commits *mid-session* during genuinely
+# continuous editing — a safety valve so agents/readers reading git HEAD don't
+# see a multi-hour session's stale content indefinitely. Coarse on purpose;
+# a marathon session yields a handful of commits, not a stream.
+#
+# The scan is minute-granular, so both fire "within a minute of" the threshold.
+_IDLE_SECONDS = 300
+_MAX_INTERVAL_SECONDS = 900
 
 
 @documents_queue.task()
