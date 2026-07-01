@@ -10,8 +10,8 @@ Guarded on the column existing: ``0001_initial`` builds a fresh schema from the
 current models (which no longer declare it) while ``0023`` adds it on the
 upgrade path, mirroring ``0023``'s own guard.
 
-Revision ID: 0041
-Revises: 0040
+Revision ID: 0043
+Revises: 0042
 Create Date: 2026-07-01 00:00:00.000000+00:00
 """
 
@@ -23,8 +23,8 @@ import sqlalchemy as sa
 from alembic import op
 
 
-revision: str = "0041"
-down_revision: str | None = "0040"
+revision: str = "0043"
+down_revision: str | None = "0042"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

@@ -311,7 +311,6 @@ export default function TriggersPage() {
   );
 }
 
-
 function DestinationsCard() {
   const { configs, error, isLoading, refresh } = useDestinationConfigs();
   const [adding, setAdding] = useState(false);

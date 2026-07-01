@@ -144,39 +144,39 @@ def fan_out_trigger_eval(
             )
             continue
 
-        # Each action renders its own message and dispatches to its own
-        # destination. The firing condition is the trigger's, shared by all.
+        # Evaluate the firing condition once per trigger, then deliver each
+        # action. Delta renders per action; the new-file eval renders in its
+        # single combined call.
+        if change_kind == ChangeKind.CREATE and trigger.scope_path != doc_path:
+            assert new_file_payload is not None
+            primary = (trigger.actions[0].message or "") if trigger.actions else ""
+            new_file_result = evaluate_new_file_in_dir(
+                trigger, primary, new_file_payload
+            )
+            if not new_file_result.triggered:
+                continue
+            new_file_message: str | None = new_file_result.message
+            reason = "new file under directory scope"
+            log.info("trigger fired (new-file-in-dir) id=%s doc=%s", trigger.id, doc_path)
+        else:
+            match = evaluate_delta(trigger, delta_payload)
+            if not match.matched:
+                continue
+            new_file_message = None
+            reason = match.reason
+            log.info("trigger fired id=%s doc=%s reason=%s", trigger.id, doc_path, reason)
+
+        fired += 1
         for action in trigger.actions:
             instruction = action.message or ""
-            if change_kind == ChangeKind.CREATE and trigger.scope_path != doc_path:
-                assert new_file_payload is not None
-                new_file_result = evaluate_new_file_in_dir(
-                    trigger, instruction, new_file_payload
-                )
-                if not new_file_result.triggered:
-                    continue
-                rendered = new_file_result.message
-                reason = "new file under directory scope"
-                log.info(
-                    "trigger fired (new-file-in-dir) id=%s doc=%s",
-                    trigger.id, doc_path,
-                )
+            if new_file_message is not None:
+                rendered = new_file_message
             else:
-                match = evaluate_delta(trigger, delta_payload)
-                if not match.matched:
-                    continue
-                reason = match.reason
                 rendered = (
                     render_delta_message(instruction, delta_payload, reason=reason)
                     if instruction
                     else ""
                 )
-                log.info(
-                    "trigger fired id=%s doc=%s reason=%s",
-                    trigger.id, doc_path, reason,
-                )
-
-            fired += 1
             _record_fire(
                 trigger=trigger,
                 action=action,
