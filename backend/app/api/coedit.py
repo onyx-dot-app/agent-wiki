@@ -120,7 +120,9 @@ def cursor(req: CursorRequest, user: User = Depends(require_user)) -> dict[str, 
     coedit_channel.broadcast_cursor(
         req.session_id,
         user_id=user.id,
-        user_display=user.name or user.email,
+        # Match list_participants' SQL COALESCE(name, email) exactly — substitute
+        # only on NULL, not on "" — so a peer's caret label and roster name agree.
+        user_display=user.name if user.name is not None else user.email,
         anchor=req.anchor,
         head=req.head,
         typing=req.typing,
