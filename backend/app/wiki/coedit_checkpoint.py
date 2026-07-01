@@ -102,4 +102,13 @@ def checkpoint_session(session_id: int) -> str | None:
     head = wiki_git.head_sha_for_path(path)
     if head is not None:
         coedit.mark_checkpointed(session_id, base_sha=head, version=sess.version)
+    else:
+        # Shouldn't happen — a no-op merge implies HEAD exists. Surface it rather
+        # than silently leaving the session dirty and re-entering this path on
+        # every future trigger.
+        log.warning(
+            "coedit checkpoint: no-op merge but no HEAD for %s (session %s); left dirty",
+            path,
+            session_id,
+        )
     return None

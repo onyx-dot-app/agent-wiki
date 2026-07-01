@@ -339,13 +339,23 @@ def mark_checkpointed(session_id: int, *, base_sha: str, version: int) -> None:
 
     Advancing ``checkpointed_version`` to ``version`` is what marks the session
     clean — a later edit bumps ``version`` past it, making it dirty again.
+    Conditional UPDATE (only advances) so a slow in-flight checkpoint can't
+    regress the watermark past what a faster concurrent one already recorded.
     """
     with session() as s:
-        sess = s.get(CoeditSession, session_id)
-        if sess is not None:
-            sess.base_sha = base_sha
-            sess.checkpointed_version = version
-            sess.last_checkpoint_at = _iso(_now())
+        s.execute(
+            update(CoeditSession)
+            .where(
+                CoeditSession.id == session_id,
+                CoeditSession.checkpointed_version < version,
+            )
+            .values(
+                base_sha=base_sha,
+                checkpointed_version=version,
+                last_checkpoint_at=_iso(_now()),
+            )
+            .execution_options(synchronize_session=False)
+        )
 
 
 def last_op_author(session_id: int) -> str | None:
