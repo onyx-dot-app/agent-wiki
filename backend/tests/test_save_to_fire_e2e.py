@@ -139,7 +139,8 @@ def test_save_fires_doc_scoped_trigger_to_event_log(signed_in, monkeypatch):
     assert payload["change_kind"] == "edit"
     assert payload["reason"] == "status flipped"
     assert payload["message"] == "[msg] status changed: status flipped"
-    assert payload["destination"] == "event_log"
+    assert payload["destination_type"] == "event_log"
+    assert payload["destination_config_id"] is None
 
 
 # --------------------------------------------------------------------------- #
