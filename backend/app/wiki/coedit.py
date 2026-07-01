@@ -20,11 +20,11 @@ unsaved buffer. See
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import func, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 
 from app.db.models import CoeditOp, CoeditParticipant, CoeditSession, User
@@ -140,12 +140,19 @@ def open_session(path: str, *, base_sha: str | None, initial_buffer: str = "") -
         )
         if existing is not None:
             return _session_row(existing)
+        # Stamp created_at/updated_at in _iso (T-separated, +00:00) rather than
+        # letting the space-separated server_default fill them: sessions_due_for_
+        # checkpoint compares these against _iso cutoffs, and mixing the two
+        # string formats breaks the lexicographic ordering.
+        now = _iso(_now())
         fresh = CoeditSession(
             path=path,
             buffer_text=initial_buffer,
             version=0,
             base_sha=base_sha,
             status="active",
+            created_at=now,
+            updated_at=now,
         )
         s.add(fresh)
         try:
@@ -356,6 +363,42 @@ def mark_checkpointed(session_id: int, *, base_sha: str, version: int) -> None:
             )
             .execution_options(synchronize_session=False)
         )
+
+
+def sessions_due_for_checkpoint(
+    *, idle_seconds: int, max_interval_seconds: int
+) -> list[SessionRow]:
+    """Active, *dirty* sessions the periodic worker should checkpoint: either
+    idle (no edit for ``idle_seconds``) or overdue (not committed within
+    ``max_interval_seconds``, or never). All three compared columns
+    (``updated_at``, ``last_checkpoint_at``, ``created_at``) are written in
+    ``_iso`` format, so the lexicographic string comparisons are well-ordered.
+    """
+    now = _now()
+    idle_cutoff = _iso(now - timedelta(seconds=idle_seconds))
+    overdue_cutoff = _iso(now - timedelta(seconds=max_interval_seconds))
+    with session() as s:
+        rows = s.scalars(
+            select(CoeditSession)
+            .where(
+                CoeditSession.status == "active",
+                CoeditSession.version > CoeditSession.checkpointed_version,
+                or_(
+                    # settled: no edit for ``idle_seconds``
+                    CoeditSession.updated_at <= idle_cutoff,
+                    # overdue: not committed within ``max_interval_seconds`` —
+                    # measured from the last checkpoint, or session start if
+                    # never checkpointed (so a never-idle session still commits,
+                    # but a just-opened one isn't grabbed mid-typing).
+                    func.coalesce(
+                        CoeditSession.last_checkpoint_at, CoeditSession.created_at
+                    )
+                    <= overdue_cutoff,
+                ),
+            )
+            .order_by(CoeditSession.updated_at.asc())
+        ).all()
+        return [_session_row(r) for r in rows]
 
 
 def last_op_author(session_id: int) -> str | None:

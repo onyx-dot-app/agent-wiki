@@ -146,6 +146,50 @@ def test_mark_checkpointed_never_regresses(users):
     assert fetched.base_sha == "sha6"
 
 
+def _due_ids(**kw) -> set[int]:
+    return {s.id for s in coedit.sessions_due_for_checkpoint(**kw)}
+
+
+def test_due_excludes_clean_session(users):
+    # Never edited (version == checkpointed_version) → never a checkpoint
+    # candidate, even with zero cutoffs.
+    s = coedit.open_session(_PATH, base_sha=None, initial_buffer="x")
+    assert _due_ids(idle_seconds=0, max_interval_seconds=0) == set()
+    assert s.id not in _due_ids(idle_seconds=0, max_interval_seconds=0)
+
+
+def test_due_includes_idle_dirty_session(users):
+    s = coedit.open_session(_PATH, base_sha=None, initial_buffer="hi")
+    coedit.apply_op(s.id, base_version=0, changes=[_ch(0, 2, "yo")], author_user_id="usr_a")
+    # idle_seconds=0 → any past edit counts as settled; max_interval large so
+    # the idle branch alone is what selects it.
+    assert s.id in _due_ids(idle_seconds=0, max_interval_seconds=3600)
+
+
+def test_due_excludes_recently_edited_session(users):
+    # Dirty but just edited and never checkpointed: not idle, and not overdue
+    # (measured from session start) → not grabbed mid-typing.
+    s = coedit.open_session(_PATH, base_sha=None, initial_buffer="hi")
+    coedit.apply_op(s.id, base_version=0, changes=[_ch(0, 2, "yo")], author_user_id="usr_a")
+    assert s.id not in _due_ids(idle_seconds=3600, max_interval_seconds=3600)
+
+
+def test_due_includes_overdue_active_session(users):
+    # Still actively edited (not idle) but past the max interval since session
+    # start → forced so a never-idle session can't stay uncommitted forever.
+    s = coedit.open_session(_PATH, base_sha=None, initial_buffer="hi")
+    coedit.apply_op(s.id, base_version=0, changes=[_ch(0, 2, "yo")], author_user_id="usr_a")
+    assert s.id in _due_ids(idle_seconds=3600, max_interval_seconds=0)
+
+
+def test_due_excludes_session_clean_since_last_checkpoint(users):
+    s = coedit.open_session(_PATH, base_sha=None, initial_buffer="hi")
+    coedit.apply_op(s.id, base_version=0, changes=[_ch(0, 2, "yo")], author_user_id="usr_a")
+    coedit.mark_checkpointed(s.id, base_sha="sha", version=1)
+    # version == checkpointed_version again → no longer dirty.
+    assert _due_ids(idle_seconds=0, max_interval_seconds=0) == set()
+
+
 def test_close_frees_path_for_new_session(users):
     first = coedit.open_session(_PATH, base_sha=None)
     coedit.close_session(first.id)

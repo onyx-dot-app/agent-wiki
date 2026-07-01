@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 from app.auth import users as users_repo
 from app.main import create_app
+from app.tasks.queues import documents_queue
 from app.wiki import acl, coedit, git
 
 from tests._auth import login_fastapi
@@ -97,6 +98,55 @@ def test_leave_removes_participant(client):
     resp = client.post("/api/coedit/leave", json={"session_id": sid})
     assert resp.status_code == 200
     assert coedit.list_participants(sid) == []
+
+
+def test_leave_last_participant_checkpoints(client):
+    uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
+    login_fastapi(client, uid)
+    _seed_page("hello world")
+    sid = client.post("/api/coedit/join", json={"path": _PATH}).json()["session_id"]
+    client.post(
+        "/api/coedit/op",
+        json={"session_id": sid, "base_version": 0, "changes": [{"from": 0, "to": 5, "insert": "hi"}]},
+    )
+
+    # The last leave enqueues a checkpoint; immediate_mode runs it inline.
+    with documents_queue.immediate_mode():
+        assert client.post("/api/coedit/leave", json={"session_id": sid}).status_code == 200
+
+    assert git.read_file(_PATH) == "hi world"
+    assert coedit.get_active_session(_PATH) is None
+
+
+def test_checkpoint_endpoint_commits_buffer(client):
+    uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
+    login_fastapi(client, uid)
+    _seed_page("hello world")
+    sid = client.post("/api/coedit/join", json={"path": _PATH}).json()["session_id"]
+    client.post(
+        "/api/coedit/op",
+        json={"session_id": sid, "base_version": 0, "changes": [{"from": 0, "to": 5, "insert": "hi"}]},
+    )
+
+    with documents_queue.immediate_mode():
+        resp = client.post("/api/coedit/checkpoint", json={"session_id": sid})
+    assert resp.status_code == 200
+    assert resp.json() == {"queued": True}
+    assert git.read_file(_PATH) == "hi world"
+    # An explicit checkpoint doesn't close a session with an active participant.
+    assert coedit.get_active_session(_PATH) is not None
+
+
+def test_checkpoint_requires_write(client):
+    owner = users_repo.create(email="owner@x.com", password="hunter2-x", name="Owner")
+    other = users_repo.create(email="other@x.com", password="hunter2-x", name="Other")
+    _seed_page()
+    acl.set_owner(_PATH, owner)  # owner-only
+    login_fastapi(client, owner)
+    sid = client.post("/api/coedit/join", json={"path": _PATH}).json()["session_id"]
+
+    login_fastapi(client, other)
+    assert client.post("/api/coedit/checkpoint", json={"session_id": sid}).status_code == 403
 
 
 def _login_and_join(client, email="ada@x.com") -> int:

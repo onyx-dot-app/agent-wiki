@@ -19,6 +19,10 @@ class LeaveRequest(BaseModel):
     session_id: int
 
 
+class CheckpointRequest(BaseModel):
+    session_id: int
+
+
 class OpRequest(BaseModel):
     session_id: int
     base_version: int
