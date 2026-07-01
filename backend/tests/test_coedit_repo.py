@@ -8,7 +8,10 @@ from __future__ import annotations
 
 import pytest
 
+from sqlalchemy import text
+
 from app.db.models import CoeditSession
+from app.db.session import session as db_session
 from app.wiki import coedit
 from tests._seed import count_rows, seed_user
 
@@ -180,6 +183,36 @@ def test_due_includes_overdue_active_session(users):
     s = coedit.open_session(_PATH, base_sha=None, initial_buffer="hi")
     coedit.apply_op(s.id, base_version=0, changes=[_ch(0, 2, "yo")], author_user_id="usr_a")
     assert s.id in _due_ids(idle_seconds=3600, max_interval_seconds=0)
+
+
+def test_legacy_space_separated_created_at_normalized_not_overdue(users):
+    # A pre-migration row carries the space-separated server-default created_at.
+    # Space sorts before 'T', so before normalization such a fresh, never-
+    # checkpointed dirty session looks overdue against an _iso cutoff.
+    s = coedit.open_session(_PATH, base_sha=None, initial_buffer="hi")
+    coedit.apply_op(s.id, base_version=0, changes=[_ch(0, 2, "yo")], author_user_id="usr_a")
+    with db_session() as sess:
+        sess.execute(
+            text(
+                "UPDATE coedit_sessions "
+                "SET created_at = replace(replace(created_at, 'T', ' '), '+00:00', '') "
+                "WHERE id = :i"
+            ),
+            {"i": s.id},
+        )
+    # Documents the bug the migration fixes: falsely overdue while well inside
+    # the max interval.
+    assert s.id in _due_ids(idle_seconds=3600, max_interval_seconds=3600)
+
+    # Migration 0042's normalization.
+    with db_session() as sess:
+        sess.execute(
+            text(
+                "UPDATE coedit_sessions SET created_at = replace(created_at, ' ', 'T') || '+00:00' "
+                "WHERE position('T' in created_at) = 0"
+            )
+        )
+    assert s.id not in _due_ids(idle_seconds=3600, max_interval_seconds=3600)
 
 
 def test_due_excludes_session_clean_since_last_checkpoint(users):
