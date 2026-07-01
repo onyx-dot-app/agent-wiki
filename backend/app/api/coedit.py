@@ -17,6 +17,7 @@ from fastapi.responses import StreamingResponse
 from app.auth import User, require_can
 from app.auth.deps import require_user
 from app.models.coedit import (
+    CheckpointRequest,
     CursorRequest,
     JoinRequest,
     JoinResponse,
@@ -25,6 +26,7 @@ from app.models.coedit import (
     OpResponse,
     ParticipantOut,
 )
+from app.tasks.coedit_checkpoint import checkpoint_coedit_session
 from app.wiki import coedit, coedit_channel, git
 
 router = APIRouter()
@@ -69,11 +71,27 @@ def join(req: JoinRequest, user: User = Depends(require_user)) -> JoinResponse:
     )
 
 
+def _checkpoint_if_last_left(session_id: int) -> None:
+    """Enqueue a final checkpoint when the last participant has left, so the
+    session's buffer lands in git without waiting for the periodic scan.
+
+    Best-effort: the participant row is already gone, so a failed enqueue (e.g.
+    a full queue) must not fail the leave. The periodic scan is the backstop —
+    the session is dirty, so it's recovered (checkpointed + closed) once idle."""
+    if coedit.list_participants(session_id):
+        return
+    try:
+        checkpoint_coedit_session(session_id)
+    except Exception:
+        log.exception("coedit: checkpoint enqueue failed on last-leave for session %s", session_id)
+
+
 @router.post("/leave")
 def leave(req: LeaveRequest, user: User = Depends(require_user)) -> dict[str, bool]:
     """Explicitly leave a session (e.g. closing the editor)."""
     coedit.leave(req.session_id, user.id)
     coedit_channel.broadcast_presence(req.session_id)
+    _checkpoint_if_last_left(req.session_id)
     return {"ok": True}
 
 
@@ -128,6 +146,18 @@ def cursor(req: CursorRequest, user: User = Depends(require_user)) -> dict[str, 
         typing=req.typing,
     )
     return {"ok": True}
+
+
+@router.post("/checkpoint")
+def checkpoint(req: CheckpointRequest, user: User = Depends(require_user)) -> dict[str, bool]:
+    """Explicit save: enqueue a checkpoint of the session's buffer to git.
+
+    Async (the commit + any merge run on the worker), so this returns once
+    queued rather than blocking on the git write.
+    """
+    _require_active(req.session_id, user, "write")
+    checkpoint_coedit_session(req.session_id)
+    return {"queued": True}
 
 
 @router.get("/session")
@@ -197,6 +227,7 @@ def stream(session_id: int, user: User = Depends(require_user)) -> StreamingResp
             if not coedit_channel.user_still_connected(session_id, user.id):
                 coedit.leave(session_id, user.id)
                 coedit_channel.broadcast_presence(session_id)
+                _checkpoint_if_last_left(session_id)
             log.info("coedit sse closed session=%s user=%s", session_id, user.id)
 
     return StreamingResponse(

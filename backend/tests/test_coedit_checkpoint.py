@@ -7,6 +7,8 @@ from __future__ import annotations
 import pytest
 
 from app.auth import users as users_repo
+from app.tasks import coedit_checkpoint as coedit_checkpoint_task
+from app.tasks.queues import documents_queue
 from app.wiki import coedit, coedit_checkpoint
 from app.wiki import git as wiki_git
 
@@ -75,6 +77,56 @@ def test_checkpoint_merges_concurrent_agent_commit(repo):
 
     # 3-way merge keeps both non-overlapping edits.
     assert wiki_git.read_file(_PATH) == "ONE\ntwo\nthree\nfour\nFIVE\n"
+
+
+def test_task_checkpoints_then_closes_when_empty(repo):
+    uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
+    sha = _seed_page("hello world")
+    sess = coedit.open_session(_PATH, base_sha=sha, initial_buffer="hello world")
+    coedit.join(sess.id, uid)
+    coedit.apply_op(sess.id, base_version=0, changes=[_ch(0, 5, "hi")], author_user_id=uid)
+    coedit.leave(sess.id, uid)  # last participant gone
+
+    with documents_queue.immediate_mode():
+        coedit_checkpoint_task.checkpoint_coedit_session(sess.id)
+
+    assert wiki_git.read_file(_PATH) == "hi world"
+    # No participants remained → the task closed the session.
+    assert coedit.get_active_session(_PATH) is None
+
+
+def test_task_keeps_session_open_when_participants_remain(repo):
+    uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
+    sha = _seed_page("hello world")
+    sess = coedit.open_session(_PATH, base_sha=sha, initial_buffer="hello world")
+    coedit.join(sess.id, uid)
+    coedit.apply_op(sess.id, base_version=0, changes=[_ch(0, 5, "hi")], author_user_id=uid)
+
+    with documents_queue.immediate_mode():
+        coedit_checkpoint_task.checkpoint_coedit_session(sess.id)
+
+    assert wiki_git.read_file(_PATH) == "hi world"
+    # A participant is still editing → session stays active.
+    st = coedit.get_active_session(_PATH)
+    assert st is not None
+    assert st.checkpointed_version == 1
+
+
+def test_scan_checkpoints_due_sessions(repo, monkeypatch):
+    # Force the scan's idle threshold to zero so a just-edited session is due.
+    monkeypatch.setattr(coedit_checkpoint_task, "_IDLE_SECONDS", 0)
+    uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
+    sha = _seed_page("hello world")
+    sess = coedit.open_session(_PATH, base_sha=sha, initial_buffer="hello world")
+    coedit.join(sess.id, uid)
+    coedit.apply_op(sess.id, base_version=0, changes=[_ch(0, 5, "hi")], author_user_id=uid)
+    coedit.leave(sess.id, uid)
+
+    with documents_queue.immediate_mode():
+        coedit_checkpoint_task.scan_and_checkpoint()
+
+    assert wiki_git.read_file(_PATH) == "hi world"
+    assert coedit.get_active_session(_PATH) is None
 
 
 def test_commit_message_credits_other_participants_as_coauthors(repo):
