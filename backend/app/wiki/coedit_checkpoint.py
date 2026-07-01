@@ -34,7 +34,7 @@ log = logging.getLogger(__name__)
 def _tip_is_ours(head_sha: str, session_id: int) -> bool:
     """True if the repo tip is *this* session's own checkpoint commit — it
     carries our ``Coedit-session`` trailer, which means nothing else has
-    committed since, so the next checkpoint can amend it in place (5c)."""
+    committed since, so the next checkpoint can amend it in place."""
     return f"Coedit-session: {session_id}" in wiki_git.commit_message_of(head_sha).splitlines()
 
 
@@ -59,7 +59,7 @@ def _commit_message(session_id: int, *, primary_author_id: str | None) -> str:
         if u is not None:
             trailers.append(f"Co-authored-by: {u['name'] or u['email']} <{u['email']}>")
     # Tag the commit with the session id so the next checkpoint recognizes this
-    # tip as ours and amends it in place (collapse) rather than stacking (5c).
+    # tip as ours and amends it in place (collapse) rather than stacking.
     trailers.append(f"Coedit-session: {session_id}")
     lines.append("")
     lines.extend(trailers)
@@ -70,7 +70,7 @@ def checkpoint_session(session_id: int) -> str | None:
     """Commit a dirty session's buffer to git; return the new sha (or None).
 
     Collapses a run of same-session checkpoints into one commit by amending the
-    tip when it's still ours (5c); commits anew when an external commit broke the
+    tip when it's still ours; commits anew when an external commit broke the
     run, reconciling it via the gateway's 3-way + AI merge. No-op (returns None)
     when the session is gone, clean (``version == checkpointed_version``), or the
     merge collapses to the current HEAD. Idempotent: after a successful commit the
@@ -85,7 +85,7 @@ def checkpoint_session(session_id: int) -> str | None:
     author = _user(primary_id) if primary_id else None
     message = _commit_message(session_id, primary_author_id=primary_id)
 
-    # Collapse (5c): if the repo tip is *this session's* last checkpoint (nothing
+    # Collapse: if the repo tip is *this session's* last checkpoint (nothing
     # committed since), amend it in place so a run of checkpoints stays one
     # commit. If anything else committed — an agent, another session — the tip
     # isn't ours (or HEAD moves under the amend's CAS), so we commit anew through
