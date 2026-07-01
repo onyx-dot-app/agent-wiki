@@ -231,6 +231,27 @@ def test_apply_op_concurrent_one_wins(users):
     assert winners[0].version == 1
 
 
+def test_apply_op_uses_utf16_offsets_with_emoji(users):
+    # 'a'=unit 0, 😀=units 1-2 (astral → 2 UTF-16 units), 'b'=unit 3.
+    # Replacing [3,4) must hit 'b' → "a😀!". Code-point slicing (len 3) would
+    # instead append, giving "a😀b!", so this pins the UTF-16 contract.
+    s = coedit.open_session(_PATH, base_sha=None, initial_buffer="a😀b")
+    out = coedit.apply_op(
+        s.id, base_version=0, changes=[{"from": 3, "to": 4, "insert": "!"}], author_user_id="usr_a"
+    )
+    assert out is not None
+    assert out.buffer_text == "a😀!"
+
+
+def test_apply_op_can_insert_astral_char(users):
+    s = coedit.open_session(_PATH, base_sha=None, initial_buffer="ab")
+    out = coedit.apply_op(
+        s.id, base_version=0, changes=[{"from": 1, "to": 1, "insert": "🎉"}], author_user_id="usr_a"
+    )
+    assert out is not None
+    assert out.buffer_text == "a🎉b"
+
+
 def test_ops_since_returns_ops_after_version(users):
     s = coedit.open_session(_PATH, base_sha=None, initial_buffer="")
     coedit.apply_op(s.id, base_version=0, changes=[{"from": 0, "to": 0, "insert": "a"}], author_user_id="usr_a")

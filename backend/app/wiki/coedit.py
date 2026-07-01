@@ -208,18 +208,28 @@ def _apply_changes(text: str, changes: list[dict[str, Any]]) -> str:
     Each change is ``{"from": int, "to": int, "insert": str}`` — replace the
     half-open range ``[from, to)`` with ``insert``. Offsets are relative to the
     *original* ``text`` (as the client saw it), and changes are expected
-    non-overlapping. We apply them right-to-left (highest ``from`` first) so an
+    non-overlapping; we apply them right-to-left (highest ``from`` first) so an
     earlier change's length delta never shifts a later change's offsets.
-    Raises ``ValueError`` on an out-of-bounds range.
+
+    **Offsets are UTF-16 code-unit indices**, matching JS / CodeMirror string
+    positions (where an astral char like an emoji counts as 2). We therefore
+    slice in UTF-16 space, *not* Python code points — otherwise any document
+    containing an emoji or other non-BMP character would slice at the wrong
+    place. Raises ``ValueError`` on an out-of-bounds range or a range that
+    splits a surrogate pair.
     """
-    result = text
+    # 2 bytes per UTF-16 code unit → unit offset N is byte offset 2N.
+    buf = bytearray(text.encode("utf-16-le"))
+    n_units = len(buf) // 2
     for ch in sorted(changes, key=lambda c: int(c["from"]), reverse=True):
         frm, to = int(ch["from"]), int(ch["to"])
-        insert = str(ch.get("insert", ""))
-        if not (0 <= frm <= to <= len(result)):
-            raise ValueError(f"change range [{frm},{to}) out of bounds for length {len(result)}")
-        result = result[:frm] + insert + result[to:]
-    return result
+        if not (0 <= frm <= to <= n_units):
+            raise ValueError(f"change range [{frm},{to}) out of bounds for length {n_units}")
+        buf[2 * frm : 2 * to] = str(ch.get("insert", "")).encode("utf-16-le")
+    try:
+        return bytes(buf).decode("utf-16-le")
+    except UnicodeDecodeError as e:
+        raise ValueError("change split a UTF-16 surrogate pair") from e
 
 
 def apply_op(
