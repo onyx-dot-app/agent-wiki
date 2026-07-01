@@ -242,9 +242,7 @@ def test_single_doc_rename_relocates_doc_scoped_trigger(tmp_repo):
 
 def test_parse_actions_reads_legacy_single_destination_blob():
     """A pre-multi-action ``action_json`` blob loads as one action."""
-    import json
-
     from app.triggers.repo import _parse_actions
 
-    legacy = json.dumps({"message": "hi", "destination": "slack"})
+    legacy = {"message": "hi", "destination": "slack"}
     assert _parse_actions(legacy) == [{"destination_config_id": None, "message": "hi"}]

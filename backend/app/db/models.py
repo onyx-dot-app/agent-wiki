@@ -440,10 +440,10 @@ class Trigger(Base):
     scope_path: Mapped[str] = mapped_column(Text, nullable=False)
     kind: Mapped[str] = mapped_column(Text, nullable=False)  # "delta" | "schedule"
     nl_description: Mapped[str] = mapped_column(Text, nullable=False)
-    # ``{"actions": [{"type", "message", "slack_webhook_id"}, ...]}``. ``type``
-    # is a ``trigger_destinations`` slug. The slack channel id (when any) lives
-    # inside the action. The wiki YAML is the source of truth for this shape.
-    action_json: Mapped[str] = mapped_column(Text, nullable=False)
+    # ``{"actions": [{"destination_config_id", "message"}, ...]}``. Each action
+    # references a ``destination_configs`` row (null id = event-log only). The
+    # wiki YAML is the source of truth for this shape.
+    action_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     schedule_cron: Mapped[str | None] = mapped_column(Text)
     # IANA timezone name (e.g. "America/Los_Angeles") that ``schedule_cron``
     # is interpreted in. Required when ``kind="schedule"``.
