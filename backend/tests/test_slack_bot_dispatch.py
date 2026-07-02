@@ -171,6 +171,28 @@ def test_list_channels_drops_entries_missing_id_or_name(monkeypatch):
             {"id": "C2"},
         ],
     }
-    monkeypatch.setattr(slack_client, "_call_api", lambda *a, **kw: captured)
+    monkeypatch.setattr(slack_client, "_call_api_get", lambda *a, **kw: captured)
     out = slack_client.list_channels(bot_token="xoxb-x")
     assert out == [{"id": "C1", "name": "eng", "is_private": False}]
+
+
+def test_list_channels_paginates_and_sorts(monkeypatch):
+    pages = [
+        {
+            "ok": True,
+            "channels": [{"id": "C2", "name": "zeta"}],
+            "response_metadata": {"next_cursor": "page2"},
+        },
+        {"ok": True, "channels": [{"id": "C1", "name": "alpha"}]},
+    ]
+    seen_params: list[dict[str, str]] = []
+
+    def fake_get(token, method, params):
+        seen_params.append(params)
+        return pages[len(seen_params) - 1]
+
+    monkeypatch.setattr(slack_client, "_call_api_get", fake_get)
+    out = slack_client.list_channels(bot_token="xoxb-x")
+    assert [c["name"] for c in out] == ["alpha", "zeta"]
+    assert "cursor" not in seen_params[0]
+    assert seen_params[1]["cursor"] == "page2"
