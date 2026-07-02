@@ -31,7 +31,7 @@ EVENT_LOG_ID = "event_log"
 # "don't spread the literal" rationale as ``EVENT_LOG_ID``.
 SLACK_ID = "slack"
 
-# Slug of the email destination (seeded by migration 0047). Fires deliver to
+# Slug of the email destination (seeded by migration 0048). Fires deliver to
 # the config's verified address; unverified configs are recorded-only.
 EMAIL_ID = "email"
 

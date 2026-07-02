@@ -6,8 +6,8 @@ Adds ``verified_at`` to ``destination_configs`` and the
 inspector because ``0001_initial`` builds fresh databases from the current
 model registry; the catalog seed is idempotent and always runs.
 
-Revision ID: 0047
-Revises: 0046
+Revision ID: 0048
+Revises: 0047
 Create Date: 2026-07-02 00:00:00.000000+00:00
 """
 
@@ -19,8 +19,8 @@ import sqlalchemy as sa
 from alembic import op
 
 
-revision: str = "0047"
-down_revision: str | None = "0046"
+revision: str = "0048"
+down_revision: str | None = "0047"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
