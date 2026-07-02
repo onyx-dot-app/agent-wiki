@@ -10,7 +10,6 @@ import {
   type FormEvent,
 } from "react";
 import { createPortal } from "react-dom";
-import { diffLines } from "diff";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import useSWR from "swr";
@@ -56,7 +55,7 @@ import { ShareDialog } from "@/components/wiki/ShareDialog";
 import { CommentsPanel } from "@/components/wiki/CommentsPanel";
 import { UpdateHealthBanner } from "@/components/wiki/UpdateHealthBanner";
 import { UpdatePolicyPanel } from "@/components/wiki/UpdatePolicyPanel";
-import { apiFetch, ApiError } from "@/lib/api";
+import { apiFetch } from "@/lib/api";
 import { listComments } from "@/lib/comments";
 import {
   paintCommentHighlights,
@@ -66,7 +65,8 @@ import {
 } from "@/lib/commentAnchor";
 import { rehypeSourcePos } from "@/lib/rehypeSourcePos";
 import { remarkBareSpaceLinks } from "@/lib/remarkBareSpaceLinks";
-import { useRequireAuth } from "@/lib/auth";
+import { useAuth, useRequireAuth } from "@/lib/auth";
+import { useCoeditSession } from "@/lib/useCoeditSession";
 import {
   useHeaderActionsHost,
   useRightPanelHost,
@@ -110,20 +110,6 @@ interface FileResponse {
   body: string;
   ref?: string;
   head_sha?: string | null;
-}
-
-interface DraftResponse {
-  path: string;
-  base_sha: string;
-  content: string;
-  updated_at: string;
-}
-
-interface ConflictState {
-  draftBody: string;
-  currentBody: string;
-  currentSha: string;
-  baseSha: string;
 }
 
 export default function WikiRoute() {
@@ -1282,8 +1268,8 @@ function FileViewer({ path }: { path: string }) {
   const host = useHeaderActionsHost();
   const rightHost = useRightPanelHost();
   const { setDrafting, requestExpand } = useDrafting();
+  const { user } = useAuth();
   const [body, setBody] = useState("");
-  const [draft, setDraft] = useState("");
   const [editing, setEditing] = useState(false);
   const [filenameDraft, setFilenameDraft] = useState("");
   const [saving, setSaving] = useState(false);
@@ -1573,19 +1559,6 @@ function FileViewer({ path }: { path: string }) {
   const [applyingTemplateId, setApplyingTemplateId] = useState<string | null>(
     null,
   );
-  // Conflict resolution: set when a save returns 409.
-  const [conflict, setConflict] = useState<ConflictState | null>(null);
-  // Resume banner: set when entering edit mode and a matching draft exists.
-  const [pendingResumeDraft, setPendingResumeDraft] =
-    useState<DraftResponse | null>(null);
-  const [resuming, setResuming] = useState(false);
-  const [consolidating, setConsolidating] = useState(false);
-  // Debounce timer ref for auto-saving the draft to the server.
-  const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Incremented on each startEdit() call and on cancel; lets async
-  // continuations inside startEdit bail out if editing was cancelled first.
-  const editSessionRef = useRef(0);
-
   const loadLatest = useCallback(() => {
     setLoading(true);
     setError(null);
@@ -1595,7 +1568,6 @@ function FileViewer({ path }: { path: string }) {
     apiFetch<FileResponse>(`/wiki/file?path=${encodeURIComponent(path)}`)
       .then((r) => {
         setBody(r.body);
-        setDraft(r.body);
         setHeadSha(r.head_sha ?? null);
       })
       .catch((e) => setError(e instanceof Error ? e.message : "failed to load"))
@@ -1659,10 +1631,10 @@ function FileViewer({ path }: { path: string }) {
     if (!liveDoc) return;
     // Re-check the gate at apply time — an in-flight fetch from before
     // the user toggled `editing` can still resolve here and would
-    // otherwise clobber their textarea draft.
+    // otherwise clobber the live session buffer. While editing, the
+    // co-edit SSE stream is the source of truth, not this poll.
     if (editing || viewingSha !== null) return;
     setBody((prev) => (prev === liveDoc.body ? prev : liveDoc.body));
-    setDraft((prev) => (prev === liveDoc.body ? prev : liveDoc.body));
     setHeadSha(liveDoc.head_sha ?? null);
   }, [liveDoc, editing, viewingSha]);
 
@@ -1729,29 +1701,6 @@ function FileViewer({ path }: { path: string }) {
   useEffect(() => {
     return () => setDrafting(null);
   }, [setDrafting]);
-
-  // Auto-save the draft to the server while the user is editing.
-  // Debounced 5s so we don't hammer the API on every keystroke.
-  // Only fires when the draft differs from the saved body.
-  useEffect(() => {
-    if (!editing) return;
-    if (draft === body) return;
-    const baseSha = viewingSha ?? headSha;
-    if (!baseSha) return;
-    if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
-    autoSaveTimer.current = setTimeout(() => {
-      void apiFetch("/wiki/file/autosave", {
-        method: "PUT",
-        body: JSON.stringify({ path, base_sha: baseSha, content: draft }),
-      }).catch(() => {
-        // Auto-save failures are silent — the user still has the draft
-        // locally and can save manually.
-      });
-    }, 5000);
-    return () => {
-      if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
-    };
-  }, [draft, editing, path, headSha, viewingSha]);
 
   const refreshAgents = useCallback(() => {
     setAgentsError(null);
@@ -1839,6 +1788,29 @@ function FileViewer({ path }: { path: string }) {
     }
   }
 
+  // Live co-editing session: clicking Edit joins the page's session and binds
+  // the textarea to the shared buffer; Save checkpoints, Cancel discards, a
+  // disconnect leaves. Only the current version is co-edited (the Edit button is
+  // hidden while viewing an old commit).
+  const coedit = useCoeditSession({
+    path,
+    enabled: editing,
+    committedBody: body,
+    myUserId: user?.id ?? null,
+    onEnd: () => {
+      setEditing(false);
+      setViewingSha(null);
+      void apiFetch<FileResponse>(`/wiki/file?path=${encodeURIComponent(path)}`)
+        .then((fresh) => {
+          setBody(fresh.body);
+          setHeadSha(fresh.head_sha ?? null);
+        })
+        .catch(() => {});
+      void refreshComments();
+      void refreshDraftState();
+    },
+  });
+
   const segments = path.split("/");
   const parentSlug = segments.slice(0, -1).join("/");
   const currentBasename = segments[segments.length - 1] ?? path;
@@ -1848,7 +1820,7 @@ function FileViewer({ path }: { path: string }) {
   const filenameValid = !!filenameNoExt && !filenameNoExt.includes("/");
   const renamed =
     editing && filenameValid && filenameNoExt !== currentBasenameNoExt;
-  const bodyChanged = editing && draft !== body;
+  const bodyChanged = editing && coedit.active && coedit.buffer !== body;
   const dirty = editing && (bodyChanged || renamed);
   // `viewingVersion`: a history version is displayed in the main pane.
   // `viewingOld`: that version is not the newest commit for this file
@@ -1897,43 +1869,14 @@ function FileViewer({ path }: { path: string }) {
     };
   }, [dirty]);
 
-  async function startEdit() {
+  function startEdit() {
+    // Entering edit mode joins the page's co-edit session (see the
+    // useCoeditSession hook, gated on `editing`), which seeds the buffer from
+    // current HEAD. The Edit button is hidden while viewing an old commit, so
+    // editing always targets the current version.
     setFilenameDraft(currentBasenameNoExt);
     setError(null);
-    const session = ++editSessionRef.current;
-    if (viewingOld && viewingSha) {
-      // Editing from an older version forks it: load that version's body
-      // into the editor. `viewingSha` stays set so save/autosave use it as
-      // base_sha and the server records the rollback. Skip the resume-draft
-      // check — any saved draft was based on a different version.
-      try {
-        const r = await apiFetch<FileResponse>(
-          `/wiki/file?path=${encodeURIComponent(path)}&ref=${encodeURIComponent(viewingSha)}`,
-        );
-        if (editSessionRef.current !== session) return;
-        setDraft(r.body);
-        setEditing(true);
-      } catch (e) {
-        setError(
-          e instanceof Error ? e.message : "failed to load version for edit",
-        );
-      }
-      return;
-    }
     setEditing(true);
-    // Check for an existing in-progress draft from a previous session.
-    try {
-      const saved = await apiFetch<DraftResponse | null>(
-        `/wiki/file/autosave?path=${encodeURIComponent(path)}`,
-      );
-      if (editSessionRef.current !== session) return;
-      if (!saved) return;
-      // Show the Resume banner regardless of whether the draft is stale.
-      // Rebase (if needed) runs when the user clicks Resume.
-      setPendingResumeDraft(saved);
-    } catch {
-      // Draft fetch failure is non-fatal — user just starts fresh.
-    }
   }
 
   async function onSave() {
@@ -1943,18 +1886,19 @@ function FileViewer({ path }: { path: string }) {
     }
     setSaving(true);
     setError(null);
+    // Snapshot what we're committing so the viewer shows it immediately; the
+    // checkpoint commit runs on a worker, and the SWR poll (re-enabled once
+    // editing is false) reconciles with the actual merged result.
+    const finalText = coedit.buffer;
     try {
-      if (bodyChanged) {
-        const baseSha = viewingSha ?? headSha;
-        await apiFetch("/wiki/file", {
-          method: "PUT",
-          body: JSON.stringify({
-            path,
-            body: draft,
-            ...(baseSha ? { base_sha: baseSha } : {}),
-          }),
-        });
-      }
+      // Commit the session buffer to git (checkpoint), then leave. onEnd exits
+      // edit mode + refreshes comments/drafting; co-editing removes the
+      // human-vs-human conflict, so there's no 409 path here.
+      await coedit.save();
+      setBody(finalText);
+      setDiffData(null);
+      if (historyOpen) refreshHistory();
+      else setCommits(null);
       if (renamed) {
         const finalName = filenameNoExt + ".md";
         const newRel = parentSlug ? `${parentSlug}/${finalName}` : finalName;
@@ -1962,67 +1906,10 @@ function FileViewer({ path }: { path: string }) {
           method: "POST",
           body: JSON.stringify({ old_path: path, new_path: newRel }),
         });
-        // Navigation will remount FileViewer with the new path; loadLatest
-        // there resets editing/body/headSha. Bail out before touching state.
         router.push(`/app/wiki/${newRel}`);
-        return;
       }
-      setEditing(false);
-      setViewingSha(null);
-      setConflict(null);
-      setPendingResumeDraft(null);
-      // Optimistically show what the user submitted. The fetch below may
-      // overwrite with the auto-merged body, but if it fails the viewer
-      // still shows the content that was just committed rather than the
-      // stale pre-edit body.
-      setBody(draft);
-      setDraft(draft);
-      setDiffData(null);
-      // History changed (new commit + possible deprecations) — refetch.
-      if (historyOpen) refreshHistory();
-      else setCommits(null);
-      // Pick up the committed body and head_sha. Overwrite the optimistic
-      // draft above with the actual merged result when the server auto-merged
-      // concurrent edits. Failures are silent — the optimistic value is a
-      // correct fallback since the PUT already succeeded.
-      try {
-        const fresh = await apiFetch<FileResponse>(
-          `/wiki/file?path=${encodeURIComponent(path)}`,
-        );
-        setHeadSha(fresh.head_sha ?? null);
-        setBody(fresh.body);
-        setDraft(fresh.body);
-      } catch {
-        // fresh fetch failed — body already shows the local draft
-      }
-      // The commit re-anchored comments server-side; refetch so the panel +
-      // highlights reflect the drift (won't re-open the panel — guarded).
-      void refreshComments();
-      // The server clears the draft row when the body diverges from
-      // the template snapshot — re-sync our context so the chat widget
-      // winds down drafting (banner + mode + conversation revert
-      // together after its debounce).
-      await refreshDraftState();
     } catch (e) {
-      if (e instanceof ApiError && e.status === 409) {
-        // Conflict: page changed since we opened it. Fetch current HEAD
-        // and show the conflict resolution panel.
-        try {
-          const current = await apiFetch<FileResponse>(
-            `/wiki/file?path=${encodeURIComponent(path)}`,
-          );
-          setConflict({
-            draftBody: draft,
-            currentBody: current.body,
-            currentSha: current.head_sha ?? headSha ?? "",
-            baseSha: viewingSha ?? headSha ?? "",
-          });
-        } catch {
-          setError("Save conflict — could not load current version.");
-        }
-      } else {
-        setError(e instanceof Error ? e.message : "save failed");
-      }
+      setError(e instanceof Error ? e.message : "save failed");
     } finally {
       setSaving(false);
     }
@@ -2033,7 +1920,7 @@ function FileViewer({ path }: { path: string }) {
     setError(null);
     try {
       const full = await getTemplate(template.id);
-      setDraft(full.body);
+      coedit.onChange(full.body);
       setAppliedTemplateBody(full.body);
       setAppliedTemplateId(template.id);
       await setDraftTemplate(path, template.id);
@@ -2046,7 +1933,7 @@ function FileViewer({ path }: { path: string }) {
   }
 
   async function onPickBlank() {
-    setDraft("");
+    coedit.onChange("");
     setAppliedTemplateBody(null);
     setAppliedTemplateId(null);
     setError(null);
@@ -2063,87 +1950,12 @@ function FileViewer({ path }: { path: string }) {
   }
 
   function onCancel() {
-    editSessionRef.current++;
-    setDraft(body);
+    // Discard resets the shared buffer to the committed body and leaves the
+    // session, so the leave-time checkpoint is a no-op (nothing lands in git).
+    // onEnd exits edit mode + refreshes.
     setFilenameDraft(currentBasenameNoExt);
-    setEditing(false);
     setError(null);
-    setConflict(null);
-    setPendingResumeDraft(null);
-    setResuming(false);
-    setConsolidating(false);
-    if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
-    // Server-side draft is intentionally kept on cancel so the user can
-    // resume from the same point next time they enter edit mode.
-  }
-
-  async function onAiConsolidate() {
-    if (!conflict) return;
-    setConsolidating(true);
-    setError(null);
-    try {
-      const result = await apiFetch<{ merged: string }>("/wiki/file/merge", {
-        method: "POST",
-        body: JSON.stringify({
-          path,
-          base_sha: conflict.baseSha,
-          current_body: conflict.currentBody,
-          draft_body: conflict.draftBody,
-        }),
-      });
-      setDraft(result.merged);
-      setHeadSha(conflict.currentSha);
-      setViewingSha(null);
-      setConflict(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "AI consolidation failed");
-    } finally {
-      setConsolidating(false);
-    }
-  }
-
-  async function onKeepMine() {
-    if (!conflict) return;
-    setSaving(true);
-    setError(null);
-    try {
-      await apiFetch("/wiki/file", {
-        method: "PUT",
-        body: JSON.stringify({
-          path,
-          body: conflict.draftBody,
-          base_sha: conflict.currentSha,
-        }),
-      });
-      setDraft(conflict.draftBody);
-      setBody(conflict.draftBody);
-      setConflict(null);
-      setEditing(false);
-      if (historyOpen) refreshHistory();
-      else setCommits(null);
-      const fresh = await apiFetch<FileResponse>(
-        `/wiki/file?path=${encodeURIComponent(path)}`,
-      );
-      setHeadSha(fresh.head_sha ?? null);
-      await refreshDraftState();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "save failed");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  function onUseCurrent() {
-    if (!conflict) return;
-    setDraft(conflict.currentBody);
-    setBody(conflict.currentBody);
-    setHeadSha(conflict.currentSha);
-    setViewingSha(null);
-    setConflict(null);
-    setEditing(false);
-    void apiFetch(`/wiki/file/autosave?path=${encodeURIComponent(path)}`, {
-      method: "DELETE",
-    }).catch(() => {});
+    void coedit.discard();
   }
 
   // Page actions live in the single pinned header (WikiHeader), not a second
@@ -2207,12 +2019,16 @@ function FileViewer({ path }: { path: string }) {
           setPolicyOpen(true);
         }}
       />
-      <Button
-        icon={SvgEdit}
-        variant="action"
-        tooltip="Edit"
-        onClick={startEdit}
-      />
+      {/* Editing always targets current HEAD via a co-edit session, so hide
+          Edit while viewing an older commit — "Back to latest" first. */}
+      {!viewingOld && (
+        <Button
+          icon={SvgEdit}
+          variant="action"
+          tooltip="Edit"
+          onClick={startEdit}
+        />
+      )}
     </>
   ) : null;
 
@@ -2268,148 +2084,11 @@ function FileViewer({ path }: { path: string }) {
           <span>
             Viewing an older version
             {viewingSha ? ` (${viewingSha.slice(0, 7)})` : ""}.
-            {editing &&
-              " Saving will replace the current version and mark the in-between revisions as deprecated."}
           </span>
           <div className="flex-1" />
           <Button size="sm" onClick={loadLatest}>
             Back to latest
           </Button>
-        </div>
-      )}
-
-      {editing && pendingResumeDraft && (
-        <div className="mb-3 flex items-center gap-3 rounded-(--border-radius-08) border border-(--status-info-02) bg-(--status-info-01) px-3 py-2 text-[13px] text-(--status-text-info-05)">
-          <span>You have unsaved changes from a previous session.</span>
-          <div className="flex-1" />
-          <Button
-            size="sm"
-            disabled={resuming}
-            onClick={() => {
-              if (pendingResumeDraft.base_sha === headSha) {
-                // Fresh draft — restore directly.
-                setDraft(pendingResumeDraft.content);
-                setPendingResumeDraft(null);
-                return;
-              }
-              // Stale draft — attempt 3-way rebase first.
-              setResuming(true);
-              void apiFetch<DraftResponse>("/wiki/file/autosave/rebase", {
-                method: "POST",
-                body: JSON.stringify({ path }),
-              })
-                .then((rebased) => {
-                  setDraft(rebased.content);
-                  setPendingResumeDraft(null);
-                })
-                .catch((e: unknown) => {
-                  if (e instanceof ApiError && e.status === 409) {
-                    const detail = e.data as {
-                      current_body: string;
-                      draft_body: string;
-                      current_sha: string;
-                    };
-                    setConflict({
-                      draftBody: detail.draft_body,
-                      currentBody: detail.current_body,
-                      currentSha: detail.current_sha,
-                      baseSha: pendingResumeDraft.base_sha,
-                    });
-                    setPendingResumeDraft(null);
-                  }
-                })
-                .finally(() => setResuming(false));
-            }}
-          >
-            {resuming ? "Rebasing…" : "Resume"}
-          </Button>
-          <Button
-            size="sm"
-            onClick={() => {
-              setPendingResumeDraft(null);
-              void apiFetch(
-                `/wiki/file/autosave?path=${encodeURIComponent(path)}`,
-                { method: "DELETE" },
-              ).catch(() => {});
-            }}
-          >
-            Discard
-          </Button>
-        </div>
-      )}
-
-      {editing && conflict && (
-        <div className="mb-3 overflow-hidden rounded-(--border-radius-08) border border-(--status-warning-02)">
-          <div className="flex items-center gap-3 bg-(--status-warning-01) px-3 py-2 text-[13px] text-(--status-text-warning-05)">
-            <span>This page was updated while you were editing.</span>
-            <div className="flex-1" />
-            <Button
-              size="sm"
-              onClick={() => void onKeepMine()}
-              disabled={saving}
-            >
-              Keep mine
-            </Button>
-            <Button size="sm" onClick={onUseCurrent}>
-              Use current
-            </Button>
-            <Button
-              size="sm"
-              onClick={() => void onAiConsolidate()}
-              disabled={consolidating || saving}
-            >
-              {consolidating ? "Merging…" : "Merge with AI"}
-            </Button>
-            <Button size="sm" onClick={() => setConflict(null)}>
-              Edit manually
-            </Button>
-          </div>
-          <div className="grid grid-cols-2 gap-0">
-            {(() => {
-              const currentHunks = diffLines(
-                conflict.draftBody,
-                conflict.currentBody,
-              );
-              const draftHunks = diffLines(
-                conflict.currentBody,
-                conflict.draftBody,
-              );
-              const preClass =
-                "m-0 text-xs leading-[1.5] font-mono whitespace-pre-wrap break-words max-h-[240px] overflow-y-auto";
-              const labelClass =
-                "text-[11px] font-semibold text-(--text-03) mb-[6px] uppercase tracking-[0.05em]";
-              return (
-                <>
-                  <div className="border-r border-(--border-01) p-3">
-                    <div className={labelClass}>Current version</div>
-                    <pre className={preClass}>
-                      {currentHunks.map((part, i) => (
-                        <span
-                          key={i}
-                          className={`${part.added ? "bg-(--status-success-01)" : "bg-transparent"} ${part.removed ? "text-transparent select-none" : "text-(--text-04)"}`}
-                        >
-                          {part.value}
-                        </span>
-                      ))}
-                    </pre>
-                  </div>
-                  <div className="p-3">
-                    <div className={labelClass}>Your draft</div>
-                    <pre className={preClass}>
-                      {draftHunks.map((part, i) => (
-                        <span
-                          key={i}
-                          className={`${part.added ? "bg-(--status-warning-01)" : "bg-transparent"} ${part.removed ? "text-transparent select-none" : "text-(--text-04)"}`}
-                        >
-                          {part.value}
-                        </span>
-                      ))}
-                    </pre>
-                  </div>
-                </>
-              );
-            })()}
-          </div>
         </div>
       )}
 
@@ -2436,10 +2115,10 @@ function FileViewer({ path }: { path: string }) {
                       // to discard without losing user work: truly blank, or
                       // still verbatim equal to the template the user just
                       // applied (so they can keep swapping templates).
-                      const isBlank = draft.trim() === "";
+                      const isBlank = coedit.buffer.trim() === "";
                       const matchesApplied =
                         appliedTemplateBody !== null &&
-                        draft === appliedTemplateBody;
+                        coedit.buffer === appliedTemplateBody;
                       const showGallery =
                         (isBlank || matchesApplied) &&
                         templates !== null &&
@@ -2457,8 +2136,8 @@ function FileViewer({ path }: { path: string }) {
                       );
                     })()}
                     <textarea
-                      value={draft}
-                      onChange={(e) => setDraft(e.target.value)}
+                      value={coedit.buffer}
+                      onChange={(e) => coedit.onChange(e.target.value)}
                       spellCheck={false}
                       placeholder="Start typing, or pick a template above…"
                       className="box-border min-h-0 w-full flex-1 resize-none rounded-(--border-radius-08) border border-(--border-01) p-4 font-mono text-sm leading-[1.6] outline-none"
