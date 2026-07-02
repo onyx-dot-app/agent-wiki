@@ -26,6 +26,16 @@ log = logging.getLogger(__name__)
 _BOT_SCOPES = "chat:write,chat:write.public,channels:read,groups:read,im:write,users:read,channels:join"
 
 
+class SlackChannel(BaseModel):
+    id: str
+    name: str
+    is_private: bool
+
+
+class SlackChannelsResponse(BaseModel):
+    channels: list[SlackChannel]
+
+
 class SlackConnectStatus(BaseModel):
     configured: bool
     connected: bool
@@ -140,6 +150,24 @@ def connect_callback(
         scope=cast(str | None, body.get("scope")),
     )
     return _bounce(return_to, outcome="ok")
+
+
+@router.get("/channels", response_model=SlackChannelsResponse)
+def list_channels(user: User = Depends(require_user)) -> SlackChannelsResponse:
+    """Channels the caller's bot connection can post to, for the picker."""
+    connection = next(iter(connections.list_for_user(user.id)), None)
+    if connection is None:
+        raise HTTPException(status_code=404, detail="slack not connected")
+    bot_token = connections.get_bot_token(user.id, str(connection["team_id"]))
+    if not bot_token:
+        raise HTTPException(status_code=404, detail="slack not connected")
+    try:
+        channels = slack_client.list_channels(bot_token=bot_token)
+    except slack_client.SlackApiError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return SlackChannelsResponse(
+        channels=[SlackChannel.model_validate(c) for c in channels]
+    )
 
 
 @router.delete("")

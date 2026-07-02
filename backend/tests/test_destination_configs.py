@@ -43,30 +43,32 @@ def test_create_rejects_empty_name(tmp_db):
 
 def test_create_without_secret(tmp_db):
     seed_user("usr_1")
-    c = configs.create("usr_1", type="slack", name="No secret")
+    c = configs.create("usr_1", type="slack", name="No secret", config={"channel_id": "C1"})
     assert c["has_secret"] is False
     assert configs.get_secret(c["id"], owner_user_id="usr_1") is None
 
 
 def test_config_json_roundtrip(tmp_db):
     seed_user("usr_1")
-    c = configs.create("usr_1", type="slack", name="Tagged", config={"routing_tag": "jira"})
+    c = configs.create(
+        "usr_1", type="slack", name="Tagged", config={"routing_tag": "jira", "channel_id": "C1"}
+    )
     got = configs.get(c["id"], "usr_1")
     assert got is not None
-    assert got["config"] == {"routing_tag": "jira"}
+    assert got["config"] == {"routing_tag": "jira", "channel_id": "C1"}
 
 
 def test_list_is_owner_scoped(tmp_db):
     seed_user("usr_1")
     seed_user("usr_2", email="two@x.com")
-    configs.create("usr_1", type="slack", name="Mine")
+    configs.create("usr_1", type="slack", name="Mine", config={"dm": True})
     assert configs.list_for_user("usr_2") == []
 
 
 def test_delete_is_owner_scoped(tmp_db):
     seed_user("usr_1")
     seed_user("usr_2", email="two@x.com")
-    c = configs.create("usr_1", type="slack", name="Mine")
+    c = configs.create("usr_1", type="slack", name="Mine", config={"dm": True})
 
     assert configs.delete(c["id"], "usr_2") is False  # not the owner
     assert configs.delete(c["id"], "usr_1") is True
