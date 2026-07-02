@@ -76,6 +76,17 @@ def test_resend_is_rate_limited_and_blocked_after_verify(client, outbox):
     assert client.post(f"/api/triggers/destination-configs/{cfg_id}/resend-verify").status_code == 400
 
 
+def test_readding_verified_address_sends_nothing(client, outbox):
+    view = _create(client)
+    client.get(f"/api/email/verify?token={_token_from(outbox)}")
+    sends_before = len(outbox)
+
+    again = _create(client)
+    assert again["id"] == view["id"]
+    assert again["verification_error"] is None
+    assert len(outbox) == sends_before
+
+
 def test_send_failure_reports_on_view_and_frees_retry(client, monkeypatch):
     def boom(**kwargs):
         raise email_service.EmailSendError("SMTP is not configured (/admin/email)")

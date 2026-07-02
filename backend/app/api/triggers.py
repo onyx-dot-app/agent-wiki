@@ -113,7 +113,9 @@ def create_destination_config(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     view = _config_view(row)
-    if req.type == destinations_repo.EMAIL_ID:
+    # Idempotent create can return an existing row; a verified address needs
+    # no fresh link.
+    if req.type == destinations_repo.EMAIL_ID and not row.get("verified_at"):
         view.verification_error = _send_verify_link(row)
     return view
 

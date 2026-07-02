@@ -191,12 +191,13 @@ export function TriggerModal({
       setError("enter a valid email address");
       return;
     }
-    // Re-committing the already-selected address is a no-op.
+    // Re-committing the already-selected address just exits edit mode.
     if (
       selectedIsEmail &&
       String(selectedConfig?.config.address ?? "").toLowerCase() ===
         address.toLowerCase()
     ) {
+      setEmailMode(false);
       emailInputRef.current?.blur();
       return;
     }
@@ -208,6 +209,7 @@ export function TriggerModal({
         address,
       );
       setDestinationConfigId(id);
+      setEmailMode(false);
       emailInputRef.current?.blur();
       await refreshConfigs();
       if (verificationError) setError(verificationError);
@@ -364,14 +366,22 @@ export function TriggerModal({
           {(emailMode || selectedIsEmail) && (
             <InputTypeIn
               ref={emailInputRef}
-              autoFocus={emailMode && !selectedIsEmail}
+              autoFocus={emailMode}
+              variant={emailMode ? undefined : "readOnly"}
               placeholder="name@example.com — Enter to add"
               value={emailDraft}
-              onChange={(e) => setEmailDraft(e.target.value)}
+              onChange={(e) => {
+                if (emailMode) setEmailDraft(e.target.value);
+              }}
               onKeyDown={(e) => {
+                if (!emailMode) return;
                 if (e.key === "Enter") {
                   e.preventDefault();
                   void commitEmail();
+                }
+                if (e.key === "Escape") {
+                  setEmailMode(false);
+                  setEmailDraft(String(selectedConfig?.config.address ?? ""));
                 }
               }}
             />
