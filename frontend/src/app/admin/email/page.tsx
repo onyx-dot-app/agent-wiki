@@ -2,7 +2,7 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 
-import { Button } from "@onyx-ai/opal/components";
+import { Button, InputTypeIn } from "@onyx-ai/opal/components";
 import { useConfirm } from "@/components/common/ConfirmDialog";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { BackLink, PageHeader } from "@/components/common/PageHeader";
@@ -159,33 +159,30 @@ function EmailSmtpForm() {
       <div className="flex gap-3">
         <label className="flex-1">
           <div className="mb-1 text-[13px] font-medium">SMTP host</div>
-          <input
+          <InputTypeIn
             value={host}
             onChange={(e) => setHost(e.target.value)}
             placeholder="smtp.gmail.com"
             required
-            className={inputClass}
           />
         </label>
         <label className="w-[110px]">
           <div className="mb-1 text-[13px] font-medium">Port</div>
-          <input
+          <InputTypeIn
             value={port}
             onChange={(e) => setPort(e.target.value)}
             inputMode="numeric"
             placeholder="587"
-            className={inputClass}
           />
         </label>
       </div>
 
       <label>
         <div className="mb-1 text-[13px] font-medium">Username</div>
-        <input
+        <InputTypeIn
           value={username}
           onChange={(e) => setUsername(e.target.value)}
           placeholder="wiki@yourdomain.com"
-          className={inputClass}
         />
       </label>
 
@@ -210,25 +207,23 @@ function EmailSmtpForm() {
             </Button>
           )}
         </div>
-        <input
+        <InputTypeIn
           type="password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           placeholder={
             settings.password_set ? "leave blank to keep" : "app password"
           }
-          className={inputClass}
         />
       </label>
 
       <label>
         <div className="mb-1 text-[13px] font-medium">From address</div>
-        <input
+        <InputTypeIn
           value={fromAddress}
           onChange={(e) => setFromAddress(e.target.value)}
           placeholder="wiki@yourdomain.com"
           required
-          className={inputClass}
         />
       </label>
 
@@ -243,11 +238,10 @@ function EmailSmtpForm() {
       <div className="mt-2 border-t border-(--border-01) pt-4">
         <div className="mb-1 text-[13px] font-medium">Send a test email</div>
         <div className="flex gap-3">
-          <input
+          <InputTypeIn
             value={testTo}
             onChange={(e) => setTestTo(e.target.value)}
             placeholder="leave blank to send to yourself"
-            className={inputClass}
           />
           <Button
             type="button"
@@ -273,6 +267,3 @@ function EmailSmtpForm() {
     </form>
   );
 }
-
-const inputClass =
-  "w-full py-2 px-[10px] box-border border border-(--border-01) rounded-(--border-radius-04) text-sm";

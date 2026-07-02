@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import io
 import logging
+import smtplib
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
@@ -658,9 +659,21 @@ def post_email_smtp_test(
         )
     except EmailNotConfiguredError as e:
         return EmailTestResponse(ok=False, detail=str(e))
+    except smtplib.SMTPAuthenticationError:
+        log.warning("admin: test email to %s failed: SMTP auth rejected", to)
+        return EmailTestResponse(
+            ok=False,
+            detail="send failed: SMTP authentication rejected (check the username and app password)",
+        )
+    except (TimeoutError, OSError, smtplib.SMTPConnectError):
+        log.warning("admin: test email to %s failed to connect", to, exc_info=True)
+        return EmailTestResponse(
+            ok=False, detail="send failed: could not connect to the SMTP host (check host and port)"
+        )
     except Exception as e:
-        log.warning("admin: test email to %s failed: %s", to, e)
-        return EmailTestResponse(ok=False, detail=f"send failed: {e}")
+        # Server-side logs keep the detail; the client gets only the class.
+        log.warning("admin: test email to %s failed", to, exc_info=True)
+        return EmailTestResponse(ok=False, detail=f"send failed: {type(e).__name__} (see server logs)")
     return EmailTestResponse(ok=True, detail=f"sent to {to}")
 
 
