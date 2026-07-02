@@ -62,11 +62,12 @@ class JoinResponse(BaseModel):
     participants: list[ParticipantOut]
 
 
-class OpView(BaseModel):
-    """One logged op, wire-shaped like the SSE ``op`` frame so a client can feed
-    it to the same apply/rebase path."""
+class Operation(BaseModel):
+    """One logged edit operation (one version bump), wire-shaped like the SSE
+    ``op`` frame so a client can feed it to the same apply/rebase path. Its
+    ``changes`` are the range edits applied together in that operation (≥1)."""
 
-    version: int  # the session version this op produced (coedit_ops.seq)
+    version: int  # the new buffer version after this operation applies (coedit_ops.seq)
     author: str  # author_user_id
     changes: list[Change]
 
@@ -78,4 +79,4 @@ class OpsResponse(BaseModel):
 
     session_id: int
     current_head_version: int
-    ops: list[OpView]
+    ops: list[Operation]

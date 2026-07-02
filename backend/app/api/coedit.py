@@ -25,7 +25,7 @@ from app.models.coedit import (
     OpRequest,
     OpResponse,
     OpsResponse,
-    OpView,
+    Operation,
     ParticipantOut,
 )
 from app.tasks.coedit_checkpoint import checkpoint_coedit_session
@@ -190,7 +190,7 @@ def ops(
         session_id=session_id,
         current_head_version=sess.version,
         ops=[
-            OpView(
+            Operation(
                 version=r.seq,
                 author=r.author_user_id,
                 changes=[coedit.Change.model_validate(c) for c in r.changes],
