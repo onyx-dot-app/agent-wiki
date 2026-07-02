@@ -54,6 +54,7 @@ export function SlackDestinationPicker({
       try {
         setChannels(await getSlackChannels());
       } catch (e) {
+        setChannels([]); // drop the loading row; the error line explains
         onError(e instanceof Error ? e.message : "failed to load channels");
       }
     }

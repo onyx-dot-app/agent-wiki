@@ -1,6 +1,10 @@
 import useSWR from "swr";
 
 import { apiFetch } from "@/lib/api";
+import {
+  createDestinationConfig,
+  type DestinationConfig,
+} from "@/lib/triggers";
 
 export interface SlackConnectStatus {
   configured: boolean;
@@ -39,11 +43,6 @@ export function disconnectSlack(): Promise<{ disconnected: boolean }> {
     method: "DELETE",
   });
 }
-
-import {
-  createDestinationConfig,
-  type DestinationConfig,
-} from "@/lib/triggers";
 
 export type SlackTarget =
   | { kind: "channel"; id: string; name: string }
