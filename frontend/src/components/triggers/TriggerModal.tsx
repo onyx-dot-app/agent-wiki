@@ -184,6 +184,16 @@ export function TriggerModal({
         ? ""
         : "Tracked in the event log only.";
 
+  function unfocusEmailInput() {
+    // Deferred past the re-render: the readOnly variant swap can replace the
+    // input node, and blurring the pre-swap node leaves the new one focused.
+    requestAnimationFrame(() => {
+      emailInputRef.current?.blur();
+      const active = document.activeElement;
+      if (active instanceof HTMLInputElement) active.blur();
+    });
+  }
+
   async function commitEmail() {
     if (emailCommitting) return;
     const address = emailDraft.trim();
@@ -198,7 +208,7 @@ export function TriggerModal({
         address.toLowerCase()
     ) {
       setEmailMode(false);
-      emailInputRef.current?.blur();
+      unfocusEmailInput();
       return;
     }
     setError(null);
@@ -210,7 +220,7 @@ export function TriggerModal({
       );
       setDestinationConfigId(id);
       setEmailMode(false);
-      emailInputRef.current?.blur();
+      unfocusEmailInput();
       await refreshConfigs();
       if (verificationError) setError(verificationError);
     } catch (e) {
