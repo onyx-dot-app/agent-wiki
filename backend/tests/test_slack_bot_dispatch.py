@@ -208,7 +208,8 @@ def test_to_mrkdwn_converts_common_markdown():
         slack_client.to_mrkdwn("see [the doc](https://x.io/d) now")
         == "see <https://x.io/d|the doc> now"
     )
-    assert slack_client.to_mrkdwn("## Heading\nbody") == "*Heading*\nbody"
+    assert slack_client.to_mrkdwn("## Heading\nbody") == "Heading\nbody"
+    assert slack_client.to_mrkdwn("## **Title**\nbody") == "*Title*\nbody"
     # Already-mrkdwn single asterisks and mentions pass through untouched.
     assert slack_client.to_mrkdwn("*fine* <@U1>") == "*fine* <@U1>"
 

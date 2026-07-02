@@ -17,7 +17,9 @@ import requests
 log = logging.getLogger(__name__)
 
 # Standard markdown -> Slack mrkdwn, the high-value cases only: Slack renders
-# **bold** and [text](url) literally, and has no heading syntax.
+# **bold** and [text](url) literally. Heading markers are stripped to plain
+# text (notifications carry no headings), before bold so `## **x**` can't
+# nest emphasis.
 _BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
 _LINK_RE = re.compile(r"\[([^\]]+)\]\((https?://[^)\s]+)\)")
 _HEADING_RE = re.compile(r"^#{1,6}\s+(.+)$", re.MULTILINE)
@@ -25,9 +27,9 @@ _HEADING_RE = re.compile(r"^#{1,6}\s+(.+)$", re.MULTILINE)
 
 def to_mrkdwn(text: str) -> str:
     """Convert common markdown constructs to Slack's mrkdwn dialect."""
+    text = _HEADING_RE.sub(r"\1", text)
     text = _BOLD_RE.sub(r"*\1*", text)
-    text = _LINK_RE.sub(r"<\2|\1>", text)
-    return _HEADING_RE.sub(r"*\1*", text)
+    return _LINK_RE.sub(r"<\2|\1>", text)
 
 _REQUEST_TIMEOUT_SECONDS = 15
 
