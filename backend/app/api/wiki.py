@@ -242,7 +242,12 @@ def get_document_by_path(
                 if merge.clean:
                     body = merge.merged
             except RuntimeError:
-                pass
+                log.warning(
+                    "coedit read: merge_content failed for %s (base_sha=%s); serving buffer verbatim",
+                    rel,
+                    sess.base_sha,
+                    exc_info=True,
+                )
         return GetDocumentResponse(path=rel, body=body, head_sha=head_sha)
     abs_path = filesystem.absolute(rel)
     if not abs_path.is_file():
