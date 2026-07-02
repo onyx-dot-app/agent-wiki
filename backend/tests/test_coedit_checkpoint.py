@@ -7,9 +7,11 @@ from __future__ import annotations
 import pytest
 
 from app.auth import users as users_repo
+from app.db.models import DocumentTemplate
+from app.db.session import session as db_session
 from app.tasks import coedit_checkpoint as coedit_checkpoint_task
 from app.tasks.queues import documents_queue
-from app.wiki import coedit, coedit_checkpoint
+from app.wiki import coedit, coedit_checkpoint, drafts
 from app.wiki import git as wiki_git
 
 _PATH = "guides/setup.md"
@@ -134,6 +136,30 @@ def test_checkpoint_merges_concurrent_agent_commit(repo):
 
     # 3-way merge keeps both non-overlapping edits.
     assert wiki_git.read_file(_PATH) == "ONE\ntwo\nthree\nfour\nFIVE\n"
+
+
+def test_checkpoint_clears_template_draft_when_body_diverges(repo):
+    # A page created from a template has a document_drafts row; once a human's
+    # committed edit diverges from the template snapshot, the row must clear.
+    # Human edits commit via the checkpoint (not PUT /file), so the checkpoint
+    # must do this — mirroring the PUT /file save path.
+    uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
+    tmpl_body = "# Template\n"
+    with db_session() as s:
+        s.add(DocumentTemplate(id="tmpl_x", name="X", body=tmpl_body))
+    sha = _seed_page(tmpl_body)
+    drafts.create(
+        path=_PATH, template_id="tmpl_x", template_body_snapshot=tmpl_body, created_by_user_id=uid
+    )
+    sess = coedit.open_session(_PATH, base_sha=sha, initial_buffer=tmpl_body)
+    coedit.join(sess.id, uid)
+    coedit.apply_op(
+        sess.id, base_version=0, changes=[_ch(0, len(tmpl_body), "# Mine\n")], author_user_id=uid
+    )
+
+    coedit_checkpoint.checkpoint_session(sess.id)
+
+    assert drafts.get(_PATH) is None  # diverged from the template → row cleared
 
 
 def test_task_checkpoints_then_closes_when_empty(repo):
