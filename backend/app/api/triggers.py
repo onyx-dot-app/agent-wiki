@@ -49,6 +49,7 @@ def _config_view(row: dict[str, Any]) -> DestinationConfigView:
         name=row["name"],
         config=cast("dict[str, Any]", row.get("config") or {}),
         has_secret=bool(row.get("has_secret")),
+        verified_at=row.get("verified_at"),
         created_at=row.get("created_at"),
     )
 

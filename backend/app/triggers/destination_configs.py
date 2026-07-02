@@ -42,6 +42,7 @@ def _to_dict(d: DestinationConfig) -> dict[str, Any]:
         "name": d.name,
         "config": d.config_json,
         "has_secret": d.secret is not None,
+        "verified_at": d.verified_at,
         "created_at": d.created_at,
     }
 
@@ -82,6 +83,10 @@ def create(
                 "a slack destination needs exactly one of: a webhook secret, "
                 "a channel_id, or dm: true"
             )
+    if type == destinations.EMAIL_ID:
+        address = ((config or {}).get("address") or "")
+        if not isinstance(address, str) or "@" not in address.strip():
+            raise ValueError("an email destination needs config.address")
 
     config_id = "dst_" + uuid.uuid4().hex[:12]
     created_at = _now_iso()
@@ -105,6 +110,7 @@ def create(
         "name": name,
         "config": config or {},
         "has_secret": secret is not None,
+        "verified_at": None,
         "created_at": created_at,
     }
 

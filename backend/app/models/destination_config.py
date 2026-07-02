@@ -31,6 +31,7 @@ class DestinationConfigView(BaseModel):
     name: str
     config: dict[str, Any] = Field(default_factory=dict)
     has_secret: bool
+    verified_at: str | None = None
     created_at: str | None
 
 
