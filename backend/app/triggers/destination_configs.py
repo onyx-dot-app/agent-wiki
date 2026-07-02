@@ -142,16 +142,6 @@ def owned_by(config_id: str, user_id: str) -> bool:
         return d is not None and d.owner_user_id == user_id
 
 
-def mark_verified(config_id: str, *, owner_user_id: str) -> bool:
-    """Stamp ``verified_at`` on the owner's config. False if not found/owned."""
-    with session() as s:
-        row = s.get(DestinationConfig, config_id)
-        if row is None or row.owner_user_id != owner_user_id:
-            return False
-        row.verified_at = _now_iso()
-    return True
-
-
 def get_secret(config_id: str, *, owner_user_id: str) -> str | None:
     """Resolve a config id to its decrypted secret, enforcing ownership.
 

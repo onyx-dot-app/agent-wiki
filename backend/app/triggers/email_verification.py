@@ -13,9 +13,8 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import delete, select
 
-from app.db.models import EmailVerificationToken
+from app.db.models import DestinationConfig, EmailVerificationToken
 from app.db.session import session
-from app.triggers import destination_configs as dest_configs
 
 log = logging.getLogger(__name__)
 
@@ -51,8 +50,10 @@ def mint_token(destination_config_id: str) -> str:
 
 
 def verify(token: str, *, owner_user_id: str) -> str | None:
-    """Atomically claim a token and stamp its config verified. Returns the
-    config id, or None on unknown/expired/replayed/foreign tokens."""
+    """Claim a token and stamp its config verified in one transaction.
+    Returns the config id, or None on unknown/expired/replayed tokens. A
+    foreign-owner attempt leaves the token unconsumed so the real owner can
+    still verify."""
     if not token.startswith(_TOKEN_PREFIX):
         return None
     now_iso = _iso(datetime.now(timezone.utc))
@@ -64,12 +65,13 @@ def verify(token: str, *, owner_user_id: str) -> str | None:
         )
         if row is None or row.consumed_at is not None or row.expires_at <= now_iso:
             return None
+        config = s.get(DestinationConfig, row.destination_config_id)
+        if config is None or config.owner_user_id != owner_user_id:
+            log.warning(
+                "email verification rejected: config %s not owned by %s",
+                row.destination_config_id, owner_user_id,
+            )
+            return None
         row.consumed_at = now_iso
-        config_id = row.destination_config_id
-    if not dest_configs.mark_verified(config_id, owner_user_id=owner_user_id):
-        log.warning(
-            "email verification token consumed but config %s not owned by %s",
-            config_id, owner_user_id,
-        )
-        return None
-    return config_id
+        config.verified_at = now_iso
+        return config.id

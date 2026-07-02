@@ -51,9 +51,13 @@ def test_verify_stamps_config_and_is_single_use(tmp_db):
 def test_verify_rejects_foreign_owner_and_garbage(tmp_db):
     seed_user("usr_1")
     seed_user("usr_2", email="two@x.com")
-    token = email_verification.mint_token(_email_config())
+    cfg_id = _email_config()
+    token = email_verification.mint_token(cfg_id)
     assert email_verification.verify(token, owner_user_id="usr_2") is None
     assert email_verification.verify("not-a-token", owner_user_id="usr_1") is None
+    # A foreign attempt must not burn the token: the real owner still verifies.
+    assert email_verification.verify(token, owner_user_id="usr_1") == cfg_id
+    assert _get(cfg_id)["verified_at"] is not None
 
 
 def test_verify_rejects_expired_token(tmp_db):
