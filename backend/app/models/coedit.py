@@ -60,3 +60,22 @@ class JoinResponse(BaseModel):
     version: int
     base_sha: str | None
     participants: list[ParticipantOut]
+
+
+class OpView(BaseModel):
+    """One logged op, wire-shaped like the SSE ``op`` frame so a client can feed
+    it to the same apply/rebase path."""
+
+    version: int  # the session version this op produced (coedit_ops.seq)
+    author: str  # author_user_id
+    changes: list[Change]
+
+
+class OpsResponse(BaseModel):
+    """Ops after a given version (oldest first) + the current head version, so a
+    client can rebase its unconfirmed edits after a 409 / reconnect / big-op
+    resync instead of replacing the buffer wholesale."""
+
+    session_id: int
+    version: int  # current head version
+    ops: list[OpView]

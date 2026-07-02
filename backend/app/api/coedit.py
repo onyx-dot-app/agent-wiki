@@ -24,6 +24,8 @@ from app.models.coedit import (
     LeaveRequest,
     OpRequest,
     OpResponse,
+    OpsResponse,
+    OpView,
     ParticipantOut,
 )
 from app.tasks.coedit_checkpoint import checkpoint_coedit_session
@@ -171,6 +173,30 @@ def session_state(session_id: int, user: User = Depends(require_user)) -> JoinRe
         version=sess.version,
         base_sha=sess.base_sha,
         participants=_participants_out(sess.id),
+    )
+
+
+@router.get("/ops")
+def ops(
+    session_id: int, since: int, user: User = Depends(require_user)
+) -> OpsResponse:
+    """Ops applied after version ``since`` (oldest first) + the current head
+    version. Lets a client rebase its unconfirmed edits after a stale op (409),
+    a reconnect, or a big-op ``resync`` — replaying the exact missed changes
+    rather than replacing the buffer. Read-only; no join side effects."""
+    sess = _require_active(session_id, user, "read")
+    rows = coedit.ops_since(session_id, since)
+    return OpsResponse(
+        session_id=session_id,
+        version=sess.version,
+        ops=[
+            OpView(
+                version=r.seq,
+                author=r.author_user_id,
+                changes=[coedit.Change.model_validate(c) for c in r.changes],
+            )
+            for r in rows
+        ],
     )
 
 
