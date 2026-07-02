@@ -155,7 +155,9 @@ export function SlackDestinationPicker({
               sizePreset="main-ui"
               variant="body"
               state="empty"
-              onClick={() => void pickDm()}
+              onClick={() => {
+                if (!busy) void pickDm();
+              }}
             />
           )}
           {connected && channels === null && (

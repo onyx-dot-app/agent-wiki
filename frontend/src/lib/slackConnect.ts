@@ -45,7 +45,9 @@ import {
   type DestinationConfig,
 } from "@/lib/triggers";
 
-export type SlackTarget = { kind: "channel"; id: string; name: string } | { kind: "dm" };
+export type SlackTarget =
+  | { kind: "channel"; id: string; name: string }
+  | { kind: "dm" };
 
 /** Reuse the matching destination config or create it, returning its id. */
 export async function ensureSlackDestination(
