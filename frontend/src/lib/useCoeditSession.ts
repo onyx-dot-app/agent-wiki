@@ -7,8 +7,9 @@
  * spliced in; anything it can't cleanly reconcile (a 409 stale op, a `resync`
  * frame, or a remote op arriving while the local buffer has unsent edits)
  * falls back to a full re-fetch — correct, occasionally jumpy (pending-op
- * rebase smooths this later). Save checkpoints + leaves; discard resets to the
- * committed body + leaves; unmount leaves.
+ * rebase smooths this later). `save` checkpoints the shared buffer to git +
+ * leaves ("Done"); unmount/disable leaves. There is no discard — the buffer is
+ * the shared document, so one participant can't revert everyone's edits.
  *
  * Offsets are UTF-16 (JS-native), matching the server — see `coedit.ts`.
  */
@@ -53,7 +54,6 @@ export interface UseCoeditSession {
    * + coalesced internally. */
   reportSelection: (anchor: number, head: number, isEdit: boolean) => void;
   save: () => Promise<void>;
-  discard: () => Promise<void>;
 }
 
 export function useCoeditSession(opts: {
@@ -328,24 +328,6 @@ export function useCoeditSession(opts: {
     }
   }, [pump, stop, onEnd]);
 
-  const discard = useCallback(async () => {
-    const sid = sessionId.current;
-    if (sid !== null) {
-      // Reset the shared buffer to the committed body so the leave-time
-      // checkpoint is a no-op (nothing of this edit lands in git).
-      const change = diffToChange(serverBuffer.current, committedBody);
-      if (change !== null) {
-        try {
-          await sendOp(sid, version.current, [change]);
-        } catch {
-          // best-effort; if it races, the checkpoint merge reconciles
-        }
-      }
-    }
-    stop();
-    onEnd?.();
-  }, [committedBody, stop, onEnd]);
-
   // Join + stream while enabled; leave on disable/unmount.
   useEffect(() => {
     if (!enabled) return;
@@ -399,6 +381,5 @@ export function useCoeditSession(opts: {
     onChange,
     reportSelection,
     save,
-    discard,
   };
 }
