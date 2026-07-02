@@ -7,9 +7,11 @@ from __future__ import annotations
 import pytest
 
 from app.auth import users as users_repo
+from app.db.models import DocumentTemplate
+from app.db.session import session as db_session
 from app.tasks import coedit_checkpoint as coedit_checkpoint_task
 from app.tasks.queues import documents_queue
-from app.wiki import coedit, coedit_checkpoint
+from app.wiki import coedit, coedit_checkpoint, drafts
 from app.wiki import git as wiki_git
 
 _PATH = "guides/setup.md"
@@ -141,10 +143,6 @@ def test_checkpoint_clears_template_draft_when_body_diverges(repo):
     # committed edit diverges from the template snapshot, the row must clear.
     # Human edits commit via the checkpoint (not PUT /file), so the checkpoint
     # must do this — mirroring the PUT /file save path.
-    from app.db.models import DocumentTemplate
-    from app.db.session import session as db_session
-    from app.wiki import drafts
-
     uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
     tmpl_body = "# Template\n"
     with db_session() as s:
