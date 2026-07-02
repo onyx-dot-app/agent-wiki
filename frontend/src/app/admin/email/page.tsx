@@ -35,8 +35,20 @@ export default function AdminEmailPage() {
         <BackLink />
         <PageHeader
           title="Outbound email"
-          description="The SMTP account every email the wiki sends goes through — trigger notifications, verification links, and notification emails. Sending stays off until a host and from address are saved."
+          description="The SMTP account every email the wiki sends goes through: trigger notifications, verification links, and notification emails. Sending stays off until a host and from address are saved."
         />
+        <p className="mb-4 text-[13px] text-(--text-03)">
+          Setup recipes for Google Workspace, Microsoft 365, SES, SendGrid, and
+          internal relays:{" "}
+          <a
+            href="https://github.com/onyx-dot-app/agent-wiki/blob/main/docs/email-setup.md"
+            target="_blank"
+            rel="noreferrer"
+            className="underline"
+          >
+            docs/email-setup.md
+          </a>
+        </p>
         <EmailSmtpForm />
       </main>
     </RequireAdmin>
