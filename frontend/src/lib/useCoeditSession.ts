@@ -88,29 +88,33 @@ export function useCoeditSession(opts: {
     if (pumpPromise.current) return pumpPromise.current;
     if (sessionId.current === null) return Promise.resolve();
     const run = (async () => {
-      try {
-        while (sessionId.current !== null) {
-          const change = diffToChange(serverBuffer.current, bufferRef.current);
-          if (change === null) return; // caught up
-          const sent = bufferRef.current;
-          try {
-            const { version: v } = await sendOp(
-              sessionId.current,
-              version.current,
-              [change],
-            );
-            version.current = v;
-            serverBuffer.current = sent;
-          } catch (err) {
-            if (err instanceof ApiError && err.status === 409) await resync();
-            return; // stop this drain; a resync (or transient failure) handled it
-          }
+      while (sessionId.current !== null) {
+        const change = diffToChange(serverBuffer.current, bufferRef.current);
+        if (change === null) return; // caught up
+        const sent = bufferRef.current;
+        try {
+          const { version: v } = await sendOp(
+            sessionId.current,
+            version.current,
+            [change],
+          );
+          version.current = v;
+          serverBuffer.current = sent;
+        } catch (err) {
+          if (err instanceof ApiError && err.status === 409) await resync();
+          return; // stop this drain; a resync (or transient failure) handled it
         }
-      } finally {
-        pumpPromise.current = null;
       }
     })();
+    // Set the in-flight handle *before* attaching the completion hook. A drain
+    // that finds no change resolves synchronously; clearing the handle from an
+    // inline `finally` would run before this assignment and leave a resolved
+    // promise stuck in `pumpPromise` — poisoning every future pump (ops would
+    // silently stop sending). The `=== run` guard clears only our own run.
     pumpPromise.current = run;
+    void run.finally(() => {
+      if (pumpPromise.current === run) pumpPromise.current = null;
+    });
     return run;
   }, [resync]);
 
