@@ -241,7 +241,7 @@ def _previous_tick(t: TriggerRecord, now_utc: datetime) -> datetime:
 def evaluate_delta(trigger: TriggerRecord, payload: str) -> MatchResult:
     """Phase 1 LLM check: does this delta satisfy ``trigger.nl_description``?
 
-    ``payload`` is the combined wiki-snapshot + change view from
+    ``payload`` is the combined scoped-docs + change view from
     ``app.triggers.diff.build_payload``. The reason is a one-line
     justification suitable for the events log.
     """
@@ -258,7 +258,7 @@ def render_delta_message(
 def evaluate_schedule(trigger: TriggerRecord, payload: str) -> MatchResult:
     """Phase 1 LLM check for a schedule tick.
 
-    ``payload`` is the wiki-snapshot + changes-since-last-check diff +
+    ``payload`` is the scoped docs + changes-since-last-check diff +
     scheduled-check block from ``app.triggers.diff.build_schedule_payload``.
     The prompt evaluates change-over-time conditions against the diff and
     overall-state conditions against the snapshot.

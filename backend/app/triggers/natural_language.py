@@ -13,7 +13,7 @@ on edits. Two phases:
   final notification text the user (or downstream system) sees.
 
 The shared ``payload`` (built by ``app.triggers.diff.build_payload``) is
-the whole wiki at the latest version followed by a ``+/-`` view of the
+the docs under the trigger's scope followed by a ``+/-`` view of the
 changed doc. The eval prompt tells the model to focus on the diff unless
 the description is clearly about overall state.
 
@@ -28,7 +28,7 @@ on every line, so we skip it entirely:
   into one round-trip.
 
 The new-file payload (``app.triggers.diff.build_new_file_payload``) is
-the wiki snapshot followed by the new file's path and full body — no
+the scoped docs followed by the new file's path and full body — no
 diff section.
 """
 from __future__ import annotations
@@ -72,14 +72,15 @@ trigger description.
 
 The user message gives you, in order:
   1. The trigger description ("if …").
-  2. A snapshot of the whole wiki at its latest version (for context on \
-how the changed doc relates to its siblings).
+  2. A SCOPED DOCS block: the current bodies of the document(s) under \
+the trigger's scope (context on how the changed doc relates to its \
+neighbors).
   3. A CHANGE block with the path, change kind, and the +/- diff (or full \
 body, for new files / wholesale rewrites).
 
 How to evaluate:
   * Triggers should typically be evaluated against the **diff** — what \
-was added, removed, or rewritten in this change. The wiki snapshot is \
+was added, removed, or rewritten in this change. The scoped docs are \
 context, not the primary signal.
   * Only evaluate against the overall current state of the document(s) \
 when the trigger description is clearly about state rather than an \
@@ -121,7 +122,7 @@ _REPORT_TOOL = {
 def matches(nl_description: str, payload: str) -> MatchResult:
     """Phase 1: did the change satisfy the trigger's NL description?
 
-    ``payload`` is the combined wiki-snapshot + change view from
+    ``payload`` is the combined scoped-docs + change view from
     ``app.triggers.diff.build_payload``.
     """
     user_msg = f"Trigger description (if):\n{nl_description}\n\n{payload}"
@@ -161,13 +162,14 @@ the final text a human (or downstream system) will see.
 The user message gives you, in order:
   1. The owner's message instruction ("send …").
   2. A one-line "match reason" produced by the firing-condition check.
-  3. A snapshot of the whole wiki at its latest version (context).
+  3. A SCOPED DOCS block: the current bodies of the document(s) under \
+the trigger's scope (context).
   4. A CHANGE block with the path, change kind, and the +/- diff.
 
 Guidance:
   * Follow the owner's instruction. Keep the message concise and \
 specific — quote concrete values from the change where useful.
-  * Ground the message in the diff first; treat the wiki snapshot as \
+  * Ground the message in the diff first; treat the scoped docs as \
 context. If the instruction is clearly about overall state, you can \
 reference the latest version directly.
   * Do not include meta-commentary ("the trigger fired because…"), \
@@ -244,7 +246,8 @@ periodically rather than on a single edit.
 
 The user message gives you, in order:
   1. The trigger description ("if …").
-  2. A snapshot of the whole wiki at its latest version.
+  2. A SCOPED DOCS block: the full current bodies of the document(s) \
+under the trigger's scope. This is the primary material.
   3. A CHANGES SINCE LAST CHECK block: the diffs (new files, edits, \
 rewrites, deletions) committed under the trigger's scope since the \
 previous scheduled check. It reads "(no changes in this window)" when \
@@ -257,7 +260,7 @@ How to evaluate:
 against the CHANGES SINCE LAST CHECK block. If that block reports no \
 changes, such a trigger does NOT fire.
   * If the trigger describes overall STATE ("X is still marked blocked", \
-"there is no owner listed"), evaluate it against the current snapshot, \
+"there is no owner listed"), evaluate it against the SCOPED DOCS block, \
 focusing on the document(s) under the listed scope.
   * Be conservative: false positives are louder than false negatives. \
 If the wiki doesn't clearly satisfy the description, say no.
@@ -274,7 +277,7 @@ def matches_snapshot(nl_description: str, payload: str) -> MatchResult:
     """Phase 1 for schedule triggers: does current wiki state satisfy the
     trigger?
 
-    ``payload`` is the wiki-snapshot + CHANGES SINCE LAST CHECK diff +
+    ``payload`` is the scoped docs + CHANGES SINCE LAST CHECK diff +
     SCHEDULED CHECK block from ``app.triggers.diff.build_schedule_payload``.
     """
     user_msg = f"Trigger description (if):\n{nl_description}\n\n{payload}"
@@ -310,7 +313,8 @@ to produce the final text a human (or downstream system) will see.
 The user message gives you, in order:
   1. The owner's message instruction ("send …").
   2. A one-line "match reason" produced by the firing-condition check.
-  3. A snapshot of the whole wiki at its latest version.
+  3. A SCOPED DOCS block: the full current bodies of the document(s) \
+under the trigger's scope. Quote from here.
   4. A CHANGES SINCE LAST CHECK block: what changed under the scope since \
 the previous check (may read "(no changes in this window)").
   5. A SCHEDULED CHECK block naming the trigger's scope and tick time.
@@ -386,12 +390,13 @@ before.
 The user message gives you, in order:
   1. The trigger description ("if …").
   2. The owner's message instruction ("send …").
-  3. A snapshot of the whole wiki at its latest version (context).
+  3. A SCOPED DOCS block: the current bodies of the document(s) under \
+the trigger's scope (context).
   4. A NEW FILE block with the path and full body of the just-created \
 document.
 
 How to evaluate:
-  * Decide ``triggered`` by reading the new file. Use the wiki snapshot \
+  * Decide ``triggered`` by reading the new file. Use the scoped docs \
 only as context — the primary signal is the new file's content.
   * Be conservative: if the file does not clearly satisfy the trigger \
 description, set ``triggered`` to false.
@@ -441,7 +446,7 @@ def evaluate_new_file_in_dir(
 ) -> NewFileEvalResult:
     """Single-call combined evaluate + render for the new-file-in-dir case.
 
-    ``payload`` is the wiki snapshot + NEW FILE block from
+    ``payload`` is the scoped docs + NEW FILE block from
     ``app.triggers.diff.build_new_file_payload``.
 
     On LLM error or unparseable output, returns ``triggered=False`` with an

@@ -49,7 +49,9 @@ def _patch_io(monkeypatch, before: str, after: str) -> None:
 
     monkeypatch.setattr(trig_task, "_read_at", fake_read)
     monkeypatch.setattr(
-        diff_helper, "build_wiki_snapshot", lambda: "=== WIKI (latest version) ===\n"
+        diff_helper,
+        "build_scope_block",
+        lambda scope_path: f"=== SCOPED DOCS (latest version) ===\nScope: {scope_path or '(whole wiki)'}\n",
     )
 
 
@@ -96,7 +98,7 @@ def test_fan_out_records_event_on_match_with_rendered_message(tmp_db, monkeypatc
     # Render saw the same payload + reason the matcher produced.
     assert captured["instruction"] == "tell me when status flips"
     assert captured["reason"] == "green→yellow"
-    assert "WIKI (latest version)" in captured["payload"]
+    assert "SCOPED DOCS (latest version)" in captured["payload"]
     assert "Path: projects/foo.md" in captured["payload"]
 
 

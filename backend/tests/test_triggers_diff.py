@@ -61,7 +61,7 @@ def test_change_view_falls_back_to_full_body_for_high_density_rewrite():
 
 
 # --------------------------------------------------------------------------- #
-# build_wiki_snapshot                                                         #
+# build_scope_block                                                           #
 # --------------------------------------------------------------------------- #
 
 
@@ -75,14 +75,32 @@ def repo_with_docs(tmp_repo, tmp_config):
     return tmp_config
 
 
-def test_wiki_snapshot_lists_md_files_with_bodies(repo_with_docs):
-    snap = diff_helper.build_wiki_snapshot()
-    assert "=== WIKI (latest version) ===" in snap
+def test_scope_block_root_lists_md_files_with_bodies(repo_with_docs):
+    snap = diff_helper.build_scope_block("")
+    assert "=== SCOPED DOCS (latest version) ===" in snap
     assert "--- a.md" in snap
     assert "alpha body" in snap
     assert "--- auth/passwords.md" in snap
-    # YAML trigger files are skipped — snapshot is .md only
+    # YAML trigger files are skipped — the block is .md only
     assert ".trigger_x.yaml" not in snap
+
+
+def test_scope_block_doc_scope_contains_only_that_doc(repo_with_docs):
+    snap = diff_helper.build_scope_block("auth/passwords.md")
+    assert "--- auth/passwords.md" in snap
+    assert "--- a.md" not in snap
+    assert "alpha body" not in snap
+
+
+def test_scope_block_folder_scope_contains_only_docs_under_it(repo_with_docs):
+    snap = diff_helper.build_scope_block("auth")
+    assert "--- auth/passwords.md" in snap
+    assert "--- a.md" not in snap
+
+
+def test_scope_block_unknown_scope_says_so(repo_with_docs):
+    snap = diff_helper.build_scope_block("nowhere/missing.md")
+    assert "(no docs found under this scope)" in snap
 
 
 # --------------------------------------------------------------------------- #
@@ -90,31 +108,35 @@ def test_wiki_snapshot_lists_md_files_with_bodies(repo_with_docs):
 # --------------------------------------------------------------------------- #
 
 
-def test_payload_combines_snapshot_then_change(repo_with_docs):
+def test_payload_combines_scoped_docs_then_change(repo_with_docs):
     payload = diff_helper.build_payload(
         doc_path="a.md",
         change_kind=ChangeKind.EDIT,
         before="# A\n\nalpha body\n",
         after="# A\n\nalpha body updated\n",
+        scope_path="a.md",
     )
-    snap_idx = payload.index("WIKI (latest version)")
+    scope_idx = payload.index("SCOPED DOCS (latest version)")
     change_idx = payload.index("=== CHANGE ===")
-    assert snap_idx < change_idx
+    assert scope_idx < change_idx
     assert "alpha body updated" in payload
+    # Scoped: sibling docs stay out of the payload.
+    assert "auth/passwords.md" not in payload
 
 
-def test_payload_accepts_prebuilt_snapshot(repo_with_docs):
-    custom = "=== WIKI (latest version) ===\n--- stub.md\nstub body\n"
+def test_payload_accepts_prebuilt_scope_block(repo_with_docs):
+    custom = "=== SCOPED DOCS (latest version) ===\n--- stub.md\nstub body\n"
     payload = diff_helper.build_payload(
         doc_path="a.md",
         change_kind=ChangeKind.EDIT,
         before="x\n",
         after="y\n",
-        wiki_snapshot=custom,
+        scope_path="a.md",
+        scope_block=custom,
     )
     assert payload.startswith(custom)
     assert "stub body" in payload
-    # Real wiki not consulted when snapshot is passed in
+    # Real wiki not consulted when the block is passed in
     assert "alpha body" not in payload
 
 
@@ -137,21 +159,22 @@ def test_new_file_view_shows_path_and_body_no_diff():
     assert "BEFORE:" not in out
 
 
-def test_new_file_payload_combines_snapshot_then_new_file(repo_with_docs):
+def test_new_file_payload_combines_scoped_docs_then_new_file(repo_with_docs):
     payload = diff_helper.build_new_file_payload(
-        doc_path="projects/foo.md", body="# Foo\n"
+        doc_path="auth/new.md", body="# Foo\n", scope_path="auth"
     )
-    snap_idx = payload.index("WIKI (latest version)")
+    scope_idx = payload.index("SCOPED DOCS (latest version)")
     nf_idx = payload.index("=== NEW FILE ===")
-    assert snap_idx < nf_idx
-    assert "alpha body" in payload  # real snapshot was used
-    assert "Path: projects/foo.md" in payload
+    assert scope_idx < nf_idx
+    assert "auth/passwords.md" in payload  # scope docs present
+    assert "alpha body" not in payload  # out-of-scope doc absent
+    assert "Path: auth/new.md" in payload
 
 
-def test_new_file_payload_accepts_prebuilt_snapshot(repo_with_docs):
-    custom = "=== WIKI (latest version) ===\n--- stub.md\nstub body\n"
+def test_new_file_payload_accepts_prebuilt_scope_block(repo_with_docs):
+    custom = "=== SCOPED DOCS (latest version) ===\n--- stub.md\nstub body\n"
     payload = diff_helper.build_new_file_payload(
-        doc_path="projects/foo.md", body="# Foo\n", wiki_snapshot=custom
+        doc_path="auth/new.md", body="# Foo\n", scope_path="auth", scope_block=custom
     )
     assert payload.startswith(custom)
     assert "alpha body" not in payload
@@ -276,17 +299,32 @@ def test_changes_since_follows_rename(tmp_repo, tmp_config):
 
 def test_schedule_payload_without_since_has_no_changes_block(repo_with_docs):
     payload = diff_helper.build_schedule_payload(scope_path="", when_iso="2026-06-03T09:00:00+00:00")
-    assert "=== WIKI (latest version) ===" in payload
+    assert "=== SCOPED DOCS (latest version) ===" in payload
     assert "=== SCHEDULED CHECK ===" in payload
     assert "CHANGES SINCE LAST CHECK" not in payload
 
 
-def test_schedule_payload_with_since_orders_snapshot_changes_check(repo_with_docs):
+def test_schedule_payload_with_since_orders_scoped_changes_check(repo_with_docs):
     since = _iso(datetime.now(timezone.utc) - timedelta(hours=1))
     payload = diff_helper.build_schedule_payload(
         scope_path="", when_iso="2026-06-03T09:00:00+00:00", since_iso=since
     )
-    snap_idx = payload.index("WIKI (latest version)")
+    scope_idx = payload.index("SCOPED DOCS (latest version)")
     chg_idx = payload.index("CHANGES SINCE LAST CHECK")
     chk_idx = payload.index("=== SCHEDULED CHECK ===")
-    assert snap_idx < chg_idx < chk_idx
+    assert scope_idx < chg_idx < chk_idx
+
+
+def test_schedule_payload_doc_scope_carries_doc_despite_large_siblings(repo_with_docs, monkeypatch):
+    """The scoped doc is always in the payload, no matter how much wiki
+    exists alphabetically before it."""
+    from app.wiki import git as wiki_git
+
+    wiki_git.commit_file("0_early/huge.md", "# Huge\n" + "x" * 50_000, "seed", author=None)
+    monkeypatch.setattr(diff_helper, "_WIKI_TOTAL_BUDGET", 10_000)
+
+    payload = diff_helper.build_schedule_payload(
+        scope_path="auth/passwords.md", when_iso="2026-06-03T09:00:00+00:00"
+    )
+    assert "--- auth/passwords.md" in payload
+    assert "0_early/huge.md" not in payload
