@@ -144,8 +144,14 @@ const baseTheme = EditorView.theme({
       "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
     lineHeight: "1.6",
   },
-  ".cm-content": { padding: "1rem" },
+  ".cm-content": { padding: "1rem", caretColor: "var(--text-05)" },
   ".cm-line": { padding: "0" },
+  // Own caret + drawn cursor follow the theme (the default is black, invisible
+  // in dark mode). Native selection also uses a theme token for contrast.
+  ".cm-cursor, .cm-dropCursor": { borderLeftColor: "var(--text-05)" },
+  "&.cm-focused .cm-selectionBackground, ::selection": {
+    backgroundColor: "var(--background-tint-03)",
+  },
   ".cm-coedit-caret": {
     display: "inline-block",
     width: "0",
