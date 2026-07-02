@@ -547,10 +547,11 @@ def regenerate_ingest_key(
 
 
 def _slack_app_view(s: SlackAppSettingsModel) -> SlackAppView:
+    secret = s.client_secret.get_secret_value()
     return SlackAppView(
         client_id=s.client_id,
-        client_secret_set=bool(s.client_secret),
-        client_secret_hint=_redact(s.client_secret),
+        client_secret_set=bool(secret),
+        client_secret_hint=_redact(secret),
     )
 
 
@@ -566,7 +567,7 @@ def put_slack_app(
 ) -> SlackAppView:
     current = slack_app_settings.get()
     if "client_secret" not in req.model_fields_set or req.client_secret == "":
-        client_secret = current.client_secret
+        client_secret = current.client_secret.get_secret_value()
     elif req.client_secret is None:
         client_secret = ""
     else:

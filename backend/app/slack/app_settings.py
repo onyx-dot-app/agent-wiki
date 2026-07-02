@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, SecretStr
 
 from app.db.models import SlackAppSettings as SlackAppSettingsRow
 from app.db.session import session
@@ -16,14 +16,15 @@ class SlackAppSettings(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     client_id: str
-    client_secret: str
+    # SecretStr so an incidental repr/str of the settings object redacts it.
+    client_secret: SecretStr
 
     @property
     def configured(self) -> bool:
-        return bool(self.client_id and self.client_secret)
+        return bool(self.client_id and self.client_secret.get_secret_value())
 
 
-_EMPTY = SlackAppSettings(client_id="", client_secret="")
+_EMPTY = SlackAppSettings(client_id="", client_secret=SecretStr(""))
 
 
 def get() -> SlackAppSettings:
@@ -31,7 +32,9 @@ def get() -> SlackAppSettings:
         row = s.get(SlackAppSettingsRow, 1)
         if row is None:
             return _EMPTY
-        return SlackAppSettings(client_id=row.client_id, client_secret=row.client_secret)
+        return SlackAppSettings(
+            client_id=row.client_id, client_secret=SecretStr(row.client_secret)
+        )
 
 
 def upsert(*, client_id: str, client_secret: str) -> None:

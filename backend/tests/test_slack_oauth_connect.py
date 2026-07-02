@@ -176,3 +176,32 @@ def test_disconnect_removes_rows(client):
     assert res.json() == {"disconnected": True}
     assert connections.list_for_user(uid) == []
     assert client.delete("/api/connectors/slack").json() == {"disconnected": False}
+
+
+def test_settings_repr_redacts_secret():
+    from pydantic import SecretStr
+
+    s = app_settings.SlackAppSettings(
+        client_id="123.456", client_secret=SecretStr("shhh-secret")
+    )
+    assert "shhh-secret" not in repr(s)
+    assert "shhh-secret" not in str(s)
+    assert s.configured
+
+
+def test_callback_bounces_on_ok_without_token(client, monkeypatch):
+    uid = seed_user("usr_1")
+    login_fastapi(client, uid)
+    _configure()
+    state = _start_and_get_state(client)
+    monkeypatch.setattr(
+        "app.api.slack_connect.slack_client.exchange_oauth_code",
+        lambda **kw: {"ok": True, "team": {"id": "T123"}},
+    )
+    res = client.get(
+        f"/api/connectors/slack/callback?code=c0de&state={state}",
+        follow_redirects=False,
+    )
+    assert res.status_code == 302
+    assert "slack_connect=error" in res.headers["location"]
+    assert connections.list_for_user(uid) == []

@@ -113,12 +113,17 @@ def connect_callback(
     try:
         body = slack_client.exchange_oauth_code(
             client_id=settings.client_id,
-            client_secret=settings.client_secret,
+            client_secret=settings.client_secret.get_secret_value(),
             code=code,
             redirect_uri=_callback_url(),
         )
     except slack_client.SlackApiError:
         log.exception("slack connect exchange failed user=%s", user.id)
+        return _bounce(return_to, outcome="error")
+    bot_token = body.get("access_token")
+    if not isinstance(bot_token, str) or not bot_token:
+        # ok=true without a token is a malformed response, not a crash.
+        log.error("slack connect exchange returned ok without access_token user=%s", user.id)
         return _bounce(return_to, outcome="error")
     team = cast(dict[str, Any], body.get("team") or {})
     authed_user = cast(dict[str, Any], body.get("authed_user") or {})
@@ -127,7 +132,7 @@ def connect_callback(
         team_id=str(team.get("id") or ""),
         team_name=cast(str | None, team.get("name")),
         slack_user_id=str(authed_user.get("id") or ""),
-        bot_token=str(body["access_token"]),
+        bot_token=bot_token,
         scope=cast(str | None, body.get("scope")),
     )
     return _bounce(return_to, outcome="ok")
