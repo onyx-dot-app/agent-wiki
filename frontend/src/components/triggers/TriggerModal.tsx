@@ -285,6 +285,7 @@ export function TriggerModal({
             connected={Boolean(slackStatus?.connected)}
             disabled={busy}
             onPick={async (id) => {
+              setError(null);
               setDestinationConfigId(id);
               await refreshConfigs();
             }}

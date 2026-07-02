@@ -46,16 +46,20 @@ export function SlackDestinationPicker({
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [channels, setChannels] = useState<SlackChannel[] | null>(null);
+  const [loadingChannels, setLoadingChannels] = useState(false);
   const [busy, setBusy] = useState(false);
 
   async function onOpenChange(next: boolean) {
     setOpen(next);
-    if (next && connected && channels === null) {
+    // channels stays null on failure so the next open retries the fetch.
+    if (next && connected && channels === null && !loadingChannels) {
+      setLoadingChannels(true);
       try {
         setChannels(await getSlackChannels());
       } catch (e) {
-        setChannels([]); // drop the loading row; the error line explains
         onError(e instanceof Error ? e.message : "failed to load channels");
+      } finally {
+        setLoadingChannels(false);
       }
     }
   }
@@ -161,7 +165,7 @@ export function SlackDestinationPicker({
               }}
             />
           )}
-          {connected && channels === null && (
+          {loadingChannels && (
             <LineItemButton
               title="Loading channels…"
               sizePreset="main-ui"

@@ -402,6 +402,7 @@ function DestinationsCard() {
               connected={connected}
               disabled={busy}
               onPick={async () => {
+                setFormError(null);
                 await refresh();
               }}
               onError={setFormError}
