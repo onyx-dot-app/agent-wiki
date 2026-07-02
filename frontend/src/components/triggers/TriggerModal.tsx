@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 
 import { Button, InputTypeIn } from "@onyx-ai/opal/components";
 import {
@@ -68,6 +68,8 @@ export function TriggerModal({
   const [error, setError] = useState<string | null>(null);
   const [emailMode, setEmailMode] = useState(false);
   const [emailDraft, setEmailDraft] = useState("");
+  const [emailCommitting, setEmailCommitting] = useState(false);
+  const emailInputRef = useRef<HTMLInputElement>(null);
 
   const tzOptions = useMemo(() => listTimezones(), []);
 
@@ -96,6 +98,8 @@ export function TriggerModal({
     setTz(initial?.schedule_timezone ?? browserTimezone());
     setStartAtLocal(utcIsoToLocalInput(initial?.schedule_start_at ?? null));
     setError(null);
+    setEmailMode(false);
+    setEmailDraft("");
   }, [
     open,
     initial?.id,
@@ -181,22 +185,36 @@ export function TriggerModal({
         : "Tracked in the event log only.";
 
   async function commitEmail() {
+    if (emailCommitting) return;
     const address = emailDraft.trim();
     if (!address.includes("@")) {
       setError("enter a valid email address");
       return;
     }
+    // Re-committing the already-selected address is a no-op.
+    if (
+      selectedIsEmail &&
+      String(selectedConfig?.config.address ?? "").toLowerCase() ===
+        address.toLowerCase()
+    ) {
+      emailInputRef.current?.blur();
+      return;
+    }
     setError(null);
+    setEmailCommitting(true);
     try {
       const { id, verificationError } = await ensureEmailDestination(
         configs,
         address,
       );
       setDestinationConfigId(id);
+      emailInputRef.current?.blur();
       await refreshConfigs();
       if (verificationError) setError(verificationError);
     } catch (e) {
       setError(e instanceof Error ? e.message : "failed to add address");
+    } finally {
+      setEmailCommitting(false);
     }
   }
 
@@ -345,6 +363,7 @@ export function TriggerModal({
           </SlackDestinationPicker>
           {(emailMode || selectedIsEmail) && (
             <InputTypeIn
+              ref={emailInputRef}
               autoFocus={emailMode && !selectedIsEmail}
               placeholder="name@example.com — Enter to add"
               value={emailDraft}

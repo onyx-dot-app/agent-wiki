@@ -35,6 +35,18 @@ def test_create_returns_unverified(tmp_db):
     assert row["verified_at"] is None
 
 
+def test_create_same_address_is_idempotent(tmp_db):
+    seed_user("usr_1")
+    first = dest_configs.create(
+        "usr_1", type="email", name="Me", config={"address": "nik@example.com"}
+    )
+    again = dest_configs.create(
+        "usr_1", type="email", name="Dup", config={"address": "NIK@example.com"}
+    )
+    assert again["id"] == first["id"]
+    assert len(dest_configs.list_for_user("usr_1")) == 1
+
+
 def test_email_config_requires_address(tmp_db):
     seed_user("usr_1")
     with pytest.raises(ValueError, match="address"):
