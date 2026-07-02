@@ -2,10 +2,10 @@
 
 /** CodeMirror 6 editor bound to a co-edit session buffer.
  *
- * Replaces the plain textarea for the edit path: same contract (a controlled
- * `value` + `onChange`), plus it renders remote peers' carets and selection
- * highlights and reports the local caret so peers see ours. Offsets are UTF-16
- * code units end-to-end (JS-native, matching the server + `coedit.ts`).
+ * A controlled editor (`value` + `onChange`) that also renders remote peers'
+ * carets and selection highlights and reports the local caret so peers see
+ * ours. Offsets are UTF-16 code units end-to-end (JS-native, matching the
+ * server + `coedit.ts`).
  *
  * Peer carets are placed from each peer's latest `cursor` frame (clamped to the
  * doc); between frames a local edit can leave a caret briefly stale — the next
@@ -14,7 +14,12 @@
  */
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { markdown } from "@codemirror/lang-markdown";
-import { EditorState, StateEffect, StateField } from "@codemirror/state";
+import {
+  EditorState,
+  StateEffect,
+  StateField,
+  Transaction,
+} from "@codemirror/state";
 import {
   Decoration,
   type DecorationSet,
@@ -158,7 +163,7 @@ const baseTheme = EditorView.theme({
     lineHeight: "1.2",
     padding: "0 3px",
     borderRadius: "3px",
-    color: "#fff",
+    color: "var(--text-inverse, #fff)",
     whiteSpace: "nowrap",
     fontFamily: "var(--font-sans, system-ui)",
     pointerEvents: "none",
@@ -191,6 +196,10 @@ export function CoeditEditor({
   useEffect(() => {
     if (!host.current) return;
     const updateListener = EditorView.updateListener.of((u) => {
+      // Skip transactions we dispatched to apply a remote op/resync — they
+      // aren't user input, so reporting them would echo the change back and
+      // falsely flag us as "typing" to peers.
+      if (u.transactions.some((t) => t.annotation(Transaction.remote))) return;
       const sel = u.state.selection.main;
       if (u.docChanged) {
         onChangeRef.current(u.state.doc.toString());
@@ -239,6 +248,8 @@ export function CoeditEditor({
           to: change.to,
           insert: change.insert,
         },
+        // Marks this as not-user-input so the updateListener ignores it.
+        annotations: Transaction.remote.of(true),
       });
     }
   }, [value]);
