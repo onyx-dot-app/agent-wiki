@@ -27,6 +27,14 @@ def _email_config(owner: str = "usr_1", address: str = "nik@example.com") -> str
     )["id"]
 
 
+def test_create_returns_unverified(tmp_db):
+    seed_user("usr_1")
+    row = dest_configs.create(
+        "usr_1", type="email", name="Me", config={"address": "nik@example.com"}
+    )
+    assert row["verified_at"] is None
+
+
 def test_email_config_requires_address(tmp_db):
     seed_user("usr_1")
     with pytest.raises(ValueError, match="address"):

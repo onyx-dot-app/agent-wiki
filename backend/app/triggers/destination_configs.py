@@ -110,6 +110,7 @@ def create(
         "name": name,
         "config": config or {},
         "has_secret": secret is not None,
+        "verified_at": None,
         "created_at": created_at,
     }
 
