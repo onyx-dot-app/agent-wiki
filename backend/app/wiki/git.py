@@ -18,7 +18,6 @@ from contextlib import contextmanager
 from collections.abc import Generator
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from urllib.parse import quote, unquote
 
 from pydantic import BaseModel
 
@@ -699,93 +698,6 @@ def diff_for_commit(sha: str, rel_path: str | None = None, *, unified: int = 3) 
 # --------------------------------------------------------------------------- #
 
 
-def _draft_branch(rel_path: str, user_id: str) -> str:
-    # Percent-encode the path so spaces and other chars invalid in git ref
-    # names are safe. Keep '/' so nested paths stay namespaced naturally.
-    return f"drafts/{user_id}/{quote(rel_path, safe='/')}"
-
-
-def save_draft(rel_path: str, user_id: str, content: str, base_sha: str) -> None:
-    """Write ``content`` to the draft branch for ``(rel_path, user_id)``.
-
-    Uses only git plumbing — no working tree checkout. The draft branch always
-    has exactly one commit on top of ``base_sha``; each save replaces it so
-    ``base_sha`` is always the parent of the branch tip.
-    """
-    branch = _draft_branch(rel_path, user_id)
-
-    # Store the content as a loose blob object.
-    blob_sha = _run(["hash-object", "-w", "--stdin"], input=content).stdout.strip()
-
-    # Build a tree starting from base_sha's tree with rel_path replaced.
-    # Use a temp index so we don't disturb the main working-tree index.
-    fd, tmp_idx = tempfile.mkstemp(suffix=".idx")
-    os.close(fd)
-    try:
-        idx_env = {**os.environ, "GIT_INDEX_FILE": tmp_idx}
-        base_tree = _run(["rev-parse", f"{base_sha}^{{tree}}"]).stdout.strip()
-        _run(["read-tree", base_tree], env=idx_env)
-        _run(
-            ["update-index", "--add", "--cacheinfo", f"100644,{blob_sha},{rel_path}"],
-            env=idx_env,
-        )
-        tree_sha = _run(["write-tree"], env=idx_env).stdout.strip()
-    finally:
-        Path(tmp_idx).unlink(missing_ok=True)
-
-    commit_sha = _run(
-        ["commit-tree", tree_sha, "-p", base_sha, "-m", f"draft: {rel_path}"]
-    ).stdout.strip()
-    _run(["update-ref", f"refs/heads/{branch}", commit_sha])
-    log.debug("save_draft %s user=%s", rel_path, user_id)
-
-
-def get_draft(rel_path: str, user_id: str) -> dict[str, str] | None:
-    """Return ``{path, base_sha, content, updated_at}`` or None if no draft."""
-    branch = _draft_branch(rel_path, user_id)
-    if _run(["rev-parse", "--verify", f"refs/heads/{branch}"], check=False).returncode != 0:
-        return None
-    result = _run(["show", f"{branch}:{rel_path}"], check=False)
-    if result.returncode != 0:
-        return None
-    content = result.stdout
-    # Branch has exactly one commit on top of base_sha; its parent = base_sha.
-    base_sha = _run(["rev-parse", f"{branch}^"]).stdout.strip()
-    updated_at = _run(["log", "--format=%aI", "-1", branch]).stdout.strip()
-    return {"path": rel_path, "base_sha": base_sha, "content": content, "updated_at": updated_at}
-
-
-def delete_draft(rel_path: str, user_id: str) -> None:
-    """Delete the draft branch for ``(rel_path, user_id)`` if it exists."""
-    branch = _draft_branch(rel_path, user_id)
-    if _run(["rev-parse", "--verify", f"refs/heads/{branch}"], check=False).returncode != 0:
-        return
-    _run(["update-ref", "-d", f"refs/heads/{branch}"])
-    log.debug("delete_draft %s user=%s", rel_path, user_id)
-
-
-def delete_drafts_for_path(rel_path: str) -> None:
-    """Delete all draft branches for a page — called when the page is deleted."""
-    out = _run(
-        ["for-each-ref", "--format=%(refname:short)", "refs/heads/drafts/"], check=False
-    ).stdout
-    for branch in out.splitlines():
-        # branch = "drafts/<user_id>/<rel_path>" — split into at most 3 parts
-        parts = branch.split("/", 2)
-        if len(parts) == 3 and unquote(parts[2]) == rel_path:
-            _run(["update-ref", "-d", f"refs/heads/{branch}"], check=False)
-
-
-class RebaseResult(BaseModel):
-    """Result of a draft rebase attempt."""
-
-    merged: str  # merged content (clean) or content with conflict markers
-    base_sha: str  # new base SHA (current HEAD)
-    clean: bool  # True = no conflicts, False = conflict markers present
-    current_body: str  # current HEAD content (for conflict UI)
-    draft_body: str  # original draft content (for conflict UI)
-
-
 class MergeResult(BaseModel):
     """Result of a ``merge_content`` call."""
 
@@ -833,37 +745,3 @@ def merge_content(base_body: str, current_body: str, incoming_body: str) -> Merg
     finally:
         for p in paths:
             Path(p).unlink(missing_ok=True)
-
-
-def rebase_draft(rel_path: str, user_id: str) -> RebaseResult | None:
-    """3-way merge the user's draft onto the current HEAD of ``rel_path``.
-
-    Returns ``None`` if no draft exists or there is no divergence.
-
-    ``clean=True`` means no conflict markers; the caller should call
-    ``save_draft`` with the merged content and the new base_sha.
-    ``clean=False`` means conflict markers are present; the caller should
-    show the conflict panel.
-    """
-    draft = get_draft(rel_path, user_id)
-    if draft is None:
-        return None
-
-    head_sha = head_sha_for_path(rel_path)
-    if head_sha is None or head_sha == draft["base_sha"]:
-        # No divergence — nothing to rebase.
-        return None
-
-    current_body = read_file(rel_path)
-    base_body = read_file(rel_path, ref=draft["base_sha"])
-    draft_body = draft["content"]
-
-    mr = merge_content(base_body, current_body, draft_body)
-
-    return RebaseResult(
-        merged=mr.merged,
-        base_sha=head_sha,
-        clean=mr.clean,
-        current_body=current_body,
-        draft_body=draft_body,
-    )
