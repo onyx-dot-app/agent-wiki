@@ -200,3 +200,35 @@ def test_list_channels_paginates_and_sorts(monkeypatch):
     assert [c["name"] for c in out] == ["alpha", "zeta"]
     assert "cursor" not in seen_params[0]
     assert seen_params[1]["cursor"] == "page2"
+
+
+def test_to_mrkdwn_converts_common_markdown():
+    assert slack_client.to_mrkdwn("**fun_poem.md**") == "*fun_poem.md*"
+    assert (
+        slack_client.to_mrkdwn("see [the doc](https://x.io/d) now")
+        == "see <https://x.io/d|the doc> now"
+    )
+    assert slack_client.to_mrkdwn("## Heading\nbody") == "*Heading*\nbody"
+    # Already-mrkdwn single asterisks and mentions pass through untouched.
+    assert slack_client.to_mrkdwn("*fine* <@U1>") == "*fine* <@U1>"
+
+
+def test_bot_post_converts_markdown(tmp_db, _bot_posts, monkeypatch):
+    seed_user(_OWNER)
+    _connect_owner()
+    cfg = dest_configs.create(
+        _OWNER, type="slack", name="Eng", config={"channel_id": "C42"}
+    )
+    t = _trigger(cfg["id"])
+    _record_fire(
+        trigger=t,
+        action=t.actions[0],
+        doc_path="projects/foo.md",
+        sha="abc123",
+        change_kind=ChangeKind.EDIT,
+        reason="r",
+        instruction="i",
+        rendered_message="**bold title**\nbody",
+        actor=None,
+    )
+    assert _bot_posts[0]["text"].startswith("*bold title*\nbody")
