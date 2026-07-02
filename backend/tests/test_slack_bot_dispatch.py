@@ -233,3 +233,56 @@ def test_bot_post_converts_markdown(tmp_db, _bot_posts, monkeypatch):
         actor=None,
     )
     assert _bot_posts[0]["text"].startswith("*bold title*\nbody")
+
+
+def test_call_api_get_retries_timeout_then_succeeds(monkeypatch):
+    import requests as req_mod
+
+    calls: list[int] = []
+
+    class _Resp:
+        status_code = 200
+        headers: dict = {}
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"ok": True, "channels": []}
+
+    def fake_get(*a, **kw):
+        calls.append(1)
+        if len(calls) == 1:
+            raise req_mod.Timeout("read timed out")
+        return _Resp()
+
+    monkeypatch.setattr(slack_client.requests, "get", fake_get)
+    monkeypatch.setattr(slack_client.time, "sleep", lambda s: None)
+    body = slack_client._call_api_get("xoxb-x", "conversations.list", {})
+    assert body["ok"] is True
+    assert len(calls) == 2
+
+
+def test_call_api_get_honors_retry_after(monkeypatch):
+    slept: list[float] = []
+
+    class _Limited:
+        status_code = 429
+        headers = {"Retry-After": "2"}
+
+    class _Ok:
+        status_code = 200
+        headers: dict = {}
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"ok": True}
+
+    responses = [_Limited(), _Ok()]
+    monkeypatch.setattr(slack_client.requests, "get", lambda *a, **kw: responses.pop(0))
+    monkeypatch.setattr(slack_client.time, "sleep", lambda s: slept.append(s))
+    body = slack_client._call_api_get("xoxb-x", "conversations.list", {})
+    assert body["ok"] is True
+    assert slept == [2]

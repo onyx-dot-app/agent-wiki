@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from typing import Any, cast
 
 import requests
@@ -73,27 +74,50 @@ def open_dm(*, bot_token: str, slack_user_id: str) -> str:
     return channel_id
 
 
+_GET_ATTEMPTS = 3
+_GET_TIMEOUT_SECONDS = 30  # bulk reads (conversations.list) run slow on big workspaces
+_MAX_RETRY_AFTER_SECONDS = 30
+
+
 def _call_api_get(bot_token: str, method: str, params: dict[str, str]) -> dict[str, Any]:
     """GET a Slack Web API read method with query params. Read methods take
-    form/query encoding, not JSON bodies (which they silently ignore)."""
-    try:
-        response = requests.get(
-            f"https://slack.com/api/{method}",
-            headers={"Authorization": f"Bearer {bot_token}"},
-            params=params,
-            timeout=_REQUEST_TIMEOUT_SECONDS,
-        )
-        response.raise_for_status()
-        body = cast(dict[str, Any], response.json())
-    except requests.RequestException as exc:
-        raise SlackApiError(f"{method} failed: {exc}") from exc
-    if not body.get("ok"):
-        raise SlackApiError(f"{method} rejected: {body.get('error', 'unknown')}")
-    return body
+    form/query encoding, not JSON bodies (which they silently ignore).
+    Retries timeouts/connection errors with backoff and honors Retry-After
+    on 429s."""
+    last_exc: Exception | None = None
+    for attempt in range(_GET_ATTEMPTS):
+        try:
+            response = requests.get(
+                f"https://slack.com/api/{method}",
+                headers={"Authorization": f"Bearer {bot_token}"},
+                params=params,
+                timeout=_GET_TIMEOUT_SECONDS,
+            )
+            if response.status_code == 429:
+                retry_after = min(
+                    int(response.headers.get("Retry-After", "1") or 1),
+                    _MAX_RETRY_AFTER_SECONDS,
+                )
+                log.info("%s rate limited; retrying in %ds", method, retry_after)
+                time.sleep(retry_after)
+                continue
+            response.raise_for_status()
+            body = cast(dict[str, Any], response.json())
+        except (requests.Timeout, requests.ConnectionError) as exc:
+            last_exc = exc
+            log.warning("%s attempt %d/%d failed: %s", method, attempt + 1, _GET_ATTEMPTS, exc)
+            time.sleep(2**attempt)
+            continue
+        except requests.RequestException as exc:
+            raise SlackApiError(f"{method} failed: {exc}") from exc
+        if not body.get("ok"):
+            raise SlackApiError(f"{method} rejected: {body.get('error', 'unknown')}")
+        return body
+    raise SlackApiError(f"{method} failed after {_GET_ATTEMPTS} attempts: {last_exc}")
 
 
-# Hard ceiling on picker pagination: 50 pages of 200 = 10k channels.
-_CHANNEL_PAGE_LIMIT = 50
+# Hard ceiling on picker pagination: 10 pages of 1000 = 10k channels.
+_CHANNEL_PAGE_LIMIT = 10
 
 
 def list_channels(*, bot_token: str) -> list[dict[str, Any]]:
@@ -106,7 +130,7 @@ def list_channels(*, bot_token: str) -> list[dict[str, Any]]:
         params = {
             "types": "public_channel,private_channel",
             "exclude_archived": "true",
-            "limit": "200",
+            "limit": "1000",
         }
         if cursor:
             params["cursor"] = cursor
