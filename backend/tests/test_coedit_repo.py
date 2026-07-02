@@ -185,10 +185,18 @@ def test_due_includes_overdue_active_session(users):
     assert s.id in _due_ids(idle_seconds=3600, max_interval_seconds=0)
 
 
-def test_legacy_space_separated_created_at_normalized_not_overdue(users):
+def test_legacy_space_separated_created_at_normalized_not_overdue(users, monkeypatch):
     # A pre-migration row carries the space-separated server-default created_at.
     # Space sorts before 'T', so before normalization such a fresh, never-
     # checkpointed dirty session looks overdue against an _iso cutoff.
+    # Frozen mid-day clock: the space-vs-'T' comparison only decides when the
+    # cutoff shares the row's date prefix, which real time breaks in the first
+    # hour of the UTC day (now - interval lands on the previous date).
+    from datetime import datetime, timezone
+
+    monkeypatch.setattr(
+        coedit, "_now", lambda: datetime(2026, 7, 2, 12, 0, tzinfo=timezone.utc)
+    )
     s = coedit.open_session(_PATH, base_sha=None, initial_buffer="hi")
     coedit.apply_op(s.id, base_version=0, changes=[_ch(0, 2, "yo")], author_user_id="usr_a")
     with db_session() as sess:
