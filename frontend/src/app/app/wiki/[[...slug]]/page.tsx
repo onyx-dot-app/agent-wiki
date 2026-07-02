@@ -1634,6 +1634,9 @@ function FileViewer({ path }: { path: string }) {
     // otherwise clobber the live session buffer. While editing, the
     // co-edit SSE stream is the source of truth, not this poll.
     if (editing || viewingSha !== null) return;
+    // The read is session-aware: while a co-edit session is open, /wiki/file
+    // serves the live buffer (a quick HEAD+buffer merge), so this poll reflects
+    // saved edits immediately — no dependency on the async checkpoint commit.
     setBody((prev) => (prev === liveDoc.body ? prev : liveDoc.body));
     setHeadSha(liveDoc.head_sha ?? null);
   }, [liveDoc, editing, viewingSha]);
@@ -1800,12 +1803,10 @@ function FileViewer({ path }: { path: string }) {
     onEnd: () => {
       setEditing(false);
       setViewingSha(null);
-      void apiFetch<FileResponse>(`/wiki/file?path=${encodeURIComponent(path)}`)
-        .then((fresh) => {
-          setBody(fresh.body);
-          setHeadSha(fresh.head_sha ?? null);
-        })
-        .catch(() => {});
+      // Don't refetch the body here. onSave sets it optimistically; the SWR
+      // poll then reconciles against the session-aware read (which serves the
+      // live buffer while the session is open), so there's no stale flash and
+      // no wait on the async checkpoint commit.
       void refreshComments();
       void refreshDraftState();
     },
@@ -1887,8 +1888,8 @@ function FileViewer({ path }: { path: string }) {
     setSaving(true);
     setError(null);
     // Snapshot what we're committing so the viewer shows it immediately; the
-    // checkpoint commit runs on a worker, and the SWR poll (re-enabled once
-    // editing is false) reconciles with the actual merged result.
+    // checkpoint commit runs on a worker, but the session-aware read serves the
+    // live buffer meanwhile, so the SWR poll keeps showing this content.
     const finalText = coedit.buffer;
     try {
       // Commit the session buffer to git (checkpoint), then leave. onEnd exits
