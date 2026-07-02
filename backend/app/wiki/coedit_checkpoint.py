@@ -24,6 +24,7 @@ from app.auth import User, set_current_user
 from app.auth import users as users_repo
 from app.models.wiki import ChangeKind
 from app.wiki import coedit, coedit_channel
+from app.wiki import drafts as wiki_drafts
 from app.wiki import git as wiki_git
 from app.wiki.utils import commit_and_fan_out
 
@@ -123,6 +124,12 @@ def checkpoint_session(session_id: int) -> str | None:
             # The commit-time merge folded in a concurrent agent commit; tell
             # participants to reload the merged buffer.
             coedit_channel.broadcast_resync(session_id, res.session.version)
+        # Drafting state: if the committed body diverged from a template
+        # snapshot, the page is now the user's own — clear the row so the chat
+        # banner drops and the template's system prompt stops applying. Human
+        # edits commit through here (not PUT /file) once editing is session-based,
+        # so this must run at the checkpoint, mirroring the PUT /file save path.
+        wiki_drafts.clear_if_diverged(path, result.new_body)
         return result.sha
 
     # None = the merge produced exactly the current HEAD (buffer already matches
