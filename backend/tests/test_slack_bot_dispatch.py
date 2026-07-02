@@ -209,6 +209,8 @@ def test_to_mrkdwn_converts_list_markers_to_bullets():
     assert slack_client.to_mrkdwn("- top\n  - nested") == "• top\n  • nested"
     # Bold at line start is emphasis, not a list marker.
     assert slack_client.to_mrkdwn("**bold** lead") == "*bold* lead"
+    # A bare marker line keeps its newline; lines don't merge.
+    assert slack_client.to_mrkdwn("-\nnext line") == "-\nnext line"
 
 
 def test_to_mrkdwn_converts_common_markdown():
@@ -245,7 +247,7 @@ def test_bot_post_converts_markdown(tmp_db, _bot_posts, monkeypatch):
 
 
 def test_post_chat_message_suppresses_unfurls(monkeypatch):
-    captured: dict = {}
+    captured: dict[str, Any] = {}
     monkeypatch.setattr(
         slack_client,
         "_call_api",

@@ -25,7 +25,8 @@ log = logging.getLogger(__name__)
 _BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
 _LINK_RE = re.compile(r"\[([^\]]+)\]\((https?://[^)\s]+)\)")
 _HEADING_RE = re.compile(r"^#{1,6}\s+(.+)$", re.MULTILINE)
-_BULLET_RE = re.compile(r"^(\s*)[-*+]\s+", re.MULTILINE)
+# [ \t]+ not \s+: a bare marker line must not consume its own newline.
+_BULLET_RE = re.compile(r"^([ \t]*)[-*+][ \t]+", re.MULTILINE)
 
 
 def to_mrkdwn(text: str) -> str:
