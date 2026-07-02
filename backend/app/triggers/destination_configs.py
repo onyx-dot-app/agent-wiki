@@ -42,6 +42,7 @@ def _to_dict(d: DestinationConfig) -> dict[str, Any]:
         "name": d.name,
         "config": d.config_json,
         "has_secret": d.secret is not None,
+        "verified_at": d.verified_at,
         "created_at": d.created_at,
     }
 
@@ -82,6 +83,10 @@ def create(
                 "a slack destination needs exactly one of: a webhook secret, "
                 "a channel_id, or dm: true"
             )
+    if type == destinations.EMAIL_ID:
+        address = ((config or {}).get("address") or "")
+        if not isinstance(address, str) or "@" not in address.strip():
+            raise ValueError("an email destination needs config.address")
 
     config_id = "dst_" + uuid.uuid4().hex[:12]
     created_at = _now_iso()
@@ -135,6 +140,16 @@ def owned_by(config_id: str, user_id: str) -> bool:
     with session() as s:
         d = s.get(DestinationConfig, config_id)
         return d is not None and d.owner_user_id == user_id
+
+
+def mark_verified(config_id: str, *, owner_user_id: str) -> bool:
+    """Stamp ``verified_at`` on the owner's config. False if not found/owned."""
+    with session() as s:
+        row = s.get(DestinationConfig, config_id)
+        if row is None or row.owner_user_id != owner_user_id:
+            return False
+        row.verified_at = _now_iso()
+    return True
 
 
 def get_secret(config_id: str, *, owner_user_id: str) -> str | None:

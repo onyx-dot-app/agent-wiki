@@ -510,9 +510,28 @@ class DestinationConfig(Base):
     )
     # Optional secret — AES-GCM encrypted at rest (bytea). See app/db/crypto.py.
     secret: Mapped[str | None] = mapped_column(EncryptedString())
+    # Set when the destination's address proved reachable (email verify flow).
+    # Types without a verification step leave it null.
+    verified_at: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
 
     __table_args__ = (Index("idx_destination_configs_owner", "owner_user_id"),)
+
+
+class EmailVerificationToken(Base):
+    """Single-use token mailed to an email destination's address. Mirrors
+    ``SlackConnectState``: minted once per config (re-mint clears prior),
+    consumed exactly once, TTL-bounded."""
+
+    __tablename__ = "email_verification_tokens"
+
+    token: Mapped[str] = mapped_column(Text, primary_key=True)
+    destination_config_id: Mapped[str] = mapped_column(
+        Text, ForeignKey("destination_configs.id", ondelete="CASCADE"), nullable=False
+    )
+    expires_at: Mapped[str] = mapped_column(Text, nullable=False)
+    consumed_at: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
 
 
 # --------------------------------------------------------------------------- #
