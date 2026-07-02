@@ -11,7 +11,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.auth import User, require_can
 from app.auth.deps import require_user
-from app.llm.agents import merge_conflict_update
 from app.models.file_system import (
     ActivityRowView,
     CommitView,
@@ -21,8 +20,6 @@ from app.models.file_system import (
     DocumentActivityResponse,
     DocumentDraftView,
     DocumentEntry,
-    DraftRequest,
-    DraftResponse,
     FileDiffResponse,
     FileHistoryResponse,
     FolderHitView,
@@ -32,15 +29,11 @@ from app.models.file_system import (
     ListDocumentsResponse,
     ListRecentPagesResponse,
     RecentPageView,
-    MergeRequest,
-    MergeResponse,
     MovedFile,
     MovePathRequest,
     MovePathResponse,
     PutDocumentRequest,
     PutDocumentResponse,
-    RebaseConflictResponse,
-    RebaseRequest,
     RecentDocsResponse,
     RecordRecentDocRequest,
     ReindexRequest,
@@ -314,8 +307,6 @@ def put_document_by_path(
     # snapshot, the user has made it their own — clear the row so the
     # chat banner drops and the template's system prompt stops applying.
     wiki_drafts.clear_if_diverged(rel, body_to_commit)
-    # Edit draft is no longer needed after a successful commit.
-    wiki_git.delete_draft(rel, user.id)
     log.info("doc %s %s by %s sha=%s", change_kind, rel, author or "?", sha[:8])
     return PutDocumentResponse(
         path=rel,
@@ -451,10 +442,9 @@ def delete_document_by_path(
     author = _git_author(user)
     sha = wiki_git.delete_path(rel, f"delete {rel}", author=author)
     for p in md_paths:
-        # Drops FTS / ACL / comments / activity / drafts / working-dir state
-        # for each removed page.
+        # Drops FTS / ACL / comments / activity / working-dir state for each
+        # removed page.
         wiki_notify.after_doc_delete(p, sha, author)
-        wiki_git.delete_drafts_for_path(p)
     log.info("doc deleted %s (%d pages) by %s sha=%s", rel, len(md_paths), author or "?", sha[:8])
     return DeleteDocumentResponse(sha=sha)
 
@@ -820,150 +810,6 @@ def set_file_draft(
         system_prompt=row["system_prompt"],
         created_at=row["created_at"],
     )
-
-
-@router.get("/file/autosave", response_model=DraftResponse | None)
-def get_draft(
-    user: User = Depends(require_user),
-    path: str = "",
-) -> DraftResponse | None:
-    """Return the user's in-progress draft for a page, or null."""
-    if not path:
-        raise HTTPException(status_code=400, detail="path required")
-    try:
-        rel = filesystem.safe_rel_path(path)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-    require_can("read", rel, user)
-    row = wiki_git.get_draft(rel, user.id)
-    if row is None:
-        return None
-    return DraftResponse(
-        path=row["path"],
-        base_sha=row["base_sha"],
-        content=row["content"],
-        updated_at=row["updated_at"],
-    )
-
-
-@router.put("/file/autosave", response_model=DraftResponse)
-def upsert_draft(
-    req: DraftRequest,
-    user: User = Depends(require_user),
-) -> DraftResponse:
-    """Auto-save the user's in-progress draft. Returns the saved draft."""
-    try:
-        rel = filesystem.safe_rel_path(req.path)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-    if not filesystem.absolute(rel).is_file():
-        raise HTTPException(status_code=404, detail="not found")
-    require_can("write", rel, user)
-    wiki_git.save_draft(rel, user.id, req.content, req.base_sha)
-    row = wiki_git.get_draft(rel, user.id)
-    assert row is not None
-    return DraftResponse(
-        path=row["path"],
-        base_sha=row["base_sha"],
-        content=row["content"],
-        updated_at=row["updated_at"],
-    )
-
-
-@router.delete("/file/autosave", status_code=status.HTTP_204_NO_CONTENT)
-def delete_draft(
-    user: User = Depends(require_user),
-    path: str = "",
-) -> None:
-    """Clear the user's in-progress draft for a page."""
-    if not path:
-        raise HTTPException(status_code=400, detail="path required")
-    try:
-        rel = filesystem.safe_rel_path(path)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-    wiki_git.delete_draft(rel, user.id)
-
-
-@router.post("/file/autosave/rebase", response_model=DraftResponse)
-def rebase_draft(
-    req: RebaseRequest,
-    user: User = Depends(require_user),
-) -> DraftResponse:
-    """3-way merge the user's draft onto the current HEAD.
-
-    Returns the merged draft (200) when git merge-file produces no conflict
-    markers, saving the rebased draft automatically.  Returns 409 with
-    ``RebaseConflictResponse`` when conflicts need human resolution.
-    Returns 404 when the page or draft does not exist.
-    """
-    try:
-        rel = filesystem.safe_rel_path(req.path)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-    if not filesystem.absolute(rel).is_file():
-        raise HTTPException(status_code=404, detail="not found")
-    require_can("write", rel, user)
-
-    result = wiki_git.rebase_draft(rel, user.id)
-    if result is None:
-        raise HTTPException(status_code=404, detail="no draft found")
-
-    if result.clean:
-        wiki_git.save_draft(rel, user.id, result.merged, result.base_sha)
-        row = wiki_git.get_draft(rel, user.id)
-        if row is None:
-            raise HTTPException(status_code=500, detail="draft vanished after save")
-        return DraftResponse(
-            path=row["path"],
-            base_sha=row["base_sha"],
-            content=row["content"],
-            updated_at=row["updated_at"],
-        )
-
-    raise HTTPException(
-        status_code=409,
-        detail=RebaseConflictResponse(
-            current_body=result.current_body,
-            draft_body=result.draft_body,
-            current_sha=result.base_sha,
-        ).model_dump(),
-    )
-
-
-@router.post("/file/merge", response_model=MergeResponse)
-def merge_draft(
-    req: MergeRequest,
-    user: User = Depends(require_user),
-) -> MergeResponse:
-    """LLM 3-way merge: combine current HEAD and the user's draft.
-
-    Returns the merged body for the user to review before saving.
-    """
-    try:
-        rel = filesystem.safe_rel_path(req.path)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-    require_can("write", rel, user)
-    try:
-        base_body = wiki_git.read_file(rel, ref=req.base_sha)
-    except wiki_git.UnknownSha as exc:
-        raise HTTPException(status_code=404, detail="base revision not found") from exc
-    # Fetch the most recent commit message so the LLM can reference it when
-    # annotating conflicting facts (e.g. "12k from fix: update connection limit").
-    current_commits = wiki_git.history(rel, limit=1)
-    current_commit_message = current_commits[0].message if current_commits else None
-    try:
-        merged = merge_conflict_update.merge(
-            wiki_path=rel,
-            base_body=base_body,
-            current_body=req.current_body,
-            draft_body=req.draft_body,
-            current_commit_message=current_commit_message,
-        )
-    except RuntimeError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
-    return MergeResponse(merged=merged)
 
 
 @router.get("/{doc_id}")
