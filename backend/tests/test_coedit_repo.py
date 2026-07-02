@@ -6,6 +6,8 @@ DB-backed (uses the per-test schema from the ``tmp_db`` fixture), mirroring
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import pytest
 
 from sqlalchemy import text
@@ -185,10 +187,18 @@ def test_due_includes_overdue_active_session(users):
     assert s.id in _due_ids(idle_seconds=3600, max_interval_seconds=0)
 
 
-def test_legacy_space_separated_created_at_normalized_not_overdue(users):
+def test_legacy_space_separated_created_at_normalized_not_overdue(users, monkeypatch):
     # A pre-migration row carries the space-separated server-default created_at.
     # Space sorts before 'T', so before normalization such a fresh, never-
     # checkpointed dirty session looks overdue against an _iso cutoff.
+    #
+    # Freeze _now at midday UTC so created_at and the (now - max_interval) cutoff
+    # share the same date+hour prefix — otherwise, when real wall-clock is within
+    # max_interval of a day/hour boundary, the earlier date digits dominate the
+    # lexicographic compare instead of the space-vs-'T' at position 10.
+    monkeypatch.setattr(
+        coedit, "_now", lambda: datetime(2026, 7, 1, 12, 0, 0, tzinfo=timezone.utc)
+    )
     s = coedit.open_session(_PATH, base_sha=None, initial_buffer="hi")
     coedit.apply_op(s.id, base_version=0, changes=[_ch(0, 2, "yo")], author_user_id="usr_a")
     with db_session() as sess:
