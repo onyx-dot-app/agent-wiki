@@ -1,53 +1,22 @@
-"""Reconcile of legacy slack triggers into destination configs: a legacy YAML
-that names a slack_webhook_id gets a mirrored destination config and is
-rewritten to reference it, and the pass is idempotent.
-"""
+"""Boot reconcile of legacy trigger YAML: pre-registry files rewrite to the
+actions shape, slack references fall back to event-log with a loud warning,
+and the pass is idempotent."""
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import yaml
 
-from app.slack import webhooks as slack_webhooks
-from app.triggers import destination_configs as dest_configs
 from app.triggers import storage
 from app.triggers.reconcile import reconcile_legacy_slack_triggers
 from app.wiki import git as wiki_git
 
 from tests._seed import seed_user
 
-_HOOK = "https://hooks.slack.com/services/EXAMPLE"
-
 
 def _write_legacy(path: str, body: dict[str, Any]) -> None:
     wiki_git.commit_file(path, yaml.safe_dump(body, sort_keys=False), f"seed {path}", author=None)
-
-
-def test_reconcile_migrates_slack_trigger(tmp_repo):
-    seed_user("usr_1")
-    wh = slack_webhooks.create("usr_1", "PM Standup", _HOOK)
-    path = ".trigger_trg_legacy.yaml"
-    _write_legacy(path, {
-        "id": "trg_legacy", "owner_user_id": "usr_1", "scope_path": "a.md",
-        "kind": "delta", "nl_description": "fire", "message": "hi",
-        "destination": "slack", "slack_webhook_id": wh["id"], "enabled": True,
-    })
-
-    assert reconcile_legacy_slack_triggers() == 1
-
-    configs = dest_configs.list_for_user("usr_1")
-    assert len(configs) == 1
-    cfg = configs[0]
-    assert cfg["type"] == "slack"
-    assert cfg["name"] == "PM Standup"
-    assert dest_configs.get_secret(cfg["id"], owner_user_id="usr_1") == _HOOK
-
-    data = storage.read_trigger(path)
-    assert data["actions"] == [{"destination_config_id": cfg["id"], "message": "hi"}]
-
-    # Idempotent: a second pass rewrites nothing and creates no duplicate config.
-    assert reconcile_legacy_slack_triggers() == 0
-    assert len(dest_configs.list_for_user("usr_1")) == 1
 
 
 def test_reconcile_migrates_event_log_trigger(tmp_repo):
@@ -58,23 +27,22 @@ def test_reconcile_migrates_event_log_trigger(tmp_repo):
         "kind": "delta", "nl_description": "fire", "message": "hi",
         "destination": "event_log", "enabled": True,
     })
+
     assert reconcile_legacy_slack_triggers() == 1
     data = storage.read_trigger(path)
     assert data["actions"] == [{"destination_config_id": None, "message": "hi"}]
-    assert dest_configs.list_for_user("usr_1") == []
+
+    # Idempotent: already-reshaped files are skipped.
+    assert reconcile_legacy_slack_triggers() == 0
 
 
-def test_reconcile_warns_when_webhook_missing(tmp_repo, caplog):
-    """A slack trigger whose source webhook is gone degrades to event-log only,
-    loudly: the drop is logged with the file, owner, and webhook id."""
-    import logging
-
+def test_reconcile_slack_reference_warns_and_degrades(tmp_repo, caplog):
     seed_user("usr_1")
-    path = ".trigger_trg_gone.yaml"
+    path = ".trigger_trg_slack.yaml"
     _write_legacy(path, {
-        "id": "trg_gone", "owner_user_id": "usr_1", "scope_path": "a.md",
+        "id": "trg_slack", "owner_user_id": "usr_1", "scope_path": "a.md",
         "kind": "delta", "nl_description": "fire", "message": "hi",
-        "destination": "slack", "slack_webhook_id": "wh_deleted", "enabled": True,
+        "destination": "slack", "slack_webhook_id": "swh_retired", "enabled": True,
     })
 
     with caplog.at_level(logging.WARNING, logger="app.triggers.reconcile"):
@@ -82,25 +50,13 @@ def test_reconcile_warns_when_webhook_missing(tmp_repo, caplog):
 
     data = storage.read_trigger(path)
     assert data["actions"] == [{"destination_config_id": None, "message": "hi"}]
-    assert dest_configs.list_for_user("usr_1") == []
-    warning = next(r for r in caplog.records if "wh_deleted" in r.getMessage())
+    warning = next(r for r in caplog.records if "swh_retired" in r.getMessage())
     assert path in warning.getMessage()
     assert "usr_1" in warning.getMessage()
 
 
-def test_reconcile_mirrors_unattached_channels(tmp_repo):
-    """A stored Slack channel with no trigger referencing it still gets a
-    destination config, so it stays visible in the destinations UI."""
+def test_reconcile_skips_unreadable_and_non_trigger_files(tmp_repo):
     seed_user("usr_1")
-    slack_webhooks.create("usr_1", "Unattached", _HOOK)
+    wiki_git.commit_file(".trigger_broken.yaml", "{not yaml: [", "seed broken", author=None)
 
-    reconcile_legacy_slack_triggers()
-
-    configs = dest_configs.list_for_user("usr_1")
-    assert [c["name"] for c in configs] == ["Unattached"]
-    assert configs[0]["type"] == "slack"
-    assert dest_configs.get_secret(configs[0]["id"], owner_user_id="usr_1") == _HOOK
-
-    # Idempotent: a second pass creates no duplicate.
-    reconcile_legacy_slack_triggers()
-    assert len(dest_configs.list_for_user("usr_1")) == 1
+    assert reconcile_legacy_slack_triggers() == 0

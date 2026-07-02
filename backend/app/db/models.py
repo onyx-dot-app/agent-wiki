@@ -485,34 +485,11 @@ class TriggerDestination(Base):
     )
 
 
-class SlackWebhook(Base):
-    """A user-owned, named Slack incoming webhook (one per channel).
-
-    Each row is a delivery target a user can point a trigger at: a human
-    ``name`` (e.g. "PM Standup") and the secret ``webhook_url``. Webhooks
-    are private to ``owner_user_id``. A slack trigger action references one
-    via its ``slack_webhook_id`` and only the owner's triggers may use it.
-    The URL is a secret and lives **only** here, never in the wiki git repo.
-    """
-
-    __tablename__ = "slack_webhooks"
-
-    id: Mapped[str] = mapped_column(Text, primary_key=True)
-    owner_user_id: Mapped[str] = mapped_column(
-        Text, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
-    )
-    name: Mapped[str] = mapped_column(Text, nullable=False)
-    # Secret — AES-GCM encrypted at rest (bytea). See app/db/crypto.py.
-    webhook_url: Mapped[str] = mapped_column(EncryptedString(), nullable=False)
-    created_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
-
-    __table_args__ = (Index("idx_slack_webhooks_owner", "owner_user_id"),)
-
 
 class DestinationConfig(Base):
     """A user-owned, named, typed delivery target a trigger can fire to.
 
-    Generalizes ``slack_webhooks`` beyond Slack: ``type`` is a
+    One row per delivery target a user registers: ``type`` is a
     ``trigger_destinations`` catalog slug (``slack``, ``webhook``, …),
     ``config_json`` holds the non-secret per-type settings, and ``secret`` is
     the optional encrypted credential (an incoming-webhook URL, a signing

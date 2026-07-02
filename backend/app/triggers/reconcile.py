@@ -1,16 +1,13 @@
-"""One-time reconcile of legacy Slack channels into destination configs.
+"""Reshapes legacy trigger YAML into the destination-config shape.
 
-Before the ``destination_configs`` registry, a user's Slack channels lived in
-``slack_webhooks`` and a trigger referenced one by a top-level
-``slack_webhook_id`` on its YAML. This mirrors every stored channel into a
-``destination_configs`` row (once) so none disappear from the destinations UI,
-and rewrites legacy trigger YAML to reference the mirror by
-``destination_config_id``.
+Files written before destination configs carried a single ``message`` /
+``destination`` / ``slack_webhook_id`` at the top level. This rewrites them to
+an ``actions`` list. A ``slack_webhook_id`` reference can no longer be
+resolved (the webhook store is retired), so such triggers fall back to
+event-log delivery with a loud warning naming the file and owner.
 
 Runs at boot before the cache rebuild. Already-reshaped triggers carry an
-``actions`` list and are skipped, and each mirrored config is found by the
-source-webhook marker rather than recreated, so it is a no-op after the first
-boot.
+``actions`` list and are skipped, so it is a no-op after the first boot.
 """
 from __future__ import annotations
 
@@ -19,60 +16,15 @@ from typing import Any, cast
 
 import yaml
 
-from app.slack import webhooks as slack_webhooks
-from app.triggers import destination_configs as dest_configs
 from app.triggers import storage
 from app.wiki import git as wiki_git
 
 log = logging.getLogger(__name__)
 
-# Marker in a mirrored config's config_json linking it to its source webhook, so
-# the mirror is created exactly once.
-_SOURCE_KEY = "from_slack_webhook"
-
-
-def _mirror_config_id(webhook_id: str, owner_user_id: str) -> str | None:
-    """The destination config mirroring ``webhook_id`` for its owner, created on
-    first sight. None if the source webhook is gone or not owned."""
-    for cfg in dest_configs.list_for_user(owner_user_id):
-        config = cfg.get("config")
-        if isinstance(config, dict) and cast(dict[str, Any], config).get(_SOURCE_KEY) == webhook_id:
-            return cast(str, cfg["id"])
-    hook = next(
-        (w for w in slack_webhooks.list_for_user(owner_user_id) if w["id"] == webhook_id),
-        None,
-    )
-    if hook is None:
-        return None
-    return cast(
-        str,
-        dest_configs.create(
-            owner_user_id,
-            type="slack",
-            name=hook["name"],
-            config={_SOURCE_KEY: webhook_id},
-            secret=hook["webhook_url"],
-        )["id"],
-    )
-
 
 def reconcile_legacy_slack_triggers() -> int:
-    """Mirror every stored Slack channel into ``destination_configs``, then
-    rewrite trigger YAML still on the legacy single-destination shape into the
-    destination-config shape. Returns the number of files rewritten."""
-    by_owner: dict[str, list[str]] = {}
-    for hook in slack_webhooks.list_all():
-        by_owner.setdefault(hook["owner_user_id"], []).append(hook["id"])
-    for owner, hook_ids in by_owner.items():
-        # One config listing per owner; steady-state boots create nothing.
-        mirrored = {
-            cast(dict[str, Any], c.get("config") or {}).get(_SOURCE_KEY)
-            for c in dest_configs.list_for_user(owner)
-        }
-        for hook_id in hook_ids:
-            if hook_id not in mirrored:
-                _mirror_config_id(hook_id, owner)
-
+    """Rewrite trigger YAML still on the legacy single-destination shape into
+    the destination-config shape. Returns the number of files rewritten."""
     rewritten = 0
     for file_path in storage.list_all_files():
         try:
@@ -86,21 +38,13 @@ def reconcile_legacy_slack_triggers() -> int:
 
         owner = raw.get("owner_user_id")
         webhook_id = raw.get("slack_webhook_id")
-        config_id: str | None = None
-        if (
-            raw.get("destination") == "slack"
-            and isinstance(webhook_id, str)
-            and isinstance(owner, str)
-        ):
-            config_id = _mirror_config_id(webhook_id, owner)
-            if config_id is None:
-                # The trigger degrades to event-log only. Name the drop so
-                # operators can find affected triggers after the migration.
-                log.warning(
-                    "reconcile: %s (owner %s) referenced slack webhook %s which no "
-                    "longer exists; trigger falls back to event-log only",
-                    file_path, owner, webhook_id,
-                )
+        if raw.get("destination") == "slack" and isinstance(webhook_id, str):
+            # Name the drop so operators can find affected triggers.
+            log.warning(
+                "reconcile: %s (owner %s) references retired slack webhook %s; "
+                "trigger falls back to event-log only",
+                file_path, owner, webhook_id,
+            )
 
         reshaped = {
             k: v
@@ -108,7 +52,7 @@ def reconcile_legacy_slack_triggers() -> int:
             if k not in ("message", "destination", "slack_webhook_id")
         }
         reshaped["actions"] = [
-            {"destination_config_id": config_id, "message": raw.get("message")}
+            {"destination_config_id": None, "message": raw.get("message")}
         ]
         try:
             storage.write_trigger(reshaped, file_path=file_path, actor=None)
