@@ -87,6 +87,8 @@ def test_channel_config_posts_via_bot(tmp_db, _bot_posts):
     assert _bot_posts[0]["bot_token"] == "xoxb-bot-token-123"
     assert _bot_posts[0]["text"].startswith("Status flipped to done")
     assert "Agent Wiki trigger on projects/foo.md" in _bot_posts[0]["text"]
+    # Channel posts mention the owner for attribution.
+    assert "<@U777>" in _bot_posts[0]["text"]
 
 
 def test_dm_config_opens_dm_and_posts(tmp_db, _bot_posts, monkeypatch):
@@ -105,6 +107,8 @@ def test_dm_config_opens_dm_and_posts(tmp_db, _bot_posts, monkeypatch):
     assert opened == ["U777"]
     assert len(_bot_posts) == 1
     assert _bot_posts[0]["channel"] == "D99"
+    # A DM is already the owner; no self-mention.
+    assert "<@U777>" not in _bot_posts[0]["text"]
 
 
 def test_bot_config_without_connection_records_only(tmp_db, _bot_posts):

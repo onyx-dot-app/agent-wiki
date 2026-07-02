@@ -442,7 +442,11 @@ def _dispatch_to_slack(
         )
         return
 
-    text = f"{rendered_message}\n— Agent Wiki trigger on {doc_path}"
+    # Channel posts name the owner as a real mention; a DM already is the owner.
+    source = f"— Agent Wiki trigger on {doc_path}"
+    if not wants_dm:
+        source += f", for <@{connection['slack_user_id']}>"
+    text = f"{rendered_message}\n{source}"
     try:
         if wants_dm and not channel_id:
             channel_id = slack_client.open_dm(
