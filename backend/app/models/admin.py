@@ -74,6 +74,15 @@ class IngestConfigRequest(BaseModel):
     auto_update_cap: int | None = Field(default=None, ge=0)
 
 
+class SlackAppConfigRequest(BaseModel):
+    """Set the Slack app OAuth credentials. ``client_secret`` follows the
+    masked-secret convention: omitted or empty keeps the stored value, null
+    clears it."""
+
+    client_id: str = ""
+    client_secret: str | None = None
+
+
 class BraintrustConfigRequest(BaseModel):
     """Empty-string ``api_key`` means 'leave existing untouched'; explicit
     ``null`` clears it. The blueprint resolves that semantic. ``enabled``
@@ -198,6 +207,12 @@ class IngestView(BaseModel):
 
 class RegenerateKeyResponse(BaseModel):
     api_key: str
+
+
+class SlackAppView(BaseModel):
+    client_id: str
+    client_secret_set: bool
+    client_secret_hint: str
 
 
 class BraintrustView(BaseModel):

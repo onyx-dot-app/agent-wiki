@@ -38,8 +38,12 @@ from app.models.admin import (
     UserCounts,
     WebConfigRequest,
     WebView,
+    SlackAppConfigRequest,
+    SlackAppView,
 )
 from app.onyx.client import validate_onyx_base_url
+from app.slack import app_settings as slack_app_settings
+from app.slack.app_settings import SlackAppSettings as SlackAppSettingsModel
 from app.tracing import settings as braintrust_settings
 from app.tracing.settings import BraintrustSettings
 from app.web import settings as web_settings
@@ -540,6 +544,45 @@ def regenerate_ingest_key(
 # --------------------------------------------------------------------------- #
 # Braintrust tracing settings                                                 #
 # --------------------------------------------------------------------------- #
+
+
+def _slack_app_view(s: SlackAppSettingsModel) -> SlackAppView:
+    secret = s.client_secret.get_secret_value()
+    return SlackAppView(
+        client_id=s.client_id,
+        client_secret_set=bool(secret),
+        client_secret_hint=_redact(secret),
+    )
+
+
+@router.get("/slack-app", response_model=SlackAppView)
+def get_slack_app(_actor: User = Depends(require_admin)) -> SlackAppView:
+    return _slack_app_view(slack_app_settings.get())
+
+
+@router.put("/slack-app", response_model=SlackAppView)
+def put_slack_app(
+    req: SlackAppConfigRequest,
+    actor: User = Depends(require_admin),
+) -> SlackAppView:
+    current = slack_app_settings.get()
+    # Omitted fields keep their stored value, matching the secret convention.
+    if "client_id" in req.model_fields_set:
+        client_id = req.client_id.strip()
+    else:
+        client_id = current.client_id
+    if "client_secret" not in req.model_fields_set or req.client_secret == "":
+        client_secret = current.client_secret.get_secret_value()
+    elif req.client_secret is None:
+        client_secret = ""
+    else:
+        client_secret = req.client_secret
+    slack_app_settings.upsert(client_id=client_id, client_secret=client_secret)
+    log.info(
+        "admin: %s updated slack app settings client_id_set=%s secret_set=%s",
+        actor.id, bool(client_id), bool(client_secret),
+    )
+    return _slack_app_view(slack_app_settings.get())
 
 
 def _braintrust_view(s: BraintrustSettings) -> BraintrustView:

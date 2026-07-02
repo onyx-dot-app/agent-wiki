@@ -9,6 +9,7 @@ lost just because Slack is unreachable.
 from __future__ import annotations
 
 import logging
+from typing import Any, cast
 
 import requests
 
@@ -19,6 +20,36 @@ _REQUEST_TIMEOUT_SECONDS = 15
 
 class SlackApiError(RuntimeError):
     pass
+
+
+def exchange_oauth_code(
+    *, client_id: str, client_secret: str, code: str, redirect_uri: str
+) -> dict[str, Any]:
+    """Exchange an OAuth authorization code at ``oauth.v2.access``.
+
+    Returns Slack's parsed response body (bot ``access_token``, ``scope``,
+    ``team``, ``authed_user``). Slack signals failure with HTTP 200 and
+    ``{"ok": false, "error": ...}``, so both transport errors and ok=false
+    raise :class:`SlackApiError`.
+    """
+    try:
+        response = requests.post(
+            "https://slack.com/api/oauth.v2.access",
+            data={
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "code": code,
+                "redirect_uri": redirect_uri,
+            },
+            timeout=_REQUEST_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+        body = cast(dict[str, Any], response.json())
+    except requests.RequestException as exc:
+        raise SlackApiError(f"oauth exchange failed: {exc}") from exc
+    if not body.get("ok"):
+        raise SlackApiError(f"oauth exchange rejected: {body.get('error', 'unknown')}")
+    return body
 
 
 def post_message(*, webhook_url: str, text: str) -> None:
