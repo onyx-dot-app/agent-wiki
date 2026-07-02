@@ -228,14 +228,21 @@ def evaluate_due_schedule_triggers(now: datetime) -> int:
     log.info("schedule eval: %d due trigger(s)", len(triggers))
     now_iso = now.astimezone(timezone.utc).isoformat(timespec="seconds")
 
+    # One scope block per distinct scope this tick — due triggers often share one.
+    scope_blocks: dict[str, str] = {}
+
     fired = 0
     for trigger in triggers:
         try:
             since_iso = schedule_window_start(trigger, now).isoformat(timespec="seconds")
+            scope = trigger.scope_path
+            if scope not in scope_blocks:
+                scope_blocks[scope] = diff_helper.build_scope_block(scope)
             if _evaluate_one_schedule(
                 trigger,
                 now_iso=now_iso,
                 since_iso=since_iso,
+                scope_block=scope_blocks[scope],
             ):
                 fired += 1
         finally:
@@ -251,6 +258,7 @@ def _evaluate_one_schedule(
     *,
     now_iso: str,
     since_iso: str,
+    scope_block: str,
 ) -> bool:
     """Evaluate a single schedule trigger; record a ``trigger.fire`` event
     on match. Returns True if it fired.
@@ -267,6 +275,7 @@ def _evaluate_one_schedule(
 
     payload = diff_helper.build_schedule_payload(
         scope_path=trigger.scope_path,
+        scope_block=scope_block,
         when_iso=now_iso,
         since_iso=since_iso,
     )

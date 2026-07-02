@@ -156,6 +156,7 @@ def build_schedule_payload(
     scope_path: str,
     when_iso: str,
     since_iso: str | None = None,
+    scope_block: str | None = None,
 ) -> str:
     """Payload for a schedule-kind trigger evaluation.
 
@@ -168,7 +169,7 @@ def build_schedule_payload(
     block names the scope and tick time.
     """
     scope_label = scope_path or "(whole wiki)"
-    parts = [build_scope_block(scope_path)]
+    parts = [scope_block if scope_block is not None else build_scope_block(scope_path)]
     if since_iso is not None:
         parts.append(build_changes_since(scope_path=scope_path, since_iso=since_iso))
     parts.append(
