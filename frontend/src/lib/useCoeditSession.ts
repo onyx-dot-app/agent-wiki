@@ -23,17 +23,29 @@ import {
   getSession,
   joinSession,
   leaveSession,
+  sendCursor,
   sendOp,
   streamSession,
 } from "./coedit";
 
 const FLUSH_DELAY_MS = 150;
+// Pace outbound cursor/typing pings; drop intermediates (design: ~75ms).
+const CURSOR_THROTTLE_MS = 80;
+// Send a final "stopped typing" ping this long after the last keystroke.
+const TYPING_IDLE_MS = 1500;
+// Clear a peer's "typing" badge if their pings go silent (crash / lost tab).
+const TYPING_EXPIRY_MS = 4000;
 
 export interface UseCoeditSession {
   active: boolean;
   buffer: string;
   participants: CoeditParticipant[];
+  /** user_ids of peers currently typing (excludes self). */
+  typing: string[];
   onChange: (next: string) => void;
+  /** Report the local caret/selection so peers see presence; `typing` marks an
+   * active edit (vs. a plain caret move). Throttled + coalesced internally. */
+  reportSelection: (anchor: number, head: number, typing: boolean) => void;
   save: () => Promise<void>;
   discard: () => Promise<void>;
 }
@@ -49,6 +61,7 @@ export function useCoeditSession(opts: {
 
   const [buffer, setBufferState] = useState("");
   const [participants, setParticipants] = useState<CoeditParticipant[]>([]);
+  const [typing, setTyping] = useState<string[]>([]);
   const [active, setActive] = useState(false);
 
   // Live state kept in refs so the stream callback and flush loop read the
@@ -60,6 +73,20 @@ export function useCoeditSession(opts: {
   const pumpPromise = useRef<Promise<void> | null>(null); // in-flight op drain
   const flushTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const abort = useRef<AbortController | null>(null);
+  // Outbound cursor/typing: throttle handle, the latest un-sent ping, the last
+  // caret (for the trailing "stopped typing"), and the idle timer.
+  const cursorThrottle = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingCursor = useRef<{
+    anchor: number;
+    head: number;
+    typing: boolean;
+  } | null>(null);
+  const lastCursor = useRef<{ anchor: number; head: number } | null>(null);
+  const typingIdle = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Inbound: per-peer expiry timers so a silent "typing" peer clears.
+  const typingTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(
+    new Map(),
+  );
   const joinPromise = useRef<Promise<void> | null>(null); // in-flight join
 
   const setBuffer = useCallback((next: string) => {
@@ -131,10 +158,70 @@ export function useCoeditSession(opts: {
     [setBuffer, scheduleFlush],
   );
 
+  const reportSelection = useCallback(
+    (anchor: number, head: number, isTyping: boolean) => {
+      if (sessionId.current === null) return;
+      lastCursor.current = { anchor, head };
+      pendingCursor.current = { anchor, head, typing: isTyping };
+      const send = () => {
+        const c = pendingCursor.current;
+        pendingCursor.current = null;
+        if (c && sessionId.current !== null) {
+          void sendCursor(sessionId.current, c.anchor, c.head, c.typing).catch(
+            () => {},
+          );
+        }
+      };
+      if (!cursorThrottle.current) {
+        send();
+        cursorThrottle.current = setTimeout(() => {
+          cursorThrottle.current = null;
+          if (pendingCursor.current) send();
+        }, CURSOR_THROTTLE_MS);
+      }
+      // Trailing "stopped typing" so a peer's badge clears when I pause.
+      if (typingIdle.current) clearTimeout(typingIdle.current);
+      if (isTyping) {
+        typingIdle.current = setTimeout(() => {
+          typingIdle.current = null;
+          const lc = lastCursor.current;
+          if (sessionId.current !== null && lc) {
+            void sendCursor(sessionId.current, lc.anchor, lc.head, false).catch(
+              () => {},
+            );
+          }
+        }, TYPING_IDLE_MS);
+      }
+    },
+    [],
+  );
+
   const onFrame = useCallback(
     (frame: CoeditFrame) => {
       if (frame.type === "presence") {
         setParticipants(frame.participants);
+        return;
+      }
+      if (frame.type === "cursor") {
+        // Presence signal only (no remote caret rendering in a textarea): track
+        // who's typing. Skip our own echo.
+        if (myUserId !== null && frame.user_id === myUserId) return;
+        const uid = frame.user_id;
+        const existing = typingTimers.current.get(uid);
+        if (existing) clearTimeout(existing);
+        typingTimers.current.delete(uid);
+        if (frame.typing) {
+          setTyping((prev) => (prev.includes(uid) ? prev : [...prev, uid]));
+          typingTimers.current.set(
+            uid,
+            setTimeout(() => {
+              typingTimers.current.delete(uid);
+              setTyping((prev) => prev.filter((u) => u !== uid));
+            }, TYPING_EXPIRY_MS),
+          );
+        } else {
+          setTyping((prev) => prev.filter((u) => u !== uid));
+        }
         return;
       }
       if (frame.type === "resync") {
@@ -160,7 +247,6 @@ export function useCoeditSession(opts: {
         serverBuffer.current = next;
         setBuffer(next);
       }
-      // cursor frames are ignored until the CodeMirror editor renders carets
     },
     [myUserId, resync, setBuffer],
   );
@@ -170,6 +256,18 @@ export function useCoeditSession(opts: {
       clearTimeout(flushTimer.current);
       flushTimer.current = null;
     }
+    if (cursorThrottle.current) {
+      clearTimeout(cursorThrottle.current);
+      cursorThrottle.current = null;
+    }
+    if (typingIdle.current) {
+      clearTimeout(typingIdle.current);
+      typingIdle.current = null;
+    }
+    for (const t of typingTimers.current.values()) clearTimeout(t);
+    typingTimers.current.clear();
+    pendingCursor.current = null;
+    setTyping([]);
     abort.current?.abort();
     abort.current = null;
     const sid = sessionId.current;
@@ -264,5 +362,14 @@ export function useCoeditSession(opts: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled, path]);
 
-  return { active, buffer, participants, onChange, save, discard };
+  return {
+    active,
+    buffer,
+    participants,
+    typing,
+    onChange,
+    reportSelection,
+    save,
+    discard,
+  };
 }
