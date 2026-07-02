@@ -1821,7 +1821,10 @@ function FileViewer({ path }: { path: string }) {
   const filenameValid = !!filenameNoExt && !filenameNoExt.includes("/");
   const renamed =
     editing && filenameValid && filenameNoExt !== currentBasenameNoExt;
-  const bodyChanged = editing && coedit.active && coedit.buffer !== body;
+  // The hook seeds its buffer with the committed body on Edit (before the join
+  // resolves), so this is accurate even during join latency — no need to gate
+  // on `coedit.active`, which would falsely disable Save mid-join.
+  const bodyChanged = editing && coedit.buffer !== body;
   const dirty = editing && (bodyChanged || renamed);
   // `viewingVersion`: a history version is displayed in the main pane.
   // `viewingOld`: that version is not the newest commit for this file
@@ -1894,7 +1897,9 @@ function FileViewer({ path }: { path: string }) {
     try {
       // Commit the session buffer to git (checkpoint), then leave. onEnd exits
       // edit mode + refreshes comments/drafting; co-editing removes the
-      // human-vs-human conflict, so there's no 409 path here.
+      // human-vs-human conflict, so there's no 409 path here. On a rename-only
+      // save the buffer is unchanged, so the checkpoint is a no-op server-side
+      // (version == checkpointed_version) — no empty commit before the move.
       await coedit.save();
       setBody(finalText);
       setDiffData(null);

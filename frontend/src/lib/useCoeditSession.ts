@@ -60,6 +60,7 @@ export function useCoeditSession(opts: {
   const pumpPromise = useRef<Promise<void> | null>(null); // in-flight op drain
   const flushTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const abort = useRef<AbortController | null>(null);
+  const joinPromise = useRef<Promise<void> | null>(null); // in-flight join
 
   const setBuffer = useCallback((next: string) => {
     bufferRef.current = next;
@@ -174,6 +175,11 @@ export function useCoeditSession(opts: {
   }, []);
 
   const save = useCallback(async () => {
+    // A Save clicked during the join round-trip must not no-op: wait for the
+    // join to resolve so the session exists (and pre-join edits are flushed).
+    if (sessionId.current === null && joinPromise.current) {
+      await joinPromise.current;
+    }
     const sid = sessionId.current;
     if (sid === null) return;
     // Drain pending edits before committing so a keystroke typed inside the
@@ -217,25 +223,38 @@ export function useCoeditSession(opts: {
     abort.current = ctrl;
     let cancelled = false;
 
-    (async () => {
+    // Seed the buffer with the committed body immediately so the textarea shows
+    // content (and callers' `buffer !== committedBody` dirty check is accurate)
+    // during the join round-trip, rather than a blank flash.
+    const seed = committedBody;
+    serverBuffer.current = seed;
+    setBuffer(seed);
+
+    const run = (async () => {
       try {
         const snap = await joinSession(path);
         if (cancelled) return;
         sessionId.current = snap.session_id;
         version.current = snap.version;
         serverBuffer.current = snap.buffer;
-        setBuffer(snap.buffer);
+        // Adopt the server buffer unless the user already typed into the seed —
+        // don't clobber edits made during the join; pump() sends their diff.
+        if (bufferRef.current === seed) setBuffer(snap.buffer);
         setParticipants(snap.participants);
         setActive(true);
+        // Flush anything typed during the join window before streaming.
+        void pump();
         // Long-lived stream; resolves when the server closes or we abort.
         await streamSession(snap.session_id, onFrame, ctrl.signal);
       } catch {
         // join failed or stream ended; leave edit mode gracefully
       }
     })();
+    joinPromise.current = run;
 
     return () => {
       cancelled = true;
+      joinPromise.current = null;
       stop();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
