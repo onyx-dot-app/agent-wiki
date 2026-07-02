@@ -83,6 +83,17 @@ class SlackAppConfigRequest(BaseModel):
     client_secret: str | None = None
 
 
+class EmailSmtpConfigRequest(BaseModel):
+    """Set the outbound SMTP account. ``password`` follows the masked-secret
+    convention: omitted or empty keeps the stored value, null clears it."""
+
+    host: str = ""
+    port: int = 587
+    username: str = ""
+    password: str | None = None
+    from_address: str = ""
+
+
 class BraintrustConfigRequest(BaseModel):
     """Empty-string ``api_key`` means 'leave existing untouched'; explicit
     ``null`` clears it. The blueprint resolves that semantic. ``enabled``
@@ -213,6 +224,26 @@ class SlackAppView(BaseModel):
     client_id: str
     client_secret_set: bool
     client_secret_hint: str
+
+
+class EmailSmtpView(BaseModel):
+    host: str
+    port: int
+    username: str
+    password_set: bool
+    password_hint: str
+    from_address: str
+
+
+class EmailTestRequest(BaseModel):
+    """Recipient for the admin test send; empty means the acting admin."""
+
+    to: str = ""
+
+
+class EmailTestResponse(BaseModel):
+    ok: bool
+    detail: str
 
 
 class BraintrustView(BaseModel):
