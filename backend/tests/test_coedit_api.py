@@ -239,3 +239,49 @@ def test_op_requires_write(client):
         json={"session_id": sid, "base_version": 0, "changes": [{"from": 0, "to": 0, "insert": "x"}]},
     )
     assert resp.status_code == 403
+
+
+def _apply_op(client, sid: int, base_version: int, changes: list[dict]) -> int:
+    resp = client.post(
+        "/api/coedit/op",
+        json={"session_id": sid, "base_version": base_version, "changes": changes},
+    )
+    assert resp.status_code == 200, resp.text
+    return resp.json()["version"]
+
+
+def test_file_read_serves_live_buffer_during_session(client):
+    # GET /wiki/file is session-aware: while a session is open, it serves the
+    # live Postgres buffer, so an edit is visible immediately — no dependency on
+    # the async checkpoint commit (git HEAD is unchanged here).
+    uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
+    login_fastapi(client, uid)
+    sha = _seed_page("# Setup\n\nhello\n")
+    sid = client.post("/api/coedit/join", json={"path": _PATH}).json()["session_id"]
+    _apply_op(client, sid, 0, [{"from": 0, "to": len("# Setup\n\nhello\n"), "insert": "LIVE\n"}])
+
+    resp = client.get(f"/api/wiki/file?path={_PATH}")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["body"] == "LIVE\n"  # buffer, not committed HEAD
+    assert body["head_sha"] == sha  # HEAD still the pre-session commit
+    # git working tree is untouched — nothing was committed.
+    assert git.read_file(_PATH) == "# Setup\n\nhello\n"
+
+
+def test_file_read_merges_agent_commit_over_live_buffer(client):
+    # Safety net: when an agent commits to git after the session opened (HEAD
+    # moves past base_sha), the read quick-merges the committed change over the
+    # buffer so a viewer sees both the in-session edit and the agent's edit.
+    uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
+    login_fastapi(client, uid)
+    doc = "one\ntwo\nthree\nfour\nfive\n"
+    _seed_page(doc)
+    sid = client.post("/api/coedit/join", json={"path": _PATH}).json()["session_id"]
+    # Human edits the first line in the buffer...
+    _apply_op(client, sid, 0, [{"from": 0, "to": 3, "insert": "ONE"}])
+    # ...an agent commits a distant, non-overlapping change out of band.
+    git.commit_file(_PATH, "one\ntwo\nthree\nfour\nFIVE\n", message="agent", author="A <a@x.com>")
+
+    body = client.get(f"/api/wiki/file?path={_PATH}").json()["body"]
+    assert body == "ONE\ntwo\nthree\nfour\nFIVE\n"  # both edits, no LLM, no commit

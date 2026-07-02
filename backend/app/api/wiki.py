@@ -59,6 +59,7 @@ from app.triggers import repo as triggers_repo
 from app.wiki import (
     acl,
     agent_activity,
+    coedit,
     diff as wiki_diff,
     drafts as wiki_drafts,
     filesystem,
@@ -214,6 +215,35 @@ def get_document_by_path(
         except wiki_git.UnknownSha as exc:
             raise HTTPException(status_code=404, detail="not found at ref") from exc
         return GetDocumentResponse(path=rel, body=body, head_sha=head_sha, ref=ref)
+    # Session-aware live read: when a co-edit session is open on this page, its
+    # Postgres buffer holds the freshest edits. The checkpoint that commits the
+    # buffer to git runs asynchronously, so HEAD lags — reading it would show
+    # stale content right after a save. Serve a quick, display-only 3-way merge
+    # of HEAD + the live buffer so a viewer sees both committed edits and
+    # in-session edits without waiting on the commit. Best-effort and
+    # non-authoritative (no LLM, nothing persisted): on a merge conflict, prefer
+    # the live buffer. This is a UI read; git stays the source of truth for
+    # committed pages.
+    sess = coedit.get_active_session(rel)
+    if sess is not None:
+        body = sess.buffer_text
+        # Fast path: if HEAD hasn't moved since the session opened (the common
+        # case — live-rebase folds inbound agent commits into the buffer and
+        # advances base_sha), the buffer already reflects everything, so skip
+        # the merge subprocess. Only when HEAD has advanced past the session's
+        # base do we quick-merge the committed change over the buffer for
+        # display; on conflict, prefer the buffer (the authoritative resolution
+        # happens at checkpoint).
+        if sess.base_sha is not None and sess.base_sha != head_sha:
+            base = wiki_git.read_file_opt(rel, ref=sess.base_sha) or ""
+            current = wiki_git.read_file_opt(rel) or ""
+            try:
+                merge = wiki_git.merge_content(base, current, sess.buffer_text)
+                if merge.clean:
+                    body = merge.merged
+            except RuntimeError:
+                pass
+        return GetDocumentResponse(path=rel, body=body, head_sha=head_sha)
     abs_path = filesystem.absolute(rel)
     if not abs_path.is_file():
         raise HTTPException(status_code=404, detail="not found")
