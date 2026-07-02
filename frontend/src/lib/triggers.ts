@@ -146,6 +146,7 @@ export interface DestinationConfig {
   id: string;
   type: string;
   name: string;
+  config: Record<string, unknown>;
   has_secret: boolean;
   created_at: string | null;
 }

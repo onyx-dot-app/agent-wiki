@@ -39,3 +39,36 @@ export function disconnectSlack(): Promise<{ disconnected: boolean }> {
     method: "DELETE",
   });
 }
+
+import {
+  createDestinationConfig,
+  type DestinationConfig,
+} from "@/lib/triggers";
+
+export type SlackTarget = { kind: "channel"; id: string; name: string } | { kind: "dm" };
+
+/** Reuse the matching destination config or create it, returning its id. */
+export async function ensureSlackDestination(
+  configs: DestinationConfig[],
+  target: SlackTarget,
+): Promise<{ id: string; created: boolean }> {
+  const existing = configs.find((c) =>
+    target.kind === "dm"
+      ? c.config.dm === true
+      : c.config.channel_id === target.id,
+  );
+  if (existing) return { id: existing.id, created: false };
+  const created =
+    target.kind === "dm"
+      ? await createDestinationConfig({
+          type: "slack",
+          name: "DM me",
+          config: { dm: true },
+        })
+      : await createDestinationConfig({
+          type: "slack",
+          name: `#${target.name}`,
+          config: { channel_id: target.id, channel_name: target.name },
+        });
+  return { id: created.id, created: true };
+}

@@ -23,11 +23,13 @@ class CreateDestinationConfigRequest(BaseModel):
 
 class DestinationConfigView(BaseModel):
     """A destination config in list form. The secret is never returned, only
-    whether one is set."""
+    whether one is set. ``config`` is the non-secret per-type settings (e.g.
+    a slack channel reference), which the UI needs for dedup and display."""
 
     id: str
     type: str
     name: str
+    config: dict[str, Any] = Field(default_factory=dict)
     has_secret: bool
     created_at: str | None
 
