@@ -66,6 +66,7 @@ import {
 import { rehypeSourcePos } from "@/lib/rehypeSourcePos";
 import { remarkBareSpaceLinks } from "@/lib/remarkBareSpaceLinks";
 import { useAuth, useRequireAuth } from "@/lib/auth";
+import { CoeditEditor } from "@/components/coedit/CoeditEditor";
 import type { CoeditParticipant } from "@/lib/coedit";
 import { useCoeditSession } from "@/lib/useCoeditSession";
 import {
@@ -1822,57 +1823,14 @@ function FileViewer({ path }: { path: string }) {
   const filenameValid = !!filenameNoExt && !filenameNoExt.includes("/");
   const renamed =
     editing && filenameValid && filenameNoExt !== currentBasenameNoExt;
-  // The hook seeds its buffer with the committed body on Edit (before the join
-  // resolves), so this is accurate even during join latency — no need to gate
-  // on `coedit.active`, which would falsely disable Save mid-join.
-  const bodyChanged = editing && coedit.buffer !== body;
-  const dirty = editing && (bodyChanged || renamed);
   // `viewingVersion`: a history version is displayed in the main pane.
   // `viewingOld`: that version is not the newest commit for this file
   // (`headSha` tracks `commits[0]`), so the warning banner applies.
   const viewingVersion = viewingSha !== null;
   const viewingOld = viewingVersion && viewingSha !== headSha;
-
-  // Guard against losing unsaved edits when the user navigates away.
-  // - beforeunload: tab close, refresh, typing a URL — browser shows a
-  //   native confirm dialog (custom message is ignored on modern browsers).
-  // - click capture: in-app links (back arrow, breadcrumbs, sidebar nav)
-  //   don't fire beforeunload, so we intercept anchor clicks and confirm
-  //   inline. Programmatic router.push (e.g. on rename-save) bypasses this
-  //   on purpose — those navigations are intentional.
-  useEffect(() => {
-    if (!dirty) return;
-    const onBeforeUnload = (e: BeforeUnloadEvent) => {
-      e.preventDefault();
-      e.returnValue = "";
-    };
-    const onDocClick = (e: MouseEvent) => {
-      if (e.defaultPrevented) return;
-      if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey)
-        return;
-      const target = e.target as HTMLElement | null;
-      const anchor = target?.closest("a");
-      if (!anchor) return;
-      const href = anchor.getAttribute("href");
-      if (!href || href.startsWith("#")) return;
-      if (anchor.target && anchor.target !== "_self") return;
-      const url = new URL(href, window.location.href);
-      if (url.origin !== window.location.origin) return;
-      if (url.pathname === window.location.pathname) return;
-      if (
-        !window.confirm("You have unsaved changes. Discard them and leave?")
-      ) {
-        e.preventDefault();
-        e.stopPropagation();
-      }
-    };
-    window.addEventListener("beforeunload", onBeforeUnload);
-    document.addEventListener("click", onDocClick, true);
-    return () => {
-      window.removeEventListener("beforeunload", onBeforeUnload);
-      document.removeEventListener("click", onDocClick, true);
-    };
-  }, [dirty]);
+  // No navigate-away guard: editing writes to the shared session buffer, which
+  // is durable in Postgres and commits at session close — leaving the page
+  // never loses edits, so there's nothing to warn about.
 
   function startEdit() {
     // Entering edit mode joins the page's co-edit session (see the
@@ -1884,7 +1842,7 @@ function FileViewer({ path }: { path: string }) {
     setEditing(true);
   }
 
-  async function onSave() {
+  async function onDone() {
     if (!filenameValid) {
       setError("Filename cannot be empty or contain '/'.");
       return;
@@ -1956,29 +1914,18 @@ function FileViewer({ path }: { path: string }) {
     }
   }
 
-  function onCancel() {
-    // Discard resets the shared buffer to the committed body and leaves the
-    // session, so the leave-time checkpoint is a no-op (nothing lands in git).
-    // onEnd exits edit mode + refreshes.
-    setFilenameDraft(currentBasenameNoExt);
-    setError(null);
-    void coedit.discard();
-  }
-
   // Page actions live in the single pinned header (WikiHeader), not a second
   // header inside the scroll area — they portal into its right-aligned slot.
   // The panel toggles are icon SelectButtons so the open panel shows the
   // selected tint; the others are tertiary icon Buttons with the lone solid
   // CTA (Edit). Editing swaps in labelled Cancel / Save for clarity.
   const headerActions = editing ? (
-    <>
-      <Button onClick={onCancel} disabled={saving}>
-        Cancel
-      </Button>
-      <Button variant="action" onClick={onSave} disabled={saving || !dirty}>
-        {saving ? "Saving…" : "Save"}
-      </Button>
-    </>
+    // One exit: "Done" leaves the session (committing the shared buffer). There
+    // is no Cancel — the buffer is the live shared document, so a single
+    // participant can't discard everyone's in-progress edits.
+    <Button variant="action" onClick={onDone} disabled={saving}>
+      {saving ? "Finishing…" : "Done"}
+    </Button>
   ) : !loading && !error ? (
     <>
       <Button
@@ -2147,28 +2094,12 @@ function FileViewer({ path }: { path: string }) {
                         />
                       );
                     })()}
-                    <textarea
+                    <CoeditEditor
                       value={coedit.buffer}
-                      onChange={(e) => {
-                        coedit.onChange(e.target.value);
-                        // An edit → I'm typing; report caret + typing so peers
-                        // see a live "typing…" signal (carets await CodeMirror).
-                        coedit.reportSelection(
-                          e.target.selectionStart,
-                          e.target.selectionEnd,
-                          true,
-                        );
-                      }}
-                      onSelect={(e) =>
-                        coedit.reportSelection(
-                          e.currentTarget.selectionStart,
-                          e.currentTarget.selectionEnd,
-                          false,
-                        )
-                      }
-                      spellCheck={false}
+                      onChange={coedit.onChange}
+                      onSelectionChange={coedit.reportSelection}
+                      peers={coedit.peers}
                       placeholder="Start typing, or pick a template above…"
-                      className="box-border min-h-0 w-full flex-1 resize-none rounded-(--border-radius-08) border border-(--border-01) p-4 font-mono text-sm leading-[1.6] outline-none"
                     />
                   </>
                 ) : (
