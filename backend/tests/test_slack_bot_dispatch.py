@@ -202,6 +202,17 @@ def test_list_channels_paginates_and_sorts(monkeypatch):
     assert seen_params[1]["cursor"] == "page2"
 
 
+def test_to_mrkdwn_converts_list_markers_to_bullets():
+    assert slack_client.to_mrkdwn("- item 1\n- item 2") == "• item 1\n• item 2"
+    assert slack_client.to_mrkdwn("* starred\n+ plussed") == "• starred\n• plussed"
+    # Nested indentation is preserved.
+    assert slack_client.to_mrkdwn("- top\n  - nested") == "• top\n  • nested"
+    # Bold at line start is emphasis, not a list marker.
+    assert slack_client.to_mrkdwn("**bold** lead") == "*bold* lead"
+    # A bare marker line keeps its newline; lines don't merge.
+    assert slack_client.to_mrkdwn("-\nnext line") == "-\nnext line"
+
+
 def test_to_mrkdwn_converts_common_markdown():
     assert slack_client.to_mrkdwn("**fun_poem.md**") == "*fun_poem.md*"
     assert (
@@ -233,6 +244,19 @@ def test_bot_post_converts_markdown(tmp_db, _bot_posts, monkeypatch):
         actor=None,
     )
     assert _bot_posts[0]["text"].startswith("*bold title*\nbody")
+
+
+def test_post_chat_message_suppresses_unfurls(monkeypatch):
+    captured: dict[str, Any] = {}
+    monkeypatch.setattr(
+        slack_client,
+        "_call_api",
+        lambda token, method, payload: captured.update({"method": method, **payload}),
+    )
+    slack_client.post_chat_message(bot_token="xoxb-x", channel="C1", text="hi")
+    assert captured["method"] == "chat.postMessage"
+    assert captured["unfurl_links"] is False
+    assert captured["unfurl_media"] is False
 
 
 def test_call_api_get_retries_timeout_then_succeeds(monkeypatch):
