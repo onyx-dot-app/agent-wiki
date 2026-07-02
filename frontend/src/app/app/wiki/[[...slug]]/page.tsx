@@ -66,6 +66,7 @@ import {
 import { rehypeSourcePos } from "@/lib/rehypeSourcePos";
 import { remarkBareSpaceLinks } from "@/lib/remarkBareSpaceLinks";
 import { useAuth, useRequireAuth } from "@/lib/auth";
+import type { CoeditParticipant } from "@/lib/coedit";
 import { useCoeditSession } from "@/lib/useCoeditSession";
 import {
   useHeaderActionsHost,
@@ -2116,6 +2117,11 @@ function FileViewer({ path }: { path: string }) {
                       onChange={setFilenameDraft}
                       disabled={saving}
                     />
+                    <CoeditPresenceBar
+                      participants={coedit.participants}
+                      typing={coedit.typing}
+                      selfUserId={user?.id ?? null}
+                    />
                     {(() => {
                       // Cards visible while the body is still "empty enough"
                       // to discard without losing user work: truly blank, or
@@ -2143,7 +2149,23 @@ function FileViewer({ path }: { path: string }) {
                     })()}
                     <textarea
                       value={coedit.buffer}
-                      onChange={(e) => coedit.onChange(e.target.value)}
+                      onChange={(e) => {
+                        coedit.onChange(e.target.value);
+                        // An edit → I'm typing; report caret + typing so peers
+                        // see a live "typing…" signal (carets await CodeMirror).
+                        coedit.reportSelection(
+                          e.target.selectionStart,
+                          e.target.selectionEnd,
+                          true,
+                        );
+                      }}
+                      onSelect={(e) =>
+                        coedit.reportSelection(
+                          e.currentTarget.selectionStart,
+                          e.currentTarget.selectionEnd,
+                          false,
+                        )
+                      }
                       spellCheck={false}
                       placeholder="Start typing, or pick a template above…"
                       className="box-border min-h-0 w-full flex-1 resize-none rounded-(--border-radius-08) border border-(--border-01) p-4 font-mono text-sm leading-[1.6] outline-none"
@@ -2605,6 +2627,41 @@ function DestinationSelect({
         </div>
       </Popover.Content>
     </Popover>
+  );
+}
+
+// Co-editing presence while editing: who else is in the session and who's
+// typing right now. Remote carets aren't drawn in a plain textarea (that waits
+// for CodeMirror) — but edits already merge into the shared buffer live, so
+// this makes the collaboration visible. Renders nothing when you're alone.
+function CoeditPresenceBar({
+  participants,
+  typing,
+  selfUserId,
+}: {
+  participants: CoeditParticipant[];
+  typing: string[];
+  selfUserId: string | null;
+}) {
+  const others = participants.filter((p) => p.user_id !== selfUserId);
+  if (others.length === 0) return null;
+  const typingSet = new Set(typing);
+  return (
+    <div className="flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1 text-[12px] text-(--text-03)">
+      <span
+        className="inline-block h-[7px] w-[7px] rounded-full bg-(--status-success-05)"
+        aria-hidden
+      />
+      {others.map((p) => (
+        <span key={p.user_id} className="inline-flex items-center gap-1">
+          <span className="font-medium text-(--text-04)">{p.user_display}</span>
+          {typingSet.has(p.user_id) && (
+            <span className="text-(--text-03) italic">typing…</span>
+          )}
+        </span>
+      ))}
+      <span>also editing</span>
+    </div>
   );
 }
 
