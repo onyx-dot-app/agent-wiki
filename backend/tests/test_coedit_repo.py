@@ -295,7 +295,7 @@ def test_apply_op_applies_change_bumps_version_and_logs(users):
     assert out is not None
     assert out.version == 1
     assert out.buffer_text == "hi world"
-    logged = coedit.ops_since(s.id, 0)
+    logged = coedit.ops_since_with_head(s.id, 0).ops
     assert [o.seq for o in logged] == [1]
     assert logged[0].base_version == 0
     assert logged[0].author_user_id == "usr_a"
@@ -372,10 +372,12 @@ def test_apply_op_can_insert_astral_char(users):
     assert out.buffer_text == "a🎉b"
 
 
-def test_ops_since_returns_ops_after_version(users):
+def test_ops_since_with_head_returns_ops_after_version(users):
     s = coedit.open_session(_PATH, base_sha=None, initial_buffer="")
     coedit.apply_op(s.id, base_version=0, changes=[_ch(0, 0, "a")], author_user_id="usr_a")
     coedit.apply_op(s.id, base_version=1, changes=[_ch(1, 1, "b")], author_user_id="usr_a")
-    assert [o.seq for o in coedit.ops_since(s.id, 0)] == [1, 2]
-    assert [o.seq for o in coedit.ops_since(s.id, 1)] == [2]
-    assert coedit.ops_since(s.id, 2) == []
+    assert [o.seq for o in coedit.ops_since_with_head(s.id, 0).ops] == [1, 2]
+    assert [o.seq for o in coedit.ops_since_with_head(s.id, 1).ops] == [2]
+    assert coedit.ops_since_with_head(s.id, 2).ops == []
+    # Head version comes back alongside the ops, from one consistent read.
+    assert coedit.ops_since_with_head(s.id, 0).head_version == 2

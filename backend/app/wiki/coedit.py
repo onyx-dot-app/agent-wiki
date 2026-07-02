@@ -239,6 +239,14 @@ class OpRow(BaseModel):
     created_at: str
 
 
+class OpsSince(BaseModel):
+    """Return of ``ops_since_with_head``: the session's current head version and
+    the logged ops in ``(after_version, head]``, read as one snapshot."""
+
+    head_version: int | None  # None if the session no longer exists
+    ops: list[OpRow]
+
+
 def _apply_changes(text: str, changes: list[Change]) -> str:
     """Apply range-replacement ``changes`` to ``text``.
 
@@ -395,25 +403,46 @@ def apply_op(
         return _session_row(row)
 
 
-def ops_since(session_id: int, after_version: int) -> list[OpRow]:
-    """Logged ops with ``seq > after_version``, oldest first — for a late
-    joiner (or a reconnecting client) to catch up incrementally."""
+def ops_since_with_head(session_id: int, after_version: int) -> OpsSince:
+    """The session's current version and its logged ops in ``(after_version,
+    head]`` (oldest first), read consistently — for a reconnecting client to
+    catch up / rebase. ``head_version`` is None if the session is gone.
+
+    Reads ``version`` first, then bounds the op query to ``seq <= version``, so
+    an op committing mid-read can't make the two disagree (it's excluded from
+    both): the returned ops always match the returned head, without needing a
+    stricter isolation level. Head can still exceed the last op's seq — a
+    live-rebase bumps the version without logging an op — which correctly
+    signals the client to full-resync rather than replay across the gap.
+    """
     with session() as s:
+        version = s.scalar(
+            select(CoeditSession.version).where(CoeditSession.id == session_id)
+        )
+        if version is None:
+            return OpsSince(head_version=None, ops=[])
         rows = s.scalars(
             select(CoeditOp)
-            .where(CoeditOp.session_id == session_id, CoeditOp.seq > after_version)
+            .where(
+                CoeditOp.session_id == session_id,
+                CoeditOp.seq > after_version,
+                CoeditOp.seq <= version,
+            )
             .order_by(CoeditOp.seq.asc())
         ).all()
-        return [
-            OpRow(
-                seq=o.seq,
-                author_user_id=o.author_user_id,
-                base_version=o.base_version,
-                changes=list(o.op_payload.get("changes", [])),
-                created_at=o.created_at,
-            )
-            for o in rows
-        ]
+        return OpsSince(
+            head_version=version,
+            ops=[
+                OpRow(
+                    seq=o.seq,
+                    author_user_id=o.author_user_id,
+                    base_version=o.base_version,
+                    changes=list(o.op_payload.get("changes", [])),
+                    created_at=o.created_at,
+                )
+                for o in rows
+            ],
+        )
 
 
 def mark_checkpointed(session_id: int, *, base_sha: str, version: int) -> None:

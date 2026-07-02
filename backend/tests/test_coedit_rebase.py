@@ -44,7 +44,7 @@ def test_rebase_onto_folds_without_logging_a_session_op(tmp_db):
     assert res.changed is True
     assert res.session.version == 1
     assert res.session.buffer_text == "HELLO world" and res.session.base_sha == "sha1"
-    assert coedit.ops_since(s.id, 0) == []  # no op logged for the fold
+    assert coedit.ops_since_with_head(s.id, 0).ops == []  # no op logged for the fold
 
 
 def test_rebase_onto_no_change_advances_base_only(tmp_db):

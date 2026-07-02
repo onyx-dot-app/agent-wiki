@@ -185,17 +185,21 @@ def ops(
     a reconnect, or a big-op ``resync`` — replaying the exact missed changes
     rather than replacing the buffer. Read-only; no join side effects."""
     sess = _require_active(session_id, user, "read")
-    rows = coedit.ops_since(session_id, since_version)
+    # Head version + ops read as one consistent snapshot (see
+    # ops_since_with_head), so a concurrent op can't desync them.
+    result = coedit.ops_since_with_head(session_id, since_version)
     return OpsResponse(
         session_id=session_id,
-        current_head_version=sess.version,
+        current_head_version=(
+            result.head_version if result.head_version is not None else sess.version
+        ),
         ops=[
             Operation(
                 version=r.seq,
                 author=r.author_user_id,
                 changes=[coedit.Change.model_validate(c) for c in r.changes],
             )
-            for r in rows
+            for r in result.ops
         ],
     )
 
