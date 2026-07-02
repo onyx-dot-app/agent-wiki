@@ -188,7 +188,7 @@ def ops(
     rows = coedit.ops_since(session_id, since_version)
     return OpsResponse(
         session_id=session_id,
-        version=sess.version,
+        current_head_version=sess.version,
         ops=[
             OpView(
                 version=r.seq,

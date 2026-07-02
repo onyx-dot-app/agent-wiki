@@ -77,5 +77,5 @@ class OpsResponse(BaseModel):
     resync instead of replacing the buffer wholesale."""
 
     session_id: int
-    version: int  # current head version
+    current_head_version: int
     ops: list[OpView]

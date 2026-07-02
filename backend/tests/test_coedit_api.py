@@ -301,7 +301,7 @@ def test_ops_since_returns_missed_changes_for_rebase(client):
 
     # since_version=0 → both ops, oldest first, wire-shaped like op frames ("from" alias).
     body = client.get(f"/api/coedit/ops?session_id={sid}&since_version=0").json()
-    assert body["version"] == v2  # current head
+    assert body["current_head_version"] == v2
     assert [o["version"] for o in body["ops"]] == [v1, v2]
     assert body["ops"][0]["changes"] == [{"from": 0, "to": 0, "insert": "X"}]
     assert body["ops"][0]["author"] == uid
