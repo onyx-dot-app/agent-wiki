@@ -398,8 +398,14 @@ function DestinationsCard() {
       }))
     )
       return;
-    await disconnectSlack();
-    await refreshSlack();
+    setFormError(null);
+    try {
+      await disconnectSlack();
+      setChannels(null);
+      await refreshSlack();
+    } catch (e) {
+      setFormError(e instanceof ApiError ? e.message : "failed to disconnect");
+    }
   }
 
   async function onDelete(id: string, label: string) {
@@ -451,8 +457,15 @@ function DestinationsCard() {
         <div className="mb-3 flex items-center justify-between rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-02) px-[14px] py-3">
           {connected ? (
             <>
-              <div className="text-[13px]">
-                Connected to <strong>{slack?.team_name ?? "Slack"}</strong>
+              <div>
+                <div className="text-[13px]">
+                  Connected to <strong>{slack?.team_name ?? "Slack"}</strong>
+                </div>
+                {slack?.token_display && (
+                  <div className="mt-[2px] font-mono text-xs text-(--text-03)">
+                    {slack.token_display}
+                  </div>
+                )}
               </div>
               <Button
                 size="sm"
@@ -472,8 +485,10 @@ function DestinationsCard() {
                 size="sm"
                 variant="action"
                 onClick={() => {
-                  if (slack?.connect_url)
-                    window.location.href = `${slack.connect_url}?return_to=/app/triggers`;
+                  if (!slack?.connect_url) return;
+                  const target = new URL(slack.connect_url);
+                  target.searchParams.set("return_to", "/app/triggers");
+                  window.location.href = target.toString();
                 }}
               >
                 Connect Slack
