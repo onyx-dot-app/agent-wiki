@@ -29,7 +29,9 @@ from app.tasks.triggers import evaluate_due_schedule_triggers
 log = logging.getLogger(__name__)
 
 
-@triggers_queue.periodic_task(crontab(minute="*/5"))
+# Every-minute scan: a no-op pass is one indexed query, and per-minute
+# ticks keep a trigger's fire within ~1min of its cron time.
+@triggers_queue.periodic_task(crontab())
 def evaluate_scheduled_triggers() -> None:
     now = datetime.now(timezone.utc)
     evaluate_due_schedule_triggers(now)

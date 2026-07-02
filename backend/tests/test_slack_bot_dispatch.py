@@ -87,6 +87,8 @@ def test_channel_config_posts_via_bot(tmp_db, _bot_posts):
     assert _bot_posts[0]["bot_token"] == "xoxb-bot-token-123"
     assert _bot_posts[0]["text"].startswith("Status flipped to done")
     assert "Agent Wiki trigger on projects/foo.md" in _bot_posts[0]["text"]
+    # Channel posts mention the owner for attribution.
+    assert "<@U777>" in _bot_posts[0]["text"]
 
 
 def test_dm_config_opens_dm_and_posts(tmp_db, _bot_posts, monkeypatch):
@@ -105,6 +107,8 @@ def test_dm_config_opens_dm_and_posts(tmp_db, _bot_posts, monkeypatch):
     assert opened == ["U777"]
     assert len(_bot_posts) == 1
     assert _bot_posts[0]["channel"] == "D99"
+    # A DM is already the owner; no self-mention.
+    assert "<@U777>" not in _bot_posts[0]["text"]
 
 
 def test_bot_config_without_connection_records_only(tmp_db, _bot_posts):
@@ -171,6 +175,114 @@ def test_list_channels_drops_entries_missing_id_or_name(monkeypatch):
             {"id": "C2"},
         ],
     }
-    monkeypatch.setattr(slack_client, "_call_api", lambda *a, **kw: captured)
+    monkeypatch.setattr(slack_client, "_call_api_get", lambda *a, **kw: captured)
     out = slack_client.list_channels(bot_token="xoxb-x")
     assert out == [{"id": "C1", "name": "eng", "is_private": False}]
+
+
+def test_list_channels_paginates_and_sorts(monkeypatch):
+    pages = [
+        {
+            "ok": True,
+            "channels": [{"id": "C2", "name": "zeta"}],
+            "response_metadata": {"next_cursor": "page2"},
+        },
+        {"ok": True, "channels": [{"id": "C1", "name": "alpha"}]},
+    ]
+    seen_params: list[dict[str, str]] = []
+
+    def fake_get(token, method, params):
+        seen_params.append(params)
+        return pages[len(seen_params) - 1]
+
+    monkeypatch.setattr(slack_client, "_call_api_get", fake_get)
+    out = slack_client.list_channels(bot_token="xoxb-x")
+    assert [c["name"] for c in out] == ["alpha", "zeta"]
+    assert "cursor" not in seen_params[0]
+    assert seen_params[1]["cursor"] == "page2"
+
+
+def test_to_mrkdwn_converts_common_markdown():
+    assert slack_client.to_mrkdwn("**fun_poem.md**") == "*fun_poem.md*"
+    assert (
+        slack_client.to_mrkdwn("see [the doc](https://x.io/d) now")
+        == "see <https://x.io/d|the doc> now"
+    )
+    assert slack_client.to_mrkdwn("## Heading\nbody") == "Heading\nbody"
+    assert slack_client.to_mrkdwn("## **Title**\nbody") == "*Title*\nbody"
+    # Already-mrkdwn single asterisks and mentions pass through untouched.
+    assert slack_client.to_mrkdwn("*fine* <@U1>") == "*fine* <@U1>"
+
+
+def test_bot_post_converts_markdown(tmp_db, _bot_posts, monkeypatch):
+    seed_user(_OWNER)
+    _connect_owner()
+    cfg = dest_configs.create(
+        _OWNER, type="slack", name="Eng", config={"channel_id": "C42"}
+    )
+    t = _trigger(cfg["id"])
+    _record_fire(
+        trigger=t,
+        action=t.actions[0],
+        doc_path="projects/foo.md",
+        sha="abc123",
+        change_kind=ChangeKind.EDIT,
+        reason="r",
+        instruction="i",
+        rendered_message="**bold title**\nbody",
+        actor=None,
+    )
+    assert _bot_posts[0]["text"].startswith("*bold title*\nbody")
+
+
+def test_call_api_get_retries_timeout_then_succeeds(monkeypatch):
+    import requests as req_mod
+
+    calls: list[int] = []
+
+    class _Resp:
+        status_code = 200
+        headers: dict = {}
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"ok": True, "channels": []}
+
+    def fake_get(*a, **kw):
+        calls.append(1)
+        if len(calls) == 1:
+            raise req_mod.Timeout("read timed out")
+        return _Resp()
+
+    monkeypatch.setattr(slack_client.requests, "get", fake_get)
+    monkeypatch.setattr(slack_client.time, "sleep", lambda s: None)
+    body = slack_client._call_api_get("xoxb-x", "conversations.list", {})
+    assert body["ok"] is True
+    assert len(calls) == 2
+
+
+def test_call_api_get_honors_retry_after(monkeypatch):
+    slept: list[float] = []
+
+    class _Limited:
+        status_code = 429
+        headers = {"Retry-After": "2"}
+
+    class _Ok:
+        status_code = 200
+        headers: dict = {}
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"ok": True}
+
+    responses = [_Limited(), _Ok()]
+    monkeypatch.setattr(slack_client.requests, "get", lambda *a, **kw: responses.pop(0))
+    monkeypatch.setattr(slack_client.time, "sleep", lambda s: slept.append(s))
+    body = slack_client._call_api_get("xoxb-x", "conversations.list", {})
+    assert body["ok"] is True
+    assert slept == [2]

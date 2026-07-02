@@ -16,8 +16,11 @@ import {
   utcIsoToLocalInput,
   type FrequencyPreset,
 } from "@/lib/cron";
+import { SelectButton } from "@onyx-ai/opal/components";
+
+import { SlackDestinationPicker } from "@/components/triggers/SlackDestinationPicker";
+import { useSlackConnectStatus } from "@/lib/slackConnect";
 import {
-  createDestinationConfig,
   createTrigger,
   updateTrigger,
   useDestinationConfigs,
@@ -51,12 +54,10 @@ export function TriggerModal({
   const [ifText, setIfText] = useState("");
   const [sendText, setSendText] = useState("");
   const { configs, refresh: refreshConfigs } = useDestinationConfigs();
+  const { status: slackStatus } = useSlackConnectStatus();
   const [destinationConfigId, setDestinationConfigId] = useState<string | null>(
     null,
   );
-  const [addingChannel, setAddingChannel] = useState(false);
-  const [newChannelName, setNewChannelName] = useState("");
-  const [newChannelUrl, setNewChannelUrl] = useState("");
   const [kind, setKind] = useState<TriggerKind>("delta");
   const [scheduleParts, setScheduleParts] = useState(defaultScheduleParts());
   const [customCron, setCustomCron] = useState("");
@@ -74,9 +75,6 @@ export function TriggerModal({
     const firstAction = initial?.actions?.[0];
     setSendText(firstAction?.message ?? "");
     setDestinationConfigId(firstAction?.destination_config_id ?? null);
-    setAddingChannel(false);
-    setNewChannelName("");
-    setNewChannelUrl("");
     setKind((initial?.kind as TriggerKind) ?? "delta");
     const parts = cronToParts(initial?.schedule_cron ?? null);
     setScheduleParts(parts);
@@ -162,38 +160,6 @@ export function TriggerModal({
   const destDescription = selectedConfig
     ? ""
     : "Tracked in the event log only.";
-
-  // The "TO" select encodes event-log as an empty value and any destination
-  // config by its id.
-  const destSelectValue = destinationConfigId ?? "";
-
-  function onPickDestination(value: string) {
-    setDestinationConfigId(value === "" ? null : value);
-  }
-
-  async function onAddChannel() {
-    const name = newChannelName.trim();
-    const url = newChannelUrl.trim();
-    if (!name || !url) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const created = await createDestinationConfig({
-        type: "slack",
-        name,
-        secret: url,
-      });
-      await refreshConfigs();
-      setDestinationConfigId(created.id);
-      setAddingChannel(false);
-      setNewChannelName("");
-      setNewChannelUrl("");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "failed to add channel");
-    } finally {
-      setBusy(false);
-    }
-  }
 
   return (
     <div
@@ -312,71 +278,27 @@ export function TriggerModal({
           <span className="text-[11px] font-bold tracking-[0.06em] text-(--text-03) uppercase">
             To
           </span>
-          <select
-            value={destSelectValue}
-            onChange={(e) => onPickDestination(e.target.value)}
+          <SlackDestinationPicker
+            configs={configs}
+            includeExisting
+            value={destinationConfigId}
+            connected={Boolean(slackStatus?.connected)}
             disabled={busy}
-            className="box-border w-full cursor-pointer rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-00) px-[10px] py-2 text-sm outline-none"
+            onPick={async (id) => {
+              setError(null);
+              setDestinationConfigId(id);
+              await refreshConfigs();
+            }}
+            onError={(m) => setError(m)}
           >
-            <option value="">Event log</option>
-            {configs.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.type} · {c.name}
-              </option>
-            ))}
-          </select>
+            <SelectButton size="sm" state="empty" width="full">
+              {selectedConfig ? selectedConfig.name : "Event log"}
+            </SelectButton>
+          </SlackDestinationPicker>
           {destDescription && (
             <span className="text-xs leading-[1.4] text-(--text-03)">
               {destDescription}
             </span>
-          )}
-          {!addingChannel ? (
-            <button
-              type="button"
-              onClick={() => setAddingChannel(true)}
-              disabled={busy}
-              className="mt-[6px] cursor-pointer self-start border-none bg-transparent p-0 text-[13px] text-(--text-inverted-05)"
-            >
-              + Add Slack channel
-            </button>
-          ) : (
-            <div className="mt-2 flex flex-col gap-2 rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-02) p-[10px]">
-              <input
-                value={newChannelName}
-                onChange={(e) => setNewChannelName(e.target.value)}
-                placeholder="Channel name (e.g. PM Standup)"
-                disabled={busy}
-                className="box-border w-full rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-00) px-[10px] py-2 text-sm outline-none"
-              />
-              <input
-                value={newChannelUrl}
-                onChange={(e) => setNewChannelUrl(e.target.value)}
-                placeholder="https://hooks.slack.com/services/…"
-                disabled={busy}
-                className="box-border w-full rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-00) px-[10px] py-2 text-sm outline-none"
-              />
-              <div className="flex gap-2">
-                <Button
-                  type="button"
-                  variant="action"
-                  size="sm"
-                  disabled={
-                    busy || !newChannelName.trim() || !newChannelUrl.trim()
-                  }
-                  onClick={() => void onAddChannel()}
-                >
-                  Add channel
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  disabled={busy}
-                  onClick={() => setAddingChannel(false)}
-                >
-                  Cancel
-                </Button>
-              </div>
-            </div>
           )}
         </label>
 

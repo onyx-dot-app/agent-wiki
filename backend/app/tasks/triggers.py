@@ -409,7 +409,9 @@ def _dispatch_to_slack(
             )
             return
         try:
-            slack_client.post_message(webhook_url=webhook_url, text=rendered_message)
+            slack_client.post_message(
+                webhook_url=webhook_url, text=slack_client.to_mrkdwn(rendered_message)
+            )
             log.info("trigger %s dispatched to slack webhook config %s", trigger.id, config_id)
         except slack_client.SlackApiError:
             log.exception("trigger %s slack webhook dispatch failed", trigger.id)
@@ -442,7 +444,11 @@ def _dispatch_to_slack(
         )
         return
 
-    text = f"{rendered_message}\n— Agent Wiki trigger on {doc_path}"
+    # Channel posts name the owner as a real mention; a DM already is the owner.
+    source = f"— Agent Wiki trigger on {doc_path}"
+    if not wants_dm:
+        source += f", for <@{connection['slack_user_id']}>"
+    text = f"{slack_client.to_mrkdwn(rendered_message)}\n{source}"
     try:
         if wants_dm and not channel_id:
             channel_id = slack_client.open_dm(

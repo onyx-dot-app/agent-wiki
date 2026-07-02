@@ -55,6 +55,7 @@ Raw SQL is permitted only in narrowly scoped DB-extension wrappers (FTS, task qu
 - No raw hex colors, radii, or shadows in React components — pull from the centralized theme module. If a shade isn't there, add it there first.
 - No `background: "white"` (or any literal); use `color.bg.page`.
 - One `Button` component per app surface; prefer the OPAL primitives (`Button`, `Tag`) for new components. Don't roll a new bespoke `<button style={{...}}>` for primary/secondary/danger chrome.
+- New UI must compose from OPAL components, not token-styled raw controls: `InputTypeIn` for inputs, `SelectButton`/`Popover`/`PopoverMenu`/`LineItemButton` for pickers and dropdowns. Flag any raw `<input>`/`<select>`/`<textarea>` in new components unless OPAL has no equivalent.
 - Modal scrims use `color.overlay`; modal shadow uses `shadow.modal`. Don't introduce slate-tinted or pure-black scrims.
 
 ## Network — Only via `apiFetch`

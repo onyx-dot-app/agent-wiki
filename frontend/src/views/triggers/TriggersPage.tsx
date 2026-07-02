@@ -12,6 +12,8 @@ import { TriggerModal } from "@/components/triggers/TriggerModal";
 import { useRequireAuth } from "@/lib/auth";
 import { describeCron } from "@/lib/cron";
 import { formatScopePath } from "@/lib/format";
+import { SlackDestinationPicker } from "@/components/triggers/SlackDestinationPicker";
+import { disconnectSlack, useSlackConnectStatus } from "@/lib/slackConnect";
 import {
   createDestinationConfig,
   deleteDestinationConfig,
@@ -319,25 +321,23 @@ export default function TriggersPage() {
 
 function DestinationsCard() {
   const { configs, error, isLoading, refresh } = useDestinationConfigs();
-  const [adding, setAdding] = useState(false);
+  const { status: slack, refresh: refreshSlack } = useSlackConnectStatus();
+  const [mode, setMode] = useState<"closed" | "webhook">("closed");
   const [name, setName] = useState("");
   const [url, setUrl] = useState("");
   const [busy, setBusy] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const confirmDialog = useConfirm();
 
-  async function onAdd() {
-    if (!name.trim() || !url.trim()) return;
+  async function addConfig(
+    input: Parameters<typeof createDestinationConfig>[0],
+  ) {
     setBusy(true);
     setFormError(null);
     try {
-      await createDestinationConfig({
-        type: "slack",
-        name: name.trim(),
-        secret: url.trim(),
-      });
+      await createDestinationConfig(input);
       await refresh();
-      setAdding(false);
+      setMode("closed");
       setName("");
       setUrl("");
     } catch (e) {
@@ -346,6 +346,29 @@ function DestinationsCard() {
       );
     } finally {
       setBusy(false);
+    }
+  }
+
+  function onAddWebhook() {
+    if (!name.trim() || !url.trim()) return;
+    void addConfig({ type: "slack", name: name.trim(), secret: url.trim() });
+  }
+
+  async function onDisconnect() {
+    if (
+      !(await confirmDialog({
+        title: "Disconnect Slack?",
+        body: "Channel and DM destinations will stop delivering until you reconnect.",
+        confirmLabel: "Disconnect",
+      }))
+    )
+      return;
+    setFormError(null);
+    try {
+      await disconnectSlack();
+      await refreshSlack();
+    } catch (e) {
+      setFormError(e instanceof ApiError ? e.message : "failed to disconnect");
     }
   }
 
@@ -366,21 +389,88 @@ function DestinationsCard() {
     }
   }
 
+  const connected = Boolean(slack?.connected);
+
   return (
     <section className="mt-[28px] rounded-(--border-radius-08) border border-(--border-01) bg-(--background-tint-01) p-4">
       <div className="mb-1 flex items-center justify-between">
         <h2 className="m-0 text-base">Destinations</h2>
-        {!adding && (
-          <Button size="sm" onClick={() => setAdding(true)}>
-            + Add Slack channel
-          </Button>
-        )}
+        <div className="flex gap-2">
+          {mode === "closed" && connected && (
+            <SlackDestinationPicker
+              configs={configs}
+              connected={connected}
+              disabled={busy}
+              onPick={async () => {
+                setFormError(null);
+                await refresh();
+              }}
+              onError={setFormError}
+            >
+              <Button size="sm" disabled={busy}>
+                + Slack
+              </Button>
+            </SlackDestinationPicker>
+          )}
+          {mode === "closed" && (
+            <Button
+              size="sm"
+              disabled={busy}
+              onClick={() => setMode("webhook")}
+            >
+              + Webhook
+            </Button>
+          )}
+        </div>
       </div>
       <p className="mt-0 mb-3 text-[13px] text-(--text-03)">
-        Delivery targets you can point a trigger at. Create a Slack incoming
-        webhook (Apps &rarr; Incoming Webhooks), then pick it as a
-        trigger&apos;s destination. Private to you.
+        Delivery targets you can point a trigger at. Private to you.
       </p>
+
+      {slack?.configured && (
+        <div className="mb-3 flex items-center justify-between rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-02) px-[14px] py-3">
+          {connected ? (
+            <>
+              <div>
+                <div className="text-[13px]">
+                  Connected to <strong>{slack?.team_name ?? "Slack"}</strong>
+                </div>
+                {slack?.token_display && (
+                  <div className="mt-[2px] font-mono text-xs text-(--text-03)">
+                    {slack.token_display}
+                  </div>
+                )}
+              </div>
+              <Button
+                size="sm"
+                variant="danger"
+                onClick={() => void onDisconnect()}
+              >
+                Disconnect
+              </Button>
+            </>
+          ) : (
+            <>
+              <div className="text-[13px]">
+                Connect Slack to deliver to channels or DMs as the Agent Wiki
+                bot.
+              </div>
+              <Button
+                size="sm"
+                variant="action"
+                onClick={() => {
+                  if (!slack?.connect_url) return;
+                  const target = new URL(slack.connect_url);
+                  target.searchParams.set("return_to", "/app/triggers");
+                  window.location.href = target.toString();
+                }}
+              >
+                Connect Slack
+              </Button>
+            </>
+          )}
+        </div>
+      )}
 
       {error && (
         <div className="mb-2 text-[13px] text-(--status-text-error-05)">
@@ -388,7 +478,7 @@ function DestinationsCard() {
         </div>
       )}
 
-      {adding && (
+      {mode === "webhook" && (
         <div className="mb-3 flex flex-col gap-2 rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-02) p-3">
           <input
             value={name}
@@ -413,21 +503,28 @@ function DestinationsCard() {
           <div className="flex gap-2">
             <Button
               size="sm"
+              variant="action"
               disabled={busy || !name.trim() || !url.trim()}
-              onClick={() => void onAdd()}
+              onClick={onAddWebhook}
             >
               {busy ? "Adding…" : "Add"}
             </Button>
-            <Button size="sm" disabled={busy} onClick={() => setAdding(false)}>
+            <Button size="sm" disabled={busy} onClick={() => setMode("closed")}>
               Cancel
             </Button>
           </div>
         </div>
       )}
 
+      {formError && mode === "closed" && (
+        <div className="mb-2 text-[13px] text-(--status-text-error-05)">
+          {formError}
+        </div>
+      )}
+
       {isLoading && configs.length === 0 && !error && <LoadingSpinner />}
 
-      {!isLoading && configs.length === 0 && !adding && (
+      {!isLoading && configs.length === 0 && mode === "closed" && (
         <p className="m-0 text-sm text-(--text-03)">
           No destinations yet &mdash; add one to deliver trigger fires to Slack.
         </p>
@@ -446,7 +543,7 @@ function DestinationsCard() {
                 </div>
                 <div className="mt-[2px] font-mono text-xs text-(--text-03)">
                   {c.type}
-                  {c.has_secret ? " · secret set" : ""}
+                  {c.has_secret ? " · webhook" : " · bot"}
                 </div>
               </div>
               <Button

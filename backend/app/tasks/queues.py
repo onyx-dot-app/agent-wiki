@@ -25,7 +25,7 @@ Queues:
   scheduled).** All trigger evaluation, both event-driven and time-based.
   Post-commit fan-out (``fan_out_trigger_eval``) runs the SQL match against
   ``doc_path`` plus every parent directory and dispatches one or two LLM
-  calls per matched trigger. The 5-min cron ``evaluate_scheduled_triggers``
+  calls per matched trigger. The every-minute cron ``evaluate_scheduled_triggers``
   (kind=schedule triggers due now) lives here too — same evaluator, same
   code paths, different ignition. Kept separate from ``documents_queue``
   because trigger eval is read-only (no commits) and we want one queue's

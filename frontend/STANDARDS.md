@@ -121,9 +121,16 @@ if (!(await confirmDialog({
 `window.confirm` left is the unsaved-changes navigation guard in the wiki
 page, which must synchronously block a click event.
 
-## Inputs / selects — consistent border and radius
+## Inputs / selects — Opal components first
 
-Form inputs and `<select>` controls use:
+New UI composes from `@onyx-ai/opal/components` rather than raw controls:
+`InputTypeIn` for text/search inputs, `SelectButton` + `Popover`/`PopoverMenu`
++ `LineItemButton` for pickers and dropdowns, `Switch`, `Checkbox`, `Tabs`.
+A raw `<input>`/`<select>` in new code is a review flag — reach for it only
+where Opal has no equivalent, and then style it per the rules below.
+
+Where a raw control is genuinely required, form inputs and `<select>`
+controls use:
 
 - border: `1px solid var(--border-01)` (use `var(--border-02)` only
   for emphasis — most inputs should be `border-01`)
