@@ -145,10 +145,14 @@ def resend_verification(
         raise HTTPException(status_code=400, detail="not an email destination")
     if row.get("verified_at"):
         raise HTTPException(status_code=400, detail="already verified")
+    address = str(cast("dict[str, Any]", row.get("config") or {}).get("address") or "")
     view = _config_view(row)
-    view.verification_error = _send_verify_link(row)
-    if view.verification_error and "just sent" in view.verification_error:
-        raise HTTPException(status_code=429, detail=view.verification_error)
+    try:
+        email_verification.send_verification_email(config_id, address)
+    except email_verification.MintRateLimitedError as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
+    except EmailSendError as exc:
+        view.verification_error = f"verification email failed: {exc}"
     return view
 
 

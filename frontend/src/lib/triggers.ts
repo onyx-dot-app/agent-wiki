@@ -148,6 +148,8 @@ export interface DestinationConfig {
   name: string;
   config: Record<string, unknown>;
   has_secret: boolean;
+  verified_at?: string | null;
+  verification_error?: string | null;
   created_at: string | null;
 }
 
