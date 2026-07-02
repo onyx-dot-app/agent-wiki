@@ -18,17 +18,20 @@ import requests
 log = logging.getLogger(__name__)
 
 # Standard markdown -> Slack mrkdwn, the high-value cases only: Slack renders
-# **bold** and [text](url) literally. Heading markers are stripped to plain
-# text (notifications carry no headings), before bold so `## **x**` can't
-# nest emphasis.
+# **bold**, [text](url), and `- item` list markers literally (mrkdwn has no
+# list syntax — real bullet characters are the convention). Heading markers
+# are stripped to plain text (notifications carry no headings), before bold
+# so `## **x**` can't nest emphasis.
 _BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
 _LINK_RE = re.compile(r"\[([^\]]+)\]\((https?://[^)\s]+)\)")
 _HEADING_RE = re.compile(r"^#{1,6}\s+(.+)$", re.MULTILINE)
+_BULLET_RE = re.compile(r"^(\s*)[-*+]\s+", re.MULTILINE)
 
 
 def to_mrkdwn(text: str) -> str:
     """Convert common markdown constructs to Slack's mrkdwn dialect."""
     text = _HEADING_RE.sub(r"\1", text)
+    text = _BULLET_RE.sub(r"\1• ", text)
     text = _BOLD_RE.sub(r"*\1*", text)
     return _LINK_RE.sub(r"<\2|\1>", text)
 
@@ -60,8 +63,18 @@ def _call_api(bot_token: str, method: str, payload: dict[str, Any]) -> dict[str,
 
 
 def post_chat_message(*, bot_token: str, channel: str, text: str) -> None:
-    """Post ``text`` to a channel (or DM channel) as the bot."""
-    _call_api(bot_token, "chat.postMessage", {"channel": channel, "text": text})
+    """Post ``text`` to a channel (or DM channel) as the bot. Link unfurls
+    are suppressed — notification posts should not grow preview cards."""
+    _call_api(
+        bot_token,
+        "chat.postMessage",
+        {
+            "channel": channel,
+            "text": text,
+            "unfurl_links": False,
+            "unfurl_media": False,
+        },
+    )
 
 
 def open_dm(*, bot_token: str, slack_user_id: str) -> str:
