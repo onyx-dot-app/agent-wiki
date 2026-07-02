@@ -566,16 +566,21 @@ def put_slack_app(
     actor: User = Depends(require_admin),
 ) -> SlackAppView:
     current = slack_app_settings.get()
+    # Omitted fields keep their stored value, matching the secret convention.
+    if "client_id" in req.model_fields_set:
+        client_id = req.client_id.strip()
+    else:
+        client_id = current.client_id
     if "client_secret" not in req.model_fields_set or req.client_secret == "":
         client_secret = current.client_secret.get_secret_value()
     elif req.client_secret is None:
         client_secret = ""
     else:
         client_secret = req.client_secret
-    slack_app_settings.upsert(client_id=req.client_id.strip(), client_secret=client_secret)
+    slack_app_settings.upsert(client_id=client_id, client_secret=client_secret)
     log.info(
         "admin: %s updated slack app settings client_id_set=%s secret_set=%s",
-        actor.id, bool(req.client_id.strip()), bool(client_secret),
+        actor.id, bool(client_id), bool(client_secret),
     )
     return _slack_app_view(slack_app_settings.get())
 

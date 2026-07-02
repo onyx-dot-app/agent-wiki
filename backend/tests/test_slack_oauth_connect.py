@@ -219,3 +219,17 @@ def test_callback_treats_non_decline_error_as_failure(client):
     assert res.status_code == 302
     assert "slack_connect=error" in res.headers["location"]
     assert connections.list_for_user(uid) == []
+
+
+def test_admin_put_secret_only_keeps_client_id(client):
+    _admin(client)
+    client.put(
+        "/api/admin/slack-app",
+        json={"client_id": "123.456", "client_secret": "shhh-secret-long-enough"},
+    )
+    # Rotating just the secret must not wipe the stored client id.
+    body = client.put(
+        "/api/admin/slack-app", json={"client_secret": "rotated-secret-value"}
+    ).json()
+    assert body["client_id"] == "123.456"
+    assert body["client_secret_set"] is True
