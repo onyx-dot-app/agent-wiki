@@ -51,18 +51,18 @@ _DIFF_DENSITY_FALLBACK = 0.5
 _CHANGES_TOTAL_BUDGET = 60_000
 
 
-def build_wiki_snapshot() -> str:
-    """Concat every tracked `.md` doc's current body. Bounded by budgets above.
-
-    Walks ``git ls-files`` so the snapshot reflects committed state, not the
-    working tree (matters during a fan-out: BEFORE/AFTER read at SHAs while
-    the snapshot reads HEAD-equivalent paths).
+def build_scope_block(scope_path: str) -> str:
+    """The current bodies of the doc(s) under the trigger's scope — the
+    payload's lead block. A ``.md`` scope is that one doc; a folder scope is
+    every doc under it; an empty scope is the whole wiki. Bounded by budgets
+    above; walks ``git ls-files`` so the block reflects committed state.
     """
-    chunks: list[str] = ["=== WIKI (latest version) ==="]
+    label = scope_path or "(whole wiki)"
+    chunks: list[str] = [f"=== SCOPED DOCS (latest version) ===\nScope: {label}\n"]
     total = len(chunks[0])
     truncated = 0
     for path in wiki_git.list_paths():
-        if not path.endswith(".md"):
+        if not path.endswith(".md") or not _in_scope(path, scope_path):
             continue
         if total >= _WIKI_TOTAL_BUDGET:
             truncated += 1
@@ -70,14 +70,15 @@ def build_wiki_snapshot() -> str:
         try:
             body = wiki_git.read_file(path)
         except Exception:
-            log.warning("snapshot: skip unreadable %s", path, exc_info=True)
+            log.warning("scope block: skip unreadable %s", path, exc_info=True)
             continue
-        body = _truncate(body, _PER_DOC_BUDGET)
-        block = f"--- {path}\n{body.rstrip()}\n"
+        block = f"--- {path}\n{_truncate(body, _PER_DOC_BUDGET).rstrip()}\n"
         chunks.append(block)
         total += len(block)
     if truncated:
         chunks.append(f"[truncated {truncated} more docs to fit budget]\n")
+    if len(chunks) == 1:
+        chunks.append("(no docs found under this scope)\n")
     return "\n".join(chunks)
 
 
@@ -117,16 +118,18 @@ def build_new_file_payload(
     *,
     doc_path: str,
     body: str,
-    wiki_snapshot: str | None = None,
+    scope_path: str,
+    scope_block: str | None = None,
 ) -> str:
     """Payload for directory-scoped triggers when a brand-new file appears.
 
     No diff section — the diff would just be the body with ``+`` on every
-    line, which is noise. Show the new file as itself instead.
+    line, which is noise. Show the new file as itself instead. The payload
+    carries only the trigger's scoped docs, never the whole wiki.
     """
-    snapshot = wiki_snapshot if wiki_snapshot is not None else build_wiki_snapshot()
+    lead = scope_block if scope_block is not None else build_scope_block(scope_path)
     nf = build_new_file_view(doc_path=doc_path, body=body)
-    return f"{snapshot}\n\n{nf}"
+    return f"{lead}\n\n{nf}"
 
 
 def build_payload(
@@ -135,19 +138,17 @@ def build_payload(
     change_kind: ChangeKind,
     before: str,
     after: str,
-    wiki_snapshot: str | None = None,
+    scope_path: str,
+    scope_block: str | None = None,
 ) -> str:
-    """Compose the full evaluator/renderer payload.
-
-    ``wiki_snapshot`` is built once per fan-out (it's the same for every
-    trigger on a given commit) and threaded through. If omitted we build
-    it inline — convenient for tests / direct invocation.
-    """
-    snapshot = wiki_snapshot if wiki_snapshot is not None else build_wiki_snapshot()
+    """Compose the full evaluator/renderer payload: the trigger's scoped docs
+    plus the change view. ``scope_block`` lets a fan-out reuse one block per
+    distinct scope instead of rebuilding it for every trigger."""
+    lead = scope_block if scope_block is not None else build_scope_block(scope_path)
     change = build_change_view(
         doc_path=doc_path, change_kind=change_kind, before=before, after=after
     )
-    return f"{snapshot}\n\n{change}"
+    return f"{lead}\n\n{change}"
 
 
 def build_schedule_payload(
@@ -155,22 +156,20 @@ def build_schedule_payload(
     scope_path: str,
     when_iso: str,
     since_iso: str | None = None,
-    wiki_snapshot: str | None = None,
+    scope_block: str | None = None,
 ) -> str:
     """Payload for a schedule-kind trigger evaluation.
 
-    A schedule tick isn't tied to a single commit, so we give the LLM the
-    full wiki snapshot for overall-state conditions. When ``since_iso`` is
-    provided (the previous tick / last fire), we also append a CHANGES
-    SINCE LAST CHECK block — the diffs committed under ``scope_path`` over
-    ``[since_iso, when_iso]`` — so the trigger can reason about *change*
-    over the window ("a new doc appeared", "X was updated since yesterday")
-    and not just current state. The trailing SCHEDULED CHECK block names
-    the scope and tick time.
+    A schedule tick isn't tied to a single commit, so the payload leads with
+    the scoped docs' current bodies for overall-state conditions. When
+    ``since_iso`` is provided (the previous tick / last fire), a CHANGES
+    SINCE LAST CHECK block follows — the diffs committed under ``scope_path``
+    over ``[since_iso, when_iso]`` — so the trigger can reason about *change*
+    over the window and not just current state. The trailing SCHEDULED CHECK
+    block names the scope and tick time.
     """
-    snapshot = wiki_snapshot if wiki_snapshot is not None else build_wiki_snapshot()
     scope_label = scope_path or "(whole wiki)"
-    parts = [snapshot]
+    parts = [scope_block if scope_block is not None else build_scope_block(scope_path)]
     if since_iso is not None:
         parts.append(build_changes_since(scope_path=scope_path, since_iso=since_iso))
     parts.append(

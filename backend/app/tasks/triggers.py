@@ -93,20 +93,34 @@ def fan_out_trigger_eval(
     after = _read_at(sha, doc_path)
     before = _read_at(f"{sha}^", doc_path)
 
-    # Build the wiki snapshot once and reuse it for every trigger on this
-    # commit. Each trigger pays its own per-call eval (and render-on-match).
-    wiki_snapshot = diff_helper.build_wiki_snapshot()
-    delta_payload = diff_helper.build_payload(
-        doc_path=doc_path,
-        change_kind=change_kind,
-        before=before,
-        after=after,
-        wiki_snapshot=wiki_snapshot,
-    )
-    new_file_payload: str | None = None
-    if change_kind == ChangeKind.CREATE:
-        new_file_payload = diff_helper.build_new_file_payload(
-            doc_path=doc_path, body=after, wiki_snapshot=wiki_snapshot
+    # Payloads are scoped per trigger: each carries only the docs under that
+    # trigger's scope plus the shared change view. One scope block is built
+    # per distinct scope on this commit.
+    scope_blocks: dict[str, str] = {}
+
+    def _scope_block(scope_path: str) -> str:
+        block = scope_blocks.get(scope_path)
+        if block is None:
+            block = diff_helper.build_scope_block(scope_path)
+            scope_blocks[scope_path] = block
+        return block
+
+    def _delta_payload(scope_path: str) -> str:
+        return diff_helper.build_payload(
+            doc_path=doc_path,
+            change_kind=change_kind,
+            before=before,
+            after=after,
+            scope_path=scope_path,
+            scope_block=_scope_block(scope_path),
+        )
+
+    def _new_file_payload(scope_path: str) -> str:
+        return diff_helper.build_new_file_payload(
+            doc_path=doc_path,
+            body=after,
+            scope_path=scope_path,
+            scope_block=_scope_block(scope_path),
         )
 
     # Cache owner ACL flags by user id — most fan-outs touch a handful of
@@ -150,10 +164,9 @@ def fan_out_trigger_eval(
         # action. Delta renders per action; the new-file eval renders in its
         # single combined call.
         if change_kind == ChangeKind.CREATE and trigger.scope_path != doc_path:
-            assert new_file_payload is not None
             primary = (trigger.actions[0].message or "") if trigger.actions else ""
             new_file_result = evaluate_new_file_in_dir(
-                trigger, primary, new_file_payload
+                trigger, primary, _new_file_payload(trigger.scope_path)
             )
             if not new_file_result.triggered:
                 continue
@@ -161,7 +174,7 @@ def fan_out_trigger_eval(
             reason = "new file under directory scope"
             log.info("trigger fired (new-file-in-dir) id=%s doc=%s", trigger.id, doc_path)
         else:
-            match = evaluate_delta(trigger, delta_payload)
+            match = evaluate_delta(trigger, _delta_payload(trigger.scope_path))
             if not match.matched:
                 continue
             new_file_message = None
@@ -175,7 +188,9 @@ def fan_out_trigger_eval(
                 rendered = new_file_message
             else:
                 rendered = (
-                    render_delta_message(instruction, delta_payload, reason=reason)
+                    render_delta_message(
+                        instruction, _delta_payload(trigger.scope_path), reason=reason
+                    )
                     if instruction
                     else ""
                 )
@@ -211,18 +226,23 @@ def evaluate_due_schedule_triggers(now: datetime) -> int:
         return 0
 
     log.info("schedule eval: %d due trigger(s)", len(triggers))
-    wiki_snapshot = diff_helper.build_wiki_snapshot()
     now_iso = now.astimezone(timezone.utc).isoformat(timespec="seconds")
+
+    # One scope block per distinct scope this tick — due triggers often share one.
+    scope_blocks: dict[str, str] = {}
 
     fired = 0
     for trigger in triggers:
         try:
             since_iso = schedule_window_start(trigger, now).isoformat(timespec="seconds")
+            scope = trigger.scope_path
+            if scope not in scope_blocks:
+                scope_blocks[scope] = diff_helper.build_scope_block(scope)
             if _evaluate_one_schedule(
                 trigger,
                 now_iso=now_iso,
                 since_iso=since_iso,
-                wiki_snapshot=wiki_snapshot,
+                scope_block=scope_blocks[scope],
             ):
                 fired += 1
         finally:
@@ -238,7 +258,7 @@ def _evaluate_one_schedule(
     *,
     now_iso: str,
     since_iso: str,
-    wiki_snapshot: str,
+    scope_block: str,
 ) -> bool:
     """Evaluate a single schedule trigger; record a ``trigger.fire`` event
     on match. Returns True if it fired.
@@ -255,9 +275,9 @@ def _evaluate_one_schedule(
 
     payload = diff_helper.build_schedule_payload(
         scope_path=trigger.scope_path,
+        scope_block=scope_block,
         when_iso=now_iso,
         since_iso=since_iso,
-        wiki_snapshot=wiki_snapshot,
     )
     match = evaluate_schedule(trigger, payload)
     if not match.matched:

@@ -44,7 +44,7 @@ def test_matches_returns_verdict_from_tool_call(monkeypatch):
     monkeypatch.setattr(natural_language, "complete", fake_complete)
 
     payload = (
-        "=== WIKI (latest version) ===\n"
+        "=== SCOPED DOCS (latest version) ===\n"
         "--- projects/foo.md\nstatus: yellow\n\n"
         "=== CHANGE ===\nPath: projects/foo.md\nKind: edit\n\n"
         "<unified diff>\n-status: green\n+status: yellow\n</unified diff>\n"
@@ -56,7 +56,7 @@ def test_matches_returns_verdict_from_tool_call(monkeypatch):
 
     user_msg = captured["messages"][-1]["content"]
     assert "Trigger description" in user_msg
-    assert "WIKI (latest version)" in user_msg
+    assert "SCOPED DOCS (latest version)" in user_msg
     assert "CHANGE" in user_msg
     assert captured["tools"][0]["name"] == "report"
 
@@ -221,7 +221,7 @@ def test_new_file_in_dir_parses_json_object(monkeypatch):
     res = natural_language.evaluate_new_file_in_dir(
         "fire when a new project doc lands",
         "tell me about new projects",
-        "=== WIKI (latest version) ===\n\n=== NEW FILE ===\nPath: p/foo.md\n\n# Foo\n",
+        "=== SCOPED DOCS (latest version) ===\n\n=== NEW FILE ===\nPath: p/foo.md\n\n# Foo\n",
     )
     triggered, msg = res.triggered, res.message
     assert triggered is True
