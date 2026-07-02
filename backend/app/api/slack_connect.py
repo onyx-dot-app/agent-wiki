@@ -106,10 +106,14 @@ def connect_callback(
         log.warning("slack connect callback rejected (bad state) user=%s", user.id)
         return _bounce(None, outcome="error")
     return_to = claimed["return_to"]
-    if error or not code:
-        # Slack sends error=access_denied when the user cancels the consent.
-        log.info("slack connect declined user=%s error=%s", user.id, error)
+    if error == "access_denied":
+        # The one error code that means the user cancelled the consent screen.
+        log.info("slack connect declined user=%s", user.id)
         return _bounce(return_to, outcome="declined")
+    if error or not code:
+        # Any other error code (or a missing code) is a failure, not a decline.
+        log.warning("slack connect failed user=%s error=%s", user.id, error)
+        return _bounce(return_to, outcome="error")
     try:
         body = slack_client.exchange_oauth_code(
             client_id=settings.client_id,

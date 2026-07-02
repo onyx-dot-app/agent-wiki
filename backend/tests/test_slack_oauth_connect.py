@@ -205,3 +205,17 @@ def test_callback_bounces_on_ok_without_token(client, monkeypatch):
     assert res.status_code == 302
     assert "slack_connect=error" in res.headers["location"]
     assert connections.list_for_user(uid) == []
+
+
+def test_callback_treats_non_decline_error_as_failure(client):
+    uid = seed_user("usr_1")
+    login_fastapi(client, uid)
+    _configure()
+    state = _start_and_get_state(client)
+    res = client.get(
+        f"/api/connectors/slack/callback?error=invalid_scope&state={state}",
+        follow_redirects=False,
+    )
+    assert res.status_code == 302
+    assert "slack_connect=error" in res.headers["location"]
+    assert connections.list_for_user(uid) == []
