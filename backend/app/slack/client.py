@@ -72,13 +72,11 @@ def list_channels(*, bot_token: str) -> list[dict[str, Any]]:
     )
     out: list[dict[str, Any]] = []
     for ch in cast(list[dict[str, Any]], body.get("channels") or []):
-        out.append(
-            {
-                "id": ch.get("id"),
-                "name": ch.get("name"),
-                "is_private": bool(ch.get("is_private")),
-            }
-        )
+        ch_id = ch.get("id")
+        ch_name = ch.get("name")
+        if not isinstance(ch_id, str) or not isinstance(ch_name, str):
+            continue  # unusable in the picker without both
+        out.append({"id": ch_id, "name": ch_name, "is_private": bool(ch.get("is_private"))})
     return out
 
 

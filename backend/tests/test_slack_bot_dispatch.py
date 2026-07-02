@@ -144,3 +144,33 @@ def test_slack_config_requires_a_target(tmp_db):
     dest_configs.create(_OWNER, type="slack", name="Hook", secret="https://hooks.slack.com/x")
     dest_configs.create(_OWNER, type="slack", name="Chan", config={"channel_id": "C1"})
     dest_configs.create(_OWNER, type="slack", name="Me", config={"dm": True})
+
+
+def test_slack_config_rejects_multiple_targets(tmp_db):
+    seed_user(_OWNER)
+    with pytest.raises(ValueError, match="exactly one"):
+        dest_configs.create(
+            _OWNER, type="slack", name="Both", config={"channel_id": "C1", "dm": True}
+        )
+    with pytest.raises(ValueError, match="exactly one"):
+        dest_configs.create(
+            _OWNER,
+            type="slack",
+            name="Both",
+            secret="https://hooks.slack.com/x",
+            config={"channel_id": "C1"},
+        )
+
+
+def test_list_channels_drops_entries_missing_id_or_name(monkeypatch):
+    captured = {
+        "ok": True,
+        "channels": [
+            {"id": "C1", "name": "eng", "is_private": False},
+            {"id": None, "name": "ghost"},
+            {"id": "C2"},
+        ],
+    }
+    monkeypatch.setattr(slack_client, "_call_api", lambda *a, **kw: captured)
+    out = slack_client.list_channels(bot_token="xoxb-x")
+    assert out == [{"id": "C1", "name": "eng", "is_private": False}]
