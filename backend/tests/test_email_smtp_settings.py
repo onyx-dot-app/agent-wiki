@@ -101,6 +101,27 @@ def test_test_endpoint_sends_via_smtp_seam(admin_client, monkeypatch):
     assert "test" in msg["Subject"].lower()
 
 
+class _AuthFailSMTP(_FakeSMTP):
+    def login(self, username, password):
+        import smtplib
+
+        raise smtplib.SMTPAuthenticationError(535, b"Username and Password not accepted")
+
+
+def test_auth_failure_reports_sanitized_message(admin_client, monkeypatch):
+    _put(
+        admin_client,
+        host="smtp.gmail.com", port=587, username="wiki@x.com",
+        password="wrong", from_address="wiki@x.com",
+    )
+    monkeypatch.setattr(email_service.smtplib, "SMTP", _AuthFailSMTP)
+    body = admin_client.post("/api/admin/email-smtp/test", json={}).json()
+    assert body["ok"] is False
+    assert "authentication rejected" in body["detail"]
+    # Transport detail stays out of the response.
+    assert "535" not in body["detail"]
+
+
 def test_test_endpoint_reports_unconfigured(admin_client):
     r = admin_client.post("/api/admin/email-smtp/test", json={})
     assert r.status_code == 200

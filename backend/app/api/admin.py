@@ -5,7 +5,6 @@ from __future__ import annotations
 import csv
 import io
 import logging
-import smtplib
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
@@ -49,7 +48,7 @@ from app.models.admin import (
 from app.onyx.client import validate_onyx_base_url
 from app.email import service as email_service
 from app.email import settings as email_settings
-from app.email.service import EmailNotConfiguredError
+from app.email.service import EmailSendError
 from app.email.settings import EmailSmtpSettings as EmailSmtpSettingsModel
 from app.slack import app_settings as slack_app_settings
 from app.slack.app_settings import SlackAppSettings as SlackAppSettingsModel
@@ -657,23 +656,8 @@ def post_email_smtp_test(
             text="This is a test message from your Agent Wiki SMTP configuration. "
             "If you are reading it, outbound email works.",
         )
-    except EmailNotConfiguredError as e:
-        return EmailTestResponse(ok=False, detail=str(e))
-    except smtplib.SMTPAuthenticationError:
-        log.warning("admin: test email to %s failed: SMTP auth rejected", to)
-        return EmailTestResponse(
-            ok=False,
-            detail="send failed: SMTP authentication rejected (check the username and app password)",
-        )
-    except (TimeoutError, OSError, smtplib.SMTPConnectError):
-        log.warning("admin: test email to %s failed to connect", to, exc_info=True)
-        return EmailTestResponse(
-            ok=False, detail="send failed: could not connect to the SMTP host (check host and port)"
-        )
-    except Exception as e:
-        # Server-side logs keep the detail; the client gets only the class.
-        log.warning("admin: test email to %s failed", to, exc_info=True)
-        return EmailTestResponse(ok=False, detail=f"send failed: {type(e).__name__} (see server logs)")
+    except EmailSendError as e:
+        return EmailTestResponse(ok=False, detail=f"send failed: {e}")
     return EmailTestResponse(ok=True, detail=f"sent to {to}")
 
 
