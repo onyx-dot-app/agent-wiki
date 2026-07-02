@@ -60,3 +60,23 @@ class JoinResponse(BaseModel):
     version: int
     base_sha: str | None
     participants: list[ParticipantOut]
+
+
+class Operation(BaseModel):
+    """One logged edit operation (one version bump), wire-shaped like the SSE
+    ``op`` frame so a client can feed it to the same apply/rebase path. Its
+    ``changes`` are the range edits applied together in that operation (≥1)."""
+
+    version: int  # the new buffer version after this operation applies (coedit_ops.seq)
+    author: str  # author_user_id
+    changes: list[Change]
+
+
+class OpsResponse(BaseModel):
+    """Ops after a given version (oldest first) + the current head version, so a
+    client can rebase its unconfirmed edits after a 409 / reconnect / big-op
+    resync instead of replacing the buffer wholesale."""
+
+    session_id: int
+    current_head_version: int
+    ops: list[Operation]

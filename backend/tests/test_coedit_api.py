@@ -285,3 +285,36 @@ def test_file_read_merges_agent_commit_over_live_buffer(client):
 
     body = client.get(f"/api/wiki/file?path={_PATH}").json()["body"]
     assert body == "ONE\ntwo\nthree\nfour\nFIVE\n"  # both edits, no LLM, no commit
+
+
+def test_ops_requires_auth(client):
+    assert client.get("/api/coedit/ops?session_id=1&since_version=0").status_code == 401
+
+
+def test_ops_since_returns_missed_changes_for_rebase(client):
+    uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
+    login_fastapi(client, uid)
+    _seed_page("abcdef\n")
+    sid = client.post("/api/coedit/join", json={"path": _PATH}).json()["session_id"]
+    v1 = _apply_op(client, sid, 0, [{"from": 0, "to": 0, "insert": "X"}])
+    v2 = _apply_op(client, sid, v1, [{"from": 0, "to": 0, "insert": "Y"}])
+
+    # since_version=0 → both ops, oldest first, wire-shaped like op frames ("from" alias).
+    body = client.get(f"/api/coedit/ops?session_id={sid}&since_version=0").json()
+    assert body["current_head_version"] == v2
+    assert [o["version"] for o in body["ops"]] == [v1, v2]
+    assert body["ops"][0]["changes"] == [{"from": 0, "to": 0, "insert": "X"}]
+    assert body["ops"][0]["author"] == uid
+
+    # since_version=v1 → only the op after it.
+    body2 = client.get(f"/api/coedit/ops?session_id={sid}&since_version={v1}").json()
+    assert [o["version"] for o in body2["ops"]] == [v2]
+
+    # since_version=head → nothing missed.
+    assert client.get(f"/api/coedit/ops?session_id={sid}&since_version={v2}").json()["ops"] == []
+
+
+def test_ops_404_when_no_active_session(client):
+    uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
+    login_fastapi(client, uid)
+    assert client.get("/api/coedit/ops?session_id=99999&since_version=0").status_code == 404
