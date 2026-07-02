@@ -1405,6 +1405,26 @@ class SlackAppSettings(Base):
     )
 
 
+class EmailSmtpSettings(Base):
+    """Singleton row: the app-wide SMTP credentials for outbound email,
+    configured from /admin/email. Every consumer (trigger destinations,
+    notification emails, verification links) sends through this one account;
+    sending is dark until host and from_address are set."""
+
+    __tablename__ = "email_smtp_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
+    host: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
+    port: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("587"))
+    username: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
+    # Secret — AES-GCM encrypted at rest (app/db/crypto.py:EncryptedString).
+    password: Mapped[str] = mapped_column(EncryptedString(), nullable=False)
+    from_address: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
+    updated_at: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
+    )
+
+
 class UserSlackConnection(Base):
     """One per user per Slack workspace: the bot token saved by "Connect
     Slack". Follows ``UserOnyxConnection``: the token is AES-GCM encrypted at

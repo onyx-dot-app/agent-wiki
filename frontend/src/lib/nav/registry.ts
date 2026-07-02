@@ -8,6 +8,7 @@ import {
   SvgGlobe,
   SvgHistory,
   SvgOnyxLogo,
+  SvgMail,
   SvgSlack,
   SvgUser,
   SvgUsers,
@@ -85,7 +86,10 @@ export const ADMIN_NAV_GROUPS = [
   },
   {
     label: "Connectors",
-    entries: [{ href: "/admin/slack", label: "Slack App", icon: SvgSlack }],
+    entries: [
+      { href: "/admin/slack", label: "Slack App", icon: SvgSlack },
+      { href: "/admin/email", label: "Outbound Email", icon: SvgMail },
+    ],
   },
   {
     label: "Statistics",

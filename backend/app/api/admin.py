@@ -38,10 +38,18 @@ from app.models.admin import (
     UserCounts,
     WebConfigRequest,
     WebView,
+    EmailSmtpConfigRequest,
+    EmailSmtpView,
+    EmailTestRequest,
+    EmailTestResponse,
     SlackAppConfigRequest,
     SlackAppView,
 )
 from app.onyx.client import validate_onyx_base_url
+from app.email import service as email_service
+from app.email import settings as email_settings
+from app.email.service import EmailSendError
+from app.email.settings import EmailSmtpSettings as EmailSmtpSettingsModel
 from app.slack import app_settings as slack_app_settings
 from app.slack.app_settings import SlackAppSettings as SlackAppSettingsModel
 from app.tracing import settings as braintrust_settings
@@ -583,6 +591,74 @@ def put_slack_app(
         actor.id, bool(client_id), bool(client_secret),
     )
     return _slack_app_view(slack_app_settings.get())
+
+
+def _email_smtp_view(s: EmailSmtpSettingsModel) -> EmailSmtpView:
+    password = s.password.get_secret_value()
+    return EmailSmtpView(
+        host=s.host,
+        port=s.port,
+        username=s.username,
+        password_set=bool(password),
+        password_hint=_redact(password),
+        from_address=s.from_address,
+    )
+
+
+@router.get("/email-smtp", response_model=EmailSmtpView)
+def get_email_smtp(_actor: User = Depends(require_admin)) -> EmailSmtpView:
+    return _email_smtp_view(email_settings.get())
+
+
+@router.put("/email-smtp", response_model=EmailSmtpView)
+def put_email_smtp(
+    req: EmailSmtpConfigRequest,
+    actor: User = Depends(require_admin),
+) -> EmailSmtpView:
+    current = email_settings.get()
+    # Omitted fields keep their stored value, matching the secret convention.
+    host = req.host.strip() if "host" in req.model_fields_set else current.host
+    port = req.port if "port" in req.model_fields_set else current.port
+    username = req.username.strip() if "username" in req.model_fields_set else current.username
+    from_address = (
+        req.from_address.strip()
+        if "from_address" in req.model_fields_set
+        else current.from_address
+    )
+    if "password" not in req.model_fields_set or req.password == "":
+        password = current.password.get_secret_value()
+    elif req.password is None:
+        password = ""
+    else:
+        password = req.password
+    email_settings.upsert(
+        host=host, port=port, username=username, password=password, from_address=from_address
+    )
+    log.info(
+        "admin: %s updated smtp settings host_set=%s from_set=%s password_set=%s",
+        actor.id, bool(host), bool(from_address), bool(password),
+    )
+    return _email_smtp_view(email_settings.get())
+
+
+@router.post("/email-smtp/test", response_model=EmailTestResponse)
+def post_email_smtp_test(
+    req: EmailTestRequest,
+    actor: User = Depends(require_admin),
+) -> EmailTestResponse:
+    """Synchronous end-to-end send so an admin can prove the account works
+    before any consumer exists."""
+    to = req.to.strip() or actor.email
+    try:
+        email_service.send(
+            to=to,
+            subject="Agent Wiki test email",
+            text="This is a test message from your Agent Wiki SMTP configuration. "
+            "If you are reading it, outbound email works.",
+        )
+    except EmailSendError as e:
+        return EmailTestResponse(ok=False, detail=f"send failed: {e}")
+    return EmailTestResponse(ok=True, detail=f"sent to {to}")
 
 
 def _braintrust_view(s: BraintrustSettings) -> BraintrustView:
