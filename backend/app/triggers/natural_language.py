@@ -174,6 +174,8 @@ reference the latest version directly.
 internal IDs, or explanations of your reasoning. Output only the \
 delivered message text.
   * Plain text or markdown is fine. No greetings, no signoff.
+  * Delivery appends its own attribution line naming the source \
+document — do not add a title or repeat the document name.
 
 Always respond by calling the `render` tool exactly once.\
 """
@@ -323,6 +325,8 @@ scoped to the SCHEDULED CHECK scope.
 internal IDs, or explanations of your reasoning. Output only the \
 delivered message text.
   * Plain text or markdown is fine. No greetings, no signoff.
+  * Delivery appends its own attribution line naming the source \
+document — do not add a title or repeat the document name.
 
 Always respond by calling the `render` tool exactly once.\
 """

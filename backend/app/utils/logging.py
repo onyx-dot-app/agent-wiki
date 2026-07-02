@@ -45,6 +45,11 @@ def setup_logging(level: str | int | None = None) -> None:
     # Tame noisy third-party loggers; flip to DEBUG via env if needed.
     logging.getLogger("werkzeug").setLevel(logging.INFO)
     logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
+    # botocore DEBUG logs full request headers (bearer tokens included) and
+    # every stream chunk — never allow it below INFO.
+    logging.getLogger("botocore").setLevel(logging.INFO)
+    logging.getLogger("boto3").setLevel(logging.INFO)
+    logging.getLogger("urllib3").setLevel(logging.INFO)
 
     _configured = True
 
