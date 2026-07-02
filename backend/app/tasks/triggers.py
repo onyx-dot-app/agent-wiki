@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import json
 import logging
+from typing import Any, cast
 
 from datetime import datetime, timezone
 
@@ -45,6 +46,7 @@ from sqlalchemy import select
 from app.db.models import Event, User
 from app.db.session import session
 from app.slack import client as slack_client
+from app.slack import connections as slack_connections
 from app.tasks.queues import triggers_queue
 from app.triggers import destination_configs as dest_configs
 from app.triggers import destinations as destinations_repo
@@ -369,7 +371,10 @@ def _record_fire(
     assert config_id is not None  # config resolved only when config_id is set
     if dtype == destinations_repo.SLACK_ID:
         _dispatch_to_slack(
-            trigger=trigger, config_id=config_id, rendered_message=rendered_message
+            trigger=trigger,
+            config=config,
+            doc_path=doc_path,
+            rendered_message=rendered_message,
         )
     else:
         log.warning(
@@ -379,29 +384,73 @@ def _record_fire(
 
 
 def _dispatch_to_slack(
-    *, trigger: TriggerRecord, config_id: str, rendered_message: str
+    *, trigger: TriggerRecord, config: dict[str, object], doc_path: str, rendered_message: str
 ) -> None:
-    """POST a fire's rendered message to the destination config's Slack channel.
+    """Deliver a fire's rendered message to the config's Slack target.
 
-    Resolves the config's decrypted secret (the incoming webhook URL) via
-    ``destination_configs.get_secret``, which enforces ownership. Failures are
-    logged and swallowed: the fire is already recorded in the events table, so
-    an unreachable Slack must not fail the task or lose it.
+    Three target shapes: a legacy incoming webhook (the config's encrypted
+    secret), a bot channel (``config.channel_id``), or a DM to the owner
+    (``config.dm``). Bot targets post through the owner's Slack connection
+    and carry a source line so the recipient can place the message. Failures
+    are logged and swallowed: the fire is already recorded in the events
+    table, so an unreachable Slack must not fail the task or lose it.
     """
-    webhook_url = dest_configs.get_secret(config_id, owner_user_id=trigger.owner_user_id)
-    if not webhook_url:
-        log.info(
-            "trigger %s slack config %s has no secret; recorded to events only",
+    if not rendered_message.strip():
+        log.info("trigger %s slack dispatch skipped: empty message", trigger.id)
+        return
+    config_id = str(config["id"])
+
+    if config.get("has_secret"):
+        webhook_url = dest_configs.get_secret(config_id, owner_user_id=trigger.owner_user_id)
+        if not webhook_url:
+            log.info(
+                "trigger %s slack config %s secret unavailable; recorded to events only",
+                trigger.id, config_id,
+            )
+            return
+        try:
+            slack_client.post_message(webhook_url=webhook_url, text=rendered_message)
+            log.info("trigger %s dispatched to slack webhook config %s", trigger.id, config_id)
+        except slack_client.SlackApiError:
+            log.exception("trigger %s slack webhook dispatch failed", trigger.id)
+        return
+
+    target = cast("dict[str, Any]", config.get("config") or {})
+    channel_id = target.get("channel_id")
+    wants_dm = bool(target.get("dm"))
+    if not channel_id and not wants_dm:
+        log.warning(
+            "trigger %s slack config %s has no delivery target; recorded to events only",
             trigger.id, config_id,
         )
         return
 
-    if not rendered_message.strip():
-        log.info("trigger %s slack dispatch skipped: empty message", trigger.id)
+    connection = next(iter(slack_connections.list_for_user(trigger.owner_user_id)), None)
+    if connection is None:
+        log.info(
+            "trigger %s owner %s has no slack connection; recorded to events only",
+            trigger.id, trigger.owner_user_id,
+        )
+        return
+    bot_token = slack_connections.get_bot_token(
+        trigger.owner_user_id, str(connection["team_id"])
+    )
+    if not bot_token:
+        log.info(
+            "trigger %s slack connection token unavailable; recorded to events only",
+            trigger.id,
+        )
         return
 
+    text = f"{rendered_message}\n— Agent Wiki trigger on {doc_path}"
     try:
-        slack_client.post_message(webhook_url=webhook_url, text=rendered_message)
-        log.info("trigger %s dispatched to slack config %s", trigger.id, config_id)
+        if wants_dm and not channel_id:
+            channel_id = slack_client.open_dm(
+                bot_token=bot_token, slack_user_id=str(connection["slack_user_id"])
+            )
+        slack_client.post_chat_message(
+            bot_token=bot_token, channel=str(channel_id), text=text
+        )
+        log.info("trigger %s dispatched via slack bot config %s", trigger.id, config_id)
     except slack_client.SlackApiError:
-        log.exception("trigger %s slack dispatch failed", trigger.id)
+        log.exception("trigger %s slack bot dispatch failed", trigger.id)

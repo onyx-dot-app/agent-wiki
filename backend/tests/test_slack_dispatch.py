@@ -98,9 +98,13 @@ def test_event_log_records_but_does_not_post(tmp_db, _captured_post):
     assert _captured_post == []
 
 
-def test_slack_config_without_secret_records_but_does_not_post(tmp_db, _captured_post):
+def test_bot_channel_config_never_hits_webhook_path(tmp_db, _captured_post):
+    """A channel-target config (no secret) must not post through the webhook
+    client, even when the owner has no bot connection."""
     seed_user(_OWNER)
-    cid = _slack_config(secret=None)
+    cid = dest_configs.create(
+        _OWNER, type="slack", name="Chan", config={"channel_id": "C1"}
+    )["id"]
 
     _fire(_trigger(destination_config_id=cid))
 

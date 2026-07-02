@@ -72,6 +72,12 @@ def create(
         raise ValueError("name is required")
     if not destinations.exists(type):
         raise ValueError(f"unknown destination type: {type}")
+    if type == destinations.SLACK_ID:
+        cfg = config or {}
+        if not secret and not cfg.get("channel_id") and not cfg.get("dm"):
+            raise ValueError(
+                "a slack destination needs a webhook secret, a channel_id, or dm: true"
+            )
 
     config_id = "dst_" + uuid.uuid4().hex[:12]
     created_at = _now_iso()

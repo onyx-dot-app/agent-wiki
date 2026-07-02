@@ -142,6 +142,22 @@ def connect_callback(
     return _bounce(return_to, outcome="ok")
 
 
+@router.get("/channels")
+def list_channels(user: User = Depends(require_user)) -> dict[str, Any]:
+    """Channels the caller's bot connection can post to, for the picker."""
+    connection = next(iter(connections.list_for_user(user.id)), None)
+    if connection is None:
+        raise HTTPException(status_code=404, detail="slack not connected")
+    bot_token = connections.get_bot_token(user.id, str(connection["team_id"]))
+    if not bot_token:
+        raise HTTPException(status_code=404, detail="slack not connected")
+    try:
+        channels = slack_client.list_channels(bot_token=bot_token)
+    except slack_client.SlackApiError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return {"channels": channels}
+
+
 @router.delete("")
 def disconnect(user: User = Depends(require_user)) -> dict[str, bool]:
     """Drop the caller's connection rows.
