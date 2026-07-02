@@ -60,3 +60,28 @@ def test_reconcile_skips_unreadable_and_non_trigger_files(tmp_repo):
     wiki_git.commit_file(".trigger_broken.yaml", "{not yaml: [", "seed broken", author=None)
 
     assert reconcile_legacy_slack_triggers() == 0
+
+
+def test_reconcile_resolves_existing_mirror(tmp_repo):
+    """A legacy slack reference whose mirrored config exists wires that config
+    instead of degrading to event-log."""
+    from app.triggers import destination_configs as dest_configs
+
+    seed_user("usr_1")
+    cfg = dest_configs.create(
+        "usr_1",
+        type="slack",
+        name="PM Standup",
+        config={"from_slack_webhook": "swh_abc123def456"},
+        secret="https://hooks.slack.com/services/EXAMPLE",
+    )
+    path = ".trigger_trg_mirrored.yaml"
+    _write_legacy(path, {
+        "id": "trg_mirrored", "owner_user_id": "usr_1", "scope_path": "a.md",
+        "kind": "delta", "nl_description": "fire", "message": "hi",
+        "destination": "slack", "slack_webhook_id": "swh_abc123def456", "enabled": True,
+    })
+
+    assert reconcile_legacy_slack_triggers() == 1
+    data = storage.read_trigger(path)
+    assert data["actions"] == [{"destination_config_id": cfg["id"], "message": "hi"}]

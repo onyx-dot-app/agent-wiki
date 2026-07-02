@@ -1,9 +1,10 @@
-"""drop the slack_webhooks table
+"""mirror remaining slack webhooks into destination_configs, then drop the table
 
-Slack channels live in ``destination_configs`` (webhook-secret, channel, or
-DM targets); the standalone webhook store has no remaining readers. The boot
-reconcile mirrored every stored channel into a destination config before this
-migration ships, so the rows are redundant copies.
+Slack channels live in ``destination_configs``; the standalone webhook store
+has no remaining readers. Rows not yet mirrored (an install that never booted
+a mirror-era version) are copied here in SQL before the drop: the encrypted
+secret is raw AES-GCM bytea with no column binding, so it moves verbatim, and
+the mirror id derives from the webhook id so re-runs are idempotent.
 
 Guarded on the live inspector because ``0001_initial`` builds fresh databases
 from the current model registry, which no longer has the table.
@@ -28,8 +29,29 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    if "slack_webhooks" in sa.inspect(op.get_bind()).get_table_names():
-        op.drop_table("slack_webhooks")
+    if "slack_webhooks" not in sa.inspect(op.get_bind()).get_table_names():
+        return
+    # Copy any row without a mirror. dst_m<id-suffix> keys the mirror to its
+    # source webhook (ids are swh_<12 hex>, so the derived id fits the dst_
+    # shape), and the config marker matches what the boot reconcile resolves.
+    op.execute(
+        sa.text(
+            """
+            INSERT INTO destination_configs
+                (id, owner_user_id, type, name, config_json, secret, created_at)
+            SELECT 'dst_m' || substr(w.id, 5), w.owner_user_id, 'slack', w.name,
+                   jsonb_build_object('from_slack_webhook', w.id),
+                   w.webhook_url, w.created_at
+            FROM slack_webhooks w
+            WHERE NOT EXISTS (
+                SELECT 1 FROM destination_configs d
+                WHERE d.config_json->>'from_slack_webhook' = w.id
+            )
+            ON CONFLICT (id) DO NOTHING
+            """
+        )
+    )
+    op.drop_table("slack_webhooks")
 
 
 def downgrade() -> None:
