@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 
 import { Button, InputTypeIn } from "@onyx-ai/opal/components";
 import {
@@ -69,7 +69,6 @@ export function TriggerModal({
   const [emailMode, setEmailMode] = useState(false);
   const [emailDraft, setEmailDraft] = useState("");
   const [emailCommitting, setEmailCommitting] = useState(false);
-  const emailInputRef = useRef<HTMLInputElement>(null);
 
   const tzOptions = useMemo(() => listTimezones(), []);
 
@@ -184,16 +183,6 @@ export function TriggerModal({
         ? ""
         : "Tracked in the event log only.";
 
-  function unfocusEmailInput() {
-    // Deferred past the re-render: the readOnly variant swap can replace the
-    // input node, and blurring the pre-swap node leaves the new one focused.
-    requestAnimationFrame(() => {
-      emailInputRef.current?.blur();
-      const active = document.activeElement;
-      if (active instanceof HTMLInputElement) active.blur();
-    });
-  }
-
   async function commitEmail() {
     if (emailCommitting) return;
     const address = emailDraft.trim();
@@ -208,7 +197,6 @@ export function TriggerModal({
         address.toLowerCase()
     ) {
       setEmailMode(false);
-      unfocusEmailInput();
       return;
     }
     setError(null);
@@ -220,7 +208,6 @@ export function TriggerModal({
       );
       setDestinationConfigId(id);
       setEmailMode(false);
-      unfocusEmailInput();
       await refreshConfigs();
       if (verificationError) setError(verificationError);
     } catch (e) {
@@ -373,18 +360,13 @@ export function TriggerModal({
                   : "Event log"}
             </SelectButton>
           </SlackDestinationPicker>
-          {(emailMode || selectedIsEmail) && (
+          {emailMode && (
             <InputTypeIn
-              ref={emailInputRef}
-              autoFocus={emailMode}
-              variant={emailMode ? undefined : "readOnly"}
+              autoFocus
               placeholder="name@example.com — Enter to add"
               value={emailDraft}
-              onChange={(e) => {
-                if (emailMode) setEmailDraft(e.target.value);
-              }}
+              onChange={(e) => setEmailDraft(e.target.value)}
               onKeyDown={(e) => {
-                if (!emailMode) return;
                 if (e.key === "Enter") {
                   e.preventDefault();
                   void commitEmail();
