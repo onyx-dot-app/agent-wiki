@@ -1,13 +1,14 @@
 /** React hook that binds a text buffer to a live co-edit session.
  *
  * On `enabled`, it joins the session for `path`, streams inbound frames, and
- * exposes `buffer` + `onChange` for a plain `<textarea>`. Local edits are sent
- * as coalesced range-change ops (one in flight); inbound ops are spliced in;
- * anything it can't cleanly reconcile (a 409 stale op, a `resync` frame, or a
- * remote op arriving while the local buffer has unsent edits) falls back to a
- * full re-fetch — correct, occasionally jumpy (the textarea MVP; CodeMirror +
- * pending-op rebase smooth this later). Save checkpoints + leaves; discard
- * resets to the committed body + leaves; unmount leaves.
+ * exposes `buffer` + `onChange` for an editor (see `CoeditEditor`), plus
+ * `participants`/`typing`/`peers` for presence and remote carets. Local edits
+ * are sent as coalesced range-change ops (one in flight); inbound ops are
+ * spliced in; anything it can't cleanly reconcile (a 409 stale op, a `resync`
+ * frame, or a remote op arriving while the local buffer has unsent edits)
+ * falls back to a full re-fetch — correct, occasionally jumpy (pending-op
+ * rebase smooths this later). Save checkpoints + leaves; discard resets to the
+ * committed body + leaves; unmount leaves.
  *
  * Offsets are UTF-16 (JS-native), matching the server — see `coedit.ts`.
  */
@@ -19,6 +20,7 @@ import {
   checkpointSession,
   type CoeditFrame,
   type CoeditParticipant,
+  type CoeditPeer,
   diffToChange,
   getSession,
   joinSession,
@@ -42,6 +44,8 @@ export interface UseCoeditSession {
   participants: CoeditParticipant[];
   /** user_ids of peers currently typing (excludes self). */
   typing: string[];
+  /** peers' live carets/selections (excludes self), for editor decorations. */
+  peers: CoeditPeer[];
   onChange: (next: string) => void;
   /** Report the local caret/selection so peers see presence. `isEdit=true`
    * (from an edit) marks "typing…" and arms its auto-clear; `isEdit=false` (a
@@ -64,6 +68,7 @@ export function useCoeditSession(opts: {
   const [buffer, setBufferState] = useState("");
   const [participants, setParticipants] = useState<CoeditParticipant[]>([]);
   const [typing, setTyping] = useState<string[]>([]);
+  const [peers, setPeers] = useState<CoeditPeer[]>([]);
   const [active, setActive] = useState(false);
 
   // Live state kept in refs so the stream callback and flush loop read the
@@ -209,13 +214,26 @@ export function useCoeditSession(opts: {
     (frame: CoeditFrame) => {
       if (frame.type === "presence") {
         setParticipants(frame.participants);
+        // Drop cursor/typing state for anyone who left.
+        const ids = new Set(frame.participants.map((p) => p.user_id));
+        setPeers((prev) => prev.filter((p) => ids.has(p.user_id)));
+        setTyping((prev) => prev.filter((u) => ids.has(u)));
         return;
       }
       if (frame.type === "cursor") {
-        // Presence signal only (no remote caret rendering in a textarea): track
-        // who's typing. Skip our own echo.
+        // A peer's caret/selection + typing. Skip our own echo.
         if (myUserId !== null && frame.user_id === myUserId) return;
         const uid = frame.user_id;
+        // Track the caret/selection for editor decorations.
+        setPeers((prev) => [
+          ...prev.filter((p) => p.user_id !== uid),
+          {
+            user_id: uid,
+            user_display: frame.user_display,
+            anchor: frame.anchor,
+            head: frame.head,
+          },
+        ]);
         const existing = typingTimers.current.get(uid);
         if (existing) clearTimeout(existing);
         typingTimers.current.delete(uid);
@@ -277,6 +295,7 @@ export function useCoeditSession(opts: {
     typingTimers.current.clear();
     pendingCursor.current = null;
     setTyping([]);
+    setPeers([]);
     abort.current?.abort();
     abort.current = null;
     const sid = sessionId.current;
@@ -376,6 +395,7 @@ export function useCoeditSession(opts: {
     buffer,
     participants,
     typing,
+    peers,
     onChange,
     reportSelection,
     save,

@@ -26,6 +26,15 @@ export interface CoeditParticipant {
   last_seen_at: string;
 }
 
+/** A peer's live caret/selection, from their latest `cursor` frame. Offsets are
+ * UTF-16 code units (JS-native), collapsed (anchor === head) = caret. */
+export interface CoeditPeer {
+  user_id: string;
+  user_display: string;
+  anchor: number;
+  head: number;
+}
+
 /** Snapshot returned by join / session (the live buffer + roster). */
 export interface CoeditSession {
   session_id: number;

@@ -66,6 +66,7 @@ import {
 import { rehypeSourcePos } from "@/lib/rehypeSourcePos";
 import { remarkBareSpaceLinks } from "@/lib/remarkBareSpaceLinks";
 import { useAuth, useRequireAuth } from "@/lib/auth";
+import { CoeditEditor } from "@/components/coedit/CoeditEditor";
 import type { CoeditParticipant } from "@/lib/coedit";
 import { useCoeditSession } from "@/lib/useCoeditSession";
 import {
@@ -2147,28 +2148,12 @@ function FileViewer({ path }: { path: string }) {
                         />
                       );
                     })()}
-                    <textarea
+                    <CoeditEditor
                       value={coedit.buffer}
-                      onChange={(e) => {
-                        coedit.onChange(e.target.value);
-                        // An edit → I'm typing; report caret + typing so peers
-                        // see a live "typing…" signal (carets await CodeMirror).
-                        coedit.reportSelection(
-                          e.target.selectionStart,
-                          e.target.selectionEnd,
-                          true,
-                        );
-                      }}
-                      onSelect={(e) =>
-                        coedit.reportSelection(
-                          e.currentTarget.selectionStart,
-                          e.currentTarget.selectionEnd,
-                          false,
-                        )
-                      }
-                      spellCheck={false}
+                      onChange={coedit.onChange}
+                      onSelectionChange={coedit.reportSelection}
+                      peers={coedit.peers}
                       placeholder="Start typing, or pick a template above…"
-                      className="box-border min-h-0 w-full flex-1 resize-none rounded-(--border-radius-08) border border-(--border-01) p-4 font-mono text-sm leading-[1.6] outline-none"
                     />
                   </>
                 ) : (
