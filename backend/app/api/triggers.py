@@ -26,7 +26,9 @@ from app.models.trigger import (
     TriggerView,
     UpdateTriggerRequest,
 )
+from app.email.service import EmailSendError
 from app.triggers import destination_configs as dest_configs
+from app.triggers import email_verification
 from app.triggers import destinations as destinations_repo
 from app.triggers import repo as triggers_repo
 from app.triggers import storage as triggers_storage
@@ -110,7 +112,44 @@ def create_destination_config(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return _config_view(row)
+    view = _config_view(row)
+    if req.type == destinations_repo.EMAIL_ID:
+        view.verification_error = _send_verify_link(row)
+    return view
+
+
+def _send_verify_link(row: dict[str, Any]) -> str | None:
+    """Fire the verify email for an email config; a failure is reported on
+    the view, not raised — the config itself was created."""
+    address = str(cast("dict[str, Any]", row.get("config") or {}).get("address") or "")
+    try:
+        email_verification.send_verification_email(str(row["id"]), address)
+    except email_verification.MintRateLimitedError as exc:
+        return str(exc)
+    except EmailSendError as exc:
+        return f"verification email failed: {exc}"
+    return None
+
+
+@router.post(
+    "/destination-configs/{config_id}/resend-verify",
+    response_model=DestinationConfigView,
+)
+def resend_verification(
+    config_id: str, user: User = Depends(require_user)
+) -> DestinationConfigView:
+    row = dest_configs.get(config_id, user.id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="not found")
+    if row.get("type") != destinations_repo.EMAIL_ID:
+        raise HTTPException(status_code=400, detail="not an email destination")
+    if row.get("verified_at"):
+        raise HTTPException(status_code=400, detail="already verified")
+    view = _config_view(row)
+    view.verification_error = _send_verify_link(row)
+    if view.verification_error and "just sent" in view.verification_error:
+        raise HTTPException(status_code=429, detail=view.verification_error)
+    return view
 
 
 @router.delete(

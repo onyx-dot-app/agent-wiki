@@ -32,6 +32,9 @@ class DestinationConfigView(BaseModel):
     config: dict[str, Any] = Field(default_factory=dict)
     has_secret: bool
     verified_at: str | None = None
+    # Set when a verify-link send attempted at create/resend time failed;
+    # the config exists either way.
+    verification_error: str | None = None
     created_at: str | None
 
 
