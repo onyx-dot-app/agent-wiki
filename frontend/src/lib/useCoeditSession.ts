@@ -43,9 +43,11 @@ export interface UseCoeditSession {
   /** user_ids of peers currently typing (excludes self). */
   typing: string[];
   onChange: (next: string) => void;
-  /** Report the local caret/selection so peers see presence; `typing` marks an
-   * active edit (vs. a plain caret move). Throttled + coalesced internally. */
-  reportSelection: (anchor: number, head: number, typing: boolean) => void;
+  /** Report the local caret/selection so peers see presence. `isEdit=true`
+   * (from an edit) marks "typing…" and arms its auto-clear; `isEdit=false` (a
+   * caret move) reports position without changing the typing state. Throttled
+   * + coalesced internally. */
+  reportSelection: (anchor: number, head: number, isEdit: boolean) => void;
   save: () => Promise<void>;
   discard: () => Promise<void>;
 }
@@ -159,10 +161,16 @@ export function useCoeditSession(opts: {
   );
 
   const reportSelection = useCallback(
-    (anchor: number, head: number, isTyping: boolean) => {
+    (anchor: number, head: number, isEdit: boolean) => {
       if (sessionId.current === null) return;
       lastCursor.current = { anchor, head };
-      pendingCursor.current = { anchor, head, typing: isTyping };
+      // A caret move (isEdit=false) must not clobber the "typing…" a recent
+      // edit set — browsers fire `select` right after every `input`, so
+      // onSelect lands one keystroke behind onChange. Derive typing from
+      // whether the idle timer is still pending (i.e. we edited recently);
+      // only an actual edit re-marks it and (re)arms the trailing clear.
+      const typing = isEdit || typingIdle.current !== null;
+      pendingCursor.current = { anchor, head, typing };
       const send = () => {
         const c = pendingCursor.current;
         pendingCursor.current = null;
@@ -179,9 +187,10 @@ export function useCoeditSession(opts: {
           if (pendingCursor.current) send();
         }, CURSOR_THROTTLE_MS);
       }
-      // Trailing "stopped typing" so a peer's badge clears when I pause.
-      if (typingIdle.current) clearTimeout(typingIdle.current);
-      if (isTyping) {
+      // Trailing "stopped typing" so a peer's badge clears when I pause. Only an
+      // edit (re)arms it; a caret move leaves the existing timer running.
+      if (isEdit) {
+        if (typingIdle.current) clearTimeout(typingIdle.current);
         typingIdle.current = setTimeout(() => {
           typingIdle.current = null;
           const lc = lastCursor.current;
