@@ -1,4 +1,7 @@
-import { createDestinationConfig, type DestinationConfig } from "@/lib/triggers";
+import {
+  createDestinationConfig,
+  type DestinationConfig,
+} from "@/lib/triggers";
 
 /** Reuse the config for this address or create it (which sends the verify
  * link). Returns the id plus any verification-send error to surface. */
@@ -18,5 +21,8 @@ export async function ensureEmailDestination(
     name: normalized,
     config: { address: normalized },
   });
-  return { id: created.id, verificationError: created.verification_error ?? null };
+  return {
+    id: created.id,
+    verificationError: created.verification_error ?? null,
+  };
 }

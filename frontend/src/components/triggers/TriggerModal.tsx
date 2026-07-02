@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 
-import { Button } from "@onyx-ai/opal/components";
+import { Button, InputTypeIn } from "@onyx-ai/opal/components";
 import {
   PRESET_OPTIONS,
   WEEKDAY_NAMES,
@@ -19,6 +19,7 @@ import {
 import { SelectButton } from "@onyx-ai/opal/components";
 
 import { SlackDestinationPicker } from "@/components/triggers/SlackDestinationPicker";
+import { ensureEmailDestination } from "@/lib/emailConnect";
 import { useSlackConnectStatus } from "@/lib/slackConnect";
 import {
   createTrigger,
@@ -65,8 +66,19 @@ export function TriggerModal({
   const [startAtLocal, setStartAtLocal] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [emailMode, setEmailMode] = useState(false);
+  const [emailDraft, setEmailDraft] = useState("");
 
   const tzOptions = useMemo(() => listTimezones(), []);
+
+  // Selecting an email destination (edit flow or picker) fills the input
+  // beneath the picker with its address.
+  const selectedForDraft = configs.find((c) => c.id === destinationConfigId);
+  useEffect(() => {
+    if (selectedForDraft?.type === "email") {
+      setEmailDraft(String(selectedForDraft.config.address ?? ""));
+    }
+  }, [selectedForDraft]);
 
   useEffect(() => {
     if (!open) return;
@@ -157,9 +169,36 @@ export function TriggerModal({
     sendText.trim() &&
     (kind === "delta" || (computedCron && tz));
   const selectedConfig = configs.find((c) => c.id === destinationConfigId);
-  const destDescription = selectedConfig
-    ? ""
-    : "Tracked in the event log only.";
+  const selectedIsEmail = selectedConfig?.type === "email";
+  const destDescription = selectedIsEmail
+    ? selectedConfig?.verified_at
+      ? `Fires will be emailed to ${selectedConfig.name}.`
+      : `A verification link was sent to ${selectedConfig?.name}. Delivery starts once it is clicked.`
+    : emailMode
+      ? "Type the address and press Enter."
+      : selectedConfig
+        ? ""
+        : "Tracked in the event log only.";
+
+  async function commitEmail() {
+    const address = emailDraft.trim();
+    if (!address.includes("@")) {
+      setError("enter a valid email address");
+      return;
+    }
+    setError(null);
+    try {
+      const { id, verificationError } = await ensureEmailDestination(
+        configs,
+        address,
+      );
+      setDestinationConfigId(id);
+      await refreshConfigs();
+      if (verificationError) setError(verificationError);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "failed to add address");
+    }
+  }
 
   return (
     <div
@@ -286,15 +325,38 @@ export function TriggerModal({
             disabled={busy}
             onPick={async (id) => {
               setError(null);
+              setEmailMode(false);
               setDestinationConfigId(id);
               await refreshConfigs();
+            }}
+            onPickEmail={() => {
+              setError(null);
+              setEmailMode(true);
             }}
             onError={(m) => setError(m)}
           >
             <SelectButton size="sm" state="empty" width="full">
-              {selectedConfig ? selectedConfig.name : "Event log"}
+              {emailMode && !selectedIsEmail
+                ? "Email"
+                : selectedConfig
+                  ? selectedConfig.name
+                  : "Event log"}
             </SelectButton>
           </SlackDestinationPicker>
+          {(emailMode || selectedIsEmail) && (
+            <InputTypeIn
+              autoFocus={emailMode && !selectedIsEmail}
+              placeholder="name@example.com — Enter to add"
+              value={emailDraft}
+              onChange={(e) => setEmailDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  void commitEmail();
+                }
+              }}
+            />
+          )}
           {destDescription && (
             <span className="text-xs leading-[1.4] text-(--text-03)">
               {destDescription}

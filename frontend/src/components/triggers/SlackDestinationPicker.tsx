@@ -16,7 +16,6 @@ import {
   SvgUser,
 } from "@onyx-ai/opal/icons";
 
-import { ensureEmailDestination } from "@/lib/emailConnect";
 import {
   ensureSlackDestination,
   getSlackChannels,
@@ -37,6 +36,9 @@ interface Props {
   /** Called with the picked config id (null = event log). Channel and DM picks
    * find-or-create their destination config first. */
   onPick: (configId: string | null) => void | Promise<void>;
+  /** When set, an "Email…" option closes the picker and defers to the caller,
+   * which owns the address input rendered beneath its trigger control. */
+  onPickEmail?: () => void;
   onError: (message: string) => void;
 }
 
@@ -48,6 +50,7 @@ export function SlackDestinationPicker({
   connected,
   disabled,
   onPick,
+  onPickEmail,
   onError,
 }: Props) {
   const [open, setOpen] = useState(false);
@@ -55,8 +58,6 @@ export function SlackDestinationPicker({
   const [channels, setChannels] = useState<SlackChannel[] | null>(null);
   const [loadingChannels, setLoadingChannels] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [addingEmail, setAddingEmail] = useState(false);
-  const [emailInput, setEmailInput] = useState("");
 
   async function onOpenChange(next: boolean) {
     setOpen(next);
@@ -77,29 +78,6 @@ export function SlackDestinationPicker({
     await onPick(configId);
     setOpen(false);
     setSearch("");
-    setAddingEmail(false);
-    setEmailInput("");
-  }
-
-  async function pickEmail() {
-    const address = emailInput.trim();
-    if (!address.includes("@")) {
-      onError("enter a valid email address");
-      return;
-    }
-    setBusy(true);
-    try {
-      const { id, verificationError } = await ensureEmailDestination(
-        configs,
-        address,
-      );
-      await pick(id);
-      if (verificationError) onError(verificationError);
-    } catch (e) {
-      onError(e instanceof Error ? e.message : "failed to add address");
-    } finally {
-      setBusy(false);
-    }
   }
 
   async function pickChannel(ch: SlackChannel) {
@@ -203,26 +181,17 @@ export function SlackDestinationPicker({
               }}
             />
           )}
-          {!addingEmail && (
+          {onPickEmail && (
             <LineItemButton
               icon={SvgMail}
-              title="Email an address…"
+              title="Email…"
               sizePreset="main-ui"
               variant="body"
               state="empty"
-              onClick={() => setAddingEmail(true)}
-            />
-          )}
-          {addingEmail && (
-            <InputTypeIn
-              autoFocus
-              variant="internal"
-              placeholder="name@example.com — Enter to add"
-              value={emailInput}
-              onChange={(e) => setEmailInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !busy) void pickEmail();
-                if (e.key === "Escape") setAddingEmail(false);
+              onClick={() => {
+                setOpen(false);
+                setSearch("");
+                onPickEmail();
               }}
             />
           )}
