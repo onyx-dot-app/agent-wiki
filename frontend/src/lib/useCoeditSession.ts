@@ -57,10 +57,9 @@ export function useCoeditSession(opts: {
   const version = useRef(0);
   const serverBuffer = useRef(""); // last text the server has acked
   const bufferRef = useRef(""); // mirrors `buffer` state for diffing
-  const inFlight = useRef(false);
+  const pumpPromise = useRef<Promise<void> | null>(null); // in-flight op drain
   const flushTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const abort = useRef<AbortController | null>(null);
-  const endedRef = useRef(false);
 
   const setBuffer = useCallback((next: string) => {
     bufferRef.current = next;
@@ -74,39 +73,50 @@ export function useCoeditSession(opts: {
       const snap = await getSession(sid);
       version.current = snap.version;
       serverBuffer.current = snap.buffer;
-      inFlight.current = false;
       setBuffer(snap.buffer);
     } catch {
       // stream/heartbeat will surface a persistent failure; ignore transient
     }
   }, [setBuffer]);
 
-  // Send the pending diff (serverBuffer → bufferRef) if idle; coalesces via a
-  // single in-flight op and re-flushes when the ack lands.
-  const flush = useCallback(() => {
-    const sid = sessionId.current;
-    if (sid === null || inFlight.current) return;
-    const change = diffToChange(serverBuffer.current, bufferRef.current);
-    if (change === null) return;
-    const sent = bufferRef.current;
-    inFlight.current = true;
-    sendOp(sid, version.current, [change])
-      .then(({ version: v }) => {
-        version.current = v;
-        serverBuffer.current = sent;
-        inFlight.current = false;
-        if (bufferRef.current !== serverBuffer.current) flush();
-      })
-      .catch((err) => {
-        inFlight.current = false;
-        if (err instanceof ApiError && err.status === 409) void resync();
-      });
+  // Drainable op sender: while the local buffer is ahead of the server, send
+  // the diff and await the ack, looping until caught up. Only one pump runs at
+  // a time; `pump()` returns the in-flight run's promise, so `save` can await it
+  // to guarantee every keystroke reached the server before checkpointing.
+  const pump = useCallback((): Promise<void> => {
+    if (pumpPromise.current) return pumpPromise.current;
+    if (sessionId.current === null) return Promise.resolve();
+    const run = (async () => {
+      try {
+        while (sessionId.current !== null) {
+          const change = diffToChange(serverBuffer.current, bufferRef.current);
+          if (change === null) return; // caught up
+          const sent = bufferRef.current;
+          try {
+            const { version: v } = await sendOp(
+              sessionId.current,
+              version.current,
+              [change],
+            );
+            version.current = v;
+            serverBuffer.current = sent;
+          } catch (err) {
+            if (err instanceof ApiError && err.status === 409) await resync();
+            return; // stop this drain; a resync (or transient failure) handled it
+          }
+        }
+      } finally {
+        pumpPromise.current = null;
+      }
+    })();
+    pumpPromise.current = run;
+    return run;
   }, [resync]);
 
   const scheduleFlush = useCallback(() => {
     if (flushTimer.current) clearTimeout(flushTimer.current);
-    flushTimer.current = setTimeout(flush, FLUSH_DELAY_MS);
-  }, [flush]);
+    flushTimer.current = setTimeout(() => void pump(), FLUSH_DELAY_MS);
+  }, [pump]);
 
   const onChange = useCallback(
     (next: string) => {
@@ -127,10 +137,15 @@ export function useCoeditSession(opts: {
         return;
       }
       if (frame.type === "op") {
-        if (frame.author === myUserId) return; // our own echo, already applied
+        // Skip our own echo — but only when we actually have an id, else a
+        // null-authored server op would be dropped when myUserId is unresolved.
+        if (myUserId !== null && frame.author === myUserId) return;
         // Only splice when we're fully caught up (no unsent local edits and no
-        // op in flight); otherwise re-fetch to avoid applying at stale offsets.
-        if (inFlight.current || bufferRef.current !== serverBuffer.current) {
+        // op draining); otherwise re-fetch to avoid applying at stale offsets.
+        if (
+          pumpPromise.current !== null ||
+          bufferRef.current !== serverBuffer.current
+        ) {
           void resync();
           return;
         }
@@ -161,18 +176,21 @@ export function useCoeditSession(opts: {
   const save = useCallback(async () => {
     const sid = sessionId.current;
     if (sid === null) return;
-    // Flush any tail edit synchronously-ish before committing, then checkpoint.
+    // Drain pending edits before committing so a keystroke typed inside the
+    // debounce window still reaches git. Cancel the timer, then await the pump
+    // (kicking one for the tail diff) so the server has the full buffer.
     if (flushTimer.current) {
       clearTimeout(flushTimer.current);
       flushTimer.current = null;
     }
+    await pump();
     try {
       await checkpointSession(sid);
     } finally {
       stop();
       onEnd?.();
     }
-  }, [stop, onEnd]);
+  }, [pump, stop, onEnd]);
 
   const discard = useCallback(async () => {
     const sid = sessionId.current;
@@ -195,7 +213,6 @@ export function useCoeditSession(opts: {
   // Join + stream while enabled; leave on disable/unmount.
   useEffect(() => {
     if (!enabled) return;
-    endedRef.current = false;
     const ctrl = new AbortController();
     abort.current = ctrl;
     let cancelled = false;
