@@ -1885,7 +1885,7 @@ function FileViewer({ path }: { path: string }) {
     setError(null);
     try {
       const full = await getTemplate(template.id);
-      coedit.onChange(full.body);
+      coedit.setDoc(full.body);
       setAppliedTemplateBody(full.body);
       setAppliedTemplateId(template.id);
       await setDraftTemplate(path, template.id);
@@ -1898,7 +1898,7 @@ function FileViewer({ path }: { path: string }) {
   }
 
   async function onPickBlank() {
-    coedit.onChange("");
+    coedit.setDoc("");
     setAppliedTemplateBody(null);
     setAppliedTemplateId(null);
     setError(null);
@@ -2094,13 +2094,25 @@ function FileViewer({ path }: { path: string }) {
                         />
                       );
                     })()}
-                    <CoeditEditor
-                      value={coedit.buffer}
-                      onChange={coedit.onChange}
-                      onSelectionChange={coedit.reportSelection}
-                      peers={coedit.peers}
-                      placeholder="Start typing, or pick a template above…"
-                    />
+                    {coedit.session ? (
+                      <CoeditEditor
+                        key={coedit.session.id}
+                        session={coedit.session}
+                        peers={coedit.peers}
+                        onSelectionChange={coedit.reportSelection}
+                        onServerFrame={coedit.onServerFrame}
+                        reportDoc={coedit.reportDoc}
+                        registerFlush={coedit.registerFlush}
+                        registerSetDoc={coedit.registerSetDoc}
+                        placeholder="Start typing, or pick a template above…"
+                      />
+                    ) : (
+                      // Joining the session; the editor mounts once we have its
+                      // start version + doc.
+                      <div className="flex min-h-0 flex-1 items-center justify-center text-[13px] text-(--text-03)">
+                        Connecting…
+                      </div>
+                    )}
                   </>
                 ) : (
                   <div className="flex min-h-0 flex-1 overflow-hidden">

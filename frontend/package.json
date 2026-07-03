@@ -13,6 +13,7 @@
     "format:check": "prettier --check src/"
   },
   "dependencies": {
+    "@codemirror/collab": "^6",
     "@codemirror/commands": "^6",
     "@codemirror/lang-markdown": "^6",
     "@codemirror/state": "^6",
