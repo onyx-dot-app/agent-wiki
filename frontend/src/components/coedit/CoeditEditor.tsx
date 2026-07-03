@@ -245,6 +245,8 @@ export function CoeditEditor({
     let v: EditorView;
     const pushing = { current: false };
     const applyingRemote = { current: false };
+    const pullPromise = { current: null as Promise<void> | null };
+    const pullQueued = { current: false };
 
     const dispatchRemote = (spec: Parameters<EditorView["dispatch"]>[0]) => {
       applyingRemote.current = true;
@@ -281,23 +283,42 @@ export function CoeditEditor({
       if (sendableUpdates(v.state).length > 0) await doPush();
     };
 
-    const pull = async (): Promise<void> => {
-      const synced = getSyncedVersion(v.state);
-      let data;
-      try {
-        data = await getOps(session.id, synced);
-      } catch {
-        return; // transient; a later trigger retries
+    // Single-flight: overlapping pulls would both anchor at the same synced
+    // version and re-apply the same ops (duplicate insertions). A concurrent
+    // caller gets the in-flight promise (so a 409 `await pull()` waits for the
+    // real result); a gap that arrives mid-pull queues one more run.
+    const pull = (): Promise<void> => {
+      if (pullPromise.current) {
+        pullQueued.current = true;
+        return pullPromise.current;
       }
-      if (data.ops.length === 0) return;
-      let len = syncedDocLength(v.state);
-      const updates = data.ops.map((o) => {
-        const cs = ChangeSet.of(o.changes, len);
-        len = cs.newLength;
-        return { changes: cs, clientID: o.client_id ?? "" };
+      const run = (async () => {
+        const synced = getSyncedVersion(v.state);
+        let data;
+        try {
+          data = await getOps(session.id, synced);
+        } catch {
+          return; // transient; a later trigger retries
+        }
+        if (data.ops.length === 0) return;
+        let len = syncedDocLength(v.state);
+        const updates = data.ops.map((o) => {
+          const cs = ChangeSet.of(o.changes, len);
+          len = cs.newLength;
+          return { changes: cs, clientID: o.client_id ?? "" };
+        });
+        dispatchRemote(receiveUpdates(v.state, updates));
+        if (sendableUpdates(v.state).length > 0) void doPush();
+      })();
+      pullPromise.current = run;
+      void run.finally(() => {
+        pullPromise.current = null;
+        if (pullQueued.current) {
+          pullQueued.current = false;
+          void pull();
+        }
       });
-      dispatchRemote(receiveUpdates(v.state, updates));
-      if (sendableUpdates(v.state).length > 0) void doPush();
+      return run;
     };
 
     const applyFrame = (frame: CoeditFrame): void => {
@@ -356,6 +377,14 @@ export function CoeditEditor({
     onServerFrame(applyFrame);
     registerFlush(async () => {
       await doPush();
+      // doPush swallows transient (non-409) failures, leaving ops un-acked. If
+      // any remain, the flush didn't reach the server — surface it so save()
+      // doesn't checkpoint a stale buffer and silently drop edits.
+      if (sendableUpdates(v.state).length > 0) {
+        throw new Error(
+          "Could not sync your latest edits — check your connection.",
+        );
+      }
     });
     registerSetDoc((text: string) => {
       v.dispatch({

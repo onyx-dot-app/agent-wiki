@@ -241,12 +241,10 @@ export function useCoeditSession(opts: {
     const sid = sessionId.current;
     if (sid === null) return;
     // Flush the editor's un-acked ops so every keystroke reaches the server
-    // before we checkpoint the buffer to git.
-    try {
-      await flushFn.current?.();
-    } catch {
-      // best-effort; the checkpoint commits whatever the server has
-    }
+    // before we checkpoint the buffer to git. If the flush fails (network),
+    // let it throw: don't checkpoint a stale buffer or leave the session —
+    // the caller surfaces the error and the user stays in the editor to retry.
+    await flushFn.current?.();
     try {
       await checkpointSession(sid);
     } finally {
