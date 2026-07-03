@@ -30,6 +30,10 @@ class OpRequest(BaseModel):
     # malformed op is a 400 (the app's RequestValidationError handler) before it
     # reaches the repo.
     changes: list[Change]
+    # Opaque per-connection id (one editor tab). Lets a collaborative client
+    # recognize its own op when it echoes back. Optional — non-collab clients
+    # omit it.
+    client_id: str | None = None
 
 
 class OpResponse(BaseModel):
@@ -69,6 +73,7 @@ class Operation(BaseModel):
 
     version: int  # the new buffer version after this operation applies (coedit_ops.seq)
     author: str  # author_user_id
+    client_id: str | None  # originating connection (collab); None for non-collab ops
     changes: list[Change]
 
 

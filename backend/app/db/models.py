@@ -972,6 +972,11 @@ class CoeditOp(Base):
         Text, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
     base_version: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    # Opaque per-connection id (one editor tab), distinct from author_user_id
+    # (a user with two tabs shares one user id). Lets a collaborative client
+    # tell its own echoed op from a peer's — confirm vs. rebase. Nullable:
+    # non-collab writers (or older clients) don't set it.
+    client_id: Mapped[str | None] = mapped_column(Text)
     op_payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     created_at: Mapped[str] = mapped_column(
         Text, nullable=False, server_default=_NOW_TEXT_DEFAULT

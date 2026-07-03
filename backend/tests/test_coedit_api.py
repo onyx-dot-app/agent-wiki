@@ -318,3 +318,31 @@ def test_ops_404_when_no_active_session(client):
     uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
     login_fastapi(client, uid)
     assert client.get("/api/coedit/ops?session_id=99999&since_version=0").status_code == 404
+
+
+def test_op_client_id_round_trips_to_ops(client):
+    uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
+    login_fastapi(client, uid)
+    _seed_page("abc\n")
+    sid = client.post("/api/coedit/join", json={"path": _PATH}).json()["session_id"]
+    # Op tagged with a per-connection client id.
+    resp = client.post(
+        "/api/coedit/op",
+        json={
+            "session_id": sid,
+            "base_version": 0,
+            "changes": [{"from": 0, "to": 0, "insert": "X"}],
+            "client_id": "cli_abc",
+        },
+    )
+    assert resp.status_code == 200
+    op = client.get(f"/api/coedit/ops?session_id={sid}&since_version=0").json()["ops"][0]
+    assert op["client_id"] == "cli_abc"
+
+    # Omitting client_id (non-collab client) is fine — it's null.
+    client.post(
+        "/api/coedit/op",
+        json={"session_id": sid, "base_version": 1, "changes": [{"from": 0, "to": 0, "insert": "Y"}]},
+    )
+    ops = client.get(f"/api/coedit/ops?session_id={sid}&since_version=1").json()["ops"]
+    assert ops[0]["client_id"] is None

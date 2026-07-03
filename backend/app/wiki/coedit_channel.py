@@ -176,6 +176,7 @@ def broadcast_op(
     version: int,
     changes: list[Change],
     author_user_id: str,
+    client_id: str | None = None,
 ) -> None:
     """Broadcast an applied edit op to the session's other connections.
 
@@ -183,6 +184,9 @@ def broadcast_op(
     the serialized payload would exceed the bus's NOTIFY cap (a large paste),
     fall back to a ``resync`` signal — peers re-fetch the buffer via
     ``GET /coedit/session`` instead of us dropping the update.
+
+    ``client_id`` (the originating connection) rides along so a collaborative
+    client can tell its own echoed op from a peer's.
     """
     frame: Frame = {
         "type": "op",
@@ -190,6 +194,7 @@ def broadcast_op(
         "version": version,
         "changes": [c.model_dump(by_alias=True) for c in changes],
         "author": author_user_id,
+        "client_id": client_id,
     }
     if not bus.payload_fits(_bus_payload(coedit_session_id, frame)):
         frame = {"type": "resync", "session_id": coedit_session_id, "version": version}
