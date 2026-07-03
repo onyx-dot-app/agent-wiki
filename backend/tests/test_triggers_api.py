@@ -7,11 +7,14 @@ from fastapi.testclient import TestClient
 from app.main import create_app
 
 from tests._auth import login_fastapi
-from tests._seed import seed_user
+from tests._seed import seed_docs, seed_user
 
 
 @pytest.fixture
 def client(tmp_repo):
+    seed_docs(
+        "a.md", "b.md", "projects/foo.md", "private/secret.md", "public.md", "fun_poem.md"
+    )
     return TestClient(create_app())
 
 
@@ -403,3 +406,21 @@ def test_list_destinations_returns_event_log(client):
     event_log = next(d for d in body["destinations"] if d["id"] == "event_log")
     assert event_log["name"]
     assert event_log["description"]
+
+
+def test_create_rejects_nonexistent_scope_with_hint(client):
+    """A typo'd scope (space for underscore) is rejected at authoring time
+    with the real path suggested."""
+    uid = seed_user(email="hint@x.com")
+    login_fastapi(client, uid)
+    r = client.post(
+        "/api/triggers",
+        json={
+            "scope_path": "fun poem.md",
+            "nl_description": "always",
+            "actions": [{"destination_config_id": None, "message": "hi"}],
+        },
+    )
+    assert r.status_code == 400
+    assert "does not exist" in r.json()["error"]
+    assert "fun_poem.md" in r.json()["error"]

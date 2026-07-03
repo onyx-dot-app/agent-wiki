@@ -7,12 +7,13 @@ from __future__ import annotations
 
 import pytest
 
-from tests._seed import seed_user
+from tests._seed import seed_docs, seed_user
 
 
 @pytest.fixture
 def as_user(tmp_repo, monkeypatch):
     """Seed a user and stub current_user so the tool handlers see them."""
+    seed_docs("a.md", "b.md", "guide.md", "public.md", "private/secret.md")
     uid = seed_user(email="u@x.com")
 
     class FakeUser:

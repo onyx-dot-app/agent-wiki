@@ -29,7 +29,9 @@ def normalize_scope_path(raw: str) -> str:
 
     Triggers accept a leading slash for "the whole wiki" — the rest of the
     wiki tooling represents that as the empty string, so we collapse to
-    ``""`` here before handing off to ``filesystem.safe_rel_path``.
+    ``""`` here before handing off to ``filesystem.safe_rel_path``. The scope
+    must exist in the wiki: payloads are built from the docs under it, so a
+    typo'd scope would fire against nothing.
     """
     stripped = raw.strip()
     if stripped in ("", "/"):
@@ -38,7 +40,33 @@ def normalize_scope_path(raw: str) -> str:
         stripped = stripped.lstrip("/")
         if stripped == "":
             return ""
-    return filesystem.safe_rel_path(stripped)
+    scope = filesystem.safe_rel_path(stripped)
+
+    paths = wiki_git.list_paths()
+    if scope.endswith(".md"):
+        if scope in paths:
+            return scope
+    elif any(p.startswith(scope.rstrip("/") + "/") for p in paths):
+        return scope
+
+    hint = _nearest_path(scope, paths)
+    suffix = f" — did you mean {hint!r}?" if hint else ""
+    raise ValueError(f"scope path {scope!r} does not exist in the wiki{suffix}")
+
+
+def _nearest_path(scope: str, paths: list[str]) -> str | None:
+    """A tracked path whose letters match ``scope`` ignoring case and
+    separators — catches the space-vs-underscore class of typo."""
+    def key(s: str) -> str:
+        return "".join(ch for ch in s.casefold() if ch.isalnum())
+
+    want = key(scope)
+    if not want:
+        return None
+    for p in paths:
+        if p.endswith(".md") and key(p) == want:
+            return p
+    return None
 
 
 def compute_path(*, scope_path: str, trigger_id: str) -> str:
