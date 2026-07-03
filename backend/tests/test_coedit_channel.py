@@ -59,7 +59,7 @@ def _change(frm: int, to: int, insert: str) -> coedit.Change:
 def test_broadcast_op_delivers_op_frame():
     coedit_channel.reset_for_tests()
     conn = coedit_channel.connect(4, "usr_a")
-    coedit_channel.broadcast_op(4, 3, [_change(0, 1, "x")], "usr_a")
+    coedit_channel.broadcast_op(4, 3, [_change(0, 1, "x")], "usr_a", client_id="cli_1")
     frame = coedit_channel.drain(conn.queue, 0.5)
     assert frame == {
         "type": "op",
@@ -67,6 +67,7 @@ def test_broadcast_op_delivers_op_frame():
         "version": 3,
         "changes": [{"from": 0, "to": 1, "insert": "x"}],
         "author": "usr_a",
+        "client_id": "cli_1",
     }
 
 

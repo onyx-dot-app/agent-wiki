@@ -234,6 +234,7 @@ class OpRow(BaseModel):
 
     seq: int  # the session version this op produced
     author_user_id: str
+    client_id: str | None  # the connection that produced it (collab); may be None
     base_version: int
     changes: list[dict[str, Any]]
     created_at: str
@@ -352,6 +353,7 @@ def apply_op(
     base_version: int,
     changes: list[Change],
     author_user_id: str,
+    client_id: str | None = None,
 ) -> SessionRow | None:
     """Apply an edit op to the buffer and log it, atomically.
 
@@ -397,6 +399,7 @@ def apply_op(
                 seq=new_version,
                 author_user_id=author_user_id,
                 base_version=base_version,
+                client_id=client_id,
                 op_payload={"changes": [c.model_dump(by_alias=True) for c in changes]},
             )
         )
@@ -436,6 +439,7 @@ def ops_since_with_head(session_id: int, after_version: int) -> OpsSince:
                 OpRow(
                     seq=o.seq,
                     author_user_id=o.author_user_id,
+                    client_id=o.client_id,
                     base_version=o.base_version,
                     changes=list(o.op_payload.get("changes", [])),
                     created_at=o.created_at,

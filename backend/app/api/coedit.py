@@ -119,13 +119,16 @@ def op(req: OpRequest, user: User = Depends(require_user)) -> OpResponse:
             base_version=req.base_version,
             changes=req.changes,
             author_user_id=user.id,
+            client_id=req.client_id,
         )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
     if out is None:
         raise HTTPException(status_code=409, detail="stale base_version; re-sync and retry")
     coedit.touch(req.session_id, user.id)
-    coedit_channel.broadcast_op(req.session_id, out.version, req.changes, user.id)
+    coedit_channel.broadcast_op(
+        req.session_id, out.version, req.changes, user.id, client_id=req.client_id
+    )
     return OpResponse(version=out.version)
 
 
@@ -197,6 +200,7 @@ def ops(
             Operation(
                 version=r.seq,
                 author=r.author_user_id,
+                client_id=r.client_id,
                 changes=[coedit.Change.model_validate(c) for c in r.changes],
             )
             for r in result.ops
