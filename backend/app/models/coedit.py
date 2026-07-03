@@ -32,8 +32,9 @@ class OpRequest(BaseModel):
     changes: list[Change]
     # Opaque per-connection id (one editor tab). Lets a collaborative client
     # recognize its own op when it echoes back. Optional — non-collab clients
-    # omit it.
-    client_id: str | None = None
+    # omit it. Bounded: it's a UUID/tab id, and it's persisted + echoed to every
+    # participant, so cap it to keep a client from bloating the log / bus.
+    client_id: str | None = Field(default=None, max_length=256)
 
 
 class OpResponse(BaseModel):

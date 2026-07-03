@@ -340,9 +340,10 @@ def test_op_client_id_round_trips_to_ops(client):
     assert op["client_id"] == "cli_abc"
 
     # Omitting client_id (non-collab client) is fine — it's null.
-    client.post(
+    resp2 = client.post(
         "/api/coedit/op",
         json={"session_id": sid, "base_version": 1, "changes": [{"from": 0, "to": 0, "insert": "Y"}]},
     )
+    assert resp2.status_code == 200
     ops = client.get(f"/api/coedit/ops?session_id={sid}&since_version=1").json()["ops"]
     assert ops[0]["client_id"] is None
