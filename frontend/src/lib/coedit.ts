@@ -53,6 +53,7 @@ export type CoeditFrame =
       version: number;
       changes: CoeditChange[];
       author: string | null;
+      client_id: string | null;
     }
   | {
       type: "cursor";
@@ -84,11 +85,14 @@ export function leaveSession(sessionId: number): Promise<void> {
 }
 
 /** Apply an edit op. Resolves to the new version, or throws `ApiError` with
- * status 409 when `baseVersion` is stale (caller re-syncs via `getSession`). */
+ * status 409 when `baseVersion` is stale (caller rebases the missed ops from
+ * `getOps` and retries). `clientId` tags the op so the sender can recognize its
+ * own echo. */
 export function sendOp(
   sessionId: number,
   baseVersion: number,
   changes: CoeditChange[],
+  clientId?: string,
 ): Promise<{ version: number }> {
   return apiFetch("/coedit/op", {
     method: "POST",
@@ -96,6 +100,7 @@ export function sendOp(
       session_id: sessionId,
       base_version: baseVersion,
       changes,
+      ...(clientId ? { client_id: clientId } : {}),
     }),
   });
 }
@@ -119,6 +124,31 @@ export function checkpointSession(
     method: "POST",
     body: JSON.stringify({ session_id: sessionId }),
   });
+}
+
+/** One logged operation (one version bump) — mirrors the SSE `op` frame. */
+export interface CoeditOperation {
+  version: number;
+  author: string;
+  client_id: string | null;
+  changes: CoeditChange[];
+}
+
+/** Ops after `since_version` (oldest first) + the current head version. Used to
+ * rebase un-acked local edits after a stale op / gap (`GET /coedit/ops`). */
+export interface CoeditOps {
+  session_id: number;
+  current_head_version: number;
+  ops: CoeditOperation[];
+}
+
+export function getOps(
+  sessionId: number,
+  sinceVersion: number,
+): Promise<CoeditOps> {
+  return apiFetch(
+    `/coedit/ops?session_id=${sessionId}&since_version=${sinceVersion}`,
+  );
 }
 
 /** Open the SSE stream; `onFrame` fires per frame until `signal` aborts (or the
