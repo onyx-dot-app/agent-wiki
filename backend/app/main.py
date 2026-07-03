@@ -33,6 +33,7 @@ from app.api import (
     craft,
     documents,
     wiki,
+    email_verify,
     events,
     health,
     installer,
@@ -223,6 +224,7 @@ def create_app() -> FastAPI:
     app.include_router(mcp_connections.router, prefix="/api/mcp/connections")
     app.include_router(mcp_tokens.router, prefix="/api/mcp/tokens")
     app.include_router(webhooks.router, prefix="/api/webhooks")
+    app.include_router(email_verify.router, prefix="/api/email")
     app.include_router(admin.router, prefix="/api/admin")
     app.include_router(templates.admin_router, prefix="/api/admin/templates")
     app.include_router(templates.router, prefix="/api/templates")

@@ -40,10 +40,13 @@ import logging
 from typing import Any, cast
 
 from datetime import datetime, timezone
+from urllib.parse import quote
 
 from sqlalchemy import select
 
+from app.config import CONFIG
 from app.db.models import Event, User
+from app.email import service as email_service
 from app.db.session import session
 from app.slack import client as slack_client
 from app.slack import connections as slack_connections
@@ -396,11 +399,55 @@ def _record_fire(
             doc_path=doc_path,
             rendered_message=rendered_message,
         )
+    elif dtype == destinations_repo.EMAIL_ID:
+        _dispatch_to_email(
+            trigger=trigger,
+            config=config,
+            doc_path=doc_path,
+            rendered_message=rendered_message,
+        )
     else:
         log.warning(
             "trigger %s destination type %r has no outbound dispatcher; recorded to events only",
             trigger.id, dtype,
         )
+
+
+def _dispatch_to_email(
+    *, trigger: TriggerRecord, config: dict[str, object], doc_path: str, rendered_message: str
+) -> None:
+    """Deliver a fire's rendered message to the config's verified address.
+
+    Unverified addresses are skipped — verification is what stops the wiki
+    being used to mail strangers. Failures are logged and swallowed: the
+    fire is already recorded in the events table.
+    """
+    if not rendered_message.strip():
+        log.info("trigger %s email dispatch skipped: empty message", trigger.id)
+        return
+    if not config.get("verified_at"):
+        log.info(
+            "trigger %s email config %s unverified; recorded to events only",
+            trigger.id, config["id"],
+        )
+        return
+    address = str(cast("dict[str, Any]", config.get("config") or {}).get("address") or "")
+    if not address:
+        log.warning("trigger %s email config %s has no address", trigger.id, config["id"])
+        return
+    doc_link = f"{CONFIG.public_base_url}/app/wiki/{quote(doc_path)}"
+    text = (
+        f"{rendered_message}\n\n— Agent Wiki trigger on {doc_path}\n{doc_link}"
+    )
+    try:
+        email_service.send(
+            to=address,
+            subject=f"Agent Wiki: {doc_path}",
+            text=text,
+        )
+        log.info("trigger %s dispatched to email config %s", trigger.id, config["id"])
+    except email_service.EmailSendError:
+        log.exception("trigger %s email dispatch failed", trigger.id)
 
 
 def _dispatch_to_slack(

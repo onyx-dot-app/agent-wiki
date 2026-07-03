@@ -8,7 +8,13 @@ import {
   Popover,
   PopoverMenu,
 } from "@onyx-ai/opal/components";
-import { SvgBubbleText, SvgCheck, SvgHash, SvgUser } from "@onyx-ai/opal/icons";
+import {
+  SvgBubbleText,
+  SvgCheck,
+  SvgHash,
+  SvgMail,
+  SvgUser,
+} from "@onyx-ai/opal/icons";
 
 import {
   ensureSlackDestination,
@@ -30,6 +36,9 @@ interface Props {
   /** Called with the picked config id (null = event log). Channel and DM picks
    * find-or-create their destination config first. */
   onPick: (configId: string | null) => void | Promise<void>;
+  /** When set, an "Email…" option closes the picker and defers to the caller,
+   * which owns the address input rendered beneath its trigger control. */
+  onPickEmail?: () => void;
   onError: (message: string) => void;
 }
 
@@ -41,6 +50,7 @@ export function SlackDestinationPicker({
   connected,
   disabled,
   onPick,
+  onPickEmail,
   onError,
 }: Props) {
   const [open, setOpen] = useState(false);
@@ -122,7 +132,7 @@ export function SlackDestinationPicker({
           <InputTypeIn
             searchIcon
             variant="internal"
-            placeholder="Search channels…"
+            placeholder="Search…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -142,8 +152,14 @@ export function SlackDestinationPicker({
           {filteredConfigs.map((c) => (
             <LineItemButton
               key={c.id}
-              icon={c.config.dm ? SvgUser : SvgHash}
-              title={c.name}
+              icon={
+                c.type === "email" ? SvgMail : c.config.dm ? SvgUser : SvgHash
+              }
+              title={
+                c.type === "email" && !c.verified_at
+                  ? `${c.name} (unverified)`
+                  : c.name
+              }
               sizePreset="main-ui"
               variant="body"
               state={value === c.id ? "selected" : "empty"}
@@ -162,6 +178,20 @@ export function SlackDestinationPicker({
               state="empty"
               onClick={() => {
                 if (!busy) void pickDm();
+              }}
+            />
+          )}
+          {onPickEmail && (
+            <LineItemButton
+              icon={SvgMail}
+              title="Email…"
+              sizePreset="main-ui"
+              variant="body"
+              state="empty"
+              onClick={() => {
+                setOpen(false);
+                setSearch("");
+                onPickEmail();
               }}
             />
           )}

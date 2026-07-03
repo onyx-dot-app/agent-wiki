@@ -87,6 +87,15 @@ def create(
         address = ((config or {}).get("address") or "")
         if not isinstance(address, str) or "@" not in address.strip():
             raise ValueError("an email destination needs config.address")
+        # Idempotent per address: re-adding returns the existing row instead
+        # of minting a duplicate (and a duplicate verification email).
+        normalized = address.strip().lower()
+        for existing in list_for_user(user_id):
+            if (
+                existing["type"] == destinations.EMAIL_ID
+                and str(existing["config"].get("address") or "").lower() == normalized
+            ):
+                return existing
 
     config_id = "dst_" + uuid.uuid4().hex[:12]
     created_at = _now_iso()

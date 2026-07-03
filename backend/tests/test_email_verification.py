@@ -35,6 +35,18 @@ def test_create_returns_unverified(tmp_db):
     assert row["verified_at"] is None
 
 
+def test_create_same_address_is_idempotent(tmp_db):
+    seed_user("usr_1")
+    first = dest_configs.create(
+        "usr_1", type="email", name="Me", config={"address": "nik@example.com"}
+    )
+    again = dest_configs.create(
+        "usr_1", type="email", name="Dup", config={"address": "NIK@example.com"}
+    )
+    assert again["id"] == first["id"]
+    assert len(dest_configs.list_for_user("usr_1")) == 1
+
+
 def test_email_config_requires_address(tmp_db):
     seed_user("usr_1")
     with pytest.raises(ValueError, match="address"):
@@ -43,29 +55,34 @@ def test_email_config_requires_address(tmp_db):
         dest_configs.create("usr_1", type="email", name="Bad", config={"address": "not-an-email"})
 
 
+def _age_token(token: str, *, seconds: int) -> None:
+    past = (datetime.now(timezone.utc) - timedelta(seconds=seconds)).strftime("%Y-%m-%d %H:%M:%S")
+    with session() as s:
+        s.execute(
+            update(EmailVerificationToken)
+            .where(EmailVerificationToken.token == token)
+            .values(created_at=past)
+        )
+
+
 def test_verify_stamps_config_and_is_single_use(tmp_db):
     seed_user("usr_1")
     cfg_id = _email_config()
     assert _get(cfg_id)["verified_at"] is None
 
     token = email_verification.mint_token(cfg_id)
-    assert email_verification.verify(token, owner_user_id="usr_1") == cfg_id
+    assert email_verification.verify(token) == cfg_id
     assert _get(cfg_id)["verified_at"] is not None
 
     # Replay is rejected.
-    assert email_verification.verify(token, owner_user_id="usr_1") is None
+    assert email_verification.verify(token) is None
 
 
-def test_verify_rejects_foreign_owner_and_garbage(tmp_db):
+def test_verify_rejects_garbage(tmp_db):
     seed_user("usr_1")
-    seed_user("usr_2", email="two@x.com")
-    cfg_id = _email_config()
-    token = email_verification.mint_token(cfg_id)
-    assert email_verification.verify(token, owner_user_id="usr_2") is None
-    assert email_verification.verify("not-a-token", owner_user_id="usr_1") is None
-    # A foreign attempt must not burn the token: the real owner still verifies.
-    assert email_verification.verify(token, owner_user_id="usr_1") == cfg_id
-    assert _get(cfg_id)["verified_at"] is not None
+    _email_config()
+    assert email_verification.verify("not-a-token") is None
+    assert email_verification.verify("") is None
 
 
 def test_verify_rejects_expired_token(tmp_db):
@@ -79,13 +96,16 @@ def test_verify_rejects_expired_token(tmp_db):
             .where(EmailVerificationToken.token == token)
             .values(expires_at=past)
         )
-    assert email_verification.verify(token, owner_user_id="usr_1") is None
+    assert email_verification.verify(token) is None
     assert _get(cfg_id)["verified_at"] is None
 
 
-def test_remint_invalidates_prior_token(tmp_db):
+def test_mint_is_rate_limited_then_remint_invalidates_prior(tmp_db):
     seed_user("usr_1")
     cfg_id = _email_config()
     first = email_verification.mint_token(cfg_id)
+    with pytest.raises(email_verification.MintRateLimitedError):
+        email_verification.mint_token(cfg_id)
+    _age_token(first, seconds=120)
     email_verification.mint_token(cfg_id)
-    assert email_verification.verify(first, owner_user_id="usr_1") is None
+    assert email_verification.verify(first) is None
