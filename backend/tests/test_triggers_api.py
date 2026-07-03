@@ -426,6 +426,27 @@ def test_create_rejects_near_miss_scope_with_hint(client):
     assert "fun_poem.md" in r.json()["error"]
 
 
+def test_near_miss_hint_never_reveals_unreadable_docs(client):
+    """A near-miss against a doc the caller can't read behaves exactly like
+    a nonexistent scope — no rejection, no hint — so the error can't be used
+    as an existence oracle for private paths."""
+    owner = seed_user(uid="usr_own", email="own@x.com")
+    _lock_path_to(owner, "private/secret.md")
+
+    probe = seed_user(uid="usr_probe", email="probe@x.com")
+    login_fastapi(client, probe)
+    r = client.post(
+        "/api/triggers",
+        json={
+            "scope_path": "private/secret md",
+            "nl_description": "always",
+            "actions": [{"destination_config_id": None, "message": "hi"}],
+        },
+    )
+    assert r.status_code == 201, r.text
+    assert "secret.md" not in (r.json()["scope_warning"] or "")
+
+
 def test_create_allows_not_yet_created_scope_with_warning(client):
     """Watching a path for creation is supported: no near-miss means the
     trigger is created, carrying a warning that the doc doesn't exist yet."""

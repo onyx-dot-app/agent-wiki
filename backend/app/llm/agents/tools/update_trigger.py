@@ -36,7 +36,7 @@ def handle(args: dict[str, Any]) -> Any:
         if not isinstance(raw, str):
             return {"error": "scope_path must be a string"}
         try:
-            scope = triggers_storage.normalize_scope_path(raw)
+            scope = triggers_storage.normalize_scope_path(raw, reader=user)
         except ValueError as exc:
             return {"error": f"invalid scope_path: {exc}"}
         kwargs["scope_path"] = scope

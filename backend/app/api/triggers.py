@@ -56,10 +56,10 @@ def _config_view(row: dict[str, Any]) -> DestinationConfigView:
     )
 
 
-def _normalize_scope_path(raw: str) -> str:
+def _normalize_scope_path(raw: str, user: User) -> str:
     if not raw.strip():
         raise ValueError("scope_path is required")
-    return triggers_storage.normalize_scope_path(raw)
+    return triggers_storage.normalize_scope_path(raw, reader=user)
 
 
 def _to_view(row: dict[str, Any]) -> TriggerView:
@@ -176,7 +176,7 @@ def create_trigger(
     req: CreateTriggerRequest, user: User = Depends(require_user),
 ) -> TriggerView:
     try:
-        scope_path = _normalize_scope_path(req.scope_path)
+        scope_path = _normalize_scope_path(req.scope_path, user)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -234,7 +234,7 @@ def update_trigger(
 
     if "scope_path" in sent_fields:
         try:
-            kwargs["scope_path"] = _normalize_scope_path(req.scope_path or "")
+            kwargs["scope_path"] = _normalize_scope_path(req.scope_path or "", user)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 

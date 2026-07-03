@@ -16,7 +16,7 @@ from typing import Any, cast
 
 import yaml
 
-from app.wiki import filesystem, git as wiki_git
+from app.wiki import acl as wiki_acl, filesystem, git as wiki_git
 
 
 def kind_of_scope(scope_path: str) -> str:
@@ -24,7 +24,7 @@ def kind_of_scope(scope_path: str) -> str:
     return "doc" if scope_path.endswith(".md") else "dir"
 
 
-def normalize_scope_path(raw: str) -> str:
+def normalize_scope_path(raw: str, *, reader: Any | None = None) -> str:
     """Validate a trigger scope path. Treats ``/`` and ``""`` as the wiki root.
 
     Triggers accept a leading slash for "the whole wiki" — the rest of the
@@ -34,8 +34,12 @@ def normalize_scope_path(raw: str) -> str:
     A scope that doesn't exist yet is allowed — watching a path for creation
     is a supported flow — but a scope that near-misses an existing doc
     (same letters, different separators or case) is a typo that would fire
-    against nothing, so it is rejected with the real path suggested. Callers
-    can pair this with ``scope_exists`` to warn on not-yet-created scopes.
+    against nothing, so it is rejected with the real path suggested. The
+    hint is only offered when ``reader`` (an object with ``id`` and
+    ``is_admin``) can read the near-miss: an unreadable doc must behave
+    exactly like a nonexistent one, or the error becomes an existence oracle
+    for private paths. Callers can pair this with ``scope_exists`` to warn
+    on not-yet-created scopes.
     """
     stripped = raw.strip()
     if stripped in ("", "/"):
@@ -46,9 +50,13 @@ def normalize_scope_path(raw: str) -> str:
             return ""
     scope = filesystem.safe_rel_path(stripped)
 
-    if not scope_exists(scope):
+    if reader is not None and not scope_exists(scope):
         hint = _nearest_path(scope, wiki_git.list_paths())
-        if hint is not None and hint != scope:
+        if (
+            hint is not None
+            and hint != scope
+            and wiki_acl.can(reader.id, reader.is_admin, "read", hint)
+        ):
             raise ValueError(
                 f"scope path {scope!r} does not exist in the wiki — did you mean {hint!r}?"
             )
