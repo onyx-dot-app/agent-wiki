@@ -42,4 +42,9 @@ def handle(args: dict[str, Any]) -> Any:
         )
     except ValueError as exc:
         return {"error": str(exc)}
-    return {"trigger": trigger}
+    result: dict[str, object] = {"trigger": trigger}
+    if not triggers_storage.scope_exists(scope):
+        result["scope_warning"] = (
+            f"{scope!r} does not exist yet; the trigger fires when it is created"
+        )
+    return result

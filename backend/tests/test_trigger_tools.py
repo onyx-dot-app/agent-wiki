@@ -39,6 +39,20 @@ def as_user(tmp_repo, monkeypatch):
 # --------------------------------------------------------------------------- #
 
 
+def test_create_trigger_warns_on_not_yet_created_scope(as_user):
+    from app.llm.agents.tools.create_trigger import handle
+
+    out = handle(
+        {
+            "scope_path": "roadmap/q3.md",
+            "trigger_nl_condition": "always",
+            "actions": [{"message": "hi"}],
+        }
+    )
+    assert "error" not in out, out
+    assert "does not exist yet" in out["scope_warning"]
+
+
 def test_create_trigger_requires_actions(as_user):
     from app.llm.agents.tools.create_trigger import handle
 

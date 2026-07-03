@@ -75,4 +75,9 @@ def handle(args: dict[str, Any]) -> Any:
         updated = triggers_repo.update(trigger_id, actor=wiki_utils.author_string(), **kwargs)
     except ValueError as exc:
         return {"error": str(exc)}
-    return {"trigger": updated}
+    result: dict[str, object] = {"trigger": updated}
+    if "scope_path" in kwargs and not triggers_storage.scope_exists(kwargs["scope_path"]):
+        result["scope_warning"] = (
+            f"{kwargs['scope_path']!r} does not exist yet; the trigger fires when it is created"
+        )
+    return result
