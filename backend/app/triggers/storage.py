@@ -29,9 +29,13 @@ def normalize_scope_path(raw: str) -> str:
 
     Triggers accept a leading slash for "the whole wiki" — the rest of the
     wiki tooling represents that as the empty string, so we collapse to
-    ``""`` here before handing off to ``filesystem.safe_rel_path``. The scope
-    must exist in the wiki: payloads are built from the docs under it, so a
-    typo'd scope would fire against nothing.
+    ``""`` here before handing off to ``filesystem.safe_rel_path``.
+
+    A scope that doesn't exist yet is allowed — watching a path for creation
+    is a supported flow — but a scope that near-misses an existing doc
+    (same letters, different separators or case) is a typo that would fire
+    against nothing, so it is rejected with the real path suggested. Callers
+    can pair this with ``scope_exists`` to warn on not-yet-created scopes.
     """
     stripped = raw.strip()
     if stripped in ("", "/"):
@@ -42,16 +46,24 @@ def normalize_scope_path(raw: str) -> str:
             return ""
     scope = filesystem.safe_rel_path(stripped)
 
+    if not scope_exists(scope):
+        hint = _nearest_path(scope, wiki_git.list_paths())
+        if hint is not None and hint != scope:
+            raise ValueError(
+                f"scope path {scope!r} does not exist in the wiki — did you mean {hint!r}?"
+            )
+    return scope
+
+
+def scope_exists(scope: str) -> bool:
+    """Whether the scope resolves to anything today: the wiki root, a tracked
+    ``.md`` doc, or a folder containing tracked docs."""
+    if not scope:
+        return True
     paths = wiki_git.list_paths()
     if scope.endswith(".md"):
-        if scope in paths:
-            return scope
-    elif any(p.startswith(scope.rstrip("/") + "/") for p in paths):
-        return scope
-
-    hint = _nearest_path(scope, paths)
-    suffix = f" — did you mean {hint!r}?" if hint else ""
-    raise ValueError(f"scope path {scope!r} does not exist in the wiki{suffix}")
+        return scope in paths
+    return any(p.startswith(scope.rstrip("/") + "/") for p in paths)
 
 
 def _nearest_path(scope: str, paths: list[str]) -> str | None:

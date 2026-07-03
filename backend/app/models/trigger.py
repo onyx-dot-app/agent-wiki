@@ -67,6 +67,8 @@ class TriggerView(BaseModel):
     """API view of a trigger row. ``actions`` comes from
     ``Trigger.action_json``. Schedule fields are only populated for
     ``kind="schedule"`` triggers."""
+    # Transient, set by create/update when the scope doesn't exist yet.
+    scope_warning: str | None = None
 
     id: str
     owner_user_id: str

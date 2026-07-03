@@ -408,7 +408,7 @@ def test_list_destinations_returns_event_log(client):
     assert event_log["description"]
 
 
-def test_create_rejects_nonexistent_scope_with_hint(client):
+def test_create_rejects_near_miss_scope_with_hint(client):
     """A typo'd scope (space for underscore) is rejected at authoring time
     with the real path suggested."""
     uid = seed_user(email="hint@x.com")
@@ -424,3 +424,33 @@ def test_create_rejects_nonexistent_scope_with_hint(client):
     assert r.status_code == 400
     assert "does not exist" in r.json()["error"]
     assert "fun_poem.md" in r.json()["error"]
+
+
+def test_create_allows_not_yet_created_scope_with_warning(client):
+    """Watching a path for creation is supported: no near-miss means the
+    trigger is created, carrying a warning that the doc doesn't exist yet."""
+    uid = seed_user(email="future@x.com")
+    login_fastapi(client, uid)
+    r = client.post(
+        "/api/triggers",
+        json={
+            "scope_path": "roadmap/q3.md",
+            "nl_description": "always",
+            "actions": [{"destination_config_id": None, "message": "hi"}],
+        },
+    )
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert "does not exist yet" in (body["scope_warning"] or "")
+
+    # Existing scopes carry no warning.
+    r2 = client.post(
+        "/api/triggers",
+        json={
+            "scope_path": "a.md",
+            "nl_description": "always",
+            "actions": [{"destination_config_id": None, "message": "hi"}],
+        },
+    )
+    assert r2.status_code == 201
+    assert r2.json()["scope_warning"] is None
