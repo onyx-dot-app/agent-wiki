@@ -3,8 +3,8 @@
 Adds a nullable per-connection client id to the co-edit op log, so a
 collaborative client can distinguish its own echoed op from a peer's.
 
-Revision ID: 0049
-Revises: 0048
+Revision ID: 0050
+Revises: 0049
 Create Date: 2026-07-03
 """
 from __future__ import annotations
@@ -14,8 +14,8 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "0049"
-down_revision: str | None = "0048"
+revision: str = "0050"
+down_revision: str | None = "0049"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
