@@ -408,9 +408,10 @@ def test_list_destinations_returns_event_log(client):
     assert event_log["description"]
 
 
-def test_create_rejects_near_miss_scope_with_hint(client):
-    """A typo'd scope (space for underscore) is rejected at authoring time
-    with the real path suggested."""
+def test_create_warns_on_near_miss_scope_with_hint(client):
+    """A typo'd scope (space for underscore) creates successfully but the
+    response warns with the real path suggested — watch-for-creation stays
+    possible for genuinely colliding names."""
     uid = seed_user(email="hint@x.com")
     login_fastapi(client, uid)
     r = client.post(
@@ -421,9 +422,10 @@ def test_create_rejects_near_miss_scope_with_hint(client):
             "actions": [{"destination_config_id": None, "message": "hi"}],
         },
     )
-    assert r.status_code == 400
-    assert "does not exist" in r.json()["error"]
-    assert "fun_poem.md" in r.json()["error"]
+    assert r.status_code == 201, r.text
+    warning = r.json()["scope_warning"] or ""
+    assert "does not exist yet" in warning
+    assert "fun_poem.md" in warning
 
 
 def test_near_miss_hint_never_reveals_unreadable_docs(client):
@@ -444,7 +446,9 @@ def test_near_miss_hint_never_reveals_unreadable_docs(client):
         },
     )
     assert r.status_code == 201, r.text
-    assert "secret.md" not in (r.json()["scope_warning"] or "")
+    warning = r.json()["scope_warning"] or ""
+    assert "does not exist yet" in warning
+    assert "secret.md" not in warning
 
 
 def test_create_allows_not_yet_created_scope_with_warning(client):

@@ -24,22 +24,12 @@ def kind_of_scope(scope_path: str) -> str:
     return "doc" if scope_path.endswith(".md") else "dir"
 
 
-def normalize_scope_path(raw: str, *, reader: Any | None = None) -> str:
+def normalize_scope_path(raw: str) -> str:
     """Validate a trigger scope path. Treats ``/`` and ``""`` as the wiki root.
 
     Triggers accept a leading slash for "the whole wiki" — the rest of the
     wiki tooling represents that as the empty string, so we collapse to
     ``""`` here before handing off to ``filesystem.safe_rel_path``.
-
-    A scope that doesn't exist yet is allowed — watching a path for creation
-    is a supported flow — but a scope that near-misses an existing doc
-    (same letters, different separators or case) is a typo that would fire
-    against nothing, so it is rejected with the real path suggested. The
-    hint is only offered when ``reader`` (an object with ``id`` and
-    ``is_admin``) can read the near-miss: an unreadable doc must behave
-    exactly like a nonexistent one, or the error becomes an existence oracle
-    for private paths. Callers can pair this with ``scope_exists`` to warn
-    on not-yet-created scopes.
     """
     stripped = raw.strip()
     if stripped in ("", "/"):
@@ -48,30 +38,48 @@ def normalize_scope_path(raw: str, *, reader: Any | None = None) -> str:
         stripped = stripped.lstrip("/")
         if stripped == "":
             return ""
-    scope = filesystem.safe_rel_path(stripped)
+    return filesystem.safe_rel_path(stripped)
 
-    if reader is not None and not scope_exists(scope):
-        hint = _nearest_path(scope, wiki_git.list_paths())
-        if (
-            hint is not None
-            and hint != scope
-            and wiki_acl.can(reader.id, reader.is_admin, "read", hint)
-        ):
-            raise ValueError(
-                f"scope path {scope!r} does not exist in the wiki — did you mean {hint!r}?"
-            )
-    return scope
+
+def scope_warning_for(scope: str, *, reader: Any) -> str | None:
+    """The authoring warning for a scope that doesn't exist yet, or None.
+
+    Watching a path for creation is supported, so nothing here blocks — but
+    the warning names a near-miss (an existing doc with the same letters and
+    different separators or case) so a typo'd scope is visible the moment
+    it's authored instead of silently firing against nothing. The hint is
+    only offered when ``reader`` (an object with ``id`` and ``is_admin``)
+    can read the near-miss: an unreadable doc must behave exactly like a
+    nonexistent one, or the warning becomes an existence oracle for private
+    paths.
+    """
+    if scope_exists(scope):
+        return None
+    hint = _nearest_path(scope, wiki_git.list_paths())
+    if (
+        hint is not None
+        and hint != scope
+        and wiki_acl.can(reader.id, reader.is_admin, "read", hint)
+    ):
+        return (
+            f"{scope!r} does not exist yet — did you mean {hint!r}? "
+            "The trigger fires only if a doc is created at the exact path."
+        )
+    return f"{scope!r} does not exist yet; the trigger fires when it is created"
 
 
 def scope_exists(scope: str) -> bool:
-    """Whether the scope resolves to anything today: the wiki root, a tracked
-    ``.md`` doc, or a folder containing tracked docs."""
+    """Whether the scope resolves to any watchable content today: the wiki
+    root, a tracked ``.md`` doc, or a folder containing tracked ``.md`` docs.
+    Only docs count — payloads are built from them, and a folder holding just
+    a trigger's own YAML file has nothing to watch."""
     if not scope:
         return True
     paths = wiki_git.list_paths()
     if scope.endswith(".md"):
         return scope in paths
-    return any(p.startswith(scope.rstrip("/") + "/") for p in paths)
+    prefix = scope.rstrip("/") + "/"
+    return any(p.endswith(".md") and p.startswith(prefix) for p in paths)
 
 
 def _nearest_path(scope: str, paths: list[str]) -> str | None:

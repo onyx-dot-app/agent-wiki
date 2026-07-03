@@ -56,10 +56,10 @@ def _config_view(row: dict[str, Any]) -> DestinationConfigView:
     )
 
 
-def _normalize_scope_path(raw: str, user: User) -> str:
+def _normalize_scope_path(raw: str) -> str:
     if not raw.strip():
         raise ValueError("scope_path is required")
-    return triggers_storage.normalize_scope_path(raw, reader=user)
+    return triggers_storage.normalize_scope_path(raw)
 
 
 def _to_view(row: dict[str, Any]) -> TriggerView:
@@ -176,7 +176,7 @@ def create_trigger(
     req: CreateTriggerRequest, user: User = Depends(require_user),
 ) -> TriggerView:
     try:
-        scope_path = _normalize_scope_path(req.scope_path, user)
+        scope_path = _normalize_scope_path(req.scope_path)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -203,10 +203,7 @@ def create_trigger(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     view = _to_view(trigger)
-    if not triggers_storage.scope_exists(scope_path):
-        view.scope_warning = (
-            f"{scope_path!r} does not exist yet; the trigger fires when it is created"
-        )
+    view.scope_warning = triggers_storage.scope_warning_for(scope_path, reader=user)
     log.info(
         "trigger created id=%s owner=%s scope=%s kind=%s enabled=%s",
         trigger.get("id"), user.id, scope_path, req.kind, req.enabled,
@@ -234,7 +231,7 @@ def update_trigger(
 
     if "scope_path" in sent_fields:
         try:
-            kwargs["scope_path"] = _normalize_scope_path(req.scope_path or "", user)
+            kwargs["scope_path"] = _normalize_scope_path(req.scope_path or "")
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -277,9 +274,9 @@ def update_trigger(
         trigger_id, user.id, sorted(kwargs.keys()),
     )
     view = _to_view(updated)
-    if "scope_path" in kwargs and not triggers_storage.scope_exists(kwargs["scope_path"]):
-        view.scope_warning = (
-            f"{kwargs['scope_path']!r} does not exist yet; the trigger fires when it is created"
+    if "scope_path" in kwargs:
+        view.scope_warning = triggers_storage.scope_warning_for(
+            kwargs["scope_path"], reader=user
         )
     return view
 

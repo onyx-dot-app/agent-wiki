@@ -36,7 +36,7 @@ def handle(args: dict[str, Any]) -> Any:
         if not isinstance(raw, str):
             return {"error": "scope_path must be a string"}
         try:
-            scope = triggers_storage.normalize_scope_path(raw, reader=user)
+            scope = triggers_storage.normalize_scope_path(raw)
         except ValueError as exc:
             return {"error": f"invalid scope_path: {exc}"}
         kwargs["scope_path"] = scope
@@ -76,8 +76,8 @@ def handle(args: dict[str, Any]) -> Any:
     except ValueError as exc:
         return {"error": str(exc)}
     result: dict[str, object] = {"trigger": updated}
-    if "scope_path" in kwargs and not triggers_storage.scope_exists(kwargs["scope_path"]):
-        result["scope_warning"] = (
-            f"{kwargs['scope_path']!r} does not exist yet; the trigger fires when it is created"
-        )
+    if "scope_path" in kwargs:
+        warning = triggers_storage.scope_warning_for(kwargs["scope_path"], reader=user)
+        if warning:
+            result["scope_warning"] = warning
     return result
