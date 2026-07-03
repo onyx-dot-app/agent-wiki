@@ -247,6 +247,9 @@ export function CoeditEditor({
     const applyingRemote = { current: false };
     const pullPromise = { current: null as Promise<void> | null };
     const pullQueued = { current: false };
+    // The synced version we last sent an op at — so we don't re-send the same
+    // op while awaiting its echo (which advances synced past this).
+    const sentAtVersion = { current: -1 };
 
     const dispatchRemote = (spec: Parameters<EditorView["dispatch"]>[0]) => {
       applyingRemote.current = true;
@@ -257,30 +260,41 @@ export function CoeditEditor({
       }
     };
 
-    // Push un-acked local edits, one op per version (our /op is one-per-
-    // version). Confirm on 200 (the SSE echo is then skipped as <= synced); a
-    // 409 means we missed ops → pull + rebase, then retry.
+    // Push the first un-acked op at the synced version (our /op is one op per
+    // version). We do NOT confirm locally — the op echoes back over the stream
+    // (client_id === ours) and is confirmed via receiveUpdates like any other,
+    // so every client applies the same ordered sequence (the convergence
+    // invariant; self-confirming out-of-band diverged clients). The next op is
+    // sent once this one's echo confirms + clears it (see the applyFrame/pull
+    // tails). A 409 means we missed ops → pull + rebase, then a tail re-pushes.
     const doPush = async (): Promise<void> => {
       if (pushing.current) return;
+      const version = getSyncedVersion(v.state);
+      // Already sent the op at this version; wait for its echo to advance
+      // synced before sending the next (else we'd re-send and 409).
+      if (version === sentAtVersion.current) return;
       const updates = sendableUpdates(v.state);
       if (updates.length === 0) return;
       pushing.current = true;
       try {
-        const version = getSyncedVersion(v.state);
         await sendOp(
           session.id,
           version,
           changeSetToChanges(updates[0]!.changes),
           session.clientId,
         );
-        dispatchRemote(receiveUpdates(v.state, [updates[0]!]));
+        sentAtVersion.current = version;
       } catch (e) {
         if (e instanceof ApiError && e.status === 409) await pull();
-        // else transient — leave un-acked; a later edit/echo retries
+        // else transient — the op stays sendable; a later echo/edit retries
       } finally {
         pushing.current = false;
       }
-      if (sendableUpdates(v.state).length > 0) await doPush();
+      // Re-push if there's still un-acked work at a *new* synced version — the
+      // 409→pull path above rebased our op onto a later version, and pull's own
+      // tail push was blocked by `pushing`. The `sentAtVersion` guard makes this
+      // a no-op after a clean send (we wait for that op's echo instead).
+      if (getSyncedVersion(v.state) !== sentAtVersion.current) void doPush();
     };
 
     // Single-flight: overlapping pulls would both anchor at the same synced
@@ -327,18 +341,32 @@ export function CoeditEditor({
         return;
       }
       if (frame.type !== "op") return;
+      // A pull in flight is fetching the authoritative op sequence; applying a
+      // frame now would double-apply. Queue a re-pull so an op that landed
+      // after the pull's snapshot is still fetched, and drop this frame.
+      if (pullPromise.current) {
+        pullQueued.current = true;
+        return;
+      }
       const synced = getSyncedVersion(v.state);
       if (frame.version <= synced) return; // already applied (incl. our echo)
       if (frame.version > synced + 1) {
         void pull(); // a gap (missed frame / big-op resync) → fetch the ops
         return;
       }
-      const cs = ChangeSet.of(frame.changes, syncedDocLength(v.state));
-      dispatchRemote(
-        receiveUpdates(v.state, [
-          { changes: cs, clientID: frame.client_id ?? "" },
-        ]),
-      );
+      try {
+        const cs = ChangeSet.of(frame.changes, syncedDocLength(v.state));
+        dispatchRemote(
+          receiveUpdates(v.state, [
+            { changes: cs, clientID: frame.client_id ?? "" },
+          ]),
+        );
+      } catch (err) {
+        // A malformed / mis-anchored op would otherwise be swallowed by the SSE
+        // reader. Surface it and re-sync from the authoritative op log.
+        console.error("coedit: failed to apply op frame; re-syncing", err);
+        void pull();
+      }
       if (sendableUpdates(v.state).length > 0) void doPush();
     };
 
@@ -376,14 +404,19 @@ export function CoeditEditor({
     view.current = v;
     onServerFrame(applyFrame);
     registerFlush(async () => {
-      await doPush();
-      // doPush swallows transient (non-409) failures, leaving ops un-acked. If
-      // any remain, the flush didn't reach the server — surface it so save()
-      // doesn't checkpoint a stale buffer and silently drop edits.
-      if (sendableUpdates(v.state).length > 0) {
-        throw new Error(
-          "Could not sync your latest edits — check your connection.",
-        );
+      // Drive the push chain, then wait until every op is confirmed (sendable
+      // drained by echoes) so the server has all our edits before checkpoint.
+      // Time out rather than hang / silently checkpoint a stale buffer.
+      const deadline = Date.now() + 5000;
+      void doPush();
+      while (sendableUpdates(v.state).length > 0) {
+        if (Date.now() > deadline) {
+          throw new Error(
+            "Could not sync your latest edits — check your connection.",
+          );
+        }
+        await new Promise((r) => setTimeout(r, 40));
+        void doPush();
       }
     });
     registerSetDoc((text: string) => {
