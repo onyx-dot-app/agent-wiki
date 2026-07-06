@@ -8,6 +8,9 @@ from fastapi.testclient import TestClient
 
 from app.main import create_app
 
+from app.db.models import Event
+from app.db.session import session
+
 from tests._auth import login_fastapi
 from tests._seed import insert_event, seed_trigger, seed_user
 
@@ -81,6 +84,21 @@ def test_trigger_id_filter_uses_limit_not_per_trigger_cap(client):
     body = client.get("/api/triggers/fires?trigger_id=trg_a&per_trigger=2").json()
     assert len(body["fires"]) == 6
     assert {f["trigger_id"] for f in body["fires"]} == {"trg_a"}
+
+
+def test_non_object_payload_json_degrades_to_empty_fields(client):
+    uid = seed_user(email="usr_1@x.com")
+    login_fastapi(client, uid)
+    seed_trigger(tid="trg_a", owner_user_id=uid, scope_path="a.md", message="m")
+    with session() as s:
+        s.add(Event(kind="trigger.fire", target="trg_a", payload_json="[1, 2]"))
+
+    r = client.get("/api/triggers/fires")
+    assert r.status_code == 200
+    fire = r.json()["fires"][0]
+    assert fire["trigger_id"] == "trg_a"
+    assert fire["doc_path"] == ""
+    assert fire["message"] == ""
 
 
 def test_payload_flattened_and_malformed_payload_safe(client):

@@ -142,9 +142,11 @@ def list_fires(
 
 def _fire_view(row: Any) -> TriggerFireView:
     try:
-        payload: dict[str, Any] = json.loads(row.payload_json or "{}")
+        parsed: Any = json.loads(row.payload_json or "{}")
     except json.JSONDecodeError:
-        payload = {}
+        parsed = {}
+    # valid non-object JSON (array, string, number) must not 500 the list
+    payload: dict[str, Any] = cast(dict[str, Any], parsed) if isinstance(parsed, dict) else {}
     return TriggerFireView(
         event_id=row.id,
         trigger_id=row.target or "",
