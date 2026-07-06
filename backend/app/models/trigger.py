@@ -90,6 +90,23 @@ class TriggerListResponse(BaseModel):
     triggers: list[TriggerView]
 
 
+class TriggerFireView(BaseModel):
+    """One recorded ``trigger.fire`` event, flattened from the events row."""
+
+    event_id: int
+    trigger_id: str
+    ts: str
+    doc_path: str
+    change_kind: str
+    reason: str
+    message: str
+    destination_type: str
+
+
+class TriggerFiresResponse(BaseModel):
+    fires: list[TriggerFireView]
+
+
 class TriggerCommit(BaseModel):
     sha: str
     author: str

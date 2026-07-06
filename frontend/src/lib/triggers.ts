@@ -93,6 +93,33 @@ export function deleteTrigger(id: string): Promise<void> {
   return apiFetch<void>(`/triggers/${id}`, { method: "DELETE" });
 }
 
+export interface TriggerFire {
+  event_id: number;
+  trigger_id: string;
+  ts: string;
+  doc_path: string;
+  change_kind: string;
+  reason: string;
+  message: string;
+  destination_type: string;
+}
+
+export async function getTriggerFires(opts?: {
+  triggerId?: string;
+  perTrigger?: number;
+  limit?: number;
+}): Promise<TriggerFire[]> {
+  const params = new URLSearchParams();
+  if (opts?.triggerId) params.set("trigger_id", opts.triggerId);
+  if (opts?.perTrigger) params.set("per_trigger", String(opts.perTrigger));
+  if (opts?.limit) params.set("limit", String(opts.limit));
+  const qs = params.toString();
+  const r = await apiFetch<{ fires: TriggerFire[] }>(
+    `/triggers/fires${qs ? `?${qs}` : ""}`,
+  );
+  return r.fires;
+}
+
 export async function getTriggerHistory(id: string): Promise<TriggerCommit[]> {
   const r = await apiFetch<{ commits: TriggerCommit[] }>(
     `/triggers/${id}/history`,
