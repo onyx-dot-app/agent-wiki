@@ -2,8 +2,23 @@
 
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 
-import { Button, Tabs } from "@onyx-ai/opal/components";
-import { SvgPlusCircle, SvgWorkflow, SvgX } from "@onyx-ai/opal/icons";
+import useSWR from "swr";
+
+import {
+  Button,
+  LineItemButton,
+  Popover,
+  PopoverMenu,
+  Tabs,
+} from "@onyx-ai/opal/components";
+import {
+  SvgBook,
+  SvgFile,
+  SvgFolder,
+  SvgPlusCircle,
+  SvgWorkflow,
+  SvgX,
+} from "@onyx-ai/opal/icons";
 import {
   PRESET_OPTIONS,
   WEEKDAY_NAMES,
@@ -112,7 +127,6 @@ export function TriggerPanel({
   const [startAtLocal, setStartAtLocal] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [watchDraft, setWatchDraft] = useState("");
 
   const tzOptions = useMemo(() => listTimezones(), []);
 
@@ -130,7 +144,6 @@ export function TriggerPanel({
     setTz(initial?.schedule_timezone ?? browserTimezone());
     setStartAtLocal(utcIsoToLocalInput(initial?.schedule_start_at ?? null));
     setError(null);
-    setWatchDraft("");
   }, [
     open,
     initial?.id,
@@ -293,47 +306,14 @@ export function TriggerPanel({
             <span className="px-[2px] text-[14px] leading-5 font-semibold text-(--text-04)">
               Watch
             </span>
-            <div className="flex min-h-[36px] w-full flex-wrap content-center items-center gap-1 rounded-(--radius-08) border border-(--border-02) bg-(--background-tint-00) p-[6px] focus-within:border-(--border-05) focus-within:shadow-[0_0_0_2px_var(--background-tint-04)]">
-              {scopePath.trim() ? (
-                <span className="flex items-center rounded-(--radius-08) bg-(--background-tint-02) py-[2px] pr-[2px] pl-1">
-                  <span className="max-w-[280px] truncate px-[2px] text-[14px] leading-5 font-medium text-(--text-04)">
-                    {scopePath.trim() === "/" ? "Whole wiki" : scopePath.trim()}
-                  </span>
-                  {!lockScope && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (!busy) {
-                          setWatchDraft(scopePath.trim());
-                          setScopePath("");
-                        }
-                      }}
-                      className="flex size-4 cursor-pointer items-center justify-center rounded-(--radius-04) border-none bg-transparent p-[2px] text-(--text-03) hover:bg-(--background-tint-03)"
-                      aria-label="Remove watched path"
-                    >
-                      <SvgX size={12} />
-                    </button>
-                  )}
-                </span>
-              ) : (
-                <input
-                  value={watchDraft}
-                  onChange={(e) => setWatchDraft(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      if (watchDraft.trim()) setScopePath(watchDraft.trim());
-                    }
-                  }}
-                  onBlur={() => {
-                    if (watchDraft.trim()) setScopePath(watchDraft.trim());
-                  }}
-                  disabled={busy || lockScope}
-                  placeholder="projects/foo.md, projects, or / for the whole wiki"
-                  className="min-w-[80px] flex-1 border-none bg-transparent px-1 py-[2px] text-[14px] leading-5 outline-none placeholder:text-(--text-02)"
-                />
-              )}
-            </div>
+            <WatchScopePicker
+              scopePath={scopePath}
+              onScopePath={(p) => {
+                setScopePath(p);
+              }}
+              disabled={busy || Boolean(lockScope)}
+              locked={Boolean(lockScope)}
+            />
             <span className="px-[2px] text-[12px] leading-4 text-(--text-03)">
               Add a specific page or an entire folder to watch.
             </span>
@@ -658,4 +638,172 @@ const CRON_FIELD_HELP: { label: string; help: string }[] = [
 
 function pad(n: number): string {
   return n.toString().padStart(2, "0");
+}
+
+const WATCH_CHIP_BAR =
+  "flex min-h-[36px] w-full flex-wrap content-center items-center gap-1 rounded-(--radius-08) border border-(--border-02) bg-(--background-tint-00) p-[6px] focus-within:border-(--border-05) focus-within:shadow-[0_0_0_2px_var(--background-tint-04)]";
+
+/** Search-and-pick for the trigger's watched scope: a dropdown over the
+ * ACL-filtered wiki path list (files and their folders), selection only —
+ * free-typed paths can't be committed, so a scope always exists. */
+function WatchScopePicker({
+  scopePath,
+  onScopePath,
+  disabled,
+  locked,
+}: {
+  scopePath: string;
+  onScopePath: (path: string) => void;
+  disabled?: boolean;
+  locked?: boolean;
+}) {
+  const { data } = useSWR<{ entries: { path: string }[] }>("/wiki");
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const anchorRef = useRef<HTMLDivElement>(null);
+
+  const files = useMemo(
+    () =>
+      (data?.entries ?? [])
+        .map((e) => e.path)
+        .filter(
+          (p) => p.endsWith(".md") && !p.split("/").pop()?.startsWith("."),
+        ),
+    [data],
+  );
+  const folders = useMemo(() => {
+    const out = new Set<string>();
+    for (const f of files) {
+      const parts = f.split("/");
+      for (let i = 1; i < parts.length; i++)
+        out.add(parts.slice(0, i).join("/"));
+    }
+    return [...out].sort();
+  }, [files]);
+
+  const q = query.trim().toLowerCase();
+  const matchedFolders = folders
+    .filter((f) => !q || f.toLowerCase().includes(q))
+    .slice(0, 8);
+  const matchedFiles = files
+    .filter((f) => !q || f.toLowerCase().includes(q))
+    .slice(0, 20);
+
+  function pick(path: string) {
+    onScopePath(path);
+    setQuery("");
+    setOpen(false);
+  }
+
+  const committed = scopePath.trim();
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <Popover.Anchor asChild>
+        <div ref={anchorRef} className={WATCH_CHIP_BAR}>
+          {committed ? (
+            <span className="flex items-center gap-[2px] rounded-(--radius-08) bg-(--background-tint-02) py-[2px] pr-[2px] pl-1">
+              <span className="flex size-4 items-center justify-center text-(--text-03)">
+                {committed === "/" ? (
+                  <SvgBook size={14} />
+                ) : committed.endsWith(".md") ? (
+                  <SvgFile size={14} />
+                ) : (
+                  <SvgFolder size={14} />
+                )}
+              </span>
+              <span className="max-w-[280px] truncate px-[2px] text-[14px] leading-5 font-medium text-(--text-04)">
+                {committed === "/" ? "Whole wiki" : committed}
+              </span>
+              {!locked && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!disabled) onScopePath("");
+                  }}
+                  className="flex size-4 cursor-pointer items-center justify-center rounded-(--radius-04) border-none bg-transparent p-[2px] text-(--text-03) hover:bg-(--background-tint-03)"
+                  aria-label="Remove watched path"
+                >
+                  <SvgX size={12} />
+                </button>
+              )}
+            </span>
+          ) : (
+            <input
+              value={query}
+              onChange={(e) => {
+                setQuery(e.target.value);
+                if (!open) setOpen(true);
+              }}
+              onFocus={() => setOpen(true)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") setOpen(false);
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  const first = matchedFiles[0] ?? matchedFolders[0];
+                  if (first) pick(first);
+                }
+              }}
+              disabled={disabled}
+              placeholder="Search pages and folders to watch"
+              className="min-w-[80px] flex-1 border-none bg-transparent px-1 py-[2px] text-[14px] leading-5 outline-none placeholder:text-(--text-02)"
+            />
+          )}
+        </div>
+      </Popover.Anchor>
+      <Popover.Content
+        width="trigger"
+        align="start"
+        sideOffset={4}
+        onOpenAutoFocus={(e) => e.preventDefault()}
+        onInteractOutside={(e) => {
+          if (anchorRef.current?.contains(e.target as Node)) e.preventDefault();
+        }}
+      >
+        <PopoverMenu>
+          {!q && (
+            <LineItemButton
+              icon={SvgBook}
+              title="Whole wiki"
+              sizePreset="main-ui"
+              variant="body"
+              state="empty"
+              onClick={() => pick("/")}
+            />
+          )}
+          {matchedFolders.map((f) => (
+            <LineItemButton
+              key={`d:${f}`}
+              icon={SvgFolder}
+              title={f}
+              sizePreset="main-ui"
+              variant="body"
+              state="empty"
+              onClick={() => pick(f)}
+            />
+          ))}
+          {matchedFiles.map((f) => (
+            <LineItemButton
+              key={`f:${f}`}
+              icon={SvgFile}
+              title={f}
+              sizePreset="main-ui"
+              variant="body"
+              state="empty"
+              onClick={() => pick(f)}
+            />
+          ))}
+          {!matchedFiles.length && !matchedFolders.length && (
+            <LineItemButton
+              title="No matches"
+              sizePreset="main-ui"
+              variant="body"
+              state="empty"
+              onClick={() => undefined}
+            />
+          )}
+        </PopoverMenu>
+      </Popover.Content>
+    </Popover>
+  );
 }
