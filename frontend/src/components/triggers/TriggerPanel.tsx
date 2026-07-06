@@ -740,7 +740,8 @@ function WatchScopePicker({
                 if (e.key === "Escape") setOpen(false);
                 if (e.key === "Enter") {
                   e.preventDefault();
-                  const first = matchedFiles[0] ?? matchedFolders[0];
+                  // Enter commits the visually top row: folders render first.
+                  const first = matchedFolders[0] ?? matchedFiles[0];
                   if (first) pick(first);
                 }
               }}
