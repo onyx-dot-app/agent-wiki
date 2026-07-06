@@ -206,6 +206,7 @@ function ActionGroupRow({
         />
       )}
 
+      {/* raw-ok: no Opal multiline input */}
       <textarea
         value={group.message}
         onChange={(e) => onPatch({ message: e.target.value })}

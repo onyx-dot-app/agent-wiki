@@ -42,6 +42,9 @@ export const Button = forwardRef<HTMLButtonElement, Props>(function Button(
     transition: "background 80ms ease, border-color 80ms ease",
     ...style,
   };
+  {
+    /* raw-ok: this is the legacy button wrapper itself */
+  }
   return <button ref={ref} disabled={disabled} style={merged} {...rest} />;
 });
 

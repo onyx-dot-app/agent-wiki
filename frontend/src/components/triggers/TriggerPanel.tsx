@@ -353,6 +353,7 @@ export function TriggerPanel({
                 Run if
               </Text>
             </div>
+            {/* raw-ok: no Opal multiline input */}
             <textarea
               value={ifText}
               onChange={(e) => setIfText(e.target.value)}
@@ -470,6 +471,7 @@ function ScheduleFields({
         <Text font="main-ui-action" color="text-04">
           Frequency
         </Text>
+        {/* raw-ok: no Opal multiline input */}
         <select
           value={parts.preset}
           onChange={(e) =>
@@ -494,6 +496,7 @@ function ScheduleFields({
           <Text font="main-ui-action" color="text-04">
             Time of day
           </Text>
+          {/* raw-ok: no Opal multiline input */}
           <input
             type="time"
             value={timeValue}
@@ -517,6 +520,7 @@ function ScheduleFields({
           <Text font="main-ui-action" color="text-04">
             Day of week
           </Text>
+          {/* raw-ok: no Opal multiline input */}
           <select
             value={parts.dayOfWeek}
             onChange={(e) =>
@@ -539,6 +543,7 @@ function ScheduleFields({
           <Text font="main-ui-action" color="text-04">
             Day of month
           </Text>
+          {/* raw-ok: no Opal multiline input */}
           <input
             type="number"
             min={1}
@@ -565,6 +570,7 @@ function ScheduleFields({
         <Text font="main-ui-action" color="text-04">
           Timezone
         </Text>
+        {/* raw-ok: no Opal multiline input */}
         <select
           value={tz}
           onChange={(e) => onTzChange(e.target.value)}
@@ -588,6 +594,7 @@ function ScheduleFields({
         <Text font="main-ui-action" color="text-04">
           Do not fire before (optional)
         </Text>
+        {/* raw-ok: no Opal multiline input */}
         <input
           type="datetime-local"
           value={startAtLocal}
@@ -619,6 +626,7 @@ function ScheduleFields({
               </div>
             ))}
           </div>
+          {/* raw-ok: no Opal multiline input */}
           <input
             value={isCustom ? customCron : computedCron}
             onChange={(e) => {

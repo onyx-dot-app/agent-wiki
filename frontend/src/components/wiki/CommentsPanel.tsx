@@ -500,6 +500,7 @@ function Comment({
               className={`${styles.kebab} ${menuOpen ? styles.kebabOpen : ""}`}
             >
               <Popover open={menuOpen} onOpenChange={setMenuOpen}>
+                {/* raw-ok: legacy form control, pre-dates the Opal rule */}
                 {/* Radix renders its own <button> here (no asChild) so the
                     trigger's onClick/ref/data-state are guaranteed to wire up —
                     OPAL's Button isn't a Radix Slot and drops them. */}

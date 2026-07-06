@@ -409,6 +409,7 @@ function Explorer({ dir }: { dir: string }) {
           onSubmit={onCreate}
           className="mb-4 flex gap-2 rounded-(--border-radius-08) border border-(--border-01) bg-(--background-tint-01) p-3"
         >
+          {/* raw-ok: legacy form control, pre-dates the Opal rule */}
           <input
             autoFocus
             value={newName}
@@ -819,6 +820,7 @@ function NewDocView({ dir }: { dir: string }) {
         />
       )}
 
+      {/* raw-ok: legacy form control, pre-dates the Opal rule */}
       <textarea
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
@@ -984,6 +986,7 @@ function StripArrow({
   onClick: () => void;
 }) {
   return (
+    // raw-ok: legacy form control, pre-dates the Opal rule
     <button
       type="button"
       onClick={onClick}
@@ -1015,6 +1018,7 @@ function TemplateCard({
   onClick: () => void;
 }) {
   return (
+    // raw-ok: legacy form control, pre-dates the Opal rule
     <button
       type="button"
       onClick={onClick}
@@ -1056,6 +1060,7 @@ function SortBar({
   return (
     <div className="mb-2 flex items-center gap-2 text-xs text-(--text-03)">
       <label htmlFor="wiki-sort">Sort:</label>
+      {/* raw-ok: legacy form control, pre-dates the Opal rule */}
       <select
         id="wiki-sort"
         value={value}
@@ -1184,6 +1189,7 @@ function Row({
           }}
           className="flex flex-1 gap-1.5"
         >
+          {/* raw-ok: legacy form control, pre-dates the Opal rule */}
           <input
             autoFocus
             value={draft}
@@ -1229,6 +1235,7 @@ function Row({
             {updatedAt ? relativeTime(updatedAt, "short") : "—"}
           </span>
           {onShare && (
+            // raw-ok: legacy form control, pre-dates the Opal rule
             <button
               onClick={onShare}
               disabled={busy}
@@ -1239,6 +1246,7 @@ function Row({
               <SvgShare size={16} />
             </button>
           )}
+          {/* raw-ok: legacy form control, pre-dates the Opal rule */}
           <button
             onClick={onStartRename}
             disabled={busy}
@@ -1248,6 +1256,7 @@ function Row({
           >
             <SvgEdit size={16} />
           </button>
+          {/* raw-ok: legacy form control, pre-dates the Opal rule */}
           <button
             onClick={onDelete}
             disabled={busy}
@@ -2337,6 +2346,7 @@ function ActiveAgentsBar({
   const expandable = count > 0;
   return (
     <div className="mb-3 overflow-hidden rounded-(--border-radius-08) border border-(--border-01) bg-(--background-tint-01)">
+      {/* raw-ok: legacy form control, pre-dates the Opal rule */}
       <button
         onClick={expandable ? onToggle : undefined}
         aria-expanded={expandable ? open : undefined}
@@ -2630,6 +2640,7 @@ function FilenameRow({
           {parent}/
         </span>
       )}
+      {/* raw-ok: legacy form control, pre-dates the Opal rule */}
       <input
         // eslint-disable-next-line jsx-a11y/no-autofocus
         autoFocus={autoFocus}

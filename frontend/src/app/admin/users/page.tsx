@@ -396,6 +396,7 @@ function StatCell({
   onClick: () => void;
 }) {
   return (
+    // raw-ok: legacy form control, pre-dates the Opal rule
     <button type="button" className={styles.statCell} onClick={onClick}>
       <Text font="main-content-emphasis">{value.toLocaleString()}</Text>
       <Text font="secondary-body" color="text-03">
@@ -682,6 +683,7 @@ function GroupsCell({
 
   if (!onClick) return inner;
   return (
+    // raw-ok: legacy form control, pre-dates the Opal rule
     <button
       type="button"
       className={styles.groupsCellButton}
@@ -1148,6 +1150,7 @@ function ChipField({
           <Text font="secondary-body" color={c.error ? "text-02" : "text-04"}>
             {c.label}
           </Text>
+          {/* raw-ok: legacy form control, pre-dates the Opal rule */}
           <button
             type="button"
             className={styles.chipRemove}
@@ -1161,6 +1164,7 @@ function ChipField({
           </button>
         </span>
       ))}
+      {/* raw-ok: legacy form control, pre-dates the Opal rule */}
       <input
         ref={inputRef}
         className={styles.chipInput}

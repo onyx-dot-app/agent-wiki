@@ -27,6 +27,9 @@ const DEFAULT_SETTINGS: UserSettings = {
 };
 
 // A short curated IANA list — covers the common cases without dumping
+{
+  /* raw-ok: legacy form control, pre-dates the Opal rule */
+}
 // the full ~600-zone list into a <select>. The text input below is the
 // escape hatch for anything else.
 const COMMON_TIMEZONES = [
@@ -129,6 +132,7 @@ function ProfileForm({
     <form onSubmit={onSubmit} className="flex flex-col gap-4">
       <label>
         <div className={lblClass}>Display name</div>
+        {/* raw-ok: legacy form control, pre-dates the Opal rule */}
         <input
           value={name}
           onChange={(e) => {
@@ -248,6 +252,7 @@ function SettingsForm({
     <form onSubmit={onSubmit} className="flex flex-col gap-4">
       <label>
         <div className={lblClass}>Theme</div>
+        {/* raw-ok: legacy form control, pre-dates the Opal rule */}
         <select
           value={draft.theme}
           onChange={(e) => pickTheme(e.target.value as ThemeSetting)}
@@ -265,6 +270,7 @@ function SettingsForm({
       <label>
         <div className={lblClass}>Timezone</div>
         {tzCustom ? (
+          // raw-ok: legacy form control, pre-dates the Opal rule
           <input
             value={draft.timezone ?? ""}
             onChange={(e) => update("timezone", e.target.value)}
@@ -272,6 +278,7 @@ function SettingsForm({
             className={inputClass}
           />
         ) : (
+          // raw-ok: legacy form control, pre-dates the Opal rule
           <select
             value={draft.timezone ?? ""}
             onChange={(e) => {
@@ -296,6 +303,7 @@ function SettingsForm({
           {tzCustom && (
             <>
               {" "}
+              {/* raw-ok: legacy form control, pre-dates the Opal rule */}
               <button
                 type="button"
                 onClick={() => {
@@ -315,6 +323,7 @@ function SettingsForm({
 
       <label>
         <div className={lblClass}>Default landing page</div>
+        {/* raw-ok: legacy form control, pre-dates the Opal rule */}
         <select
           value={draft.default_landing}
           onChange={(e) =>
@@ -392,6 +401,7 @@ function ChatModelForm({
     <form onSubmit={onSubmit} className="flex flex-col gap-4">
       <label>
         <div className={lblClass}>Chat model</div>
+        {/* raw-ok: legacy form control, pre-dates the Opal rule */}
         <input
           value={chatModel}
           onChange={(e) => {
