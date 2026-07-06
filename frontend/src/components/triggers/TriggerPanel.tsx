@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 
-import { Button, InputTypeIn, Tabs } from "@onyx-ai/opal/components";
+import { Button, Tabs } from "@onyx-ai/opal/components";
 import { SvgPlusCircle, SvgWorkflow, SvgX } from "@onyx-ai/opal/icons";
 import {
   PRESET_OPTIONS,
@@ -17,16 +17,18 @@ import {
   utcIsoToLocalInput,
   type FrequencyPreset,
 } from "@/lib/cron";
-import { SelectButton } from "@onyx-ai/opal/components";
 
-import { SlackDestinationPicker } from "@/components/triggers/SlackDestinationPicker";
-import { ensureEmailDestination } from "@/lib/emailConnect";
+import {
+  ActionEditor,
+  type ActionGroup,
+} from "@/components/triggers/ActionEditor";
 import { useSlackConnectStatus } from "@/lib/slackConnect";
 import {
   createTrigger,
   updateTrigger,
   useDestinationConfigs,
   type Trigger,
+  type TriggerActionInput,
   type TriggerCreateInput,
   type TriggerKind,
 } from "@/lib/triggers";
@@ -40,9 +42,49 @@ interface Props {
   lockScope?: boolean;
 }
 
+let groupKeyCounter = 1;
+const nextGroupKey = () => ++groupKeyCounter;
+
+/** Rebuild editor groups from a trigger's flat action list: actions sharing a
+ * destination type and message collapse into one group with recipient chips.
+ * An action whose config no longer exists is already recorded-only at
+ * dispatch, so it lands in an Activity Center group keeping its message. */
+function groupsFromActions(
+  actions: Trigger["actions"] | undefined,
+  configs: { id: string; type: string }[],
+): ActionGroup[] {
+  const out: ActionGroup[] = [];
+  for (const a of actions ?? []) {
+    const message = a.message ?? "";
+    const cfg = a.destination_config_id
+      ? configs.find((c) => c.id === a.destination_config_id)
+      : undefined;
+    const type: ActionGroup["type"] =
+      cfg?.type === "slack" || cfg?.type === "email" ? cfg.type : "event_log";
+    const existing = out.find((g) => g.type === type && g.message === message);
+    if (existing) {
+      if (cfg && !existing.configIds.includes(cfg.id))
+        existing.configIds.push(cfg.id);
+      continue;
+    }
+    out.push({
+      key: nextGroupKey(),
+      type,
+      configIds: cfg ? [cfg.id] : [],
+      message,
+    });
+  }
+  if (!out.length)
+    out.push({
+      key: nextGroupKey(),
+      type: "event_log",
+      configIds: [],
+      message: "",
+    });
+  return out;
+}
+
 const EXAMPLE_IF = "the document is updated with a release version";
-const EXAMPLE_SEND =
-  "a message saying that the version has been finalized or updated to the specific version number.";
 
 export function TriggerPanel({
   open,
@@ -54,12 +96,15 @@ export function TriggerPanel({
   const isEdit = Boolean(initial?.id);
   const [scopePath, setScopePath] = useState("");
   const [ifText, setIfText] = useState("");
-  const [sendText, setSendText] = useState("");
   const { configs, refresh: refreshConfigs } = useDestinationConfigs();
   const { status: slackStatus } = useSlackConnectStatus();
-  const [destinationConfigId, setDestinationConfigId] = useState<string | null>(
-    null,
-  );
+  const [groups, setGroups] = useState<ActionGroup[]>([
+    { key: 1, type: "event_log", configIds: [], message: "" },
+  ]);
+  // Hydration reads configs through a ref so the open-reset effect doesn't
+  // re-fire (and clobber edits) when the SWR config list revalidates.
+  const configsRef = useRef(configs);
+  configsRef.current = configs;
   const [kind, setKind] = useState<TriggerKind>("delta");
   const [scheduleParts, setScheduleParts] = useState(defaultScheduleParts());
   const [customCron, setCustomCron] = useState("");
@@ -68,28 +113,14 @@ export function TriggerPanel({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [watchDraft, setWatchDraft] = useState("");
-  const [emailMode, setEmailMode] = useState(false);
-  const [emailDraft, setEmailDraft] = useState("");
-  const [emailCommitting, setEmailCommitting] = useState(false);
 
   const tzOptions = useMemo(() => listTimezones(), []);
-
-  // Selecting an email destination (edit flow or picker) fills the input
-  // beneath the picker with its address.
-  const selectedForDraft = configs.find((c) => c.id === destinationConfigId);
-  useEffect(() => {
-    if (selectedForDraft?.type === "email") {
-      setEmailDraft(String(selectedForDraft.config.address ?? ""));
-    }
-  }, [selectedForDraft]);
 
   useEffect(() => {
     if (!open) return;
     setScopePath(initial?.scope_path ?? "");
     setIfText(initial?.nl_description ?? "");
-    const firstAction = initial?.actions?.[0];
-    setSendText(firstAction?.message ?? "");
-    setDestinationConfigId(firstAction?.destination_config_id ?? null);
+    setGroups(groupsFromActions(initial?.actions, configsRef.current));
     setKind((initial?.kind as TriggerKind) ?? "delta");
     const parts = cronToParts(initial?.schedule_cron ?? null);
     setScheduleParts(parts);
@@ -99,8 +130,6 @@ export function TriggerPanel({
     setTz(initial?.schedule_timezone ?? browserTimezone());
     setStartAtLocal(utcIsoToLocalInput(initial?.schedule_start_at ?? null));
     setError(null);
-    setEmailMode(false);
-    setEmailDraft("");
     setWatchDraft("");
   }, [
     open,
@@ -125,11 +154,19 @@ export function TriggerPanel({
     setError(null);
     try {
       const nl = ifText.trim();
-      const msg = sendText.trim();
+      const actions: TriggerActionInput[] = groups.flatMap(
+        (g): TriggerActionInput[] =>
+          g.type === "event_log"
+            ? [{ destination_config_id: null, message: g.message.trim() }]
+            : g.configIds.map((id) => ({
+                destination_config_id: id,
+                message: g.message.trim(),
+              })),
+      );
       const baseInput: TriggerCreateInput = {
         scope_path: scopePath.trim(),
         nl_description: nl,
-        actions: [{ destination_config_id: destinationConfigId, message: msg }],
+        actions,
         kind,
       };
       if (kind === "schedule") {
@@ -149,9 +186,7 @@ export function TriggerPanel({
         saved = await updateTrigger(initial.id, {
           scope_path: scopePath.trim(),
           nl_description: nl,
-          actions: [
-            { destination_config_id: destinationConfigId, message: msg },
-          ],
+          actions,
           schedule_cron: kind === "schedule" ? computedCron : null,
           schedule_timezone: kind === "schedule" ? tz : null,
           schedule_start_at:
@@ -169,56 +204,26 @@ export function TriggerPanel({
     }
   }
 
+  const groupsValid = groups.every(
+    (g) =>
+      g.message.trim() && (g.type === "event_log" || g.configIds.length > 0),
+  );
   const canSave =
     scopePath.trim() &&
     ifText.trim() &&
-    sendText.trim() &&
+    groupsValid &&
     (kind === "delta" || (computedCron && tz));
-  const selectedConfig = configs.find((c) => c.id === destinationConfigId);
-  const selectedIsEmail = selectedConfig?.type === "email";
-  const destDescription = selectedIsEmail
-    ? selectedConfig?.verified_at
-      ? `Fires will be emailed to ${selectedConfig.name}.`
-      : `A verification link was sent to ${selectedConfig?.name}. Delivery starts once it is clicked.`
-    : emailMode
-      ? "Type the address and press Enter."
-      : selectedConfig
-        ? ""
-        : "Tracked in the event log only.";
 
-  async function commitEmail() {
-    if (emailCommitting) return;
-    const address = emailDraft.trim();
-    if (!address.includes("@")) {
-      setError("enter a valid email address");
-      return;
-    }
-    // Re-committing the already-selected address just exits edit mode.
-    if (
-      selectedIsEmail &&
-      String(selectedConfig?.config.address ?? "").toLowerCase() ===
-        address.toLowerCase()
-    ) {
-      setEmailMode(false);
-      return;
-    }
-    setError(null);
-    setEmailCommitting(true);
-    try {
-      const { id, verificationError } = await ensureEmailDestination(
-        configs,
-        address,
-      );
-      setDestinationConfigId(id);
-      setEmailMode(false);
-      await refreshConfigs();
-      if (verificationError) setError(verificationError);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "failed to add address");
-    } finally {
-      setEmailCommitting(false);
-    }
-  }
+  const destinationSummary = groups
+    .map((g) =>
+      g.type === "event_log"
+        ? "the Activity Center"
+        : g.configIds
+            .map((id) => configs.find((c) => c.id === id)?.name)
+            .filter(Boolean)
+            .join(", ") || (g.type === "slack" ? "Slack" : "Email"),
+    )
+    .join(" and ");
 
   return (
     <div className="fixed top-2 right-2 z-[100] flex max-h-[calc(100vh-16px)] w-[464px] max-w-[calc(100vw-16px)] flex-col">
@@ -373,77 +378,34 @@ export function TriggerPanel({
             )}
           </div>
 
-          <div className="flex w-full flex-col gap-1">
-            <span className="px-[2px] text-[14px] leading-5 font-semibold text-(--text-04)">
-              Then Send
-            </span>
-            <SlackDestinationPicker
-              configs={configs}
-              includeExisting
-              value={destinationConfigId}
-              connected={Boolean(slackStatus?.connected)}
+          <ActionEditor
+            groups={groups}
+            onChange={setGroups}
+            configs={configs}
+            refreshConfigs={refreshConfigs}
+            slackConnected={Boolean(slackStatus?.connected)}
+            disabled={busy}
+            onError={(m) => setError(m)}
+          />
+          <div className="flex w-full items-center">
+            <Button
+              type="button"
+              icon={SvgPlusCircle}
               disabled={busy}
-              onPick={async (id) => {
-                setError(null);
-                setEmailMode(false);
-                setDestinationConfigId(id);
-                await refreshConfigs();
-              }}
-              onPickEmail={() => {
-                setError(null);
-                setEmailMode(true);
-              }}
-              onError={(m) => setError(m)}
+              onClick={() =>
+                setGroups([
+                  ...groups,
+                  {
+                    key: nextGroupKey(),
+                    type: slackStatus?.connected ? "slack" : "email",
+                    configIds: [],
+                    message: "",
+                  },
+                ])
+              }
             >
-              <SelectButton size="sm" state="empty" width="full">
-                {emailMode && !selectedIsEmail
-                  ? "Email"
-                  : selectedConfig
-                    ? selectedConfig.name
-                    : "Event log"}
-              </SelectButton>
-            </SlackDestinationPicker>
-            {emailMode && (
-              <InputTypeIn
-                autoFocus
-                placeholder="name@example.com — Enter to add"
-                value={emailDraft}
-                onChange={(e) => setEmailDraft(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    void commitEmail();
-                  }
-                  if (e.key === "Escape") {
-                    setEmailMode(false);
-                    setEmailDraft(String(selectedConfig?.config.address ?? ""));
-                  }
-                }}
-              />
-            )}
-            <textarea
-              value={sendText}
-              onChange={(e) => setSendText(e.target.value)}
-              disabled={busy}
-              placeholder={EXAMPLE_SEND}
-              rows={2}
-              className="box-border w-full resize-y rounded-(--radius-08) border border-(--border-02) bg-(--background-tint-00) px-[10px] py-2 text-[14px] leading-5 outline-none placeholder:text-(--text-02) focus:border-(--border-05) focus:shadow-[0_0_0_2px_var(--background-tint-04)]"
-            />
-            {destDescription && (
-              <span className="px-[2px] text-[12px] leading-4 text-(--text-03)">
-                {destDescription}
-              </span>
-            )}
-            <div className="mt-1 flex w-full items-center">
-              <Button
-                type="button"
-                icon={SvgPlusCircle}
-                disabled
-                tooltip="Multiple actions per trigger are coming soon"
-              >
-                Add More Actions
-              </Button>
-            </div>
+              Add More Actions
+            </Button>
           </div>
 
           {error && (
@@ -456,10 +418,8 @@ export function TriggerPanel({
         <div className="flex w-full items-center gap-2 border-t border-(--border-01) bg-(--background-tint-00) p-3">
           <p className="m-0 min-w-0 flex-1 px-[2px] text-[12px] leading-4 text-(--text-03)">
             Messages will be sent to{" "}
-            <strong className="font-bold">
-              {selectedConfig ? selectedConfig.name : "the event log"}
-            </strong>{" "}
-            when conditions are met.
+            <strong className="font-bold">{destinationSummary}</strong> when
+            conditions are met.
           </p>
           <Button type="submit" variant="action" disabled={busy || !canSave}>
             {busy ? "Saving…" : isEdit ? "Save" : "Create"}
