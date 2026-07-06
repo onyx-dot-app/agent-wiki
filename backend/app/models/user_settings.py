@@ -33,6 +33,10 @@ class UserSettings(BaseModel):
     # Preferred provider + model for chat. None = use the global agent settings.
     chat_provider: str | None = None
     chat_model: str | None = None
+    # Email copies of in-app activity, sent to the login address (users.email)
+    # — the account's own identity, so no verification flow applies.
+    notify_comment_email: bool = False
+    notify_update_warning_email: bool = False
 
     @field_validator("timezone")
     @classmethod
@@ -57,6 +61,8 @@ class UserSettingsUpdate(BaseModel):
     default_landing: Literal["wiki_home", "recent", "last_viewed"] | None = Field(default=None)
     chat_provider: str | None = Field(default=None)
     chat_model: str | None = Field(default=None)
+    notify_comment_email: bool | None = Field(default=None)
+    notify_update_warning_email: bool | None = Field(default=None)
 
     def non_null(self) -> dict[str, Any]:
         sent = self.model_fields_set

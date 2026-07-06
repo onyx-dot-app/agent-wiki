@@ -26,9 +26,12 @@ from typing import Any
 
 from sqlalchemy import select
 
+from app.config import CONFIG
 from app.db.models import Event
 from app.db.session import session
+from app.tasks.notify_emails import send_notification_email
 from app.tasks.queues import lightweight_maintenance_queue
+from app.wiki import acl
 from app.wiki import constants as wiki_constants
 from app.wiki import git as wiki_git
 from app.wiki import update_policy
@@ -51,6 +54,20 @@ def _record_event(kind: str, path: str, payload: dict[str, Any]) -> None:
                 payload_json=json.dumps(payload),
             )
         )
+
+
+def _queue_owner_email(path: str, *, subject: str, text: str) -> None:
+    """Mail the page owner a copy of the event, if they opted in."""
+    owner = acl.get_owner(path)
+    if not owner:
+        return
+    doc_link = f"{CONFIG.public_base_url}/app/wiki/{path}"
+    send_notification_email(
+        user_id=owner,
+        kind="update_warning",
+        subject=subject,
+        text=f"{text}\n\n{doc_link}",
+    )
 
 
 def record_auto_update_capped(path: str, count: int, cap: int) -> None:
@@ -84,6 +101,14 @@ def record_auto_update_capped(path: str, count: int, cap: int) -> None:
             )
         )
     log.info("auto-update capped: %s at %d updates/24h (cap %d)", path, count, cap)
+    _queue_owner_email(
+        path,
+        subject=f"Agent Wiki: auto-updates paused for {path}",
+        text=(
+            f"{path} hit the limit of {cap} auto-updates in 24 hours, so "
+            f"further auto-updates are paused for now."
+        ),
+    )
 
 
 @lightweight_maintenance_queue.task()
@@ -115,4 +140,12 @@ def _check_update_frequency_inline(path: str) -> None:
         EVENT_FREQUENT_UPDATES,
         path,
         {"doc_path": path, "count": count, "threshold": threshold},
+    )
+    _queue_owner_email(
+        path,
+        subject=f"Agent Wiki: frequent auto-updates on {path}",
+        text=(
+            f"{path} has auto-updated {count} times in the past 24 hours "
+            f"(warning threshold {threshold})."
+        ),
     )

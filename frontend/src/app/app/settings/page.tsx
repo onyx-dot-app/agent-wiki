@@ -8,6 +8,7 @@ import {
   InputTypeIn,
   LineItemButton,
   LinkButton,
+  Switch,
   Text,
 } from "@onyx-ai/opal/components";
 import { SvgSliders } from "@onyx-ai/opal/icons";
@@ -25,6 +26,8 @@ const DEFAULT_SETTINGS: UserSettings = {
   default_landing: "wiki_home",
   chat_provider: null,
   chat_model: null,
+  notify_comment_email: false,
+  notify_update_warning_email: false,
 };
 
 // A short curated IANA list — covers the common cases without dumping the
@@ -50,6 +53,7 @@ const COMMON_TIMEZONES = [
 const TABS = [
   { key: "general", label: "General" },
   { key: "wiki", label: "Wiki Preferences" },
+  { key: "notifications", label: "Notifications" },
   { key: "account", label: "Account & Access" },
 ] as const;
 
@@ -123,6 +127,14 @@ function SettingsPageInner() {
                 />
               </Section>
             )}
+            {tab === "notifications" && (
+              <Section title="Notifications">
+                <NotificationsForm
+                  initial={user.settings}
+                  updateSettings={updateSettings}
+                />
+              </Section>
+            )}
             {tab === "account" && (
               <Section title="Account & Access">
                 <ProfileForm
@@ -168,6 +180,84 @@ function FieldLabel({ children }: { children: string }) {
 
 function FieldHint({ children }: { children: React.ReactNode }) {
   return <div className="mt-1 text-xs text-(--text-03)">{children}</div>;
+}
+
+function NotificationToggle({
+  label,
+  description,
+  checked,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  description: string;
+  checked: boolean;
+  disabled: boolean;
+  onChange: (next: boolean) => void;
+}) {
+  return (
+    <div className="flex w-full items-start gap-3">
+      <div className="min-w-0 flex-1">
+        <FieldLabel>{label}</FieldLabel>
+        <FieldHint>{description}</FieldHint>
+      </div>
+      <Switch
+        checked={checked}
+        disabled={disabled}
+        onCheckedChange={onChange}
+      />
+    </div>
+  );
+}
+
+function NotificationsForm({
+  initial,
+  updateSettings,
+}: {
+  initial: UserSettings;
+  updateSettings: (partial: Partial<UserSettings>) => Promise<UserSettings>;
+}) {
+  const [busyKey, setBusyKey] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function toggle(
+    key: "notify_comment_email" | "notify_update_warning_email",
+    next: boolean,
+  ) {
+    setBusyKey(key);
+    setError(null);
+    try {
+      await updateSettings({ [key]: next });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "failed to save");
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-5">
+      <FieldHint>
+        Email copies go to your login email, the address you already sign in
+        with. Nothing to verify.
+      </FieldHint>
+      <NotificationToggle
+        label="Comment emails"
+        description="Email me when someone comments on a page I own or mentions me in a comment."
+        checked={initial.notify_comment_email}
+        disabled={busyKey !== null}
+        onChange={(next) => void toggle("notify_comment_email", next)}
+      />
+      <NotificationToggle
+        label="Auto-update warning emails"
+        description="Email me when a page I own auto-updates past the warning threshold or hits the update cap."
+        checked={initial.notify_update_warning_email}
+        disabled={busyKey !== null}
+        onChange={(next) => void toggle("notify_update_warning_email", next)}
+      />
+      <FormStatus error={error} saved={false} />
+    </div>
+  );
 }
 
 function ProfileForm({
