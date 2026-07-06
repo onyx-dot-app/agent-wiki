@@ -1,22 +1,23 @@
 "use client";
 
-import {
-  useEffect,
-  useMemo,
-  useState,
-  type FormEvent,
-  type ReactNode,
-} from "react";
+import { Suspense, useEffect, useMemo, useState, type FormEvent } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 
-import { Button } from "@onyx-ai/opal/components";
-import { BackLink, PageHeader } from "@/components/common/PageHeader";
+import {
+  Button,
+  InputTypeIn,
+  LineItemButton,
+  LinkButton,
+  Text,
+} from "@onyx-ai/opal/components";
+import { SvgSliders } from "@onyx-ai/opal/icons";
+import { SettingsLayouts } from "@onyx-ai/opal/layouts";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { apiFetch } from "@/lib/api";
 import { useRequireAuth } from "@/lib/auth";
 import { effectiveTimezone } from "@/lib/cron";
 import { useTheme } from "next-themes";
 import type { DefaultLanding, ThemeSetting, UserSettings } from "@/types";
-import styles from "./page.module.css";
 
 const DEFAULT_SETTINGS: UserSettings = {
   theme: "system",
@@ -26,8 +27,8 @@ const DEFAULT_SETTINGS: UserSettings = {
   chat_model: null,
 };
 
-// A short curated IANA list — covers the common cases without dumping
-// the full ~600-zone list into a <select>. The text input below is the
+// A short curated IANA list — covers the common cases without dumping the
+// full ~600-zone list into a native select. The text input below is the
 // escape hatch for anything else.
 const COMMON_TIMEZONES = [
   "UTC",
@@ -46,56 +47,136 @@ const COMMON_TIMEZONES = [
   "Australia/Sydney",
 ];
 
+const TABS = [
+  { key: "general", label: "General" },
+  { key: "wiki", label: "Wiki Preferences" },
+  { key: "account", label: "Account & Access" },
+] as const;
+
+type TabKey = (typeof TABS)[number]["key"];
+
 export default function SettingsPage() {
-  const { user, loading, updateSettings, updateProfile } = useRequireAuth();
-
-  if (loading || !user) {
-    return (
-      <main className={styles.loading}>
-        <LoadingSpinner center />
-      </main>
-    );
-  }
-
   return (
-    <main className={styles.main}>
-      <BackLink href="/" label="← Home" />
-      <PageHeader
-        title="Personal settings"
-        description="Profile fields and preferences scoped to your account. Saved on the server, so they follow you across browsers."
-      />
-      <Section title="Profile">
-        <ProfileForm initialName={user.name} updateProfile={updateProfile} />
-      </Section>
-      <Section title="Preferences">
-        <SettingsForm initial={user.settings} updateSettings={updateSettings} />
-      </Section>
-      <Section title="Chat model">
-        <ChatModelForm
-          initial={user.settings}
-          updateSettings={updateSettings}
-        />
-      </Section>
-    </main>
+    <Suspense fallback={<LoadingSpinner center />}>
+      <SettingsPageInner />
+    </Suspense>
   );
 }
 
-function Section({ title, children }: { title: string; children: ReactNode }) {
+function SettingsPageInner() {
+  const { user, loading, updateSettings, updateProfile } = useRequireAuth();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const rawTab = searchParams.get("tab");
+  const tab: TabKey = TABS.some((t) => t.key === rawTab)
+    ? (rawTab as TabKey)
+    : "general";
+
+  if (loading || !user) {
+    return <LoadingSpinner center />;
+  }
+
   return (
-    <section className="mt-6">
-      <h2 className="m-0 mb-3 text-sm font-semibold tracking-[0.4px] text-(--text-03) uppercase">
+    <SettingsLayouts.Root width="lg">
+      <SettingsLayouts.Header
+        icon={SvgSliders}
+        title="Settings"
+        description="Preferences scoped to your account. Saved on the server, so they follow you across browsers."
+        divider
+      />
+      <SettingsLayouts.Body>
+        <div className="flex w-full items-start gap-6 max-md:flex-col">
+          <nav className="flex w-44 shrink-0 flex-col gap-1 max-md:w-full max-md:flex-row max-md:flex-wrap">
+            {TABS.map((t) => (
+              <LineItemButton
+                key={t.key}
+                title={t.label}
+                sizePreset="main-ui"
+                variant="body"
+                state={tab === t.key ? "selected" : "empty"}
+                onClick={() =>
+                  router.replace(`/app/settings?tab=${t.key}`, {
+                    scroll: false,
+                  })
+                }
+              />
+            ))}
+          </nav>
+          <div className="flex min-w-0 flex-1 flex-col gap-6">
+            {tab === "general" && (
+              <Section title="General">
+                <AppearanceForm
+                  initial={user.settings}
+                  updateSettings={updateSettings}
+                />
+              </Section>
+            )}
+            {tab === "wiki" && (
+              <Section title="Wiki Preferences">
+                <WikiPrefsForm
+                  initial={user.settings}
+                  updateSettings={updateSettings}
+                />
+                <ChatModelForm
+                  initial={user.settings}
+                  updateSettings={updateSettings}
+                />
+              </Section>
+            )}
+            {tab === "account" && (
+              <Section title="Account & Access">
+                <ProfileForm
+                  initialName={user.name}
+                  email={user.email}
+                  updateProfile={updateProfile}
+                />
+              </Section>
+            )}
+          </div>
+        </div>
+      </SettingsLayouts.Body>
+    </SettingsLayouts.Root>
+  );
+}
+
+function Section({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="flex flex-col gap-4">
+      <Text as="h2" font="main-content-emphasis" color="text-04">
         {title}
-      </h2>
+      </Text>
       {children}
     </section>
   );
 }
 
+function FieldLabel({ children }: { children: string }) {
+  return (
+    <div className="mb-1">
+      <Text font="main-ui-action" color="text-04">
+        {children}
+      </Text>
+    </div>
+  );
+}
+
+function FieldHint({ children }: { children: React.ReactNode }) {
+  return <div className="mt-1 text-xs text-(--text-03)">{children}</div>;
+}
+
 function ProfileForm({
   initialName,
+  email,
   updateProfile,
 }: {
   initialName: string | null;
+  email: string;
   updateProfile: (partial: { name: string }) => Promise<unknown>;
 }) {
   const [name, setName] = useState<string>(initialName ?? "");
@@ -128,8 +209,8 @@ function ProfileForm({
   return (
     <form onSubmit={onSubmit} className="flex flex-col gap-4">
       <label>
-        <div className={lblClass}>Display name</div>
-        <input
+        <FieldLabel>Display name</FieldLabel>
+        <InputTypeIn
           value={name}
           onChange={(e) => {
             setName(e.target.value);
@@ -138,16 +219,24 @@ function ProfileForm({
           }}
           placeholder="e.g. Ada Lovelace"
           maxLength={200}
-          className={inputClass}
         />
-        <div className={hintClass}>
+        <FieldHint>
           Shown in the app header and on activity attributed to you. Leave blank
           to fall back to your email.
-        </div>
+        </FieldHint>
       </label>
 
-      {error && <div className="text-(--status-text-error-05)">{error}</div>}
-      {saved && <div className="text-(--status-text-success-05)">Saved.</div>}
+      <div>
+        <FieldLabel>Login email</FieldLabel>
+        <Text font="main-ui-body" color="text-04">
+          {email}
+        </Text>
+        <FieldHint>
+          The address you sign in with. Account emails go here.
+        </FieldHint>
+      </div>
+
+      <FormStatus error={error} saved={saved} />
       <div>
         <Button type="submit" variant="action" disabled={saving || !dirty}>
           {saving ? "Saving…" : "Save"}
@@ -157,52 +246,45 @@ function ProfileForm({
   );
 }
 
-function SettingsForm({
-  initial,
-  updateSettings,
+function FormStatus({
+  error,
+  saved,
 }: {
-  initial: UserSettings;
-  updateSettings: (partial: Partial<UserSettings>) => Promise<UserSettings>;
+  error: string | null;
+  saved: boolean;
 }) {
-  // An unset timezone (null) means "use my local zone" — show that concretely
-  // in the form so the field never reads UTC just because nothing was chosen.
-  const initialTz = effectiveTimezone(initial.timezone);
-  const [draft, setDraft] = useState<UserSettings>({
-    ...DEFAULT_SETTINGS,
-    ...initial,
-    timezone: initialTz,
-  });
+  if (error)
+    return <div className="text-(--status-text-error-05)">{error}</div>;
+  if (saved)
+    return <div className="text-(--status-text-success-05)">Saved.</div>;
+  return null;
+}
+
+/** Shared save plumbing for the settings forms: diff the draft against a
+ * baseline and PUT only the changed keys, so untouched fields never patch. */
+function useSettingsDraft(
+  baseline: UserSettings,
+  updateSettings: (partial: Partial<UserSettings>) => Promise<UserSettings>,
+) {
+  const [draft, setDraft] = useState<UserSettings>(baseline);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [tzCustom, setTzCustom] = useState<boolean>(
-    !COMMON_TIMEZONES.includes(initialTz),
-  );
 
-  // Pull future updates (e.g. another tab) back into the form.
+  // A baseline swap (fresh settings from the server) restarts the form:
+  // drop any stale saved/error status along with the draft reset.
   useEffect(() => {
-    const tz = effectiveTimezone(initial.timezone);
-    setDraft({ ...DEFAULT_SETTINGS, ...initial, timezone: tz });
-    setTzCustom(!COMMON_TIMEZONES.includes(tz));
-  }, [initial]);
+    setSaved(false);
+    setError(null);
+  }, [baseline]);
 
-  // The baseline the form diffs against: identical to `initial`, but with the
-  // timezone resolved the same way the field displays it. Both `dirty` and the
-  // save diff use this, so a save that didn't touch the timezone never patches
-  // it — leaving an unset (null) timezone unset rather than pinning the local
-  // zone.
-  const baseline = useMemo<UserSettings>(
-    () => ({ ...initial, timezone: effectiveTimezone(initial.timezone) }),
-    [initial],
+  const dirty = useMemo(
+    () =>
+      (Object.keys(draft) as (keyof UserSettings)[]).some(
+        (k) => draft[k] !== baseline[k],
+      ),
+    [draft, baseline],
   );
-
-  const { setTheme } = useTheme();
-
-  const dirty = useMemo(() => {
-    return (Object.keys(draft) as (keyof UserSettings)[]).some(
-      (k) => draft[k] !== baseline[k],
-    );
-  }, [draft, baseline]);
 
   function update<K extends keyof UserSettings>(
     key: K,
@@ -213,15 +295,7 @@ function SettingsForm({
     setError(null);
   }
 
-  function pickTheme(theme: ThemeSetting) {
-    update("theme", theme);
-    // Apply immediately so the user sees the change without waiting for
-    // the round-trip — Save still needs to hit the server to persist.
-    setTheme(theme);
-  }
-
-  async function onSubmit(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
+  async function save(onError?: () => void) {
     if (!dirty) return;
     setSaving(true);
     setError(null);
@@ -237,103 +311,192 @@ function SettingsForm({
       setSaved(true);
     } catch (e) {
       setError(e instanceof Error ? e.message : "failed to save");
-      // Revert the optimistic theme apply if the server rejected.
-      setTheme(initial.theme);
+      onError?.();
     } finally {
       setSaving(false);
     }
   }
 
+  return { draft, setDraft, update, save, dirty, saving, saved, error };
+}
+
+function AppearanceForm({
+  initial,
+  updateSettings,
+}: {
+  initial: UserSettings;
+  updateSettings: (partial: Partial<UserSettings>) => Promise<UserSettings>;
+}) {
+  // An unset timezone (null) means "use my local zone" — show that concretely
+  // in the form so the field never reads UTC just because nothing was chosen.
+  const initialTz = effectiveTimezone(initial.timezone);
+  const baseline = useMemo<UserSettings>(
+    () => ({ ...DEFAULT_SETTINGS, ...initial, timezone: initialTz }),
+    [initial, initialTz],
+  );
+  const form = useSettingsDraft(baseline, updateSettings);
+  const { draft, setDraft, update } = form;
+  const [tzCustom, setTzCustom] = useState<boolean>(
+    !COMMON_TIMEZONES.includes(initialTz),
+  );
+
+  // Pull future updates (e.g. another tab) back into the form.
+  useEffect(() => {
+    setDraft(baseline);
+    setTzCustom(!COMMON_TIMEZONES.includes(baseline.timezone ?? ""));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [baseline]);
+
+  const { setTheme } = useTheme();
+
+  function pickTheme(theme: ThemeSetting) {
+    update("theme", theme);
+    // Apply immediately so the user sees the change without waiting for
+    // the round-trip — Save still needs to hit the server to persist.
+    setTheme(theme);
+  }
+
   return (
-    <form onSubmit={onSubmit} className="flex flex-col gap-4">
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        // Revert the optimistic theme apply if the server rejected.
+        void form.save(() => setTheme(initial.theme));
+      }}
+      className="flex flex-col gap-4"
+    >
       <label>
-        <div className={lblClass}>Theme</div>
+        <FieldLabel>Theme</FieldLabel>
+        {/* raw-ok: no Opal select component */}
         <select
           value={draft.theme}
           onChange={(e) => pickTheme(e.target.value as ThemeSetting)}
-          className={inputClass}
+          className={selectClass}
         >
           <option value="system">System (match OS)</option>
           <option value="light">Light</option>
           <option value="dark">Dark</option>
         </select>
-        <div className={hintClass}>
-          Visual chrome of the app on this account.
-        </div>
+        <FieldHint>Visual chrome of the app on this account.</FieldHint>
       </label>
 
       <label>
-        <div className={lblClass}>Timezone</div>
+        <FieldLabel>Timezone</FieldLabel>
         {tzCustom ? (
-          <input
+          <InputTypeIn
             value={draft.timezone ?? ""}
             onChange={(e) => update("timezone", e.target.value)}
             placeholder="e.g. America/Los_Angeles"
-            className={inputClass}
           />
         ) : (
-          <select
-            value={draft.timezone ?? ""}
-            onChange={(e) => {
-              if (e.target.value === "__custom__") {
-                setTzCustom(true);
-                return;
-              }
-              update("timezone", e.target.value);
-            }}
-            className={inputClass}
-          >
-            {COMMON_TIMEZONES.map((tz) => (
-              <option key={tz} value={tz}>
-                {tz}
-              </option>
-            ))}
-            <option value="__custom__">Other…</option>
-          </select>
+          <>
+            {/* raw-ok: no Opal select component */}
+            <select
+              value={draft.timezone ?? ""}
+              onChange={(e) => {
+                if (e.target.value === "__custom__") {
+                  setTzCustom(true);
+                  return;
+                }
+                update("timezone", e.target.value);
+              }}
+              className={selectClass}
+            >
+              {COMMON_TIMEZONES.map((tz) => (
+                <option key={tz} value={tz}>
+                  {tz}
+                </option>
+              ))}
+              <option value="__custom__">Other…</option>
+            </select>
+          </>
         )}
-        <div className={hintClass}>
+        <FieldHint>
           Used for timestamps and scheduled-trigger displays.
           {tzCustom && (
             <>
               {" "}
-              <button
-                type="button"
+              <LinkButton
                 onClick={() => {
                   setTzCustom(false);
                   if (!COMMON_TIMEZONES.includes(draft.timezone ?? "")) {
                     update("timezone", "UTC");
                   }
                 }}
-                className="cursor-pointer border-none bg-transparent p-0 text-xs text-(--text-03) underline"
               >
                 Pick from common list
-              </button>
+              </LinkButton>
             </>
           )}
-        </div>
+        </FieldHint>
       </label>
 
+      <FormStatus error={form.error} saved={form.saved} />
+      <div>
+        <Button
+          type="submit"
+          variant="action"
+          disabled={form.saving || !form.dirty}
+        >
+          {form.saving ? "Saving…" : "Save"}
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+function WikiPrefsForm({
+  initial,
+  updateSettings,
+}: {
+  initial: UserSettings;
+  updateSettings: (partial: Partial<UserSettings>) => Promise<UserSettings>;
+}) {
+  const baseline = useMemo<UserSettings>(
+    () => ({ ...DEFAULT_SETTINGS, ...initial }),
+    [initial],
+  );
+  const form = useSettingsDraft(baseline, updateSettings);
+  const { draft, setDraft, update } = form;
+
+  useEffect(() => {
+    setDraft(baseline);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [baseline]);
+
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        void form.save();
+      }}
+      className="flex flex-col gap-4"
+    >
       <label>
-        <div className={lblClass}>Default landing page</div>
+        <FieldLabel>Default landing page</FieldLabel>
+        {/* raw-ok: no Opal select component */}
         <select
           value={draft.default_landing}
           onChange={(e) =>
             update("default_landing", e.target.value as DefaultLanding)
           }
-          className={inputClass}
+          className={selectClass}
         >
           <option value="wiki_home">Wiki home</option>
           <option value="recent">Recently edited</option>
           <option value="last_viewed">Last viewed page</option>
         </select>
-        <div className={hintClass}>Where the app opens after sign-in.</div>
+        <FieldHint>Where the app opens after sign-in.</FieldHint>
       </label>
 
-      {error && <div className="text-(--status-text-error-05)">{error}</div>}
-      {saved && <div className="text-(--status-text-success-05)">Saved.</div>}
+      <FormStatus error={form.error} saved={form.saved} />
       <div>
-        <Button type="submit" variant="action" disabled={saving || !dirty}>
-          {saving ? "Saving…" : "Save"}
+        <Button
+          type="submit"
+          variant="action"
+          disabled={form.saving || !form.dirty}
+        >
+          {form.saving ? "Saving…" : "Save"}
         </Button>
       </div>
     </form>
@@ -391,8 +554,8 @@ function ChatModelForm({
   return (
     <form onSubmit={onSubmit} className="flex flex-col gap-4">
       <label>
-        <div className={lblClass}>Chat model</div>
-        <input
+        <FieldLabel>Chat model</FieldLabel>
+        <InputTypeIn
           value={chatModel}
           onChange={(e) => {
             setChatModel(e.target.value);
@@ -400,19 +563,17 @@ function ChatModelForm({
             setError(null);
           }}
           placeholder={placeholder}
-          className={inputClass}
         />
-        <div className={hintClass}>
+        <FieldHint>
           Override the model used in your chat sessions. Leave blank to use the
           admin-configured agent default
           {llmStatus?.configured
             ? ` (currently ${llmStatus.provider} / ${llmStatus.model})`
             : ""}
           .
-        </div>
+        </FieldHint>
       </label>
-      {error && <div className="text-(--status-text-error-05)">{error}</div>}
-      {saved && <div className="text-(--status-text-success-05)">Saved.</div>}
+      <FormStatus error={error} saved={saved} />
       <div>
         <Button type="submit" variant="action" disabled={saving}>
           {saving ? "Saving…" : "Save"}
@@ -422,7 +583,5 @@ function ChatModelForm({
   );
 }
 
-const inputClass =
-  "w-full py-2 px-[10px] box-border border border-(--border-01) rounded-(--border-radius-04) text-sm";
-const lblClass = "mb-1 text-[13px] font-medium";
-const hintClass = "mt-1 text-xs text-(--text-03) leading-[1.5]";
+const selectClass =
+  "w-full py-2 px-[10px] box-border border border-(--border-02) rounded-(--radius-08) bg-(--background-neutral-00) text-sm";
