@@ -75,4 +75,9 @@ def handle(args: dict[str, Any]) -> Any:
         updated = triggers_repo.update(trigger_id, actor=wiki_utils.author_string(), **kwargs)
     except ValueError as exc:
         return {"error": str(exc)}
-    return {"trigger": updated}
+    result: dict[str, object] = {"trigger": updated}
+    if "scope_path" in kwargs:
+        warning = triggers_storage.scope_warning_for(kwargs["scope_path"], reader=user)
+        if warning:
+            result["scope_warning"] = warning
+    return result

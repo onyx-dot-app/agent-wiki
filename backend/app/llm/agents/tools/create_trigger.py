@@ -42,4 +42,8 @@ def handle(args: dict[str, Any]) -> Any:
         )
     except ValueError as exc:
         return {"error": str(exc)}
-    return {"trigger": trigger}
+    result: dict[str, object] = {"trigger": trigger}
+    warning = triggers_storage.scope_warning_for(scope, reader=user)
+    if warning:
+        result["scope_warning"] = warning
+    return result

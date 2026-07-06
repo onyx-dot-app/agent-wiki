@@ -7,12 +7,13 @@ from __future__ import annotations
 
 import pytest
 
-from tests._seed import seed_user
+from tests._seed import seed_docs, seed_user
 
 
 @pytest.fixture
 def as_user(tmp_repo, monkeypatch):
     """Seed a user and stub current_user so the tool handlers see them."""
+    seed_docs("a.md", "b.md", "guide.md", "public.md", "private/secret.md")
     uid = seed_user(email="u@x.com")
 
     class FakeUser:
@@ -36,6 +37,20 @@ def as_user(tmp_repo, monkeypatch):
 # --------------------------------------------------------------------------- #
 # create_trigger                                                              #
 # --------------------------------------------------------------------------- #
+
+
+def test_create_trigger_warns_on_not_yet_created_scope(as_user):
+    from app.llm.agents.tools.create_trigger import handle
+
+    out = handle(
+        {
+            "scope_path": "roadmap/q3.md",
+            "trigger_nl_condition": "always",
+            "actions": [{"message": "hi"}],
+        }
+    )
+    assert "error" not in out, out
+    assert "does not exist yet" in out["scope_warning"]
 
 
 def test_create_trigger_requires_actions(as_user):

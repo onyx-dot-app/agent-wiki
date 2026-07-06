@@ -163,3 +163,11 @@ __all__ = [
     "seed_trigger",
     "seed_user",
 ]
+
+
+def seed_docs(*paths: str) -> None:
+    """Commit placeholder docs so trigger scopes resolve during authoring."""
+    from app.wiki import git as wiki_git
+
+    for path in paths:
+        wiki_git.commit_file(path, f"# {path}\n\nseeded\n", "seed", author=None)

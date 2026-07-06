@@ -202,11 +202,13 @@ def create_trigger(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    view = _to_view(trigger)
+    view.scope_warning = triggers_storage.scope_warning_for(scope_path, reader=user)
     log.info(
         "trigger created id=%s owner=%s scope=%s kind=%s enabled=%s",
         trigger.get("id"), user.id, scope_path, req.kind, req.enabled,
     )
-    return _to_view(trigger)
+    return view
 
 
 @router.put("/{trigger_id}", response_model=TriggerView)
@@ -271,7 +273,12 @@ def update_trigger(
         "trigger updated id=%s owner=%s fields=%s",
         trigger_id, user.id, sorted(kwargs.keys()),
     )
-    return _to_view(updated)
+    view = _to_view(updated)
+    if "scope_path" in kwargs:
+        view.scope_warning = triggers_storage.scope_warning_for(
+            kwargs["scope_path"], reader=user
+        )
+    return view
 
 
 @router.delete("/{trigger_id}", status_code=status.HTTP_204_NO_CONTENT)

@@ -7,11 +7,14 @@ from fastapi.testclient import TestClient
 from app.main import create_app
 
 from tests._auth import login_fastapi
-from tests._seed import seed_user
+from tests._seed import seed_docs, seed_user
 
 
 @pytest.fixture
 def client(tmp_repo):
+    seed_docs(
+        "a.md", "b.md", "projects/foo.md", "private/secret.md", "public.md", "fun_poem.md"
+    )
     return TestClient(create_app())
 
 
@@ -403,3 +406,76 @@ def test_list_destinations_returns_event_log(client):
     event_log = next(d for d in body["destinations"] if d["id"] == "event_log")
     assert event_log["name"]
     assert event_log["description"]
+
+
+def test_create_warns_on_near_miss_scope_with_hint(client):
+    """A typo'd scope (space for underscore) creates successfully but the
+    response warns with the real path suggested — watch-for-creation stays
+    possible for genuinely colliding names."""
+    uid = seed_user(email="hint@x.com")
+    login_fastapi(client, uid)
+    r = client.post(
+        "/api/triggers",
+        json={
+            "scope_path": "fun poem.md",
+            "nl_description": "always",
+            "actions": [{"destination_config_id": None, "message": "hi"}],
+        },
+    )
+    assert r.status_code == 201, r.text
+    warning = r.json()["scope_warning"] or ""
+    assert "does not exist yet" in warning
+    assert "fun_poem.md" in warning
+
+
+def test_near_miss_hint_never_reveals_unreadable_docs(client):
+    """A near-miss against a doc the caller can't read behaves exactly like
+    a nonexistent scope — no rejection, no hint — so the error can't be used
+    as an existence oracle for private paths."""
+    owner = seed_user(uid="usr_own", email="own@x.com")
+    _lock_path_to(owner, "private/secret.md")
+
+    probe = seed_user(uid="usr_probe", email="probe@x.com")
+    login_fastapi(client, probe)
+    r = client.post(
+        "/api/triggers",
+        json={
+            "scope_path": "private/secret md",
+            "nl_description": "always",
+            "actions": [{"destination_config_id": None, "message": "hi"}],
+        },
+    )
+    assert r.status_code == 201, r.text
+    warning = r.json()["scope_warning"] or ""
+    assert "does not exist yet" in warning
+    assert "secret.md" not in warning
+
+
+def test_create_allows_not_yet_created_scope_with_warning(client):
+    """Watching a path for creation is supported: no near-miss means the
+    trigger is created, carrying a warning that the doc doesn't exist yet."""
+    uid = seed_user(email="future@x.com")
+    login_fastapi(client, uid)
+    r = client.post(
+        "/api/triggers",
+        json={
+            "scope_path": "roadmap/q3.md",
+            "nl_description": "always",
+            "actions": [{"destination_config_id": None, "message": "hi"}],
+        },
+    )
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert "does not exist yet" in (body["scope_warning"] or "")
+
+    # Existing scopes carry no warning.
+    r2 = client.post(
+        "/api/triggers",
+        json={
+            "scope_path": "a.md",
+            "nl_description": "always",
+            "actions": [{"destination_config_id": None, "message": "hi"}],
+        },
+    )
+    assert r2.status_code == 201
+    assert r2.json()["scope_warning"] is None
