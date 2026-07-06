@@ -1,11 +1,16 @@
 """FastAPI port of ``app/api/triggers.py`` (Phase 3)."""
 from __future__ import annotations
 
+import json
 import logging
 import re
 from typing import Any, cast
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from sqlalchemy import func, select
+
+from app.db.models import Event as EventRow, Trigger
+from app.db.session import session as db_session
 
 from app.auth import User, require_can
 from app.auth.deps import require_user
@@ -20,6 +25,8 @@ from app.models.trigger import (
     TriggerCommit,
     TriggerDestinationsResponse,
     TriggerDestinationView,
+    TriggerFiresResponse,
+    TriggerFireView,
     TriggerHistoryResponse,
     TriggerListResponse,
     TriggerVersionResponse,
@@ -96,6 +103,60 @@ def list_destination_configs(
     """The caller's own destination configs. Secrets are never returned."""
     rows = dest_configs.list_for_user(user.id)
     return DestinationConfigListResponse(configs=[_config_view(r) for r in rows])
+
+
+@router.get("/fires", response_model=TriggerFiresResponse)
+def list_fires(
+    user: User = Depends(require_user),
+    trigger_id: str | None = None,
+    per_trigger: int = Query(3, ge=1, le=50),
+    limit: int = Query(200, ge=1, le=500),
+) -> TriggerFiresResponse:
+    """Recent ``trigger.fire`` events for the caller's triggers, capped
+    per trigger so one busy trigger can't starve the rest. ``trigger_id``
+    narrows to a single trigger (its fires up to ``limit``)."""
+    owned = select(Trigger.id).where(Trigger.owner_user_id == user.id)
+    ranked = (
+        select(
+            EventRow,
+            func.row_number()
+            .over(partition_by=EventRow.target, order_by=EventRow.id.desc())
+            .label("rn"),
+        )
+        .where(EventRow.kind == "trigger.fire", EventRow.target.in_(owned))
+    )
+    if trigger_id:
+        ranked = ranked.where(EventRow.target == trigger_id)
+    sub = ranked.subquery()
+    cap = limit if trigger_id else per_trigger
+    stmt = (
+        select(sub)
+        .where(sub.c.rn <= cap)
+        .order_by(sub.c.id.desc())
+        .limit(limit)
+    )
+    with db_session() as s:
+        rows = s.execute(stmt).all()
+    return TriggerFiresResponse(fires=[_fire_view(r) for r in rows])
+
+
+def _fire_view(row: Any) -> TriggerFireView:
+    try:
+        parsed: Any = json.loads(row.payload_json or "{}")
+    except json.JSONDecodeError:
+        parsed = {}
+    # valid non-object JSON (array, string, number) must not 500 the list
+    payload: dict[str, Any] = cast(dict[str, Any], parsed) if isinstance(parsed, dict) else {}
+    return TriggerFireView(
+        event_id=row.id,
+        trigger_id=row.target or "",
+        ts=row.ts,
+        doc_path=str(payload.get("doc_path") or ""),
+        change_kind=str(payload.get("change_kind") or ""),
+        reason=str(payload.get("reason") or ""),
+        message=str(payload.get("message") or ""),
+        destination_type=str(payload.get("destination_type") or ""),
+    )
 
 
 @router.post(
