@@ -222,3 +222,43 @@ def test_commit_message_credits_other_participants_as_coauthors(repo):
     msg = coedit_checkpoint._commit_message(sess.id, primary_author_id=b)
     assert "Co-authored-by: Ada <ada@x.com>" in msg
     assert "bo@x.com" not in msg
+
+
+def test_checkpoint_skips_closed_dirty_session(repo):
+    # A closed session with un-checkpointed edits must NOT be re-committed — it
+    # would clobber newer HEAD with a stale buffer (the 2026-07-06 incident).
+    # Its edits stay in the buffer for manual recovery.
+    uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
+    sha = _seed_page("hello world")
+    sess = coedit.open_session(_PATH, base_sha=sha, initial_buffer="hello world")
+    coedit.join(sess.id, uid)
+    coedit.apply_op(sess.id, base_version=0, changes=[_ch(0, 5, "hi")], author_user_id=uid)
+    # An agent lands a newer commit after the buffer's base.
+    newer = wiki_git.commit_file(_PATH, "hello world v2", "agent", author="A <a@x.com>")
+    coedit.close_session(sess.id)  # closed while still dirty (v1, checkpointed v0)
+
+    assert coedit_checkpoint.checkpoint_session(sess.id) is None  # skipped
+    # HEAD is untouched — the stale buffer did not clobber the agent's commit.
+    assert wiki_git.head_sha_for_path(_PATH) == newer
+    assert wiki_git.read_file(_PATH) == "hello world v2"
+
+
+def test_duplicate_queued_checkpoints_commit_once(repo):
+    # Two queued checkpoint tasks for the same session must produce ONE commit:
+    # the first commits + closes; the second no-ops on the now-closed session
+    # (previously each re-committed → the incident's 4x clobber).
+    uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
+    sha = _seed_page("hello world")
+    sess = coedit.open_session(_PATH, base_sha=sha, initial_buffer="hello world")
+    coedit.join(sess.id, uid)
+    coedit.apply_op(sess.id, base_version=0, changes=[_ch(0, 5, "hi")], author_user_id=uid)
+    coedit.leave(sess.id, uid)  # last participant gone → eligible to close
+
+    before = len(wiki_git.history(_PATH))
+    with documents_queue.immediate_mode():
+        coedit_checkpoint_task.checkpoint_coedit_session(sess.id)  # commits + closes
+        coedit_checkpoint_task.checkpoint_coedit_session(sess.id)  # duplicate → no-op
+        coedit_checkpoint_task.checkpoint_coedit_session(sess.id)  # duplicate → no-op
+    after = len(wiki_git.history(_PATH))
+    assert after - before == 1  # exactly one "Co-editing checkpoint" commit
+    assert wiki_git.read_file(_PATH) == "hi world"
