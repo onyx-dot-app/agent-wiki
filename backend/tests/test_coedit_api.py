@@ -347,3 +347,23 @@ def test_op_client_id_round_trips_to_ops(client):
     assert resp2.status_code == 200
     ops = client.get(f"/api/coedit/ops?session_id={sid}&since_version=1").json()["ops"]
     assert ops[0]["client_id"] is None
+
+
+def test_file_read_serves_head_when_session_has_no_participants(client):
+    # A zombie session (active but everyone left, checkpoint not yet run) must
+    # NOT pin viewers to its stale buffer — the read falls through to committed
+    # HEAD. Otherwise a backed-up checkpoint queue makes every viewer see stale
+    # content indefinitely.
+    uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
+    login_fastapi(client, uid)
+    _seed_page("# Setup\n\nhello\n")
+    sid = client.post("/api/coedit/join", json={"path": _PATH}).json()["session_id"]
+    _apply_op(client, sid, 0, [{"from": 0, "to": len("# Setup\n\nhello\n"), "insert": "LIVE\n"}])
+    # Everyone leaves — participant row removed, but the session stays active
+    # (close is deferred to the checkpoint task).
+    coedit.leave(sid, uid)
+    st = coedit.get_active_session(_PATH)
+    assert st is not None and st.status == "active"  # still active (zombie)
+
+    body = client.get(f"/api/wiki/file?path={_PATH}").json()["body"]
+    assert body == "# Setup\n\nhello\n"  # committed HEAD, not the "LIVE" buffer

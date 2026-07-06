@@ -218,7 +218,13 @@ def get_document_by_path(
     # the live buffer. This is a UI read; git stays the source of truth for
     # committed pages.
     sess = coedit.get_active_session(rel)
-    if sess is not None:
+    # Only serve the live buffer while someone is actually in the session. An
+    # active session with no participants is a zombie awaiting its final
+    # checkpoint (enqueued on the last leave); serving its buffer would pin
+    # every viewer to a stale snapshot until that checkpoint runs — which, if
+    # the queue is backed up, can be far behind HEAD. Fall through to the
+    # committed working tree instead.
+    if sess is not None and coedit.list_participants(sess.id):
         body = sess.buffer_text
         # Fast path: if HEAD hasn't moved since the session opened (the common
         # case — live-rebase folds inbound agent commits into the buffer and
