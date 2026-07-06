@@ -40,7 +40,7 @@ import {
 } from "@onyx-ai/opal/icons";
 import { useConfirm } from "@/components/common/ConfirmDialog";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
-import { TriggerModal } from "@/components/triggers/TriggerModal";
+import { TriggerPanel } from "@/components/triggers/TriggerPanel";
 import { DiffView } from "@/components/wiki/DiffView";
 import { HistoryPanel } from "@/components/wiki/HistoryPanel";
 import { RunAgentPanel } from "@/components/wiki/RunAgentPanel";
@@ -392,7 +392,7 @@ function Explorer({ dir }: { dir: string }) {
     >
       {host?.el && createPortal(headerActions, host.el)}
 
-      <TriggerModal
+      <TriggerPanel
         open={triggerModalOpen}
         initial={{ scope_path: dir || "/" }}
         lockScope
@@ -2007,7 +2007,7 @@ function FileViewer({ path }: { path: string }) {
         <div className="mb-3 text-xs text-(--text-04)">{triggerStatus}</div>
       )}
 
-      <TriggerModal
+      <TriggerPanel
         open={triggerModalOpen}
         initial={{ scope_path: path }}
         lockScope

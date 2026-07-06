@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 
-import { Button, InputTypeIn } from "@onyx-ai/opal/components";
+import { Button, InputTypeIn, Tabs } from "@onyx-ai/opal/components";
+import { SvgPlusCircle, SvgWorkflow, SvgX } from "@onyx-ai/opal/icons";
 import {
   PRESET_OPTIONS,
   WEEKDAY_NAMES,
@@ -43,7 +44,7 @@ const EXAMPLE_IF = "the document is updated with a release version";
 const EXAMPLE_SEND =
   "a message saying that the version has been finalized or updated to the specific version number.";
 
-export function TriggerModal({
+export function TriggerPanel({
   open,
   initial,
   onClose,
@@ -218,183 +219,241 @@ export function TriggerModal({
   }
 
   return (
-    <div
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-(--mask-03)"
-    >
+    <div className="fixed top-2 right-2 z-[100] flex max-h-[calc(100vh-16px)] w-[464px] max-w-[calc(100vw-16px)] flex-col">
       <form
         onSubmit={onSubmit}
-        className="relative z-[1] flex max-h-[92vh] w-[min(560px,92vw)] flex-col gap-4 overflow-y-auto rounded-(--border-radius-12) bg-(--background-tint-00) p-6 shadow-(--shadow-modal)"
+        className="flex max-h-full w-full flex-col overflow-hidden rounded-(--radius-12) border border-(--border-01) bg-(--background-tint-00)"
       >
-        <div>
-          <h2 className="m-0 text-lg font-semibold text-(--text-05)">
-            {isEdit ? "Edit trigger" : "Create a trigger"}
-          </h2>
-          <p className="mt-[6px] mb-0 text-[13px] leading-[1.55] text-(--text-04)">
-            Triggers monitor documents or folders and send events when a
-            specified condition is met. They can fire on document updates or on
-            a recurring schedule.
-          </p>
+        <div className="flex w-full items-start gap-2 p-2">
+          <div className="flex min-w-0 flex-1 items-start gap-[2px] p-[2px]">
+            <span className="flex size-6 items-center justify-center p-1">
+              <SvgWorkflow size={18} />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="m-0 px-[2px] text-[16px] leading-6 font-semibold text-(--text-04)">
+                {isEdit ? "Edit Trigger" : "New Trigger"}
+              </p>
+              <p className="m-0 px-[2px] text-[12px] leading-4 text-(--text-03)">
+                Trigger actions on changes or specified conditions.
+              </p>
+            </div>
+          </div>
+          <Button
+            type="button"
+            icon={SvgX}
+            size="sm"
+            tooltip="Close"
+            onClick={onClose}
+            disabled={busy}
+          />
         </div>
 
-        <label className="flex flex-col gap-1.5">
-          <span className="text-[11px] font-bold tracking-[0.06em] text-(--text-03) uppercase">
-            When to run
-          </span>
-          <select
+        <div className="flex w-full flex-1 flex-col gap-3 overflow-y-auto bg-(--background-tint-01) p-3">
+          <Tabs
             value={kind}
-            onChange={(e) => setKind(e.target.value as TriggerKind)}
-            disabled={busy || isEdit}
-            className={`box-border w-full rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-00) px-[10px] py-2 text-sm outline-none ${isEdit ? "cursor-not-allowed" : "cursor-pointer"}`}
+            onValueChange={(v) => {
+              if (!isEdit && !busy) setKind(v as TriggerKind);
+            }}
+            variant="contained"
           >
-            <option value="delta">On a document update</option>
-            <option value="schedule">On a schedule</option>
-          </select>
-          {isEdit && (
-            <span className="text-xs leading-[1.4] text-(--text-03)">
-              The trigger type can&rsquo;t be changed after creation. Delete and
-              recreate to switch.
+            <Tabs.List>
+              <Tabs.Trigger
+                value="delta"
+                disabled={isEdit && kind !== "delta"}
+                tooltip={
+                  isEdit
+                    ? "The trigger type can't be changed after creation"
+                    : undefined
+                }
+              >
+                Run on Wiki Updates
+              </Tabs.Trigger>
+              <Tabs.Trigger
+                value="schedule"
+                disabled={isEdit && kind !== "schedule"}
+                tooltip={
+                  isEdit
+                    ? "The trigger type can't be changed after creation"
+                    : undefined
+                }
+              >
+                Recurring Schedule
+              </Tabs.Trigger>
+            </Tabs.List>
+          </Tabs>
+
+          <div className="flex w-full flex-col gap-1">
+            <span className="px-[2px] text-[14px] leading-5 font-semibold text-(--text-04)">
+              Watch
             </span>
-          )}
-        </label>
+            <div className="flex min-h-[38px] w-full flex-wrap content-center items-center gap-1 rounded-(--radius-08) border border-(--border-01) bg-(--background-tint-00) p-[6px] focus-within:border-(--border-05) focus-within:shadow-[0_0_0_2px_var(--background-tint-04)]">
+              {scopePath.trim() ? (
+                <span className="flex items-center rounded-(--radius-08) bg-(--background-tint-02) py-[2px] pr-[2px] pl-1">
+                  <span className="max-w-[280px] truncate px-[2px] text-[14px] leading-5 font-medium text-(--text-04)">
+                    {scopePath.trim() === "" || scopePath.trim() === "/"
+                      ? "Whole wiki"
+                      : scopePath.trim()}
+                  </span>
+                  {!lockScope && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!busy) setScopePath("");
+                      }}
+                      className="flex size-4 cursor-pointer items-center justify-center rounded-(--radius-04) border-none bg-transparent p-[2px] text-(--text-03) hover:bg-(--background-tint-03)"
+                      aria-label="Remove watched path"
+                    >
+                      <SvgX size={12} />
+                    </button>
+                  )}
+                </span>
+              ) : (
+                <input
+                  value={scopePath}
+                  onChange={(e) => setScopePath(e.target.value)}
+                  disabled={busy || lockScope}
+                  placeholder="projects/foo.md, projects, or / for the whole wiki"
+                  className="min-w-[80px] flex-1 border-none bg-transparent px-1 py-[2px] text-[14px] leading-5 outline-none placeholder:text-(--text-02)"
+                />
+              )}
+            </div>
+            <span className="px-[2px] text-[12px] leading-4 text-(--text-03)">
+              Add a specific page or an entire folder to watch.
+            </span>
+          </div>
 
-        <label className="flex flex-col gap-1.5">
-          <span className="text-[11px] font-bold tracking-[0.06em] text-(--text-03) uppercase">
-            Watching
-          </span>
-          <input
-            value={scopePath}
-            onChange={(e) => setScopePath(e.target.value)}
-            disabled={busy || lockScope}
-            placeholder="projects/foo.md or projects"
-            className="box-border w-full rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-00) px-[10px] py-2 text-sm outline-none"
-          />
-          <span className="text-xs leading-[1.4] text-(--text-03)">
-            e.g. <code>projects/foo.md</code> for one document,{" "}
-            <code>projects</code> for a folder, or <code>/</code> to watch the
-            whole wiki.
-          </span>
-        </label>
+          <div className="h-0 w-full border-t border-(--border-01)" />
 
-        {kind === "schedule" && (
-          <ScheduleFields
-            parts={scheduleParts}
-            onPartsChange={setScheduleParts}
-            customCron={customCron}
-            onCustomCronChange={setCustomCron}
-            tz={tz}
-            onTzChange={setTz}
-            tzOptions={tzOptions}
-            startAtLocal={startAtLocal}
-            onStartAtChange={setStartAtLocal}
-            cronSummary={cronSummary}
-            computedCron={computedCron}
-            disabled={busy}
-          />
-        )}
-
-        <label className="flex flex-col gap-1.5">
-          <span className="text-[11px] font-bold tracking-[0.06em] text-(--text-03) uppercase">
-            If
-          </span>
-          <textarea
-            value={ifText}
-            onChange={(e) => setIfText(e.target.value)}
-            disabled={busy}
-            placeholder={EXAMPLE_IF}
-            rows={2}
-            className="box-border w-full resize-y rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-00) px-[10px] py-2 text-sm outline-none"
-          />
           {kind === "schedule" && (
-            <span className="text-xs leading-[1.4] text-(--text-03)">
-              On each scheduled run, the trigger fires only when this condition
-              is satisfied by the current state of the documents under{" "}
-              <em>Watching</em>.
-            </span>
-          )}
-        </label>
-
-        <label className="flex flex-col gap-1.5">
-          <span className="text-[11px] font-bold tracking-[0.06em] text-(--text-03) uppercase">
-            Then send
-          </span>
-          <textarea
-            value={sendText}
-            onChange={(e) => setSendText(e.target.value)}
-            disabled={busy}
-            placeholder={EXAMPLE_SEND}
-            rows={2}
-            className="box-border w-full resize-y rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-00) px-[10px] py-2 text-sm outline-none"
-          />
-        </label>
-
-        <label className="flex flex-col gap-1.5">
-          <span className="text-[11px] font-bold tracking-[0.06em] text-(--text-03) uppercase">
-            To
-          </span>
-          <SlackDestinationPicker
-            configs={configs}
-            includeExisting
-            value={destinationConfigId}
-            connected={Boolean(slackStatus?.connected)}
-            disabled={busy}
-            onPick={async (id) => {
-              setError(null);
-              setEmailMode(false);
-              setDestinationConfigId(id);
-              await refreshConfigs();
-            }}
-            onPickEmail={() => {
-              setError(null);
-              setEmailMode(true);
-            }}
-            onError={(m) => setError(m)}
-          >
-            <SelectButton size="sm" state="empty" width="full">
-              {emailMode && !selectedIsEmail
-                ? "Email"
-                : selectedConfig
-                  ? selectedConfig.name
-                  : "Event log"}
-            </SelectButton>
-          </SlackDestinationPicker>
-          {emailMode && (
-            <InputTypeIn
-              autoFocus
-              placeholder="name@example.com — Enter to add"
-              value={emailDraft}
-              onChange={(e) => setEmailDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  void commitEmail();
-                }
-                if (e.key === "Escape") {
-                  setEmailMode(false);
-                  setEmailDraft(String(selectedConfig?.config.address ?? ""));
-                }
-              }}
+            <ScheduleFields
+              parts={scheduleParts}
+              onPartsChange={setScheduleParts}
+              customCron={customCron}
+              onCustomCronChange={setCustomCron}
+              tz={tz}
+              onTzChange={setTz}
+              tzOptions={tzOptions}
+              startAtLocal={startAtLocal}
+              onStartAtChange={setStartAtLocal}
+              cronSummary={cronSummary}
+              computedCron={computedCron}
+              disabled={busy}
             />
           )}
-          {destDescription && (
-            <span className="text-xs leading-[1.4] text-(--text-03)">
-              {destDescription}
+
+          <div className="flex w-full flex-col gap-1">
+            <span className="px-[2px] text-[14px] leading-5 font-semibold text-(--text-04)">
+              Run if
             </span>
-          )}
-        </label>
-
-        {error && (
-          <div className="rounded-(--border-radius-04) bg-(--status-error-01) p-[10px] text-[13px] text-(--status-text-error-05)">
-            {error}
+            <textarea
+              value={ifText}
+              onChange={(e) => setIfText(e.target.value)}
+              disabled={busy}
+              placeholder={EXAMPLE_IF}
+              rows={2}
+              className="box-border w-full resize-y rounded-(--radius-08) border border-(--border-01) bg-(--background-tint-00) px-2 py-[6px] text-sm outline-none placeholder:text-(--text-02) focus:border-(--border-05) focus:shadow-[0_0_0_2px_var(--background-tint-04)]"
+            />
+            {kind === "schedule" && (
+              <span className="px-[2px] text-[12px] leading-4 text-(--text-03)">
+                On each scheduled run, the trigger fires only when this
+                condition is satisfied by the watched documents.
+              </span>
+            )}
           </div>
-        )}
 
-        <div className="flex justify-end gap-2">
-          <Button type="button" onClick={onClose} disabled={busy}>
-            Cancel
-          </Button>
+          <div className="flex w-full flex-col gap-1">
+            <span className="px-[2px] text-[14px] leading-5 font-semibold text-(--text-04)">
+              Then Send
+            </span>
+            <SlackDestinationPicker
+              configs={configs}
+              includeExisting
+              value={destinationConfigId}
+              connected={Boolean(slackStatus?.connected)}
+              disabled={busy}
+              onPick={async (id) => {
+                setError(null);
+                setEmailMode(false);
+                setDestinationConfigId(id);
+                await refreshConfigs();
+              }}
+              onPickEmail={() => {
+                setError(null);
+                setEmailMode(true);
+              }}
+              onError={(m) => setError(m)}
+            >
+              <SelectButton size="sm" state="empty" width="full">
+                {emailMode && !selectedIsEmail
+                  ? "Email"
+                  : selectedConfig
+                    ? selectedConfig.name
+                    : "Event log"}
+              </SelectButton>
+            </SlackDestinationPicker>
+            {emailMode && (
+              <InputTypeIn
+                autoFocus
+                placeholder="name@example.com — Enter to add"
+                value={emailDraft}
+                onChange={(e) => setEmailDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    void commitEmail();
+                  }
+                  if (e.key === "Escape") {
+                    setEmailMode(false);
+                    setEmailDraft(String(selectedConfig?.config.address ?? ""));
+                  }
+                }}
+              />
+            )}
+            <textarea
+              value={sendText}
+              onChange={(e) => setSendText(e.target.value)}
+              disabled={busy}
+              placeholder={EXAMPLE_SEND}
+              rows={2}
+              className="box-border w-full resize-y rounded-(--radius-08) border border-(--border-01) bg-(--background-tint-00) px-2 py-[6px] text-sm outline-none placeholder:text-(--text-02) focus:border-(--border-05) focus:shadow-[0_0_0_2px_var(--background-tint-04)]"
+            />
+            {destDescription && (
+              <span className="px-[2px] text-[12px] leading-4 text-(--text-03)">
+                {destDescription}
+              </span>
+            )}
+            <div className="mt-1 flex w-full items-center">
+              <button
+                type="button"
+                disabled
+                title="Multiple actions per trigger are coming soon"
+                className="flex cursor-not-allowed items-center gap-1 rounded-(--radius-12) border border-(--border-01) bg-(--background-tint-01) p-2 opacity-60"
+              >
+                <span className="flex size-5 items-center justify-center p-[2px] text-(--text-03)">
+                  <SvgPlusCircle size={16} />
+                </span>
+                <span className="pr-1 pl-[2px] text-[14px] leading-5 font-semibold text-(--text-03)">
+                  Add More Actions
+                </span>
+              </button>
+            </div>
+          </div>
+
+          {error && (
+            <div className="rounded-(--radius-08) bg-(--status-error-01) p-[10px] text-[13px] text-(--status-text-error-05)">
+              {error}
+            </div>
+          )}
+        </div>
+
+        <div className="flex w-full items-center gap-2 border-t border-(--border-01) bg-(--background-tint-00) p-3">
+          <p className="m-0 min-w-0 flex-1 px-[2px] text-[12px] leading-4 text-(--text-03)">
+            Messages will be sent to{" "}
+            <strong className="font-bold">
+              {selectedConfig ? selectedConfig.name : "the event log"}
+            </strong>{" "}
+            when conditions are met.
+          </p>
           <Button type="submit" variant="action" disabled={busy || !canSave}>
             {busy ? "Saving…" : isEdit ? "Save" : "Create"}
           </Button>
