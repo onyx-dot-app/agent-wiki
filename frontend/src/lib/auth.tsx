@@ -172,7 +172,11 @@ export function useRequireAuth(): AuthContextValue {
       pathname !== "/login" &&
       pathname !== "/signup"
     ) {
-      const next = encodeURIComponent(pathname || "/");
+      // Keep the query string so deep links (e.g. ?tab=) survive the
+      // round-trip. Read from location inside the effect — useSearchParams
+      // would impose a Suspense boundary on every consumer at prerender.
+      const qs = window.location.search;
+      const next = encodeURIComponent(`${pathname || "/"}${qs}`);
       router.replace(`/login?next=${next}`);
     }
   }, [auth.loading, auth.user, pathname, router]);

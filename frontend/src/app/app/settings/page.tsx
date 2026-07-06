@@ -85,8 +85,8 @@ function SettingsPageInner() {
         divider
       />
       <SettingsLayouts.Body>
-        <div className="flex w-full items-start gap-6">
-          <nav className="flex w-44 shrink-0 flex-col gap-1">
+        <div className="flex w-full items-start gap-6 max-md:flex-col">
+          <nav className="flex w-44 shrink-0 flex-col gap-1 max-md:w-full max-md:flex-row max-md:flex-wrap">
             {TABS.map((t) => (
               <LineItemButton
                 key={t.key}
@@ -270,6 +270,13 @@ function useSettingsDraft(
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // A baseline swap (fresh settings from the server) restarts the form:
+  // drop any stale saved/error status along with the draft reset.
+  useEffect(() => {
+    setSaved(false);
+    setError(null);
+  }, [baseline]);
 
   const dirty = useMemo(
     () =>
