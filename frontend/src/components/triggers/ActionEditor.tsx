@@ -120,14 +120,17 @@ function ActionGroupRow({
   const meta = TYPE_META[group.type];
   const TypeIcon = meta.icon;
 
-  // Activity Center is offered once across the trigger.
+  // Activity Center is offered once across the trigger; Slack only when a
+  // connection exists (or this group already targets it, so an edit of an
+  // existing Slack trigger stays visible).
   const typeOptions = (
     ["event_log", "slack", "email"] as ActionGroupType[]
-  ).filter((t) =>
-    t === "event_log"
-      ? group.type === "event_log" || !usedTypes.includes("event_log")
-      : true,
-  );
+  ).filter((t) => {
+    if (t === "event_log")
+      return group.type === "event_log" || !usedTypes.includes("event_log");
+    if (t === "slack") return slackConnected || group.type === "slack";
+    return true;
+  });
 
   return (
     <div className="flex w-full flex-col gap-1">
