@@ -66,8 +66,28 @@ def checkpoint_session(session_id: int) -> str | None:
     AI merge. Idempotent: after a successful commit the session is marked clean.
     """
     sess = coedit.get_session(session_id)
-    if sess is None or sess.version == sess.checkpointed_version:
-        return None  # gone or nothing new to commit
+    if sess is None:
+        return None  # gone
+    if sess.status != coedit.SessionStatus.ACTIVE.value:
+        # A closed session is finalized — never re-commit it. This dedupes
+        # queued duplicates: once the first checkpoint commits and closes the
+        # session, every other queued copy no-ops here. A closed session should
+        # already be clean (close follows a clean checkpoint); if it's somehow
+        # dirty, log and skip rather than clobber HEAD with its stale buffer —
+        # the edits stay in the buffer for manual recovery.
+        if sess.version != sess.checkpointed_version:
+            log.warning(
+                "coedit checkpoint: session %s is %s but dirty (v%d != "
+                "checkpointed v%d); skipping — buffer left uncommitted, needs "
+                "manual reconciliation",
+                session_id,
+                sess.status,
+                sess.version,
+                sess.checkpointed_version,
+            )
+        return None
+    if sess.version == sess.checkpointed_version:
+        return None  # nothing new to commit
 
     path = sess.path
     # Merge base = the page content at the last checkpoint. None when the

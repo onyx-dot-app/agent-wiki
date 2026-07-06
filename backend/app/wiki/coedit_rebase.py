@@ -47,7 +47,7 @@ def rebase_session(session_id: int, head_sha: str) -> RebaseOutcome:
     ``app/tasks/coedit_rebase.py``, which acts on a ``CONFLICT`` outcome).
     """
     sess = coedit.get_session(session_id)
-    if sess is None or sess.status != "active" or sess.base_sha == head_sha:
+    if sess is None or sess.status != coedit.SessionStatus.ACTIVE.value or sess.base_sha == head_sha:
         return RebaseOutcome.SKIP
     # A stale task can carry a head_sha the session has already moved past: a
     # concurrent checkpoint, or a later commit's rebase, may have advanced

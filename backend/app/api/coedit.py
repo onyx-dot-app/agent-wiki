@@ -99,7 +99,7 @@ def leave(req: LeaveRequest, user: User = Depends(require_user)) -> dict[str, bo
 
 def _require_active(session_id: int, user: User, action: str) -> coedit.SessionRow:
     sess = coedit.get_session(session_id)
-    if sess is None or sess.status != "active":
+    if sess is None or sess.status != coedit.SessionStatus.ACTIVE.value:
         raise HTTPException(status_code=404, detail="no active session")
     require_can(action, sess.path, user)
     return sess
@@ -220,7 +220,7 @@ def stream(session_id: int, user: User = Depends(require_user)) -> StreamingResp
     ``leave`` once the user's last connection for the session closes.
     """
     sess = coedit.get_session(session_id)
-    if sess is None or sess.status != "active":
+    if sess is None or sess.status != coedit.SessionStatus.ACTIVE.value:
         raise HTTPException(status_code=404, detail="no active session")
     # Opening the stream makes the user a session participant (roster +
     # heartbeat + commit attribution), so it requires write — symmetric with
