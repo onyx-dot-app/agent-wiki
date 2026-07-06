@@ -101,6 +101,7 @@ class TriggerFireView(BaseModel):
     reason: str
     message: str
     destination_type: str
+    destination_config_id: str | None
 
 
 class TriggerFiresResponse(BaseModel):

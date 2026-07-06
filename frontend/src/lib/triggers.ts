@@ -102,6 +102,7 @@ export interface TriggerFire {
   reason: string;
   message: string;
   destination_type: string;
+  destination_config_id: string | null;
 }
 
 export async function getTriggerFires(opts?: {

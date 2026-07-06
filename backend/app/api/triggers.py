@@ -156,6 +156,11 @@ def _fire_view(row: Any) -> TriggerFireView:
         reason=str(payload.get("reason") or ""),
         message=str(payload.get("message") or ""),
         destination_type=str(payload.get("destination_type") or ""),
+        destination_config_id=(
+            str(payload["destination_config_id"])
+            if payload.get("destination_config_id")
+            else None
+        ),
     )
 
 
