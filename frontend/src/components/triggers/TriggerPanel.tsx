@@ -286,7 +286,7 @@ export function TriggerPanel({
             <span className="px-[2px] text-[14px] leading-5 font-semibold text-(--text-04)">
               Watch
             </span>
-            <div className="flex min-h-[38px] w-full flex-wrap content-center items-center gap-1 rounded-(--radius-08) border border-(--border-01) bg-(--background-tint-00) p-[6px] focus-within:border-(--border-05) focus-within:shadow-[0_0_0_2px_var(--background-tint-04)]">
+            <div className="flex min-h-[36px] w-full flex-wrap content-center items-center gap-1 rounded-(--radius-08) border border-(--border-02) bg-(--background-tint-00) p-[6px] focus-within:border-(--border-05) focus-within:shadow-[0_0_0_2px_var(--background-tint-04)]">
               {scopePath.trim() ? (
                 <span className="flex items-center rounded-(--radius-08) bg-(--background-tint-02) py-[2px] pr-[2px] pl-1">
                   <span className="max-w-[280px] truncate px-[2px] text-[14px] leading-5 font-medium text-(--text-04)">
@@ -349,7 +349,7 @@ export function TriggerPanel({
               disabled={busy}
               placeholder={EXAMPLE_IF}
               rows={2}
-              className="box-border w-full resize-y rounded-(--radius-08) border border-(--border-01) bg-(--background-tint-00) px-2 py-[6px] text-sm outline-none placeholder:text-(--text-02) focus:border-(--border-05) focus:shadow-[0_0_0_2px_var(--background-tint-04)]"
+              className="box-border w-full resize-y rounded-(--radius-08) border border-(--border-02) bg-(--background-tint-00) px-[10px] py-2 text-[14px] leading-5 outline-none placeholder:text-(--text-02) focus:border-(--border-05) focus:shadow-[0_0_0_2px_var(--background-tint-04)]"
             />
             {kind === "schedule" && (
               <span className="px-[2px] text-[12px] leading-4 text-(--text-03)">
@@ -413,7 +413,7 @@ export function TriggerPanel({
               disabled={busy}
               placeholder={EXAMPLE_SEND}
               rows={2}
-              className="box-border w-full resize-y rounded-(--radius-08) border border-(--border-01) bg-(--background-tint-00) px-2 py-[6px] text-sm outline-none placeholder:text-(--text-02) focus:border-(--border-05) focus:shadow-[0_0_0_2px_var(--background-tint-04)]"
+              className="box-border w-full resize-y rounded-(--radius-08) border border-(--border-02) bg-(--background-tint-00) px-[10px] py-2 text-[14px] leading-5 outline-none placeholder:text-(--text-02) focus:border-(--border-05) focus:shadow-[0_0_0_2px_var(--background-tint-04)]"
             />
             {destDescription && (
               <span className="px-[2px] text-[12px] leading-4 text-(--text-03)">
