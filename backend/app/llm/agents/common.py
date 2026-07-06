@@ -24,6 +24,13 @@ def today_str() -> str:
 
     The weekday matters: pages with week-keyed sections ("Week of ...") need it
     to place an update in the right week.
+
+    UTC rather than a user timezone: the ingest reconciler fans one document
+    out to pages owned by different users, so no single user timezone applies.
+    The tradeoff is that work done in a US evening is stamped with the next
+    day (and near a Monday, the next week). If dates should follow the org's
+    wall clock instead, thread an admin-configured org timezone through this
+    one seam — every updater prompt reads its date from here.
     """
     now = datetime.now(timezone.utc)
     return f"{now:%Y-%m-%d} ({now:%A})"
