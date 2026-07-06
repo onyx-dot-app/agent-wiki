@@ -347,3 +347,41 @@ def test_op_client_id_round_trips_to_ops(client):
     assert resp2.status_code == 200
     ops = client.get(f"/api/coedit/ops?session_id={sid}&since_version=1").json()["ops"]
     assert ops[0]["client_id"] is None
+
+
+def test_file_read_serves_head_when_buffer_conflicts_with_committed_change(client):
+    # When an agent commits a change that OVERLAPS the in-session edit (HEAD
+    # moves past base_sha, the 3-way merge conflicts), the read serves committed
+    # HEAD rather than the buffer. Preferring the buffer here would let a stale
+    # session (in the limit, a zombie with no one left to reconcile it) hide the
+    # committed change from every viewer — the 2026-07-06 incident.
+    uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
+    login_fastapi(client, uid)
+    _seed_page("one\ntwo\nthree\n")
+    sid = client.post("/api/coedit/join", json={"path": _PATH}).json()["session_id"]
+    # Human edits the first line in the buffer...
+    _apply_op(client, sid, 0, [{"from": 0, "to": 3, "insert": "BUFFER"}])
+    # ...an agent commits a CONFLICTING change to the same first line out of band.
+    git.commit_file(_PATH, "AGENT\ntwo\nthree\n", message="agent", author="A <a@x.com>")
+
+    body = client.get(f"/api/wiki/file?path={_PATH}").json()["body"]
+    assert body == "AGENT\ntwo\nthree\n"  # committed HEAD, not the stale buffer
+
+
+def test_file_read_serves_buffer_at_zero_participants_when_no_conflict(client):
+    # A departed editor's un-committed edit stays visible (no ~checkpoint-delay
+    # gap) as long as it doesn't conflict with a moved HEAD: base_sha == HEAD, so
+    # the buffer already reflects everything and the read serves it verbatim even
+    # with no participants left. Safety is keyed on conflict-with-HEAD, not on
+    # whether anyone is still in the session.
+    uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
+    login_fastapi(client, uid)
+    _seed_page("# Setup\n\nhello\n")
+    sid = client.post("/api/coedit/join", json={"path": _PATH}).json()["session_id"]
+    _apply_op(client, sid, 0, [{"from": 0, "to": len("# Setup\n\nhello\n"), "insert": "LIVE\n"}])
+    coedit.leave(sid, uid)  # everyone leaves; session stays active (zombie)
+    st = coedit.get_active_session(_PATH)
+    assert st is not None and st.status == "active"
+
+    body = client.get(f"/api/wiki/file?path={_PATH}").json()["body"]
+    assert body == "LIVE\n"  # HEAD hasn't moved → buffer still safe to serve
