@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 from app.db.fts import SearchHit
 from app.ingest.models import WikiUpdateCandidate
-from app.llm.agents.common import IRRELEVANT_SENTINEL, TextEdit, batch_by_chars
+from app.llm.agents.common import IRRELEVANT_SENTINEL, TextEdit, batch_by_chars, today_str
 from app.llm.agents.ingest_batch_reconciler import (
     _parse_tool_results,
     batch_reconcile,
@@ -355,6 +355,22 @@ def test_update_instruction_rendered_in_prompt(mock_client):
     )
     user_msg = mock_client.complete.call_args.kwargs["messages"][1]["content"]
     assert "Update instruction for this page: Keep it terse." in user_msg
+
+
+@patch("app.llm.agents.ingest_batch_reconciler.client")
+def test_today_date_rendered_in_prompt(mock_client):
+    # Real load_prompt so the doc header block is actually rendered.
+    mock_client.complete.return_value = _llm_response(
+        {"results": [{"candidate_index": 1, "action": "no_change"}]}
+    )
+    before = today_str()
+    batch_reconcile(
+        title="T", url="", content="doc", source="s",
+        candidates=[_candidate("page.md")], model="m",
+    )
+    after = today_str()
+    user_msg = mock_client.complete.call_args.kwargs["messages"][1]["content"]
+    assert f"Today's date: {before}" in user_msg or f"Today's date: {after}" in user_msg
 
 
 @patch("app.llm.agents.ingest_batch_reconciler.client")

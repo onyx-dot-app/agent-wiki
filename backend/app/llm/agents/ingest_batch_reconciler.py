@@ -21,7 +21,13 @@ from typing import Any, NamedTuple, cast
 from app.ingest.models import WikiUpdateCandidate
 from app.llm import client
 from app.llm.client import ToolCall
-from app.llm.agents.common import IRRELEVANT_SENTINEL, TextEdit, apply_edits, batch_by_chars
+from app.llm.agents.common import (
+    IRRELEVANT_SENTINEL,
+    TextEdit,
+    apply_edits,
+    batch_by_chars,
+    today_str,
+)
 from app.metrics import (
     ingest_reconciler_cached_input_tokens,
     ingest_reconciler_input_tokens,
@@ -127,6 +133,10 @@ def batch_reconcile(
 
     # Worth caching the incoming doc only when sibling batches will reread it.
     cache_doc = len(batches) > 1
+    # One date for the whole run: sibling batches must agree on it (a run
+    # crossing midnight would otherwise date-place one document's updates
+    # inconsistently, and a differing doc message would defeat cache_doc).
+    today = today_str()
     results: list[str | None] = []
     for batch in batches:
         results.extend(
@@ -138,6 +148,7 @@ def batch_reconcile(
                 batch=batch,
                 model=model,
                 cache_doc=cache_doc,
+                today=today,
             )
         )
 
@@ -162,6 +173,7 @@ def _reconcile_batch(
     batch: list[WikiUpdateCandidate],
     model: str,
     cache_doc: bool,
+    today: str,
 ) -> list[str | None]:
     def _format_candidate(index: int, c: WikiUpdateCandidate) -> str:
         header = f"[{index + 1}] {c.hit.path}"
@@ -180,6 +192,7 @@ def _reconcile_batch(
         title=title or "(no title)",
         url=url or "",
         source=source,
+        today=today,
         content=content,
     )
     candidates = load_prompt("ingest_batch_reconciler.candidates").format(
