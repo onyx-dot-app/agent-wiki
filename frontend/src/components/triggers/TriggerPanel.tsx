@@ -8,7 +8,6 @@ import {
   Button,
   Divider,
   FilterButton,
-  InputTypeIn,
   LineItemButton,
   Popover,
   PopoverMenu,
@@ -666,7 +665,7 @@ function pad(n: number): string {
 }
 
 const WATCH_CHIP_BAR =
-  "flex min-h-[36px] w-full flex-wrap content-center items-center gap-1 rounded-(--radius-08) border border-(--border-02) bg-(--background-tint-00) p-[6px] focus-within:border-(--border-05) focus-within:shadow-[0_0_0_2px_var(--background-tint-04)]";
+  "flex min-h-9 w-full flex-wrap content-center items-center gap-1 text-[14px] leading-5 rounded-(--radius-08) border border-(--border-02) bg-(--background-tint-00) p-[5px] focus-within:border-(--border-05) focus-within:shadow-[0_0_0_2px_var(--background-tint-04)]";
 
 /** Search-and-pick for the trigger's watched scope: a dropdown over the
  * ACL-filtered wiki path list (files and their folders), selection only —
@@ -744,30 +743,29 @@ function WatchScopePicker({
               {committed === "/" ? "Whole wiki" : committed}
             </FilterButton>
           ) : (
-            <div className="min-w-[120px] flex-1">
-              <InputTypeIn
-                variant="internal"
-                value={query}
-                onChange={(e) => {
-                  setQuery(e.target.value);
-                  if (!open) setOpen(true);
-                }}
-                onFocus={() => setOpen(true)}
-                onKeyDown={(e) => {
-                  if (e.key === "Escape") setOpen(false);
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    // Enter commits the visually top row: Whole wiki leads an
-                    // empty query, then folders, then files.
-                    const first = !q
-                      ? "/"
-                      : (matchedFolders[0] ?? matchedFiles[0]);
-                    if (first) pick(first);
-                  }
-                }}
-                placeholder="Search pages and folders to watch"
-              />
-            </div>
+            // raw-ok: bare .opal-input-field; InputTypeIn's own 36px container would double-box the 36px Input/Tags row
+            <input
+              className="opal-input-field min-w-[120px] flex-1"
+              value={query}
+              onChange={(e) => {
+                setQuery(e.target.value);
+                if (!open) setOpen(true);
+              }}
+              onFocus={() => setOpen(true)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") setOpen(false);
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  // Enter commits the visually top row: Whole wiki leads an
+                  // empty query, then folders, then files.
+                  const first = !q
+                    ? "/"
+                    : (matchedFolders[0] ?? matchedFiles[0]);
+                  if (first) pick(first);
+                }
+              }}
+              placeholder="Search pages and folders to watch"
+            />
           )}
         </div>
       </Popover.Anchor>

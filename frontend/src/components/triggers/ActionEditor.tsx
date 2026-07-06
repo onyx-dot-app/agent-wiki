@@ -5,7 +5,6 @@ import { useRef, useState } from "react";
 import {
   Button,
   FilterButton,
-  InputTypeIn,
   LineItemButton,
   Popover,
   PopoverMenu,
@@ -222,7 +221,7 @@ function ActionGroupRow({
 /** Input-shaped chip container — a composite Opal doesn't provide; the chips
  * and inline input inside it are library components. */
 const CHIP_BAR =
-  "flex min-h-9 w-full flex-wrap content-center items-center gap-1 rounded-(--radius-08) border border-(--border-02) bg-(--background-neutral-00) p-[6px] focus-within:border-(--border-05) focus-within:shadow-[0_0_0_2px_var(--background-tint-04)]";
+  "flex min-h-9 w-full flex-wrap content-center items-center gap-1 text-[14px] leading-5 rounded-(--radius-08) border border-(--border-02) bg-(--background-neutral-00) p-[5px] focus-within:border-(--border-05) focus-within:shadow-[0_0_0_2px_var(--background-tint-04)]";
 
 function ToLabel() {
   return (
@@ -343,25 +342,24 @@ function SlackToRow({
                 {c.name}
               </FilterButton>
             ))}
-            <div className="min-w-[120px] flex-1">
-              <InputTypeIn
-                variant="internal"
-                value={search}
-                onChange={(e) => {
-                  setSearch(e.target.value);
-                  if (!open) void onOpenChange(true);
-                }}
-                onFocus={() => {
-                  if (!open) void onOpenChange(true);
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Escape") setOpen(false);
-                }}
-                placeholder={
-                  selected.length ? "Add a channel" : "Add a channel or DM"
-                }
-              />
-            </div>
+            {/* raw-ok: bare .opal-input-field; InputTypeIn's own 36px container would double-box the 36px Input/Tags row */}
+            <input
+              className="opal-input-field min-w-[120px] flex-1"
+              value={search}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                if (!open) void onOpenChange(true);
+              }}
+              onFocus={() => {
+                if (!open) void onOpenChange(true);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") setOpen(false);
+              }}
+              placeholder={
+                selected.length ? "Add a channel" : "Add a channel or DM"
+              }
+            />
           </div>
         </Popover.Anchor>
         <Popover.Content
@@ -477,20 +475,19 @@ function EmailToRow({
             {c.verified_at ? c.name : `${c.name} (unverified)`}
           </FilterButton>
         ))}
-        <div className="min-w-[120px] flex-1">
-          <InputTypeIn
-            variant="internal"
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                void add();
-              }
-            }}
-            placeholder="Add an email"
-          />
-        </div>
+        {/* raw-ok: bare .opal-input-field; InputTypeIn's own 36px container would double-box the 36px Input/Tags row */}
+        <input
+          className="opal-input-field min-w-[120px] flex-1"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              void add();
+            }
+          }}
+          placeholder="Add an email"
+        />
       </div>
     </>
   );
