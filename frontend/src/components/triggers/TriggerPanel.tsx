@@ -6,10 +6,14 @@ import useSWR from "swr";
 
 import {
   Button,
+  Divider,
+  FilterButton,
+  InputTypeIn,
   LineItemButton,
   Popover,
   PopoverMenu,
   Tabs,
+  Text,
 } from "@onyx-ai/opal/components";
 import {
   SvgBook,
@@ -19,6 +23,7 @@ import {
   SvgWorkflow,
   SvgX,
 } from "@onyx-ai/opal/icons";
+import { markdown } from "@onyx-ai/opal/utils";
 import {
   PRESET_OPTIONS,
   WEEKDAY_NAMES,
@@ -249,13 +254,13 @@ export function TriggerPanel({
             <span className="flex size-6 items-center justify-center p-1">
               <SvgWorkflow size={18} />
             </span>
-            <div className="min-w-0 flex-1">
-              <p className="m-0 px-[2px] text-[16px] leading-6 font-semibold text-(--text-04)">
+            <div className="min-w-0 flex-1 px-[2px]">
+              <Text as="p" font="main-content-emphasis" color="text-04">
                 {isEdit ? "Edit Trigger" : "New Trigger"}
-              </p>
-              <p className="m-0 px-[2px] text-[12px] leading-4 text-(--text-03)">
+              </Text>
+              <Text as="p" font="secondary-body" color="text-03">
                 Trigger actions on changes or specified conditions.
-              </p>
+              </Text>
             </div>
           </div>
           <Button
@@ -303,9 +308,11 @@ export function TriggerPanel({
           </Tabs>
 
           <div className="flex w-full flex-col gap-1">
-            <span className="px-[2px] text-[14px] leading-5 font-semibold text-(--text-04)">
-              Watch
-            </span>
+            <div className="px-[2px]">
+              <Text font="main-ui-action" color="text-04">
+                Watch
+              </Text>
+            </div>
             <WatchScopePicker
               scopePath={scopePath}
               onScopePath={(p) => {
@@ -314,12 +321,14 @@ export function TriggerPanel({
               disabled={busy || Boolean(lockScope)}
               locked={Boolean(lockScope)}
             />
-            <span className="px-[2px] text-[12px] leading-4 text-(--text-03)">
-              Add a specific page or an entire folder to watch.
-            </span>
+            <div className="px-[2px]">
+              <Text font="secondary-body" color="text-03">
+                Add a specific page or an entire folder to watch.
+              </Text>
+            </div>
           </div>
 
-          <div className="h-0 w-full border-t border-(--border-01)" />
+          <Divider />
 
           {kind === "schedule" && (
             <ScheduleFields
@@ -339,9 +348,11 @@ export function TriggerPanel({
           )}
 
           <div className="flex w-full flex-col gap-1">
-            <span className="px-[2px] text-[14px] leading-5 font-semibold text-(--text-04)">
-              Run if
-            </span>
+            <div className="px-[2px]">
+              <Text font="main-ui-action" color="text-04">
+                Run if
+              </Text>
+            </div>
             <textarea
               value={ifText}
               onChange={(e) => setIfText(e.target.value)}
@@ -351,10 +362,12 @@ export function TriggerPanel({
               className="box-border w-full resize-y rounded-(--radius-08) border border-(--border-02) bg-(--background-tint-00) px-[10px] py-2 text-[14px] leading-5 outline-none placeholder:text-(--text-02) focus:border-(--border-05) focus:shadow-[0_0_0_2px_var(--background-tint-04)]"
             />
             {kind === "schedule" && (
-              <span className="px-[2px] text-[12px] leading-4 text-(--text-03)">
-                On each scheduled run, the trigger fires only when this
-                condition is satisfied by the watched documents.
-              </span>
+              <div className="px-[2px]">
+                <Text font="secondary-body" color="text-03">
+                  On each scheduled run, the trigger fires only when this
+                  condition is satisfied by the watched documents.
+                </Text>
+              </div>
             )}
           </div>
 
@@ -396,11 +409,13 @@ export function TriggerPanel({
         </div>
 
         <div className="flex w-full items-center gap-2 border-t border-(--border-01) bg-(--background-tint-00) p-3">
-          <p className="m-0 min-w-0 flex-1 px-[2px] text-[12px] leading-4 text-(--text-03)">
-            Messages will be sent to{" "}
-            <strong className="font-bold">{destinationSummary}</strong> when
-            conditions are met.
-          </p>
+          <div className="min-w-0 flex-1 px-[2px]">
+            <Text as="p" font="secondary-body" color="text-03">
+              {markdown(
+                `Messages will be sent to **${destinationSummary}** when conditions are met.`,
+              )}
+            </Text>
+          </div>
           <Button type="submit" variant="action" disabled={busy || !canSave}>
             {busy ? "Saving…" : isEdit ? "Save" : "Create"}
           </Button>
@@ -452,9 +467,9 @@ function ScheduleFields({
   return (
     <div className="flex flex-col gap-3 rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-01) p-[14px]">
       <label className="flex flex-col gap-1.5">
-        <span className="text-[11px] font-bold tracking-[0.06em] text-(--text-03) uppercase">
+        <Text font="main-ui-action" color="text-04">
           Frequency
-        </span>
+        </Text>
         <select
           value={parts.preset}
           onChange={(e) =>
@@ -476,9 +491,9 @@ function ScheduleFields({
 
       {showTimeOfDay && (
         <label className="flex flex-col gap-1.5">
-          <span className="text-[11px] font-bold tracking-[0.06em] text-(--text-03) uppercase">
+          <Text font="main-ui-action" color="text-04">
             Time of day
-          </span>
+          </Text>
           <input
             type="time"
             value={timeValue}
@@ -491,17 +506,17 @@ function ScheduleFields({
             disabled={disabled}
             className="box-border w-full rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-00) px-[10px] py-2 text-sm outline-none"
           />
-          <span className="text-xs leading-[1.4] text-(--text-03)">
+          <Text font="secondary-body" color="text-03">
             Interpreted in the timezone selected below.
-          </span>
+          </Text>
         </label>
       )}
 
       {showWeekday && (
         <label className="flex flex-col gap-1.5">
-          <span className="text-[11px] font-bold tracking-[0.06em] text-(--text-03) uppercase">
+          <Text font="main-ui-action" color="text-04">
             Day of week
-          </span>
+          </Text>
           <select
             value={parts.dayOfWeek}
             onChange={(e) =>
@@ -521,9 +536,9 @@ function ScheduleFields({
 
       {showDayOfMonth && (
         <label className="flex flex-col gap-1.5">
-          <span className="text-[11px] font-bold tracking-[0.06em] text-(--text-03) uppercase">
+          <Text font="main-ui-action" color="text-04">
             Day of month
-          </span>
+          </Text>
           <input
             type="number"
             min={1}
@@ -538,18 +553,18 @@ function ScheduleFields({
             disabled={disabled}
             className="box-border w-full rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-00) px-[10px] py-2 text-sm outline-none"
           />
-          <span className="text-xs leading-[1.4] text-(--text-03)">
+          <Text font="secondary-body" color="text-03">
             Months without this day (e.g. day 31 in February) skip that month
             entirely &mdash; the schedule does not roll over to the next valid
             day.
-          </span>
+          </Text>
         </label>
       )}
 
       <label className="flex flex-col gap-1.5">
-        <span className="text-[11px] font-bold tracking-[0.06em] text-(--text-03) uppercase">
+        <Text font="main-ui-action" color="text-04">
           Timezone
-        </span>
+        </Text>
         <select
           value={tz}
           onChange={(e) => onTzChange(e.target.value)}
@@ -563,16 +578,16 @@ function ScheduleFields({
             </option>
           ))}
         </select>
-        <span className="text-xs leading-[1.4] text-(--text-03)">
+        <Text font="secondary-body" color="text-03">
           The schedule runs in this timezone. Daylight-saving transitions are
           handled automatically.
-        </span>
+        </Text>
       </label>
 
       <label className="flex flex-col gap-1.5">
-        <span className="text-[11px] font-bold tracking-[0.06em] text-(--text-03) uppercase">
+        <Text font="main-ui-action" color="text-04">
           Do not fire before (optional)
-        </span>
+        </Text>
         <input
           type="datetime-local"
           value={startAtLocal}
@@ -580,11 +595,11 @@ function ScheduleFields({
           disabled={disabled}
           className="box-border w-full rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-00) px-[10px] py-2 text-sm outline-none"
         />
-        <span className="text-xs leading-[1.4] text-(--text-03)">
+        <Text font="secondary-body" color="text-03">
           Anchored to your local time. Leave empty to start at the next
           scheduled run. Useful for delaying a launch (e.g. &ldquo;don&rsquo;t
           start until next Monday&rdquo;).
-        </span>
+        </Text>
       </label>
 
       <details>
@@ -614,15 +629,17 @@ function ScheduleFields({
             placeholder="*/15 * * * *"
             className="box-border w-full rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-00) px-[10px] py-2 font-mono text-sm outline-none"
           />
-          <span className="text-xs leading-[1.4] text-(--text-03)">
+          <Text font="secondary-body" color="text-03">
             Standard 5-field cron. Editing this switches the frequency to
             &ldquo;Custom&rdquo;.
-          </span>
+          </Text>
         </div>
       </details>
 
-      <div className="rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-00) p-2 text-[13px] leading-[1.5] text-(--text-05)">
-        <strong>{cronSummary}</strong>
+      <div className="rounded-(--radius-04) border border-(--border-01) bg-(--background-tint-00) p-2">
+        <Text font="main-ui-action" color="text-05">
+          {cronSummary}
+        </Text>
       </div>
     </div>
   );
@@ -702,56 +719,47 @@ function WatchScopePicker({
       <Popover.Anchor asChild>
         <div ref={anchorRef} className={WATCH_CHIP_BAR}>
           {committed ? (
-            <span className="flex items-center gap-[2px] rounded-(--radius-08) bg-(--background-tint-02) py-[2px] pr-[2px] pl-1">
-              <span className="flex size-4 items-center justify-center text-(--text-03)">
-                {committed === "/" ? (
-                  <SvgBook size={14} />
-                ) : committed.endsWith(".md") ? (
-                  <SvgFile size={14} />
-                ) : (
-                  <SvgFolder size={14} />
-                )}
-              </span>
-              <span className="max-w-[280px] truncate px-[2px] text-[14px] leading-5 font-medium text-(--text-04)">
-                {committed === "/" ? "Whole wiki" : committed}
-              </span>
-              {!locked && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (!disabled) onScopePath("");
-                  }}
-                  className="flex size-4 cursor-pointer items-center justify-center rounded-(--radius-04) border-none bg-transparent p-[2px] text-(--text-03) hover:bg-(--background-tint-03)"
-                  aria-label="Remove watched path"
-                >
-                  <SvgX size={12} />
-                </button>
-              )}
-            </span>
-          ) : (
-            <input
-              value={query}
-              onChange={(e) => {
-                setQuery(e.target.value);
-                if (!open) setOpen(true);
-              }}
-              onFocus={() => setOpen(true)}
-              onKeyDown={(e) => {
-                if (e.key === "Escape") setOpen(false);
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  // Enter commits the visually top row: Whole wiki leads an
-                  // empty query, then folders, then files.
-                  const first = !q
-                    ? "/"
-                    : (matchedFolders[0] ?? matchedFiles[0]);
-                  if (first) pick(first);
-                }
+            <FilterButton
+              icon={
+                committed === "/"
+                  ? SvgBook
+                  : committed.endsWith(".md")
+                    ? SvgFile
+                    : SvgFolder
+              }
+              active={!locked}
+              onClear={() => {
+                if (!disabled && !locked) onScopePath("");
               }}
               disabled={disabled}
-              placeholder="Search pages and folders to watch"
-              className="min-w-[80px] flex-1 border-none bg-transparent px-1 py-[2px] text-[14px] leading-5 outline-none placeholder:text-(--text-02)"
-            />
+            >
+              {committed === "/" ? "Whole wiki" : committed}
+            </FilterButton>
+          ) : (
+            <div className="min-w-[120px] flex-1">
+              <InputTypeIn
+                variant="internal"
+                value={query}
+                onChange={(e) => {
+                  setQuery(e.target.value);
+                  if (!open) setOpen(true);
+                }}
+                onFocus={() => setOpen(true)}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") setOpen(false);
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    // Enter commits the visually top row: Whole wiki leads an
+                    // empty query, then folders, then files.
+                    const first = !q
+                      ? "/"
+                      : (matchedFolders[0] ?? matchedFiles[0]);
+                    if (first) pick(first);
+                  }
+                }}
+                placeholder="Search pages and folders to watch"
+              />
+            </div>
           )}
         </div>
       </Popover.Anchor>

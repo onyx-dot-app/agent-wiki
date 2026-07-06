@@ -2,16 +2,23 @@
 
 import { useRef, useState } from "react";
 
-import { LineItemButton, Popover, PopoverMenu } from "@onyx-ai/opal/components";
+import {
+  Button,
+  FilterButton,
+  InputTypeIn,
+  LineItemButton,
+  Popover,
+  PopoverMenu,
+  SelectButton,
+  Text,
+} from "@onyx-ai/opal/components";
 import {
   SvgActivity,
-  SvgChevronDown,
   SvgHash,
   SvgMail,
   SvgSlack,
   SvgTrash,
   SvgUser,
-  SvgX,
 } from "@onyx-ai/opal/icons";
 
 import { ensureEmailDestination } from "@/lib/emailConnect";
@@ -118,7 +125,6 @@ function ActionGroupRow({
 }: RowProps) {
   const [typeOpen, setTypeOpen] = useState(false);
   const meta = TYPE_META[group.type];
-  const TypeIcon = meta.icon;
 
   // Activity Center is offered once across the trigger; Slack only when a
   // connection exists (or this group already targets it, so an edit of an
@@ -134,41 +140,31 @@ function ActionGroupRow({
 
   return (
     <div className="flex w-full flex-col gap-1">
-      <div className="flex w-full items-center">
-        <span className="flex-1 px-[2px] text-[14px] leading-5 font-semibold text-(--text-04)">
-          {label}
-        </span>
+      <div className="flex w-full items-center px-[2px]">
+        <div className="flex-1">
+          <Text font="main-ui-action" color="text-04">
+            {label}
+          </Text>
+        </div>
         {onRemove && (
-          <button
+          <Button
             type="button"
+            icon={SvgTrash}
+            size="sm"
+            tooltip="Remove this action"
             onClick={onRemove}
             disabled={disabled}
-            className="flex size-7 cursor-pointer items-center justify-center rounded-(--radius-08) border-none bg-transparent p-1 text-(--text-03) hover:bg-(--background-tint-02)"
-            aria-label="Remove this action"
-          >
-            <SvgTrash size={16} />
-          </button>
+          />
         )}
       </div>
 
       <Popover open={typeOpen} onOpenChange={setTypeOpen}>
         <Popover.Trigger asChild disabled={disabled}>
-          <button
-            type="button"
-            className="flex h-9 w-full cursor-pointer items-center gap-1 rounded-(--radius-08) border border-(--border-02) bg-(--background-neutral-00) p-[6px] text-left"
-          >
-            <span className="flex size-6 items-center justify-center p-[2px]">
-              <TypeIcon size={18} />
-            </span>
-            <span className="flex-1 truncate px-[2px] text-[14px] leading-5 font-medium text-(--text-04)">
-              {meta.label}
-            </span>
-            <span className="flex size-6 items-center justify-center p-[2px] text-(--text-03)">
-              <SvgChevronDown size={16} />
-            </span>
-          </button>
+          <SelectButton icon={meta.icon} size="sm" state="empty" width="full">
+            {meta.label}
+          </SelectButton>
         </Popover.Trigger>
-        <Popover.Content width="fit" align="start" sideOffset={4}>
+        <Popover.Content width="trigger" align="start" sideOffset={4}>
           <PopoverMenu>
             {typeOptions.map((t) => (
               <LineItemButton
@@ -222,51 +218,18 @@ function ActionGroupRow({
   );
 }
 
-function Chip({
-  icon: Icon,
-  text,
-  onRemove,
-  disabled,
-}: {
-  icon?: typeof SvgHash;
-  text: string;
-  onRemove: () => void;
-  disabled?: boolean;
-}) {
-  return (
-    <span className="flex items-center gap-[2px] rounded-(--radius-08) bg-(--background-tint-02) py-[2px] pr-[2px] pl-1">
-      {Icon && (
-        <span className="flex size-4 items-center justify-center text-(--text-03)">
-          <Icon size={14} />
-        </span>
-      )}
-      <span className="max-w-[200px] truncate px-[2px] text-[14px] leading-5 font-medium text-(--text-04)">
-        {text}
-      </span>
-      <button
-        type="button"
-        onClick={onRemove}
-        disabled={disabled}
-        className="flex size-4 cursor-pointer items-center justify-center rounded-(--radius-04) border-none bg-transparent p-[2px] text-(--text-03) hover:bg-(--background-tint-03)"
-        aria-label={`Remove ${text}`}
-      >
-        <SvgX size={12} />
-      </button>
-    </span>
-  );
-}
-
+/** Input-shaped chip container — a composite Opal doesn't provide; the chips
+ * and inline input inside it are library components. */
 const CHIP_BAR =
   "flex min-h-9 w-full flex-wrap content-center items-center gap-1 rounded-(--radius-08) border border-(--border-02) bg-(--background-neutral-00) p-[6px] focus-within:border-(--border-05) focus-within:shadow-[0_0_0_2px_var(--background-tint-04)]";
 
-const GHOST_INPUT =
-  "min-w-[80px] flex-1 border-none bg-transparent px-1 py-[2px] text-[14px] leading-5 outline-none placeholder:text-(--text-02)";
-
 function ToLabel() {
   return (
-    <span className="px-[2px] text-[14px] leading-5 font-semibold text-(--text-04)">
-      To
-    </span>
+    <div className="px-[2px]">
+      <Text font="main-ui-action" color="text-04">
+        To
+      </Text>
+    </div>
   );
 }
 
@@ -351,9 +314,11 @@ function SlackToRow({
     return (
       <>
         <ToLabel />
-        <p className="m-0 px-[2px] text-[12px] leading-4 text-(--text-03)">
-          Connect Slack from the Triggers page to pick channels.
-        </p>
+        <div className="px-[2px]">
+          <Text font="secondary-body" color="text-03">
+            Connect Slack from the Triggers page to pick channels.
+          </Text>
+        </div>
       </>
     );
   }
@@ -365,34 +330,37 @@ function SlackToRow({
         <Popover.Anchor asChild>
           <div ref={anchorRef} className={CHIP_BAR}>
             {selected.map((c) => (
-              <Chip
+              <FilterButton
                 key={c.id}
                 icon={c.config.dm ? SvgUser : SvgHash}
-                text={c.name}
-                disabled={disabled}
-                onRemove={() =>
+                active
+                onClear={() =>
                   onConfigIds(configIds.filter((id) => id !== c.id))
                 }
-              />
+                disabled={disabled}
+              >
+                {c.name}
+              </FilterButton>
             ))}
-            <input
-              value={search}
-              onChange={(e) => {
-                setSearch(e.target.value);
-                if (!open) void onOpenChange(true);
-              }}
-              onFocus={() => {
-                if (!open) void onOpenChange(true);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Escape") setOpen(false);
-              }}
-              disabled={disabled}
-              placeholder={
-                selected.length ? "Add a channel" : "Add a channel or DM"
-              }
-              className={GHOST_INPUT}
-            />
+            <div className="min-w-[120px] flex-1">
+              <InputTypeIn
+                variant="internal"
+                value={search}
+                onChange={(e) => {
+                  setSearch(e.target.value);
+                  if (!open) void onOpenChange(true);
+                }}
+                onFocus={() => {
+                  if (!open) void onOpenChange(true);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") setOpen(false);
+                }}
+                placeholder={
+                  selected.length ? "Add a channel" : "Add a channel or DM"
+                }
+              />
+            </div>
           </div>
         </Popover.Anchor>
         <Popover.Content
@@ -497,26 +465,31 @@ function EmailToRow({
       <ToLabel />
       <div className={CHIP_BAR}>
         {selected.map((c) => (
-          <Chip
+          <FilterButton
             key={c.id}
-            text={c.verified_at ? c.name : `${c.name} (unverified)`}
+            icon={SvgMail}
+            active
+            onClear={() => onConfigIds(configIds.filter((id) => id !== c.id))}
             disabled={disabled}
-            onRemove={() => onConfigIds(configIds.filter((id) => id !== c.id))}
-          />
+            tooltip={c.verified_at ? undefined : "Not verified yet"}
+          >
+            {c.verified_at ? c.name : `${c.name} (unverified)`}
+          </FilterButton>
         ))}
-        <input
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              void add();
-            }
-          }}
-          disabled={disabled}
-          placeholder="Add an email"
-          className={GHOST_INPUT}
-        />
+        <div className="min-w-[120px] flex-1">
+          <InputTypeIn
+            variant="internal"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                void add();
+              }
+            }}
+            placeholder="Add an email"
+          />
+        </div>
       </div>
     </>
   );
