@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { LineItemButton, Popover, PopoverMenu } from "@onyx-ai/opal/components";
 import {
@@ -292,6 +292,7 @@ function SlackToRow({
   const [channels, setChannels] = useState<SlackChannel[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
+  const anchorRef = useRef<HTMLDivElement>(null);
 
   const selected = configIds
     .map((id) => configs.find((c) => c.id === id))
@@ -330,6 +331,7 @@ function SlackToRow({
             });
       await refreshConfigs();
       if (!configIds.includes(id)) onConfigIds([...configIds, id]);
+      // Stay open so several recipients can be added in one pass.
       setSearch("");
     } catch (e) {
       onError(e instanceof Error ? e.message : "failed to add recipient");
@@ -360,8 +362,8 @@ function SlackToRow({
     <>
       <ToLabel />
       <Popover open={open} onOpenChange={(v) => void onOpenChange(v)}>
-        <Popover.Trigger asChild disabled={disabled}>
-          <div className={CHIP_BAR}>
+        <Popover.Anchor asChild>
+          <div ref={anchorRef} className={CHIP_BAR}>
             {selected.map((c) => (
               <Chip
                 key={c.id}
@@ -382,6 +384,9 @@ function SlackToRow({
               onFocus={() => {
                 if (!open) void onOpenChange(true);
               }}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") setOpen(false);
+              }}
               disabled={disabled}
               placeholder={
                 selected.length ? "Add a channel" : "Add a channel or DM"
@@ -389,8 +394,18 @@ function SlackToRow({
               className={GHOST_INPUT}
             />
           </div>
-        </Popover.Trigger>
-        <Popover.Content width="fit" align="start" sideOffset={4}>
+        </Popover.Anchor>
+        <Popover.Content
+          width="trigger"
+          align="start"
+          sideOffset={4}
+          onOpenAutoFocus={(e) => e.preventDefault()}
+          onInteractOutside={(e) => {
+            // Clicking back into the chip bar (the anchor) is not "outside".
+            if (anchorRef.current?.contains(e.target as Node))
+              e.preventDefault();
+          }}
+        >
           <PopoverMenu>
             {!hasDm && !q && (
               <LineItemButton
