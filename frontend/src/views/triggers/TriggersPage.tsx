@@ -8,7 +8,7 @@ import { SettingsLayouts } from "@onyx-ai/opal/layouts";
 import { useConfirm } from "@/components/common/ConfirmDialog";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { TriggerHistoryModal } from "@/components/triggers/TriggerHistoryModal";
-import { TriggerModal } from "@/components/triggers/TriggerModal";
+import { TriggerPanel } from "@/components/triggers/TriggerPanel";
 import { useRequireAuth } from "@/lib/auth";
 import { describeCron } from "@/lib/cron";
 import { formatScopePath } from "@/lib/format";
@@ -266,7 +266,7 @@ export default function TriggersPage() {
         <DestinationsCard />
       </SettingsLayouts.Body>
 
-      <TriggerModal
+      <TriggerPanel
         open={modalOpen}
         initial={editing ?? undefined}
         onClose={() => {
