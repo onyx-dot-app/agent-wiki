@@ -740,8 +740,11 @@ function WatchScopePicker({
                 if (e.key === "Escape") setOpen(false);
                 if (e.key === "Enter") {
                   e.preventDefault();
-                  // Enter commits the visually top row: folders render first.
-                  const first = matchedFolders[0] ?? matchedFiles[0];
+                  // Enter commits the visually top row: Whole wiki leads an
+                  // empty query, then folders, then files.
+                  const first = !q
+                    ? "/"
+                    : (matchedFolders[0] ?? matchedFiles[0]);
                   if (first) pick(first);
                 }
               }}
