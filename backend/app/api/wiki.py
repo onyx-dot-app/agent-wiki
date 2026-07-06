@@ -218,35 +218,32 @@ def get_document_by_path(
     # the live buffer. This is a UI read; git stays the source of truth for
     # committed pages.
     sess = coedit.get_active_session(rel)
-    # Only serve the live buffer while someone is actually in the session. An
-    # active session with no participants is a zombie awaiting its final
-    # checkpoint (enqueued on the last leave); serving its buffer would pin
-    # every viewer to a stale snapshot until that checkpoint runs — which, if
-    # the queue is backed up, can be far behind HEAD. Fall through to the
-    # committed working tree instead.
-    if sess is not None and coedit.list_participants(sess.id):
+    if sess is not None:
         body = sess.buffer_text
         # Fast path: if HEAD hasn't moved since the session opened (the common
         # case — live-rebase folds inbound agent commits into the buffer and
         # advances base_sha), the buffer already reflects everything, so skip
-        # the merge subprocess. Only when HEAD has advanced past the session's
-        # base do we quick-merge the committed change over the buffer for
-        # display; on conflict, prefer the buffer (the authoritative resolution
-        # happens at checkpoint).
+        # the merge subprocess. When HEAD has advanced past the session's base,
+        # reconcile the committed change with the buffer for display: a clean
+        # 3-way merge shows both; on a conflict — or a merge failure — serve
+        # committed HEAD, not the buffer. Preferring the buffer there would let
+        # a stale/lagging session (in the limit, a zombie with no participants
+        # left to reconcile it) hide the committed change from every viewer —
+        # the 2026-07-06 incident. The authoritative merge happens at checkpoint.
         if sess.base_sha is not None and sess.base_sha != head_sha:
             base = wiki_git.read_file_opt(rel, ref=sess.base_sha) or ""
             current = wiki_git.read_file_opt(rel) or ""
             try:
                 merge = wiki_git.merge_content(base, current, sess.buffer_text)
-                if merge.clean:
-                    body = merge.merged
+                body = merge.merged if merge.clean else current
             except RuntimeError:
                 log.warning(
-                    "coedit read: merge_content failed for %s (base_sha=%s); serving buffer verbatim",
+                    "coedit read: merge_content failed for %s (base_sha=%s); serving HEAD",
                     rel,
                     sess.base_sha,
                     exc_info=True,
                 )
+                body = current
         return GetDocumentResponse(path=rel, body=body, head_sha=head_sha)
     abs_path = filesystem.absolute(rel)
     if not abs_path.is_file():
