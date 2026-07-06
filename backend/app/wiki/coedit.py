@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta, timezone
+from enum import Enum
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -49,6 +50,16 @@ def _iso(ts: datetime) -> str:
 # --------------------------------------------------------------------------- #
 # Row shapes                                                                  #
 # --------------------------------------------------------------------------- #
+
+
+class SessionStatus(str, Enum):
+    """Lifecycle state of a co-edit session. Single source of truth for the
+    valid `coedit_sessions.status` values; the DB CHECK constraint in
+    `app/db/models.py` mirrors these (`str, Enum` so members serialize as their
+    string value, matching the `CommentStatus` pattern in `app/models/comment.py`)."""
+
+    ACTIVE = "active"  # accepting ops; exactly one per path (partial unique index)
+    CLOSED = "closed"  # finalized after a clean checkpoint; never re-commits
 
 
 class SessionRow(BaseModel):
@@ -125,7 +136,7 @@ def get_active_session(path: str) -> SessionRow | None:
     with session() as s:
         row = s.scalar(
             select(CoeditSession).where(
-                CoeditSession.path == path, CoeditSession.status == "active"
+                CoeditSession.path == path, CoeditSession.status == SessionStatus.ACTIVE.value
             )
         )
         return _session_row(row) if row is not None else None
@@ -149,7 +160,7 @@ def open_session(path: str, *, base_sha: str | None, initial_buffer: str = "") -
     with session() as s:
         existing = s.scalar(
             select(CoeditSession).where(
-                CoeditSession.path == path, CoeditSession.status == "active"
+                CoeditSession.path == path, CoeditSession.status == SessionStatus.ACTIVE.value
             )
         )
         if existing is not None:
@@ -164,7 +175,7 @@ def open_session(path: str, *, base_sha: str | None, initial_buffer: str = "") -
             buffer_text=initial_buffer,
             version=0,
             base_sha=base_sha,
-            status="active",
+            status=SessionStatus.ACTIVE.value,
             created_at=now,
             updated_at=now,
         )
@@ -176,7 +187,7 @@ def open_session(path: str, *, base_sha: str | None, initial_buffer: str = "") -
             s.rollback()
             winner = s.scalar(
                 select(CoeditSession).where(
-                    CoeditSession.path == path, CoeditSession.status == "active"
+                    CoeditSession.path == path, CoeditSession.status == SessionStatus.ACTIVE.value
                 )
             )
             if winner is None:  # pragma: no cover - winner closed in the gap
@@ -206,7 +217,7 @@ def set_buffer(session_id: int, *, base_version: int, buffer_text: str) -> Sessi
             .where(
                 CoeditSession.id == session_id,
                 CoeditSession.version == base_version,
-                CoeditSession.status == "active",
+                CoeditSession.status == SessionStatus.ACTIVE.value,
             )
             .values(buffer_text=buffer_text, version=base_version + 1, updated_at=now)
             .returning(CoeditSession)
@@ -317,7 +328,7 @@ def rebase_onto(
             select(CoeditSession.buffer_text).where(
                 CoeditSession.id == session_id,
                 CoeditSession.version == base_version,
-                CoeditSession.status == "active",
+                CoeditSession.status == SessionStatus.ACTIVE.value,
             )
         ).scalar_one_or_none()
         if current is None:
@@ -336,7 +347,7 @@ def rebase_onto(
             .where(
                 CoeditSession.id == session_id,
                 CoeditSession.version == base_version,
-                CoeditSession.status == "active",
+                CoeditSession.status == SessionStatus.ACTIVE.value,
             )
             .values(**values)
             .returning(CoeditSession)
@@ -370,7 +381,7 @@ def apply_op(
         current = s.execute(
             select(CoeditSession.buffer_text).where(
                 CoeditSession.id == session_id,
-                CoeditSession.status == "active",
+                CoeditSession.status == SessionStatus.ACTIVE.value,
                 CoeditSession.version == base_version,
             )
         ).scalar_one_or_none()
@@ -385,7 +396,7 @@ def apply_op(
             .where(
                 CoeditSession.id == session_id,
                 CoeditSession.version == base_version,
-                CoeditSession.status == "active",
+                CoeditSession.status == SessionStatus.ACTIVE.value,
             )
             .values(buffer_text=new_buffer, version=new_version, updated_at=now)
             .returning(CoeditSession)
@@ -489,7 +500,7 @@ def sessions_due_for_checkpoint(
         rows = s.scalars(
             select(CoeditSession)
             .where(
-                CoeditSession.status == "active",
+                CoeditSession.status == SessionStatus.ACTIVE.value,
                 CoeditSession.version > CoeditSession.checkpointed_version,
                 or_(
                     # settled: no edit for ``idle_seconds``
@@ -525,8 +536,8 @@ def close_session(session_id: int) -> None:
     """Mark a session closed, freeing the path for a new active session."""
     with session() as s:
         sess = s.get(CoeditSession, session_id)
-        if sess is not None and sess.status != "closed":
-            sess.status = "closed"
+        if sess is not None and sess.status != SessionStatus.CLOSED.value:
+            sess.status = SessionStatus.CLOSED.value
             sess.updated_at = _iso(_now())
 
 
@@ -546,10 +557,10 @@ def close_if_clean(session_id: int) -> bool:
             update(CoeditSession)
             .where(
                 CoeditSession.id == session_id,
-                CoeditSession.status == "active",
+                CoeditSession.status == SessionStatus.ACTIVE.value,
                 CoeditSession.version == CoeditSession.checkpointed_version,
             )
-            .values(status="closed", updated_at=_iso(_now()))
+            .values(status=SessionStatus.CLOSED.value, updated_at=_iso(_now()))
             .returning(CoeditSession.id)
             .execution_options(synchronize_session=False)
         ).one_or_none()

@@ -68,17 +68,13 @@ def checkpoint_session(session_id: int) -> str | None:
     sess = coedit.get_session(session_id)
     if sess is None:
         return None  # gone
-    if sess.status != "active":
-        # A closed session is finalized — never re-commit it. This is what
-        # dedupes queued duplicates: once the first checkpoint commits and the
-        # task closes the session, every other queued copy no-ops here instead
-        # of re-committing the same buffer. (Previously a closed session still
-        # committed, and rebase_onto's status='active' CAS then failed to mark
-        # it checkpointed, so N queued copies each committed — the 2026-07-06
-        # incident's 4× clobber.) A closed session should already be clean
-        # (close only follows a clean checkpoint); if it's somehow dirty, log
-        # loudly rather than clobber HEAD with its stale buffer — the edits stay
-        # in the buffer for manual recovery.
+    if sess.status != coedit.SessionStatus.ACTIVE.value:
+        # A closed session is finalized — never re-commit it. This dedupes
+        # queued duplicates: once the first checkpoint commits and closes the
+        # session, every other queued copy no-ops here. A closed session should
+        # already be clean (close follows a clean checkpoint); if it's somehow
+        # dirty, log and skip rather than clobber HEAD with its stale buffer —
+        # the edits stay in the buffer for manual recovery.
         if sess.version != sess.checkpointed_version:
             log.warning(
                 "coedit checkpoint: session %s is %s but dirty (v%d != "
