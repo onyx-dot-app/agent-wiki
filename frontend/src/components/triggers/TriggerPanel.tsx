@@ -57,6 +57,9 @@ interface Props {
   initial?: Partial<Trigger>;
   onClose: () => void;
   onSaved: (t: Trigger) => void;
+  /** Shown as a Delete button in the footer on edit; the caller owns the
+   * confirm + request and closes the panel by resolving. */
+  onDelete?: () => void | Promise<void>;
   /** Lock the scope_path input so callers (e.g. doc page) can pin it. */
   lockScope?: boolean;
 }
@@ -110,6 +113,7 @@ export function TriggerPanel({
   initial,
   onClose,
   onSaved,
+  onDelete,
   lockScope,
 }: Props) {
   const isEdit = Boolean(initial?.id);
@@ -416,6 +420,17 @@ export function TriggerPanel({
               )}
             </Text>
           </div>
+          {isEdit && onDelete && (
+            <Button
+              type="button"
+              variant="danger"
+              prominence="secondary"
+              disabled={busy}
+              onClick={() => void onDelete()}
+            >
+              Delete
+            </Button>
+          )}
           <Button type="submit" variant="action" disabled={busy || !canSave}>
             {busy ? "Saving…" : isEdit ? "Save" : "Create"}
           </Button>

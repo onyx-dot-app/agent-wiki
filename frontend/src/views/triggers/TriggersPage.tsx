@@ -2,32 +2,27 @@
 
 import { useState } from "react";
 
-import { Button } from "@onyx-ai/opal/components";
-import { SvgPlus, SvgWorkflow } from "@onyx-ai/opal/icons";
+import useSWR from "swr";
+
+import { Button, Tabs, Text } from "@onyx-ai/opal/components";
+import { SvgPlusCircle, SvgSearch, SvgWorkflow } from "@onyx-ai/opal/icons";
 import { SettingsLayouts } from "@onyx-ai/opal/layouts";
 import { useConfirm } from "@/components/common/ConfirmDialog";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { TriggerHistoryModal } from "@/components/triggers/TriggerHistoryModal";
 import { TriggerPanel } from "@/components/triggers/TriggerPanel";
 import { useRequireAuth } from "@/lib/auth";
-import { describeCron } from "@/lib/cron";
-import { formatScopePath } from "@/lib/format";
-import { SlackDestinationPicker } from "@/components/triggers/SlackDestinationPicker";
-import { disconnectSlack, useSlackConnectStatus } from "@/lib/slackConnect";
+import { TriggerCard } from "@/components/triggers/TriggerCard";
 import {
-  createDestinationConfig,
-  deleteDestinationConfig,
   deleteTrigger,
+  getTriggerFires,
   getTriggerVersion,
   updateTrigger,
   useDestinationConfigs,
   useTriggers,
   type Trigger,
+  type TriggerFire,
 } from "@/lib/triggers";
-import { ApiError } from "@/lib/api";
-
-const sentenceTagCn =
-  "shrink-0 text-[10px] font-semibold px-[6px] py-[1px] rounded-(--border-radius-04) bg-(--background-tint-03) text-(--text-05) uppercase tracking-[0.3px]";
 
 function formatRelative(iso: string | null | undefined): string {
   if (!iso) return "";
@@ -49,13 +44,26 @@ export default function TriggersPage() {
   const { user, loading } = useRequireAuth();
   const { triggers, error: listSwrError, refresh } = useTriggers();
   const { configs } = useDestinationConfigs();
-  const destinationLabel = (t: Trigger) => {
-    if (t.actions.length > 1) return `${t.actions.length} destinations`;
-    const configId = t.actions[0]?.destination_config_id;
-    if (!configId) return "Event log";
-    const cfg = configs.find((c) => c.id === configId);
-    return cfg ? `${cfg.type} · ${cfg.name}` : "(destination removed)";
-  };
+  const [kindTab, setKindTab] = useState<"delta" | "schedule">("delta");
+  const [search, setSearch] = useState("");
+  const { data: firesData } = useSWR("/triggers/fires?per_trigger=3", () =>
+    getTriggerFires({ perTrigger: 3 }),
+  );
+  const firesByTrigger = new Map<string, TriggerFire[]>();
+  for (const f of firesData ?? []) {
+    const cur = firesByTrigger.get(f.trigger_id);
+    if (cur) cur.push(f);
+    else firesByTrigger.set(f.trigger_id, [f]);
+  }
+  const q = search.trim().toLowerCase();
+  const visible = triggers.filter(
+    (t) =>
+      t.kind === kindTab &&
+      (!q ||
+        t.scope_path.toLowerCase().includes(q) ||
+        t.nl_description.toLowerCase().includes(q) ||
+        t.actions.some((a) => (a.message ?? "").toLowerCase().includes(q))),
+  );
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
@@ -87,7 +95,7 @@ export default function TriggersPage() {
     }
   }
 
-  async function onDelete(t: Trigger) {
+  async function onDelete(t: Trigger): Promise<boolean> {
     if (
       !(await confirmDialog({
         title: "Delete this trigger?",
@@ -95,7 +103,7 @@ export default function TriggersPage() {
         confirmLabel: "Delete",
       }))
     )
-      return;
+      return false;
     setBusyId(t.id);
     setMutationError(null);
     try {
@@ -106,8 +114,10 @@ export default function TriggersPage() {
         }),
         { revalidate: true },
       );
+      return true;
     } catch (e) {
       setMutationError(e instanceof Error ? e.message : "delete failed");
+      return false;
     } finally {
       setBusyId(null);
     }
@@ -122,153 +132,92 @@ export default function TriggersPage() {
         divider
       />
       <SettingsLayouts.Body>
-        <div className="mb-4 flex justify-end">
+        <Tabs
+          value={kindTab}
+          onValueChange={(v) => setKindTab(v as "delta" | "schedule")}
+          variant="contained"
+        >
+          <Tabs.List>
+            <Tabs.Trigger value="delta">Run on Wiki Updates</Tabs.Trigger>
+            <Tabs.Trigger value="schedule">Recurring Schedule</Tabs.Trigger>
+          </Tabs.List>
+        </Tabs>
+        <div className="flex w-full items-center gap-3 px-2 py-3">
+          <div className="flex min-w-[160px] flex-1 items-center gap-1 rounded-(--radius-08) p-[6px] text-[14px] leading-5">
+            <span className="flex size-6 items-center justify-center p-1">
+              <SvgSearch className="size-4 text-(--text-03)" />
+            </span>
+            {/* raw-ok: bare .opal-input-field; the borderless search bar composite has no Opal component */}
+            <input
+              className="opal-input-field min-w-0 flex-1"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search triggers…"
+            />
+          </div>
           <Button
-            icon={SvgPlus}
+            variant="action"
+            rightIcon={SvgPlusCircle}
             onClick={() => {
               setEditing(null);
               setModalOpen(true);
             }}
           >
-            New trigger
+            Add Trigger
           </Button>
         </div>
         {listError && (
-          <div className="mb-3 rounded-(--border-radius-04) bg-(--status-error-01) p-[10px] text-[13px] text-(--status-text-error-05)">
+          <div className="mb-3 rounded-(--radius-04) bg-(--status-error-01) p-[10px] text-[13px] text-(--status-text-error-05)">
             {listError}
           </div>
         )}
 
-        {triggers.length === 0 && !listError && (
-          <p className="text-sm text-(--text-03)">
-            No triggers yet. Create one to start watching documents for changes.
-          </p>
+        {visible.length === 0 && !listError && (
+          <div className="px-2 py-4">
+            <Text font="main-ui-body" color="text-03">
+              {q
+                ? "No triggers match the search."
+                : kindTab === "delta"
+                  ? "No update triggers yet. Add one to start watching pages for changes."
+                  : "No scheduled triggers yet. Add one to run checks on a recurring schedule."}
+            </Text>
+          </div>
         )}
 
-        <ul className="m-0 list-none p-0">
-          {triggers.map((t) => (
-            <li
+        <div className="flex w-full flex-col gap-2">
+          {visible.map((t) => (
+            <TriggerCard
               key={t.id}
-              className={`mb-[10px] rounded-(--border-radius-08) border border-(--border-01) bg-(--background-tint-00) px-4 py-[14px] ${busyId === t.id ? "opacity-60" : "opacity-100"}`}
-            >
-              <div className="mb-[10px] flex flex-wrap items-center justify-between gap-3">
-                <div className="flex min-w-0 flex-wrap items-baseline gap-[10px] font-mono text-xs text-(--text-03)">
-                  <span title={t.scope_path}>
-                    {formatScopePath(t.scope_path)}
-                  </span>
-                  <span className="text-[11px] text-(--text-02)">{t.id}</span>
-                  {t.last_edited_at && (
-                    <span
-                      title={new Date(t.last_edited_at).toLocaleString()}
-                      className="text-[11px] text-(--text-02)"
-                    >
-                      edited {formatRelative(t.last_edited_at)}
-                    </span>
-                  )}
-                </div>
-                <div className="flex shrink-0 flex-wrap items-center gap-1.5">
-                  <span
-                    className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-[2px] text-[11px] font-semibold tracking-[0.3px] ${t.enabled ? "border-(--border-01) bg-(--background-tint-03) text-(--text-05)" : "border-(--border-01) bg-(--background-tint-02) text-(--text-03)"}`}
-                  >
-                    <span
-                      aria-hidden
-                      className={`h-[6px] w-[6px] rounded-full ${t.enabled ? "bg-(--status-text-success-05)" : "bg-(--text-02)"}`}
-                    />
-                    {t.enabled ? "ENABLED" : "DISABLED"}
-                  </span>
-                  <Button
-                    size="sm"
-                    onClick={() => onToggle(t)}
-                    disabled={busyId === t.id}
-                  >
-                    {t.enabled ? "Disable" : "Enable"}
-                  </Button>
-                  <Button
-                    size="sm"
-                    onClick={() => {
-                      setEditing(t);
-                      setModalOpen(true);
-                    }}
-                    disabled={busyId === t.id}
-                  >
-                    Edit
-                  </Button>
-                  <Button
-                    size="sm"
-                    onClick={() => setHistoryFor(t)}
-                    disabled={busyId === t.id}
-                  >
-                    History
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="danger"
-                    onClick={() => onDelete(t)}
-                    disabled={busyId === t.id}
-                  >
-                    Delete
-                  </Button>
-                </div>
-              </div>
-              <div className="text-sm leading-[1.55] text-(--text-05)">
-                {t.kind === "schedule" && (
-                  <div className="mb-[6px] flex items-baseline gap-2">
-                    <span className={sentenceTagCn}>WHEN</span>
-                    <span className="min-w-0 flex-1">
-                      {describeCron(t.schedule_cron, t.schedule_timezone)}
-                      {t.schedule_start_at && (
-                        <>
-                          {" "}
-                          <span className="text-xs text-(--text-03)">
-                            · starting{" "}
-                            {new Date(t.schedule_start_at).toLocaleString()}
-                          </span>
-                        </>
-                      )}
-                      {t.schedule_last_fired_at && (
-                        <>
-                          {" "}
-                          <span className="text-xs text-(--text-02)">
-                            · last checked{" "}
-                            {formatRelative(t.schedule_last_fired_at)}
-                          </span>
-                        </>
-                      )}
-                    </span>
-                  </div>
-                )}
-                <div className="flex items-baseline gap-2">
-                  <span className={sentenceTagCn}>IF</span>
-                  <span className="min-w-0 flex-1">{t.nl_description}</span>
-                </div>
-                {t.actions
-                  .filter((a) => a.message)
-                  .map((a, i) => (
-                    <div
-                      key={`${a.destination_config_id ?? "event_log"}-${a.message}-${i}`}
-                      className="mt-[6px] flex items-baseline gap-2"
-                    >
-                      <span className={sentenceTagCn}>THEN SEND</span>
-                      <span className="min-w-0 flex-1">{a.message}</span>
-                    </div>
-                  ))}
-                <div className="mt-[6px] flex items-baseline gap-2">
-                  <span className={sentenceTagCn}>TO</span>
-                  <span className="min-w-0 flex-1 text-(--text-04)">
-                    {destinationLabel(t)}
-                  </span>
-                </div>
-              </div>
-            </li>
+              trigger={t}
+              fires={firesByTrigger.get(t.id) ?? []}
+              configs={configs}
+              ownerName={user.name || user.email}
+              busy={busyId === t.id}
+              formatRelative={formatRelative}
+              onToggle={() => void onToggle(t)}
+              onEdit={() => {
+                setEditing(t);
+                setModalOpen(true);
+              }}
+              onHistory={() => setHistoryFor(t)}
+            />
           ))}
-        </ul>
-
-        <DestinationsCard />
+        </div>
       </SettingsLayouts.Body>
 
       <TriggerPanel
         open={modalOpen}
         initial={editing ?? undefined}
+        onDelete={
+          editing
+            ? async () => {
+                if (await onDelete(editing)) {
+                  setModalOpen(false);
+                  setEditing(null);
+                }
+              }
+            : undefined
+        }
         onClose={() => {
           setModalOpen(false);
           setEditing(null);
@@ -316,247 +265,5 @@ export default function TriggersPage() {
         }}
       />
     </SettingsLayouts.Root>
-  );
-}
-
-function DestinationsCard() {
-  const { configs, error, isLoading, refresh } = useDestinationConfigs();
-  const { status: slack, refresh: refreshSlack } = useSlackConnectStatus();
-  const [mode, setMode] = useState<"closed" | "webhook">("closed");
-  const [name, setName] = useState("");
-  const [url, setUrl] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [formError, setFormError] = useState<string | null>(null);
-  const confirmDialog = useConfirm();
-
-  async function addConfig(
-    input: Parameters<typeof createDestinationConfig>[0],
-  ) {
-    setBusy(true);
-    setFormError(null);
-    try {
-      await createDestinationConfig(input);
-      await refresh();
-      setMode("closed");
-      setName("");
-      setUrl("");
-    } catch (e) {
-      setFormError(
-        e instanceof ApiError ? e.message : "failed to add destination",
-      );
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  function onAddWebhook() {
-    if (!name.trim() || !url.trim()) return;
-    void addConfig({ type: "slack", name: name.trim(), secret: url.trim() });
-  }
-
-  async function onDisconnect() {
-    if (
-      !(await confirmDialog({
-        title: "Disconnect Slack?",
-        body: "Channel and DM destinations will stop delivering until you reconnect.",
-        confirmLabel: "Disconnect",
-      }))
-    )
-      return;
-    setFormError(null);
-    try {
-      await disconnectSlack();
-      await refreshSlack();
-    } catch (e) {
-      setFormError(e instanceof ApiError ? e.message : "failed to disconnect");
-    }
-  }
-
-  async function onDelete(id: string, label: string) {
-    if (
-      !(await confirmDialog({
-        title: `Delete "${label}"?`,
-        body: "Triggers pointing at it will stop delivering there.",
-        confirmLabel: "Delete",
-      }))
-    )
-      return;
-    try {
-      await deleteDestinationConfig(id);
-      await refresh();
-    } catch (e) {
-      alert(e instanceof ApiError ? e.message : "failed to delete");
-    }
-  }
-
-  const connected = Boolean(slack?.connected);
-
-  return (
-    <section className="mt-[28px] rounded-(--border-radius-08) border border-(--border-01) bg-(--background-tint-01) p-4">
-      <div className="mb-1 flex items-center justify-between">
-        <h2 className="m-0 text-base">Destinations</h2>
-        <div className="flex gap-2">
-          {mode === "closed" && connected && (
-            <SlackDestinationPicker
-              configs={configs}
-              connected={connected}
-              disabled={busy}
-              onPick={async () => {
-                setFormError(null);
-                await refresh();
-              }}
-              onError={setFormError}
-            >
-              <Button size="sm" disabled={busy}>
-                + Slack
-              </Button>
-            </SlackDestinationPicker>
-          )}
-          {mode === "closed" && (
-            <Button
-              size="sm"
-              disabled={busy}
-              onClick={() => setMode("webhook")}
-            >
-              + Webhook
-            </Button>
-          )}
-        </div>
-      </div>
-      <p className="mt-0 mb-3 text-[13px] text-(--text-03)">
-        Delivery targets you can point a trigger at. Private to you.
-      </p>
-
-      {slack?.configured && (
-        <div className="mb-3 flex items-center justify-between rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-02) px-[14px] py-3">
-          {connected ? (
-            <>
-              <div>
-                <div className="text-[13px]">
-                  Connected to <strong>{slack?.team_name ?? "Slack"}</strong>
-                </div>
-                {slack?.token_display && (
-                  <div className="mt-[2px] font-mono text-xs text-(--text-03)">
-                    {slack.token_display}
-                  </div>
-                )}
-              </div>
-              <Button
-                size="sm"
-                variant="danger"
-                onClick={() => void onDisconnect()}
-              >
-                Disconnect
-              </Button>
-            </>
-          ) : (
-            <>
-              <div className="text-[13px]">
-                Connect Slack to deliver to channels or DMs as the Agent Wiki
-                bot.
-              </div>
-              <Button
-                size="sm"
-                variant="action"
-                onClick={() => {
-                  if (!slack?.connect_url) return;
-                  const target = new URL(slack.connect_url);
-                  target.searchParams.set("return_to", "/app/triggers");
-                  window.location.href = target.toString();
-                }}
-              >
-                Connect Slack
-              </Button>
-            </>
-          )}
-        </div>
-      )}
-
-      {error && (
-        <div className="mb-2 text-[13px] text-(--status-text-error-05)">
-          {error.message || "Failed to load destinations."}
-        </div>
-      )}
-
-      {mode === "webhook" && (
-        <div className="mb-3 flex flex-col gap-2 rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-02) p-3">
-          <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Name (e.g. PM Standup)"
-            disabled={busy}
-            maxLength={80}
-            className="box-border w-full rounded-(--border-radius-04) border border-(--border-01) px-[10px] py-2 text-sm"
-          />
-          <input
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            placeholder="https://hooks.slack.com/services/…"
-            disabled={busy}
-            className="box-border w-full rounded-(--border-radius-04) border border-(--border-01) px-[10px] py-2 text-sm"
-          />
-          {formError && (
-            <div className="text-[13px] text-(--status-text-error-05)">
-              {formError}
-            </div>
-          )}
-          <div className="flex gap-2">
-            <Button
-              size="sm"
-              variant="action"
-              disabled={busy || !name.trim() || !url.trim()}
-              onClick={onAddWebhook}
-            >
-              {busy ? "Adding…" : "Add"}
-            </Button>
-            <Button size="sm" disabled={busy} onClick={() => setMode("closed")}>
-              Cancel
-            </Button>
-          </div>
-        </div>
-      )}
-
-      {formError && mode === "closed" && (
-        <div className="mb-2 text-[13px] text-(--status-text-error-05)">
-          {formError}
-        </div>
-      )}
-
-      {isLoading && configs.length === 0 && !error && <LoadingSpinner />}
-
-      {!isLoading && configs.length === 0 && mode === "closed" && (
-        <p className="m-0 text-sm text-(--text-03)">
-          No destinations yet &mdash; add one to deliver trigger fires to Slack.
-        </p>
-      )}
-
-      {configs.length > 0 && (
-        <ul className="m-0 list-none p-0">
-          {configs.map((c) => (
-            <li
-              key={c.id}
-              className="mt-2 flex items-center gap-3 rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-00) px-3 py-[10px]"
-            >
-              <div className="min-w-0 flex-1">
-                <div className="text-sm font-medium text-(--text-05)">
-                  {c.name}
-                </div>
-                <div className="mt-[2px] font-mono text-xs text-(--text-03)">
-                  {c.type}
-                  {c.has_secret ? " · webhook" : " · bot"}
-                </div>
-              </div>
-              <Button
-                size="sm"
-                variant="danger"
-                onClick={() => void onDelete(c.id, c.name)}
-              >
-                Delete
-              </Button>
-            </li>
-          ))}
-        </ul>
-      )}
-    </section>
   );
 }
