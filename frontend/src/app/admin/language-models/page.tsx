@@ -299,7 +299,6 @@ function AgentModelSection({
             {options.map(({ provider: p, model: m }) => {
               const isSelected = selProvider === p && selModel === m;
               return (
-                // raw-ok: legacy form control, pre-dates the Opal rule
                 <button
                   key={`${p}:${m}`}
                   type="button"
@@ -580,7 +579,6 @@ function ProviderForm({
           {knownModels.map((id) => {
             const checked = selectedModels.has(id);
             return (
-              // raw-ok: legacy form control, pre-dates the Opal rule
               <button
                 key={id}
                 type="button"
@@ -754,7 +752,6 @@ function ModelListEditor({
           </div>
         ))}
         <div className="flex gap-2">
-          {/* raw-ok: legacy form control, pre-dates the Opal rule */}
           <input
             type="text"
             value={newModel}
@@ -1089,7 +1086,6 @@ function Field({
   return (
     <label>
       <div className={lblClass}>{label}</div>
-      {/* raw-ok: legacy form control, pre-dates the Opal rule */}
       <input className={inputClass} {...inputProps} />
       {hint && <div className="mt-1 text-xs text-(--text-03)">{hint}</div>}
     </label>

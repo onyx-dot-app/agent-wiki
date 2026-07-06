@@ -480,7 +480,6 @@ function DestinationsCard() {
 
       {mode === "webhook" && (
         <div className="mb-3 flex flex-col gap-2 rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-02) p-3">
-          {/* raw-ok: legacy form control, pre-dates the Opal rule */}
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
@@ -489,7 +488,6 @@ function DestinationsCard() {
             maxLength={80}
             className="box-border w-full rounded-(--border-radius-04) border border-(--border-01) px-[10px] py-2 text-sm"
           />
-          {/* raw-ok: legacy form control, pre-dates the Opal rule */}
           <input
             value={url}
             onChange={(e) => setUrl(e.target.value)}
