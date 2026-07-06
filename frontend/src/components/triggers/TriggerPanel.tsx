@@ -67,6 +67,7 @@ export function TriggerPanel({
   const [startAtLocal, setStartAtLocal] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [watchDraft, setWatchDraft] = useState("");
   const [emailMode, setEmailMode] = useState(false);
   const [emailDraft, setEmailDraft] = useState("");
   const [emailCommitting, setEmailCommitting] = useState(false);
@@ -100,6 +101,7 @@ export function TriggerPanel({
     setError(null);
     setEmailMode(false);
     setEmailDraft("");
+    setWatchDraft("");
   }, [
     open,
     initial?.id,
@@ -296,7 +298,10 @@ export function TriggerPanel({
                     <button
                       type="button"
                       onClick={() => {
-                        if (!busy) setScopePath("");
+                        if (!busy) {
+                          setWatchDraft(scopePath.trim());
+                          setScopePath("");
+                        }
                       }}
                       className="flex size-4 cursor-pointer items-center justify-center rounded-(--radius-04) border-none bg-transparent p-[2px] text-(--text-03) hover:bg-(--background-tint-03)"
                       aria-label="Remove watched path"
@@ -307,8 +312,17 @@ export function TriggerPanel({
                 </span>
               ) : (
                 <input
-                  value={scopePath}
-                  onChange={(e) => setScopePath(e.target.value)}
+                  value={watchDraft}
+                  onChange={(e) => setWatchDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      if (watchDraft.trim()) setScopePath(watchDraft.trim());
+                    }
+                  }}
+                  onBlur={() => {
+                    if (watchDraft.trim()) setScopePath(watchDraft.trim());
+                  }}
                   disabled={busy || lockScope}
                   placeholder="projects/foo.md, projects, or / for the whole wiki"
                   className="min-w-[80px] flex-1 border-none bg-transparent px-1 py-[2px] text-[14px] leading-5 outline-none placeholder:text-(--text-02)"
