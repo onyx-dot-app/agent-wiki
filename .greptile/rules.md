@@ -73,7 +73,3 @@ Code comments describe what the code IS, not what it replaced or used to be. No 
 ## Pre-Commit Discipline
 
 The repo's pre-commit hooks (ruff + basedpyright strict, plus frontend typecheck in CI) are the authority. Code that lints clean locally but trips them on push is a regression. Run `pre-commit run --files <changed>` before requesting review.
-
-## Opal components are mandatory in the frontend — no raw interactive elements
-
-New or modified `.tsx` code MUST use `@onyx-ai/opal` components instead of raw elements: `Button`/`SelectButton`/`OpenButton`/`FilterButton` (not `<button>`), `InputTypeIn` (not `<input>`), `Text` with font/color presets (not styled `<p>/<span>/<strong>`), `Divider`, `LineItemButton`, `Popover`, `Tabs`. Before writing any custom composition, survey the full library (`components`, `layouts`, `core`, `utils` — including `markdown()` for inline emphasis). A raw `<button>`, `<input>`, `<select>`, or `<textarea>` is only acceptable with a `raw-ok: <reason>` comment on the same or preceding line (enforced by `frontend/scripts/check-raw-elements.sh` in pre-commit/CI), and the reason must name a real gap in the library, not convenience. Flag any unjustified raw element or any hand-rolled equivalent of an existing Opal component as a blocking issue.

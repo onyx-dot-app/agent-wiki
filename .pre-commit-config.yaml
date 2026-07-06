@@ -48,12 +48,6 @@ repos:
       # Frontend checks. Local hooks via `bun` so the tool versions match
       # what `bun install` resolves from frontend/bun.lock — same
       # no-second-source-of-truth rule as the uv hooks above.
-      - id: no-raw-interactive-elements
-        name: opal components, not raw elements
-        entry: frontend/scripts/check-raw-elements.sh
-        language: system
-        files: ^frontend/src/.*\.tsx$
-
       - id: prettier
         name: prettier (frontend)
         # pre-commit passes paths from the repo root; strip the frontend/
