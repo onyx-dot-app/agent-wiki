@@ -70,10 +70,11 @@ export function TriggerCard({
   onEdit,
   onHistory,
 }: Props) {
-  // The newest fire opens expanded on enabled triggers, per the mock.
-  const [expanded, setExpanded] = useState<Set<number>>(
-    () => new Set(t.enabled && fires[0] ? [fires[0].event_id] : []),
-  );
+  // The newest fire renders expanded on enabled triggers (per the mock);
+  // clicks override per row. Derived, since fires arrive after mount.
+  const [overrides, setOverrides] = useState<Map<number, boolean>>(new Map());
+  const isRowOpen = (f: TriggerFire) =>
+    overrides.get(f.event_id) ?? (t.enabled && f === fires[0]);
 
   const destinationTypes = [
     ...new Set(
@@ -87,13 +88,8 @@ export function TriggerCard({
 
   const ScopeIcon = scopeIcon(t.scope_path);
 
-  function toggleRow(eventId: number) {
-    setExpanded((cur) => {
-      const next = new Set(cur);
-      if (next.has(eventId)) next.delete(eventId);
-      else next.add(eventId);
-      return next;
-    });
+  function toggleRow(f: TriggerFire) {
+    setOverrides((cur) => new Map(cur).set(f.event_id, !isRowOpen(f)));
   }
 
   return (
@@ -221,7 +217,7 @@ export function TriggerCard({
           </div>
         ) : (
           fires.map((f) => {
-            const isOpen = expanded.has(f.event_id);
+            const isOpen = isRowOpen(f);
             const Chevron = isOpen ? SvgChevronUp : SvgChevronDown;
             return (
               <div key={f.event_id} className="flex w-full flex-col">
@@ -252,7 +248,7 @@ export function TriggerCard({
                     {/* raw-ok: 20px inline chevron; Opal Button's smallest container oversizes this row */}
                     <button
                       type="button"
-                      onClick={() => toggleRow(f.event_id)}
+                      onClick={() => toggleRow(f)}
                       aria-expanded={isOpen}
                       title="Details"
                       className="flex size-5 cursor-pointer items-center justify-center rounded-(--radius-08) border-0 bg-transparent p-[2px] hover:bg-(--background-tint-02)"

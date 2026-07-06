@@ -95,7 +95,7 @@ export default function TriggersPage() {
     }
   }
 
-  async function onDelete(t: Trigger) {
+  async function onDelete(t: Trigger): Promise<boolean> {
     if (
       !(await confirmDialog({
         title: "Delete this trigger?",
@@ -103,7 +103,7 @@ export default function TriggersPage() {
         confirmLabel: "Delete",
       }))
     )
-      return;
+      return false;
     setBusyId(t.id);
     setMutationError(null);
     try {
@@ -114,8 +114,10 @@ export default function TriggersPage() {
         }),
         { revalidate: true },
       );
+      return true;
     } catch (e) {
       setMutationError(e instanceof Error ? e.message : "delete failed");
+      return false;
     } finally {
       setBusyId(null);
     }
@@ -206,6 +208,16 @@ export default function TriggersPage() {
       <TriggerPanel
         open={modalOpen}
         initial={editing ?? undefined}
+        onDelete={
+          editing
+            ? async () => {
+                if (await onDelete(editing)) {
+                  setModalOpen(false);
+                  setEditing(null);
+                }
+              }
+            : undefined
+        }
         onClose={() => {
           setModalOpen(false);
           setEditing(null);
