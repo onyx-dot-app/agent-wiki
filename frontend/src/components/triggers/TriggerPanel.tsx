@@ -290,9 +290,7 @@ export function TriggerPanel({
               {scopePath.trim() ? (
                 <span className="flex items-center rounded-(--radius-08) bg-(--background-tint-02) py-[2px] pr-[2px] pl-1">
                   <span className="max-w-[280px] truncate px-[2px] text-[14px] leading-5 font-medium text-(--text-04)">
-                    {scopePath.trim() === "" || scopePath.trim() === "/"
-                      ? "Whole wiki"
-                      : scopePath.trim()}
+                    {scopePath.trim() === "/" ? "Whole wiki" : scopePath.trim()}
                   </span>
                   {!lockScope && (
                     <button
@@ -423,19 +421,14 @@ export function TriggerPanel({
               </span>
             )}
             <div className="mt-1 flex w-full items-center">
-              <button
+              <Button
                 type="button"
+                icon={SvgPlusCircle}
                 disabled
-                title="Multiple actions per trigger are coming soon"
-                className="flex cursor-not-allowed items-center gap-1 rounded-(--radius-12) border border-(--border-01) bg-(--background-tint-01) p-2 opacity-60"
+                tooltip="Multiple actions per trigger are coming soon"
               >
-                <span className="flex size-5 items-center justify-center p-[2px] text-(--text-03)">
-                  <SvgPlusCircle size={16} />
-                </span>
-                <span className="pr-1 pl-[2px] text-[14px] leading-5 font-semibold text-(--text-03)">
-                  Add More Actions
-                </span>
-              </button>
+                Add More Actions
+              </Button>
             </div>
           </div>
 
