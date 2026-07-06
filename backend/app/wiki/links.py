@@ -11,10 +11,17 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from urllib.parse import quote
 
 from pydantic import BaseModel, ConfigDict
 
+from app.config import CONFIG
 from app.wiki import filesystem
+
+
+def doc_url(path: str) -> str:
+    """Absolute app URL for a wiki page, path percent-encoded."""
+    return f"{CONFIG.public_base_url}/app/wiki/{quote(path)}"
 
 
 # Match ``[text](target)`` not preceded by a ``!`` (image syntax).

@@ -65,11 +65,19 @@ def test_send_failure_is_swallowed(tmp_db, monkeypatch):
         )  # must not raise
 
 
-def test_comment_fans_out_to_owner_and_mentions_not_author(tmp_db, sent):
+def test_comment_fans_out_to_owner_and_readable_mentions_not_author(tmp_db, sent):
     author = _user("u_author", "author@x.com", notify_comment_email=True)
     _user("u_owner", "owner@x.com", notify_comment_email=True)
     _user("u_mention", "mention@x.com", notify_comment_email=True)
     acl.set_owner("notes/a.md", "u_owner")
+    acl.grant(
+        resource_kind="page",
+        resource_path="notes/a.md",
+        principal_kind="user",
+        principal_id="u_mention",
+        permission="read",
+        granted_by_user_id="u_owner",
+    )
 
     row = {
         "doc_path": "notes/a.md",
@@ -82,6 +90,25 @@ def test_comment_fans_out_to_owner_and_mentions_not_author(tmp_db, sent):
     assert all("notes/a.md" in c["subject"] for c in sent)
     # mention tokens render as plain names in the mail body
     assert "mention:u_mention" not in sent[0]["text"]
+    # links percent-encode the path
+    assert "/app/wiki/notes/a.md" in sent[0]["text"]
+
+
+def test_mention_without_read_access_is_not_emailed(tmp_db, sent):
+    author = _user("u_author", "author@x.com")
+    _user("u_owner", "owner@x.com", notify_comment_email=True)
+    _user("u_outsider", "outsider@x.com", notify_comment_email=True)
+    # owner stamp makes the page managed; u_outsider holds no grant
+    acl.set_owner("notes/secret.md", "u_owner")
+
+    row = {
+        "doc_path": "notes/secret.md",
+        "body": "fyi @[Outsider](mention:u_outsider)",
+    }
+    with triggers_queue.immediate_mode():
+        comment_notifications.queue_for_comment(row, author_id=author)
+
+    assert [c["to"] for c in sent] == ["owner@x.com"]
 
 
 def test_update_events_mail_the_owner(tmp_db, sent):

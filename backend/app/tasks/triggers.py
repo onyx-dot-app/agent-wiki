@@ -40,11 +40,9 @@ import logging
 from typing import Any, cast
 
 from datetime import datetime, timezone
-from urllib.parse import quote
 
 from sqlalchemy import select
 
-from app.config import CONFIG
 from app.db.models import Event, User
 from app.email import service as email_service
 from app.db.session import session
@@ -68,6 +66,7 @@ from app.triggers.engine import (
     schedule_window_start,
 )
 from app.wiki import acl as wiki_acl
+from app.wiki.links import doc_url
 from app.wiki import git as wiki_git
 from app.models.wiki import ChangeKind
 
@@ -435,7 +434,7 @@ def _dispatch_to_email(
     if not address:
         log.warning("trigger %s email config %s has no address", trigger.id, config["id"])
         return
-    doc_link = f"{CONFIG.public_base_url}/app/wiki/{quote(doc_path)}"
+    doc_link = doc_url(doc_path)
     text = (
         f"{rendered_message}\n\n— Agent Wiki trigger on {doc_path}\n{doc_link}"
     )

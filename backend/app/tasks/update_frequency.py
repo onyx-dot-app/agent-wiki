@@ -26,13 +26,13 @@ from typing import Any
 
 from sqlalchemy import select
 
-from app.config import CONFIG
 from app.db.models import Event
 from app.db.session import session
 from app.tasks.notify_emails import send_notification_email
 from app.tasks.queues import lightweight_maintenance_queue
 from app.wiki import acl
 from app.wiki import constants as wiki_constants
+from app.wiki.links import doc_url
 from app.wiki import git as wiki_git
 from app.wiki import update_policy
 
@@ -61,7 +61,7 @@ def _queue_owner_email(path: str, *, subject: str, text: str) -> None:
     owner = acl.get_owner(path)
     if not owner:
         return
-    doc_link = f"{CONFIG.public_base_url}/app/wiki/{path}"
+    doc_link = doc_url(path)
     send_notification_email(
         user_id=owner,
         kind="update_warning",
