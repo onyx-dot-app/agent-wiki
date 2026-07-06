@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 from typing import NamedTuple
 
 from app.ingest.models import WikiUpdateCandidate
@@ -16,6 +17,16 @@ class TextEdit(NamedTuple):
 
 NO_CHANGE_SENTINEL = "NO_CHANGE"
 IRRELEVANT_SENTINEL = "IRRELEVANT"
+
+
+def today_str() -> str:
+    """Current UTC date for updater prompts, e.g. ``2026-07-06 (Monday)``.
+
+    The weekday matters: pages with week-keyed sections ("Week of ...") need it
+    to place an update in the right week.
+    """
+    now = datetime.now(timezone.utc)
+    return f"{now:%Y-%m-%d} ({now:%A})"
 
 
 def batch_by_chars(

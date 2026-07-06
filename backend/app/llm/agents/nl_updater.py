@@ -12,7 +12,7 @@ from typing import Any
 from sqlalchemy.exc import OperationalError
 
 from app.llm import client
-from app.llm.agents.common import NO_CHANGE_SENTINEL, strip_outer_fence
+from app.llm.agents.common import NO_CHANGE_SENTINEL, strip_outer_fence, today_str
 from app.llm.prompts import load_prompt
 from app.tracing import trace_flow
 from app.wiki import update_policy
@@ -56,6 +56,7 @@ def process_instruction(wiki_path: str, current_body: str, payload: dict[str, An
     input = load_prompt("wiki_updater.mcp.input").format(
         wiki_path=wiki_path,
         source=source,
+        today=today_str(),
         current_body=current_body,
         payload=payload,
         update_instruction=instruction_section,

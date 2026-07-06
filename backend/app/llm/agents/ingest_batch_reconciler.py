@@ -21,7 +21,13 @@ from typing import Any, NamedTuple, cast
 from app.ingest.models import WikiUpdateCandidate
 from app.llm import client
 from app.llm.client import ToolCall
-from app.llm.agents.common import IRRELEVANT_SENTINEL, TextEdit, apply_edits, batch_by_chars
+from app.llm.agents.common import (
+    IRRELEVANT_SENTINEL,
+    TextEdit,
+    apply_edits,
+    batch_by_chars,
+    today_str,
+)
 from app.metrics import (
     ingest_reconciler_cached_input_tokens,
     ingest_reconciler_input_tokens,
@@ -180,6 +186,7 @@ def _reconcile_batch(
         title=title or "(no title)",
         url=url or "",
         source=source,
+        today=today_str(),
         content=content,
     )
     candidates = load_prompt("ingest_batch_reconciler.candidates").format(

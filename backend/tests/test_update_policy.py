@@ -183,6 +183,28 @@ def test_nl_updater_omits_section_when_no_policy(tmp_db, monkeypatch):
     assert "Update instruction for this page" not in captured["messages"][1]["content"]
 
 
+def test_nl_updater_includes_today_date(tmp_db, monkeypatch):
+    from app.llm.agents import nl_updater
+    from app.llm.agents.common import today_str
+    from app.llm.client import CompletionResult
+
+    captured: dict[str, Any] = {}
+
+    def fake_complete(*, messages, **kwargs):
+        captured["messages"] = messages
+        return CompletionResult(text="NO_CHANGE", tool_calls=[], stop_reason="end_turn")
+
+    monkeypatch.setattr(nl_updater.client, "complete", fake_complete)
+    before = today_str()
+    nl_updater.process_instruction(
+        wiki_path="a/page.md", current_body="# A", payload={"instruction": "x"},
+        source="test",
+    )
+    after = today_str()
+    user_msg = captured["messages"][1]["content"]
+    assert f"Today's date: {before}" in user_msg or f"Today's date: {after}" in user_msg
+
+
 def test_nl_updater_proceeds_when_policy_store_unavailable(monkeypatch):
     """No DB (offline eval): an unreachable policy store must not fail the update."""
     from sqlalchemy.exc import OperationalError

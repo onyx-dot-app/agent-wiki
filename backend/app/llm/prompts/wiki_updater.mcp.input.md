@@ -1,5 +1,6 @@
 Wiki page: {wiki_path}
 Update source: {source}
+Today's date: {today}
 
 --- Current page body ---
 {current_body}
