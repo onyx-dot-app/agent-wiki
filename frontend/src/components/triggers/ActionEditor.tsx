@@ -227,7 +227,7 @@ function ActionGroupRow({
         value={group.message}
         onChange={(e) => onPatch({ message: e.target.value })}
         variant={disabled ? "disabled" : "primary"}
-        placeholder="A notification message to the recipients."
+        placeholder="Describe what the message should say, e.g. summarize what changed and who is affected. The trigger writes the final message from this."
         rows={2}
       />
     </div>
