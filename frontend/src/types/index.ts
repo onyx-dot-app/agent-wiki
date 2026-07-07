@@ -16,6 +16,7 @@ export interface UserSettings {
   chat_model: string | null;
   notify_comment_email: boolean;
   notify_update_warning_email: boolean;
+  work_role: string | null;
 }
 
 export type UserSettingsUpdate = Partial<UserSettings>;

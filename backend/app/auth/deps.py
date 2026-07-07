@@ -30,6 +30,12 @@ log = logging.getLogger(__name__)
 _BEARER_PREFIX = "Bearer "
 
 
+def user_epoch(user_id: str) -> int:
+    """Current ``session_epoch`` for stamping fresh sessions at login."""
+    row = users_repo.get_by_id(user_id)
+    return int((row or {}).get("session_epoch") or 0)
+
+
 def current_user(request: Request) -> User | None:
     """Resolve the active user from the session cookie. Returns
     ``None`` when there is no cookie, the signature is invalid, the
@@ -42,6 +48,10 @@ def current_user(request: Request) -> User | None:
         return None
     if not row["is_active"]:
         # A deactivated user's existing session stops authenticating.
+        return None
+    # Sessions minted before a password change carry an older epoch (or none,
+    # for pre-epoch cookies against a bumped account) and stop authenticating.
+    if int(request.session.get("session_epoch") or 0) != int(row["session_epoch"] or 0):
         return None
     return User(
         id=row["id"],

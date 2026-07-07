@@ -67,6 +67,11 @@ class User(Base):
     is_active: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("TRUE")
     )
+    # Bumped on password change; sessions minted under an older epoch stop
+    # authenticating.
+    session_epoch: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
     created_at: Mapped[str] = mapped_column(
         Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
     )

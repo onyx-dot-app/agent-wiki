@@ -17,7 +17,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.auth import User, users as users_repo
 from app.auth.basic import authenticate
-from app.auth.deps import require_user
+from app.auth.deps import require_user, user_epoch
 from app.auth.oidc import client as oidc_client, upsert_oidc_user
 from app.auth import invites
 from app.auth.whitelist import is_allowed, is_open
@@ -74,6 +74,7 @@ def signup(req: SignupRequest, request: Request) -> AuthSession:
     user = User(id=row["id"], email=row["email"], name=row["name"], is_admin=row["is_admin"])
     request.session.clear()
     request.session["user_id"] = user.id
+    request.session["session_epoch"] = user_epoch(user.id)
     log.info("signup: user %s (%s) is_admin=%s", user.id, user.email, user.is_admin)
     return _session_payload(user)
 
@@ -91,6 +92,7 @@ def login(req: LoginRequest, request: Request) -> AuthSession:
         raise HTTPException(status_code=401, detail="invalid credentials")
     request.session.clear()
     request.session["user_id"] = user.id
+    request.session["session_epoch"] = user_epoch(user.id)
     log.info("login: user %s (%s)", user.id, user.email)
     return _session_payload(user)
 
@@ -167,6 +169,7 @@ async def oidc_callback(request: Request) -> Response:
     user = User(id=row["id"], email=row["email"], name=row["name"], is_admin=row["is_admin"])
     request.session.clear()
     request.session["user_id"] = user.id
+    request.session["session_epoch"] = user_epoch(user.id)
     log.info("oidc login: user %s (%s)", user.id, user.email)
     return RedirectResponse(url="/")
 

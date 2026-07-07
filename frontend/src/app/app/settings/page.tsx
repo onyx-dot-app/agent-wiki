@@ -1,22 +1,32 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useState, type FormEvent } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import {
   Button,
   InputTypeIn,
   LineItemButton,
-  LinkButton,
+  Popover,
+  PopoverMenu,
+  SelectButton,
   Switch,
   Text,
 } from "@onyx-ai/opal/components";
-import { SvgSliders } from "@onyx-ai/opal/icons";
 import {
-  Content,
+  SvgBook,
+  SvgChevronDown,
+  SvgClock,
+  SvgEdit,
+  SvgHistory,
+  SvgLock,
+  SvgMoon,
+  SvgSliders,
+  SvgSun,
+} from "@onyx-ai/opal/icons";
+import {
   InputErrorText,
   InputHorizontal,
-  InputVertical,
   Section as LayoutSection,
   SettingsLayouts,
 } from "@onyx-ai/opal/layouts";
@@ -27,19 +37,8 @@ import { effectiveTimezone } from "@/lib/cron";
 import { useTheme } from "next-themes";
 import type { DefaultLanding, ThemeSetting, UserSettings } from "@/types";
 
-const DEFAULT_SETTINGS: UserSettings = {
-  theme: "system",
-  timezone: null,
-  default_landing: "wiki_home",
-  chat_provider: null,
-  chat_model: null,
-  notify_comment_email: false,
-  notify_update_warning_email: false,
-};
-
 // A short curated IANA list — covers the common cases without dumping the
-// full ~600-zone list into a native select. The text input below is the
-// escape hatch for anything else.
+// full ~600-zone list into one menu. Other… is the escape hatch.
 const COMMON_TIMEZONES = [
   "UTC",
   "America/Los_Angeles",
@@ -66,6 +65,8 @@ const TABS = [
 
 type TabKey = (typeof TABS)[number]["key"];
 
+type UpdateSettings = (partial: Partial<UserSettings>) => Promise<UserSettings>;
+
 export default function SettingsPage() {
   return (
     <Suspense fallback={<LoadingSpinner center />}>
@@ -88,13 +89,8 @@ function SettingsPageInner() {
   }
 
   return (
-    <SettingsLayouts.Root width="lg">
-      <SettingsLayouts.Header
-        icon={SvgSliders}
-        title="Settings"
-        description="Preferences scoped to your account. Saved on the server, so they follow you across browsers."
-        divider
-      />
+    <SettingsLayouts.Root width="md">
+      <SettingsLayouts.Header icon={SvgSliders} title="Settings" divider />
       <SettingsLayouts.Body>
         <div className="flex w-full items-start gap-6 max-md:flex-col">
           <nav className="flex w-44 shrink-0 flex-col gap-1 max-md:w-full max-md:flex-row max-md:flex-wrap">
@@ -115,41 +111,92 @@ function SettingsPageInner() {
           </nav>
           <div className="flex min-w-0 flex-1 flex-col gap-6">
             {tab === "general" && (
-              <Section title="General">
-                <AppearanceForm
-                  initial={user.settings}
-                  updateSettings={updateSettings}
-                />
-              </Section>
+              <>
+                <SettingsSection title="Profile">
+                  <SettingsCard>
+                    <TextFieldRow
+                      title="Full Name"
+                      description="We'll display this name in the app."
+                      placeholder="Your name"
+                      value={user.name ?? ""}
+                      onSave={(v) => updateProfile({ name: v })}
+                    />
+                    <TextFieldRow
+                      title="Work Role"
+                      description="Share your role to better tailor responses."
+                      placeholder="Your role"
+                      value={user.settings.work_role ?? ""}
+                      onSave={(v) =>
+                        updateSettings({ work_role: v.trim() || null })
+                      }
+                    />
+                  </SettingsCard>
+                </SettingsSection>
+                <SettingsSection title="Appearance">
+                  <SettingsCard>
+                    <ColorModeRow
+                      settings={user.settings}
+                      updateSettings={updateSettings}
+                    />
+                  </SettingsCard>
+                </SettingsSection>
+              </>
             )}
             {tab === "wiki" && (
-              <Section title="Wiki Preferences">
-                <WikiPrefsForm
-                  initial={user.settings}
-                  updateSettings={updateSettings}
-                />
-                <ChatModelForm
-                  initial={user.settings}
-                  updateSettings={updateSettings}
-                />
-              </Section>
+              <SettingsSection title="Wiki">
+                <SettingsCard>
+                  <DefaultModelRow
+                    settings={user.settings}
+                    updateSettings={updateSettings}
+                  />
+                </SettingsCard>
+                <SettingsCard>
+                  <TimezoneRow
+                    settings={user.settings}
+                    updateSettings={updateSettings}
+                  />
+                  <LandingPageRow
+                    settings={user.settings}
+                    updateSettings={updateSettings}
+                  />
+                </SettingsCard>
+              </SettingsSection>
             )}
             {tab === "notifications" && (
-              <Section title="Notifications">
-                <NotificationsForm
-                  initial={user.settings}
-                  updateSettings={updateSettings}
-                />
-              </Section>
+              <SettingsSection title="Notifications">
+                <SettingsCard>
+                  <SwitchRow
+                    title="Comment Emails"
+                    description="Email your login address when someone comments on a page you own or mentions you."
+                    settingsKey="notify_comment_email"
+                    settings={user.settings}
+                    updateSettings={updateSettings}
+                  />
+                  <SwitchRow
+                    title="Auto-Update Warning Emails"
+                    description="Email your login address when a page you own passes the update warning threshold or hits the cap."
+                    settingsKey="notify_update_warning_email"
+                    settings={user.settings}
+                    updateSettings={updateSettings}
+                  />
+                </SettingsCard>
+              </SettingsSection>
             )}
             {tab === "account" && (
-              <Section title="Account & Access">
-                <ProfileForm
-                  initialName={user.name}
-                  email={user.email}
-                  updateProfile={updateProfile}
-                />
-              </Section>
+              <SettingsSection title="Account">
+                <SettingsCard>
+                  <InputHorizontal
+                    center
+                    title="Email"
+                    description="This is your Onyx user name."
+                  >
+                    <Text font="main-ui-body" color="text-04" nowrap>
+                      {user.email}
+                    </Text>
+                  </InputHorizontal>
+                  <ChangePasswordRow />
+                </SettingsCard>
+              </SettingsSection>
             )}
           </div>
         </div>
@@ -158,7 +205,7 @@ function SettingsPageInner() {
   );
 }
 
-function Section({
+function SettingsSection({
   title,
   children,
 }: {
@@ -166,419 +213,191 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <LayoutSection flexDirection="column" alignItems="start" gap={1}>
-      <Content title={title} sizePreset="main-content" variant="section" />
-      {children}
-    </LayoutSection>
-  );
-}
-
-function NotificationToggle({
-  label,
-  description,
-  checked,
-  disabled,
-  onChange,
-}: {
-  label: string;
-  description: string;
-  checked: boolean;
-  disabled: boolean;
-  onChange: (next: boolean) => void;
-}) {
-  return (
-    <InputHorizontal withLabel center title={label} description={description}>
-      <Switch
-        checked={checked}
-        disabled={disabled}
-        onCheckedChange={onChange}
-      />
-    </InputHorizontal>
-  );
-}
-
-function NotificationsForm({
-  initial,
-  updateSettings,
-}: {
-  initial: UserSettings;
-  updateSettings: (partial: Partial<UserSettings>) => Promise<UserSettings>;
-}) {
-  const [busyKey, setBusyKey] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  async function toggle(
-    key: "notify_comment_email" | "notify_update_warning_email",
-    next: boolean,
-  ) {
-    setBusyKey(key);
-    setError(null);
-    try {
-      await updateSettings({ [key]: next });
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "failed to save");
-    } finally {
-      setBusyKey(null);
-    }
-  }
-
-  return (
-    <LayoutSection flexDirection="column" alignItems="start" gap={1.25}>
-      <Text font="secondary-body" color="text-03">
-        Email copies go to your login email, the address you already sign in
-        with. Nothing to verify.
-      </Text>
-      <NotificationToggle
-        label="Comment emails"
-        description="Email me when someone comments on a page I own or mentions me in a comment."
-        checked={initial.notify_comment_email}
-        disabled={busyKey !== null}
-        onChange={(next) => void toggle("notify_comment_email", next)}
-      />
-      <NotificationToggle
-        label="Auto-update warning emails"
-        description="Email me when a page I own auto-updates past the warning threshold or hits the update cap."
-        checked={initial.notify_update_warning_email}
-        disabled={busyKey !== null}
-        onChange={(next) => void toggle("notify_update_warning_email", next)}
-      />
-      <FormStatus error={error} saved={false} />
-    </LayoutSection>
-  );
-}
-
-function ProfileForm({
-  initialName,
-  email,
-  updateProfile,
-}: {
-  initialName: string | null;
-  email: string;
-  updateProfile: (partial: { name: string }) => Promise<unknown>;
-}) {
-  const [name, setName] = useState<string>(initialName ?? "");
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    setName(initialName ?? "");
-  }, [initialName]);
-
-  const dirty = name !== (initialName ?? "");
-
-  async function onSubmit(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    if (!dirty) return;
-    setSaving(true);
-    setError(null);
-    setSaved(false);
-    try {
-      await updateProfile({ name });
-      setSaved(true);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "failed to save");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <form onSubmit={onSubmit} className="flex flex-col gap-4">
-      <InputVertical
-        withLabel
-        title="Display name"
-        subDescription="Shown in the app header and on activity attributed to you. Leave blank to fall back to your email."
-      >
-        <InputTypeIn
-          value={name}
-          onChange={(e) => {
-            setName(e.target.value);
-            setSaved(false);
-            setError(null);
-          }}
-          placeholder="e.g. Ada Lovelace"
-          maxLength={200}
-        />
-      </InputVertical>
-
-      <InputVertical
-        title="Login email"
-        subDescription="The address you sign in with. Account emails go here."
-      >
-        <Text font="main-ui-body" color="text-04">
-          {email}
+    <LayoutSection flexDirection="column" alignItems="start" gap={0.75}>
+      <span className="px-[2px]">
+        <Text font="main-content-emphasis" color="text-04">
+          {title}
         </Text>
-      </InputVertical>
-
-      <FormStatus error={error} saved={saved} />
-      <div>
-        <Button type="submit" variant="action" disabled={saving || !dirty}>
-          {saving ? "Saving…" : "Save"}
-        </Button>
-      </div>
-    </form>
+      </span>
+      <div className="flex w-full flex-col gap-4">{children}</div>
+    </LayoutSection>
   );
 }
 
-function FormStatus({
-  error,
-  saved,
-}: {
-  error: string | null;
-  saved: boolean;
-}) {
-  if (error) return <InputErrorText type="error">{error}</InputErrorText>;
-  if (saved)
-    return (
-      <Text font="main-ui-body" color="status-success-05">
-        Saved.
-      </Text>
-    );
-  return null;
+/** The mock's settings card: rows stacked inside one white bordered shell. */
+function SettingsCard({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="box-border flex w-full flex-col gap-4 rounded-(--radius-16) border border-(--border-01) bg-(--background-tint-00) p-4">
+      {children}
+    </div>
+  );
 }
 
-/** Shared save plumbing for the settings forms: diff the draft against a
- * baseline and PUT only the changed keys, so untouched fields never patch. */
-function useSettingsDraft(
-  baseline: UserSettings,
-  updateSettings: (partial: Partial<UserSettings>) => Promise<UserSettings>,
-) {
-  const [draft, setDraft] = useState<UserSettings>(baseline);
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
+/** Right-hand control slot of a row, capped at the mock's 240px. */
+function ControlSlot({ children }: { children: React.ReactNode }) {
+  return <div className="w-full max-w-[240px]">{children}</div>;
+}
+
+/** Text field row that saves on blur (or Enter) when the value changed. */
+function TextFieldRow({
+  title,
+  description,
+  placeholder,
+  value,
+  onSave,
+}: {
+  title: string;
+  description: string;
+  placeholder: string;
+  value: string;
+  onSave: (next: string) => Promise<unknown>;
+}) {
+  const [draft, setDraft] = useState(value);
   const [error, setError] = useState<string | null>(null);
 
-  // A baseline swap (fresh settings from the server) restarts the form:
-  // drop any stale saved/error status along with the draft reset.
   useEffect(() => {
-    setSaved(false);
-    setError(null);
-  }, [baseline]);
+    setDraft(value);
+  }, [value]);
 
-  const dirty = useMemo(
-    () =>
-      (Object.keys(draft) as (keyof UserSettings)[]).some(
-        (k) => draft[k] !== baseline[k],
-      ),
-    [draft, baseline],
-  );
-
-  function update<K extends keyof UserSettings>(
-    key: K,
-    value: UserSettings[K],
-  ) {
-    setDraft((d) => ({ ...d, [key]: value }));
-    setSaved(false);
+  async function commit() {
+    if (draft === value) return;
     setError(null);
-  }
-
-  async function save(onError?: () => void) {
-    if (!dirty) return;
-    setSaving(true);
-    setError(null);
-    setSaved(false);
     try {
-      const partial: Partial<UserSettings> = {};
-      (Object.keys(draft) as (keyof UserSettings)[]).forEach((k) => {
-        if (draft[k] !== baseline[k]) {
-          (partial as Record<string, unknown>)[k] = draft[k];
-        }
-      });
-      await updateSettings(partial);
-      setSaved(true);
+      await onSave(draft);
     } catch (e) {
       setError(e instanceof Error ? e.message : "failed to save");
-      onError?.();
-    } finally {
-      setSaving(false);
     }
   }
 
-  return { draft, setDraft, update, save, dirty, saving, saved, error };
+  return (
+    <div className="flex w-full flex-col gap-1">
+      <InputHorizontal center title={title} description={description}>
+        <ControlSlot>
+          <InputTypeIn
+            value={draft}
+            onChange={(e) => {
+              setDraft(e.target.value);
+              setError(null);
+            }}
+            onBlur={() => void commit()}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") e.currentTarget.blur();
+            }}
+            placeholder={placeholder}
+          />
+        </ControlSlot>
+      </InputHorizontal>
+      {error && <InputErrorText type="error">{error}</InputErrorText>}
+    </div>
+  );
 }
 
-function AppearanceForm({
-  initial,
+/** Select-style row: SelectButton trigger + popover menu, saving on pick. */
+function SelectRow({
+  title,
+  description,
+  label,
+  icon,
+  error,
+  children,
+  open,
+  onOpenChange,
+}: {
+  title: string;
+  description: string;
+  label: string;
+  icon?: React.ComponentProps<typeof SelectButton>["icon"];
+  error?: string | null;
+  children: React.ReactNode[];
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  return (
+    <div className="flex w-full flex-col gap-1">
+      <InputHorizontal center title={title} description={description}>
+        <div className="w-[240px] shrink-0 rounded-(--radius-08) border border-(--border-02) bg-(--background-neutral-00) [&_.opal-select-button]:w-full [&_.opal-select-button>*:nth-last-child(1)]:ml-auto">
+          <Popover open={open} onOpenChange={onOpenChange}>
+            <Popover.Trigger asChild>
+              <SelectButton
+                icon={icon}
+                rightIcon={SvgChevronDown}
+                size="sm"
+                state="empty"
+                width="full"
+              >
+                {label}
+              </SelectButton>
+            </Popover.Trigger>
+            <Popover.Content width="trigger" align="end" sideOffset={4}>
+              <PopoverMenu>{children}</PopoverMenu>
+            </Popover.Content>
+          </Popover>
+        </div>
+      </InputHorizontal>
+      {error && <InputErrorText type="error">{error}</InputErrorText>}
+    </div>
+  );
+}
+
+function ColorModeRow({
+  settings,
   updateSettings,
 }: {
-  initial: UserSettings;
-  updateSettings: (partial: Partial<UserSettings>) => Promise<UserSettings>;
+  settings: UserSettings;
+  updateSettings: UpdateSettings;
 }) {
-  // An unset timezone (null) means "use my local zone" — show that concretely
-  // in the form so the field never reads UTC just because nothing was chosen.
-  const initialTz = effectiveTimezone(initial.timezone);
-  const baseline = useMemo<UserSettings>(
-    () => ({ ...DEFAULT_SETTINGS, ...initial, timezone: initialTz }),
-    [initial, initialTz],
-  );
-  const form = useSettingsDraft(baseline, updateSettings);
-  const { draft, setDraft, update } = form;
-  const [tzCustom, setTzCustom] = useState<boolean>(
-    !COMMON_TIMEZONES.includes(initialTz),
-  );
+  const { setTheme, systemTheme } = useTheme();
+  const [open, setOpen] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  // Pull future updates (e.g. another tab) back into the form.
-  useEffect(() => {
-    setDraft(baseline);
-    setTzCustom(!COMMON_TIMEZONES.includes(baseline.timezone ?? ""));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [baseline]);
+  const systemLabel = systemTheme === "dark" ? "Dark" : "Light";
+  const label =
+    settings.theme === "system"
+      ? `Auto (${systemLabel})`
+      : settings.theme === "dark"
+        ? "Dark"
+        : "Light";
 
-  const { setTheme } = useTheme();
-
-  function pickTheme(theme: ThemeSetting) {
-    update("theme", theme);
-    // Apply immediately so the user sees the change without waiting for
-    // the round-trip — Save still needs to hit the server to persist.
+  async function pick(theme: ThemeSetting) {
+    setOpen(false);
+    setError(null);
     setTheme(theme);
+    try {
+      await updateSettings({ theme });
+    } catch (e) {
+      // Revert the optimistic apply if the server rejected.
+      setTheme(settings.theme);
+      setError(e instanceof Error ? e.message : "failed to save");
+    }
   }
 
   return (
-    <form
-      onSubmit={(e) => {
-        e.preventDefault();
-        // Revert the optimistic theme apply if the server rejected.
-        void form.save(() => setTheme(initial.theme));
-      }}
-      className="flex flex-col gap-4"
+    <SelectRow
+      title="Color Mode"
+      description="Select your preferred color mode for the UI."
+      label={label}
+      icon={settings.theme === "dark" ? SvgMoon : SvgSun}
+      error={error}
+      open={open}
+      onOpenChange={setOpen}
     >
-      <InputVertical
-        withLabel
-        title="Theme"
-        subDescription="Visual chrome of the app on this account."
-      >
-        {/* raw-ok: no Opal select component */}
-        <select
-          value={draft.theme}
-          onChange={(e) => pickTheme(e.target.value as ThemeSetting)}
-          className={selectClass}
-        >
-          <option value="system">System (match OS)</option>
-          <option value="light">Light</option>
-          <option value="dark">Dark</option>
-        </select>
-      </InputVertical>
-
-      <InputVertical
-        withLabel
-        title="Timezone"
-        subDescription="Used for timestamps and scheduled-trigger displays."
-      >
-        {tzCustom ? (
-          <InputTypeIn
-            value={draft.timezone ?? ""}
-            onChange={(e) => update("timezone", e.target.value)}
-            placeholder="e.g. America/Los_Angeles"
-          />
-        ) : (
-          <>
-            {/* raw-ok: no Opal select component */}
-            <select
-              value={draft.timezone ?? ""}
-              onChange={(e) => {
-                if (e.target.value === "__custom__") {
-                  setTzCustom(true);
-                  return;
-                }
-                update("timezone", e.target.value);
-              }}
-              className={selectClass}
-            >
-              {COMMON_TIMEZONES.map((tz) => (
-                <option key={tz} value={tz}>
-                  {tz}
-                </option>
-              ))}
-              <option value="__custom__">Other…</option>
-            </select>
-          </>
-        )}
-        {tzCustom && (
-          <LinkButton
-            onClick={() => {
-              setTzCustom(false);
-              if (!COMMON_TIMEZONES.includes(draft.timezone ?? "")) {
-                update("timezone", "UTC");
-              }
-            }}
-          >
-            Pick from common list
-          </LinkButton>
-        )}
-      </InputVertical>
-
-      <FormStatus error={form.error} saved={form.saved} />
-      <div>
-        <Button
-          type="submit"
-          variant="action"
-          disabled={form.saving || !form.dirty}
-        >
-          {form.saving ? "Saving…" : "Save"}
-        </Button>
-      </div>
-    </form>
-  );
-}
-
-function WikiPrefsForm({
-  initial,
-  updateSettings,
-}: {
-  initial: UserSettings;
-  updateSettings: (partial: Partial<UserSettings>) => Promise<UserSettings>;
-}) {
-  const baseline = useMemo<UserSettings>(
-    () => ({ ...DEFAULT_SETTINGS, ...initial }),
-    [initial],
-  );
-  const form = useSettingsDraft(baseline, updateSettings);
-  const { draft, setDraft, update } = form;
-
-  useEffect(() => {
-    setDraft(baseline);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [baseline]);
-
-  return (
-    <form
-      onSubmit={(e) => {
-        e.preventDefault();
-        void form.save();
-      }}
-      className="flex flex-col gap-4"
-    >
-      <InputVertical
-        withLabel
-        title="Default landing page"
-        subDescription="Where the app opens after sign-in."
-      >
-        {/* raw-ok: no Opal select component */}
-        <select
-          value={draft.default_landing}
-          onChange={(e) =>
-            update("default_landing", e.target.value as DefaultLanding)
-          }
-          className={selectClass}
-        >
-          <option value="wiki_home">Wiki home</option>
-          <option value="recent">Recently edited</option>
-          <option value="last_viewed">Last viewed page</option>
-        </select>
-      </InputVertical>
-
-      <FormStatus error={form.error} saved={form.saved} />
-      <div>
-        <Button
-          type="submit"
-          variant="action"
-          disabled={form.saving || !form.dirty}
-        >
-          {form.saving ? "Saving…" : "Save"}
-        </Button>
-      </div>
-    </form>
+      {(
+        [
+          ["system", `Auto (${systemLabel})`],
+          ["light", "Light"],
+          ["dark", "Dark"],
+        ] as const
+      ).map(([value, title]) => (
+        <LineItemButton
+          key={value}
+          title={title}
+          sizePreset="main-ui"
+          variant="body"
+          state={settings.theme === value ? "selected" : "empty"}
+          onClick={() => void pick(value)}
+        />
+      ))}
+    </SelectRow>
   );
 }
 
@@ -588,22 +407,18 @@ interface LLMStatus {
   model: string;
 }
 
-function ChatModelForm({
-  initial,
+function DefaultModelRow({
+  settings,
   updateSettings,
 }: {
-  initial: UserSettings;
-  updateSettings: (partial: Partial<UserSettings>) => Promise<UserSettings>;
+  settings: UserSettings;
+  updateSettings: UpdateSettings;
 }) {
-  const [chatModel, setChatModel] = useState<string>(initial.chat_model ?? "");
+  const [open, setOpen] = useState(false);
+  const [custom, setCustom] = useState(false);
+  const [draft, setDraft] = useState(settings.chat_model ?? "");
   const [llmStatus, setLlmStatus] = useState<LLMStatus | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    setChatModel(initial.chat_model ?? "");
-  }, [initial.chat_model]);
 
   useEffect(() => {
     apiFetch<LLMStatus>("/llm/status")
@@ -611,55 +426,410 @@ function ChatModelForm({
       .catch(() => null);
   }, []);
 
-  async function onSubmit(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    setSaving(true);
+  useEffect(() => {
+    setDraft(settings.chat_model ?? "");
+  }, [settings.chat_model]);
+
+  const shortModel = llmStatus?.model?.split(/[/.]/).pop();
+  const systemLabel = `System Default${shortModel ? ` (${shortModel})` : ""}`;
+  const label = settings.chat_model ?? systemLabel;
+
+  async function save(model: string | null) {
     setError(null);
-    setSaved(false);
     try {
-      await updateSettings({ chat_model: chatModel.trim() || null });
-      setSaved(true);
+      await updateSettings({ chat_model: model });
     } catch (e) {
       setError(e instanceof Error ? e.message : "failed to save");
-    } finally {
-      setSaving(false);
     }
   }
 
-  const placeholder = llmStatus?.model
-    ? `${llmStatus.model} (agent default)`
-    : "leave blank to use agent default";
+  if (custom) {
+    return (
+      <div className="flex w-full flex-col gap-1">
+        <InputHorizontal
+          center
+          title="Default Model"
+          description="This model will be used by Onyx by default in your chats."
+        >
+          <ControlSlot>
+            <InputTypeIn
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onBlur={() => {
+                setCustom(false);
+                void save(draft.trim() || null);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") e.currentTarget.blur();
+              }}
+              placeholder="provider/model id"
+              autoFocus
+            />
+          </ControlSlot>
+        </InputHorizontal>
+        {error && <InputErrorText type="error">{error}</InputErrorText>}
+      </div>
+    );
+  }
 
   return (
-    <form onSubmit={onSubmit} className="flex flex-col gap-4">
-      <InputVertical
-        withLabel
-        title="Chat model"
-        subDescription={`Override the model used in your chat sessions. Leave blank to use the admin-configured agent default${
-          llmStatus?.configured
-            ? ` (currently ${llmStatus.provider} / ${llmStatus.model})`
-            : ""
-        }.`}
-      >
-        <InputTypeIn
-          value={chatModel}
-          onChange={(e) => {
-            setChatModel(e.target.value);
-            setSaved(false);
-            setError(null);
-          }}
-          placeholder={placeholder}
-        />
-      </InputVertical>
-      <FormStatus error={error} saved={saved} />
-      <div>
-        <Button type="submit" variant="action" disabled={saving}>
-          {saving ? "Saving…" : "Save"}
-        </Button>
-      </div>
-    </form>
+    <SelectRow
+      title="Default Model"
+      description="This model will be used by Onyx by default in your chats."
+      label={label}
+      error={error}
+      open={open}
+      onOpenChange={setOpen}
+    >
+      <LineItemButton
+        title={systemLabel}
+        sizePreset="main-ui"
+        variant="body"
+        state={settings.chat_model ? "empty" : "selected"}
+        onClick={() => {
+          setOpen(false);
+          void save(null);
+        }}
+      />
+      <LineItemButton
+        icon={SvgEdit}
+        title="Custom model…"
+        sizePreset="main-ui"
+        variant="body"
+        state={settings.chat_model ? "selected" : "empty"}
+        onClick={() => {
+          setOpen(false);
+          setCustom(true);
+        }}
+      />
+    </SelectRow>
   );
 }
 
-const selectClass =
-  "w-full py-2 px-[10px] box-border border border-(--border-02) rounded-(--radius-08) bg-(--background-neutral-00) text-sm";
+function TimezoneRow({
+  settings,
+  updateSettings,
+}: {
+  settings: UserSettings;
+  updateSettings: UpdateSettings;
+}) {
+  const current = effectiveTimezone(settings.timezone);
+  const [open, setOpen] = useState(false);
+  const [custom, setCustom] = useState(false);
+  const [draft, setDraft] = useState(current);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setDraft(effectiveTimezone(settings.timezone));
+  }, [settings.timezone]);
+
+  async function save(tz: string) {
+    setError(null);
+    try {
+      await updateSettings({ timezone: tz });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "failed to save");
+    }
+  }
+
+  async function saveCleared() {
+    setError(null);
+    try {
+      await updateSettings({ timezone: null });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "failed to save");
+    }
+  }
+
+  if (custom) {
+    return (
+      <div className="flex w-full flex-col gap-1">
+        <InputHorizontal
+          center
+          title="Timezone"
+          description="Default for time-based scheduled triggers."
+        >
+          <ControlSlot>
+            <InputTypeIn
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onBlur={() => {
+                setCustom(false);
+                const next = draft.trim();
+                // Clearing the field drops the override back to the local zone.
+                if (!next) void saveCleared();
+                else if (next !== current) void save(next);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") e.currentTarget.blur();
+              }}
+              placeholder="e.g. America/Los_Angeles"
+              autoFocus
+            />
+          </ControlSlot>
+        </InputHorizontal>
+        {error && <InputErrorText type="error">{error}</InputErrorText>}
+      </div>
+    );
+  }
+
+  return (
+    <SelectRow
+      title="Timezone"
+      description="Default for time-based scheduled triggers."
+      label={current.replace(/_/g, " ")}
+      icon={SvgClock}
+      error={error}
+      open={open}
+      onOpenChange={setOpen}
+    >
+      {COMMON_TIMEZONES.map((tz) => (
+        <LineItemButton
+          key={tz}
+          title={tz.replace(/_/g, " ")}
+          sizePreset="main-ui"
+          variant="body"
+          state={current === tz ? "selected" : "empty"}
+          onClick={() => {
+            setOpen(false);
+            if (tz !== current) void save(tz);
+          }}
+        />
+      ))}
+      <LineItemButton
+        icon={SvgEdit}
+        title="Other…"
+        sizePreset="main-ui"
+        variant="body"
+        state="empty"
+        onClick={() => {
+          setOpen(false);
+          setCustom(true);
+        }}
+      />
+    </SelectRow>
+  );
+}
+
+const LANDING_OPTIONS: {
+  value: DefaultLanding;
+  title: string;
+  icon: typeof SvgBook;
+}[] = [
+  { value: "wiki_home", title: "Wiki Home", icon: SvgBook },
+  { value: "recent", title: "Recently Edited", icon: SvgHistory },
+  { value: "last_viewed", title: "Last Viewed Page", icon: SvgClock },
+];
+
+function LandingPageRow({
+  settings,
+  updateSettings,
+}: {
+  settings: UserSettings;
+  updateSettings: UpdateSettings;
+}) {
+  const [open, setOpen] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const active =
+    LANDING_OPTIONS.find((o) => o.value === settings.default_landing) ??
+    LANDING_OPTIONS[0];
+
+  async function pick(value: DefaultLanding) {
+    setOpen(false);
+    if (value === settings.default_landing) return;
+    setError(null);
+    try {
+      await updateSettings({ default_landing: value });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "failed to save");
+    }
+  }
+
+  return (
+    <SelectRow
+      title="Landing Page"
+      description="Default page to land on when the app opens."
+      label={active.title}
+      icon={active.icon}
+      error={error}
+      open={open}
+      onOpenChange={setOpen}
+    >
+      {LANDING_OPTIONS.map((o) => (
+        <LineItemButton
+          key={o.value}
+          icon={o.icon}
+          title={o.title}
+          sizePreset="main-ui"
+          variant="body"
+          state={settings.default_landing === o.value ? "selected" : "empty"}
+          onClick={() => void pick(o.value)}
+        />
+      ))}
+    </SelectRow>
+  );
+}
+
+function SwitchRow({
+  title,
+  description,
+  settingsKey,
+  settings,
+  updateSettings,
+}: {
+  title: string;
+  description: string;
+  settingsKey: "notify_comment_email" | "notify_update_warning_email";
+  settings: UserSettings;
+  updateSettings: UpdateSettings;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function toggle(next: boolean) {
+    setBusy(true);
+    setError(null);
+    try {
+      await updateSettings({ [settingsKey]: next });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "failed to save");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="flex w-full flex-col gap-1">
+      <InputHorizontal center title={title} description={description}>
+        <div className="flex w-full max-w-[240px] justify-end">
+          <Switch
+            checked={settings[settingsKey]}
+            disabled={busy}
+            onCheckedChange={(next) => void toggle(next)}
+          />
+        </div>
+      </InputHorizontal>
+      {error && <InputErrorText type="error">{error}</InputErrorText>}
+    </div>
+  );
+}
+
+function ChangePasswordRow() {
+  const [openForm, setOpenForm] = useState(false);
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+
+  function reset() {
+    setCurrent("");
+    setNext("");
+    setConfirm("");
+    setError(null);
+  }
+
+  async function submit() {
+    if (next.length < 8) {
+      setError("new password must be at least 8 characters");
+      return;
+    }
+    if (next !== confirm) {
+      setError("passwords do not match");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await apiFetch<void>("/user/password", {
+        method: "PUT",
+        body: JSON.stringify({
+          current_password: current,
+          new_password: next,
+        }),
+      });
+      reset();
+      setOpenForm(false);
+      setSaved(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "failed to change password");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="flex w-full flex-col gap-2">
+      <InputHorizontal
+        center
+        title="Password"
+        description="Manage your account password."
+      >
+        <div className="flex w-full max-w-[240px] justify-end">
+          <Button
+            type="button"
+            icon={SvgLock}
+            prominence="secondary"
+            onClick={() => {
+              setSaved(false);
+              setOpenForm((v) => !v);
+              if (openForm) reset();
+            }}
+          >
+            Change Password
+          </Button>
+        </div>
+      </InputHorizontal>
+      {saved && !openForm && (
+        <Text font="secondary-body" color="status-success-05">
+          Password changed.
+        </Text>
+      )}
+      {openForm && (
+        <div className="flex w-full max-w-[360px] flex-col gap-2 self-end">
+          <InputTypeIn
+            type="password"
+            value={current}
+            onChange={(e) => setCurrent(e.target.value)}
+            placeholder="Current password"
+          />
+          <InputTypeIn
+            type="password"
+            value={next}
+            onChange={(e) => setNext(e.target.value)}
+            placeholder="New password (min 8 characters)"
+          />
+          <InputTypeIn
+            type="password"
+            value={confirm}
+            onChange={(e) => setConfirm(e.target.value)}
+            placeholder="Confirm new password"
+          />
+          {error && <InputErrorText type="error">{error}</InputErrorText>}
+          <div className="flex justify-end gap-2">
+            <Button
+              type="button"
+              prominence="secondary"
+              disabled={busy}
+              onClick={() => {
+                reset();
+                setOpenForm(false);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="action"
+              disabled={busy || !current || !next || !confirm}
+              onClick={() => void submit()}
+            >
+              {busy ? "Saving…" : "Save"}
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
