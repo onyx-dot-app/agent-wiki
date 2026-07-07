@@ -98,11 +98,16 @@ function eventTexts(event: AppEvent): {
       body: p.message || p.reason || null,
     };
   }
-  // Unknown kinds stay legible instead of masquerading as trigger fires.
+  // Unknown kinds stay legible instead of masquerading as trigger fires,
+  // and their payload stays inspectable when it has no message/reason.
+  const payloadKeys = Object.keys(event.payload ?? {});
   return {
     prefix: "Event",
     subject: event.kind,
-    body: p.message || p.reason || null,
+    body:
+      p.message ||
+      p.reason ||
+      (payloadKeys.length ? JSON.stringify(event.payload) : null),
   };
 }
 
