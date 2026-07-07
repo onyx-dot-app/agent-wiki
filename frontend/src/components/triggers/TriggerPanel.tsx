@@ -15,6 +15,7 @@ import {
 } from "@onyx-ai/opal/components";
 import {
   SvgBook,
+  SvgChevronUp,
   SvgFile,
   SvgFolder,
   SvgPlusCircle,
@@ -279,9 +280,9 @@ export function TriggerPanel({
           </div>
           <Button
             type="button"
-            icon={SvgX}
+            icon={docked ? SvgChevronUp : SvgX}
             size="sm"
-            tooltip="Close"
+            tooltip={docked ? "Collapse" : "Close"}
             onClick={onClose}
             disabled={busy}
           />

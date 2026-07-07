@@ -31,7 +31,7 @@ function scopeCovers(scope: string, path: string): boolean {
 
 interface Props {
   path: string;
-  onClose: () => void;
+  onClose?: () => void;
   onEdit: (trigger: Trigger) => void;
   onAdd: () => void;
 }
@@ -91,14 +91,16 @@ export function AutomationsPanel({ path, onClose, onEdit, onAdd }: Props) {
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search triggers…"
         />
-        <Button
-          type="button"
-          icon={SvgX}
-          size="sm"
-          prominence="tertiary"
-          tooltip="Close"
-          onClick={onClose}
-        />
+        {onClose && (
+          <Button
+            type="button"
+            icon={SvgX}
+            size="sm"
+            prominence="tertiary"
+            tooltip="Close"
+            onClick={onClose}
+          />
+        )}
       </div>
 
       <div className="flex min-h-0 w-full flex-1 flex-col gap-2 overflow-y-auto py-1">
