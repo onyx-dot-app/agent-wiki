@@ -3,13 +3,8 @@
 import { useState } from "react";
 import useSWR from "swr";
 
-import { Button, LinkButton } from "@onyx-ai/opal/components";
-import {
-  SvgExternalLink,
-  SvgPlusCircle,
-  SvgSearch,
-  SvgX,
-} from "@onyx-ai/opal/icons";
+import { Button, LinkButton, InputTypeIn } from "@onyx-ai/opal/components";
+import { SvgExternalLink, SvgPlusCircle, SvgX } from "@onyx-ai/opal/icons";
 import { IllustrationContent } from "@onyx-ai/opal/layouts";
 import { SvgEmpty } from "@onyx-ai/opal/illustrations";
 
@@ -88,13 +83,10 @@ export function AutomationsPanel({ path, onClose, onEdit, onAdd }: Props) {
 
   return (
     <div className="flex h-full w-full flex-col gap-1 bg-(--background-tint-01) p-1">
-      <div className="flex w-full items-center gap-1 rounded-(--radius-12) border border-(--border-01) bg-(--background-tint-00) p-[6px]">
-        <span className="flex size-6 items-center justify-center p-1">
-          <SvgSearch className="size-4 text-(--text-03)" />
-        </span>
-        {/* raw-ok: bare .opal-input-field; the borderless search bar composite has no Opal component */}
-        <input
-          className="opal-input-field min-w-0 flex-1 text-[14px] leading-5"
+      <div className="flex w-full items-center gap-1 rounded-(--radius-12) border border-(--border-01) bg-(--background-tint-00) p-[6px] [&>*:first-child]:min-w-0 [&>*:first-child]:flex-1">
+        <InputTypeIn
+          variant="internal"
+          searchIcon
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search triggers…"

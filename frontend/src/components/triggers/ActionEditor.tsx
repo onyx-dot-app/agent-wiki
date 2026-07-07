@@ -21,6 +21,7 @@ import {
 } from "@onyx-ai/opal/icons";
 
 import InputChipField from "@/components/inputs/InputChipField";
+import InputTextArea from "@/components/inputs/InputTextArea";
 import { ensureEmailDestination } from "@/lib/emailConnect";
 import {
   ensureSlackDestination,
@@ -222,14 +223,12 @@ function ActionGroupRow({
         />
       )}
 
-      {/* raw-ok: no Opal multiline input */}
-      <textarea
+      <InputTextArea
         value={group.message}
         onChange={(e) => onPatch({ message: e.target.value })}
-        disabled={disabled}
+        variant={disabled ? "disabled" : "primary"}
         placeholder="A notification message to the recipients."
         rows={2}
-        className="box-border w-full resize-y rounded-(--radius-08) border border-(--border-02) bg-(--background-tint-00) px-[10px] py-2 text-[14px] leading-5 outline-none placeholder:text-(--text-02) focus:border-(--border-05) focus:shadow-[0_0_0_2px_var(--background-tint-04)]"
       />
     </div>
   );

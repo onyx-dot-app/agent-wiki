@@ -41,6 +41,7 @@ import {
   type ActionGroup,
 } from "@/components/triggers/ActionEditor";
 import InputChipField from "@/components/inputs/InputChipField";
+import InputTextArea from "@/components/inputs/InputTextArea";
 import { useSlackConnectStatus } from "@/lib/slackConnect";
 import {
   createTrigger,
@@ -366,14 +367,12 @@ export function TriggerPanel({
                 Run if
               </Text>
             </div>
-            {/* raw-ok: no Opal multiline input */}
-            <textarea
+            <InputTextArea
               value={ifText}
               onChange={(e) => setIfText(e.target.value)}
-              disabled={busy}
+              variant={busy ? "disabled" : "primary"}
               placeholder={EXAMPLE_IF}
               rows={2}
-              className="box-border w-full resize-y rounded-(--radius-08) border border-(--border-02) bg-(--background-tint-00) px-[10px] py-2 text-[14px] leading-5 outline-none placeholder:text-(--text-02) focus:border-(--border-05) focus:shadow-[0_0_0_2px_var(--background-tint-04)]"
             />
             {kind === "schedule" && (
               <div className="px-[2px]">

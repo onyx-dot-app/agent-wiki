@@ -1325,6 +1325,8 @@ function FileViewer({ path }: { path: string }) {
     setHistoryOpen(false);
     setPolicyOpen(false);
     setAutomationsOpen(false);
+    setTriggerModalOpen(false);
+    setEditingTrigger(null);
     setCommentsOpen(true);
   }, []);
 
@@ -1773,11 +1775,13 @@ function FileViewer({ path }: { path: string }) {
       return;
     }
     setHistoryOpen(true);
-    // Mutual exclusion with the comments + policy + automations panels (see
-    // ``openComments``).
+    // Mutual exclusion with the comments + policy + automations panels and
+    // the docked trigger editor (see ``openComments``).
     setCommentsOpen(false);
     setPolicyOpen(false);
     setAutomationsOpen(false);
+    setTriggerModalOpen(false);
+    setEditingTrigger(null);
     setCommentDraft(null);
     // Opening history: show the newest commit's diff immediately rather
     // than leaving the rendered body up until the user clicks a row.
@@ -1950,8 +1954,10 @@ function FileViewer({ path }: { path: string }) {
         state={automationsOpen ? "selected" : "empty"}
         tooltip="Triggers"
         onClick={() => {
-          if (automationsOpen) {
+          if (automationsOpen || triggerModalOpen) {
             setAutomationsOpen(false);
+            setTriggerModalOpen(false);
+            setEditingTrigger(null);
             return;
           }
           setHistoryOpen(false);
@@ -1992,6 +1998,8 @@ function FileViewer({ path }: { path: string }) {
           setCommentsOpen(false);
           setCommentDraft(null);
           setAutomationsOpen(false);
+          setTriggerModalOpen(false);
+          setEditingTrigger(null);
           setPolicyOpen(true);
         }}
       />
@@ -2201,6 +2209,8 @@ function FileViewer({ path }: { path: string }) {
                     setHistoryOpen(false);
                     setCommentsOpen(false);
                     setAutomationsOpen(false);
+                    setTriggerModalOpen(false);
+                    setEditingTrigger(null);
                     setPolicyOpen(true);
                   }}
                 />
