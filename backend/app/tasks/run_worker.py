@@ -1,7 +1,7 @@
 """Entry point for a worker container.
 
 Run with: ``python -m app.tasks.run_worker <queue>`` where ``<queue>`` is
-one of ``documents``, ``triggers``, or ``lightweight_maintenance``.
+one of ``documents``, ``triggers``, ``coedit``, or ``lightweight_maintenance``.
 Each queue gets its own worker process — see ``app/tasks/queues.py`` for the
 queue rationale.
 
@@ -79,10 +79,15 @@ def _wait_for_db(timeout_s: float = 60.0, poll_s: float = 1.0) -> None:
 
 # Per-queue handler concurrency (= number of worker threads in this process).
 # ``documents`` is LLM-bound; we don't want concurrent provider calls from a
-# single host so it stays at 1. The cheap queues run wider.
+# single host so it stays at 1. The cheap queues run wider. ``coedit`` runs
+# wider than ``documents`` even though it can commit + AI-merge: a checkpoint is
+# mostly a fast git commit (the AI merge fires only on a concurrent-commit
+# overlap), and per-session safety comes from a Postgres advisory lock, not
+# single-threading — so distinct sessions checkpoint in parallel.
 _CONCURRENCY = {
     "documents": 1,
     "triggers": 4,
+    "coedit": 4,
     "lightweight_maintenance": 4,
 }
 
@@ -94,6 +99,7 @@ _METRICS_PORT = {
     "documents": 9091,
     "triggers": 9092,
     "lightweight_maintenance": 9093,
+    "coedit": 9094,
 }
 
 

@@ -6,8 +6,10 @@ to git. This wires up *when* that happens:
 * a periodic scan checkpoints dirty sessions that have gone idle or are overdue,
 * the last-participant-leave and explicit-save paths enqueue ``checkpoint_coedit_session``.
 
-Checkpointing does a git commit (and maybe an LLM merge), so it runs on
-``documents_queue`` — never inline in a web request.
+Checkpointing does a git commit (and maybe an LLM merge), so it runs on its
+own ``coedit_queue`` — never inline in a web request. It gets a dedicated queue
+(not ``documents_queue``) so a session's committed page can't go stale behind
+hours of connector ingest; see ``app/tasks/queues.py``.
 """
 
 from __future__ import annotations
@@ -15,7 +17,7 @@ from __future__ import annotations
 import logging
 
 from app.tasks.queue import crontab
-from app.tasks.queues import documents_queue
+from app.tasks.queues import coedit_queue
 from app.wiki import coedit
 from app.wiki.coedit_checkpoint import checkpoint_session
 
@@ -40,7 +42,7 @@ _IDLE_SECONDS = 300
 _MAX_INTERVAL_SECONDS = 900
 
 
-@documents_queue.task()
+@coedit_queue.task()
 def checkpoint_coedit_session(session_id: int) -> None:
     """Commit a session's buffer, then close it if everyone has since left.
 
@@ -53,7 +55,7 @@ def checkpoint_coedit_session(session_id: int) -> None:
         coedit.close_if_clean(session_id)
 
 
-@documents_queue.periodic_task(crontab(minute="*"))
+@coedit_queue.periodic_task(crontab(minute="*"))
 def scan_and_checkpoint() -> None:
     """Enqueue a checkpoint for every dirty session that's idle or overdue."""
     due = coedit.sessions_due_for_checkpoint(

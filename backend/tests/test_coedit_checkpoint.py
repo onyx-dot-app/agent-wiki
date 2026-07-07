@@ -4,13 +4,17 @@ trailers. DB + real git (the ``tmp_repo`` fixture).
 """
 from __future__ import annotations
 
+import os
+
 import pytest
+from sqlalchemy import text
 
 from app.auth import users as users_repo
 from app.db.models import DocumentTemplate
 from app.db.session import session as db_session
+from app.db.session import try_advisory_xact_lock
 from app.tasks import coedit_checkpoint as coedit_checkpoint_task
-from app.tasks.queues import documents_queue
+from app.tasks.queues import coedit_queue
 from app.wiki import coedit, coedit_checkpoint, drafts
 from app.wiki import git as wiki_git
 
@@ -170,7 +174,7 @@ def test_task_checkpoints_then_closes_when_empty(repo):
     coedit.apply_op(sess.id, base_version=0, changes=[_ch(0, 5, "hi")], author_user_id=uid)
     coedit.leave(sess.id, uid)  # last participant gone
 
-    with documents_queue.immediate_mode():
+    with coedit_queue.immediate_mode():
         coedit_checkpoint_task.checkpoint_coedit_session(sess.id)
 
     assert wiki_git.read_file(_PATH) == "hi world"
@@ -185,7 +189,7 @@ def test_task_keeps_session_open_when_participants_remain(repo):
     coedit.join(sess.id, uid)
     coedit.apply_op(sess.id, base_version=0, changes=[_ch(0, 5, "hi")], author_user_id=uid)
 
-    with documents_queue.immediate_mode():
+    with coedit_queue.immediate_mode():
         coedit_checkpoint_task.checkpoint_coedit_session(sess.id)
 
     assert wiki_git.read_file(_PATH) == "hi world"
@@ -205,7 +209,7 @@ def test_scan_checkpoints_due_sessions(repo, monkeypatch):
     coedit.apply_op(sess.id, base_version=0, changes=[_ch(0, 5, "hi")], author_user_id=uid)
     coedit.leave(sess.id, uid)
 
-    with documents_queue.immediate_mode():
+    with coedit_queue.immediate_mode():
         coedit_checkpoint_task.scan_and_checkpoint()
 
     assert wiki_git.read_file(_PATH) == "hi world"
@@ -255,10 +259,51 @@ def test_duplicate_queued_checkpoints_commit_once(repo):
     coedit.leave(sess.id, uid)  # last participant gone → eligible to close
 
     before = len(wiki_git.history(_PATH))
-    with documents_queue.immediate_mode():
+    with coedit_queue.immediate_mode():
         coedit_checkpoint_task.checkpoint_coedit_session(sess.id)  # commits + closes
         coedit_checkpoint_task.checkpoint_coedit_session(sess.id)  # duplicate → no-op
         coedit_checkpoint_task.checkpoint_coedit_session(sess.id)  # duplicate → no-op
     after = len(wiki_git.history(_PATH))
     assert after - before == 1  # exactly one "Co-editing checkpoint" commit
     assert wiki_git.read_file(_PATH) == "hi world"
+
+
+def test_checkpoint_lock_serializes_same_session_only(repo):
+    # The advisory lock is what makes concurrency > 1 safe: while one worker
+    # holds a session's checkpoint lock, another connection can't take the same
+    # session's key (so a concurrent duplicate blocks, then no-ops), but a
+    # *different* session's key is free (distinct sessions checkpoint in
+    # parallel). Session ids are offset by PID so parallel xdist workers don't
+    # collide on the DB-global advisory keyspace.
+    base = 1_000_000 + os.getpid() % 1_000_000
+    sid, other = base, base + 1
+
+    def try_lock(s, session_id: int) -> bool:
+        return bool(
+            s.execute(
+                text("SELECT pg_try_advisory_xact_lock(:k)"),
+                {"k": coedit.checkpoint_lock_key(session_id)},
+            ).scalar()
+        )
+
+    with coedit.checkpoint_lock(sid) as acquired:
+        assert acquired is True  # uncontended → held
+        with db_session() as s2:  # a second connection
+            assert try_lock(s2, sid) is False  # same session's key is held
+            assert try_lock(s2, other) is True  # a different session's is free
+    # Released on context exit (transaction-scoped) — the key is takeable again.
+    with db_session() as s3:
+        assert try_lock(s3, sid) is True
+
+
+def test_checkpoint_lock_times_out_when_held(repo):
+    # A duplicate checkpoint that can't get the lock within the cap yields False
+    # (→ the task skips and no-ops) rather than blocking forever.
+    base = 2_000_000 + os.getpid() % 1_000_000
+    with coedit.checkpoint_lock(base) as acquired:
+        assert acquired is True
+        with db_session() as s2:
+            got = try_advisory_xact_lock(
+                s2, coedit.checkpoint_lock_key(base), timeout_ms=100
+            )
+        assert got is False  # held elsewhere → bounded wait elapsed
