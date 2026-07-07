@@ -24,6 +24,14 @@ interface IngestSettings {
   onyx_base_url: string | null;
   warn_update_threshold_default: number;
   auto_update_cap: number;
+  updated_at: string | null;
+  updated_by_email: string | null;
+}
+
+// Backend timestamps are "YYYY-MM-DD HH:MM:SS" UTC text — render local.
+function formatUtcTimestamp(ts: string): string {
+  const d = new Date(`${ts.replace(" ", "T")}Z`);
+  return Number.isNaN(d.getTime()) ? ts : d.toLocaleString();
 }
 
 export default function AdminIngestPage() {
@@ -139,7 +147,10 @@ function IngestForm() {
         },
       );
       setFreshKey(r.api_key);
-      setSettings((prev) => (prev ? { ...prev, api_key_set: true } : prev));
+      // Refetch just the settings object (not the form fields) so the
+      // key hint and last-modified line reflect the regeneration.
+      const refreshed = await apiFetch<IngestSettings>("/admin/ingest");
+      setSettings(refreshed);
       setKeyVisible(true);
       setSaved(
         "New API key generated. Copy it now — it will be masked after you leave this page.",
@@ -232,6 +243,14 @@ function IngestForm() {
                 Regenerate
               </Button>
             </div>
+            {settings.updated_at && (
+              <div className="mt-1.5 text-xs text-(--text-03)">
+                Last modified {formatUtcTimestamp(settings.updated_at)}
+                {settings.updated_by_email
+                  ? ` by ${settings.updated_by_email}`
+                  : ""}
+              </div>
+            )}
           </div>
         </div>
       </section>
