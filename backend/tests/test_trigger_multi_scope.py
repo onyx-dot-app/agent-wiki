@@ -252,3 +252,22 @@ def test_rebuild_drops_invalid_scope_lists(tmp_db):
     row = triggers_repo.get(created["id"])
     assert row is not None
     assert row["scopes"] == [{"path": "a.md"}]
+
+
+def test_scope_path_rebind_resets_ranged_single_scope(client):
+    uid = seed_user(email="u@x.com")
+    login_fastapi(client, uid)
+    created = client.post(
+        "/api/triggers",
+        json={
+            "scope_path": "a.md",
+            "scopes": [{"path": "a.md", "start_line": 6, "end_line": 9}],
+            "nl_description": "always",
+            "actions": [{"destination_config_id": None, "message": "m"}],
+        },
+    ).json()
+    r = client.put(f"/api/triggers/{created['id']}", json={"scope_path": "b.md"})
+    assert r.status_code == 200, r.text
+    assert r.json()["scopes"] == [{"path": "b.md", "start_line": None, "end_line": None}]
+    assert [t.id for t in find_matching_triggers("b.md")] == [created["id"]]
+    assert find_matching_triggers("a.md") == []

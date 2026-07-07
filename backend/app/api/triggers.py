@@ -323,9 +323,10 @@ def update_trigger(
             kwargs["scope_path"] = _normalize_scope_path(req.scope_path or "")
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        # Rebinding the primary without a watch list resets to single-scope.
-        if existing.get("scopes") and len(existing["scopes"]) > 1:
-            kwargs["scopes"] = [{"path": kwargs["scope_path"]}]
+        # Rebinding the primary without a watch list resets to single-scope —
+        # unconditionally, or a cached secondary path or line range would keep
+        # the trigger watching the old target until a rebuild.
+        kwargs["scopes"] = [{"path": kwargs["scope_path"]}]
 
     # Require read access against whichever scope ends up sticking — the
     # new one if rebinding, otherwise the existing one (in case ACLs
