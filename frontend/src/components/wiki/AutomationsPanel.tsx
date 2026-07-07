@@ -20,16 +20,13 @@ import {
   type TriggerFire,
 } from "@/lib/triggers";
 
-/** True when a trigger's scope covers the given page: exact page, ancestor
- * folder, or the whole wiki. Mirrors the backend's fan-out matching. */
+/** Faithful mirror of the backend's ``_in_scope`` (app/triggers/diff.py):
+ * empty scope = whole wiki, else exact match or directory prefix. Stored
+ * scopes arrive normalized (no leading slash; root collapsed to ""). */
 function scopeCovers(scope: string, path: string): boolean {
-  // Stored scopes and page paths may differ in leading/trailing slashes.
-  const s = scope.replace(/^\/+|\/+$/g, "");
-  const p = path.replace(/^\/+|\/+$/g, "");
-  if (s === "") return true;
-  if (s === p) return true;
-  if (!s.endsWith(".md")) return p.startsWith(`${s}/`);
-  return false;
+  if (!scope) return true;
+  if (path === scope) return true;
+  return path.startsWith(`${scope.replace(/\/+$/, "")}/`);
 }
 
 interface Props {
