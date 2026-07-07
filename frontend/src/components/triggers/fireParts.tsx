@@ -1,6 +1,8 @@
 "use client";
 
-import { Tag, Text } from "@onyx-ai/opal/components";
+import { Tag } from "@onyx-ai/opal/components";
+
+import UserAvatar from "@/components/inputs/UserAvatar";
 import {
   SvgActivity,
   SvgBook,
@@ -40,9 +42,9 @@ export function ScopeChip({ scope }: { scope: string }) {
   );
 }
 
-/** Overlapping 20px owner-initial + destination-type circles. Custom spans:
- * Opal ships no avatar primitive (checked alias-tolerant across the dist —
- * only Table's qualifier-column docs mention avatars). */
+/** Overlapping 20px owner avatar + destination-type circles. The owner
+ * circle is the ported UserAvatar; destination circles stay custom (no
+ * icon-in-circle primitive exists in Opal or refresh-components). */
 export function AvatarCluster({
   ownerName,
   destinationTypes,
@@ -52,11 +54,7 @@ export function AvatarCluster({
 }) {
   return (
     <span className="flex items-center px-[2px]">
-      <span className="flex size-5 items-center justify-center rounded-full border border-(--border-01) bg-(--background-neutral-inverted-00)">
-        <Text font="secondary-action" color="text-inverted-05">
-          {(ownerName[0] ?? "?").toUpperCase()}
-        </Text>
-      </span>
+      <UserAvatar name={ownerName} size={20} />
       {destinationTypes.map((type) => {
         const Icon = destinationIcon(type);
         return (
