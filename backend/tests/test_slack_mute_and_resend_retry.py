@@ -9,7 +9,10 @@ from fastapi.testclient import TestClient
 
 from app.main import create_app
 from app.models.wiki import ChangeKind
+from app.db.models import DestinationConfig
+from app.db.session import session
 from app.slack import connections as slack_connections
+from app.slack import client as slack_client
 from app.tasks.triggers import _record_fire
 from app.triggers import destination_configs as dest_configs
 from app.triggers import destinations as destinations_repo
@@ -242,3 +245,67 @@ def test_muted_connection_silences_webhook_destinations(tmp_db, monkeypatch):
     assert posted == []
     kinds = [e["kind"] for e in list_events()]
     assert "trigger.fire" in kinds
+
+
+def test_legacy_config_routes_to_the_workspace_that_accepts_the_channel(
+    tmp_db, monkeypatch
+):
+    uid = seed_user(email="u@x.com")
+    _connect(uid)  # T1
+    slack_connections.upsert(
+        user_id=uid,
+        team_id="T2",
+        team_name="Second Team",
+        slack_user_id="U2",
+        bot_token="xoxb-secret-2",
+        scope="chat:write",
+    )
+    # Legacy config: no team_id stamp; the channel lives in T2.
+    cfg = dest_configs.create(
+        uid,
+        type=destinations_repo.SLACK_ID,
+        name="#general",
+        config={"channel_id": "C2"},
+    )
+    with session() as db:
+        row = db.get(DestinationConfig, cfg["id"])
+        assert row is not None
+        row.config_json = {"channel_id": "C2"}
+
+    action = TriggerAction(destination_config_id=cfg["id"], message="hi")
+    trigger = TriggerRecord(
+        id="trg_4",
+        owner_user_id=uid,
+        scope_path="a.md",
+        kind="delta",
+        nl_description="always",
+        actions=[action],
+        enabled=True,
+        file_path=None,
+        created_at=None,
+        last_edited_at=None,
+    )
+
+    posted: list[dict[str, Any]] = []
+
+    def fake_post(*, bot_token: str, channel: str, text: str) -> None:
+        if bot_token != "xoxb-secret-2":
+            raise slack_client.SlackApiError("channel_not_found")
+        posted.append({"bot_token": bot_token, "channel": channel})
+
+    monkeypatch.setattr("app.tasks.triggers.slack_client.post_chat_message", fake_post)
+
+    _record_fire(
+        trigger=trigger,
+        action=action,
+        doc_path="a.md",
+        sha="abc",
+        change_kind=ChangeKind.EDIT,
+        reason="r",
+        instruction="i",
+        rendered_message="hi",
+        actor=None,
+    )
+
+    assert len(posted) == 1
+    assert posted[0]["channel"] == "C2"

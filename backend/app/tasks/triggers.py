@@ -507,53 +507,68 @@ def _dispatch_to_slack(
         )
         return
 
-    # Resolve the connection the target belongs to: configs stamped with a
-    # team_id use that workspace; legacy configs fall back to the first
-    # connection. Mute is checked on the SAME connection that would deliver,
-    # so muting one workspace never silences another.
+    # Resolve the connection the target belongs to. Configs stamped with a
+    # team_id use exactly that workspace. Legacy unstamped configs try each
+    # of the owner's connections in the stable order until one accepts the
+    # channel (a wrong-workspace token fails without delivering), so the
+    # channel's real workspace wins rather than whichever row happens to be
+    # first. Mute is checked on the SAME connection that would deliver.
     config_team = target.get("team_id")
     if config_team:
-        connection = slack_connections.get(trigger.owner_user_id, str(config_team))
+        stamped = slack_connections.get(trigger.owner_user_id, str(config_team))
+        candidates = [stamped] if stamped else []
     else:
-        connection = next(
-            iter(slack_connections.list_for_user(trigger.owner_user_id)), None
-        )
-    if connection is None:
+        candidates = slack_connections.list_for_user(trigger.owner_user_id)
+    if not candidates:
         log.info(
             "trigger %s owner %s has no slack connection for this target; "
             "recorded to events only",
             trigger.id, trigger.owner_user_id,
         )
         return
-    if connection.get("muted"):
+    unmuted = [c for c in candidates if not c.get("muted")]
+    if not unmuted:
         log.info(
-            "trigger %s slack connection %s muted; recorded to events only",
-            trigger.id, connection["team_id"],
-        )
-        return
-    bot_token = slack_connections.get_bot_token(
-        trigger.owner_user_id, str(connection["team_id"])
-    )
-    if not bot_token:
-        log.info(
-            "trigger %s slack connection token unavailable; recorded to events only",
+            "trigger %s slack connections muted for this target; "
+            "recorded to events only",
             trigger.id,
         )
         return
 
-    # Channel posts name the owner as a real mention; a DM already is the owner.
-    source = f"— Agent Wiki trigger on {doc_path}"
-    if not wants_dm:
-        source += f", for <@{connection['slack_user_id']}>"
-    text = f"{slack_client.to_mrkdwn(rendered_message)}\n{source}"
-    try:
-        if wants_dm and not channel_id:
-            channel_id = slack_client.open_dm(
-                bot_token=bot_token, slack_user_id=str(connection["slack_user_id"])
-            )
-        slack_client.post_chat_message(
-            bot_token=bot_token, channel=str(channel_id), text=text
+    for connection in unmuted:
+        bot_token = slack_connections.get_bot_token(
+            trigger.owner_user_id, str(connection["team_id"])
         )
-        log.info("trigger %s dispatched via slack bot config %s", trigger.id, config_id)
-    except slack_client.SlackApiError:
-        log.exception("trigger %s slack bot dispatch failed", trigger.id)
+        if not bot_token:
+            continue
+        # Channel posts name the owner as a real mention; a DM already is
+        # the owner.
+        source = f"— Agent Wiki trigger on {doc_path}"
+        if not wants_dm:
+            source += f", for <@{connection['slack_user_id']}>"
+        text = f"{slack_client.to_mrkdwn(rendered_message)}\n{source}"
+        try:
+            post_channel = channel_id
+            if wants_dm and not post_channel:
+                post_channel = slack_client.open_dm(
+                    bot_token=bot_token,
+                    slack_user_id=str(connection["slack_user_id"]),
+                )
+            slack_client.post_chat_message(
+                bot_token=bot_token, channel=str(post_channel), text=text
+            )
+            log.info(
+                "trigger %s dispatched via slack bot config %s team %s",
+                trigger.id, config_id, connection["team_id"],
+            )
+            return
+        except slack_client.SlackApiError:
+            log.warning(
+                "trigger %s slack post failed on team %s; trying next connection",
+                trigger.id, connection["team_id"], exc_info=True,
+            )
+    log.error(
+        "trigger %s slack bot dispatch failed on all connections; "
+        "recorded to events only",
+        trigger.id,
+    )
