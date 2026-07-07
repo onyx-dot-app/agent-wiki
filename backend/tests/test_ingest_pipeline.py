@@ -302,6 +302,18 @@ def test_new_body_commits(mock_search, mock_reconcile, mock_read, mock_commit, m
     mock_notify.assert_called_once()
 
 
+@patch("app.tasks.wiki_update.wiki_git.read_file", return_value="old body")
+@patch("app.tasks.wiki_update.ingest_batch_reconciler.batch_reconcile")
+@patch("app.tasks.wiki_update.ingest_search.candidates")
+def test_push_metadata_passed_to_reconciler(mock_search, mock_reconcile, mock_read, monkeypatch):
+    monkeypatch.setattr("app.tasks.wiki_update.get_llm_settings", lambda: _settings_with_model())
+    mock_search.return_value = _cs([_hit("page.md", "Page", 5.0)])
+    mock_reconcile.return_value = ([None], 1)
+    meta = {"object_type": ["PullRequest"], "merged": ["True"]}
+    _run(_make_push(source="github", metadata=meta))
+    assert mock_reconcile.call_args.kwargs["metadata"] == meta
+
+
 @patch("app.tasks.wiki_update.wiki_git.head_sha_for_path", return_value="headsha")
 @patch("app.wiki.utils.wiki_notify.after_doc_write")
 @patch("app.tasks.wiki_update.wiki_git.commit_file", return_value="sha123")
