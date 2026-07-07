@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-import { Button, Switch, Text } from "@onyx-ai/opal/components";
+import { Button, Switch, Tag, Text } from "@onyx-ai/opal/components";
 import { markdown } from "@onyx-ai/opal/utils";
 import {
   SvgChevronDown,
@@ -87,6 +87,16 @@ export function TriggerCard({
       <div className="flex w-full items-center p-[2px]">
         <div className="flex min-w-0 flex-1 items-center gap-1 p-[2px]">
           <ScopeChip scope={t.scope_path} />
+          {(t.scopes?.length ?? 0) > 1 && (
+            <span
+              title={t.scopes
+                .slice(1)
+                .map((sc) => sc.path || "Whole wiki")
+                .join(", ")}
+            >
+              <Tag title={`+${t.scopes.length - 1}`} />
+            </span>
+          )}
           <span className="flex size-4 items-center justify-center p-[2px]">
             <SvgWorkflow className="size-3 text-(--text-03)" />
           </span>

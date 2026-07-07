@@ -14,10 +14,17 @@ export interface TriggerActionInput {
   message: string;
 }
 
+export interface TriggerScope {
+  path: string;
+  start_line?: number | null;
+  end_line?: number | null;
+}
+
 export interface Trigger {
   id: string;
   owner_user_id: string;
   scope_path: string;
+  scopes: TriggerScope[];
   kind: TriggerKind;
   nl_description: string;
   actions: TriggerAction[];
@@ -41,6 +48,7 @@ export interface TriggerCommit {
 
 export interface TriggerCreateInput {
   scope_path: string;
+  scopes?: TriggerScope[];
   nl_description: string;
   actions: TriggerActionInput[];
   enabled?: boolean;
@@ -52,6 +60,7 @@ export interface TriggerCreateInput {
 
 export interface TriggerUpdateInput {
   scope_path?: string;
+  scopes?: TriggerScope[];
   nl_description?: string;
   actions?: TriggerActionInput[];
   enabled?: boolean;

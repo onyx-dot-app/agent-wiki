@@ -264,6 +264,38 @@ def build_changes_since(*, scope_path: str, since_iso: str) -> str:
     return "\n".join(chunks)
 
 
+def change_touches_lines(
+    before: str, after: str, start_line: int, end_line: int
+) -> bool:
+    """Does the edit touch the 1-based inclusive ``[start_line, end_line]``
+    of the *current* body? Insertions and replacements count where they land
+    in the new file; a pure deletion counts at the line it collapses onto.
+    New files count if the range exists in the body; deletions of the whole
+    file always count (the watched lines are gone)."""
+    if before == after:
+        return False
+    if not after:
+        return True
+    after_lines = after.splitlines()
+    if not before:
+        return start_line <= len(after_lines)
+    matcher = difflib.SequenceMatcher(
+        a=before.splitlines(keepends=True), b=after.splitlines(keepends=True)
+    )
+    for tag, _i1, _i2, j1, j2 in matcher.get_opcodes():
+        if tag == "equal":
+            continue
+        # New-file line span of this edit; a deletion (j1 == j2) collapses
+        # onto line j1, so treat it as touching that single position.
+        lo = j1 + 1
+        hi = j2 if j2 > j1 else min(j1 + 1, len(after_lines))
+        if lo > hi:
+            lo = hi
+        if hi >= start_line and lo <= end_line:
+            return True
+    return False
+
+
 def _unified_diff(before: str, after: str) -> str:
     return "".join(
         difflib.unified_diff(

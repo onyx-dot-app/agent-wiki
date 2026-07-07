@@ -249,13 +249,19 @@ def create_trigger(
     req: CreateTriggerRequest, user: User = Depends(require_user),
 ) -> TriggerView:
     try:
-        scope_path = _normalize_scope_path(req.scope_path)
+        scopes = [s.model_dump() for s in req.scopes] if req.scopes else None
+        scope_path = _normalize_scope_path(
+            req.scopes[0].path if req.scopes else req.scope_path
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    # A trigger reads the scope at fire-time to render its message; require
-    # the same up-front so users can't watch paths they can't see.
+    # A trigger reads its scopes at fire-time to render its message; require
+    # the same up-front on every watched path so users can't watch paths
+    # they can't see.
     require_can("read", scope_path, user)
+    for entry in scopes or []:
+        require_can("read", triggers_storage.normalize_scope_path(entry["path"]), user)
 
     if req.kind not in triggers_repo.ALLOWED_KINDS:
         raise HTTPException(status_code=400, detail=f"unsupported kind: {req.kind!r}")
@@ -264,6 +270,7 @@ def create_trigger(
         trigger = triggers_repo.create(
             owner_user_id=user.id,
             scope_path=scope_path,
+            scopes=scopes,
             nl_description=req.nl_description.strip(),
             actions=[a.model_dump() for a in req.actions],
             kind=req.kind,
@@ -302,17 +309,31 @@ def update_trigger(
     sent_fields = req.model_fields_set
     kwargs: dict[str, Any] = {}
 
-    if "scope_path" in sent_fields:
+    if "scopes" in sent_fields and req.scopes:
+        try:
+            kwargs["scopes"] = [s.model_dump() for s in req.scopes]
+            kwargs["scope_path"] = _normalize_scope_path(req.scopes[0].path)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    elif "scope_path" in sent_fields:
         try:
             kwargs["scope_path"] = _normalize_scope_path(req.scope_path or "")
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        # Rebinding the primary without a watch list resets to single-scope.
+        if existing.get("scopes") and len(existing["scopes"]) > 1:
+            kwargs["scopes"] = [{"path": kwargs["scope_path"]}]
 
     # Require read access against whichever scope ends up sticking — the
     # new one if rebinding, otherwise the existing one (in case ACLs
     # were revoked after the trigger was created).
     final_scope = kwargs.get("scope_path", existing["scope_path"])
     require_can("read", final_scope, user)
+    sent_scopes = cast("list[dict[str, Any]]", kwargs.get("scopes") or [])
+    for entry in sent_scopes:
+        require_can(
+            "read", triggers_storage.normalize_scope_path(str(entry["path"])), user
+        )
 
     if "nl_description" in sent_fields:
         nl = (req.nl_description or "").strip()

@@ -443,6 +443,10 @@ class Trigger(Base):
         Text, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
     scope_path: Mapped[str] = mapped_column(Text, nullable=False)
+    # Full watch list [{path, start_line?, end_line?}, ...]; scope_path
+    # mirrors the first entry's path (file placement + fast primary lookup).
+    # NULL = legacy single scope derived from scope_path.
+    scopes_json: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB)
     kind: Mapped[str] = mapped_column(Text, nullable=False)  # "delta" | "schedule"
     nl_description: Mapped[str] = mapped_column(Text, nullable=False)
     # ``{"actions": [{"destination_config_id", "message"}, ...]}``. Each action
