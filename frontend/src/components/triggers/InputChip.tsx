@@ -1,34 +1,48 @@
 "use client";
 
-import { Button, Tag } from "@onyx-ai/opal/components";
+import { Button, Text } from "@onyx-ai/opal/components";
 import { SvgX } from "@onyx-ai/opal/icons";
 import type { IconFunctionComponent } from "@onyx-ai/opal/types";
 
-/** A removable selection inside an input chip bar: Opal Tag plus a 2xs clear
- * button. FilterButton is unsuitable here — its selected state is the dark
- * filter-bar look and its light state swaps the clear for a chevron. */
+/** A removable selection inside an input chip bar, per the Input/Tags spec:
+ * a tinted radius-08 container holding an optional 16px icon, main-ui-body
+ * text, and an internal remove button inside the chip. Opal's Tag has no
+ * remove and FilterButton's states are the filter-bar look, so the container
+ * is composed here from Text and an internal-prominence Button. */
 export function InputChip({
-  icon,
+  icon: Icon,
   label,
   onRemove,
   disabled,
   title,
 }: {
-  icon: IconFunctionComponent;
+  icon?: IconFunctionComponent;
   label: string;
   onRemove?: () => void;
   disabled?: boolean;
   title?: string;
 }) {
   return (
-    <span className="flex shrink-0 items-center gap-[2px]" title={title}>
-      <Tag icon={icon} title={label} />
+    <span
+      className="flex shrink-0 items-center rounded-(--radius-08) bg-(--background-tint-02) px-1 py-[2px]"
+      title={title}
+    >
+      {Icon && (
+        <span className="flex size-4 items-center justify-center">
+          <Icon className="size-3.5 text-(--text-04)" />
+        </span>
+      )}
+      <span className="max-w-[160px] px-[2px]">
+        <Text font="main-ui-body" color="text-04" nowrap maxLines={1}>
+          {label}
+        </Text>
+      </span>
       {onRemove && (
         <Button
           type="button"
           icon={SvgX}
           size="2xs"
-          prominence="tertiary"
+          prominence="internal"
           tooltip="Remove"
           onClick={onRemove}
           disabled={disabled}

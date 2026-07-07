@@ -326,7 +326,7 @@ export function TriggerPanel({
             />
             <div className="px-[2px]">
               <Text font="secondary-body" color="text-03">
-                Add a specific page or an entire folder to watch.
+                Add specific sections or entire pages to watch.
               </Text>
             </div>
           </div>
@@ -681,7 +681,7 @@ function pad(n: number): string {
 }
 
 const WATCH_CHIP_BAR =
-  "flex min-h-9 w-full flex-wrap content-center items-center gap-1 text-[14px] leading-5 rounded-(--radius-08) border border-(--border-02) bg-(--background-tint-00) p-[5px] focus-within:border-(--border-05) focus-within:shadow-[0_0_0_2px_var(--background-tint-04)]";
+  "flex min-h-9 w-full flex-wrap content-center items-center gap-1 text-[14px] leading-5 rounded-(--radius-08) border border-(--border-02) bg-(--background-neutral-00) p-[6px] focus-within:border-(--border-05) focus-within:shadow-[0_0_0_2px_var(--background-tint-04)]";
 
 /** Search-and-pick for the trigger's watched scope: a dropdown over the
  * ACL-filtered wiki path list (files and their folders), selection only —

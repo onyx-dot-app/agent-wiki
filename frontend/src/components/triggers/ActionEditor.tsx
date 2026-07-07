@@ -74,7 +74,7 @@ export function ActionEditor({
   }
 
   return (
-    <div className="flex w-full flex-col gap-3">
+    <div className="flex w-full flex-col gap-2">
       {groups.map((group, i) => (
         <ActionGroupRow
           key={group.key}
@@ -139,7 +139,7 @@ function ActionGroupRow({
   });
 
   return (
-    <div className="flex w-full flex-col gap-1">
+    <div className="group/action flex w-full flex-col gap-1">
       <div className="flex w-full items-center px-[2px]">
         <div className="flex-1">
           <Text font="main-ui-action" color="text-04">
@@ -147,15 +147,18 @@ function ActionGroupRow({
           </Text>
         </div>
         {onRemove && (
-          <Button
-            type="button"
-            icon={SvgTrash}
-            size="sm"
-            prominence="tertiary"
-            tooltip="Remove this action"
-            onClick={onRemove}
-            disabled={disabled}
-          />
+          /* Hidden at rest per the mock; hover over the action block reveals it. */
+          <span className="opacity-0 transition-opacity group-focus-within/action:opacity-100 group-hover/action:opacity-100">
+            <Button
+              type="button"
+              icon={SvgTrash}
+              size="sm"
+              prominence="tertiary"
+              tooltip="Remove this action"
+              onClick={onRemove}
+              disabled={disabled}
+            />
+          </span>
         )}
       </div>
 
@@ -164,7 +167,7 @@ function ActionGroupRow({
             input border, keeps content left-aligned, and pushes the chevron
             to the right edge. It wraps outside the trigger so the button
             stays the popover's accessible trigger element. */}
-        <span className="block w-full rounded-(--radius-08) border border-(--border-02) bg-(--background-neutral-00) [&_.opal-select-button]:w-full [&_.opal-select-button]:justify-start [&_.opal-select-button>*:nth-last-child(1)]:ml-auto">
+        <span className="flex h-9 w-full items-center rounded-(--radius-08) border border-(--border-02) bg-(--background-neutral-00) px-[2px] [&_.opal-select-button]:w-full [&_.opal-select-button]:justify-start [&_.opal-select-button>*:nth-last-child(1)]:ml-auto [&>*]:w-full">
           <Popover.Trigger asChild disabled={disabled}>
             <SelectButton
               icon={meta.icon}
@@ -235,7 +238,7 @@ function ActionGroupRow({
 /** Input-shaped chip container — a composite Opal doesn't provide; the chips
  * and inline input inside it are library components. */
 const CHIP_BAR =
-  "flex min-h-9 w-full flex-wrap content-center items-center gap-1 text-[14px] leading-5 rounded-(--radius-08) border border-(--border-02) bg-(--background-neutral-00) p-[5px] focus-within:border-(--border-05) focus-within:shadow-[0_0_0_2px_var(--background-tint-04)]";
+  "flex min-h-9 w-full flex-wrap content-center items-center gap-1 text-[14px] leading-5 rounded-(--radius-08) border border-(--border-02) bg-(--background-neutral-00) p-[6px] focus-within:border-(--border-05) focus-within:shadow-[0_0_0_2px_var(--background-tint-04)]";
 
 function ToLabel() {
   return (
