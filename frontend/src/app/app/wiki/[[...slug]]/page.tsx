@@ -15,6 +15,7 @@ import remarkGfm from "remark-gfm";
 import useSWR from "swr";
 import {
   Button,
+  Divider,
   LineItemButton,
   OpenButton,
   Popover,
@@ -42,6 +43,7 @@ import { useConfirm } from "@/components/common/ConfirmDialog";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { TriggerPanel } from "@/components/triggers/TriggerPanel";
 import { AutomationsPanel } from "@/components/wiki/AutomationsPanel";
+import { useLeftPanel } from "@/providers/LeftPanelProvider";
 import { deleteTrigger, useTriggers, type Trigger } from "@/lib/triggers";
 import { DiffView } from "@/components/wiki/DiffView";
 import { HistoryPanel } from "@/components/wiki/HistoryPanel";
@@ -1271,6 +1273,7 @@ function FileViewer({ path }: { path: string }) {
   const isMobile = useIsMobile();
   const host = useHeaderActionsHost();
   const rightHost = useRightPanelHost();
+  const { isActivitiesOpen, toggleActivities } = useLeftPanel();
   const { refresh: refreshTriggers } = useTriggers();
   const { setDrafting, requestExpand } = useDrafting();
   const { user } = useAuth();
@@ -2027,7 +2030,7 @@ function FileViewer({ path }: { path: string }) {
       )}
 
       <TriggerPanel
-        open={triggerModalOpen}
+        open={triggerModalOpen && (isMobile || !rightHost?.el)}
         initial={editingTrigger ?? { scope_path: path }}
         lockScope={!editingTrigger}
         onDelete={
@@ -2269,7 +2272,76 @@ function FileViewer({ path }: { path: string }) {
               </div>,
               rightHost.el,
             )}
+          {triggerModalOpen &&
+            !isMobile &&
+            rightHost?.el &&
+            createPortal(
+              <div className="flex h-full w-[480px] flex-col gap-2 border-l border-(--border-01) bg-(--background-tint-01) p-2">
+                <TriggerPanel
+                  open
+                  docked
+                  initial={editingTrigger ?? { scope_path: path }}
+                  lockScope={!editingTrigger}
+                  onDelete={
+                    editingTrigger
+                      ? async () => {
+                          if (
+                            !(await confirmDialog({
+                              title: "Delete this trigger?",
+                              body: `"${editingTrigger.nl_description}"`,
+                              confirmLabel: "Delete",
+                            }))
+                          )
+                            return;
+                          await deleteTrigger(editingTrigger.id);
+                          await refreshTriggers();
+                          setTriggerModalOpen(false);
+                          setEditingTrigger(null);
+                        }
+                      : undefined
+                  }
+                  onClose={() => {
+                    setTriggerModalOpen(false);
+                    setEditingTrigger(null);
+                    setAutomationsOpen(true);
+                  }}
+                  onSaved={(t) => {
+                    setTriggerStatus(
+                      editingTrigger
+                        ? `Updated trigger for ${t.scope_path}`
+                        : `Created trigger for ${t.scope_path}`,
+                    );
+                    void refreshTriggers();
+                  }}
+                />
+                <div className="w-full">
+                  <Divider
+                    title="Activity"
+                    foldable
+                    open={false}
+                    onOpenChange={() => {
+                      setTriggerModalOpen(false);
+                      setEditingTrigger(null);
+                      setAutomationsOpen(false);
+                      if (!isActivitiesOpen) toggleActivities();
+                    }}
+                  />
+                  <Divider
+                    title="Triggers"
+                    foldable
+                    open={false}
+                    onOpenChange={() => {
+                      setTriggerModalOpen(false);
+                      setEditingTrigger(null);
+                      setAutomationsOpen(true);
+                    }}
+                  />
+                </div>
+              </div>,
+              rightHost.el,
+            )}
           {automationsOpen &&
+            !triggerModalOpen &&
             !isMobile &&
             rightHost?.el &&
             createPortal(

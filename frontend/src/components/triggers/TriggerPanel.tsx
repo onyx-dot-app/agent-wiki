@@ -62,6 +62,9 @@ interface Props {
   onDelete?: () => void | Promise<void>;
   /** Lock the scope_path input so callers (e.g. doc page) can pin it. */
   lockScope?: boolean;
+  /** Render as a docked right-panel column instead of the floating overlay
+   * (the doc page portals it into the right-panel host per the mock). */
+  docked?: boolean;
 }
 
 let groupKeyCounter = 1;
@@ -115,6 +118,7 @@ export function TriggerPanel({
   onSaved,
   onDelete,
   lockScope,
+  docked,
 }: Props) {
   const isEdit = Boolean(initial?.id);
   const [scopePath, setScopePath] = useState("");
@@ -247,7 +251,13 @@ export function TriggerPanel({
     .join(" and ");
 
   return (
-    <div className="fixed top-2 right-2 z-[100] flex max-h-[calc(100vh-16px)] w-[464px] max-w-[calc(100vw-16px)] flex-col">
+    <div
+      className={
+        docked
+          ? "flex max-h-full w-full flex-col"
+          : "fixed top-2 right-2 z-[100] flex max-h-[calc(100vh-16px)] w-[464px] max-w-[calc(100vw-16px)] flex-col"
+      }
+    >
       <form
         onSubmit={onSubmit}
         className="flex max-h-full w-full flex-col overflow-hidden rounded-(--radius-12) border border-(--border-01) bg-(--background-tint-00)"
