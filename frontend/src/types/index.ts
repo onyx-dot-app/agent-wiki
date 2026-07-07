@@ -14,6 +14,8 @@ export interface UserSettings {
   default_landing: DefaultLanding;
   chat_provider: string | null;
   chat_model: string | null;
+  notify_comment_email: boolean;
+  notify_update_warning_email: boolean;
 }
 
 export type UserSettingsUpdate = Partial<UserSettings>;

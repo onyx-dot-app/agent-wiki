@@ -19,6 +19,8 @@ const DEFAULT_USER_SETTINGS: UserSettings = {
   default_landing: "wiki_home",
   chat_provider: null,
   chat_model: null,
+  notify_comment_email: false,
+  notify_update_warning_email: false,
 };
 
 export interface AuthUser {

@@ -34,6 +34,7 @@ from app.models.comment import (
     EditCommentRequest,
 )
 from app.wiki import comment_remap, comments as comments_repo, filesystem
+from app.wiki import comment_notifications
 
 log = logging.getLogger(__name__)
 
@@ -185,6 +186,7 @@ def create_comment(
         quoted_text=req.quoted_text,
     )
     _fire_event(rel_path, row, user)
+    comment_notifications.queue_for_comment(row, author_id=user.id)
     return CommentView.model_validate(row)
 
 
@@ -203,6 +205,7 @@ def reply_to_comment(
     )
     if row is None:  # parent deleted between load and insert
         raise HTTPException(status_code=404, detail="comment not found")
+    comment_notifications.queue_for_comment(row, author_id=user.id)
     return CommentView.model_validate(row)
 
 

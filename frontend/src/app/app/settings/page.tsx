@@ -8,10 +8,18 @@ import {
   InputTypeIn,
   LineItemButton,
   LinkButton,
+  Switch,
   Text,
 } from "@onyx-ai/opal/components";
 import { SvgSliders } from "@onyx-ai/opal/icons";
-import { SettingsLayouts } from "@onyx-ai/opal/layouts";
+import {
+  Content,
+  InputErrorText,
+  InputHorizontal,
+  InputVertical,
+  Section as LayoutSection,
+  SettingsLayouts,
+} from "@onyx-ai/opal/layouts";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { apiFetch } from "@/lib/api";
 import { useRequireAuth } from "@/lib/auth";
@@ -25,6 +33,8 @@ const DEFAULT_SETTINGS: UserSettings = {
   default_landing: "wiki_home",
   chat_provider: null,
   chat_model: null,
+  notify_comment_email: false,
+  notify_update_warning_email: false,
 };
 
 // A short curated IANA list — covers the common cases without dumping the
@@ -50,6 +60,7 @@ const COMMON_TIMEZONES = [
 const TABS = [
   { key: "general", label: "General" },
   { key: "wiki", label: "Wiki Preferences" },
+  { key: "notifications", label: "Notifications" },
   { key: "account", label: "Account & Access" },
 ] as const;
 
@@ -123,6 +134,14 @@ function SettingsPageInner() {
                 />
               </Section>
             )}
+            {tab === "notifications" && (
+              <Section title="Notifications">
+                <NotificationsForm
+                  initial={user.settings}
+                  updateSettings={updateSettings}
+                />
+              </Section>
+            )}
             {tab === "account" && (
               <Section title="Account & Access">
                 <ProfileForm
@@ -147,27 +166,85 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <section className="flex flex-col gap-4">
-      <Text as="h2" font="main-content-emphasis" color="text-04">
-        {title}
-      </Text>
+    <LayoutSection flexDirection="column" alignItems="start" gap={1}>
+      <Content title={title} sizePreset="main-content" variant="section" />
       {children}
-    </section>
+    </LayoutSection>
   );
 }
 
-function FieldLabel({ children }: { children: string }) {
+function NotificationToggle({
+  label,
+  description,
+  checked,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  description: string;
+  checked: boolean;
+  disabled: boolean;
+  onChange: (next: boolean) => void;
+}) {
   return (
-    <div className="mb-1">
-      <Text font="main-ui-action" color="text-04">
-        {children}
-      </Text>
-    </div>
+    <InputHorizontal withLabel center title={label} description={description}>
+      <Switch
+        checked={checked}
+        disabled={disabled}
+        onCheckedChange={onChange}
+      />
+    </InputHorizontal>
   );
 }
 
-function FieldHint({ children }: { children: React.ReactNode }) {
-  return <div className="mt-1 text-xs text-(--text-03)">{children}</div>;
+function NotificationsForm({
+  initial,
+  updateSettings,
+}: {
+  initial: UserSettings;
+  updateSettings: (partial: Partial<UserSettings>) => Promise<UserSettings>;
+}) {
+  const [busyKey, setBusyKey] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function toggle(
+    key: "notify_comment_email" | "notify_update_warning_email",
+    next: boolean,
+  ) {
+    setBusyKey(key);
+    setError(null);
+    try {
+      await updateSettings({ [key]: next });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "failed to save");
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
+  return (
+    <LayoutSection flexDirection="column" alignItems="start" gap={1.25}>
+      <Text font="secondary-body" color="text-03">
+        Email copies go to your login email, the address you already sign in
+        with. Nothing to verify.
+      </Text>
+      <NotificationToggle
+        label="Comment emails"
+        description="Email me when someone comments on a page I own or mentions me in a comment."
+        checked={initial.notify_comment_email}
+        disabled={busyKey !== null}
+        onChange={(next) => void toggle("notify_comment_email", next)}
+      />
+      <NotificationToggle
+        label="Auto-update warning emails"
+        description="Email me when a page I own auto-updates past the warning threshold or hits the update cap."
+        checked={initial.notify_update_warning_email}
+        disabled={busyKey !== null}
+        onChange={(next) => void toggle("notify_update_warning_email", next)}
+      />
+      <FormStatus error={error} saved={false} />
+    </LayoutSection>
+  );
 }
 
 function ProfileForm({
@@ -208,8 +285,11 @@ function ProfileForm({
 
   return (
     <form onSubmit={onSubmit} className="flex flex-col gap-4">
-      <label>
-        <FieldLabel>Display name</FieldLabel>
+      <InputVertical
+        withLabel
+        title="Display name"
+        subDescription="Shown in the app header and on activity attributed to you. Leave blank to fall back to your email."
+      >
         <InputTypeIn
           value={name}
           onChange={(e) => {
@@ -220,21 +300,16 @@ function ProfileForm({
           placeholder="e.g. Ada Lovelace"
           maxLength={200}
         />
-        <FieldHint>
-          Shown in the app header and on activity attributed to you. Leave blank
-          to fall back to your email.
-        </FieldHint>
-      </label>
+      </InputVertical>
 
-      <div>
-        <FieldLabel>Login email</FieldLabel>
+      <InputVertical
+        title="Login email"
+        subDescription="The address you sign in with. Account emails go here."
+      >
         <Text font="main-ui-body" color="text-04">
           {email}
         </Text>
-        <FieldHint>
-          The address you sign in with. Account emails go here.
-        </FieldHint>
-      </div>
+      </InputVertical>
 
       <FormStatus error={error} saved={saved} />
       <div>
@@ -253,10 +328,13 @@ function FormStatus({
   error: string | null;
   saved: boolean;
 }) {
-  if (error)
-    return <div className="text-(--status-text-error-05)">{error}</div>;
+  if (error) return <InputErrorText type="error">{error}</InputErrorText>;
   if (saved)
-    return <div className="text-(--status-text-success-05)">Saved.</div>;
+    return (
+      <Text font="main-ui-body" color="status-success-05">
+        Saved.
+      </Text>
+    );
   return null;
 }
 
@@ -365,8 +443,11 @@ function AppearanceForm({
       }}
       className="flex flex-col gap-4"
     >
-      <label>
-        <FieldLabel>Theme</FieldLabel>
+      <InputVertical
+        withLabel
+        title="Theme"
+        subDescription="Visual chrome of the app on this account."
+      >
         {/* raw-ok: no Opal select component */}
         <select
           value={draft.theme}
@@ -377,11 +458,13 @@ function AppearanceForm({
           <option value="light">Light</option>
           <option value="dark">Dark</option>
         </select>
-        <FieldHint>Visual chrome of the app on this account.</FieldHint>
-      </label>
+      </InputVertical>
 
-      <label>
-        <FieldLabel>Timezone</FieldLabel>
+      <InputVertical
+        withLabel
+        title="Timezone"
+        subDescription="Used for timestamps and scheduled-trigger displays."
+      >
         {tzCustom ? (
           <InputTypeIn
             value={draft.timezone ?? ""}
@@ -411,25 +494,19 @@ function AppearanceForm({
             </select>
           </>
         )}
-        <FieldHint>
-          Used for timestamps and scheduled-trigger displays.
-          {tzCustom && (
-            <>
-              {" "}
-              <LinkButton
-                onClick={() => {
-                  setTzCustom(false);
-                  if (!COMMON_TIMEZONES.includes(draft.timezone ?? "")) {
-                    update("timezone", "UTC");
-                  }
-                }}
-              >
-                Pick from common list
-              </LinkButton>
-            </>
-          )}
-        </FieldHint>
-      </label>
+        {tzCustom && (
+          <LinkButton
+            onClick={() => {
+              setTzCustom(false);
+              if (!COMMON_TIMEZONES.includes(draft.timezone ?? "")) {
+                update("timezone", "UTC");
+              }
+            }}
+          >
+            Pick from common list
+          </LinkButton>
+        )}
+      </InputVertical>
 
       <FormStatus error={form.error} saved={form.saved} />
       <div>
@@ -472,8 +549,11 @@ function WikiPrefsForm({
       }}
       className="flex flex-col gap-4"
     >
-      <label>
-        <FieldLabel>Default landing page</FieldLabel>
+      <InputVertical
+        withLabel
+        title="Default landing page"
+        subDescription="Where the app opens after sign-in."
+      >
         {/* raw-ok: no Opal select component */}
         <select
           value={draft.default_landing}
@@ -486,8 +566,7 @@ function WikiPrefsForm({
           <option value="recent">Recently edited</option>
           <option value="last_viewed">Last viewed page</option>
         </select>
-        <FieldHint>Where the app opens after sign-in.</FieldHint>
-      </label>
+      </InputVertical>
 
       <FormStatus error={form.error} saved={form.saved} />
       <div>
@@ -553,8 +632,15 @@ function ChatModelForm({
 
   return (
     <form onSubmit={onSubmit} className="flex flex-col gap-4">
-      <label>
-        <FieldLabel>Chat model</FieldLabel>
+      <InputVertical
+        withLabel
+        title="Chat model"
+        subDescription={`Override the model used in your chat sessions. Leave blank to use the admin-configured agent default${
+          llmStatus?.configured
+            ? ` (currently ${llmStatus.provider} / ${llmStatus.model})`
+            : ""
+        }.`}
+      >
         <InputTypeIn
           value={chatModel}
           onChange={(e) => {
@@ -564,15 +650,7 @@ function ChatModelForm({
           }}
           placeholder={placeholder}
         />
-        <FieldHint>
-          Override the model used in your chat sessions. Leave blank to use the
-          admin-configured agent default
-          {llmStatus?.configured
-            ? ` (currently ${llmStatus.provider} / ${llmStatus.model})`
-            : ""}
-          .
-        </FieldHint>
-      </label>
+      </InputVertical>
       <FormStatus error={error} saved={saved} />
       <div>
         <Button type="submit" variant="action" disabled={saving}>
