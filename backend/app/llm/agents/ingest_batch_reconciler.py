@@ -119,7 +119,7 @@ def _format_metadata(metadata: dict[str, Any] | None) -> str:
         return ""
     lines: list[str] = []
     for key, value in metadata.items():
-        values: list[Any] = value if isinstance(value, list) else [value]
+        values = cast(list[Any], value) if isinstance(value, list) else [value]
         rendered = ", ".join(" ".join(str(v).split()) for v in values if str(v).strip())
         if rendered:
             lines.append(f"{key}: {rendered}")
