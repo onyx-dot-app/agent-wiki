@@ -1321,6 +1321,7 @@ function FileViewer({ path }: { path: string }) {
   const openComments = useCallback(() => {
     setHistoryOpen(false);
     setPolicyOpen(false);
+    setAutomationsOpen(false);
     setCommentsOpen(true);
   }, []);
 
@@ -1769,9 +1770,11 @@ function FileViewer({ path }: { path: string }) {
       return;
     }
     setHistoryOpen(true);
-    // Mutual exclusion with the comments + policy panels (see ``openComments``).
+    // Mutual exclusion with the comments + policy + automations panels (see
+    // ``openComments``).
     setCommentsOpen(false);
     setPolicyOpen(false);
+    setAutomationsOpen(false);
     setCommentDraft(null);
     // Opening history: show the newest commit's diff immediately rather
     // than leaving the rendered body up until the user clicks a row.
@@ -1985,6 +1988,7 @@ function FileViewer({ path }: { path: string }) {
           setHistoryOpen(false);
           setCommentsOpen(false);
           setCommentDraft(null);
+          setAutomationsOpen(false);
           setPolicyOpen(true);
         }}
       />

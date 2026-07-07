@@ -23,12 +23,12 @@ import {
 /** True when a trigger's scope covers the given page: exact page, ancestor
  * folder, or the whole wiki. Mirrors the backend's fan-out matching. */
 function scopeCovers(scope: string, path: string): boolean {
-  if (scope === "/" || scope === "") return true;
-  if (scope === path) return true;
-  if (!scope.endsWith(".md")) {
-    const prefix = scope.endsWith("/") ? scope : `${scope}/`;
-    return path.startsWith(prefix);
-  }
+  // Stored scopes and page paths may differ in leading/trailing slashes.
+  const s = scope.replace(/^\/+|\/+$/g, "");
+  const p = path.replace(/^\/+|\/+$/g, "");
+  if (s === "") return true;
+  if (s === p) return true;
+  if (!s.endsWith(".md")) return p.startsWith(`${s}/`);
   return false;
 }
 
