@@ -5,32 +5,15 @@ import { useState } from "react";
 import { Button, Switch, Text } from "@onyx-ai/opal/components";
 import { markdown } from "@onyx-ai/opal/utils";
 import {
-  SvgActivity,
-  SvgBook,
   SvgChevronDown,
   SvgChevronUp,
-  SvgFile,
-  SvgFolder,
   SvgInfo,
-  SvgMail,
   SvgSettings,
-  SvgSlack,
   SvgWorkflow,
 } from "@onyx-ai/opal/icons";
 
-import { formatScopePath } from "@/lib/format";
+import { AvatarCluster, ScopeChip } from "@/components/triggers/fireParts";
 import type { DestinationConfig, Trigger, TriggerFire } from "@/lib/triggers";
-
-function scopeIcon(scope: string) {
-  if (scope === "/" || scope === "") return SvgBook;
-  return scope.endsWith(".md") ? SvgFile : SvgFolder;
-}
-
-function destinationIcon(type: string) {
-  if (type === "slack") return SvgSlack;
-  if (type === "email") return SvgMail;
-  return SvgActivity;
-}
 
 /** The card's per-fire "Sent message to X · N ago" line names the config the
  * fire was recorded against; a deleted config degrades to the type name. */
@@ -86,8 +69,6 @@ export function TriggerCard({
     ),
   ];
 
-  const ScopeIcon = scopeIcon(t.scope_path);
-
   function toggleRow(f: TriggerFire) {
     setOverrides((cur) => new Map(cur).set(f.event_id, !isRowOpen(f)));
   }
@@ -100,42 +81,14 @@ export function TriggerCard({
     >
       <div className="flex w-full items-center p-[2px]">
         <div className="flex min-w-0 flex-1 items-center gap-1 p-[2px]">
-          <span
-            className="flex max-w-[220px] items-center rounded-(--radius-04) bg-(--background-tint-02) p-[2px]"
-            title={t.scope_path || "Whole wiki"}
-          >
-            <span className="flex size-4 items-center justify-center p-[2px]">
-              <ScopeIcon className="size-3 text-(--text-03)" />
-            </span>
-            <span className="min-w-0 px-[2px]">
-              <Text font="secondary-body" color="text-03" nowrap maxLines={1}>
-                {t.scope_path
-                  ? formatScopePath(t.scope_path).replace(/^\//, "")
-                  : "Whole wiki"}
-              </Text>
-            </span>
-          </span>
+          <ScopeChip scope={t.scope_path} />
           <span className="flex size-4 items-center justify-center p-[2px]">
             <SvgWorkflow className="size-3 text-(--text-03)" />
           </span>
-          <span className="flex items-center px-[2px]">
-            <span className="flex size-5 items-center justify-center rounded-full border border-(--border-01) bg-(--background-neutral-inverted-00)">
-              <Text font="secondary-action" color="text-inverted-05">
-                {(ownerName[0] ?? "?").toUpperCase()}
-              </Text>
-            </span>
-            {destinationTypes.map((type) => {
-              const Icon = destinationIcon(type);
-              return (
-                <span
-                  key={type}
-                  className="-ml-1 flex size-5 items-center justify-center rounded-full border border-(--border-01) bg-(--background-neutral-00)"
-                >
-                  <Icon className="size-3 text-(--text-04)" />
-                </span>
-              );
-            })}
-          </span>
+          <AvatarCluster
+            ownerName={ownerName}
+            destinationTypes={destinationTypes}
+          />
           <span className="min-w-0 px-[2px]">
             <Text font="secondary-body" color="text-03" nowrap maxLines={1}>
               {`${ownerName} (you)`}
@@ -258,7 +211,7 @@ export function TriggerCard({
                   </div>
                 </div>
                 {isOpen && f.message && (
-                  <div className="w-full pr-5 pb-1">
+                  <div className="w-full pr-5 pb-1 [&>span]:block">
                     <Text font="main-ui-body" color="text-03">
                       {markdown(f.message)}
                     </Text>

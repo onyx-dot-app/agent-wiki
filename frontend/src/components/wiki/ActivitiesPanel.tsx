@@ -1,141 +1,193 @@
 "use client";
 
 import { useState } from "react";
-import { Button, Divider, InputTypeIn, Tag } from "@onyx-ai/opal/components";
+import {
+  Button,
+  LineItemButton,
+  Divider,
+  InputTypeIn,
+  Tag,
+  Text,
+} from "@onyx-ai/opal/components";
 import { SvgEmpty, SvgNotFound } from "@onyx-ai/opal/illustrations";
-import { SvgActivity, SvgX } from "@onyx-ai/opal/icons";
+import {
+  SvgActivity,
+  SvgChevronDown,
+  SvgChevronUp,
+  SvgWorkflow,
+  SvgX,
+} from "@onyx-ai/opal/icons";
+import { markdown } from "@onyx-ai/opal/utils";
 import { Content, IllustrationContent, Section } from "@onyx-ai/opal/layouts";
 import { timeAgo } from "@onyx-ai/opal/time";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
+import { AvatarCluster, ScopeChip } from "@/components/triggers/fireParts";
 import {
   isNewActivity,
   toEventIso,
   useEvents,
   type AppEvent,
 } from "@/lib/activities";
-import { formatScopePath } from "@/lib/format";
+import { useAuth } from "@/lib/auth";
 import { useLeftPanel } from "@/providers/LeftPanelProvider";
 
-interface TriggerFirePayload {
+interface ActivityPayload {
   doc_path?: string;
   change_kind?: string;
   reason?: string;
-}
-
-interface FrequentUpdatesPayload {
-  doc_path?: string;
+  message?: string;
+  destination_type?: string;
   count?: number;
   threshold?: number;
-}
-
-interface AutoUpdateCappedPayload {
-  doc_path?: string;
-  count?: number;
   cap?: number;
 }
 
 // Searchable text for an event regardless of kind.
 function eventHaystack(event: AppEvent): string {
-  const p = event.payload as TriggerFirePayload & FrequentUpdatesPayload;
-  return [p.doc_path, p.change_kind, p.reason, event.target, event.kind]
+  const p = event.payload as ActivityPayload;
+  return [
+    p.doc_path,
+    p.change_kind,
+    p.reason,
+    p.message,
+    event.target,
+    event.kind,
+  ]
     .filter(Boolean)
     .join(" ")
     .toLowerCase();
 }
 
-interface ActivityCardProps {
-  event: AppEvent;
+function destinationName(type: string | undefined): string {
+  if (type === "slack") return "Slack";
+  if (type === "email") return "Email";
+  return "Activity Center";
 }
 
-const cardClass =
-  "mx-3 my-1.5 rounded-(--border-radius-08) border border-(--border-01) bg-(--background-tint-00) px-3 py-2.5";
-
-function FrequentUpdatesCard({ event }: ActivityCardProps) {
-  const p = event.payload as FrequentUpdatesPayload;
-  return (
-    <div className={cardClass}>
-      <div className="mb-1 flex items-start justify-between gap-2">
-        <span className="truncate font-mono text-xs text-(--text-04)">
-          {p.doc_path ? formatScopePath(p.doc_path) : "(no path)"}
-        </span>
-        <span className="shrink-0">
-          <Tag title="Frequent" color="amber" />
-        </span>
-      </div>
-      <p className="mb-1.5 line-clamp-2 text-xs text-(--text-04)">
-        Auto-updated {p.count ?? "?"} times in the past 24 hours
-        {p.threshold ? ` (warns at ${p.threshold}).` : "."}
-      </p>
-      <div className="flex items-center justify-end">
-        <span className="text-[11px] text-(--text-02)">
-          {timeAgo(toEventIso(event.ts))}
-        </span>
-      </div>
-    </div>
-  );
-}
-
-function AutoUpdateCappedCard({ event }: ActivityCardProps) {
-  const p = event.payload as AutoUpdateCappedPayload;
-  return (
-    <div className={cardClass}>
-      <div className="mb-1 flex items-start justify-between gap-2">
-        <span className="truncate font-mono text-xs text-(--text-04)">
-          {p.doc_path ? formatScopePath(p.doc_path) : "(no path)"}
-        </span>
-        <span className="shrink-0">
-          <Tag title="Capped" color="red" />
-        </span>
-      </div>
-      <p className="mb-1.5 line-clamp-2 text-xs text-(--text-04)">
-        Auto-update paused — hit the limit of {p.cap ?? "?"} updates in 24
-        hours.
-      </p>
-      <div className="flex items-center justify-end">
-        <span className="text-[11px] text-(--text-02)">
-          {timeAgo(toEventIso(event.ts))}
-        </span>
-      </div>
-    </div>
-  );
-}
-
-function ActivityCard({ event }: ActivityCardProps) {
+/** Collapsed one-liner (prefix + bold subject) + expandable body per kind. */
+function eventTexts(event: AppEvent): {
+  prefix: string;
+  subject: string;
+  body: string | null;
+} {
+  const p = event.payload as ActivityPayload;
   if (event.kind === "wiki.frequent_updates") {
-    return <FrequentUpdatesCard event={event} />;
+    return {
+      prefix: "Frequent auto-updates on",
+      subject: p.doc_path ?? "a page",
+      body: `Auto-updated ${p.count ?? "?"} times in the past 24 hours${
+        p.threshold ? ` (warns at ${p.threshold})` : ""
+      }.`,
+    };
   }
   if (event.kind === "wiki.auto_update_capped") {
-    return <AutoUpdateCappedCard event={event} />;
+    return {
+      prefix: "Auto-updates paused on",
+      subject: p.doc_path ?? "a page",
+      body: `Hit the limit of ${p.cap ?? "?"} auto-updates in 24 hours, so further auto-updates are paused for now.`,
+    };
   }
-  const p = event.payload as TriggerFirePayload;
+  if (event.kind === "trigger.fire") {
+    const verb =
+      p.destination_type === "event_log" || !p.destination_type
+        ? "Sent a notification to"
+        : "Sent a message to";
+    return {
+      prefix: verb,
+      subject: destinationName(p.destination_type),
+      body: p.message || p.reason || null,
+    };
+  }
+  // Unknown kinds stay legible instead of masquerading as trigger fires,
+  // and their payload stays inspectable when it has no message/reason.
+  const payloadKeys = Object.keys(event.payload ?? {});
+  return {
+    prefix: "Event",
+    subject: event.kind,
+    body:
+      p.message ||
+      p.reason ||
+      (payloadKeys.length ? JSON.stringify(event.payload) : null),
+  };
+}
+
+function ActivityRow({
+  event,
+  ownerName,
+}: {
+  event: AppEvent;
+  ownerName: string;
+}) {
+  const p = event.payload as ActivityPayload;
+  const fresh = isNewActivity(event.ts);
+  const { prefix, subject, body } = eventTexts(event);
+  const [override, setOverride] = useState<boolean | null>(null);
+  // New entries open expanded, older ones collapsed; the chevron overrides.
+  const open = override ?? (fresh && body !== null);
+  const Chevron = open ? SvgChevronUp : SvgChevronDown;
+
+  const destinationTypes =
+    event.kind === "trigger.fire" ? [p.destination_type ?? "event_log"] : [];
+
   return (
-    <div className={cardClass}>
-      <div className="mb-1 flex items-start justify-between gap-2">
-        {p.doc_path ? (
-          <span className="truncate font-mono text-xs text-(--text-04)">
-            {formatScopePath(p.doc_path)}
+    <div className="flex w-full flex-col px-3 py-1">
+      <div className="flex w-full items-center p-[2px]">
+        <div className="flex min-w-0 flex-1 items-center gap-1 p-[2px]">
+          <ScopeChip scope={p.doc_path ?? event.target ?? ""} />
+          <span className="flex size-4 items-center justify-center p-[2px]">
+            {event.kind === "trigger.fire" ? (
+              <SvgWorkflow className="size-3 text-(--text-03)" />
+            ) : (
+              <SvgActivity className="size-3 text-(--text-03)" />
+            )}
           </span>
-        ) : (
-          <em className="text-xs text-(--text-02)">(no path)</em>
-        )}
-        {p.change_kind && (
-          <span className="shrink-0 rounded-(--border-radius-04) bg-(--background-tint-03) px-1.5 py-[2px] text-[10px] font-semibold tracking-[0.3px] text-(--text-05) uppercase">
-            {p.change_kind}
+          <AvatarCluster
+            ownerName={ownerName}
+            destinationTypes={destinationTypes}
+          />
+        </div>
+        <div className="flex shrink-0 items-center gap-1 p-[2px]">
+          <Text font="secondary-body" color="text-03" nowrap>
+            {timeAgo(toEventIso(event.ts)) ?? ""}
+          </Text>
+          <span className="flex size-5 items-center justify-center">
+            {fresh ? (
+              <span className="size-[6px] rounded-full bg-(--action-link-05)" />
+            ) : (
+              <span className="size-2 rounded-full border border-(--border-02)" />
+            )}
           </span>
-        )}
+        </div>
       </div>
-      {p.reason && (
-        <p className="mb-1.5 line-clamp-2 text-xs text-(--text-04)">
-          {p.reason}
-        </p>
-      )}
-      <div className="flex items-center justify-between">
-        <span className="text-[11px] text-(--text-02)">
-          trigger {event.target ?? "?"}
-        </span>
-        <span className="text-[11px] text-(--text-02)">
-          {timeAgo(toEventIso(event.ts))}
-        </span>
+      <div className="flex w-full flex-col p-1 pt-0">
+        {body ? (
+          <LineItemButton
+            title={markdown(`${prefix} **${subject}**`)}
+            sizePreset="secondary"
+            variant="body"
+            state="empty"
+            width="full"
+            onClick={() => setOverride(!open)}
+            rightChildren={
+              <span className="flex size-5 items-center justify-center">
+                <Chevron className="size-3.5 text-(--text-03)" />
+              </span>
+            }
+          />
+        ) : (
+          <div className="flex w-full items-center px-[2px] py-[2px]">
+            <Text font="secondary-body" color="text-03" nowrap maxLines={1}>
+              {markdown(`${prefix} **${subject}**`)}
+            </Text>
+          </div>
+        )}
+        {open && body && (
+          <div className="w-full pr-5 pb-1 [&>span]:block">
+            <Text font="main-ui-body" color="text-03">
+              {markdown(body)}
+            </Text>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -143,6 +195,8 @@ function ActivityCard({ event }: ActivityCardProps) {
 
 export default function ActivitiesPanel() {
   const { toggleActivities } = useLeftPanel();
+  const { user } = useAuth();
+  const ownerName = user?.name || user?.email || "?";
   const [query, setQuery] = useState("");
   const { events, isLoading } = useEvents(
     { limit: 100 },
@@ -159,7 +213,7 @@ export default function ActivitiesPanel() {
   const olderEvents = filtered.filter((ev) => !isNewActivity(ev.ts));
 
   return (
-    <div className="flex h-full w-(--activities-view) flex-col rounded-(--border-radius-12) border border-(--border-01) p-1">
+    <div className="flex h-full w-(--activities-view) flex-col rounded-(--radius-12) border border-(--border-01) p-1">
       {/* Header */}
       <Section
         flexDirection="row"
@@ -230,7 +284,7 @@ export default function ActivitiesPanel() {
               <Divider title="New" />
             </div>
             {newEvents.map((ev) => (
-              <ActivityCard key={ev.id} event={ev} />
+              <ActivityRow key={ev.id} event={ev} ownerName={ownerName} />
             ))}
           </>
         )}
@@ -241,7 +295,7 @@ export default function ActivitiesPanel() {
               <Divider title="Older" />
             </div>
             {olderEvents.map((ev) => (
-              <ActivityCard key={ev.id} event={ev} />
+              <ActivityRow key={ev.id} event={ev} ownerName={ownerName} />
             ))}
           </>
         )}
