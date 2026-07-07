@@ -143,6 +143,12 @@ def tmp_config(tmp_path, monkeypatch):
 
     _fts.reset_client_for_tests()
 
+    # Same for the lazy Redis client — otherwise a client cached against the
+    # default URL (or an earlier test's broker) leaks across cases.
+    from app.tasks.queue import reset_redis_for_tests
+
+    reset_redis_for_tests()
+
     # Each test rebuilds the engine so the new schema's search_path takes effect.
     from app.db.session import reset_engine_for_tests
 
@@ -159,6 +165,9 @@ def tmp_config(tmp_path, monkeypatch):
 
         _comment_fts.drop_index_for_tests()  # and the per-test comment index
     _fts.reset_client_for_tests()
+    from app.tasks.queue import reset_redis_for_tests
+
+    reset_redis_for_tests()
     with psycopg.connect(_BASE_URL, autocommit=True) as conn:
         conn.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(schema)))
 

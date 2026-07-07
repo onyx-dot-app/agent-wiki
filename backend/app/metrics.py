@@ -130,6 +130,39 @@ class _WikiAutoUpdateCollector:
 
 REGISTRY.register(_WikiAutoUpdateCollector())
 
+
+class _TaskQueueCollector:
+    """Per-queue backlog depth + oldest-message age, sampled at scrape time
+    (mirrors the queue set in ``app/tasks/queues.py``). Depth catches a *growing*
+    backlog; oldest-age catches a *stalled* queue — a message sitting unworked
+    behind a slow/stuck worker — which depth alone misses when the backlog is
+    small. This is the signal that surfaced the 2026-07 checkpoint starvation."""
+
+    def collect(self):
+        from app.tasks.queues import QUEUES
+
+        depth = GaugeMetricFamily(
+            "task_queue_depth",
+            "Pending messages (ready + delayed) per task queue",
+            labels=["queue"],
+        )
+        age = GaugeMetricFamily(
+            "task_queue_oldest_age_seconds",
+            "Age of the oldest ready message per task queue (0 when empty)",
+            labels=["queue"],
+        )
+        for name, q in QUEUES.items():
+            try:
+                depth.add_metric([name], q.depth().pending)
+                age.add_metric([name], q.oldest_age_seconds() or 0.0)
+            except Exception:
+                log.warning("metrics: queue stats failed for %s", name, exc_info=True)
+        yield depth
+        yield age
+
+
+REGISTRY.register(_TaskQueueCollector())
+
 ingest_selector_candidates_filtered = Histogram(
     "ingest_selector_candidates_filtered",
     "Candidates dropped by the weak-model selector per ingest request",

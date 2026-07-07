@@ -143,6 +143,17 @@ def get_redis() -> Any:
         return _redis_client
 
 
+def reset_redis_for_tests() -> None:
+    """Drop the cached client so the next ``get_redis()`` re-reads ``CONFIG``.
+
+    Tests point ``CONFIG.redis_url`` at a per-test broker; without this the
+    lazily-cached client from an earlier test (or the default URL) leaks across
+    cases. Mirrors ``reset_engine_for_tests`` / ``fts.reset_client_for_tests``.
+    """
+    global _redis_client
+    _redis_client = None
+
+
 # --------------------------------------------------------------------------- #
 # Redis key helpers                                                           #
 # --------------------------------------------------------------------------- #
@@ -275,6 +286,27 @@ class TaskQueue(BaseModel):
             return QueueDepth(ready=ready, delayed=delayed, in_flight=in_flight)
         except Exception:
             return QueueDepth(ready=0, delayed=0, in_flight=0)
+
+    def oldest_age_seconds(self) -> float | None:
+        """Seconds the oldest message in the ready stream has waited, or None if
+        the stream is empty. Redis stream IDs embed the enqueue time (ms), so the
+        first entry's id dates the oldest un-consumed message — the signal for a
+        *stalled* queue (a slow/stuck worker), which depth alone misses when the
+        backlog is small. Uses Redis server time to match the id clock. Ignores
+        the delay set (not-yet-due scheduled items). None in immediate mode."""
+        if self.immediate:
+            return None
+        r = get_redis()
+        try:
+            entries = r.xrange(_stream_key(self.name), count=1)
+            if not entries:
+                return None
+            enqueued_ms = int(str(entries[0][0]).split("-", 1)[0])
+            secs, micros = r.time()
+            now_ms = int(secs) * 1000 + int(micros) // 1000
+            return max(0.0, (now_ms - enqueued_ms) / 1000.0)
+        except Exception:
+            return None
 
     def enqueue(
         self,
