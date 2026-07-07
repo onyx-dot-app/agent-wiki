@@ -76,9 +76,12 @@ export async function ensureSlackDestination(
   return { id: created.id, created: true };
 }
 
-export function setSlackMuted(muted: boolean): Promise<SlackConnectStatus> {
+export function setSlackMuted(
+  muted: boolean,
+  teamId?: string | null,
+): Promise<SlackConnectStatus> {
   return apiFetch<SlackConnectStatus>("/connectors/slack/mute", {
     method: "PUT",
-    body: JSON.stringify({ muted }),
+    body: JSON.stringify({ muted, team_id: teamId ?? undefined }),
   });
 }

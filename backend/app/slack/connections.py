@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from cryptography.exceptions import InvalidTag
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from sqlalchemy.orm import defer
 
 from app.db.models import UserSlackConnection
@@ -102,15 +102,20 @@ def get(user_id: str, team_id: str) -> dict[str, Any] | None:
         return _to_dict(row) if row else None
 
 
-def set_muted(user_id: str, team_id: str, muted: bool) -> dict[str, Any] | None:
-    """Flip delivery muting on one connection. Returns the updated row."""
+def set_muted(user_id: str, team_id: str, muted: bool) -> bool:
+    """Flip delivery muting on one connection without touching the stored
+    token. Returns whether a row matched."""
     with session() as s:
-        c = s.get(UserSlackConnection, (user_id, team_id))
-        if c is None:
-            return None
-        c.muted = muted
-        c.updated_at = _now_iso()
-        return _to_dict(c)
+        matched = s.scalar(
+            update(UserSlackConnection)
+            .where(
+                UserSlackConnection.user_id == user_id,
+                UserSlackConnection.team_id == team_id,
+            )
+            .values(muted=muted, updated_at=_now_iso())
+            .returning(UserSlackConnection.team_id)
+        )
+        return matched is not None
 
 
 def delete_connection(user_id: str, team_id: str) -> bool:

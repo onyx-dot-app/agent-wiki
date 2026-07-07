@@ -61,7 +61,7 @@ export function ConnectorsTab() {
     if (!status) return;
     setError(null);
     try {
-      await setSlackMuted(!status.muted);
+      await setSlackMuted(!status.muted, status.team_id);
       await refreshSlack();
     } catch (e) {
       setError(e instanceof Error ? e.message : "failed to update");
@@ -255,6 +255,14 @@ function EmailsModal({
   const [cooldowns, setCooldowns] = useState<Map<string, number>>(new Map());
   const [now, setNow] = useState(() => Date.now());
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Async handlers must not set state once the modal has unmounted.
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   const hasCooldowns = [...cooldowns.values()].some((t) => t > now);
   useEffect(() => {
@@ -288,6 +296,7 @@ function EmailsModal({
         address,
       );
       await refresh();
+      if (!mountedRef.current) return;
       setDraft("");
       if (verificationError) setError(verificationError);
       else {
@@ -295,9 +304,10 @@ function EmailsModal({
         startCooldown(id, 60);
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : "failed to add address");
+      if (mountedRef.current)
+        setError(e instanceof Error ? e.message : "failed to add address");
     } finally {
-      setBusy(false);
+      if (mountedRef.current) setBusy(false);
     }
   }
 
@@ -305,6 +315,7 @@ function EmailsModal({
     setError(null);
     setSentTo(null);
     const result = await resendVerification(c.id);
+    if (!mountedRef.current) return;
     if (result.ok) {
       setSentTo(c.name);
       startCooldown(c.id, 60);
@@ -321,7 +332,8 @@ function EmailsModal({
       await deleteDestinationConfig(c.id);
       await refresh();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "failed to remove");
+      if (mountedRef.current)
+        setError(e instanceof Error ? e.message : "failed to remove");
     }
   }
 
