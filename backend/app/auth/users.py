@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Iterable
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.auth.passwords import hash_password
@@ -29,6 +29,7 @@ def _to_dict(u: User) -> dict[str, Any]:
         "email": u.email,
         "name": u.name,
         "password_hash": u.password_hash,
+        "session_epoch": u.session_epoch,
         "is_admin": u.is_admin,
         "is_active": u.is_active,
         "created_at": u.created_at,
@@ -176,14 +177,23 @@ def delete(user_id: str) -> None:
             s.delete(u)
 
 
-def set_password(user_id: str, new_password: str) -> bool:
-    """Replace the stored hash. Returns False for an unknown user."""
+def set_password(user_id: str, new_password: str) -> int | None:
+    """Replace the stored hash and bump ``session_epoch`` so sessions minted
+    before the change stop authenticating. Returns the new epoch, or None
+    when the row vanished (checked via the UPDATE's own rowcount, so a
+    concurrent delete can't be reported as success)."""
     with session() as s:
-        u = s.get(User, user_id)
-        if u is None:
-            return False
-        u.password_hash = hash_password(new_password)
-        return True
+        result = s.execute(
+            update(User)
+            .where(User.id == user_id)
+            .values(
+                password_hash=hash_password(new_password),
+                session_epoch=User.session_epoch + 1,
+            )
+            .returning(User.session_epoch)
+        )
+        row = result.first()
+        return int(row[0]) if row is not None else None
 
 
 def update_name(user_id: str, name: str | None) -> dict[str, Any] | None:

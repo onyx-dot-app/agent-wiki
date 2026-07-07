@@ -53,6 +53,24 @@ def test_short_new_password_is_rejected(client):
     assert r.status_code == 400
 
 
+def test_change_invalidates_other_sessions_but_not_own(client, tmp_db):
+    uid = _seed_with_password("u_1", "orig-password")
+    login_fastapi(client, uid)
+    # a second client with its own pre-change session
+    other = TestClient(create_app())
+    login_fastapi(other, uid)
+    assert other.get("/api/user/settings").status_code == 200
+
+    r = client.put(
+        "/api/user/password",
+        json={"current_password": "orig-password", "new_password": "new-password-1"},
+    )
+    assert r.status_code == 204
+    # the changer's session keeps working; the other session is dead
+    assert client.get("/api/user/settings").status_code == 200
+    assert other.get("/api/user/settings").status_code == 401
+
+
 def test_change_succeeds_and_replaces_hash(client):
     uid = _seed_with_password("u_1", "orig-password")
     login_fastapi(client, uid)

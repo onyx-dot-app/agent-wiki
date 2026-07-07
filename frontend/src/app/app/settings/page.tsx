@@ -532,6 +532,15 @@ function TimezoneRow({
     }
   }
 
+  async function saveCleared() {
+    setError(null);
+    try {
+      await updateSettings({ timezone: null });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "failed to save");
+    }
+  }
+
   if (custom) {
     return (
       <div className="flex w-full flex-col gap-1">
@@ -546,7 +555,10 @@ function TimezoneRow({
               onChange={(e) => setDraft(e.target.value)}
               onBlur={() => {
                 setCustom(false);
-                if (draft.trim() && draft !== current) void save(draft.trim());
+                const next = draft.trim();
+                // Clearing the field drops the override back to the local zone.
+                if (!next) void saveCleared();
+                else if (next !== current) void save(next);
               }}
               onKeyDown={(e) => {
                 if (e.key === "Enter") e.currentTarget.blur();

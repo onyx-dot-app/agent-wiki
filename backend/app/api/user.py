@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import ValidationError
 
 from app.auth import User
@@ -57,14 +57,21 @@ class ChangePasswordRequest(BaseModel):
 
 @router.put("/password", status_code=status.HTTP_204_NO_CONTENT)
 def put_password(
-    req: ChangePasswordRequest, user: User = Depends(require_user)
+    request: Request,
+    req: ChangePasswordRequest,
+    user: User = Depends(require_user),
 ) -> None:
     row = users_repo.get_by_id(user.id)
     if row is None or not verify_password(
         req.current_password, str(row.get("password_hash") or "")
     ):
         raise RequestError("current password is incorrect")
-    users_repo.set_password(user.id, req.new_password)
+    new_epoch = users_repo.set_password(user.id, req.new_password)
+    if new_epoch is None:
+        # The row vanished between the check and the write.
+        raise HTTPException(status_code=404, detail="not found")
+    # Other sessions die with the old epoch; the changer's stays live.
+    request.session["session_epoch"] = new_epoch
     log.info("user %s changed password", user.id)
 
 
