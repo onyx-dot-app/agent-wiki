@@ -468,6 +468,19 @@ def _dispatch_to_slack(
     config_id = str(config["id"])
 
     if config.get("has_secret"):
+        # Webhooks carry no workspace, so the settings page's single mute
+        # toggle (the deterministic first connection) governs them; owners
+        # with no connection at all have no mute surface and keep sending.
+        first = next(
+            iter(slack_connections.list_for_user(trigger.owner_user_id)), None
+        )
+        if first is not None and first.get("muted"):
+            log.info(
+                "trigger %s slack webhook muted via connection %s; "
+                "recorded to events only",
+                trigger.id, first["team_id"],
+            )
+            return
         webhook_url = dest_configs.get_secret(config_id, owner_user_id=trigger.owner_user_id)
         if not webhook_url:
             log.info(
