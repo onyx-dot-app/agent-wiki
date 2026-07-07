@@ -38,7 +38,7 @@ class _FakeRedis:
         return [{"name": "workers", "last-delivered-id": last}]
 
     def xrange(self, key, min="-", max="+", count=None):
-        if isinstance(min, str) and min.startswith("("):
+        if min.startswith("("):  # exclusive lower bound "(<ms>-<seq>"
             boundary = int(min[1:].split("-")[0])
             ready = [ms for ms in self._entries if ms > boundary]
         else:
