@@ -58,6 +58,8 @@ def _ingest_settings(*, auto_update_cap: int) -> IngestSettings:
         onyx_base_url=None,
         warn_update_threshold_default=10,
         auto_update_cap=auto_update_cap,
+        updated_at=None,
+        updated_by_user_id=None,
     )
 
 

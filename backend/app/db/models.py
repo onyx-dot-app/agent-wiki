@@ -794,6 +794,10 @@ class IngestSettings(Base):
     updated_at: Mapped[str] = mapped_column(
         Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
     )
+    # The admin who last saved these settings or regenerated the API key.
+    updated_by_user_id: Mapped[str | None] = mapped_column(
+        Text, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
 
     __table_args__ = (CheckConstraint("id = 1", name="ingest_settings_singleton"),)
 

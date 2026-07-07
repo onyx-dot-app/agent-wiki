@@ -24,6 +24,14 @@ interface IngestSettings {
   onyx_base_url: string | null;
   warn_update_threshold_default: number;
   auto_update_cap: number;
+  updated_at: string | null;
+  updated_by_email: string | null;
+}
+
+// Backend timestamps are "YYYY-MM-DD HH:MM:SS" UTC text — render local.
+function formatUtcTimestamp(ts: string): string {
+  const d = new Date(`${ts.replace(" ", "T")}Z`);
+  return Number.isNaN(d.getTime()) ? ts : d.toLocaleString();
 }
 
 export default function AdminIngestPage() {
@@ -139,11 +147,30 @@ function IngestForm() {
         },
       );
       setFreshKey(r.api_key);
-      setSettings((prev) => (prev ? { ...prev, api_key_set: true } : prev));
       setKeyVisible(true);
       setSaved(
         "New API key generated. Copy it now — it will be masked after you leave this page.",
       );
+      // Best-effort refresh of the display-only fields (key hint, last
+      // modified). The one-time key above must stay visible even if this
+      // fails, and the form-backed fields keep their pre-regenerate baseline
+      // so the dirty check stays consistent with the inputs.
+      try {
+        const refreshed = await apiFetch<IngestSettings>("/admin/ingest");
+        setSettings((prev) =>
+          prev
+            ? {
+                ...prev,
+                api_key_set: refreshed.api_key_set,
+                api_key_hint: refreshed.api_key_hint,
+                updated_at: refreshed.updated_at,
+                updated_by_email: refreshed.updated_by_email,
+              }
+            : refreshed,
+        );
+      } catch {
+        setSettings((prev) => (prev ? { ...prev, api_key_set: true } : prev));
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "failed to regenerate");
     } finally {
@@ -232,6 +259,14 @@ function IngestForm() {
                 Regenerate
               </Button>
             </div>
+            {settings.updated_at && (
+              <div className="mt-1.5 text-xs text-(--text-03)">
+                Last modified {formatUtcTimestamp(settings.updated_at)}
+                {settings.updated_by_email
+                  ? ` by ${settings.updated_by_email}`
+                  : ""}
+              </div>
+            )}
           </div>
         </div>
       </section>

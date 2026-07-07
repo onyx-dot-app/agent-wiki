@@ -486,6 +486,9 @@ _MAX_DOC_CHARS = 5_000_000
 
 
 def _ingest_view(s: IngestSettings) -> IngestView:
+    updated_by = (
+        users_repo.get_by_id(s.updated_by_user_id) if s.updated_by_user_id else None
+    )
     return IngestView(
         max_doc_chars=s.max_doc_chars,
         api_key_set=bool(s.api_key),
@@ -493,6 +496,8 @@ def _ingest_view(s: IngestSettings) -> IngestView:
         onyx_base_url=s.onyx_base_url,
         warn_update_threshold_default=s.warn_update_threshold_default,
         auto_update_cap=s.auto_update_cap,
+        updated_at=s.updated_at,
+        updated_by_email=updated_by["email"] if updated_by else None,
     )
 
 
@@ -527,6 +532,7 @@ def put_ingest(
         onyx_base_url=onyx_base_url,
         warn_update_threshold_default=req.warn_update_threshold_default,
         auto_update_cap=req.auto_update_cap,
+        updated_by_user_id=actor.id,
     )
     log.info(
         "admin: %s updated ingest settings max_doc_chars=%d onyx_base_url_set=%s "
@@ -544,7 +550,7 @@ def put_ingest(
 def regenerate_ingest_key(
     actor: User = Depends(require_admin),
 ) -> RegenerateKeyResponse:
-    key = ingest_settings.regenerate_key()
+    key = ingest_settings.regenerate_key(updated_by_user_id=actor.id)
     log.info("admin: %s regenerated ingest api_key", actor.id)
     return RegenerateKeyResponse(api_key=key)
 

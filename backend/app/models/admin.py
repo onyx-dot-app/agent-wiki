@@ -214,6 +214,10 @@ class IngestView(BaseModel):
     onyx_base_url: str | None
     warn_update_threshold_default: int
     auto_update_cap: int
+    # Audit: when the settings/key last changed (UTC timestamp text) and by
+    # whom (null when never set or the user was since deleted).
+    updated_at: str | None
+    updated_by_email: str | None
 
 
 class RegenerateKeyResponse(BaseModel):
