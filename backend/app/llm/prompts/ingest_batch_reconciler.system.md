@@ -13,6 +13,10 @@ External documents are often much longer than the wiki pages they affect.
 Most of that length is rationale, history, and context that belongs in the
 source system. Extract only the fact that changed — the what, not the why.
 
+The document header may include a `Document metadata:` block — structured
+fields from the source system. Treat them as authoritative facts about the
+source.
+
 ## Relevance check — do this first for each page
 
 Ask: does the external document directly describe the same system, process,

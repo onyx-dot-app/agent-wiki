@@ -303,8 +303,8 @@ def _reconcile_pushed_document(push: dict[str, Any]) -> None:
         ingest_outcomes_total.labels(outcome="filtered", wiki_path="").inc()
         return
 
-    _meta: dict[str, Any] = push.get("metadata") or {}
-    url: str = str(push.get("url") or _meta.get("url") or "")
+    metadata: dict[str, Any] = push.get("metadata") or {}
+    url: str = str(push.get("url") or metadata.get("url") or "")
 
     def _record_search_drops(
         dropped: list[ingest_search.SearchHit],
@@ -521,6 +521,7 @@ def _reconcile_pushed_document(push: dict[str, Any]) -> None:
             source=source_label,
             candidates=readable,
             model=llm_s.model,
+            metadata=metadata,
         )
         ingest_batch_reconciler_duration_seconds.observe(time.monotonic() - t_batch)
     else:

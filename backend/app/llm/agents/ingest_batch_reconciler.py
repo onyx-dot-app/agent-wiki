@@ -16,6 +16,7 @@ Batches fail independently.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any, NamedTuple, cast
 
 from app.ingest.models import WikiUpdateCandidate
@@ -41,6 +42,16 @@ log = logging.getLogger(__name__)
 
 _RECONCILER_BUDGET_CHARS = 200_000
 _RECONCILER_MAX_TOKENS = 8192
+# Source metadata is a small header, not document content — cap the rendered
+# block so an abusive value can't crowd candidates out of the char budget.
+_METADATA_MAX_CHARS = 2_000
+# Connector metadata is arbitrary — redact anything credential-shaped before
+# it reaches the prompt: keys with secret-like names are dropped entirely, and
+# URL query strings (where signed-URL secrets live) are stripped from values.
+_SENSITIVE_KEY_RE = re.compile(
+    r"(?i)(token|secret|passw|credential|api[_-]?key|auth|signature|cookie|session)"
+)
+_URL_QUERY_RE = re.compile(r"(https?://[^\s?]+)\?\S*")
 
 _SUBMIT_TOOL: dict[str, Any] = {
     "name": "submit_results",
@@ -104,6 +115,36 @@ class BatchReconcileResult(NamedTuple):
     llm_calls: int
 
 
+def _format_metadata(metadata: dict[str, Any] | None) -> str:
+    """Render pushed source metadata (e.g. a PR's state/author/labels) as a
+    ``Document metadata:`` header block for the doc prompt.
+
+    One ``key: value`` line per key — whitespace collapsed in both keys and
+    values so neither can break the line-per-key structure, list values
+    joined with commas. Keys matching ``_SENSITIVE_KEY_RE`` are dropped and
+    URL query strings are stripped from values, so credential-shaped fields
+    never reach the prompt. Returns "" when there is nothing to show.
+    """
+    if not metadata:
+        return ""
+    lines: list[str] = []
+    for key, value in metadata.items():
+        key = " ".join(key.split())
+        if not key or _SENSITIVE_KEY_RE.search(key):
+            continue
+        values = cast(list[Any], value) if isinstance(value, list) else [value]
+        rendered = ", ".join(" ".join(str(v).split()) for v in values if str(v).strip())
+        rendered = _URL_QUERY_RE.sub(r"\1", rendered)
+        if rendered:
+            lines.append(f"{key}: {rendered}")
+    if not lines:
+        return ""
+    block = "Document metadata:\n" + "\n".join(lines)
+    if len(block) > _METADATA_MAX_CHARS:
+        block = block[:_METADATA_MAX_CHARS] + "… (truncated)"
+    return block
+
+
 def batch_reconcile(
     *,
     title: str | None,
@@ -112,6 +153,7 @@ def batch_reconcile(
     source: str,
     candidates: list[WikiUpdateCandidate],
     model: str,
+    metadata: dict[str, Any] | None = None,
 ) -> BatchReconcileResult:
     """Reconcile all candidates in one or more LLM calls.
 
@@ -128,7 +170,8 @@ def batch_reconcile(
     if not candidates:
         return BatchReconcileResult(results=[], llm_calls=0)
 
-    candidate_budget = max(_RECONCILER_BUDGET_CHARS - len(content), 0)
+    metadata_block = _format_metadata(metadata)
+    candidate_budget = max(_RECONCILER_BUDGET_CHARS - len(content) - len(metadata_block), 0)
     batches = batch_by_chars(candidates, candidate_budget)
 
     # Worth caching the incoming doc only when sibling batches will reread it.
@@ -145,6 +188,7 @@ def batch_reconcile(
                 url=url,
                 content=content,
                 source=source,
+                metadata_block=metadata_block,
                 batch=batch,
                 model=model,
                 cache_doc=cache_doc,
@@ -170,6 +214,7 @@ def _reconcile_batch(
     url: str,
     content: str,
     source: str,
+    metadata_block: str,
     batch: list[WikiUpdateCandidate],
     model: str,
     cache_doc: bool,
@@ -193,6 +238,7 @@ def _reconcile_batch(
         url=url or "",
         source=source,
         today=today,
+        metadata=metadata_block,
         content=content,
     )
     candidates = load_prompt("ingest_batch_reconciler.candidates").format(

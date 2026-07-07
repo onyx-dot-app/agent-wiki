@@ -8,6 +8,8 @@ from app.db.fts import SearchHit
 from app.ingest.models import WikiUpdateCandidate
 from app.llm.agents.common import IRRELEVANT_SENTINEL, TextEdit, batch_by_chars, today_str
 from app.llm.agents.ingest_batch_reconciler import (
+    _METADATA_MAX_CHARS,
+    _format_metadata,
     _parse_tool_results,
     batch_reconcile,
 )
@@ -384,3 +386,94 @@ def test_no_instruction_line_when_absent(mock_client):
     )
     user_msg = mock_client.complete.call_args.kwargs["messages"][1]["content"]
     assert "Update instruction for this page" not in user_msg
+
+
+# --------------------------------------------------------------------------- #
+# Source metadata rendering                                                    #
+# --------------------------------------------------------------------------- #
+
+
+def test_format_metadata_empty_and_none():
+    assert _format_metadata(None) == ""
+    assert _format_metadata({}) == ""
+    assert _format_metadata({"k": []}) == ""
+
+
+def test_format_metadata_joins_lists_and_collapses_whitespace():
+    block = _format_metadata({
+        "merged": ["True"],
+        "labels": ["bug", "p0"],
+        "notes": "line one\nline two",
+    })
+    assert block == (
+        "Document metadata:\n"
+        "merged: True\n"
+        "labels: bug, p0\n"
+        "notes: line one line two"
+    )
+
+
+def test_format_metadata_drops_sensitive_keys():
+    block = _format_metadata({
+        "state": "open",
+        "access_token": "ghp_abc123",
+        "Webhook-Secret": "shh",
+        "API_KEY": "k",
+        "session_id": "s",
+    })
+    assert block == "Document metadata:\nstate: open"
+
+
+def test_format_metadata_strips_url_query_strings():
+    block = _format_metadata({
+        "download": "https://s3.example.com/f.pdf?X-Amz-Signature=abc&X-Amz-Credential=xyz",
+    })
+    assert block == "Document metadata:\ndownload: https://s3.example.com/f.pdf"
+
+
+def test_format_metadata_collapses_whitespace_in_keys():
+    # A key with embedded newlines must not split the block into extra
+    # header-like lines the model would read as separate fields.
+    block = _format_metadata({"merged: True\nstate": "open"})
+    assert block == "Document metadata:\nmerged: True state: open"
+
+
+def test_format_metadata_truncates_oversized_block():
+    block = _format_metadata({"k": "x" * (2 * _METADATA_MAX_CHARS)})
+    assert block.endswith("… (truncated)")
+    assert len(block) <= _METADATA_MAX_CHARS + len("… (truncated)")
+
+
+@patch("app.llm.agents.ingest_batch_reconciler.client")
+def test_metadata_rendered_in_prompt(mock_client):
+    # Real load_prompt so the doc header block is actually rendered.
+    mock_client.complete.return_value = _llm_response(
+        {"results": [{"candidate_index": 1, "action": "no_change"}]}
+    )
+    batch_reconcile(
+        title="123: Fix flaky test", url="https://github.com/o/r/pull/123",
+        content="PR body", source="github",
+        candidates=[_candidate("page.md")], model="m",
+        metadata={
+            "object_type": ["PullRequest"],
+            "merged": ["True"],
+            "user": ["{'login': 'roshan'}"],
+        },
+    )
+    user_msg = mock_client.complete.call_args.kwargs["messages"][1]["content"]
+    assert "Document metadata:" in user_msg
+    assert "merged: True" in user_msg
+    assert "user: {'login': 'roshan'}" in user_msg
+
+
+@patch("app.llm.agents.ingest_batch_reconciler.client")
+def test_no_metadata_block_when_absent(mock_client):
+    mock_client.complete.return_value = _llm_response(
+        {"results": [{"candidate_index": 1, "action": "no_change"}]}
+    )
+    batch_reconcile(
+        title="T", url="", content="doc", source="s",
+        candidates=[_candidate("page.md")], model="m",
+    )
+    user_msg = mock_client.complete.call_args.kwargs["messages"][1]["content"]
+    assert "Document metadata:" not in user_msg
