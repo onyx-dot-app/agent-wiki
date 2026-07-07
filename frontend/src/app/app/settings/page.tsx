@@ -30,6 +30,7 @@ import {
   Section as LayoutSection,
   SettingsLayouts,
 } from "@onyx-ai/opal/layouts";
+import { ConnectorsTab } from "@/components/settings/ConnectorsTab";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { apiFetch } from "@/lib/api";
 import { useRequireAuth } from "@/lib/auth";
@@ -61,6 +62,7 @@ const TABS = [
   { key: "wiki", label: "Wiki Preferences" },
   { key: "notifications", label: "Notifications" },
   { key: "account", label: "Account & Access" },
+  { key: "connectors", label: "Connectors" },
 ] as const;
 
 type TabKey = (typeof TABS)[number]["key"];
@@ -180,6 +182,11 @@ function SettingsPageInner() {
                     updateSettings={updateSettings}
                   />
                 </SettingsCard>
+              </SettingsSection>
+            )}
+            {tab === "connectors" && (
+              <SettingsSection title="Connectors">
+                <ConnectorsTab />
               </SettingsSection>
             )}
             {tab === "account" && (

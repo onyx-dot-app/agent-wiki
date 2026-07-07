@@ -81,7 +81,10 @@ def _on_http_exception(_request: Request, exc: Exception) -> JSONResponse:
         if isinstance(exc.detail, dict)
         else ErrorResponse(error=str(exc.detail)).model_dump()
     )
-    return JSONResponse(status_code=exc.status_code, content=content)
+    # Preserve semantic headers the endpoint attached (e.g. Retry-After).
+    return JSONResponse(
+        status_code=exc.status_code, content=content, headers=exc.headers
+    )
 
 
 def _on_validation_error(_request: Request, exc: Exception) -> JSONResponse:

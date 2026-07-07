@@ -1452,6 +1452,11 @@ class UserSlackConnection(Base):
     )
     team_id: Mapped[str] = mapped_column(Text, primary_key=True)
     team_name: Mapped[str | None] = mapped_column(Text)
+    # Pauses Slack delivery without disconnecting; dispatch skips muted
+    # connections and records the fire to events only.
+    muted: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("FALSE")
+    )
     # The connecting user's own Slack id, for DM-yourself delivery and
     # attribution.
     slack_user_id: Mapped[str] = mapped_column(Text, nullable=False)

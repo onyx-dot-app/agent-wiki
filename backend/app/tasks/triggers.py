@@ -501,6 +501,11 @@ def _dispatch_to_slack(
             trigger.id, trigger.owner_user_id,
         )
         return
+    if connection.get("muted"):
+        log.info(
+            "trigger %s slack connection muted; recorded to events only", trigger.id
+        )
+        return
     bot_token = slack_connections.get_bot_token(
         trigger.owner_user_id, str(connection["team_id"])
     )

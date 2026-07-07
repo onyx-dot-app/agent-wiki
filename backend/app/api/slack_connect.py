@@ -40,8 +40,14 @@ class SlackConnectStatus(BaseModel):
     configured: bool
     connected: bool
     team_name: str | None = None
+    team_id: str | None = None
     token_display: str | None = None
+    muted: bool = False
     connect_url: str | None = None
+
+
+class SlackMuteRequest(BaseModel):
+    muted: bool
 
 
 def _require_configured() -> app_settings.SlackAppSettings:
@@ -77,9 +83,25 @@ def get_status(user: User = Depends(require_user)) -> SlackConnectStatus:
         configured=settings.configured,
         connected=first is not None,
         team_name=first["team_name"] if first else None,
+        team_id=first["team_id"] if first else None,
         token_display=first["token_display"] if first else None,
+        muted=bool(first["muted"]) if first else False,
         connect_url=connect_url,
     )
+
+
+@router.put("/mute", response_model=SlackConnectStatus)
+def set_mute(
+    req: SlackMuteRequest, user: User = Depends(require_user)
+) -> SlackConnectStatus:
+    """Pause or resume Slack delivery on the user's connection without
+    disconnecting."""
+    rows = connections.list_for_user(user.id)
+    first = rows[0] if rows else None
+    if first is None:
+        raise HTTPException(status_code=404, detail="not connected")
+    connections.set_muted(user.id, str(first["team_id"]), req.muted)
+    return get_status(user)
 
 
 @router.get("/start")

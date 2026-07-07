@@ -42,6 +42,7 @@ def _to_dict(c: UserSlackConnection) -> dict[str, Any]:
         "slack_user_id": c.slack_user_id,
         "token_display": c.token_display,
         "scope": c.scope,
+        "muted": c.muted,
         "created_at": c.created_at,
         "updated_at": c.updated_at,
     }
@@ -99,6 +100,17 @@ def get(user_id: str, team_id: str) -> dict[str, Any] | None:
     with session() as s:
         row = s.get(UserSlackConnection, (user_id, team_id), options=[_DEFER_TOKEN])
         return _to_dict(row) if row else None
+
+
+def set_muted(user_id: str, team_id: str, muted: bool) -> dict[str, Any] | None:
+    """Flip delivery muting on one connection. Returns the updated row."""
+    with session() as s:
+        c = s.get(UserSlackConnection, (user_id, team_id))
+        if c is None:
+            return None
+        c.muted = muted
+        c.updated_at = _now_iso()
+        return _to_dict(c)
 
 
 def delete_connection(user_id: str, team_id: str) -> bool:
