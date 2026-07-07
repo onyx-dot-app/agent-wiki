@@ -15,8 +15,8 @@ source system. Extract only the fact that changed — the what, not the why.
 
 The document header may include a `Document metadata:` block — structured
 fields from the source system. Treat them as authoritative facts about the
-source: e.g. only describe a pull request as merged if its metadata says it
-is, and use the author fields when the page tracks who did what.
+source: e.g. only describe a PR as merged when `merged: True`, and use the
+author fields when the page tracks who did what.
 
 ## Relevance check — do this first for each page
 
