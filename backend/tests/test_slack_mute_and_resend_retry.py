@@ -364,3 +364,59 @@ def test_any_muted_connection_silences_webhooks_even_when_oldest_is_unmuted(
     )
 
     assert posted == []
+
+
+def test_webhook_for_unmuted_workspace_delivers_despite_other_muted(
+    tmp_db, monkeypatch
+):
+    uid = seed_user(email="u@x.com")
+    _connect(uid)  # T1
+    slack_connections.upsert(
+        user_id=uid,
+        team_id="T2",
+        team_name="Second Team",
+        slack_user_id="U2",
+        bot_token="xoxb-secret-2",
+        scope="chat:write",
+    )
+    slack_connections.set_muted(uid, "T2", True)
+    # Webhook belongs to T1 (unmuted) — T2's mute must not suppress it.
+    cfg = dest_configs.create(
+        uid,
+        type=destinations_repo.SLACK_ID,
+        name="webhook",
+        secret="https://hooks.slack.com/services/T1/B000/xyz",  # pragma: allowlist secret
+    )
+    action = TriggerAction(destination_config_id=cfg["id"], message="hi")
+    trigger = TriggerRecord(
+        id="trg_6",
+        owner_user_id=uid,
+        scope_path="a.md",
+        kind="delta",
+        nl_description="always",
+        actions=[action],
+        enabled=True,
+        file_path=None,
+        created_at=None,
+        last_edited_at=None,
+    )
+
+    posted: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        "app.tasks.triggers.slack_client.post_message",
+        lambda **kw: posted.append(kw),
+    )
+
+    _record_fire(
+        trigger=trigger,
+        action=action,
+        doc_path="a.md",
+        sha="abc",
+        change_kind=ChangeKind.EDIT,
+        reason="r",
+        instruction="i",
+        rendered_message="hi",
+        actor=None,
+    )
+
+    assert len(posted) == 1

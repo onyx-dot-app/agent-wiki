@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any, cast
 
 from datetime import datetime, timezone
@@ -468,31 +469,39 @@ def _dispatch_to_slack(
     config_id = str(config["id"])
 
     if config.get("has_secret"):
-        # Webhooks carry no workspace identity, so they cannot be matched to
-        # a specific connection's mute. Fail quiet: any muted connection
-        # suppresses webhook sends, since the webhook may belong to that
-        # workspace. Owners with no connections have no mute surface and
-        # keep sending.
-        muted_team = next(
-            (
-                c["team_id"]
-                for c in slack_connections.list_for_user(trigger.owner_user_id)
-                if c.get("muted")
-            ),
-            None,
-        )
-        if muted_team is not None:
-            log.info(
-                "trigger %s slack webhook suppressed: connection %s is muted; "
-                "recorded to events only",
-                trigger.id, muted_team,
-            )
-            return
         webhook_url = dest_configs.get_secret(config_id, owner_user_id=trigger.owner_user_id)
         if not webhook_url:
             log.info(
                 "trigger %s slack config %s secret unavailable; recorded to events only",
                 trigger.id, config_id,
+            )
+            return
+        # Slack webhook URLs embed their workspace id
+        # (hooks.slack.com/services/<TEAM>/...), so the mute check targets
+        # exactly the webhook's own workspace. URLs that don't parse fall
+        # back to fail-quiet: any muted connection suppresses the send.
+        team_match = re.match(
+            r"https://hooks\.slack\.com/services/(T[A-Z0-9]+)/", webhook_url
+        )
+        connections = slack_connections.list_for_user(trigger.owner_user_id)
+        if team_match:
+            muted_team = next(
+                (
+                    c["team_id"]
+                    for c in connections
+                    if c["team_id"] == team_match.group(1) and c.get("muted")
+                ),
+                None,
+            )
+        else:
+            muted_team = next(
+                (c["team_id"] for c in connections if c.get("muted")), None
+            )
+        if muted_team is not None:
+            log.info(
+                "trigger %s slack webhook suppressed: connection %s is muted; "
+                "recorded to events only",
+                trigger.id, muted_team,
             )
             return
         try:
