@@ -64,7 +64,19 @@ def checkpoint_session(session_id: int) -> str | None:
     (``version == checkpointed_version``), or the merge collapses to the current
     HEAD. Reconciles concurrent agent/ingest commits via the gateway's 3-way +
     AI merge. Idempotent: after a successful commit the session is marked clean.
+
+    Serialized per session by an advisory lock, so two workers that both dequeued
+    a checkpoint for the same session can't both commit the buffer — the loser
+    blocks, then re-reads a clean/closed session and no-ops (see
+    ``coedit.checkpoint_lock``). Distinct sessions still checkpoint in parallel.
     """
+    with coedit.checkpoint_lock(session_id):
+        return _checkpoint_locked(session_id)
+
+
+def _checkpoint_locked(session_id: int) -> str | None:
+    """Body of ``checkpoint_session``, run while holding the session's checkpoint
+    advisory lock so the read-guard-commit sequence is atomic across workers."""
     sess = coedit.get_session(session_id)
     if sess is None:
         return None  # gone

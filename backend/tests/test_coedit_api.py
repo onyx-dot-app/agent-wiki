@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 
 from app.auth import users as users_repo
 from app.main import create_app
-from app.tasks.queues import documents_queue
+from app.tasks.queues import coedit_queue
 from app.wiki import acl, coedit, git
 
 from tests._auth import login_fastapi
@@ -111,7 +111,7 @@ def test_leave_last_participant_checkpoints(client):
     )
 
     # The last leave enqueues a checkpoint; immediate_mode runs it inline.
-    with documents_queue.immediate_mode():
+    with coedit_queue.immediate_mode():
         assert client.post("/api/coedit/leave", json={"session_id": sid}).status_code == 200
 
     assert git.read_file(_PATH) == "hi world"
@@ -128,7 +128,7 @@ def test_checkpoint_endpoint_commits_buffer(client):
         json={"session_id": sid, "base_version": 0, "changes": [{"from": 0, "to": 5, "insert": "hi"}]},
     )
 
-    with documents_queue.immediate_mode():
+    with coedit_queue.immediate_mode():
         resp = client.post("/api/coedit/checkpoint", json={"session_id": sid})
     assert resp.status_code == 200
     assert resp.json() == {"queued": True}

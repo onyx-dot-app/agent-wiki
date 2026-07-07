@@ -22,6 +22,7 @@
         "API Server",
         "Worker: documents",
         "Worker: triggers",
+        "Worker: coedit",
         "Worker: lightweight_maintenance"
       ],
       "presentation": {
@@ -46,6 +47,7 @@
       "configurations": [
         "Worker: documents",
         "Worker: triggers",
+        "Worker: coedit",
         "Worker: lightweight_maintenance"
       ],
       "presentation": {
@@ -156,6 +158,31 @@
       ],
       "console": "integratedTerminal",
       "consoleTitle": "Worker: triggers Console",
+      "justMyCode": false,
+      "presentation": {
+        "group": "2"
+      }
+    },
+    {
+      // Commits co-edit session buffers to git (with an AI merge on overlap).
+      // Own queue so a checkpoint can't sit behind connector ingest; per-session
+      // safety comes from an advisory lock, so it runs multi-threaded.
+      "name": "Worker: coedit",
+      "type": "debugpy",
+      "request": "launch",
+      "python": "${workspaceFolder}/backend/.venv/bin/python",
+      "module": "app.tasks.run_worker",
+      "cwd": "${workspaceFolder}/backend",
+      "envFile": "${workspaceFolder}/.env",
+      "env": {
+        "LOG_LEVEL": "DEBUG",
+        "PYTHONUNBUFFERED": "1"
+      },
+      "args": [
+        "coedit"
+      ],
+      "console": "integratedTerminal",
+      "consoleTitle": "Worker: coedit Console",
       "justMyCode": false,
       "presentation": {
         "group": "2"

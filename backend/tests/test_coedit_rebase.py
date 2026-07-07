@@ -9,7 +9,7 @@ import pytest
 from app.auth import users as users_repo
 from app.models.wiki import ChangeKind
 from app.tasks import coedit_rebase as coedit_rebase_task
-from app.tasks.queues import documents_queue, lightweight_maintenance_queue
+from app.tasks.queues import coedit_queue, lightweight_maintenance_queue
 from app.wiki import coedit, coedit_checkpoint, coedit_rebase
 from app.wiki import git as wiki_git
 from app.wiki.utils import commit_and_fan_out
@@ -141,12 +141,12 @@ def test_conflict_hands_off_to_checkpoint_by_name(repo, monkeypatch):
     # no import of app.tasks.coedit_checkpoint is needed (would be circular).
     calls: list[int] = []
     monkeypatch.setitem(
-        documents_queue.handlers, "checkpoint_coedit_session", lambda sid: calls.append(sid)
+        coedit_queue.handlers, "checkpoint_coedit_session", lambda sid: calls.append(sid)
     )
     uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
     sid, new_sha = _seed_conflict(uid)
 
-    with lightweight_maintenance_queue.immediate_mode(), documents_queue.immediate_mode():
+    with lightweight_maintenance_queue.immediate_mode(), coedit_queue.immediate_mode():
         coedit_rebase_task.rebase_coedit_session(sid, new_sha)
 
     assert calls == [sid]

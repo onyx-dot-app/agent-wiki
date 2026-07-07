@@ -20,6 +20,8 @@ unsaved buffer. See
 from __future__ import annotations
 
 import logging
+from collections.abc import Generator
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any
@@ -29,7 +31,7 @@ from sqlalchemy import func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 
 from app.db.models import CoeditOp, CoeditParticipant, CoeditSession, User
-from app.db.session import session
+from app.db.session import advisory_xact_lock, session
 
 log = logging.getLogger(__name__)
 
@@ -565,6 +567,36 @@ def close_if_clean(session_id: int) -> bool:
             .execution_options(synchronize_session=False)
         ).one_or_none()
         return closed is not None
+
+
+# Namespace for checkpoint advisory-lock keys. The whole DB shares one 64-bit
+# advisory keyspace (see triggers/repo.py's _REBUILD_ADVISORY_LOCK), so pack a
+# tag into the high 32 bits to keep checkpoint keys in their own band and off
+# any bare small-integer key. Assumes session_id < 2**32 (a serial won't reach
+# 4 billion).
+_CHECKPOINT_LOCK_NS = 0xC0ED
+
+
+def checkpoint_lock_key(session_id: int) -> int:
+    return (_CHECKPOINT_LOCK_NS << 32) | session_id
+
+
+@contextmanager
+def checkpoint_lock(session_id: int) -> Generator[None]:
+    """Serialize checkpoints of one session across concurrent workers.
+
+    Different sessions still checkpoint in parallel — the lock is keyed on
+    session_id — but two workers that both dequeued a checkpoint for the *same*
+    session run one at a time, so the loser re-reads a clean/closed session and
+    no-ops instead of committing the same buffer twice. Uses a *transaction*-
+    scoped advisory lock (auto-released on commit/rollback), so a worker that
+    dies mid-checkpoint can't strand it. Chosen over ``SELECT ... FOR UPDATE`` on
+    the session row because that row is written by every live ``apply_op`` — a
+    row lock held across the checkpoint's (possibly LLM) merge would freeze live
+    editing; an abstract advisory lock doesn't. See ``coedit_checkpoint``."""
+    with session() as s:
+        advisory_xact_lock(s, checkpoint_lock_key(session_id))
+        yield
 
 
 def rename_path(old_path: str, new_path: str) -> None:

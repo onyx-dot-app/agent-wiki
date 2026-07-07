@@ -1,15 +1,16 @@
-"""Three task queues backed by Redis Streams.
+"""Four task queues backed by Redis Streams.
 
-We deliberately split background work into **three independent queues**, each
+We deliberately split background work into **four independent queues**, each
 with its own ``TaskQueue`` instance and its own consumer process. Each queue
 is a Redis Stream (``queue:{name}``) so each queue's backlog is isolated from
 the others. A slow LLM doc-rewrite can't delay a reindex; a flood of
-trigger evaluations can't backpressure connector ingest.
+trigger evaluations can't backpressure connector ingest; a co-edit checkpoint
+can't sit behind an hour of connector ingest.
 
 Each constant below is the canonical entry point for tasks that belong on
-that queue. Don't add a fourth queue without a real reason — the value of
-this split comes from the queues being a small, fixed set that the rest of
-the system can reason about.
+that queue. Keep this a small, fixed set — the value of the split comes from
+the queues being few and reason-about-able. Add one only when a workload's
+latency/throughput profile genuinely conflicts with every existing queue.
 
 Queues:
 
@@ -33,6 +34,17 @@ Queues:
   Onyx Craft launches also ride this queue (each blocks ~10-60s on Onyx
   sandbox provisioning).
 
+* ``coedit_queue`` — **co-edit session checkpoints.** Commits a live session
+  buffer to git and, on a concurrent agent/ingest commit, runs an AI merge —
+  so like ``documents_queue`` it commits and may hit the LLM, and can't live on
+  ``lightweight_maintenance_queue``. It gets its *own* queue because a
+  checkpoint's freshness is user-visible (readers see git HEAD): parked behind
+  hours of connector ingest on ``documents_queue``, a session's committed page
+  goes stale and, in the limit, pins readers to a lagging buffer (the 2026-07-06
+  incident). Runs wider than ``documents`` because per-session safety comes from
+  a Postgres advisory lock (``coedit.checkpoint_lock_key``), not single-threading
+  — different sessions checkpoint in parallel; the same session is serialized.
+
 * ``lightweight_maintenance_queue`` — **fast upkeep tasks.** Sub-second,
   no LLM, no external HTTP, no wiki commits. Anything that fits that
   profile and isn't worth its own queue lives here. The placement rule
@@ -51,7 +63,8 @@ Queues:
 
 Each consumer runs as a separate worker container — see
 ``docker-compose.yml`` (``worker-documents``, ``worker-triggers``,
-``worker-lightweight-maintenance``) and ``app/tasks/run_worker.py``.
+``worker-coedit``, ``worker-lightweight-maintenance``) and
+``app/tasks/run_worker.py``.
 """
 from __future__ import annotations
 
@@ -61,6 +74,7 @@ from app.tasks.queue import QueueFullError, TaskQueue
 __all__ = [
     "QueueFullError",
     "QUEUES",
+    "coedit_queue",
     "documents_queue",
     "lightweight_maintenance_queue",
     "triggers_queue",
@@ -73,6 +87,7 @@ def _make(name: str) -> TaskQueue:
 
 documents_queue = _make("documents")
 triggers_queue = _make("triggers")
+coedit_queue = _make("coedit")
 lightweight_maintenance_queue = _make("lightweight_maintenance")
 
 # Map queue-name → instance, used by run_worker.py to launch the right
@@ -80,5 +95,6 @@ lightweight_maintenance_queue = _make("lightweight_maintenance")
 QUEUES = {
     "documents": documents_queue,
     "triggers": triggers_queue,
+    "coedit": coedit_queue,
     "lightweight_maintenance": lightweight_maintenance_queue,
 }
