@@ -1,6 +1,6 @@
 "use client";
 
-import { Text } from "@onyx-ai/opal/components";
+import { Tag, Text } from "@onyx-ai/opal/components";
 import {
   SvgActivity,
   SvgBook,
@@ -23,30 +23,26 @@ export function destinationIcon(type: string) {
   return SvgActivity;
 }
 
-/** The tinted page/folder tag shared by trigger cards and activity rows.
- * Custom spans: Opal ships no passive tag/badge primitive (FilterButton is
- * its only chip and is interactive-only). */
+/** The page/folder tag shared by trigger cards and activity rows. The
+ * wrapper span only bounds width for long paths and carries the full-path
+ * hover title. */
 export function ScopeChip({ scope }: { scope: string }) {
-  const Icon = scopeIcon(scope);
   return (
     <span
-      className="flex max-w-[220px] items-center rounded-(--radius-04) bg-(--background-tint-02) p-[2px]"
+      className="flex max-w-[220px] items-center overflow-hidden"
       title={scope || "Whole wiki"}
     >
-      <span className="flex size-4 items-center justify-center p-[2px]">
-        <Icon className="size-3 text-(--text-03)" />
-      </span>
-      <span className="min-w-0 px-[2px]">
-        <Text font="secondary-body" color="text-03" nowrap maxLines={1}>
-          {scope ? formatScopePath(scope).replace(/^\//, "") : "Whole wiki"}
-        </Text>
-      </span>
+      <Tag
+        icon={scopeIcon(scope)}
+        title={scope ? formatScopePath(scope).replace(/^\//, "") : "Whole wiki"}
+      />
     </span>
   );
 }
 
 /** Overlapping 20px owner-initial + destination-type circles. Custom spans:
- * Opal ships no avatar primitive. */
+ * Opal ships no avatar primitive (checked alias-tolerant across the dist —
+ * only Table's qualifier-column docs mention avatars). */
 export function AvatarCluster({
   ownerName,
   destinationTypes,
