@@ -4,7 +4,6 @@ import { useRef, useState } from "react";
 
 import {
   Button,
-  FilterButton,
   LineItemButton,
   Popover,
   PopoverMenu,
@@ -16,10 +15,12 @@ import {
   SvgHash,
   SvgMail,
   SvgSlack,
+  SvgChevronDown,
   SvgTrash,
   SvgUser,
 } from "@onyx-ai/opal/icons";
 
+import { InputChip } from "@/components/triggers/InputChip";
 import { ensureEmailDestination } from "@/lib/emailConnect";
 import {
   ensureSlackDestination,
@@ -150,6 +151,7 @@ function ActionGroupRow({
             type="button"
             icon={SvgTrash}
             size="sm"
+            prominence="tertiary"
             tooltip="Remove this action"
             onClick={onRemove}
             disabled={disabled}
@@ -158,11 +160,23 @@ function ActionGroupRow({
       </div>
 
       <Popover open={typeOpen} onOpenChange={setTypeOpen}>
-        <Popover.Trigger asChild disabled={disabled}>
-          <SelectButton icon={meta.icon} size="sm" state="empty" width="full">
-            {meta.label}
-          </SelectButton>
-        </Popover.Trigger>
+        {/* SelectButton draws no border of its own; the slot supplies the
+            input border, keeps content left-aligned, and pushes the chevron
+            to the right edge. It wraps outside the trigger so the button
+            stays the popover's accessible trigger element. */}
+        <span className="block w-full rounded-(--radius-08) border border-(--border-02) bg-(--background-neutral-00) [&_.opal-select-button]:w-full [&_.opal-select-button]:justify-start [&_.opal-select-button>*:nth-last-child(1)]:ml-auto">
+          <Popover.Trigger asChild disabled={disabled}>
+            <SelectButton
+              icon={meta.icon}
+              rightIcon={SvgChevronDown}
+              size="sm"
+              state="empty"
+              width="full"
+            >
+              {meta.label}
+            </SelectButton>
+          </Popover.Trigger>
+        </span>
         <Popover.Content width="trigger" align="start" sideOffset={4}>
           <PopoverMenu>
             {typeOptions.map((t) => (
@@ -330,17 +344,15 @@ function SlackToRow({
         <Popover.Anchor asChild>
           <div ref={anchorRef} className={CHIP_BAR}>
             {selected.map((c) => (
-              <FilterButton
+              <InputChip
                 key={c.id}
                 icon={c.config.dm ? SvgUser : SvgHash}
-                active
-                onClear={() =>
+                label={c.name}
+                onRemove={() =>
                   onConfigIds(configIds.filter((id) => id !== c.id))
                 }
                 disabled={disabled}
-              >
-                {c.name}
-              </FilterButton>
+              />
             ))}
             {/* raw-ok: bare .opal-input-field; InputTypeIn's own 36px container would double-box the 36px Input/Tags row */}
             <input
@@ -464,16 +476,14 @@ function EmailToRow({
       <ToLabel />
       <div className={CHIP_BAR}>
         {selected.map((c) => (
-          <FilterButton
+          <InputChip
             key={c.id}
             icon={SvgMail}
-            active
-            onClear={() => onConfigIds(configIds.filter((id) => id !== c.id))}
+            label={c.verified_at ? c.name : `${c.name} (unverified)`}
+            onRemove={() => onConfigIds(configIds.filter((id) => id !== c.id))}
             disabled={disabled}
-            tooltip={c.verified_at ? undefined : "Not verified yet"}
-          >
-            {c.verified_at ? c.name : `${c.name} (unverified)`}
-          </FilterButton>
+            title={c.verified_at ? undefined : "Not verified yet"}
+          />
         ))}
         {/* raw-ok: bare .opal-input-field; InputTypeIn's own 36px container would double-box the 36px Input/Tags row */}
         <input

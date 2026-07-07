@@ -7,7 +7,6 @@ import useSWR from "swr";
 import {
   Button,
   Divider,
-  FilterButton,
   LineItemButton,
   Popover,
   PopoverMenu,
@@ -41,6 +40,7 @@ import {
   ActionEditor,
   type ActionGroup,
 } from "@/components/triggers/ActionEditor";
+import { InputChip } from "@/components/triggers/InputChip";
 import { useSlackConnectStatus } from "@/lib/slackConnect";
 import {
   createTrigger,
@@ -388,6 +388,7 @@ export function TriggerPanel({
             <Button
               type="button"
               icon={SvgPlusCircle}
+              prominence="secondary"
               disabled={busy}
               onClick={() =>
                 setGroups([
@@ -741,7 +742,7 @@ function WatchScopePicker({
       <Popover.Anchor asChild>
         <div ref={anchorRef} className={WATCH_CHIP_BAR}>
           {committed ? (
-            <FilterButton
+            <InputChip
               icon={
                 committed === "/"
                   ? SvgBook
@@ -749,14 +750,10 @@ function WatchScopePicker({
                     ? SvgFile
                     : SvgFolder
               }
-              active={!locked}
-              onClear={() => {
-                if (!disabled && !locked) onScopePath("");
-              }}
+              label={committed === "/" ? "Whole wiki" : committed}
+              onRemove={locked ? undefined : () => onScopePath("")}
               disabled={disabled}
-            >
-              {committed === "/" ? "Whole wiki" : committed}
-            </FilterButton>
+            />
           ) : (
             // raw-ok: bare .opal-input-field; InputTypeIn's own 36px container would double-box the 36px Input/Tags row
             <input
