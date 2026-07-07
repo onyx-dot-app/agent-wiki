@@ -494,16 +494,28 @@ def _dispatch_to_slack(
         )
         return
 
-    connection = next(iter(slack_connections.list_for_user(trigger.owner_user_id)), None)
+    # Resolve the connection the target belongs to: configs stamped with a
+    # team_id use that workspace; legacy configs fall back to the first
+    # connection. Mute is checked on the SAME connection that would deliver,
+    # so muting one workspace never silences another.
+    config_team = target.get("team_id")
+    if config_team:
+        connection = slack_connections.get(trigger.owner_user_id, str(config_team))
+    else:
+        connection = next(
+            iter(slack_connections.list_for_user(trigger.owner_user_id)), None
+        )
     if connection is None:
         log.info(
-            "trigger %s owner %s has no slack connection; recorded to events only",
+            "trigger %s owner %s has no slack connection for this target; "
+            "recorded to events only",
             trigger.id, trigger.owner_user_id,
         )
         return
     if connection.get("muted"):
         log.info(
-            "trigger %s slack connection muted; recorded to events only", trigger.id
+            "trigger %s slack connection %s muted; recorded to events only",
+            trigger.id, connection["team_id"],
         )
         return
     bot_token = slack_connections.get_bot_token(
