@@ -3,12 +3,15 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import ValidationError
 
 from app.auth import User
 from app.auth import users as users_repo
 from app.auth.deps import require_user
+from pydantic import BaseModel, Field
+
+from app.auth.passwords import verify_password
 from app.models._helpers import RequestError
 from app.models.auth import AuthSession
 from app.models.user_profile import UserProfileUpdate
@@ -45,6 +48,24 @@ def put_settings(
         raise HTTPException(status_code=404, detail="not found")
     log.info("user %s updated settings keys=%s", user.id, sorted(partial.keys()))
     return UserSettings.model_validate(updated)
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(min_length=1)
+    new_password: str = Field(min_length=8)
+
+
+@router.put("/password", status_code=status.HTTP_204_NO_CONTENT)
+def put_password(
+    req: ChangePasswordRequest, user: User = Depends(require_user)
+) -> None:
+    row = users_repo.get_by_id(user.id)
+    if row is None or not verify_password(
+        req.current_password, str(row.get("password_hash") or "")
+    ):
+        raise RequestError("current password is incorrect")
+    users_repo.set_password(user.id, req.new_password)
+    log.info("user %s changed password", user.id)
 
 
 @router.put("/profile", response_model=AuthSession)

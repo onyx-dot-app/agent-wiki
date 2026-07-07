@@ -176,6 +176,16 @@ def delete(user_id: str) -> None:
             s.delete(u)
 
 
+def set_password(user_id: str, new_password: str) -> bool:
+    """Replace the stored hash. Returns False for an unknown user."""
+    with session() as s:
+        u = s.get(User, user_id)
+        if u is None:
+            return False
+        u.password_hash = hash_password(new_password)
+        return True
+
+
 def update_name(user_id: str, name: str | None) -> dict[str, Any] | None:
     """Set the user's display name. Returns the refreshed user dict, or
     None if the user doesn't exist."""

@@ -21,6 +21,7 @@ const DEFAULT_USER_SETTINGS: UserSettings = {
   chat_model: null,
   notify_comment_email: false,
   notify_update_warning_email: false,
+  work_role: null,
 };
 
 export interface AuthUser {

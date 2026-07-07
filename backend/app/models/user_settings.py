@@ -37,6 +37,8 @@ class UserSettings(BaseModel):
     # — the account's own identity, so no verification flow applies.
     notify_comment_email: bool = False
     notify_update_warning_email: bool = False
+    # Free-text role shown to the LLM so responses can be tailored.
+    work_role: str | None = None
 
     @field_validator("timezone")
     @classmethod
@@ -63,6 +65,7 @@ class UserSettingsUpdate(BaseModel):
     chat_model: str | None = Field(default=None)
     notify_comment_email: bool | None = Field(default=None)
     notify_update_warning_email: bool | None = Field(default=None)
+    work_role: str | None = Field(default=None)
 
     def non_null(self) -> dict[str, Any]:
         sent = self.model_fields_set
