@@ -143,6 +143,17 @@ def get_redis() -> Any:
         return _redis_client
 
 
+def reset_redis_for_tests() -> None:
+    """Drop the cached client so the next ``get_redis()`` re-reads ``CONFIG``.
+
+    Tests point ``CONFIG.redis_url`` at a per-test broker; without this the
+    lazily-cached client from an earlier test (or the default URL) leaks across
+    cases. Mirrors ``reset_engine_for_tests`` / ``fts.reset_client_for_tests``.
+    """
+    global _redis_client
+    _redis_client = None
+
+
 # --------------------------------------------------------------------------- #
 # Redis key helpers                                                           #
 # --------------------------------------------------------------------------- #
@@ -166,6 +177,12 @@ def _counter_key(name: str) -> str:
 
 def _sched_lock_key(name: str) -> str:
     return f"queue:{name}:sched_lock"
+
+
+def _as_str(v: Any) -> str:
+    """Redis values are str under our decode_responses client, but be robust to a
+    non-decoding client (bytes) so id parsing can't silently mis-read."""
+    return v.decode() if isinstance(v, bytes) else str(v)
 
 
 # --------------------------------------------------------------------------- #
@@ -275,6 +292,39 @@ class TaskQueue(BaseModel):
             return QueueDepth(ready=ready, delayed=delayed, in_flight=in_flight)
         except Exception:
             return QueueDepth(ready=0, delayed=0, in_flight=0)
+
+    def oldest_age_seconds(self) -> float | None:
+        """Seconds the oldest message in the ready stream has waited, or None if
+        nothing is ready. Redis stream IDs embed the enqueue time (ms), so the
+        oldest ready entry's id dates the oldest unworked message — the backlog
+        signal depth alone misses when the queue is shallow. Starts strictly
+        after the group's last-delivered-id, so an in-flight entry (delivered to
+        a worker, not yet acked) isn't counted as queue latency — matching
+        depth().ready. Uses Redis server time to match the id clock. Ignores the
+        delay set (not-yet-due scheduled items). None in immediate mode."""
+        if self.immediate:
+            return None
+        r = get_redis()
+        try:
+            # Everything up to last-delivered-id has already been handed to a
+            # worker; the oldest *ready* message is the next one after it.
+            last_id = "0-0"
+            try:
+                for g in r.xinfo_groups(_stream_key(self.name)):
+                    if _as_str(g.get("name")) == "workers":
+                        last_id = _as_str(g.get("last-delivered-id")) or "0-0"
+                        break
+            except Exception:
+                pass  # group not created yet → treat every entry as ready
+            entries = r.xrange(_stream_key(self.name), min=f"({last_id}", count=1)
+            if not entries:
+                return None
+            enqueued_ms = int(_as_str(entries[0][0]).split("-", 1)[0])
+            secs, micros = r.time()
+            now_ms = int(secs) * 1000 + int(micros) // 1000
+            return max(0.0, (now_ms - enqueued_ms) / 1000.0)
+        except Exception:
+            return None
 
     def enqueue(
         self,
