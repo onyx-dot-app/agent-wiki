@@ -7,7 +7,6 @@ import useSWR from "swr";
 import {
   Button,
   Divider,
-  FilterButton,
   LineItemButton,
   Popover,
   PopoverMenu,
@@ -16,6 +15,7 @@ import {
 } from "@onyx-ai/opal/components";
 import {
   SvgBook,
+  SvgFold,
   SvgFile,
   SvgFolder,
   SvgPlusCircle,
@@ -41,6 +41,8 @@ import {
   ActionEditor,
   type ActionGroup,
 } from "@/components/triggers/ActionEditor";
+import InputChipField from "@/components/inputs/InputChipField";
+import InputTextArea from "@/components/inputs/InputTextArea";
 import { useSlackConnectStatus } from "@/lib/slackConnect";
 import {
   createTrigger,
@@ -62,6 +64,9 @@ interface Props {
   onDelete?: () => void | Promise<void>;
   /** Lock the scope_path input so callers (e.g. doc page) can pin it. */
   lockScope?: boolean;
+  /** Render as a docked right-panel column instead of the floating overlay
+   * (the doc page portals it into the right-panel host per the mock). */
+  docked?: boolean;
 }
 
 let groupKeyCounter = 1;
@@ -115,6 +120,7 @@ export function TriggerPanel({
   onSaved,
   onDelete,
   lockScope,
+  docked,
 }: Props) {
   const isEdit = Boolean(initial?.id);
   const [scopePath, setScopePath] = useState("");
@@ -247,7 +253,13 @@ export function TriggerPanel({
     .join(" and ");
 
   return (
-    <div className="fixed top-2 right-2 z-[100] flex max-h-[calc(100vh-16px)] w-[464px] max-w-[calc(100vw-16px)] flex-col">
+    <div
+      className={
+        docked
+          ? "flex max-h-full w-full flex-col"
+          : "fixed top-2 right-2 z-[100] flex max-h-[calc(100vh-16px)] w-[464px] max-w-[calc(100vw-16px)] flex-col"
+      }
+    >
       <form
         onSubmit={onSubmit}
         className="flex max-h-full w-full flex-col overflow-hidden rounded-(--radius-12) border border-(--border-01) bg-(--background-tint-00)"
@@ -268,9 +280,10 @@ export function TriggerPanel({
           </div>
           <Button
             type="button"
-            icon={SvgX}
+            icon={docked ? SvgFold : SvgX}
             size="sm"
-            tooltip="Close"
+            prominence="internal"
+            tooltip={docked ? "Collapse" : "Close"}
             onClick={onClose}
             disabled={busy}
           />
@@ -326,7 +339,7 @@ export function TriggerPanel({
             />
             <div className="px-[2px]">
               <Text font="secondary-body" color="text-03">
-                Add a specific page or an entire folder to watch.
+                Add specific sections or entire pages to watch.
               </Text>
             </div>
           </div>
@@ -356,14 +369,12 @@ export function TriggerPanel({
                 Run if
               </Text>
             </div>
-            {/* raw-ok: no Opal multiline input */}
-            <textarea
+            <InputTextArea
               value={ifText}
               onChange={(e) => setIfText(e.target.value)}
-              disabled={busy}
+              variant={busy ? "disabled" : "primary"}
               placeholder={EXAMPLE_IF}
               rows={2}
-              className="box-border w-full resize-y rounded-(--radius-08) border border-(--border-02) bg-(--background-tint-00) px-[10px] py-2 text-[14px] leading-5 outline-none placeholder:text-(--text-02) focus:border-(--border-05) focus:shadow-[0_0_0_2px_var(--background-tint-04)]"
             />
             {kind === "schedule" && (
               <div className="px-[2px]">
@@ -388,6 +399,7 @@ export function TriggerPanel({
             <Button
               type="button"
               icon={SvgPlusCircle}
+              prominence="secondary"
               disabled={busy}
               onClick={() =>
                 setGroups([
@@ -679,9 +691,6 @@ function pad(n: number): string {
   return n.toString().padStart(2, "0");
 }
 
-const WATCH_CHIP_BAR =
-  "flex min-h-9 w-full flex-wrap content-center items-center gap-1 text-[14px] leading-5 rounded-(--radius-08) border border-(--border-02) bg-(--background-tint-00) p-[5px] focus-within:border-(--border-05) focus-within:shadow-[0_0_0_2px_var(--background-tint-04)]";
-
 /** Search-and-pick for the trigger's watched scope: a dropdown over the
  * ACL-filtered wiki path list (files and their folders), selection only —
  * free-typed paths can't be committed, so a scope always exists. */
@@ -739,49 +748,39 @@ function WatchScopePicker({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <Popover.Anchor asChild>
-        <div ref={anchorRef} className={WATCH_CHIP_BAR}>
-          {committed ? (
-            <FilterButton
-              icon={
-                committed === "/"
-                  ? SvgBook
-                  : committed.endsWith(".md")
-                    ? SvgFile
-                    : SvgFolder
-              }
-              active={!locked}
-              onClear={() => {
-                if (!disabled && !locked) onScopePath("");
-              }}
-              disabled={disabled}
-            >
-              {committed === "/" ? "Whole wiki" : committed}
-            </FilterButton>
-          ) : (
-            // raw-ok: bare .opal-input-field; InputTypeIn's own 36px container would double-box the 36px Input/Tags row
-            <input
-              className="opal-input-field min-w-[120px] flex-1"
-              value={query}
-              onChange={(e) => {
-                setQuery(e.target.value);
-                if (!open) setOpen(true);
-              }}
-              onFocus={() => setOpen(true)}
-              onKeyDown={(e) => {
-                if (e.key === "Escape") setOpen(false);
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  // Enter commits the visually top row: Whole wiki leads an
-                  // empty query, then folders, then files.
-                  const first = !q
-                    ? "/"
-                    : (matchedFolders[0] ?? matchedFiles[0]);
-                  if (first) pick(first);
-                }
-              }}
-              placeholder="Search pages and folders to watch"
-            />
-          )}
+        <div ref={anchorRef} className="w-full">
+          <InputChipField
+            chips={
+              committed
+                ? [
+                    {
+                      id: committed,
+                      label: committed === "/" ? "Whole wiki" : committed,
+                    },
+                  ]
+                : []
+            }
+            onRemoveChip={() => {
+              if (!locked) onScopePath("");
+            }}
+            onAdd={() => {
+              // Enter commits the visually top row: Whole wiki leads an
+              // empty query, then folders, then files.
+              const first = !q ? "/" : (matchedFolders[0] ?? matchedFiles[0]);
+              if (first) pick(first);
+            }}
+            value={query}
+            onChange={(v) => {
+              setQuery(v);
+              if (!open) setOpen(true);
+            }}
+            onFocus={() => setOpen(true)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") setOpen(false);
+            }}
+            disabled={disabled || (Boolean(committed) && Boolean(locked))}
+            placeholder={committed ? "" : "Search pages and folders to watch"}
+          />
         </div>
       </Popover.Anchor>
       <Popover.Content

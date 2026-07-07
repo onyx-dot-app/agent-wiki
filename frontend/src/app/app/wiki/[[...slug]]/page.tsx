@@ -15,6 +15,7 @@ import remarkGfm from "remark-gfm";
 import useSWR from "swr";
 import {
   Button,
+  Divider,
   LineItemButton,
   OpenButton,
   Popover,
@@ -41,6 +42,9 @@ import {
 import { useConfirm } from "@/components/common/ConfirmDialog";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { TriggerPanel } from "@/components/triggers/TriggerPanel";
+import { TriggersSidePanel } from "@/components/wiki/TriggersSidePanel";
+import { useLeftPanel } from "@/providers/LeftPanelProvider";
+import { deleteTrigger, useTriggers, type Trigger } from "@/lib/triggers";
 import { DiffView } from "@/components/wiki/DiffView";
 import { HistoryPanel } from "@/components/wiki/HistoryPanel";
 import { RunAgentPanel } from "@/components/wiki/RunAgentPanel";
@@ -1269,6 +1273,8 @@ function FileViewer({ path }: { path: string }) {
   const isMobile = useIsMobile();
   const host = useHeaderActionsHost();
   const rightHost = useRightPanelHost();
+  const { isActivitiesOpen, toggleActivities } = useLeftPanel();
+  const { refresh: refreshTriggers } = useTriggers();
   const { setDrafting, requestExpand } = useDrafting();
   const { user } = useAuth();
   const [body, setBody] = useState("");
@@ -1279,6 +1285,8 @@ function FileViewer({ path }: { path: string }) {
   const [loading, setLoading] = useState(true);
   const [triggerModalOpen, setTriggerModalOpen] = useState(false);
   const [triggerStatus, setTriggerStatus] = useState<string | null>(null);
+  const [automationsOpen, setAutomationsOpen] = useState(false);
+  const [editingTrigger, setEditingTrigger] = useState<Trigger | null>(null);
   const [runAgentOpen, setRunAgentOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const confirmDialog = useConfirm();
@@ -1316,6 +1324,9 @@ function FileViewer({ path }: { path: string }) {
   const openComments = useCallback(() => {
     setHistoryOpen(false);
     setPolicyOpen(false);
+    setAutomationsOpen(false);
+    setTriggerModalOpen(false);
+    setEditingTrigger(null);
     setCommentsOpen(true);
   }, []);
 
@@ -1764,9 +1775,13 @@ function FileViewer({ path }: { path: string }) {
       return;
     }
     setHistoryOpen(true);
-    // Mutual exclusion with the comments + policy panels (see ``openComments``).
+    // Mutual exclusion with the comments + policy + automations panels and
+    // the docked trigger editor (see ``openComments``).
     setCommentsOpen(false);
     setPolicyOpen(false);
+    setAutomationsOpen(false);
+    setTriggerModalOpen(false);
+    setEditingTrigger(null);
     setCommentDraft(null);
     // Opening history: show the newest commit's diff immediately rather
     // than leaving the rendered body up until the user clicks a row.
@@ -1934,11 +1949,23 @@ function FileViewer({ path }: { path: string }) {
         tooltip="Run Agent"
         onClick={() => setRunAgentOpen(true)}
       />
-      <Button
+      <SelectButton
         icon={SvgWorkflow}
-        prominence="tertiary"
-        tooltip="Trigger"
-        onClick={() => setTriggerModalOpen(true)}
+        state={automationsOpen ? "selected" : "empty"}
+        tooltip="Triggers"
+        onClick={() => {
+          if (automationsOpen || triggerModalOpen) {
+            setAutomationsOpen(false);
+            setTriggerModalOpen(false);
+            setEditingTrigger(null);
+            return;
+          }
+          setHistoryOpen(false);
+          setCommentsOpen(false);
+          setCommentDraft(null);
+          setPolicyOpen(false);
+          setAutomationsOpen(true);
+        }}
       />
       <Button
         icon={SvgShare}
@@ -1970,6 +1997,9 @@ function FileViewer({ path }: { path: string }) {
           setHistoryOpen(false);
           setCommentsOpen(false);
           setCommentDraft(null);
+          setAutomationsOpen(false);
+          setTriggerModalOpen(false);
+          setEditingTrigger(null);
           setPolicyOpen(true);
         }}
       />
@@ -2008,11 +2038,39 @@ function FileViewer({ path }: { path: string }) {
       )}
 
       <TriggerPanel
-        open={triggerModalOpen}
-        initial={{ scope_path: path }}
-        lockScope
-        onClose={() => setTriggerModalOpen(false)}
-        onSaved={(t) => setTriggerStatus(`Created trigger for ${t.scope_path}`)}
+        open={triggerModalOpen && (isMobile || !rightHost?.el)}
+        initial={editingTrigger ?? { scope_path: path }}
+        lockScope={!editingTrigger}
+        onDelete={
+          editingTrigger
+            ? async () => {
+                if (
+                  !(await confirmDialog({
+                    title: "Delete this trigger?",
+                    body: `"${editingTrigger.nl_description}"`,
+                    confirmLabel: "Delete",
+                  }))
+                )
+                  return;
+                await deleteTrigger(editingTrigger.id);
+                await refreshTriggers();
+                setTriggerModalOpen(false);
+                setEditingTrigger(null);
+              }
+            : undefined
+        }
+        onClose={() => {
+          setTriggerModalOpen(false);
+          setEditingTrigger(null);
+        }}
+        onSaved={(t) => {
+          setTriggerStatus(
+            editingTrigger
+              ? `Updated trigger for ${t.scope_path}`
+              : `Created trigger for ${t.scope_path}`,
+          );
+          void refreshTriggers();
+        }}
       />
 
       <ShareDialog
@@ -2147,7 +2205,14 @@ function FileViewer({ path }: { path: string }) {
               <div className="mx-auto w-full max-w-[768px]">
                 <UpdateHealthBanner
                   path={path}
-                  onOpenPolicy={() => setPolicyOpen(true)}
+                  onOpenPolicy={() => {
+                    setHistoryOpen(false);
+                    setCommentsOpen(false);
+                    setAutomationsOpen(false);
+                    setTriggerModalOpen(false);
+                    setEditingTrigger(null);
+                    setPolicyOpen(true);
+                  }}
                 />
               </div>
               <article
@@ -2214,6 +2279,15 @@ function FileViewer({ path }: { path: string }) {
                   onShowHistory={toggleHistory}
                   fullHeight
                 />
+              </div>,
+              rightHost.el,
+            )}
+          {automationsOpen &&
+            !isMobile &&
+            rightHost?.el &&
+            createPortal(
+              <div className="flex h-full w-[480px] flex-col border-l border-(--border-01) bg-(--background-tint-01) p-2">
+                <TriggersSidePanel path={path} onStatus={setTriggerStatus} />
               </div>,
               rightHost.el,
             )}

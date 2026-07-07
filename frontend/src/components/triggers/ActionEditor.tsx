@@ -4,7 +4,6 @@ import { useRef, useState } from "react";
 
 import {
   Button,
-  FilterButton,
   LineItemButton,
   Popover,
   PopoverMenu,
@@ -16,10 +15,13 @@ import {
   SvgHash,
   SvgMail,
   SvgSlack,
+  SvgChevronDown,
   SvgTrash,
   SvgUser,
 } from "@onyx-ai/opal/icons";
 
+import InputChipField from "@/components/inputs/InputChipField";
+import InputTextArea from "@/components/inputs/InputTextArea";
 import { ensureEmailDestination } from "@/lib/emailConnect";
 import {
   ensureSlackDestination,
@@ -73,7 +75,7 @@ export function ActionEditor({
   }
 
   return (
-    <div className="flex w-full flex-col gap-3">
+    <div className="flex w-full flex-col gap-2">
       {groups.map((group, i) => (
         <ActionGroupRow
           key={group.key}
@@ -138,7 +140,7 @@ function ActionGroupRow({
   });
 
   return (
-    <div className="flex w-full flex-col gap-1">
+    <div className="group/action flex w-full flex-col gap-1">
       <div className="flex w-full items-center px-[2px]">
         <div className="flex-1">
           <Text font="main-ui-action" color="text-04">
@@ -146,23 +148,39 @@ function ActionGroupRow({
           </Text>
         </div>
         {onRemove && (
-          <Button
-            type="button"
-            icon={SvgTrash}
-            size="sm"
-            tooltip="Remove this action"
-            onClick={onRemove}
-            disabled={disabled}
-          />
+          /* Hidden at rest per the mock; hover over the action block reveals it. */
+          <span className="opacity-0 transition-opacity group-focus-within/action:opacity-100 group-hover/action:opacity-100">
+            <Button
+              type="button"
+              icon={SvgTrash}
+              size="sm"
+              prominence="tertiary"
+              tooltip="Remove this action"
+              onClick={onRemove}
+              disabled={disabled}
+            />
+          </span>
         )}
       </div>
 
       <Popover open={typeOpen} onOpenChange={setTypeOpen}>
-        <Popover.Trigger asChild disabled={disabled}>
-          <SelectButton icon={meta.icon} size="sm" state="empty" width="full">
-            {meta.label}
-          </SelectButton>
-        </Popover.Trigger>
+        {/* SelectButton draws no border of its own; the slot supplies the
+            input border, keeps content left-aligned, and pushes the chevron
+            to the right edge. It wraps outside the trigger so the button
+            stays the popover's accessible trigger element. */}
+        <span className="flex h-9 w-full items-center rounded-(--radius-08) border border-(--border-02) bg-(--background-neutral-00) px-[2px] [&_.opal-select-button]:w-full [&_.opal-select-button]:justify-start [&_.opal-select-button>*:nth-last-child(1)]:ml-auto [&>*]:w-full">
+          <Popover.Trigger asChild disabled={disabled}>
+            <SelectButton
+              icon={meta.icon}
+              rightIcon={SvgChevronDown}
+              size="sm"
+              state="empty"
+              width="full"
+            >
+              {meta.label}
+            </SelectButton>
+          </Popover.Trigger>
+        </span>
         <Popover.Content width="trigger" align="start" sideOffset={4}>
           <PopoverMenu>
             {typeOptions.map((t) => (
@@ -205,23 +223,16 @@ function ActionGroupRow({
         />
       )}
 
-      {/* raw-ok: no Opal multiline input */}
-      <textarea
+      <InputTextArea
         value={group.message}
         onChange={(e) => onPatch({ message: e.target.value })}
-        disabled={disabled}
-        placeholder="A notification message to the recipients."
-        rows={2}
-        className="box-border w-full resize-y rounded-(--radius-08) border border-(--border-02) bg-(--background-tint-00) px-[10px] py-2 text-[14px] leading-5 outline-none placeholder:text-(--text-02) focus:border-(--border-05) focus:shadow-[0_0_0_2px_var(--background-tint-04)]"
+        variant={disabled ? "disabled" : "primary"}
+        placeholder="Describe what the message should say, e.g. summarize what changed and who is affected. The trigger writes the final message from this."
+        rows={3}
       />
     </div>
   );
 }
-
-/** Input-shaped chip container — a composite Opal doesn't provide; the chips
- * and inline input inside it are library components. */
-const CHIP_BAR =
-  "flex min-h-9 w-full flex-wrap content-center items-center gap-1 text-[14px] leading-5 rounded-(--radius-08) border border-(--border-02) bg-(--background-neutral-00) p-[5px] focus-within:border-(--border-05) focus-within:shadow-[0_0_0_2px_var(--background-tint-04)]";
 
 function ToLabel() {
   return (
@@ -328,26 +339,19 @@ function SlackToRow({
       <ToLabel />
       <Popover open={open} onOpenChange={(v) => void onOpenChange(v)}>
         <Popover.Anchor asChild>
-          <div ref={anchorRef} className={CHIP_BAR}>
-            {selected.map((c) => (
-              <FilterButton
-                key={c.id}
-                icon={c.config.dm ? SvgUser : SvgHash}
-                active
-                onClear={() =>
-                  onConfigIds(configIds.filter((id) => id !== c.id))
-                }
-                disabled={disabled}
-              >
-                {c.name}
-              </FilterButton>
-            ))}
-            {/* raw-ok: bare .opal-input-field; InputTypeIn's own 36px container would double-box the 36px Input/Tags row */}
-            <input
-              className="opal-input-field min-w-[120px] flex-1"
+          <div ref={anchorRef} className="w-full">
+            <InputChipField
+              chips={selected.map((c) => ({ id: c.id, label: c.name }))}
+              onRemoveChip={(id) =>
+                onConfigIds(configIds.filter((x) => x !== id))
+              }
+              onAdd={() => {
+                const first = filtered[0];
+                if (first) void pick(first);
+              }}
               value={search}
-              onChange={(e) => {
-                setSearch(e.target.value);
+              onChange={(v) => {
+                setSearch(v);
                 if (!open) void onOpenChange(true);
               }}
               onFocus={() => {
@@ -356,6 +360,7 @@ function SlackToRow({
               onKeyDown={(e) => {
                 if (e.key === "Escape") setOpen(false);
               }}
+              disabled={disabled}
               placeholder={
                 selected.length ? "Add a channel" : "Add a channel or DM"
               }
@@ -462,33 +467,19 @@ function EmailToRow({
   return (
     <>
       <ToLabel />
-      <div className={CHIP_BAR}>
-        {selected.map((c) => (
-          <FilterButton
-            key={c.id}
-            icon={SvgMail}
-            active
-            onClear={() => onConfigIds(configIds.filter((id) => id !== c.id))}
-            disabled={disabled}
-            tooltip={c.verified_at ? undefined : "Not verified yet"}
-          >
-            {c.verified_at ? c.name : `${c.name} (unverified)`}
-          </FilterButton>
-        ))}
-        {/* raw-ok: bare .opal-input-field; InputTypeIn's own 36px container would double-box the 36px Input/Tags row */}
-        <input
-          className="opal-input-field min-w-[120px] flex-1"
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              void add();
-            }
-          }}
-          placeholder="Add an email"
-        />
-      </div>
+      <InputChipField
+        chips={selected.map((c) => ({
+          id: c.id,
+          label: c.verified_at ? c.name : `${c.name} (unverified)`,
+          error: !c.verified_at,
+        }))}
+        onRemoveChip={(id) => onConfigIds(configIds.filter((x) => x !== id))}
+        onAdd={() => void add()}
+        value={draft}
+        onChange={setDraft}
+        disabled={disabled || busy}
+        placeholder="Add an email"
+      />
     </>
   );
 }
