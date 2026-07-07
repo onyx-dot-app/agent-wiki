@@ -478,12 +478,15 @@ def _dispatch_to_slack(
             return
         # Slack webhook URLs embed their workspace id
         # (hooks.slack.com/services/<TEAM>/...), so the mute check targets
-        # exactly the webhook's own workspace. URLs that don't parse fall
-        # back to fail-quiet: any muted connection suppresses the send.
+        # exactly the webhook's own workspace. For URLs that don't parse:
+        # a single connection is the only Slack there is, so its mute
+        # applies; with multiple workspaces an unattributable webhook never
+        # borrows another workspace's mute and keeps sending.
         team_match = re.match(
             r"https://hooks\.slack\.com/services/(T[A-Z0-9]+)/", webhook_url
         )
         connections = slack_connections.list_for_user(trigger.owner_user_id)
+        muted_team = None
         if team_match:
             muted_team = next(
                 (
@@ -493,10 +496,8 @@ def _dispatch_to_slack(
                 ),
                 None,
             )
-        else:
-            muted_team = next(
-                (c["team_id"] for c in connections if c.get("muted")), None
-            )
+        elif len(connections) == 1 and connections[0].get("muted"):
+            muted_team = connections[0]["team_id"]
         if muted_team is not None:
             log.info(
                 "trigger %s slack webhook suppressed: connection %s is muted; "

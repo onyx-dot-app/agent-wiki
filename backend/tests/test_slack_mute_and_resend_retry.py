@@ -311,7 +311,7 @@ def test_legacy_config_routes_to_the_workspace_that_accepts_the_channel(
     assert posted[0]["channel"] == "C2"
 
 
-def test_any_muted_connection_silences_webhooks_even_when_oldest_is_unmuted(
+def test_unattributable_webhook_with_multiple_workspaces_delivers(
     tmp_db, monkeypatch
 ):
     uid = seed_user(email="u@x.com")
@@ -325,6 +325,8 @@ def test_any_muted_connection_silences_webhooks_even_when_oldest_is_unmuted(
         scope="chat:write",
     )
     slack_connections.set_muted(uid, "T2", True)
+    # Unparseable host: the webhook cannot be attributed, and with two
+    # workspaces neither one's mute may be borrowed.
     cfg = dest_configs.create(
         uid,
         type=destinations_repo.SLACK_ID,
@@ -363,7 +365,7 @@ def test_any_muted_connection_silences_webhooks_even_when_oldest_is_unmuted(
         actor=None,
     )
 
-    assert posted == []
+    assert len(posted) == 1
 
 
 def test_webhook_for_unmuted_workspace_delivers_despite_other_muted(
