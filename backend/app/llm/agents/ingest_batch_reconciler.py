@@ -16,6 +16,7 @@ Batches fail independently.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any, NamedTuple, cast
 
 from app.ingest.models import WikiUpdateCandidate
@@ -44,6 +45,13 @@ _RECONCILER_MAX_TOKENS = 8192
 # Source metadata is a small header, not document content — cap the rendered
 # block so an abusive value can't crowd candidates out of the char budget.
 _METADATA_MAX_CHARS = 2_000
+# Connector metadata is arbitrary — redact anything credential-shaped before
+# it reaches the prompt: keys with secret-like names are dropped entirely, and
+# URL query strings (where signed-URL secrets live) are stripped from values.
+_SENSITIVE_KEY_RE = re.compile(
+    r"(?i)(token|secret|passw|credential|api[_-]?key|auth|signature|cookie|session)"
+)
+_URL_QUERY_RE = re.compile(r"(https?://[^\s?]+)\?\S*")
 
 _SUBMIT_TOOL: dict[str, Any] = {
     "name": "submit_results",
@@ -111,16 +119,22 @@ def _format_metadata(metadata: dict[str, Any] | None) -> str:
     """Render pushed source metadata (e.g. a PR's state/author/labels) as a
     ``Document metadata:`` header block for the doc prompt.
 
-    One ``key: value`` line per key — list values joined with commas, inner
-    whitespace collapsed so a multiline value can't break the line-per-key
-    structure. Returns "" when there is nothing to show.
+    One ``key: value`` line per key — whitespace collapsed in both keys and
+    values so neither can break the line-per-key structure, list values
+    joined with commas. Keys matching ``_SENSITIVE_KEY_RE`` are dropped and
+    URL query strings are stripped from values, so credential-shaped fields
+    never reach the prompt. Returns "" when there is nothing to show.
     """
     if not metadata:
         return ""
     lines: list[str] = []
     for key, value in metadata.items():
+        key = " ".join(key.split())
+        if not key or _SENSITIVE_KEY_RE.search(key):
+            continue
         values = cast(list[Any], value) if isinstance(value, list) else [value]
         rendered = ", ".join(" ".join(str(v).split()) for v in values if str(v).strip())
+        rendered = _URL_QUERY_RE.sub(r"\1", rendered)
         if rendered:
             lines.append(f"{key}: {rendered}")
     if not lines:

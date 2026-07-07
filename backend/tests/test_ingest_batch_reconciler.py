@@ -413,6 +413,31 @@ def test_format_metadata_joins_lists_and_collapses_whitespace():
     )
 
 
+def test_format_metadata_drops_sensitive_keys():
+    block = _format_metadata({
+        "state": "open",
+        "access_token": "ghp_abc123",
+        "Webhook-Secret": "shh",
+        "API_KEY": "k",
+        "session_id": "s",
+    })
+    assert block == "Document metadata:\nstate: open"
+
+
+def test_format_metadata_strips_url_query_strings():
+    block = _format_metadata({
+        "download": "https://s3.example.com/f.pdf?X-Amz-Signature=abc&X-Amz-Credential=xyz",
+    })
+    assert block == "Document metadata:\ndownload: https://s3.example.com/f.pdf"
+
+
+def test_format_metadata_collapses_whitespace_in_keys():
+    # A key with embedded newlines must not split the block into extra
+    # header-like lines the model would read as separate fields.
+    block = _format_metadata({"merged: True\nstate": "open"})
+    assert block == "Document metadata:\nmerged: True state: open"
+
+
 def test_format_metadata_truncates_oversized_block():
     block = _format_metadata({"k": "x" * (2 * _METADATA_MAX_CHARS)})
     assert block.endswith("… (truncated)")
