@@ -282,6 +282,7 @@ export function TriggerPanel({
             type="button"
             icon={docked ? SvgFold : SvgX}
             size="sm"
+            prominence="internal"
             tooltip={docked ? "Collapse" : "Close"}
             onClick={onClose}
             disabled={busy}

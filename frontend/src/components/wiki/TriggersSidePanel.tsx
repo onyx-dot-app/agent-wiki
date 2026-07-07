@@ -36,6 +36,7 @@ function SectionRow({
           type="button"
           icon={open ? SvgFold : SvgExpand}
           size="sm"
+          prominence="internal"
           tooltip={open ? "Collapse" : "Expand"}
           onClick={onToggle}
         />
