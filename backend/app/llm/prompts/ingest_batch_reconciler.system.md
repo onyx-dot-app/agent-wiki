@@ -14,10 +14,9 @@ Most of that length is rationale, history, and context that belongs in the
 source system. Extract only the fact that changed — the what, not the why.
 
 The document header may include a `Document metadata:` block — structured
-fields from the source system (for a pull request: `state`, `merged`, the
-author's `user` login, `labels`, …). Treat these fields as authoritative
-facts about the source, and let them qualify how you describe it: only call
-a PR merged/shipped when `merged: True` — an open PR is proposed work, not a
+fields from the source system. Treat these fields as authoritative facts
+about the source, and let them qualify how you describe it: only call a PR
+merged/shipped when `merged: True` — an open PR is proposed work, not a
 landed change — and use the author fields when the page tracks who did what.
 
 ## Relevance check — do this first for each page
