@@ -81,7 +81,7 @@ export function AutomationsPanel({ path, onClose, onEdit }: Props) {
   }
 
   return (
-    <div className="flex h-full w-full flex-col gap-1 bg-(--background-tint-01) p-1">
+    <div className="flex w-full flex-col gap-1 bg-(--background-tint-01) p-1">
       <div className="flex w-full items-center gap-1 rounded-(--radius-12) border border-(--border-01) bg-(--background-tint-00) p-[6px] [&>*:first-child]:min-w-0 [&>*:first-child]:flex-1">
         <InputTypeIn
           variant="internal"
@@ -102,9 +102,9 @@ export function AutomationsPanel({ path, onClose, onEdit }: Props) {
         )}
       </div>
 
-      <div className="flex min-h-0 w-full flex-1 flex-col gap-2 overflow-y-auto py-1">
+      <div className="flex w-full flex-col gap-2 py-1">
         {visible.length === 0 && (
-          <div className="flex h-full flex-col items-center justify-center gap-3">
+          <div className="flex flex-col items-center justify-center gap-3 py-4">
             <IllustrationContent
               illustration={SvgEmpty}
               title={q ? "No matching triggers." : "No triggers on this page."}

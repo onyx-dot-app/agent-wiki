@@ -26,20 +26,26 @@ function SectionRow({
   onToggle: () => void;
   children: React.ReactNode;
 }) {
+  // Plain Card with conditional children: Card's expandable body caps at
+  // 320px and scrolls internally, but sections must grow to full height and
+  // leave scrolling to the panel column.
   return (
-    <Card padding="xs" expandable expanded={open} expandedContent={children}>
-      <div className="flex w-full items-center gap-1">
-        <div className="min-w-0 flex-1">
-          <Divider title={title} />
+    <Card padding="xs">
+      <div className="flex w-full flex-col">
+        <div className="flex w-full items-center gap-1">
+          <div className="min-w-0 flex-1">
+            <Divider title={title} />
+          </div>
+          <Button
+            type="button"
+            icon={open ? SvgFold : SvgExpand}
+            size="sm"
+            prominence="internal"
+            tooltip={open ? "Collapse" : "Expand"}
+            onClick={onToggle}
+          />
         </div>
-        <Button
-          type="button"
-          icon={open ? SvgFold : SvgExpand}
-          size="sm"
-          prominence="internal"
-          tooltip={open ? "Collapse" : "Expand"}
-          onClick={onToggle}
-        />
+        {open && children}
       </div>
     </Card>
   );
@@ -131,7 +137,7 @@ export function TriggersSidePanel({
         open={activityOpen}
         onToggle={() => setActivityOpen((v) => !v)}
       >
-        <div className="flex max-h-[320px] w-full flex-col overflow-y-auto p-1">
+        <div className="flex w-full flex-col p-1">
           {docEvents.length === 0 && (
             <div className="p-2 text-center text-[12px] leading-4 text-(--text-03)">
               No trigger activity for this page yet.

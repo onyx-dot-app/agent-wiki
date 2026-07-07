@@ -369,6 +369,7 @@ def _record_fire(
             "message_instruction": instruction,
             "destination_config_id": config_id,
             "destination_type": dtype,
+            "destination_name": config["name"] if config else None,
         }
     )
     with session() as s:

@@ -37,6 +37,7 @@ interface ActivityPayload {
   reason?: string;
   message?: string;
   destination_type?: string;
+  destination_name?: string | null;
   count?: number;
   threshold?: number;
   cap?: number;
@@ -94,7 +95,7 @@ function eventTexts(event: AppEvent): {
         : "Sent a message to";
     return {
       prefix: verb,
-      subject: destinationName(p.destination_type),
+      subject: p.destination_name ?? destinationName(p.destination_type),
       body: p.message || p.reason || null,
     };
   }
