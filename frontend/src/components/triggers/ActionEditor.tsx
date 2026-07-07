@@ -20,7 +20,7 @@ import {
   SvgUser,
 } from "@onyx-ai/opal/icons";
 
-import { InputChip } from "@/components/triggers/InputChip";
+import InputChipField from "@/components/inputs/InputChipField";
 import { ensureEmailDestination } from "@/lib/emailConnect";
 import {
   ensureSlackDestination,
@@ -235,11 +235,6 @@ function ActionGroupRow({
   );
 }
 
-/** Input-shaped chip container — a composite Opal doesn't provide; the chips
- * and inline input inside it are library components. */
-const CHIP_BAR =
-  "flex min-h-9 w-full flex-wrap content-center items-center gap-1 text-[14px] leading-5 rounded-(--radius-08) border border-(--border-02) bg-(--background-neutral-00) p-[6px] focus-within:border-(--border-05) focus-within:shadow-[0_0_0_2px_var(--background-tint-04)]";
-
 function ToLabel() {
   return (
     <div className="px-[2px]">
@@ -345,24 +340,19 @@ function SlackToRow({
       <ToLabel />
       <Popover open={open} onOpenChange={(v) => void onOpenChange(v)}>
         <Popover.Anchor asChild>
-          <div ref={anchorRef} className={CHIP_BAR}>
-            {selected.map((c) => (
-              <InputChip
-                key={c.id}
-                icon={c.config.dm ? SvgUser : SvgHash}
-                label={c.name}
-                onRemove={() =>
-                  onConfigIds(configIds.filter((id) => id !== c.id))
-                }
-                disabled={disabled}
-              />
-            ))}
-            {/* raw-ok: bare .opal-input-field; InputTypeIn's own 36px container would double-box the 36px Input/Tags row */}
-            <input
-              className="opal-input-field min-w-[120px] flex-1"
+          <div ref={anchorRef} className="w-full">
+            <InputChipField
+              chips={selected.map((c) => ({ id: c.id, label: c.name }))}
+              onRemoveChip={(id) =>
+                onConfigIds(configIds.filter((x) => x !== id))
+              }
+              onAdd={() => {
+                const first = filtered[0];
+                if (first) void pick(first);
+              }}
               value={search}
-              onChange={(e) => {
-                setSearch(e.target.value);
+              onChange={(v) => {
+                setSearch(v);
                 if (!open) void onOpenChange(true);
               }}
               onFocus={() => {
@@ -371,6 +361,7 @@ function SlackToRow({
               onKeyDown={(e) => {
                 if (e.key === "Escape") setOpen(false);
               }}
+              disabled={disabled}
               placeholder={
                 selected.length ? "Add a channel" : "Add a channel or DM"
               }
@@ -477,31 +468,19 @@ function EmailToRow({
   return (
     <>
       <ToLabel />
-      <div className={CHIP_BAR}>
-        {selected.map((c) => (
-          <InputChip
-            key={c.id}
-            icon={SvgMail}
-            label={c.verified_at ? c.name : `${c.name} (unverified)`}
-            onRemove={() => onConfigIds(configIds.filter((id) => id !== c.id))}
-            disabled={disabled}
-            title={c.verified_at ? undefined : "Not verified yet"}
-          />
-        ))}
-        {/* raw-ok: bare .opal-input-field; InputTypeIn's own 36px container would double-box the 36px Input/Tags row */}
-        <input
-          className="opal-input-field min-w-[120px] flex-1"
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              void add();
-            }
-          }}
-          placeholder="Add an email"
-        />
-      </div>
+      <InputChipField
+        chips={selected.map((c) => ({
+          id: c.id,
+          label: c.verified_at ? c.name : `${c.name} (unverified)`,
+          error: !c.verified_at,
+        }))}
+        onRemoveChip={(id) => onConfigIds(configIds.filter((x) => x !== id))}
+        onAdd={() => void add()}
+        value={draft}
+        onChange={setDraft}
+        disabled={disabled || busy}
+        placeholder="Add an email"
+      />
     </>
   );
 }
