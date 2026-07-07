@@ -22,7 +22,7 @@ from tests._seed import seed_trigger, seed_user
 
 
 @pytest.fixture
-def client(tmp_db):
+def client(tmp_repo):
     return TestClient(create_app())
 
 
@@ -195,7 +195,7 @@ def test_update_replaces_watch_list(client):
     assert find_matching_triggers("notes/x.md") == []
 
 
-def test_rebuild_restores_scopes(tmp_db):
+def test_rebuild_restores_scopes(tmp_repo):
     uid = seed_user(email="u@x.com")
     created = triggers_repo.create(
         owner_user_id=uid,
@@ -232,7 +232,7 @@ def test_update_rejects_empty_scopes(client):
     assert row is not None and len(row["scopes"]) == 2
 
 
-def test_rebuild_drops_invalid_scope_lists(tmp_db):
+def test_rebuild_drops_invalid_scope_lists(tmp_repo):
     uid = seed_user(email="u@x.com")
     created = triggers_repo.create(
         owner_user_id=uid,
