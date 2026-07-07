@@ -4,7 +4,12 @@ import { useState } from "react";
 import useSWR from "swr";
 
 import { Button, LinkButton } from "@onyx-ai/opal/components";
-import { SvgExternalLink, SvgPlus, SvgSearch, SvgX } from "@onyx-ai/opal/icons";
+import {
+  SvgExternalLink,
+  SvgPlusCircle,
+  SvgSearch,
+  SvgX,
+} from "@onyx-ai/opal/icons";
 import { IllustrationContent } from "@onyx-ai/opal/layouts";
 import { SvgEmpty } from "@onyx-ai/opal/illustrations";
 
@@ -92,7 +97,7 @@ export function AutomationsPanel({ path, onClose, onEdit, onAdd }: Props) {
           className="opal-input-field min-w-0 flex-1 text-[14px] leading-5"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search automations…"
+          placeholder="Search triggers…"
         />
         <Button
           type="button"
@@ -106,13 +111,21 @@ export function AutomationsPanel({ path, onClose, onEdit, onAdd }: Props) {
 
       <div className="flex min-h-0 w-full flex-1 flex-col gap-2 overflow-y-auto py-1">
         {visible.length === 0 && (
-          <div className="flex h-full items-center justify-center">
+          <div className="flex h-full flex-col items-center justify-center gap-3">
             <IllustrationContent
               illustration={SvgEmpty}
-              title={
-                q ? "No matching automations." : "No automations on this page."
-              }
+              title={q ? "No matching triggers." : "No triggers on this page."}
             />
+            {!q && (
+              <Button
+                type="button"
+                variant="action"
+                rightIcon={SvgPlusCircle}
+                onClick={onAdd}
+              >
+                Add Trigger
+              </Button>
+            )}
           </div>
         )}
         {visible.map((t) => (
@@ -134,17 +147,18 @@ export function AutomationsPanel({ path, onClose, onEdit, onAdd }: Props) {
         <span className="flex items-center gap-1">
           <SvgExternalLink className="size-4 text-(--text-03)" />
           <LinkButton href="/app/triggers" target="_self">
-            All Automations
+            All Triggers
           </LinkButton>
         </span>
         <Button
           type="button"
-          icon={SvgPlus}
           size="sm"
-          prominence="tertiary"
-          tooltip="Add a trigger for this page"
+          variant="action"
+          rightIcon={SvgPlusCircle}
           onClick={onAdd}
-        />
+        >
+          Add Trigger
+        </Button>
       </div>
     </div>
   );

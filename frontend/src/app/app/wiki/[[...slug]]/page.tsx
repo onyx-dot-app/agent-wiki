@@ -1945,7 +1945,7 @@ function FileViewer({ path }: { path: string }) {
       <SelectButton
         icon={SvgWorkflow}
         state={automationsOpen ? "selected" : "empty"}
-        tooltip="Automations"
+        tooltip="Triggers"
         onClick={() => {
           if (automationsOpen) {
             setAutomationsOpen(false);
