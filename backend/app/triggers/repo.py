@@ -610,6 +610,19 @@ def rebuild_from_filesystem() -> int:
             )
             skipped += 1
             continue
+        # Hand-edited files may carry unnormalized primaries (e.g. "/" for the
+        # whole wiki); the engine and the scopes validator both expect the
+        # stored form, so normalize before anything downstream sees it.
+        try:
+            data["scope_path"] = storage.normalize_scope_path(
+                str(data.get("scope_path", ""))
+            )
+        except ValueError:
+            log.warning(
+                "rebuild_from_filesystem: skip %s (invalid scope_path)", file_path
+            )
+            skipped += 1
+            continue
         parsed.append((file_path, data))
 
     fallback_now = _now_iso()

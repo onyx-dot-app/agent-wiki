@@ -271,3 +271,25 @@ def test_scope_path_rebind_resets_ranged_single_scope(client):
     assert r.json()["scopes"] == [{"path": "b.md", "start_line": None, "end_line": None}]
     assert [t.id for t in find_matching_triggers("b.md")] == [created["id"]]
     assert find_matching_triggers("a.md") == []
+
+
+def test_rebuild_normalizes_slash_whole_wiki(tmp_repo):
+    uid = seed_user(email="u@x.com")
+    created = triggers_repo.create(
+        owner_user_id=uid,
+        scope_path="",
+        nl_description="always",
+        actions=[{"destination_config_id": None, "message": "m"}],
+    )
+    # Hand-edit the YAML to the "/" spelling of the whole wiki.
+    from app.wiki import git as wiki_git
+
+    file_path = created["file_path"]
+    body = wiki_git.read_file(file_path)
+    body = body.replace("scope_path: ''", "scope_path: /")
+    wiki_git.commit_file(file_path, body, message="hand edit", author="t <t@x>")
+    triggers_repo.rebuild_from_filesystem()
+    row = triggers_repo.get(created["id"])
+    assert row is not None
+    assert row["scope_path"] == ""
+    assert [t.id for t in find_matching_triggers("anything/x.md")] == [created["id"]]
