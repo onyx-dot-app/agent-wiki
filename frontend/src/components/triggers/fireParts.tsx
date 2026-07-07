@@ -23,7 +23,9 @@ export function destinationIcon(type: string) {
   return SvgActivity;
 }
 
-/** The tinted page/folder tag shared by trigger cards and activity rows. */
+/** The tinted page/folder tag shared by trigger cards and activity rows.
+ * Custom spans: Opal ships no passive tag/badge primitive (FilterButton is
+ * its only chip and is interactive-only). */
 export function ScopeChip({ scope }: { scope: string }) {
   const Icon = scopeIcon(scope);
   return (
@@ -43,7 +45,8 @@ export function ScopeChip({ scope }: { scope: string }) {
   );
 }
 
-/** Overlapping 20px owner-initial + destination-type circles. */
+/** Overlapping 20px owner-initial + destination-type circles. Custom spans:
+ * Opal ships no avatar primitive. */
 export function AvatarCluster({
   ownerName,
   destinationTypes,

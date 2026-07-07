@@ -3,6 +3,7 @@
 import { useState } from "react";
 import {
   Button,
+  LineItemButton,
   Divider,
   InputTypeIn,
   Tag,
@@ -154,32 +155,27 @@ function ActivityRow({
         </div>
       </div>
       <div className="flex w-full flex-col p-1 pt-0">
-        <div className="flex w-full items-center gap-[2px]">
-          <div className="flex min-w-0 flex-1 items-center py-[2px]">
-            <span className="shrink-0 px-[2px]">
-              <Text font="secondary-body" color="text-03" nowrap>
-                {prefix}
-              </Text>
-            </span>
-            <span className="min-w-0 px-[2px]">
-              <Text font="secondary-action" color="text-03" nowrap maxLines={1}>
-                {subject}
-              </Text>
-            </span>
+        {body ? (
+          <LineItemButton
+            title={markdown(`${prefix} **${subject}**`)}
+            sizePreset="secondary"
+            variant="body"
+            state="empty"
+            width="full"
+            onClick={() => setOverride(!open)}
+            rightChildren={
+              <span className="flex size-5 items-center justify-center">
+                <Chevron className="size-3.5 text-(--text-03)" />
+              </span>
+            }
+          />
+        ) : (
+          <div className="flex w-full items-center px-[2px] py-[2px]">
+            <Text font="secondary-body" color="text-03" nowrap maxLines={1}>
+              {markdown(`${prefix} **${subject}**`)}
+            </Text>
           </div>
-          {body && (
-            /* raw-ok: 20px inline chevron; Opal Button's smallest container oversizes this row */
-            <button
-              type="button"
-              onClick={() => setOverride(!open)}
-              aria-expanded={open}
-              title="Details"
-              className="flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-(--radius-08) border-0 bg-transparent p-[2px] hover:bg-(--background-tint-02)"
-            >
-              <Chevron className="size-3.5 text-(--text-03)" />
-            </button>
-          )}
-        </div>
+        )}
         {open && body && (
           <div className="w-full pr-5 pb-1 [&>span]:block">
             <Text font="main-ui-body" color="text-03">
