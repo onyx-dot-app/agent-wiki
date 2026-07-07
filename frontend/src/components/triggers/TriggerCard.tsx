@@ -132,7 +132,7 @@ export function TriggerCard({
       <div className="flex w-full flex-col p-1">
         {conditionsOnly || fires.length === 0 ? (
           <div className="flex w-full items-start gap-[2px]">
-            <div className="flex min-w-0 flex-1 flex-col py-[2px]">
+            <div className="flex min-w-0 flex-1 flex-col py-[2px] [&_span>span]:block">
               <span className="px-[2px]">
                 <Text font="secondary-body" color="text-03">
                   {markdown(`**IF** ${t.nl_description}`)}

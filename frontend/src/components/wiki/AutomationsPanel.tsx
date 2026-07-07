@@ -4,7 +4,7 @@ import { useState } from "react";
 import useSWR from "swr";
 
 import { Button, LinkButton, InputTypeIn } from "@onyx-ai/opal/components";
-import { SvgExternalLink, SvgPlusCircle, SvgX } from "@onyx-ai/opal/icons";
+import { SvgExternalLink, SvgX } from "@onyx-ai/opal/icons";
 import { IllustrationContent } from "@onyx-ai/opal/layouts";
 import { SvgEmpty } from "@onyx-ai/opal/illustrations";
 
@@ -33,12 +33,11 @@ interface Props {
   path: string;
   onClose?: () => void;
   onEdit: (trigger: Trigger) => void;
-  onAdd: () => void;
 }
 
 /** The doc page's automations rail: this page's triggers as cards, with
  * search and a link out to the full Triggers page. */
-export function AutomationsPanel({ path, onClose, onEdit, onAdd }: Props) {
+export function AutomationsPanel({ path, onClose, onEdit }: Props) {
   const { user } = useAuth();
   const { triggers, refresh } = useTriggers();
   const { configs } = useDestinationConfigs();
@@ -110,16 +109,6 @@ export function AutomationsPanel({ path, onClose, onEdit, onAdd }: Props) {
               illustration={SvgEmpty}
               title={q ? "No matching triggers." : "No triggers on this page."}
             />
-            {!q && (
-              <Button
-                type="button"
-                variant="action"
-                rightIcon={SvgPlusCircle}
-                onClick={onAdd}
-              >
-                Add Trigger
-              </Button>
-            )}
           </div>
         )}
         {visible.map((t) => (
@@ -138,22 +127,13 @@ export function AutomationsPanel({ path, onClose, onEdit, onAdd }: Props) {
         ))}
       </div>
 
-      <div className="flex w-full items-center justify-between p-2">
+      <div className="flex w-full items-center p-2">
         <span className="flex items-center gap-1">
           <SvgExternalLink className="size-4 text-(--text-03)" />
           <LinkButton href="/app/triggers" target="_self">
             All Triggers
           </LinkButton>
         </span>
-        <Button
-          type="button"
-          size="sm"
-          variant="action"
-          rightIcon={SvgPlusCircle}
-          onClick={onAdd}
-        >
-          Add Trigger
-        </Button>
       </div>
     </div>
   );

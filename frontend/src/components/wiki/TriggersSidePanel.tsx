@@ -148,12 +148,8 @@ export function TriggersSidePanel({
         open={triggersOpen}
         onToggle={() => setTriggersOpen((v) => !v)}
       >
-        <div className="h-[360px] w-full">
-          <AutomationsPanel
-            path={path}
-            onEdit={(t) => openForm(t)}
-            onAdd={() => openForm(null)}
-          />
+        <div className="w-full">
+          <AutomationsPanel path={path} onEdit={(t) => openForm(t)} />
         </div>
       </SectionRow>
     </div>
