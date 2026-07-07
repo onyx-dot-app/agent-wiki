@@ -40,8 +40,8 @@ Queues:
   ``lightweight_maintenance_queue``. It gets its *own* queue because a
   checkpoint's freshness is user-visible (readers see git HEAD): parked behind
   hours of connector ingest on ``documents_queue``, a session's committed page
-  goes stale and, in the limit, pins readers to a lagging buffer (the 2026-07-06
-  incident). Runs wider than ``documents`` because per-session safety comes from
+  goes stale and, in the limit, pins readers to a lagging buffer. Runs wider
+  than ``documents`` because per-session safety comes from
   a Postgres advisory lock (``coedit.checkpoint_lock_key``), not single-threading
   — different sessions checkpoint in parallel; the same session is serialized.
 
