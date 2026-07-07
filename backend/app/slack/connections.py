@@ -87,11 +87,16 @@ def upsert(
 
 
 def list_for_user(user_id: str) -> list[dict[str, Any]]:
+    """Oldest connection first. Status, mute defaulting, and trigger dispatch
+    all treat the first row as "the" connection, so the order must be stable."""
     with session() as s:
         rows = s.scalars(
             select(UserSlackConnection)
             .options(_DEFER_TOKEN)
             .where(UserSlackConnection.user_id == user_id)
+            .order_by(
+                UserSlackConnection.created_at, UserSlackConnection.team_id
+            )
         ).all()
         return [_to_dict(c) for c in rows]
 
