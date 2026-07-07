@@ -136,7 +136,7 @@ class _TaskQueueCollector:
     (mirrors the queue set in ``app/tasks/queues.py``). Depth catches a *growing*
     backlog; oldest-age catches a *stalled* queue — a message sitting unworked
     behind a slow/stuck worker — which depth alone misses when the backlog is
-    small. This is the signal that surfaced the 2026-07 checkpoint starvation."""
+    small."""
 
     def collect(self):
         from app.tasks.queues import QUEUES

@@ -179,6 +179,12 @@ def _sched_lock_key(name: str) -> str:
     return f"queue:{name}:sched_lock"
 
 
+def _as_str(v: Any) -> str:
+    """Redis values are str under our decode_responses client, but be robust to a
+    non-decoding client (bytes) so id parsing can't silently mis-read."""
+    return v.decode() if isinstance(v, bytes) else str(v)
+
+
 # --------------------------------------------------------------------------- #
 # Consumer-group bootstrap                                                    #
 # --------------------------------------------------------------------------- #
@@ -289,19 +295,31 @@ class TaskQueue(BaseModel):
 
     def oldest_age_seconds(self) -> float | None:
         """Seconds the oldest message in the ready stream has waited, or None if
-        the stream is empty. Redis stream IDs embed the enqueue time (ms), so the
-        first entry's id dates the oldest un-consumed message — the signal for a
-        *stalled* queue (a slow/stuck worker), which depth alone misses when the
-        backlog is small. Uses Redis server time to match the id clock. Ignores
-        the delay set (not-yet-due scheduled items). None in immediate mode."""
+        nothing is ready. Redis stream IDs embed the enqueue time (ms), so the
+        oldest ready entry's id dates the oldest unworked message — the backlog
+        signal depth alone misses when the queue is shallow. Starts strictly
+        after the group's last-delivered-id, so an in-flight entry (delivered to
+        a worker, not yet acked) isn't counted as queue latency — matching
+        depth().ready. Uses Redis server time to match the id clock. Ignores the
+        delay set (not-yet-due scheduled items). None in immediate mode."""
         if self.immediate:
             return None
         r = get_redis()
         try:
-            entries = r.xrange(_stream_key(self.name), count=1)
+            # Everything up to last-delivered-id has already been handed to a
+            # worker; the oldest *ready* message is the next one after it.
+            last_id = "0-0"
+            try:
+                for g in r.xinfo_groups(_stream_key(self.name)):
+                    if _as_str(g.get("name")) == "workers":
+                        last_id = _as_str(g.get("last-delivered-id")) or "0-0"
+                        break
+            except Exception:
+                pass  # group not created yet → treat every entry as ready
+            entries = r.xrange(_stream_key(self.name), min=f"({last_id}", count=1)
             if not entries:
                 return None
-            enqueued_ms = int(str(entries[0][0]).split("-", 1)[0])
+            enqueued_ms = int(_as_str(entries[0][0]).split("-", 1)[0])
             secs, micros = r.time()
             now_ms = int(secs) * 1000 + int(micros) // 1000
             return max(0.0, (now_ms - enqueued_ms) / 1000.0)

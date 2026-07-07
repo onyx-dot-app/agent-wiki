@@ -37,6 +37,7 @@ from psycopg import sql
 from app.config import Config
 from app.realtime import bus as _bus
 from app.mcp_server import session as _mcp_session
+from app.tasks.queue import reset_redis_for_tests
 
 # --------------------------------------------------------------------------- #
 # OpenSearch availability check (runs once at collection time)                #
@@ -145,8 +146,6 @@ def tmp_config(tmp_path, monkeypatch):
 
     # Same for the lazy Redis client — otherwise a client cached against the
     # default URL (or an earlier test's broker) leaks across cases.
-    from app.tasks.queue import reset_redis_for_tests
-
     reset_redis_for_tests()
 
     # Each test rebuilds the engine so the new schema's search_path takes effect.
@@ -165,8 +164,6 @@ def tmp_config(tmp_path, monkeypatch):
 
         _comment_fts.drop_index_for_tests()  # and the per-test comment index
     _fts.reset_client_for_tests()
-    from app.tasks.queue import reset_redis_for_tests
-
     reset_redis_for_tests()
     with psycopg.connect(_BASE_URL, autocommit=True) as conn:
         conn.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(schema)))
