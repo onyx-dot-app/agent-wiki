@@ -2,7 +2,13 @@
 
 import { useEffect, useRef, useState } from "react";
 
-import { Button, LinkButton, Text } from "@onyx-ai/opal/components";
+import {
+  Button,
+  LinkButton,
+  Text,
+  Card,
+  InputTypeIn,
+} from "@onyx-ai/opal/components";
 import {
   SvgVolumeOff,
   SvgCheckCircle,
@@ -11,9 +17,10 @@ import {
   SvgTrash,
   SvgX,
 } from "@onyx-ai/opal/icons";
-import { InputErrorText } from "@onyx-ai/opal/layouts";
+import { InputErrorText, Content, ContentAction } from "@onyx-ai/opal/layouts";
 
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
+import type { IconFunctionComponent } from "@onyx-ai/opal/types";
 import { useConfirm } from "@/components/common/ConfirmDialog";
 import { ensureEmailDestination } from "@/lib/emailConnect";
 import {
@@ -73,7 +80,7 @@ export function ConnectorsTab() {
   return (
     <div className="flex w-full flex-col gap-4">
       <ConnectorCard
-        icon={<SvgSlack className="size-5" />}
+        icon={SvgSlack}
         title="Slack"
         description="Send wiki updates as Slack messages to you and your channels."
         connected={status.connected}
@@ -119,7 +126,7 @@ export function ConnectorsTab() {
       </ConnectorCard>
 
       <ConnectorCard
-        icon={<SvgMail className="size-5" />}
+        icon={SvgMail}
         title="Emails"
         description="Send wiki updates as notifications to your email addresses."
         connected={emailConfigs.length > 0}
@@ -166,7 +173,7 @@ function ConnectorCard({
   manageLabel,
   children,
 }: {
-  icon: React.ReactNode;
+  icon: IconFunctionComponent;
   title: string;
   description: string;
   connected: boolean;
@@ -177,63 +184,57 @@ function ConnectorCard({
   children?: React.ReactNode;
 }) {
   return (
-    <div className="box-border flex w-full flex-col gap-2 rounded-(--radius-16) border border-(--border-01) bg-(--background-tint-00) p-4">
-      <div className="flex w-full items-start justify-between gap-2">
-        <div className="flex min-w-0 items-start gap-2">
-          <span className="flex size-6 items-center justify-center">
-            {icon}
-          </span>
-          <div className="min-w-0">
-            <Text font="main-ui-action" color="text-04">
-              {title}
-            </Text>
-            <div>
-              <Text font="secondary-body" color="text-03">
-                {description}
-              </Text>
-            </div>
-          </div>
-        </div>
-        <span className="flex shrink-0 items-center gap-1">
-          {connected ? (
-            <>
-              <Text font="main-ui-action" color="text-04" nowrap>
-                Connected
-              </Text>
-              <SvgCheckCircle className="size-4 text-(--status-success-05)" />
-              {onManage && (
+    <Card padding="md">
+      <div className="flex w-full flex-col gap-2">
+        <ContentAction
+          sizePreset="main-ui"
+          variant="section"
+          icon={icon}
+          title={title}
+          description={description}
+          rightChildren={
+            <span className="flex shrink-0 items-center gap-1">
+              {connected ? (
+                <>
+                  <Text font="main-ui-action" color="text-04" nowrap>
+                    Connected
+                  </Text>
+                  <SvgCheckCircle className="size-4 text-(--status-success-05)" />
+                  {onManage && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      prominence="secondary"
+                      onClick={onManage}
+                    >
+                      {manageLabel ?? "Manage"}
+                    </Button>
+                  )}
+                </>
+              ) : connectHref ? (
+                <LinkButton href={connectHref} target="_self">
+                  Connect
+                </LinkButton>
+              ) : onManage ? (
                 <Button
                   type="button"
                   size="sm"
                   prominence="secondary"
                   onClick={onManage}
                 >
-                  {manageLabel ?? "Manage"}
+                  {manageLabel ?? "Connect"}
                 </Button>
+              ) : (
+                <Text font="secondary-body" color="text-03" nowrap>
+                  {unavailableNote ?? "Unavailable"}
+                </Text>
               )}
-            </>
-          ) : connectHref ? (
-            <LinkButton href={connectHref} target="_self">
-              Connect
-            </LinkButton>
-          ) : onManage ? (
-            <Button
-              type="button"
-              size="sm"
-              prominence="secondary"
-              onClick={onManage}
-            >
-              {manageLabel ?? "Connect"}
-            </Button>
-          ) : (
-            <Text font="secondary-body" color="text-03" nowrap>
-              {unavailableNote ?? "Unavailable"}
-            </Text>
-          )}
-        </span>
+            </span>
+          }
+        />
+        {children}
       </div>
-      {children}
-    </div>
+    </Card>
   );
 }
 
@@ -365,10 +366,8 @@ function EmailsModal({
         </Text>
 
         <div className="flex w-full items-center gap-2">
-          <div className="flex min-h-9 flex-1 items-center rounded-(--radius-08) border border-(--border-02) bg-(--background-neutral-00) px-2 text-[14px] leading-5">
-            {/* raw-ok: bare .opal-input-field; InputTypeIn's own container would double-box this row */}
-            <input
-              className="opal-input-field min-w-0 flex-1"
+          <div className="min-w-0 flex-1">
+            <InputTypeIn
               value={draft}
               onChange={(e) => {
                 setDraft(e.target.value);
@@ -414,23 +413,17 @@ function EmailsModal({
                 key={c.id}
                 className="flex w-full items-center justify-between gap-2 border-b border-(--border-01) py-2 last:border-b-0"
               >
-                <div className="flex min-w-0 items-center gap-2">
-                  <Text font="main-ui-body" color="text-04" nowrap maxLines={1}>
-                    {c.name}
-                  </Text>
-                  {c.verified_at ? (
-                    <Text
-                      font="secondary-body"
-                      color="status-success-05"
-                      nowrap
-                    >
-                      Verified
-                    </Text>
-                  ) : (
-                    <Text font="secondary-body" color="text-03" nowrap>
-                      Not verified
-                    </Text>
-                  )}
+                <div className="min-w-0 flex-1">
+                  <Content
+                    sizePreset="main-ui"
+                    variant="section"
+                    title={c.name}
+                    tag={
+                      c.verified_at
+                        ? { title: "Verified", color: "green" }
+                        : { title: "Not verified", color: "amber" }
+                    }
+                  />
                 </div>
                 <span className="flex shrink-0 items-center gap-1">
                   {!c.verified_at &&
