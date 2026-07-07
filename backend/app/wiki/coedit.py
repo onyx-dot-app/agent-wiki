@@ -31,7 +31,7 @@ from sqlalchemy import func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 
 from app.db.models import CoeditOp, CoeditParticipant, CoeditSession, User
-from app.db.session import advisory_xact_lock, session
+from app.db.session import session, try_advisory_xact_lock
 
 log = logging.getLogger(__name__)
 
@@ -575,6 +575,13 @@ def close_if_clean(session_id: int) -> bool:
 # any bare small-integer key. Assumes session_id < 2**32 (a serial won't reach
 # 4 billion).
 _CHECKPOINT_LOCK_NS = 0xC0ED
+# Cap how long a duplicate checkpoint waits for the in-progress one. Comfortably
+# above a normal checkpoint (a git commit is ms; an AI merge is seconds) so a
+# waiter still blocks long enough to pick up the committed result and no-op —
+# but bounded, so a pathologically slow/hung merge can't pin a waiter (and its
+# worker thread) indefinitely. On timeout the waiter skips; the periodic scan
+# re-enqueues if the session is still dirty.
+_CHECKPOINT_LOCK_TIMEOUT_MS = 30_000
 
 
 def checkpoint_lock_key(session_id: int) -> int:
@@ -582,11 +589,13 @@ def checkpoint_lock_key(session_id: int) -> int:
 
 
 @contextmanager
-def checkpoint_lock(session_id: int) -> Generator[None]:
+def checkpoint_lock(session_id: int) -> Generator[bool]:
     """Serialize checkpoints of one session across concurrent workers.
 
-    Different sessions still checkpoint in parallel — the lock is keyed on
-    session_id — but two workers that both dequeued a checkpoint for the *same*
+    Yields True if this caller holds the lock (proceed), False if another worker
+    held it past ``_CHECKPOINT_LOCK_TIMEOUT_MS`` (skip — a later trigger/scan
+    retries). Different sessions still checkpoint in parallel (the lock is keyed
+    on session_id); two workers that both dequeued a checkpoint for the *same*
     session run one at a time, so the loser re-reads a clean/closed session and
     no-ops instead of committing the same buffer twice. Uses a *transaction*-
     scoped advisory lock (auto-released on commit/rollback), so a worker that
@@ -595,8 +604,9 @@ def checkpoint_lock(session_id: int) -> Generator[None]:
     row lock held across the checkpoint's (possibly LLM) merge would freeze live
     editing; an abstract advisory lock doesn't. See ``coedit_checkpoint``."""
     with session() as s:
-        advisory_xact_lock(s, checkpoint_lock_key(session_id))
-        yield
+        yield try_advisory_xact_lock(
+            s, checkpoint_lock_key(session_id), timeout_ms=_CHECKPOINT_LOCK_TIMEOUT_MS
+        )
 
 
 def rename_path(old_path: str, new_path: str) -> None:

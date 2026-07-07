@@ -70,7 +70,12 @@ def checkpoint_session(session_id: int) -> str | None:
     blocks, then re-reads a clean/closed session and no-ops (see
     ``coedit.checkpoint_lock``). Distinct sessions still checkpoint in parallel.
     """
-    with coedit.checkpoint_lock(session_id):
+    with coedit.checkpoint_lock(session_id) as acquired:
+        if not acquired:
+            # Another worker is checkpointing this session and held the lock past
+            # the wait cap. Skip — the periodic scan re-enqueues if still dirty.
+            log.info("coedit checkpoint: session %s busy; skipping (scan retries)", session_id)
+            return None
         return _checkpoint_locked(session_id)
 
 

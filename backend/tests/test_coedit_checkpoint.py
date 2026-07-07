@@ -12,6 +12,7 @@ from sqlalchemy import text
 from app.auth import users as users_repo
 from app.db.models import DocumentTemplate
 from app.db.session import session as db_session
+from app.db.session import try_advisory_xact_lock
 from app.tasks import coedit_checkpoint as coedit_checkpoint_task
 from app.tasks.queues import coedit_queue
 from app.wiki import coedit, coedit_checkpoint, drafts
@@ -285,10 +286,24 @@ def test_checkpoint_lock_serializes_same_session_only(repo):
             ).scalar()
         )
 
-    with coedit.checkpoint_lock(sid):
+    with coedit.checkpoint_lock(sid) as acquired:
+        assert acquired is True  # uncontended → held
         with db_session() as s2:  # a second connection
             assert try_lock(s2, sid) is False  # same session's key is held
             assert try_lock(s2, other) is True  # a different session's is free
     # Released on context exit (transaction-scoped) — the key is takeable again.
     with db_session() as s3:
         assert try_lock(s3, sid) is True
+
+
+def test_checkpoint_lock_times_out_when_held(repo):
+    # A duplicate checkpoint that can't get the lock within the cap yields False
+    # (→ the task skips and no-ops) rather than blocking forever.
+    base = 2_000_000 + os.getpid() % 1_000_000
+    with coedit.checkpoint_lock(base) as acquired:
+        assert acquired is True
+        with db_session() as s2:
+            got = try_advisory_xact_lock(
+                s2, coedit.checkpoint_lock_key(base), timeout_ms=100
+            )
+        assert got is False  # held elsewhere → bounded wait elapsed

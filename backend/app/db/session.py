@@ -25,6 +25,7 @@ from typing import Generator, cast
 
 from sqlalchemy import Engine, Executable, create_engine, text
 from sqlalchemy.engine import CursorResult
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.config import CONFIG
@@ -179,3 +180,23 @@ def advisory_xact_lock(s: Session, key: int) -> None:
     ``rebuild_from_filesystem``).
     """
     s.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": key})
+
+
+def try_advisory_xact_lock(s: Session, key: int, *, timeout_ms: int) -> bool:
+    """Bounded ``advisory_xact_lock``: wait at most ``timeout_ms`` for the lock.
+
+    Returns True once held; False if another transaction still holds it when the
+    wait elapses (the caller skips and lets a later retry pick the work up). The
+    lock is transaction-scoped and auto-released like ``advisory_xact_lock``; the
+    ``lock_timeout`` is set ``LOCAL`` so it never leaks to the pooled connection.
+    """
+    # set_config(..., is_local=true) == SET LOCAL, but parameterizable.
+    s.execute(text("SELECT set_config('lock_timeout', :ms, true)"), {"ms": str(timeout_ms)})
+    try:
+        s.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": key})
+    except OperationalError:
+        # lock_timeout fired (SQLSTATE 55P03); the statement aborted the
+        # transaction, so roll back to leave the caller's session reusable.
+        s.rollback()
+        return False
+    return True
