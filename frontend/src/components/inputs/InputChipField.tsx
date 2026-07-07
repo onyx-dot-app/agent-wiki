@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { InputTypeIn } from "@onyx-ai/opal/components";
 import { cn } from "@onyx-ai/opal/utils";
 import type { IconFunctionComponent } from "@onyx-ai/opal/types";
 
@@ -70,7 +71,7 @@ export default function InputChipField({
       className={cn(
         "flex min-h-9 w-full cursor-text flex-row flex-wrap items-center gap-1 rounded-(--radius-08) p-1.5",
         "border border-(--border-02) bg-(--background-neutral-00) focus-within:border-(--border-05) focus-within:shadow-[0_0_0_2px_var(--background-tint-04)]",
-        disabled && "cursor-not-allowed opacity-50",
+        disabled && "pointer-events-none cursor-not-allowed opacity-50",
         className,
       )}
       onClick={() => inputRef.current?.focus()}
@@ -86,18 +87,17 @@ export default function InputChipField({
         </Chip>
       ))}
       {Icon && <Icon className="size-4 shrink-0 text-(--text-04)" />}
-      {/* raw-ok: InputChipField's own inner input, per the upstream component */}
-      <input
-        ref={inputRef}
-        type="text"
-        disabled={disabled}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        onKeyDown={handleKeyDown}
-        onFocus={onFocus}
-        placeholder={placeholder}
-        className="h-6 min-w-[80px] flex-1 bg-transparent p-0.5 text-[14px] leading-5 text-(--text-04) outline-none placeholder:text-(--text-02)"
-      />
+      <span className="min-w-[80px] flex-1 [&_input]:w-full">
+        <InputTypeIn
+          ref={inputRef}
+          variant="internal"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onKeyDown={handleKeyDown}
+          onFocus={onFocus}
+          placeholder={placeholder}
+        />
+      </span>
     </div>
   );
 }

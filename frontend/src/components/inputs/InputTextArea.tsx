@@ -22,7 +22,6 @@ const InputTextArea = React.forwardRef<HTMLTextAreaElement, InputTextAreaProps>(
   ) {
     const disabled = variant === "disabled";
     return (
-      // raw-ok: InputTextArea's own inner textarea, per the upstream component
       <textarea
         ref={ref}
         rows={rows}
