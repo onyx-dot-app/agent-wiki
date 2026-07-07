@@ -211,8 +211,8 @@ export function TriggerCard({
                   </div>
                 </div>
                 {isOpen && f.message && (
-                  <div className="w-full pr-5 pb-1">
-                    <Text as="p" font="main-ui-body" color="text-03">
+                  <div className="w-full pr-5 pb-1 [&>span]:block">
+                    <Text font="main-ui-body" color="text-03">
                       {markdown(f.message)}
                     </Text>
                   </div>

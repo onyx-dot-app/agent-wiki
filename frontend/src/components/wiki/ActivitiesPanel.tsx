@@ -86,13 +86,21 @@ function eventTexts(event: AppEvent): {
       body: `Hit the limit of ${p.cap ?? "?"} auto-updates in 24 hours, so further auto-updates are paused for now.`,
     };
   }
-  const verb =
-    p.destination_type === "event_log" || !p.destination_type
-      ? "Sent a notification to"
-      : "Sent a message to";
+  if (event.kind === "trigger.fire") {
+    const verb =
+      p.destination_type === "event_log" || !p.destination_type
+        ? "Sent a notification to"
+        : "Sent a message to";
+    return {
+      prefix: verb,
+      subject: destinationName(p.destination_type),
+      body: p.message || p.reason || null,
+    };
+  }
+  // Unknown kinds stay legible instead of masquerading as trigger fires.
   return {
-    prefix: verb,
-    subject: destinationName(p.destination_type),
+    prefix: "Event",
+    subject: event.kind,
     body: p.message || p.reason || null,
   };
 }
@@ -173,8 +181,8 @@ function ActivityRow({
           )}
         </div>
         {open && body && (
-          <div className="w-full pr-5 pb-1">
-            <Text as="p" font="main-ui-body" color="text-03">
+          <div className="w-full pr-5 pb-1 [&>span]:block">
+            <Text font="main-ui-body" color="text-03">
               {markdown(body)}
             </Text>
           </div>
