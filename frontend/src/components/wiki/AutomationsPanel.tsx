@@ -124,6 +124,7 @@ export function AutomationsPanel({ path, onClose, onEdit, onAdd }: Props) {
         )}
         {visible.map((t) => (
           <TriggerCard
+            conditionsOnly
             key={t.id}
             trigger={t}
             fires={firesByTrigger.get(t.id) ?? []}

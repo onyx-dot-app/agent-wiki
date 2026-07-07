@@ -3,7 +3,7 @@
 import { useState } from "react";
 
 import { Button, Card, Divider } from "@onyx-ai/opal/components";
-import { SvgExpand } from "@onyx-ai/opal/icons";
+import { SvgExpand, SvgFold } from "@onyx-ai/opal/icons";
 
 import { ActivityRow } from "@/components/wiki/ActivitiesPanel";
 import { AutomationsPanel } from "@/components/wiki/AutomationsPanel";
@@ -34,9 +34,8 @@ function SectionRow({
         </div>
         <Button
           type="button"
-          icon={SvgExpand}
+          icon={open ? SvgFold : SvgExpand}
           size="sm"
-          prominence="internal"
           tooltip={open ? "Collapse" : "Expand"}
           onClick={onToggle}
         />

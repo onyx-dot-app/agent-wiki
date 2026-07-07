@@ -38,6 +38,9 @@ interface Props {
   onEdit: () => void;
   /** Omit to hide the info button (the doc-page rail has no history modal). */
   onHistory?: () => void;
+  /** Render only the trigger's conditions (IF/Then/message) — no run
+   * status, no fire history. For compact listings like the doc side panel. */
+  conditionsOnly?: boolean;
 }
 
 /** One trigger on the Triggers page: scope chip + owner header with the
@@ -53,6 +56,7 @@ export function TriggerCard({
   onToggle,
   onEdit,
   onHistory,
+  conditionsOnly,
 }: Props) {
   // The newest fire renders expanded on enabled triggers (per the mock);
   // clicks override per row. Derived, since fires arrive after mount.
@@ -126,7 +130,7 @@ export function TriggerCard({
       </div>
 
       <div className="flex w-full flex-col p-1">
-        {fires.length === 0 ? (
+        {conditionsOnly || fires.length === 0 ? (
           <div className="flex w-full items-start gap-[2px]">
             <div className="flex min-w-0 flex-1 flex-col py-[2px]">
               <span className="px-[2px]">
@@ -160,16 +164,18 @@ export function TriggerCard({
                 </span>
               )}
             </div>
-            <div className="flex shrink-0 items-center gap-[2px]">
-              <span className="px-[2px]">
-                <Text font="secondary-body" color="text-03" nowrap>
-                  No runs yet
-                </Text>
-              </span>
-              <span className="flex size-5 items-center justify-center">
-                <span className="size-2 rounded-full border border-(--border-02)" />
-              </span>
-            </div>
+            {!conditionsOnly && (
+              <div className="flex shrink-0 items-center gap-[2px]">
+                <span className="px-[2px]">
+                  <Text font="secondary-body" color="text-03" nowrap>
+                    No runs yet
+                  </Text>
+                </span>
+                <span className="flex size-5 items-center justify-center">
+                  <span className="size-2 rounded-full border border-(--border-02)" />
+                </span>
+              </div>
+            )}
           </div>
         ) : (
           fires.map((f) => {
