@@ -698,7 +698,7 @@ def rebuild_from_filesystem() -> int:
                     id=data["id"],
                     owner_user_id=owner_id,
                     scope_path=data["scope_path"],
-                    scopes_json=data.get("scopes"),
+                    scopes_json=_scopes_for_rebuild(data),
                     kind=data["kind"],
                     nl_description=data["nl_description"],
                     action_json=_actions_json(actions_payload),
@@ -715,6 +715,26 @@ def rebuild_from_filesystem() -> int:
             loaded += 1
     log.info("rebuild_from_filesystem loaded=%d skipped=%d", loaded, skipped)
     return loaded
+
+
+def _scopes_for_rebuild(data: dict[str, Any]) -> list[dict[str, Any]] | None:
+    """Run a YAML watch list through the same validator as the API; a
+    hand-edited file that fails validation degrades to the single primary
+    scope instead of caching an unvalidated list (or dropping the trigger)."""
+    scopes = data.get("scopes")
+    if not scopes:
+        return None
+    try:
+        return _validate_scopes(
+            cast("list[dict[str, Any]]", scopes), data["scope_path"]
+        )
+    except ValueError:
+        log.warning(
+            "rebuild_from_filesystem: trigger %s has an invalid scopes list; "
+            "falling back to its primary scope",
+            data.get("id"),
+        )
+        return None
 
 
 def fire_counts_by_sha(shas: set[str]) -> dict[str, int]:

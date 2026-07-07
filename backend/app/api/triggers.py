@@ -309,7 +309,10 @@ def update_trigger(
     sent_fields = req.model_fields_set
     kwargs: dict[str, Any] = {}
 
-    if "scopes" in sent_fields and req.scopes:
+    if "scopes" in sent_fields:
+        # An explicit empty list must not silently keep the old watch list.
+        if not req.scopes:
+            raise HTTPException(status_code=400, detail="scopes cannot be empty")
         try:
             kwargs["scopes"] = [s.model_dump() for s in req.scopes]
             kwargs["scope_path"] = _normalize_scope_path(req.scopes[0].path)

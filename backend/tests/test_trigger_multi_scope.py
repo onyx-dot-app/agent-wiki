@@ -211,3 +211,44 @@ def test_rebuild_restores_scopes(tmp_db):
         {"path": "a.md", "start_line": 2},
         {"path": "notes"},
     ]
+
+
+def test_update_rejects_empty_scopes(client):
+    uid = seed_user(email="u@x.com")
+    login_fastapi(client, uid)
+    created = client.post(
+        "/api/triggers",
+        json={
+            "scope_path": "a.md",
+            "scopes": [{"path": "a.md"}, {"path": "notes"}],
+            "nl_description": "always",
+            "actions": [{"destination_config_id": None, "message": "m"}],
+        },
+    ).json()
+    r = client.put(f"/api/triggers/{created['id']}", json={"scopes": []})
+    assert r.status_code == 400
+    # The old watch list is untouched.
+    row = triggers_repo.get(created["id"])
+    assert row is not None and len(row["scopes"]) == 2
+
+
+def test_rebuild_drops_invalid_scope_lists(tmp_db):
+    uid = seed_user(email="u@x.com")
+    created = triggers_repo.create(
+        owner_user_id=uid,
+        scope_path="a.md",
+        scopes=[{"path": "a.md"}, {"path": "notes"}],
+        nl_description="always",
+        actions=[{"destination_config_id": None, "message": "m"}],
+    )
+    # Hand-corrupt the YAML: a range on a folder entry fails validation.
+    from app.wiki import git as wiki_git
+
+    file_path = created["file_path"]
+    body = wiki_git.read_file(file_path)
+    body = body.replace("- path: notes", "- path: notes\n  start_line: 3")
+    wiki_git.commit_file(file_path, body, message="corrupt", author="t <t@x>")
+    triggers_repo.rebuild_from_filesystem()
+    row = triggers_repo.get(created["id"])
+    assert row is not None
+    assert row["scopes"] == [{"path": "a.md"}]
