@@ -2194,7 +2194,12 @@ function FileViewer({ path }: { path: string }) {
               <div className="mx-auto w-full max-w-[768px]">
                 <UpdateHealthBanner
                   path={path}
-                  onOpenPolicy={() => setPolicyOpen(true)}
+                  onOpenPolicy={() => {
+                    setHistoryOpen(false);
+                    setCommentsOpen(false);
+                    setAutomationsOpen(false);
+                    setPolicyOpen(true);
+                  }}
                 />
               </div>
               <article
