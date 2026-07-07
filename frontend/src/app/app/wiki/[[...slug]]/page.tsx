@@ -41,6 +41,8 @@ import {
 import { useConfirm } from "@/components/common/ConfirmDialog";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { TriggerPanel } from "@/components/triggers/TriggerPanel";
+import { AutomationsPanel } from "@/components/wiki/AutomationsPanel";
+import { deleteTrigger, useTriggers, type Trigger } from "@/lib/triggers";
 import { DiffView } from "@/components/wiki/DiffView";
 import { HistoryPanel } from "@/components/wiki/HistoryPanel";
 import { RunAgentPanel } from "@/components/wiki/RunAgentPanel";
@@ -1269,6 +1271,7 @@ function FileViewer({ path }: { path: string }) {
   const isMobile = useIsMobile();
   const host = useHeaderActionsHost();
   const rightHost = useRightPanelHost();
+  const { refresh: refreshTriggers } = useTriggers();
   const { setDrafting, requestExpand } = useDrafting();
   const { user } = useAuth();
   const [body, setBody] = useState("");
@@ -1279,6 +1282,8 @@ function FileViewer({ path }: { path: string }) {
   const [loading, setLoading] = useState(true);
   const [triggerModalOpen, setTriggerModalOpen] = useState(false);
   const [triggerStatus, setTriggerStatus] = useState<string | null>(null);
+  const [automationsOpen, setAutomationsOpen] = useState(false);
+  const [editingTrigger, setEditingTrigger] = useState<Trigger | null>(null);
   const [runAgentOpen, setRunAgentOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const confirmDialog = useConfirm();
@@ -1934,11 +1939,21 @@ function FileViewer({ path }: { path: string }) {
         tooltip="Run Agent"
         onClick={() => setRunAgentOpen(true)}
       />
-      <Button
+      <SelectButton
         icon={SvgWorkflow}
-        prominence="tertiary"
-        tooltip="Trigger"
-        onClick={() => setTriggerModalOpen(true)}
+        state={automationsOpen ? "selected" : "empty"}
+        tooltip="Automations"
+        onClick={() => {
+          if (automationsOpen) {
+            setAutomationsOpen(false);
+            return;
+          }
+          setHistoryOpen(false);
+          setCommentsOpen(false);
+          setCommentDraft(null);
+          setPolicyOpen(false);
+          setAutomationsOpen(true);
+        }}
       />
       <Button
         icon={SvgShare}
@@ -2009,10 +2024,38 @@ function FileViewer({ path }: { path: string }) {
 
       <TriggerPanel
         open={triggerModalOpen}
-        initial={{ scope_path: path }}
-        lockScope
-        onClose={() => setTriggerModalOpen(false)}
-        onSaved={(t) => setTriggerStatus(`Created trigger for ${t.scope_path}`)}
+        initial={editingTrigger ?? { scope_path: path }}
+        lockScope={!editingTrigger}
+        onDelete={
+          editingTrigger
+            ? async () => {
+                if (
+                  !(await confirmDialog({
+                    title: "Delete this trigger?",
+                    body: `"${editingTrigger.nl_description}"`,
+                    confirmLabel: "Delete",
+                  }))
+                )
+                  return;
+                await deleteTrigger(editingTrigger.id);
+                await refreshTriggers();
+                setTriggerModalOpen(false);
+                setEditingTrigger(null);
+              }
+            : undefined
+        }
+        onClose={() => {
+          setTriggerModalOpen(false);
+          setEditingTrigger(null);
+        }}
+        onSaved={(t) => {
+          setTriggerStatus(
+            editingTrigger
+              ? `Updated trigger for ${t.scope_path}`
+              : `Created trigger for ${t.scope_path}`,
+          );
+          void refreshTriggers();
+        }}
       />
 
       <ShareDialog
@@ -2213,6 +2256,26 @@ function FileViewer({ path }: { path: string }) {
                   onClose={() => setPolicyOpen(false)}
                   onShowHistory={toggleHistory}
                   fullHeight
+                />
+              </div>,
+              rightHost.el,
+            )}
+          {automationsOpen &&
+            !isMobile &&
+            rightHost?.el &&
+            createPortal(
+              <div className="flex h-full w-[400px] border-l border-(--border-01)">
+                <AutomationsPanel
+                  path={path}
+                  onClose={() => setAutomationsOpen(false)}
+                  onEdit={(t) => {
+                    setEditingTrigger(t);
+                    setTriggerModalOpen(true);
+                  }}
+                  onAdd={() => {
+                    setEditingTrigger(null);
+                    setTriggerModalOpen(true);
+                  }}
                 />
               </div>,
               rightHost.el,

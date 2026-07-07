@@ -36,7 +36,8 @@ interface Props {
   formatRelative: (iso: string | null | undefined) => string;
   onToggle: () => void;
   onEdit: () => void;
-  onHistory: () => void;
+  /** Omit to hide the info button (the doc-page rail has no history modal). */
+  onHistory?: () => void;
 }
 
 /** One trigger on the Triggers page: scope chip + owner header with the
@@ -96,15 +97,17 @@ export function TriggerCard({
           </span>
         </div>
         <div className="flex shrink-0 items-center gap-1">
-          <Button
-            type="button"
-            icon={SvgInfo}
-            size="sm"
-            prominence="tertiary"
-            tooltip="Details and history"
-            onClick={onHistory}
-            disabled={busy}
-          />
+          {onHistory && (
+            <Button
+              type="button"
+              icon={SvgInfo}
+              size="sm"
+              prominence="tertiary"
+              tooltip="Details and history"
+              onClick={onHistory}
+              disabled={busy}
+            />
+          )}
           <Button
             type="button"
             icon={SvgSettings}
