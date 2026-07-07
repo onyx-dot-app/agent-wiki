@@ -2,8 +2,8 @@
 
 import { useState } from "react";
 
-import { Card, LineItemButton } from "@onyx-ai/opal/components";
-import { SvgChevronDown, SvgChevronUp } from "@onyx-ai/opal/icons";
+import { Button, Card, Divider } from "@onyx-ai/opal/components";
+import { SvgExpand } from "@onyx-ai/opal/icons";
 
 import { ActivityRow } from "@/components/wiki/ActivitiesPanel";
 import { AutomationsPanel } from "@/components/wiki/AutomationsPanel";
@@ -13,7 +13,8 @@ import { useAuth } from "@/lib/auth";
 import { useEvents } from "@/lib/activities";
 import { deleteTrigger, useTriggers, type Trigger } from "@/lib/triggers";
 
-/** One collapsed accordion row: bordered card with a full-width toggle. */
+/** One accordion section row per the mock: a bordered card holding a titled
+ * Divider with the 24px expand icon button at its right edge. */
 function SectionRow({
   title,
   open,
@@ -26,24 +27,20 @@ function SectionRow({
   children: React.ReactNode;
 }) {
   return (
-    <Card padding="fit" expandable expanded={open} expandedContent={children}>
-      <LineItemButton
-        title={title}
-        sizePreset="main-ui"
-        variant="body"
-        state="empty"
-        width="full"
-        onClick={onToggle}
-        rightChildren={
-          <span className="flex size-5 items-center justify-center">
-            {open ? (
-              <SvgChevronUp className="size-3.5 text-(--text-03)" />
-            ) : (
-              <SvgChevronDown className="size-3.5 text-(--text-03)" />
-            )}
-          </span>
-        }
-      />
+    <Card padding="xs" expandable expanded={open} expandedContent={children}>
+      <div className="flex w-full items-center gap-1">
+        <div className="min-w-0 flex-1">
+          <Divider title={title} />
+        </div>
+        <Button
+          type="button"
+          icon={SvgExpand}
+          size="sm"
+          prominence="internal"
+          tooltip={open ? "Collapse" : "Expand"}
+          onClick={onToggle}
+        />
+      </div>
     </Card>
   );
 }
