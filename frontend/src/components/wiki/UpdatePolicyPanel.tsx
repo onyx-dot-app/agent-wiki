@@ -190,6 +190,42 @@ export function UpdatePolicyPanel({
             <div className={styles.row}>
               <div className={styles.rowText}>
                 <Text font="main-content-emphasis" color="text-04">
+                  AI Management
+                </Text>
+                <span className={styles.desc}>
+                  Allow AI to organize and maintain this {kind} on its own,
+                  without asking for approval on each change.
+                </span>
+                {aiManagedSetHere ? (
+                  <div className={styles.originRow}>
+                    <span className={styles.origin}>Set on this {kind}</span>
+                    <Button
+                      prominence="tertiary"
+                      size="sm"
+                      disabled={saving}
+                      onClick={() => save({ ai_management_allowed: null })}
+                    >
+                      Reset to inherited
+                    </Button>
+                  </div>
+                ) : (
+                  <span className={styles.origin}>
+                    {effAiManaged
+                      ? "Inherited — on (from a parent folder)"
+                      : "Inherited — off (default)"}
+                  </span>
+                )}
+              </div>
+              <Switch
+                checked={aiSwitchOn}
+                disabled={saving}
+                onCheckedChange={onToggleAiManaged}
+              />
+            </div>
+
+            <div className={styles.row}>
+              <div className={styles.rowText}>
+                <Text font="main-content-emphasis" color="text-04">
                   Auto-Update Wiki
                 </Text>
                 <span className={styles.desc}>
@@ -222,42 +258,6 @@ export function UpdatePolicyPanel({
                 checked={switchOn}
                 disabled={saving}
                 onCheckedChange={onToggle}
-              />
-            </div>
-
-            <div className={styles.row}>
-              <div className={styles.rowText}>
-                <Text font="main-content-emphasis" color="text-04">
-                  AI Management
-                </Text>
-                <span className={styles.desc}>
-                  Allow AI to organize and maintain this {kind} on its own,
-                  without asking for approval on each change.
-                </span>
-                {aiManagedSetHere ? (
-                  <div className={styles.originRow}>
-                    <span className={styles.origin}>Set on this {kind}</span>
-                    <Button
-                      prominence="tertiary"
-                      size="sm"
-                      disabled={saving}
-                      onClick={() => save({ ai_management_allowed: null })}
-                    >
-                      Reset to inherited
-                    </Button>
-                  </div>
-                ) : (
-                  <span className={styles.origin}>
-                    {effAiManaged
-                      ? "Inherited — on (from a parent folder)"
-                      : "Inherited — off (default)"}
-                  </span>
-                )}
-              </div>
-              <Switch
-                checked={aiSwitchOn}
-                disabled={saving}
-                onCheckedChange={onToggleAiManaged}
               />
             </div>
 
