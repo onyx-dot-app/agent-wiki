@@ -23,7 +23,7 @@ import {
   SvgX,
 } from "@onyx-ai/opal/icons";
 import { Content } from "@onyx-ai/opal/layouts";
-import { markdown } from "@onyx-ai/opal/utils";
+import { cn, markdown } from "@onyx-ai/opal/utils";
 import {
   PRESET_OPTIONS,
   WEEKDAY_NAMES,
@@ -290,13 +290,16 @@ export function TriggerPanel({
     <div
       className={
         docked
-          ? "flex max-h-full w-full flex-col"
+          ? "flex w-full flex-col"
           : "fixed top-2 right-2 z-[100] flex max-h-[calc(100vh-16px)] w-[464px] max-w-[calc(100vw-16px)] flex-col"
       }
     >
       <form
         onSubmit={onSubmit}
-        className="flex max-h-full w-full flex-col overflow-hidden rounded-(--radius-12) border border-(--border-01) bg-(--background-tint-00)"
+        className={cn(
+          "flex w-full flex-col overflow-hidden rounded-(--radius-12) border border-(--border-01) bg-(--background-tint-00)",
+          !docked && "max-h-full",
+        )}
       >
         <div className="flex w-full items-start gap-2 p-2">
           <div className="flex min-w-0 flex-1 items-start gap-[2px] p-[2px]">
@@ -323,7 +326,12 @@ export function TriggerPanel({
           />
         </div>
 
-        <div className="flex w-full flex-1 flex-col gap-3 overflow-y-auto bg-(--background-tint-01) p-3">
+        <div
+          className={cn(
+            "flex w-full flex-1 flex-col gap-3 bg-(--background-tint-01) p-3",
+            !docked && "overflow-y-auto",
+          )}
+        >
           <Tabs
             value={kind}
             onValueChange={(v) => {
