@@ -307,3 +307,83 @@ def test_checkpoint_lock_times_out_when_held(repo):
                 s2, coedit.checkpoint_lock_key(base), timeout_ms=100
             )
         assert got is False  # held elsewhere → bounded wait elapsed
+
+
+# --------------------------------------------------------------------------- #
+# Page moves: sessions follow the page; dead paths never resurrect            #
+# --------------------------------------------------------------------------- #
+
+
+def test_on_path_moved_rekeys_session(repo):
+    uid = users_repo.create(email="mia@x.com", password="hunter2-x", name="Mia")
+    sha = _seed_page("hello world")
+    sess = coedit.open_session(_PATH, base_sha=sha, initial_buffer="hello world")
+    coedit.join(sess.id, uid)
+
+    new_path = "guides/install.md"
+    coedit.on_path_moved([(_PATH, new_path)])
+
+    assert coedit.get_active_session(_PATH) is None
+    moved = coedit.get_active_session(new_path)
+    assert moved is not None and moved.id == sess.id
+
+
+def test_on_path_moved_folder_rename_carries_sessions(repo):
+    sha = wiki_git.commit_file("a/deep/page.md", "body", "seed", author=None)
+    sess = coedit.open_session("a/deep/page.md", base_sha=sha, initial_buffer="body")
+
+    coedit.on_path_moved([("a/deep/page.md", "b/deep/page.md")])
+
+    moved = coedit.get_active_session("b/deep/page.md")
+    assert moved is not None and moved.id == sess.id
+
+
+def test_checkpoint_commits_to_new_path_after_move(repo):
+    uid = users_repo.create(email="eve@x.com", password="hunter2-x", name="Eve")
+    sha = _seed_page("hello world")
+    sess = coedit.open_session(_PATH, base_sha=sha, initial_buffer="hello world")
+    coedit.join(sess.id, uid)
+    coedit.apply_op(sess.id, base_version=0, changes=[_ch(0, 5, "howdy")], author_user_id=uid)
+
+    new_path = "guides/install.md"
+    wiki_git.move_path(_PATH, new_path, "rename")
+    coedit.on_path_moved([(_PATH, new_path)])
+
+    new_sha = coedit_checkpoint.checkpoint_session(sess.id)
+    assert new_sha is not None
+    # The buffer landed on the page's new home; the old path stays gone.
+    assert wiki_git.read_file_opt(new_path) == "howdy world"
+    assert wiki_git.read_file_opt(_PATH) is None
+
+
+def test_checkpoint_closes_session_when_path_gone(repo):
+    uid = users_repo.create(email="zoe@x.com", password="hunter2-x", name="Zoe")
+    sha = _seed_page("hello world")
+    sess = coedit.open_session(_PATH, base_sha=sha, initial_buffer="hello world")
+    coedit.join(sess.id, uid)
+    coedit.apply_op(sess.id, base_version=0, changes=[_ch(0, 5, "stale")], author_user_id=uid)
+
+    # The page moves away but the session is NOT re-keyed (the pre-fix bug, or
+    # a raw-git rename that bypassed the lifecycle hook).
+    wiki_git.move_path(_PATH, "guides/renamed.md", "rename")
+
+    assert coedit_checkpoint.checkpoint_session(sess.id) is None
+    # No resurrection at the dead path, and the session is closed with the
+    # buffer preserved for manual recovery.
+    assert wiki_git.read_file_opt(_PATH) is None
+    after = coedit.get_session(sess.id)
+    assert after is not None
+    assert after.status == coedit.SessionStatus.CLOSED.value
+    assert after.buffer_text == "stale world"
+
+
+def test_checkpoint_still_creates_brand_new_page(repo):
+    # base_sha None = the session legitimately started on a not-yet-committed
+    # page; the missing-path guard must not block the create flow.
+    uid = users_repo.create(email="new@x.com", password="hunter2-x", name="New")
+    sess = coedit.open_session("guides/fresh.md", base_sha=None, initial_buffer="")
+    coedit.join(sess.id, uid)
+    coedit.apply_op(sess.id, base_version=0, changes=[_ch(0, 0, "first words")], author_user_id=uid)
+
+    assert coedit_checkpoint.checkpoint_session(sess.id) is not None
+    assert wiki_git.read_file_opt("guides/fresh.md") == "first words"

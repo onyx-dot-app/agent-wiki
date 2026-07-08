@@ -32,6 +32,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.db.models import CoeditOp, CoeditParticipant, CoeditSession, User
 from app.db.session import session, try_advisory_xact_lock
+from app.wiki import filesystem
 
 log = logging.getLogger(__name__)
 
@@ -541,6 +542,40 @@ def close_session(session_id: int) -> None:
         if sess is not None and sess.status != SessionStatus.CLOSED.value:
             sess.status = SessionStatus.CLOSED.value
             sess.updated_at = _iso(_now())
+
+
+def on_path_moved(moves: list[tuple[str, str]]) -> None:
+    """Re-key co-edit sessions so a session (and its queued checkpoints, which
+    resolve the path through the session row) follows a page move/rename.
+
+    Without this, a session keyed to the old path checkpoints its buffer back
+    to a path that no longer exists in git — recreating the page under its
+    pre-move name. Mirrors ``acl.on_path_moved`` / ``update_policy.on_path_moved``:
+    exact rows are repointed per pair, and a directory rename carries every
+    session nested under the folder. Closed sessions are re-keyed too, so
+    their history stays attached to the page.
+    """
+    if not moves:
+        return
+    with session() as s:
+        for old_p, new_p in moves:
+            s.execute(
+                update(CoeditSession)
+                .where(CoeditSession.path == old_p)
+                .values(path=new_p)
+            )
+        old_prefix, new_prefix = filesystem.common_folder_rename(moves)
+        if old_prefix is not None and new_prefix is not None:
+            s.execute(
+                update(CoeditSession)
+                .where(CoeditSession.path.like(old_prefix + "/%"))
+                .values(
+                    path=func.concat(
+                        new_prefix,
+                        func.substr(CoeditSession.path, len(old_prefix) + 1),
+                    )
+                )
+            )
 
 
 def close_if_clean(session_id: int) -> bool:

@@ -107,6 +107,20 @@ def _checkpoint_locked(session_id: int) -> str | None:
         return None  # nothing new to commit
 
     path = sess.path
+    # The page existed when the session was seeded (base_sha set) but is gone
+    # from HEAD — it was moved or deleted underneath the session. A move should
+    # have re-keyed the session (``coedit.on_path_moved``); committing here
+    # would resurrect the dead path from the buffer. Close instead; the buffer
+    # stays in the row for manual recovery.
+    if sess.base_sha is not None and wiki_git.read_file_opt(path) is None:
+        log.warning(
+            "coedit checkpoint: session %s targets missing path %r (moved or "
+            "deleted); closing — buffer left uncommitted",
+            session_id,
+            path,
+        )
+        coedit.close_session(session_id)
+        return None
     # Merge base = the page content at the last checkpoint. None when the
     # session was opened on a not-yet-existing page (→ create).
     base_body = wiki_git.read_file_opt(path, ref=sess.base_sha) if sess.base_sha else None
