@@ -6,7 +6,7 @@ inspector because ``0001_initial`` builds fresh databases from the current
 models.
 
 Revision ID: 8c3fa27d9e42
-Revises: 0075dcbb622e
+Revises: 7f2a91c04b11
 Create Date: 2026-07-07 07:05:00.000000+00:00
 """
 from __future__ import annotations
@@ -19,7 +19,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 
 
 revision: str = "8c3fa27d9e42"
-down_revision: str | None = "0075dcbb622e"
+down_revision: str | None = "7f2a91c04b11"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
