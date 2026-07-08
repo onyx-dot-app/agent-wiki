@@ -1,9 +1,8 @@
 """Handler for the `set_update_policy` tool. Spec lives in `set_update_policy.json`.
 
 Lets an agent set the per-page / per-folder update policy — whether
-connector/ingestion auto-update is disabled, the free-text `update_instruction`
-the updater honors, and whether AI auto-management is allowed for the scope
-(`ai_management_allowed`). PATCH semantics mirror `PATCH /api/update-policy`: only the
+connector/ingestion auto-update is disabled, and the free-text `update_instruction`
+the updater honors. PATCH semantics mirror `PATCH /api/update-policy`: only the
 fields present in the call change; an empty `update_instruction` (or an explicit
 null) clears it so the scope inherits from an ancestor again.
 
@@ -57,15 +56,10 @@ def handle(args: dict[str, Any]) -> Any:
         if instruction is not None and not isinstance(instruction, str):
             return {"error": "update_instruction must be a string"}
         patch["update_instruction"] = instruction
-    if "ai_management_allowed" in args:
-        ai_allowed = args["ai_management_allowed"]
-        if ai_allowed is not None and not isinstance(ai_allowed, bool):
-            return {"error": "ai_management_allowed must be a boolean"}
-        patch["ai_management_allowed"] = ai_allowed
     if not patch:
         return {
-            "error": "provide at least one of `ingestion_auto_update_disabled`, "
-            "`update_instruction`, or `ai_management_allowed` to change"
+            "error": "provide at least one of `ingestion_auto_update_disabled` "
+            "or `update_instruction` to change"
         }
 
     user = current_user()
@@ -78,7 +72,6 @@ def handle(args: dict[str, Any]) -> Any:
         {
             "ingestion_auto_update_disabled": explicit_row["ingestion_auto_update_disabled"],
             "update_instruction": explicit_row["update_instruction"],
-            "ai_management_allowed": explicit_row["ai_management_allowed"],
         }
         if explicit_row is not None
         else None
@@ -93,6 +86,5 @@ def handle(args: dict[str, Any]) -> Any:
         "effective": {
             "ingestion_auto_update_disabled": effective.ingestion_auto_update_disabled,
             "update_instruction": effective.update_instruction,
-            "ai_management_allowed": effective.ai_management_allowed,
         },
     }

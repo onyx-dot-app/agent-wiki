@@ -42,6 +42,7 @@ export function UpdatePolicyPanel({
   const [loaded, setLoaded] = useState(false); // first fetch succeeded
   const [policy, setPolicy] = useState<UpdatePolicyResponse | null>(null);
   const [pendingOn, setPendingOn] = useState<boolean | null>(null); // optimistic toggle
+  const [pendingAiOn, setPendingAiOn] = useState<boolean | null>(null); // optimistic AI toggle
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   // Live slider value while dragging the per-page warning threshold; null until
@@ -98,6 +99,8 @@ export function UpdatePolicyPanel({
   const effDisabled = policy?.effective.ingestion_auto_update_disabled ?? false;
   const disableSetHere =
     policy?.explicit?.ingestion_auto_update_disabled != null;
+  const effAiManaged = policy?.effective.ai_management_allowed ?? false;
+  const aiManagedSetHere = policy?.explicit?.ai_management_allowed != null;
   const ownInstruction = policy?.explicit?.update_instruction ?? "";
   const effInstruction = policy?.effective.update_instruction ?? "";
   // Per-page warning threshold: explicit value set on this page (null = using
@@ -125,6 +128,7 @@ export function UpdatePolicyPanel({
     } finally {
       setSaving(false);
       setPendingOn(null);
+      setPendingAiOn(null);
     }
   }
 
@@ -146,6 +150,14 @@ export function UpdatePolicyPanel({
   }
 
   const switchOn = pendingOn ?? !effDisabled;
+
+  // "AI Management" ON = ai_management_allowed (stored positively, no inversion).
+  function onToggleAiManaged(on: boolean) {
+    setPendingAiOn(on);
+    void save({ ai_management_allowed: on });
+  }
+
+  const aiSwitchOn = pendingAiOn ?? effAiManaged;
 
   return (
     <div className={`${styles.panel} ${fullHeight ? styles.fullHeight : ""}`}>
@@ -210,6 +222,42 @@ export function UpdatePolicyPanel({
                 checked={switchOn}
                 disabled={saving}
                 onCheckedChange={onToggle}
+              />
+            </div>
+
+            <div className={styles.row}>
+              <div className={styles.rowText}>
+                <Text font="main-content-emphasis" color="text-04">
+                  AI Management
+                </Text>
+                <span className={styles.desc}>
+                  Allow AI to organize and maintain this {kind} on its own,
+                  without asking for approval on each change.
+                </span>
+                {aiManagedSetHere ? (
+                  <div className={styles.originRow}>
+                    <span className={styles.origin}>Set on this {kind}</span>
+                    <Button
+                      prominence="tertiary"
+                      size="sm"
+                      disabled={saving}
+                      onClick={() => save({ ai_management_allowed: null })}
+                    >
+                      Reset to inherited
+                    </Button>
+                  </div>
+                ) : (
+                  <span className={styles.origin}>
+                    {effAiManaged
+                      ? "Inherited — on (from a parent folder)"
+                      : "Inherited — off (default)"}
+                  </span>
+                )}
+              </div>
+              <Switch
+                checked={aiSwitchOn}
+                disabled={saving}
+                onCheckedChange={onToggleAiManaged}
               />
             </div>
 
