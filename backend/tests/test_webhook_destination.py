@@ -98,3 +98,74 @@ def test_deliver_raises_on_non_2xx(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     with pytest.raises(webhook_client.WebhookError):
         webhook_client.deliver(url="https://example.com/hook", body=b"{}")
+
+
+# --- send-test endpoint (API level) ---
+
+from fastapi.testclient import TestClient  # noqa: E402
+
+from app.main import create_app  # noqa: E402
+from app.triggers import destination_configs as dest_configs  # noqa: E402
+from app.triggers import destinations as destinations_repo  # noqa: E402
+from tests._auth import login_fastapi  # noqa: E402
+from tests._seed import seed_user  # noqa: E402
+
+
+def _public(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "app.net.ssrf.socket.getaddrinfo",
+        lambda *a, **k: [(2, 1, 6, "", ("93.184.216.34", 443))],
+    )
+
+
+def test_send_test_event_posts_sample(monkeypatch: pytest.MonkeyPatch, tmp_db) -> None:
+    _public(monkeypatch)
+    sent: dict[str, object] = {}
+
+    class _Resp:
+        status_code = 200
+
+    def fake_post(url: str, **kw: object) -> _Resp:
+        sent["data"] = kw.get("data")
+        return _Resp()
+
+    monkeypatch.setattr("app.webhooks.client.requests.post", fake_post)
+
+    uid = seed_user(email="u@x.com")
+    cfg = dest_configs.create(
+        uid,
+        type=destinations_repo.WEBHOOK_ID,
+        name="my hook",
+        config={"url": "https://example.com/hook", "routing_tag": "roadmap"},
+        secret="shh",
+    )
+    client = TestClient(create_app())
+    login_fastapi(client, uid)
+    resp = client.post(f"/api/triggers/destination-configs/{cfg['id']}/test")
+    assert resp.status_code == 204
+    body = sent["data"]
+    assert isinstance(body, (bytes, bytearray))
+    assert b'"event":"trigger.test"' in bytes(body)
+    assert b'"routing_tag":"roadmap"' in bytes(body)
+
+
+def test_send_test_404_for_unknown(tmp_db) -> None:
+    uid = seed_user(email="u2@x.com")
+    client = TestClient(create_app())
+    login_fastapi(client, uid)
+    resp = client.post("/api/triggers/destination-configs/dst_nope/test")
+    assert resp.status_code == 404
+
+
+def test_send_test_400_for_non_webhook(tmp_db) -> None:
+    uid = seed_user(email="u3@x.com")
+    cfg = dest_configs.create(
+        uid,
+        type=destinations_repo.EMAIL_ID,
+        name="a@b.com",
+        config={"address": "a@b.com"},
+    )
+    client = TestClient(create_app())
+    login_fastapi(client, uid)
+    resp = client.post(f"/api/triggers/destination-configs/{cfg['id']}/test")
+    assert resp.status_code == 400
