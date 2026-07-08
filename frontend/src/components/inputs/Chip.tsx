@@ -1,4 +1,4 @@
-import { Button, Text } from "@onyx-ai/opal/components";
+import { Button, Text, Tooltip } from "@onyx-ai/opal/components";
 import { cn } from "@onyx-ai/opal/utils";
 import { SvgAlertTriangle, SvgX } from "@onyx-ai/opal/icons";
 import type { IconFunctionComponent } from "@onyx-ai/opal/types";
@@ -27,57 +27,66 @@ export default function Chip({
   truncateLabel = false,
 }: ChipProps) {
   return (
-    <div
-      className={cn(
-        "flex items-center bg-(--background-tint-02)",
-        smallLabel
-          ? "gap-0 rounded-(--radius-04) p-[2px]"
-          : "gap-0.5 rounded-(--radius-08) px-1 py-0.5",
-      )}
+    <Tooltip
+      tooltip={
+        children ? (
+          <span className="font-secondary-body break-all">{children}</span>
+        ) : undefined
+      }
+      side="top"
     >
-      {Icon && <Icon className="size-3 shrink-0 text-(--text-03)" />}
-      {children && (
-        <span
-          className={
-            truncateLabel
-              ? "flex max-w-[120px] items-center truncate"
-              : "flex items-center"
-          }
-        >
-          <Text
-            font={smallLabel ? "figure-small-value" : "main-ui-body"}
-            color="text-04"
-            nowrap
-            maxLines={1}
+      <div
+        className={cn(
+          "flex max-w-full min-w-0 items-center bg-(--background-tint-02)",
+          smallLabel
+            ? "gap-0 rounded-(--radius-04) p-[2px]"
+            : "gap-0.5 rounded-(--radius-08) px-1 py-0.5",
+        )}
+      >
+        {Icon && <Icon className="size-3 shrink-0 text-(--text-03)" />}
+        {children && (
+          <span
+            className={
+              truncateLabel
+                ? "block max-w-[120px] min-w-0 truncate"
+                : "block min-w-0 truncate"
+            }
           >
-            {children}
-          </Text>
-        </span>
-      )}
-      {error && (
-        <SvgAlertTriangle className="size-3.5 shrink-0 text-(--status-warning-05)" />
-      )}
-      {onRemove && (
-        <span
-          className={cn(
-            "flex items-center",
-            smallLabel
-              ? "[&_button]:!size-3 [&_svg]:!size-2.5 [&_svg]:text-(--text-04)"
-              : "[&_svg]:text-(--text-05)",
-          )}
-        >
-          <Button
-            type="button"
-            prominence="tertiary"
-            icon={SvgX}
-            size={smallLabel ? "fit" : "xs"}
-            onClick={(e) => {
-              e.stopPropagation();
-              onRemove();
-            }}
-          />
-        </span>
-      )}
-    </div>
+            <Text
+              font={smallLabel ? "figure-small-value" : "main-ui-body"}
+              color="text-04"
+              nowrap
+              maxLines={1}
+            >
+              {children}
+            </Text>
+          </span>
+        )}
+        {error && (
+          <SvgAlertTriangle className="size-3.5 shrink-0 text-(--status-warning-05)" />
+        )}
+        {onRemove && (
+          <span
+            className={cn(
+              "flex items-center",
+              smallLabel
+                ? "[&_button]:!size-3 [&_svg]:!size-2.5 [&_svg]:text-(--text-04)"
+                : "[&_svg]:text-(--text-05)",
+            )}
+          >
+            <Button
+              type="button"
+              prominence="tertiary"
+              icon={SvgX}
+              size={smallLabel ? "fit" : "xs"}
+              onClick={(e) => {
+                e.stopPropagation();
+                onRemove();
+              }}
+            />
+          </span>
+        )}
+      </div>
+    </Tooltip>
   );
 }

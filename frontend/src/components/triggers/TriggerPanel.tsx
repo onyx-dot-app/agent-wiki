@@ -1,6 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import {
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 
 import useSWR from "swr";
 
@@ -22,7 +29,8 @@ import {
   SvgWorkflow,
   SvgX,
 } from "@onyx-ai/opal/icons";
-import { markdown } from "@onyx-ai/opal/utils";
+import { Content } from "@onyx-ai/opal/layouts";
+import { cn, markdown } from "@onyx-ai/opal/utils";
 import {
   PRESET_OPTIONS,
   WEEKDAY_NAMES,
@@ -109,6 +117,39 @@ function groupsFromActions(
       message: "",
     });
   return out;
+}
+
+/** Vertical label + control + helper stack. Composes Opal's Content for the
+ * label row; InputVertical is unsuitable here (its root is h-full, sized for
+ * fixed-height rows, and collapses in a free-flow column). */
+function LabeledField({
+  title,
+  helper,
+  htmlFor,
+  children,
+}: {
+  title: string;
+  helper?: string;
+  /** id of the native control below, so the visible title is a real label. */
+  htmlFor?: string;
+  children: React.ReactNode;
+}) {
+  const heading = (
+    <Content title={title} sizePreset="main-ui" variant="section" />
+  );
+  return (
+    <div className="flex w-full flex-col gap-1">
+      {htmlFor ? <label htmlFor={htmlFor}>{heading}</label> : heading}
+      {children}
+      {helper && (
+        <div className="px-[2px]">
+          <Text font="secondary-body" color="text-03">
+            {helper}
+          </Text>
+        </div>
+      )}
+    </div>
+  );
 }
 
 const EXAMPLE_IF = "the document is updated with a release version";
@@ -256,13 +297,16 @@ export function TriggerPanel({
     <div
       className={
         docked
-          ? "flex max-h-full w-full flex-col"
+          ? "flex w-full flex-col"
           : "fixed top-2 right-2 z-[100] flex max-h-[calc(100vh-16px)] w-[464px] max-w-[calc(100vw-16px)] flex-col"
       }
     >
       <form
         onSubmit={onSubmit}
-        className="flex max-h-full w-full flex-col overflow-hidden rounded-(--radius-12) border border-(--border-01) bg-(--background-tint-00)"
+        className={cn(
+          "flex w-full flex-col overflow-hidden rounded-(--radius-12) border border-(--border-01) bg-(--background-tint-00)",
+          !docked && "max-h-full",
+        )}
       >
         <div className="flex w-full items-start gap-2 p-2">
           <div className="flex min-w-0 flex-1 items-start gap-[2px] p-[2px]">
@@ -289,7 +333,12 @@ export function TriggerPanel({
           />
         </div>
 
-        <div className="flex w-full flex-1 flex-col gap-3 overflow-y-auto bg-(--background-tint-01) p-3">
+        <div
+          className={cn(
+            "flex w-full flex-1 flex-col gap-3 bg-(--background-tint-01) p-3",
+            !docked && "overflow-y-auto",
+          )}
+        >
           <Tabs
             value={kind}
             onValueChange={(v) => {
@@ -323,12 +372,10 @@ export function TriggerPanel({
             </Tabs.List>
           </Tabs>
 
-          <div className="flex w-full flex-col gap-1">
-            <div className="px-[2px]">
-              <Text font="main-ui-action" color="text-04">
-                Watch
-              </Text>
-            </div>
+          <LabeledField
+            title="Watch"
+            helper="Add specific sections or entire pages to watch."
+          >
             <WatchScopePicker
               scopePath={scopePath}
               onScopePath={(p) => {
@@ -337,12 +384,7 @@ export function TriggerPanel({
               disabled={busy || Boolean(lockScope)}
               locked={Boolean(lockScope)}
             />
-            <div className="px-[2px]">
-              <Text font="secondary-body" color="text-03">
-                Add specific sections or entire pages to watch.
-              </Text>
-            </div>
-          </div>
+          </LabeledField>
 
           <Divider />
 
@@ -363,12 +405,7 @@ export function TriggerPanel({
             />
           )}
 
-          <div className="flex w-full flex-col gap-1">
-            <div className="px-[2px]">
-              <Text font="main-ui-action" color="text-04">
-                Run if
-              </Text>
-            </div>
+          <LabeledField title="Run if">
             <InputTextArea
               value={ifText}
               onChange={(e) => setIfText(e.target.value)}
@@ -384,7 +421,7 @@ export function TriggerPanel({
                 </Text>
               </div>
             )}
-          </div>
+          </LabeledField>
 
           <ActionEditor
             groups={groups}
@@ -491,14 +528,17 @@ function ScheduleFields({
 
   const timeValue = `${pad(parts.hour)}:${pad(parts.minute)}`;
 
+  // Unique per mounted panel so a second open panel can't duplicate ids or
+  // let a label focus another instance's control.
+  const uid = useId();
+  const id = (field: string) => `${uid}-${field}`;
+
   return (
-    <div className="flex flex-col gap-3 rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-01) p-[14px]">
-      <label className="flex flex-col gap-1.5">
-        <Text font="main-ui-action" color="text-04">
-          Frequency
-        </Text>
+    <div className="flex flex-col gap-3 rounded-(--radius-04) border border-(--border-01) bg-(--background-tint-01) p-[14px]">
+      <LabeledField title="Frequency" htmlFor={id("frequency")}>
         {/* raw-ok: no Opal multiline input */}
         <select
+          id={id("frequency")}
           value={parts.preset}
           onChange={(e) =>
             onPartsChange({
@@ -507,7 +547,7 @@ function ScheduleFields({
             })
           }
           disabled={disabled}
-          className="box-border w-full cursor-pointer rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-00) px-[10px] py-2 text-sm outline-none"
+          className="box-border w-full cursor-pointer rounded-(--radius-04) border border-(--border-01) bg-(--background-tint-00) px-[10px] py-2 text-sm outline-none"
         >
           {PRESET_OPTIONS.map((o) => (
             <option key={o.value} value={o.value}>
@@ -515,15 +555,13 @@ function ScheduleFields({
             </option>
           ))}
         </select>
-      </label>
+      </LabeledField>
 
       {showTimeOfDay && (
-        <label className="flex flex-col gap-1.5">
-          <Text font="main-ui-action" color="text-04">
-            Time of day
-          </Text>
+        <LabeledField title="Time of day" htmlFor={id("time")}>
           {/* raw-ok: no Opal multiline input */}
           <input
+            id={id("time")}
             type="time"
             value={timeValue}
             onChange={(e) => {
@@ -533,27 +571,25 @@ function ScheduleFields({
               }
             }}
             disabled={disabled}
-            className="box-border w-full rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-00) px-[10px] py-2 text-sm outline-none"
+            className="box-border w-full rounded-(--radius-04) border border-(--border-01) bg-(--background-tint-00) px-[10px] py-2 text-sm outline-none"
           />
           <Text font="secondary-body" color="text-03">
             Interpreted in the timezone selected below.
           </Text>
-        </label>
+        </LabeledField>
       )}
 
       {showWeekday && (
-        <label className="flex flex-col gap-1.5">
-          <Text font="main-ui-action" color="text-04">
-            Day of week
-          </Text>
+        <LabeledField title="Day of week" htmlFor={id("weekday")}>
           {/* raw-ok: no Opal multiline input */}
           <select
+            id={id("weekday")}
             value={parts.dayOfWeek}
             onChange={(e) =>
               onPartsChange({ ...parts, dayOfWeek: Number(e.target.value) })
             }
             disabled={disabled}
-            className="box-border w-full cursor-pointer rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-00) px-[10px] py-2 text-sm outline-none"
+            className="box-border w-full cursor-pointer rounded-(--radius-04) border border-(--border-01) bg-(--background-tint-00) px-[10px] py-2 text-sm outline-none"
           >
             {WEEKDAY_NAMES.map((name, i) => (
               <option key={i} value={i}>
@@ -561,16 +597,14 @@ function ScheduleFields({
               </option>
             ))}
           </select>
-        </label>
+        </LabeledField>
       )}
 
       {showDayOfMonth && (
-        <label className="flex flex-col gap-1.5">
-          <Text font="main-ui-action" color="text-04">
-            Day of month
-          </Text>
+        <LabeledField title="Day of month" htmlFor={id("monthday")}>
           {/* raw-ok: no Opal multiline input */}
           <input
+            id={id("monthday")}
             type="number"
             min={1}
             max={31}
@@ -582,26 +616,24 @@ function ScheduleFields({
               }
             }}
             disabled={disabled}
-            className="box-border w-full rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-00) px-[10px] py-2 text-sm outline-none"
+            className="box-border w-full rounded-(--radius-04) border border-(--border-01) bg-(--background-tint-00) px-[10px] py-2 text-sm outline-none"
           />
           <Text font="secondary-body" color="text-03">
             Months without this day (e.g. day 31 in February) skip that month
             entirely &mdash; the schedule does not roll over to the next valid
             day.
           </Text>
-        </label>
+        </LabeledField>
       )}
 
-      <label className="flex flex-col gap-1.5">
-        <Text font="main-ui-action" color="text-04">
-          Timezone
-        </Text>
+      <LabeledField title="Timezone" htmlFor={id("timezone")}>
         {/* raw-ok: no Opal multiline input */}
         <select
+          id={id("timezone")}
           value={tz}
           onChange={(e) => onTzChange(e.target.value)}
           disabled={disabled}
-          className="box-border w-full cursor-pointer rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-00) px-[10px] py-2 text-sm outline-none"
+          className="box-border w-full cursor-pointer rounded-(--radius-04) border border-(--border-01) bg-(--background-tint-00) px-[10px] py-2 text-sm outline-none"
         >
           {tzOptions.includes(tz) ? null : <option value={tz}>{tz}</option>}
           {tzOptions.map((zone) => (
@@ -614,26 +646,27 @@ function ScheduleFields({
           The schedule runs in this timezone. Daylight-saving transitions are
           handled automatically.
         </Text>
-      </label>
+      </LabeledField>
 
-      <label className="flex flex-col gap-1.5">
-        <Text font="main-ui-action" color="text-04">
-          Do not fire before (optional)
-        </Text>
+      <LabeledField
+        title="Do not fire before (optional)"
+        htmlFor={id("not-before")}
+      >
         {/* raw-ok: no Opal multiline input */}
         <input
+          id={id("not-before")}
           type="datetime-local"
           value={startAtLocal}
           onChange={(e) => onStartAtChange(e.target.value)}
           disabled={disabled}
-          className="box-border w-full rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-00) px-[10px] py-2 text-sm outline-none"
+          className="box-border w-full rounded-(--radius-04) border border-(--border-01) bg-(--background-tint-00) px-[10px] py-2 text-sm outline-none"
         />
         <Text font="secondary-body" color="text-03">
           Anchored to your local time. Leave empty to start at the next
           scheduled run. Useful for delaying a launch (e.g. &ldquo;don&rsquo;t
           start until next Monday&rdquo;).
         </Text>
-      </label>
+      </LabeledField>
 
       <details>
         <summary className="cursor-pointer text-xs font-semibold text-(--text-04) select-none">
@@ -661,7 +694,7 @@ function ScheduleFields({
             }}
             disabled={disabled}
             placeholder="*/15 * * * *"
-            className="box-border w-full rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-00) px-[10px] py-2 font-mono text-sm outline-none"
+            className="box-border w-full rounded-(--radius-04) border border-(--border-01) bg-(--background-tint-00) px-[10px] py-2 font-mono text-sm outline-none"
           />
           <Text font="secondary-body" color="text-03">
             Standard 5-field cron. Editing this switches the frequency to
