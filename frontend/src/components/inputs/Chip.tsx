@@ -14,7 +14,8 @@ export interface ChipProps {
 }
 
 /** Port of Onyx's refresh-components Chip (chip/tag with optional remove),
- * adapted to agent-wiki's Opal Text API. Swap to the library version when it
+ * adapted to agent-wiki's Opal Text API and to the Figma Tag values (dark
+ * text-04 label, tight padding). Swap to the library version when it
  * ships in @onyx-ai/opal. */
 export default function Chip({
   children,
@@ -25,13 +26,13 @@ export default function Chip({
   truncateLabel = false,
 }: ChipProps) {
   return (
-    <div className="flex items-center gap-1 rounded-(--radius-08) bg-(--background-tint-02) px-1.5 py-0.5">
+    <div className="flex items-center gap-0.5 rounded-(--radius-08) bg-(--background-tint-02) px-1 py-0.5">
       {Icon && <Icon className="size-3 shrink-0 text-(--text-03)" />}
       {children && (
         <span className={truncateLabel ? "max-w-[120px] truncate" : undefined}>
           <Text
             font={smallLabel ? "secondary-body" : "main-ui-body"}
-            color="text-03"
+            color="text-04"
             nowrap
             maxLines={1}
           >
