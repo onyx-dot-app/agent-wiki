@@ -29,7 +29,7 @@ export default function Chip({
   return (
     <div
       className={cn(
-        "flex items-center bg-(--background-tint-02)",
+        "flex max-w-full min-w-0 items-center bg-(--background-tint-02)",
         smallLabel
           ? "gap-0 rounded-(--radius-04) p-[2px]"
           : "gap-0.5 rounded-(--radius-08) px-1 py-0.5",
@@ -40,8 +40,8 @@ export default function Chip({
         <span
           className={
             truncateLabel
-              ? "flex max-w-[120px] items-center truncate"
-              : "flex items-center"
+              ? "block max-w-[120px] min-w-0 truncate"
+              : "block min-w-0 truncate"
           }
         >
           <Text
