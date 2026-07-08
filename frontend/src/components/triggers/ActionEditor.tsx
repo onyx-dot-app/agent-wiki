@@ -19,6 +19,7 @@ import {
   SvgTrash,
   SvgUser,
 } from "@onyx-ai/opal/icons";
+import { ContentAction } from "@onyx-ai/opal/layouts";
 
 import InputChipField from "@/components/inputs/InputChipField";
 import InputTextArea from "@/components/inputs/InputTextArea";
@@ -141,27 +142,27 @@ function ActionGroupRow({
 
   return (
     <div className="group/action flex w-full flex-col gap-1">
-      <div className="flex w-full items-center px-[2px]">
-        <div className="flex-1">
-          <Text font="main-ui-action" color="text-04">
-            {label}
-          </Text>
-        </div>
-        {onRemove && (
-          /* Hidden at rest per the mock; hover over the action block reveals it. */
-          <span className="opacity-0 transition-opacity group-focus-within/action:opacity-100 group-hover/action:opacity-100">
-            <Button
-              type="button"
-              icon={SvgTrash}
-              size="sm"
-              prominence="tertiary"
-              tooltip="Remove this action"
-              onClick={onRemove}
-              disabled={disabled}
-            />
-          </span>
-        )}
-      </div>
+      <ContentAction
+        title={label}
+        sizePreset="main-ui"
+        variant="section"
+        rightChildren={
+          onRemove && (
+            /* Hidden at rest per the mock; hover over the action block reveals it. */
+            <span className="opacity-0 transition-opacity group-focus-within/action:opacity-100 group-hover/action:opacity-100">
+              <Button
+                type="button"
+                icon={SvgTrash}
+                size="sm"
+                prominence="tertiary"
+                tooltip="Remove this action"
+                onClick={onRemove}
+                disabled={disabled}
+              />
+            </span>
+          )
+        }
+      />
 
       <Popover open={typeOpen} onOpenChange={setTypeOpen}>
         {/* SelectButton draws no border of its own; the slot supplies the

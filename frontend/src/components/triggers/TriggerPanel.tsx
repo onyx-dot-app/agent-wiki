@@ -22,6 +22,7 @@ import {
   SvgWorkflow,
   SvgX,
 } from "@onyx-ai/opal/icons";
+import { Content } from "@onyx-ai/opal/layouts";
 import { markdown } from "@onyx-ai/opal/utils";
 import {
   PRESET_OPTIONS,
@@ -109,6 +110,39 @@ function groupsFromActions(
       message: "",
     });
   return out;
+}
+
+/** Vertical label + control + helper stack. Composes Opal's Content for the
+ * label row; InputVertical is unsuitable here (its root is h-full, sized for
+ * fixed-height rows, and collapses in a free-flow column). */
+function LabeledField({
+  title,
+  helper,
+  htmlFor,
+  children,
+}: {
+  title: string;
+  helper?: string;
+  /** id of the native control below, so the visible title is a real label. */
+  htmlFor?: string;
+  children: React.ReactNode;
+}) {
+  const heading = (
+    <Content title={title} sizePreset="main-ui" variant="section" />
+  );
+  return (
+    <div className="flex w-full flex-col gap-1">
+      {htmlFor ? <label htmlFor={htmlFor}>{heading}</label> : heading}
+      {children}
+      {helper && (
+        <div className="px-[2px]">
+          <Text font="secondary-body" color="text-03">
+            {helper}
+          </Text>
+        </div>
+      )}
+    </div>
+  );
 }
 
 const EXAMPLE_IF = "the document is updated with a release version";
@@ -323,12 +357,10 @@ export function TriggerPanel({
             </Tabs.List>
           </Tabs>
 
-          <div className="flex w-full flex-col gap-1">
-            <div className="px-[2px]">
-              <Text font="main-ui-action" color="text-04">
-                Watch
-              </Text>
-            </div>
+          <LabeledField
+            title="Watch"
+            helper="Add specific sections or entire pages to watch."
+          >
             <WatchScopePicker
               scopePath={scopePath}
               onScopePath={(p) => {
@@ -337,12 +369,7 @@ export function TriggerPanel({
               disabled={busy || Boolean(lockScope)}
               locked={Boolean(lockScope)}
             />
-            <div className="px-[2px]">
-              <Text font="secondary-body" color="text-03">
-                Add specific sections or entire pages to watch.
-              </Text>
-            </div>
-          </div>
+          </LabeledField>
 
           <Divider />
 
@@ -363,12 +390,7 @@ export function TriggerPanel({
             />
           )}
 
-          <div className="flex w-full flex-col gap-1">
-            <div className="px-[2px]">
-              <Text font="main-ui-action" color="text-04">
-                Run if
-              </Text>
-            </div>
+          <LabeledField title="Run if">
             <InputTextArea
               value={ifText}
               onChange={(e) => setIfText(e.target.value)}
@@ -384,7 +406,7 @@ export function TriggerPanel({
                 </Text>
               </div>
             )}
-          </div>
+          </LabeledField>
 
           <ActionEditor
             groups={groups}
@@ -492,11 +514,9 @@ function ScheduleFields({
   const timeValue = `${pad(parts.hour)}:${pad(parts.minute)}`;
 
   return (
-    <div className="flex flex-col gap-3 rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-01) p-[14px]">
+    <div className="flex flex-col gap-3 rounded-(--radius-04) border border-(--border-01) bg-(--background-tint-01) p-[14px]">
       <label className="flex flex-col gap-1.5">
-        <Text font="main-ui-action" color="text-04">
-          Frequency
-        </Text>
+        <Content title="Frequency" sizePreset="main-ui" variant="section" />
         {/* raw-ok: no Opal multiline input */}
         <select
           value={parts.preset}
@@ -507,7 +527,7 @@ function ScheduleFields({
             })
           }
           disabled={disabled}
-          className="box-border w-full cursor-pointer rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-00) px-[10px] py-2 text-sm outline-none"
+          className="box-border w-full cursor-pointer rounded-(--radius-04) border border-(--border-01) bg-(--background-tint-00) px-[10px] py-2 text-sm outline-none"
         >
           {PRESET_OPTIONS.map((o) => (
             <option key={o.value} value={o.value}>
@@ -519,9 +539,7 @@ function ScheduleFields({
 
       {showTimeOfDay && (
         <label className="flex flex-col gap-1.5">
-          <Text font="main-ui-action" color="text-04">
-            Time of day
-          </Text>
+          <Content title="Time of day" sizePreset="main-ui" variant="section" />
           {/* raw-ok: no Opal multiline input */}
           <input
             type="time"
@@ -533,7 +551,7 @@ function ScheduleFields({
               }
             }}
             disabled={disabled}
-            className="box-border w-full rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-00) px-[10px] py-2 text-sm outline-none"
+            className="box-border w-full rounded-(--radius-04) border border-(--border-01) bg-(--background-tint-00) px-[10px] py-2 text-sm outline-none"
           />
           <Text font="secondary-body" color="text-03">
             Interpreted in the timezone selected below.
@@ -543,9 +561,7 @@ function ScheduleFields({
 
       {showWeekday && (
         <label className="flex flex-col gap-1.5">
-          <Text font="main-ui-action" color="text-04">
-            Day of week
-          </Text>
+          <Content title="Day of week" sizePreset="main-ui" variant="section" />
           {/* raw-ok: no Opal multiline input */}
           <select
             value={parts.dayOfWeek}
@@ -553,7 +569,7 @@ function ScheduleFields({
               onPartsChange({ ...parts, dayOfWeek: Number(e.target.value) })
             }
             disabled={disabled}
-            className="box-border w-full cursor-pointer rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-00) px-[10px] py-2 text-sm outline-none"
+            className="box-border w-full cursor-pointer rounded-(--radius-04) border border-(--border-01) bg-(--background-tint-00) px-[10px] py-2 text-sm outline-none"
           >
             {WEEKDAY_NAMES.map((name, i) => (
               <option key={i} value={i}>
@@ -566,9 +582,11 @@ function ScheduleFields({
 
       {showDayOfMonth && (
         <label className="flex flex-col gap-1.5">
-          <Text font="main-ui-action" color="text-04">
-            Day of month
-          </Text>
+          <Content
+            title="Day of month"
+            sizePreset="main-ui"
+            variant="section"
+          />
           {/* raw-ok: no Opal multiline input */}
           <input
             type="number"
@@ -582,7 +600,7 @@ function ScheduleFields({
               }
             }}
             disabled={disabled}
-            className="box-border w-full rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-00) px-[10px] py-2 text-sm outline-none"
+            className="box-border w-full rounded-(--radius-04) border border-(--border-01) bg-(--background-tint-00) px-[10px] py-2 text-sm outline-none"
           />
           <Text font="secondary-body" color="text-03">
             Months without this day (e.g. day 31 in February) skip that month
@@ -593,15 +611,13 @@ function ScheduleFields({
       )}
 
       <label className="flex flex-col gap-1.5">
-        <Text font="main-ui-action" color="text-04">
-          Timezone
-        </Text>
+        <Content title="Timezone" sizePreset="main-ui" variant="section" />
         {/* raw-ok: no Opal multiline input */}
         <select
           value={tz}
           onChange={(e) => onTzChange(e.target.value)}
           disabled={disabled}
-          className="box-border w-full cursor-pointer rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-00) px-[10px] py-2 text-sm outline-none"
+          className="box-border w-full cursor-pointer rounded-(--radius-04) border border-(--border-01) bg-(--background-tint-00) px-[10px] py-2 text-sm outline-none"
         >
           {tzOptions.includes(tz) ? null : <option value={tz}>{tz}</option>}
           {tzOptions.map((zone) => (
@@ -617,16 +633,18 @@ function ScheduleFields({
       </label>
 
       <label className="flex flex-col gap-1.5">
-        <Text font="main-ui-action" color="text-04">
-          Do not fire before (optional)
-        </Text>
+        <Content
+          title="Do not fire before (optional)"
+          sizePreset="main-ui"
+          variant="section"
+        />
         {/* raw-ok: no Opal multiline input */}
         <input
           type="datetime-local"
           value={startAtLocal}
           onChange={(e) => onStartAtChange(e.target.value)}
           disabled={disabled}
-          className="box-border w-full rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-00) px-[10px] py-2 text-sm outline-none"
+          className="box-border w-full rounded-(--radius-04) border border-(--border-01) bg-(--background-tint-00) px-[10px] py-2 text-sm outline-none"
         />
         <Text font="secondary-body" color="text-03">
           Anchored to your local time. Leave empty to start at the next
@@ -661,7 +679,7 @@ function ScheduleFields({
             }}
             disabled={disabled}
             placeholder="*/15 * * * *"
-            className="box-border w-full rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-00) px-[10px] py-2 font-mono text-sm outline-none"
+            className="box-border w-full rounded-(--radius-04) border border-(--border-01) bg-(--background-tint-00) px-[10px] py-2 font-mono text-sm outline-none"
           />
           <Text font="secondary-body" color="text-03">
             Standard 5-field cron. Editing this switches the frequency to
