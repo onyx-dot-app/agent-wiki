@@ -60,8 +60,10 @@ export default function Chip({
       {onRemove && (
         <span
           className={cn(
-            "flex items-center [&_svg]:text-(--text-05)",
-            smallLabel && "[&_button]:size-3 [&_svg]:size-2.5",
+            "flex items-center",
+            smallLabel
+              ? "[&_button]:!size-3 [&_svg]:!size-2.5 [&_svg]:text-(--text-04)"
+              : "[&_svg]:text-(--text-05)",
           )}
         >
           <Button
