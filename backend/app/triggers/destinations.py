@@ -11,6 +11,7 @@ The repo owns destination-id validation. Repos / API / agent tools call
 destination is a one-line migration plus a dispatcher — no edits to the
 trigger-creation surface.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -35,6 +36,11 @@ SLACK_ID = "slack"
 # the config's verified address; unverified configs are recorded-only.
 EMAIL_ID = "email"
 
+# Slug of the generic webhook destination. Covers Zapier, n8n, Make,
+# Pipedream, and any HTTP receiver: dispatch POSTs a structured JSON event
+# (not the prose message) to the config's URL, HMAC-signed with its secret.
+WEBHOOK_ID = "webhook"
+
 
 def _to_dict(d: TriggerDestination) -> dict[str, Any]:
     return {
@@ -47,9 +53,7 @@ def _to_dict(d: TriggerDestination) -> dict[str, Any]:
 
 def list_all() -> list[dict[str, Any]]:
     with session() as s:
-        rows = s.scalars(
-            select(TriggerDestination).order_by(TriggerDestination.id)
-        ).all()
+        rows = s.scalars(select(TriggerDestination).order_by(TriggerDestination.id)).all()
         return [_to_dict(d) for d in rows]
 
 

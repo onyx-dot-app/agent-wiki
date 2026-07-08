@@ -17,13 +17,14 @@ from __future__ import annotations
 import logging
 import uuid
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import select
 
 from app.db.models import DestinationConfig
 from app.db.session import session
 from app.slack import connections as slack_connections
+from app.net.ssrf import assert_public_url
 from app.triggers import destinations
 
 log = logging.getLogger(__name__)
@@ -59,6 +60,14 @@ def list_for_user(user_id: str) -> list[dict[str, Any]]:
         return [_to_dict(d) for d in rows]
 
 
+def _is_str_map(obj: object) -> bool:
+    """True when obj is a dict whose keys and values are all strings."""
+    if not isinstance(obj, dict):
+        return False
+    items = cast("dict[object, object]", obj).items()
+    return all(isinstance(k, str) and isinstance(v, str) for k, v in items)
+
+
 def create(
     user_id: str,
     *,
@@ -91,6 +100,18 @@ def create(
                 "a slack destination needs exactly one of: a webhook secret, "
                 "a channel_id, or dm: true"
             )
+    if type == destinations.WEBHOOK_ID:
+        cfg = config or {}
+        url = cfg.get("url")
+        if not isinstance(url, str) or not url.strip():
+            raise ValueError("a webhook destination needs config.url")
+        # Fail fast on a private/loopback/metadata URL at registration time,
+        # not only at fire time.
+        assert_public_url(url.strip())
+        headers = cfg.get("headers")
+        if headers is not None and not _is_str_map(headers):
+            raise ValueError("webhook headers must be a string map")
+
     if type == destinations.EMAIL_ID:
         address = ((config or {}).get("address") or "")
         if not isinstance(address, str) or "@" not in address.strip():
