@@ -27,7 +27,14 @@ export default function Chip({
   truncateLabel = false,
 }: ChipProps) {
   return (
-    <Tooltip tooltip={children} side="top">
+    <Tooltip
+      tooltip={
+        children ? (
+          <span className="font-secondary-body break-all">{children}</span>
+        ) : undefined
+      }
+      side="top"
+    >
       <div
         className={cn(
           "flex max-w-full min-w-0 items-center bg-(--background-tint-02)",
