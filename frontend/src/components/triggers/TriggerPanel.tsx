@@ -1,6 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import {
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 
 import useSWR from "swr";
 
@@ -521,12 +528,17 @@ function ScheduleFields({
 
   const timeValue = `${pad(parts.hour)}:${pad(parts.minute)}`;
 
+  // Unique per mounted panel so a second open panel can't duplicate ids or
+  // let a label focus another instance's control.
+  const uid = useId();
+  const id = (field: string) => `${uid}-${field}`;
+
   return (
     <div className="flex flex-col gap-3 rounded-(--radius-04) border border-(--border-01) bg-(--background-tint-01) p-[14px]">
-      <LabeledField title="Frequency" htmlFor="schedule-frequency">
+      <LabeledField title="Frequency" htmlFor={id("frequency")}>
         {/* raw-ok: no Opal multiline input */}
         <select
-          id="schedule-frequency"
+          id={id("frequency")}
           value={parts.preset}
           onChange={(e) =>
             onPartsChange({
@@ -546,10 +558,10 @@ function ScheduleFields({
       </LabeledField>
 
       {showTimeOfDay && (
-        <LabeledField title="Time of day" htmlFor="schedule-time">
+        <LabeledField title="Time of day" htmlFor={id("time")}>
           {/* raw-ok: no Opal multiline input */}
           <input
-            id="schedule-time"
+            id={id("time")}
             type="time"
             value={timeValue}
             onChange={(e) => {
@@ -568,10 +580,10 @@ function ScheduleFields({
       )}
 
       {showWeekday && (
-        <LabeledField title="Day of week" htmlFor="schedule-weekday">
+        <LabeledField title="Day of week" htmlFor={id("weekday")}>
           {/* raw-ok: no Opal multiline input */}
           <select
-            id="schedule-weekday"
+            id={id("weekday")}
             value={parts.dayOfWeek}
             onChange={(e) =>
               onPartsChange({ ...parts, dayOfWeek: Number(e.target.value) })
@@ -589,10 +601,10 @@ function ScheduleFields({
       )}
 
       {showDayOfMonth && (
-        <LabeledField title="Day of month" htmlFor="schedule-monthday">
+        <LabeledField title="Day of month" htmlFor={id("monthday")}>
           {/* raw-ok: no Opal multiline input */}
           <input
-            id="schedule-monthday"
+            id={id("monthday")}
             type="number"
             min={1}
             max={31}
@@ -614,10 +626,10 @@ function ScheduleFields({
         </LabeledField>
       )}
 
-      <LabeledField title="Timezone" htmlFor="schedule-timezone">
+      <LabeledField title="Timezone" htmlFor={id("timezone")}>
         {/* raw-ok: no Opal multiline input */}
         <select
-          id="schedule-timezone"
+          id={id("timezone")}
           value={tz}
           onChange={(e) => onTzChange(e.target.value)}
           disabled={disabled}
@@ -638,11 +650,11 @@ function ScheduleFields({
 
       <LabeledField
         title="Do not fire before (optional)"
-        htmlFor="schedule-not-before"
+        htmlFor={id("not-before")}
       >
         {/* raw-ok: no Opal multiline input */}
         <input
-          id="schedule-not-before"
+          id={id("not-before")}
           type="datetime-local"
           value={startAtLocal}
           onChange={(e) => onStartAtChange(e.target.value)}
