@@ -523,10 +523,10 @@ function ScheduleFields({
 
   return (
     <div className="flex flex-col gap-3 rounded-(--radius-04) border border-(--border-01) bg-(--background-tint-01) p-[14px]">
-      <label className="flex flex-col gap-1.5">
-        <Content title="Frequency" sizePreset="main-ui" variant="section" />
+      <LabeledField title="Frequency" htmlFor="schedule-frequency">
         {/* raw-ok: no Opal multiline input */}
         <select
+          id="schedule-frequency"
           value={parts.preset}
           onChange={(e) =>
             onPartsChange({
@@ -543,13 +543,13 @@ function ScheduleFields({
             </option>
           ))}
         </select>
-      </label>
+      </LabeledField>
 
       {showTimeOfDay && (
-        <label className="flex flex-col gap-1.5">
-          <Content title="Time of day" sizePreset="main-ui" variant="section" />
+        <LabeledField title="Time of day" htmlFor="schedule-time">
           {/* raw-ok: no Opal multiline input */}
           <input
+            id="schedule-time"
             type="time"
             value={timeValue}
             onChange={(e) => {
@@ -564,14 +564,14 @@ function ScheduleFields({
           <Text font="secondary-body" color="text-03">
             Interpreted in the timezone selected below.
           </Text>
-        </label>
+        </LabeledField>
       )}
 
       {showWeekday && (
-        <label className="flex flex-col gap-1.5">
-          <Content title="Day of week" sizePreset="main-ui" variant="section" />
+        <LabeledField title="Day of week" htmlFor="schedule-weekday">
           {/* raw-ok: no Opal multiline input */}
           <select
+            id="schedule-weekday"
             value={parts.dayOfWeek}
             onChange={(e) =>
               onPartsChange({ ...parts, dayOfWeek: Number(e.target.value) })
@@ -585,18 +585,14 @@ function ScheduleFields({
               </option>
             ))}
           </select>
-        </label>
+        </LabeledField>
       )}
 
       {showDayOfMonth && (
-        <label className="flex flex-col gap-1.5">
-          <Content
-            title="Day of month"
-            sizePreset="main-ui"
-            variant="section"
-          />
+        <LabeledField title="Day of month" htmlFor="schedule-monthday">
           {/* raw-ok: no Opal multiline input */}
           <input
+            id="schedule-monthday"
             type="number"
             min={1}
             max={31}
@@ -615,13 +611,13 @@ function ScheduleFields({
             entirely &mdash; the schedule does not roll over to the next valid
             day.
           </Text>
-        </label>
+        </LabeledField>
       )}
 
-      <label className="flex flex-col gap-1.5">
-        <Content title="Timezone" sizePreset="main-ui" variant="section" />
+      <LabeledField title="Timezone" htmlFor="schedule-timezone">
         {/* raw-ok: no Opal multiline input */}
         <select
+          id="schedule-timezone"
           value={tz}
           onChange={(e) => onTzChange(e.target.value)}
           disabled={disabled}
@@ -638,16 +634,15 @@ function ScheduleFields({
           The schedule runs in this timezone. Daylight-saving transitions are
           handled automatically.
         </Text>
-      </label>
+      </LabeledField>
 
-      <label className="flex flex-col gap-1.5">
-        <Content
-          title="Do not fire before (optional)"
-          sizePreset="main-ui"
-          variant="section"
-        />
+      <LabeledField
+        title="Do not fire before (optional)"
+        htmlFor="schedule-not-before"
+      >
         {/* raw-ok: no Opal multiline input */}
         <input
+          id="schedule-not-before"
           type="datetime-local"
           value={startAtLocal}
           onChange={(e) => onStartAtChange(e.target.value)}
@@ -659,7 +654,7 @@ function ScheduleFields({
           scheduled run. Useful for delaying a launch (e.g. &ldquo;don&rsquo;t
           start until next Monday&rdquo;).
         </Text>
-      </label>
+      </LabeledField>
 
       <details>
         <summary className="cursor-pointer text-xs font-semibold text-(--text-04) select-none">
