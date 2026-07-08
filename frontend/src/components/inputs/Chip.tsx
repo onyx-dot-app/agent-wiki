@@ -1,4 +1,5 @@
 import { Button, Text } from "@onyx-ai/opal/components";
+import { cn } from "@onyx-ai/opal/utils";
 import { SvgAlertTriangle, SvgX } from "@onyx-ai/opal/icons";
 import type { IconFunctionComponent } from "@onyx-ai/opal/types";
 
@@ -26,7 +27,14 @@ export default function Chip({
   truncateLabel = false,
 }: ChipProps) {
   return (
-    <div className="flex items-center gap-0.5 rounded-(--radius-08) bg-(--background-tint-02) px-1 py-0.5">
+    <div
+      className={cn(
+        "flex items-center bg-(--background-tint-02)",
+        smallLabel
+          ? "gap-0 rounded-(--radius-04) p-[2px]"
+          : "gap-0.5 rounded-(--radius-08) px-1 py-0.5",
+      )}
+    >
       {Icon && <Icon className="size-3 shrink-0 text-(--text-03)" />}
       {children && (
         <span
@@ -37,7 +45,7 @@ export default function Chip({
           }
         >
           <Text
-            font={smallLabel ? "secondary-body" : "main-ui-body"}
+            font={smallLabel ? "figure-small-value" : "main-ui-body"}
             color="text-04"
             nowrap
             maxLines={1}
@@ -50,12 +58,17 @@ export default function Chip({
         <SvgAlertTriangle className="size-3.5 shrink-0 text-(--status-warning-05)" />
       )}
       {onRemove && (
-        <span className="flex items-center [&_svg]:text-(--text-05)">
+        <span
+          className={cn(
+            "flex items-center [&_svg]:text-(--text-05)",
+            smallLabel && "[&_button]:size-3 [&_svg]:size-2.5",
+          )}
+        >
           <Button
             type="button"
             prominence="tertiary"
             icon={SvgX}
-            size="xs"
+            size={smallLabel ? "fit" : "xs"}
             onClick={(e) => {
               e.stopPropagation();
               onRemove();

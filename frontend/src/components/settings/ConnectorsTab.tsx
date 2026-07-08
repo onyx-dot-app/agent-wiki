@@ -144,7 +144,7 @@ export function ConnectorsTab() {
               <Button
                 type="button"
                 icon={SvgVolumeOff}
-                size="sm"
+                size="md"
                 prominence={status.muted ? "secondary" : "tertiary"}
                 tooltip={
                   status.muted ? "Resume Slack delivery" : "Mute Slack delivery"
@@ -154,7 +154,7 @@ export function ConnectorsTab() {
               <Button
                 type="button"
                 icon={SvgUnplug}
-                size="sm"
+                size="md"
                 prominence="tertiary"
                 tooltip="Disconnect Server"
                 onClick={() => void onDisconnect()}
@@ -183,7 +183,7 @@ export function ConnectorsTab() {
             <Button
               type="button"
               icon={SvgSettings}
-              size="sm"
+              size="md"
               prominence="tertiary"
               tooltip="Manage"
               onClick={() => setEmailsOpen(true)}
@@ -231,67 +231,69 @@ function ConnectorCard({
   foldActions?: React.ReactNode;
 }) {
   return (
-    <Card
-      padding="xs"
-      rounding="md"
-      border="solid"
-      background={connected ? "light" : "heavy"}
-    >
-      <div className="flex w-full items-start">
-        <div className="flex min-w-0 flex-1 flex-col p-2">
-          <Content
-            sizePreset="main-ui"
-            variant="section"
-            icon={Icon}
-            title={title}
-            description={description}
-          />
-          {detail && (
-            <div className="w-full pt-1 pl-6 [&>span]:block">{detail}</div>
-          )}
+    <div className="w-full [&_.opal-content-md-icon-container_svg]:!size-[18px]">
+      <Card
+        padding="xs"
+        rounding="md"
+        border="solid"
+        background={connected ? "light" : "heavy"}
+      >
+        <div className="flex w-full items-start">
+          <div className="flex min-w-0 flex-1 flex-col p-2">
+            <Content
+              sizePreset="main-ui"
+              variant="section"
+              icon={Icon}
+              title={title}
+              description={description}
+            />
+            {detail && (
+              <div className="w-full pt-1 pl-6 [&>span]:block">{detail}</div>
+            )}
+          </div>
+          <div className="flex shrink-0 flex-col items-end">
+            {connected ? (
+              <span className="flex items-center gap-1 p-2">
+                <Text font="main-ui-action" color="text-03" nowrap>
+                  Connected
+                </Text>
+                <SvgCheckCircle className="size-4 text-(--status-success-05)" />
+              </span>
+            ) : connectHref ? (
+              <Button
+                size="sm"
+                prominence="tertiary"
+                rightIcon={SvgArrowExchange}
+                href={connectHref}
+              >
+                Connect
+              </Button>
+            ) : onConnect ? (
+              <Button
+                type="button"
+                size="sm"
+                prominence="tertiary"
+                rightIcon={SvgArrowExchange}
+                onClick={onConnect}
+              >
+                Connect
+              </Button>
+            ) : (
+              <span className="p-2">
+                <Text font="secondary-body" color="text-03" nowrap>
+                  {unavailableNote ?? "Unavailable"}
+                </Text>
+              </span>
+            )}
+            {foldActions && (
+              <div className="flex items-center justify-end gap-1 p-1">
+                {foldActions}
+              </div>
+            )}
+          </div>
         </div>
-        <div className="flex shrink-0 flex-col items-end">
-          {connected ? (
-            <span className="flex items-center gap-1 p-2">
-              <Text font="main-ui-action" color="text-03" nowrap>
-                Connected
-              </Text>
-              <SvgCheckCircle className="size-4 text-(--status-success-05)" />
-            </span>
-          ) : connectHref ? (
-            <Button
-              size="sm"
-              prominence="tertiary"
-              rightIcon={SvgArrowExchange}
-              href={connectHref}
-            >
-              Connect
-            </Button>
-          ) : onConnect ? (
-            <Button
-              type="button"
-              size="sm"
-              prominence="tertiary"
-              rightIcon={SvgArrowExchange}
-              onClick={onConnect}
-            >
-              Connect
-            </Button>
-          ) : (
-            <span className="p-2">
-              <Text font="secondary-body" color="text-03" nowrap>
-                {unavailableNote ?? "Unavailable"}
-              </Text>
-            </span>
-          )}
-          {foldActions && (
-            <div className="flex items-center justify-end gap-1 p-1">
-              {foldActions}
-            </div>
-          )}
-        </div>
-      </div>
-    </Card>
+      </Card>
+    </div>
   );
 }
 
@@ -309,11 +311,11 @@ function AddressTags({
   return (
     <div className="flex w-full flex-wrap items-center gap-1">
       {visible.map((c) => (
-        <Chip key={c.id} truncateLabel onRemove={() => onRemove(c)}>
+        <Chip key={c.id} smallLabel truncateLabel onRemove={() => onRemove(c)}>
           {c.name}
         </Chip>
       ))}
-      {overflow > 0 && <Chip icon={SvgMail}>{`+${overflow}`}</Chip>}
+      {overflow > 0 && <Chip smallLabel icon={SvgMail}>{`+${overflow}`}</Chip>}
     </div>
   );
 }
@@ -548,16 +550,18 @@ function EmailsModal({
                       rightChildren={
                         <span className="flex shrink-0 items-center gap-1">
                           {!c.verified_at && (
-                            <Button
-                              type="button"
-                              size="xs"
-                              prominence="secondary"
-                              icon={SvgSend}
-                              disabled={remaining > 0}
-                              onClick={() => void onResend(c)}
-                            >
-                              {remaining > 0 ? `${remaining}s` : "Verify"}
-                            </Button>
+                            <span className="flex items-center [&_button]:!h-6 [&_button]:!rounded-(--radius-08) [&_button]:!border-0 [&_button]:!bg-(--background-tint-00) [&_button_span]:!text-[12px] [&_button_span]:!leading-4">
+                              <Button
+                                type="button"
+                                size="xs"
+                                prominence="secondary"
+                                icon={SvgSend}
+                                disabled={remaining > 0}
+                                onClick={() => void onResend(c)}
+                              >
+                                {remaining > 0 ? `${remaining}s` : "Verify"}
+                              </Button>
+                            </span>
                           )}
                           <Button
                             type="button"
