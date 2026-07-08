@@ -1,13 +1,15 @@
 // Typed client for the per-page/per-folder update policy
-// (`/api/update-policy`). The policy has two fields — whether ingestion
-// auto-update is disabled, and a free-text update instruction — resolved
-// most-granular-wins on the server. `effective` is what's actually in force
-// (incl. inheritance); `explicit` is the row set on exactly this path.
+// (`/api/update-policy`). The policy has three fields — whether ingestion
+// auto-update is disabled, a free-text update instruction, and whether AI
+// management is allowed — resolved most-granular-wins on the server.
+// `effective` is what's actually in force (incl. inheritance); `explicit` is
+// the row set on exactly this path.
 import { apiFetch } from "@/lib/api";
 
 export interface EffectivePolicy {
   ingestion_auto_update_disabled: boolean;
   update_instruction: string | null;
+  ai_management_allowed: boolean;
 }
 
 export interface ExplicitPolicy {
@@ -15,6 +17,7 @@ export interface ExplicitPolicy {
   kind: "page" | "folder";
   ingestion_auto_update_disabled: boolean | null;
   update_instruction: string | null;
+  ai_management_allowed: boolean | null;
   // Owner-set per-page warning threshold (auto-updates/24h); null = inherit
   // the global default; 0 = warnings off for this page.
   warn_update_threshold: number | null;
@@ -35,6 +38,7 @@ export interface UpdatePolicyResponse {
 export interface UpdatePolicyPatch {
   ingestion_auto_update_disabled?: boolean | null;
   update_instruction?: string | null;
+  ai_management_allowed?: boolean | null;
   warn_update_threshold?: number | null;
 }
 
