@@ -807,6 +807,7 @@ function WatchScopePicker({
       <Popover.Anchor asChild>
         <div ref={anchorRef} className="w-full">
           <InputChipField
+            inputBelow
             chips={scopes.map((scope, i) => ({
               id: `${scope.path}#${scope.start_line ?? ""}#${i}`,
               label: scopeLabel(scope),
