@@ -29,7 +29,13 @@ export default function Chip({
     <div className="flex items-center gap-0.5 rounded-(--radius-08) bg-(--background-tint-02) px-1 py-0.5">
       {Icon && <Icon className="size-3 shrink-0 text-(--text-03)" />}
       {children && (
-        <span className={truncateLabel ? "max-w-[120px] truncate" : undefined}>
+        <span
+          className={
+            truncateLabel
+              ? "flex max-w-[120px] items-center truncate"
+              : "flex items-center"
+          }
+        >
           <Text
             font={smallLabel ? "secondary-body" : "main-ui-body"}
             color="text-04"
@@ -44,7 +50,7 @@ export default function Chip({
         <SvgAlertTriangle className="size-3.5 shrink-0 text-(--status-warning-05)" />
       )}
       {onRemove && (
-        <span className="[&_svg]:text-(--text-05)">
+        <span className="flex items-center [&_svg]:text-(--text-05)">
           <Button
             type="button"
             prominence="tertiary"
