@@ -397,6 +397,7 @@ function EmailsModal({
           configs,
           d.label,
         );
+        if (!mountedRef.current) return;
         if (verificationError) setError(verificationError);
         else startCooldown(id, 60);
       }
