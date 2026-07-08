@@ -21,7 +21,7 @@ export default function Chip({
   children,
   icon: Icon,
   onRemove,
-  smallLabel = true,
+  smallLabel = false,
   error = false,
   truncateLabel = false,
 }: ChipProps) {
@@ -44,16 +44,18 @@ export default function Chip({
         <SvgAlertTriangle className="size-3.5 shrink-0 text-(--status-warning-05)" />
       )}
       {onRemove && (
-        <Button
-          type="button"
-          prominence="tertiary"
-          icon={SvgX}
-          size="xs"
-          onClick={(e) => {
-            e.stopPropagation();
-            onRemove();
-          }}
-        />
+        <span className="[&_svg]:text-(--text-05)">
+          <Button
+            type="button"
+            prominence="tertiary"
+            icon={SvgX}
+            size="xs"
+            onClick={(e) => {
+              e.stopPropagation();
+              onRemove();
+            }}
+          />
+        </span>
       )}
     </div>
   );
