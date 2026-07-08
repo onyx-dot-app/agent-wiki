@@ -66,7 +66,9 @@ def test_status_reflects_configuration_and_connection(client):
         "configured": False,
         "connected": False,
         "team_name": None,
+        "team_id": None,
         "token_display": None,
+        "muted": False,
         "connect_url": None,
     }
 

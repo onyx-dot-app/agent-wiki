@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any, cast
 
 from datetime import datetime, timezone
@@ -475,6 +476,35 @@ def _dispatch_to_slack(
                 trigger.id, config_id,
             )
             return
+        # Slack webhook URLs embed their workspace id
+        # (hooks.slack.com/services/<TEAM>/...), so the mute check targets
+        # exactly the webhook's own workspace. For URLs that don't parse:
+        # a single connection is the only Slack there is, so its mute
+        # applies; with multiple workspaces an unattributable webhook never
+        # borrows another workspace's mute and keeps sending.
+        team_match = re.match(
+            r"https://hooks\.slack\.com/services/(T[A-Z0-9]+)/", webhook_url
+        )
+        connections = slack_connections.list_for_user(trigger.owner_user_id)
+        muted_team = None
+        if team_match:
+            muted_team = next(
+                (
+                    c["team_id"]
+                    for c in connections
+                    if c["team_id"] == team_match.group(1) and c.get("muted")
+                ),
+                None,
+            )
+        elif len(connections) == 1 and connections[0].get("muted"):
+            muted_team = connections[0]["team_id"]
+        if muted_team is not None:
+            log.info(
+                "trigger %s slack webhook suppressed: connection %s is muted; "
+                "recorded to events only",
+                trigger.id, muted_team,
+            )
+            return
         try:
             slack_client.post_message(
                 webhook_url=webhook_url, text=slack_client.to_mrkdwn(rendered_message)
@@ -494,36 +524,68 @@ def _dispatch_to_slack(
         )
         return
 
-    connection = next(iter(slack_connections.list_for_user(trigger.owner_user_id)), None)
-    if connection is None:
+    # Resolve the connection the target belongs to. Configs stamped with a
+    # team_id use exactly that workspace. Legacy unstamped configs try each
+    # of the owner's connections in the stable order until one accepts the
+    # channel (a wrong-workspace token fails without delivering), so the
+    # channel's real workspace wins rather than whichever row happens to be
+    # first. Mute is checked on the SAME connection that would deliver.
+    config_team = target.get("team_id")
+    if config_team:
+        stamped = slack_connections.get(trigger.owner_user_id, str(config_team))
+        candidates = [stamped] if stamped else []
+    else:
+        candidates = slack_connections.list_for_user(trigger.owner_user_id)
+    if not candidates:
         log.info(
-            "trigger %s owner %s has no slack connection; recorded to events only",
+            "trigger %s owner %s has no slack connection for this target; "
+            "recorded to events only",
             trigger.id, trigger.owner_user_id,
         )
         return
-    bot_token = slack_connections.get_bot_token(
-        trigger.owner_user_id, str(connection["team_id"])
-    )
-    if not bot_token:
+    unmuted = [c for c in candidates if not c.get("muted")]
+    if not unmuted:
         log.info(
-            "trigger %s slack connection token unavailable; recorded to events only",
+            "trigger %s slack connections muted for this target; "
+            "recorded to events only",
             trigger.id,
         )
         return
 
-    # Channel posts name the owner as a real mention; a DM already is the owner.
-    source = f"— Agent Wiki trigger on {doc_path}"
-    if not wants_dm:
-        source += f", for <@{connection['slack_user_id']}>"
-    text = f"{slack_client.to_mrkdwn(rendered_message)}\n{source}"
-    try:
-        if wants_dm and not channel_id:
-            channel_id = slack_client.open_dm(
-                bot_token=bot_token, slack_user_id=str(connection["slack_user_id"])
-            )
-        slack_client.post_chat_message(
-            bot_token=bot_token, channel=str(channel_id), text=text
+    for connection in unmuted:
+        bot_token = slack_connections.get_bot_token(
+            trigger.owner_user_id, str(connection["team_id"])
         )
-        log.info("trigger %s dispatched via slack bot config %s", trigger.id, config_id)
-    except slack_client.SlackApiError:
-        log.exception("trigger %s slack bot dispatch failed", trigger.id)
+        if not bot_token:
+            continue
+        # Channel posts name the owner as a real mention; a DM already is
+        # the owner.
+        source = f"— Agent Wiki trigger on {doc_path}"
+        if not wants_dm:
+            source += f", for <@{connection['slack_user_id']}>"
+        text = f"{slack_client.to_mrkdwn(rendered_message)}\n{source}"
+        try:
+            post_channel = channel_id
+            if wants_dm and not post_channel:
+                post_channel = slack_client.open_dm(
+                    bot_token=bot_token,
+                    slack_user_id=str(connection["slack_user_id"]),
+                )
+            slack_client.post_chat_message(
+                bot_token=bot_token, channel=str(post_channel), text=text
+            )
+            log.info(
+                "trigger %s dispatched via slack bot config %s team %s",
+                trigger.id, config_id, connection["team_id"],
+            )
+            return
+        except slack_client.SlackApiError:
+            log.warning(
+                "trigger %s slack post failed on team %s; trying next connection",
+                trigger.id, connection["team_id"], exc_info=True,
+            )
+    log.error(
+        "trigger %s slack bot dispatch failed on all connections; "
+        "recorded to events only",
+        trigger.id,
+    )

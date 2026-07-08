@@ -30,6 +30,10 @@ _MINT_COOLDOWN_SECONDS = 60
 class MintRateLimitedError(RuntimeError):
     """A verification email for this config was sent too recently."""
 
+    def __init__(self, message: str, retry_after_seconds: int) -> None:
+        super().__init__(message)
+        self.retry_after_seconds = retry_after_seconds
+
 
 def _iso(dt: datetime) -> str:
     return dt.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
@@ -44,14 +48,21 @@ def mint_token(destination_config_id: str) -> str:
     floor = _iso(now - timedelta(seconds=_MINT_COOLDOWN_SECONDS))
     with session() as s:
         recent = s.scalar(
-            select(EmailVerificationToken.token).where(
+            select(EmailVerificationToken.created_at).where(
                 EmailVerificationToken.destination_config_id == destination_config_id,
                 EmailVerificationToken.created_at > floor,
                 EmailVerificationToken.consumed_at.is_(None),
             )
         )
         if recent is not None:
-            raise MintRateLimitedError("a verification email was just sent; wait a minute")
+            sent_at = datetime.strptime(recent, "%Y-%m-%d %H:%M:%S").replace(
+                tzinfo=timezone.utc
+            )
+            elapsed = int((now - sent_at).total_seconds())
+            retry_after = max(1, _MINT_COOLDOWN_SECONDS - elapsed)
+            raise MintRateLimitedError(
+                "a verification email was just sent; wait a minute", retry_after
+            )
         s.execute(
             delete(EmailVerificationToken).where(
                 EmailVerificationToken.destination_config_id == destination_config_id

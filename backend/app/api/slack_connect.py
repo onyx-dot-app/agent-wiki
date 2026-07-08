@@ -40,8 +40,16 @@ class SlackConnectStatus(BaseModel):
     configured: bool
     connected: bool
     team_name: str | None = None
+    team_id: str | None = None
     token_display: str | None = None
+    muted: bool = False
     connect_url: str | None = None
+
+
+class SlackMuteRequest(BaseModel):
+    muted: bool
+    # Required when the user has connections in more than one workspace.
+    team_id: str | None = None
 
 
 def _require_configured() -> app_settings.SlackAppSettings:
@@ -77,9 +85,34 @@ def get_status(user: User = Depends(require_user)) -> SlackConnectStatus:
         configured=settings.configured,
         connected=first is not None,
         team_name=first["team_name"] if first else None,
+        team_id=first["team_id"] if first else None,
         token_display=first["token_display"] if first else None,
+        muted=bool(first["muted"]) if first else False,
         connect_url=connect_url,
     )
+
+
+@router.put("/mute", response_model=SlackConnectStatus)
+def set_mute(
+    req: SlackMuteRequest, user: User = Depends(require_user)
+) -> SlackConnectStatus:
+    """Pause or resume Slack delivery on one connection without
+    disconnecting."""
+    rows = connections.list_for_user(user.id)
+    if not rows:
+        raise HTTPException(status_code=404, detail="not connected")
+    if req.team_id is not None:
+        team_id = req.team_id
+    elif len(rows) == 1:
+        team_id = str(rows[0]["team_id"])
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="multiple Slack workspaces connected; pass team_id",
+        )
+    if not connections.set_muted(user.id, team_id, req.muted):
+        raise HTTPException(status_code=404, detail="not connected")
+    return get_status(user)
 
 
 @router.get("/start")

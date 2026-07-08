@@ -218,7 +218,14 @@ def resend_verification(
     try:
         email_verification.send_verification_email(config_id, address)
     except email_verification.MintRateLimitedError as exc:
-        raise HTTPException(status_code=429, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "error": str(exc),
+                "retry_after_seconds": exc.retry_after_seconds,
+            },
+            headers={"Retry-After": str(exc.retry_after_seconds)},
+        ) from exc
     except EmailSendError as exc:
         view.verification_error = f"verification email failed: {exc}"
     return view

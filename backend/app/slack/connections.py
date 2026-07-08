@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from cryptography.exceptions import InvalidTag
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from sqlalchemy.orm import defer
 
 from app.db.models import UserSlackConnection
@@ -42,6 +42,7 @@ def _to_dict(c: UserSlackConnection) -> dict[str, Any]:
         "slack_user_id": c.slack_user_id,
         "token_display": c.token_display,
         "scope": c.scope,
+        "muted": c.muted,
         "created_at": c.created_at,
         "updated_at": c.updated_at,
     }
@@ -86,11 +87,16 @@ def upsert(
 
 
 def list_for_user(user_id: str) -> list[dict[str, Any]]:
+    """Oldest connection first. Status, mute defaulting, and trigger dispatch
+    all treat the first row as "the" connection, so the order must be stable."""
     with session() as s:
         rows = s.scalars(
             select(UserSlackConnection)
             .options(_DEFER_TOKEN)
             .where(UserSlackConnection.user_id == user_id)
+            .order_by(
+                UserSlackConnection.created_at, UserSlackConnection.team_id
+            )
         ).all()
         return [_to_dict(c) for c in rows]
 
@@ -99,6 +105,22 @@ def get(user_id: str, team_id: str) -> dict[str, Any] | None:
     with session() as s:
         row = s.get(UserSlackConnection, (user_id, team_id), options=[_DEFER_TOKEN])
         return _to_dict(row) if row else None
+
+
+def set_muted(user_id: str, team_id: str, muted: bool) -> bool:
+    """Flip delivery muting on one connection without touching the stored
+    token. Returns whether a row matched."""
+    with session() as s:
+        matched = s.scalar(
+            update(UserSlackConnection)
+            .where(
+                UserSlackConnection.user_id == user_id,
+                UserSlackConnection.team_id == team_id,
+            )
+            .values(muted=muted, updated_at=_now_iso())
+            .returning(UserSlackConnection.team_id)
+        )
+        return matched is not None
 
 
 def delete_connection(user_id: str, team_id: str) -> bool:

@@ -68,10 +68,10 @@ export default function InputChipField({
 
   return (
     <div
+      data-variant={disabled ? "disabled" : "primary"}
       className={cn(
-        "flex min-h-9 w-full cursor-text flex-row flex-wrap items-center gap-1 rounded-(--radius-08) p-1.5",
-        "border border-(--border-02) bg-(--background-neutral-00) focus-within:border-(--border-05) focus-within:shadow-[0_0_0_2px_var(--background-tint-04)]",
-        disabled && "pointer-events-none cursor-not-allowed opacity-50",
+        "opal-input min-h-9 cursor-text flex-wrap gap-1",
+        disabled && "pointer-events-none",
         className,
       )}
       onClick={() => inputRef.current?.focus()}
@@ -87,17 +87,18 @@ export default function InputChipField({
         </Chip>
       ))}
       {Icon && <Icon className="size-4 shrink-0 text-(--text-04)" />}
-      <span className="min-w-[80px] flex-1 [&_input]:w-full">
-        <InputTypeIn
-          ref={inputRef}
-          variant="internal"
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          onKeyDown={handleKeyDown}
-          onFocus={onFocus}
-          placeholder={placeholder}
-        />
-      </span>
+      {/* raw-ok: Opal's .opal-input-field contract for a composite input's inner field; nested InputTypeIn double-pads past the 36px Input/Tags height */}
+      <input
+        ref={inputRef}
+        type="text"
+        className="opal-input-field min-w-[80px] flex-1"
+        disabled={disabled}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onKeyDown={handleKeyDown}
+        onFocus={onFocus}
+        placeholder={placeholder}
+      />
     </div>
   );
 }

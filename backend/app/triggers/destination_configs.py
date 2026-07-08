@@ -23,6 +23,7 @@ from sqlalchemy import select
 
 from app.db.models import DestinationConfig
 from app.db.session import session
+from app.slack import connections as slack_connections
 from app.triggers import destinations
 
 log = logging.getLogger(__name__)
@@ -75,6 +76,13 @@ def create(
         raise ValueError(f"unknown destination type: {type}")
     if type == destinations.SLACK_ID:
         cfg = config or {}
+        # Stamp the workspace the target belongs to (the caller listed its
+        # channels from that connection); dispatch and mute resolve by it.
+        if not cfg.get("team_id"):
+            first = next(iter(slack_connections.list_for_user(user_id)), None)
+            if first is not None:
+                cfg = {**cfg, "team_id": first["team_id"]}
+                config = cfg
         targets = sum(
             1 for present in (secret, cfg.get("channel_id"), cfg.get("dm")) if present
         )

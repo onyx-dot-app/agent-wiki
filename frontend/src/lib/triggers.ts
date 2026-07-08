@@ -1,6 +1,6 @@
 import useSWR from "swr";
 
-import { apiFetch } from "@/lib/api";
+import { ApiError, apiFetch } from "@/lib/api";
 
 export type TriggerKind = "delta" | "schedule";
 
@@ -209,4 +209,30 @@ export function deleteDestinationConfig(id: string): Promise<void> {
   return apiFetch<void>(`/triggers/destination-configs/${id}`, {
     method: "DELETE",
   });
+}
+
+/** Resend the verification email. A 429 resolves with the server's
+ * retry_after_seconds so callers can run a countdown instead of guessing. */
+export async function resendVerification(
+  configId: string,
+): Promise<{ ok: boolean; retryAfterSeconds?: number; error?: string }> {
+  try {
+    await apiFetch<DestinationConfig>(
+      `/triggers/destination-configs/${configId}/resend-verify`,
+      { method: "POST" },
+    );
+    return { ok: true };
+  } catch (e) {
+    if (e instanceof ApiError) {
+      if (e.status === 429) {
+        const data = e.data as { retry_after_seconds?: number } | undefined;
+        return {
+          ok: false,
+          retryAfterSeconds: data?.retry_after_seconds ?? 60,
+        };
+      }
+      return { ok: false, error: e.message };
+    }
+    return { ok: false, error: "request failed" };
+  }
 }

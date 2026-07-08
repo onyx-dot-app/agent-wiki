@@ -12,6 +12,8 @@ export interface SlackConnectStatus {
   team_name: string | null;
   token_display: string | null;
   connect_url: string | null;
+  muted: boolean;
+  team_id: string | null;
 }
 
 export interface SlackChannel {
@@ -72,4 +74,14 @@ export async function ensureSlackDestination(
           config: { channel_id: target.id, channel_name: target.name },
         });
   return { id: created.id, created: true };
+}
+
+export function setSlackMuted(
+  muted: boolean,
+  teamId?: string | null,
+): Promise<SlackConnectStatus> {
+  return apiFetch<SlackConnectStatus>("/connectors/slack/mute", {
+    method: "PUT",
+    body: JSON.stringify({ muted, team_id: teamId ?? undefined }),
+  });
 }
