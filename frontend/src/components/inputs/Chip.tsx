@@ -9,6 +9,8 @@ export interface ChipProps {
   smallLabel?: boolean;
   /** Warning-coloured indicator icon after the label. */
   error?: boolean;
+  /** Cap the label at 120px with an ellipsis (the mock's mini-tag form). */
+  truncateLabel?: boolean;
 }
 
 /** Port of Onyx's refresh-components Chip (chip/tag with optional remove),
@@ -20,19 +22,22 @@ export default function Chip({
   onRemove,
   smallLabel = true,
   error = false,
+  truncateLabel = false,
 }: ChipProps) {
   return (
     <div className="flex items-center gap-1 rounded-(--radius-08) bg-(--background-tint-02) px-1.5 py-0.5">
       {Icon && <Icon className="size-3 shrink-0 text-(--text-03)" />}
       {children && (
-        <Text
-          font={smallLabel ? "secondary-body" : "main-ui-body"}
-          color="text-03"
-          nowrap
-          maxLines={1}
-        >
-          {children}
-        </Text>
+        <span className={truncateLabel ? "max-w-[120px] truncate" : undefined}>
+          <Text
+            font={smallLabel ? "secondary-body" : "main-ui-body"}
+            color="text-03"
+            nowrap
+            maxLines={1}
+          >
+            {children}
+          </Text>
+        </span>
       )}
       {error && (
         <SvgAlertTriangle className="size-3.5 shrink-0 text-(--status-warning-05)" />

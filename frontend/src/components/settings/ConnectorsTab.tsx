@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
-import { Button, LinkButton, Text } from "@onyx-ai/opal/components";
+import { Button, Card, Text } from "@onyx-ai/opal/components";
 import {
   SvgArrowExchange,
   SvgCheckCircle,
@@ -14,10 +14,11 @@ import {
   SvgVolumeOff,
   SvgX,
 } from "@onyx-ai/opal/icons";
-import { InputErrorText } from "@onyx-ai/opal/layouts";
+import { Content, ContentAction, InputErrorText } from "@onyx-ai/opal/layouts";
 import { cn, markdown } from "@onyx-ai/opal/utils";
 
 import { SvgSend } from "@/components/icons/SvgSend";
+import Chip from "@/components/inputs/Chip";
 import InputChipField, {
   type ChipItem,
 } from "@/components/inputs/InputChipField";
@@ -38,6 +39,21 @@ import {
 } from "@/lib/triggers";
 
 const MAX_EMAILS = 5;
+
+/** Status-coloured icons for ContentAction's icon slot. */
+function VerifiedIcon(props: React.ComponentProps<typeof SvgCheckCircle>) {
+  return (
+    <SvgCheckCircle
+      {...props}
+      className={cn(props.className, "text-(--status-success-05)")}
+    />
+  );
+}
+function PendingIcon(props: React.ComponentProps<typeof SvgClock>) {
+  return (
+    <SvgClock {...props} className={cn(props.className, "text-(--text-03)")} />
+  );
+}
 
 /** The Connectors settings tab per the mock: Slack and Emails cards with a
  * tertiary status affordance top-right, a fold line of icon actions under
@@ -210,34 +226,24 @@ function ConnectorCard({
   foldActions?: React.ReactNode;
 }) {
   return (
-    <div
-      className={cn(
-        "w-full min-w-[280px] rounded-(--radius-12) border border-(--border-01) p-1",
-        connected
-          ? "bg-(--background-tint-00)"
-          : "bg-(--background-neutral-01)",
-      )}
+    <Card
+      padding="xs"
+      rounding="md"
+      border="solid"
+      background={connected ? "light" : "heavy"}
     >
       <div className="flex w-full items-start">
         <div className="flex min-w-0 flex-1 flex-col p-2">
-          <div className="flex w-full max-w-[480px] items-start gap-1">
-            <span className="flex size-5 shrink-0 items-center justify-center">
-              <Icon className="size-[18px]" />
-            </span>
-            <div className="flex min-w-0 flex-1 flex-col">
-              <span className="px-[2px]">
-                <Text font="main-ui-action" color="text-04" nowrap>
-                  {title}
-                </Text>
-              </span>
-              <span className="px-[2px]">
-                <Text font="secondary-body" color="text-03">
-                  {description}
-                </Text>
-              </span>
-            </div>
-          </div>
-          {detail && <div className="w-full pt-1 pl-6">{detail}</div>}
+          <Content
+            sizePreset="main-ui"
+            variant="section"
+            icon={Icon}
+            title={title}
+            description={description}
+          />
+          {detail && (
+            <div className="w-full pt-1 pl-6 [&>span]:block">{detail}</div>
+          )}
         </div>
         <div className="flex shrink-0 flex-col items-end">
           {connected ? (
@@ -280,7 +286,7 @@ function ConnectorCard({
           )}
         </div>
       </div>
-    </div>
+    </Card>
   );
 }
 
@@ -298,37 +304,11 @@ function AddressTags({
   return (
     <div className="flex w-full flex-wrap items-center gap-1">
       {visible.map((c) => (
-        <span
-          key={c.id}
-          className="flex items-center rounded-(--radius-04) bg-(--background-tint-02) p-[2px]"
-        >
-          <span className="max-w-[120px] truncate px-[2px]">
-            <Text font="figure-small-value" color="text-04" nowrap>
-              {c.name}
-            </Text>
-          </span>
-          <Button
-            type="button"
-            icon={SvgX}
-            size="2xs"
-            prominence="internal"
-            tooltip={`Remove ${c.name}`}
-            onClick={() => onRemove(c)}
-          />
-        </span>
+        <Chip key={c.id} truncateLabel onRemove={() => onRemove(c)}>
+          {c.name}
+        </Chip>
       ))}
-      {overflow > 0 && (
-        <span className="flex items-center rounded-(--radius-04) bg-(--background-tint-02) p-[2px]">
-          <span className="flex size-3 items-center justify-center p-[1px]">
-            <SvgMail className="size-full text-(--text-03)" />
-          </span>
-          <span className="px-[2px]">
-            <Text font="figure-small-value" color="text-04" nowrap>
-              {`+${overflow}`}
-            </Text>
-          </span>
-        </span>
-      )}
+      {overflow > 0 && <Chip icon={SvgMail}>{`+${overflow}`}</Chip>}
     </div>
   );
 }
@@ -490,20 +470,14 @@ function EmailsModal({
         className="flex max-h-[92vh] w-[min(480px,92vw)] flex-col overflow-y-auto rounded-(--radius-16) border border-(--border-01) bg-(--background-tint-01) shadow-(--shadow-modal)"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="relative flex w-full flex-col items-start gap-1 rounded-t-(--radius-16) bg-(--background-tint-00) p-4">
-          <span className="flex size-7 items-center justify-center">
-            <SvgMail className="size-6 text-(--text-04)" />
-          </span>
-          <span className="px-[2px]">
-            <Text font="heading-h3" color="text-04">
-              Emails
-            </Text>
-          </span>
-          <span className="px-[2px]">
-            <Text font="secondary-body" color="text-03">
-              Send wiki updates notifications to your email addresses.
-            </Text>
-          </span>
+        <div className="relative w-full rounded-t-(--radius-16) bg-(--background-tint-00) p-4">
+          <Content
+            sizePreset="section"
+            variant="heading"
+            icon={SvgMail}
+            title="Emails"
+            description="Send wiki updates notifications to your email addresses."
+          />
           <span className="absolute top-2 right-2">
             <Button
               type="button"
@@ -557,46 +531,38 @@ function EmailsModal({
                 return (
                   <div
                     key={c.id}
-                    className="flex w-full items-start gap-[2px] rounded-(--radius-08) bg-(--background-tint-01) p-[6px]"
+                    className="w-full rounded-(--radius-08) bg-(--background-tint-01) p-[6px]"
                   >
-                    <div className="flex min-w-0 flex-1 items-start gap-1 p-[2px]">
-                      <span className="flex size-5 shrink-0 items-center justify-center p-[2px]">
-                        {c.verified_at ? (
-                          <SvgCheckCircle className="size-full text-(--status-success-05)" />
-                        ) : (
-                          <SvgClock className="size-full text-(--text-03)" />
-                        )}
-                      </span>
-                      <div className="flex min-w-0 flex-1 flex-col px-[2px]">
-                        <span className="truncate">
-                          <Text font="main-ui-action" color="text-04" nowrap>
-                            {c.name}
-                          </Text>
+                    <ContentAction
+                      sizePreset="main-ui"
+                      variant="section"
+                      icon={c.verified_at ? VerifiedIcon : PendingIcon}
+                      title={c.name}
+                      description={c.verified_at ? "Verified" : "Not verified"}
+                      rightChildren={
+                        <span className="flex shrink-0 items-center gap-1">
+                          {!c.verified_at && (
+                            <Button
+                              type="button"
+                              size="xs"
+                              prominence="secondary"
+                              icon={SvgSend}
+                              disabled={remaining > 0}
+                              onClick={() => void onResend(c)}
+                            >
+                              {remaining > 0 ? `${remaining}s` : "Verify"}
+                            </Button>
+                          )}
+                          <Button
+                            type="button"
+                            icon={SvgX}
+                            size="sm"
+                            prominence="tertiary"
+                            tooltip="Remove address"
+                            onClick={() => void onDelete(c)}
+                          />
                         </span>
-                        <Text font="secondary-body" color="text-03">
-                          {c.verified_at ? "Verified" : "Not verified"}
-                        </Text>
-                      </div>
-                    </div>
-                    {!c.verified_at && (
-                      <Button
-                        type="button"
-                        size="xs"
-                        prominence="secondary"
-                        icon={SvgSend}
-                        disabled={remaining > 0}
-                        onClick={() => void onResend(c)}
-                      >
-                        {remaining > 0 ? `${remaining}s` : "Verify"}
-                      </Button>
-                    )}
-                    <Button
-                      type="button"
-                      icon={SvgX}
-                      size="sm"
-                      prominence="tertiary"
-                      tooltip="Remove address"
-                      onClick={() => void onDelete(c)}
+                      }
                     />
                   </div>
                 );
