@@ -1,9 +1,10 @@
 """Update-policy repo — per-page / per-folder control over wiki auto-updates.
 
 Postgres-only governance metadata keyed by path (a ``.md`` page, a folder, or
-``""`` for the wiki root), mirroring ``app/wiki/acl.py``. Two independent
-settings — ``ingestion_auto_update_disabled`` (tri-state) and
-``update_instruction`` — are each resolved most-granular-wins by walking a path
+``""`` for the wiki root), mirroring ``app/wiki/acl.py``. Three independent
+settings — ``ingestion_auto_update_disabled`` (tri-state),
+``update_instruction``, and ``ai_management_allowed`` (tri-state) — are each
+resolved most-granular-wins by walking a path
 and its ancestor folders. See the design page
 ``Engineering Projects/Agent Wiki Project/design/Update Policy.md``.
 
@@ -44,6 +45,9 @@ class ResolvedPolicy(BaseModel):
 
     ingestion_auto_update_disabled: bool = False
     update_instruction: str | None = None
+    # Effective default is False: without an explicit opt-in somewhere in the
+    # scope chain, AI auto-management stays propose -> approve.
+    ai_management_allowed: bool = False
 
 
 def _now() -> str:
@@ -70,6 +74,7 @@ def _to_dict(row: UpdatePolicy) -> dict[str, Any]:
         "kind": row.kind,
         "ingestion_auto_update_disabled": row.ingestion_auto_update_disabled,
         "update_instruction": row.update_instruction,
+        "ai_management_allowed": row.ai_management_allowed,
         "warn_update_threshold": row.warn_update_threshold,
         "updated_by_user_id": row.updated_by_user_id,
         "created_at": row.created_at,
@@ -104,6 +109,7 @@ def set_policy(
     *,
     ingestion_auto_update_disabled: bool | None | _UnsetType = _UNSET,
     update_instruction: str | None | _UnsetType = _UNSET,
+    ai_management_allowed: bool | None | _UnsetType = _UNSET,
     warn_update_threshold: int | None | _UnsetType = _UNSET,
     actor_user_id: str | None = None,
 ) -> dict[str, Any] | None:
@@ -124,12 +130,15 @@ def set_policy(
             row.ingestion_auto_update_disabled = ingestion_auto_update_disabled
         if not isinstance(update_instruction, _UnsetType):
             row.update_instruction = update_instruction or None
+        if not isinstance(ai_management_allowed, _UnsetType):
+            row.ai_management_allowed = ai_management_allowed
         if not isinstance(warn_update_threshold, _UnsetType):
             row.warn_update_threshold = warn_update_threshold
 
         if (
             row.ingestion_auto_update_disabled is None
             and not row.update_instruction
+            and row.ai_management_allowed is None
             and row.warn_update_threshold is None
         ):
             if existed:
@@ -217,6 +226,7 @@ def _resolve_chain(chain: list[str], by_path: dict[str, UpdatePolicy]) -> Resolv
     """Resolve one scope chain (closest first) against pre-fetched rows."""
     disabled: bool | None = None
     instruction: str | None = None
+    ai_managed: bool | None = None
     for scope in chain:
         row = by_path.get(scope)
         if row is None:
@@ -225,11 +235,14 @@ def _resolve_chain(chain: list[str], by_path: dict[str, UpdatePolicy]) -> Resolv
             disabled = row.ingestion_auto_update_disabled
         if instruction is None and row.update_instruction:
             instruction = row.update_instruction
-        if disabled is not None and instruction is not None:
+        if ai_managed is None and row.ai_management_allowed is not None:
+            ai_managed = row.ai_management_allowed
+        if disabled is not None and instruction is not None and ai_managed is not None:
             break
     return ResolvedPolicy(
         ingestion_auto_update_disabled=bool(disabled),
         update_instruction=instruction,
+        ai_management_allowed=bool(ai_managed),
     )
 
 
@@ -267,6 +280,11 @@ def resolve_for_path(path: str) -> ResolvedPolicy:
 def is_ingest_disabled(path: str) -> bool:
     """Convenience: is connector/ingest auto-update disabled for ``path``?"""
     return resolve_for_path(path).ingestion_auto_update_disabled
+
+
+def is_ai_management_allowed(path: str) -> bool:
+    """Convenience: may the AI auto-manage ``path`` (effective, cascaded)?"""
+    return resolve_for_path(path).ai_management_allowed
 
 
 def disabled_paths(paths: Iterable[str]) -> set[str]:

@@ -1172,7 +1172,7 @@ class UpdatePolicy(Base):
     a folder, or ``""`` (the wiki root). A row exists only while it carries a
     setting; clearing every field deletes it (see ``app/wiki/update_policy.py``).
 
-    Two independent settings, each resolved most-granular-wins by walking the
+    Three independent settings, each resolved most-granular-wins by walking the
     path and its ancestor folders (``update_policy.resolve_for_path``):
 
     - ``ingestion_auto_update_disabled`` — tri-state. ``NULL`` inherits from a
@@ -1182,6 +1182,12 @@ class UpdatePolicy(Base):
       updater, direct agent writes, or human edits.
     - ``update_instruction`` — free-text guidance injected into the updater LLM
       prompts. ``NULL``/empty means none.
+    - ``ai_management_allowed`` — tri-state. ``NULL`` inherits; ``True`` lets
+      the AI auto-manage this scope (structural and content changes without
+      per-change approval — consumed by the wiki auto-management engine);
+      ``False`` explicitly forbids it, doubling as the intentional-duplicate /
+      don't-consolidate marker. Effective default is ``False`` — everything
+      goes through propose → approve.
     """
 
     __tablename__ = "update_policies"
@@ -1190,6 +1196,7 @@ class UpdatePolicy(Base):
     kind: Mapped[str] = mapped_column(Text, nullable=False)  # "page" | "folder"
     ingestion_auto_update_disabled: Mapped[bool | None] = mapped_column(Boolean)
     update_instruction: Mapped[str | None] = mapped_column(Text)
+    ai_management_allowed: Mapped[bool | None] = mapped_column(Boolean)
     # Owner-set per-page warning threshold: notify the owner once a page is
     # auto-updated more than this many times in 24h. ``NULL`` inherits the
     # global default (``ingest_settings.warn_update_threshold_default``). Per-page

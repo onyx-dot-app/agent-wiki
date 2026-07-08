@@ -41,6 +41,7 @@ def _build_response(path: str) -> UpdatePolicyResponse:
         effective=EffectivePolicy(
             ingestion_auto_update_disabled=effective.ingestion_auto_update_disabled,
             update_instruction=effective.update_instruction,
+            ai_management_allowed=effective.ai_management_allowed,
         ),
     )
 
@@ -68,6 +69,8 @@ def patch_update_policy(
         patch["ingestion_auto_update_disabled"] = req.ingestion_auto_update_disabled
     if "update_instruction" in req.model_fields_set:
         patch["update_instruction"] = req.update_instruction
+    if "ai_management_allowed" in req.model_fields_set:
+        patch["ai_management_allowed"] = req.ai_management_allowed
     if "warn_update_threshold" in req.model_fields_set:
         patch["warn_update_threshold"] = req.warn_update_threshold
     # Nothing to change — don't touch the row (would falsify updated_by/_at).

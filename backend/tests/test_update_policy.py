@@ -320,3 +320,44 @@ def test_on_page_deleted_drops_row(tmp_db):
     update_policy.set_policy("a.md", ingestion_auto_update_disabled=True)
     update_policy.on_page_deleted("a.md")
     assert update_policy.get("a.md") is None
+
+
+# --------------------------------------------------------------------------- #
+# ai_management_allowed cascade                                               #
+# --------------------------------------------------------------------------- #
+
+
+def test_ai_management_defaults_to_false(tmp_db):
+    assert update_policy.is_ai_management_allowed("a/b/page.md") is False
+
+
+def test_ai_management_page_level_allow(tmp_db):
+    update_policy.set_policy("a/page.md", ai_management_allowed=True)
+    assert update_policy.is_ai_management_allowed("a/page.md") is True
+
+
+def test_ai_management_folder_allow_page_forbid(tmp_db):
+    update_policy.set_policy("a", ai_management_allowed=True)
+    # Explicit page-level False opts out under an allowed folder (the
+    # don't-consolidate marker case).
+    update_policy.set_policy("a/page.md", ai_management_allowed=False)
+    assert update_policy.is_ai_management_allowed("a/page.md") is False
+    # A sibling with no own row inherits the folder's allow.
+    assert update_policy.is_ai_management_allowed("a/other.md") is True
+
+
+def test_ai_management_resolves_independently_of_other_fields(tmp_db):
+    update_policy.set_policy("a", ai_management_allowed=True)
+    update_policy.set_policy("a/page.md", ingestion_auto_update_disabled=True)
+    resolved = update_policy.resolve_for_path("a/page.md")
+    # ai flag inherited from the folder; disable set on the page itself.
+    assert resolved.ai_management_allowed is True
+    assert resolved.ingestion_auto_update_disabled is True
+
+
+def test_ai_management_clearing_can_delete_row(tmp_db):
+    update_policy.set_policy("a/page.md", ai_management_allowed=True)
+    result = update_policy.set_policy("a/page.md", ai_management_allowed=None)
+    # The flag was the row's only setting; clearing it removes the row.
+    assert result is None
+    assert update_policy.get("a/page.md") is None
