@@ -25,6 +25,15 @@ class TriggerActionView(BaseModel):
 # --------------------------------------------------------------------------- #
 
 
+class TriggerScopeShape(BaseModel):
+    """One watch entry: a page or folder path, optionally narrowed to a
+    1-based inclusive line range (pages only)."""
+
+    path: str = Field(min_length=1)
+    start_line: int | None = Field(default=None, ge=1)
+    end_line: int | None = Field(default=None, ge=1)
+
+
 class CreateTriggerRequest(BaseModel):
     """``actions`` is the delivery list; each entry's ``destination_config_id``
     must reference a destination config the caller owns (GET
@@ -37,6 +46,9 @@ class CreateTriggerRequest(BaseModel):
     """
 
     scope_path: str = Field(min_length=1)
+    # Full watch list; when present, scopes[0].path governs and scope_path
+    # may be omitted from consideration (kept for older clients).
+    scopes: list[TriggerScopeShape] | None = None
     nl_description: str = Field(min_length=1)
     actions: list[TriggerActionShape] = Field(min_length=1)
     kind: str = "delta"
@@ -50,6 +62,7 @@ class UpdateTriggerRequest(BaseModel):
     """All fields optional — the route only updates the ones that were sent."""
 
     scope_path: str | None = None
+    scopes: list[TriggerScopeShape] | None = None
     nl_description: str | None = None
     actions: list[TriggerActionShape] | None = None
     enabled: bool | None = None
@@ -73,6 +86,7 @@ class TriggerView(BaseModel):
     id: str
     owner_user_id: str
     scope_path: str
+    scopes: list[TriggerScopeShape] = Field(default_factory=list)
     kind: str
     nl_description: str
     actions: list[TriggerActionView]

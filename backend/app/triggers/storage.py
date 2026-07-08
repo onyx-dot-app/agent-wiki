@@ -130,6 +130,17 @@ def serialize(trigger: dict[str, Any]) -> str:
         value = trigger.get(key)
         if value is not None:
             payload[key] = value
+    # The full watch list is emitted only when it says more than scope_path
+    # alone (extra paths or a line range), so single-scope YAMLs stay clean.
+    scopes = cast("list[dict[str, Any]] | None", trigger.get("scopes"))
+    if scopes and (
+        len(scopes) > 1
+        or scopes[0].get("start_line") is not None
+        or scopes[0].get("path") != trigger["scope_path"]
+    ):
+        payload["scopes"] = [
+            {k: v for k, v in entry.items() if v is not None} for entry in scopes
+        ]
     return yaml.safe_dump(payload, sort_keys=False)
 
 
@@ -164,7 +175,29 @@ def parse(yaml_text: str) -> dict[str, Any]:
     typed.setdefault("schedule_cron", None)
     typed.setdefault("schedule_timezone", None)
     typed.setdefault("schedule_start_at", None)
+    typed["scopes"] = _parse_scopes(typed)
     return typed
+
+
+def _parse_scopes(data: dict[str, Any]) -> list[dict[str, Any]] | None:
+    """Read the ``scopes`` watch list, dropping malformed entries. ``None``
+    when the file predates multi-scope (scope_path alone describes it)."""
+    raw = data.pop("scopes", None)
+    if not isinstance(raw, list):
+        return None
+    out: list[dict[str, Any]] = []
+    for entry in cast(list[Any], raw):
+        if not isinstance(entry, dict):
+            continue
+        e = cast(dict[str, Any], entry)
+        if not isinstance(e.get("path"), str):
+            continue
+        scope: dict[str, Any] = {"path": e["path"]}
+        for key in ("start_line", "end_line"):
+            if isinstance(e.get(key), int):
+                scope[key] = e[key]
+        out.append(scope)
+    return out or None
 
 
 def _parse_actions(data: dict[str, Any]) -> list[dict[str, Any]]:

@@ -54,6 +54,7 @@ import InputTextArea from "@/components/inputs/InputTextArea";
 import { useSlackConnectStatus } from "@/lib/slackConnect";
 import {
   createTrigger,
+  type TriggerScope,
   updateTrigger,
   useDestinationConfigs,
   type Trigger,
@@ -164,7 +165,7 @@ export function TriggerPanel({
   docked,
 }: Props) {
   const isEdit = Boolean(initial?.id);
-  const [scopePath, setScopePath] = useState("");
+  const [scopes, setScopes] = useState<TriggerScope[]>([]);
   const [ifText, setIfText] = useState("");
   const { configs, refresh: refreshConfigs } = useDestinationConfigs();
   const { status: slackStatus } = useSlackConnectStatus();
@@ -187,7 +188,13 @@ export function TriggerPanel({
 
   useEffect(() => {
     if (!open) return;
-    setScopePath(initial?.scope_path ?? "");
+    setScopes(
+      initial?.scopes?.length
+        ? initial.scopes
+        : initial?.scope_path
+          ? [{ path: initial.scope_path }]
+          : [],
+    );
     setIfText(initial?.nl_description ?? "");
     setGroups(groupsFromActions(initial?.actions, configsRef.current));
     setKind((initial?.kind as TriggerKind) ?? "delta");
@@ -232,7 +239,8 @@ export function TriggerPanel({
               })),
       );
       const baseInput: TriggerCreateInput = {
-        scope_path: scopePath.trim(),
+        scope_path: scopes[0]?.path ?? "",
+        scopes,
         nl_description: nl,
         actions,
         kind,
@@ -252,7 +260,7 @@ export function TriggerPanel({
         // delta we explicitly null them so a kind-flip in the DB stays
         // consistent (the API already enforces the invariant).
         saved = await updateTrigger(initial.id, {
-          scope_path: scopePath.trim(),
+          scopes,
           nl_description: nl,
           actions,
           schedule_cron: kind === "schedule" ? computedCron : null,
@@ -277,7 +285,7 @@ export function TriggerPanel({
       g.message.trim() && (g.type === "event_log" || g.configIds.length > 0),
   );
   const canSave =
-    scopePath.trim() &&
+    scopes.length > 0 &&
     ifText.trim() &&
     groupsValid &&
     (kind === "delta" || (computedCron && tz));
@@ -377,10 +385,8 @@ export function TriggerPanel({
             helper="Add specific sections or entire pages to watch."
           >
             <WatchScopePicker
-              scopePath={scopePath}
-              onScopePath={(p) => {
-                setScopePath(p);
-              }}
+              scopes={scopes}
+              onScopes={setScopes}
               disabled={busy || Boolean(lockScope)}
               locked={Boolean(lockScope)}
             />
@@ -727,14 +733,25 @@ function pad(n: number): string {
 /** Search-and-pick for the trigger's watched scope: a dropdown over the
  * ACL-filtered wiki path list (files and their folders), selection only —
  * free-typed paths can't be committed, so a scope always exists. */
+function scopeLabel(scope: TriggerScope): string {
+  const base =
+    scope.path === "" || scope.path === "/" ? "Whole wiki" : scope.path;
+  if (scope.start_line == null) return base;
+  const range =
+    scope.end_line != null && scope.end_line !== scope.start_line
+      ? `line ${scope.start_line}\u2013${scope.end_line}`
+      : `line ${scope.start_line}`;
+  return `${base} \u00b7 ${range}`;
+}
+
 function WatchScopePicker({
-  scopePath,
-  onScopePath,
+  scopes,
+  onScopes,
   disabled,
   locked,
 }: {
-  scopePath: string;
-  onScopePath: (path: string) => void;
+  scopes: TriggerScope[];
+  onScopes: (scopes: TriggerScope[]) => void;
   disabled?: boolean;
   locked?: boolean;
 }) {
@@ -771,30 +788,37 @@ function WatchScopePicker({
     .slice(0, 20);
 
   function pick(path: string) {
-    onScopePath(path);
+    // Whole wiki subsumes everything; otherwise append if not already watched.
+    if (path === "/" || path === "") {
+      onScopes([{ path: "/" }]);
+    } else if (!scopes.some((s) => s.path === path)) {
+      onScopes([...scopes.filter((s) => s.path !== "/"), { path }]);
+    }
     setQuery("");
     setOpen(false);
   }
 
-  const committed = scopePath.trim();
+  function remove(index: number) {
+    onScopes(scopes.filter((_, i) => i !== index));
+  }
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <Popover.Anchor asChild>
         <div ref={anchorRef} className="w-full">
           <InputChipField
-            chips={
-              committed
-                ? [
-                    {
-                      id: committed,
-                      label: committed === "/" ? "Whole wiki" : committed,
-                    },
-                  ]
-                : []
-            }
-            onRemoveChip={() => {
-              if (!locked) onScopePath("");
+            inputBelow
+            chips={scopes.map((scope, i) => ({
+              id: `${scope.path}#${scope.start_line ?? ""}#${i}`,
+              label: scopeLabel(scope),
+            }))}
+            onRemoveChip={(id) => {
+              if (disabled || locked) return;
+              const i = scopes.findIndex(
+                (scope, idx) =>
+                  `${scope.path}#${scope.start_line ?? ""}#${idx}` === id,
+              );
+              if (i >= 0) remove(i);
             }}
             onAdd={() => {
               // Enter commits the visually top row: Whole wiki leads an
@@ -811,8 +835,14 @@ function WatchScopePicker({
             onKeyDown={(e) => {
               if (e.key === "Escape") setOpen(false);
             }}
-            disabled={disabled || (Boolean(committed) && Boolean(locked))}
-            placeholder={committed ? "" : "Search pages and folders to watch"}
+            disabled={disabled || Boolean(locked)}
+            placeholder={
+              scopes.length
+                ? locked
+                  ? ""
+                  : "Add another page or folder"
+                : "Search pages and folders to watch"
+            }
           />
         </div>
       </Popover.Anchor>

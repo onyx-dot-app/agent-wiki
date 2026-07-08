@@ -23,7 +23,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from croniter import croniter
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import select
 
 from app.db.models import Trigger
@@ -40,7 +40,6 @@ from app.triggers.natural_language import (
     render_snapshot_message as nl_render_snapshot_message,
 )
 from app.triggers.repo import _parse_actions  # pyright: ignore[reportPrivateUsage]
-from app.wiki.filesystem import parent_dirs
 
 log = logging.getLogger(__name__)
 
@@ -53,13 +52,25 @@ class TriggerAction(BaseModel):
     message: str | None = None
 
 
+class TriggerScope(BaseModel):
+    """One watched path, optionally narrowed to a 1-based inclusive line
+    range (line ranges only make sense on ``.md`` page scopes)."""
+
+    path: str
+    start_line: int | None = None
+    end_line: int | None = None
+
+
 class TriggerRecord(BaseModel):
     """Eval-side view of a trigger row. ``actions`` is parsed from
-    ``Trigger.action_json``. The raw column shape is hidden."""
+    ``Trigger.action_json``; ``scopes`` is the full watch list (the legacy
+    single scope when the row predates multi-scope). The raw column shape
+    is hidden."""
 
     id: str
     owner_user_id: str
     scope_path: str
+    scopes: list[TriggerScope] = Field(default_factory=list)
     kind: str
     nl_description: str
     actions: list[TriggerAction]
@@ -72,12 +83,19 @@ class TriggerRecord(BaseModel):
     schedule_start_at: str | None = None
     schedule_last_fired_at: str | None = None
 
+    @model_validator(mode="after")
+    def _default_scopes(self) -> "TriggerRecord":
+        if not self.scopes:
+            self.scopes = [TriggerScope(path=self.scope_path)]
+        return self
+
 
 def _to_record(t: Trigger) -> TriggerRecord:
     return TriggerRecord(
         id=t.id,
         owner_user_id=t.owner_user_id,
         scope_path=t.scope_path,
+        scopes=_parse_scopes(t),
         kind=t.kind,
         nl_description=t.nl_description,
         actions=[TriggerAction(**a) for a in _parse_actions(t.action_json)],
@@ -92,18 +110,55 @@ def _to_record(t: Trigger) -> TriggerRecord:
     )
 
 
+def _parse_scopes(t: Trigger) -> list[TriggerScope]:
+    if not t.scopes_json:
+        return [TriggerScope(path=t.scope_path)]
+    out: list[TriggerScope] = []
+    for entry in t.scopes_json:
+        try:
+            out.append(TriggerScope(**entry))
+        except Exception:
+            log.warning("trigger %s: skipping malformed scope entry %r", t.id, entry)
+    return out or [TriggerScope(path=t.scope_path)]
+
+
+def scope_covers(scope_path: str, doc_path: str) -> bool:
+    """Exact page, ancestor folder, or whole wiki (empty scope)."""
+    if not scope_path:
+        return True
+    if doc_path == scope_path:
+        return True
+    return doc_path.startswith(scope_path.rstrip("/") + "/")
+
+
+def matched_scope(record: TriggerRecord, doc_path: str) -> TriggerScope | None:
+    """The most specific watch entry covering ``doc_path`` — an exact page
+    match wins over a folder, a folder over the whole wiki — so a line range
+    on the page entry governs even when a broader scope also matches."""
+    best: TriggerScope | None = None
+    for scope in record.scopes:
+        if not scope_covers(scope.path, doc_path):
+            continue
+        if best is None or len(scope.path) > len(best.path):
+            best = scope
+    return best
+
+
 def find_matching_triggers(doc_path: str) -> list[TriggerRecord]:
-    """Return enabled delta triggers attached to ``doc_path`` or any parent dir."""
-    candidates = [doc_path, *parent_dirs(doc_path)]
+    """Return enabled delta triggers whose watch list covers ``doc_path``.
+
+    Filters in Python over the enabled delta rows: the watch list lives in
+    JSON, and per-wiki trigger counts are small enough that a SQL pushdown
+    would buy nothing."""
     with session() as s:
         rows = s.scalars(
             select(Trigger).where(
                 Trigger.kind == "delta",
                 Trigger.enabled.is_(True),
-                Trigger.scope_path.in_(candidates),
             )
         ).all()
-        return [_to_record(t) for t in rows]
+        records = [_to_record(t) for t in rows]
+    return [r for r in records if matched_scope(r, doc_path) is not None]
 
 
 def find_due_schedule_triggers(now: datetime) -> list[TriggerRecord]:

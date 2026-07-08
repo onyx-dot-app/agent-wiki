@@ -26,6 +26,9 @@ export interface InputChipFieldProps {
   disabled?: boolean;
   icon?: IconFunctionComponent;
   className?: string;
+  /** Put the text input on its own full-width line below the chips instead
+   * of inline, so a long placeholder is never clipped in the leftover gap. */
+  inputBelow?: boolean;
   onFocus?: () => void;
   onKeyDown?: (e: React.KeyboardEvent<HTMLInputElement>) => void;
 }
@@ -45,6 +48,7 @@ export default function InputChipField({
   disabled = false,
   icon: Icon,
   className,
+  inputBelow = false,
   onFocus,
   onKeyDown,
 }: InputChipFieldProps) {
@@ -90,7 +94,10 @@ export default function InputChipField({
       <input
         ref={inputRef}
         type="text"
-        className="opal-input-field min-w-[80px] flex-1"
+        className={cn(
+          "opal-input-field",
+          inputBelow ? "basis-full" : "min-w-[80px] flex-1",
+        )}
         disabled={disabled}
         value={value}
         onChange={(e) => onChange(e.target.value)}

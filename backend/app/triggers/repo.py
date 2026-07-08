@@ -175,6 +175,7 @@ def _to_dict(t: Trigger) -> dict[str, Any]:
         "id": t.id,
         "owner_user_id": t.owner_user_id,
         "scope_path": t.scope_path,
+        "scopes": t.scopes_json or [{"path": t.scope_path}],
         "kind": t.kind,
         "nl_description": t.nl_description,
         "actions": _parse_actions(t.action_json),
@@ -189,6 +190,46 @@ def _to_dict(t: Trigger) -> dict[str, Any]:
     }
 
 
+def _validate_scopes(
+    scopes: list[dict[str, Any]] | None, scope_path: str
+) -> list[dict[str, Any]] | None:
+    """Validate the watch list: first entry must mirror ``scope_path``, paths
+    are normalized and deduped, line ranges are 1-based ordered ints allowed
+    on ``.md`` entries only. ``None`` stays ``None`` (single-scope row)."""
+    if scopes is None:
+        return None
+    if not scopes:
+        raise ValueError("scopes must be a non-empty list when provided")
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for entry in scopes:
+        path = storage.normalize_scope_path(str(entry.get("path", "")))
+        start = entry.get("start_line")
+        end = entry.get("end_line")
+        if (start is not None or end is not None) and not path.endswith(".md"):
+            raise ValueError("line ranges are only valid on page (.md) scopes")
+        if start is not None:
+            if not isinstance(start, int) or start < 1:
+                raise ValueError("start_line must be a positive integer")
+            if end is not None and (not isinstance(end, int) or end < start):
+                raise ValueError("end_line must be an integer >= start_line")
+        elif end is not None:
+            raise ValueError("end_line requires start_line")
+        key = f"{path}#{start}-{end}"
+        if key in seen:
+            continue
+        seen.add(key)
+        scope: dict[str, Any] = {"path": path}
+        if start is not None:
+            scope["start_line"] = start
+            if end is not None:
+                scope["end_line"] = end
+        out.append(scope)
+    if out[0]["path"] != scope_path:
+        raise ValueError("scopes[0].path must match scope_path")
+    return out
+
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
@@ -197,6 +238,7 @@ def create(
     *,
     owner_user_id: str,
     scope_path: str,
+    scopes: list[dict[str, Any]] | None = None,
     nl_description: str,
     actions: object,
     kind: str = "delta",
@@ -220,6 +262,7 @@ def create(
         schedule_start_at=schedule_start_at,
     )
 
+    scopes_value = _validate_scopes(scopes, scope_path)
     trigger_id = "trg_" + uuid.uuid4().hex[:12]
     created_at = _now_iso()
     file_path = storage.compute_path(scope_path=scope_path, trigger_id=trigger_id)
@@ -227,6 +270,7 @@ def create(
         "id": trigger_id,
         "owner_user_id": owner_user_id,
         "scope_path": scope_path,
+        "scopes": scopes_value or [{"path": scope_path}],
         "kind": kind,
         "nl_description": nl_description,
         "actions": validated_actions,
@@ -244,6 +288,7 @@ def create(
                 id=trigger_id,
                 owner_user_id=owner_user_id,
                 scope_path=scope_path,
+                scopes_json=scopes_value,
                 kind=kind,
                 nl_description=nl_description,
                 action_json=_actions_json(validated_actions),
@@ -288,6 +333,7 @@ def update(
     trigger_id: str,
     *,
     scope_path: str | None = None,
+    scopes: list[dict[str, Any]] | None = None,
     nl_description: str | None = None,
     actions: object = _UNSET,
     enabled: bool | None = None,
@@ -303,6 +349,8 @@ def update(
     new = dict(existing)
     if scope_path is not None:
         new["scope_path"] = scope_path
+    if scopes is not None:
+        new["scopes"] = _validate_scopes(scopes, new.get("scope_path") or existing["scope_path"])
     if nl_description is not None:
         if not nl_description.strip():
             raise ValueError("nl_description must be a non-empty string")
@@ -338,6 +386,7 @@ def update(
 
     if (
         new["scope_path"] == existing["scope_path"]
+        and new.get("scopes") == existing.get("scopes")
         and new["nl_description"] == existing["nl_description"]
         and new["actions"] == existing["actions"]
         and new["enabled"] == existing["enabled"]
@@ -364,6 +413,8 @@ def update(
         if t is None:
             return None
         t.scope_path = new["scope_path"]
+        if scopes is not None:
+            t.scopes_json = new["scopes"]
         t.nl_description = new["nl_description"]
         t.action_json = _actions_json(new["actions"])
         t.enabled = new["enabled"]
@@ -559,6 +610,19 @@ def rebuild_from_filesystem() -> int:
             )
             skipped += 1
             continue
+        # Hand-edited files may carry unnormalized primaries (e.g. "/" for the
+        # whole wiki); the engine and the scopes validator both expect the
+        # stored form, so normalize before anything downstream sees it.
+        try:
+            data["scope_path"] = storage.normalize_scope_path(
+                str(data.get("scope_path", ""))
+            )
+        except ValueError:
+            log.warning(
+                "rebuild_from_filesystem: skip %s (invalid scope_path)", file_path
+            )
+            skipped += 1
+            continue
         parsed.append((file_path, data))
 
     fallback_now = _now_iso()
@@ -647,6 +711,7 @@ def rebuild_from_filesystem() -> int:
                     id=data["id"],
                     owner_user_id=owner_id,
                     scope_path=data["scope_path"],
+                    scopes_json=_scopes_for_rebuild(data),
                     kind=data["kind"],
                     nl_description=data["nl_description"],
                     action_json=_actions_json(actions_payload),
@@ -663,6 +728,26 @@ def rebuild_from_filesystem() -> int:
             loaded += 1
     log.info("rebuild_from_filesystem loaded=%d skipped=%d", loaded, skipped)
     return loaded
+
+
+def _scopes_for_rebuild(data: dict[str, Any]) -> list[dict[str, Any]] | None:
+    """Run a YAML watch list through the same validator as the API; a
+    hand-edited file that fails validation degrades to the single primary
+    scope instead of caching an unvalidated list (or dropping the trigger)."""
+    scopes = data.get("scopes")
+    if not scopes:
+        return None
+    try:
+        return _validate_scopes(
+            cast("list[dict[str, Any]]", scopes), data["scope_path"]
+        )
+    except ValueError:
+        log.warning(
+            "rebuild_from_filesystem: trigger %s has an invalid scopes list; "
+            "falling back to its primary scope",
+            data.get("id"),
+        )
+        return None
 
 
 def fire_counts_by_sha(shas: set[str]) -> dict[str, int]:

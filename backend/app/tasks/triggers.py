@@ -62,6 +62,7 @@ from app.triggers.engine import (
     evaluate_schedule,
     find_due_schedule_triggers,
     find_matching_triggers,
+    matched_scope,
     render_delta_message,
     render_schedule_message,
     schedule_window_start,
@@ -108,22 +109,28 @@ def fan_out_trigger_eval(
             scope_blocks[scope_path] = block
         return block
 
-    def _delta_payload(scope_path: str) -> str:
+    def _lead_block(trigger: TriggerRecord) -> str:
+        """The payload's scoped-docs lead covering the trigger's whole watch
+        list; per-path blocks are shared across triggers on this commit."""
+        paths = list(dict.fromkeys(s.path for s in trigger.scopes))
+        return "\n\n".join(_scope_block(p) for p in paths)
+
+    def _delta_payload(trigger: TriggerRecord) -> str:
         return diff_helper.build_payload(
             doc_path=doc_path,
             change_kind=change_kind,
             before=before,
             after=after,
-            scope_path=scope_path,
-            scope_block=_scope_block(scope_path),
+            scope_path=trigger.scope_path,
+            scope_block=_lead_block(trigger),
         )
 
-    def _new_file_payload(scope_path: str) -> str:
+    def _new_file_payload(trigger: TriggerRecord) -> str:
         return diff_helper.build_new_file_payload(
             doc_path=doc_path,
             body=after,
-            scope_path=scope_path,
-            scope_block=_scope_block(scope_path),
+            scope_path=trigger.scope_path,
+            scope_block=_lead_block(trigger),
         )
 
     # Cache owner ACL flags by user id — most fan-outs touch a handful of
@@ -163,13 +170,28 @@ def fan_out_trigger_eval(
             )
             continue
 
+        # A line-ranged watch entry only fires when the edit touches those
+        # lines of the changed doc; checked cheaply before any LLM eval.
+        matched = matched_scope(trigger, doc_path)
+        if matched is not None and matched.start_line is not None:
+            end = matched.end_line or matched.start_line
+            if not diff_helper.change_touches_lines(
+                before, after, matched.start_line, end
+            ):
+                log.debug(
+                    "trigger %s skipped: change outside lines %d-%d of %s",
+                    trigger.id, matched.start_line, end, doc_path,
+                )
+                continue
+
         # Evaluate the firing condition once per trigger, then deliver each
         # action. Delta renders per action; the new-file eval renders in its
         # single combined call.
-        if change_kind == ChangeKind.CREATE and trigger.scope_path != doc_path:
+        matched_path = matched.path if matched is not None else trigger.scope_path
+        if change_kind == ChangeKind.CREATE and matched_path != doc_path:
             primary = (trigger.actions[0].message or "") if trigger.actions else ""
             new_file_result = evaluate_new_file_in_dir(
-                trigger, primary, _new_file_payload(trigger.scope_path)
+                trigger, primary, _new_file_payload(trigger)
             )
             if not new_file_result.triggered:
                 continue
@@ -177,7 +199,7 @@ def fan_out_trigger_eval(
             reason = "new file under directory scope"
             log.info("trigger fired (new-file-in-dir) id=%s doc=%s", trigger.id, doc_path)
         else:
-            match = evaluate_delta(trigger, _delta_payload(trigger.scope_path))
+            match = evaluate_delta(trigger, _delta_payload(trigger))
             if not match.matched:
                 continue
             new_file_message = None
@@ -192,7 +214,7 @@ def fan_out_trigger_eval(
             else:
                 rendered = (
                     render_delta_message(
-                        instruction, _delta_payload(trigger.scope_path), reason=reason
+                        instruction, _delta_payload(trigger), reason=reason
                     )
                     if instruction
                     else ""

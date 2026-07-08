@@ -64,6 +64,7 @@ def seed_trigger(
     schedule_timezone: str | None = None,
     schedule_start_at: str | None = None,
     schedule_last_fired_at: str | None = None,
+    scopes: list[dict[str, Any]] | None = None,
 ) -> str:
     action_json = {
         "actions": [{"destination_config_id": destination_config_id, "message": message}]
@@ -74,6 +75,7 @@ def seed_trigger(
                 id=tid,
                 owner_user_id=owner_user_id,
                 scope_path=scope_path,
+                scopes_json=scopes,
                 kind=kind,
                 nl_description=nl_description,
                 action_json=action_json,
