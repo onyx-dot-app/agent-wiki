@@ -45,13 +45,18 @@ function VerifiedIcon(props: React.ComponentProps<typeof SvgCheckCircle>) {
   return (
     <SvgCheckCircle
       {...props}
-      className={cn(props.className, "text-(--status-success-05)")}
+      className={cn(props.className, "size-4")}
+      style={{ color: "var(--status-success-05)" }}
     />
   );
 }
 function PendingIcon(props: React.ComponentProps<typeof SvgClock>) {
   return (
-    <SvgClock {...props} className={cn(props.className, "text-(--text-03)")} />
+    <SvgClock
+      {...props}
+      className={cn(props.className, "size-4")}
+      style={{ color: "var(--text-03)" }}
+    />
   );
 }
 
@@ -493,7 +498,7 @@ function EmailsModal({
 
         <div className="w-full flex-1 p-4">
           <div className="flex w-full flex-col gap-2 rounded-(--radius-12) bg-(--background-tint-00) p-2">
-            <div className="flex w-full items-start gap-1">
+            <div className="flex w-full items-center gap-1">
               <div className="min-w-0 flex-1">
                 <InputChipField
                   chips={drafts}

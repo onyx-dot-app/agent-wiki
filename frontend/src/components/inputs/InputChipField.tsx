@@ -87,17 +87,18 @@ export default function InputChipField({
         </Chip>
       ))}
       {Icon && <Icon className="size-4 shrink-0 text-(--text-04)" />}
-      <span className="min-w-[80px] flex-1 [&_input]:w-full">
-        <InputTypeIn
-          ref={inputRef}
-          variant="internal"
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          onKeyDown={handleKeyDown}
-          onFocus={onFocus}
-          placeholder={placeholder}
-        />
-      </span>
+      {/* raw-ok: Opal's .opal-input-field contract for a composite input's inner field; nested InputTypeIn double-pads past the 36px Input/Tags height */}
+      <input
+        ref={inputRef}
+        type="text"
+        className="opal-input-field min-w-[80px] flex-1"
+        disabled={disabled}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onKeyDown={handleKeyDown}
+        onFocus={onFocus}
+        placeholder={placeholder}
+      />
     </div>
   );
 }
