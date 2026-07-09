@@ -104,12 +104,13 @@ def create(
 ) -> dict[str, Any]:
     """Insert a ``pending`` proposal and return it.
 
-    ``source_paths`` must be non-empty; ``target_paths`` may be empty only
-    for ``delete_empty_folder``. ``base_shas`` should cover every source path
-    (the drift anchors execution re-validates against).
+    Arity varies by op: ``create_folder`` has no source (0 → 1) and
+    ``delete_empty_folder`` no target (1 → 0); everything else needs both
+    (merge is N → 1, split 1 → N). ``base_shas`` should cover every source
+    path (the drift anchors execution re-validates against).
     """
-    if not source_paths:
-        raise ValueError("source_paths must be non-empty")
+    if not source_paths and op is not ProposalOp.CREATE_FOLDER:
+        raise ValueError(f"source_paths required for op {op.value!r}")
     if not target_paths and op is not ProposalOp.DELETE_EMPTY_FOLDER:
         raise ValueError(f"target_paths required for op {op.value!r}")
     now = _now()

@@ -143,3 +143,14 @@ def test_op_check_constraint(tmp_db):
                     detector="sweep",
                 )
             )
+
+
+def test_create_folder_needs_no_source(tmp_db):
+    row = _mk(
+        op=ProposalOp.CREATE_FOLDER,
+        source_paths=[],
+        target_paths=["new-team-space"],
+        base_shas={},
+    )
+    assert row["op"] == "create_folder"
+    assert row["source_paths"] == []
