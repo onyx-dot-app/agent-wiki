@@ -48,5 +48,6 @@ Connect your AI agents — Claude, Codex, Onyx, etc. — via MCP and they'll hav
 |------|------|----------------|
 | 1 | [Setup](Setup.md) | Point the app at an LLM provider, invite teammates, verify the smoke path. |
 | 2 | [Triggers and Events](Features/Triggers%20and%20Events.md) | Write your first natural-language trigger. |
-| 3 | [AI Wiki Helper](Features/AI%20Wiki%20Helper.md) | Chat with an agent that can read and edit the wiki for you. |
-| 4 | [Wiki Pages](Features/Wiki%20Pages.md) | How pages, search, and history work. |
+| 3 | [Connecting Workflows](Features/Connecting%20Workflows.md) | Fan trigger fires out to Zapier, n8n, Make, or any webhook. |
+| 4 | [AI Wiki Helper](Features/AI%20Wiki%20Helper.md) | Chat with an agent that can read and edit the wiki for you. |
+| 5 | [Wiki Pages](Features/Wiki%20Pages.md) | How pages, search, and history work. |
