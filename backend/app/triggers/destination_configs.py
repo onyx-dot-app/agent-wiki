@@ -111,6 +111,9 @@ def create(
         headers = cfg.get("headers")
         if headers is not None and not _is_str_map(headers):
             raise ValueError("webhook headers must be a string map")
+        routing_tag = cfg.get("routing_tag")
+        if routing_tag is not None and not isinstance(routing_tag, str):
+            raise ValueError("webhook routing_tag must be a string")
 
     if type == destinations.EMAIL_ID:
         address = ((config or {}).get("address") or "")

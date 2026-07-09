@@ -50,6 +50,8 @@ def deliver(
             url, data=body, headers=request_headers, timeout=_TIMEOUT_SECONDS
         )
     except requests.RequestException as e:
-        raise WebhookError(f"webhook POST failed: {e}") from e
+        # e's message embeds the full URL (may carry tokens). Keep the failure
+        # type only and drop the cause chain so responses and logs stay clean.
+        raise WebhookError(f"webhook POST failed: {type(e).__name__}") from None
     if response.status_code >= 400:
         raise WebhookError(f"webhook returned {response.status_code}")
