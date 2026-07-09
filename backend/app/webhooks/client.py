@@ -39,8 +39,8 @@ def deliver(
 ) -> None:
     """POST ``body`` to ``url`` with a JSON content type, the caller's custom
     headers, and an HMAC signature header when a secret is set. Raises
-    :class:`WebhookError` on an unsafe URL, a network failure, or a non-2xx
-    response."""
+    :class:`~app.net.ssrf.UnsafeUrlError` on an unsafe URL, or
+    :class:`WebhookError` on a network failure or non-2xx response."""
     assert_public_url(url)
     request_headers = {"Content-Type": "application/json", **(headers or {})}
     if secret:

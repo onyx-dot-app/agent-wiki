@@ -71,6 +71,7 @@ from app.wiki import acl as wiki_acl
 from app.wiki.links import doc_url
 from app.wiki import git as wiki_git
 from app.models.webhook import WebhookEvent
+from app.net.ssrf import UnsafeUrlError
 from app.webhooks import client as webhook_client
 from app.models.wiki import ChangeKind
 
@@ -504,7 +505,9 @@ def _dispatch_to_webhook(
     try:
         webhook_client.deliver(url=url, body=body, headers=headers, secret=secret)
         log.info("trigger %s dispatched to webhook config %s", trigger.id, config["id"])
-    except webhook_client.WebhookError:
+    except (webhook_client.WebhookError, UnsafeUrlError):
+        # An unsafe URL (e.g. DNS rebinding to a private host at fire time) raises
+        # UnsafeUrlError, not WebhookError. Swallow both so the recorded fire stands.
         log.exception("trigger %s webhook dispatch failed", trigger.id)
 
 
