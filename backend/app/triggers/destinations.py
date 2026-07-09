@@ -35,6 +35,11 @@ SLACK_ID = "slack"
 # the config's verified address; unverified configs are recorded-only.
 EMAIL_ID = "email"
 
+# Slug of the generic webhook destination. Covers Zapier, n8n, Make,
+# Pipedream, and any HTTP receiver: dispatch POSTs a structured JSON event
+# (not the prose message) to the config's URL, HMAC-signed with its secret.
+WEBHOOK_ID = "webhook"
+
 
 def _to_dict(d: TriggerDestination) -> dict[str, Any]:
     return {

@@ -34,6 +34,9 @@ from app.models.trigger import (
     UpdateTriggerRequest,
 )
 from app.email.service import EmailSendError
+from app.net.ssrf import UnsafeUrlError
+from app.webhooks import client as webhook_client
+from app.webhooks import dispatch as webhook_dispatch
 from app.triggers import destination_configs as dest_configs
 from app.triggers import email_verification
 from app.triggers import destinations as destinations_repo
@@ -229,6 +232,30 @@ def resend_verification(
     except EmailSendError as exc:
         view.verification_error = f"verification email failed: {exc}"
     return view
+
+
+@router.post(
+    "/destination-configs/{config_id}/test",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def send_test_event(config_id: str, user: User = Depends(require_user)) -> Response:
+    """Fire a sample event at a webhook config so the receiver can learn the
+    payload shape. Owner-scoped, webhook configs only."""
+    row = dest_configs.get(config_id, user.id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="not found")
+    if row.get("type") != destinations_repo.WEBHOOK_ID:
+        raise HTTPException(status_code=400, detail="not a webhook destination")
+    secret = dest_configs.get_secret(config_id, owner_user_id=user.id)
+    try:
+        webhook_dispatch.send_test(
+            config=row, secret=secret, actor=user.email or user.id
+        )
+    except UnsafeUrlError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except webhook_client.WebhookError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.delete(

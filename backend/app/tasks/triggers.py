@@ -70,6 +70,9 @@ from app.triggers.engine import (
 from app.wiki import acl as wiki_acl
 from app.wiki.links import doc_url
 from app.wiki import git as wiki_git
+from app.models.webhook import WebhookEvent
+from app.net.ssrf import UnsafeUrlError
+from app.webhooks import client as webhook_client
 from app.models.wiki import ChangeKind
 
 log = logging.getLogger(__name__)
@@ -429,11 +432,83 @@ def _record_fire(
             doc_path=doc_path,
             rendered_message=rendered_message,
         )
+    elif dtype == destinations_repo.WEBHOOK_ID:
+        _dispatch_to_webhook(
+            trigger=trigger,
+            config=config,
+            doc_path=doc_path,
+            sha=sha,
+            change_kind=change_kind,
+            reason=reason,
+            rendered_message=rendered_message,
+            actor=actor,
+        )
     else:
         log.warning(
             "trigger %s destination type %r has no outbound dispatcher; recorded to events only",
             trigger.id, dtype,
         )
+
+
+def _str_map_or_none(obj: object) -> dict[str, str] | None:
+    """Coerce a config value to a string->string map (keys and values
+    stringified), or None when it isn't a dict."""
+    if not isinstance(obj, dict):
+        return None
+    return {str(k): str(v) for k, v in cast("dict[object, object]", obj).items()}
+
+
+def _dispatch_to_webhook(
+    *,
+    trigger: TriggerRecord,
+    config: dict[str, Any],
+    doc_path: str,
+    sha: str,
+    change_kind: ChangeKind,
+    reason: str,
+    rendered_message: str,
+    actor: str | None,
+) -> None:
+    """POST the fire as a structured event to the config's webhook URL.
+
+    Workflow destinations get machine-readable fields, not the prose message.
+    The URL, custom headers, routing tag, and static fields come from the
+    config. The signing secret HMACs the body. Failures are logged and
+    swallowed: the fire is already recorded.
+    """
+    target = cast("dict[str, Any]", config.get("config") or {})
+    url = target.get("url")
+    if not isinstance(url, str) or not url:
+        log.warning(
+            "trigger %s webhook config %s has no url; recorded to events only",
+            trigger.id, config["id"],
+        )
+        return
+    event = WebhookEvent(
+        trigger_id=trigger.id,
+        trigger_kind=trigger.kind,
+        doc_path=doc_path,
+        sha=sha,
+        change_kind=change_kind.value,
+        fired_at=datetime.now(timezone.utc).isoformat(),
+        actor=actor,
+        summary=rendered_message,
+        reason=reason,
+        routing_tag=target.get("routing_tag"),
+        fields=_str_map_or_none(target.get("fields")) or {},
+    )
+    body = event.model_dump_json().encode()
+    headers = _str_map_or_none(target.get("headers"))
+    secret = dest_configs.get_secret(
+        str(config["id"]), owner_user_id=trigger.owner_user_id
+    )
+    try:
+        webhook_client.deliver(url=url, body=body, headers=headers, secret=secret)
+        log.info("trigger %s dispatched to webhook config %s", trigger.id, config["id"])
+    except (webhook_client.WebhookError, UnsafeUrlError):
+        # An unsafe URL (e.g. DNS rebinding to a private host at fire time) raises
+        # UnsafeUrlError, not WebhookError. Swallow both so the recorded fire stands.
+        log.exception("trigger %s webhook dispatch failed", trigger.id)
 
 
 def _dispatch_to_email(
