@@ -31,6 +31,7 @@ from sqlalchemy import func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 
 from app.db.models import CoeditOp, CoeditParticipant, CoeditSession, User
+from app.models.wiki import PathMove
 from app.db.session import session, try_advisory_xact_lock
 
 log = logging.getLogger(__name__)
@@ -142,6 +143,26 @@ def get_active_session(path: str) -> SessionRow | None:
             )
         )
         return _session_row(row) if row is not None else None
+
+
+def blocking_active_session_path(dest: str) -> str | None:
+    """Path of an active session at ``dest`` or nested under it, or ``None``.
+
+    Move validation refuses a destination where someone is drafting a
+    not-yet-committed page: the session has no file on disk, so the plain
+    destination-exists check can't see it (see ``api/wiki.py:/move``)."""
+    with session() as s:
+        return s.scalar(
+            select(CoeditSession.path)
+            .where(
+                CoeditSession.status == SessionStatus.ACTIVE.value,
+                or_(
+                    CoeditSession.path == dest,
+                    CoeditSession.path.like(dest + "/%"),
+                ),
+            )
+            .limit(1)
+        )
 
 
 def get_session(session_id: int) -> SessionRow | None:
@@ -541,6 +562,68 @@ def close_session(session_id: int) -> None:
         if sess is not None and sess.status != SessionStatus.CLOSED.value:
             sess.status = SessionStatus.CLOSED.value
             sess.updated_at = _iso(_now())
+
+
+def on_path_moved(moves: list[PathMove]) -> None:
+    """Re-key co-edit sessions so a session (and its queued checkpoints, which
+    resolve the path through the session row) follows a page move/rename.
+
+    Without this, a session keyed to the old path checkpoints its buffer back
+    to a path that no longer exists in git — recreating the page under its
+    pre-move name. Exact per-pair re-keys only: sessions are keyed to ``.md``
+    files and ``git.move_path`` emits one pair per tracked file, so a folder
+    rename is fully covered without prefix matching (which would also re-key
+    unmoved siblings on a single cross-folder move). Closed sessions are
+    re-keyed too, so their history stays attached to the page.
+
+    Destination collisions (an active session already at ``mv.new``): the
+    origin session always wins. Long-lived drafts at the destination block
+    the move up front (``blocking_active_session_path`` → 409), so any active
+    session still here was opened inside the seconds-wide window since that
+    check — typically someone opening the just-moved page before this re-key
+    ran. It is superseded (closed); if it managed to collect edits, they stay
+    in the closed row's buffer. Each pair runs in a savepoint so a racing
+    insert that still trips the active-unique index degrades to a logged skip
+    instead of aborting the whole move fan-out.
+    """
+    if not moves:
+        return
+    with session() as s:
+        for mv in moves:
+            try:
+                with s.begin_nested():
+                    dest = s.scalar(
+                        select(CoeditSession).where(
+                            CoeditSession.path == mv.new,
+                            CoeditSession.status == SessionStatus.ACTIVE.value,
+                        )
+                    )
+                    if dest is not None:
+                        if dest.version != dest.checkpointed_version:
+                            log.warning(
+                                "coedit on_path_moved: superseding young dirty "
+                                "session %s at %r; its buffer stays in the "
+                                "closed row",
+                                dest.id,
+                                mv.new,
+                            )
+                        dest.status = SessionStatus.CLOSED.value
+                        dest.updated_at = _iso(_now())
+                        s.flush()
+                    s.execute(
+                        update(CoeditSession)
+                        .where(CoeditSession.path == mv.old)
+                        .values(path=mv.new)
+                    )
+            except IntegrityError:
+                # A racing open_session won the unique index between our check
+                # and the update — same outcome as the dirty-collision skip.
+                log.warning(
+                    "coedit on_path_moved: lost re-key race for %r -> %r; "
+                    "leaving sessions at the old path",
+                    mv.old,
+                    mv.new,
+                )
 
 
 def close_if_clean(session_id: int) -> bool:

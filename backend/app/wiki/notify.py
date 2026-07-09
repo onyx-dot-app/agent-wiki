@@ -38,9 +38,9 @@ from app.tasks.reindex import index_path
 from app.tasks.triggers import fan_out_trigger_eval
 from app.tasks.update_frequency import check_update_frequency
 from app.triggers import repo as triggers_repo
-from app.wiki import acl, agent_activity, comments, constants as wiki_constants, drafts, update_policy
+from app.wiki import acl, agent_activity, coedit, comments, constants as wiki_constants, drafts, update_policy
 from app.wiki.comment_remap import remap_comments
-from app.models.wiki import ChangeKind
+from app.models.wiki import ChangeKind, PathMove
 
 log = logging.getLogger(__name__)
 
@@ -152,7 +152,7 @@ def after_doc_delete(rel_path: str, sha: str, actor: str | None) -> None:
 
 
 def after_path_move(
-    moves: list[tuple[str, str]], sha: str, actor: str | None
+    moves: list[PathMove], sha: str, actor: str | None
 ) -> None:
     """Post-move side effects for every ``(old, new)`` pair from a single
     ``git mv`` commit.
@@ -168,7 +168,9 @@ def after_path_move(
 
     Every Postgres row that is a *live pointer* to the page is re-pointed to
     the new path so nothing strands on a path that no longer exists:
-    ACL + owner rows in one pass via ``acl.on_path_moved``; comments; the
+    ACL + owner rows in one pass via ``acl.on_path_moved``; co-edit
+    sessions (so live buffers and their queued checkpoints follow the
+    page instead of resurrecting the old path); comments; the
     agent-activity rail; template-draft state; and per-(user, machine)
     working-dir bindings. Point-in-time records (launch history, ingest eval
     samples, the audit log) are deliberately left alone.
@@ -184,8 +186,10 @@ def after_path_move(
     """
     acl.on_path_moved(moves)
     update_policy.on_path_moved(moves)
+    coedit.on_path_moved(moves)
     list_changed = False
-    for old_p, new_p in moves:
+    for mv in moves:
+        old_p, new_p = mv.old, mv.new
         old_is_md = old_p.endswith(".md")
         new_is_md = new_p.endswith(".md")
         if old_is_md:

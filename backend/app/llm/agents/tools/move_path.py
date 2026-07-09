@@ -9,7 +9,7 @@ from typing import Any
 
 from app.wiki import utils as wiki_utils
 from app.llm.agents.tools.errors import ToolError
-from app.wiki import filesystem, git as wiki_git, notify as wiki_notify
+from app.wiki import coedit, filesystem, git as wiki_git, notify as wiki_notify
 
 
 def handle(args: dict[str, Any]) -> Any:
@@ -40,6 +40,12 @@ def handle(args: dict[str, Any]) -> Any:
             raise ToolError(f"old_path not found: {old_rel}")
         if new_abs.exists():
             raise ToolError(f"new_path already exists: {new_rel}")
+        blocking = coedit.blocking_active_session_path(new_rel)
+        if blocking is not None:
+            raise ToolError(
+                f"someone is editing an unsaved draft at {blocking!r}; "
+                "pick a different name or wait for it to be saved"
+            )
         if old_abs.is_file() and old_rel.endswith(".md") and not new_rel.endswith(".md"):
             raise ToolError("renaming a .md file requires new_path to end in .md")
         if old_abs.is_dir() and new_rel.endswith(".md"):
@@ -55,7 +61,7 @@ def handle(args: dict[str, Any]) -> Any:
             "old_path": old_rel,
             "new_path": new_rel,
             "sha": sha,
-            "moved": [{"old": o, "new": n} for o, n in moves],
+            "moved": [{"old": mv.old, "new": mv.new} for mv in moves],
         }
     except ToolError as exc:
         return {"error": str(exc)}

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.models.wiki import ChangeKind
+from app.models.wiki import ChangeKind, PathMove
 from app.wiki import comments, notify
 from app.wiki import git as wiki_git
 
@@ -58,7 +58,7 @@ def test_after_path_move_md_to_md_rekeys_comments(tmp_repo):
     sha = wiki_git.commit_file("a.md", body, "seed", author=None)
     c = _seed_comment("a.md", sha, body, "sentence")
 
-    notify.after_path_move([("a.md", "b.md")], sha, actor=None)
+    notify.after_path_move([PathMove(old="a.md", new="b.md")], sha, actor=None)
 
     assert comments.list_for_doc("a.md") == []
     moved = comments.get(c["id"])
@@ -71,7 +71,7 @@ def test_after_path_move_md_to_non_md_orphans_comments(tmp_repo):
     sha = wiki_git.commit_file("a.md", body, "seed", author=None)
     c = _seed_comment("a.md", sha, body, "sentence")
 
-    notify.after_path_move([("a.md", "notes.txt")], sha, actor=None)
+    notify.after_path_move([PathMove(old="a.md", new="notes.txt")], sha, actor=None)
 
     got = comments.get(c["id"])
     assert got is not None

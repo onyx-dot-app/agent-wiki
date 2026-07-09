@@ -22,6 +22,7 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy import func, select, update
 
 from app.db.models import UpdatePolicy
+from app.models.wiki import PathMove
 from app.db.session import session
 from app.ingest import settings as ingest_settings
 from app.wiki import filesystem
@@ -174,7 +175,7 @@ def on_page_deleted(path: str) -> None:
     delete(path)
 
 
-def on_path_moved(moves: list[tuple[str, str]]) -> None:
+def on_path_moved(moves: list[PathMove]) -> None:
     """Re-key policy rows so a page/folder policy follows a move/rename.
 
     For each ``(old, new)`` pair the exact row at ``old`` is repointed to
@@ -186,11 +187,11 @@ def on_path_moved(moves: list[tuple[str, str]]) -> None:
     if not moves:
         return
     with session() as s:
-        for old_p, new_p in moves:
+        for mv in moves:
             s.execute(
                 update(UpdatePolicy)
-                .where(UpdatePolicy.path == old_p)
-                .values(path=new_p)
+                .where(UpdatePolicy.path == mv.old)
+                .values(path=mv.new)
             )
         old_prefix, new_prefix = filesystem.common_folder_rename(moves)
         if old_prefix is not None and new_prefix is not None:

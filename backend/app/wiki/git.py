@@ -22,6 +22,7 @@ from pathlib import Path
 from pydantic import BaseModel
 
 from app.config import CONFIG
+from app.models.wiki import PathMove
 from app.wiki import constants
 
 log = logging.getLogger(__name__)
@@ -212,22 +213,22 @@ def move_path(
     new_rel_path: str,
     message: str,
     author: str | None = None,
-) -> tuple[str, list[tuple[str, str]]]:
+) -> tuple[str, list[PathMove]]:
     """Rename a tracked file or directory via ``git mv``, single commit.
 
-    Returns ``(sha, [(old, new), ...])`` where each tuple is one tracked
-    file that was actually moved. For a directory rename this lists every
+    Returns ``(sha, moves)`` where each ``PathMove`` is one tracked file
+    that was actually moved. For a directory rename this lists every
     nested file. Used by tools that move things without rewriting content.
     """
     listed = _run(["ls-files", "-z", "--", old_rel_path]).stdout.split("\0")
     tracked = [p for p in listed if p]
-    moves: list[tuple[str, str]] = []
+    moves: list[PathMove] = []
     for old_p in tracked:
         if old_p == old_rel_path:
-            moves.append((old_p, new_rel_path))
+            moves.append(PathMove(old=old_p, new=new_rel_path))
         else:
             rest = old_p[len(old_rel_path) :].lstrip("/")
-            moves.append((old_p, f"{new_rel_path}/{rest}"))
+            moves.append(PathMove(old=old_p, new=f"{new_rel_path}/{rest}"))
     full_new = Path(CONFIG.wiki_dir) / new_rel_path
     full_new.parent.mkdir(parents=True, exist_ok=True)
     env_args = ["--author", author] if author else []

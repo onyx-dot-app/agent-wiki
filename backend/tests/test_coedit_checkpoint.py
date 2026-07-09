@@ -17,6 +17,7 @@ from app.tasks import coedit_checkpoint as coedit_checkpoint_task
 from app.tasks.queues import coedit_queue
 from app.wiki import coedit, coedit_checkpoint, drafts
 from app.wiki import git as wiki_git
+from app.models.wiki import PathMove
 
 _PATH = "guides/setup.md"
 
@@ -307,3 +308,171 @@ def test_checkpoint_lock_times_out_when_held(repo):
                 s2, coedit.checkpoint_lock_key(base), timeout_ms=100
             )
         assert got is False  # held elsewhere → bounded wait elapsed
+
+
+# --------------------------------------------------------------------------- #
+# Page moves: sessions follow the page; dead paths never resurrect            #
+# --------------------------------------------------------------------------- #
+
+
+def test_on_path_moved_rekeys_session(repo):
+    uid = users_repo.create(email="mia@x.com", password="hunter2-x", name="Mia")
+    sha = _seed_page("hello world")
+    sess = coedit.open_session(_PATH, base_sha=sha, initial_buffer="hello world")
+    coedit.join(sess.id, uid)
+
+    new_path = "guides/install.md"
+    coedit.on_path_moved([PathMove(old=_PATH, new=new_path)])
+
+    assert coedit.get_active_session(_PATH) is None
+    moved = coedit.get_active_session(new_path)
+    assert moved is not None and moved.id == sess.id
+
+
+def test_on_path_moved_folder_rename_carries_sessions(repo):
+    sha = wiki_git.commit_file("a/deep/page.md", "body", "seed", author=None)
+    sess = coedit.open_session("a/deep/page.md", base_sha=sha, initial_buffer="body")
+
+    coedit.on_path_moved([PathMove(old="a/deep/page.md", new="b/deep/page.md")])
+
+    moved = coedit.get_active_session("b/deep/page.md")
+    assert moved is not None and moved.id == sess.id
+
+
+def test_checkpoint_commits_to_new_path_after_move(repo):
+    uid = users_repo.create(email="eve@x.com", password="hunter2-x", name="Eve")
+    sha = _seed_page("hello world")
+    sess = coedit.open_session(_PATH, base_sha=sha, initial_buffer="hello world")
+    coedit.join(sess.id, uid)
+    coedit.apply_op(sess.id, base_version=0, changes=[_ch(0, 5, "howdy")], author_user_id=uid)
+
+    new_path = "guides/install.md"
+    wiki_git.move_path(_PATH, new_path, "rename")
+    coedit.on_path_moved([PathMove(old=_PATH, new=new_path)])
+
+    new_sha = coedit_checkpoint.checkpoint_session(sess.id)
+    assert new_sha is not None
+    # The buffer landed on the page's new home; the old path stays gone.
+    assert wiki_git.read_file_opt(new_path) == "howdy world"
+    assert wiki_git.read_file_opt(_PATH) is None
+
+
+def test_checkpoint_closes_session_when_path_gone(repo):
+    uid = users_repo.create(email="zoe@x.com", password="hunter2-x", name="Zoe")
+    sha = _seed_page("hello world")
+    sess = coedit.open_session(_PATH, base_sha=sha, initial_buffer="hello world")
+    coedit.join(sess.id, uid)
+    coedit.apply_op(sess.id, base_version=0, changes=[_ch(0, 5, "stale")], author_user_id=uid)
+
+    # The page moves away but the session is NOT re-keyed (the pre-fix bug, or
+    # a raw-git rename that bypassed the lifecycle hook). The editor left, so
+    # the session is participant-less — the zombie case the guard closes.
+    coedit.leave(sess.id, uid)
+    wiki_git.move_path(_PATH, "guides/renamed.md", "rename")
+
+    assert coedit_checkpoint.checkpoint_session(sess.id) is None
+    # No resurrection at the dead path, and the session is closed with the
+    # buffer preserved for manual recovery.
+    assert wiki_git.read_file_opt(_PATH) is None
+    after = coedit.get_session(sess.id)
+    assert after is not None
+    assert after.status == coedit.SessionStatus.CLOSED.value
+    assert after.buffer_text == "stale world"
+
+
+def test_checkpoint_still_creates_brand_new_page(repo):
+    # base_sha None = the session legitimately started on a not-yet-committed
+    # page; the missing-path guard must not block the create flow.
+    uid = users_repo.create(email="new@x.com", password="hunter2-x", name="New")
+    sess = coedit.open_session("guides/fresh.md", base_sha=None, initial_buffer="")
+    coedit.join(sess.id, uid)
+    coedit.apply_op(sess.id, base_version=0, changes=[_ch(0, 0, "first words")], author_user_id=uid)
+
+    assert coedit_checkpoint.checkpoint_session(sess.id) is not None
+    assert wiki_git.read_file_opt("guides/fresh.md") == "first words"
+
+
+def test_checkpoint_skips_but_keeps_session_with_participants(repo):
+    uid = users_repo.create(email="liv@x.com", password="hunter2-x", name="Liv")
+    sha = _seed_page("hello world")
+    sess = coedit.open_session(_PATH, base_sha=sha, initial_buffer="hello world")
+    coedit.join(sess.id, uid)
+    coedit.apply_op(sess.id, base_version=0, changes=[_ch(0, 5, "live")], author_user_id=uid)
+
+    # Path vanishes mid-session while someone is still editing (e.g. a move
+    # whose re-key hasn't landed yet): skip, don't close — the scan retries.
+    wiki_git.move_path(_PATH, "guides/renamed.md", "rename")
+
+    assert coedit_checkpoint.checkpoint_session(sess.id) is None
+    assert wiki_git.read_file_opt(_PATH) is None
+    after = coedit.get_session(sess.id)
+    assert after is not None and after.status == coedit.SessionStatus.ACTIVE.value
+
+
+def test_on_path_moved_leaves_siblings_alone(repo):
+    # A single cross-folder page move must not re-key sessions of unmoved
+    # siblings in the same folder (prefix matching would).
+    sha_a = wiki_git.commit_file("a/deep/page.md", "moving", "seed", author=None)
+    sha_b = wiki_git.commit_file("a/deep/other.md", "staying", "seed", author=None)
+    moved = coedit.open_session("a/deep/page.md", base_sha=sha_a, initial_buffer="moving")
+    sibling = coedit.open_session("a/deep/other.md", base_sha=sha_b, initial_buffer="staying")
+
+    coedit.on_path_moved([PathMove(old="a/deep/page.md", new="b/deep/page.md")])
+
+    got_moved = coedit.get_active_session("b/deep/page.md")
+    assert got_moved is not None and got_moved.id == moved.id
+    got_sibling = coedit.get_active_session("a/deep/other.md")
+    assert got_sibling is not None and got_sibling.id == sibling.id
+
+
+def test_on_path_moved_origin_wins_over_young_dirty_destination(repo):
+    uid = users_repo.create(email="sq@x.com", password="hunter2-x", name="Sq")
+    sha = _seed_page("origin")
+    origin = coedit.open_session(_PATH, base_sha=sha, initial_buffer="origin")
+    # A session opened at the destination inside the move window collected a
+    # few keystrokes. Long-lived drafts can't get here — the move's 409
+    # pre-check (blocking_active_session_path) rejects them before git mv.
+    young = coedit.open_session("guides/target.md", base_sha=None, initial_buffer="")
+    coedit.join(young.id, uid)
+    coedit.apply_op(young.id, base_version=0, changes=[_ch(0, 0, "few chars")], author_user_id=uid)
+
+    coedit.on_path_moved([PathMove(old=_PATH, new="guides/target.md")])
+
+    # The origin session follows the page; the young session closes with its
+    # keystrokes preserved in the row.
+    at_dest = coedit.get_active_session("guides/target.md")
+    assert at_dest is not None and at_dest.id == origin.id
+    superseded = coedit.get_session(young.id)
+    assert superseded is not None
+    assert superseded.status == coedit.SessionStatus.CLOSED.value
+    assert superseded.buffer_text == "few chars"
+
+
+def test_on_path_moved_supersedes_clean_destination_session(repo):
+    uid = users_repo.create(email="ed@x.com", password="hunter2-x", name="Ed")
+    sha = _seed_page("origin body")
+    origin = coedit.open_session(_PATH, base_sha=sha, initial_buffer="origin body")
+    coedit.join(origin.id, uid)
+    coedit.apply_op(origin.id, base_version=0, changes=[_ch(0, 6, "edited")], author_user_id=uid)
+    # Someone opened the just-moved page at its new home before the re-key ran:
+    # a clean session seeded from the moved content.
+    fresh = coedit.open_session("guides/target.md", base_sha=sha, initial_buffer="origin body")
+
+    coedit.on_path_moved([PathMove(old=_PATH, new="guides/target.md")])
+
+    # The dirty origin session follows the page; the clean fresh session closes.
+    at_dest = coedit.get_active_session("guides/target.md")
+    assert at_dest is not None and at_dest.id == origin.id
+    assert at_dest.buffer_text == "edited body"
+    superseded = coedit.get_session(fresh.id)
+    assert superseded is not None
+    assert superseded.status == coedit.SessionStatus.CLOSED.value
+
+
+def test_blocking_active_session_path(repo):
+    assert coedit.blocking_active_session_path("guides/new-home.md") is None
+    coedit.open_session("guides/new-home.md", base_sha=None, initial_buffer="")
+    # Exact page destination blocks; a folder destination blocks on nested paths.
+    assert coedit.blocking_active_session_path("guides/new-home.md") == "guides/new-home.md"
+    assert coedit.blocking_active_session_path("guides") == "guides/new-home.md"
+    assert coedit.blocking_active_session_path("other") is None

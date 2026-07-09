@@ -32,6 +32,7 @@ from croniter import croniter
 from sqlalchemy import delete as sa_delete, or_, select, update as sa_update
 
 from app.db.models import Event, Trigger, User
+from app.models.wiki import PathMove
 from app.db.session import advisory_xact_lock, session
 from app.triggers import destination_configs as dest_configs
 from app.triggers import storage
@@ -512,7 +513,7 @@ def _recache_path(trigger_id: str, *, scope_path: str, file_path: str) -> None:
         )
 
 
-def repoint_scopes_for_moves(moves: list[tuple[str, str]], *, actor: str | None) -> None:
+def repoint_scopes_for_moves(moves: list[PathMove], *, actor: str | None) -> None:
     """Rewrite trigger scopes after a path move so they don't dangle.
 
     A trigger's ``scope_path`` lives *inside* its committed YAML, and the
@@ -536,7 +537,8 @@ def repoint_scopes_for_moves(moves: list[tuple[str, str]], *, actor: str | None)
     handled_ids: set[str] = set()
 
     # Case A — trigger YAMLs that physically moved with a folder.
-    for old_p, new_p in moves:
+    for mv in moves:
+        old_p, new_p = mv.old, mv.new
         if old_p == new_p or not _is_trigger_file(old_p):
             continue
         try:
@@ -560,8 +562,9 @@ def repoint_scopes_for_moves(moves: list[tuple[str, str]], *, actor: str | None)
         _recache_path(data["id"], scope_path=new_scope, file_path=new_p)
 
     # Case B — docs whose sibling doc-scoped trigger YAML stayed put.
-    moved_yaml_olds = {old_p for old_p, _ in moves if _is_trigger_file(old_p)}
-    for old_p, new_p in moves:
+    moved_yaml_olds = {mv.old for mv in moves if _is_trigger_file(mv.old)}
+    for mv in moves:
+        old_p, new_p = mv.old, mv.new
         if old_p == new_p or not old_p.endswith(".md"):
             continue
         with session() as s:

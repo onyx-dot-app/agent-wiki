@@ -375,6 +375,15 @@ def move_document_or_folder(
             status_code=409,
             detail="a file or folder with that name already exists",
         )
+    # An active co-edit session can hold a not-yet-committed draft at the
+    # destination — no file on disk, so the exists() check above misses it.
+    blocking = coedit.blocking_active_session_path(new_rel)
+    if blocking is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=f"someone is editing an unsaved draft at '{blocking}' — "
+            "pick a different name or wait for it to be saved",
+        )
     if old_abs.is_file() and old_rel.endswith(".md") and not new_rel.endswith(".md"):
         raise HTTPException(
             status_code=400,
@@ -412,7 +421,7 @@ def move_document_or_folder(
         old_path=old_rel,
         new_path=new_rel,
         sha=sha,
-        moved=[MovedFile(old=o, new=n) for o, n in moves],
+        moved=[MovedFile(old=mv.old, new=mv.new) for mv in moves],
     )
 
 

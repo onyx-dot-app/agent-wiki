@@ -44,6 +44,7 @@ from sqlalchemy import (
 from app.auth import groups as groups_repo
 from app.db.models import AclEntry, WikiOwner
 from app.db.session import session
+from app.models.wiki import PathMove
 from app.wiki.filesystem import common_folder_rename
 
 log = logging.getLogger(__name__)
@@ -704,7 +705,7 @@ def on_page_deleted(path: str) -> None:
     delete_all_for_path(canon)
 
 
-def on_path_moved(moves: list[tuple[str, str]]) -> None:
+def on_path_moved(moves: list[PathMove]) -> None:
     """Rewrite ``acl_entries.resource_path`` and ``wiki_owners.path`` for
     every ``(old, new)`` pair from one ``git mv`` commit.
 
@@ -716,7 +717,8 @@ def on_path_moved(moves: list[tuple[str, str]]) -> None:
     if not moves:
         return
     with session() as s:
-        for old_p, new_p in moves:
+        for mv in moves:
+            old_p, new_p = mv.old, mv.new
             if _is_md_page(old_p):
                 # Page move: page-level ACLs + owner row.
                 s.execute(

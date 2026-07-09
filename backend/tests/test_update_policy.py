@@ -10,6 +10,7 @@ from typing import Any
 import pytest
 
 from app.wiki import update_policy
+from app.models.wiki import PathMove
 
 
 # --------------------------------------------------------------------------- #
@@ -292,7 +293,7 @@ def test_on_path_moved_rekeys_page(tmp_db):
     update_policy.set_policy(
         "a.md", ingestion_auto_update_disabled=True, update_instruction="x"
     )
-    update_policy.on_path_moved([("a.md", "b.md")])
+    update_policy.on_path_moved([PathMove(old="a.md", new="b.md")])
     assert update_policy.get("a.md") is None
     moved = update_policy.get("b.md")
     assert moved is not None
@@ -306,7 +307,7 @@ def test_on_path_moved_folder_rename_carries_subtree(tmp_db):
     update_policy.set_policy("proj/sub", ingestion_auto_update_disabled=True)
     update_policy.set_policy("proj/x.md", ingestion_auto_update_disabled=True)
     # A directory rename surfaces as one move pair per nested file.
-    update_policy.on_path_moved([("proj/x.md", "work/x.md")])
+    update_policy.on_path_moved([PathMove(old="proj/x.md", new="work/x.md")])
     assert update_policy.get("proj") is None
     assert update_policy.get("proj/sub") is None
     assert update_policy.get("proj/x.md") is None

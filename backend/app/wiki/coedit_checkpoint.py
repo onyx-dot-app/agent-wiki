@@ -23,7 +23,7 @@ import logging
 from app.auth import User, set_current_user
 from app.auth import users as users_repo
 from app.models.wiki import ChangeKind
-from app.wiki import coedit, coedit_channel
+from app.wiki import coedit, coedit_channel, filesystem
 from app.wiki import drafts as wiki_drafts
 from app.wiki import git as wiki_git
 from app.wiki.utils import commit_and_fan_out
@@ -107,6 +107,33 @@ def _checkpoint_locked(session_id: int) -> str | None:
         return None  # nothing new to commit
 
     path = sess.path
+    # The page existed when the session was seeded (base_sha set) but the
+    # working-tree file is gone — it was moved or deleted underneath the
+    # session. A move should have re-keyed the session
+    # (``coedit.on_path_moved``); committing here would resurrect the dead
+    # path from the buffer. Working-tree ``is_file`` (not a git read) so a
+    # transient git failure can't masquerade as a missing page; an OSError
+    # propagates and the task retries. Participant-less sessions close (the
+    # zombie case; buffer stays in the row for recovery). Sessions with live
+    # participants just skip: if a move re-key is landing concurrently, the
+    # scan retries after it points the session at the new path.
+    if sess.base_sha is not None and not filesystem.absolute(path).is_file():
+        if coedit.list_participants(session_id):
+            log.warning(
+                "coedit checkpoint: session %s targets missing path %r but has "
+                "participants; skipping (scan retries after any move re-key)",
+                session_id,
+                path,
+            )
+            return None
+        log.warning(
+            "coedit checkpoint: session %s targets missing path %r (moved or "
+            "deleted); closing — buffer left uncommitted",
+            session_id,
+            path,
+        )
+        coedit.close_session(session_id)
+        return None
     # Merge base = the page content at the last checkpoint. None when the
     # session was opened on a not-yet-existing page (→ create).
     base_body = wiki_git.read_file_opt(path, ref=sess.base_sha) if sess.base_sha else None

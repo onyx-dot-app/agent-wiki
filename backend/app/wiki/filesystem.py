@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 
 from app.config import CONFIG
+from app.models.wiki import PathMove
 
 log = logging.getLogger(__name__)
 
@@ -37,19 +38,19 @@ def parent_dirs(rel_path: str) -> list[str]:
 
 
 def common_folder_rename(
-    moves: list[tuple[str, str]],
+    moves: list[PathMove],
 ) -> tuple[str | None, str | None]:
     """If every move shares a common ``(old_prefix, new_prefix)`` directory
     swap, return it; else ``(None, None)``.
 
-    ``move_path`` of a directory yields one ``(old, new)`` tuple per nested
+    ``move_path`` of a directory yields one ``PathMove`` per nested
     file, all sharing the same prefix swap, so this recovers the directory
     rename without the caller having to flag it. Move handlers use it to
     rewrite folder-scoped rows (ACL grants, update policies) in one pass.
     """
     if not moves:
         return None, None
-    first_old, first_new = moves[0]
+    first_old, first_new = moves[0].old, moves[0].new
     if "/" not in first_old or "/" not in first_new:
         return None, None
     old_prefix = first_old.rsplit("/", 1)[0]
@@ -60,10 +61,10 @@ def common_folder_rename(
         if suffix_old != suffix_new:
             return None, None
         if all(
-            o.startswith(old_prefix + "/")
-            and n.startswith(new_prefix + "/")
-            and o[len(old_prefix):] == n[len(new_prefix):]
-            for o, n in moves
+            mv.old.startswith(old_prefix + "/")
+            and mv.new.startswith(new_prefix + "/")
+            and mv.old[len(old_prefix):] == mv.new[len(new_prefix):]
+            for mv in moves
         ):
             return old_prefix, new_prefix
         # Walk up one level and retry — handles nested rename detection.
