@@ -61,6 +61,14 @@ class User(Base):
     name: Mapped[str | None] = mapped_column(Text)
     # Null when AUTH_MODE=oidc.
     password_hash: Mapped[str | None] = mapped_column(Text)
+    # "human" for every signup; "system" for seeded non-person principals (the
+    # AI user). System users can never log in, never count toward the
+    # first-user-auto-admin or last-admin guards, and are excluded from user
+    # listings/search by default — but they are real, grantable, attributable
+    # principals everywhere else (ACL grants, page ownership, commit authorship).
+    kind: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'human'")
+    )
     is_admin: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("FALSE")
     )

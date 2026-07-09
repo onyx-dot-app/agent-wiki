@@ -17,6 +17,12 @@ from app.models.user_settings import UserSettings
 
 log = logging.getLogger(__name__)
 
+# The seeded AI system user (see migration b5e2d19c7a44). A real, grantable,
+# attributable principal for autonomous wiki work — but kind="system": it can
+# never log in, never counts toward first-user-auto-admin or last-admin
+# guards, and is excluded from listings/search by default.
+AI_USER_ID = "system-wiki-ai"
+
 
 def _now() -> str:
     """UTC timestamp matching the ``YYYY-MM-DD HH:MM:SS`` column format."""
@@ -32,6 +38,7 @@ def _to_dict(u: User) -> dict[str, Any]:
         "session_epoch": u.session_epoch,
         "is_admin": u.is_admin,
         "is_active": u.is_active,
+        "kind": u.kind,
         "created_at": u.created_at,
         "updated_at": u.updated_at,
         "settings": _settings_with_defaults(u.settings),
@@ -61,10 +68,12 @@ def count() -> int:
         return s.scalar(select(func.count()).select_from(User)) or 0
 
 
-def list_all() -> list[dict[str, Any]]:
+def list_all(include_system: bool = False) -> list[dict[str, Any]]:
     with session() as s:
-        users = s.scalars(select(User).order_by(User.created_at.asc())).all()
-        return [_to_dict(u) for u in users]
+        stmt = select(User).order_by(User.created_at.asc())
+        if not include_system:
+            stmt = stmt.where(User.kind == "human")
+        return [_to_dict(u) for u in s.scalars(stmt).all()]
 
 
 def get_many(user_ids: Iterable[str]) -> dict[str, dict[str, Any]]:
@@ -88,7 +97,10 @@ def search(query: str, limit: int = 20) -> list[dict[str, Any]]:
     """
     q = (query or "").strip().lower()
     with session() as s:
-        stmt = select(User)
+        # System principals (the AI user) don't belong in people typeaheads;
+        # surfaces that want them (e.g. the share picker, later) opt in
+        # explicitly rather than every picker filtering them out.
+        stmt = select(User).where(User.kind == "human")
         if q:
             like = "%" + q + "%"
             stmt = stmt.where(
@@ -108,7 +120,14 @@ def create(email: str, password: str, name: str | None = None) -> str:
     """Create a user. The very first user is auto-promoted to admin."""
     user_id = str(uuid.uuid4())
     with session() as s:
-        existing_count = s.scalar(select(func.count()).select_from(User)) or 0
+        # Count humans only: the seeded AI system user must not steal the
+        # first-signup auto-admin promotion.
+        existing_count = (
+            s.scalar(
+                select(func.count()).select_from(User).where(User.kind == "human")
+            )
+            or 0
+        )
         is_admin = existing_count == 0
         s.add(
             User(
@@ -123,6 +142,14 @@ def create(email: str, password: str, name: str | None = None) -> str:
         "user created id=%s email=%s is_admin=%s", user_id, email.lower(), is_admin
     )
     return user_id
+
+
+def get_ai_user() -> dict[str, Any]:
+    """The seeded AI system user. Raises if the seed migration hasn't run."""
+    row = get_by_id(AI_USER_ID)
+    if row is None:
+        raise RuntimeError("AI system user missing — did migrations run?")
+    return row
 
 
 def set_admin(user_id: str, is_admin: bool) -> None:
@@ -142,16 +169,24 @@ def set_active(user_id: str, is_active: bool) -> None:
 
 
 def status_counts() -> dict[str, int]:
-    """``{active, inactive}`` counts over real accounts (invited emails are
-    counted separately, in ``app.auth.invites``)."""
+    """``{active, inactive}`` counts over real human accounts (invited emails
+    are counted separately, in ``app.auth.invites``; system principals like
+    the AI user are not people and are excluded)."""
     with session() as s:
         active = (
             s.scalar(
-                select(func.count()).select_from(User).where(User.is_active.is_(True))
+                select(func.count())
+                .select_from(User)
+                .where(User.is_active.is_(True), User.kind == "human")
             )
             or 0
         )
-        total = s.scalar(select(func.count()).select_from(User)) or 0
+        total = (
+            s.scalar(
+                select(func.count()).select_from(User).where(User.kind == "human")
+            )
+            or 0
+        )
     return {"active": active, "inactive": total - active}
 
 
