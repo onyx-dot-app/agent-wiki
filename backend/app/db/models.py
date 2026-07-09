@@ -1290,12 +1290,13 @@ class ChangeProposal(Base):
     created_via: Mapped[str] = mapped_column(Text, nullable=False)
     # Correlates all proposals from one sweep run (batched notifications).
     run_id: Mapped[str | None] = mapped_column(Text)
-    # Who the operation would execute as (delegation auto-apply), and who
-    # approved it. SET NULL on account deletion, like update_policies.
+    # Who the operation would execute as (delegation auto-apply), and the
+    # human who decided (approved or rejected — status says which; NULL on
+    # auto-approval). SET NULL on account deletion, like update_policies.
     acting_user_id: Mapped[str | None] = mapped_column(
         Text, ForeignKey("users.id", ondelete="SET NULL")
     )
-    approved_by_user_id: Mapped[str | None] = mapped_column(
+    reviewed_by_user_id: Mapped[str | None] = mapped_column(
         Text, ForeignKey("users.id", ondelete="SET NULL")
     )
     # Why the proposal left the pending/approved path (rejected/stale/expired).

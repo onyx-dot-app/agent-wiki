@@ -192,3 +192,15 @@ def test_proposed_bodies_roundtrip(tmp_db):
     # Pure-structural proposals carry none.
     mv = _mk(op=ProposalOp.MOVE, source_paths=["x.md"], target_paths=["y/x.md"], base_shas={"x.md": "s"})
     assert (proposals.get(mv["id"]) or {})["proposed_bodies"] is None
+
+
+def test_reject_records_reviewer_not_approver(tmp_db):
+    seed_user(uid="u_rej", email="rej@x.com")
+    row = _mk()
+    assert proposals.reject(row["id"], user_id="u_rej", reason="intentional copies") is True
+    got = proposals.get(row["id"])
+    assert got is not None
+    assert got["status"] == "rejected"
+    assert got["reviewed_by_user_id"] == "u_rej"
+    # Rejection never sets an acting user — nothing will execute.
+    assert got["acting_user_id"] is None
