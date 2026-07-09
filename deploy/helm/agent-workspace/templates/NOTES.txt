@@ -15,3 +15,8 @@ agent-workspace has been deployed.
 {{- end }}
 
 4. Open https://{{ .Values.ingress.host }} — the first account you sign up is auto-promoted to admin.
+{{- if not .Values.backup.enabled }}
+
+5. Backups are not enabled. Set backup.enabled=true with an S3-compatible
+   bucket to schedule daily wiki + database backups — see docs/backups.md.
+{{- end }}

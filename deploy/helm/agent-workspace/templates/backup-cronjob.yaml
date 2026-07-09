@@ -1,0 +1,101 @@
+{{- if .Values.backup.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "agent-workspace.fullname" . }}-backup
+  labels:
+    {{- include "agent-workspace.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backup
+spec:
+  schedule: {{ .Values.backup.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 3600
+      template:
+        metadata:
+          labels:
+            {{- include "agent-workspace.labels" . | nindent 12 }}
+            app.kubernetes.io/component: backup
+        spec:
+          restartPolicy: Never
+          serviceAccountName: {{ include "agent-workspace.serviceAccountName" . }}
+          {{- with .Values.imagePullSecrets }}
+          imagePullSecrets:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          containers:
+            - name: backup
+              image: "{{ .Values.image.backend.repository }}:{{ .Values.image.backend.tag }}"
+              imagePullPolicy: {{ .Values.image.backend.pullPolicy }}
+              command: ["python", "-m", "app.scripts.backup_to_s3"]
+              env:
+                - name: DATABASE_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "agent-workspace.fullname" . }}-secrets
+                      key: database-url
+                - name: WIKI_DIR
+                  value: /wiki
+                - name: BACKUP_S3_BUCKET
+                  value: {{ required "backup.s3.bucket is required when backup.enabled" .Values.backup.s3.bucket | quote }}
+                - name: BACKUP_S3_PREFIX
+                  value: {{ .Values.backup.s3.prefix | quote }}
+                {{- with .Values.backup.s3.endpoint }}
+                - name: BACKUP_S3_ENDPOINT
+                  value: {{ . | quote }}
+                {{- end }}
+                {{- with .Values.backup.s3.region }}
+                - name: BACKUP_S3_REGION
+                  value: {{ . | quote }}
+                {{- end }}
+                - name: BACKUP_KEEP_LAST
+                  value: {{ .Values.backup.keepLast | quote }}
+                {{- if .Values.backup.s3.accessKeyId }}
+                - name: AWS_ACCESS_KEY_ID
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "agent-workspace.fullname" . }}-secrets
+                      key: backup-s3-access-key-id
+                - name: AWS_SECRET_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "agent-workspace.fullname" . }}-secrets
+                      key: backup-s3-secret-access-key
+                {{- end }}
+              volumeMounts:
+                - name: wiki-data
+                  mountPath: /wiki
+                  readOnly: true
+              resources:
+                {{- toYaml .Values.backup.resources | nindent 16 }}
+          volumes:
+            {{- include "agent-workspace.backendVolumes" . | nindent 12 }}
+          # Co-schedule with the backend so the RWO wiki-data PVC (already
+          # mounted by backend + workers on one node) can attach here too.
+          affinity:
+            podAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                - labelSelector:
+                    matchExpressions:
+                      - key: app.kubernetes.io/name
+                        operator: In
+                        values:
+                          - {{ include "agent-workspace.name" . }}
+                      - key: app.kubernetes.io/component
+                        operator: In
+                        values:
+                          - backend
+                  topologyKey: kubernetes.io/hostname
+          {{- with .Values.nodeSelector }}
+          nodeSelector:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.tolerations }}
+          tolerations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+{{- end }}

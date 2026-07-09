@@ -5,8 +5,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1
 
 # git is required — the wiki is a git repo and the backend shells out to it.
+# postgresql-client-17 provides pg_dump for `app/scripts/backup_to_s3.py`
+# (the Helm chart's backup CronJob); it comes from the PGDG repo because
+# pg_dump refuses servers newer than itself and Debian bookworm ships v15.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends git ca-certificates libjemalloc2 \
+ && apt-get install -y --no-install-recommends git ca-certificates libjemalloc2 postgresql-common \
+ && /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y \
+ && apt-get install -y --no-install-recommends postgresql-client-17 \
  && rm -rf /var/lib/apt/lists/*
 
 # Use jemalloc instead of glibc malloc to reduce memory fragmentation
