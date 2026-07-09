@@ -103,3 +103,12 @@ def test_kind_check_constraint_rejects_unknown_values(tmp_db):
                     kind="robot",
                 )
             )
+
+
+def test_oidc_upsert_refuses_system_user_email(tmp_db):
+    import pytest
+
+    from app.auth.oidc import SystemUserSignInError, upsert_oidc_user
+
+    with pytest.raises(SystemUserSignInError):
+        upsert_oidc_user(email="wiki-ai@system.local", name="Impostor")

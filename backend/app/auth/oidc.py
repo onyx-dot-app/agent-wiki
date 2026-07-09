@@ -73,6 +73,14 @@ def client() -> StarletteOAuth2App | None:
     )
 
 
+class SystemUserSignInError(Exception):
+    """An OIDC sign-in resolved to a system principal — always refused."""
+
+    def __init__(self, email: str) -> None:
+        self.email = email
+        super().__init__(f"refusing OIDC sign-in as system user {email!r}")
+
+
 def upsert_oidc_user(email: str, name: str | None) -> str:
     """Find or create a user by email for an OIDC sign-in.
 
@@ -83,6 +91,10 @@ def upsert_oidc_user(email: str, name: str | None) -> str:
     """
     existing = users_repo.get_by_email(email)
     if existing is not None:
+        if existing["kind"] != users_repo.UserKind.HUMAN.value:
+            # A system principal (the AI user) can never be signed into, even
+            # if an IdP asserts its (placeholder, non-routable) email.
+            raise SystemUserSignInError(email)
         return existing["id"]
     # Random password the user can never use; OIDC sign-in bypasses
     # ``authenticate``. Schema requires password_hash; storing a hash
