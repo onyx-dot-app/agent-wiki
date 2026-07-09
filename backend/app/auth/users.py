@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import uuid
 from datetime import datetime, timezone
+from enum import Enum
 from typing import Any, Iterable
 
 from sqlalchemy import func, or_, select, update
@@ -16,6 +17,17 @@ from app.db.session import session
 from app.models.user_settings import UserSettings
 
 log = logging.getLogger(__name__)
+
+
+class UserKind(str, Enum):
+    """Single source of truth for the valid ``users.kind`` values; the DB
+    CHECK constraint in ``app/db/models.py`` mirrors these (`str, Enum` so
+    members serialize as their string value, matching ``SessionStatus`` in
+    ``app/wiki/coedit.py``)."""
+
+    HUMAN = "human"  # every signup
+    SYSTEM = "system"  # seeded non-person principals (the AI user)
+
 
 # The seeded AI system user (see migration b5e2d19c7a44). A real, grantable,
 # attributable principal for autonomous wiki work — but kind="system": it can
@@ -72,7 +84,7 @@ def list_all(include_system: bool = False) -> list[dict[str, Any]]:
     with session() as s:
         stmt = select(User).order_by(User.created_at.asc())
         if not include_system:
-            stmt = stmt.where(User.kind == "human")
+            stmt = stmt.where(User.kind == UserKind.HUMAN.value)
         return [_to_dict(u) for u in s.scalars(stmt).all()]
 
 
@@ -100,7 +112,7 @@ def search(query: str, limit: int = 20) -> list[dict[str, Any]]:
         # System principals (the AI user) don't belong in people typeaheads;
         # surfaces that want them (e.g. the share picker, later) opt in
         # explicitly rather than every picker filtering them out.
-        stmt = select(User).where(User.kind == "human")
+        stmt = select(User).where(User.kind == UserKind.HUMAN.value)
         if q:
             like = "%" + q + "%"
             stmt = stmt.where(
@@ -124,7 +136,7 @@ def create(email: str, password: str, name: str | None = None) -> str:
         # first-signup auto-admin promotion.
         existing_count = (
             s.scalar(
-                select(func.count()).select_from(User).where(User.kind == "human")
+                select(func.count()).select_from(User).where(User.kind == UserKind.HUMAN.value)
             )
             or 0
         )
@@ -177,13 +189,13 @@ def status_counts() -> dict[str, int]:
             s.scalar(
                 select(func.count())
                 .select_from(User)
-                .where(User.is_active.is_(True), User.kind == "human")
+                .where(User.is_active.is_(True), User.kind == UserKind.HUMAN.value)
             )
             or 0
         )
         total = (
             s.scalar(
-                select(func.count()).select_from(User).where(User.kind == "human")
+                select(func.count()).select_from(User).where(User.kind == UserKind.HUMAN.value)
             )
             or 0
         )

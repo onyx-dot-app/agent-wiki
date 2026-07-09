@@ -37,6 +37,11 @@ def upgrade() -> None:
                 "kind", sa.Text(), nullable=False, server_default=sa.text("'human'")
             ),
         )
+    constraints = {c["name"] for c in inspector.get_check_constraints("users")}
+    if "users_kind_check" not in constraints:
+        op.create_check_constraint(
+            "users_kind_check", "users", "kind IN ('human', 'system')"
+        )
     # Seed the AI user. No password hash (can never log in), not admin, active.
     bind.execute(
         sa.text(

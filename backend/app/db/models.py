@@ -66,6 +66,7 @@ class User(Base):
     # first-user-auto-admin or last-admin guards, and are excluded from user
     # listings/search by default — but they are real, grantable, attributable
     # principals everywhere else (ACL grants, page ownership, commit authorship).
+    # Valid values mirror ``app.auth.users.UserKind``.
     kind: Mapped[str] = mapped_column(
         Text, nullable=False, server_default=text("'human'")
     )
@@ -93,6 +94,13 @@ class User(Base):
     # field defaults from the pydantic model on read.
     settings: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "kind IN ('human', 'system')",
+            name="users_kind_check",
+        ),
     )
 
 

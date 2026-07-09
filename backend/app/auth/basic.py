@@ -9,7 +9,7 @@ def authenticate(email: str, password: str) -> User | None:
     row = users_repo.get_by_email(email)
     if row is None or not row["password_hash"]:
         return None
-    if row["kind"] != "human":
+    if row["kind"] != users_repo.UserKind.HUMAN.value:
         # System principals (the AI user) can never authenticate, even if a
         # password hash were ever set on the row.
         return None

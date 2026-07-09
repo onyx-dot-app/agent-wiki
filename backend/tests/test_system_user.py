@@ -84,3 +84,22 @@ def test_admin_cannot_modify_or_delete_system_user(tmp_db, tmp_repo):
     # Untouched.
     row = users_repo.get_ai_user()
     assert row["is_admin"] is False and row["is_active"] is True
+
+
+def test_kind_check_constraint_rejects_unknown_values(tmp_db):
+    import pytest
+    from sqlalchemy.exc import IntegrityError
+
+    from app.db.models import User
+    from app.db.session import session
+
+    with pytest.raises(IntegrityError):
+        with session() as s:
+            s.add(
+                User(
+                    id="u_bad_kind",
+                    email="bad@x.com",
+                    password_hash="x",
+                    kind="robot",
+                )
+            )
