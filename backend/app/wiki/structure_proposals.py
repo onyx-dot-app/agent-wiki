@@ -1,6 +1,6 @@
 """Structure-proposal repo — the Wiki Auto Management proposal lifecycle.
 
-A proposal is the typed record a detector emits and a human (or delegation)
+A proposal is the typed record a detection run emits and a human (or delegation)
 approves before anything touches the wiki: op kind, exact paths, the base
 SHAs it was computed against, and an audience fingerprint. Approval binds to
 these fields — execution re-validates and marks the proposal ``stale`` on
@@ -51,8 +51,10 @@ class ProposalStatus(str, Enum):
     STALE = "stale"
 
 
-class ProposalDetector(str, Enum):
-    """Which entry point emitted the proposal. The DB CHECK mirrors these."""
+class ProposalOrigin(str, Enum):
+    """Where the proposal came from. The DB CHECK mirrors these; today both
+    origins are AI detection paths — a human-initiated ``manual`` origin is a
+    plausible later addition (one-line CHECK widening)."""
 
     SWEEP = "sweep"
     ON_CREATE = "on_create"
@@ -75,7 +77,7 @@ def _to_dict(row: StructureProposal) -> dict[str, Any]:
         "acl_fingerprint_after": row.acl_fingerprint_after,
         "summary": row.summary,
         "instruction": row.instruction,
-        "detector": row.detector,
+        "origin": row.origin,
         "run_id": row.run_id,
         "acting_user_id": row.acting_user_id,
         "approved_by_user_id": row.approved_by_user_id,
@@ -94,7 +96,7 @@ def create(
     target_paths: list[str],
     base_shas: dict[str, str],
     summary: str,
-    detector: ProposalDetector,
+    origin: ProposalOrigin,
     instruction: str | None = None,
     run_id: str | None = None,
     acting_user_id: str | None = None,
@@ -123,7 +125,7 @@ def create(
             base_shas=base_shas,
             summary=summary,
             instruction=instruction,
-            detector=detector.value,
+            origin=origin.value,
             run_id=run_id,
             acting_user_id=acting_user_id,
             acl_fingerprint_before=acl_fingerprint_before,

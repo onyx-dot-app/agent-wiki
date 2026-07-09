@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 
 from app.wiki import structure_proposals as proposals
-from app.wiki.structure_proposals import ProposalDetector, ProposalOp, ProposalStatus
+from app.wiki.structure_proposals import ProposalOrigin, ProposalOp, ProposalStatus
 from tests._seed import seed_user
 
 
@@ -28,7 +28,7 @@ def _mk(
         target_paths=target_paths if target_paths is not None else ["a/dup.md"],
         base_shas=base_shas if base_shas is not None else {"a/dup.md": "sha-a", "b/dup.md": "sha-b"},
         summary="merge duplicate pages about the same topic",
-        detector=ProposalDetector.SWEEP,
+        origin=ProposalOrigin.SWEEP,
         run_id=run_id,
         instruction=instruction,
         expires_at=expires_at,
@@ -44,7 +44,7 @@ def test_create_and_get_roundtrip(tmp_db):
     assert got["source_paths"] == ["a/dup.md", "b/dup.md"]
     assert got["base_shas"]["b/dup.md"] == "sha-b"
     assert got["instruction"] == "fold b into a, keep both changelogs"
-    assert got["detector"] == "sweep"
+    assert got["origin"] == "sweep"
 
 
 def test_create_validates_paths(tmp_db):
@@ -140,7 +140,7 @@ def test_op_check_constraint(tmp_db):
                     op="explode",
                     source_paths=["a.md"],
                     summary="nope",
-                    detector="sweep",
+                    origin="sweep",
                 )
             )
 

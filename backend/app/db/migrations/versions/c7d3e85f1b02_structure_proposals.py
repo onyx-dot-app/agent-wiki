@@ -49,7 +49,7 @@ def upgrade() -> None:
         sa.Column("acl_fingerprint_after", sa.Text(), nullable=True),
         sa.Column("summary", sa.Text(), nullable=False),
         sa.Column("instruction", sa.Text(), nullable=True),
-        sa.Column("detector", sa.Text(), nullable=False),
+        sa.Column("origin", sa.Text(), nullable=False),
         sa.Column("run_id", sa.Text(), nullable=True),
         sa.Column(
             "acting_user_id",
@@ -89,8 +89,8 @@ def upgrade() -> None:
             name="structure_proposals_status_check",
         ),
         sa.CheckConstraint(
-            "detector IN ('sweep', 'on_create')",
-            name="structure_proposals_detector_check",
+            "origin IN ('sweep', 'on_create')",
+            name="structure_proposals_origin_check",
         ),
     )
     op.create_index(
