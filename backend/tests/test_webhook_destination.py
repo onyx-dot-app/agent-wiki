@@ -22,7 +22,7 @@ from app.webhooks import client as webhook_client
         "http://localhost/hook",
         "http://10.1.2.3/hook",
         "http://192.168.0.5/hook",
-        "http://169.254.169.254/latest/meta-data",  # cloud metadata
+        "http://169.254.169.254/latest/meta-data",
         "ftp://example.com/hook",  # non-http scheme
         "http:///nohost",
     ],
@@ -112,10 +112,10 @@ from tests._seed import seed_user  # noqa: E402
 
 
 def _public(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        "app.net.ssrf.socket.getaddrinfo",
-        lambda *a, **k: [(2, 1, 6, "", ("93.184.216.34", 443))],
-    )
+    # Bypass the SSRF resolve at both call sites. Patching socket globally
+    # leaks into the DB-fixture teardown and times out the schema drop.
+    monkeypatch.setattr("app.triggers.destination_configs.assert_public_url", lambda url: None)
+    monkeypatch.setattr("app.webhooks.client.assert_public_url", lambda url: None)
 
 
 def test_send_test_event_posts_sample(monkeypatch: pytest.MonkeyPatch, tmp_db) -> None:
