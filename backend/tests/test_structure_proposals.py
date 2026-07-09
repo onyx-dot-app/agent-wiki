@@ -173,3 +173,22 @@ def test_auto_approve_leaves_no_human_approver(tmp_db):
     assert proposals.auto_approve(row["id"], acting_user_id=users_repo.AI_USER_ID) is False
     # And proceeds to applied through the same gate as human-approved ones.
     assert proposals.mark_applied(row["id"], applied_sha="sha-auto") is True
+
+
+def test_proposed_bodies_roundtrip(tmp_db):
+    row = proposals.create(
+        op=ProposalOp.MERGE,
+        source_paths=["a/dup.md", "b/dup.md"],
+        target_paths=["a/dup.md"],
+        base_shas={"a/dup.md": "s1", "b/dup.md": "s2"},
+        summary="merge duplicates",
+        created_via=ProposalCreatedVia.SWEEP,
+        instruction="fold b into a",
+        proposed_bodies={"a/dup.md": "# Merged\n\ncontent from both pages\n"},
+    )
+    got = proposals.get(row["id"])
+    assert got is not None
+    assert got["proposed_bodies"] == {"a/dup.md": "# Merged\n\ncontent from both pages\n"}
+    # Pure-structural proposals carry none.
+    mv = _mk(op=ProposalOp.MOVE, source_paths=["x.md"], target_paths=["y/x.md"], base_shas={"x.md": "s"})
+    assert (proposals.get(mv["id"]) or {})["proposed_bodies"] is None

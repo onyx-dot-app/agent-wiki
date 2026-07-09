@@ -47,6 +47,7 @@ def upgrade() -> None:
         ),
         sa.Column("acl_fingerprint_before", sa.Text(), nullable=True),
         sa.Column("acl_fingerprint_after", sa.Text(), nullable=True),
+        sa.Column("proposed_bodies", JSONB, nullable=True),
         sa.Column("summary", sa.Text(), nullable=False),
         sa.Column("instruction", sa.Text(), nullable=True),
         sa.Column("created_via", sa.Text(), nullable=False),

@@ -76,6 +76,7 @@ def _to_dict(row: StructureProposal) -> dict[str, Any]:
         "base_shas": row.base_shas,
         "acl_fingerprint_before": row.acl_fingerprint_before,
         "acl_fingerprint_after": row.acl_fingerprint_after,
+        "proposed_bodies": row.proposed_bodies,
         "summary": row.summary,
         "instruction": row.instruction,
         "created_via": row.created_via,
@@ -99,6 +100,7 @@ def create(
     summary: str,
     created_via: ProposalCreatedVia,
     instruction: str | None = None,
+    proposed_bodies: dict[str, str] | None = None,
     run_id: str | None = None,
     acting_user_id: str | None = None,
     acl_fingerprint_before: str | None = None,
@@ -111,6 +113,10 @@ def create(
     ``delete_empty_folder`` no target (1 → 0); everything else needs both
     (merge is N → 1, split 1 → N). ``base_shas`` should cover every source
     path (the drift anchors execution re-validates against).
+
+    Content-bearing ops (merge/split) should carry ``proposed_bodies`` — the
+    exact markdown per target path that the approver previews and execution
+    applies; regeneration only happens through the staleness path.
     """
     if not source_paths and op is not ProposalOp.CREATE_FOLDER:
         raise ValueError(f"source_paths required for op {op.value!r}")
@@ -126,6 +132,7 @@ def create(
             base_shas=base_shas,
             summary=summary,
             instruction=instruction,
+            proposed_bodies=proposed_bodies,
             created_via=created_via.value,
             run_id=run_id,
             acting_user_id=acting_user_id,

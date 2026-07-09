@@ -1277,6 +1277,11 @@ class StructureProposal(Base):
     # detection). Null until the ACL fingerprinting lands.
     acl_fingerprint_before: Mapped[str | None] = mapped_column(Text)
     acl_fingerprint_after: Mapped[str | None] = mapped_column(Text)
+    # Proposed resulting markdown for content-bearing ops (merge/split):
+    # {target_path: body}. What the approver previews is exactly what
+    # execution applies while the base SHAs still match; drift goes stale and
+    # regenerates. NULL for pure-structural ops (move/rename/folder ops).
+    proposed_bodies: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     # Human-facing one-liner for the queue card ("why this proposal").
     summary: Mapped[str] = mapped_column(Text, nullable=False)
     # NL instruction for the content step (e.g. how to merge two bodies);
