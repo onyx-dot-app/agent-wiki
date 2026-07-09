@@ -22,7 +22,7 @@ from app.webhooks import client as webhook_client
         "http://localhost/hook",
         "http://10.1.2.3/hook",
         "http://192.168.0.5/hook",
-        "http://169.254.169.254/latest/meta-data",
+        "http://169.254.0.1/hook",
         "ftp://example.com/hook",  # non-http scheme
         "http:///nohost",
     ],
