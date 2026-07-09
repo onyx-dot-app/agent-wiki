@@ -220,6 +220,14 @@ export function deleteDestinationConfig(id: string): Promise<void> {
   });
 }
 
+/** POST a sample event to a webhook destination so a receiver (Zapier, n8n,
+ * ...) can learn the field shape before a real trigger points at it. */
+export function sendTestEvent(id: string): Promise<void> {
+  return apiFetch<void>(`/triggers/destination-configs/${id}/test`, {
+    method: "POST",
+  });
+}
+
 /** Resend the verification email. A 429 resolves with the server's
  * retry_after_seconds so callers can run a countdown instead of guessing. */
 export async function resendVerification(

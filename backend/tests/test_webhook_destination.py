@@ -92,11 +92,14 @@ def test_deliver_raises_on_non_2xx(monkeypatch: pytest.MonkeyPatch) -> None:
 
     class _Resp:
         status_code = 500
+        text = "workflow must be active"
 
     monkeypatch.setattr(
         "app.webhooks.client.requests.post", lambda *a, **k: _Resp()
     )
-    with pytest.raises(webhook_client.WebhookError):
+    with pytest.raises(
+        webhook_client.WebhookError, match="500.*workflow must be active"
+    ):
         webhook_client.deliver(url="https://example.com/hook", body=b"{}")
 
 

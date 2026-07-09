@@ -96,7 +96,9 @@ function groupsFromActions(
       ? configs.find((c) => c.id === a.destination_config_id)
       : undefined;
     const type: ActionGroup["type"] =
-      cfg?.type === "slack" || cfg?.type === "email" ? cfg.type : "event_log";
+      cfg?.type === "slack" || cfg?.type === "email" || cfg?.type === "webhook"
+        ? cfg.type
+        : "event_log";
     const existing = out.find((g) => g.type === type && g.message === message);
     if (existing) {
       if (cfg && !existing.configIds.includes(cfg.id))

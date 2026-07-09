@@ -74,7 +74,7 @@ export default function InputChipField({
     <div
       data-variant={disabled ? "disabled" : "primary"}
       className={cn(
-        "opal-input min-h-9 cursor-text flex-wrap gap-1",
+        "opal-input min-h-9 cursor-text flex-wrap !justify-start gap-1",
         className,
       )}
       onClick={() => inputRef.current?.focus()}

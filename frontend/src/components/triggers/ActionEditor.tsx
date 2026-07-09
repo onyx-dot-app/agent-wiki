@@ -13,6 +13,7 @@ import {
 import {
   SvgActivity,
   SvgHash,
+  SvgLink,
   SvgMail,
   SvgSlack,
   SvgChevronDown,
@@ -31,7 +32,7 @@ import {
 } from "@/lib/slackConnect";
 import type { DestinationConfig } from "@/lib/triggers";
 
-export type ActionGroupType = "event_log" | "slack" | "email";
+export type ActionGroupType = "event_log" | "slack" | "email" | "webhook";
 
 export interface ActionGroup {
   key: number;
@@ -47,6 +48,7 @@ const TYPE_META: Record<
   event_log: { label: "Notification in Activity Center", icon: SvgActivity },
   slack: { label: "Slack", icon: SvgSlack },
   email: { label: "Email", icon: SvgMail },
+  webhook: { label: "Webhook", icon: SvgLink },
 };
 
 interface Props {
@@ -132,11 +134,15 @@ function ActionGroupRow({
   // connection exists (or this group already targets it, so an edit of an
   // existing Slack trigger stays visible).
   const typeOptions = (
-    ["event_log", "slack", "email"] as ActionGroupType[]
+    ["event_log", "slack", "email", "webhook"] as ActionGroupType[]
   ).filter((t) => {
     if (t === "event_log")
       return group.type === "event_log" || !usedTypes.includes("event_log");
     if (t === "slack") return slackConnected || group.type === "slack";
+    if (t === "webhook")
+      return (
+        group.type === "webhook" || configs.some((c) => c.type === "webhook")
+      );
     return true;
   });
 
@@ -223,6 +229,14 @@ function ActionGroupRow({
           onError={onError}
         />
       )}
+      {group.type === "webhook" && (
+        <WebhookToRow
+          configIds={group.configIds}
+          onConfigIds={(ids) => onPatch({ configIds: ids })}
+          configs={configs}
+          disabled={disabled}
+        />
+      )}
 
       <InputTextArea
         value={group.message}
@@ -232,6 +246,119 @@ function ActionGroupRow({
         rows={3}
       />
     </div>
+  );
+}
+
+function WebhookToRow({
+  configIds,
+  onConfigIds,
+  configs,
+  disabled,
+}: {
+  configIds: string[];
+  onConfigIds: (ids: string[]) => void;
+  configs: DestinationConfig[];
+  disabled?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const anchorRef = useRef<HTMLDivElement>(null);
+  const endpoints = configs.filter((c) => c.type === "webhook");
+  const selected = configIds
+    .map((id) => endpoints.find((c) => c.id === id))
+    .filter((c): c is DestinationConfig => Boolean(c));
+  const q = search.trim().toLowerCase();
+  const available = endpoints.filter(
+    (c) =>
+      !configIds.includes(c.id) && (!q || c.name.toLowerCase().includes(q)),
+  );
+
+  function add(id: string) {
+    onConfigIds([...configIds, id]);
+    setSearch("");
+  }
+
+  if (endpoints.length === 0) {
+    return (
+      <>
+        <ToLabel />
+        <div className="px-[2px]">
+          <Text font="secondary-body" color="text-03">
+            Add a webhook endpoint in Settings → Connectors to send here.
+          </Text>
+        </div>
+      </>
+    );
+  }
+
+  return (
+    <>
+      <ToLabel />
+      <Popover open={open} onOpenChange={setOpen}>
+        <Popover.Anchor asChild>
+          <div ref={anchorRef} className="w-full">
+            <InputChipField
+              chips={selected.map((c) => ({ id: c.id, label: c.name }))}
+              onRemoveChip={(id) =>
+                onConfigIds(configIds.filter((x) => x !== id))
+              }
+              onAdd={() => {
+                const first = available[0];
+                if (first) add(first.id);
+              }}
+              value={search}
+              onChange={(v) => {
+                setSearch(v);
+                if (!open) setOpen(true);
+              }}
+              onFocus={() => setOpen(true)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") setOpen(false);
+              }}
+              disabled={disabled}
+              placeholder={
+                selected.length ? "Add an endpoint" : "Pick an endpoint"
+              }
+            />
+          </div>
+        </Popover.Anchor>
+        <Popover.Content
+          width="trigger"
+          align="start"
+          sideOffset={4}
+          onOpenAutoFocus={(e) => e.preventDefault()}
+          onInteractOutside={(e) => {
+            if (anchorRef.current?.contains(e.target as Node))
+              e.preventDefault();
+          }}
+        >
+          {available.length === 0 ? (
+            <div className="px-3 py-2">
+              <Text font="secondary-body" color="text-03">
+                {q ? "No matching endpoints." : "All endpoints added."}
+              </Text>
+            </div>
+          ) : (
+            <PopoverMenu>
+              {available.map((c) => (
+                <LineItemButton
+                  key={c.id}
+                  icon={SvgLink}
+                  title={c.name}
+                  sizePreset="main-ui"
+                  variant="body"
+                  state="empty"
+                  onClick={() => {
+                    add(c.id);
+                    setOpen(false);
+                  }}
+                />
+              ))}
+            </PopoverMenu>
+          )}
+        </Popover.Content>
+      </Popover>
+    </>
   );
 }
 

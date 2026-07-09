@@ -53,4 +53,8 @@ def deliver(
         # type only and drop the cause chain so responses and logs stay clean.
         raise WebhookError(f"webhook POST failed: {type(e).__name__}") from None
     if response.status_code >= 400:
-        raise WebhookError(f"webhook returned {response.status_code}")
+        # The body is how a 4xx says why (e.g. n8n: "workflow must be
+        # active"). Truncated, and never our secret.
+        raise WebhookError(
+            f"webhook returned {response.status_code}: {response.text[:500]}"
+        )

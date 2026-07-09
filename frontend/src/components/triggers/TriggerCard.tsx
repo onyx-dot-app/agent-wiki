@@ -7,6 +7,7 @@ import { markdown } from "@onyx-ai/opal/utils";
 import {
   SvgChevronDown,
   SvgChevronUp,
+  SvgClock,
   SvgInfo,
   SvgSettings,
   SvgWorkflow,
@@ -64,9 +65,17 @@ export function TriggerCard({
   const isRowOpen = (f: TriggerFire) =>
     overrides.get(f.event_id) ?? (t.enabled && f === fires[0]);
 
+  // Drop actions whose destination config was deleted so they don't
+  // appear in the summary or the avatar cluster.
+  const liveActions = t.actions.filter(
+    (a) =>
+      !a.destination_config_id ||
+      configs.some((c) => c.id === a.destination_config_id),
+  );
+
   const destinationTypes = [
     ...new Set(
-      t.actions.map((a) => {
+      liveActions.map((a) => {
         if (!a.destination_config_id) return "event_log";
         const cfg = configs.find((c) => c.id === a.destination_config_id);
         return cfg?.type ?? "event_log";
@@ -97,9 +106,10 @@ export function TriggerCard({
               <Tag title={`+${t.scopes.length - 1}`} />
             </span>
           )}
-          <span className="flex size-4 items-center justify-center p-[2px]">
-            <SvgWorkflow className="size-3 text-(--text-03)" />
-          </span>
+          <Tag
+            icon={t.kind === "schedule" ? SvgClock : SvgWorkflow}
+            title={t.kind === "schedule" ? "Recurring" : "On updates"}
+          />
           <AvatarCluster
             ownerName={ownerName}
             destinationTypes={destinationTypes}
@@ -148,13 +158,11 @@ export function TriggerCard({
                   {markdown(`**IF** ${t.nl_description}`)}
                 </Text>
               </span>
-              {t.actions.map((a, i) => {
+              {liveActions.map((a, i) => {
                 const cfg = a.destination_config_id
                   ? configs.find((c) => c.id === a.destination_config_id)
                   : null;
-                const dest = a.destination_config_id
-                  ? (cfg?.name ?? "(destination removed)")
-                  : "Activity Center";
+                const dest = cfg?.name ?? "Activity Center";
                 return (
                   <span
                     key={`${a.destination_config_id ?? "event_log"}-${i}`}
@@ -166,10 +174,10 @@ export function TriggerCard({
                   </span>
                 );
               })}
-              {t.actions[0]?.message && (
+              {liveActions[0]?.message && (
                 <span className="px-[2px]">
                   <Text font="secondary-action" color="text-03">
-                    {t.actions[0].message}
+                    {liveActions[0].message}
                   </Text>
                 </span>
               )}
