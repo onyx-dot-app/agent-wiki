@@ -3,8 +3,8 @@
 Webhook destinations POST to a URL the user typed, so the URL must be
 proven to point at a public host before we send. ``assert_public_url``
 parses the URL, requires http/https, resolves the host, and rejects any
-resolved address that is private, loopback, link-local, multicast,
-reserved, or the cloud metadata endpoint (169.254.169.254).
+resolved address that is private, loopback, link-local, multicast, or
+reserved. Link-local covers the cloud metadata endpoint.
 
 Limitation: the resolve-then-send window leaves a DNS-rebinding gap (the
 name could resolve to a public IP here and a private one at request
@@ -25,9 +25,9 @@ class UnsafeUrlError(ValueError):
 
 def _ip_is_public(ip: str) -> bool:
     addr = ipaddress.ip_address(ip)
-    # is_global is False for private, loopback, link-local (incl. the
-    # 169.254.169.254 metadata endpoint), multicast, reserved, and
-    # unspecified ranges: exactly the set we refuse.
+    # is_global is False for private, loopback, link-local (which covers the
+    # cloud metadata endpoint), multicast, reserved, and unspecified ranges:
+    # exactly the set we refuse.
     return addr.is_global
 
 
