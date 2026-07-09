@@ -1237,6 +1237,101 @@ class UpdatePolicy(Base):
 
 
 # --------------------------------------------------------------------------- #
+# Wiki auto-management — change proposals (Postgres-only)                     #
+# --------------------------------------------------------------------------- #
+
+
+class ChangeProposal(Base):
+    """One proposed change to the wiki, awaiting approval.
+
+    The typed record the Wiki Auto Management engine emits (sweep or on-create
+    detection) and the pending-cleanups queue reviews. Approval binds to these
+    fields: if HEAD or the ACL fingerprint drifts before execution, the
+    proposal goes stale and re-validates instead of executing something nobody
+    saw. Valid ``op`` / ``status`` / ``created_via`` values mirror the enums in
+    ``app/wiki/change_proposals.py``.
+
+    Variable-arity paths (a merge has N sources, a split N targets) live in
+    JSONB lists; ``base_shas`` maps each source path to the commit the
+    proposal was computed against.
+    """
+
+    __tablename__ = "change_proposals"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    op: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'pending'")
+    )
+    # Wiki-relative paths, JSONB lists of strings. Arity varies by op:
+    # create_folder has no source, delete_empty_folder no target.
+    source_paths: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
+    target_paths: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )
+    # {source_path: head_sha_at_detection} — the drift anchor.
+    base_shas: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+    # Hash of the effective read/write audience before/after (audience-change
+    # detection). Null until the ACL fingerprinting lands.
+    acl_fingerprint_before: Mapped[str | None] = mapped_column(Text)
+    acl_fingerprint_after: Mapped[str | None] = mapped_column(Text)
+    # Proposed resulting markdown for content-bearing ops (merge/split):
+    # {target_path: body}. What the approver previews is exactly what
+    # execution applies while the base SHAs still match; drift goes stale and
+    # regenerates. NULL for pure-structural ops (move/rename/folder ops).
+    proposed_bodies: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    # Human-facing one-liner for the queue card ("why this proposal").
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    # NL instruction for the content step (e.g. how to merge two bodies);
+    # structural-only ops leave it null.
+    instruction: Mapped[str | None] = mapped_column(Text)
+    created_via: Mapped[str] = mapped_column(Text, nullable=False)
+    # Correlates all proposals from one sweep run (batched notifications).
+    run_id: Mapped[str | None] = mapped_column(Text)
+    # Who the operation would execute as (delegation auto-apply), and the
+    # human who decided (approved or rejected — status says which; NULL on
+    # auto-approval). SET NULL on account deletion, like update_policies.
+    acting_user_id: Mapped[str | None] = mapped_column(
+        Text, ForeignKey("users.id", ondelete="SET NULL")
+    )
+    reviewed_by_user_id: Mapped[str | None] = mapped_column(
+        Text, ForeignKey("users.id", ondelete="SET NULL")
+    )
+    # Why the proposal left the pending/approved path (rejected/stale/expired).
+    status_reason: Mapped[str | None] = mapped_column(Text)
+    # Commit that applied it (status='applied').
+    applied_sha: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
+    )
+    updated_at: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
+    )
+    # TTL: pending proposals past this moment are expired by the sweep.
+    expires_at: Mapped[str | None] = mapped_column(Text)
+
+    __table_args__ = (
+        CheckConstraint(
+            "op IN ('move', 'rename', 'merge', 'split', 'create_folder', "
+            "'delete_empty_folder')",
+            name="change_proposals_op_check",
+        ),
+        CheckConstraint(
+            "status IN ('pending', 'approved', 'applied', 'rejected', "
+            "'expired', 'stale')",
+            name="change_proposals_status_check",
+        ),
+        CheckConstraint(
+            "created_via IN ('sweep', 'on_create')",
+            name="change_proposals_created_via_check",
+        ),
+        Index("idx_change_proposals_status", "status", "created_at"),
+    )
+
+
+# --------------------------------------------------------------------------- #
 # Comments — human discussion anchored to wiki pages (Postgres-only)          #
 # --------------------------------------------------------------------------- #
 
