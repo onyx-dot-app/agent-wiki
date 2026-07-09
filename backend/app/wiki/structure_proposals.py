@@ -192,14 +192,34 @@ def _transition(
 
 
 def approve(proposal_id: int, *, user_id: str) -> bool:
-    """``pending → approved``. The approver becomes the acting user — they
-    must cover the whole operation, so execution runs as them."""
+    """``pending → approved`` by a human. The approver becomes the acting
+    user — they must cover the whole operation, so execution runs as them."""
     return _transition(
         proposal_id,
         from_statuses=(ProposalStatus.PENDING,),
         to=ProposalStatus.APPROVED,
         approved_by_user_id=user_id,
         acting_user_id=user_id,
+    )
+
+
+def auto_approve(proposal_id: int, *, acting_user_id: str) -> bool:
+    """``pending → approved`` without a human: every path the proposal touches
+    is inside AI-managed scope (``ai_management_allowed`` effective, or the
+    page is AI-owned), so no approval is required. ``approved_by_user_id``
+    stays NULL — that's how digests and the queue UI tell "auto-applied
+    (AI-managed scope)" from "approved by <person>". ``acting_user_id`` is the
+    authorizing principal: the AI system user for AI-managed/AI-owned scopes,
+    or the delegating owner under per-user delegation.
+
+    The caller (the engine) is responsible for the scope check across *all*
+    source and target paths — one path outside AI management drops the
+    proposal to the human queue instead."""
+    return _transition(
+        proposal_id,
+        from_statuses=(ProposalStatus.PENDING,),
+        to=ProposalStatus.APPROVED,
+        acting_user_id=acting_user_id,
     )
 
 

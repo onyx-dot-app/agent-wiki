@@ -154,3 +154,22 @@ def test_create_folder_needs_no_source(tmp_db):
     )
     assert row["op"] == "create_folder"
     assert row["source_paths"] == []
+
+
+def test_auto_approve_leaves_no_human_approver(tmp_db):
+    from app.auth import users as users_repo
+
+    row = _mk()
+    assert (
+        proposals.auto_approve(row["id"], acting_user_id=users_repo.AI_USER_ID)
+        is True
+    )
+    got = proposals.get(row["id"])
+    assert got is not None
+    assert got["status"] == "approved"
+    assert got["approved_by_user_id"] is None  # nobody clicked
+    assert got["acting_user_id"] == users_repo.AI_USER_ID
+    # Still races like any transition: a second auto-approve loses.
+    assert proposals.auto_approve(row["id"], acting_user_id=users_repo.AI_USER_ID) is False
+    # And proceeds to applied through the same gate as human-approved ones.
+    assert proposals.mark_applied(row["id"], applied_sha="sha-auto") is True
