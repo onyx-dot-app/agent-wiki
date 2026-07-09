@@ -1263,8 +1263,8 @@ class StructureProposal(Base):
     status: Mapped[str] = mapped_column(
         Text, nullable=False, server_default=text("'pending'")
     )
-    # Wiki-relative paths. Sources must be non-empty; targets may be empty for
-    # delete_empty_folder. JSONB lists of strings.
+    # Wiki-relative paths, JSONB lists of strings. Arity varies by op:
+    # create_folder has no source, delete_empty_folder no target.
     source_paths: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
     target_paths: Mapped[list[str]] = mapped_column(
         JSONB, nullable=False, server_default=text("'[]'::jsonb")
