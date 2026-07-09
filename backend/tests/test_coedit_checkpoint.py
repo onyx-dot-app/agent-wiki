@@ -425,17 +425,54 @@ def test_on_path_moved_leaves_siblings_alone(repo):
     assert got_sibling is not None and got_sibling.id == sibling.id
 
 
-def test_on_path_moved_skips_destination_collision(repo):
+def test_on_path_moved_origin_wins_over_young_dirty_destination(repo):
+    uid = users_repo.create(email="sq@x.com", password="hunter2-x", name="Sq")
     sha = _seed_page("origin")
     origin = coedit.open_session(_PATH, base_sha=sha, initial_buffer="origin")
-    # Someone is already drafting an (uncommitted) page at the destination.
-    squatter = coedit.open_session("guides/target.md", base_sha=None, initial_buffer="draft")
+    # A session opened at the destination inside the move window collected a
+    # few keystrokes. Long-lived drafts can't get here — the move's 409
+    # pre-check (blocking_active_session_path) rejects them before git mv.
+    young = coedit.open_session("guides/target.md", base_sha=None, initial_buffer="")
+    coedit.join(young.id, uid)
+    coedit.apply_op(young.id, base_version=0, changes=[_ch(0, 0, "few chars")], author_user_id=uid)
 
     coedit.on_path_moved([PathMove(old=_PATH, new="guides/target.md")])
 
-    # The squatter keeps the destination; the origin session stays keyed to the
-    # old path (the checkpoint missing-path guard retires it later).
+    # The origin session follows the page; the young session closes with its
+    # keystrokes preserved in the row.
     at_dest = coedit.get_active_session("guides/target.md")
-    assert at_dest is not None and at_dest.id == squatter.id
-    at_origin = coedit.get_active_session(_PATH)
-    assert at_origin is not None and at_origin.id == origin.id
+    assert at_dest is not None and at_dest.id == origin.id
+    superseded = coedit.get_session(young.id)
+    assert superseded is not None
+    assert superseded.status == coedit.SessionStatus.CLOSED.value
+    assert superseded.buffer_text == "few chars"
+
+
+def test_on_path_moved_supersedes_clean_destination_session(repo):
+    uid = users_repo.create(email="ed@x.com", password="hunter2-x", name="Ed")
+    sha = _seed_page("origin body")
+    origin = coedit.open_session(_PATH, base_sha=sha, initial_buffer="origin body")
+    coedit.join(origin.id, uid)
+    coedit.apply_op(origin.id, base_version=0, changes=[_ch(0, 6, "edited")], author_user_id=uid)
+    # Someone opened the just-moved page at its new home before the re-key ran:
+    # a clean session seeded from the moved content.
+    fresh = coedit.open_session("guides/target.md", base_sha=sha, initial_buffer="origin body")
+
+    coedit.on_path_moved([PathMove(old=_PATH, new="guides/target.md")])
+
+    # The dirty origin session follows the page; the clean fresh session closes.
+    at_dest = coedit.get_active_session("guides/target.md")
+    assert at_dest is not None and at_dest.id == origin.id
+    assert at_dest.buffer_text == "edited body"
+    superseded = coedit.get_session(fresh.id)
+    assert superseded is not None
+    assert superseded.status == coedit.SessionStatus.CLOSED.value
+
+
+def test_blocking_active_session_path(repo):
+    assert coedit.blocking_active_session_path("guides/new-home.md") is None
+    coedit.open_session("guides/new-home.md", base_sha=None, initial_buffer="")
+    # Exact page destination blocks; a folder destination blocks on nested paths.
+    assert coedit.blocking_active_session_path("guides/new-home.md") == "guides/new-home.md"
+    assert coedit.blocking_active_session_path("guides") == "guides/new-home.md"
+    assert coedit.blocking_active_session_path("other") is None
