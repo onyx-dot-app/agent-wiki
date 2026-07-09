@@ -1248,7 +1248,7 @@ class StructureProposal(Base):
     detection) and the pending-cleanups queue reviews. Approval binds to these
     fields: if HEAD or the ACL fingerprint drifts before execution, the
     proposal goes stale and re-validates instead of executing something nobody
-    saw. Valid ``op`` / ``status`` / ``entry_point`` values mirror the enums in
+    saw. Valid ``op`` / ``status`` / ``created_via`` values mirror the enums in
     ``app/wiki/structure_proposals.py``.
 
     Variable-arity paths (a merge has N sources, a split N targets) live in
@@ -1282,7 +1282,7 @@ class StructureProposal(Base):
     # NL instruction for the content step (e.g. how to merge two bodies);
     # structural-only ops leave it null.
     instruction: Mapped[str | None] = mapped_column(Text)
-    entry_point: Mapped[str] = mapped_column(Text, nullable=False)
+    created_via: Mapped[str] = mapped_column(Text, nullable=False)
     # Correlates all proposals from one sweep run (batched notifications).
     run_id: Mapped[str | None] = mapped_column(Text)
     # Who the operation would execute as (delegation auto-apply), and who
@@ -1318,8 +1318,8 @@ class StructureProposal(Base):
             name="structure_proposals_status_check",
         ),
         CheckConstraint(
-            "entry_point IN ('sweep', 'on_create')",
-            name="structure_proposals_entry_point_check",
+            "created_via IN ('sweep', 'on_create')",
+            name="structure_proposals_created_via_check",
         ),
         Index("idx_structure_proposals_status", "status", "created_at"),
     )

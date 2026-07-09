@@ -51,11 +51,11 @@ class ProposalStatus(str, Enum):
     STALE = "stale"
 
 
-class ProposalEntryPoint(str, Enum):
-    """Which entry point created the proposal ("two entry points feed one
-    pipeline" — PRD Overview). The DB CHECK mirrors these; today both are AI
-    detection paths — a human-initiated ``manual`` entry point is a plausible
-    later addition (one-line CHECK widening)."""
+class ProposalCreatedVia(str, Enum):
+    """How the proposal was created — the PRD's two entry points ("two entry
+    points feed one pipeline"). The DB CHECK mirrors these; today both are AI
+    detection paths — a human-initiated ``manual`` value is a plausible later
+    addition (one-line CHECK widening)."""
 
     SWEEP = "sweep"
     ON_CREATE = "on_create"
@@ -78,7 +78,7 @@ def _to_dict(row: StructureProposal) -> dict[str, Any]:
         "acl_fingerprint_after": row.acl_fingerprint_after,
         "summary": row.summary,
         "instruction": row.instruction,
-        "entry_point": row.entry_point,
+        "created_via": row.created_via,
         "run_id": row.run_id,
         "acting_user_id": row.acting_user_id,
         "approved_by_user_id": row.approved_by_user_id,
@@ -97,7 +97,7 @@ def create(
     target_paths: list[str],
     base_shas: dict[str, str],
     summary: str,
-    entry_point: ProposalEntryPoint,
+    created_via: ProposalCreatedVia,
     instruction: str | None = None,
     run_id: str | None = None,
     acting_user_id: str | None = None,
@@ -126,7 +126,7 @@ def create(
             base_shas=base_shas,
             summary=summary,
             instruction=instruction,
-            entry_point=entry_point.value,
+            created_via=created_via.value,
             run_id=run_id,
             acting_user_id=acting_user_id,
             acl_fingerprint_before=acl_fingerprint_before,
