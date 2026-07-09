@@ -33,7 +33,6 @@ from sqlalchemy.exc import IntegrityError
 from app.db.models import CoeditOp, CoeditParticipant, CoeditSession, User
 from app.models.wiki import PathMove
 from app.db.session import session, try_advisory_xact_lock
-from app.wiki import filesystem
 
 log = logging.getLogger(__name__)
 
@@ -551,31 +550,40 @@ def on_path_moved(moves: list[PathMove]) -> None:
 
     Without this, a session keyed to the old path checkpoints its buffer back
     to a path that no longer exists in git — recreating the page under its
-    pre-move name. Mirrors ``acl.on_path_moved`` / ``update_policy.on_path_moved``:
-    exact rows are repointed per pair, and a directory rename carries every
-    session nested under the folder. Closed sessions are re-keyed too, so
-    their history stays attached to the page.
+    pre-move name. Exact per-pair re-keys only: sessions are keyed to ``.md``
+    files and ``git.move_path`` emits one pair per tracked file, so a folder
+    rename is fully covered without prefix matching (which would also re-key
+    unmoved siblings on a single cross-folder move). Closed sessions are
+    re-keyed too, so their history stays attached to the page.
+
+    If the destination already has an *active* session (possible when someone
+    is drafting a not-yet-committed page there), that pair is skipped rather
+    than tripping the active-unique index — the stranded session is later
+    closed by the checkpoint's missing-path guard, buffer preserved.
     """
     if not moves:
         return
     with session() as s:
         for mv in moves:
+            collision = s.scalar(
+                select(CoeditSession.id).where(
+                    CoeditSession.path == mv.new,
+                    CoeditSession.status == SessionStatus.ACTIVE.value,
+                )
+            )
+            if collision is not None:
+                log.warning(
+                    "coedit on_path_moved: active session %s already at %r; "
+                    "not re-keying sessions from %r",
+                    collision,
+                    mv.new,
+                    mv.old,
+                )
+                continue
             s.execute(
                 update(CoeditSession)
                 .where(CoeditSession.path == mv.old)
                 .values(path=mv.new)
-            )
-        old_prefix, new_prefix = filesystem.common_folder_rename(moves)
-        if old_prefix is not None and new_prefix is not None:
-            s.execute(
-                update(CoeditSession)
-                .where(CoeditSession.path.like(old_prefix + "/%"))
-                .values(
-                    path=func.concat(
-                        new_prefix,
-                        func.substr(CoeditSession.path, len(old_prefix) + 1),
-                    )
-                )
             )
 
 

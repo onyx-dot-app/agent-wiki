@@ -365,7 +365,9 @@ def test_checkpoint_closes_session_when_path_gone(repo):
     coedit.apply_op(sess.id, base_version=0, changes=[_ch(0, 5, "stale")], author_user_id=uid)
 
     # The page moves away but the session is NOT re-keyed (the pre-fix bug, or
-    # a raw-git rename that bypassed the lifecycle hook).
+    # a raw-git rename that bypassed the lifecycle hook). The editor left, so
+    # the session is participant-less — the zombie case the guard closes.
+    coedit.leave(sess.id, uid)
     wiki_git.move_path(_PATH, "guides/renamed.md", "rename")
 
     assert coedit_checkpoint.checkpoint_session(sess.id) is None
@@ -388,3 +390,52 @@ def test_checkpoint_still_creates_brand_new_page(repo):
 
     assert coedit_checkpoint.checkpoint_session(sess.id) is not None
     assert wiki_git.read_file_opt("guides/fresh.md") == "first words"
+
+
+def test_checkpoint_skips_but_keeps_session_with_participants(repo):
+    uid = users_repo.create(email="liv@x.com", password="hunter2-x", name="Liv")
+    sha = _seed_page("hello world")
+    sess = coedit.open_session(_PATH, base_sha=sha, initial_buffer="hello world")
+    coedit.join(sess.id, uid)
+    coedit.apply_op(sess.id, base_version=0, changes=[_ch(0, 5, "live")], author_user_id=uid)
+
+    # Path vanishes mid-session while someone is still editing (e.g. a move
+    # whose re-key hasn't landed yet): skip, don't close — the scan retries.
+    wiki_git.move_path(_PATH, "guides/renamed.md", "rename")
+
+    assert coedit_checkpoint.checkpoint_session(sess.id) is None
+    assert wiki_git.read_file_opt(_PATH) is None
+    after = coedit.get_session(sess.id)
+    assert after is not None and after.status == coedit.SessionStatus.ACTIVE.value
+
+
+def test_on_path_moved_leaves_siblings_alone(repo):
+    # A single cross-folder page move must not re-key sessions of unmoved
+    # siblings in the same folder (prefix matching would).
+    sha_a = wiki_git.commit_file("a/deep/page.md", "moving", "seed", author=None)
+    sha_b = wiki_git.commit_file("a/deep/other.md", "staying", "seed", author=None)
+    moved = coedit.open_session("a/deep/page.md", base_sha=sha_a, initial_buffer="moving")
+    sibling = coedit.open_session("a/deep/other.md", base_sha=sha_b, initial_buffer="staying")
+
+    coedit.on_path_moved([PathMove(old="a/deep/page.md", new="b/deep/page.md")])
+
+    got_moved = coedit.get_active_session("b/deep/page.md")
+    assert got_moved is not None and got_moved.id == moved.id
+    got_sibling = coedit.get_active_session("a/deep/other.md")
+    assert got_sibling is not None and got_sibling.id == sibling.id
+
+
+def test_on_path_moved_skips_destination_collision(repo):
+    sha = _seed_page("origin")
+    origin = coedit.open_session(_PATH, base_sha=sha, initial_buffer="origin")
+    # Someone is already drafting an (uncommitted) page at the destination.
+    squatter = coedit.open_session("guides/target.md", base_sha=None, initial_buffer="draft")
+
+    coedit.on_path_moved([PathMove(old=_PATH, new="guides/target.md")])
+
+    # The squatter keeps the destination; the origin session stays keyed to the
+    # old path (the checkpoint missing-path guard retires it later).
+    at_dest = coedit.get_active_session("guides/target.md")
+    assert at_dest is not None and at_dest.id == squatter.id
+    at_origin = coedit.get_active_session(_PATH)
+    assert at_origin is not None and at_origin.id == origin.id
