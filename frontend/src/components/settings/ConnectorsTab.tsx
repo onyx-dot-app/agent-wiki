@@ -215,6 +215,8 @@ export function ConnectorsTab() {
             <ChipList
               items={webhookConfigs.map((c) => ({ id: c.id, label: c.name }))}
               onRemove={(id) => void onRemoveConfig(id)}
+              maxVisible={6}
+              overflowIcon={SvgLink}
             />
           ) : undefined
         }
