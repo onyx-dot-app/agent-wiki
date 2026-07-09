@@ -15,6 +15,7 @@ secret is never written to the wiki git repo. Repos return dicts, not ORM rows.
 from __future__ import annotations
 
 import logging
+import secrets
 import uuid
 from datetime import datetime, timezone
 from typing import Any, cast
@@ -114,6 +115,10 @@ def create(
         routing_tag = cfg.get("routing_tag")
         if routing_tag is not None and not isinstance(routing_tag, str):
             raise ValueError("webhook routing_tag must be a string")
+        if secret is None:
+            # Sign every webhook. Mint a secret server-side when the caller
+            # did not supply one. Stored encrypted, never returned.
+            secret = secrets.token_hex(32)
 
     if type == destinations.EMAIL_ID:
         address = ((config or {}).get("address") or "")

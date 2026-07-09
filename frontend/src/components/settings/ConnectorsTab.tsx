@@ -7,6 +7,7 @@ import {
   SvgArrowExchange,
   SvgCheckCircle,
   SvgClock,
+  SvgLink,
   SvgMail,
   SvgSettings,
   SvgSlack,
@@ -14,11 +15,18 @@ import {
   SvgVolumeOff,
   SvgX,
 } from "@onyx-ai/opal/icons";
-import { Content, ContentAction, InputErrorText } from "@onyx-ai/opal/layouts";
+import { Content, InputErrorText } from "@onyx-ai/opal/layouts";
 import { cn, markdown } from "@onyx-ai/opal/utils";
 
 import { SvgSend } from "@/components/icons/SvgSend";
-import Chip from "@/components/inputs/Chip";
+import {
+  ConfigRowCard,
+  ConnectorModalShell,
+  CountDivider,
+  MiniActionButton,
+} from "@/components/settings/ConnectorModal";
+import { WebhookModal } from "@/components/settings/WebhookModal";
+import ChipList from "@/components/inputs/ChipList";
 import InputChipField, {
   type ChipItem,
 } from "@/components/inputs/InputChipField";
@@ -40,7 +48,7 @@ import {
 
 const MAX_EMAILS = 5;
 
-/** Status-coloured icons for ContentAction's icon slot. */
+/** Status-coloured icons for the config row's icon slot. */
 function VerifiedIcon(props: React.ComponentProps<typeof SvgCheckCircle>) {
   return (
     <SvgCheckCircle
@@ -68,10 +76,12 @@ export function ConnectorsTab() {
   const { status, refresh: refreshSlack, isLoading } = useSlackConnectStatus();
   const { configs, refresh: refreshConfigs } = useDestinationConfigs();
   const [emailsOpen, setEmailsOpen] = useState(false);
+  const [webhooksOpen, setWebhooksOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const confirmDialog = useConfirm();
 
   const emailConfigs = configs.filter((c) => c.type === "email");
+  const webhookConfigs = configs.filter((c) => c.type === "webhook");
 
   async function onDisconnect() {
     if (
@@ -102,10 +112,10 @@ export function ConnectorsTab() {
     }
   }
 
-  async function onRemoveAddress(c: DestinationConfig) {
+  async function onRemoveConfig(id: string) {
     setError(null);
     try {
-      await deleteDestinationConfig(c.id);
+      await deleteDestinationConfig(id);
       await refreshConfigs();
     } catch (e) {
       setError(e instanceof Error ? e.message : "failed to remove");
@@ -172,9 +182,11 @@ export function ConnectorsTab() {
         onConnect={() => setEmailsOpen(true)}
         detail={
           emailConfigs.length > 0 ? (
-            <AddressTags
-              configs={emailConfigs}
-              onRemove={(c) => void onRemoveAddress(c)}
+            <ChipList
+              items={emailConfigs.map((c) => ({ id: c.id, label: c.name }))}
+              onRemove={(id) => void onRemoveConfig(id)}
+              maxVisible={2}
+              overflowIcon={SvgMail}
             />
           ) : undefined
         }
@@ -192,6 +204,34 @@ export function ConnectorsTab() {
         }
       />
 
+      <ConnectorCard
+        icon={SvgLink}
+        title="Webhooks"
+        description="POST wiki updates to Zapier, n8n, Make, or any HTTP endpoint."
+        connected={webhookConfigs.length > 0}
+        onConnect={() => setWebhooksOpen(true)}
+        detail={
+          webhookConfigs.length > 0 ? (
+            <ChipList
+              items={webhookConfigs.map((c) => ({ id: c.id, label: c.name }))}
+              onRemove={(id) => void onRemoveConfig(id)}
+            />
+          ) : undefined
+        }
+        foldActions={
+          webhookConfigs.length > 0 ? (
+            <Button
+              type="button"
+              icon={SvgSettings}
+              size="md"
+              prominence="tertiary"
+              tooltip="Manage"
+              onClick={() => setWebhooksOpen(true)}
+            />
+          ) : undefined
+        }
+      />
+
       {error && <InputErrorText type="error">{error}</InputErrorText>}
 
       {emailsOpen && (
@@ -199,6 +239,14 @@ export function ConnectorsTab() {
           configs={emailConfigs}
           refresh={refreshConfigs}
           onClose={() => setEmailsOpen(false)}
+        />
+      )}
+
+      {webhooksOpen && (
+        <WebhookModal
+          configs={webhookConfigs}
+          refresh={refreshConfigs}
+          onClose={() => setWebhooksOpen(false)}
         />
       )}
     </div>
@@ -293,29 +341,6 @@ function ConnectorCard({
           </div>
         </div>
       </Card>
-    </div>
-  );
-}
-
-/** The mock's mini address tags: 10px labels on tint-02, truncated at
- * 120px, first two shown with an overflow "+N" tag carrying a mail glyph. */
-function AddressTags({
-  configs,
-  onRemove,
-}: {
-  configs: DestinationConfig[];
-  onRemove: (c: DestinationConfig) => void;
-}) {
-  const visible = configs.slice(0, 2);
-  const overflow = configs.length - visible.length;
-  return (
-    <div className="flex w-full flex-wrap items-center gap-1">
-      {visible.map((c) => (
-        <Chip key={c.id} smallLabel truncateLabel onRemove={() => onRemove(c)}>
-          {c.name}
-        </Chip>
-      ))}
-      {overflow > 0 && <Chip smallLabel icon={SvgMail}>{`+${overflow}`}</Chip>}
     </div>
   );
 }
@@ -445,155 +470,101 @@ function EmailsModal({
     }
   }
 
-  return (
+  const banner = sentBanner && (
     <div
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-(--mask-03) backdrop-blur-[2px]"
-      onClick={onClose}
+      className="fixed top-6 left-1/2 flex w-[min(480px,92vw)] -translate-x-1/2 items-start gap-2 rounded-(--radius-12) border border-(--status-info-03) bg-(--background-tint-00) p-3 shadow-(--shadow-modal)"
+      onClick={(e) => e.stopPropagation()}
     >
-      {sentBanner && (
-        <div
-          className="fixed top-6 left-1/2 flex w-[min(480px,92vw)] -translate-x-1/2 items-start gap-2 rounded-(--radius-12) border border-(--status-info-03) bg-(--background-tint-00) p-3 shadow-(--shadow-modal)"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <SvgSend className="mt-[2px] size-4 shrink-0 text-(--status-info-05)" />
-          <div className="flex min-w-0 flex-1 flex-col">
-            <Text font="main-ui-action" color="text-04">
-              Check your email inbox.
-            </Text>
-            <Text font="secondary-body" color="text-03">
-              We&apos;ve sent a verification link to your email address.
-            </Text>
-          </div>
+      <SvgSend className="mt-[2px] size-4 shrink-0 text-(--status-info-05)" />
+      <div className="flex min-w-0 flex-1 flex-col">
+        <Text font="main-ui-action" color="text-04">
+          Check your email inbox.
+        </Text>
+        <Text font="secondary-body" color="text-03">
+          We&apos;ve sent a verification link to your email address.
+        </Text>
+      </div>
+      <Button
+        type="button"
+        icon={SvgX}
+        size="sm"
+        prominence="tertiary"
+        tooltip="Dismiss"
+        onClick={() => setSentBanner(false)}
+      />
+    </div>
+  );
+
+  return (
+    <ConnectorModalShell
+      icon={SvgMail}
+      title="Emails"
+      description="Send wiki updates notifications to your email addresses."
+      onClose={onClose}
+      banner={banner}
+    >
+      <div className="flex w-full items-center gap-1">
+        <div className="min-w-0 flex-1">
+          <InputChipField
+            chips={drafts}
+            onRemoveChip={(id: string) =>
+              setDrafts((cur) => cur.filter((d) => d.id !== id))
+            }
+            onAdd={addDraft}
+            value={draft}
+            onChange={setDraft}
+            placeholder="Add an email…"
+            disabled={busy}
+          />
+        </div>
+        {drafts.length > 0 && (
           <Button
             type="button"
-            icon={SvgX}
-            size="sm"
-            prominence="tertiary"
-            tooltip="Dismiss"
-            onClick={() => setSentBanner(false)}
-          />
-        </div>
-      )}
-      <div
-        className="flex max-h-[92vh] w-[min(480px,92vw)] flex-col overflow-y-auto rounded-(--radius-16) border border-(--border-01) bg-(--background-tint-01) shadow-(--shadow-modal)"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="relative w-full rounded-t-(--radius-16) bg-(--background-tint-00) p-4">
-          <Content
-            sizePreset="section"
-            variant="heading"
-            icon={SvgMail}
-            title="Emails"
-            description="Send wiki updates notifications to your email addresses."
-          />
-          <span className="absolute top-2 right-2">
-            <Button
-              type="button"
-              icon={SvgX}
-              size="sm"
-              prominence="tertiary"
-              tooltip="Close"
-              onClick={onClose}
-            />
-          </span>
-        </div>
-
-        <div className="w-full flex-1 p-4">
-          <div className="flex w-full flex-col gap-2 rounded-(--radius-12) bg-(--background-tint-00) p-2">
-            <div className="flex w-full items-center gap-1">
-              <div className="min-w-0 flex-1">
-                <InputChipField
-                  chips={drafts}
-                  onRemoveChip={(id: string) =>
-                    setDrafts((cur) => cur.filter((d) => d.id !== id))
-                  }
-                  onAdd={addDraft}
-                  value={draft}
-                  onChange={setDraft}
-                  placeholder="Add an email…"
-                  disabled={busy}
-                />
-              </div>
-              {drafts.length > 0 && (
-                <Button
-                  type="button"
-                  variant="action"
-                  icon={SvgSend}
-                  disabled={busy}
-                  onClick={() => void onSend()}
-                >
-                  Send
-                </Button>
-              )}
-            </div>
-
-            {error && <InputErrorText type="error">{error}</InputErrorText>}
-
-            <div className="flex w-full flex-col gap-1">
-              {configs.map((c) => {
-                const deadline = cooldowns.get(c.id) ?? 0;
-                const remaining = Math.max(
-                  0,
-                  Math.ceil((deadline - now) / 1000),
-                );
-                return (
-                  <div
-                    key={c.id}
-                    className="w-full rounded-(--radius-08) bg-(--background-tint-01) p-[6px]"
-                  >
-                    <ContentAction
-                      sizePreset="main-ui"
-                      variant="section"
-                      icon={c.verified_at ? VerifiedIcon : PendingIcon}
-                      title={c.name}
-                      description={c.verified_at ? "Verified" : "Not verified"}
-                      rightChildren={
-                        <span className="flex shrink-0 items-center gap-1">
-                          {!c.verified_at && (
-                            <span className="flex items-center [&_button]:!h-6 [&_button]:!rounded-(--radius-08) [&_button]:!border-0 [&_button]:!bg-(--background-tint-00) [&_button_span]:!text-[12px] [&_button_span]:!leading-4">
-                              <Button
-                                type="button"
-                                size="xs"
-                                prominence="secondary"
-                                icon={SvgSend}
-                                disabled={remaining > 0}
-                                onClick={() => void onResend(c)}
-                              >
-                                {remaining > 0 ? `${remaining}s` : "Verify"}
-                              </Button>
-                            </span>
-                          )}
-                          <Button
-                            type="button"
-                            icon={SvgX}
-                            size="sm"
-                            prominence="tertiary"
-                            tooltip="Remove address"
-                            onClick={() => void onDelete(c)}
-                          />
-                        </span>
-                      }
-                    />
-                  </div>
-                );
-              })}
-              <div className="flex w-full items-center gap-2 px-4 py-2">
-                <span className="h-0 min-w-px flex-1 border-t border-(--border-01)" />
-                <Text font="secondary-body" color="text-03" nowrap>
-                  {`${configs.length} ${configs.length === 1 ? "Email" : "Emails"}`}
-                </Text>
-                <span className="h-0 min-w-px flex-1 border-t border-(--border-01)" />
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="flex h-[68px] w-full items-center justify-end rounded-b-(--radius-16) bg-(--background-tint-00) p-4">
-          <Button type="button" prominence="secondary" onClick={onClose}>
-            Done
+            variant="action"
+            icon={SvgSend}
+            disabled={busy}
+            onClick={() => void onSend()}
+          >
+            Send
           </Button>
-        </div>
+        )}
       </div>
-    </div>
+
+      {error && <InputErrorText type="error">{error}</InputErrorText>}
+
+      <div className="flex w-full flex-col gap-1">
+        {configs.map((c) => {
+          const deadline = cooldowns.get(c.id) ?? 0;
+          const remaining = Math.max(0, Math.ceil((deadline - now) / 1000));
+          return (
+            <ConfigRowCard
+              key={c.id}
+              icon={c.verified_at ? VerifiedIcon : PendingIcon}
+              title={c.name}
+              description={c.verified_at ? "Verified" : "Not verified"}
+            >
+              {!c.verified_at && (
+                <MiniActionButton
+                  icon={SvgSend}
+                  disabled={remaining > 0}
+                  onClick={() => void onResend(c)}
+                >
+                  {remaining > 0 ? `${remaining}s` : "Verify"}
+                </MiniActionButton>
+              )}
+              <Button
+                type="button"
+                icon={SvgX}
+                size="sm"
+                prominence="tertiary"
+                tooltip="Remove address"
+                onClick={() => void onDelete(c)}
+              />
+            </ConfigRowCard>
+          );
+        })}
+        <CountDivider count={configs.length} noun="Email" />
+      </div>
+    </ConnectorModalShell>
   );
 }

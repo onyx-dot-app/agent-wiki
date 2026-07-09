@@ -12,6 +12,8 @@ export interface ChipProps {
   error?: boolean;
   /** Cap the label at 120px with an ellipsis (the mock's mini-tag form). */
   truncateLabel?: boolean;
+  /** Hover tooltip content. Defaults to the label. */
+  tooltip?: string;
 }
 
 /** Port of Onyx's refresh-components Chip (chip/tag with optional remove),
@@ -25,12 +27,14 @@ export default function Chip({
   smallLabel = false,
   error = false,
   truncateLabel = false,
+  tooltip,
 }: ChipProps) {
+  const tooltipText = tooltip ?? children;
   return (
     <Tooltip
       tooltip={
-        children ? (
-          <span className="font-secondary-body break-all">{children}</span>
+        tooltipText ? (
+          <span className="font-secondary-body break-all">{tooltipText}</span>
         ) : undefined
       }
       side="top"
@@ -45,12 +49,13 @@ export default function Chip({
       >
         {Icon && <Icon className="size-3 shrink-0 text-(--text-03)" />}
         {children && (
+          // leading-[0]: kill the wrapper's line-box strut so the inner Text's
+          // line-height sizes it and flex centers glyphs with the remove button.
           <span
-            className={
-              truncateLabel
-                ? "block max-w-[120px] min-w-0 truncate"
-                : "block min-w-0 truncate"
-            }
+            className={cn(
+              "block min-w-0 truncate leading-[0]",
+              truncateLabel && "max-w-[120px]",
+            )}
           >
             <Text
               font={smallLabel ? "figure-small-value" : "main-ui-body"}

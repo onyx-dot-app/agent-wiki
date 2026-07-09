@@ -8,6 +8,7 @@ import {
   SvgBook,
   SvgFile,
   SvgFolder,
+  SvgLink,
   SvgMail,
   SvgSlack,
 } from "@onyx-ai/opal/icons";
@@ -22,6 +23,7 @@ export function scopeIcon(scope: string) {
 export function destinationIcon(type: string) {
   if (type === "slack") return SvgSlack;
   if (type === "email") return SvgMail;
+  if (type === "webhook") return SvgLink;
   return SvgActivity;
 }
 
