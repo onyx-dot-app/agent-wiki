@@ -69,7 +69,7 @@ def test_approve_binds_acting_user(tmp_db):
     got = proposals.get(row["id"])
     assert got is not None
     assert got["status"] == "approved"
-    assert got["approved_by_user_id"] == "u_appr"
+    assert got["reviewed_by_user_id"] == "u_appr"
     assert got["acting_user_id"] == "u_appr"
 
 
@@ -167,7 +167,7 @@ def test_auto_approve_leaves_no_human_approver(tmp_db):
     got = proposals.get(row["id"])
     assert got is not None
     assert got["status"] == "approved"
-    assert got["approved_by_user_id"] is None  # nobody clicked
+    assert got["reviewed_by_user_id"] is None  # nobody clicked
     assert got["acting_user_id"] == users_repo.AI_USER_ID
     # Still races like any transition: a second auto-approve loses.
     assert proposals.auto_approve(row["id"], acting_user_id=users_repo.AI_USER_ID) is False

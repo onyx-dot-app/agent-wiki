@@ -14,7 +14,6 @@ row and returns ``False``).
 """
 from __future__ import annotations
 
-import logging
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
@@ -23,8 +22,6 @@ from sqlalchemy import select, update
 
 from app.db.models import ChangeProposal
 from app.db.session import execute_dml, session
-
-log = logging.getLogger(__name__)
 
 
 class ProposalOp(str, Enum):
@@ -82,7 +79,7 @@ def _to_dict(row: ChangeProposal) -> dict[str, Any]:
         "created_via": row.created_via,
         "run_id": row.run_id,
         "acting_user_id": row.acting_user_id,
-        "approved_by_user_id": row.approved_by_user_id,
+        "reviewed_by_user_id": row.reviewed_by_user_id,
         "status_reason": row.status_reason,
         "applied_sha": row.applied_sha,
         "created_at": row.created_at,
@@ -202,13 +199,13 @@ def _transition(
 
 
 def approve(proposal_id: int, *, user_id: str) -> bool:
-    """``pending → approved`` by a human. The approver becomes the acting
+    """``pending → approved`` by a human. The reviewer becomes the acting
     user — they must cover the whole operation, so execution runs as them."""
     return _transition(
         proposal_id,
         from_statuses=(ProposalStatus.PENDING,),
         to=ProposalStatus.APPROVED,
-        approved_by_user_id=user_id,
+        reviewed_by_user_id=user_id,
         acting_user_id=user_id,
     )
 
@@ -216,7 +213,7 @@ def approve(proposal_id: int, *, user_id: str) -> bool:
 def auto_approve(proposal_id: int, *, acting_user_id: str) -> bool:
     """``pending → approved`` without a human: every path the proposal touches
     is inside AI-managed scope (``ai_management_allowed`` effective, or the
-    page is AI-owned), so no approval is required. ``approved_by_user_id``
+    page is AI-owned), so no approval is required. ``reviewed_by_user_id``
     stays NULL — that's how digests and the queue UI tell "auto-applied
     (AI-managed scope)" from "approved by <person>". ``acting_user_id`` is the
     authorizing principal: the AI system user for AI-managed/AI-owned scopes,
@@ -238,7 +235,7 @@ def reject(proposal_id: int, *, user_id: str, reason: str | None = None) -> bool
         proposal_id,
         from_statuses=(ProposalStatus.PENDING,),
         to=ProposalStatus.REJECTED,
-        approved_by_user_id=user_id,
+        reviewed_by_user_id=user_id,
         status_reason=reason,
     )
 
