@@ -18,7 +18,7 @@ from sqlalchemy.exc import IntegrityError
 from app.auth import User, users as users_repo
 from app.auth.basic import authenticate
 from app.auth.deps import require_user, user_epoch
-from app.auth.oidc import client as oidc_client, upsert_oidc_user
+from app.auth.oidc import client as oidc_client, upsert_oidc_user, SystemUserSignInError
 from app.auth import invites
 from app.auth.whitelist import is_allowed, is_open
 from app.config import CONFIG
@@ -162,7 +162,11 @@ async def oidc_callback(request: Request) -> Response:
 
     name_raw = userinfo.get("name")
     name = name_raw if isinstance(name_raw, str) else None
-    user_id = upsert_oidc_user(email=email, name=name)
+    try:
+        user_id = upsert_oidc_user(email=email, name=name)
+    except SystemUserSignInError:
+        log.warning("oidc: refused sign-in as system user %s", email)
+        return RedirectResponse(url="/login?error=oidc_email_not_allowed")
     invites.remove(email)
     row = users_repo.get_by_id(user_id)
     assert row is not None

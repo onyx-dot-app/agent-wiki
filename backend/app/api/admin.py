@@ -121,6 +121,9 @@ def update_user(
     if req.is_active is False and user_id == actor.id:
         raise HTTPException(status_code=400, detail="cannot deactivate yourself")
 
+    if target["kind"] != users_repo.UserKind.HUMAN.value:
+        raise HTTPException(status_code=400, detail="cannot modify a system user")
+
     # An active admin being demoted and/or deactivated must not be the last one.
     if (was_admin and was_active) and not (final_admin and final_active):
         if users_repo.admin_count() <= 1:
@@ -197,6 +200,8 @@ def delete_user(user_id: str, actor: User = Depends(require_admin)) -> OkRespons
     target = users_repo.get_by_id(user_id)
     if target is None:
         raise HTTPException(status_code=404, detail="not found")
+    if target["kind"] != users_repo.UserKind.HUMAN.value:
+        raise HTTPException(status_code=400, detail="cannot delete a system user")
     if bool(target["is_admin"]) and users_repo.admin_count() <= 1:
         raise HTTPException(status_code=400, detail="cannot delete the last admin")
     users_repo.delete(user_id)
