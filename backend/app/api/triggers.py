@@ -240,7 +240,7 @@ def resend_verification(
 )
 def send_test_event(config_id: str, user: User = Depends(require_user)) -> Response:
     """Fire a sample event at a webhook config so the receiver can learn the
-    payload shape. Owner-scoped; webhook configs only."""
+    payload shape. Owner-scoped, webhook configs only."""
     row = dest_configs.get(config_id, user.id)
     if row is None:
         raise HTTPException(status_code=404, detail="not found")

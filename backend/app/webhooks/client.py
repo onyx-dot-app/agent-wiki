@@ -1,9 +1,8 @@
 """Outbound sender for webhook destinations.
 
-One place that signs and POSTs a structured event to a user-supplied URL:
-the trigger dispatcher and the "send test event" endpoint both call
-:func:`deliver`. Every send runs through the SSRF guard first and carries an
-HMAC-SHA256 signature over the exact body bytes so a receiver can confirm the
+Signs and POSTs a structured event to a user-supplied URL. Every send runs
+through the SSRF guard first, and carries an HMAC-SHA256 signature over the
+exact body bytes when a signing secret is set, so a receiver can confirm the
 call came from us.
 """
 from __future__ import annotations

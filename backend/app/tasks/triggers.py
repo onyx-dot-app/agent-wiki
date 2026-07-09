@@ -451,8 +451,8 @@ def _record_fire(
 
 
 def _str_map_or_none(obj: object) -> dict[str, str] | None:
-    """Coerce a config value to a string->string map, or None if it isn't a
-    dict (config validation already guarantees string entries)."""
+    """Coerce a config value to a string->string map (keys and values
+    stringified), or None when it isn't a dict."""
     if not isinstance(obj, dict):
         return None
     return {str(k): str(v) for k, v in cast("dict[object, object]", obj).items()}
@@ -473,7 +473,7 @@ def _dispatch_to_webhook(
 
     Workflow destinations get machine-readable fields, not the prose message.
     The URL, custom headers, routing tag, and static fields come from the
-    config; the signing secret HMACs the body. Failures are logged and
+    config. The signing secret HMACs the body. Failures are logged and
     swallowed: the fire is already recorded.
     """
     target = cast("dict[str, Any]", config.get("config") or {})

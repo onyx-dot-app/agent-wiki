@@ -11,7 +11,6 @@ The repo owns destination-id validation. Repos / API / agent tools call
 destination is a one-line migration plus a dispatcher — no edits to the
 trigger-creation surface.
 """
-
 from __future__ import annotations
 
 from typing import Any
@@ -53,7 +52,9 @@ def _to_dict(d: TriggerDestination) -> dict[str, Any]:
 
 def list_all() -> list[dict[str, Any]]:
     with session() as s:
-        rows = s.scalars(select(TriggerDestination).order_by(TriggerDestination.id)).all()
+        rows = s.scalars(
+            select(TriggerDestination).order_by(TriggerDestination.id)
+        ).all()
         return [_to_dict(d) for d in rows]
 
 

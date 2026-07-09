@@ -1,6 +1,6 @@
 """Webhook destination: the SSRF guard, the HMAC signer, and delivery.
 
-Guards the security-critical seam of PR 9: user-supplied webhook URLs must
+Guards the security-critical seam: user-supplied webhook URLs must
 never reach private/loopback/metadata hosts, and every body must carry an
 HMAC signature a receiver can verify.
 """

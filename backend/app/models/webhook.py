@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class WebhookEvent(BaseModel):
-    """The JSON body POSTed to a webhook destination on each fire."""
+    """The JSON body POSTed to a webhook destination for a fire or test event."""
 
     model_config = ConfigDict(frozen=True)
 

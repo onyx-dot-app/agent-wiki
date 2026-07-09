@@ -9,7 +9,7 @@ reserved, or the cloud metadata endpoint (169.254.169.254).
 Limitation: the resolve-then-send window leaves a DNS-rebinding gap (the
 name could resolve to a public IP here and a private one at request
 time). Pinning the checked IP into the transport closes it and is the
-deferred hardening; the resolve check blocks the ordinary SSRF attempts.
+deferred hardening. The resolve check blocks the ordinary SSRF attempts.
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ def _ip_is_public(ip: str) -> bool:
     addr = ipaddress.ip_address(ip)
     # is_global is False for private, loopback, link-local (incl. the
     # 169.254.169.254 metadata endpoint), multicast, reserved, and
-    # unspecified ranges — exactly the set we refuse.
+    # unspecified ranges: exactly the set we refuse.
     return addr.is_global
 
 
