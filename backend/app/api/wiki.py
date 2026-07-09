@@ -412,7 +412,7 @@ def move_document_or_folder(
         old_path=old_rel,
         new_path=new_rel,
         sha=sha,
-        moved=[MovedFile(old=o, new=n) for o, n in moves],
+        moved=[MovedFile(old=mv.old, new=mv.new) for mv in moves],
     )
 
 

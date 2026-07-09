@@ -40,7 +40,7 @@ from app.tasks.update_frequency import check_update_frequency
 from app.triggers import repo as triggers_repo
 from app.wiki import acl, agent_activity, coedit, comments, constants as wiki_constants, drafts, update_policy
 from app.wiki.comment_remap import remap_comments
-from app.models.wiki import ChangeKind
+from app.models.wiki import ChangeKind, PathMove
 
 log = logging.getLogger(__name__)
 
@@ -152,7 +152,7 @@ def after_doc_delete(rel_path: str, sha: str, actor: str | None) -> None:
 
 
 def after_path_move(
-    moves: list[tuple[str, str]], sha: str, actor: str | None
+    moves: list[PathMove], sha: str, actor: str | None
 ) -> None:
     """Post-move side effects for every ``(old, new)`` pair from a single
     ``git mv`` commit.
@@ -188,7 +188,8 @@ def after_path_move(
     update_policy.on_path_moved(moves)
     coedit.on_path_moved(moves)
     list_changed = False
-    for old_p, new_p in moves:
+    for mv in moves:
+        old_p, new_p = mv.old, mv.new
         old_is_md = old_p.endswith(".md")
         new_is_md = new_p.endswith(".md")
         if old_is_md:

@@ -4,12 +4,29 @@ from __future__ import annotations
 from enum import Enum
 from typing import NamedTuple
 
+from pydantic import BaseModel, ConfigDict
+
 
 class ChangeKind(str, Enum):
     CREATE = "create"
     EDIT = "edit"
     DELETE = "delete"
     SCHEDULE = "schedule"
+
+
+class PathMove(BaseModel):
+    """One tracked file relocated by a move/rename commit: ``old`` → ``new``.
+
+    ``git.move_path`` emits one per tracked file (a directory rename yields
+    one per nested file, all sharing the same prefix swap); the move handlers
+    (``notify.after_path_move`` → ACL / update-policy / co-edit / trigger
+    re-keying) consume them.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    old: str
+    new: str
 
 
 class CommitResult(NamedTuple):

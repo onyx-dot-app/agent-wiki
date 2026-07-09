@@ -12,6 +12,7 @@ from app.db.models import DocumentTemplate
 from app.db.session import session
 from app.wiki import agent_activity, drafts, notify, update_policy
 from app.wiki import git as wiki_git
+from app.models.wiki import PathMove
 
 from tests._seed import seed_user
 
@@ -29,7 +30,7 @@ def test_after_path_move_repoints_agent_activity(tmp_repo):
         user_id=user, agent_name=None, doc_path="a.md", activity="wrote", description=None
     )
 
-    notify.after_path_move([("a.md", "b.md")], sha, actor=None)
+    notify.after_path_move([PathMove(old="a.md", new="b.md")], sha, actor=None)
 
     assert agent_activity.list_for_doc("a.md") == []
     assert len(agent_activity.list_for_doc("b.md")) == 1
@@ -43,7 +44,7 @@ def test_after_path_move_repoints_drafts(tmp_repo):
         path="a.md", template_id=tid, template_body_snapshot="# T\n", created_by_user_id=user
     )
 
-    notify.after_path_move([("a.md", "b.md")], sha, actor=None)
+    notify.after_path_move([PathMove(old="a.md", new="b.md")], sha, actor=None)
 
     assert drafts.get("a.md") is None
     moved = drafts.get("b.md")
@@ -57,7 +58,7 @@ def test_after_path_move_repoints_page_working_dirs(tmp_repo):
         user_id=user, machine_id="m1", wiki_path="a.md", working_dir="/tmp/checkout"
     )
 
-    notify.after_path_move([("a.md", "b.md")], sha, actor=None)
+    notify.after_path_move([PathMove(old="a.md", new="b.md")], sha, actor=None)
 
     assert page_dirs.get_for_page(user_id=user, machine_id="m1", wiki_path="a.md") is None
     assert (
@@ -82,7 +83,7 @@ def test_after_path_move_out_of_md_space_clears_activity_and_drafts(tmp_repo):
         user_id=user, machine_id="m1", wiki_path="a.md", working_dir="/tmp/checkout"
     )
 
-    notify.after_path_move([("a.md", "notes.txt")], sha, actor=None)
+    notify.after_path_move([PathMove(old="a.md", new="notes.txt")], sha, actor=None)
 
     assert agent_activity.list_for_doc("a.md") == []
     assert drafts.get("a.md") is None
@@ -94,7 +95,7 @@ def test_after_path_move_repoints_update_policy(tmp_repo):
     update_policy.set_policy("a.md", ingestion_auto_update_disabled=True)
     sha = wiki_git.commit_file("a.md", "body\n", "seed", author=None)
 
-    notify.after_path_move([("a.md", "b.md")], sha, actor=None)
+    notify.after_path_move([PathMove(old="a.md", new="b.md")], sha, actor=None)
 
     assert update_policy.get("a.md") is None
     assert update_policy.get("b.md") is not None
@@ -109,7 +110,7 @@ def test_after_path_move_patches_cache_without_full_rebuild(tmp_repo, monkeypatc
     monkeypatch.setattr(notify.triggers_repo, "rebuild_from_filesystem", lambda: calls.append(1))
     sha = wiki_git.commit_file("a.md", "body\n", "seed", author=None)
 
-    notify.after_path_move([("a.md", "b.md")], sha, actor=None)
+    notify.after_path_move([PathMove(old="a.md", new="b.md")], sha, actor=None)
 
     assert calls == []
 
@@ -127,6 +128,6 @@ def test_after_path_move_falls_back_to_rebuild_when_repoint_raises(tmp_repo, mon
     monkeypatch.setattr(notify.triggers_repo, "rebuild_from_filesystem", lambda: calls.append(1))
     sha = wiki_git.commit_file("a.md", "body\n", "seed", author=None)
 
-    notify.after_path_move([("a.md", "b.md")], sha, actor=None)
+    notify.after_path_move([PathMove(old="a.md", new="b.md")], sha, actor=None)
 
     assert calls == [1]

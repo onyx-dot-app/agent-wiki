@@ -17,6 +17,7 @@ from app.tasks import coedit_checkpoint as coedit_checkpoint_task
 from app.tasks.queues import coedit_queue
 from app.wiki import coedit, coedit_checkpoint, drafts
 from app.wiki import git as wiki_git
+from app.models.wiki import PathMove
 
 _PATH = "guides/setup.md"
 
@@ -321,7 +322,7 @@ def test_on_path_moved_rekeys_session(repo):
     coedit.join(sess.id, uid)
 
     new_path = "guides/install.md"
-    coedit.on_path_moved([(_PATH, new_path)])
+    coedit.on_path_moved([PathMove(old=_PATH, new=new_path)])
 
     assert coedit.get_active_session(_PATH) is None
     moved = coedit.get_active_session(new_path)
@@ -332,7 +333,7 @@ def test_on_path_moved_folder_rename_carries_sessions(repo):
     sha = wiki_git.commit_file("a/deep/page.md", "body", "seed", author=None)
     sess = coedit.open_session("a/deep/page.md", base_sha=sha, initial_buffer="body")
 
-    coedit.on_path_moved([("a/deep/page.md", "b/deep/page.md")])
+    coedit.on_path_moved([PathMove(old="a/deep/page.md", new="b/deep/page.md")])
 
     moved = coedit.get_active_session("b/deep/page.md")
     assert moved is not None and moved.id == sess.id
@@ -347,7 +348,7 @@ def test_checkpoint_commits_to_new_path_after_move(repo):
 
     new_path = "guides/install.md"
     wiki_git.move_path(_PATH, new_path, "rename")
-    coedit.on_path_moved([(_PATH, new_path)])
+    coedit.on_path_moved([PathMove(old=_PATH, new=new_path)])
 
     new_sha = coedit_checkpoint.checkpoint_session(sess.id)
     assert new_sha is not None

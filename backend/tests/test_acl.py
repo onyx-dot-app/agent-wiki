@@ -13,6 +13,7 @@ import pytest
 from app.auth import groups as groups_repo
 from app.auth import users as users_repo
 from app.wiki import acl
+from app.models.wiki import PathMove
 from tests._seed import seed_user
 
 
@@ -428,7 +429,7 @@ def test_on_page_deleted_drops_owner_and_acls(tmp_db):
 def test_on_path_moved_rewrites_page_owner_and_acls(tmp_db):
     alice = seed_user(uid="u_alice", email="alice@x.com")
     acl.on_page_created("old/spec.md", owner_user_id=alice)
-    acl.on_path_moved([("old/spec.md", "new/spec.md")])
+    acl.on_path_moved([PathMove(old="old/spec.md", new="new/spec.md")])
 
     assert acl.get_owner("old/spec.md") is None
     assert acl.get_owner("new/spec.md") == alice
@@ -452,7 +453,7 @@ def test_on_path_moved_rewrites_folder_acls_for_directory_rename(tmp_db):
     # Two pages under it (simulating a directory move).
     acl.on_page_created("old/a.md", owner_user_id=alice)
     acl.on_page_created("old/b.md", owner_user_id=alice)
-    acl.on_path_moved([("old/a.md", "new/a.md"), ("old/b.md", "new/b.md")])
+    acl.on_path_moved([PathMove(old="old/a.md", new="new/a.md"), PathMove(old="old/b.md", new="new/b.md")])
 
     # Folder grant should now apply at "new".
     assert acl.effective(alice, False, "new/a.md") >= {"read"}

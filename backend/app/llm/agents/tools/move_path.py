@@ -55,7 +55,7 @@ def handle(args: dict[str, Any]) -> Any:
             "old_path": old_rel,
             "new_path": new_rel,
             "sha": sha,
-            "moved": [{"old": o, "new": n} for o, n in moves],
+            "moved": [{"old": mv.old, "new": mv.new} for mv in moves],
         }
     except ToolError as exc:
         return {"error": str(exc)}

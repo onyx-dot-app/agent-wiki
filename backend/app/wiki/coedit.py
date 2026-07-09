@@ -31,6 +31,7 @@ from sqlalchemy import func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 
 from app.db.models import CoeditOp, CoeditParticipant, CoeditSession, User
+from app.models.wiki import PathMove
 from app.db.session import session, try_advisory_xact_lock
 from app.wiki import filesystem
 
@@ -544,7 +545,7 @@ def close_session(session_id: int) -> None:
             sess.updated_at = _iso(_now())
 
 
-def on_path_moved(moves: list[tuple[str, str]]) -> None:
+def on_path_moved(moves: list[PathMove]) -> None:
     """Re-key co-edit sessions so a session (and its queued checkpoints, which
     resolve the path through the session row) follows a page move/rename.
 
@@ -558,11 +559,11 @@ def on_path_moved(moves: list[tuple[str, str]]) -> None:
     if not moves:
         return
     with session() as s:
-        for old_p, new_p in moves:
+        for mv in moves:
             s.execute(
                 update(CoeditSession)
-                .where(CoeditSession.path == old_p)
-                .values(path=new_p)
+                .where(CoeditSession.path == mv.old)
+                .values(path=mv.new)
             )
         old_prefix, new_prefix = filesystem.common_folder_rename(moves)
         if old_prefix is not None and new_prefix is not None:
