@@ -19,10 +19,15 @@ from app.wiki import git as wiki_git
 
 
 class FakeS3:
-    """Minimal in-memory stand-in for the boto3 S3 client surface we use."""
+    """Minimal in-memory stand-in for the boto3 S3 client surface we use.
 
-    def __init__(self) -> None:
+    Paginates like the real API (page size configurable, default 2 so tests
+    exercise ContinuationToken handling without thousands of objects).
+    """
+
+    def __init__(self, page_size: int = 2) -> None:
         self.objects: dict[str, bytes] = {}
+        self.page_size = page_size
 
     def upload_file(self, filename: str, bucket: str, key: str) -> None:
         self.objects[key] = Path(filename).read_bytes()
@@ -30,12 +35,27 @@ class FakeS3:
     def head_object(self, Bucket: str, Key: str) -> dict:
         return {"ContentLength": len(self.objects[Key])}
 
-    def list_objects_v2(self, Bucket: str, Prefix: str, Delimiter: str | None = None) -> dict:
+    def list_objects_v2(
+        self,
+        Bucket: str,
+        Prefix: str,
+        Delimiter: str | None = None,
+        ContinuationToken: str | None = None,
+    ) -> dict:
         keys = sorted(k for k in self.objects if k.startswith(Prefix))
         if Delimiter is None:
-            return {"Contents": [{"Key": k} for k in keys]}
-        groups = sorted({k[: k.index(Delimiter, len(Prefix)) + 1] for k in keys})
-        return {"CommonPrefixes": [{"Prefix": g} for g in groups]}
+            entries = [{"Key": k} for k in keys]
+            field = "Contents"
+        else:
+            groups = sorted({k[: k.index(Delimiter, len(Prefix)) + 1] for k in keys})
+            entries = [{"Prefix": g} for g in groups]
+            field = "CommonPrefixes"
+        start = int(ContinuationToken) if ContinuationToken else 0
+        page = entries[start : start + self.page_size]
+        resp: dict = {field: page}
+        if start + self.page_size < len(entries):
+            resp["NextContinuationToken"] = str(start + self.page_size)
+        return resp
 
     def delete_object(self, Bucket: str, Key: str) -> None:
         del self.objects[Key]
@@ -107,18 +127,18 @@ def test_prune_disabled_by_default(backup_env):
     assert client.objects
 
 
-def test_dump_database_normalizes_sqlalchemy_url(backup_env, monkeypatch, tmp_config):
-    seen: list[list[str]] = []
+def test_dump_database_normalizes_url_and_hides_password(
+    backup_env, monkeypatch, tmp_config
+):
+    seen: list[tuple[list[str], dict | None]] = []
 
     def fake_run(args, **kwargs):
-        seen.append(args)
+        seen.append((args, kwargs.get("env")))
         return subprocess.CompletedProcess(args, 0, "", "")
 
     cfg = tmp_config.model_copy(
         update={
-            "database_url": tmp_config.database_url.replace(
-                "postgresql://", "postgresql+psycopg://", 1
-            )
+            "database_url": "postgresql+psycopg://wiki:s3cr3t@db.example:5433/agent_wiki?options=-csearch_path%3Dfoo"
         }
     )
     monkeypatch.setattr("app.scripts.backup_to_s3.CONFIG", cfg)
@@ -126,6 +146,22 @@ def test_dump_database_normalizes_sqlalchemy_url(backup_env, monkeypatch, tmp_co
 
     backup_to_s3.dump_database("/tmp/out.dump")
 
-    url_arg = seen[0][-1]
-    assert url_arg.startswith("postgresql://")
-    assert "+psycopg" not in url_arg
+    args, env = seen[0]
+    url_arg = args[-1]
+    # SQLAlchemy dialect marker stripped; password absent from argv (it is
+    # world-readable via /proc); query params survive.
+    assert url_arg == "postgresql://wiki@db.example:5433/agent_wiki?options=-csearch_path%3Dfoo"
+    assert env is not None and env["PGPASSWORD"] == "s3cr3t"
+
+
+def test_prune_failure_does_not_fail_the_run(backup_env, monkeypatch):
+    monkeypatch.setenv("BACKUP_S3_BUCKET", "b")
+    monkeypatch.setattr(backup_to_s3, "_s3_client", lambda cfg: FakeS3())
+    monkeypatch.setattr(backup_to_s3, "run_backup", lambda cfg, client: ["p/x/y"])
+
+    def boom(client, cfg):
+        raise RuntimeError("no DeleteObject for you")
+
+    monkeypatch.setattr(backup_to_s3, "prune", boom)
+
+    assert backup_to_s3.main() == 0

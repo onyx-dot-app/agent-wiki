@@ -43,7 +43,8 @@ import sys
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
+from urllib.parse import urlsplit, urlunsplit
 
 from pydantic import BaseModel, ConfigDict
 
@@ -93,10 +94,23 @@ def dump_database(dest_path: str) -> None:
     Custom format so ``pg_restore`` can do selective/parallel restores and
     the dump is compressed. pg_dump takes a snapshot, so running against a
     live database is consistent.
+
+    The password is stripped from the URI and passed via ``PGPASSWORD`` so
+    it never appears in the process table (argv is world-readable via
+    ``/proc/<pid>/cmdline``).
     """
     # pg_dump takes libpq URIs (postgresql://); strip the SQLAlchemy dialect
     # marker in case the deployment set the +psycopg form.
     url = CONFIG.database_url.replace("postgresql+psycopg://", "postgresql://", 1)
+    parts = urlsplit(url)
+    env = None
+    if parts.password is not None:
+        netloc = parts.username or ""
+        netloc += f"@{parts.hostname}" if parts.hostname else "@"
+        if parts.port:
+            netloc += f":{parts.port}"
+        url = urlunsplit(parts._replace(netloc=netloc))
+        env = {**os.environ, "PGPASSWORD": parts.password}
     subprocess.run(
         [
             "pg_dump",
@@ -109,6 +123,7 @@ def dump_database(dest_path: str) -> None:
         check=True,
         capture_output=True,
         text=True,
+        env=env,
     )
 
 
@@ -124,6 +139,19 @@ def upload(client: Any, cfg: BackupConfig, ts: str, paths: list[Path]) -> list[s
     return keys
 
 
+def _list_all(client: Any, **kwargs: Any) -> Iterator[dict[str, Any]]:
+    """``list_objects_v2`` with pagination — a single call caps at 1000 entries."""
+    token: str | None = None
+    while True:
+        page = client.list_objects_v2(
+            **kwargs, **({"ContinuationToken": token} if token else {})
+        )
+        yield page
+        token = page.get("NextContinuationToken")
+        if not token:
+            return
+
+
 def prune(client: Any, cfg: BackupConfig) -> list[str]:
     """Delete all but the newest ``keep_last`` backups under the prefix.
 
@@ -133,17 +161,18 @@ def prune(client: Any, cfg: BackupConfig) -> list[str]:
     """
     if cfg.keep_last <= 0:
         return []
-    resp = client.list_objects_v2(
-        Bucket=cfg.bucket, Prefix=f"{cfg.prefix}/", Delimiter="/"
+    groups = sorted(
+        cp["Prefix"]
+        for page in _list_all(client, Bucket=cfg.bucket, Prefix=f"{cfg.prefix}/", Delimiter="/")
+        for cp in page.get("CommonPrefixes", [])
     )
-    groups = sorted(cp["Prefix"] for cp in resp.get("CommonPrefixes", []))
     doomed = groups[: -cfg.keep_last] if len(groups) > cfg.keep_last else []
     deleted: list[str] = []
     for group in doomed:
-        objs = client.list_objects_v2(Bucket=cfg.bucket, Prefix=group)
-        for obj in objs.get("Contents", []):
-            client.delete_object(Bucket=cfg.bucket, Key=obj["Key"])
-            deleted.append(obj["Key"])
+        for page in _list_all(client, Bucket=cfg.bucket, Prefix=group):
+            for obj in page.get("Contents", []):
+                client.delete_object(Bucket=cfg.bucket, Key=obj["Key"])
+                deleted.append(obj["Key"])
     if deleted:
         log.info("pruned %d object(s) beyond keep_last=%d", len(deleted), cfg.keep_last)
     return deleted
@@ -158,16 +187,15 @@ def run_backup(cfg: BackupConfig, client: Any) -> list[str]:
         log.info("wiki bundle: %d bytes", bundle_path.stat().st_size)
         dump_database(str(dump_path))
         log.info("db dump: %d bytes", dump_path.stat().st_size)
-        keys = upload(client, cfg, ts, [bundle_path, dump_path])
-    prune(client, cfg)
-    return keys
+        return upload(client, cfg, ts, [bundle_path, dump_path])
 
 
 def main() -> int:
     setup_logging()
     cfg = BackupConfig.from_env()
+    client = _s3_client(cfg)
     try:
-        keys = run_backup(cfg, _s3_client(cfg))
+        keys = run_backup(cfg, client)
     except subprocess.CalledProcessError as e:
         log.error(
             "backup failed (exit %d): %s", e.returncode, (e.stderr or "").strip()
@@ -177,6 +205,14 @@ def main() -> int:
         log.exception("backup failed")
         return 1
     log.info("backup complete: %s", ", ".join(keys))
+    # Retention is best-effort: the backup is already safe in the bucket, so a
+    # pruning error must not fail the job and misreport backup health. It is
+    # logged loudly; a bucket lifecycle rule is the alternative if DeleteObject
+    # can't be granted.
+    try:
+        prune(client, cfg)
+    except Exception:
+        log.exception("backup succeeded but pruning old backups failed")
     return 0
 
 
