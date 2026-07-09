@@ -1,6 +1,6 @@
-"""structure proposals
+"""change proposals
 
-Adds ``structure_proposals`` — the Wiki Auto Management proposal record
+Adds ``change_proposals`` — the Wiki Auto Management proposal record
 (op, paths, base SHAs, ACL fingerprints, lifecycle status). Inert at this
 migration: no code emits or consumes rows yet. Guarded with the inspector
 because ``0001_initial`` builds fresh databases from the current models.
@@ -26,10 +26,10 @@ depends_on: str | Sequence[str] | None = None
 def upgrade() -> None:
     bind = op.get_bind()
     inspector = sa.inspect(bind)
-    if inspector.has_table("structure_proposals"):
+    if inspector.has_table("change_proposals"):
         return
     op.create_table(
-        "structure_proposals",
+        "change_proposals",
         sa.Column("id", sa.BigInteger(), primary_key=True, autoincrement=True),
         sa.Column("op", sa.Text(), nullable=False),
         sa.Column(
@@ -82,21 +82,21 @@ def upgrade() -> None:
         sa.CheckConstraint(
             "op IN ('move', 'rename', 'merge', 'split', 'create_folder', "
             "'delete_empty_folder')",
-            name="structure_proposals_op_check",
+            name="change_proposals_op_check",
         ),
         sa.CheckConstraint(
             "status IN ('pending', 'approved', 'applied', 'rejected', "
             "'expired', 'stale')",
-            name="structure_proposals_status_check",
+            name="change_proposals_status_check",
         ),
         sa.CheckConstraint(
             "created_via IN ('sweep', 'on_create')",
-            name="structure_proposals_created_via_check",
+            name="change_proposals_created_via_check",
         ),
     )
     op.create_index(
-        "idx_structure_proposals_status",
-        "structure_proposals",
+        "idx_change_proposals_status",
+        "change_proposals",
         ["status", "created_at"],
     )
 
@@ -104,5 +104,5 @@ def upgrade() -> None:
 def downgrade() -> None:
     bind = op.get_bind()
     inspector = sa.inspect(bind)
-    if inspector.has_table("structure_proposals"):
-        op.drop_table("structure_proposals")
+    if inspector.has_table("change_proposals"):
+        op.drop_table("change_proposals")

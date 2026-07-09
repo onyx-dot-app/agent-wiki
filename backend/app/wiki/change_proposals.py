@@ -1,4 +1,4 @@
-"""Structure-proposal repo — the Wiki Auto Management proposal lifecycle.
+"""Change-proposal repo — the Wiki Auto Management proposal lifecycle.
 
 A proposal is the typed record a detection run emits and a human (or delegation)
 approves before anything touches the wiki: op kind, exact paths, the base
@@ -7,7 +7,7 @@ these fields — execution re-validates and marks the proposal ``stale`` on
 drift rather than acting on something nobody previewed. See the PRD
 (``design/PRD: Wiki Auto Management.md``) and the engineering page.
 
-Free functions over ``StructureProposal``; each opens its own session and
+Free functions over ``ChangeProposal``; each opens its own session and
 returns plain dicts. Status changes go through conditional UPDATEs so a
 concurrent transition can't be double-applied (the loser's guard matches no
 row and returns ``False``).
@@ -21,14 +21,14 @@ from typing import Any
 
 from sqlalchemy import select, update
 
-from app.db.models import StructureProposal
+from app.db.models import ChangeProposal
 from app.db.session import execute_dml, session
 
 log = logging.getLogger(__name__)
 
 
 class ProposalOp(str, Enum):
-    """Single source of truth for ``structure_proposals.op``; the DB CHECK
+    """Single source of truth for ``change_proposals.op``; the DB CHECK
     constraint in ``app/db/models.py`` mirrors these."""
 
     MOVE = "move"
@@ -66,7 +66,7 @@ def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
 
-def _to_dict(row: StructureProposal) -> dict[str, Any]:
+def _to_dict(row: ChangeProposal) -> dict[str, Any]:
     return {
         "id": row.id,
         "op": row.op,
@@ -124,7 +124,7 @@ def create(
         raise ValueError(f"target_paths required for op {op.value!r}")
     now = _now()
     with session() as s:
-        row = StructureProposal(
+        row = ChangeProposal(
             op=op.value,
             status=ProposalStatus.PENDING.value,
             source_paths=source_paths,
@@ -149,7 +149,7 @@ def create(
 
 def get(proposal_id: int) -> dict[str, Any] | None:
     with session() as s:
-        row = s.get(StructureProposal, proposal_id)
+        row = s.get(ChangeProposal, proposal_id)
         return _to_dict(row) if row is not None else None
 
 
@@ -159,9 +159,9 @@ def list_by_status(
     """Proposals in ``status``, oldest first (queue order)."""
     with session() as s:
         rows = s.scalars(
-            select(StructureProposal)
-            .where(StructureProposal.status == status.value)
-            .order_by(StructureProposal.created_at.asc(), StructureProposal.id.asc())
+            select(ChangeProposal)
+            .where(ChangeProposal.status == status.value)
+            .order_by(ChangeProposal.created_at.asc(), ChangeProposal.id.asc())
             .limit(limit)
         ).all()
         return [_to_dict(r) for r in rows]
@@ -171,9 +171,9 @@ def list_for_run(run_id: str) -> list[dict[str, Any]]:
     """Every proposal a detection run emitted (batched notifications)."""
     with session() as s:
         rows = s.scalars(
-            select(StructureProposal)
-            .where(StructureProposal.run_id == run_id)
-            .order_by(StructureProposal.id.asc())
+            select(ChangeProposal)
+            .where(ChangeProposal.run_id == run_id)
+            .order_by(ChangeProposal.id.asc())
         ).all()
         return [_to_dict(r) for r in rows]
 
@@ -191,10 +191,10 @@ def _transition(
     with session() as s:
         changed = execute_dml(
             s,
-            update(StructureProposal)
+            update(ChangeProposal)
             .where(
-                StructureProposal.id == proposal_id,
-                StructureProposal.status.in_([f.value for f in from_statuses]),
+                ChangeProposal.id == proposal_id,
+                ChangeProposal.status.in_([f.value for f in from_statuses]),
             )
             .values(status=to.value, updated_at=_now(), **fields),
         )
@@ -271,11 +271,11 @@ def expire_pending(*, older_than: str) -> int:
     with session() as s:
         return execute_dml(
             s,
-            update(StructureProposal)
+            update(ChangeProposal)
             .where(
-                StructureProposal.status == ProposalStatus.PENDING.value,
-                StructureProposal.expires_at.is_not(None),
-                StructureProposal.expires_at <= older_than,
+                ChangeProposal.status == ProposalStatus.PENDING.value,
+                ChangeProposal.expires_at.is_not(None),
+                ChangeProposal.expires_at <= older_than,
             )
             .values(
                 status=ProposalStatus.EXPIRED.value,

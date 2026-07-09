@@ -1237,26 +1237,26 @@ class UpdatePolicy(Base):
 
 
 # --------------------------------------------------------------------------- #
-# Wiki auto-management — structural change proposals (Postgres-only)          #
+# Wiki auto-management — change proposals (Postgres-only)                     #
 # --------------------------------------------------------------------------- #
 
 
-class StructureProposal(Base):
-    """One proposed structural change to the wiki, awaiting approval.
+class ChangeProposal(Base):
+    """One proposed change to the wiki, awaiting approval.
 
     The typed record the Wiki Auto Management engine emits (sweep or on-create
     detection) and the pending-cleanups queue reviews. Approval binds to these
     fields: if HEAD or the ACL fingerprint drifts before execution, the
     proposal goes stale and re-validates instead of executing something nobody
     saw. Valid ``op`` / ``status`` / ``created_via`` values mirror the enums in
-    ``app/wiki/structure_proposals.py``.
+    ``app/wiki/change_proposals.py``.
 
     Variable-arity paths (a merge has N sources, a split N targets) live in
     JSONB lists; ``base_shas`` maps each source path to the commit the
     proposal was computed against.
     """
 
-    __tablename__ = "structure_proposals"
+    __tablename__ = "change_proposals"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     op: Mapped[str] = mapped_column(Text, nullable=False)
@@ -1315,18 +1315,18 @@ class StructureProposal(Base):
         CheckConstraint(
             "op IN ('move', 'rename', 'merge', 'split', 'create_folder', "
             "'delete_empty_folder')",
-            name="structure_proposals_op_check",
+            name="change_proposals_op_check",
         ),
         CheckConstraint(
             "status IN ('pending', 'approved', 'applied', 'rejected', "
             "'expired', 'stale')",
-            name="structure_proposals_status_check",
+            name="change_proposals_status_check",
         ),
         CheckConstraint(
             "created_via IN ('sweep', 'on_create')",
-            name="structure_proposals_created_via_check",
+            name="change_proposals_created_via_check",
         ),
-        Index("idx_structure_proposals_status", "status", "created_at"),
+        Index("idx_change_proposals_status", "status", "created_at"),
     )
 
 

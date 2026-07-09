@@ -1,4 +1,4 @@
-"""Structure-proposal repo (app/wiki/structure_proposals.py) — lifecycle and
+"""Change-proposal repo (app/wiki/change_proposals.py) — lifecycle and
 concurrency guards. Real DB; the table lands via the migration chain.
 """
 from __future__ import annotations
@@ -7,8 +7,8 @@ from typing import Any
 
 import pytest
 
-from app.wiki import structure_proposals as proposals
-from app.wiki.structure_proposals import ProposalCreatedVia, ProposalOp, ProposalStatus
+from app.wiki import change_proposals as proposals
+from app.wiki.change_proposals import ProposalCreatedVia, ProposalOp, ProposalStatus
 from tests._seed import seed_user
 
 
@@ -130,13 +130,13 @@ def test_expire_pending_respects_ttl(tmp_db):
 def test_op_check_constraint(tmp_db):
     from sqlalchemy.exc import IntegrityError
 
-    from app.db.models import StructureProposal
+    from app.db.models import ChangeProposal
     from app.db.session import session
 
     with pytest.raises(IntegrityError):
         with session() as s:
             s.add(
-                StructureProposal(
+                ChangeProposal(
                     op="explode",
                     source_paths=["a.md"],
                     summary="nope",
