@@ -216,7 +216,11 @@ def fan_out_trigger_eval(
         fired += 1
         for action in trigger.actions:
             instruction = action.message or ""
-            if new_file_message is not None:
+            if _action_targets_craft(action, trigger.owner_user_id):
+                # Craft receives the message verbatim, so the recorded fire
+                # carries it as-is and no render runs.
+                rendered = instruction
+            elif new_file_message is not None:
                 rendered = new_file_message
             else:
                 rendered = (
@@ -321,11 +325,14 @@ def _evaluate_one_schedule(
     )
     for action in trigger.actions:
         instruction = action.message or ""
-        rendered = (
-            render_schedule_message(instruction, payload, reason=match.reason)
-            if instruction
-            else ""
-        )
+        if _action_targets_craft(action, trigger.owner_user_id):
+            rendered = instruction
+        else:
+            rendered = (
+                render_schedule_message(instruction, payload, reason=match.reason)
+                if instruction
+                else ""
+            )
         _record_fire(
             trigger=trigger,
             action=action,
@@ -364,6 +371,15 @@ def _read_at(ref: str, rel_path: str) -> str:
     except wiki_git.UnknownSha:
         log.debug("read_at miss ref=%s path=%s", ref, rel_path)
         return ""
+
+
+def _action_targets_craft(action: TriggerAction, owner_user_id: str) -> bool:
+    """True when the action's destination config is type craft. Craft gets
+    the action's message verbatim, so the wiki-side render is skipped."""
+    if action.destination_config_id is None:
+        return False
+    cfg = dest_configs.get(action.destination_config_id, owner_user_id)
+    return bool(cfg) and cfg["type"] == destinations_repo.CRAFT_ID
 
 
 def _record_fire(
@@ -454,7 +470,6 @@ def _record_fire(
             change_kind=change_kind,
             reason=reason,
             instruction=instruction,
-            rendered_message=rendered_message,
         )
     else:
         log.warning(
@@ -478,15 +493,14 @@ def _dispatch_to_craft(
     change_kind: ChangeKind,
     reason: str,
     instruction: str,
-    rendered_message: str,
 ) -> None:
     """Start a Craft session for the trigger's owner, seeded with the fire.
 
-    The action's message is the owner's task for Craft, so it leads the seed
-    verbatim (the rendered summary rides along as change context) and the
-    source page attaches through the launch path. A craft_started notification
-    tells the owner which trigger launched the build and what it is doing.
-    Launch preconditions (Craft dark, owner disconnected, page unreadable,
+    The action's message is the owner's task for Craft: it leads the seed
+    verbatim, untouched by the wiki's LLM, and the source page attaches
+    through the launch path. A craft_started notification tells the owner
+    which trigger launched the build and what it is doing. Launch
+    preconditions (Craft dark, owner disconnected, page unreadable,
     provisioning cap) and any launch failure are logged and swallowed: the
     fire is already recorded, and an escaping error would fail the fan-out
     task and re-fire on retry.
@@ -501,8 +515,7 @@ def _dispatch_to_craft(
     message = (
         f"{instruction}\n\n"
         f"Fire context: trigger {trigger.id} ({trigger.kind}) fired on {doc_path} "
-        f"({change_kind.value}). Match reason: {reason}\n"
-        f"What changed: {rendered_message}"
+        f"({change_kind.value}). Match reason: {reason}"
     )
     try:
         sid, status = craft_workflow.start_session(

@@ -283,7 +283,11 @@ function ActionGroupRow({
         value={group.message}
         onChange={(e) => onPatch({ message: e.target.value })}
         variant={disabled ? "disabled" : "primary"}
-        placeholder="Describe what the message should say, e.g. summarize what changed and who is affected. The trigger writes the final message from this."
+        placeholder={
+          group.type === "craft"
+            ? "Tell Craft what to build when this fires, e.g. generate a fun image of the page content. Sent to Craft as written."
+            : "Describe what the message should say, e.g. summarize what changed and who is affected. The trigger writes the final message from this."
+        }
         rows={3}
       />
     </div>

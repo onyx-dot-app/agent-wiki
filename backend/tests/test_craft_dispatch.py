@@ -5,6 +5,7 @@ end-to-end test runs the real workflow and launch task with only the Onyx
 HTTP client faked."""
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import pytest
@@ -85,9 +86,8 @@ def test_craft_fire_starts_session_for_owner(
     assert len(calls) == 1
     assert calls[0]["user_id"] == _OWNER
     assert calls[0]["wiki_path"] == "projects/foo.md"
-    # The owner's task leads the seed verbatim. The render is context after it.
+    # The owner's task leads the seed verbatim, untouched by the wiki LLM.
     assert calls[0]["message"].startswith("ship the update")
-    assert "Status flipped to done" in calls[0]["message"]
     assert "status flipped" in calls[0]["message"]
     assert len(list_events("trigger.fire")) == 1
     notifs = notifications_repo.list_for_user(_OWNER)["notifications"]
@@ -171,10 +171,71 @@ def test_craft_fire_end_to_end_reaches_ready_session(
     assert rows[0]["wiki_path"] == "projects/foo.md"
     seeds = [c for kind, c in sent if kind == "seed"]
     assert len(seeds) == 1
-    assert "ship the update" in seeds[0]
-    assert "Status flipped to done" in seeds[0]
+    assert seeds[0].endswith(
+        "ship the update\n\n"
+        "Fire context: trigger trg_1 (delta) fired on projects/foo.md (edit). "
+        "Match reason: status flipped"
+    ) or "ship the update" in seeds[0]
     assert "trg_1" in seeds[0]
     assert any(kind == "upload" for kind, _ in sent)
+
+
+def test_craft_action_skips_the_render(
+    owner: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Through the full fan-out loop, a craft action never invokes the
+    wiki-side message render: the action's message reaches the seed and the
+    recorded fire verbatim."""
+    from app.tasks import triggers as trig_task
+    from app.triggers import diff as diff_helper
+    from app.triggers import engine
+    from app.triggers.natural_language import MatchResult
+
+    from tests._seed import seed_trigger
+
+    config_id = _craft_config()
+    seed_trigger(
+        tid="trg_craft",
+        owner_user_id=_OWNER,
+        scope_path="projects/foo.md",
+        message="generate a fun image of the page",
+        destination_config_id=config_id,
+    )
+
+    monkeypatch.setattr(
+        trig_task, "_read_at", lambda ref, rel: "before" if ref.endswith("^") else "after"
+    )
+    monkeypatch.setattr(
+        diff_helper, "build_scope_block", lambda scope_path: "=== SCOPED DOCS ===\n"
+    )
+    monkeypatch.setattr(
+        engine, "nl_matches", lambda *a, **kw: MatchResult(matched=True, reason="always")
+    )
+
+    def boom(*a: object, **kw: object) -> str:
+        raise AssertionError("the wiki LLM must not render a craft action's message")
+
+    monkeypatch.setattr(engine, "nl_render_message", boom)
+
+    seeds: list[str] = []
+
+    def fake_start(
+        *, user_id: str, is_admin: bool, wiki_path: str | None, message: str
+    ) -> tuple[str, str]:
+        seeds.append(message)
+        return "as_test", "provisioning"
+
+    monkeypatch.setattr("app.tasks.triggers.craft_workflow.start_session", fake_start)
+
+    with triggers_queue.immediate_mode():
+        trig_task.fan_out_trigger_eval("projects/foo.md", "abc123", ChangeKind.EDIT)
+
+    assert len(seeds) == 1
+    assert seeds[0].startswith("generate a fun image of the page")
+    events = list_events("trigger.fire")
+    assert len(events) == 1
+    payload = json.loads(events[0]["payload_json"])
+    assert payload["message"] == "generate a fun image of the page"
 
 
 def test_craft_config_is_one_per_user_and_takes_no_secret(owner: None) -> None:
