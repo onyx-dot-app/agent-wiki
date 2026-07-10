@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 
 from app.auth import users as users_repo
 from app.main import create_app
+from app.wiki import git as wiki_git
 from app.wiki import templates as templates_repo
 from app.wiki import update_policy
 from tests._auth import login_fastapi
@@ -174,3 +175,40 @@ def test_blank_template_cannot_be_renamed_but_can_be_edited(client: TestClient) 
         f"/api/admin/templates/{t['id']}", json={"name": "Blank", "body": "# scaffold\n"}
     )
     assert edited.status_code == 200
+
+
+def test_template_seeds_ai_management_allowed(tmp_repo):
+    row = templates_repo.create(
+        name="Managed Space",
+        body="# {{title}}\n",
+        description=None,
+        system_prompt=None,
+        ai_management_allowed=True,
+        created_by_user_id=None,
+    )
+    assert row["ai_management_allowed"] is True
+
+    path = "spaces/managed-page.md"
+    wiki_git.commit_file(path, "# Managed page\n", "seed", author=None)
+    assert templates_repo.apply_policy_to_page(path, row["id"], None) is True
+    assert update_policy.is_ai_management_allowed(path) is True
+    # The other policy fields stay inherited — the template only set the flag.
+    assert update_policy.resolve_for_path(path).ingestion_auto_update_disabled is False
+
+
+def test_template_without_flag_leaves_policy_inherited(tmp_repo):
+    row = templates_repo.create(
+        name="Plain Notes",
+        body="# Notes\n",
+        description=None,
+        system_prompt=None,
+        created_by_user_id=None,
+    )
+    assert row["ai_management_allowed"] is None
+    path = "spaces/plain-page.md"
+    wiki_git.commit_file(path, "# Plain\n", "seed", author=None)
+    templates_repo.apply_policy_to_page(path, row["id"], None)
+    # No explicit row fields were written for the flag.
+    assert update_policy.is_ai_management_allowed(path) is False
+    explicit = update_policy.get(path)
+    assert explicit is None or explicit["ai_management_allowed"] is None

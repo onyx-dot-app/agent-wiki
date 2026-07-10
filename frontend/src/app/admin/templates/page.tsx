@@ -258,6 +258,12 @@ function TemplateModal({
   const [updateInstruction, setUpdateInstruction] = useState(
     initial?.update_instruction ?? "",
   );
+  // Whether pages created from this template start opted into AI
+  // auto-management. Defaults to off; a template author enables it
+  // deliberately (e.g. team spaces the AI should keep organized).
+  const [aiManagedOn, setAiManagedOn] = useState<boolean>(
+    initial?.ai_management_allowed === true,
+  );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -283,6 +289,9 @@ function TemplateModal({
         system_prompt: initial?.system_prompt ?? null,
         ingestion_auto_update_disabled: !autoUpdateOn,
         update_instruction: updateInstruction.trim() || null,
+        // Unset (inherit) unless deliberately enabled — starter templates
+        // ship without the flag.
+        ai_management_allowed: aiManagedOn ? true : null,
       };
       if (initial) {
         await updateTemplate(initial.id, payload);
@@ -350,6 +359,18 @@ function TemplateModal({
             Pages created from this template start with ingestion auto-update{" "}
             {autoUpdateOn ? "on" : "off"}. Leave it off for pages that shouldn't
             be rewritten by ingestion (e.g. meeting notes).
+          </div>
+        </div>
+
+        <div>
+          <div className="flex items-center justify-between gap-3">
+            <div className={lblClass}>AI management</div>
+            <Switch checked={aiManagedOn} onCheckedChange={setAiManagedOn} />
+          </div>
+          <div className="mt-1 text-xs text-(--text-02)">
+            Pages created from this template {aiManagedOn ? "are" : "are not"}{" "}
+            opted into AI auto-management (the AI may organize them — moves,
+            merges — without per-change approval).
           </div>
         </div>
 

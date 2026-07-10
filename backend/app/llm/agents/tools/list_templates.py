@@ -20,6 +20,7 @@ def handle(args: dict[str, Any]) -> Any:
             "description": t["description"],
             "body": t["body"],
             "auto_update_disabled": t["ingestion_auto_update_disabled"],
+            "ai_management_allowed": t["ai_management_allowed"],
             "update_instruction": t["update_instruction"],
         }
         for t in templates_repo.list_all()
