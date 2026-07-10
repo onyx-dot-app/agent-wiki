@@ -12,6 +12,7 @@ import {
   SvgMail,
   SvgSlack,
 } from "@onyx-ai/opal/icons";
+import { SvgOnyxLogo } from "@onyx-ai/opal/logos";
 
 import { formatScopePath } from "@/lib/format";
 
@@ -24,6 +25,7 @@ export function destinationIcon(type: string) {
   if (type === "slack") return SvgSlack;
   if (type === "email") return SvgMail;
   if (type === "webhook") return SvgLink;
+  if (type === "craft") return SvgOnyxLogo;
   return SvgActivity;
 }
 

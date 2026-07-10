@@ -15,6 +15,7 @@ import {
   SvgVolumeOff,
   SvgX,
 } from "@onyx-ai/opal/icons";
+import { SvgOnyxLogo } from "@onyx-ai/opal/logos";
 import { Content, InputErrorText } from "@onyx-ai/opal/layouts";
 import { cn, markdown } from "@onyx-ai/opal/utils";
 
@@ -33,6 +34,7 @@ import InputChipField, {
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import type { IconFunctionComponent } from "@onyx-ai/opal/types";
 import { useConfirm } from "@/components/common/ConfirmDialog";
+import { disconnectCraft, useCraftConnect } from "@/lib/craft";
 import { ensureEmailDestination } from "@/lib/emailConnect";
 import {
   disconnectSlack,
@@ -74,6 +76,11 @@ function PendingIcon(props: React.ComponentProps<typeof SvgClock>) {
  * title. The Emails card opens the address-management modal. */
 export function ConnectorsTab() {
   const { status, refresh: refreshSlack, isLoading } = useSlackConnectStatus();
+  const {
+    status: craftStatus,
+    isUnavailable: craftUnavailable,
+    refresh: refreshCraft,
+  } = useCraftConnect();
   const { configs, refresh: refreshConfigs } = useDestinationConfigs();
   const [emailsOpen, setEmailsOpen] = useState(false);
   const [webhooksOpen, setWebhooksOpen] = useState(false);
@@ -109,6 +116,24 @@ export function ConnectorsTab() {
       await refreshSlack();
     } catch (e) {
       setError(e instanceof Error ? e.message : "failed to update");
+    }
+  }
+
+  async function onDisconnectCraft() {
+    if (
+      !(await confirmDialog({
+        title: "Disconnect Onyx Craft?",
+        body: "Triggers that start Craft sessions will stop until you reconnect.",
+        confirmLabel: "Disconnect",
+      }))
+    )
+      return;
+    setError(null);
+    try {
+      await disconnectCraft();
+      await refreshCraft();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "failed to disconnect");
     }
   }
 
@@ -229,6 +254,40 @@ export function ConnectorsTab() {
               prominence="tertiary"
               tooltip="Manage"
               onClick={() => setWebhooksOpen(true)}
+            />
+          ) : undefined
+        }
+      />
+
+      <ConnectorCard
+        icon={SvgOnyxLogo}
+        title="Onyx Craft"
+        description="Start a Craft session in Onyx when a trigger fires."
+        connected={Boolean(craftStatus?.connected)}
+        connectHref={craftStatus?.connect_url ?? undefined}
+        unavailableNote={
+          craftUnavailable
+            ? "An admin needs to configure the Onyx connection first."
+            : undefined
+        }
+        detail={
+          craftStatus?.connected ? (
+            <Text font="secondary-body" color="text-03">
+              {markdown(
+                `Connected as **${craftStatus.onyx_user_email ?? "you"}**`,
+              )}
+            </Text>
+          ) : undefined
+        }
+        foldActions={
+          craftStatus?.connected ? (
+            <Button
+              type="button"
+              icon={SvgUnplug}
+              size="md"
+              prominence="tertiary"
+              tooltip="Disconnect Onyx Craft"
+              onClick={() => void onDisconnectCraft()}
             />
           ) : undefined
         }

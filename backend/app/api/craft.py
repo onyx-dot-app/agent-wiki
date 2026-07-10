@@ -32,10 +32,8 @@ from fastapi.responses import RedirectResponse
 from app.auth import User
 from app.auth.deps import require_user
 from app.config import CONFIG
-from app.db import agent_sessions as sessions_repo
 from app.ingest import settings as ingest_settings
-from app.launchers import prompt_builder
-from app.launchers.registry import get_registry
+from app.launchers import craft as craft_workflow
 from app.models.craft import (
     CraftConnectRequest,
     CraftConnectStatus,
@@ -45,27 +43,19 @@ from app.models.craft import (
 from app.onyx import connect as connect_flow
 from app.onyx import connections
 from app.onyx.client import OnyxAuthError, OnyxClient, OnyxError, exchange_connect_code
-from app.tasks.craft import attachment_filename, craft_launch
 from app.tasks.queues import QueueFullError
-from app.wiki import acl as wiki_acl
-from app.wiki import filesystem as wiki_fs
 
 log = logging.getLogger(__name__)
 
 router = APIRouter()
 
-_TOOL_ID = "onyx-craft"
-# Modest per-user backstop on concurrent sandbox provisioning — the
-# idempotency probe already dedups per-page double-clicks.
-_MAX_PROVISIONING_PER_USER = 3
-
 
 def _require_available() -> str:
     """404 when the feature is dark; otherwise the Onyx origin."""
-    base = ingest_settings.get_onyx_base_url()
-    if not base:
-        raise HTTPException(status_code=404, detail="onyx connection not configured")
-    return base
+    try:
+        return craft_workflow.require_available()
+    except craft_workflow.CraftUnavailable as exc:
+        raise HTTPException(status_code=404, detail="onyx connection not configured") from exc
 
 
 def _callback_url() -> str:
@@ -95,61 +85,37 @@ def _bounce(return_to: str | None, *, outcome: str) -> RedirectResponse:
 
 @router.post("/launch", response_model=CraftLaunchResponse)
 def post_launch(req: CraftLaunchRequest, user: User = Depends(require_user)) -> CraftLaunchResponse:
-    base = _require_available()
-
-    manifest = get_registry().get(_TOOL_ID)
-    if manifest is None or manifest.kind != "in_app":
-        raise HTTPException(status_code=500, detail="onyx-craft manifest missing or not in_app")
-
-    if connections.get_with_pat(user.id, onyx_base_url=base) is None:
+    """Thin HTTP shell over the shared launch workflow: translate its
+    errors to status codes."""
+    try:
+        sid, status = craft_workflow.start_session(
+            user_id=user.id,
+            is_admin=bool(user.is_admin),
+            wiki_path=req.wiki_path,
+            message=req.message,
+        )
+    except craft_workflow.CraftUnavailable as exc:
+        raise HTTPException(status_code=404, detail="onyx connection not configured") from exc
+    except craft_workflow.CraftMisconfigured as exc:
+        raise HTTPException(
+            status_code=500, detail="onyx-craft manifest missing or not in_app"
+        ) from exc
+    except craft_workflow.CraftNotConnected as exc:
         # Structured signal, not an error state — the frontend renders a
         # "Connect Onyx" call-to-action and sends the browser to /connect/start.
-        raise HTTPException(status_code=409, detail="needs_onyx_connect")
-
-    # ACL-gate + canonicalize the source page before anything is created.
-    wiki_path: str | None = None
-    if req.wiki_path is not None:
-        try:
-            wiki_path = wiki_fs.safe_rel_path(req.wiki_path)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail="invalid wiki_path") from exc
-        if not wiki_acl.can(user.id, bool(user.is_admin), "read", wiki_path):
-            raise HTTPException(status_code=403, detail="forbidden")
-
-    # Idempotency: an in-flight launch for the same (user, page) is returned
-    # as-is — no second sandbox.
-    existing = sessions_repo.find_in_flight(user.id, tool_id=_TOOL_ID, wiki_path=wiki_path)
-    if existing is not None:
-        return CraftLaunchResponse(agent_session_id=existing["id"], status=existing["status"])
-
-    if sessions_repo.count_provisioning(user.id, tool_id=_TOOL_ID) >= _MAX_PROVISIONING_PER_USER:
-        raise HTTPException(status_code=429, detail="rate_limited")
-
-    seed = prompt_builder.build_craft_seed_prompt(
-        attachment_filename=attachment_filename(wiki_path) if wiki_path else None,
-        user_message=req.message,
-    )
-    sid = sessions_repo.create(
-        user_id=user.id,
-        tool_id=_TOOL_ID,
-        first_turn_prompt=seed,
-        wiki_path=wiki_path,
-        working_dir=None,
-        status="provisioning",
-    )
-    try:
-        craft_launch(sid)
+        raise HTTPException(status_code=409, detail="needs_onyx_connect") from exc
+    except craft_workflow.CraftInvalidPath as exc:
+        raise HTTPException(status_code=400, detail="invalid wiki_path") from exc
+    except craft_workflow.CraftForbidden as exc:
+        raise HTTPException(status_code=403, detail="forbidden") from exc
+    except craft_workflow.CraftRateLimited as exc:
+        raise HTTPException(status_code=429, detail="rate_limited") from exc
+    except QueueFullError:
+        raise
     except Exception as exc:
-        # The 'provisioning' row is already committed; a failed enqueue means the
-        # worker never runs, so mark it failed rather than stranding find_in_flight
-        # on a session that can never progress.
-        sessions_repo.mark_craft_failed(sid, reason="provisioning_failed")
-        if isinstance(exc, QueueFullError):
-            raise
-        log.exception("craft launch enqueue failed session=%s", sid)
+        log.exception("craft launch enqueue failed user=%s", user.id)
         raise HTTPException(status_code=503, detail="failed to enqueue craft launch") from exc
-    log.info("craft launch enqueued session=%s user=%s page=%s", sid, user.id, wiki_path)
-    return CraftLaunchResponse(agent_session_id=sid, status="provisioning")
+    return CraftLaunchResponse(agent_session_id=sid, status=status)
 
 
 # --------------------------------------------------------------------------- #

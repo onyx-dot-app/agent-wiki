@@ -120,6 +120,15 @@ def create(
             # did not supply one. Stored encrypted, never returned.
             secret = secrets.token_hex(32)
 
+    if type == destinations.CRAFT_ID:
+        if secret is not None:
+            raise ValueError("a craft destination takes no secret")
+        # One craft row per user: the Onyx connection, not the config,
+        # carries the target, so re-adding returns the existing row.
+        for existing in list_for_user(user_id):
+            if existing["type"] == destinations.CRAFT_ID:
+                return existing
+
     if type == destinations.EMAIL_ID:
         address = ((config or {}).get("address") or "")
         if not isinstance(address, str) or "@" not in address.strip():

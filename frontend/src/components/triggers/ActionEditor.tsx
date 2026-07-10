@@ -10,6 +10,7 @@ import {
   SelectButton,
   Text,
 } from "@onyx-ai/opal/components";
+import { SvgOnyxLogo } from "@onyx-ai/opal/logos";
 import {
   SvgActivity,
   SvgHash,
@@ -30,9 +31,15 @@ import {
   getSlackChannels,
   type SlackChannel,
 } from "@/lib/slackConnect";
+import { ensureCraftDestination } from "@/lib/craft";
 import type { DestinationConfig } from "@/lib/triggers";
 
-export type ActionGroupType = "event_log" | "slack" | "email" | "webhook";
+export type ActionGroupType =
+  | "event_log"
+  | "slack"
+  | "email"
+  | "webhook"
+  | "craft";
 
 export interface ActionGroup {
   key: number;
@@ -49,6 +56,7 @@ const TYPE_META: Record<
   slack: { label: "Slack", icon: SvgSlack },
   email: { label: "Email", icon: SvgMail },
   webhook: { label: "Webhook", icon: SvgLink },
+  craft: { label: "Onyx Craft", icon: SvgOnyxLogo },
 };
 
 interface Props {
@@ -57,6 +65,7 @@ interface Props {
   configs: DestinationConfig[];
   refreshConfigs: () => Promise<unknown>;
   slackConnected: boolean;
+  craftConnected: boolean;
   disabled?: boolean;
   onError: (message: string) => void;
 }
@@ -70,6 +79,7 @@ export function ActionEditor({
   configs,
   refreshConfigs,
   slackConnected,
+  craftConnected,
   disabled,
   onError,
 }: Props) {
@@ -94,6 +104,7 @@ export function ActionEditor({
           configs={configs}
           refreshConfigs={refreshConfigs}
           slackConnected={slackConnected}
+          craftConnected={craftConnected}
           disabled={disabled}
           onError={onError}
         />
@@ -111,6 +122,7 @@ interface RowProps {
   configs: DestinationConfig[];
   refreshConfigs: () => Promise<unknown>;
   slackConnected: boolean;
+  craftConnected: boolean;
   disabled?: boolean;
   onError: (message: string) => void;
 }
@@ -124,6 +136,7 @@ function ActionGroupRow({
   configs,
   refreshConfigs,
   slackConnected,
+  craftConnected,
   disabled,
   onError,
 }: RowProps) {
@@ -134,11 +147,12 @@ function ActionGroupRow({
   // connection exists (or this group already targets it, so an edit of an
   // existing Slack trigger stays visible).
   const typeOptions = (
-    ["event_log", "slack", "email", "webhook"] as ActionGroupType[]
+    ["event_log", "slack", "email", "webhook", "craft"] as ActionGroupType[]
   ).filter((t) => {
     if (t === "event_log")
       return group.type === "event_log" || !usedTypes.includes("event_log");
     if (t === "slack") return slackConnected || group.type === "slack";
+    if (t === "craft") return craftConnected || group.type === "craft";
     if (t === "webhook")
       return (
         group.type === "webhook" || configs.some((c) => c.type === "webhook")
@@ -199,8 +213,27 @@ function ActionGroupRow({
                 variant="body"
                 state={group.type === t ? "selected" : "empty"}
                 onClick={() => {
-                  if (t !== group.type) onPatch({ type: t, configIds: [] });
                   setTypeOpen(false);
+                  if (t === group.type) return;
+                  if (t === "craft") {
+                    // Craft has exactly one per-user config. Picking the
+                    // type finds-or-creates it and wires the action in one step.
+                    void (async () => {
+                      try {
+                        const id = await ensureCraftDestination(configs);
+                        await refreshConfigs();
+                        onPatch({ type: t, configIds: [id] });
+                      } catch (e) {
+                        onError(
+                          e instanceof Error
+                            ? e.message
+                            : "failed to select Onyx Craft",
+                        );
+                      }
+                    })();
+                    return;
+                  }
+                  onPatch({ type: t, configIds: [] });
                 }}
               />
             ))}
@@ -228,6 +261,17 @@ function ActionGroupRow({
           disabled={disabled}
           onError={onError}
         />
+      )}
+      {group.type === "craft" && (
+        <>
+          <ToLabel />
+          <div className="px-[2px]">
+            <Text font="secondary-body" color="text-03">
+              Starts an Onyx Craft session for you, seeded with the page and the
+              fire.
+            </Text>
+          </div>
+        </>
       )}
       {group.type === "webhook" && (
         <WebhookToRow

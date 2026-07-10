@@ -45,11 +45,13 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 
 from app.db.models import Event, User
+from app.auth import users as users_repo
 from app.email import service as email_service
+from app.launchers import craft as craft_workflow
 from app.db.session import session
 from app.slack import client as slack_client
 from app.slack import connections as slack_connections
-from app.tasks.queues import triggers_queue
+from app.tasks.queues import QueueFullError, triggers_queue
 from app.triggers import destination_configs as dest_configs
 from app.triggers import destinations as destinations_repo
 from app.triggers import diff as diff_helper
@@ -443,6 +445,14 @@ def _record_fire(
             rendered_message=rendered_message,
             actor=actor,
         )
+    elif dtype == destinations_repo.CRAFT_ID:
+        _dispatch_to_craft(
+            trigger=trigger,
+            doc_path=doc_path,
+            change_kind=change_kind,
+            reason=reason,
+            rendered_message=rendered_message,
+        )
     else:
         log.warning(
             "trigger %s destination type %r has no outbound dispatcher; recorded to events only",
@@ -456,6 +466,47 @@ def _str_map_or_none(obj: object) -> dict[str, str] | None:
     if not isinstance(obj, dict):
         return None
     return {str(k): str(v) for k, v in cast("dict[object, object]", obj).items()}
+
+
+def _dispatch_to_craft(
+    *,
+    trigger: TriggerRecord,
+    doc_path: str,
+    change_kind: ChangeKind,
+    reason: str,
+    rendered_message: str,
+) -> None:
+    """Start a Craft session for the trigger's owner, seeded with the fire.
+
+    The source page attaches through the launch path, so the seed carries the
+    rendered summary plus compact fire context. Launch preconditions (Craft
+    dark, owner disconnected, page unreadable, provisioning cap) and a full
+    launch queue are logged and swallowed: the fire is already recorded.
+    """
+    owner = users_repo.get_by_id(trigger.owner_user_id)
+    if owner is None:
+        log.warning(
+            "trigger %s owner %s missing; craft dispatch skipped",
+            trigger.id, trigger.owner_user_id,
+        )
+        return
+    message = (
+        f"{rendered_message}\n\n"
+        f"Fire context: trigger {trigger.id} ({trigger.kind}) on {doc_path} "
+        f"({change_kind.value}). Match reason: {reason}"
+    )
+    try:
+        sid, status = craft_workflow.start_session(
+            user_id=trigger.owner_user_id,
+            is_admin=bool(owner["is_admin"]),
+            wiki_path=doc_path,
+            message=message,
+        )
+        log.info(
+            "trigger %s dispatched to craft: session %s (%s)", trigger.id, sid, status
+        )
+    except (craft_workflow.CraftLaunchError, QueueFullError):
+        log.exception("trigger %s craft dispatch failed", trigger.id)
 
 
 def _dispatch_to_webhook(

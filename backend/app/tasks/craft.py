@@ -1,8 +1,9 @@
 """Background launch of an Onyx Craft build session.
 
-One task: ``craft_launch(agent_session_id)``. The HTTP route creates the
-``AgentSession`` row (status='provisioning') and enqueues this; the worker
-then, as the launching user (their stored PAT):
+One task: ``craft_launch(agent_session_id)``. ``start_session``
+(app/launchers/craft.py) creates the ``AgentSession`` row
+(status='provisioning') and enqueues this. The worker then, as the
+launching user (their stored PAT):
 
 1. creates the Onyx build session (BLOCKS on sandbox provisioning, ~10-60s),
 2. uploads the wiki page body as ``attachments/<page>.md``,
