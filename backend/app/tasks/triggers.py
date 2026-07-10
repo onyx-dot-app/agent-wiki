@@ -46,8 +46,10 @@ from sqlalchemy import select
 
 from app.db.models import Event, User
 from app.auth import users as users_repo
+from app.db import notifications as notifications_repo
 from app.email import service as email_service
 from app.launchers import craft as craft_workflow
+from app.tasks.craft import NOTIF_CRAFT_STARTED
 from app.db.session import session
 from app.slack import client as slack_client
 from app.slack import connections as slack_connections
@@ -451,6 +453,7 @@ def _record_fire(
             doc_path=doc_path,
             change_kind=change_kind,
             reason=reason,
+            instruction=instruction,
             rendered_message=rendered_message,
         )
     else:
@@ -474,15 +477,19 @@ def _dispatch_to_craft(
     doc_path: str,
     change_kind: ChangeKind,
     reason: str,
+    instruction: str,
     rendered_message: str,
 ) -> None:
     """Start a Craft session for the trigger's owner, seeded with the fire.
 
-    The source page attaches through the launch path, so the seed carries the
-    rendered summary plus compact fire context. Launch preconditions (Craft
-    dark, owner disconnected, page unreadable, provisioning cap) and any
-    launch failure are logged and swallowed: the fire is already recorded,
-    and an escaping error would fail the fan-out task and re-fire on retry.
+    The action's message is the owner's task for Craft, so it leads the seed
+    verbatim (the rendered summary rides along as change context) and the
+    source page attaches through the launch path. A craft_started notification
+    tells the owner which trigger launched the build and what it is doing.
+    Launch preconditions (Craft dark, owner disconnected, page unreadable,
+    provisioning cap) and any launch failure are logged and swallowed: the
+    fire is already recorded, and an escaping error would fail the fan-out
+    task and re-fire on retry.
     """
     owner = users_repo.get_by_id(trigger.owner_user_id)
     if owner is None:
@@ -492,9 +499,10 @@ def _dispatch_to_craft(
         )
         return
     message = (
-        f"{rendered_message}\n\n"
-        f"Fire context: trigger {trigger.id} ({trigger.kind}) on {doc_path} "
-        f"({change_kind.value}). Match reason: {reason}"
+        f"{instruction}\n\n"
+        f"Fire context: trigger {trigger.id} ({trigger.kind}) fired on {doc_path} "
+        f"({change_kind.value}). Match reason: {reason}\n"
+        f"What changed: {rendered_message}"
     )
     try:
         sid, status = craft_workflow.start_session(
@@ -502,6 +510,14 @@ def _dispatch_to_craft(
             is_admin=bool(owner["is_admin"]),
             wiki_path=doc_path,
             message=message,
+        )
+        page = doc_path.rsplit("/", 1)[-1].removesuffix(".md")
+        notifications_repo.create(
+            user_id=trigger.owner_user_id,
+            notif_type=NOTIF_CRAFT_STARTED,
+            title=f'Craft build started — "{page}"',
+            description=instruction,
+            data={"agent_session_id": sid, "trigger_id": trigger.id, "wiki_path": doc_path},
         )
         log.info(
             "trigger %s dispatched to craft: session %s (%s)", trigger.id, sid, status

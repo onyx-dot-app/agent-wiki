@@ -10,6 +10,7 @@ from typing import Any
 import pytest
 
 from app.db import agent_sessions as sessions_repo
+from app.db import notifications as notifications_repo
 from app.ingest import settings as ingest_settings
 from app.launchers import craft as craft_workflow
 from app.models.wiki import ChangeKind
@@ -53,7 +54,8 @@ def _fire(trigger: TriggerRecord) -> None:
         sha="abc123",
         change_kind=ChangeKind.EDIT,
         reason="status flipped",
-        instruction="say what changed",
+        # The fire site binds instruction to the action's message.
+        instruction="ship the update",
         rendered_message="Status flipped to done",
         actor="U <u@x.com>",
     )
@@ -83,9 +85,16 @@ def test_craft_fire_starts_session_for_owner(
     assert len(calls) == 1
     assert calls[0]["user_id"] == _OWNER
     assert calls[0]["wiki_path"] == "projects/foo.md"
+    # The owner's task leads the seed verbatim. The render is context after it.
+    assert calls[0]["message"].startswith("ship the update")
     assert "Status flipped to done" in calls[0]["message"]
     assert "status flipped" in calls[0]["message"]
     assert len(list_events("trigger.fire")) == 1
+    notifs = notifications_repo.list_for_user(_OWNER)["notifications"]
+    started = [n for n in notifs if n["notif_type"] == "craft_started"]
+    assert len(started) == 1
+    assert started[0]["description"] == "ship the update"
+    assert started[0]["data"]["agent_session_id"] == "as_test"
 
 
 def test_craft_launch_error_keeps_fire(
@@ -162,6 +171,7 @@ def test_craft_fire_end_to_end_reaches_ready_session(
     assert rows[0]["wiki_path"] == "projects/foo.md"
     seeds = [c for kind, c in sent if kind == "seed"]
     assert len(seeds) == 1
+    assert "ship the update" in seeds[0]
     assert "Status flipped to done" in seeds[0]
     assert "trg_1" in seeds[0]
     assert any(kind == "upload" for kind, _ in sent)

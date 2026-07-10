@@ -45,6 +45,8 @@ log = logging.getLogger(__name__)
 
 NOTIF_CRAFT_READY = "craft_ready"
 NOTIF_CRAFT_FAILED = "craft_failed"
+# Written by the trigger dispatcher when a fire launches a build.
+NOTIF_CRAFT_STARTED = "craft_started"
 
 _MAX_ATTACHMENT_NAME = 80
 
