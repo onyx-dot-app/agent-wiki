@@ -18,6 +18,7 @@ from contextlib import contextmanager
 from collections.abc import Generator
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel
 
@@ -259,6 +260,143 @@ def delete_path(rel_path: str, message: str, author: str | None = None) -> str:
         _run(["commit", "-m", message, *env_args])
         sha = _run(["rev-parse", "HEAD"]).stdout.strip()
     log.debug("delete_path %s sha=%s author=%s", rel_path, sha[:8], author or "default")
+    return sha
+
+
+class PathFate(BaseModel):
+    """Resolution of a path that is absent from HEAD's tree.
+
+    ``path`` is the name the file/folder had when the fate commit touched it
+    — for a moved-then-deleted page this is the post-move name, which is
+    where ``last_content_sha`` can read it and where a restore reintroduces it.
+    """
+
+    status: Literal["deleted", "moved"]
+    path: str
+    sha: str  # the commit that removed or renamed the path
+    author: str
+    ts: str  # ISO-8601 author date
+    message: str  # commit subject
+    new_path: str | None = None  # moved only: current path at HEAD
+    last_content_sha: str | None = None  # deleted only: parent of the delete commit
+
+
+def _commit_name_status(sha: str) -> list[tuple[str, str, str | None]]:
+    """``(status, path, rename_target)`` rows for one commit, with rename
+    detection on. No pathspec — filtering by path would hide the new side
+    of a rename and make git report it as a plain delete."""
+    out = _run(
+        ["diff-tree", "-M", "--name-status", "-r", "--root", "--no-commit-id", sha],
+        check=False,
+    ).stdout
+    rows: list[tuple[str, str, str | None]] = []
+    for line in out.splitlines():
+        parts = line.split("\t")
+        if len(parts) < 2:
+            continue
+        status = parts[0]
+        if status.startswith("R") and len(parts) == 3:
+            rows.append((status, parts[1], parts[2]))
+        else:
+            rows.append((status, parts[-1], None))
+    return rows
+
+
+def _fate_commit_meta(rel_path: str) -> tuple[str, str, str, str] | None:
+    """``(sha, author, ts, subject)`` of the last commit touching ``rel_path``."""
+    sep = "\x1f"
+    out = _run(
+        ["log", "-n1", f"--pretty=format:%H{sep}%an{sep}%aI{sep}%s", "--", rel_path],
+        check=False,
+    ).stdout.strip()
+    if not out:
+        return None
+    parts = out.split(sep)
+    return (parts[0], parts[1], parts[2], parts[3]) if len(parts) == 4 else None
+
+
+def path_fate(rel_path: str, *, max_hops: int = 10) -> PathFate | None:
+    """Resolve the fate of a path that no longer exists at HEAD.
+
+    Returns a ``PathFate`` with status ``"deleted"`` (plus the ref where the
+    content is still readable) or ``"moved"`` (plus the path's current name at
+    HEAD, following up to ``max_hops`` successive renames — a moved-then-moved
+    or moved-then-deleted chain resolves to its final fate). Works for files
+    and folders; a folder's fate is derived from the fate of its tracked
+    children. Returns ``None`` when the path never existed, still exists at
+    HEAD, or the rename chain can't be resolved.
+    """
+    current = rel_path
+    for _ in range(max_hops):
+        meta = _fate_commit_meta(current)
+        if meta is None:
+            return None
+        sha, author, ts, subject = meta
+        rows = _commit_name_status(sha)
+        prefix = current + "/"
+        moved_to: str | None = None
+        deleted = False
+        for status, old_p, new_p in rows:
+            if status.startswith("R") and new_p is not None:
+                if old_p == current:
+                    moved_to = new_p
+                    break
+                if old_p.startswith(prefix):
+                    # Folder rename: recover the folder's new name by
+                    # stripping this child's relative suffix off its new path.
+                    rest = old_p[len(prefix) :]
+                    if new_p.endswith("/" + rest):
+                        moved_to = new_p[: -len(rest) - 1]
+                        break
+            elif status == "D" and (old_p == current or old_p.startswith(prefix)):
+                deleted = True
+            elif old_p == current or old_p.startswith(prefix):
+                # The last commit touching this path added/modified it — the
+                # path (or part of the folder) still exists; not a tombstone.
+                return None
+        if moved_to is not None:
+            if (Path(CONFIG.wiki_dir) / moved_to).exists():
+                return PathFate(
+                    status="moved",
+                    path=current,
+                    sha=sha,
+                    author=author,
+                    ts=ts,
+                    message=subject,
+                    new_path=moved_to,
+                )
+            current = moved_to  # renamed again or deleted later — keep chasing
+            continue
+        if deleted:
+            return PathFate(
+                status="deleted",
+                path=current,
+                sha=sha,
+                author=author,
+                ts=ts,
+                message=subject,
+                last_content_sha=parent_sha(sha),
+            )
+        return None
+    return None
+
+
+def restore_path(rel_path: str, ref: str, message: str, author: str | None = None) -> str:
+    """Reintroduce ``rel_path`` (file or folder) as it existed at ``ref``,
+    as a new commit — additive history, no revert. Returns the commit SHA.
+
+    Raises ``UnknownSha`` when ``ref:rel_path`` can't be resolved.
+    """
+    env_args = ["--author", author] if author else []
+    with commit_lock():
+        try:
+            # checkout <ref> -- <path> updates the index and working tree.
+            _run(["checkout", ref, "--", rel_path])
+        except subprocess.CalledProcessError as e:
+            raise UnknownSha(ref) from e
+        _run(["commit", "-m", message, *env_args])
+        sha = _run(["rev-parse", "HEAD"]).stdout.strip()
+    log.info("restore_path %s from %s sha=%s", rel_path, ref[:8], sha[:8])
     return sha
 
 

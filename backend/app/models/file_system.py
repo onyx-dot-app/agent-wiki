@@ -186,6 +186,42 @@ class DeleteDocumentResponse(BaseModel):
     sha: str
 
 
+class TombstoneCommit(BaseModel):
+    """The commit that removed or renamed the requested path."""
+
+    sha: str
+    author: str
+    ts: str
+    message: str
+
+
+class PathTombstoneResponse(BaseModel):
+    """Fate of a wiki path that no longer exists at HEAD.
+
+    ``status="deleted"``: ``last_content_sha`` is the ref where the content is
+    still readable (``GET /wiki/file?ref=``) and ``path`` is the name the page
+    had when deleted (differs from the requested path if it was moved first).
+    ``status="moved"``: ``moved_to`` is the path's current name at HEAD.
+    """
+
+    path: str
+    status: Literal["deleted", "moved"]
+    commit: TombstoneCommit
+    moved_to: str | None = None
+    last_content_sha: str | None = None
+    can_restore: bool = False
+
+
+class RestorePathRequest(BaseModel):
+    path: str = Field(min_length=1)
+
+
+class RestorePathResponse(BaseModel):
+    path: str
+    sha: str
+    restored: list[str]  # every file reintroduced (all of them for a folder)
+
+
 class ReindexResponse(BaseModel):
     path: str
     queued: bool
