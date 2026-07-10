@@ -40,6 +40,11 @@ EMAIL_ID = "email"
 # (not the prose message) to the config's URL, HMAC-signed with its secret.
 WEBHOOK_ID = "webhook"
 
+# Slug of the Craft destination. A craft action starts an Onyx Craft session
+# for the trigger's owner through the existing connection + launch path,
+# seeded with the fire and the source page.
+CRAFT_ID = "craft"
+
 
 def _to_dict(d: TriggerDestination) -> dict[str, Any]:
     return {

@@ -51,6 +51,7 @@ import {
 } from "@/components/triggers/ActionEditor";
 import InputChipField from "@/components/inputs/InputChipField";
 import InputTextArea from "@/components/inputs/InputTextArea";
+import { useCraftConnect } from "@/lib/craft";
 import { useSlackConnectStatus } from "@/lib/slackConnect";
 import {
   createTrigger,
@@ -96,7 +97,10 @@ function groupsFromActions(
       ? configs.find((c) => c.id === a.destination_config_id)
       : undefined;
     const type: ActionGroup["type"] =
-      cfg?.type === "slack" || cfg?.type === "email" || cfg?.type === "webhook"
+      cfg?.type === "slack" ||
+      cfg?.type === "email" ||
+      cfg?.type === "webhook" ||
+      cfg?.type === "craft"
         ? cfg.type
         : "event_log";
     const existing = out.find((g) => g.type === type && g.message === message);
@@ -171,6 +175,7 @@ export function TriggerPanel({
   const [ifText, setIfText] = useState("");
   const { configs, refresh: refreshConfigs } = useDestinationConfigs();
   const { status: slackStatus } = useSlackConnectStatus();
+  const { status: craftStatus } = useCraftConnect();
   const [groups, setGroups] = useState<ActionGroup[]>([
     { key: 1, type: "event_log", configIds: [], message: "" },
   ]);
@@ -437,6 +442,7 @@ export function TriggerPanel({
             configs={configs}
             refreshConfigs={refreshConfigs}
             slackConnected={Boolean(slackStatus?.connected)}
+            craftConnected={Boolean(craftStatus?.connected)}
             disabled={busy}
             onError={(m) => setError(m)}
           />

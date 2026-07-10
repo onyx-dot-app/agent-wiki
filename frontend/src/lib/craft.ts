@@ -3,6 +3,10 @@
 import useSWR from "swr";
 
 import { apiFetch, ApiError } from "@/lib/api";
+import {
+  createDestinationConfig,
+  type DestinationConfig,
+} from "@/lib/triggers";
 
 // Mirrors app/models/craft.py:CraftConnectStatus.
 export interface CraftConnectStatus {
@@ -49,6 +53,21 @@ export function disconnectCraft(): Promise<{ disconnected: boolean }> {
   return apiFetch<{ disconnected: boolean }>("/craft/connect", {
     method: "DELETE",
   });
+}
+
+/** Find-or-create the user's single craft destination config, returning its
+ * id. The backend keeps craft configs one-per-user, so re-creation is safe. */
+export async function ensureCraftDestination(
+  configs: DestinationConfig[],
+): Promise<string> {
+  const existing = configs.find((c) => c.type === "craft");
+  if (existing) return existing.id;
+  const created = await createDestinationConfig({
+    type: "craft",
+    name: "Onyx Craft",
+    config: {},
+  });
+  return created.id;
 }
 
 export function craftLaunch(req: {
