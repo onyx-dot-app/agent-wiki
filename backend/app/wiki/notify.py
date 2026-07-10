@@ -38,7 +38,7 @@ from app.tasks.reindex import index_path
 from app.tasks.triggers import fan_out_trigger_eval
 from app.tasks.update_frequency import check_update_frequency
 from app.triggers import repo as triggers_repo
-from app.wiki import acl, agent_activity, coedit, comments, constants as wiki_constants, drafts, update_policy
+from app.wiki import acl, agent_activity, coedit, comments, constants as wiki_constants, doc_ids, drafts, update_policy
 from app.wiki.comment_remap import remap_comments
 from app.models.wiki import ChangeKind, PathMove
 
@@ -88,6 +88,8 @@ def after_doc_write(
         return
     if change_kind == ChangeKind.CREATE:
         acl.on_page_created(rel_path, owner_user_id=owner_user_id)
+        # Stable id for the new page (+ any implicitly-created ancestor folders).
+        doc_ids.mint_for_page(rel_path)
     index_path(rel_path)
     fan_out_trigger_eval(rel_path, sha, change_kind, actor)
     # Ingestion churn → check the page's 24h update frequency against the
@@ -137,6 +139,9 @@ def after_doc_delete(rel_path: str, sha: str, actor: str | None) -> None:
     fts.delete_document(rel_path)
     acl.on_page_deleted(rel_path)
     update_policy.on_page_deleted(rel_path)
+    # Stable id survives as a tombstone row (delete stamps, never drops) so
+    # id URLs keep resolving and a restore re-binds the same id.
+    doc_ids.on_deleted(rel_path)
     # The body is gone, so there's nothing to re-anchor against — orphan the
     # page's comments (keeps them as tombstones) rather than dropping them.
     comments.orphan_all_for_doc(rel_path)
@@ -152,7 +157,11 @@ def after_doc_delete(rel_path: str, sha: str, actor: str | None) -> None:
 
 
 def after_path_move(
-    moves: list[PathMove], sha: str, actor: str | None
+    moves: list[PathMove],
+    sha: str,
+    actor: str | None,
+    *,
+    root_move: PathMove | None = None,
 ) -> None:
     """Post-move side effects for every ``(old, new)`` pair from a single
     ``git mv`` commit.
@@ -186,6 +195,10 @@ def after_path_move(
     """
     acl.on_path_moved(moves)
     update_policy.on_path_moved(moves)
+    # root_move (the rename as issued — the folder itself for a directory
+    # move) lets doc_ids re-key the renamed folder's own row even when
+    # common_folder_rename can't see it from the file moves alone.
+    doc_ids.on_path_moved(moves, root_move=root_move)
     coedit.on_path_moved(moves)
     list_changed = False
     for mv in moves:

@@ -12,8 +12,9 @@ Three entry points:
 All three swallow exceptions so a broken OpenSearch never aborts a doc
 write or hourly sweep.  Errors are logged at WARNING level.
 
-Neither function depends on the ``documents`` table — only the git
-working tree is consulted for content and path existence.
+Content and path existence come from the git working tree only. The
+startup sweep additionally backfills ``wiki_doc_ids`` rows for pages
+that predate stable ids.
 """
 from __future__ import annotations
 
@@ -23,7 +24,7 @@ import re
 from app.db import fts
 from app.tasks.queue import crontab
 from app.tasks.queues import lightweight_maintenance_queue
-from app.wiki import git as wiki_git
+from app.wiki import doc_ids, git as wiki_git
 
 log = logging.getLogger(__name__)
 
@@ -78,6 +79,8 @@ def reindex_all_inline() -> None:
     if not paths:
         return
     log.info("reindex: indexing %d wiki page(s) at startup", len(paths))
+    # Same walk doubles as the stable-id backfill for pre-id content.
+    doc_ids.ensure_for_paths(paths)
     for path in paths:
         index_path_inline(path)
 
