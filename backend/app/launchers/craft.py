@@ -61,11 +61,21 @@ def require_available() -> str:
 
 
 def start_session(
-    *, user_id: str, is_admin: bool, wiki_path: str | None, message: str
+    *,
+    user_id: str,
+    is_admin: bool,
+    wiki_path: str | None,
+    message: str,
+    reuse_ready: bool = True,
 ) -> tuple[str, str]:
     """Launch a Craft session for ``user_id`` seeded with ``message``, or
     return the in-flight one for the same page. ``wiki_path`` attaches the
     page to the sandbox. Returns ``(session_id, status)``.
+
+    ``reuse_ready=False`` narrows the idempotency probe to sessions still
+    provisioning: a finished (ready) session then never blocks a new launch.
+    Repeated trigger fires need that, while the launch button reuses the
+    live session.
 
     Raises a CraftLaunchError subclass on a failed precondition and lets a
     failed enqueue propagate after marking the session failed.
@@ -88,7 +98,10 @@ def start_session(
 
     # Idempotency: an in-flight launch for the same (user, page) is returned
     # as-is, never a second sandbox.
-    existing = sessions_repo.find_in_flight(user_id, tool_id=TOOL_ID, wiki_path=path)
+    statuses = ("provisioning", "ready") if reuse_ready else ("provisioning",)
+    existing = sessions_repo.find_in_flight(
+        user_id, tool_id=TOOL_ID, wiki_path=path, statuses=statuses
+    )
     if existing is not None:
         return str(existing["id"]), str(existing["status"])
 

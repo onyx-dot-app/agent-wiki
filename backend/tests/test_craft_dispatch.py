@@ -73,10 +73,21 @@ def test_craft_fire_starts_session_for_owner(
     calls: list[dict[str, Any]] = []
 
     def fake_start(
-        *, user_id: str, is_admin: bool, wiki_path: str | None, message: str
+        *,
+        user_id: str,
+        is_admin: bool,
+        wiki_path: str | None,
+        message: str,
+        reuse_ready: bool,
     ) -> tuple[str, str]:
         calls.append(
-            {"user_id": user_id, "is_admin": is_admin, "wiki_path": wiki_path, "message": message}
+            {
+                "user_id": user_id,
+                "is_admin": is_admin,
+                "wiki_path": wiki_path,
+                "message": message,
+                "reuse_ready": reuse_ready,
+            }
         )
         return "as_test", "provisioning"
 
@@ -86,6 +97,7 @@ def test_craft_fire_starts_session_for_owner(
     assert len(calls) == 1
     assert calls[0]["user_id"] == _OWNER
     assert calls[0]["wiki_path"] == "projects/foo.md"
+    assert calls[0]["reuse_ready"] is False
     # The owner's task leads the seed verbatim, untouched by the wiki LLM.
     assert calls[0]["message"].startswith("ship the update")
     assert "status flipped" in calls[0]["message"]
@@ -220,7 +232,12 @@ def test_craft_action_skips_the_render(
     seeds: list[str] = []
 
     def fake_start(
-        *, user_id: str, is_admin: bool, wiki_path: str | None, message: str
+        *,
+        user_id: str,
+        is_admin: bool,
+        wiki_path: str | None,
+        message: str,
+        reuse_ready: bool,
     ) -> tuple[str, str]:
         seeds.append(message)
         return "as_test", "provisioning"
@@ -236,6 +253,49 @@ def test_craft_action_skips_the_render(
     assert len(events) == 1
     payload = json.loads(events[0]["payload_json"])
     assert payload["message"] == "generate a fun image of the page"
+
+
+def test_ready_session_never_absorbs_a_trigger_fire(
+    owner: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A finished (ready) session for the page must not swallow a new
+    trigger-fired launch: reuse_ready=False creates a fresh session, while
+    the default keeps returning the live one for the launch button."""
+    ingest_settings.upsert(max_doc_chars=100_000, onyx_base_url="https://onyx.example.com")
+    connections.upsert(
+        user_id=_OWNER,
+        onyx_pat="onyx_pat_" + "p" * 40,
+        onyx_user_email="nik@onyx.app",
+        expires_at=None,
+        onyx_base_url="https://onyx.example.com",
+    )
+    ready_sid = sessions_repo.create(
+        user_id=_OWNER,
+        tool_id="onyx-craft",
+        first_turn_prompt="old build",
+        wiki_path="projects/foo.md",
+        working_dir=None,
+        status="ready",
+    )
+    enqueued: list[str] = []
+    monkeypatch.setattr("app.launchers.craft.craft_launch", enqueued.append)
+
+    reused_sid, reused_status = craft_workflow.start_session(
+        user_id=_OWNER, is_admin=False, wiki_path="projects/foo.md", message="again"
+    )
+    assert (reused_sid, reused_status) == (ready_sid, "ready")
+    assert enqueued == []
+
+    new_sid, new_status = craft_workflow.start_session(
+        user_id=_OWNER,
+        is_admin=False,
+        wiki_path="projects/foo.md",
+        message="again",
+        reuse_ready=False,
+    )
+    assert new_sid != ready_sid
+    assert new_status == "provisioning"
+    assert enqueued == [new_sid]
 
 
 def test_craft_config_is_one_per_user_and_takes_no_secret(owner: None) -> None:

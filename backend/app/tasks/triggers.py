@@ -523,6 +523,8 @@ def _dispatch_to_craft(
             is_admin=bool(owner["is_admin"]),
             wiki_path=doc_path,
             message=message,
+            # Each fire is a new build. A finished session must not absorb it.
+            reuse_ready=False,
         )
         page = doc_path.rsplit("/", 1)[-1].removesuffix(".md")
         notifications_repo.create(
