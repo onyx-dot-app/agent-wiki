@@ -263,15 +263,12 @@ function ActionGroupRow({
         />
       )}
       {group.type === "craft" && (
-        <>
-          <ToLabel />
-          <div className="px-[2px]">
-            <Text font="secondary-body" color="text-03">
-              Starts an Onyx Craft session for you, seeded with the page and the
-              fire.
-            </Text>
-          </div>
-        </>
+        <div className="px-[2px]">
+          <Text font="secondary-body" color="text-03">
+            Starts an Onyx Craft session for you, seeded with the page and the
+            fire.
+          </Text>
+        </div>
       )}
       {group.type === "webhook" && (
         <WebhookToRow
