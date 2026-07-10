@@ -1,16 +1,23 @@
 """Craft dispatch in ``_record_fire``: a craft action starts a session for the
 trigger's owner seeded with the fire, launch preconditions never lose the
-recorded event, and craft configs stay one-per-user with no secret."""
+recorded event, and craft configs stay one-per-user with no secret. The
+end-to-end test runs the real workflow and launch task with only the Onyx
+HTTP client faked."""
 from __future__ import annotations
 
 from typing import Any
 
 import pytest
 
+from app.db import agent_sessions as sessions_repo
+from app.ingest import settings as ingest_settings
 from app.launchers import craft as craft_workflow
 from app.models.wiki import ChangeKind
+from app.onyx import connections
+from app.tasks.queues import triggers_queue
 from app.tasks.triggers import _record_fire
 from app.triggers import destination_configs as dest_configs
+from app.wiki import git as wiki_git
 
 from tests._seed import list_events, seed_user
 from app.triggers.engine import TriggerAction, TriggerRecord
@@ -101,6 +108,63 @@ def test_craft_transport_error_never_fails_the_task(
     monkeypatch.setattr("app.tasks.triggers.craft_workflow.start_session", fake_start)
     _fire(_trigger(_craft_config()))
     assert len(list_events("trigger.fire")) == 1
+
+
+def test_craft_fire_end_to_end_reaches_ready_session(
+    tmp_repo: object, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Fire -> dispatch -> real start_session -> real craft_launch task, with
+    only the Onyx HTTP client faked: the session reaches ready, the page is
+    attached, and the seed carries the rendered summary plus fire context."""
+    ingest_settings.upsert(max_doc_chars=100_000, onyx_base_url="https://onyx.example.com")
+    seed_user(_OWNER)
+    connections.upsert(
+        user_id=_OWNER,
+        onyx_pat="onyx_pat_" + "p" * 40,
+        onyx_user_email="nik@onyx.app",
+        expires_at=None,
+        onyx_base_url="https://onyx.example.com",
+    )
+    wiki_git.commit_file("projects/foo.md", "# foo\n", "seed", author=None)
+
+    sent: list[tuple[str, Any]] = []
+
+    class Fake:
+        def __init__(self, base_url: str, pat: str):
+            pass
+
+        def create_build_session(self) -> str:
+            return "bs_e2e"
+
+        def set_session_name(self, session_id: str, *, name: str) -> None:
+            pass
+
+        def upload_attachment(
+            self, session_id: str, *, filename: str, content: bytes
+        ) -> None:
+            sent.append(("upload", filename))
+
+        def session_message_count(self, session_id: str) -> int:
+            return 0
+
+        def send_seed_message(self, session_id: str, *, content: str) -> None:
+            sent.append(("seed", content))
+
+    monkeypatch.setattr("app.tasks.craft.OnyxClient", Fake)
+
+    with triggers_queue.immediate_mode():
+        _fire(_trigger(_craft_config()))
+
+    assert len(list_events("trigger.fire")) == 1
+    rows = sessions_repo.list_for_user(_OWNER)
+    assert len(rows) == 1
+    assert rows[0]["status"] == "ready"
+    assert rows[0]["wiki_path"] == "projects/foo.md"
+    seeds = [c for kind, c in sent if kind == "seed"]
+    assert len(seeds) == 1
+    assert "Status flipped to done" in seeds[0]
+    assert "trg_1" in seeds[0]
+    assert any(kind == "upload" for kind, _ in sent)
 
 
 def test_craft_config_is_one_per_user_and_takes_no_secret(owner: None) -> None:
