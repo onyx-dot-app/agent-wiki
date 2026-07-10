@@ -86,7 +86,8 @@ def test_dump_database_normalizes_url_and_hides_password(
 
     cfg = tmp_config.model_copy(
         update={
-            "database_url": "postgresql+psycopg://wiki:s3%40cr%3At@db.example:5433/agent_wiki?options=-csearch_path%3Dfoo"
+            # Fake percent-encoded password — decoding it is what's under test.
+            "database_url": "postgresql+psycopg://wiki:s3%40cr%3At@db.example:5433/agent_wiki?options=-csearch_path%3Dfoo"  # pragma: allowlist secret # ripsecrets:ignore
         }
     )
     monkeypatch.setattr("app.scripts.backup_to_s3.CONFIG", cfg)
