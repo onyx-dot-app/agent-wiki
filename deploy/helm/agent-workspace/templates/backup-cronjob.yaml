@@ -33,13 +33,11 @@ spec:
               imagePullPolicy: {{ .Values.image.backend.pullPolicy }}
               command: ["python", "-m", "app.scripts.backup_to_s3"]
               env:
-                - name: DATABASE_URL
-                  valueFrom:
-                    secretKeyRef:
-                      name: {{ include "agent-workspace.fullname" . }}-secrets
-                      key: database-url
-                - name: WIKI_DIR
-                  value: /wiki
+                # Full backend env, not just DATABASE_URL/WIKI_DIR: importing
+                # the app config validates every required field (e.g.
+                # PUBLIC_BASE_URL), so the job needs the same env the backend
+                # boots with.
+                {{- include "agent-workspace.backendEnv" . | nindent 16 }}
                 - name: BACKUP_S3_BUCKET
                   value: {{ required "backup.s3.bucket is required when backup.enabled" .Values.backup.s3.bucket | quote }}
                 - name: BACKUP_S3_PREFIX
