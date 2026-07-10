@@ -49,6 +49,14 @@ restore from it.
 **Retention is the bucket's job**: set a lifecycle rule on the prefix
 (e.g. expire after 14 days). The job itself only ever writes.
 
+**Encryption is the bucket's job too**: the job uploads plain objects over
+TLS and relies on the bucket's at-rest encryption — on by default on AWS S3
+(SSE-S3) and configurable to SSE-KMS with your own key; on MinIO/R2/GCS,
+enable default encryption on the bucket/server. The wiki bundle contains
+every page in the clear, so scope bucket read access accordingly.
+Application-encrypted database columns (LLM provider keys and other
+secrets) remain ciphertext inside the dump regardless.
+
 **Alert on two signals**: `kube_job_status_failed` for the
 `<release>-backup` CronJob catches failing runs, and a freshness check —
 `kube_cronjob_status_last_successful_time` (or the age of the newest
