@@ -69,6 +69,7 @@ def _to_dict(t: DocumentTemplate) -> dict[str, Any]:
         "description": t.description,
         "system_prompt": t.system_prompt,
         "ingestion_auto_update_disabled": t.ingestion_auto_update_disabled,
+        "ai_management_allowed": t.ai_management_allowed,
         "update_instruction": t.update_instruction,
         "sort_order": t.sort_order,
         "created_by_user_id": t.created_by_user_id,
@@ -101,6 +102,7 @@ def create(
     description: str | None,
     system_prompt: str | None,
     ingestion_auto_update_disabled: bool | None = None,
+    ai_management_allowed: bool | None = None,
     update_instruction: str | None = None,
     created_by_user_id: str | None,
 ) -> dict[str, Any]:
@@ -120,6 +122,7 @@ def create(
                 description=description,
                 system_prompt=system_prompt,
                 ingestion_auto_update_disabled=ingestion_auto_update_disabled,
+                ai_management_allowed=ai_management_allowed,
                 update_instruction=update_instruction,
                 sort_order=next_order,
                 created_by_user_id=created_by_user_id,
@@ -143,6 +146,7 @@ def update(
     description: str | None,
     system_prompt: str | None,
     ingestion_auto_update_disabled: bool | None | _UnsetType = _UNSET,
+    ai_management_allowed: bool | None | _UnsetType = _UNSET,
     update_instruction: str | None | _UnsetType = _UNSET,
 ) -> dict[str, Any] | None:
     with session() as s:
@@ -162,6 +166,8 @@ def update(
         # client that doesn't send them can't silently clear a template's policy.
         if not isinstance(ingestion_auto_update_disabled, _UnsetType):
             t.ingestion_auto_update_disabled = ingestion_auto_update_disabled
+        if not isinstance(ai_management_allowed, _UnsetType):
+            t.ai_management_allowed = ai_management_allowed
         if not isinstance(update_instruction, _UnsetType):
             t.update_instruction = update_instruction
         t.updated_at = _now_text(s)
@@ -216,6 +222,8 @@ def apply_policy_to_page(
         patch["ingestion_auto_update_disabled"] = tmpl["ingestion_auto_update_disabled"]
     if tmpl.get("update_instruction"):
         patch["update_instruction"] = tmpl["update_instruction"]
+    if tmpl.get("ai_management_allowed") is not None:
+        patch["ai_management_allowed"] = tmpl["ai_management_allowed"]
     if patch:
         update_policy.set_policy(path, actor_user_id=actor_user_id, **patch)
     return True

@@ -652,9 +652,11 @@ class DocumentTemplate(Base):
     # Default update policy seeded onto a page created from this template
     # (applied to its update_policies row). NULL = leave to the inherited
     # default. Lets a template (e.g. "Meeting notes") start with auto-update
-    # off, or carry scope guidance for the updater.
+    # off, carry scope guidance for the updater, or opt the page into AI
+    # auto-management from birth.
     ingestion_auto_update_disabled: Mapped[bool | None] = mapped_column(Boolean)
     update_instruction: Mapped[str | None] = mapped_column(Text)
+    ai_management_allowed: Mapped[bool | None] = mapped_column(Boolean)
     # Admin-controlled ordering for the picker. Lower values render
     # first; ties fall back to ``name`` alphabetical. New rows land at
     # the end (max(sort_order) + 1) so admins decide where they live.

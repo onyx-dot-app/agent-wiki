@@ -37,6 +37,7 @@ def _view(row: dict[str, Any]) -> DocumentTemplateView:
         system_prompt=row["system_prompt"],
         ingestion_auto_update_disabled=row["ingestion_auto_update_disabled"],
         update_instruction=row["update_instruction"],
+        ai_management_allowed=row["ai_management_allowed"],
         sort_order=row["sort_order"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
@@ -110,6 +111,7 @@ def create_template(
             system_prompt=(req.system_prompt or None),
             ingestion_auto_update_disabled=req.ingestion_auto_update_disabled,
             update_instruction=(req.update_instruction or None),
+            ai_management_allowed=req.ai_management_allowed,
             created_by_user_id=actor.id,
         )
     except templates_repo.TemplateNameTaken as exc:
@@ -141,6 +143,8 @@ def update_template(
             policy["ingestion_auto_update_disabled"] = req.ingestion_auto_update_disabled
         if "update_instruction" in req.model_fields_set:
             policy["update_instruction"] = req.update_instruction or None
+        if "ai_management_allowed" in req.model_fields_set:
+            policy["ai_management_allowed"] = req.ai_management_allowed
         row = templates_repo.update(
             template_id,
             name=name,

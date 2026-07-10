@@ -15,6 +15,7 @@ class DocumentTemplateView(BaseModel):
     # Default update policy applied to a page created from this template.
     ingestion_auto_update_disabled: bool | None = None
     update_instruction: str | None = None
+    ai_management_allowed: bool | None = None
     sort_order: int
     created_at: str
     updated_at: str
@@ -47,6 +48,7 @@ class CreateDocumentTemplateRequest(BaseModel):
     system_prompt: str | None = None
     ingestion_auto_update_disabled: bool | None = None
     update_instruction: str | None = None
+    ai_management_allowed: bool | None = None
 
 
 class UpdateDocumentTemplateRequest(BaseModel):
@@ -56,6 +58,7 @@ class UpdateDocumentTemplateRequest(BaseModel):
     system_prompt: str | None = None
     ingestion_auto_update_disabled: bool | None = None
     update_instruction: str | None = None
+    ai_management_allowed: bool | None = None
 
 
 class ReorderDocumentTemplatesRequest(BaseModel):
