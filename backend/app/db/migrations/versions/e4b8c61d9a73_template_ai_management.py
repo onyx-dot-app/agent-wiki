@@ -7,7 +7,7 @@ unset; admins opt specific templates in. Guarded with the inspector because
 ``0001_initial`` builds fresh databases from the current models.
 
 Revision ID: e4b8c61d9a73
-Revises: c7d3e85f1b02
+Revises: d4f8a26e9c11
 Create Date: 2026-07-10 00:00:00.000000+00:00
 """
 from __future__ import annotations
@@ -18,7 +18,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision: str = "e4b8c61d9a73"
-down_revision: str | None = "c7d3e85f1b02"
+down_revision: str | None = "d4f8a26e9c11"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
