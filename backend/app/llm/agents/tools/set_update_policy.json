@@ -9,15 +9,21 @@
         "description": "Wiki-relative path: a page ending in `.md`, a folder, or \"\" for the wiki root. A page must already exist; a folder policy may be set ahead of its children (future pages inherit it)."
       },
       "ingestion_auto_update_disabled": {
-        "type": "boolean",
-        "description": "true = block connector/ingestion auto-update for this page (or everything under this folder); false = allow it. Omit to leave unchanged."
+        "type": [
+          "boolean",
+          "null"
+        ],
+        "description": "true = block connector/ingestion auto-update for this page (or everything under this folder); false = allow it. null clears back to inherit. Omit to leave unchanged."
       },
       "update_instruction": {
         "type": "string",
         "description": "Guidance the updater agent follows when editing this page/folder. Pass an empty string to clear it (so it inherits any ancestor instruction). Omit to leave unchanged."
       },
       "ai_management_allowed": {
-        "type": "boolean",
+        "type": [
+          "boolean",
+          "null"
+        ],
         "description": "true = allow the AI to auto-manage this page (or everything under this folder) without per-change approval; false = explicitly forbid AI management for this scope (also serves as a do-not-consolidate marker). null clears back to inherit. Omit to leave unchanged."
       }
     },
