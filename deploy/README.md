@@ -99,10 +99,11 @@ to admin (see `app/auth/users.py`). Configure the LLM provider/keys from
 - **App update** — cut a new `v*` tag, then `helm upgrade --set image.*.tag=<new>`.
 - **Cluster update** — `terraform apply` after bumping `cluster_version` or
   module versions.
-- **Backups** — not wired in this scaffold. The `wiki-data` PVC is a real git
-  repo; cron a `git push --mirror` to a remote for the durable content. App
-  state and the pgmq task queues live in Postgres — back that up with whatever
-  your managed Postgres provides (point-in-time recovery, daily snapshots).
+- **Backups** — opt-in via the chart: `backup.enabled=true` schedules a
+  CronJob that uploads a `git bundle` of the wiki repo **and** a `pg_dump`
+  of the database together to any S3-compatible bucket. Both halves are
+  needed — permissions, comments, and update policies live only in
+  Postgres. Setup and restore: [`docs/backups.md`](../docs/backups.md).
 - **Tear down** — `helm uninstall agent-wiki -n agent-wiki`, then
   `terraform destroy`. PVCs use `Retain` reclaim policy, so EBS volumes
   survive `helm uninstall` and need to be deleted manually if you want them

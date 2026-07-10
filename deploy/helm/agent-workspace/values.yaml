@@ -146,6 +146,48 @@ persistence:
     storageClass: gp3
     accessMode: ReadWriteOnce
 
+backup:
+  # Opt-in application-consistent backups: each run uploads a `git bundle`
+  # of the wiki repo AND a `pg_dump` of the app database together to an
+  # S3-compatible bucket. Both halves are needed for a faithful restore —
+  # the wiki volume alone silently loses permissions, owners, update
+  # policies, and comments (Postgres-only by design); the database alone
+  # loses the pages. Setup + restore procedure: docs/backups.md.
+  enabled: false
+  # Cron schedule, cluster timezone (UTC on most clusters).
+  schedule: "0 8 * * *"
+  # Kill a wedged run after this many seconds.
+  activeDeadlineSeconds: 3600
+  # Retention is the bucket's job: set a lifecycle rule on the prefix
+  # (e.g. expire objects after 14 days). The job only ever writes.
+  # The CronJob runs on its own ServiceAccount (<fullname>-backup) so
+  # bucket credentials granted via IRSA don't leak to the app pods.
+  serviceAccount:
+    annotations: {}
+  s3:
+    bucket: ""
+    # Key prefix inside the bucket; backups land at <prefix>/<timestamp>/.
+    prefix: agent-wiki-backups
+    # Endpoint URL for non-AWS backends (MinIO, Cloudflare R2, GCS interop).
+    # Leave empty for AWS S3.
+    endpoint: ""
+    region: ""
+    # Static credentials, stored in the chart secret. Leave both empty to
+    # use the pod's ambient IAM identity instead (e.g. EKS IRSA bound to
+    # the chart's service account).
+    accessKeyId: ""
+    secretAccessKey: ""
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+      # The bundle + dump are staged on container ephemeral storage before
+      # upload; size for roughly the wiki repo + a compressed DB dump.
+      ephemeral-storage: 1Gi
+    limits:
+      memory: 512Mi
+      ephemeral-storage: 4Gi
+
 ingress:
   enabled: true
   className: nginx

@@ -484,6 +484,18 @@ def list_paths(prefix: str = "") -> list[str]:
     return [p for p in out.split("\0") if p]
 
 
+def bundle(dest_path: str) -> None:
+    """Write a ``git bundle`` of the whole repo (all refs + full history)
+    to ``dest_path``.
+
+    A bundle is a single portable file that ``git clone`` accepts directly,
+    which makes it the backup format for the wiki: restoring is
+    ``git clone <bundle> <dir>`` with nothing lost. Read-only on the repo —
+    safe to run against a live working tree without the commit lock.
+    """
+    _run(["bundle", "create", dest_path, "--all"])
+
+
 def paths_touched_since(since_iso: str) -> set[str]:
     """Paths added, modified, renamed, or deleted by any commit at or
     after ``since_iso`` (any timestamp that ``git log --since`` accepts).
