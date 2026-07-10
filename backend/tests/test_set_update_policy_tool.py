@@ -122,3 +122,34 @@ def test_denies_unauthorized_user(tmp_repo, monkeypatch):
     out = handle({"path": _PAGE, "ingestion_auto_update_disabled": True})
     assert "error" in out
     assert update_policy.get(_PAGE) is None  # nothing written
+
+
+def test_sets_ai_management_allowed(tmp_repo, monkeypatch):
+    _commit()
+    _as_user(monkeypatch)
+    out = handle({"path": _PAGE, "ai_management_allowed": True})
+    assert "error" not in out
+    assert out["explicit"]["ai_management_allowed"] is True
+    assert out["effective"]["ai_management_allowed"] is True
+    assert update_policy.is_ai_management_allowed(_PAGE) is True
+    # PATCH semantics: the other settings stay untouched.
+    assert out["effective"]["ingestion_auto_update_disabled"] is False
+
+
+def test_folder_ai_management_inherits_to_page(tmp_repo, monkeypatch):
+    _commit()
+    _as_user(monkeypatch)
+    out = handle({"path": "guides", "ai_management_allowed": True})
+    assert "error" not in out
+    # The page under the folder inherits the allow without its own row.
+    assert update_policy.is_ai_management_allowed(_PAGE) is True
+    # An explicit page-level False opts back out (don't-consolidate case).
+    out = handle({"path": _PAGE, "ai_management_allowed": False})
+    assert out["effective"]["ai_management_allowed"] is False
+
+
+def test_ai_management_allowed_rejects_non_boolean(tmp_repo, monkeypatch):
+    _commit()
+    _as_user(monkeypatch)
+    out = handle({"path": _PAGE, "ai_management_allowed": "yes"})
+    assert out["error"] == "ai_management_allowed must be a boolean"
