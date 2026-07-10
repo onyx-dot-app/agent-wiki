@@ -19,6 +19,7 @@ import { SvgOnyxLogo } from "@onyx-ai/opal/logos";
 import { Content, InputErrorText } from "@onyx-ai/opal/layouts";
 import { cn, markdown } from "@onyx-ai/opal/utils";
 
+import { ConnectOnyxCraft } from "@/components/agents/ConnectOnyxCraft";
 import { SvgSend } from "@/components/icons/SvgSend";
 import {
   ConfigRowCard,
@@ -84,6 +85,7 @@ export function ConnectorsTab() {
   const { configs, refresh: refreshConfigs } = useDestinationConfigs();
   const [emailsOpen, setEmailsOpen] = useState(false);
   const [webhooksOpen, setWebhooksOpen] = useState(false);
+  const [craftOpen, setCraftOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const confirmDialog = useConfirm();
 
@@ -264,7 +266,7 @@ export function ConnectorsTab() {
         title="Onyx Craft"
         description="Start a Craft session in Onyx when a trigger fires."
         connected={Boolean(craftStatus?.connected)}
-        connectHref={craftStatus?.connect_url ?? undefined}
+        onConnect={craftUnavailable ? undefined : () => setCraftOpen(true)}
         unavailableNote={
           craftUnavailable
             ? "An admin needs to configure the Onyx connection first."
@@ -309,6 +311,17 @@ export function ConnectorsTab() {
           refresh={refreshConfigs}
           onClose={() => setWebhooksOpen(false)}
         />
+      )}
+
+      {craftOpen && (
+        <ConnectorModalShell
+          icon={SvgOnyxLogo}
+          title="Onyx Craft"
+          description="Craft runs as you. Paste a personal access token from your Onyx account."
+          onClose={() => setCraftOpen(false)}
+        >
+          <ConnectOnyxCraft onConnected={() => void refreshCraft()} />
+        </ConnectorModalShell>
       )}
     </div>
   );
