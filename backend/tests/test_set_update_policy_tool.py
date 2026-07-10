@@ -153,3 +153,25 @@ def test_ai_management_allowed_rejects_non_boolean(tmp_repo, monkeypatch):
     _as_user(monkeypatch)
     out = handle({"path": _PAGE, "ai_management_allowed": "yes"})
     assert out["error"] == "ai_management_allowed must be a boolean"
+
+
+def test_ai_management_null_clears_back_to_inherit(tmp_repo, monkeypatch):
+    _commit()
+    _as_user(monkeypatch)
+    handle({"path": "guides", "ai_management_allowed": True})
+    handle({"path": _PAGE, "ai_management_allowed": False})
+    assert update_policy.is_ai_management_allowed(_PAGE) is False
+
+    # Explicit null clears the page override; the folder's allow shows through.
+    out = handle({"path": _PAGE, "ai_management_allowed": None})
+    assert "error" not in out
+    assert out["explicit"] is None  # flag was the page row's only setting
+    assert out["effective"]["ai_management_allowed"] is True
+    assert update_policy.is_ai_management_allowed(_PAGE) is True
+
+    # Clearing when the flag was the only setting anywhere removes the row
+    # without inventing one.
+    out = handle({"path": "guides", "ai_management_allowed": None})
+    assert out["explicit"] is None
+    assert out["effective"]["ai_management_allowed"] is False
+    assert update_policy.get("guides") is None
