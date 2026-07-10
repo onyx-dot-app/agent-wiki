@@ -92,6 +92,17 @@ def test_craft_launch_error_keeps_fire(
     assert len(list_events("trigger.fire")) == 1
 
 
+def test_craft_transport_error_never_fails_the_task(
+    owner: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fake_start(**_kw: object) -> tuple[str, str]:
+        raise RuntimeError("redis send failed")
+
+    monkeypatch.setattr("app.tasks.triggers.craft_workflow.start_session", fake_start)
+    _fire(_trigger(_craft_config()))
+    assert len(list_events("trigger.fire")) == 1
+
+
 def test_craft_config_is_one_per_user_and_takes_no_secret(owner: None) -> None:
     first = dest_configs.create(_OWNER, type="craft", name="Onyx Craft", config=None)
     again = dest_configs.create(_OWNER, type="craft", name="Different Name", config=None)

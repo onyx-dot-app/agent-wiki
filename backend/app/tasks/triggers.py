@@ -51,7 +51,7 @@ from app.launchers import craft as craft_workflow
 from app.db.session import session
 from app.slack import client as slack_client
 from app.slack import connections as slack_connections
-from app.tasks.queues import QueueFullError, triggers_queue
+from app.tasks.queues import triggers_queue
 from app.triggers import destination_configs as dest_configs
 from app.triggers import destinations as destinations_repo
 from app.triggers import diff as diff_helper
@@ -480,8 +480,9 @@ def _dispatch_to_craft(
 
     The source page attaches through the launch path, so the seed carries the
     rendered summary plus compact fire context. Launch preconditions (Craft
-    dark, owner disconnected, page unreadable, provisioning cap) and a full
-    launch queue are logged and swallowed: the fire is already recorded.
+    dark, owner disconnected, page unreadable, provisioning cap) and any
+    launch failure are logged and swallowed: the fire is already recorded,
+    and an escaping error would fail the fan-out task and re-fire on retry.
     """
     owner = users_repo.get_by_id(trigger.owner_user_id)
     if owner is None:
@@ -505,7 +506,7 @@ def _dispatch_to_craft(
         log.info(
             "trigger %s dispatched to craft: session %s (%s)", trigger.id, sid, status
         )
-    except (craft_workflow.CraftLaunchError, QueueFullError):
+    except Exception:
         log.exception("trigger %s craft dispatch failed", trigger.id)
 
 
