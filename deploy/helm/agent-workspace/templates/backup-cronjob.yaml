@@ -14,7 +14,7 @@ spec:
   jobTemplate:
     spec:
       backoffLimit: 2
-      activeDeadlineSeconds: 3600
+      activeDeadlineSeconds: {{ .Values.backup.activeDeadlineSeconds }}
       template:
         metadata:
           labels:
@@ -22,15 +22,23 @@ spec:
             app.kubernetes.io/component: backup
         spec:
           restartPolicy: Never
-          serviceAccountName: {{ include "agent-workspace.serviceAccountName" . }}
+          serviceAccountName: {{ include "agent-workspace.fullname" . }}-backup
           {{- with .Values.imagePullSecrets }}
           imagePullSecrets:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.podSecurityContext }}
+          securityContext:
             {{- toYaml . | nindent 12 }}
           {{- end }}
           containers:
             - name: backup
               image: "{{ .Values.image.backend.repository }}:{{ .Values.image.backend.tag }}"
               imagePullPolicy: {{ .Values.image.backend.pullPolicy }}
+              {{- with .Values.securityContext }}
+              securityContext:
+                {{- toYaml . | nindent 16 }}
+              {{- end }}
               command: ["python", "-m", "app.scripts.backup_to_s3"]
               env:
                 # Full backend env, not just DATABASE_URL/WIKI_DIR: importing
@@ -50,8 +58,6 @@ spec:
                 - name: BACKUP_S3_REGION
                   value: {{ . | quote }}
                 {{- end }}
-                - name: BACKUP_KEEP_LAST
-                  value: {{ .Values.backup.keepLast | quote }}
                 {{- if .Values.backup.s3.accessKeyId }}
                 - name: AWS_ACCESS_KEY_ID
                   valueFrom:

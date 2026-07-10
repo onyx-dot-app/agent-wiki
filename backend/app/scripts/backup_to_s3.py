@@ -15,6 +15,7 @@ pages. See ``docs/backups.md`` for the full restore procedure.
 
 Uploads go to ``s3://<bucket>/<prefix>/<ts>/`` via boto3, so any
 S3-compatible endpoint works (AWS S3, GCS interop, MinIO, Cloudflare R2).
+Retention is the bucket's job: use a lifecycle rule on the prefix.
 
 Configuration is env-based (the Helm chart's backup CronJob sets these):
 
@@ -22,9 +23,6 @@ Configuration is env-based (the Helm chart's backup CronJob sets these):
 - ``BACKUP_S3_PREFIX``   — key prefix, default ``agent-wiki-backups``.
 - ``BACKUP_S3_ENDPOINT`` — optional endpoint URL for non-AWS backends.
 - ``BACKUP_S3_REGION``   — optional region.
-- ``BACKUP_KEEP_LAST``   — optional int; after a successful upload, delete
-  all but the newest N backups under the prefix. Default 0 = keep
-  everything (use bucket lifecycle rules instead if you prefer).
 - Credentials via the standard AWS env vars / IAM role chain.
 
 ``DATABASE_URL`` and ``WIKI_DIR`` come from the normal app config.
@@ -43,10 +41,10 @@ import sys
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterator
-from urllib.parse import urlsplit, urlunsplit
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict
+from sqlalchemy.engine import make_url
 
 from app.config import CONFIG
 from app.utils.logging import setup_logging
@@ -62,7 +60,6 @@ class BackupConfig(BaseModel):
     prefix: str = "agent-wiki-backups"
     endpoint_url: str | None = None
     region: str | None = None
-    keep_last: int = 0
 
     @staticmethod
     def from_env() -> "BackupConfig":
@@ -74,7 +71,6 @@ class BackupConfig(BaseModel):
             prefix=os.environ.get("BACKUP_S3_PREFIX", "agent-wiki-backups"),
             endpoint_url=os.environ.get("BACKUP_S3_ENDPOINT") or None,
             region=os.environ.get("BACKUP_S3_REGION") or None,
-            keep_last=int(os.environ.get("BACKUP_KEEP_LAST", "0")),
         )
 
 
@@ -95,22 +91,18 @@ def dump_database(dest_path: str) -> None:
     the dump is compressed. pg_dump takes a snapshot, so running against a
     live database is consistent.
 
-    The password is stripped from the URI and passed via ``PGPASSWORD`` so
-    it never appears in the process table (argv is world-readable via
+    The URL is parsed with SQLAlchemy's ``make_url`` (handles any dialect
+    marker, percent-encoded passwords, IPv6 hosts). The decoded password is
+    passed via ``PGPASSWORD`` and removed from the URI so it never appears
+    in the process table (argv is world-readable via
     ``/proc/<pid>/cmdline``).
     """
-    # pg_dump takes libpq URIs (postgresql://); strip the SQLAlchemy dialect
-    # marker in case the deployment set the +psycopg form.
-    url = CONFIG.database_url.replace("postgresql+psycopg://", "postgresql://", 1)
-    parts = urlsplit(url)
+    url = make_url(CONFIG.database_url)
     env = None
-    if parts.password is not None:
-        netloc = parts.username or ""
-        netloc += f"@{parts.hostname}" if parts.hostname else "@"
-        if parts.port:
-            netloc += f":{parts.port}"
-        url = urlunsplit(parts._replace(netloc=netloc))
-        env = {**os.environ, "PGPASSWORD": parts.password}
+    if url.password is not None:
+        env = {**os.environ, "PGPASSWORD": str(url.password)}
+        url = url._replace(password=None)
+    url = url._replace(drivername="postgresql")
     subprocess.run(
         [
             "pg_dump",
@@ -118,7 +110,7 @@ def dump_database(dest_path: str) -> None:
             "--no-owner",
             "--file",
             dest_path,
-            url,
+            url.render_as_string(hide_password=False),
         ],
         check=True,
         capture_output=True,
@@ -139,54 +131,22 @@ def upload(client: Any, cfg: BackupConfig, ts: str, paths: list[Path]) -> list[s
     return keys
 
 
-def _list_all(client: Any, **kwargs: Any) -> Iterator[dict[str, Any]]:
-    """``list_objects_v2`` with pagination — a single call caps at 1000 entries."""
-    token: str | None = None
-    while True:
-        page = client.list_objects_v2(
-            **kwargs, **({"ContinuationToken": token} if token else {})
-        )
-        yield page
-        token = page.get("NextContinuationToken")
-        if not token:
-            return
-
-
-def prune(client: Any, cfg: BackupConfig) -> list[str]:
-    """Delete all but the newest ``keep_last`` backups under the prefix.
-
-    Backups are grouped by their timestamp sub-prefix; timestamps are
-    lexicographically sortable (UTC ``%Y%m%dT%H%M%SZ``), so newest = last.
-    No-op when ``keep_last`` is 0.
-    """
-    if cfg.keep_last <= 0:
-        return []
-    groups = sorted(
-        cp["Prefix"]
-        for page in _list_all(client, Bucket=cfg.bucket, Prefix=f"{cfg.prefix}/", Delimiter="/")
-        for cp in page.get("CommonPrefixes", [])
-    )
-    doomed = groups[: -cfg.keep_last] if len(groups) > cfg.keep_last else []
-    deleted: list[str] = []
-    for group in doomed:
-        for page in _list_all(client, Bucket=cfg.bucket, Prefix=group):
-            for obj in page.get("Contents", []):
-                client.delete_object(Bucket=cfg.bucket, Key=obj["Key"])
-                deleted.append(obj["Key"])
-    if deleted:
-        log.info("pruned %d object(s) beyond keep_last=%d", len(deleted), cfg.keep_last)
-    return deleted
-
-
 def run_backup(cfg: BackupConfig, client: Any) -> list[str]:
     ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     with tempfile.TemporaryDirectory(prefix="agent-wiki-backup-") as tmp:
         bundle_path = Path(tmp) / f"wiki-{ts}.bundle"
         dump_path = Path(tmp) / f"db-{ts}.dump"
+        # Bundle BEFORE dump — the order is load-bearing. The dump may only be
+        # newer than the bundle: a page created in the gap restores as orphan
+        # ACL rows (harmless). Flipped, it would restore as a page with no ACL
+        # rows, which the implicit-public fallback in app/wiki/acl.py makes
+        # readable by everyone.
         wiki_git.bundle(str(bundle_path))
         log.info("wiki bundle: %d bytes", bundle_path.stat().st_size)
         dump_database(str(dump_path))
         log.info("db dump: %d bytes", dump_path.stat().st_size)
+        # Bundle is uploaded first for the same reason restores require both
+        # files: a group missing db-*.dump is a failed run, not a backup.
         return upload(client, cfg, ts, [bundle_path, dump_path])
 
 
@@ -205,14 +165,6 @@ def main() -> int:
         log.exception("backup failed")
         return 1
     log.info("backup complete: %s", ", ".join(keys))
-    # Retention is best-effort: the backup is already safe in the bucket, so a
-    # pruning error must not fail the job and misreport backup health. It is
-    # logged loudly; a bucket lifecycle rule is the alternative if DeleteObject
-    # can't be granted.
-    try:
-        prune(client, cfg)
-    except Exception:
-        log.exception("backup succeeded but pruning old backups failed")
     return 0
 
 

@@ -156,9 +156,14 @@ backup:
   enabled: false
   # Cron schedule, cluster timezone (UTC on most clusters).
   schedule: "0 8 * * *"
-  # After each successful run, delete all but the newest N backups under
-  # the prefix. 0 keeps everything (use bucket lifecycle rules instead).
-  keepLast: 14
+  # Kill a wedged run after this many seconds.
+  activeDeadlineSeconds: 3600
+  # Retention is the bucket's job: set a lifecycle rule on the prefix
+  # (e.g. expire objects after 14 days). The job only ever writes.
+  # The CronJob runs on its own ServiceAccount (<fullname>-backup) so
+  # bucket credentials granted via IRSA don't leak to the app pods.
+  serviceAccount:
+    annotations: {}
   s3:
     bucket: ""
     # Key prefix inside the bucket; backups land at <prefix>/<timestamp>/.
@@ -176,8 +181,12 @@ backup:
     requests:
       cpu: 100m
       memory: 256Mi
+      # The bundle + dump are staged on container ephemeral storage before
+      # upload; size for roughly the wiki repo + a compressed DB dump.
+      ephemeral-storage: 1Gi
     limits:
       memory: 512Mi
+      ephemeral-storage: 4Gi
 
 ingress:
   enabled: true
