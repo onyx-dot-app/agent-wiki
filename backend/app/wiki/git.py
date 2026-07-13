@@ -24,16 +24,16 @@ from pydantic import BaseModel
 from app.config import CONFIG
 from app.models.wiki import PathMove
 from app.wiki import constants
+from app.wiki.filesystem import TRASH_DIR, TRASH_PREFIX
 
 log = logging.getLogger(__name__)
 
 _SHA_LINE_RE = re.compile(r"^[0-9a-f]{40}$")
 
-# Trashed items live under `.trash/` (see app/wiki/trash.py). Every path
-# enumerator excludes it so trashed content never surfaces in the tree,
-# search, recents, or the reconcile sweep — the isolation the Trash feature
-# depends on. Trash internals address `.trash/` paths directly.
-_TRASH_PREFIX = ".trash/"
+# Trashed items live under `.trash/` (TRASH_PREFIX, defined in filesystem.py).
+# Every path enumerator excludes it so trashed content never surfaces in the
+# tree, search, recents, or the reconcile sweep — the isolation the Trash
+# feature depends on. Trash internals address `.trash/` paths directly.
 
 
 class CommitInfo(BaseModel):
@@ -487,7 +487,7 @@ def ingest_update_times_24h(rel_path: str) -> list[int]:
 def list_paths(prefix: str = "") -> list[str]:
     """List tracked files under a path prefix (excluding the hidden ``.trash/``)."""
     out = _run(["ls-files", "-z", prefix or "."]).stdout
-    return [p for p in out.split("\0") if p and not p.startswith(_TRASH_PREFIX)]
+    return [p for p in out.split("\0") if p and not p.startswith(TRASH_PREFIX)]
 
 
 def bundle(dest_path: str) -> None:
@@ -524,7 +524,7 @@ def paths_touched_since(since_iso: str) -> set[str]:
     return {
         line
         for line in out.splitlines()
-        if line.strip() and not line.startswith(_TRASH_PREFIX)
+        if line.strip() and not line.startswith(TRASH_PREFIX)
     }
 
 
@@ -625,7 +625,7 @@ def paths_authored_by(author_email: str, limit: int = 50) -> list[tuple[str, str
             continue
         if (
             line.endswith(".md")
-            and not line.startswith(_TRASH_PREFIX)
+            and not line.startswith(TRASH_PREFIX)
             and line not in seen
         ):
             seen[line] = current_ts
@@ -650,7 +650,7 @@ def list_trash_files() -> list[str]:
     Deliberately bypasses the ``.trash/`` exclusion the other enumerators apply;
     only the trash repo (``app/wiki/trash.py``) should call it.
     """
-    out = _run(["ls-files", "-z", "--", _TRASH_PREFIX.rstrip("/")]).stdout
+    out = _run(["ls-files", "-z", "--", TRASH_DIR]).stdout
     return [p for p in out.split("\0") if p]
 
 
@@ -679,7 +679,7 @@ def restore_from_trash(
     re-point path-keyed metadata via ``after_path_move``. Raises
     ``GitNothingToCommitError`` if the trash id has no files.
     """
-    prefix = f"{_TRASH_PREFIX}{trash_id}/"
+    prefix = f"{TRASH_PREFIX}{trash_id}/"
     trashed = [p for p in list_trash_files() if p.startswith(prefix)]
     if not trashed:
         raise GitNothingToCommitError(prefix)
