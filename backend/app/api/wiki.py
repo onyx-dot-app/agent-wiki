@@ -32,6 +32,7 @@ from app.models.file_system import (
     MovedFile,
     MovePathRequest,
     MovePathResponse,
+    PathTombstoneResponse,
     PutDocumentRequest,
     PutDocumentResponse,
     RecentDocsResponse,
@@ -39,6 +40,8 @@ from app.models.file_system import (
     ReindexRequest,
     ReindexResponse,
     ReorderStarredRequest,
+    RestorePathRequest,
+    RestorePathResponse,
     ReviseDraftRequest,
     ReviseDraftResponse,
     SearchHitView,
@@ -46,6 +49,9 @@ from app.models.file_system import (
     SetDocumentDraftRequest,
     StarDocRequest,
     StarredDocsResponse,
+    TombstoneCommit,
+    TrashItem,
+    TrashListResponse,
 )
 from app.tasks.reindex import index_path
 from app.triggers import repo as triggers_repo
@@ -459,6 +465,167 @@ def delete_document_by_path(
         wiki_notify.after_doc_delete(p, sha, author)
     log.info("doc deleted %s (%d pages) by %s sha=%s", rel, len(md_paths), author or "?", sha[:8])
     return DeleteDocumentResponse(sha=sha)
+
+
+def _restorable_paths(fate: wiki_git.PathFate) -> tuple[list[str], list[str]]:
+    """``(all files, .md pages)`` that a restore of ``fate`` would reintroduce."""
+    if fate.last_content_sha is None:
+        return [], []
+    prefix = fate.path + "/"
+    files = [
+        p
+        for p in wiki_git.tree_paths_at(fate.last_content_sha)
+        if p == fate.path or p.startswith(prefix)
+    ]
+    return files, [p for p in files if p.endswith(".md")]
+
+
+@router.get("/trash", response_model=TrashListResponse)
+def list_trash(
+    user: User = Depends(require_user),
+    limit: int = Query(100, ge=1, le=500),
+) -> TrashListResponse:
+    """Pages/folders deleted (and not since re-created or restored) — the Trash
+    view. Sourced from git: each delete is a commit, so we walk recent deletes
+    and keep those whose path has no live doc now. ACL-filtered: an item shows
+    only if the caller can read its closest surviving ancestor scope."""
+    items: list[TrashItem] = []
+    seen: set[str] = set()
+    for d in wiki_git.recent_deletions(limit=limit * 3):
+        if d.path in seen:
+            continue
+        seen.add(d.path)
+        # Skip anything live again at that path (re-created or already restored).
+        if filesystem.absolute(d.path).exists():
+            continue
+        if not acl.can(user.id, user.is_admin, "read", d.path):
+            continue
+        kind = "page" if d.path.endswith(".md") else "folder"
+        items.append(
+            TrashItem(
+                path=d.path,
+                kind=kind,
+                deleted_sha=d.sha,
+                deleted_by=d.author,
+                deleted_at=d.ts,
+                last_content_sha=wiki_git.parent_sha(d.sha),
+            )
+        )
+        if len(items) >= limit:
+            break
+    return TrashListResponse(items=items)
+
+
+@router.get("/file/tombstone", response_model=PathTombstoneResponse)
+def file_tombstone(
+    user: User = Depends(require_user),
+    path: str = "",
+) -> PathTombstoneResponse:
+    """Fate of a wiki path that no longer exists at HEAD: deleted (with the
+    ref where the content is still readable) or moved (with its current path,
+    rename chains followed). 404 when the path never existed."""
+    if not path:
+        raise HTTPException(status_code=400, detail="path required")
+    try:
+        rel = filesystem.safe_rel_path(path)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    if filesystem.absolute(rel).exists():
+        raise HTTPException(status_code=409, detail="path exists")
+    fate = wiki_git.path_fate(rel)
+    if fate is None:
+        raise HTTPException(status_code=404, detail="not found")
+    commit = TombstoneCommit(sha=fate.sha, author=fate.author, ts=fate.ts, message=fate.message)
+    if fate.status == "moved" and fate.new_path is not None:
+        # The page's ACL rows moved with it — the target's rules decide who
+        # may learn where it went.
+        require_can("read", fate.new_path, user)
+        return PathTombstoneResponse(
+            path=rel, status="moved", commit=commit, moved_to=fate.new_path
+        )
+    # Deleted: the page's own ACL rows are gone, so this resolves through the
+    # closest surviving ancestor folder's ACLs (implicit-public if unmanaged).
+    require_can("read", fate.path, user)
+    _, md_paths = _restorable_paths(fate)
+    can_restore = bool(md_paths) and all(
+        acl.can(user.id, user.is_admin, "write", p) for p in md_paths
+    )
+    return PathTombstoneResponse(
+        path=rel,
+        status="deleted",
+        commit=commit,
+        last_content_sha=fate.last_content_sha,
+        can_restore=can_restore,
+    )
+
+
+@router.post("/file/restore", response_model=RestorePathResponse)
+def restore_deleted_path(
+    req: RestorePathRequest,
+    user: User = Depends(require_user),
+) -> RestorePathResponse:
+    """Reintroduce a deleted file or folder as of just before its delete
+    commit — a new additive commit, no history rewrite. Each restored page
+    runs the create lifecycle, so the restorer becomes its owner."""
+    try:
+        rel = filesystem.safe_rel_path(req.path)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    if filesystem.absolute(rel).exists():
+        raise HTTPException(status_code=409, detail="path already exists")
+    fate = wiki_git.path_fate(rel)
+    if fate is None:
+        raise HTTPException(status_code=404, detail="not found")
+    if fate.status == "moved":
+        raise HTTPException(
+            status_code=409, detail=f"not deleted — moved to '{fate.new_path}'"
+        )
+    if fate.last_content_sha is None:
+        raise HTTPException(status_code=404, detail="no restorable content")
+    # A moved-then-deleted page restores at its final (post-move) name, which
+    # may differ from the requested path — make sure that spot is free too.
+    if fate.path != rel and filesystem.absolute(fate.path).exists():
+        raise HTTPException(status_code=409, detail=f"'{fate.path}' already exists")
+    files, md_paths = _restorable_paths(fate)
+    if not files:
+        raise HTTPException(status_code=404, detail="no restorable content")
+    # Page-level ACL rows died with the pages; this resolves through the
+    # surviving ancestor folders' rules (implicit-public if unmanaged).
+    for p in md_paths:
+        require_can("write", p, user)
+    blocking = coedit.blocking_active_session_path(fate.path)
+    if blocking is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=f"someone is editing an unsaved draft at '{blocking}' — "
+            "wait for it to be saved",
+        )
+    author = _git_author(user)
+    try:
+        sha = wiki_git.restore_path(
+            fate.path, fate.last_content_sha, f"restore {fate.path}", author=author
+        )
+    except wiki_git.UnknownSha as exc:
+        raise HTTPException(status_code=404, detail="no restorable content") from exc
+    for p in md_paths:
+        # Create lifecycle: default-public ACLs + owner stamp, FTS reindex,
+        # trigger fan-out, MCP pub-sub.
+        wiki_notify.after_doc_write(
+            p, sha, ChangeKind.CREATE, author, owner_user_id=user.id
+        )
+    # Restoring a folder can reintroduce trigger YAMLs whose cache rows were
+    # dropped — reconverge the cache from disk so they fire again.
+    if any(p.rsplit("/", 1)[-1].startswith(".trigger_") for p in files):
+        triggers_repo.rebuild_from_filesystem()
+    log.info(
+        "restored %s (%d pages) from %s by %s sha=%s",
+        fate.path,
+        len(md_paths),
+        fate.last_content_sha[:8],
+        author or "?",
+        sha[:8],
+    )
+    return RestorePathResponse(path=fate.path, sha=sha, restored=files)
 
 
 @router.post("/reindex", response_model=ReindexResponse)
