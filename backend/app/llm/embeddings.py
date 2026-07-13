@@ -16,12 +16,10 @@ from __future__ import annotations
 import hashlib
 import logging
 from array import array
-from functools import lru_cache
-
-from openai import OpenAI
 
 from app.config import CONFIG
 from app.llm import settings as llm_settings
+from app.llm.providers import openai as openai_provider
 
 log = logging.getLogger(__name__)
 
@@ -57,11 +55,6 @@ def unpack(blob: bytes) -> list[float]:
     return a.tolist()
 
 
-@lru_cache(maxsize=4)
-def _client(api_key: str) -> OpenAI:
-    return OpenAI(api_key=api_key)
-
-
 def _api_key() -> str:
     try:
         return llm_settings.get().openai_api_key or ""
@@ -90,19 +83,11 @@ def embed_texts(texts: list[str]) -> list[list[float]] | None:
     key = _api_key()
     if not key:
         return None
-    client = _client(key)
     model = model_name()
     out: list[list[float]] = []
     try:
         for i in range(0, len(texts), _BATCH):
-            # OpenAI rejects empty strings; substitute a space.
-            chunk = [t if t else " " for t in texts[i : i + _BATCH]]
-            resp = client.embeddings.create(model=model, input=chunk)
-            # The API does not guarantee resp.data is in input order; each item
-            # carries its input position in ``.index``. Order by it so vector[i]
-            # aligns to texts[i] — otherwise a batch could silently mis-assign a
-            # page's vector to another page.
-            out.extend(list(d.embedding) for d in sorted(resp.data, key=lambda d: d.index))
+            out.extend(openai_provider.embed(key, model, texts[i : i + _BATCH]))
         return out
     except Exception:
         log.warning("embeddings: embed_texts failed for %d text(s)", len(texts), exc_info=True)

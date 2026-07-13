@@ -30,6 +30,22 @@ def _client(api_key: str) -> OpenAI:
     return OpenAI(api_key=api_key)
 
 
+def embed(api_key: str, model: str, inputs: list[str]) -> list[list[float]]:
+    """One embedding vector per input, ordered to match ``inputs``.
+
+    The SDK call surface for embeddings lives here (with the rest of the OpenAI
+    provider) so no module above ``providers/`` imports the SDK. Reuses the same
+    cached ``_client`` as chat, so there's a single client-construction path.
+
+    OpenAI rejects empty strings, so blanks are sent as a space. The API may
+    return items out of order; each carries its input position in ``.index``,
+    so results are sorted by it before extraction.
+    """
+    payload = [t if t else " " for t in inputs]
+    resp = cast(Any, _client(api_key)).embeddings.create(model=model, input=payload)
+    return [list(d.embedding) for d in sorted(resp.data, key=lambda d: d.index)]
+
+
 class OpenAIProvider:
     name = "openai"
 
