@@ -123,6 +123,25 @@ def test_folder_trash_and_restore(tmp_repo):
     assert client.get("/api/wiki/file?path=proj/sub/b.md").json()["body"] == "# B\n"
 
 
+def test_single_file_folder_classified_as_folder(tmp_repo):
+    # A folder with exactly one .md file trashes to the same tree as trashing
+    # that page directly (.trash/<id>/only/a.md). The recorded root — not the
+    # file list — must decide: this is a folder, restore must recreate `only/`.
+    user = seed_user()
+    client = _client(user)
+    client.put("/api/wiki/file", json={"path": "only/a.md", "body": "# A\n"})
+
+    tid = client.delete("/api/wiki/file?path=only").json()["trash_id"]
+    items = {i["path"]: i for i in client.get("/api/wiki/trash").json()["items"]}
+    assert items["only"]["kind"] == "folder"  # not "only/a.md" / "page"
+
+    view = client.get(f"/api/wiki/trash/{tid}").json()
+    assert view["path"] == "only" and view["kind"] == "folder"
+
+    assert client.post("/api/wiki/file/restore", json={"trash_id": tid}).status_code == 200
+    assert client.get("/api/wiki/file?path=only/a.md").json()["body"] == "# A\n"
+
+
 def test_trashed_private_page_hidden_from_other_user(tmp_repo):
     owner = seed_user()
     other = seed_user(uid="u_other", email="other@x.com")

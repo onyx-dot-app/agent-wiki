@@ -468,7 +468,8 @@ def delete_document_by_path(
     # hidden everywhere (see filesystem.TRASH_DIR + the enumerator exclusions).
     trash_id = wiki_trash.new_trash_id()
     dest = wiki_trash.trash_location(trash_id, rel)
-    sha, moves = wiki_git.move_path(rel, dest, f"trash {rel}", author=author)
+    msg = wiki_trash.trash_commit_message(rel)
+    sha, moves = wiki_git.move_path(rel, dest, msg, author=author)
     wiki_notify.after_doc_trashed(moves, sha, author)
     log.info("doc trashed %s (%d pages) trash_id=%s by %s", rel, len(md_paths), trash_id, author or "?")
     return DeleteDocumentResponse(sha=sha, trash_id=trash_id)

@@ -654,18 +654,21 @@ def list_trash_files() -> list[str]:
     return [p for p in out.split("\0") if p]
 
 
-def last_commit_meta_for_path(rel_path: str) -> tuple[str, str, str] | None:
-    """``(sha, author, ISO-ts)`` of the most recent commit touching ``rel_path``,
-    or ``None``. For a trashed path this is the trash-move commit (who/when)."""
+def last_commit_meta_for_path(rel_path: str) -> tuple[str, str, str, str] | None:
+    """``(sha, author, ISO-ts, message)`` of the most recent commit touching
+    ``rel_path``, or ``None``. For a trashed path this is the trash-move commit —
+    who/when plus the full message, whose ``Trash-Original`` trailer records the
+    root that was trashed (see ``app/wiki/trash.py``). ``message`` is placed last
+    so its embedded newlines can't be confused with a field separator."""
     sep = "\x1f"
     out = _run(
-        ["log", "-n1", f"--pretty=format:%H{sep}%an{sep}%aI", "--", rel_path],
+        ["log", "-n1", f"--pretty=format:%H{sep}%an{sep}%aI{sep}%B", "--", rel_path],
         check=False,
     ).stdout.strip()
     if not out:
         return None
-    parts = out.split(sep)
-    return (parts[0], parts[1], parts[2]) if len(parts) == 3 else None
+    parts = out.split(sep, 3)
+    return (parts[0], parts[1], parts[2], parts[3]) if len(parts) == 4 else None
 
 
 def restore_from_trash(

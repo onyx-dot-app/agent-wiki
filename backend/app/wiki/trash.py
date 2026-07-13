@@ -43,13 +43,39 @@ def trash_location(trash_id: str, original_path: str) -> str:
     return f"{TRASH_DIR}/{trash_id}/{original_path}"
 
 
+_ORIGINAL_TRAILER = "Trash-Original:"
+
+
+def trash_commit_message(original_path: str) -> str:
+    """Commit message for a trash-move.
+
+    The subject (``trash <path>``) is for humans; the ``Trash-Original`` trailer
+    records the *root* that was trashed so the Trash view can classify it. The
+    ``.trash/`` tree alone can't: trashing a page ``p/a.md`` and trashing a
+    folder ``p/`` whose only file is ``a.md`` both land as ``.trash/<id>/p/a.md``
+    — byte-identical trees. Only the deleter knows which it was, so we record it.
+    """
+    return f"trash {original_path}\n\n{_ORIGINAL_TRAILER} {original_path}"
+
+
+def _original_from_message(message: str) -> str | None:
+    for line in message.splitlines():
+        if line.startswith(_ORIGINAL_TRAILER):
+            return line[len(_ORIGINAL_TRAILER) :].strip() or None
+    return None
+
+
 def _entry(trash_id: str, originals: list[str]) -> TrashEntry | None:
     if not originals:
         return None
-    root = originals[0] if len(originals) == 1 else os.path.commonpath(originals)
-    kind = "page" if (len(originals) == 1 and root.endswith(".md")) else "folder"
     meta = wiki_git.last_commit_meta_for_path(f"{TRASH_DIR}/{trash_id}")
-    _sha, author, ts = meta if meta else ("", "", "")
+    _sha, author, ts, message = meta if meta else ("", "", "", "")
+    root = _original_from_message(message)
+    if root is None:
+        # No trailer (trash predating trash_commit_message) — infer from the file
+        # list. Ambiguous for a single-file folder, hence the trailer above.
+        root = originals[0] if len(originals) == 1 else os.path.commonpath(originals)
+    kind = "page" if root.endswith(".md") else "folder"
     return TrashEntry(
         trash_id=trash_id,
         original_path=root,
