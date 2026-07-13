@@ -1,4 +1,4 @@
-"""OpenAI embeddings for the ingestion relevance filter (Phase 0).
+"""OpenAI embeddings for the ingestion relevance filter.
 
 Best-effort, like ``app.db.fts``: any failure logs at WARNING and returns
 ``None`` so an embedding glitch never aborts a doc commit or the reindex
@@ -8,8 +8,7 @@ fallback), matching the chat providers.
 Vectors are ``text-embedding-3-small`` (1536-d), content-capped to match the
 offline model-selection study so production vectors are distributed like the
 vectors the cosine / model thresholds were calibrated on. Gated on the OpenAI
-key alone (:func:`available`): a deployment without one is a no-op, so this
-module changes no behavior until an OpenAI provider is configured.
+key alone (:func:`available`): a deployment without one is a no-op.
 """
 from __future__ import annotations
 

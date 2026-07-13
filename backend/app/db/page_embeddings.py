@@ -1,4 +1,4 @@
-"""Postgres store for wiki page embeddings (Phase 0 relevance-filter foundation).
+"""Postgres store for wiki page embeddings (ingestion relevance filter).
 
 Durable storage only — Postgres never computes similarity (no pgvector). The
 filter scores an incoming doc against *every* page, so scoring runs against an

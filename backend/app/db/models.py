@@ -825,7 +825,7 @@ class IngestSettings(Base):
 
 
 class PageEmbedding(Base):
-    """Per-page embedding vector for the ingestion relevance filter (Phase 0).
+    """Per-page embedding vector for the ingestion relevance filter.
 
     Durable store for the raw embedding of each ``.md`` page body. Postgres
     never computes similarity — scoring runs against an in-worker matrix loaded

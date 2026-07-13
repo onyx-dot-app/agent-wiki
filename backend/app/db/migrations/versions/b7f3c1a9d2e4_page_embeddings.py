@@ -1,9 +1,9 @@
 """page embeddings
 
 Adds ``page_embeddings`` — the per-page embedding-vector store for the
-ingestion relevance filter (Phase 0). Durable storage only; scoring runs
-against an in-worker matrix built from these rows. Guarded with the inspector
-because ``0001_initial`` builds fresh databases from the current models.
+ingestion relevance filter. Durable storage only; scoring runs against an
+in-worker matrix built from these rows. Guarded with the inspector because
+``0001_initial`` builds fresh databases from the current models.
 
 Revision ID: b7f3c1a9d2e4
 Revises: e4b8c61d9a73

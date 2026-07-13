@@ -38,7 +38,7 @@ def _extract_title(body: str) -> str:
 
 
 # --------------------------------------------------------------------------- #
-# Page embeddings (Phase 0 relevance-filter foundation)                       #
+# Page embeddings (ingestion relevance filter)                                #
 #                                                                             #
 # Ride the reindex path: the same walk that keeps OpenSearch fresh keeps the  #
 # per-page embedding store fresh. All best-effort and gated on an OpenAI key  #
