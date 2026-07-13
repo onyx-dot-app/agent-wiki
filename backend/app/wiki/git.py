@@ -24,10 +24,16 @@ from pydantic import BaseModel
 from app.config import CONFIG
 from app.models.wiki import PathMove
 from app.wiki import constants
+from app.wiki.filesystem import TRASH_DIR, TRASH_PREFIX
 
 log = logging.getLogger(__name__)
 
 _SHA_LINE_RE = re.compile(r"^[0-9a-f]{40}$")
+
+# Trashed items live under `.trash/` (TRASH_PREFIX, defined in filesystem.py).
+# Every path enumerator excludes it so trashed content never surfaces in the
+# tree, search, recents, or the reconcile sweep — the isolation the Trash
+# feature depends on. Trash internals address `.trash/` paths directly.
 
 
 class CommitInfo(BaseModel):
@@ -479,9 +485,9 @@ def ingest_update_times_24h(rel_path: str) -> list[int]:
 
 
 def list_paths(prefix: str = "") -> list[str]:
-    """List tracked files under a path prefix."""
+    """List tracked files under a path prefix (excluding the hidden ``.trash/``)."""
     out = _run(["ls-files", "-z", prefix or "."]).stdout
-    return [p for p in out.split("\0") if p]
+    return [p for p in out.split("\0") if p and not p.startswith(TRASH_PREFIX)]
 
 
 def bundle(dest_path: str) -> None:
@@ -515,7 +521,11 @@ def paths_touched_since(since_iso: str) -> set[str]:
         ],
         check=False,
     ).stdout
-    return {line for line in out.splitlines() if line.strip()}
+    return {
+        line
+        for line in out.splitlines()
+        if line.strip() and not line.startswith(TRASH_PREFIX)
+    }
 
 
 def rev_before(iso: str) -> str | None:
@@ -613,7 +623,11 @@ def paths_authored_by(author_email: str, limit: int = 50) -> list[tuple[str, str
             continue
         if not line or current_ts is None:
             continue
-        if line.endswith(".md") and line not in seen:
+        if (
+            line.endswith(".md")
+            and not line.startswith(TRASH_PREFIX)
+            and line not in seen
+        ):
             seen[line] = current_ts
     return list(seen.items())[:limit]
 
@@ -628,6 +642,60 @@ def tree_paths_at(sha: str) -> list[str]:
     """All tracked file paths in the tree at ``sha``."""
     out = _run(["ls-tree", "-r", "--name-only", sha], check=False).stdout
     return [line for line in out.splitlines() if line]
+
+
+def list_trash_files() -> list[str]:
+    """Tracked files currently under ``.trash/`` — the raw trash contents.
+
+    Deliberately bypasses the ``.trash/`` exclusion the other enumerators apply;
+    only the trash repo (``app/wiki/trash.py``) should call it.
+    """
+    out = _run(["ls-files", "-z", "--", TRASH_DIR]).stdout
+    return [p for p in out.split("\0") if p]
+
+
+def last_commit_meta_for_path(rel_path: str) -> tuple[str, str, str, str] | None:
+    """``(sha, author, ISO-ts, message)`` of the most recent commit touching
+    ``rel_path``, or ``None``. For a trashed path this is the trash-move commit —
+    who/when plus the full message, whose ``Trash-Original`` trailer records the
+    root that was trashed (see ``app/wiki/trash.py``). ``message`` is placed last
+    so its embedded newlines can't be confused with a field separator."""
+    sep = "\x1f"
+    out = _run(
+        ["log", "-n1", f"--pretty=format:%H{sep}%an{sep}%aI{sep}%B", "--", rel_path],
+        check=False,
+    ).stdout.strip()
+    if not out:
+        return None
+    parts = out.split(sep, 3)
+    return (parts[0], parts[1], parts[2], parts[3]) if len(parts) == 4 else None
+
+
+def restore_from_trash(
+    trash_id: str, message: str, author: str | None = None
+) -> tuple[str, list[PathMove]]:
+    """Move every file under ``.trash/<trash_id>/`` back to its original path
+    (the path with the ``.trash/<trash_id>/`` prefix stripped), one commit.
+
+    File-granular so restoring a single page doesn't collide with a still-live
+    sibling in the same folder. Returns ``(sha, moves)`` for the caller to
+    re-point path-keyed metadata via ``after_path_move``. Raises
+    ``GitNothingToCommitError`` if the trash id has no files.
+    """
+    prefix = f"{TRASH_PREFIX}{trash_id}/"
+    trashed = [p for p in list_trash_files() if p.startswith(prefix)]
+    if not trashed:
+        raise GitNothingToCommitError(prefix)
+    moves = [PathMove(old=p, new=p[len(prefix) :]) for p in trashed]
+    env_args = ["--author", author] if author else []
+    with commit_lock():
+        for mv in moves:
+            (Path(CONFIG.wiki_dir) / mv.new).parent.mkdir(parents=True, exist_ok=True)
+            _run(["mv", mv.old, mv.new])
+        _run(["commit", "-m", message, *env_args])
+        sha = _run(["rev-parse", "HEAD"]).stdout.strip()
+    log.info("restore_from_trash %s (%d files) sha=%s", trash_id, len(moves), sha[:8])
+    return sha, moves
 
 
 class UnknownSha(Exception):

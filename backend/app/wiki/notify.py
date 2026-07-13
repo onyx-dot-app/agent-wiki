@@ -152,6 +152,58 @@ def after_doc_delete(rel_path: str, sha: str, actor: str | None) -> None:
     mcp_pubsub.publish_list_changed()
 
 
+def after_doc_trashed(
+    moves: list[PathMove],
+    sha: str,
+    actor: str | None,
+    *,
+    root_move: PathMove | None = None,
+) -> None:
+    """Side effects when items are moved into ``.trash/`` (soft delete).
+
+    Trashing is a move, so this **re-points** the path-keyed metadata (ACL,
+    owner, policy, comments, activity, drafts, working-dirs) to the trash
+    location — that's what makes restore lossless: moving back re-points it
+    all to the original path. But unlike a normal move, the destination is
+    hidden, so we do **not** index or announce the ``.trash/`` copy; instead
+    we drop the item from search and fire a ``delete`` event on the old path,
+    so it disappears from search / triggers / live views. Restore reuses the
+    normal ``after_path_move`` (moving out of ``.trash/`` re-indexes at the
+    original path).
+
+    ``root_move`` is the folder/page root that was trashed (``rel`` →
+    ``.trash/<id>/rel``). Like ``after_path_move``, it's needed so a folder's
+    own ACL/policy row re-points to the trash location even when all its files
+    sit in a subdirectory — otherwise it strands at the (now gone) original
+    path and ``_trash_perms`` mis-authorizes the trashed folder. See
+    ``acl.on_path_moved``.
+    """
+    acl.on_path_moved(moves, root_move=root_move)
+    update_policy.on_path_moved(moves, root_move=root_move)
+    coedit.on_path_moved(moves)
+    for mv in moves:
+        if not mv.old.endswith(".md"):
+            continue
+        # Leave search/live: drop the index + embedding, fire delete, notify.
+        fts.delete_document(mv.old)
+        drop_page_embedding(mv.old)
+        fan_out_trigger_eval(mv.old, sha, ChangeKind.DELETE, actor)
+        mcp_pubsub.publish_doc_delete(mv.old, sha)
+        # Carry the durable metadata to the trash path so restore recovers it
+        # (do NOT re-anchor/re-index it — the .trash/ copy stays hidden).
+        comments.reassign_doc_path(mv.old, mv.new)
+        agent_activity.rename_doc(mv.old, mv.new)
+        drafts.rename(mv.old, mv.new)
+        page_dirs.rename_page(old_wiki_path=mv.old, new_wiki_path=mv.new)
+    # Trigger YAMLs moved into .trash are excluded from loading, so reconverging
+    # the cache from disk drops the trashed triggers (they stop firing).
+    try:
+        triggers_repo.rebuild_from_filesystem()
+    except Exception:
+        log.exception("trigger cache rebuild after trash failed")
+    mcp_pubsub.publish_list_changed()
+
+
 def after_path_move(
     moves: list[PathMove],
     sha: str,

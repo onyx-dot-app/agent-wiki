@@ -39,6 +39,8 @@ from app.models.file_system import (
     ReindexRequest,
     ReindexResponse,
     ReorderStarredRequest,
+    RestorePathResponse,
+    RestoreTrashRequest,
     ReviseDraftRequest,
     ReviseDraftResponse,
     SearchHitView,
@@ -46,6 +48,9 @@ from app.models.file_system import (
     SetDocumentDraftRequest,
     StarDocRequest,
     StarredDocsResponse,
+    TrashEntryView,
+    TrashItemView,
+    TrashListResponse,
 )
 from app.tasks.reindex import index_path
 from app.triggers import repo as triggers_repo
@@ -62,6 +67,7 @@ from app.wiki import (
     search as wiki_search,
     starred as wiki_starred,
     templates as templates_repo,
+    trash as wiki_trash,
     update_policy as update_policy_repo,
     utils as wiki_utils,
 )
@@ -456,13 +462,123 @@ def delete_document_by_path(
     for p in md_paths:
         require_can("write", p, user)
     author = _git_author(user)
-    sha = wiki_git.delete_path(rel, f"delete {rel}", author=author)
-    for p in md_paths:
-        # Drops FTS / ACL / comments / activity / working-dir state for each
-        # removed page.
-        wiki_notify.after_doc_delete(p, sha, author)
-    log.info("doc deleted %s (%d pages) by %s sha=%s", rel, len(md_paths), author or "?", sha[:8])
-    return DeleteDocumentResponse(sha=sha)
+    # Soft delete = move into the hidden .trash/<trash_id>/<path>. Because it's
+    # a move, after_doc_trashed re-points ACL/comments/policy to the trash
+    # location, so restore is lossless; the item is dropped from search and
+    # hidden everywhere (see filesystem.TRASH_DIR + the enumerator exclusions).
+    trash_id = wiki_trash.new_trash_id()
+    dest = wiki_trash.trash_location(trash_id, rel)
+    msg = wiki_trash.trash_commit_message(rel)
+    sha, moves = wiki_git.move_path(rel, dest, msg, author=author)
+    wiki_notify.after_doc_trashed(
+        moves, sha, author, root_move=PathMove(old=rel, new=dest)
+    )
+    log.info("doc trashed %s (%d pages) trash_id=%s by %s", rel, len(md_paths), trash_id, author or "?")
+    return DeleteDocumentResponse(sha=sha, trash_id=trash_id)
+
+
+def _trash_perms(user: User, entry: "wiki_trash.TrashEntry") -> set[str]:
+    """The user's permissions on a trashed item, resolved once against the
+    *trash* path — the item's own ACL grants were re-pointed there by the
+    trashing move, so this reflects who could access the page, not who can see
+    its (possibly unrelated) original folder now. Callers derive read-visibility
+    and restore (write) from the returned set to avoid a second DB round-trip."""
+    loc = wiki_trash.trash_location(entry.trash_id, entry.original_path)
+    return acl.effective(user.id, user.is_admin, loc)
+
+
+@router.get("/trash", response_model=TrashListResponse)
+def list_trash(user: User = Depends(require_user)) -> TrashListResponse:
+    """Trashed pages/folders, newest-first — the Trash view. Derived from the
+    `.trash/` git tree; shown only to callers who could access the item."""
+    items: list[TrashEntryView] = []
+    for e in wiki_trash.list_entries():
+        perms = _trash_perms(user, e)
+        if "read" not in perms:
+            continue
+        items.append(
+            TrashEntryView(
+                trash_id=e.trash_id,
+                path=e.original_path,
+                kind=e.kind,
+                trashed_by=e.trashed_by,
+                trashed_at=e.trashed_at,
+                can_restore="write" in perms,
+            )
+        )
+    return TrashListResponse(items=items)
+
+
+@router.get("/trash/{trash_id}", response_model=TrashItemView)
+def view_trash_item(
+    trash_id: str,
+    user: User = Depends(require_user),
+) -> TrashItemView:
+    """A trashed item's details + (for a page) its content, for preview before
+    restore. Reads the `.trash/` copy directly — the only read path into it."""
+    entry = wiki_trash.entry_for(trash_id)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="not found")
+    perms = _trash_perms(user, entry)
+    if "read" not in perms:
+        raise HTTPException(status_code=403, detail="not permitted")
+    body: str | None = None
+    if entry.kind == "page":
+        body = wiki_git.read_file_opt(
+            wiki_trash.trash_location(trash_id, entry.original_path)
+        )
+    return TrashItemView(
+        trash_id=entry.trash_id,
+        path=entry.original_path,
+        kind=entry.kind,
+        trashed_by=entry.trashed_by,
+        trashed_at=entry.trashed_at,
+        can_restore="write" in perms,
+        body=body,
+    )
+
+
+@router.post("/file/restore", response_model=RestorePathResponse)
+def restore_trashed(
+    req: RestoreTrashRequest,
+    user: User = Depends(require_user),
+) -> RestorePathResponse:
+    """Restore a trashed item: move it back out of `.trash/` to its original
+    path. Lossless — `after_path_move` re-points the metadata that trashing
+    parked at the trash location."""
+    entry = wiki_trash.entry_for(req.trash_id)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="not found")
+    if "write" not in _trash_perms(user, entry):
+        raise HTTPException(status_code=403, detail="not permitted")
+    # Refuse if any original path is now occupied (re-created since deletion).
+    prefix = f"{wiki_trash.TRASH_DIR}/{req.trash_id}/"
+    for f in wiki_git.list_trash_files():
+        if f.startswith(prefix) and filesystem.absolute(f[len(prefix) :]).exists():
+            raise HTTPException(
+                status_code=409, detail=f"'{f[len(prefix):]}' already exists"
+            )
+    author = _git_author(user)
+    sha, moves = wiki_git.restore_from_trash(
+        req.trash_id, f"restore {entry.original_path}", author=author
+    )
+    # Moving out of .trash/ is a normal move: re-index + re-point everything back.
+    # root_move is the trash root → original, so a folder's own ACL/policy row
+    # follows even when its files are all nested (mirrors the trash direction).
+    trash_root = wiki_trash.trash_location(req.trash_id, entry.original_path)
+    wiki_notify.after_path_move(
+        moves, sha, author, root_move=PathMove(old=trash_root, new=entry.original_path)
+    )
+    log.info(
+        "restored trash_id=%s to %s (%d files) by %s",
+        req.trash_id,
+        entry.original_path,
+        len(moves),
+        author or "?",
+    )
+    return RestorePathResponse(
+        path=entry.original_path, sha=sha, restored=[m.new for m in moves]
+    )
 
 
 @router.post("/reindex", response_model=ReindexResponse)

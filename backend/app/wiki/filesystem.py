@@ -10,13 +10,27 @@ from app.models.wiki import PathMove
 
 log = logging.getLogger(__name__)
 
+# Reserved top-level directory holding trashed items (`.trash/<id>/<path>`).
+# It is internal: no user-facing path may live in or resolve into it, so the
+# whole feature's isolation hinges on rejecting it here — every read/write/list
+# normalizes through safe_rel_path. Trash internals build `.trash/…` paths
+# directly (bypassing this guard) via the trash repo. This is the single
+# definition; git.py and trash.py import it.
+TRASH_DIR = ".trash"
+TRASH_PREFIX = TRASH_DIR + "/"
+
 
 def safe_rel_path(rel_path: str) -> str:
-    """Reject path traversal. Returns a normalized path or raises ValueError."""
+    """Reject path traversal and the reserved ``.trash/`` area. Returns a
+    normalized path or raises ValueError."""
     if rel_path.startswith("/") or ".." in Path(rel_path).parts:
         log.warning("rejected unsafe wiki path: %r", rel_path)
         raise ValueError(f"unsafe path: {rel_path!r}")
-    return os.path.normpath(rel_path)
+    normalized = os.path.normpath(rel_path)
+    if normalized == TRASH_DIR or normalized.startswith(TRASH_PREFIX):
+        log.warning("rejected access to trash path: %r", rel_path)
+        raise ValueError(f"path is in trash and not directly accessible: {rel_path!r}")
+    return normalized
 
 
 def absolute(rel_path: str) -> Path:
