@@ -16,6 +16,7 @@ import useSWR from "swr";
 import {
   Button,
   Divider,
+  EmptyMessageCard,
   LineItemButton,
   OpenButton,
   Popover,
@@ -23,6 +24,7 @@ import {
   SelectButton,
 } from "@onyx-ai/opal/components";
 import {
+  SvgAlertTriangle,
   SvgBubbleText,
   SvgChevronLeft,
   SvgChevronRight,
@@ -59,7 +61,8 @@ import { ShareDialog } from "@/components/wiki/ShareDialog";
 import { CommentsPanel } from "@/components/wiki/CommentsPanel";
 import { UpdateHealthBanner } from "@/components/wiki/UpdateHealthBanner";
 import { UpdatePolicyPanel } from "@/components/wiki/UpdatePolicyPanel";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, ApiError } from "@/lib/api";
+import { isDocId, wikiHref, resolveDocId, resolveIds } from "@/lib/wikiHref";
 import { listComments } from "@/lib/comments";
 import {
   paintCommentHighlights,
@@ -121,39 +124,80 @@ interface FileResponse {
 export default function WikiRoute() {
   const { user, loading } = useRequireAuth();
   const isMobile = useIsMobile();
+  const router = useRouter();
   const params = useParams<{ slug?: string[] }>();
   const searchParams = useSearchParams();
   const isNewMode = searchParams?.get("new") === "1";
   const rawSlugParts = (params?.slug ?? []) as string[];
+
+  // Every wiki URL is id-based: `/app/wiki/<id>` (Google-Docs style). The id is
+  // stable, so the URL survives rename/move. A legacy `/app/wiki/<path>` URL
+  // still resolves as input and is redirected to its id URL below.
+  const first = rawSlugParts[0];
+  const idMode = !!first && isDocId(first);
+  const commentId = searchParams?.get("comment") ?? null;
+
+  // id mode: resolve the id to its current path / kind / deleted state.
+  const { data: resolved, error: resolveErr } = useSWR(
+    idMode ? `/wiki/id/${first}` : null,
+    () => resolveDocId(first as string),
+    { revalidateOnFocus: false },
+  );
+
   // Next.js may hand back percent-encoded segments (e.g. "local%20testing").
   // Decode so labels and downstream API paths use literal characters.
-  const slugParts = rawSlugParts.map((s) => {
+  const decodedParts = rawSlugParts.map((s) => {
     try {
       return decodeURIComponent(s);
     } catch {
       return s;
     }
   });
-  const slugPath = slugParts.join("/");
-  const isFile = slugPath.endsWith(".md");
+  const pathModePath = decodedParts.join("/");
+  // The doc/folder path we're viewing: from the resolved id, or (legacy path
+  // URL) straight from the URL.
+  const effectivePath = idMode ? (resolved?.path ?? null) : pathModePath;
+  const isFile = !!effectivePath && effectivePath.endsWith(".md");
 
-  // Remember the most recent wiki path so the "Last viewed" landing
-  // setting has something to fall back to, and feed the sidebar
-  // "Recents" list when an actual doc (not a folder) is opened.
+  // Redirect a legacy path URL to its canonical id URL (`/app/wiki/<id>`).
+  // Skips the new-doc flow (no id yet) and paths with no live id (unsaved /
+  // not-yet-backfilled) — those keep rendering by path. Guarded so it can't
+  // loop.
   useEffect(() => {
-    rememberWikiPath("/app/wiki" + (slugPath ? "/" + slugPath : ""));
-    if (isFile) void recordRecentDoc(slugPath);
-  }, [slugPath, isFile]);
+    if (idMode || !pathModePath || isNewMode) return;
+    const suffix = commentId ? `?comment=${encodeURIComponent(commentId)}` : "";
+    let cancelled = false;
+    void resolveIds([pathModePath])
+      .then((map) => {
+        const id = map[pathModePath];
+        if (!cancelled && id) router.replace(wikiHref(id) + suffix);
+      })
+      .catch(() => {
+        /* no live id — render by path */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [idMode, pathModePath, isNewMode, commentId, router]);
+
+  // Remember the most recent wiki path (for the "Last viewed" landing) and
+  // feed the sidebar Recents when an actual doc is opened.
+  useEffect(() => {
+    if (effectivePath === null) return;
+    rememberWikiPath("/app/wiki" + (effectivePath ? "/" + effectivePath : ""));
+    if (isFile) void recordRecentDoc(effectivePath);
+  }, [effectivePath, isFile]);
 
   // Tab title tracks the open doc (or folder); falls back to the app name.
   useEffect(() => {
-    const last = slugPath.split("/").pop() ?? "";
+    if (effectivePath === null) return;
+    const last = effectivePath.split("/").pop() ?? "";
     const label = isFile ? last.replace(/\.md$/i, "") : last;
     document.title = label || "agent-wiki";
     return () => {
       document.title = "agent-wiki";
     };
-  }, [slugPath, isFile]);
+  }, [effectivePath, isFile]);
 
   if (loading || !user)
     return (
@@ -162,12 +206,50 @@ export default function WikiRoute() {
       </main>
     );
 
-  if (isFile) return <FileViewer path={slugPath} />;
-  if (isNewMode) return <NewDocView dir={slugPath} />;
+  if (idMode) {
+    // Unknown id / resolve failure / deleted page → the link no longer points
+    // at a live doc. (Deleted-page recovery is a separate feature.)
+    if (resolveErr || resolved?.deleted_at)
+      return <WikiUnknownLink status={(resolveErr as ApiError)?.status} />;
+    if (!resolved)
+      return (
+        <main className={isMobile ? "p-4" : "p-8"}>
+          <LoadingSpinner center />
+        </main>
+      );
+  }
+
+  if (isFile) return <FileViewer path={effectivePath as string} />;
+  if (isNewMode) return <NewDocView dir={pathModePath} />;
   // Wiki root with no doc open → the "Welcome to Onyx Wiki" landing.
   // Sub-folders still render the directory explorer.
-  if (slugPath === "") return <WikiHome />;
-  return <Explorer dir={slugPath} />;
+  if (!effectivePath) return <WikiHome />;
+  return <Explorer dir={effectivePath} />;
+}
+
+/** A wiki URL that no longer points at a live doc — an unknown id or one whose
+ * page has been deleted. Recovering deleted pages is a separate feature. */
+function WikiUnknownLink({ status }: { status?: number }) {
+  const router = useRouter();
+  return (
+    <main className="flex h-full items-center justify-center p-8 pb-[16vh]">
+      <div className="flex flex-col items-center gap-4">
+        <EmptyMessageCard
+          sizePreset="main-ui"
+          icon={SvgAlertTriangle}
+          title="This page isn’t available"
+          description={
+            status === 404
+              ? "The link may be broken, or the page was removed."
+              : "The page it pointed to may have been moved or removed."
+          }
+        />
+        <Button onClick={() => router.push("/app/wiki")}>
+          Go to wiki home
+        </Button>
+      </div>
+    </main>
+  );
 }
 
 function Explorer({ dir }: { dir: string }) {
@@ -729,7 +811,7 @@ function NewDocView({ dir }: { dir: string }) {
     try {
       const name = filenameNoExt + ".md";
       const fullPath = (destDir ? destDir + "/" : "") + name;
-      await apiFetch("/wiki/file", {
+      const created = await apiFetch<{ id?: string | null }>("/wiki/file", {
         method: "PUT",
         body: JSON.stringify({
           path: fullPath,
@@ -747,7 +829,12 @@ function NewDocView({ dir }: { dir: string }) {
       // Hand-off: keep the drafting state (and the chat's drafting
       // session) alive across the navigation — see the unmount cleanup.
       createHandoffRef.current = true;
-      router.push(`/app/wiki/${fullPath}?new=1`);
+      // Land on the new page's id URL directly (the create response carries
+      // the minted id), so it's a clean /app/wiki/<id> like every other page.
+      // Keep ?new=1 — FileViewer reads it to auto-open the assistant on a
+      // freshly-created doc.
+      const base = created.id ? wikiHref(created.id) : `/app/wiki/${fullPath}`;
+      router.push(`${base}?new=1`);
     } catch (e) {
       setError(e instanceof Error ? e.message : "create failed");
       setSaving(false);
