@@ -470,7 +470,9 @@ def delete_document_by_path(
     dest = wiki_trash.trash_location(trash_id, rel)
     msg = wiki_trash.trash_commit_message(rel)
     sha, moves = wiki_git.move_path(rel, dest, msg, author=author)
-    wiki_notify.after_doc_trashed(moves, sha, author)
+    wiki_notify.after_doc_trashed(
+        moves, sha, author, root_move=PathMove(old=rel, new=dest)
+    )
     log.info("doc trashed %s (%d pages) trash_id=%s by %s", rel, len(md_paths), trash_id, author or "?")
     return DeleteDocumentResponse(sha=sha, trash_id=trash_id)
 
@@ -556,7 +558,12 @@ def restore_trashed(
         req.trash_id, f"restore {entry.original_path}", author=author
     )
     # Moving out of .trash/ is a normal move: re-index + re-point everything back.
-    wiki_notify.after_path_move(moves, sha, author)
+    # root_move is the trash root → original, so a folder's own ACL/policy row
+    # follows even when its files are all nested (mirrors the trash direction).
+    trash_root = wiki_trash.trash_location(req.trash_id, entry.original_path)
+    wiki_notify.after_path_move(
+        moves, sha, author, root_move=PathMove(old=trash_root, new=entry.original_path)
+    )
     log.info(
         "restored trash_id=%s to %s (%d files) by %s",
         req.trash_id,

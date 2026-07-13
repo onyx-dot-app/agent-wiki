@@ -142,6 +142,35 @@ def test_single_file_folder_classified_as_folder(tmp_repo):
     assert client.get("/api/wiki/file?path=only/a.md").json()["body"] == "# A\n"
 
 
+def test_trashed_folder_grant_repoints_when_files_nested(tmp_repo):
+    # A folder visible only via a *folder-level* grant, whose only file sits in
+    # a subdirectory. Trashing must re-point the folder's own grant to the trash
+    # location (root_move) — otherwise it strands at the now-gone path and the
+    # item is mis-authorized in Trash. Without the fix `other` sees nothing.
+    owner = seed_user()
+    other = seed_user(uid="u_o2", email="o2@x.com")
+    oc = _client(owner)
+    oc.put("/api/wiki/file", json={"path": "proj/sub/a.md", "body": "# A\n"})
+    # Drop the page's own public grant so visibility hinges on the folder grant.
+    for gid in _everyone_ids("proj/sub/a.md"):
+        acl.revoke(gid)
+    acl.grant(
+        resource_kind="folder",
+        resource_path="proj",
+        principal_kind="everyone",
+        principal_id=None,
+        permission="read",
+        granted_by_user_id=None,
+    )
+
+    tid = oc.delete("/api/wiki/file?path=proj").json()["trash_id"]
+
+    other_c = _client(other)
+    items = {i["path"]: i for i in other_c.get("/api/wiki/trash").json()["items"]}
+    assert "proj" in items and items["proj"]["kind"] == "folder"
+    assert other_c.get(f"/api/wiki/trash/{tid}").status_code == 200
+
+
 def test_trashed_private_page_hidden_from_other_user(tmp_repo):
     owner = seed_user()
     other = seed_user(uid="u_other", email="other@x.com")

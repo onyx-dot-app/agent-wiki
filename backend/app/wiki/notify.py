@@ -152,7 +152,13 @@ def after_doc_delete(rel_path: str, sha: str, actor: str | None) -> None:
     mcp_pubsub.publish_list_changed()
 
 
-def after_doc_trashed(moves: list[PathMove], sha: str, actor: str | None) -> None:
+def after_doc_trashed(
+    moves: list[PathMove],
+    sha: str,
+    actor: str | None,
+    *,
+    root_move: PathMove | None = None,
+) -> None:
     """Side effects when items are moved into ``.trash/`` (soft delete).
 
     Trashing is a move, so this **re-points** the path-keyed metadata (ACL,
@@ -164,9 +170,16 @@ def after_doc_trashed(moves: list[PathMove], sha: str, actor: str | None) -> Non
     so it disappears from search / triggers / live views. Restore reuses the
     normal ``after_path_move`` (moving out of ``.trash/`` re-indexes at the
     original path).
+
+    ``root_move`` is the folder/page root that was trashed (``rel`` →
+    ``.trash/<id>/rel``). Like ``after_path_move``, it's needed so a folder's
+    own ACL/policy row re-points to the trash location even when all its files
+    sit in a subdirectory — otherwise it strands at the (now gone) original
+    path and ``_trash_perm`` mis-authorizes the trashed folder. See
+    ``acl.on_path_moved``.
     """
-    acl.on_path_moved(moves)
-    update_policy.on_path_moved(moves)
+    acl.on_path_moved(moves, root_move=root_move)
+    update_policy.on_path_moved(moves, root_move=root_move)
     coedit.on_path_moved(moves)
     for mv in moves:
         if not mv.old.endswith(".md"):
