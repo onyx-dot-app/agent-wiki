@@ -68,6 +68,25 @@ def id_for_path(path: str) -> str | None:
         return row.id if row else None
 
 
+def ids_for_paths(paths: list[str]) -> dict[str, str]:
+    """``{path: id}`` for the live rows among ``paths``, in one query.
+
+    Paths without a live row are simply absent from the result — callers
+    building navigation links tolerate a missing id (fall back to the path).
+    Used by the listing/search endpoints to attach stable ids in bulk rather
+    than resolving one path at a time.
+    """
+    if not paths:
+        return {}
+    with session() as s:
+        rows = s.execute(
+            select(WikiDocId.path, WikiDocId.id).where(
+                WikiDocId.path.in_(paths), WikiDocId.deleted_at.is_(None)
+            )
+        ).all()
+    return {path: doc_id for path, doc_id in rows}
+
+
 def get_or_mint(path: str) -> str:
     """Id of the live row at ``path``, minting one if absent.
 

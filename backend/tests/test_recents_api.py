@@ -41,11 +41,11 @@ def test_record_and_list_newest_first(client):
 
     _record(client, "a.md")
     _record(client, "b.md")
-    assert client.get("/api/wiki/recents").json() == {"paths": ["b.md", "a.md"]}
+    assert client.get("/api/wiki/recents").json()["paths"] == ["b.md", "a.md"]
 
     # Re-opening an older doc bumps it to the front, no duplicate row.
     _record(client, "a.md")
-    assert client.get("/api/wiki/recents").json() == {"paths": ["a.md", "b.md"]}
+    assert client.get("/api/wiki/recents").json()["paths"] == ["a.md", "b.md"]
 
 
 def test_doc_updates_do_not_affect_recents(client):
@@ -63,7 +63,7 @@ def test_doc_updates_do_not_affect_recents(client):
     wiki_git.commit_file("never-opened.md", "# n v2", "agent update")
     wiki_git.commit_file("a.md", "# a v2", "agent update")
 
-    assert client.get("/api/wiki/recents").json() == {"paths": ["b.md", "a.md"]}
+    assert client.get("/api/wiki/recents").json()["paths"] == ["b.md", "a.md"]
 
 
 def test_recents_are_per_user(client):
@@ -77,7 +77,7 @@ def test_recents_are_per_user(client):
 
     login_fastapi(client, bob)
     _record(client, "b.md")
-    assert client.get("/api/wiki/recents").json() == {"paths": ["b.md"]}
+    assert client.get("/api/wiki/recents").json()["paths"] == ["b.md"]
 
 
 def test_deleted_docs_drop_out(client):
@@ -89,7 +89,7 @@ def test_deleted_docs_drop_out(client):
     _record(client, "keep.md")
 
     wiki_git.delete_path("gone.md", "remove")
-    assert client.get("/api/wiki/recents").json() == {"paths": ["keep.md"]}
+    assert client.get("/api/wiki/recents").json()["paths"] == ["keep.md"]
 
 
 def test_revoked_read_access_drops_out(client):
@@ -100,7 +100,7 @@ def test_revoked_read_access_drops_out(client):
 
     login_fastapi(client, bob)
     _record(client, "private.md")
-    assert client.get("/api/wiki/recents").json() == {"paths": ["private.md"]}
+    assert client.get("/api/wiki/recents").json()["paths"] == ["private.md"]
 
     # Make the doc owner-only after Bob's view.
     acl.set_owner("private.md", alice)
@@ -108,7 +108,7 @@ def test_revoked_read_access_drops_out(client):
         if grant["principal_kind"] == "everyone":
             acl.revoke(grant["id"])
 
-    assert client.get("/api/wiki/recents").json() == {"paths": []}
+    assert client.get("/api/wiki/recents").json()["paths"] == []
 
 
 def test_record_requires_read_access(client):
@@ -123,7 +123,7 @@ def test_record_requires_read_access(client):
     login_fastapi(client, bob)
     resp = client.post("/api/wiki/recents", json={"path": "private.md"})
     assert resp.status_code == 403
-    assert client.get("/api/wiki/recents").json() == {"paths": []}
+    assert client.get("/api/wiki/recents").json()["paths"] == []
 
 
 def test_record_rejects_traversal(client):

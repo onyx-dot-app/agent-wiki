@@ -176,3 +176,37 @@ def test_resolve_unknown_id_404(tmp_repo):
     client = _client(user)
     assert client.get("/api/wiki/id/deadbeefdeadbeef").status_code == 404
     assert client.get("/api/wiki/file?id=deadbeefdeadbeef").status_code == 404
+
+
+def test_listing_endpoints_carry_stable_id(tmp_repo):
+    user = seed_user()
+    client = _client(user)
+    page_id = client.put(
+        "/api/wiki/file", json={"path": "proj/a.md", "body": "# A\n"}
+    ).json()["id"]
+
+    # The tree listing is file-based (git ls-files), so it carries page ids;
+    # implicit folders like ``proj`` aren't rows here (the frontend derives the
+    # folder tree from paths and resolves a folder's own id separately).
+    entries = {e["path"]: e["id"] for e in client.get("/api/wiki").json()["entries"]}
+    assert entries["proj/a.md"] == page_id
+
+    # Recents and starred expose the id alongside the legacy paths list.
+    client.post("/api/wiki/recents", json={"path": "proj/a.md"})
+    client.post("/api/wiki/starred", json={"path": "proj/a.md"})
+    recents = client.get("/api/wiki/recents").json()
+    starred = client.get("/api/wiki/starred").json()
+    assert recents["paths"] == ["proj/a.md"]
+    assert recents["items"] == [{"path": "proj/a.md", "id": page_id}]
+    assert starred["items"] == [{"path": "proj/a.md", "id": page_id}]
+
+
+def test_listing_id_is_none_for_unbackfilled_page(tmp_repo):
+    # A page seeded outside the API has no id row yet; the tree still lists it,
+    # with id=None, rather than failing.
+    user = seed_user()
+    client = _client(user)
+    wiki_git.commit_file("legacy.md", "# L\n", "seed")
+    entries = {e["path"]: e["id"] for e in client.get("/api/wiki").json()["entries"]}
+    assert "legacy.md" in entries
+    assert entries["legacy.md"] is None

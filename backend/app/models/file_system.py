@@ -102,10 +102,18 @@ class IngestRequest(BaseModel):
 class DocumentEntry(BaseModel):
     path: str
     updated_at: str  # ISO-8601 author-time of the most recent commit touching the path
+    id: str | None = None  # stable wiki_doc_id; None for pre-id rows not yet backfilled
 
 
 class ListDocumentsResponse(BaseModel):
     entries: list[DocumentEntry]
+
+
+class DocRef(BaseModel):
+    """A path paired with its stable id, for id-based navigation links."""
+
+    path: str
+    id: str | None = None
 
 
 class RecordRecentDocRequest(BaseModel):
@@ -116,6 +124,9 @@ class RecentDocsResponse(BaseModel):
     # Newest-first paths of docs the user opened, already filtered to
     # ones that still exist and remain readable.
     paths: list[str]
+    # Same list paired with stable ids, for id-based links. Kept alongside
+    # ``paths`` (not replacing it) so the pre-migration frontend still works.
+    items: list[DocRef] = []
 
 
 class StarDocRequest(BaseModel):
@@ -131,6 +142,9 @@ class StarredDocsResponse(BaseModel):
     # User-ordered starred doc paths, already filtered to ones that
     # still exist and remain readable.
     paths: list[str]
+    # Same list paired with stable ids, for id-based links. Additive; see
+    # RecentDocsResponse.
+    items: list[DocRef] = []
 
 
 class RecentPageView(BaseModel):
@@ -145,6 +159,7 @@ class RecentPageView(BaseModel):
     title: str
     updated_at: str
     preview: str
+    id: str | None = None  # stable wiki_doc_id
 
 
 class ListRecentPagesResponse(BaseModel):
@@ -319,11 +334,12 @@ class FileDiffResponse(BaseModel):
 
 
 class SearchHitView(BaseModel):
-    doc_id: str
+    doc_id: str  # search-index key (currently the path); distinct from the stable id below
     path: str
     title: str | None
     snippet: str
     score: float
+    id: str | None = None  # stable wiki_doc_id, for id-based navigation
 
 
 class FolderHitView(BaseModel):
