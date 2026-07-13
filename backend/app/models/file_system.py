@@ -184,6 +184,39 @@ class MovePathResponse(BaseModel):
 
 class DeleteDocumentResponse(BaseModel):
     sha: str
+    # Deleting moves the item to Trash; this is its handle for restore/undo.
+    trash_id: str | None = None
+
+
+class TrashEntryView(BaseModel):
+    """One item in the Trash list."""
+
+    trash_id: str
+    path: str  # original location; restore moves it back here
+    kind: Literal["page", "folder"]
+    trashed_by: str
+    trashed_at: str  # ISO-8601
+    can_restore: bool = False
+
+
+class TrashListResponse(BaseModel):
+    items: list[TrashEntryView]
+
+
+class TrashItemView(TrashEntryView):
+    """A single trashed item plus (for a page) its content, for preview."""
+
+    body: str | None = None
+
+
+class RestoreTrashRequest(BaseModel):
+    trash_id: str = Field(min_length=1)
+
+
+class RestorePathResponse(BaseModel):
+    path: str  # where it was restored to
+    sha: str
+    restored: list[str]  # every file reintroduced
 
 
 class ReindexResponse(BaseModel):
