@@ -119,7 +119,6 @@ def tmp_config(tmp_path, monkeypatch):
         ingest_bm25_title_boost=2.0,
         ingest_bm25_limit=20,
         ingest_irrelevant_stop_n=2,
-        ingest_embeddings_enabled=False,
         ingest_embed_model="text-embedding-3-small",
         ingest_eval_logging=False,
         ingest_eval_retention_days=90,

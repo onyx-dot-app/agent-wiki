@@ -7,9 +7,9 @@ fallback), matching the chat providers.
 
 Vectors are ``text-embedding-3-small`` (1536-d), content-capped to match the
 offline model-selection study so production vectors are distributed like the
-vectors the cosine / model thresholds were calibrated on. Everything here is
-gated behind ``CONFIG.ingest_embeddings_enabled`` (default off), so importing
-or shipping this module changes no behavior until an operator opts in.
+vectors the cosine / model thresholds were calibrated on. Gated on the OpenAI
+key alone (:func:`available`): a deployment without one is a no-op, so this
+module changes no behavior until an OpenAI provider is configured.
 """
 from __future__ import annotations
 
@@ -71,18 +71,21 @@ def _api_key() -> str:
 
 
 def available() -> bool:
-    """True when embeddings are enabled *and* an OpenAI key is configured."""
-    return bool(CONFIG.ingest_embeddings_enabled) and bool(_api_key())
+    """True when an OpenAI key is configured. Embeddings are gated on the key
+    alone — there's no separate enable flag; a deployment with an OpenAI key
+    (the same one the chat providers use) gets page/doc embeddings, one without
+    is a no-op."""
+    return bool(_api_key())
 
 
 def embed_texts(texts: list[str]) -> list[list[float]] | None:
     """Embed a batch of texts.
 
     Returns one vector per input (same order), or ``None`` on any failure and
-    when embeddings are disabled / unconfigured. Never raises — callers treat
-    ``None`` as "no vector this time" and fall back (stale vector / skip).
+    when no OpenAI key is configured. Never raises — callers treat ``None`` as
+    "no vector this time" and fall back (stale vector / skip).
     """
-    if not CONFIG.ingest_embeddings_enabled or not texts:
+    if not texts:
         return None
     key = _api_key()
     if not key:

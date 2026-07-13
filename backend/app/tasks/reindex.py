@@ -20,7 +20,6 @@ from __future__ import annotations
 import logging
 import re
 
-from app.config import CONFIG
 from app.db import fts, page_embeddings
 from app.llm import embeddings
 from app.tasks.queue import crontab
@@ -42,14 +41,14 @@ def _extract_title(body: str) -> str:
 # Page embeddings (Phase 0 relevance-filter foundation)                       #
 #                                                                             #
 # Ride the reindex path: the same walk that keeps OpenSearch fresh keeps the  #
-# per-page embedding store fresh. All best-effort and gated behind            #
-# CONFIG.ingest_embeddings_enabled — a failure (or the feature being off)     #
-# never affects BM25 indexing or a doc commit.                                #
+# per-page embedding store fresh. All best-effort and gated on an OpenAI key  #
+# (embeddings.available()) — a failure (or no key configured) never affects   #
+# BM25 indexing or a doc commit.                                              #
 # --------------------------------------------------------------------------- #
 
 
 def _embed_page(path: str, body: str) -> None:
-    """Embed a page body into ``page_embeddings`` when enabled + configured.
+    """Embed a page body into ``page_embeddings`` when an OpenAI key is configured.
 
     Skips re-embedding when the (capped) body hash is unchanged, so ordinary
     commits and the hourly sweep don't re-hit the embedding API for pages that
@@ -70,9 +69,9 @@ def _embed_page(path: str, body: str) -> None:
 
 
 def drop_page_embedding(path: str) -> None:
-    """Remove a page's stored embedding (page delete / move-away). Best-effort
-    and gated; a no-op when the feature was never enabled."""
-    if not CONFIG.ingest_embeddings_enabled:
+    """Remove a page's stored embedding (page delete / move-away). Best-effort;
+    a no-op when no OpenAI key is configured (nothing was ever stored)."""
+    if not embeddings.available():
         return
     try:
         page_embeddings.delete(path)

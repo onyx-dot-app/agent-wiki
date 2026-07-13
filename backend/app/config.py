@@ -64,11 +64,11 @@ class Config(BaseModel):
     ingest_bm25_limit: int
     ingest_irrelevant_stop_n: int
 
-    # Relevance-filter embeddings (Phase 0). Off by default: when enabled, the
-    # reindex path embeds page bodies into ``page_embeddings`` (adds OpenAI cost
-    # on commits). No ingestion behavior change — the store is populated for the
-    # cosine cold-start / two-tower warm filter that lands in later phases.
-    ingest_embeddings_enabled: bool
+    # Relevance-filter embeddings (Phase 0): the model used to embed page/doc
+    # bodies into ``page_embeddings``. Active whenever an OpenAI key is
+    # configured (no separate enable flag) — a deployment without one is a
+    # no-op. Populates the store for the cosine cold-start / two-tower warm
+    # filter that lands in later phases.
     ingest_embed_model: str
 
     # Opt-in eval logging — captures reconciler inputs/outputs to ingest_eval_samples
@@ -177,8 +177,6 @@ def load_config() -> Config:
         ingest_bm25_title_boost=_positive_float("INGEST_BM25_TITLE_BOOST", 2.0),
         ingest_bm25_limit=_positive_int("INGEST_BM25_LIMIT", 20),
         ingest_irrelevant_stop_n=_positive_int("INGEST_IRRELEVANT_STOP_N", 2),
-        ingest_embeddings_enabled=os.environ.get("INGEST_EMBEDDINGS_ENABLED", "false").lower()
-        in {"1", "true", "yes"},
         ingest_embed_model=os.environ.get("INGEST_EMBED_MODEL", "text-embedding-3-small"),
         auth_mode=os.environ.get("AUTH_MODE", "basic"),
         oidc_issuer=os.environ.get("OIDC_ISSUER", ""),

@@ -1,8 +1,8 @@
 """Unit tests for the Phase-0 embedding foundation (pure — no DB / network).
 
 Covers the vector pack/unpack round-trip, the content-hash guard, and that the
-feature is a safe no-op when disabled (the default), so shipping it changes no
-behavior until an operator opts in.
+feature is a safe no-op without an OpenAI key, so shipping it changes no
+behavior until an OpenAI provider is configured.
 """
 from __future__ import annotations
 
@@ -22,9 +22,10 @@ def test_content_sha256_is_stable_and_distinct() -> None:
     assert embeddings.content_sha256("a") != embeddings.content_sha256("b")
 
 
-def test_disabled_by_default_is_a_noop() -> None:
-    # Default config has ingest embeddings off (and test env has no OpenAI key),
-    # so the client is never called and every entry point is best-effort None.
+def test_noop_without_openai_key(monkeypatch) -> None:
+    # Embeddings are gated on an OpenAI key; with none configured the client is
+    # never called and every entry point is a best-effort no-op.
+    monkeypatch.setattr(embeddings, "_api_key", lambda: "")
     assert embeddings.available() is False
     assert embeddings.embed_texts(["anything"]) is None
     assert embeddings.embed_text("anything") is None
