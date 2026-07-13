@@ -17,6 +17,7 @@ from app.models.file_system import (
     CreateFolderRequest,
     CreateFolderResponse,
     DeleteDocumentResponse,
+    DocRef,
     DocumentActivityResponse,
     DocumentDraftView,
     DocumentEntry,
@@ -153,7 +154,8 @@ def list_documents(
         # Keep non-md paths (folders, .gitkeep) so the explorer can render
         # the tree; permission checks happen on actual page access.
         raw = [(p, ts) for p, ts in raw if not p.endswith(".md") or p in visible]
-    entries = [DocumentEntry(path=p, updated_at=ts) for p, ts in raw]
+    ids = doc_ids.ids_for_paths([p for p, _ in raw])
+    entries = [DocumentEntry(path=p, updated_at=ts, id=ids.get(p)) for p, ts in raw]
     return ListDocumentsResponse(entries=entries)
 
 
@@ -177,8 +179,10 @@ def list_recent_pages(
         md = [(p, ts) for p, ts in md if p in visible]
     # Newest first; empty timestamps sink to the bottom.
     md.sort(key=lambda pt: pt[1], reverse=True)
+    top = md[:limit]
+    ids = doc_ids.ids_for_paths([p for p, _ in top])
     pages: list[RecentPageView] = []
-    for path, ts in md[:limit]:
+    for path, ts in top:
         abs_path = filesystem.absolute(path)
         if not abs_path.is_file():
             continue
@@ -187,7 +191,11 @@ def list_recent_pages(
         except OSError:
             continue
         title, preview = _title_and_preview(body, path)
-        pages.append(RecentPageView(path=path, title=title, updated_at=ts, preview=preview))
+        pages.append(
+            RecentPageView(
+                path=path, title=title, updated_at=ts, preview=preview, id=ids.get(path)
+            )
+        )
     return ListRecentPagesResponse(pages=pages)
 
 
@@ -710,6 +718,7 @@ def search_documents(
         user_id=user.id,
         is_admin=user.is_admin,
     )
+    ids = doc_ids.ids_for_paths([h.path for h in hits])
     return SearchResponse(
         query=query,
         hits=[
@@ -719,6 +728,7 @@ def search_documents(
                 title=h.title,
                 snippet=h.snippet,
                 score=h.score,
+                id=ids.get(h.path),
             )
             for h in hits
         ],
@@ -736,7 +746,9 @@ def list_recent_docs(user: User = Depends(require_user)) -> RecentDocsResponse:
         from app.wiki import acl as _acl
 
         paths = _acl.filter_paths_in_python(user.id, False, paths)
-    return RecentDocsResponse(paths=paths)
+    ids = doc_ids.ids_for_paths(paths)
+    items = [DocRef(path=p, id=ids.get(p)) for p in paths]
+    return RecentDocsResponse(paths=paths, items=items)
 
 
 @router.post("/recents", status_code=status.HTTP_204_NO_CONTENT)
@@ -762,7 +774,9 @@ def list_starred_docs(user: User = Depends(require_user)) -> StarredDocsResponse
         from app.wiki import acl as _acl
 
         paths = _acl.filter_paths_in_python(user.id, False, paths)
-    return StarredDocsResponse(paths=paths)
+    ids = doc_ids.ids_for_paths(paths)
+    items = [DocRef(path=p, id=ids.get(p)) for p in paths]
+    return StarredDocsResponse(paths=paths, items=items)
 
 
 @router.post("/starred", status_code=status.HTTP_204_NO_CONTENT)

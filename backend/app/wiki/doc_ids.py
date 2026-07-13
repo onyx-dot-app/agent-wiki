@@ -68,6 +68,38 @@ def id_for_path(path: str) -> str | None:
         return row.id if row else None
 
 
+def ids_for_paths(paths: list[str]) -> dict[str, str]:
+    """``{path: id}`` for the live rows among ``paths``.
+
+    Paths without a live row are simply absent from the result — callers
+    building navigation links tolerate a missing id (fall back to the path).
+    Used by the listing/search endpoints to attach stable ids in bulk rather
+    than resolving one path at a time.
+
+    The lookup is chunked so a whole-tree listing can't emit one ``IN (...)``
+    with an unbounded bind-parameter count (parse/plan cost grows with it);
+    every path is still returned, just across a bounded number of statements.
+    """
+    if not paths:
+        return {}
+    out: dict[str, str] = {}
+    with session() as s:
+        for i in range(0, len(paths), _ID_LOOKUP_CHUNK):
+            chunk = paths[i : i + _ID_LOOKUP_CHUNK]
+            rows = s.execute(
+                select(WikiDocId.path, WikiDocId.id).where(
+                    WikiDocId.path.in_(chunk), WikiDocId.deleted_at.is_(None)
+                )
+            ).all()
+            out.update({path: doc_id for path, doc_id in rows})
+    return out
+
+
+# Max paths per ``IN (...)`` in ``ids_for_paths`` — bounds per-statement
+# parse/plan cost on a large tree without a round-trip per path.
+_ID_LOOKUP_CHUNK = 1000
+
+
 def get_or_mint(path: str) -> str:
     """Id of the live row at ``path``, minting one if absent.
 
