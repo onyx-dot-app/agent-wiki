@@ -500,7 +500,7 @@ def list_trash(user: User = Depends(require_user)) -> TrashListResponse:
             TrashEntryView(
                 trash_id=e.trash_id,
                 path=e.original_path,
-                kind="page" if e.kind == "page" else "folder",
+                kind=e.kind,
                 trashed_by=e.trashed_by,
                 trashed_at=e.trashed_at,
                 can_restore="write" in perms,
@@ -530,7 +530,7 @@ def view_trash_item(
     return TrashItemView(
         trash_id=entry.trash_id,
         path=entry.original_path,
-        kind="page" if entry.kind == "page" else "folder",
+        kind=entry.kind,
         trashed_by=entry.trashed_by,
         trashed_at=entry.trashed_at,
         can_restore="write" in perms,

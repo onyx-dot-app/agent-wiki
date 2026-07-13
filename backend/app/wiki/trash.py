@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import os
 import uuid
+from typing import Literal
 
 from pydantic import BaseModel
 
@@ -29,7 +30,7 @@ class TrashEntry(BaseModel):
 
     trash_id: str
     original_path: str  # where it lived; restore moves it back here
-    kind: str  # "page" | "folder"
+    kind: Literal["page", "folder"]
     trashed_by: str  # git author of the trash-move commit
     trashed_at: str  # ISO-8601
 
@@ -75,7 +76,7 @@ def _entry(trash_id: str, originals: list[str]) -> TrashEntry | None:
         # No trailer (trash predating trash_commit_message) — infer from the file
         # list. Ambiguous for a single-file folder, hence the trailer above.
         root = originals[0] if len(originals) == 1 else os.path.commonpath(originals)
-    kind = "page" if root.endswith(".md") else "folder"
+    kind: Literal["page", "folder"] = "page" if root.endswith(".md") else "folder"
     return TrashEntry(
         trash_id=trash_id,
         original_path=root,
