@@ -121,7 +121,9 @@ class ResolveIdsRequest(BaseModel):
     paths it holds but has no id for yet — folder paths (not carried by the
     file-based tree listing) and synthesized breadcrumb ancestors."""
 
-    paths: list[str]
+    # Bounded like the other parameterised endpoints; a single view resolves at
+    # most a handful (visible folders + breadcrumb ancestors), so 1000 is ample.
+    paths: list[str] = Field(max_length=1000)
 
 
 class ResolveIdsResponse(BaseModel):

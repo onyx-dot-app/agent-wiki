@@ -172,7 +172,7 @@ def resolve_ids(
     dropped; folder paths pass through (folder existence is already visible in
     the tree, and page-level permission is enforced on actual access)."""
     try:
-        rels = [filesystem.safe_rel_path(p) for p in req.paths if p.strip()]
+        rels = [filesystem.safe_rel_path(p.strip()) for p in req.paths if p.strip()]
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     if not user.is_admin:
