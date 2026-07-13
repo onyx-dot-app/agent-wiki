@@ -142,3 +142,27 @@ def test_trashed_private_page_hidden_from_other_user(tmp_repo):
     assert any(
         i["trash_id"] == tid for i in owner_client.get("/api/wiki/trash").json()["items"]
     )
+
+
+def test_duplicate_names_coexist_in_trash(tmp_repo):
+    user = seed_user()
+    client = _client(user)
+    # Trash a.md, re-create a.md, trash again → two trashed "a.md" items.
+    client.put("/api/wiki/file", json={"path": "a.md", "body": "# v1\n"})
+    tid1 = client.delete("/api/wiki/file?path=a.md").json()["trash_id"]
+    client.put("/api/wiki/file", json={"path": "a.md", "body": "# v2\n"})
+    tid2 = client.delete("/api/wiki/file?path=a.md").json()["trash_id"]
+
+    assert tid1 != tid2
+    items = client.get("/api/wiki/trash").json()["items"]
+    a_items = [i for i in items if i["path"] == "a.md"]
+    assert len(a_items) == 2  # both coexist, distinct trash_ids
+    # Each keeps its own content.
+    assert client.get(f"/api/wiki/trash/{tid1}").json()["body"] == "# v1\n"
+    assert client.get(f"/api/wiki/trash/{tid2}").json()["body"] == "# v2\n"
+
+    # Path is free → restore one succeeds; then the path is occupied → the
+    # other 409s (can't restore two items onto the same live path).
+    assert client.post("/api/wiki/file/restore", json={"trash_id": tid1}).status_code == 200
+    assert client.get("/api/wiki/file?path=a.md").json()["body"] == "# v1\n"
+    assert client.post("/api/wiki/file/restore", json={"trash_id": tid2}).status_code == 409
