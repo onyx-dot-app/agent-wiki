@@ -477,31 +477,35 @@ def delete_document_by_path(
     return DeleteDocumentResponse(sha=sha, trash_id=trash_id)
 
 
-def _trash_perm(user: User, action: str, entry: "wiki_trash.TrashEntry") -> bool:
-    """Can ``user`` read/restore this trashed item? Checked against the *trash*
-    path — the item's own ACL grants were re-pointed there by the trashing move,
-    so this reflects who could access the page, not who can see its (possibly
-    unrelated) original folder now."""
+def _trash_perms(user: User, entry: "wiki_trash.TrashEntry") -> set[str]:
+    """The user's permissions on a trashed item, resolved once against the
+    *trash* path — the item's own ACL grants were re-pointed there by the
+    trashing move, so this reflects who could access the page, not who can see
+    its (possibly unrelated) original folder now. Callers derive read-visibility
+    and restore (write) from the returned set to avoid a second DB round-trip."""
     loc = wiki_trash.trash_location(entry.trash_id, entry.original_path)
-    return acl.can(user.id, user.is_admin, action, loc)
+    return acl.effective(user.id, user.is_admin, loc)
 
 
 @router.get("/trash", response_model=TrashListResponse)
 def list_trash(user: User = Depends(require_user)) -> TrashListResponse:
     """Trashed pages/folders, newest-first — the Trash view. Derived from the
     `.trash/` git tree; shown only to callers who could access the item."""
-    items = [
-        TrashEntryView(
-            trash_id=e.trash_id,
-            path=e.original_path,
-            kind="page" if e.kind == "page" else "folder",
-            trashed_by=e.trashed_by,
-            trashed_at=e.trashed_at,
-            can_restore=_trash_perm(user, "write", e),
+    items: list[TrashEntryView] = []
+    for e in wiki_trash.list_entries():
+        perms = _trash_perms(user, e)
+        if "read" not in perms:
+            continue
+        items.append(
+            TrashEntryView(
+                trash_id=e.trash_id,
+                path=e.original_path,
+                kind="page" if e.kind == "page" else "folder",
+                trashed_by=e.trashed_by,
+                trashed_at=e.trashed_at,
+                can_restore="write" in perms,
+            )
         )
-        for e in wiki_trash.list_entries()
-        if _trash_perm(user, "read", e)
-    ]
     return TrashListResponse(items=items)
 
 
@@ -515,7 +519,8 @@ def view_trash_item(
     entry = wiki_trash.entry_for(trash_id)
     if entry is None:
         raise HTTPException(status_code=404, detail="not found")
-    if not _trash_perm(user, "read", entry):
+    perms = _trash_perms(user, entry)
+    if "read" not in perms:
         raise HTTPException(status_code=403, detail="not permitted")
     body: str | None = None
     if entry.kind == "page":
@@ -528,7 +533,7 @@ def view_trash_item(
         kind="page" if entry.kind == "page" else "folder",
         trashed_by=entry.trashed_by,
         trashed_at=entry.trashed_at,
-        can_restore=_trash_perm(user, "write", entry),
+        can_restore="write" in perms,
         body=body,
     )
 
@@ -544,7 +549,7 @@ def restore_trashed(
     entry = wiki_trash.entry_for(req.trash_id)
     if entry is None:
         raise HTTPException(status_code=404, detail="not found")
-    if not _trash_perm(user, "write", entry):
+    if "write" not in _trash_perms(user, entry):
         raise HTTPException(status_code=403, detail="not permitted")
     # Refuse if any original path is now occupied (re-created since deletion).
     prefix = f"{wiki_trash.TRASH_DIR}/{req.trash_id}/"

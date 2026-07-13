@@ -175,7 +175,7 @@ def after_doc_trashed(
     ``.trash/<id>/rel``). Like ``after_path_move``, it's needed so a folder's
     own ACL/policy row re-points to the trash location even when all its files
     sit in a subdirectory — otherwise it strands at the (now gone) original
-    path and ``_trash_perm`` mis-authorizes the trashed folder. See
+    path and ``_trash_perms`` mis-authorizes the trashed folder. See
     ``acl.on_path_moved``.
     """
     acl.on_path_moved(moves, root_move=root_move)
