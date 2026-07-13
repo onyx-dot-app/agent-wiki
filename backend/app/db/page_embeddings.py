@@ -11,11 +11,21 @@ is swallowed there so it never aborts a doc commit.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import NamedTuple
 
 from sqlalchemy import delete as sa_delete, select
 
 from app.db.models import PageEmbedding
 from app.db.session import session
+
+
+class PageVector(NamedTuple):
+    """A page's stored embedding: its wiki path and the packed float32 vector
+    (unpack with ``app.llm.embeddings.unpack``). The unit :func:`load_all`
+    returns to build the in-worker scoring matrix."""
+
+    path: str
+    vector: bytes
 
 
 def _now() -> str:
@@ -59,12 +69,12 @@ def delete(path: str) -> None:
         s.execute(sa_delete(PageEmbedding).where(PageEmbedding.path == path))
 
 
-def load_all(model: str | None = None) -> list[tuple[str, bytes]]:
-    """``(path, packed-vector)`` for all rows, optionally filtered to a
-    single embedding ``model``. Builds the in-worker scoring matrix — a cold
-    load / periodic refresh, never the per-document hot path."""
+def load_all(model: str | None = None) -> list[PageVector]:
+    """All stored page vectors, optionally filtered to a single embedding
+    ``model``. Builds the in-worker scoring matrix — a cold load / periodic
+    refresh, never the per-document hot path."""
     with session() as s:
         stmt = select(PageEmbedding.path, PageEmbedding.vector)
         if model:
             stmt = stmt.where(PageEmbedding.model == model)
-        return [(path, bytes(vec)) for path, vec in s.execute(stmt)]
+        return [PageVector(path, bytes(vec)) for path, vec in s.execute(stmt)]
