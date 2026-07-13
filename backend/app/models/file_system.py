@@ -156,6 +156,7 @@ class GetDocumentResponse(BaseModel):
     body: str
     head_sha: str | None
     ref: str | None = None  # only set when reading at a specific ref
+    id: str | None = None  # stable doc id; None on historical/deleted reads
 
 
 class PutDocumentResponse(BaseModel):
@@ -163,6 +164,20 @@ class PutDocumentResponse(BaseModel):
     sha: str
     created: bool
     deprecated: list[str]
+    id: str | None = None  # stable doc id
+
+
+class ResolveDocIdResponse(BaseModel):
+    """A stable doc id resolved to its current binding.
+
+    ``deleted_at`` set means the page/folder was deleted — the path is where
+    it lived at delete time (feed it to the tombstone/restore endpoints).
+    """
+
+    id: str
+    path: str
+    kind: Literal["page", "folder"]
+    deleted_at: str | None = None
 
 
 class CreateFolderResponse(BaseModel):

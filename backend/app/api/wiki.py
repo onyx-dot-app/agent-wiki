@@ -42,6 +42,7 @@ from app.models.file_system import (
     RecordRecentDocRequest,
     ReindexRequest,
     ReindexResponse,
+    ResolveDocIdResponse,
     ReorderStarredRequest,
     ReviseDraftRequest,
     ReviseDraftResponse,
@@ -58,6 +59,7 @@ from app.wiki import (
     agent_activity,
     coedit,
     diff as wiki_diff,
+    doc_ids,
     drafts as wiki_drafts,
     filesystem,
     git as wiki_git,
@@ -71,7 +73,7 @@ from app.wiki import (
 )
 from app.ingest import settings as ingest_settings
 from app.models.update_policy import UpdateHealthResponse
-from app.models.wiki import ChangeKind, CommitMaxRetriesError
+from app.models.wiki import ChangeKind, CommitMaxRetriesError, PathMove
 
 router = APIRouter()
 log = logging.getLogger(__name__)
@@ -194,15 +196,28 @@ def get_document_by_path(
     user: User = Depends(require_user),
     path: str = "",
     ref: str | None = None,
+    doc_id: str | None = Query(None, alias="id"),
 ) -> GetDocumentResponse:
+    if doc_id and not path:
+        row = doc_ids.get(doc_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="unknown id")
+        path = str(row["path"])
     if not path:
-        raise HTTPException(status_code=400, detail="path required")
+        raise HTTPException(status_code=400, detail="path or id required")
     try:
         rel = filesystem.safe_rel_path(path)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     require_can("read", rel, user)
     head_sha = wiki_git.head_sha_for_path(rel)
+    # Stable id: reading a live page lazily backfills its row (pre-id pages);
+    # historical/deleted reads only report an id if a live row exists.
+    page_id = (
+        doc_ids.get_or_mint(rel)
+        if filesystem.absolute(rel).is_file()
+        else doc_ids.id_for_path(rel)
+    )
     if ref:
         # The path may have been different at this ref (rename). Resolve
         # via --follow so old commits don't 404 on the current name.
@@ -211,7 +226,7 @@ def get_document_by_path(
             body = wiki_git.read_file(historical, ref=ref)
         except wiki_git.UnknownSha as exc:
             raise HTTPException(status_code=404, detail="not found at ref") from exc
-        return GetDocumentResponse(path=rel, body=body, head_sha=head_sha, ref=ref)
+        return GetDocumentResponse(path=rel, body=body, head_sha=head_sha, ref=ref, id=page_id)
     # Session-aware live read: when a co-edit session is open on this page, its
     # Postgres buffer holds the freshest edits. The checkpoint that commits the
     # buffer to git runs asynchronously, so HEAD lags — reading it would show
@@ -248,11 +263,11 @@ def get_document_by_path(
                     exc_info=True,
                 )
                 body = current
-        return GetDocumentResponse(path=rel, body=body, head_sha=head_sha)
+        return GetDocumentResponse(path=rel, body=body, head_sha=head_sha, id=page_id)
     abs_path = filesystem.absolute(rel)
     if not abs_path.is_file():
         raise HTTPException(status_code=404, detail="not found")
-    return GetDocumentResponse(path=rel, body=abs_path.read_text(), head_sha=head_sha)
+    return GetDocumentResponse(path=rel, body=abs_path.read_text(), head_sha=head_sha, id=page_id)
 
 
 @router.put("/file", response_model=PutDocumentResponse)
@@ -320,6 +335,9 @@ def put_document_by_path(
         sha=sha,
         created=not existed,
         deprecated=[],
+        # The create lifecycle minted on first save; edits of pre-id pages
+        # backfill here.
+        id=doc_ids.get_or_mint(rel),
     )
 
 
@@ -349,6 +367,7 @@ def create_folder(
         raise HTTPException(status_code=409, detail="folder already exists")
     author = _git_author(user)
     sha = wiki_git.commit_file(f"{rel}/.gitkeep", "", f"create folder {rel}", author=author)
+    doc_ids.get_or_mint(rel)
     log.info("folder created %s by %s sha=%s", rel, author or "?", sha[:8])
     return CreateFolderResponse(path=rel, sha=sha)
 
@@ -416,7 +435,9 @@ def move_document_or_folder(
 
     # after_path_move re-points every live path-keyed cache (ACL, comments,
     # activity, drafts, working-dirs) and reconverges the trigger cache.
-    wiki_notify.after_path_move(moves, sha, author)
+    wiki_notify.after_path_move(
+        moves, sha, author, root_move=PathMove(old=old_rel, new=new_rel)
+    )
 
     log.info(
         "move %s -> %s by %s sha=%s files=%d", old_rel, new_rel, author or "?", sha[:8], len(moves)
@@ -461,8 +482,36 @@ def delete_document_by_path(
         # Drops FTS / ACL / comments / activity / working-dir state for each
         # removed page.
         wiki_notify.after_doc_delete(p, sha, author)
+    # Stamps the folder's own id rows, which the per-page fan-out above never
+    # sees (it only gets .md paths). For a single-page delete rel == the page
+    # already stamped, so this is a no-op (deleted_at IS NULL no longer matches).
+    doc_ids.on_deleted(rel)
     log.info("doc deleted %s (%d pages) by %s sha=%s", rel, len(md_paths), author or "?", sha[:8])
     return DeleteDocumentResponse(sha=sha)
+
+
+@router.get("/id/{doc_id}", response_model=ResolveDocIdResponse)
+def resolve_doc_id(
+    doc_id: str,
+    user: User = Depends(require_user),
+) -> ResolveDocIdResponse:
+    """Resolve a stable doc id to its current binding. ``deleted_at`` set
+    means the page/folder was deleted; ``path`` is where it lived at delete
+    time — feed it to the tombstone/restore endpoints."""
+    row = doc_ids.get(doc_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="unknown id")
+    # Stored paths are always app-generated from validated values, but
+    # re-validate before the ACL check so this endpoint matches every other.
+    try:
+        path = filesystem.safe_rel_path(str(row["path"]))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    require_can("read", path, user)
+    kind = "page" if row["kind"] == "page" else "folder"
+    return ResolveDocIdResponse(
+        id=doc_id, path=path, kind=kind, deleted_at=row["deleted_at"]
+    )
 
 
 def _restorable_paths(fate: wiki_git.PathFate) -> tuple[list[str], list[str]]:
@@ -571,6 +620,16 @@ def restore_deleted_path(
         )
     except wiki_git.UnknownSha as exc:
         raise HTTPException(status_code=404, detail="no restorable content") from exc
+    # Re-bind stable ids before the create lifecycle runs, so the fan-out's
+    # mint step finds the resurrected rows instead of minting fresh ids.
+    # ``files`` are blobs only, so add every intermediate folder path too —
+    # otherwise nested folders (e.g. proj/sub) get fresh ids on restore.
+    restore_paths: set[str] = {fate.path, *files}
+    for f in files:
+        parts = f.split("/")[:-1]
+        for i in range(1, len(parts) + 1):
+            restore_paths.add("/".join(parts[:i]))
+    doc_ids.on_restored(sorted(restore_paths))
     for p in md_paths:
         # Create lifecycle: default-public ACLs + owner stamp, FTS reindex,
         # trigger fan-out, MCP pub-sub.
