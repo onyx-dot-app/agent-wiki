@@ -210,3 +210,13 @@ def test_listing_id_is_none_for_unbackfilled_page(tmp_repo):
     entries = {e["path"]: e["id"] for e in client.get("/api/wiki").json()["entries"]}
     assert "legacy.md" in entries
     assert entries["legacy.md"] is None
+
+
+def test_ids_for_paths_merges_across_chunks(tmp_repo, monkeypatch):
+    # Force multiple chunks so the merge path is exercised without 1000+ rows.
+    monkeypatch.setattr(doc_ids, "_ID_LOOKUP_CHUNK", 2)
+    paths = [f"p{i}.md" for i in range(5)]
+    want = {p: doc_ids.mint_for_page(p) for p in paths}
+    # An absent path is simply omitted, not an error.
+    got = doc_ids.ids_for_paths(paths + ["missing.md"])
+    assert got == want
