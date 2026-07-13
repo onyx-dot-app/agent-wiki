@@ -34,7 +34,7 @@ import logging
 from app.db import fts, page_dirs
 from app.mcp_server import pubsub as mcp_pubsub
 from app.tasks import coedit_rebase as coedit_rebase_trigger
-from app.tasks.reindex import index_path
+from app.tasks.reindex import drop_page_embedding, index_path
 from app.tasks.triggers import fan_out_trigger_eval
 from app.tasks.update_frequency import check_update_frequency
 from app.triggers import repo as triggers_repo
@@ -135,6 +135,7 @@ def after_doc_delete(rel_path: str, sha: str, actor: str | None) -> None:
     if not rel_path.endswith(".md"):
         return
     fts.delete_document(rel_path)
+    drop_page_embedding(rel_path)
     acl.on_page_deleted(rel_path)
     update_policy.on_page_deleted(rel_path)
     # The body is gone, so there's nothing to re-anchor against — orphan the
@@ -194,6 +195,7 @@ def after_path_move(
         new_is_md = new_p.endswith(".md")
         if old_is_md:
             fts.delete_document(old_p)
+            drop_page_embedding(old_p)
             fan_out_trigger_eval(old_p, sha, ChangeKind.DELETE, actor)
             mcp_pubsub.publish_doc_delete(old_p, sha)
             list_changed = True

@@ -824,6 +824,36 @@ class IngestSettings(Base):
     __table_args__ = (CheckConstraint("id = 1", name="ingest_settings_singleton"),)
 
 
+class PageEmbedding(Base):
+    """Per-page embedding vector for the ingestion relevance filter (Phase 0).
+
+    Durable store for the raw embedding of each ``.md`` page body. Postgres
+    never computes similarity — scoring runs against an in-worker matrix loaded
+    from these rows; the DB only stores/loads. Path-keyed so it follows page
+    moves/deletes like other live rows. Written best-effort from the reindex
+    path (``app.tasks.reindex``); read by ``app.db.page_embeddings``.
+    """
+
+    __tablename__ = "page_embeddings"
+
+    # Wiki-relative page path; also the OpenSearch ``_id`` and the natural key.
+    path: Mapped[str] = mapped_column(Text, primary_key=True)
+    # sha256 of the (capped) page body — re-embed guard for unchanged bodies.
+    content_sha256: Mapped[str] = mapped_column(Text, nullable=False)
+    # Embedding model id (e.g. "text-embedding-3-small"); vectors are
+    # model-specific, so a model change is a full re-embed backfill.
+    model: Mapped[str] = mapped_column(Text, nullable=False)
+    # Raw vector, packed float32 (app.llm.embeddings.pack/unpack).
+    vector: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    # ISO timestamp; indexed so the in-worker cache can refresh incrementally
+    # (rows with updated_at > cursor) instead of reloading everything.
+    updated_at: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
+    )
+
+    __table_args__ = (Index("ix_page_embeddings_updated_at", "updated_at"),)
+
+
 class BraintrustSettings(Base):
     __tablename__ = "braintrust_settings"
 
