@@ -220,3 +220,62 @@ def test_ids_for_paths_merges_across_chunks(tmp_repo, monkeypatch):
     # An absent path is simply omitted, not an error.
     got = doc_ids.ids_for_paths(paths + ["missing.md"])
     assert got == want
+
+
+def test_resolve_ids_endpoint_returns_folder_and_page_ids(tmp_repo):
+    user = seed_user()
+    client = _client(user)
+    page_id = client.put(
+        "/api/wiki/file", json={"path": "proj/sub/a.md", "body": "# A\n"}
+    ).json()["id"]
+    proj_id = doc_ids.id_for_path("proj")
+    sub_id = doc_ids.id_for_path("proj/sub")
+
+    resp = client.post(
+        "/api/wiki/resolve-ids",
+        json={"paths": ["proj", "proj/sub", "proj/sub/a.md", "nope.md", ""]},
+    )
+    assert resp.status_code == 200
+    got = {it["path"]: it["id"] for it in resp.json()["items"]}
+    # Folder paths (absent from the file-based tree listing) resolve here.
+    assert got == {"proj": proj_id, "proj/sub": sub_id, "proj/sub/a.md": page_id}
+
+
+def test_resolve_ids_acl_filters_pages_for_non_admin(tmp_repo):
+    from app.wiki import acl
+
+    owner = seed_user()
+    other = seed_user(uid="u_other", email="other@x.com")
+    owner_client = _client(owner)
+    owner_client.put("/api/wiki/file", json={"path": "secret.md", "body": "# S\n"})
+    # Strip the default everyone-read grant → owner-only.
+    for g in acl.list_for_path("secret.md"):
+        if g["principal_kind"] == "everyone":
+            acl.revoke(g["id"])
+
+    resp = _client(other).post("/api/wiki/resolve-ids", json={"paths": ["secret.md"]})
+    assert resp.status_code == 200
+    # The page the caller can't read is omitted rather than leaked.
+    assert resp.json()["items"] == []
+
+
+def test_resolve_ids_trims_whitespace_padded_paths(tmp_repo):
+    user = seed_user()
+    client = _client(user)
+    page_id = client.put(
+        "/api/wiki/file", json={"path": "proj/a.md", "body": "# A\n"}
+    ).json()["id"]
+    # A padded path must still resolve — the strip guard used to only gate
+    # blankness while passing the unstripped path to safe_rel_path.
+    resp = client.post("/api/wiki/resolve-ids", json={"paths": ["  proj/a.md  "]})
+    assert resp.status_code == 200
+    assert resp.json()["items"] == [{"path": "proj/a.md", "id": page_id}]
+
+
+def test_resolve_ids_rejects_oversized_batch(tmp_repo):
+    client = _client(seed_user())
+    resp = client.post(
+        "/api/wiki/resolve-ids", json={"paths": [f"p{i}.md" for i in range(1001)]}
+    )
+    # The app maps request-validation errors to 400 (see _on_validation_error).
+    assert resp.status_code == 400

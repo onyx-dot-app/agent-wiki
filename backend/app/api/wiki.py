@@ -44,6 +44,8 @@ from app.models.file_system import (
     ReindexRequest,
     ReindexResponse,
     ResolveDocIdResponse,
+    ResolveIdsRequest,
+    ResolveIdsResponse,
     ReorderStarredRequest,
     ReviseDraftRequest,
     ReviseDraftResponse,
@@ -157,6 +159,28 @@ def list_documents(
     ids = doc_ids.ids_for_paths([p for p, _ in raw])
     entries = [DocumentEntry(path=p, updated_at=ts, id=ids.get(p)) for p, ts in raw]
     return ListDocumentsResponse(entries=entries)
+
+
+@router.post("/resolve-ids", response_model=ResolveIdsResponse)
+def resolve_ids(
+    req: ResolveIdsRequest,
+    user: User = Depends(require_user),
+) -> ResolveIdsResponse:
+    """Bulk path→id for building id-based hrefs (folders, breadcrumb ancestors).
+
+    ACL-filtered like the tree listing: a `.md` path the caller can't read is
+    dropped; folder paths pass through (folder existence is already visible in
+    the tree, and page-level permission is enforced on actual access)."""
+    try:
+        rels = [filesystem.safe_rel_path(p.strip()) for p in req.paths if p.strip()]
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    if not user.is_admin:
+        md = [p for p in rels if p.endswith(".md")]
+        visible = set(acl.filter_paths_in_python(user.id, False, md))
+        rels = [p for p in rels if not p.endswith(".md") or p in visible]
+    ids = doc_ids.ids_for_paths(rels)
+    return ResolveIdsResponse(items=[DocRef(path=p, id=i) for p, i in ids.items()])
 
 
 @router.get("/recent", response_model=ListRecentPagesResponse)
@@ -718,7 +742,7 @@ def search_documents(
         user_id=user.id,
         is_admin=user.is_admin,
     )
-    ids = doc_ids.ids_for_paths([h.path for h in hits])
+    ids = doc_ids.ids_for_paths([h.path for h in hits] + [f.path for f in folders])
     return SearchResponse(
         query=query,
         hits=[
@@ -732,7 +756,7 @@ def search_documents(
             )
             for h in hits
         ],
-        folders=[FolderHitView(path=f.path) for f in folders],
+        folders=[FolderHitView(path=f.path, id=ids.get(f.path)) for f in folders],
     )
 
 

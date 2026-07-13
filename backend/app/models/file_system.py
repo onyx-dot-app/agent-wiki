@@ -116,6 +116,22 @@ class DocRef(BaseModel):
     id: str | None = None
 
 
+class ResolveIdsRequest(BaseModel):
+    """Bulk path→id lookup. The frontend uses this to build id-based hrefs for
+    paths it holds but has no id for yet — folder paths (not carried by the
+    file-based tree listing) and synthesized breadcrumb ancestors."""
+
+    # Bounded like the other parameterised endpoints; a single view resolves at
+    # most a handful (visible folders + breadcrumb ancestors), so 1000 is ample.
+    paths: list[str] = Field(max_length=1000)
+
+
+class ResolveIdsResponse(BaseModel):
+    # One entry per input path that has a live id row; paths without one are
+    # simply omitted (the caller falls back to a path URL).
+    items: list[DocRef]
+
+
 class RecordRecentDocRequest(BaseModel):
     path: str
 
@@ -344,6 +360,7 @@ class SearchHitView(BaseModel):
 
 class FolderHitView(BaseModel):
     path: str
+    id: str | None = None  # stable wiki_doc_id of the folder, for id-based navigation
 
 
 class SearchResponse(BaseModel):
