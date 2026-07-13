@@ -482,8 +482,9 @@ def delete_document_by_path(
         # Drops FTS / ACL / comments / activity / working-dir state for each
         # removed page.
         wiki_notify.after_doc_delete(p, sha, author)
-    # Per-page fan-out stamped each page's id row; a folder delete also
-    # tombstones the folder rows themselves (the fan-out only sees .md paths).
+    # Stamps the folder's own id rows, which the per-page fan-out above never
+    # sees (it only gets .md paths). For a single-page delete rel == the page
+    # already stamped, so this is a no-op (deleted_at IS NULL no longer matches).
     doc_ids.on_deleted(rel)
     log.info("doc deleted %s (%d pages) by %s sha=%s", rel, len(md_paths), author or "?", sha[:8])
     return DeleteDocumentResponse(sha=sha)
@@ -500,7 +501,12 @@ def resolve_doc_id(
     row = doc_ids.get(doc_id)
     if row is None:
         raise HTTPException(status_code=404, detail="unknown id")
-    path = str(row["path"])
+    # Stored paths are always app-generated from validated values, but
+    # re-validate before the ACL check so this endpoint matches every other.
+    try:
+        path = filesystem.safe_rel_path(str(row["path"]))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
     require_can("read", path, user)
     kind = "page" if row["kind"] == "page" else "folder"
     return ResolveDocIdResponse(
@@ -616,7 +622,14 @@ def restore_deleted_path(
         raise HTTPException(status_code=404, detail="no restorable content") from exc
     # Re-bind stable ids before the create lifecycle runs, so the fan-out's
     # mint step finds the resurrected rows instead of minting fresh ids.
-    doc_ids.on_restored([fate.path, *files])
+    # ``files`` are blobs only, so add every intermediate folder path too —
+    # otherwise nested folders (e.g. proj/sub) get fresh ids on restore.
+    restore_paths: set[str] = {fate.path, *files}
+    for f in files:
+        parts = f.split("/")[:-1]
+        for i in range(1, len(parts) + 1):
+            restore_paths.add("/".join(parts[:i]))
+    doc_ids.on_restored(sorted(restore_paths))
     for p in md_paths:
         # Create lifecycle: default-public ACLs + owner stamp, FTS reindex,
         # trigger fan-out, MCP pub-sub.

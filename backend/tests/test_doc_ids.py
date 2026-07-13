@@ -134,6 +134,26 @@ def test_folder_delete_tombstones_folder_and_nested_ids(tmp_repo):
     assert doc_ids.id_for_path("proj/a.md") == page_id
 
 
+def test_nested_folder_ids_survive_delete_restore(tmp_repo):
+    # Two-level layout: the intermediate folder proj/sub has its own id row,
+    # which restore must resurrect rather than let mint_for_page mint fresh.
+    user = seed_user()
+    client = _client(user)
+    page_id = client.put(
+        "/api/wiki/file", json={"path": "proj/sub/a.md", "body": "# A\n"}
+    ).json()["id"]
+    proj_id = doc_ids.id_for_path("proj")
+    sub_id = doc_ids.id_for_path("proj/sub")
+    assert proj_id is not None and sub_id is not None
+
+    client.delete("/api/wiki/file?path=proj")
+    client.post("/api/wiki/file/restore", json={"path": "proj"})
+
+    assert doc_ids.id_for_path("proj") == proj_id
+    assert doc_ids.id_for_path("proj/sub") == sub_id
+    assert doc_ids.id_for_path("proj/sub/a.md") == page_id
+
+
 def test_read_by_id_and_lazy_backfill(tmp_repo):
     user = seed_user()
     client = _client(user)
