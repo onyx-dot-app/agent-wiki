@@ -98,7 +98,11 @@ def embed_texts(texts: list[str]) -> list[list[float]] | None:
             # OpenAI rejects empty strings; substitute a space.
             chunk = [t if t else " " for t in texts[i : i + _BATCH]]
             resp = client.embeddings.create(model=model, input=chunk)
-            out.extend(list(d.embedding) for d in resp.data)
+            # The API does not guarantee resp.data is in input order; each item
+            # carries its input position in ``.index``. Order by it so vector[i]
+            # aligns to texts[i] — otherwise a batch could silently mis-assign a
+            # page's vector to another page.
+            out.extend(list(d.embedding) for d in sorted(resp.data, key=lambda d: d.index))
         return out
     except Exception:
         log.warning("embeddings: embed_texts failed for %d text(s)", len(texts), exc_info=True)
