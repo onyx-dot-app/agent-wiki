@@ -67,7 +67,7 @@ from app.wiki import (
 )
 from app.ingest import settings as ingest_settings
 from app.models.update_policy import UpdateHealthResponse
-from app.models.wiki import ChangeKind, CommitMaxRetriesError
+from app.models.wiki import ChangeKind, CommitMaxRetriesError, PathMove
 
 router = APIRouter()
 log = logging.getLogger(__name__)
@@ -412,7 +412,11 @@ def move_document_or_folder(
 
     # after_path_move re-points every live path-keyed cache (ACL, comments,
     # activity, drafts, working-dirs) and reconverges the trigger cache.
-    wiki_notify.after_path_move(moves, sha, author)
+    # root_move is the actual rename so folder-level grants re-point correctly
+    # even when all of a folder's files sit in one subdirectory.
+    wiki_notify.after_path_move(
+        moves, sha, author, root_move=PathMove(old=old_rel, new=new_rel)
+    )
 
     log.info(
         "move %s -> %s by %s sha=%s files=%d", old_rel, new_rel, author or "?", sha[:8], len(moves)

@@ -705,7 +705,7 @@ def on_page_deleted(path: str) -> None:
     delete_all_for_path(canon)
 
 
-def on_path_moved(moves: list[PathMove]) -> None:
+def on_path_moved(moves: list[PathMove], root_move: PathMove | None = None) -> None:
     """Rewrite ``acl_entries.resource_path`` and ``wiki_owners.path`` for
     every ``(old, new)`` pair from one ``git mv`` commit.
 
@@ -713,6 +713,13 @@ def on_path_moved(moves: list[PathMove]) -> None:
     a directory ``a/`` is renamed to ``b/``, an existing folder grant
     at ``a/sub`` becomes ``b/sub``. We do this with a row-by-row
     rewrite per move; the volume is tiny in practice.
+
+    ``root_move`` is the rename as the caller issued it (the folder itself for
+    a directory move). Prefer it for the folder-prefix rewrite: inferring the
+    prefix from the file moves via ``common_folder_rename`` finds the *deepest*
+    shared prefix, which misses the renamed folder's own grant when all its
+    files sit in one subdirectory (e.g. moving ``a`` whose only file is
+    ``a/sub/x.md``). Falls back to inference when not supplied.
     """
     if not moves:
         return
@@ -733,12 +740,13 @@ def on_path_moved(moves: list[PathMove]) -> None:
                     update(WikiOwner).where(WikiOwner.path == old_p).values(path=new_p)
                 )
 
-        # Detect a folder-level rename by looking for a common (old, new)
-        # prefix shared across every moved file. ``move_path`` of a
-        # directory yields one tuple per nested file all sharing the
-        # same prefix swap, so this catches it without the caller having
-        # to tell us.
-        old_prefix, new_prefix = common_folder_rename(moves)
+        # The folder-level prefix swap. Prefer the caller's explicit root_move
+        # (the actual folder rename); otherwise infer it from the shared prefix
+        # of the file moves — which can under-reach (see docstring).
+        if root_move is not None and not _is_md_page(root_move.old):
+            old_prefix, new_prefix = root_move.old, root_move.new
+        else:
+            old_prefix, new_prefix = common_folder_rename(moves)
         if old_prefix is not None and new_prefix is not None:
             # Folder ACL at the renamed folder itself.
             s.execute(

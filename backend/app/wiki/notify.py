@@ -153,7 +153,11 @@ def after_doc_delete(rel_path: str, sha: str, actor: str | None) -> None:
 
 
 def after_path_move(
-    moves: list[PathMove], sha: str, actor: str | None
+    moves: list[PathMove],
+    sha: str,
+    actor: str | None,
+    *,
+    root_move: PathMove | None = None,
 ) -> None:
     """Post-move side effects for every ``(old, new)`` pair from a single
     ``git mv`` commit.
@@ -185,8 +189,8 @@ def after_path_move(
     delete, and a single ``list_changed`` is fired at the end (the
     tree shape changed once, even if many paths moved).
     """
-    acl.on_path_moved(moves)
-    update_policy.on_path_moved(moves)
+    acl.on_path_moved(moves, root_move=root_move)
+    update_policy.on_path_moved(moves, root_move=root_move)
     coedit.on_path_moved(moves)
     list_changed = False
     for mv in moves:
