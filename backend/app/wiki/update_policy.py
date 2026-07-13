@@ -175,7 +175,7 @@ def on_page_deleted(path: str) -> None:
     delete(path)
 
 
-def on_path_moved(moves: list[PathMove]) -> None:
+def on_path_moved(moves: list[PathMove], root_move: PathMove | None = None) -> None:
     """Re-key policy rows so a page/folder policy follows a move/rename.
 
     For each ``(old, new)`` pair the exact row at ``old`` is repointed to
@@ -183,6 +183,10 @@ def on_path_moved(moves: list[PathMove]) -> None:
     folder's own row and every row nested under it are repointed too — so
     renaming ``a`` to ``b`` carries ``a`` and ``a/sub`` along. Mirrors
     ``acl.on_path_moved``; the row volume is tiny in practice.
+
+    ``root_move`` is the caller's actual folder rename; prefer it over inferring
+    the prefix from the file moves (which finds the deepest shared prefix and
+    can miss the folder's own row). See ``acl.on_path_moved``.
     """
     if not moves:
         return
@@ -193,7 +197,10 @@ def on_path_moved(moves: list[PathMove]) -> None:
                 .where(UpdatePolicy.path == mv.old)
                 .values(path=mv.new)
             )
-        old_prefix, new_prefix = filesystem.common_folder_rename(moves)
+        if root_move is not None and not root_move.old.endswith(".md"):
+            old_prefix, new_prefix = root_move.old, root_move.new
+        else:
+            old_prefix, new_prefix = filesystem.common_folder_rename(moves)
         if old_prefix is not None and new_prefix is not None:
             # The renamed folder's own policy row.
             s.execute(

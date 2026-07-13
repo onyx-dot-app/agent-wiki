@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.models.wiki import PathMove
 from app.wiki import utils as wiki_utils
 from app.llm.agents.tools.errors import ToolError
 from app.wiki import coedit, filesystem, git as wiki_git, notify as wiki_notify
@@ -55,7 +56,9 @@ def handle(args: dict[str, Any]) -> Any:
         sha, moves = wiki_git.move_path(
             old_rel, new_rel, commit_message.strip(), author=author
         )
-        wiki_notify.after_path_move(moves, sha, author)
+        wiki_notify.after_path_move(
+            moves, sha, author, root_move=PathMove(old=old_rel, new=new_rel)
+        )
 
         return {
             "old_path": old_rel,
