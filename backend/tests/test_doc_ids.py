@@ -279,3 +279,18 @@ def test_resolve_ids_rejects_oversized_batch(tmp_repo):
     )
     # The app maps request-validation errors to 400 (see _on_validation_error).
     assert resp.status_code == 400
+
+
+def test_backfill_all_mints_existing_pages_and_folders(tmp_repo):
+    # Seed content directly via git (no lifecycle hook) so nothing has an id —
+    # the state of a wiki created before stable ids.
+    wiki_git.commit_file("proj/sub/a.md", "# A\n", "seed")
+    wiki_git.commit_file("top.md", "# T\n", "seed")
+    wiki_git.commit_file("empty/.gitkeep", "", "seed empty folder")
+    assert doc_ids.id_for_path("proj/sub/a.md") is None
+
+    doc_ids.backfill_all()
+
+    # Every page, every ancestor folder, and the empty (.gitkeep-only) folder.
+    for p in ("proj/sub/a.md", "top.md", "proj", "proj/sub", "empty"):
+        assert doc_ids.id_for_path(p) is not None, p

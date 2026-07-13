@@ -25,7 +25,7 @@ from sqlalchemy.exc import IntegrityError
 from app.db.models import WikiDocId
 from app.db.session import session
 from app.models.wiki import PathMove
-from app.wiki import filesystem
+from app.wiki import filesystem, git as wiki_git
 
 log = logging.getLogger(__name__)
 
@@ -146,6 +146,37 @@ def ensure_for_paths(paths: list[str]) -> None:
                 get_or_mint(p)
         except Exception:
             log.exception("doc_ids backfill failed for %s", p)
+
+
+def backfill_all() -> None:
+    """Mint ids for every tracked page and folder that lacks a live row.
+
+    Run once at boot so an existing wiki (created before stable ids) gets ids
+    for all its pages *and folders* — not just the pages someone happens to
+    open. Gated on a cheap count so a fully-minted wiki does almost no work;
+    otherwise mints the missing rows (``get_or_mint`` skips those that exist).
+
+    Folders are enumerated from the tracked-file prefixes so empty folders
+    (only a ``.gitkeep``) get ids too, which page-ancestor seeding misses.
+    """
+    files = wiki_git.list_paths()
+    md = [p for p in files if p.endswith(".md")]
+    folders: set[str] = set()
+    for f in files:
+        parts = f.split("/")[:-1]
+        for i in range(1, len(parts) + 1):
+            folders.add("/".join(parts[:i]))
+    want = len(folders | set(md))
+    with session() as s:
+        have = s.execute(
+            select(func.count())
+            .select_from(WikiDocId)
+            .where(WikiDocId.deleted_at.is_(None))
+        ).scalar_one()
+    if have >= want:
+        return
+    log.info("doc_ids backfill: %d live rows < %d tracked paths; minting missing", have, want)
+    ensure_for_paths([*sorted(folders), *md])
 
 
 def on_path_moved(moves: list[PathMove], root_move: PathMove | None = None) -> None:
