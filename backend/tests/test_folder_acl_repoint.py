@@ -56,9 +56,13 @@ def test_without_root_move_the_deep_prefix_is_missed(tmp_db):
 
 def test_update_policy_folder_repoints_with_root_move(tmp_db):
     update_policy.set_policy("proj", ingestion_auto_update_disabled=True)
+    # A nested-folder row exercises the LIKE "proj/%" branch of the rewrite.
+    update_policy.set_policy("proj/sub", ingestion_auto_update_disabled=True)
     update_policy.on_path_moved(
         [PathMove(old="proj/sub/a.md", new="proj2/sub/a.md")],
         root_move=PathMove(old="proj", new="proj2"),
     )
     assert update_policy.get("proj2") is not None
     assert update_policy.get("proj") is None
+    assert update_policy.get("proj2/sub") is not None
+    assert update_policy.get("proj/sub") is None
