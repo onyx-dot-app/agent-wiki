@@ -54,6 +54,42 @@ def test_delete_moves_to_trash_and_hides_everywhere(tmp_repo):
     assert items["proj/a.md"]["kind"] == "page"
 
 
+def test_purge_trash_item_removes_it_immediately(tmp_repo):
+    # Permanent delete from Trash, ahead of the 30-day auto-purge.
+    user = seed_user()
+    client = _client(user)
+    client.put("/api/wiki/file", json={"path": "note.md", "body": "# N\n"})
+    tid = client.delete("/api/wiki/file?path=note.md").json()["trash_id"]
+    assert any(
+        i["trash_id"] == tid for i in client.get("/api/wiki/trash").json()["items"]
+    )
+
+    resp = client.delete(f"/api/wiki/trash/{tid}")
+    assert resp.status_code == 200
+    assert resp.json()["path"] == "note.md"
+
+    # Gone from Trash and no longer viewable.
+    assert not any(
+        i["trash_id"] == tid for i in client.get("/api/wiki/trash").json()["items"]
+    )
+    assert client.get(f"/api/wiki/trash/{tid}").status_code == 404
+
+
+def test_purge_trash_item_requires_write(tmp_repo):
+    # Mirrors restore: a user without write on the trashed item can't purge it.
+    owner = seed_user()
+    other = seed_user(uid="u_pp", email="pp@x.com")
+    oc = _client(owner)
+    oc.put("/api/wiki/file", json={"path": "secret.md", "body": "# S\n"})
+    for gid in _everyone_ids("secret.md"):
+        acl.revoke(gid)
+    tid = oc.delete("/api/wiki/file?path=secret.md").json()["trash_id"]
+
+    assert _client(other).delete(f"/api/wiki/trash/{tid}").status_code == 403
+    # Still there for the owner.
+    assert oc.get(f"/api/wiki/trash/{tid}").status_code == 200
+
+
 def test_view_trashed_page_returns_content(tmp_repo):
     user = seed_user()
     client = _client(user)
