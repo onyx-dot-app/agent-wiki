@@ -40,6 +40,31 @@ def get_sha(path: str) -> str | None:
         return row.content_sha256 if row else None
 
 
+def get_vector(path: str) -> bytes | None:
+    """Stored packed vector for ``path`` (unpack with
+    ``app.llm.embeddings.unpack``), or ``None`` if the page has no embedding."""
+    with session() as s:
+        row = s.get(PageEmbedding, path)
+        return bytes(row.vector) if row else None
+
+
+def load_paths(paths: list[str]) -> dict[str, bytes]:
+    """``path -> packed vector`` for the given paths that have a stored
+    embedding (missing paths are simply absent). One query — used to attach
+    candidate-page vectors before relevance filtering."""
+    if not paths:
+        return {}
+    with session() as s:
+        return {
+            path: bytes(vec)
+            for path, vec in s.execute(
+                select(PageEmbedding.path, PageEmbedding.vector).where(
+                    PageEmbedding.path.in_(paths)
+                )
+            )
+        }
+
+
 def all_shas() -> dict[str, str]:
     """``path -> content_sha256`` for every stored page. Cheap (no vectors);
     used by backfill / reconcile to find missing or stale pages."""
