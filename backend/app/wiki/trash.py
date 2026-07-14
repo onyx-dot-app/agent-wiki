@@ -95,8 +95,14 @@ def list_entries() -> list[TrashEntry]:
         trash_id, _, original = rest.partition("/")
         if original:
             groups.setdefault(trash_id, []).append(original)
+    # Order by trash-move commit recency (newest first) — deterministic even
+    # for two moves in the same author-date second, which a trashed_at-string
+    # sort can't disambiguate. This makes "newest tombstone for a path" (which a
+    # re-deleted page's id URL depends on) stable. Ids missing from the git
+    # ordering (shouldn't happen) sort last, stably.
+    rank = {tid: i for i, tid in enumerate(wiki_git.trash_ids_newest_first())}
     entries = [e for tid, orig in groups.items() if (e := _entry(tid, orig))]
-    entries.sort(key=lambda e: e.trashed_at, reverse=True)
+    entries.sort(key=lambda e: rank.get(e.trash_id, len(rank)))
     return entries
 
 
