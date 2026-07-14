@@ -601,6 +601,12 @@ def deleted_doc_tombstone(
         rel = filesystem.safe_rel_path(path)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+    # A live page/folder occupies this path (e.g. recreated after a delete) —
+    # it's not deleted, even if an older tombstone for the same path lingers in
+    # Trash. Report not-deleted so the panel doesn't show stale delete metadata
+    # or a Restore that would 409.
+    if filesystem.absolute(rel).exists():
+        raise HTTPException(status_code=404, detail="not found")
     entry = wiki_trash.entry_for_original_path(rel)
     if entry is None:
         raise HTTPException(status_code=404, detail="not found")

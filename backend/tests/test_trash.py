@@ -268,3 +268,16 @@ def test_deleted_tombstone_hidden_from_other_user(tmp_repo):
     # re-pointed trash-path ACL — no leak of a deleted private page).
     assert oc.get("/api/wiki/deleted?path=secret.md").status_code == 200
     assert _client(other).get("/api/wiki/deleted?path=secret.md").status_code == 403
+
+
+def test_deleted_endpoint_404_when_path_recreated(tmp_repo):
+    # Delete a.md, then recreate a live a.md. The old tombstone still exists in
+    # Trash, but the path is live now → /wiki/deleted must report not-deleted
+    # (else the panel shows stale delete metadata + a Restore that would 409).
+    user = seed_user()
+    client = _client(user)
+    client.put("/api/wiki/file", json={"path": "a.md", "body": "# v1\n"})
+    client.delete("/api/wiki/file?path=a.md")
+    client.put("/api/wiki/file", json={"path": "a.md", "body": "# v2\n"})
+
+    assert client.get("/api/wiki/deleted?path=a.md").status_code == 404

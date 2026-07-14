@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-import { Button, MessageCard, Tag, Text } from "@onyx-ai/opal/components";
+import { Button, Card, MessageCard, Tag, Text } from "@onyx-ai/opal/components";
 import { SvgTrash } from "@onyx-ai/opal/icons";
 import { SettingsLayouts } from "@onyx-ai/opal/layouts";
 
@@ -80,39 +80,43 @@ export default function TrashPage() {
 
         <div className="flex w-full flex-col gap-2">
           {items.map((entry) => (
-            <div
+            <Card
               key={entry.trash_id}
-              className="flex w-full items-center gap-3 rounded-(--border-radius-08) border border-(--border-01) p-3"
+              padding="sm"
+              border="solid"
+              rounding="sm"
             >
-              <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-                <div className="flex items-center gap-2">
-                  <div className="min-w-0 truncate">
-                    <Text font="main-content-body">{itemLabel(entry)}</Text>
+              <div className="flex w-full items-center gap-3">
+                <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                  <div className="flex items-center gap-2">
+                    <div className="min-w-0 truncate">
+                      <Text font="main-content-body">{itemLabel(entry)}</Text>
+                    </div>
+                    <Tag
+                      title={entry.kind === "page" ? "Page" : "Folder"}
+                      color="gray"
+                    />
                   </div>
-                  <Tag
-                    title={entry.kind === "page" ? "Page" : "Folder"}
-                    color="gray"
-                  />
+                  <div className="truncate">
+                    <Text font="main-ui-body" color="text-03">
+                      {`${entry.path} · deleted by ${entry.trashed_by}${
+                        entry.trashed_at
+                          ? ` · ${formatRelative(entry.trashed_at)}`
+                          : ""
+                      }`}
+                    </Text>
+                  </div>
                 </div>
-                <div className="truncate">
-                  <Text font="main-ui-body" color="text-03">
-                    {`${entry.path} · deleted by ${entry.trashed_by}${
-                      entry.trashed_at
-                        ? ` · ${formatRelative(entry.trashed_at)}`
-                        : ""
-                    }`}
-                  </Text>
-                </div>
+                <Button
+                  prominence="secondary"
+                  size="sm"
+                  disabled={!entry.can_restore || busyId === entry.trash_id}
+                  onClick={() => void restore(entry)}
+                >
+                  {busyId === entry.trash_id ? "Restoring…" : "Restore"}
+                </Button>
               </div>
-              <Button
-                prominence="secondary"
-                size="sm"
-                disabled={!entry.can_restore || busyId === entry.trash_id}
-                onClick={() => void restore(entry)}
-              >
-                {busyId === entry.trash_id ? "Restoring…" : "Restore"}
-              </Button>
-            </div>
+            </Card>
           ))}
         </div>
       </SettingsLayouts.Body>
