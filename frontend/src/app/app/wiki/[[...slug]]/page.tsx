@@ -63,7 +63,13 @@ import { CommentsPanel } from "@/components/wiki/CommentsPanel";
 import { UpdateHealthBanner } from "@/components/wiki/UpdateHealthBanner";
 import { UpdatePolicyPanel } from "@/components/wiki/UpdatePolicyPanel";
 import { apiFetch, ApiError } from "@/lib/api";
-import { isDocId, wikiHref, resolveDocId, resolveIds } from "@/lib/wikiHref";
+import {
+  isDocId,
+  wikiHref,
+  wikiPath,
+  resolveDocId,
+  resolveIds,
+} from "@/lib/wikiHref";
 import { formatRelative } from "@/lib/format";
 import { getDeletedTombstone, restoreTrashed } from "@/lib/trash";
 import { listComments } from "@/lib/comments";
@@ -304,7 +310,8 @@ function WikiTombstone({ path }: { path: string }) {
     try {
       const res = await restoreTrashed(entry.trash_id);
       // Land on the restored page; the route resolves the path → id URL.
-      router.push("/app/wiki/" + res.path);
+      // wikiPath encodes each segment (paths may contain spaces, #, %, …).
+      router.push(wikiPath(res.path));
     } catch (e) {
       setErr(
         e instanceof ApiError && e.status === 409

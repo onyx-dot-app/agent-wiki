@@ -13,6 +13,7 @@ export type AppFocusType =
   | "triggers"
   | "agents-and-actions"
   | "chats"
+  | "trash"
   | "none";
 
 // Single source of truth for route → focus type mapping.
@@ -25,6 +26,7 @@ const ROUTES: ReadonlyArray<{
   { href: "/app/triggers", type: "triggers" },
   { href: "/app/agents-and-actions", type: "agents-and-actions" },
   { href: "/app/chats", type: "chats" },
+  { href: "/app/trash", type: "trash" },
 ];
 
 function decodeWikiPath(raw: string): string {
