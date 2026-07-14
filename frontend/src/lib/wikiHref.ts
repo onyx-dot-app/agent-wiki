@@ -11,11 +11,10 @@ import { mutate } from "swr";
 import { apiFetch } from "@/lib/api";
 
 /** Revalidate every wiki-related SWR cache after a create / rename / move /
- * delete / restore, so the UI reacts: the tree listing, the open doc's id→path
- * resolve (`/wiki/id/<id>` — the key that makes a rename/move survive on screen),
- * its content (`/wiki/file…`), recents, starred, trash, and the path→id lookups.
- * Without this a rename leaves the open page resolving to its old (now gone)
- * path. Matches both string keys under `/wiki` and the path-id array keys. */
+ * delete / restore: the tree listing, the open doc's id→path resolve
+ * (`/wiki/id/<id>`), its content (`/wiki/file…`), recents, starred, trash, and
+ * the path→id lookups. Matches both string keys under `/wiki` and the path-id
+ * array keys. */
 export function revalidateWiki(): Promise<unknown> {
   return mutate((key) => {
     const k = Array.isArray(key) ? key[0] : key;

@@ -100,9 +100,8 @@ export function WikiItemActionsProvider({
     return () => clearTimeout(t);
   }, [toast]);
 
-  // Revalidate every wiki cache (tree, open doc's id→path resolve + content,
-  // recents, starred, trash) so a rename/move/delete is reflected immediately —
-  // otherwise the open page keeps resolving to its old, now-gone path.
+  // Revalidate every wiki cache the tree and open document read, after a
+  // rename / move / delete.
   const refresh = () => void revalidateWiki();
 
   const remapActiveFolder = (oldPath: string, newPath: string) =>
