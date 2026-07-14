@@ -69,6 +69,7 @@ import {
   wikiPath,
   resolveDocId,
   resolveIds,
+  revalidateWiki,
 } from "@/lib/wikiHref";
 import { formatRelative } from "@/lib/format";
 import { getDeletedTombstone, restoreTrashed } from "@/lib/trash";
@@ -415,10 +416,13 @@ function Explorer({ dir }: { dir: string }) {
   const error =
     mutationError ?? (listError instanceof Error ? listError.message : null);
   const setError = setMutationError;
-  // Force the cache to revalidate from the server. Used after writes
-  // (create / delete / move) to pull in the new tree.
+  // Force the cache to revalidate from the server after writes (create /
+  // delete / move). Refreshes this listing *and* every wiki cache — including
+  // the open doc's id→path resolve and content — so a rename/move is reflected
+  // on screen instead of leaving the view on the old path.
   const refresh = useCallback(() => {
     void mutatePaths();
+    void revalidateWiki();
   }, [mutatePaths]);
   const [busyPath, setBusyPath] = useState<string | null>(null);
   // Folders still use an inline filename form; new docs route to

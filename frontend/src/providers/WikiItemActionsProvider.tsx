@@ -8,10 +8,10 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
-import useSWR, { useSWRConfig } from "swr";
+import useSWR from "swr";
 
 import { apiFetch } from "@/lib/api";
-import { shareableWikiUrl } from "@/lib/wikiHref";
+import { revalidateWiki, shareableWikiUrl } from "@/lib/wikiHref";
 import { RunAgentPanel } from "@/components/wiki/RunAgentPanel";
 import { ShareDialog } from "@/components/wiki/ShareDialog";
 import { MoveModal, RenameModal } from "@/components/wiki/WikiItemModals";
@@ -84,7 +84,6 @@ export function WikiItemActionsProvider({
   children,
   active = true,
 }: WikiItemActionsProviderProps) {
-  const { mutate } = useSWRConfig();
   const { data } = useSWR<{ entries: Entry[] }>(active ? "/wiki" : null);
   const entries = data?.entries ?? [];
 
@@ -101,12 +100,9 @@ export function WikiItemActionsProvider({
     return () => clearTimeout(t);
   }, [toast]);
 
-  const refresh = () => {
-    void mutate("/wiki");
-    void mutate(
-      (key) => typeof key === "string" && key.startsWith("/wiki/recent"),
-    );
-  };
+  // Revalidate every wiki cache the tree and open document read, after a
+  // rename / move / delete.
+  const refresh = () => void revalidateWiki();
 
   const remapActiveFolder = (oldPath: string, newPath: string) =>
     setActiveFolder((prev) =>
