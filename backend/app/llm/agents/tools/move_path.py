@@ -34,6 +34,9 @@ def handle(args: dict[str, Any]) -> Any:
             raise ToolError("paths must be non-empty")
         if old_rel == new_rel:
             raise ToolError("old_path and new_path are identical")
+        # A folder can't move inside itself — `git mv proj proj/sub` fails.
+        if new_rel.startswith(old_rel + "/"):
+            raise ToolError("cannot move a folder into itself")
 
         old_abs = filesystem.absolute(old_rel)
         new_abs = filesystem.absolute(new_rel)

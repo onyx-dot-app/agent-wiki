@@ -474,6 +474,14 @@ def move_document_or_folder(
         raise HTTPException(status_code=400, detail=str(e)) from e
     if old_rel == new_rel:
         raise HTTPException(status_code=400, detail="old_path and new_path are identical")
+    # A folder can't move inside itself — git refuses `mv proj proj/sub` and
+    # would surface as a bare 500. The UI already blocks this; guard the API/MCP
+    # path too. (Unreachable for a page target — a valid path can't nest under a
+    # `.md` file — but the string check is harmless there.)
+    if new_rel.startswith(old_rel + "/"):
+        raise HTTPException(
+            status_code=400, detail="cannot move a folder into itself"
+        )
     old_abs = filesystem.absolute(old_rel)
     new_abs = filesystem.absolute(new_rel)
     if not old_abs.exists():
