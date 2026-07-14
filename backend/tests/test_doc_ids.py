@@ -95,6 +95,27 @@ def test_page_move_between_existing_folders_keeps_folder_ids(tmp_repo):
     assert doc_ids.id_for_path("dest") == dest_id
 
 
+def test_move_folder_into_own_descendant_is_400(tmp_repo):
+    # Moving a folder inside itself makes `git mv` fatal; the endpoint must
+    # reject it with a clean 400, not surface the git failure as a 500.
+    user = seed_user()
+    client = _client(user)
+    client.put("/api/wiki/file", json={"path": "proj/a.md", "body": "# A\n"})
+
+    resp = client.post(
+        "/api/wiki/move", json={"old_path": "proj", "new_path": "proj/sub"}
+    )
+    assert resp.status_code == 400
+    assert "into itself" in resp.json()["error"]
+
+    # A missing source still reports 404 — the self-nesting guard defers to the
+    # existence check rather than shadowing it with a 400.
+    ghost = client.post(
+        "/api/wiki/move", json={"old_path": "ghost", "new_path": "ghost/sub"}
+    )
+    assert ghost.status_code == 404
+
+
 def test_ids_follow_folder_move(tmp_repo):
     user = seed_user()
     client = _client(user)

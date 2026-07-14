@@ -179,6 +179,24 @@ def test_move_path_rejects_dir_to_md(repo):
     assert ".md" in out["error"]
 
 
+def test_move_path_rejects_move_into_own_subtree(repo):
+    # `auth` is a seeded folder; moving it under itself would make git fatal.
+    from app.llm.agents.tools.move_path import handle
+
+    out = handle(
+        {"old_path": "auth", "new_path": "auth/nested", "commit_message": "x"}
+    )
+    assert "error" in out
+    assert "into itself" in out["error"]
+
+    # A missing source reports not-found, not "into itself" — the self-nesting
+    # guard runs after the existence check.
+    ghost = handle(
+        {"old_path": "ghost", "new_path": "ghost/sub", "commit_message": "x"}
+    )
+    assert "not found" in ghost["error"]
+
+
 def test_move_path_rejects_traversal(repo):
     from app.llm.agents.tools.move_path import handle
 

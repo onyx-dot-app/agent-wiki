@@ -39,6 +39,10 @@ def handle(args: dict[str, Any]) -> Any:
         new_abs = filesystem.absolute(new_rel)
         if not old_abs.exists():
             raise ToolError(f"old_path not found: {old_rel}")
+        # A folder can't move inside itself — `git mv proj proj/sub` fails.
+        # After the existence check so a missing source still reports not-found.
+        if new_rel.startswith(old_rel + "/"):
+            raise ToolError("cannot move a folder into itself")
         if new_abs.exists():
             raise ToolError(f"new_path already exists: {new_rel}")
         blocking = coedit.blocking_active_session_path(new_rel)

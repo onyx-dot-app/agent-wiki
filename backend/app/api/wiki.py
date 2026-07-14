@@ -478,6 +478,15 @@ def move_document_or_folder(
     new_abs = filesystem.absolute(new_rel)
     if not old_abs.exists():
         raise HTTPException(status_code=404, detail="not found")
+    # A folder can't move inside itself — git refuses `mv proj proj/sub` and
+    # would surface as a bare 500. The UI already blocks this; guard the API/MCP
+    # path too. After the existence check so a missing source still 404s.
+    # (Unreachable for a page target — a valid path can't nest under a `.md`
+    # file — but the string check is harmless there.)
+    if new_rel.startswith(old_rel + "/"):
+        raise HTTPException(
+            status_code=400, detail="cannot move a folder into itself"
+        )
     if new_abs.exists():
         raise HTTPException(
             status_code=409,
