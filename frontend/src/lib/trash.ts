@@ -44,6 +44,15 @@ export async function restoreTrashed(
   });
 }
 
+/** Permanently remove a trashed item now, ahead of the 30-day auto-purge.
+ * Irreversible from the app (content remains in git history). Requires the
+ * same write access as restore; 403 otherwise. */
+export async function purgeTrashed(trashId: string): Promise<void> {
+  await apiFetch<void>(`/wiki/trash/${encodeURIComponent(trashId)}`, {
+    method: "DELETE",
+  });
+}
+
 /** Tombstone info for a deleted page/folder by its original path — the
  * most-recent Trash entry, for the deleted-URL panel. Rejects (404) when the
  * path isn't in Trash. */
