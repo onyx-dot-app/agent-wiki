@@ -12,6 +12,7 @@ export const STARRED_KEY = "/wiki/starred";
 
 export interface StarredDocsResponse {
   paths: string[];
+  items?: { path: string; id: string | null }[];
 }
 
 export async function starDoc(path: string): Promise<void> {

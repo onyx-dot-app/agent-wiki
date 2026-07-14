@@ -11,6 +11,7 @@ export const RECENTS_KEY = "/wiki/recents";
 
 export interface RecentDocsResponse {
   paths: string[];
+  items?: { path: string; id: string | null }[];
 }
 
 /** Record that the user opened a wiki doc, then refresh any mounted

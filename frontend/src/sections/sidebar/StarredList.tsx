@@ -22,16 +22,18 @@ import { CSS } from "@dnd-kit/utilities";
 import { Button, SidebarTab } from "@onyx-ai/opal/components";
 import { SvgDocFile, SvgStarOff } from "@onyx-ai/opal/icons";
 import { reorderStarred, unstarDoc } from "@/lib/starred";
+import { wikiHref } from "@/lib/wikiHref";
 import { docLabel } from "@/sections/sidebar/docLabel";
 import { useAppFocus } from "@/hooks/useAppFocus";
 
 interface StarredRowProps {
   path: string;
+  id: string | null;
   selected: boolean;
   onNavigate: () => void;
 }
 
-function StarredRow({ path, selected, onNavigate }: StarredRowProps) {
+function StarredRow({ path, id, selected, onNavigate }: StarredRowProps) {
   const {
     attributes,
     listeners,
@@ -50,7 +52,7 @@ function StarredRow({ path, selected, onNavigate }: StarredRowProps) {
       {...listeners}
     >
       <SidebarTab
-        href={`/app/wiki/${path}`}
+        href={id ? wikiHref(id) : `/app/wiki/${path}`}
         selected={selected}
         icon={SvgDocFile}
         nested
@@ -79,12 +81,18 @@ function StarredRow({ path, selected, onNavigate }: StarredRowProps) {
 
 interface StarredListProps {
   paths: string[];
+  // path→id for id-based hrefs; drag-reorder still keys on `paths`.
+  ids: Record<string, string>;
   onNavigate: () => void;
 }
 
 /** The draggable "Starred" rows. Reordering is optimistic — the SWR
  * cache is updated immediately and rolled back if the PUT fails. */
-export default function StarredList({ paths, onNavigate }: StarredListProps) {
+export default function StarredList({
+  paths,
+  ids,
+  onNavigate,
+}: StarredListProps) {
   const focus = useAppFocus();
   // Require a little movement before a drag starts so plain clicks
   // still navigate to the doc.
@@ -114,6 +122,7 @@ export default function StarredList({ paths, onNavigate }: StarredListProps) {
             <StarredRow
               key={path}
               path={path}
+              id={ids[path] ?? null}
               selected={focus.matchesWikiPath(path)}
               onNavigate={onNavigate}
             />

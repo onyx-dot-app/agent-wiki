@@ -17,6 +17,7 @@ export interface RecentPage {
   title: string;
   updated_at: string;
   preview: string;
+  id?: string | null;
 }
 
 export interface WordDiff {

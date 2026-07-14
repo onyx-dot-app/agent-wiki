@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import useSWR from "swr";
 import { Button } from "@onyx-ai/opal/components";
 import { SvgFolder } from "@onyx-ai/opal/icons";
 import { NotificationBell } from "@/components/common/NotificationBell";
@@ -8,6 +9,7 @@ import { CraftNotifier } from "@/components/wiki/CraftNotifier";
 import { useAppFocus } from "@/hooks/useAppFocus";
 import { useLeftPanel } from "@/providers/LeftPanelProvider";
 import { useHeaderActionsHost } from "@/providers/WikiHeaderActionsProvider";
+import { resolveIds, wikiHref } from "@/lib/wikiHref";
 
 function segmentLabel(segment: string): string {
   return segment.replace(/\.md$/, "").replace(/_/g, " ");
@@ -20,12 +22,26 @@ export function WikiHeader() {
   const host = useHeaderActionsHost();
 
   const segments = wikiPath ? wikiPath.split("/") : [];
+  // Ancestor + self segment paths, resolved to ids so each crumb links to the
+  // stable `/app/wiki/<id>` URL. Folder segments (no id) and paths that haven't
+  // resolved yet fall back to a path URL, which the route canonicalizes.
+  const segmentPaths = segments.map((_, i) =>
+    segments.slice(0, i + 1).join("/"),
+  );
+  const { data: crumbIds } = useSWR(
+    segmentPaths.length ? ["wiki-crumb-ids", segmentPaths.join("\n")] : null,
+    () => resolveIds(segmentPaths),
+  );
   const crumbs: Array<{ label: string; href: string }> = [
     { label: "Wiki", href: "/app/wiki" },
   ];
   segments.forEach((seg, i) => {
-    const path = segments.slice(0, i + 1).join("/");
-    crumbs.push({ label: segmentLabel(seg), href: `/app/wiki/${path}` });
+    const path = segmentPaths[i];
+    const id = crumbIds?.[path];
+    crumbs.push({
+      label: segmentLabel(seg),
+      href: id ? wikiHref(id) : `/app/wiki/${path}`,
+    });
   });
 
   return (

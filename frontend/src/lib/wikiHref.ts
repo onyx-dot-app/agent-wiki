@@ -20,7 +20,10 @@ export function revalidateWiki(): Promise<unknown> {
     const k = Array.isArray(key) ? key[0] : key;
     return (
       typeof k === "string" &&
-      (k.startsWith("/wiki") || k === "id-fallback" || k === "wiki-path-id")
+      (k.startsWith("/wiki") ||
+        k === "id-fallback" ||
+        k === "wiki-path-id" ||
+        k === "wiki-crumb-ids")
     );
   });
 }
