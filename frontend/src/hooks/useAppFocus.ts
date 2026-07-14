@@ -2,6 +2,11 @@
 
 import { useMemo } from "react";
 import { usePathname } from "next/navigation";
+import useSWR from "swr";
+
+import { isDocId, resolveDocId } from "@/lib/wikiHref";
+
+const WIKI_PREFIX = "/app/wiki/";
 
 export type AppFocusType =
   | "wiki"
@@ -73,16 +78,33 @@ export class AppFocus {
 
 export function useAppFocus(): AppFocus {
   const pathname = usePathname();
+
+  // Wiki URLs are id-based (`/app/wiki/<id>`). To report the real doc path
+  // (breadcrumbs, recents highlighting) we resolve the id to its path. This
+  // shares SWR's cache with the wiki route's own resolve, so it's not an extra
+  // request. Legacy path URLs (during the redirect to the id URL) parse inline.
+  const firstSeg = pathname.startsWith(WIKI_PREFIX)
+    ? pathname.slice(WIKI_PREFIX.length).split("/")[0]
+    : "";
+  const idInUrl = isDocId(firstSeg) ? firstSeg : null;
+  const { data: resolved } = useSWR(
+    idInUrl ? `/wiki/id/${idInUrl}` : null,
+    () => resolveDocId(idInUrl as string),
+    { revalidateOnFocus: false },
+  );
+
   return useMemo(() => {
     for (const { href, type } of ROUTES) {
       if (pathname.startsWith(href)) {
-        const wikiPath =
-          type === "wiki" && pathname.length > href.length
-            ? decodeWikiPath(pathname.slice(href.length + 1))
-            : null;
+        let wikiPath: string | null = null;
+        if (type === "wiki" && pathname.length > href.length) {
+          wikiPath = idInUrl
+            ? (resolved?.path ?? null)
+            : decodeWikiPath(pathname.slice(href.length + 1));
+        }
         return new AppFocus(type, href, wikiPath);
       }
     }
     return new AppFocus("none", null);
-  }, [pathname]);
+  }, [pathname, idInUrl, resolved]);
 }
