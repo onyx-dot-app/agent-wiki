@@ -63,19 +63,19 @@ export async function resolveIds(
 }
 
 /** Absolute, shareable wiki URL — the id URL (`/app/wiki/<id>`), so a shared
- * link survives a later rename/move. Falls back to a path URL if the id can't
- * be resolved. `extraParams` (e.g. `"comment=abc"`, no leading `?`/`&`) is
- * appended as a query string. */
+ * link survives a later rename/move. `extraParams` (e.g. `"comment=abc"`, no
+ * leading `?`/`&`) is appended as a query string.
+ *
+ * A path with no live id row is simply absent from the resolve result — that's
+ * a legitimate fallback to a plain path URL. A transient lookup failure, by
+ * contrast, *rejects*: we must not hand back a fragile path URL as if it were
+ * the durable link, so the caller can surface the failure instead of silently
+ * copying a link that may break on the next rename. */
 export async function shareableWikiUrl(
   path: string,
   extraParams = "",
 ): Promise<string> {
-  let id: string | undefined;
-  try {
-    id = (await resolveIds([path]))[path];
-  } catch {
-    /* no live id — fall back to the plain path URL */
-  }
+  const id = (await resolveIds([path]))[path];
   const base = `${window.location.origin}${id ? wikiHref(id) : wikiPath(path)}`;
   const q = extraParams.replace(/^[?&]/, "");
   return q ? `${base}?${q}` : base;

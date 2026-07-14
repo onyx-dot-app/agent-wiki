@@ -134,7 +134,9 @@ export default function WikiRoute() {
   // stable, so the URL survives rename/move. A legacy `/app/wiki/<path>` URL
   // still resolves as input and is redirected to its id URL below.
   const first = rawSlugParts[0];
-  const idMode = !!first && isDocId(first);
+  // An id URL is always a single segment (`/app/wiki/<id>`); a multi-segment
+  // slug is a legacy path even if its first segment looks like an id.
+  const idMode = rawSlugParts.length === 1 && !!first && isDocId(first);
   const commentId = searchParams?.get("comment") ?? null;
 
   // id mode: resolve the id to its current path / kind / deleted state.
@@ -156,7 +158,14 @@ export default function WikiRoute() {
   const pathModePath = decodedParts.join("/");
   // The doc/folder path we're viewing: from the resolved id, or (legacy path
   // URL) straight from the URL.
-  const effectivePath = idMode ? (resolved?.path ?? null) : pathModePath;
+  // A 16-hex single segment can also be a legacy page/folder literally named
+  // like an id. If the id lookup 404s, fall back to treating the segment as a
+  // path so the real page/folder still loads.
+  const idResolve404 =
+    idMode && (resolveErr as ApiError | undefined)?.status === 404;
+  const effectivePath = idMode
+    ? (resolved?.path ?? (idResolve404 ? pathModePath : null))
+    : pathModePath;
   const isFile = !!effectivePath && effectivePath.endsWith(".md");
 
   // Redirect a legacy path URL to its canonical id URL (`/app/wiki/<id>`).
@@ -206,9 +215,11 @@ export default function WikiRoute() {
       </main>
     );
 
-  if (idMode) {
-    // Unknown id / resolve failure / deleted page → the link no longer points
-    // at a live doc. (Deleted-page recovery is a separate feature.)
+  if (idMode && !idResolve404) {
+    // Non-404 resolve failure / deleted page → the link no longer points at a
+    // live doc. (A 404 falls through to path rendering above, in case the
+    // segment is a legacy path that merely looks like an id. Deleted-page
+    // recovery is a separate feature.)
     if (resolveErr || resolved?.deleted_at)
       return <WikiUnknownLink status={(resolveErr as ApiError)?.status} />;
     if (!resolved)

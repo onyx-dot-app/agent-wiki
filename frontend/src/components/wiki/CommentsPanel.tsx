@@ -462,8 +462,14 @@ function Comment({
   // title/icon is the "done" feedback.
   const copyLink = async () => {
     // Durable id-based deep-link (survives rename/move); the ?comment= anchor
-    // rides along.
-    const url = await commentLink(path, comment.thread_root_id);
+    // rides along. A transient id-resolve failure skips the copy rather than
+    // handing over a fragile path link.
+    let url: string;
+    try {
+      url = await commentLink(path, comment.thread_root_id);
+    } catch {
+      return;
+    }
     void navigator.clipboard
       .writeText(url)
       .then(() => {

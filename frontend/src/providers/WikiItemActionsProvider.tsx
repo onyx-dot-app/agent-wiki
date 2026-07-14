@@ -124,8 +124,16 @@ export function WikiItemActionsProvider({
     launchAgent: setAgentPath,
     copyLink: async (path) => {
       // Share the durable id-based URL so the link survives a later
-      // rename/move (falls back to a path URL if the id can't be resolved).
-      const url = await shareableWikiUrl(path);
+      // rename/move (falls back to a path URL only when the page genuinely
+      // has no live id). A transient resolve failure rejects rather than
+      // copying a fragile link, so report it instead of a false success.
+      let url: string;
+      try {
+        url = await shareableWikiUrl(path);
+      } catch {
+        setToast("Couldn't copy link");
+        return;
+      }
       navigator.clipboard
         .writeText(url)
         .then(() => setToast("Link copied"))
