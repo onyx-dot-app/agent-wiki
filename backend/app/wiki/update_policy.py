@@ -165,6 +165,20 @@ def delete(path: str) -> bool:
         return True
 
 
+def delete_at(path: str) -> bool:
+    """Delete the policy row stored at *exactly* ``path``, without normalization.
+
+    For internal cleanup of rows parked at non-canonical keys that ``delete``'s
+    ``safe_rel_path`` would reject — notably ``.trash/…`` rows re-pointed there by
+    a trash move (see ``app/wiki/trash.py:purge``). Returns whether a row went."""
+    with session() as s:
+        row = s.get(UpdatePolicy, path)
+        if row is None:
+            return False
+        s.delete(row)
+        return True
+
+
 def on_page_deleted(path: str) -> None:
     """Drop the policy row for a deleted page (mirrors ``acl.on_page_deleted``).
 

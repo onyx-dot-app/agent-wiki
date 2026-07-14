@@ -723,6 +723,27 @@ def restore_from_trash(
     return sha, moves
 
 
+def purge_from_trash(
+    trash_id: str, message: str, author: str | None = None
+) -> str | None:
+    """Permanently remove ``.trash/<trash_id>/`` from the working tree via
+    ``git rm`` and commit. **Soft purge**: the content stays in git *history*
+    (we never rewrite history — additive-only), it just leaves the working tree
+    and therefore the Trash view. Returns the commit sha, or ``None`` when the
+    trash id has no tracked files (already purged/restored)."""
+    prefix = f"{TRASH_PREFIX}{trash_id}/"
+    files = [p for p in list_trash_files() if p.startswith(prefix)]
+    if not files:
+        return None
+    env_args = ["--author", author] if author else []
+    with commit_lock():
+        _run(["rm", "-r", "--", f"{TRASH_DIR}/{trash_id}"])
+        _run(["commit", "-m", message, *env_args])
+        sha = _run(["rev-parse", "HEAD"]).stdout.strip()
+    log.info("purge_from_trash %s (%d files) sha=%s", trash_id, len(files), sha[:8])
+    return sha
+
+
 class UnknownSha(Exception):
     """Raised when a SHA can't be resolved against the wiki repo.
 
