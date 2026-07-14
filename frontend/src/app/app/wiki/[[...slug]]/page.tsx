@@ -978,6 +978,9 @@ function NewDocView({ dir }: { dir: string }) {
       if (appliedTemplateId) {
         await setDraftTemplate(fullPath, appliedTemplateId);
       }
+      // Revalidate every wiki cache so the persistent Directory sidebar (and
+      // any open folder listing) shows the new page without a full reload.
+      void revalidateWiki();
       // Hand-off: keep the drafting state (and the chat's drafting
       // session) alive across the navigation — see the unmount cleanup.
       createHandoffRef.current = true;
