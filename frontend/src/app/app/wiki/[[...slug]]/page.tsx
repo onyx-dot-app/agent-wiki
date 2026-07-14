@@ -978,6 +978,9 @@ function NewDocView({ dir }: { dir: string }) {
       if (appliedTemplateId) {
         await setDraftTemplate(fullPath, appliedTemplateId);
       }
+      // Revalidate every wiki cache so the persistent Directory sidebar (and
+      // any open folder listing) shows the new page without a full reload.
+      void revalidateWiki();
       // Hand-off: keep the drafting state (and the chat's drafting
       // session) alive across the navigation — see the unmount cleanup.
       createHandoffRef.current = true;
@@ -2125,7 +2128,14 @@ function FileViewer({ path }: { path: string }) {
           method: "POST",
           body: JSON.stringify({ old_path: path, new_path: newRel }),
         });
-        router.push(`/app/wiki/${newRel}`);
+        // The id URL survives a rename, so the open page's id→path resolve now
+        // points at the old path. Revalidate every wiki cache (including that
+        // resolve and the content read) so the page follows to its new path,
+        // then route to the renamed doc's durable id URL — falling back to the
+        // path URL only for an id-less page.
+        await revalidateWiki();
+        const id = (await resolveIds([newRel]))[newRel];
+        router.replace(id ? wikiHref(id) : `/app/wiki/${newRel}`);
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "save failed");

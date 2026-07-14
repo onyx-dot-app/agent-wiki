@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useState, type FormEvent } from "react";
-import useSWR, { useSWRConfig } from "swr";
+import useSWR from "swr";
 
 import {
   Button,
@@ -20,6 +20,7 @@ import {
 } from "@onyx-ai/opal/icons";
 
 import { apiFetch } from "@/lib/api";
+import { revalidateWiki } from "@/lib/wikiHref";
 import { useActiveFolder } from "@/providers/WikiItemActionsProvider";
 import WikiItemMenu from "@/components/wiki/WikiItemActions";
 import styles from "@/components/wiki/WikiTree.module.css";
@@ -189,7 +190,6 @@ function FolderNode({
  */
 export function WikiTree() {
   const router = useRouter();
-  const { mutate } = useSWRConfig();
   const { data } = useSWR<{ entries: Entry[] }>("/wiki");
   const entries = data?.entries ?? [];
   const { folders, files } = childrenOf(entries, "");
@@ -247,7 +247,7 @@ export function WikiTree() {
     });
   };
 
-  const refresh = () => void mutate("/wiki");
+  const refresh = () => void revalidateWiki();
 
   // New pages route to NewDocView for the active folder; new folders create
   // inside it. Both fall back to the wiki root when nothing is active.
