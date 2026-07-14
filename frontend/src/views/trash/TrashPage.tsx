@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-import { Button, Tag, Text } from "@onyx-ai/opal/components";
+import { Button, MessageCard, Tag, Text } from "@onyx-ai/opal/components";
 import { SvgTrash } from "@onyx-ai/opal/icons";
 import { SettingsLayouts } from "@onyx-ai/opal/layouts";
 
@@ -65,8 +65,8 @@ export default function TrashPage() {
       />
       <SettingsLayouts.Body>
         {listError && (
-          <div className="mb-3 rounded-(--radius-04) bg-(--status-error-01) p-[10px] text-[13px] text-(--status-text-error-05)">
-            {listError}
+          <div className="mb-3">
+            <MessageCard variant="error" title={listError} />
           </div>
         )}
 

@@ -18,6 +18,7 @@ import {
   Divider,
   EmptyMessageCard,
   LineItemButton,
+  MessageCard,
   OpenButton,
   Popover,
   PopoverMenu,
@@ -327,11 +328,7 @@ function WikiTombstone({ path }: { path: string }) {
             entry.trashed_at ? ` · ${formatRelative(entry.trashed_at)}` : ""
           }. Restore it to bring it back to ${entry.path}.`}
         />
-        {err && (
-          <div className="rounded-(--border-radius-04) bg-(--status-error-01) p-[10px] text-[13px] text-(--status-text-error-05)">
-            {err}
-          </div>
-        )}
+        {err && <MessageCard variant="error" title={err} />}
         <div className="flex items-center gap-2">
           <Button
             prominence="secondary"
