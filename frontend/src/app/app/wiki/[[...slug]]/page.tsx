@@ -18,6 +18,7 @@ import {
   Divider,
   EmptyMessageCard,
   LineItemButton,
+  MessageCard,
   OpenButton,
   Popover,
   PopoverMenu,
@@ -62,7 +63,15 @@ import { CommentsPanel } from "@/components/wiki/CommentsPanel";
 import { UpdateHealthBanner } from "@/components/wiki/UpdateHealthBanner";
 import { UpdatePolicyPanel } from "@/components/wiki/UpdatePolicyPanel";
 import { apiFetch, ApiError } from "@/lib/api";
-import { isDocId, wikiHref, resolveDocId, resolveIds } from "@/lib/wikiHref";
+import {
+  isDocId,
+  wikiHref,
+  wikiPath,
+  resolveDocId,
+  resolveIds,
+} from "@/lib/wikiHref";
+import { formatRelative } from "@/lib/format";
+import { getDeletedTombstone, restoreTrashed } from "@/lib/trash";
 import { listComments } from "@/lib/comments";
 import {
   paintCommentHighlights,
@@ -216,11 +225,12 @@ export default function WikiRoute() {
     );
 
   if (idMode && !idResolve404) {
-    // Non-404 resolve failure / deleted page → the link no longer points at a
-    // live doc. (A 404 falls through to path rendering above, in case the
-    // segment is a legacy path that merely looks like an id. Deleted-page
-    // recovery is a separate feature.)
-    if (resolveErr || resolved?.deleted_at)
+    // A 404 falls through to path rendering above (the segment may be a legacy
+    // path that merely looks like an id).
+    // Deleted page → tombstone panel (who/when + Restore); other resolve
+    // failure → the generic unavailable card.
+    if (resolved?.deleted_at) return <WikiTombstone path={resolved.path} />;
+    if (resolveErr)
       return <WikiUnknownLink status={(resolveErr as ApiError)?.status} />;
     if (!resolved)
       return (
@@ -238,8 +248,9 @@ export default function WikiRoute() {
   return <Explorer dir={effectivePath} />;
 }
 
-/** A wiki URL that no longer points at a live doc — an unknown id or one whose
- * page has been deleted. Recovering deleted pages is a separate feature. */
+/** A wiki URL that no longer points at a live doc — an unknown/expired id, or
+ * a page that was deleted but is no longer in Trash (purged). A deleted page
+ * still in Trash renders {@link WikiTombstone} instead. */
 function WikiUnknownLink({ status }: { status?: number }) {
   const router = useRouter();
   return (
@@ -258,6 +269,86 @@ function WikiUnknownLink({ status }: { status?: number }) {
         <Button onClick={() => router.push("/app/wiki")}>
           Go to wiki home
         </Button>
+      </div>
+    </main>
+  );
+}
+
+/** Tombstone for a deleted page/folder reached via its id URL: shows who/when
+ * and offers Restore. Falls back to {@link WikiUnknownLink} when the item is no
+ * longer in Trash (purged, or deleted before Trash shipped). */
+function WikiTombstone({ path }: { path: string }) {
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const {
+    data: entry,
+    error,
+    isLoading,
+  } = useSWR(
+    `/wiki/deleted?path=${encodeURIComponent(path)}`,
+    () => getDeletedTombstone(path),
+    { revalidateOnFocus: false },
+  );
+
+  if (isLoading)
+    return (
+      <main className="p-8">
+        <LoadingSpinner center />
+      </main>
+    );
+  if (error || !entry)
+    return <WikiUnknownLink status={(error as ApiError)?.status} />;
+
+  const label = (entry.path.split("/").pop() ?? entry.path).replace(
+    /\.md$/i,
+    "",
+  );
+  const restore = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      const res = await restoreTrashed(entry.trash_id);
+      // Land on the restored page; the route resolves the path → id URL.
+      // wikiPath encodes each segment (paths may contain spaces, #, %, …).
+      router.push(wikiPath(res.path));
+    } catch (e) {
+      setErr(
+        e instanceof ApiError && e.status === 409
+          ? `A page already exists at ${entry.path}.`
+          : e instanceof Error
+            ? e.message
+            : "Restore failed.",
+      );
+      setBusy(false);
+    }
+  };
+
+  return (
+    <main className="flex h-full items-center justify-center p-8 pb-[16vh]">
+      <div className="flex flex-col items-center gap-4">
+        <EmptyMessageCard
+          sizePreset="main-ui"
+          icon={SvgTrash}
+          title={`“${label}” was deleted`}
+          description={`Deleted by ${entry.trashed_by}${
+            entry.trashed_at ? ` · ${formatRelative(entry.trashed_at)}` : ""
+          }. Restore it to bring it back to ${entry.path}.`}
+        />
+        {err && <MessageCard variant="error" title={err} />}
+        <div className="flex items-center gap-2">
+          <Button
+            prominence="secondary"
+            onClick={() => router.push("/app/wiki")}
+          >
+            Go to wiki home
+          </Button>
+          {entry.can_restore && (
+            <Button onClick={() => void restore()} disabled={busy}>
+              {busy ? "Restoring…" : "Restore"}
+            </Button>
+          )}
+        </div>
       </div>
     </main>
   );
@@ -373,7 +464,7 @@ function Explorer({ dir }: { dir: string }) {
     if (
       !(await confirmDialog({
         title: `Delete ${rel}?`,
-        body: "This cannot be undone.",
+        body: "It will be moved to Trash, where you can restore it.",
         confirmLabel: "Delete",
       }))
     )
