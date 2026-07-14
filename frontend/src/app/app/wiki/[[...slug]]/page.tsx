@@ -173,7 +173,11 @@ export default function WikiRoute() {
   // fall through to the folder explorer (which would render an empty folder).
   const idResolve404 =
     idMode && (resolveErr as ApiError | undefined)?.status === 404;
-  const { data: idFallback, isLoading: idFallbackLoading } = useSWR(
+  const {
+    data: idFallback,
+    error: idFallbackError,
+    isLoading: idFallbackLoading,
+  } = useSWR(
     idResolve404 && pathModePath ? ["id-fallback", pathModePath] : null,
     () => resolveIds([pathModePath]).then((m) => m[pathModePath] ?? null),
     { revalidateOnFocus: false },
@@ -205,10 +209,13 @@ export default function WikiRoute() {
   }, [pathModeActive, pathId, commentId, router]);
 
   // A 16-hex id that didn't resolve but *is* a real doc's path (a page/folder
-  // literally named like an id) → send it to its canonical id URL.
+  // literally named like an id) → send it to its canonical id URL, preserving
+  // a comment deep-link like the path redirect does.
   useEffect(() => {
-    if (idResolve404 && idFallback) router.replace(wikiHref(idFallback));
-  }, [idResolve404, idFallback, router]);
+    if (!idResolve404 || !idFallback) return;
+    const suffix = commentId ? `?comment=${encodeURIComponent(commentId)}` : "";
+    router.replace(wikiHref(idFallback) + suffix);
+  }, [idResolve404, idFallback, commentId, router]);
 
   // Remember the most recent wiki path (for the "Last viewed" landing) and
   // feed the sidebar Recents when an actual doc is opened.
@@ -239,15 +246,17 @@ export default function WikiRoute() {
   if (idMode) {
     if (idResolve404) {
       // Unknown id. If it's actually a live doc's path we're mid-redirect (or
-      // still checking) → spinner; otherwise the id is genuinely unknown/expired
-      // → the unavailable card (never the empty folder explorer).
+      // still checking) → spinner; otherwise the unavailable card (never the
+      // empty folder explorer). If the fallback lookup itself failed (after
+      // SWR's retries) we can't confirm the path is missing, so show the softer
+      // generic copy rather than the definitive 404 "broken link" claim.
       if (idFallbackLoading || idFallback)
         return (
           <main className={isMobile ? "p-4" : "p-8"}>
             <LoadingSpinner center />
           </main>
         );
-      return <WikiUnknownLink status={404} />;
+      return <WikiUnknownLink status={idFallbackError ? undefined : 404} />;
     }
     // Deleted page → tombstone panel (who/when + Restore); other resolve
     // failure → the generic unavailable card.
