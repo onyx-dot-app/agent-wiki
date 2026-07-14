@@ -127,10 +127,17 @@ def entry_for(trash_id: str) -> TrashEntry | None:
 
 
 def purge(trash_id: str, actor: str | None = None) -> bool:
-    """Permanently remove a trashed item (past retention): ``git rm`` its
-    ``.trash/<trash_id>/`` subtree + commit, then drop the ACL/owner/policy rows
-    that trashing parked at the trash location so they don't dangle. Content
-    stays in git history (soft purge). Returns ``True`` if anything was purged.
+    """Permanently remove a trashed item (past retention): drop the ACL/owner/
+    policy rows that trashing parked at the trash location, then ``git rm`` its
+    ``.trash/<trash_id>/`` subtree + commit. Content stays in git history (soft
+    purge). Returns ``True`` if anything was purged.
+
+    **Order matters — cleanup before `git rm`, so the purge is retryable.** The
+    row deletes are idempotent; the `git rm` is the last, committing step. If any
+    step fails, the `.trash/` files remain, so the next sweep re-runs the whole
+    thing (re-clearing rows is a no-op) and finishes the `git rm`. Doing the
+    `git rm` first would strand the parked rows on failure: the retry would
+    short-circuit at the empty-`.trash/` guard below.
 
     Does *not* touch the item's ``wiki_doc_ids`` tombstone: the id keeps
     resolving to a deleted state, and the tombstone panel degrades to the
@@ -145,7 +152,6 @@ def purge(trash_id: str, actor: str | None = None) -> bool:
     trash_paths = [f for f in wiki_git.list_trash_files() if f.startswith(prefix)]
     if not trash_paths:
         return False
-    wiki_git.purge_from_trash(trash_id, f"purge trash {trash_id}", author=actor)
     # Every `.trash/<id>/…` path that could hold a parked row: each file plus
     # its ancestor folders down to `.trash/<id>`.
     to_clear: set[str] = set()
@@ -158,4 +164,6 @@ def purge(trash_id: str, actor: str | None = None) -> bool:
         # delete_at (not delete): the parked key is a `.trash/…` path, which
         # delete()'s safe_rel_path normalization rejects.
         update_policy.delete_at(path)
+    # git rm last — the committing step, after the idempotent row cleanup.
+    wiki_git.purge_from_trash(trash_id, f"purge trash {trash_id}", author=actor)
     return True
