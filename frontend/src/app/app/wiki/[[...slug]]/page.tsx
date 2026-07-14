@@ -165,38 +165,57 @@ export default function WikiRoute() {
     }
   });
   const pathModePath = decodedParts.join("/");
-  // The doc/folder path we're viewing: from the resolved id, or (legacy path
-  // URL) straight from the URL.
-  // A 16-hex single segment can also be a legacy page/folder literally named
-  // like an id. If the id lookup 404s, fall back to treating the segment as a
-  // path so the real page/folder still loads.
+  // A single 16-hex segment is treated as an id. When it doesn't resolve (404)
+  // it's almost always an unknown/expired id — but it *could* be a legacy path
+  // literally named like an id, so we resolve that path: a live id means it's a
+  // real doc (redirect to its canonical id URL below); no id means the id is
+  // simply unknown → the "unavailable" card. This is why an unknown id must NOT
+  // fall through to the folder explorer (which would render an empty folder).
   const idResolve404 =
     idMode && (resolveErr as ApiError | undefined)?.status === 404;
-  const effectivePath = idMode
-    ? (resolved?.path ?? (idResolve404 ? pathModePath : null))
-    : pathModePath;
+  const {
+    data: idFallback,
+    error: idFallbackError,
+    isLoading: idFallbackLoading,
+  } = useSWR(
+    idResolve404 && pathModePath ? ["id-fallback", pathModePath] : null,
+    () => resolveIds([pathModePath]).then((m) => m[pathModePath] ?? null),
+    { revalidateOnFocus: false },
+  );
+  // The doc/folder path we're viewing: from the resolved id, or (legacy path
+  // URL) straight from the URL. An unresolved id contributes no path.
+  const effectivePath = idMode ? (resolved?.path ?? null) : pathModePath;
   const isFile = !!effectivePath && effectivePath.endsWith(".md");
 
-  // Redirect a legacy path URL to its canonical id URL (`/app/wiki/<id>`).
-  // Skips the new-doc flow (no id yet) and paths with no live id (unsaved /
-  // not-yet-backfilled) — those keep rendering by path. Guarded so it can't
-  // loop.
+  // Legacy path URL (`/app/wiki/<path>`): every real page/folder has a stable
+  // id, so we resolve the path → redirect to its canonical id URL. A path that
+  // resolves to *no* id doesn't exist → the render shows "unavailable" rather
+  // than an empty folder explorer. The wiki root and the new-doc flow have no
+  // path/id and are handled directly.
+  const pathModeActive = !idMode && !!pathModePath && !isNewMode;
+  const {
+    data: pathId,
+    error: pathIdError,
+    isLoading: pathIdLoading,
+  } = useSWR(
+    pathModeActive ? ["wiki-path-id", pathModePath] : null,
+    () => resolveIds([pathModePath]).then((m) => m[pathModePath] ?? null),
+    { revalidateOnFocus: false },
+  );
   useEffect(() => {
-    if (idMode || !pathModePath || isNewMode) return;
+    if (!pathModeActive || !pathId) return;
     const suffix = commentId ? `?comment=${encodeURIComponent(commentId)}` : "";
-    let cancelled = false;
-    void resolveIds([pathModePath])
-      .then((map) => {
-        const id = map[pathModePath];
-        if (!cancelled && id) router.replace(wikiHref(id) + suffix);
-      })
-      .catch(() => {
-        /* no live id — render by path */
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [idMode, pathModePath, isNewMode, commentId, router]);
+    router.replace(wikiHref(pathId) + suffix);
+  }, [pathModeActive, pathId, commentId, router]);
+
+  // A 16-hex id that didn't resolve but *is* a real doc's path (a page/folder
+  // literally named like an id) → send it to its canonical id URL, preserving
+  // a comment deep-link like the path redirect does.
+  useEffect(() => {
+    if (!idResolve404 || !idFallback) return;
+    const suffix = commentId ? `?comment=${encodeURIComponent(commentId)}` : "";
+    router.replace(wikiHref(idFallback) + suffix);
+  }, [idResolve404, idFallback, commentId, router]);
 
   // Remember the most recent wiki path (for the "Last viewed" landing) and
   // feed the sidebar Recents when an actual doc is opened.
@@ -224,9 +243,21 @@ export default function WikiRoute() {
       </main>
     );
 
-  if (idMode && !idResolve404) {
-    // A 404 falls through to path rendering above (the segment may be a legacy
-    // path that merely looks like an id).
+  if (idMode) {
+    if (idResolve404) {
+      // Unknown id. If it's actually a live doc's path we're mid-redirect (or
+      // still checking) → spinner; otherwise the unavailable card (never the
+      // empty folder explorer). If the fallback lookup itself failed (after
+      // SWR's retries) we can't confirm the path is missing, so show the softer
+      // generic copy rather than the definitive 404 "broken link" claim.
+      if (idFallbackLoading || idFallback)
+        return (
+          <main className={isMobile ? "p-4" : "p-8"}>
+            <LoadingSpinner center />
+          </main>
+        );
+      return <WikiUnknownLink status={idFallbackError ? undefined : 404} />;
+    }
     // Deleted page → tombstone panel (who/when + Restore); other resolve
     // failure → the generic unavailable card.
     if (resolved?.deleted_at) return <WikiTombstone path={resolved.path} />;
@@ -238,6 +269,21 @@ export default function WikiRoute() {
           <LoadingSpinner center />
         </main>
       );
+  }
+
+  if (pathModeActive) {
+    // Real page/folder → has an id → redirecting to its canonical id URL
+    // (spinner). Still resolving → spinner. Resolved to no id → the path
+    // doesn't exist → unavailable. On a transient resolve failure, fall through
+    // to render-by-path below rather than falsely claim unavailable.
+    if (pathIdLoading || pathId)
+      return (
+        <main className={isMobile ? "p-4" : "p-8"}>
+          <LoadingSpinner center />
+        </main>
+      );
+    if (!pathIdError && pathId === null)
+      return <WikiUnknownLink status={404} />;
   }
 
   if (isFile) return <FileViewer path={effectivePath as string} />;
