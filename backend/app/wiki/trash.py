@@ -21,7 +21,7 @@ import uuid
 from pydantic import BaseModel
 
 from app.models.wiki import PageKind
-from app.wiki import git as wiki_git
+from app.wiki import acl, git as wiki_git, update_policy
 from app.wiki.filesystem import TRASH_DIR
 
 
@@ -144,10 +144,6 @@ def purge(trash_id: str, actor: str | None = None) -> bool:
     generic "unavailable" card once ``/wiki/deleted`` 404s (the trash entry is
     gone). Retiring the id fully is a separate concern (the id→trash link isn't
     tracked, and multiple tombstones can share a path)."""
-    # Import here to avoid a module-load cycle (acl/update_policy don't import
-    # trash, but this keeps trash's import surface minimal).
-    from app.wiki import acl, update_policy
-
     prefix = f"{TRASH_DIR}/{trash_id}/"
     trash_paths = [f for f in wiki_git.list_trash_files() if f.startswith(prefix)]
     if not trash_paths:
