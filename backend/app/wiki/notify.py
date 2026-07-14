@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import logging
 
-from app.db import fts, page_dirs
+from app.db import fts, page_dirs, provenance as db_provenance
 from app.mcp_server import pubsub as mcp_pubsub
 from app.tasks import coedit_rebase as coedit_rebase_trigger
 from app.tasks.reindex import drop_page_embedding, index_path
@@ -43,6 +43,27 @@ from app.wiki.comment_remap import remap_comments
 from app.models.wiki import ChangeKind, PathMove
 
 log = logging.getLogger(__name__)
+
+
+def _rename_provenance_safe(old_path: str, new_path: str) -> None:
+    """Follow the provenance ledger to a moved page, but never let a ledger
+    failure abort the rest of the move. The ledger is best-effort. A failed
+    re-point leaves that page's older rows on the old path, degrading its
+    attribution, not the move.
+    """
+    try:
+        db_provenance.rename_doc(old_path, new_path)
+    except Exception:
+        log.exception("provenance rename failed for %s -> %s", old_path, new_path)
+
+
+def _delete_provenance_safe(doc_path: str) -> None:
+    """Drop provenance for a page that left .md space, but never let a ledger
+    failure abort the rest of the move. Best-effort, like the rename."""
+    try:
+        db_provenance.delete_for_doc(doc_path)
+    except Exception:
+        log.exception("provenance delete failed for %s", doc_path)
 
 
 def _remap_comments_safe(path: str) -> None:
@@ -119,8 +140,8 @@ def after_doc_delete(rel_path: str, sha: str, actor: str | None) -> None:
 
     Drops every Postgres row that is a *live pointer* to the page: the
     owner + page-level ACL rows (folder ACLs above are untouched), the
-    agent-activity rail, template-draft state, and per-(user, machine)
-    working-dir bindings. Comments are kept as tombstones (orphaned, not
+    agent-activity rail, the provenance ledger, template-draft state, and
+    per-(user, machine) working-dir bindings. Comments are kept as tombstones (orphaned, not
     deleted) since they have archival value; the rest are operational state
     with none. Point-in-time records (launch history, eval samples) are left
     alone.
@@ -150,6 +171,7 @@ def after_doc_delete(rel_path: str, sha: str, actor: str | None) -> None:
     # later recreated at this path; agent_activity is TTL'd but cleared here
     # for symmetry with the move-out-of-.md-space path.
     agent_activity.delete_for_doc(rel_path)
+    _delete_provenance_safe(rel_path)
     drafts.delete(rel_path)
     page_dirs.delete_all_for_page(rel_path)
     fan_out_trigger_eval(rel_path, sha, ChangeKind.DELETE, actor)
@@ -204,6 +226,7 @@ def after_doc_trashed(
         # (do NOT re-anchor/re-index it — the .trash/ copy stays hidden).
         comments.reassign_doc_path(mv.old, mv.new)
         agent_activity.rename_doc(mv.old, mv.new)
+        _rename_provenance_safe(mv.old, mv.new)
         drafts.rename(mv.old, mv.new)
         page_dirs.rename_page(old_wiki_path=mv.old, new_wiki_path=mv.new)
     # Trigger YAMLs moved into .trash are excluded from loading, so reconverging
@@ -279,6 +302,7 @@ def after_path_move(
             _remap_comments_safe(new_p)
             # Other live pointers follow the page to its new path.
             agent_activity.rename_doc(old_p, new_p)
+            _rename_provenance_safe(old_p, new_p)
             drafts.rename(old_p, new_p)
             page_dirs.rename_page(old_wiki_path=old_p, new_wiki_path=new_p)
         elif old_is_md:
@@ -287,6 +311,7 @@ def after_path_move(
             # on a path that no longer exists.
             comments.orphan_all_for_doc(old_p)
             agent_activity.delete_for_doc(old_p)
+            _delete_provenance_safe(old_p)
             drafts.delete(old_p)
             page_dirs.delete_all_for_page(old_p)
     # Triggers store their scope_path inside the moved YAML (and the YAML's

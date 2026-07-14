@@ -1,4 +1,5 @@
 """Internal domain types for the wiki layer."""
+
 from __future__ import annotations
 
 from enum import Enum
@@ -60,6 +61,33 @@ class CommitResult(NamedTuple):
     sha: str
     old_body: str
     new_body: str
+
+
+class ActorKind(str, Enum):
+    """Valid ``provenance_ledger.actor_kind`` values. Single source of truth,
+    mirrored by the CHECK constraint in ``app/db/models.py`` (same pattern as
+    ``UserKind``)."""
+
+    HUMAN = "human"
+    AGENT = "agent"
+    INGESTION = "ingestion"
+    SYSTEM = "system"
+
+
+class WriteProvenance(BaseModel):
+    """Source facts for an ingestion write, threaded through the commit gateway
+    into the provenance ledger. Set only for ingestion writes.
+
+    Field names mirror the ``provenance_ledger`` source columns so the ledger
+    insert can spread them.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    source_document_id: str | None = None
+    source_type: str | None = None
+    source_url: str | None = None
+    source_title: str | None = None
 
 
 class CommitMaxRetriesError(Exception):
