@@ -22,6 +22,7 @@ import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { RECENTS_KEY, type RecentDocsResponse } from "@/lib/recents";
 import { STARRED_KEY, starDoc, type StarredDocsResponse } from "@/lib/starred";
+import { wikiHref } from "@/lib/wikiHref";
 import { docLabel } from "@/sections/sidebar/docLabel";
 import StarredList from "@/sections/sidebar/StarredList";
 import UserMenu from "@/sections/sidebar/UserMenu";
@@ -31,22 +32,32 @@ import { useAppFocus } from "@/hooks/useAppFocus";
 import { useLeftPanel } from "@/providers/LeftPanelProvider";
 import { isNewActivity, useEvents } from "@/lib/activities";
 
-function useRecentPages() {
+type DocRef = { path: string; id: string | null };
+
+/** path→id map from a `{paths, items}` response — items is additive, so fall
+ * back to no ids when it's absent (links then use a path URL). */
+function idMap(items: DocRef[] | undefined): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const it of items ?? []) if (it.id) out[it.path] = it.id;
+  return out;
+}
+
+function useRecentPages(): DocRef[] {
   const { data } = useSWR(
     RECENTS_KEY,
     (key: string) => apiFetch<RecentDocsResponse>(key),
     { revalidateOnFocus: false },
   );
-  return data?.paths ?? [];
+  return data?.items ?? (data?.paths ?? []).map((path) => ({ path, id: null }));
 }
 
-function useStarredPages() {
+function useStarredPages(): { paths: string[]; ids: Record<string, string> } {
   const { data } = useSWR(
     STARRED_KEY,
     (key: string) => apiFetch<StarredDocsResponse>(key),
     { revalidateOnFocus: false },
   );
-  return data?.paths ?? [];
+  return { paths: data?.paths ?? [], ids: idMap(data?.items) };
 }
 
 export default function AppSidebar() {
@@ -59,10 +70,10 @@ export default function AppSidebar() {
     { refreshInterval: 30_000 },
   );
   const hasNewActivities = activityEvents.some((ev) => isNewActivity(ev.ts));
-  const starred = useStarredPages();
+  const { paths: starred, ids: starredIds } = useStarredPages();
   const starredSet = new Set(starred);
   const recents = useRecentPages();
-  const pages = recents.filter((p) => !starredSet.has(p));
+  const pages = recents.filter((p) => !starredSet.has(p.path));
   const searchRef = useRef<WikiSearchHandle>(null);
   const { folded, setFolded } = useSidebarState();
 
@@ -107,7 +118,11 @@ export default function AppSidebar() {
       <SidebarLayouts.Body scrollKey="app-sidebar">
         {starred.length > 0 && (
           <SidebarLayouts.Section title="Starred">
-            <StarredList paths={starred} onNavigate={closeMobile} />
+            <StarredList
+              paths={starred}
+              ids={starredIds}
+              onNavigate={closeMobile}
+            />
           </SidebarLayouts.Section>
         )}
 
@@ -119,8 +134,8 @@ export default function AppSidebar() {
               </Text>
             </div>
           )}
-          {pages.map((path) => {
-            const href = `/app/wiki/${path}`;
+          {pages.map(({ path, id }) => {
+            const href = id ? wikiHref(id) : `/app/wiki/${path}`;
             return (
               <div key={path} className="group/recent">
                 <SidebarTab

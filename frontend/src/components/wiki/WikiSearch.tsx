@@ -17,6 +17,7 @@ import {
 import { createPortal } from "react-dom";
 
 import { apiFetch, ApiError } from "@/lib/api";
+import { wikiHref, wikiPath } from "@/lib/wikiHref";
 
 // Imperative handle so the sidebar can focus the search input after
 // expanding from a collapsed state (the input only mounts when the
@@ -189,9 +190,11 @@ export const WikiSearch = forwardRef<WikiSearchHandle, WikiSearchProps>(
           router.push(
             `/app/wiki/${row.hit.doc_path}?comment=${row.hit.thread_root_id}`,
           );
+        } else if (row.kind === "folder") {
+          // no id in payload — folder hits stay path-based.
+          router.push(wikiPath(row.folder.path));
         } else {
-          const path = row.kind === "folder" ? row.folder.path : row.hit.path;
-          router.push(`/app/wiki/${path}`);
+          router.push(wikiHref(row.hit.doc_id));
         }
         onNavigate?.();
       },

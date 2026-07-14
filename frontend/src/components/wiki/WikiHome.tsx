@@ -28,6 +28,7 @@ import { relativeTime } from "@/lib/time";
 import { listTemplateSummaries } from "@/lib/templates";
 import type { DocumentTemplateSummary } from "@/lib/templates";
 import { AI_DRAFT_KEY, generateDraft, type RecentPage } from "@/lib/wiki";
+import { wikiHref, wikiPath } from "@/lib/wikiHref";
 import WikiItemMenu from "@/components/wiki/WikiItemActions";
 import styles from "@/components/wiki/WikiHome.module.css";
 
@@ -192,7 +193,9 @@ export function WikiHome() {
               <div key={p.path} className={styles.recentCell}>
                 <RecentCard
                   page={p}
-                  onClick={() => router.push(`/app/wiki/${p.path}`)}
+                  onClick={() =>
+                    router.push(p.id ? wikiHref(p.id) : wikiPath(p.path))
+                  }
                 />
               </div>
             ))}
