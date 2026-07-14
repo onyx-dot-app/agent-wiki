@@ -6,7 +6,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from app.models.wiki import PageKind
+from app.models.wiki import Attribution, PageKind, SourceRef
 
 
 # --------------------------------------------------------------------------- #
@@ -174,6 +174,8 @@ class GetDocumentResponse(BaseModel):
     head_sha: str | None
     ref: str | None = None  # only set when reading at a specific ref
     id: str | None = None  # stable wiki_doc_id; None for historical/deleted reads
+    attribution: Attribution | None = None
+    sources: list[SourceRef] = Field(default_factory=list)
 
 
 class PutDocumentResponse(BaseModel):
@@ -299,6 +301,7 @@ class CommitView(BaseModel):
     added: int = 0
     removed: int = 0
     triggered: int = 0  # number of automations this commit fired
+    attribution: Attribution | None = None
 
 
 class FileHistoryResponse(BaseModel):

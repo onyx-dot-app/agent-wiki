@@ -69,6 +69,7 @@ from app.wiki import (
     filesystem,
     git as wiki_git,
     notify as wiki_notify,
+    provenance,
     recents as wiki_recents,
     search as wiki_search,
     starred as wiki_starred,
@@ -311,6 +312,7 @@ def get_document_by_path(
         except wiki_git.UnknownSha as exc:
             raise HTTPException(status_code=404, detail="not found at ref") from exc
         return GetDocumentResponse(path=rel, body=body, head_sha=head_sha, ref=ref, id=page_id)
+
     # Session-aware live read: when a co-edit session is open on this page, its
     # Postgres buffer holds the freshest edits. The checkpoint that commits the
     # buffer to git runs asynchronously, so HEAD lags — reading it would show
@@ -347,12 +349,19 @@ def get_document_by_path(
                     exc_info=True,
                 )
                 body = current
-        return GetDocumentResponse(path=rel, body=body, head_sha=head_sha, id=page_id)
-    abs_path = filesystem.absolute(rel)
-    if not abs_path.is_file():
-        raise HTTPException(status_code=404, detail="not found")
+    else:
+        abs_path = filesystem.absolute(rel)
+        if not abs_path.is_file():
+            raise HTTPException(status_code=404, detail="not found")
+        body = abs_path.read_text()
+    # Page-level (current HEAD), so both live reads share them.
     return GetDocumentResponse(
-        path=rel, body=abs_path.read_text(), head_sha=head_sha, id=page_id
+        path=rel,
+        body=body,
+        head_sha=head_sha,
+        id=page_id,
+        attribution=provenance.head_attribution(rel, head_sha),
+        sources=provenance.sources_for_path(rel),
     )
 
 
@@ -942,6 +951,7 @@ def file_history(
                 deprecated.add(token)
     head_sha = rows[0].sha if rows else None
     fires = triggers_repo.fire_counts_by_sha({r.sha for r in rows})
+    attr_by_sha = provenance.for_history(rows, rel)
     visible = [
         CommitView(
             sha=r.sha,
@@ -952,6 +962,7 @@ def file_history(
             added=r.added,
             removed=r.removed,
             triggered=fires.get(r.sha, 0),
+            attribution=attr_by_sha[r.sha],
         )
         for r in rows
         if r.sha not in deprecated
