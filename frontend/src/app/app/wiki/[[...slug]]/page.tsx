@@ -2125,7 +2125,14 @@ function FileViewer({ path }: { path: string }) {
           method: "POST",
           body: JSON.stringify({ old_path: path, new_path: newRel }),
         });
-        router.push(`/app/wiki/${newRel}`);
+        // The id URL survives a rename, so the open page's id→path resolve now
+        // points at the old path. Revalidate every wiki cache (including that
+        // resolve and the content read) so the page follows to its new path,
+        // then route to the renamed doc's durable id URL — falling back to the
+        // path URL only for an id-less page.
+        await revalidateWiki();
+        const id = (await resolveIds([newRel]))[newRel];
+        router.replace(id ? wikiHref(id) : `/app/wiki/${newRel}`);
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "save failed");
