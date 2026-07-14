@@ -117,6 +117,25 @@ def entry_for_original_path(path: str) -> TrashEntry | None:
     return next((e for e in list_entries() if e.original_path == path), None)
 
 
+def entry_containing_path(path: str) -> TrashEntry | None:
+    """The newest trash entry whose trashed subtree contains ``path`` — either
+    ``path`` itself (a directly-trashed page/folder) or a page nested under a
+    trashed folder (``path`` = ``proj/a.md``, entry root = ``proj``).
+
+    Unlike ``entry_for_original_path`` (exact-root match, for the tombstone
+    panel), this finds the entry that parked ``path``'s ACL at its trash
+    location, so a deleted id's resolve can authorize against it — including a
+    nested page whose own root was never a separate trash entry."""
+    return next(
+        (
+            e
+            for e in list_entries()
+            if path == e.original_path or path.startswith(e.original_path + "/")
+        ),
+        None,
+    )
+
+
 def entry_for(trash_id: str) -> TrashEntry | None:
     """The trash entry for ``trash_id``, or ``None`` if unknown/empty."""
     prefix = f"{TRASH_DIR}/{trash_id}/"

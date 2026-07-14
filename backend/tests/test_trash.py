@@ -270,6 +270,30 @@ def test_deleted_tombstone_hidden_from_other_user(tmp_repo):
     assert _client(other).get("/api/wiki/deleted?path=secret.md").status_code == 403
 
 
+def test_deleted_id_resolve_hidden_from_other_user(tmp_repo):
+    # The id-URL resolve endpoint must not leak a deleted private page. Deleting
+    # re-points the page's ACL to its trash location, leaving the original path
+    # unmanaged (implicit-public) — so resolve must gate on the trash location,
+    # not the bare path, or path/kind/deleted_at leak to anyone.
+    owner = seed_user()
+    other = seed_user(uid="u_t2", email="t2@x.com")
+    oc = _client(owner)
+    doc_id = oc.put("/api/wiki/file", json={"path": "secret.md", "body": "# S\n"}).json()[
+        "id"
+    ]
+    for gid in _everyone_ids("secret.md"):
+        acl.revoke(gid)
+    oc.delete("/api/wiki/file?path=secret.md")
+
+    # Owner still resolves the id to its tombstone; another user gets a 404 that
+    # reveals nothing (no path, kind, or deletion time).
+    owner_view = oc.get(f"/api/wiki/id/{doc_id}")
+    assert owner_view.status_code == 200
+    assert owner_view.json()["deleted_at"] is not None
+    assert owner_view.json()["path"] == "secret.md"
+    assert _client(other).get(f"/api/wiki/id/{doc_id}").status_code == 404
+
+
 def test_deleted_endpoint_404_when_path_recreated(tmp_repo):
     # Delete a.md, then recreate a live a.md. The old tombstone still exists in
     # Trash, but the path is live now → /wiki/deleted must report not-deleted

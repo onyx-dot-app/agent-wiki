@@ -203,7 +203,22 @@ def resolve_doc_id(
         path = filesystem.safe_rel_path(str(row["path"]))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-    require_can("read", path, user)
+    if row["deleted_at"] is not None:
+        # Deleted: the trashing move re-pointed the item's ACL rows to its
+        # `.trash/` location, leaving the original path unmanaged (implicit
+        # -public). Gate on that trash location like the rest of the Trash
+        # surface (`/deleted`, `/trash`) so a formerly-private page's path,
+        # kind, and deletion time don't leak to a user who never had access.
+        # Resolve against the path's *own* trash location (not the entry root)
+        # so a page nested under a trashed folder inherits the folder's grants.
+        # A purged entry (its `.trash/` tree gone) can't be authorized, so it
+        # reads as unknown — matching the "purged → unavailable" tombstone.
+        entry = wiki_trash.entry_containing_path(path)
+        loc = wiki_trash.trash_location(entry.trash_id, path) if entry else None
+        if loc is None or "read" not in acl.effective(user.id, user.is_admin, loc):
+            raise HTTPException(status_code=404, detail="unknown id")
+    else:
+        require_can("read", path, user)
     return ResolveDocIdResponse(
         id=doc_id, path=path, kind=PageKind.of(path), deleted_at=row["deleted_at"]
     )
