@@ -25,7 +25,9 @@ export function WikiHeader() {
   // Ancestor + self segment paths, resolved to ids so each crumb links to the
   // stable `/app/wiki/<id>` URL. Folder segments (no id) and paths that haven't
   // resolved yet fall back to a path URL, which the route canonicalizes.
-  const segmentPaths = segments.map((_, i) => segments.slice(0, i + 1).join("/"));
+  const segmentPaths = segments.map((_, i) =>
+    segments.slice(0, i + 1).join("/"),
+  );
   const { data: crumbIds } = useSWR(
     segmentPaths.length ? ["wiki-crumb-ids", segmentPaths.join("\n")] : null,
     () => resolveIds(segmentPaths),
