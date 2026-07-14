@@ -108,6 +108,13 @@ def test_move_folder_into_own_descendant_is_400(tmp_repo):
     assert resp.status_code == 400
     assert "into itself" in resp.json()["error"]
 
+    # A missing source still reports 404 — the self-nesting guard defers to the
+    # existence check rather than shadowing it with a 400.
+    ghost = client.post(
+        "/api/wiki/move", json={"old_path": "ghost", "new_path": "ghost/sub"}
+    )
+    assert ghost.status_code == 404
+
 
 def test_ids_follow_folder_move(tmp_repo):
     user = seed_user()

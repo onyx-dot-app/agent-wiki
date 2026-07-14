@@ -189,6 +189,13 @@ def test_move_path_rejects_move_into_own_subtree(repo):
     assert "error" in out
     assert "into itself" in out["error"]
 
+    # A missing source reports not-found, not "into itself" — the self-nesting
+    # guard runs after the existence check.
+    ghost = handle(
+        {"old_path": "ghost", "new_path": "ghost/sub", "commit_message": "x"}
+    )
+    assert "not found" in ghost["error"]
+
 
 def test_move_path_rejects_traversal(repo):
     from app.llm.agents.tools.move_path import handle
