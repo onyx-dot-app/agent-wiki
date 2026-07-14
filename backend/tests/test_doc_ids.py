@@ -64,6 +64,37 @@ def test_id_follows_file_move(tmp_repo):
     assert resolved["deleted_at"] is None
 
 
+def test_page_move_between_existing_folders_keeps_folder_ids(tmp_repo):
+    """Moving a single page between two existing folders re-keys only the page
+    id, never the source folder's row. A lone cross-folder file move looks like
+    a folder rename to prefix inference; the page ``root_move`` tells
+    ``on_path_moved`` it isn't, so the source folder's row is left alone.
+    Rewriting it onto the existing destination folder row hit the live-path
+    unique index and 500'd the move."""
+    user = seed_user()
+    client = _client(user)
+    # Two sibling folders, each with a page, so both folder id rows exist.
+    src_page = client.put(
+        "/api/wiki/file", json={"path": "scratch/xrep.md", "body": "# X\n"}
+    ).json()["id"]
+    client.put("/api/wiki/file", json={"path": "dest/keep.md", "body": "# K\n"})
+    scratch_id = doc_ids.id_for_path("scratch")
+    dest_id = doc_ids.id_for_path("dest")
+
+    resp = client.post(
+        "/api/wiki/move", json={"old_path": "scratch/xrep.md", "new_path": "dest/xrep.md"}
+    )
+    assert resp.status_code == 200
+
+    # The page id followed the move; the source page path is now unbound.
+    assert doc_ids.id_for_path("dest/xrep.md") == src_page
+    assert doc_ids.id_for_path("scratch/xrep.md") is None
+    # Both folder id rows are intact — the source folder was not rewritten onto
+    # the destination.
+    assert doc_ids.id_for_path("scratch") == scratch_id
+    assert doc_ids.id_for_path("dest") == dest_id
+
+
 def test_ids_follow_folder_move(tmp_repo):
     user = seed_user()
     client = _client(user)

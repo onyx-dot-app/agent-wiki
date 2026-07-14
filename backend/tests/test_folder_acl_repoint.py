@@ -1,9 +1,15 @@
-"""Folder-level ACL/policy re-point on move, including the deep-only case.
+"""Folder-level ACL/policy re-point on move.
 
-`acl.on_path_moved` / `update_policy.on_path_moved` infer the folder-prefix
-swap from the file moves, but that finds the *deepest* shared prefix — so a
-folder whose files all sit in one subdirectory would leave the folder's own
-row stranded. The move callers pass the real rename as `root_move` to fix it.
+The move callers pass the real rename as `root_move`. A folder `root_move`
+drives the folder-prefix swap; a `.md`-page `root_move` is a single page move,
+so no folder row is touched. This matters both ways:
+
+- Deep-only folder: a folder whose files all sit in one subdirectory. Inference
+  from the file moves finds only the *deepest* shared prefix and would strand
+  the folder's own row; `root_move` re-points it correctly.
+- Single cross-folder file move: inference can't tell it from a folder rename
+  and would rewrite the source folder's row onto the destination; the page
+  `root_move` suppresses the folder-prefix swap entirely.
 """
 from __future__ import annotations
 
@@ -52,6 +58,38 @@ def test_without_root_move_the_deep_prefix_is_missed(tmp_db):
     )
     acl.on_path_moved([PathMove(old="proj/sub/a.md", new="proj2/sub/a.md")])
     assert "proj" in _folder_paths("proj/sub/a.md")  # stranded without root_move
+
+
+def test_page_move_between_folders_leaves_folder_acl_untouched(tmp_db):
+    # A folder grant on each of two sibling folders. Moving a single page from
+    # one to the other must not rewrite the source folder's grant onto the
+    # destination — the page root_move suppresses the folder-prefix swap.
+    for folder in ("scratch", "dest"):
+        acl.grant(
+            resource_kind="folder",
+            resource_path=folder,
+            principal_kind="everyone",
+            principal_id=None,
+            permission="read",
+            granted_by_user_id=None,
+        )
+    acl.on_path_moved(
+        [PathMove(old="scratch/xrep.md", new="dest/xrep.md")],
+        root_move=PathMove(old="scratch/xrep.md", new="dest/xrep.md"),
+    )
+    assert "scratch" in _folder_paths("scratch/other.md")
+    assert "dest" in _folder_paths("dest/xrep.md")
+
+
+def test_page_move_between_folders_leaves_policy_rows_untouched(tmp_db):
+    update_policy.set_policy("scratch", ingestion_auto_update_disabled=True)
+    update_policy.set_policy("dest", ingestion_auto_update_disabled=True)
+    update_policy.on_path_moved(
+        [PathMove(old="scratch/xrep.md", new="dest/xrep.md")],
+        root_move=PathMove(old="scratch/xrep.md", new="dest/xrep.md"),
+    )
+    assert update_policy.get("scratch") is not None
+    assert update_policy.get("dest") is not None
 
 
 def test_update_policy_folder_repoints_with_root_move(tmp_db):

@@ -211,8 +211,18 @@ def on_path_moved(moves: list[PathMove], root_move: PathMove | None = None) -> N
                 .where(UpdatePolicy.path == mv.old)
                 .values(path=mv.new)
             )
-        if root_move is not None and not root_move.old.endswith(".md"):
-            old_prefix, new_prefix = root_move.old, root_move.new
+        if root_move is not None:
+            # A `.md`-page root is a single page move: the per-file loop above
+            # re-keys it and there is no folder-prefix rewrite. Only a folder
+            # root drives the prefix swap. (Inferring the prefix from the file
+            # moves alone can't tell a single cross-folder file move from a
+            # folder rename, and would rewrite the source folder's row onto the
+            # destination's.)
+            old_prefix, new_prefix = (
+                (None, None)
+                if root_move.old.endswith(".md")
+                else (root_move.old, root_move.new)
+            )
         else:
             old_prefix, new_prefix = filesystem.common_folder_rename(moves)
         if old_prefix is not None and new_prefix is not None:
