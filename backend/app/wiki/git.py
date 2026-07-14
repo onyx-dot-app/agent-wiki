@@ -654,6 +654,31 @@ def list_trash_files() -> list[str]:
     return [p for p in out.split("\0") if p]
 
 
+def trash_ids_newest_first() -> list[str]:
+    """Trash ids ordered by their trash-move commit, newest first.
+
+    Deterministic even when two moves land in the same author-date second —
+    sorting entries by the ``trashed_at`` *string* can't disambiguate those, but
+    git's commit history can. Walks additions under ``.trash/`` newest-commit
+    first and records each id at its first (i.e. creating) appearance.
+    """
+    out = _run(
+        ["log", "--diff-filter=A", "--name-only", "--format=", "--", TRASH_DIR],
+        check=False,
+    ).stdout
+    order: list[str] = []
+    seen: set[str] = set()
+    for line in out.splitlines():
+        line = line.strip()
+        if not line.startswith(TRASH_PREFIX):
+            continue
+        tid = line[len(TRASH_PREFIX) :].split("/", 1)[0]
+        if tid and tid not in seen:
+            seen.add(tid)
+            order.append(tid)
+    return order
+
+
 def last_commit_meta_for_path(rel_path: str) -> tuple[str, str, str, str] | None:
     """``(sha, author, ISO-ts, message)`` of the most recent commit touching
     ``rel_path``, or ``None``. For a trashed path this is the trash-move commit —

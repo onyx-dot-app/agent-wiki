@@ -142,8 +142,8 @@ export function WikiItemActionsProvider({
     remove: async (path, isFolder) => {
       const label = path.replace(/\.md$/, "").split("/").pop() ?? path;
       const message = isFolder
-        ? `Delete folder "${label}" and everything in it? This cannot be undone.`
-        : `Delete ${label}? This cannot be undone.`;
+        ? `Delete folder "${label}" and everything in it? It will be moved to Trash, where you can restore it.`
+        : `Delete ${label}? It will be moved to Trash, where you can restore it.`;
       if (!window.confirm(message)) return;
       try {
         await apiFetch(`/wiki/file?path=${encodeURIComponent(path)}`, {

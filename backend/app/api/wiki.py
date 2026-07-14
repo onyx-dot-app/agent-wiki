@@ -586,6 +586,43 @@ def list_trash(user: User = Depends(require_user)) -> TrashListResponse:
     return TrashListResponse(items=items)
 
 
+@router.get("/deleted", response_model=TrashEntryView)
+def deleted_doc_tombstone(
+    user: User = Depends(require_user),
+    path: str = "",
+) -> TrashEntryView:
+    """Tombstone info for a deleted page/folder — its most-recent Trash entry
+    (who/when + `trash_id` for Restore), for the deleted-URL panel. 404 when the
+    path isn't in Trash. ACL-checked against the trash location, like the rest
+    of the Trash surface, so a deleted private page doesn't leak."""
+    if not path:
+        raise HTTPException(status_code=400, detail="path required")
+    try:
+        rel = filesystem.safe_rel_path(path)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    # A live page/folder occupies this path (e.g. recreated after a delete) —
+    # it's not deleted, even if an older tombstone for the same path lingers in
+    # Trash. Report not-deleted so the panel doesn't show stale delete metadata
+    # or a Restore that would 409.
+    if filesystem.absolute(rel).exists():
+        raise HTTPException(status_code=404, detail="not found")
+    entry = wiki_trash.entry_for_original_path(rel)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="not found")
+    perms = _trash_perms(user, entry)
+    if "read" not in perms:
+        raise HTTPException(status_code=403, detail="not permitted")
+    return TrashEntryView(
+        trash_id=entry.trash_id,
+        path=entry.original_path,
+        kind=entry.kind,
+        trashed_by=entry.trashed_by,
+        trashed_at=entry.trashed_at,
+        can_restore="write" in perms,
+    )
+
+
 @router.get("/trash/{trash_id}", response_model=TrashItemView)
 def view_trash_item(
     trash_id: str,

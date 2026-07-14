@@ -8,6 +8,7 @@ import {
   SvgSearch,
   SvgSettings,
   SvgStar,
+  SvgTrash,
 } from "@onyx-ai/opal/icons";
 import { SidebarLayouts, useSidebarState } from "@onyx-ai/opal/layouts";
 import { sidebarLogo } from "@/sections/sidebar/shared";
@@ -166,6 +167,15 @@ export default function AppSidebar() {
           }
         >
           Activities
+        </SidebarTab>
+        <SidebarTab
+          icon={SvgTrash}
+          folded={folded}
+          tooltip={folded ? "Trash" : undefined}
+          selected={focus.matchesHref("/app/trash")}
+          href="/app/trash"
+        >
+          Trash
         </SidebarTab>
         {user?.is_admin && (
           <SidebarTab
