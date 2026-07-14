@@ -736,11 +736,18 @@ def on_path_moved(moves: list[PathMove], root_move: PathMove | None = None) -> N
                     update(WikiOwner).where(WikiOwner.path == old_p).values(path=new_p)
                 )
 
-        # The folder-level prefix swap. Prefer the caller's explicit root_move
-        # (the actual folder rename); otherwise infer it from the shared prefix
-        # of the file moves — which can under-reach (see docstring).
-        if root_move is not None and not _is_md_page(root_move.old):
-            old_prefix, new_prefix = root_move.old, root_move.new
+        # The folder-level prefix swap. A `.md`-page root is a single page
+        # move: the per-file loop above re-keys it and there is no folder to
+        # prefix-rewrite. Only a folder root drives the swap. Legacy callers
+        # without a root_move fall back to inferring the prefix from the shared
+        # prefix of the file moves — which can under-reach (see docstring) and
+        # can't tell a single cross-folder file move from a folder rename.
+        if root_move is not None:
+            old_prefix, new_prefix = (
+                (None, None)
+                if _is_md_page(root_move.old)
+                else (root_move.old, root_move.new)
+            )
         else:
             old_prefix, new_prefix = common_folder_rename(moves)
         if old_prefix is not None and new_prefix is not None:
