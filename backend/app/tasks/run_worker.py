@@ -40,6 +40,7 @@ _TASK_MODULES = (
     "app.tasks.notify_emails",
     "app.tasks.periodic",
     "app.tasks.reindex",
+    "app.tasks.trash_purge",
     "app.tasks.triggers",
     "app.tasks.update_frequency",
 )
