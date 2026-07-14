@@ -703,7 +703,15 @@ def purge_trash_item(
         raise HTTPException(status_code=404, detail="not found")
     if "write" not in _trash_perms(user, entry):
         raise HTTPException(status_code=403, detail="not permitted")
-    wiki_trash.purge(trash_id, actor=_git_author(user))
+    if not wiki_trash.purge(trash_id, actor=_git_author(user)):
+        # entry_for found it a moment ago, so a False return means the `.trash/`
+        # subtree was gone by the time purge ran — a concurrent purge (e.g. the
+        # daily sweep) beat us. The end state is the same (item is gone), but
+        # the race is unexpected, so surface it.
+        log.warning(
+            "purge_trash_item: %s vanished before purge (concurrent sweep?)",
+            trash_id,
+        )
     return PurgeTrashResponse(trash_id=trash_id, path=entry.original_path)
 
 
