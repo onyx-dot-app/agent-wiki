@@ -17,6 +17,7 @@ from app.models.file_system import (
     CreateFolderRequest,
     CreateFolderResponse,
     DeleteDocumentResponse,
+    DocRef,
     DocumentActivityResponse,
     DocumentDraftView,
     DocumentEntry,
@@ -38,6 +39,9 @@ from app.models.file_system import (
     RecordRecentDocRequest,
     ReindexRequest,
     ReindexResponse,
+    ResolveDocIdResponse,
+    ResolveIdsRequest,
+    ResolveIdsResponse,
     ReorderStarredRequest,
     RestorePathResponse,
     RestoreTrashRequest,
@@ -59,6 +63,7 @@ from app.wiki import (
     agent_activity,
     coedit,
     diff as wiki_diff,
+    doc_ids,
     drafts as wiki_drafts,
     filesystem,
     git as wiki_git,
@@ -153,8 +158,55 @@ def list_documents(
         # Keep non-md paths (folders, .gitkeep) so the explorer can render
         # the tree; permission checks happen on actual page access.
         raw = [(p, ts) for p, ts in raw if not p.endswith(".md") or p in visible]
-    entries = [DocumentEntry(path=p, updated_at=ts) for p, ts in raw]
+    ids = doc_ids.ids_for_paths([p for p, _ in raw])
+    entries = [DocumentEntry(path=p, updated_at=ts, id=ids.get(p)) for p, ts in raw]
     return ListDocumentsResponse(entries=entries)
+
+
+@router.post("/resolve-ids", response_model=ResolveIdsResponse)
+def resolve_ids(
+    req: ResolveIdsRequest,
+    user: User = Depends(require_user),
+) -> ResolveIdsResponse:
+    """Bulk path→id for building id-based hrefs (folders, breadcrumb ancestors).
+
+    ACL-filtered like the tree listing: a `.md` path the caller can't read is
+    dropped; folder paths pass through (folder existence is already visible in
+    the tree, and page-level permission is enforced on actual access)."""
+    try:
+        rels = [filesystem.safe_rel_path(p.strip()) for p in req.paths if p.strip()]
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    if not user.is_admin:
+        md = [p for p in rels if p.endswith(".md")]
+        visible = set(acl.filter_paths_in_python(user.id, False, md))
+        rels = [p for p in rels if not p.endswith(".md") or p in visible]
+    ids = doc_ids.ids_for_paths(rels)
+    return ResolveIdsResponse(items=[DocRef(path=p, id=i) for p, i in ids.items()])
+
+
+@router.get("/id/{doc_id}", response_model=ResolveDocIdResponse)
+def resolve_doc_id(
+    doc_id: str,
+    user: User = Depends(require_user),
+) -> ResolveDocIdResponse:
+    """Resolve a stable doc id to its current binding — the id-URL entry point.
+
+    ``deleted_at`` set means the page/folder was trashed; ``path`` is where it
+    lived, for the tombstone/restore surfaces. 404 for an unknown id."""
+    row = doc_ids.get(doc_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="unknown id")
+    # Stored paths are app-generated from validated values, but re-validate
+    # before the ACL check so this endpoint matches every other read path.
+    try:
+        path = filesystem.safe_rel_path(str(row["path"]))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    require_can("read", path, user)
+    return ResolveDocIdResponse(
+        id=doc_id, path=path, kind=PageKind.of(path), deleted_at=row["deleted_at"]
+    )
 
 
 @router.get("/recent", response_model=ListRecentPagesResponse)
@@ -177,8 +229,10 @@ def list_recent_pages(
         md = [(p, ts) for p, ts in md if p in visible]
     # Newest first; empty timestamps sink to the bottom.
     md.sort(key=lambda pt: pt[1], reverse=True)
+    top = md[:limit]
+    ids = doc_ids.ids_for_paths([p for p, _ in top])
     pages: list[RecentPageView] = []
-    for path, ts in md[:limit]:
+    for path, ts in top:
         abs_path = filesystem.absolute(path)
         if not abs_path.is_file():
             continue
@@ -187,7 +241,11 @@ def list_recent_pages(
         except OSError:
             continue
         title, preview = _title_and_preview(body, path)
-        pages.append(RecentPageView(path=path, title=title, updated_at=ts, preview=preview))
+        pages.append(
+            RecentPageView(
+                path=path, title=title, updated_at=ts, preview=preview, id=ids.get(path)
+            )
+        )
     return ListRecentPagesResponse(pages=pages)
 
 
@@ -196,15 +254,28 @@ def get_document_by_path(
     user: User = Depends(require_user),
     path: str = "",
     ref: str | None = None,
+    doc_id: str | None = Query(None, alias="id"),
 ) -> GetDocumentResponse:
+    if doc_id and not path:
+        row = doc_ids.get(doc_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="unknown id")
+        path = str(row["path"])
     if not path:
-        raise HTTPException(status_code=400, detail="path required")
+        raise HTTPException(status_code=400, detail="path or id required")
     try:
         rel = filesystem.safe_rel_path(path)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     require_can("read", rel, user)
     head_sha = wiki_git.head_sha_for_path(rel)
+    # Stable id: reading a live page lazily backfills its row (pre-id pages);
+    # historical/deleted reads only report an id if a live row exists.
+    page_id = (
+        doc_ids.get_or_mint(rel)
+        if filesystem.absolute(rel).is_file()
+        else doc_ids.id_for_path(rel)
+    )
     if ref:
         # The path may have been different at this ref (rename). Resolve
         # via --follow so old commits don't 404 on the current name.
@@ -213,7 +284,7 @@ def get_document_by_path(
             body = wiki_git.read_file(historical, ref=ref)
         except wiki_git.UnknownSha as exc:
             raise HTTPException(status_code=404, detail="not found at ref") from exc
-        return GetDocumentResponse(path=rel, body=body, head_sha=head_sha, ref=ref)
+        return GetDocumentResponse(path=rel, body=body, head_sha=head_sha, ref=ref, id=page_id)
     # Session-aware live read: when a co-edit session is open on this page, its
     # Postgres buffer holds the freshest edits. The checkpoint that commits the
     # buffer to git runs asynchronously, so HEAD lags — reading it would show
@@ -250,11 +321,13 @@ def get_document_by_path(
                     exc_info=True,
                 )
                 body = current
-        return GetDocumentResponse(path=rel, body=body, head_sha=head_sha)
+        return GetDocumentResponse(path=rel, body=body, head_sha=head_sha, id=page_id)
     abs_path = filesystem.absolute(rel)
     if not abs_path.is_file():
         raise HTTPException(status_code=404, detail="not found")
-    return GetDocumentResponse(path=rel, body=abs_path.read_text(), head_sha=head_sha)
+    return GetDocumentResponse(
+        path=rel, body=abs_path.read_text(), head_sha=head_sha, id=page_id
+    )
 
 
 @router.put("/file", response_model=PutDocumentResponse)
@@ -322,6 +395,9 @@ def put_document_by_path(
         sha=sha,
         created=not existed,
         deprecated=[],
+        # The create lifecycle minted on first save; edits of pre-id pages
+        # backfill here.
+        id=doc_ids.get_or_mint(rel),
     )
 
 
@@ -351,6 +427,7 @@ def create_folder(
         raise HTTPException(status_code=409, detail="folder already exists")
     author = _git_author(user)
     sha = wiki_git.commit_file(f"{rel}/.gitkeep", "", f"create folder {rel}", author=author)
+    doc_ids.get_or_mint(rel)
     log.info("folder created %s by %s sha=%s", rel, author or "?", sha[:8])
     return CreateFolderResponse(path=rel, sha=sha)
 
@@ -569,6 +646,9 @@ def restore_trashed(
     wiki_notify.after_path_move(
         moves, sha, author, root_move=PathMove(old=trash_root, new=entry.original_path)
     )
+    # Re-bind the tombstoned ids to their original paths (after_path_move's
+    # doc_ids hook is a no-op here — nothing live sits at the .trash/ source).
+    doc_ids.on_restored([mv.new for mv in moves])
     log.info(
         "restored trash_id=%s to %s (%d files) by %s",
         req.trash_id,
@@ -640,6 +720,7 @@ def search_documents(
         user_id=user.id,
         is_admin=user.is_admin,
     )
+    ids = doc_ids.ids_for_paths([h.path for h in hits] + [f.path for f in folders])
     return SearchResponse(
         query=query,
         hits=[
@@ -649,10 +730,11 @@ def search_documents(
                 title=h.title,
                 snippet=h.snippet,
                 score=h.score,
+                id=ids.get(h.path),
             )
             for h in hits
         ],
-        folders=[FolderHitView(path=f.path) for f in folders],
+        folders=[FolderHitView(path=f.path, id=ids.get(f.path)) for f in folders],
     )
 
 
@@ -666,7 +748,9 @@ def list_recent_docs(user: User = Depends(require_user)) -> RecentDocsResponse:
         from app.wiki import acl as _acl
 
         paths = _acl.filter_paths_in_python(user.id, False, paths)
-    return RecentDocsResponse(paths=paths)
+    ids = doc_ids.ids_for_paths(paths)
+    items = [DocRef(path=p, id=ids.get(p)) for p in paths]
+    return RecentDocsResponse(paths=paths, items=items)
 
 
 @router.post("/recents", status_code=status.HTTP_204_NO_CONTENT)
@@ -692,7 +776,9 @@ def list_starred_docs(user: User = Depends(require_user)) -> StarredDocsResponse
         from app.wiki import acl as _acl
 
         paths = _acl.filter_paths_in_python(user.id, False, paths)
-    return StarredDocsResponse(paths=paths)
+    ids = doc_ids.ids_for_paths(paths)
+    items = [DocRef(path=p, id=ids.get(p)) for p in paths]
+    return StarredDocsResponse(paths=paths, items=items)
 
 
 @router.post("/starred", status_code=status.HTTP_204_NO_CONTENT)

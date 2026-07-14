@@ -1268,6 +1268,46 @@ class UpdatePolicy(Base):
     )
 
 
+class WikiDocId(Base):
+    """Stable identity for a wiki page or folder — the path↔id mapping.
+
+    **Postgres-only** metadata like ``acl_entries``: git has no native file
+    identity (renames are heuristic inference), so IDs are minted here and
+    maintained at the wiki lifecycle seams (``app/wiki/notify.py``). ``path``
+    is the page's/folder's *live* location; moves re-key it in place so the
+    id survives any reorganization.
+
+    Deletes stamp ``deleted_at`` instead of dropping the row — an id keeps
+    resolving after deletion (to the tombstone view) and a restore re-binds
+    it. A page recreated at the same path is a *new* document and gets a
+    fresh id, hence the partial unique index: ``path`` is unique among live
+    rows only, while any number of tombstone rows may share it.
+    """
+
+    __tablename__ = "wiki_doc_ids"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    path: Mapped[str] = mapped_column(Text, nullable=False)
+    kind: Mapped[str] = mapped_column(Text, nullable=False)  # "page" | "folder"
+    created_at: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
+    )
+    deleted_at: Mapped[str | None] = mapped_column(Text)
+
+    __table_args__ = (
+        CheckConstraint(
+            "kind IN ('page', 'folder')",
+            name="wiki_doc_ids_kind_check",
+        ),
+        Index(
+            "uq_wiki_doc_ids_live_path",
+            "path",
+            unique=True,
+            postgresql_where=text("deleted_at IS NULL"),
+        ),
+    )
+
+
 # --------------------------------------------------------------------------- #
 # Wiki auto-management — change proposals (Postgres-only)                     #
 # --------------------------------------------------------------------------- #

@@ -104,10 +104,18 @@ class IngestRequest(BaseModel):
 class DocumentEntry(BaseModel):
     path: str
     updated_at: str  # ISO-8601 author-time of the most recent commit touching the path
+    id: str | None = None  # stable wiki_doc_id; None for pre-id rows not yet backfilled
 
 
 class ListDocumentsResponse(BaseModel):
     entries: list[DocumentEntry]
+
+
+class DocRef(BaseModel):
+    """A path paired with its stable id, for id-based navigation links."""
+
+    path: str
+    id: str | None = None
 
 
 class RecordRecentDocRequest(BaseModel):
@@ -118,6 +126,9 @@ class RecentDocsResponse(BaseModel):
     # Newest-first paths of docs the user opened, already filtered to
     # ones that still exist and remain readable.
     paths: list[str]
+    # Same list paired with stable ids, for id-based links. Kept alongside
+    # ``paths`` (not replacing it) so the pre-migration frontend still works.
+    items: list[DocRef] = []
 
 
 class StarDocRequest(BaseModel):
@@ -133,6 +144,9 @@ class StarredDocsResponse(BaseModel):
     # User-ordered starred doc paths, already filtered to ones that
     # still exist and remain readable.
     paths: list[str]
+    # Same list paired with stable ids, for id-based links. Additive; see
+    # RecentDocsResponse.
+    items: list[DocRef] = []
 
 
 class RecentPageView(BaseModel):
@@ -147,6 +161,7 @@ class RecentPageView(BaseModel):
     title: str
     updated_at: str
     preview: str
+    id: str | None = None  # stable wiki_doc_id
 
 
 class ListRecentPagesResponse(BaseModel):
@@ -158,6 +173,7 @@ class GetDocumentResponse(BaseModel):
     body: str
     head_sha: str | None
     ref: str | None = None  # only set when reading at a specific ref
+    id: str | None = None  # stable wiki_doc_id; None for historical/deleted reads
 
 
 class PutDocumentResponse(BaseModel):
@@ -165,6 +181,36 @@ class PutDocumentResponse(BaseModel):
     sha: str
     created: bool
     deprecated: list[str]
+    id: str | None = None  # stable wiki_doc_id (minted on create, backfilled on edit)
+
+
+class ResolveDocIdResponse(BaseModel):
+    """A stable doc id resolved to its current binding.
+
+    ``deleted_at`` set means the page/folder was deleted — the path is where
+    it lived at delete time (feed it to the tombstone/restore endpoints).
+    """
+
+    id: str
+    path: str
+    kind: PageKind
+    deleted_at: str | None = None
+
+
+class ResolveIdsRequest(BaseModel):
+    """Bulk path→id lookup. The frontend uses this to build id-based hrefs for
+    paths it holds but has no id for yet — folder paths (not carried by the
+    file-based tree listing) and synthesized breadcrumb ancestors."""
+
+    # Bounded like the other parameterised endpoints; a single view resolves at
+    # most a handful (visible folders + breadcrumb ancestors), so 1000 is ample.
+    paths: list[str] = Field(max_length=1000)
+
+
+class ResolveIdsResponse(BaseModel):
+    # One entry per input path that has a live id row; paths without one are
+    # simply omitted (the caller falls back to a path URL).
+    items: list[DocRef]
 
 
 class CreateFolderResponse(BaseModel):
@@ -303,15 +349,17 @@ class FileDiffResponse(BaseModel):
 
 
 class SearchHitView(BaseModel):
-    doc_id: str
+    doc_id: str  # search-index key (currently the path); distinct from the stable id below
     path: str
     title: str | None
     snippet: str
     score: float
+    id: str | None = None  # stable wiki_doc_id, for id-based navigation
 
 
 class FolderHitView(BaseModel):
     path: str
+    id: str | None = None  # stable wiki_doc_id of the folder, for id-based navigation
 
 
 class SearchResponse(BaseModel):

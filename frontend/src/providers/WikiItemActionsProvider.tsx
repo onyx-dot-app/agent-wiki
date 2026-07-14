@@ -11,6 +11,7 @@ import { createPortal } from "react-dom";
 import useSWR, { useSWRConfig } from "swr";
 
 import { apiFetch } from "@/lib/api";
+import { shareableWikiUrl } from "@/lib/wikiHref";
 import { RunAgentPanel } from "@/components/wiki/RunAgentPanel";
 import { ShareDialog } from "@/components/wiki/ShareDialog";
 import { MoveModal, RenameModal } from "@/components/wiki/WikiItemModals";
@@ -121,9 +122,18 @@ export function WikiItemActionsProvider({
     rename: setRenamePath,
     move: setMovePath,
     launchAgent: setAgentPath,
-    copyLink: (path) => {
-      const encoded = path.split("/").map(encodeURIComponent).join("/");
-      const url = `${window.location.origin}/app/wiki/${encoded}`;
+    copyLink: async (path) => {
+      // Share the durable id-based URL so the link survives a later
+      // rename/move (falls back to a path URL only when the page genuinely
+      // has no live id). A transient resolve failure rejects rather than
+      // copying a fragile link, so report it instead of a false success.
+      let url: string;
+      try {
+        url = await shareableWikiUrl(path);
+      } catch {
+        setToast("Couldn't copy link");
+        return;
+      }
       navigator.clipboard
         .writeText(url)
         .then(() => setToast("Link copied"))

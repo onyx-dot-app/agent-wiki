@@ -17,6 +17,7 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useAuth } from "@/lib/auth";
+import { shareableWikiUrl } from "@/lib/wikiHref";
 import {
   createComment,
   deleteComment,
@@ -71,15 +72,10 @@ function toIso(ts: string): string {
 }
 
 /** Deep-link to a specific thread: the page route reads `?comment=<id>`, opens
- * the panel, and scrolls to the thread's anchored span. Each path segment is
- * encoded since wiki paths contain spaces. */
-function commentLink(path: string, rootId: string): string {
-  const encoded = path
-    .split("/")
-    .filter(Boolean)
-    .map((s) => encodeURIComponent(s))
-    .join("/");
-  return `${window.location.origin}/app/wiki/${encoded}?comment=${rootId}`;
+ * the panel, and scrolls to the thread's anchored span. Uses the durable
+ * id-based URL so the link survives a page rename/move. */
+function commentLink(path: string, rootId: string): Promise<string> {
+  return shareableWikiUrl(path, `comment=${rootId}`);
 }
 
 export function CommentsPanel({
@@ -464,9 +460,18 @@ function Comment({
   // Copy a deep-link to this comment's thread (anchors live on the root, so all
   // comments in a thread share its link). Doesn't close the menu — the swapped
   // title/icon is the "done" feedback.
-  const copyLink = () => {
+  const copyLink = async () => {
+    // Durable id-based deep-link (survives rename/move); the ?comment= anchor
+    // rides along. A transient id-resolve failure skips the copy rather than
+    // handing over a fragile path link.
+    let url: string;
+    try {
+      url = await commentLink(path, comment.thread_root_id);
+    } catch {
+      return;
+    }
     void navigator.clipboard
-      .writeText(commentLink(path, comment.thread_root_id))
+      .writeText(url)
       .then(() => {
         setCopied(true);
         window.setTimeout(() => setCopied(false), 1500);

@@ -38,7 +38,7 @@ from app.tasks.reindex import drop_page_embedding, index_path
 from app.tasks.triggers import fan_out_trigger_eval
 from app.tasks.update_frequency import check_update_frequency
 from app.triggers import repo as triggers_repo
-from app.wiki import acl, agent_activity, coedit, comments, constants as wiki_constants, drafts, update_policy
+from app.wiki import acl, agent_activity, coedit, comments, constants as wiki_constants, doc_ids, drafts, update_policy
 from app.wiki.comment_remap import remap_comments
 from app.models.wiki import ChangeKind, PathMove
 
@@ -88,6 +88,8 @@ def after_doc_write(
         return
     if change_kind == ChangeKind.CREATE:
         acl.on_page_created(rel_path, owner_user_id=owner_user_id)
+        # Mint a stable id for the page (and seed rows for its ancestor folders).
+        doc_ids.mint_for_page(rel_path)
     index_path(rel_path)
     fan_out_trigger_eval(rel_path, sha, change_kind, actor)
     # Ingestion churn → check the page's 24h update frequency against the
@@ -138,6 +140,9 @@ def after_doc_delete(rel_path: str, sha: str, actor: str | None) -> None:
     drop_page_embedding(rel_path)
     acl.on_page_deleted(rel_path)
     update_policy.on_page_deleted(rel_path)
+    # Tombstone the id (kept, not dropped) so it still resolves — to a deleted
+    # state — and a later restore can re-bind it.
+    doc_ids.on_deleted(rel_path)
     # The body is gone, so there's nothing to re-anchor against — orphan the
     # page's comments (keeps them as tombstones) rather than dropping them.
     comments.orphan_all_for_doc(rel_path)
@@ -181,6 +186,12 @@ def after_doc_trashed(
     acl.on_path_moved(moves, root_move=root_move)
     update_policy.on_path_moved(moves, root_move=root_move)
     coedit.on_path_moved(moves)
+    # Tombstone the id(s) at the *original* root rather than following the move
+    # into `.trash/` — the id keeps resolving (to a deleted state), and restore
+    # re-binds it. ACL/policy above deliberately follow into `.trash/` (so the
+    # Trash view can authorize); ids deliberately don't.
+    if root_move is not None:
+        doc_ids.on_deleted(root_move.old)
     for mv in moves:
         if not mv.old.endswith(".md"):
             continue
@@ -243,6 +254,7 @@ def after_path_move(
     """
     acl.on_path_moved(moves, root_move=root_move)
     update_policy.on_path_moved(moves, root_move=root_move)
+    doc_ids.on_path_moved(moves, root_move=root_move)
     coedit.on_path_moved(moves)
     list_changed = False
     for mv in moves:

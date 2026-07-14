@@ -47,6 +47,7 @@ import {
   type UserLite,
 } from "@/lib/users";
 import { lastSegment } from "@/lib/wiki";
+import { shareableWikiUrl } from "@/lib/wikiHref";
 import { markdown } from "@onyx-ai/opal/utils";
 
 import { TransferModal } from "./TransferModal";
@@ -286,14 +287,8 @@ export function ShareDialog({ path, open, onClose }: ShareDialogProps) {
 
   const copyLink = async () => {
     try {
-      const trimmed = path.replace(/\/+$/, "");
-      const encodedPath = trimmed
-        .split("/")
-        .filter(Boolean)
-        .map((segment) => encodeURIComponent(segment))
-        .join("/");
-      const targetPath = encodedPath ? `/app/wiki/${encodedPath}` : "/app/wiki";
-      const shareUrl = `${window.location.origin}${targetPath}`;
+      // Durable id-based URL so a shared link survives a later rename/move.
+      const shareUrl = await shareableWikiUrl(path.replace(/\/+$/, ""));
       await navigator.clipboard.writeText(shareUrl);
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1500);
