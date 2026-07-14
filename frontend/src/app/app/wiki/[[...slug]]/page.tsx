@@ -183,26 +183,26 @@ export default function WikiRoute() {
   const effectivePath = idMode ? (resolved?.path ?? null) : pathModePath;
   const isFile = !!effectivePath && effectivePath.endsWith(".md");
 
-  // Redirect a legacy path URL to its canonical id URL (`/app/wiki/<id>`).
-  // Skips the new-doc flow (no id yet) and paths with no live id (unsaved /
-  // not-yet-backfilled) — those keep rendering by path. Guarded so it can't
-  // loop.
+  // Legacy path URL (`/app/wiki/<path>`): every real page/folder has a stable
+  // id, so we resolve the path → redirect to its canonical id URL. A path that
+  // resolves to *no* id doesn't exist → the render shows "unavailable" rather
+  // than an empty folder explorer. The wiki root and the new-doc flow have no
+  // path/id and are handled directly.
+  const pathModeActive = !idMode && !!pathModePath && !isNewMode;
+  const {
+    data: pathId,
+    error: pathIdError,
+    isLoading: pathIdLoading,
+  } = useSWR(
+    pathModeActive ? ["wiki-path-id", pathModePath] : null,
+    () => resolveIds([pathModePath]).then((m) => m[pathModePath] ?? null),
+    { revalidateOnFocus: false },
+  );
   useEffect(() => {
-    if (idMode || !pathModePath || isNewMode) return;
+    if (!pathModeActive || !pathId) return;
     const suffix = commentId ? `?comment=${encodeURIComponent(commentId)}` : "";
-    let cancelled = false;
-    void resolveIds([pathModePath])
-      .then((map) => {
-        const id = map[pathModePath];
-        if (!cancelled && id) router.replace(wikiHref(id) + suffix);
-      })
-      .catch(() => {
-        /* no live id — render by path */
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [idMode, pathModePath, isNewMode, commentId, router]);
+    router.replace(wikiHref(pathId) + suffix);
+  }, [pathModeActive, pathId, commentId, router]);
 
   // A 16-hex id that didn't resolve but *is* a real doc's path (a page/folder
   // literally named like an id) → send it to its canonical id URL.
@@ -260,6 +260,21 @@ export default function WikiRoute() {
           <LoadingSpinner center />
         </main>
       );
+  }
+
+  if (pathModeActive) {
+    // Real page/folder → has an id → redirecting to its canonical id URL
+    // (spinner). Still resolving → spinner. Resolved to no id → the path
+    // doesn't exist → unavailable. On a transient resolve failure, fall through
+    // to render-by-path below rather than falsely claim unavailable.
+    if (pathIdLoading || pathId)
+      return (
+        <main className={isMobile ? "p-4" : "p-8"}>
+          <LoadingSpinner center />
+        </main>
+      );
+    if (!pathIdError && pathId === null)
+      return <WikiUnknownLink status={404} />;
   }
 
   if (isFile) return <FileViewer path={effectivePath as string} />;
