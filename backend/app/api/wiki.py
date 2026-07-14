@@ -73,7 +73,7 @@ from app.wiki import (
 )
 from app.ingest import settings as ingest_settings
 from app.models.update_policy import UpdateHealthResponse
-from app.models.wiki import ChangeKind, CommitMaxRetriesError, PathMove
+from app.models.wiki import ChangeKind, CommitMaxRetriesError, PageKind, PathMove
 
 router = APIRouter()
 log = logging.getLogger(__name__)
@@ -523,7 +523,7 @@ def view_trash_item(
     if "read" not in perms:
         raise HTTPException(status_code=403, detail="not permitted")
     body: str | None = None
-    if entry.kind == "page":
+    if entry.kind == PageKind.PAGE:
         body = wiki_git.read_file_opt(
             wiki_trash.trash_location(trash_id, entry.original_path)
         )

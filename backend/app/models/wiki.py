@@ -14,6 +14,26 @@ class ChangeKind(str, Enum):
     SCHEDULE = "schedule"
 
 
+class PageKind(str, Enum):
+    """Whether a wiki path names a page (a ``.md`` file) or a folder.
+
+    The single representation of this distinction across the wiki layer —
+    ACLs (``resource_kind``), update policies, and the Trash view all classify
+    paths this way. ``str``-valued so it compares/serializes as ``"page"`` /
+    ``"folder"`` (matching the stored column values and the DB CHECK
+    constraints) with no ``.value`` juggling at call sites.
+    """
+
+    PAGE = "page"
+    FOLDER = "folder"
+
+    @classmethod
+    def of(cls, path: str) -> "PageKind":
+        """Classify ``path`` by extension: a ``.md`` file is a page, anything
+        else (including the root ``""``) is a folder."""
+        return cls.PAGE if path.endswith(".md") else cls.FOLDER
+
+
 class PathMove(BaseModel):
     """One tracked file relocated by a move/rename commit: ``old`` → ``new``.
 
