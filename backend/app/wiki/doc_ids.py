@@ -8,9 +8,9 @@ re-binds it). A page recreated at a previously-deleted path is a new
 document with a fresh id; the partial unique index on live ``path`` rows
 enforces that at most one live row occupies a path.
 
-Backfill for pre-existing content is lazy: reads mint missing rows via
-:func:`get_or_mint`, and the hourly BM25 reconcile sweep calls
-:func:`ensure_for_paths` for recently-touched pages.
+Backfill for pre-existing content is lazy: a read of a page with no row mints
+one via :func:`get_or_mint`. Ancestor-folder rows are seeded when a page is
+created under them (:func:`mint_for_page`), not on a lazy read.
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ from sqlalchemy.exc import IntegrityError
 from app.db.models import WikiDocId
 from app.db.session import session
 from app.models.wiki import PathMove
-from app.wiki import filesystem, git as wiki_git
+from app.wiki import filesystem
 
 log = logging.getLogger(__name__)
 
@@ -132,51 +132,6 @@ def mint_for_page(path: str) -> str:
     for i in range(1, len(parts) + 1):
         get_or_mint("/".join(parts[:i]))
     return get_or_mint(path)
-
-
-def ensure_for_paths(paths: list[str]) -> None:
-    """Backfill: mint live rows for any of ``paths`` that lack one. Pages
-    also seed their ancestor folders. Never raises — backfill must not
-    abort its caller (the startup reindex sweep)."""
-    for p in paths:
-        try:
-            if p.endswith(".md"):
-                mint_for_page(p)
-            else:
-                get_or_mint(p)
-        except Exception:
-            log.exception("doc_ids backfill failed for %s", p)
-
-
-def backfill_all() -> None:
-    """Mint ids for every tracked page and folder that lacks a live row.
-
-    Run once at boot so an existing wiki (created before stable ids) gets ids
-    for all its pages *and folders* — not just the pages someone happens to
-    open. Gated on a cheap count so a fully-minted wiki does almost no work;
-    otherwise mints the missing rows (``get_or_mint`` skips those that exist).
-
-    Folders are enumerated from the tracked-file prefixes so empty folders
-    (only a ``.gitkeep``) get ids too, which page-ancestor seeding misses.
-    """
-    files = wiki_git.list_paths()
-    md = [p for p in files if p.endswith(".md")]
-    folders: set[str] = set()
-    for f in files:
-        parts = f.split("/")[:-1]
-        for i in range(1, len(parts) + 1):
-            folders.add("/".join(parts[:i]))
-    want = len(folders | set(md))
-    with session() as s:
-        have = s.execute(
-            select(func.count())
-            .select_from(WikiDocId)
-            .where(WikiDocId.deleted_at.is_(None))
-        ).scalar_one()
-    if have >= want:
-        return
-    log.info("doc_ids backfill: %d live rows < %d tracked paths; minting missing", have, want)
-    ensure_for_paths([*sorted(folders), *md])
 
 
 def on_path_moved(moves: list[PathMove], root_move: PathMove | None = None) -> None:

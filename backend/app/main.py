@@ -57,7 +57,6 @@ from app.auth.deps import CurrentUserMiddleware
 import app.config as _app_config
 from app.db import comment_fts
 from app.wiki import comments as _comments_repo
-from app.wiki import doc_ids
 from app.metrics import setup_prometheus
 from app.realtime import bus
 from app.llm.errors import LLMError
@@ -177,10 +176,6 @@ async def _lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     # The index persists across reboots, so steady-state boots skip this.
     if comment_fts.count() == 0:
         _comments_repo.reindex_all_inline()
-    # Stable doc ids: mint for every existing page + folder that lacks one, so
-    # a pre-ids wiki gets full id coverage. Self-gates (cheap count) so a
-    # fully-minted wiki skips the work on later boots.
-    doc_ids.backfill_all()
     triggers_repo.purge_invalid_triggers(actor="system <system@agent-wiki>")
     triggers_reconcile.reconcile_legacy_slack_triggers()
     triggers_repo.rebuild_from_filesystem()
