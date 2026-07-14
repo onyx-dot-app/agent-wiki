@@ -100,6 +100,17 @@ def list_entries() -> list[TrashEntry]:
     return entries
 
 
+def entry_for_original_path(path: str) -> TrashEntry | None:
+    """The most-recently-trashed entry whose original location was ``path``,
+    or ``None`` if that path was never trashed (or its trash was purged).
+
+    Powers the deleted-URL tombstone: a page/folder deleted from ``path`` can
+    have several tombstones (deleted, recreated, deleted again) — the newest
+    is the one a Restore would bring back. ``list_entries`` is newest-first,
+    so the first match wins."""
+    return next((e for e in list_entries() if e.original_path == path), None)
+
+
 def entry_for(trash_id: str) -> TrashEntry | None:
     """The trash entry for ``trash_id``, or ``None`` if unknown/empty."""
     prefix = f"{TRASH_DIR}/{trash_id}/"

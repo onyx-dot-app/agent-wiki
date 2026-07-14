@@ -214,3 +214,57 @@ def test_duplicate_names_coexist_in_trash(tmp_repo):
     assert client.post("/api/wiki/file/restore", json={"trash_id": tid1}).status_code == 200
     assert client.get("/api/wiki/file?path=a.md").json()["body"] == "# v1\n"
     assert client.post("/api/wiki/file/restore", json={"trash_id": tid2}).status_code == 409
+
+
+def test_deleted_endpoint_returns_tombstone(tmp_repo):
+    # The deleted-URL tombstone panel looks up a deleted page's Trash entry by
+    # its original path to show who/when + offer Restore.
+    user = seed_user()
+    client = _client(user)
+    client.put("/api/wiki/file", json={"path": "proj/note.md", "body": "# N\n"})
+    tid = client.delete("/api/wiki/file?path=proj/note.md").json()["trash_id"]
+
+    t = client.get("/api/wiki/deleted?path=proj/note.md")
+    assert t.status_code == 200
+    body = t.json()
+    assert body["trash_id"] == tid
+    assert body["path"] == "proj/note.md"
+    assert body["kind"] == "page"
+    assert body["can_restore"] is True
+
+
+def test_deleted_endpoint_404_when_not_trashed(tmp_repo):
+    user = seed_user()
+    client = _client(user)
+    client.put("/api/wiki/file", json={"path": "live.md", "body": "# L\n"})
+    # A live page and a never-existed path are both "not deleted" → 404.
+    assert client.get("/api/wiki/deleted?path=live.md").status_code == 404
+    assert client.get("/api/wiki/deleted?path=never.md").status_code == 404
+
+
+def test_deleted_endpoint_returns_newest_tombstone(tmp_repo):
+    # Delete / recreate / delete → the endpoint returns the most-recent entry
+    # (the one a Restore would bring back).
+    user = seed_user()
+    client = _client(user)
+    client.put("/api/wiki/file", json={"path": "a.md", "body": "# v1\n"})
+    client.delete("/api/wiki/file?path=a.md")
+    client.put("/api/wiki/file", json={"path": "a.md", "body": "# v2\n"})
+    tid2 = client.delete("/api/wiki/file?path=a.md").json()["trash_id"]
+
+    assert client.get("/api/wiki/deleted?path=a.md").json()["trash_id"] == tid2
+
+
+def test_deleted_tombstone_hidden_from_other_user(tmp_repo):
+    owner = seed_user()
+    other = seed_user(uid="u_t2", email="t2@x.com")
+    oc = _client(owner)
+    oc.put("/api/wiki/file", json={"path": "secret.md", "body": "# S\n"})
+    for gid in _everyone_ids("secret.md"):
+        acl.revoke(gid)
+    oc.delete("/api/wiki/file?path=secret.md")
+
+    # Owner sees the tombstone; another user can't (403, resolved against the
+    # re-pointed trash-path ACL — no leak of a deleted private page).
+    assert oc.get("/api/wiki/deleted?path=secret.md").status_code == 200
+    assert _client(other).get("/api/wiki/deleted?path=secret.md").status_code == 403
