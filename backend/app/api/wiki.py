@@ -209,13 +209,23 @@ def resolve_doc_id(
         # -public). Gate on that trash location like the rest of the Trash
         # surface (`/deleted`, `/trash`) so a formerly-private page's path,
         # kind, and deletion time don't leak to a user who never had access.
-        # Resolve against the path's *own* trash location (not the entry root)
+        # Authorize against the path's own trash location (not the entry root)
         # so a page nested under a trashed folder inherits the folder's grants.
-        # A purged entry (its `.trash/` tree gone) can't be authorized, so it
-        # reads as unknown — matching the "purged → unavailable" tombstone.
-        entry = wiki_trash.entry_containing_path(path)
-        loc = wiki_trash.trash_location(entry.trash_id, path) if entry else None
-        if loc is None or "read" not in acl.effective(user.id, user.is_admin, loc):
+        # A path can map to several trash entries (deleted, recreated, folder
+        # deleted) and the tombstone doesn't say which is ours, so require read
+        # on *every* matching entry: an unauthorized user is always blocked by
+        # the truly-private one, and we never authorize against an unrelated
+        # page's ACL. No entries (its `.trash/` tree was purged) → unknown,
+        # matching the "purged → unavailable" tombstone.
+        entries = wiki_trash.entries_containing_path(path)
+        readable = entries and all(
+            "read"
+            in acl.effective(
+                user.id, user.is_admin, wiki_trash.trash_location(e.trash_id, path)
+            )
+            for e in entries
+        )
+        if not readable:
             raise HTTPException(status_code=404, detail="unknown id")
     else:
         require_can("read", path, user)

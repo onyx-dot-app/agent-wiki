@@ -117,23 +117,24 @@ def entry_for_original_path(path: str) -> TrashEntry | None:
     return next((e for e in list_entries() if e.original_path == path), None)
 
 
-def entry_containing_path(path: str) -> TrashEntry | None:
-    """The newest trash entry whose trashed subtree contains ``path`` — either
-    ``path`` itself (a directly-trashed page/folder) or a page nested under a
-    trashed folder (``path`` = ``proj/a.md``, entry root = ``proj``).
+def entries_containing_path(path: str) -> list[TrashEntry]:
+    """Every trash entry whose trashed subtree contains ``path`` — ``path``
+    itself (a directly-trashed page/folder) or a page nested under a trashed
+    folder (``path`` = ``proj/a.md``, entry root = ``proj``).
 
-    Unlike ``entry_for_original_path`` (exact-root match, for the tombstone
-    panel), this finds the entry that parked ``path``'s ACL at its trash
-    location, so a deleted id's resolve can authorize against it — including a
-    nested page whose own root was never a separate trash entry."""
-    return next(
-        (
-            e
-            for e in list_entries()
-            if path == e.original_path or path.startswith(e.original_path + "/")
-        ),
-        None,
-    )
+    A path can be covered by more than one entry (deleted, recreated, then its
+    enclosing folder deleted), and the ``wiki_doc_ids`` tombstone doesn't record
+    which trash entry it belongs to. Rather than guess — picking the wrong one
+    would authorize a deleted id against an unrelated page's ACL — the caller
+    checks access against *all* of them, so it can fail safe when ambiguous.
+    Each entry parked ``path``'s ACL at its own ``.trash/<id>/<path>`` location
+    (see ``trash_location``); authorize against that, not the entry root, so a
+    nested page inherits its trashed folder's grants."""
+    return [
+        e
+        for e in list_entries()
+        if path == e.original_path or path.startswith(e.original_path + "/")
+    ]
 
 
 def entry_for(trash_id: str) -> TrashEntry | None:

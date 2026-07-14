@@ -294,6 +294,32 @@ def test_deleted_id_resolve_hidden_from_other_user(tmp_repo):
     assert _client(other).get(f"/api/wiki/id/{doc_id}").status_code == 404
 
 
+def test_deleted_id_resolve_denies_when_ambiguous_tombstones(tmp_repo):
+    # A path can carry several tombstones (delete → recreate → delete the
+    # enclosing folder), and the tombstone doesn't record which trash entry it
+    # belongs to. The old id must stay hidden from a user who lacked access to
+    # *its* delete, even when a newer same-path tombstone is public.
+    owner = seed_user()
+    other = seed_user(uid="u_amb", email="amb@x.com")
+    oc = _client(owner)
+    # Private page, deleted → tombstone #1 (private).
+    old_id = oc.put(
+        "/api/wiki/file", json={"path": "proj/secret.md", "body": "# S\n"}
+    ).json()["id"]
+    for gid in _everyone_ids("proj/secret.md"):
+        acl.revoke(gid)
+    oc.delete("/api/wiki/file?path=proj/secret.md")
+    # Recreate at the same path (public), then trash the whole folder → a second,
+    # public tombstone whose subtree also covers proj/secret.md.
+    oc.put("/api/wiki/file", json={"path": "proj/secret.md", "body": "# new\n"})
+    oc.delete("/api/wiki/file?path=proj")
+
+    # The other user is blocked by the private entry even though the folder
+    # tombstone covering the same path is public; the owner still resolves it.
+    assert _client(other).get(f"/api/wiki/id/{old_id}").status_code == 404
+    assert oc.get(f"/api/wiki/id/{old_id}").status_code == 200
+
+
 def test_deleted_endpoint_404_when_path_recreated(tmp_repo):
     # Delete a.md, then recreate a live a.md. The old tombstone still exists in
     # Trash, but the path is live now → /wiki/deleted must report not-deleted
