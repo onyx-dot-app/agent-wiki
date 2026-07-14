@@ -17,6 +17,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.auth import PermissionDenied, current_user, require_can
+from app.models.wiki import PageKind
 from app.wiki import update_policy, utils as wiki_utils
 
 
@@ -41,7 +42,7 @@ def handle(args: dict[str, Any]) -> Any:
 
     # A page policy must target an existing page; folder/root policies may be set
     # ahead of their children (future pages inherit them).
-    if kind == "page" and not wiki_utils.file_exists(norm):
+    if kind == PageKind.PAGE and not wiki_utils.file_exists(norm):
         return {"error": f"file not found: {norm}"}
 
     # PATCH: only change settings the caller actually provided. Key present =
@@ -86,7 +87,7 @@ def handle(args: dict[str, Any]) -> Any:
     effective = update_policy.resolve_for_path(norm)
     return {
         "path": norm,
-        "kind": kind,
+        "kind": kind.value,
         # This scope's own row (None once it carries no settings and inherits fully).
         "explicit": explicit,
         # What actually applies here after folder→page inheritance.

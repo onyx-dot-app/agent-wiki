@@ -6,6 +6,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from app.models.wiki import PageKind
+
 
 # --------------------------------------------------------------------------- #
 # Existing schemas (kept for forward compatibility)                           #
@@ -193,7 +195,7 @@ class TrashEntryView(BaseModel):
 
     trash_id: str
     path: str  # original location; restore moves it back here
-    kind: Literal["page", "folder"]
+    kind: PageKind
     trashed_by: str
     trashed_at: str  # ISO-8601
     can_restore: bool = False

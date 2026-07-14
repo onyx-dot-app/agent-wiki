@@ -22,7 +22,7 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy import func, select, update
 
 from app.db.models import UpdatePolicy
-from app.models.wiki import PathMove
+from app.models.wiki import PageKind, PathMove
 from app.db.session import session
 from app.ingest import settings as ingest_settings
 from app.wiki import filesystem
@@ -56,9 +56,9 @@ def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
 
-def kind_for_path(path: str) -> str:
+def kind_for_path(path: str) -> PageKind:
     """A ``.md`` path is a ``page``; everything else (incl. root) is a ``folder``."""
-    return "page" if path.endswith(".md") else "folder"
+    return PageKind.of(path)
 
 
 def normalize_path(raw: str) -> str:
@@ -341,7 +341,7 @@ def count_ingest_enabled_pages(
         return total_pages
     candidates: set[str] = set()
     for scope in scopes:
-        if kind_for_path(scope) == "page":
+        if kind_for_path(scope) == PageKind.PAGE:
             candidates.add(scope)
         else:
             candidates.update(list_pages_under(f"{scope}/" if scope else ""))

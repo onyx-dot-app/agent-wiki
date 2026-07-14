@@ -1,9 +1,9 @@
 """HTTP shapes for /api/update-policy."""
 from __future__ import annotations
 
-from typing import Literal
-
 from pydantic import BaseModel, Field
+
+from app.models.wiki import PageKind
 
 
 class EffectivePolicy(BaseModel):
@@ -18,7 +18,7 @@ class ExplicitPolicy(BaseModel):
     """The policy row set on exactly this path (no cascade)."""
 
     path: str
-    kind: Literal["page", "folder"]
+    kind: PageKind
     ingestion_auto_update_disabled: bool | None = None
     update_instruction: str | None = None
     ai_management_allowed: bool | None = None

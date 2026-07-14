@@ -11,6 +11,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from app.models.wiki import PageKind
+
 
 # --------------------------------------------------------------------------- #
 # Groups                                                                      #
@@ -80,12 +82,11 @@ class GroupSharesResponse(BaseModel):
 
 
 PrincipalKind = Literal["user", "group", "everyone"]
-ResourceKind = Literal["page", "folder"]
 Permission = Literal["read", "write"]
 
 
 class AclGrantRequest(BaseModel):
-    resource_kind: ResourceKind
+    resource_kind: PageKind
     resource_path: str
     principal_kind: PrincipalKind
     principal_id: str | None = None
@@ -94,7 +95,7 @@ class AclGrantRequest(BaseModel):
 
 class AclEntryOut(BaseModel):
     id: str
-    resource_kind: str
+    resource_kind: PageKind
     resource_path: str
     principal_kind: str
     principal_id: str | None

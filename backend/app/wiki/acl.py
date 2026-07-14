@@ -44,7 +44,7 @@ from sqlalchemy import (
 from app.auth import groups as groups_repo
 from app.db.models import AclEntry, WikiOwner
 from app.db.session import session
-from app.models.wiki import PathMove
+from app.models.wiki import PageKind, PathMove
 from app.wiki.filesystem import common_folder_rename
 
 log = logging.getLogger(__name__)
@@ -90,7 +90,7 @@ def _is_md_page(path: str) -> bool:
 def _owner_key(path: str) -> str:
     """WikiOwner rows are keyed by the same canonical path as AclEntry rows,
     so owner lookups and grants on the same resource always agree."""
-    return _canonicalize("page" if _is_md_page(path) else "folder", path)
+    return _canonicalize(PageKind.of(path), path)
 
 
 def get_owner(path: str) -> str | None:
@@ -123,7 +123,7 @@ def transfer_owner(path: str, new_owner_id: str | None) -> None:
     convention). Clearing the owner (``new_owner_id is None``) still
     leaves the prior owner an editor. The grant is idempotent.
     """
-    resource_kind = "page" if _is_md_page(path) else "folder"
+    resource_kind = PageKind.of(path)
     canon = _canonicalize(resource_kind, path)
     # Single session so the owner move and the editor grant commit (or roll
     # back) together — otherwise a failed grant after a committed owner move
@@ -183,9 +183,9 @@ def group_grant_counts() -> dict[str, dict[str, int]]:
             if gid is None:
                 continue
             row = out.setdefault(gid, {"pages": 0, "folders": 0})
-            if kind == "page":
+            if kind == PageKind.PAGE:
                 row["pages"] = int(n)
-            elif kind == "folder":
+            elif kind == PageKind.FOLDER:
                 row["folders"] = int(n)
     return out
 
@@ -195,7 +195,7 @@ def group_grant_counts() -> dict[str, dict[str, int]]:
 # --------------------------------------------------------------------------- #
 
 
-_VALID_RESOURCE_KINDS = {"page", "folder"}
+_VALID_RESOURCE_KINDS = {k.value for k in PageKind}
 _VALID_PRINCIPAL_KINDS = {"user", "group", "everyone"}
 _VALID_PERMISSIONS = {"read", "write"}
 
@@ -210,7 +210,7 @@ def _canonicalize(resource_kind: str, resource_path: str) -> str:
     p = os.path.normpath(p) if p else ""
     if p == ".":
         p = ""
-    if resource_kind == "page" and not _is_md_page(p):
+    if resource_kind == PageKind.PAGE and not _is_md_page(p):
         raise ValueError(f"page resource_path must end in .md: {resource_path!r}")
     return p
 
@@ -305,7 +305,7 @@ def list_for_path(path: str) -> list[dict[str, Any]]:
     is it inherited from."
     """
     is_page = _is_md_page(path)
-    canon = _canonicalize("page" if is_page else "folder", path)
+    canon = _canonicalize(PageKind.PAGE if is_page else PageKind.FOLDER, path)
     if is_page:
         ancestors = _ancestors(canon)
     else:
@@ -322,7 +322,7 @@ def list_for_path(path: str) -> list[dict[str, Any]]:
                 s.scalars(
                     select(AclEntry)
                     .where(
-                        AclEntry.resource_kind == "page",
+                        AclEntry.resource_kind == PageKind.PAGE,
                         AclEntry.resource_path == canon,
                     )
                     .order_by(AclEntry.created_at.asc())
@@ -334,7 +334,7 @@ def list_for_path(path: str) -> list[dict[str, Any]]:
                 s.scalars(
                     select(AclEntry)
                     .where(
-                        AclEntry.resource_kind == "folder",
+                        AclEntry.resource_kind == PageKind.FOLDER,
                         AclEntry.resource_path == f,
                     )
                     .order_by(AclEntry.created_at.asc())
@@ -375,7 +375,7 @@ def delete_all_for_path(path: str) -> None:
     with session() as s:
         s.execute(
             delete(AclEntry).where(
-                AclEntry.resource_kind == "page",
+                AclEntry.resource_kind == PageKind.PAGE,
                 AclEntry.resource_path == path,
             )
         )
@@ -421,11 +421,7 @@ def effective(
 
     raw_path = path.strip().strip("/")
     is_page = _is_md_page(raw_path)
-    canon_path = (
-        _canonicalize("page", raw_path)
-        if is_page
-        else _canonicalize("folder", raw_path)
-    )
+    canon_path = _canonicalize(PageKind.of(raw_path), raw_path)
     folder_paths = (
         _ancestors(canon_path) if is_page else _folder_self_and_ancestors(canon_path)
     )
@@ -466,14 +462,14 @@ def _path_is_managed(s: Any, page_path: str, folder_paths: list[str]) -> bool:
     if page_path and _is_md_page(page_path):
         conditions.append(
             and_(
-                AclEntry.resource_kind == "page",
+                AclEntry.resource_kind == PageKind.PAGE,
                 AclEntry.resource_path == page_path,
             )
         )
     if folder_paths:
         conditions.append(
             and_(
-                AclEntry.resource_kind == "folder",
+                AclEntry.resource_kind == PageKind.FOLDER,
                 AclEntry.resource_path.in_(folder_paths),
             )
         )
@@ -506,12 +502,12 @@ def _grants_for_principal(
     resource_clauses: list[ColumnElement[bool]] = []
     if page_path and _is_md_page(page_path):
         resource_clauses.append(
-            and_(AclEntry.resource_kind == "page", AclEntry.resource_path == page_path)
+            and_(AclEntry.resource_kind == PageKind.PAGE, AclEntry.resource_path == page_path)
         )
     if folder_paths:
         resource_clauses.append(
             and_(
-                AclEntry.resource_kind == "folder",
+                AclEntry.resource_kind == PageKind.FOLDER,
                 AclEntry.resource_path.in_(folder_paths),
             )
         )
@@ -583,12 +579,12 @@ def visible_paths_filter(
     principal_predicate = or_(*principal_clauses)
 
     page_match = and_(
-        AclEntry.resource_kind == "page",
+        AclEntry.resource_kind == PageKind.PAGE,
         AclEntry.resource_path == path_column,
         principal_predicate,
     )
     folder_match = and_(
-        AclEntry.resource_kind == "folder",
+        AclEntry.resource_kind == PageKind.FOLDER,
         principal_predicate,
         or_(
             AclEntry.resource_path == "",
@@ -603,11 +599,11 @@ def visible_paths_filter(
     any_acl_match = and_(
         or_(
             and_(
-                AclEntry.resource_kind == "page",
+                AclEntry.resource_kind == PageKind.PAGE,
                 AclEntry.resource_path == path_column,
             ),
             and_(
-                AclEntry.resource_kind == "folder",
+                AclEntry.resource_kind == PageKind.FOLDER,
                 or_(
                     AclEntry.resource_path == "",
                     path_column.like(AclEntry.resource_path + "/%"),
@@ -666,7 +662,7 @@ def on_page_created(path: str, owner_user_id: str | None) -> None:
     """
     if not _is_md_page(path):
         return
-    canon = _canonicalize("page", path)
+    canon = _canonicalize(PageKind.PAGE, path)
     with session() as s:
         if s.get(WikiOwner, canon) is None:
             s.add(WikiOwner(path=canon, owner_user_id=owner_user_id))
@@ -675,7 +671,7 @@ def on_page_created(path: str, owner_user_id: str | None) -> None:
                 select(func.count())
                 .select_from(AclEntry)
                 .where(
-                    AclEntry.resource_kind == "page",
+                    AclEntry.resource_kind == PageKind.PAGE,
                     AclEntry.resource_path == canon,
                     AclEntry.principal_kind == "everyone",
                 )
@@ -687,7 +683,7 @@ def on_page_created(path: str, owner_user_id: str | None) -> None:
                 s.add(
                     AclEntry(
                         id=f"acl_{uuid.uuid4().hex[:12]}",
-                        resource_kind="page",
+                        resource_kind=PageKind.PAGE,
                         resource_path=canon,
                         principal_kind="everyone",
                         principal_id=None,
@@ -701,7 +697,7 @@ def on_page_deleted(path: str) -> None:
     """Remove owner + all page-level ACL rows for ``path``."""
     if not _is_md_page(path):
         return
-    canon = _canonicalize("page", path)
+    canon = _canonicalize(PageKind.PAGE, path)
     delete_all_for_path(canon)
 
 
@@ -731,7 +727,7 @@ def on_path_moved(moves: list[PathMove], root_move: PathMove | None = None) -> N
                 s.execute(
                     update(AclEntry)
                     .where(
-                        AclEntry.resource_kind == "page",
+                        AclEntry.resource_kind == PageKind.PAGE,
                         AclEntry.resource_path == old_p,
                     )
                     .values(resource_path=new_p)
@@ -752,7 +748,7 @@ def on_path_moved(moves: list[PathMove], root_move: PathMove | None = None) -> N
             s.execute(
                 update(AclEntry)
                 .where(
-                    AclEntry.resource_kind == "folder",
+                    AclEntry.resource_kind == PageKind.FOLDER,
                     AclEntry.resource_path == old_prefix,
                 )
                 .values(resource_path=new_prefix)
@@ -761,7 +757,7 @@ def on_path_moved(moves: list[PathMove], root_move: PathMove | None = None) -> N
             s.execute(
                 update(AclEntry)
                 .where(
-                    AclEntry.resource_kind == "folder",
+                    AclEntry.resource_kind == PageKind.FOLDER,
                     AclEntry.resource_path.like(old_prefix + "/%"),
                 )
                 .values(
