@@ -8,6 +8,8 @@ requires-python = ">=3.12"
 dependencies = [
     "torch>=2.2",
     "numpy>=1.26",
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
 ]
 
 [dependency-groups]
@@ -15,6 +17,7 @@ dev = [
     "pytest>=8",
     "ruff>=0.6",
     "basedpyright>=1.10",
+    "httpx>=0.27",  # fastapi.testclient transport
 ]
 
 [tool.pytest.ini_options]
