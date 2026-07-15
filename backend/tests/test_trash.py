@@ -11,7 +11,8 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 from app.main import create_app
-from app.wiki import acl, trash
+from app.tasks.reindex import index_path_inline
+from app.wiki import acl, comments, trash, update_policy
 
 from tests._auth import login_fastapi
 from tests._seed import seed_user
@@ -102,11 +103,15 @@ def test_view_trashed_page_returns_content(tmp_repo):
 
 
 def test_restore_moves_back_losslessly(tmp_repo):
+    # Restore is lossless: ACL, owner, update policy, AND comments — every
+    # path-keyed row the trashing move re-pointed — come back at the original
+    # path. (Previously this only asserted the ACL grant.)
     owner = seed_user()
     other = seed_user(uid="u_other", email="other@x.com")
     client = _client(owner)
-    client.put("/api/wiki/file", json={"path": "doc.md", "body": "# Doc\n"})
-    # A specific grant that must survive the delete/restore round-trip.
+    sha = client.put("/api/wiki/file", json={"path": "doc.md", "body": "# Doc\n"}).json()[
+        "sha"
+    ]
     acl.grant(
         resource_kind="page",
         resource_path="doc.md",
@@ -114,6 +119,21 @@ def test_restore_moves_back_losslessly(tmp_repo):
         principal_id=other,
         permission="write",
         granted_by_user_id=owner,
+    )
+    acl.set_owner("doc.md", other)  # a distinct, known owner to assert survives
+    update_policy.set_policy(
+        "doc.md",
+        ingestion_auto_update_disabled=True,
+        update_instruction="keep it terse",
+    )
+    comments.create_thread(
+        doc_path="doc.md",
+        body="a note",
+        author_user_id=owner,
+        anchor_sha=sha,
+        start_offset=0,
+        end_offset=1,
+        quoted_text="#",
     )
 
     tid = client.delete("/api/wiki/file?path=doc.md").json()["trash_id"]
@@ -123,12 +143,71 @@ def test_restore_moves_back_losslessly(tmp_repo):
     read = client.get("/api/wiki/file?path=doc.md")
     assert read.status_code == 200
     assert read.json()["body"] == "# Doc\n"
-    # …and the grant came back with it (lossless — the move re-pointed it).
+    # …and every piece of path-keyed metadata came back with it.
     grants = [
         (g["principal_kind"], g["principal_id"], g["permission"])
         for g in acl.list_for_path("doc.md")
     ]
-    assert ("user", other, "write") in grants
+    assert ("user", other, "write") in grants  # ACL grant
+    assert acl.get_owner("doc.md") == other  # owner
+    pol = update_policy.get("doc.md")  # update policy
+    assert pol is not None
+    assert pol["ingestion_auto_update_disabled"] is True
+    assert pol["update_instruction"] == "keep it terse"
+    assert len(comments.list_for_doc("doc.md")) == 1  # comment
+
+
+def test_trashed_page_excluded_from_search_and_recents(tmp_repo):
+    # Trashed content must vanish from every discovery surface, not just the
+    # tree: the FTS/search index (trashing drops the row) and recents (filtered
+    # to still-existing paths).
+    user = seed_user()
+    client = _client(user)
+    client.put(
+        "/api/wiki/file",
+        json={"path": "findme.md", "body": "# Findme\nzebrafish marker body"},
+    )
+    # Create enqueues an async reindex; index inline so search is deterministic.
+    index_path_inline("findme.md")
+    client.post("/api/wiki/recents", json={"path": "findme.md"})
+
+    # Present in both before delete.
+    hits = client.get("/api/wiki/search?q=zebrafish").json()["hits"]
+    assert any(h["path"] == "findme.md" for h in hits)
+    assert "findme.md" in client.get("/api/wiki/recents").json()["paths"]
+
+    client.delete("/api/wiki/file?path=findme.md")
+
+    # Gone from both after delete.
+    hits2 = client.get("/api/wiki/search?q=zebrafish").json()["hits"]
+    assert not any(h["path"] == "findme.md" for h in hits2)
+    assert "findme.md" not in client.get("/api/wiki/recents").json()["paths"]
+
+
+def test_restore_and_purge_leave_no_empty_trash_dir(tmp_repo):
+    # `git mv` (restore) and `git rm` (purge) can leave the now-empty
+    # `.trash/<id>/` directory in the working tree; both paths prune it.
+    from pathlib import Path
+
+    from app.config import CONFIG
+
+    def trash_dir(tid: str) -> Path:
+        return Path(CONFIG.wiki_dir) / ".trash" / tid
+
+    user = seed_user()
+    client = _client(user)
+
+    # Restore path.
+    client.put("/api/wiki/file", json={"path": "r/x.md", "body": "# X\n"})
+    tid = client.delete("/api/wiki/file?path=r/x.md").json()["trash_id"]
+    client.post("/api/wiki/file/restore", json={"trash_id": tid})
+    assert not trash_dir(tid).exists()
+
+    # Purge path.
+    client.put("/api/wiki/file", json={"path": "p/y.md", "body": "# Y\n"})
+    tid2 = client.delete("/api/wiki/file?path=p/y.md").json()["trash_id"]
+    assert client.delete(f"/api/wiki/trash/{tid2}").status_code == 200
+    assert not trash_dir(tid2).exists()
 
 
 def test_restore_refused_when_path_recreated(tmp_repo):

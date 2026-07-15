@@ -696,6 +696,29 @@ def last_commit_meta_for_path(rel_path: str) -> tuple[str, str, str, str] | None
     return (parts[0], parts[1], parts[2], parts[3]) if len(parts) == 4 else None
 
 
+def _prune_empty_trash_dirs(trash_id: str) -> None:
+    """Remove now-empty working-tree dirs under ``.trash/<trash_id>/`` left by a
+    restore (``git mv`` out) or purge (``git rm``). Git doesn't track empty
+    directories, so this is a filesystem-only cleanup — nothing to commit."""
+    root = Path(CONFIG.wiki_dir) / TRASH_DIR / trash_id
+    if not root.exists():
+        return
+    # Deepest-first so a dir is emptied before we try to remove it.
+    for d in sorted(
+        (p for p in root.rglob("*") if p.is_dir()),
+        key=lambda p: len(p.parts),
+        reverse=True,
+    ):
+        try:
+            d.rmdir()
+        except OSError:
+            pass  # still holds something (unexpected) — leave it
+    try:
+        root.rmdir()
+    except OSError:
+        pass
+
+
 def restore_from_trash(
     trash_id: str, message: str, author: str | None = None
 ) -> tuple[str, list[PathMove]]:
@@ -719,6 +742,7 @@ def restore_from_trash(
             _run(["mv", mv.old, mv.new])
         _run(["commit", "-m", message, *env_args])
         sha = _run(["rev-parse", "HEAD"]).stdout.strip()
+    _prune_empty_trash_dirs(trash_id)
     log.info("restore_from_trash %s (%d files) sha=%s", trash_id, len(moves), sha[:8])
     return sha, moves
 
@@ -740,6 +764,7 @@ def purge_from_trash(
         _run(["rm", "-r", "--", f"{TRASH_DIR}/{trash_id}"])
         _run(["commit", "-m", message, *env_args])
         sha = _run(["rev-parse", "HEAD"]).stdout.strip()
+    _prune_empty_trash_dirs(trash_id)
     log.info("purge_from_trash %s (%d files) sha=%s", trash_id, len(files), sha[:8])
     return sha
 

@@ -239,7 +239,10 @@ def delete_document(doc_id: str) -> None:
 
         c: OpenSearch = client  # type: ignore[assignment]
         try:
-            c.delete(index=_index_name(), id=doc_id)
+            # refresh so the removal is visible immediately, matching
+            # upsert_document — a trashed page must drop out of search at once,
+            # not on OpenSearch's next auto-refresh.
+            c.delete(index=_index_name(), id=doc_id, refresh=True)  # type: ignore[call-arg]
         except NotFoundError:
             pass
     except Exception:
