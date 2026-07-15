@@ -33,6 +33,7 @@ from app.models.file_system import (
     MovedFile,
     MovePathRequest,
     MovePathResponse,
+    PurgeTrashResponse,
     PutDocumentRequest,
     PutDocumentResponse,
     RecentDocsResponse,
@@ -684,6 +685,34 @@ def view_trash_item(
         can_restore="write" in perms,
         body=body,
     )
+
+
+@router.delete("/trash/{trash_id}", response_model=PurgeTrashResponse)
+def purge_trash_item(
+    trash_id: str,
+    user: User = Depends(require_user),
+) -> PurgeTrashResponse:
+    """Permanently remove a trashed item now, ahead of the 30-day auto-purge:
+    `git rm` its `.trash/` subtree + drop the parked ACL/owner/policy rows.
+    Content stays in git history (soft purge). Requires the same permission as
+    restore (write on the trashed item) — if you can bring it back, you can
+    delete it for good. The item's ``wiki_doc_ids`` tombstone is left as-is, so
+    its id URL degrades to the generic "unavailable" card (like auto-purge)."""
+    entry = wiki_trash.entry_for(trash_id)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="not found")
+    if "write" not in _trash_perms(user, entry):
+        raise HTTPException(status_code=403, detail="not permitted")
+    if not wiki_trash.purge(trash_id, actor=_git_author(user)):
+        # entry_for found it a moment ago, so a False return means the `.trash/`
+        # subtree was gone by the time purge ran — a concurrent purge (e.g. the
+        # daily sweep) beat us. The end state is the same (item is gone), but
+        # the race is unexpected, so surface it.
+        log.warning(
+            "purge_trash_item: %s vanished before purge (concurrent sweep?)",
+            trash_id,
+        )
+    return PurgeTrashResponse(trash_id=trash_id, path=entry.original_path)
 
 
 @router.post("/file/restore", response_model=RestorePathResponse)

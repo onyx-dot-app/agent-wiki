@@ -267,6 +267,11 @@ class RestorePathResponse(BaseModel):
     restored: list[str]  # every file reintroduced
 
 
+class PurgeTrashResponse(BaseModel):
+    trash_id: str
+    path: str  # the original path that was permanently removed
+
+
 class ReindexResponse(BaseModel):
     path: str
     queued: bool
