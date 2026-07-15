@@ -11,5 +11,18 @@ pluggable :class:`Scorer`). Filters operate on the pipeline carriers
 from app.ingest.relevance.cosine_filter import CosineSimilarityFilter
 from app.ingest.relevance.filter import RelevanceFilter
 from app.ingest.relevance.two_tower_filter import Scorer, TwoTowerFilter
+from app.ingest.relevance.two_tower_scorer import (
+    ScoreRequest,
+    ScoreResponse,
+    TwoTowerScorer,
+)
 
-__all__ = ["CosineSimilarityFilter", "RelevanceFilter", "Scorer", "TwoTowerFilter"]
+__all__ = [
+    "CosineSimilarityFilter",
+    "RelevanceFilter",
+    "Scorer",
+    "ScoreRequest",
+    "ScoreResponse",
+    "TwoTowerFilter",
+    "TwoTowerScorer",
+]
