@@ -1,0 +1,93 @@
+"""Export a trained two-tower bundle to ONNX for in-process serving.
+
+The backend scores relevance in-process with onnxruntime — no torch, no separate
+model-server pod. This tool is the torch → ONNX bridge: load a bundle, export
+the network to a graph whose output is P(update) per (doc, page) pair, and
+verify the ONNX output matches torch before writing it.
+
+    python export.py model.inference.pt model.onnx
+"""
+from __future__ import annotations
+
+import argparse
+from pathlib import Path
+
+import numpy as np
+import onnxruntime as ort
+import torch
+from torch import nn
+
+from two_tower.bundle import load_inference_bundle
+
+# Two-tower output classes: index 1 == "update" (i.e. relevant).
+_UPDATE_CLASS_INDEX = 1
+
+# Inputs match what the backend's OnnxScorer feeds: the page (wiki) side and the
+# document side, one row per candidate pair.
+_INPUT_NAMES = ["wiki", "doc"]
+_OUTPUT_NAME = "prob"
+
+_PARITY_ATOL = 1e-5
+
+
+class _ProbHead(nn.Module):
+    """Wrap the classifier so the graph outputs P(update) directly, not logits."""
+
+    def __init__(self, model: nn.Module) -> None:
+        super().__init__()
+        self.model = model
+
+    def forward(self, wiki_emb: torch.Tensor, doc_emb: torch.Tensor) -> torch.Tensor:
+        logits = self.model(wiki_emb, doc_emb)
+        return torch.softmax(logits, dim=-1)[:, _UPDATE_CLASS_INDEX]
+
+
+def export_onnx(bundle_path: Path, out_path: Path) -> None:
+    """Export ``bundle_path`` (a .inference.pt) to an ONNX graph at ``out_path``.
+
+    Raises if the ONNX output doesn't match torch within tolerance.
+    """
+    bundle = load_inference_bundle(bundle_path)
+    head = _ProbHead(bundle.model).eval()
+    embed_dim = bundle.model.input_proj.in_features // 2  # concat[wiki, doc]
+
+    example = (torch.randn(3, embed_dim), torch.randn(3, embed_dim))
+    torch.onnx.export(
+        head,
+        example,
+        str(out_path),
+        input_names=_INPUT_NAMES,
+        output_names=[_OUTPUT_NAME],
+        # Batch (number of candidate pages) varies per request.
+        dynamic_axes={name: {0: "batch"} for name in [*_INPUT_NAMES, _OUTPUT_NAME]},
+        # Classic TorchScript exporter — the dynamo path pulls in onnxscript and
+        # is overkill for this plain MLP.
+        dynamo=False,
+    )
+    _assert_parity(head, out_path, example)
+
+
+def _assert_parity(
+    head: nn.Module, onnx_path: Path, example: tuple[torch.Tensor, torch.Tensor]
+) -> None:
+    wiki, doc = example
+    with torch.no_grad():
+        torch_out = head(wiki, doc).numpy()
+    session = ort.InferenceSession(str(onnx_path), providers=["CPUExecutionProvider"])
+    onnx_out = session.run(None, {"wiki": wiki.numpy(), "doc": doc.numpy()})[0]
+    max_diff = float(np.abs(torch_out - onnx_out).max())
+    if max_diff > _PARITY_ATOL:
+        raise RuntimeError(f"ONNX/torch parity failed: max diff {max_diff} > {_PARITY_ATOL}")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("bundle", type=Path, help="path to a *.inference.pt bundle")
+    parser.add_argument("out", type=Path, help="destination *.onnx path")
+    args = parser.parse_args()
+    export_onnx(args.bundle, args.out)
+    print(f"exported {args.out} (parity within {_PARITY_ATOL})")
+
+
+if __name__ == "__main__":
+    main()
