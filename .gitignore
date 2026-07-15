@@ -67,3 +67,10 @@ override.tf.json
 *.tfvars
 !example.tfvars
 uv.lock
+
+# model server: trained weights are never committed (per-deployment, supplied
+# at runtime from an artifact store / mounted path).
+model_server/**/*.inference.pt
+model_server/**/*.inference.json
+model_server/**/*.pt
+model_server/weights/
