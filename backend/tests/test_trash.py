@@ -105,7 +105,7 @@ def test_view_trashed_page_returns_content(tmp_repo):
 def test_restore_moves_back_losslessly(tmp_repo):
     # Restore is lossless: ACL, owner, update policy, AND comments — every
     # path-keyed row the trashing move re-pointed — come back at the original
-    # path. (Previously this only asserted the ACL grant.)
+    # path after a delete→restore round-trip.
     owner = seed_user()
     other = seed_user(uid="u_other", email="other@x.com")
     client = _client(owner)
@@ -200,7 +200,7 @@ def test_restore_and_purge_leave_no_empty_trash_dir(tmp_repo):
     # Restore path.
     client.put("/api/wiki/file", json={"path": "r/x.md", "body": "# X\n"})
     tid = client.delete("/api/wiki/file?path=r/x.md").json()["trash_id"]
-    client.post("/api/wiki/file/restore", json={"trash_id": tid})
+    assert client.post("/api/wiki/file/restore", json={"trash_id": tid}).status_code == 200
     assert not trash_dir(tid).exists()
 
     # Purge path.
