@@ -10,8 +10,8 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
+from app.db import fts
 from app.main import create_app
-from app.tasks.reindex import index_path_inline
 from app.wiki import acl, comments, trash, update_policy
 
 from tests._auth import login_fastapi
@@ -157,30 +157,23 @@ def test_restore_moves_back_losslessly(tmp_repo):
     assert len(comments.list_for_doc("doc.md")) == 1  # comment
 
 
-def test_trashed_page_excluded_from_search_and_recents(tmp_repo):
+def test_trashed_page_excluded_from_search_and_recents(tmp_repo, monkeypatch):
     # Trashed content must vanish from every discovery surface, not just the
-    # tree: the FTS/search index (trashing drops the row) and recents (filtered
-    # to still-existing paths).
+    # tree: it's dropped from the search index and filtered out of recents.
+    # Search is OpenSearch-backed (not available in CI), so assert the index
+    # delete is issued at the seam; recents is Postgres, so check it end-to-end.
+    dropped: list[str] = []
+    monkeypatch.setattr(fts, "delete_document", lambda path: dropped.append(path))
+
     user = seed_user()
     client = _client(user)
-    client.put(
-        "/api/wiki/file",
-        json={"path": "findme.md", "body": "# Findme\nzebrafish marker body"},
-    )
-    # Create enqueues an async reindex; index inline so search is deterministic.
-    index_path_inline("findme.md")
+    client.put("/api/wiki/file", json={"path": "findme.md", "body": "# Findme\n"})
     client.post("/api/wiki/recents", json={"path": "findme.md"})
-
-    # Present in both before delete.
-    hits = client.get("/api/wiki/search?q=zebrafish").json()["hits"]
-    assert any(h["path"] == "findme.md" for h in hits)
     assert "findme.md" in client.get("/api/wiki/recents").json()["paths"]
 
     client.delete("/api/wiki/file?path=findme.md")
 
-    # Gone from both after delete.
-    hits2 = client.get("/api/wiki/search?q=zebrafish").json()["hits"]
-    assert not any(h["path"] == "findme.md" for h in hits2)
+    assert "findme.md" in dropped  # removed from the search index
     assert "findme.md" not in client.get("/api/wiki/recents").json()["paths"]
 
 
