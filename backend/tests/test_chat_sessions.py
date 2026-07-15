@@ -267,6 +267,17 @@ def test_send_message_context_without_open_page(tmp_db, monkeypatch):
     assert "not on a specific wiki page" in ctx["content"]
 
 
+def test_send_message_rejects_oversized_current_path(tmp_db):
+    """current_path is bounded so it can't bloat the prompt (validation → 400)."""
+    client = _signed_in_client(tmp_db, "alice@example.com")
+    sid = client.post("/api/chat/sessions").json()["id"]
+    resp = client.post(
+        "/api/chat/messages",
+        json={"session_id": sid, "content": "hi", "current_path": "x" * 3000},
+    )
+    assert resp.status_code == 400
+
+
 def test_send_message_does_not_persist_assistant_on_llm_error(tmp_db, monkeypatch):
     """If the LLM blows up mid-stream, only the user turn lands in the DB."""
     from app.llm.errors import LLMError

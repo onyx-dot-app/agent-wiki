@@ -28,7 +28,9 @@ class SendChatRequest(BaseModel):
 
     session_id: str
     content: str = Field(min_length=1)
-    current_path: str | None = None
+    # Bounded so a client can't bloat every prompt turn — real wiki paths are
+    # short; safe_rel_path caps them well under this.
+    current_path: str | None = Field(default=None, max_length=2048)
 
 
 class DraftingInitRequest(BaseModel):
