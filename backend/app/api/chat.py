@@ -37,6 +37,7 @@ from app.models.chat import (
 )
 from app.tasks.chat_title import generate_chat_title
 from app.tracing import trace_flow
+from app.wiki import filesystem
 from app.wiki import templates as wiki_templates
 
 router = APIRouter()
@@ -56,6 +57,22 @@ def _session_out(row: dict[str, Any]) -> ChatSessionOut:
     )
 
 
+def _safe_current_path(current_path: str | None) -> str | None:
+    """Validate the client-supplied open-page path before it's embedded in the
+    prompt. It's an optional context hint, so a value that could break the
+    ``<system-reminder>`` framing (newlines / angle brackets) or isn't a valid
+    wiki path (traversal, ``.trash``) is dropped, not rejected — the turn still
+    runs, just without page context."""
+    if not current_path:
+        return None
+    if any(c in current_path for c in "\n\r<>"):
+        return None
+    try:
+        return filesystem.safe_rel_path(current_path)
+    except ValueError:
+        return None
+
+
 def _inject_turn_context(
     messages: list[dict[str, Any]],
     user: User,
@@ -69,6 +86,7 @@ def _inject_turn_context(
     history."""
     who = f"{user.name} <{user.email}>" if user.name else user.email
     role = f", role: {work_role}" if work_role else ""
+    current_path = _safe_current_path(current_path)
     if current_path:
         where = (
             f'They currently have the wiki page "{current_path}" open — read it '
