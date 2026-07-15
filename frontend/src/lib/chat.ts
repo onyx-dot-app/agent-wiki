@@ -48,13 +48,19 @@ export function streamMessage(
   sessionId: string,
   content: string,
   onEvent: (data: unknown) => void,
-  options?: { signal?: AbortSignal },
+  options?: { signal?: AbortSignal; currentPath?: string | null },
 ): Promise<void> {
   return apiStream(
     "/chat/messages",
     {
       method: "POST",
-      body: JSON.stringify({ session_id: sessionId, content }),
+      // current_path: the wiki page the user has open, so the agent knows
+      // what they're looking at (null when not on a page).
+      body: JSON.stringify({
+        session_id: sessionId,
+        content,
+        current_path: options?.currentPath ?? null,
+      }),
     },
     onEvent,
     options?.signal,

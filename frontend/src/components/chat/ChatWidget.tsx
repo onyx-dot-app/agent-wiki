@@ -39,6 +39,7 @@ import {
   type PersistedChatMessage,
 } from "@/lib/chat";
 import { useDrafting, type DraftingState } from "@/lib/drafting";
+import { useAppFocus } from "@/hooks/useAppFocus";
 import { ChatHistoryPanel } from "@/components/chat/ChatHistoryPanel";
 import { presentTool } from "@/lib/tools";
 import { reviseDraft } from "@/lib/wiki";
@@ -79,6 +80,9 @@ const MIN_EXPANDED_WIDTH = 280;
 export function ChatWidget() {
   const { user } = useAuth();
   const { drafting, expandTick, getDraftBody, applyDraftBody } = useDrafting();
+  // The wiki page the user currently has open (null off the wiki), sent with
+  // each message so the chat agent knows what they're looking at.
+  const currentWikiPath = useAppFocus().wikiPath;
   const [mode, setMode] = useState<Mode>("closed");
   const [expandedWidth, setExpandedWidth] = useState<number>(
     DEFAULT_EXPANDED_WIDTH,
@@ -442,16 +446,21 @@ export function ChatWidget() {
 
       let streamFailed = false;
       try {
-        await streamMessage(activeId, text, (raw) => {
-          const ev = raw as StreamEvent;
-          if (ev.type === "error") {
-            streamFailed = true;
-            setError(ev.message);
-            setItems((prev) => markRunningToolsAsError(prev));
-            return;
-          }
-          setItems((prev) => reduceEvent(prev, ev));
-        });
+        await streamMessage(
+          activeId,
+          text,
+          (raw) => {
+            const ev = raw as StreamEvent;
+            if (ev.type === "error") {
+              streamFailed = true;
+              setError(ev.message);
+              setItems((prev) => markRunningToolsAsError(prev));
+              return;
+            }
+            setItems((prev) => reduceEvent(prev, ev));
+          },
+          { currentPath: currentWikiPath },
+        );
       } catch (err) {
         streamFailed = true;
         setError(formatError(err));
@@ -475,7 +484,7 @@ export function ChatWidget() {
         }
       }
     },
-    [sessionId, drafting, getDraftBody, applyDraftBody],
+    [sessionId, drafting, getDraftBody, applyDraftBody, currentWikiPath],
   );
 
   const onSend = useCallback(
