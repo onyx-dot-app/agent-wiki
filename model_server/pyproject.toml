@@ -1,0 +1,36 @@
+[project]
+name = "agent-wiki-model-server"
+version = "0.0.0"
+description = "Relevance scoring service for agent-wiki ingestion (two-tower model)."
+requires-python = ">=3.12"
+# torch is intentionally isolated to this service — the main backend has no ML
+# runtime and reaches the model over HTTP.
+dependencies = [
+    "torch>=2.2",
+    "numpy>=1.26",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "ruff>=0.6",
+    "basedpyright>=1.10",
+]
+
+[tool.pytest.ini_options]
+# Put this project root on sys.path so tests import the `two_tower` package.
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.basedpyright]
+# Strict, like the backend. The reportUnknown* family is relaxed only because
+# torch ships incomplete type stubs (tensor ops surface as "Unknown");
+# annotation-completeness checks (reportMissingParameterType, ...) stay on.
+typeCheckingMode = "strict"
+reportMissingTypeStubs = "none"
+reportUnknownMemberType = "none"
+reportUnknownArgumentType = "none"
+reportUnknownVariableType = "none"
