@@ -32,6 +32,7 @@ dependencies = [
     "fastapi>=0.110,<0.137",
     "uvicorn[standard]>=0.27",  # ASGI server — production entry via Dockerfile CMD
     "itsdangerous>=2.1", # Starlette SessionMiddleware signs the session cookie
+    "onnxruntime>=1.17", # in-process relevance scoring (two-tower ONNX); no torch
 ]
 
 [project.optional-dependencies]
