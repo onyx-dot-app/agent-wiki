@@ -19,10 +19,16 @@ class SendChatRequest(BaseModel):
     ``POST /api/chat/sessions`` on first send). The backend loads the
     full prior message history from the DB and runs the agent loop —
     only the latest user content travels over the wire.
+
+    ``current_path`` is the wiki page the user has open when they send the
+    message (``None`` when they're not on a specific page). The backend feeds
+    it — plus who the user is — to the agent as ephemeral per-turn context so
+    the chat is aware of both.
     """
 
     session_id: str
     content: str = Field(min_length=1)
+    current_path: str | None = None
 
 
 class DraftingInitRequest(BaseModel):

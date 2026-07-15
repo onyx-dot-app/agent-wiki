@@ -56,6 +56,37 @@ def _session_out(row: dict[str, Any]) -> ChatSessionOut:
     )
 
 
+def _inject_turn_context(
+    messages: list[dict[str, Any]],
+    user: User,
+    current_path: str | None,
+    work_role: str | None,
+) -> None:
+    """Give the chat agent per-turn awareness of who it's talking to and which
+    wiki page they have open, as a user-role ``<system-reminder>`` inserted just
+    before the latest user turn. Ephemeral — built fresh from the live request
+    each turn and never persisted, so a later navigation isn't frozen into
+    history."""
+    who = f"{user.name} <{user.email}>" if user.name else user.email
+    role = f", role: {work_role}" if work_role else ""
+    if current_path:
+        where = (
+            f'They currently have the wiki page "{current_path}" open — read it '
+            "with read_doc/read_page if their message is about it."
+        )
+    else:
+        where = "They are not on a specific wiki page right now."
+    reminder = {
+        "role": "user",
+        "content": (
+            f"<system-reminder>\nYou are chatting with {who}{role}. {where}\n"
+            "</system-reminder>"
+        ),
+    }
+    # Before the current (last) user turn so the agent reads context first.
+    messages.insert(max(len(messages) - 1, 0), reminder)
+
+
 @router.get("/sessions", response_model=list[ChatSessionOut])
 def list_sessions(user: User = Depends(require_user)) -> list[ChatSessionOut]:
     rows = sessions_repo.list_for_user(user.id)
@@ -178,6 +209,9 @@ async def send_message(
             ):
                 raw_settings = await run_in_threadpool(users_repo.get_settings, user_id)
                 user_prefs = UserSettings.model_validate(raw_settings or {})
+                _inject_turn_context(
+                    messages, user, req.current_path, user_prefs.work_role
+                )
                 gen = run_chat_stream(
                     messages,
                     model=user_prefs.chat_model,
