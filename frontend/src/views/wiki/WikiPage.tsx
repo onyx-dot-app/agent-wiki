@@ -14,12 +14,14 @@ import {
   Button,
   Divider,
   EmptyMessageCard,
+  InputTypeIn,
   MessageCard,
   Text,
 } from "@onyx-ai/opal/components";
 import {
   SvgAlertTriangle,
   SvgArrowUpDown,
+  SvgCheck,
   SvgChevronLeft,
   SvgDocFile,
   SvgFolder,
@@ -478,103 +480,109 @@ function Explorer({ dir }: { dir: string }) {
           </p>
         )}
 
-        {(subdirs.length > 0 || files.length > 0) && (
-          // Column header line (mock 709:144294): Name spans, Last Updated
-          // carries the sort control cycling name ascending, descending, recent.
-          <div className="flex items-center px-3 pb-1">
-            <span className="min-w-0 flex-1">
-              <Text font="main-ui-action" color="text-04">
-                Name
+        {/* Table surface: header line + white rows on a tint container
+            (mock's Table, tint-01 on radius-08, rows tint-00 on radius-12). */}
+        <div className="rounded-(--radius-08) bg-(--background-tint-01) p-1">
+          {(subdirs.length > 0 || files.length > 0) && (
+            // Column header line (mock 709:144294): Name spans, Last Updated
+            // carries the sort control cycling name ascending, descending, recent.
+            <div className="flex items-center px-3 pt-1 pb-2">
+              <span className="min-w-0 flex-1">
+                <Text font="main-ui-action" color="text-04">
+                  Name
+                </Text>
+              </span>
+              <Text font="main-ui-action" color="text-04" nowrap>
+                Last Updated
               </Text>
-            </span>
-            <Text font="main-ui-action" color="text-04" nowrap>
-              Last Updated
-            </Text>
-            <Button
-              icon={SvgArrowUpDown}
-              prominence="tertiary"
-              size="sm"
-              tooltip={`Sort: ${sortLabel}`}
-              onClick={cycleSort}
-            />
-          </div>
-        )}
-
-        <ul className="m-0 list-none p-0">
-          {dir && (
-            <BackRow
-              onClick={() =>
-                router.push(parentDir ? `/app/wiki/${parentDir}` : "/app/wiki")
-              }
-            />
+              <Button
+                icon={SvgArrowUpDown}
+                prominence="tertiary"
+                size="sm"
+                tooltip={`Sort: ${sortLabel}`}
+                onClick={cycleSort}
+              />
+            </div>
           )}
-          {(() => {
-            const dirEntries = subdirs.map((d) => ({ ...d, isFile: false }));
-            const fileEntries = files.map((f) => ({ ...f, isFile: true }));
-            // Folders always above docs; ordering within each group is set by `sort`.
-            const ordered = [...dirEntries, ...fileEntries];
-            return ordered.map(({ name, updated_at, isFile }) => {
-              const childPath = (dir ? dir + "/" : "") + name;
-              return (
-                <Row
-                  key={(isFile ? "f:" : "d:") + name}
-                  icon={
-                    isFile ? (
-                      <SvgDocFile size={20} aria-hidden />
-                    ) : (
-                      <SvgFolder size={20} aria-hidden />
-                    )
-                  }
-                  label={name}
-                  updatedAt={updated_at}
-                  href={`/app/wiki/${childPath}`}
-                  path={childPath}
-                  isFile={isFile}
-                  busy={busyPath === childPath}
-                  onDelete={() => onDelete(childPath)}
-                  renaming={renaming === childPath}
-                  onStartRename={() => setRenaming(childPath)}
-                  onCancelRename={() => setRenaming(null)}
-                  onSubmitRename={(v) => onRenameSubmit(childPath, v)}
-                  onDragStart={() => setDragSource(childPath)}
-                  onDragEnd={() => {
-                    setDragSource(null);
-                    setDropTarget(null);
-                  }}
-                  dropActive={!isFile && dropTarget === childPath}
-                  onFolderDragOver={
-                    isFile
-                      ? undefined
-                      : () => {
-                          if (dragSource && dragSource !== childPath) {
-                            setDropTarget(childPath);
+
+          <ul className="m-0 list-none p-0">
+            {dir && (
+              <BackRow
+                onClick={() =>
+                  router.push(
+                    parentDir ? `/app/wiki/${parentDir}` : "/app/wiki",
+                  )
+                }
+              />
+            )}
+            {(() => {
+              const dirEntries = subdirs.map((d) => ({ ...d, isFile: false }));
+              const fileEntries = files.map((f) => ({ ...f, isFile: true }));
+              // Folders always above docs; ordering within each group is set by `sort`.
+              const ordered = [...dirEntries, ...fileEntries];
+              return ordered.map(({ name, updated_at, isFile }) => {
+                const childPath = (dir ? dir + "/" : "") + name;
+                return (
+                  <Row
+                    key={(isFile ? "f:" : "d:") + name}
+                    icon={
+                      isFile ? (
+                        <SvgDocFile size={18} aria-hidden />
+                      ) : (
+                        <SvgFolder size={18} aria-hidden />
+                      )
+                    }
+                    label={name}
+                    updatedAt={updated_at}
+                    href={`/app/wiki/${childPath}`}
+                    path={childPath}
+                    isFile={isFile}
+                    busy={busyPath === childPath}
+                    onDelete={() => onDelete(childPath)}
+                    renaming={renaming === childPath}
+                    onStartRename={() => setRenaming(childPath)}
+                    onCancelRename={() => setRenaming(null)}
+                    onSubmitRename={(v) => onRenameSubmit(childPath, v)}
+                    onDragStart={() => setDragSource(childPath)}
+                    onDragEnd={() => {
+                      setDragSource(null);
+                      setDropTarget(null);
+                    }}
+                    dropActive={!isFile && dropTarget === childPath}
+                    onFolderDragOver={
+                      isFile
+                        ? undefined
+                        : () => {
+                            if (dragSource && dragSource !== childPath) {
+                              setDropTarget(childPath);
+                            }
                           }
-                        }
-                  }
-                  onFolderDragLeave={
-                    isFile
-                      ? undefined
-                      : () =>
-                          setDropTarget((cur) =>
-                            cur === childPath ? null : cur,
-                          )
-                  }
-                  onFolderDrop={
-                    isFile
-                      ? undefined
-                      : () => {
-                          if (dragSource && dragSource !== childPath) {
-                            onMove(dragSource, childPath);
+                    }
+                    onFolderDragLeave={
+                      isFile
+                        ? undefined
+                        : () =>
+                            setDropTarget((cur) =>
+                              cur === childPath ? null : cur,
+                            )
+                    }
+                    onFolderDrop={
+                      isFile
+                        ? undefined
+                        : () => {
+                            if (dragSource && dragSource !== childPath) {
+                              onMove(dragSource, childPath);
+                            }
+                            setDragSource(null);
+                            setDropTarget(null);
                           }
-                          setDragSource(null);
-                          setDropTarget(null);
-                        }
-                  }
-                />
-              );
-            });
-          })()}
-        </ul>
+                    }
+                  />
+                );
+              });
+            })()}
+          </ul>
+        </div>
         <div className="my-2">
           <Divider />
         </div>
@@ -918,9 +926,20 @@ function NewDocView({ dir }: { dir: string }) {
 
 type SortMode = "name-asc" | "name-desc" | "recent";
 
-/* Shared card-row chrome for the folder listing (mock table rows 0:599). */
+/* Shared card-row chrome for the folder listing: borderless white cards on
+   the table's tint background (mock rows 4857:368063). */
 const ROW_CLASS =
-  "mb-1 flex h-11 items-center rounded-(--radius-08) border border-(--border-01) px-2";
+  "mb-1 flex h-11 items-center rounded-(--radius-12) py-1 pr-2 pl-1";
+
+/* The mock's shaded leading box: a 36px tint square holding the row's
+   file/folder glyph (Qualifier Container, tint-01 on radius-08). */
+function RowQualifier({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="mr-2 flex size-9 shrink-0 items-center justify-center rounded-(--radius-08) bg-(--background-tint-01) text-(--text-03)">
+      {children}
+    </span>
+  );
+}
 
 function BackRow({ onClick }: { onClick: () => void }) {
   return (
@@ -935,9 +954,9 @@ function BackRow({ onClick }: { onClick: () => void }) {
       }}
       className={`${ROW_CLASS} cursor-pointer bg-(--background-tint-00) hover:bg-(--background-tint-02)`}
     >
-      <span className="mr-[10px] flex text-(--text-03)">
-        <SvgChevronLeft size={20} aria-hidden />
-      </span>
+      <RowQualifier>
+        <SvgChevronLeft size={18} aria-hidden />
+      </RowQualifier>
       <span className="flex flex-1 items-center text-sm text-(--text-05)">
         Back
       </span>
@@ -1049,16 +1068,19 @@ function Row({
       onMouseLeave={() => setHover(false)}
       className={`${ROW_CLASS} ${dropActive ? "bg-(--background-tint-03) outline outline-2 outline-(--background-tint-inverted-00)" : hover || menuOpen ? "bg-(--background-tint-02)" : "bg-(--background-tint-00)"} ${busy ? "opacity-50" : "opacity-100"} ${renaming ? "cursor-default" : "cursor-pointer"}`}
     >
-      <span className="mr-[10px] flex text-(--text-03)">{icon}</span>
+      <RowQualifier>{icon}</RowQualifier>
       {renaming ? (
+        // Mock rename state (890:418642): the name cell becomes an input with
+        // its text preselected, confirmed by the check button or Enter.
         <form
           onSubmit={(e) => {
             e.preventDefault();
             onSubmitRename(draft);
           }}
-          className="flex flex-1 gap-1.5"
+          className="flex min-w-0 flex-1 items-center"
         >
-          <input
+          <InputTypeIn
+            ref={(el) => el?.select()}
             autoFocus
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
@@ -1068,25 +1090,22 @@ function Row({
                 onCancelRename();
               }
             }}
-            disabled={busy}
-            className="flex-1 rounded-(--radius-04) border border-(--border-01) px-2 py-1 text-sm"
+            aria-label={`Rename ${label}`}
+            rightChildren={
+              // Keep focus in the input across the click so Escape still
+              // works if the request errors.
+              <span onMouseDown={(e) => e.preventDefault()}>
+                <Button
+                  prominence="tertiary"
+                  size="sm"
+                  icon={SvgCheck}
+                  aria-label="Save name"
+                  disabled={busy || !draft.trim()}
+                  onClick={() => onSubmitRename(draft)}
+                />
+              </span>
+            }
           />
-          <Button
-            type="submit"
-            size="sm"
-            variant="action"
-            disabled={busy || !draft.trim()}
-          >
-            Save
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            onClick={onCancelRename}
-            disabled={busy}
-          >
-            Cancel
-          </Button>
         </form>
       ) : (
         // The label is a plain span — the click target is the parent

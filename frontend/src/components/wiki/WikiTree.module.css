@@ -91,13 +91,15 @@
   padding-left: 4px;
 }
 
-/* Fixed 12px chevron column (mock's Fold slot). The internal button centers
-   in it and overhangs without shifting the glyph column. */
+/* Fixed chevron column (mock's Fold slot). The internal button centers in it
+   and overhangs, so the extra margin keeps its hover pill clear of the
+   file/folder glyph. */
 .chevronSlot {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 12px;
+  width: 14px;
+  margin-right: 4px;
   flex-shrink: 0;
   color: var(--text-02);
 }

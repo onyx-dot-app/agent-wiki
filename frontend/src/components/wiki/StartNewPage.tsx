@@ -1,6 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import { useState } from "react";
 import useSWR from "swr";
 import { LineItemButton, SelectCard, Text } from "@onyx-ai/opal/components";
 import { Section } from "@onyx-ai/opal/layouts";
@@ -11,11 +12,13 @@ import styles from "@/components/wiki/StartNewPage.module.css";
 
 /**
  * "Start a new page" section (mock 709:259993): a Blank card + the first two
- * featured templates + a More Templates row. Shared by the Home landing and
- * folder pages; `dir` scopes where the new page is created ("" = wiki root).
+ * featured templates, with a More Templates row that expands the full gallery
+ * in place (mock 709:260311). Shared by the Home landing and folder pages.
+ * `dir` scopes where the new page is created ("" = wiki root).
  */
 export function StartNewPage({ dir = "" }: { dir?: string }) {
   const router = useRouter();
+  const [expanded, setExpanded] = useState(false);
   const { data: templates } = useSWR<DocumentTemplateSummary[]>(
     "templates:summaries",
     listTemplateSummaries,
@@ -24,9 +27,9 @@ export function StartNewPage({ dir = "" }: { dir?: string }) {
   // auto-update policy). Route the blank card through it when present, and
   // keep it out of the featured row so it isn't shown twice.
   const blankTemplate = (templates ?? []).find((t) => t.name === "Blank");
-  const featured = (templates ?? [])
-    .filter((t) => t.name !== "Blank")
-    .slice(0, 2);
+  const nonBlank = (templates ?? []).filter((t) => t.name !== "Blank");
+  const featured = expanded ? nonBlank : nonBlank.slice(0, 2);
+  const hasMore = !expanded && nonBlank.length > 2;
 
   function startNewPage(templateId?: string) {
     const qs = templateId
@@ -65,18 +68,20 @@ export function StartNewPage({ dir = "" }: { dir?: string }) {
           </div>
         ))}
       </div>
-      <div className={styles.moreRow}>
-        <LineItemButton
-          variant="body"
-          sizePreset="main-ui"
-          title="More Templates"
-          width="full"
-          rightChildren={
-            <SvgChevronRight size={18} className={styles.moreChevron} />
-          }
-          onClick={() => startNewPage()}
-        />
-      </div>
+      {hasMore && (
+        <div className={styles.moreRow}>
+          <LineItemButton
+            variant="body"
+            sizePreset="main-ui"
+            title="More Templates"
+            width="full"
+            rightChildren={
+              <SvgChevronRight size={18} className={styles.moreChevron} />
+            }
+            onClick={() => setExpanded(true)}
+          />
+        </div>
+      )}
     </>
   );
 }
