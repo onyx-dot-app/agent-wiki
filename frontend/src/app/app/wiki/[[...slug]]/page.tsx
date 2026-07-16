@@ -11,10 +11,8 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import useSWR from "swr";
-import { Content } from "@onyx-ai/opal/layouts";
 import {
   Button,
-  Divider,
   EmptyMessageCard,
   LineItemButton,
   MessageCard,
@@ -79,7 +77,7 @@ import {
   selectionToAnchor,
   type CommentDraft,
 } from "@/lib/fileview/commentAnchor";
-import { MarkdownRenderer } from "@/lib/fileview/components";
+import { DocTitle, MarkdownRenderer } from "@/lib/fileview/components";
 import { pageTitle } from "@/lib/fileview/utils";
 import { useAuth, useRequireAuth } from "@/lib/auth";
 import { Coeditor } from "@/lib/coeditor/components";
@@ -287,7 +285,7 @@ export default function WikiRoute() {
       return <WikiUnknownLink status={404} />;
   }
 
-  if (isFile) return <FileViewer path={effectivePath as string} />;
+  if (isFile) return <FileView path={effectivePath as string} />;
   if (isNewMode) return <NewDocView dir={pathModePath} />;
   // Wiki root with no doc open → the "Welcome to Onyx Wiki" landing.
   // Sub-folders still render the directory explorer.
@@ -890,7 +888,7 @@ function NewDocView({ dir }: { dir: string }) {
   // Clear drafting on unmount (cancel, sidebar nav, …) — the chat widget
   // tears its drafting session down synchronously on null, so the collapse
   // happens in the same paint as the page change. The one exception is
-  // Create: it navigates to the doc it just made and FileViewer re-syncs
+  // Create: it navigates to the doc it just made and FileView re-syncs
   // drafting from the server-side draft row, so passing through null there
   // would collapse the chat only to re-init it a moment later.
   const createHandoffRef = useRef(false);
@@ -983,7 +981,7 @@ function NewDocView({ dir }: { dir: string }) {
       createHandoffRef.current = true;
       // Land on the new page's id URL directly (the create response carries
       // the minted id), so it's a clean /app/wiki/<id> like every other page.
-      // Keep ?new=1 — FileViewer reads it to auto-open the assistant on a
+      // Keep ?new=1 — FileView reads it to auto-open the assistant on a
       // freshly-created doc.
       const base = created.id ? wikiHref(created.id) : `/app/wiki/${fullPath}`;
       router.push(`${base}?new=1`);
@@ -1506,7 +1504,7 @@ function Row({
   );
 }
 
-function FileViewer({ path }: { path: string }) {
+function FileView({ path }: { path: string }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const isMobile = useIsMobile();
@@ -2270,16 +2268,7 @@ function FileViewer({ path }: { path: string }) {
           agentsBarHost.el,
         )}
 
-      {!editing && (
-        <>
-          <Content
-            sizePreset="main-ui"
-            variant="section"
-            title={pageTitle(path)}
-          />
-          <Divider />
-        </>
-      )}
+      {!editing && <DocTitle path={path} />}
 
       {!editing && triggerStatus && (
         <div className="mb-3 text-xs text-(--text-04)">{triggerStatus}</div>
