@@ -188,6 +188,8 @@ services:
     profiles: ["app"]
     build: ./frontend
     env_file: .env
+    environment:
+      - BACKEND_URL=http://backend:8080
     expose:
       - "3000"
     depends_on:

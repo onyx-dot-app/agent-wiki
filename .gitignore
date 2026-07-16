@@ -49,8 +49,10 @@ backend/runs/
 *.swp
 .vscode/settings.json
 
-# claude code — entire dir is local-only (runtime state + per-user settings).
+# tooling
+# Claude Code - entire dir is local-only (runtime state + per-user settings).
 .claude/
+plans/
 
 # terraform (deploy/terraform/ is a template; lock file is intentionally not tracked here)
 *.tfstate
