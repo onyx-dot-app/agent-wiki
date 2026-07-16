@@ -10,7 +10,6 @@ import {
   type FormEvent,
 } from "react";
 import { createPortal } from "react-dom";
-import useSWR from "swr";
 import {
   Button,
   EmptyMessageCard,
@@ -35,16 +34,9 @@ import { WikiHome } from "@/components/wiki/WikiHome";
 import { ShareDialog } from "@/components/wiki/ShareDialog";
 import { UpdatePolicyPanel } from "@/components/wiki/UpdatePolicyPanel";
 import { apiFetch, ApiError } from "@/lib/api";
-import {
-  isDocId,
-  wikiHref,
-  wikiPath,
-  resolveDocId,
-  resolveIds,
-  revalidateWiki,
-} from "@/lib/wikiHref";
+import { isDocId, wikiHref, wikiPath, revalidateWiki } from "@/lib/wikiHref";
 import { formatRelative } from "@/lib/format";
-import { getDeletedTombstone, restoreTrashed } from "@/lib/trash";
+import { restoreTrashed } from "@/lib/trash";
 import {
   FileView,
   TemplateGallery,
@@ -52,6 +44,12 @@ import {
   DestinationSelect,
   FilenameRow,
 } from "@/lib/fileview/components";
+import {
+  useWikiTree,
+  useDeletedTombstone,
+  useDocIdResolve,
+  usePathToId,
+} from "@/lib/fileview/hooks";
 import { pageTitle } from "@/lib/fileview/utils";
 import { useRequireAuth } from "@/lib/auth";
 import { useHeaderActionsHost } from "@/providers/WikiHeaderActionsProvider";
@@ -67,15 +65,6 @@ import {
 import { relativeTime } from "@/lib/time";
 import { useIsMobile } from "@/lib/viewport";
 import { AI_DRAFT_KEY } from "@/lib/wiki";
-
-interface DocEntry {
-  path: string;
-  updated_at: string;
-}
-
-interface ListResponse {
-  entries: DocEntry[];
-}
 
 /** A wiki URL that no longer points at a live doc — an unknown/expired id, or
  * a page that was deleted but is no longer in Trash (purged). A deleted page
@@ -110,15 +99,7 @@ function WikiTombstone({ path }: { path: string }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const {
-    data: entry,
-    error,
-    isLoading,
-  } = useSWR(
-    `/wiki/deleted?path=${encodeURIComponent(path)}`,
-    () => getDeletedTombstone(path),
-    { revalidateOnFocus: false },
-  );
+  const { entry, error, isLoading } = useDeletedTombstone(path);
 
   if (isLoading)
     return (
@@ -184,12 +165,7 @@ function Explorer({ dir }: { dir: string }) {
   const router = useRouter();
   const isMobile = useIsMobile();
   const host = useHeaderActionsHost();
-  const {
-    data,
-    error: listError,
-    mutate: mutatePaths,
-  } = useSWR<ListResponse>("/wiki");
-  const entries = data?.entries ?? [];
+  const { entries, error: listError, mutate: mutatePaths } = useWikiTree();
   const [mutationError, setMutationError] = useState<string | null>(null);
   const confirmDialog = useConfirm();
   const error =
@@ -605,8 +581,8 @@ function NewDocView({ dir }: { dir: string }) {
   // Destination folder for the new doc — defaults to the route's folder but is
   // user-selectable (the AI flow lands at root, so the picker is how you place it).
   const [destDir, setDestDir] = useState(dir);
-  const { data: tree } = useSWR<ListResponse>("/wiki");
-  const folders = useMemo(() => collectFolders(tree?.entries ?? []), [tree]);
+  const { entries } = useWikiTree();
+  const folders = useMemo(() => collectFolders(entries), [entries]);
 
   // Drop the stash once consumed so it doesn't re-apply on remount / back-nav.
   useEffect(() => {
@@ -1097,10 +1073,8 @@ export default function WikiPage() {
   const commentId = searchParams?.get("comment") ?? null;
 
   // id mode: resolve the id to its current path / kind / deleted state.
-  const { data: resolved, error: resolveErr } = useSWR(
-    idMode ? `/wiki/id/${first}` : null,
-    () => resolveDocId(first as string),
-    { revalidateOnFocus: false },
+  const { resolved, error: resolveErr } = useDocIdResolve(
+    idMode ? (first as string) : null,
   );
 
   // Next.js may hand back percent-encoded segments (e.g. "local%20testing").
@@ -1122,13 +1096,12 @@ export default function WikiPage() {
   const idResolve404 =
     idMode && (resolveErr as ApiError | undefined)?.status === 404;
   const {
-    data: idFallback,
+    id: idFallback,
     error: idFallbackError,
     isLoading: idFallbackLoading,
-  } = useSWR(
-    idResolve404 && pathModePath ? ["id-fallback", pathModePath] : null,
-    () => resolveIds([pathModePath]).then((m) => m[pathModePath] ?? null),
-    { revalidateOnFocus: false },
+  } = usePathToId(
+    "id-fallback",
+    idResolve404 && pathModePath ? pathModePath : null,
   );
   // The doc/folder path we're viewing: from the resolved id, or (legacy path
   // URL) straight from the URL. An unresolved id contributes no path.
@@ -1142,14 +1115,10 @@ export default function WikiPage() {
   // path/id and are handled directly.
   const pathModeActive = !idMode && !!pathModePath && !isNewMode;
   const {
-    data: pathId,
+    id: pathId,
     error: pathIdError,
     isLoading: pathIdLoading,
-  } = useSWR(
-    pathModeActive ? ["wiki-path-id", pathModePath] : null,
-    () => resolveIds([pathModePath]).then((m) => m[pathModePath] ?? null),
-    { revalidateOnFocus: false },
-  );
+  } = usePathToId("wiki-path-id", pathModeActive ? pathModePath : null);
   useEffect(() => {
     if (!pathModeActive || !pathId) return;
     const suffix = commentId ? `?comment=${encodeURIComponent(commentId)}` : "";
