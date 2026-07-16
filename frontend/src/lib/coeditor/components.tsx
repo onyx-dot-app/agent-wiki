@@ -36,6 +36,7 @@ import {
   colorFor,
   syncedDocLength,
 } from "@/lib/coeditor/utils";
+import { wysiwygMarkdown } from "@/lib/coeditor/wysiwyg";
 
 /** A remote peer's caret: a thin colored bar with a small name label above it. */
 class CaretWidget extends WidgetType {
@@ -130,8 +131,7 @@ const baseTheme = EditorView.theme({
   "&.cm-focused": { outline: "none" },
   ".cm-scroller": {
     overflow: "auto",
-    fontFamily:
-      "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+    fontFamily: "var(--font-sans, system-ui, -apple-system, sans-serif)",
     lineHeight: "1.6",
   },
   ".cm-content": { padding: "1rem", caretColor: "var(--text-05)" },
@@ -139,6 +139,46 @@ const baseTheme = EditorView.theme({
   ".cm-cursor, .cm-dropCursor": { borderLeftColor: "var(--text-05)" },
   "&.cm-focused .cm-selectionBackground, ::selection": {
     backgroundColor: "var(--background-tint-03)",
+  },
+  ".cm-md-h1, .cm-md-h2, .cm-md-h3, .cm-md-h4, .cm-md-h5, .cm-md-h6": {
+    fontWeight: "bold",
+    display: "inline-block",
+  },
+  ".cm-md-h1": { fontSize: "2em", marginTop: "0.5em" },
+  ".cm-md-h2": { fontSize: "1.6em", marginTop: "0.5em" },
+  ".cm-md-h3": { fontSize: "1.375em", marginTop: "0.4em" },
+  ".cm-md-h4": { fontSize: "1.25em", marginTop: "0.4em" },
+  ".cm-md-h5": { fontSize: "1.125em", marginTop: "0.3em" },
+  ".cm-md-h6": { fontSize: "1.125em", marginTop: "0.3em", opacity: "0.85" },
+  ".cm-md-strong": { fontWeight: "bold" },
+  ".cm-md-em": { fontStyle: "italic" },
+  ".cm-md-code-inline": {
+    fontFamily:
+      "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+    backgroundColor: "var(--background-tint-01)",
+    borderRadius: "var(--border-radius-04, 4px)",
+    padding: "0.1em 0.3em",
+  },
+  ".cm-md-code-block": {
+    fontFamily:
+      "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+    display: "block",
+    backgroundColor: "var(--background-tint-01)",
+    borderRadius: "var(--border-radius-08)",
+  },
+  ".cm-md-blockquote": {
+    display: "inline-block",
+    borderLeft: "3px solid var(--border-02)",
+    paddingLeft: "0.75em",
+    color: "var(--text-03)",
+  },
+  ".cm-md-link": {
+    color: "var(--accent-01)",
+    textDecoration: "underline",
+  },
+  ".cm-md-list-bullet, .cm-md-list-number": {
+    color: "var(--text-03)",
+    userSelect: "none",
   },
   ".cm-coedit-caret": {
     display: "inline-block",
@@ -165,6 +205,17 @@ const baseTheme = EditorView.theme({
   },
 });
 
+interface CoeditorProps {
+  session: CoeditSessionHandle;
+  peers: CoeditPeer[];
+  onSelectionChange: (anchor: number, head: number, isEdit: boolean) => void;
+  onServerFrame: (handler: ((frame: CoeditFrame) => void) | null) => void;
+  reportDoc: (doc: string) => void;
+  registerFlush: (fn: (() => Promise<void>) | null) => void;
+  registerSetDoc: (fn: ((text: string) => void) | null) => void;
+  placeholder?: string;
+}
+
 /** CodeMirror 6 editor that owns the co-edit document via `@codemirror/collab`.
  *
  * The editor is the source of truth for the doc + version; local edits push to
@@ -187,16 +238,7 @@ export function Coeditor({
   registerFlush,
   registerSetDoc,
   placeholder,
-}: {
-  session: CoeditSessionHandle;
-  peers: CoeditPeer[];
-  onSelectionChange: (anchor: number, head: number, isEdit: boolean) => void;
-  onServerFrame: (handler: ((frame: CoeditFrame) => void) | null) => void;
-  reportDoc: (doc: string) => void;
-  registerFlush: (fn: (() => Promise<void>) | null) => void;
-  registerSetDoc: (fn: ((text: string) => void) | null) => void;
-  placeholder?: string;
-}) {
+}: CoeditorProps) {
   const host = useRef<HTMLDivElement | null>(null);
   const view = useRef<EditorView | null>(null);
   // Latest callbacks without re-creating the editor.
@@ -359,6 +401,7 @@ export function Coeditor({
         history(),
         keymap.of([...defaultKeymap, ...historyKeymap]),
         markdown(),
+        wysiwygMarkdown(),
         EditorView.lineWrapping,
         placeholderExt(placeholder ?? ""),
         peersField,

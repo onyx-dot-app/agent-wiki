@@ -26,7 +26,7 @@ import {
   replyToComment,
   resolveThread,
 } from "@/lib/comments";
-import type { CommentDraft } from "@/lib/commentAnchor";
+import type { CommentDraft } from "@/lib/fileview/commentAnchor";
 import {
   detokenizeMentions,
   parseBody,

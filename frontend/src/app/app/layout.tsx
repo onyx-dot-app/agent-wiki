@@ -9,6 +9,7 @@ import { WikiItemActionsProvider } from "@/providers/WikiItemActionsProvider";
 import { LeftPanelProvider, useLeftPanel } from "@/providers/LeftPanelProvider";
 import {
   WikiHeaderActionsProvider,
+  useAgentsBarHost,
   useRightPanelHost,
 } from "@/providers/WikiHeaderActionsProvider";
 import { WikiTree } from "@/components/wiki/WikiTree";
@@ -102,6 +103,11 @@ function RightPanelHost() {
   );
 }
 
+function AgentsBarHost() {
+  const host = useAgentsBarHost();
+  return <div ref={host?.setEl} className="shrink-0" />;
+}
+
 function AppContent({ children }: AppContentProps) {
   const { view, isOnWikiRoute } = useLeftPanel();
   return (
@@ -124,6 +130,7 @@ function AppContent({ children }: AppContentProps) {
               <WikiHeader />
             </RootLayout.Header>
           )}
+          {isOnWikiRoute && <AgentsBarHost />}
           <RootLayout.MainContent>{children}</RootLayout.MainContent>
         </RootLayout.App>
         <RightPanelHost />
