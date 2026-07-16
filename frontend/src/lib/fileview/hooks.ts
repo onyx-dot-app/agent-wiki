@@ -30,12 +30,12 @@ export function useDeletedTombstone(path: string | null) {
 /** Resolve a doc id to its current binding (path/kind/deleted state).
  * Enabled whenever `id` is non-null. */
 export function useDocIdResolve(id: string | null) {
-  const { data, error } = useSWR(
+  const { data, error, isLoading } = useSWR(
     id ? `/wiki/id/${id}` : null,
     () => resolveDocId(id as string),
     { revalidateOnFocus: false },
   );
-  return { resolved: data, error };
+  return { resolved: data, error, isLoading };
 }
 
 /** Resolve a single path to its live id. Enabled whenever `path` is non-null.
