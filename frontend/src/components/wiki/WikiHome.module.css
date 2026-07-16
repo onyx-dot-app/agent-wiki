@@ -106,49 +106,6 @@
 }
 
 /* Templates strip */
-.templates {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
-  padding: 8px;
-}
-.templateCell {
-  display: flex;
-  min-width: 0;
-}
-
-/* "More Templates" — full-width row: label left, chevron far right (mock 319:27988). */
-.moreRow {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  box-sizing: border-box;
-  margin: 0 8px;
-  width: calc(100% - 16px);
-  padding: 8px;
-  border: none;
-  background: transparent;
-  border-radius: var(--border-radius-04);
-  cursor: pointer;
-}
-.moreRow:hover {
-  background: var(--background-tint-03);
-}
-.moreLabel {
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--text-04);
-}
-.moreChevron {
-  color: var(--text-03);
-  flex: 0 0 auto;
-}
-
-/* Blank-page glyph — plain OPAL plus-circle icon, not an interactive Button. */
-.blankGlyph {
-  display: inline-flex;
-  color: var(--text-03);
-}
 
 /* AI input — box left edge aligns with the card grid (padding 8px); the octagon
    mark hangs into the left gutter, vertically centered, out of the input flow. */
@@ -258,7 +215,6 @@
   .column {
     width: 100%;
   }
-  .templates,
   .recentGrid {
     grid-template-columns: 1fr;
   }

@@ -381,7 +381,7 @@ export function WikiTree() {
               with SvgFold below becoming SvgArrowWallLeft). */}
           <SvgTextLines size={16} />
           <Text font="main-ui-action" color="text-05">
-            Wiki
+            Wiki Directory
           </Text>
         </span>
         <Button
@@ -396,8 +396,8 @@ export function WikiTree() {
         <InputTypeIn
           searchIcon
           clearButton
-          placeholder="Search wiki..."
-          aria-label="Search wiki"
+          placeholder="Search wiki directory..."
+          aria-label="Search wiki directory"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />

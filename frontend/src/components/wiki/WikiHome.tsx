@@ -14,21 +14,17 @@ import {
   SelectCard,
   Text,
 } from "@onyx-ai/opal/components";
-import { Section } from "@onyx-ai/opal/layouts";
 import {
   SvgArrowUp,
-  SvgChevronRight,
   SvgMoreHorizontal,
   SvgOnyxOctagon,
-  SvgPlusCircle,
 } from "@onyx-ai/opal/icons";
 import { SvgOnyxLogo } from "@onyx-ai/opal/logos";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { relativeTime } from "@/lib/time";
-import { listTemplateSummaries } from "@/lib/templates";
-import type { DocumentTemplateSummary } from "@/lib/templates";
 import { AI_DRAFT_KEY, generateDraft, type RecentPage } from "@/lib/wiki";
 import { wikiHref, wikiPath } from "@/lib/wikiHref";
+import { StartNewPage } from "@/components/wiki/StartNewPage";
 import WikiItemMenu from "@/components/wiki/WikiItemActions";
 import styles from "@/components/wiki/WikiHome.module.css";
 
@@ -42,25 +38,6 @@ export function WikiHome() {
     "/wiki/recent?limit=12",
   );
   const recent = recentData?.pages ?? [];
-
-  const { data: templates } = useSWR<DocumentTemplateSummary[]>(
-    "templates:summaries",
-    listTemplateSummaries,
-  );
-  // The "Blank" template is the empty-start entry point (carries an auto-update
-  // policy); route the blank card through it when present, and keep it out of
-  // the featured row so it isn't shown twice.
-  const blankTemplate = (templates ?? []).find((t) => t.name === "Blank");
-  const featured = (templates ?? [])
-    .filter((t) => t.name !== "Blank")
-    .slice(0, 2);
-
-  function startNewPage(templateId?: string) {
-    const qs = templateId
-      ? `?new=1&template=${encodeURIComponent(templateId)}`
-      : "?new=1";
-    router.push(`/app/wiki${qs}`);
-  }
 
   async function onAiSubmit(e: FormEvent) {
     e.preventDefault();
@@ -105,45 +82,7 @@ export function WikiHome() {
           <Divider />
         </div>
 
-        {/* Start a new page */}
-        <div className={styles.sectionHeader}>
-          <span className={styles.secHead}>Start a new page</span>
-        </div>
-        <div className={styles.templates}>
-          <div className={styles.templateCell}>
-            <TemplateCard
-              title="Blank page"
-              glyph={
-                <span className={styles.blankGlyph}>
-                  <SvgPlusCircle size={22} />
-                </span>
-              }
-              onClick={() => startNewPage(blankTemplate?.id)}
-            />
-          </div>
-          {featured.map((t) => (
-            <div key={t.id} className={styles.templateCell}>
-              <TemplateCard
-                title={t.name}
-                description={t.description ?? ""}
-                note={
-                  t.ingestion_auto_update_disabled
-                    ? "Auto-update off"
-                    : undefined
-                }
-                onClick={() => startNewPage(t.id)}
-              />
-            </div>
-          ))}
-        </div>
-        <button
-          type="button"
-          className={styles.moreRow}
-          onClick={() => startNewPage()}
-        >
-          <span className={styles.moreLabel}>More Templates</span>
-          <SvgChevronRight size={18} className={styles.moreChevron} />
-        </button>
+        <StartNewPage />
 
         {/* Write with AI */}
         <div className={styles.aiRow}>
@@ -203,59 +142,6 @@ export function WikiHome() {
         )}
       </div>
     </main>
-  );
-}
-
-function TemplateCard({
-  title,
-  description,
-  note,
-  glyph,
-  onClick,
-}: {
-  title: string;
-  description?: string;
-  note?: string;
-  glyph?: React.ReactNode;
-  onClick: () => void;
-}) {
-  return (
-    <SelectCard
-      state="empty"
-      onClick={onClick}
-      padding="sm"
-      rounding="lg"
-      border="solid"
-    >
-      <Section
-        flexDirection="column"
-        alignItems="start"
-        justifyContent="start"
-        gap={0.25}
-        width="full"
-        height="full"
-      >
-        <Text font="main-ui-action" color="text-05" nowrap>
-          {title}
-        </Text>
-        {glyph ? (
-          glyph
-        ) : (
-          <>
-            {description ? (
-              <Text font="secondary-body" color="text-03">
-                {description}
-              </Text>
-            ) : null}
-            {note ? (
-              <Text font="secondary-body" color="text-02">
-                {note}
-              </Text>
-            ) : null}
-          </>
-        )}
-      </Section>
-    </SelectCard>
   );
 }
 

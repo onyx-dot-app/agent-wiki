@@ -20,6 +20,9 @@ export interface WikiItemMenuProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   align?: "start" | "center" | "end";
+  /** Replace the provider's rename/delete with surface-local flows (e.g. the
+   * folder explorer's inline rename and styled confirm). */
+  overrides?: { rename?: () => void; remove?: () => void };
   children: ReactNode;
 }
 
@@ -34,6 +37,7 @@ export default function WikiItemMenu({
   open,
   onOpenChange,
   align = "start",
+  overrides,
   children,
 }: WikiItemMenuProps) {
   const actions = useRowActions();
@@ -77,7 +81,7 @@ export default function WikiItemMenu({
             sizePreset="main-ui"
             icon={SvgEdit}
             title="Rename"
-            onClick={run(actions.rename)}
+            onClick={run(overrides?.rename ?? actions.rename)}
           />
           <LineItemButton
             variant="body"
@@ -112,7 +116,8 @@ export default function WikiItemMenu({
               title="Delete"
               onClick={() => {
                 onOpenChange(false);
-                actions.remove(path, isFolder);
+                if (overrides?.remove) overrides.remove();
+                else actions.remove(path, isFolder);
               }}
             />
           </span>

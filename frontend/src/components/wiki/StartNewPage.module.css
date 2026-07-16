@@ -1,0 +1,49 @@
+/* "Start a new page" section shared by Home and folder pages: section header,
+   3-card template grid, More Templates row (mock 709:259993). */
+
+.sectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px 4px;
+}
+
+.secHead {
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 600;
+  color: var(--text-04);
+}
+
+.templates {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  padding: 8px;
+}
+.templateCell {
+  display: flex;
+  min-width: 0;
+}
+
+/* "More Templates" row container, aligning the LineItemButton with the card
+   grid's 8px side padding (mock 319:27988). */
+.moreRow {
+  padding: 0 8px;
+}
+.moreChevron {
+  color: var(--text-03);
+  flex: 0 0 auto;
+}
+
+/* Blank-page glyph, a plain OPAL plus-circle icon, not an interactive Button. */
+.blankGlyph {
+  display: inline-flex;
+  color: var(--text-03);
+}
+
+@media (max-width: 720px) {
+  .templates {
+    grid-template-columns: 1fr;
+  }
+}

@@ -16,7 +16,9 @@ import styles from "./UpdatePolicyPanel.module.css";
 
 interface Props {
   path: string;
-  onClose: () => void;
+  // Renders the close control when set. Omit when the panel is inlined in a
+  // page column (folder pages) rather than shown as a dismissable drawer.
+  onClose?: () => void;
   fullHeight?: boolean;
   // When set, the activity row shows an "Update History" link that calls this.
   // Omit on surfaces with no history view (e.g. the folder explorer drawer).
@@ -161,20 +163,24 @@ export function UpdatePolicyPanel({
 
   return (
     <div className={`${styles.panel} ${fullHeight ? styles.fullHeight : ""}`}>
-      <div className={styles.headerRow}>
-        <div className={styles.headerTitle}>
-          <Text font="main-ui-action" color="text-04">
-            Update Policy
-          </Text>
+      {/* Title + close only in drawer hosts. The inline folder-page card
+          starts straight at the policy rows (mock 1673:32813). */}
+      {onClose && (
+        <div className={styles.headerRow}>
+          <div className={styles.headerTitle}>
+            <Text font="main-ui-action" color="text-04">
+              Update Policy
+            </Text>
+          </div>
+          <Button
+            icon={SvgX}
+            prominence="tertiary"
+            size="sm"
+            tooltip="Close"
+            onClick={onClose}
+          />
         </div>
-        <Button
-          icon={SvgX}
-          prominence="tertiary"
-          size="sm"
-          tooltip="Close"
-          onClick={onClose}
-        />
-      </div>
+      )}
 
       <div className={styles.scroll}>
         {loading ? (

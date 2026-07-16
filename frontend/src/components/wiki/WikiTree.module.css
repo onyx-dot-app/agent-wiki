@@ -6,7 +6,8 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
-  width: 100%;
+  /* Fixed panel width per the annotated mock (comment on 705:142872). */
+  width: 312px;
   height: 100%;
   box-sizing: border-box;
   background: var(--background-tint-01);
@@ -54,22 +55,15 @@
   color: var(--status-text-error-05);
 }
 
-/* Tree list. Scrolls both axes rather than growing or truncating. Vertical
-   when it outgrows the viewport, horizontal when deep nesting and long names
-   run past the panel width (labels keep their natural width below). */
+/* Tree list. The header/search zone above stays fixed and only this list
+   scrolls, vertically. Long names truncate with an ellipsis (OPAL's default)
+   so the panel never scrolls horizontally (annotated mock on 705:142872). */
 .list {
   flex: 1;
   min-height: 0;
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
   width: 100%;
-}
-
-/* Let row labels keep their full width (OPAL truncates with an ellipsis by
-   default) so long/deep names overflow and drive the horizontal scroll. */
-.list :global(p) {
-  overflow: visible;
-  text-overflow: clip;
-  white-space: nowrap;
 }
 
 /* Row label: leading file/folder glyph inline with the name (the SidebarTab
@@ -78,18 +72,22 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
   color: inherit;
 }
 .rowLabel > svg {
   flex-shrink: 0;
   color: var(--text-03);
 }
+.rowLabel > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 /* Expanded folder's children, indented one level per depth with the mock's
-   vertical guide line. Sized to content so deep names can overflow. */
+   vertical guide line. */
 .nested {
-  width: max-content;
-  min-width: 100%;
   margin-left: 12px;
   padding-left: 4px;
   border-left: 1px solid var(--border-01);
