@@ -282,7 +282,7 @@ export function FileView({ path }: FileViewProps) {
 
   // Live co-editing session: joined whenever the current (non-historical)
   // version is showing, left when the user opens an old commit — see
-  // `useCoeditSession`'s `enabled` doc. No explicit Save; `leave` (checkpoint
+  // `useCoeditSession`'s `enabled` doc. No explicit Save; teardown (checkpoint
   // + leave) fires from the hook itself on that transition/unmount, not from
   // a button here.
   const coedit = useCoeditSession({
@@ -884,6 +884,19 @@ export function FileView({ path }: FileViewProps) {
                       onSelectionForComment={handleSelectionForComment}
                       placeholder="Start typing, or pick a template above…"
                     />
+                  ) : coedit.joinError ? (
+                    // The join handshake itself failed — there's no read-only
+                    // fallback to fall back to, so this has to be an actionable
+                    // dead end, not a permanent "Connecting…".
+                    <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 text-[13px] text-(--text-03)">
+                      <span>
+                        Couldn't connect to the editing session:{" "}
+                        {coedit.joinError}
+                      </span>
+                      <Button size="sm" onClick={coedit.retryJoin}>
+                        Retry
+                      </Button>
+                    </div>
                   ) : (
                     // Joining the session; the editor mounts once we have its
                     // start version + doc.

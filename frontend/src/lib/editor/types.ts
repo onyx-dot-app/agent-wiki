@@ -93,6 +93,13 @@ export interface UseCoeditSession {
   peers: CoeditPeer[];
   /** Set once joined; the editor mounts its collab document from it. */
   session: CoeditSessionHandle | null;
+  /** Set when the join handshake itself fails (network error, 4xx/5xx,
+   * expired auth) — `session` stays null and stays null forever unless the
+   * caller shows this and offers `retryJoin`. A stream drop *after* a
+   * successful join doesn't set this (the session is already usable). */
+  joinError: string | null;
+  /** Clears `joinError` and re-runs the join handshake. */
+  retryJoin: () => void;
   /** Autosave state, for a "Saving…/Saved/Couldn't save" indicator. */
   saveStatus: "saved" | "saving" | "error";
   /** Register a handler the hook calls with each inbound `op`/`resync` frame. */
@@ -101,7 +108,7 @@ export interface UseCoeditSession {
    * also arms the autosave idle/max-interval timers. */
   reportDoc: (doc: string) => void;
   /** Register the editor's "flush pending ops" fn, awaited before every
-   * checkpoint (autosave or `leave`). */
+   * checkpoint (autosave or session teardown). */
   registerFlush: (fn: (() => Promise<void>) | null) => void;
   /** Register the editor's "replace whole doc" fn (template pick / blank). */
   registerSetDoc: (fn: ((text: string) => void) | null) => void;
@@ -112,7 +119,4 @@ export interface UseCoeditSession {
    * marks "typing…" + arms its auto-clear; `isEdit=false` (a caret move) reports
    * position without changing the typing state. Throttled + coalesced. */
   reportSelection: (anchor: number, head: number, isEdit: boolean) => void;
-  /** Flush pending ops, checkpoint the buffer to git, then leave the session.
-   * Not a Save button — called on unmount/path-change/entering history. */
-  leave: () => Promise<void>;
 }

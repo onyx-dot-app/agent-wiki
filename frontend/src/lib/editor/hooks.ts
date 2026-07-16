@@ -3,19 +3,27 @@
 /** React hook that owns a live co-edit session's lifecycle + presence.
  *
  * On `enabled` it joins the session for `path`, streams inbound frames, and
- * exposes presence (`participants`/`typing`/`peers`), autosave (`saveStatus`),
- * and a `leave` (checkpoint + leave, for the caller's own unmount/transition
- * cleanup). The *document* is owned by the editor via `@codemirror/collab`
- * (see `Coeditor`), not here — the hook just hands the editor what it needs to
- * run collab (`session` = id/clientId/start version+doc), forwards inbound
- * `op`/`resync` frames to it (`onServerFrame`), and keeps a read-only `buffer`
- * mirror for non-editor UI (the template gallery).
+ * exposes presence (`participants`/`typing`/`peers`) and autosave
+ * (`saveStatus`). Teardown (flush + best-effort checkpoint + leave +
+ * `onEnd`) happens entirely inside the hook's own effect cleanup — driven by
+ * `enabled`/`path` changing or the component unmounting, never by the caller
+ * invoking a function. The *document* is owned by the editor via
+ * `@codemirror/collab` (see `Coeditor`), not here — the hook just hands the
+ * editor what it needs to run collab (`session` = id/clientId/start
+ * version+doc), forwards inbound `op`/`resync` frames to it (`onServerFrame`),
+ * and keeps a read-only `buffer` mirror for non-editor UI (the template
+ * gallery).
  *
  * Autosave: every `reportDoc` (called by the editor on each doc change) arms
  * an idle timer (checkpoint `AUTOSAVE_IDLE_MS` after the last edit) and, if
  * not already running, a hard-cap timer (`AUTOSAVE_MAX_INTERVAL_MS`) so a
  * continuously-typing user still checkpoints periodically. There's no
- * explicit Save — `leave` only runs on unmount/path-change/entering history.
+ * explicit Save.
+ *
+ * If the join handshake itself fails, `session` stays null forever and
+ * `joinError` is set — the editor has no read-only fallback to fall back to
+ * now, so the caller must show `joinError` and offer `retryJoin` rather than
+ * leaving the UI stuck on a permanent "Connecting…".
  *
  * Offsets are UTF-16 (JS-native), matching the server — see `svc.ts`.
  */
@@ -66,6 +74,14 @@ export function useCoeditSession(opts: {
   const [peers, setPeers] = useState<CoeditPeer[]>([]);
   const [active, setActive] = useState(false);
   const [session, setSession] = useState<CoeditSessionHandle | null>(null);
+  const [joinError, setJoinError] = useState<string | null>(null);
+  // Bumped by `retryJoin` to force the join effect to re-run even when
+  // `enabled`/`path` haven't changed.
+  const [retryToken, setRetryToken] = useState(0);
+  const retryJoin = useCallback(() => {
+    setJoinError(null);
+    setRetryToken((t) => t + 1);
+  }, []);
   const [saveStatus, setSaveStatus] =
     useState<UseCoeditSession["saveStatus"]>("saved");
 
@@ -77,7 +93,6 @@ export function useCoeditSession(opts: {
   const sessionId = useRef<number | null>(null);
   const clientId = useRef<string>("");
   const abort = useRef<AbortController | null>(null);
-  const joinPromise = useRef<Promise<void> | null>(null);
   // Editor-registered hooks: inbound frame handler + pending-op flush.
   const serverFrame = useRef<((frame: CoeditFrame) => void) | null>(null);
   const flushFn = useRef<(() => Promise<void>) | null>(null);
@@ -244,6 +259,10 @@ export function useCoeditSession(opts: {
     [myUserId],
   );
 
+  // Tears the session down and fires `onEnd` — the one and only "session is
+  // over" signal. Only called from the join effect's cleanup below, so this
+  // is always a genuine end (disable, path change, or unmount), never a
+  // silent mid-session reset.
   const stop = useCallback(() => {
     clearAutosaveTimers();
     if (cursorThrottle.current) {
@@ -266,34 +285,13 @@ export function useCoeditSession(opts: {
     setActive(false);
     setSession(null);
     if (sid !== null) void leaveSession(sid).catch(() => {});
-  }, [clearAutosaveTimers]);
-
-  // Flush + checkpoint + leave the session. Called on unmount, on a path
-  // change, and when switching into history view — never from a button.
-  const leave = useCallback(async () => {
-    if (sessionId.current === null && joinPromise.current) {
-      await joinPromise.current;
-    }
-    const sid = sessionId.current;
-    if (sid === null) return;
-    // Flush the editor's un-acked ops so every keystroke reaches the server
-    // before we checkpoint the buffer to git. If the flush fails (network),
-    // let it throw: don't checkpoint a stale buffer or leave the session —
-    // the caller surfaces the error and the user stays in the editor to retry.
-    setSaveStatus("saving");
-    await flushFn.current?.();
-    try {
-      await checkpointSession(sid);
-      setSaveStatus("saved");
-    } finally {
-      stop();
-      onEnd?.();
-    }
-  }, [stop, onEnd]);
+    onEnd?.();
+  }, [clearAutosaveTimers, onEnd]);
 
   // Join + stream while enabled (the caller passes `!viewingVersion` — i.e.
   // whenever the live/current doc is showing, not an old commit); leave on
-  // disable/path-change/unmount.
+  // disable/path-change/unmount. `retryToken` lets `retryJoin` force a re-run
+  // without `enabled`/`path` changing.
   useEffect(() => {
     if (!enabled) return;
     const ctrl = new AbortController();
@@ -302,31 +300,47 @@ export function useCoeditSession(opts: {
     let cancelled = false;
     // Mirror shows the committed body until the join resolves.
     setBuffer(committedBody);
+    setJoinError(null);
 
-    const run = (async () => {
+    void (async () => {
+      let snap;
       try {
-        const snap = await joinSession(path);
-        if (cancelled) return;
-        sessionId.current = snap.session_id;
-        setBuffer(snap.buffer);
-        setParticipants(snap.participants);
-        setSession({
-          id: snap.session_id,
-          clientId: clientId.current,
-          startVersion: snap.version,
-          startDoc: snap.buffer,
-        });
-        setActive(true);
+        snap = await joinSession(path);
+      } catch (e) {
+        // The join handshake itself failed — there's no session to fall
+        // back to (no more read-only mode), so this must be surfaced rather
+        // than left as a silent, permanent "Connecting…".
+        if (!cancelled) {
+          setJoinError(
+            e instanceof Error
+              ? e.message
+              : "Failed to join the editing session.",
+          );
+        }
+        return;
+      }
+      if (cancelled) return;
+      sessionId.current = snap.session_id;
+      setBuffer(snap.buffer);
+      setParticipants(snap.participants);
+      setSession({
+        id: snap.session_id,
+        clientId: clientId.current,
+        startVersion: snap.version,
+        startDoc: snap.buffer,
+      });
+      setActive(true);
+      try {
         await streamSession(snap.session_id, onFrame, ctrl.signal);
       } catch {
-        // join failed or stream ended; leave edit mode gracefully
+        // Stream ended/dropped after a successful join (including our own
+        // cleanup's abort) — the session/doc are already usable, so this
+        // isn't a join failure and doesn't need to surface as one.
       }
     })();
-    joinPromise.current = run;
 
     return () => {
       cancelled = true;
-      joinPromise.current = null;
       // Capture before the synchronous `stop()` below clears them, so a
       // trailing checkpoint can still cover the last idle-autosave window
       // (the periodic autosave while mounted is the primary durability path;
@@ -348,7 +362,7 @@ export function useCoeditSession(opts: {
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, path]);
+  }, [enabled, path, retryToken]);
 
   // Best-effort checkpoint when the tab is backgrounded/closed — `keepalive`
   // lets the request survive the page tearing down. Covers the gap between
@@ -378,6 +392,8 @@ export function useCoeditSession(opts: {
     typing,
     peers,
     session,
+    joinError,
+    retryJoin,
     saveStatus,
     onServerFrame,
     reportDoc,
@@ -385,6 +401,5 @@ export function useCoeditSession(opts: {
     registerSetDoc,
     setDoc,
     reportSelection,
-    leave,
   };
 }
