@@ -59,6 +59,24 @@ launchersEnabled: false
 # decision (committed / no_change / irrelevant). Off by default; enable on
 # environments where you want to collect real traffic for eval review.
 ingestEvalLogging: false
+
+# Warm two-tower relevance model. Leave s3Uri empty to run the cosine
+# cold-start filter (nothing is downloaded). When set, an init-container on the
+# documents worker pulls the exported .onnx from S3 into an emptyDir the worker
+# reads at <mountPath>/model.onnx. The weights are supplied at runtime, never
+# baked into the image or committed. A download failure degrades to cosine
+# rather than blocking startup. Credentials come from the standard AWS env /
+# IAM role chain (same as backup.s3); any S3-compatible endpoint works.
+ingestRelevance:
+  twoTower:
+    # s3://<bucket>/<key> of the exported .onnx. Empty => cosine cold-start.
+    s3Uri: ""
+    # Optional endpoint URL for non-AWS backends (GCS interop, MinIO, R2).
+    endpoint: ""
+    # Optional region.
+    region: ""
+    # emptyDir mount on the documents worker; the file lands at <mountPath>/model.onnx.
+    mountPath: /models/relevance
 # Browser-facing wiki origin (e.g. "https://wiki.example.com", no
 # trailing slash). Backend advertises this URL in launcher launch URIs,
 # redirect targets, email links. Optional: when left empty the chart

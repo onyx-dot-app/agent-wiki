@@ -77,7 +77,7 @@ class Config(BaseModel):
     # never in the repo). The two-tower's threshold ships with the model (its
     # embedded cutoff) — the model is the single source of truth for it. Cosine has
     # its own scale, so it keeps its own configurable threshold.
-    ingest_relevance_model_path: str
+    ingest_relevance_two_tower_model_path: str
     ingest_relevance_cosine_threshold: float
 
     # Opt-in eval logging — captures reconciler inputs/outputs to ingest_eval_samples
@@ -200,7 +200,7 @@ def load_config() -> Config:
         ingest_bm25_limit=_positive_int("INGEST_BM25_LIMIT", 20),
         ingest_irrelevant_stop_n=_positive_int("INGEST_IRRELEVANT_STOP_N", 2),
         ingest_embed_model=os.environ.get("INGEST_EMBED_MODEL", "text-embedding-3-small"),
-        ingest_relevance_model_path=os.environ.get("INGEST_RELEVANCE_MODEL_PATH", ""),
+        ingest_relevance_two_tower_model_path=os.environ.get("INGEST_RELEVANCE_TWO_TOWER_MODEL_PATH", ""),
         # Cosine cold-start default: the study's 85%-filter operating point.
         ingest_relevance_cosine_threshold=_nonneg_float(
             "INGEST_RELEVANCE_COSINE_THRESHOLD", 0.4334
