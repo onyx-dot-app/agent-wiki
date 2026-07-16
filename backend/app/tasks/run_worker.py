@@ -33,6 +33,7 @@ _TASK_MODULES = (
     "app.tasks.coedit_checkpoint",
     "app.tasks.coedit_rebase",
     "app.tasks.craft",
+    "app.tasks.detection",
     "app.tasks.wiki_update",
     "app.tasks.expire_launch_artifacts",
     "app.tasks.ingest_eval_retention",
