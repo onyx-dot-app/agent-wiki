@@ -186,14 +186,17 @@ function buildDecorations(view: EditorView): DecorationSet {
           case "URL":
             // Only the URL inside a `[text](url)` link is markup to hide —
             // a bare autolink's URL is its own visible content.
-            if (node.node.parent?.name === "Link") hideMark(state, node, ranges);
+            if (node.node.parent?.name === "Link")
+              hideMark(state, node, ranges);
             break;
           case "ListMark": {
             if (lineRevealed(state, node.from)) break;
             const parent = node.node.parent;
             const ordered = parent?.parent?.name === "OrderedList";
             const widget = ordered
-              ? new OrderedMarkerWidget(state.doc.sliceString(node.from, node.to))
+              ? new OrderedMarkerWidget(
+                  state.doc.sliceString(node.from, node.to),
+                )
               : new BulletWidget();
             ranges.push(
               Decoration.replace({ widget }).range(node.from, node.to),
