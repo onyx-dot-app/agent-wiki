@@ -1,6 +1,6 @@
 import type { ChangeSet, EditorState } from "@codemirror/state";
 import { sendableUpdates } from "@codemirror/collab";
-import type { CoeditChange } from "./types";
+import type { CoeditChange } from "@/lib/coediting/types";
 
 /** Opal-ish hues that read on both themes, one per peer slot. */
 export const PEER_COLORS = [

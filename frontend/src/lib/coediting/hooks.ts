@@ -12,15 +12,15 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import type { CoeditFrame, CoeditParticipant, CoeditPeer, UseCoeditSession, CoeditSessionHandle } from "./types";
+import type { CoeditFrame, CoeditParticipant, CoeditPeer, UseCoeditSession, CoeditSessionHandle } from "@/lib/coediting/types";
 import {
   checkpointSession,
   joinSession,
   leaveSession,
   sendCursor,
   streamSession,
-} from "./svc";
-import { CURSOR_THROTTLE_MS, TYPING_EXPIRY_MS, TYPING_IDLE_MS } from "./constants";
+} from "@/lib/coediting/svc";
+import { CURSOR_THROTTLE_MS, TYPING_EXPIRY_MS, TYPING_IDLE_MS } from "@/lib/coediting/constants";
 
 /** Generate a fresh per-connection collab clientId (UUID v4).
  * Used to filter out our own op echoes from the SSE stream. */

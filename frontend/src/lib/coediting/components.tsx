@@ -25,9 +25,9 @@ import {
 } from "@codemirror/view";
 import { useEffect, useRef } from "react";
 import { ApiError } from "@/lib/api";
-import type { CoeditFrame, CoeditPeer, CoeditSessionHandle } from "./types";
-import { getOps, sendOp } from "./svc";
-import { changeSetToChanges, colorFor, syncedDocLength } from "./utils";
+import type { CoeditFrame, CoeditPeer, CoeditSessionHandle } from "@/lib/coediting/types";
+import { getOps, sendOp } from "@/lib/coediting/svc";
+import { changeSetToChanges, colorFor, syncedDocLength } from "@/lib/coediting/utils";
 
 /** A remote peer's caret: a thin colored bar with a small name label above it. */
 class CaretWidget extends WidgetType {
