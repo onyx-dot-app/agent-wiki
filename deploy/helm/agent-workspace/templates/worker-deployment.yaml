@@ -46,6 +46,33 @@ spec:
       securityContext:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- /* The relevance filter runs only in the documents worker; fetch the */ -}}
+      {{- /* warm model only there, and only when one is configured.           */ -}}
+      {{- $relevanceModel := and (eq $queue "documents") (not (empty $.Values.ingestRelevance.model.s3Uri)) }}
+      {{- $modelPath := printf "%s/model.onnx" $.Values.ingestRelevance.model.mountPath }}
+      {{- if $relevanceModel }}
+      initContainers:
+        - name: fetch-relevance-model
+          image: "{{ $.Values.image.backend.repository }}:{{ $.Values.image.backend.tag }}"
+          imagePullPolicy: {{ $.Values.image.backend.pullPolicy }}
+          command: ["python", "-m", "app.scripts.download_relevance_model"]
+          {{- with $.Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          env:
+            - name: INGEST_RELEVANCE_MODEL_PATH
+              value: {{ $modelPath | quote }}
+            - name: INGEST_RELEVANCE_MODEL_S3_URI
+              value: {{ $.Values.ingestRelevance.model.s3Uri | quote }}
+            - name: INGEST_RELEVANCE_MODEL_S3_ENDPOINT
+              value: {{ $.Values.ingestRelevance.model.endpoint | quote }}
+            - name: INGEST_RELEVANCE_MODEL_S3_REGION
+              value: {{ $.Values.ingestRelevance.model.region | quote }}
+          volumeMounts:
+            - name: relevance-model
+              mountPath: {{ $.Values.ingestRelevance.model.mountPath | quote }}
+      {{- end }}
       containers:
         - name: worker
           image: "{{ $.Values.image.backend.repository }}:{{ $.Values.image.backend.tag }}"
@@ -61,12 +88,24 @@ spec:
           {{- end }}
           env:
             {{- include "agent-workspace.backendEnv" $ | nindent 12 }}
+            {{- if $relevanceModel }}
+            - name: INGEST_RELEVANCE_MODEL_PATH
+              value: {{ $modelPath | quote }}
+            {{- end }}
           volumeMounts:
             {{- include "agent-workspace.backendVolumeMounts" $ | nindent 12 }}
+            {{- if $relevanceModel }}
+            - name: relevance-model
+              mountPath: {{ $.Values.ingestRelevance.model.mountPath | quote }}
+            {{- end }}
           resources:
             {{- toYaml $.Values.worker.resources | nindent 12 }}
       volumes:
         {{- include "agent-workspace.backendVolumes" $ | nindent 8 }}
+        {{- if $relevanceModel }}
+        - name: relevance-model
+          emptyDir: {}
+        {{- end }}
       # Co-schedule with the backend so the RWO PVCs land on the same node.
       affinity:
         podAffinity:
