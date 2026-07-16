@@ -13,6 +13,7 @@ import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import useSWR from "swr";
+import { Content } from "@onyx-ai/opal/layouts";
 import {
   Button,
   Divider,
@@ -87,6 +88,7 @@ import { Coeditor } from "@/lib/coeditor/components";
 import type { CoeditParticipant } from "@/lib/coeditor/types";
 import { useCoeditSession } from "@/lib/coeditor/hooks";
 import {
+  useAgentsBarHost,
   useHeaderActionsHost,
   useRightPanelHost,
 } from "@/providers/WikiHeaderActionsProvider";
@@ -1514,6 +1516,7 @@ function FileViewer({ path }: { path: string }) {
   const searchParams = useSearchParams();
   const isMobile = useIsMobile();
   const host = useHeaderActionsHost();
+  const agentsBarHost = useAgentsBarHost();
   const rightHost = useRightPanelHost();
   const { isActivitiesOpen, toggleActivities } = useLeftPanel();
   const { refresh: refreshTriggers } = useTriggers();
@@ -2271,15 +2274,29 @@ function FileViewer({ path }: { path: string }) {
     >
       {host?.el && headerActions && createPortal(headerActions, host.el)}
 
+      {agentsBarHost?.el &&
+        !editing &&
+        createPortal(
+          <ActiveAgentsBar
+            agents={agents}
+            sessions={activeSessions}
+            error={agentsError}
+            open={agentsOpen}
+            onToggle={() => setAgentsOpen((v) => !v)}
+            onCloseSession={handleCloseSession}
+          />,
+          agentsBarHost.el,
+        )}
+
       {!editing && (
-        <ActiveAgentsBar
-          agents={agents}
-          sessions={activeSessions}
-          error={agentsError}
-          open={agentsOpen}
-          onToggle={() => setAgentsOpen((v) => !v)}
-          onCloseSession={handleCloseSession}
-        />
+        <>
+          <Content
+            sizePreset="main-ui"
+            variant="section"
+            title={(path.split("/").pop() ?? path).replace(/\.md$/i, "")}
+          />
+          <Divider />
+        </>
       )}
 
       {!editing && triggerStatus && (
