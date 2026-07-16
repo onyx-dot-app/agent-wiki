@@ -7,8 +7,9 @@
  * the design in `design/Co-Editing.md`.
  *
  * Offsets are UTF-16 code units — which is exactly what JS string indexing and
- * `slice` use, so `diffToChange`/`applyChange` interoperate with the server
- * (`Change` in `app/wiki/coedit.py`) without conversion.
+ * `slice` use, so the ops interoperate with the server
+ * (`Change` in `app/wiki/coedit.py`) without conversion; see `utils.ts` for
+ * `diffToChange`/`applyChange`.
  */
 import { apiFetch, apiStream } from "@/lib/api";
 import type {

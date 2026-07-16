@@ -1,71 +1,49 @@
-"""HTTP :class:`~app.ingest.relevance.two_tower_filter.Scorer` client for the
-relevance model server.
+"""The two-tower :class:`Scorer` — runs the exported two-tower ONNX graph.
 
-Scores embedding pairs by POSTing them to a separate model-server service (the
-Onyx ``model_server`` pattern) that hosts the trained two-tower network. Keeping
-the model in its own service means the backend carries no ML runtime — only
-this thin HTTP client and the shared request/response schema.
+Maps the filter's one-document-against-many-pages call onto the graph's
+``(wiki, doc) -> prob`` contract: the page is the wiki side, the document is
+tiled across the candidate pages, one forward pass returns P(update) per page.
+Execution is delegated to :class:`OnnxModel`; this class owns only the
+two-tower-specific I/O — the parallel to ``cosine_similarity_score`` for the
+cosine filter.
 
-Raises on any transport or protocol failure; ``TwoTowerFilter`` catches it and
-fails open (keeps the candidates), so a slow or down model server degrades to
-"keep everything" rather than blocking ingestion.
-
-The ``ScoreRequest`` / ``ScoreResponse`` schema is the wire contract the model
-server must implement; both sides share it.
+The trained model is exported to ONNX offline (torch lives only in that export
+step); the backend only ever loads and runs the resulting graph, in-process.
 """
 from __future__ import annotations
 
 from collections.abc import Sequence
 
-import requests
-from pydantic import BaseModel
+import numpy as np
 
-# Path on the model server that scores a batch of (doc, page) embedding pairs.
-SCORE_PATH = "/score"
+from app.ingest.relevance.onnx_model import OnnxModel
 
-# Conservative default: the filter only saves reconcile cost, so a scorer that
-# can't answer quickly should fail open fast rather than stall the pipeline.
-DEFAULT_TIMEOUT_SECONDS = 5.0
-
-
-class ScoreRequest(BaseModel):
-    """One document vector scored against many candidate-page vectors."""
-
-    doc_vec: list[float]
-    page_vecs: list[list[float]]
-
-
-class ScoreResponse(BaseModel):
-    """P(relevant) per page, aligned to ``ScoreRequest.page_vecs``."""
-
-    probs: list[float]
+# Graph input/output names — must match what the ONNX export writes.
+_WIKI_INPUT = "wiki"
+_DOC_INPUT = "doc"
+_PROB_OUTPUT = "prob"
 
 
 class TwoTowerScorer:
-    """The two-tower :class:`Scorer`, backed by an HTTP call to the model server.
+    """A :class:`Scorer` backed by the two-tower ONNX graph, run in-process."""
 
-    Named for the model it serves, though the wire contract itself is a plain
-    vectors-in/probs-out call — the two-tower is what the server hosts.
-    """
+    def __init__(self, model_path: str) -> None:
+        self._model = OnnxModel(model_path)
 
-    def __init__(
-        self, base_url: str, *, timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS
-    ) -> None:
-        self._url = base_url.rstrip("/") + SCORE_PATH
-        self._timeout = timeout_seconds
-        # One persistent session: the scorer is hit once per document during an
-        # ingestion run, so reusing the connection avoids a per-call TCP/TLS
-        # handshake to the same host.
-        self._session = requests.Session()
+    @property
+    def cutoff(self) -> float | None:
+        """The model's calibrated P(update) threshold, embedded at export time
+        (``None`` if the graph carries no cutoff)."""
+        raw = self._model.metadata().get("cutoff")
+        return float(raw) if raw else None
 
     def score_batch(
         self, doc_vec: Sequence[float], page_vecs: list[Sequence[float]]
     ) -> list[float]:
-        payload = ScoreRequest(
-            doc_vec=list(doc_vec), page_vecs=[list(v) for v in page_vecs]
-        )
-        resp = self._session.post(
-            self._url, json=payload.model_dump(), timeout=self._timeout
-        )
-        resp.raise_for_status()
-        return ScoreResponse.model_validate(resp.json()).probs
+        if not page_vecs:
+            return []
+        wiki = np.asarray(page_vecs, dtype=np.float32)
+        # The document is scored against every page, so tile it across the batch.
+        doc = np.asarray([list(doc_vec)] * len(page_vecs), dtype=np.float32)
+        probs = self._model.run({_WIKI_INPUT: wiki, _DOC_INPUT: doc}, _PROB_OUTPUT)
+        return probs.astype(np.float64).ravel().tolist()
