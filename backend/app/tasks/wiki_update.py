@@ -343,18 +343,16 @@ def _reconcile_pushed_document(push: dict[str, Any]) -> None:
         return
 
     vectors = page_embeddings.load_all(embeddings.model_name())
-    # Resolve every page's update policy in one query: pages whose policy
-    # disables ingestion auto-update are never candidates, and each kept page's
-    # resolved update instruction rides its candidate into the reconciler prompt.
+    # Resolve every page's update policy in one query. Policy-disabled pages
+    # are excluded *after* the filter (with the cap check below): recording the
+    # ingestion_auto_update_disabled outcome only for pages the filter judged
+    # relevant keeps that metric meaning "policy blocked a would-be candidate",
+    # not "a disabled page exists" (which would fire per page per document).
     policies = update_policy.resolve_for_paths([pv.path for pv in vectors])
-    pages: list[CandidatePage] = []
-    for pv in vectors:
-        policy = policies.get(pv.path)
-        if policy is not None and policy.ingestion_auto_update_disabled:
-            continue
-        pages.append(
-            CandidatePage(path=pv.path, body="", embedding=embeddings.unpack(pv.vector))
-        )
+    pages = [
+        CandidatePage(path=pv.path, body="", embedding=embeddings.unpack(pv.vector))
+        for pv in vectors
+    ]
 
     relevance_result = get_relevance_service().evaluate(doc_carrier, pages)
     for page in relevance_result.dropped:
@@ -391,6 +389,15 @@ def _reconcile_pushed_document(push: dict[str, Any]) -> None:
     readable: list[WikiUpdateCandidate] = []
     for page in relevance_result.kept:
         policy = policies.get(page.path)
+        if policy is not None and policy.ingestion_auto_update_disabled:
+            ingest_outcomes_total.labels(
+                outcome="ingestion_auto_update_disabled", wiki_path=page.path
+            ).inc()
+            log.debug(
+                "process_pushed_document: ingestion auto-update disabled for %s, skipping",
+                page.path,
+            )
+            continue
         cap_count = len(wiki_git.ingest_update_times_24h(page.path)) if cap > 0 else 0
         if cap > 0 and cap_count >= cap:
             ingest_outcomes_total.labels(
@@ -413,8 +420,8 @@ def _reconcile_pushed_document(push: dict[str, Any]) -> None:
             continue
         readable.append(
             WikiUpdateCandidate(
-                # Synthesized hit — retrieval is the relevance filter now, so
-                # there is no BM25 rank/score; downstream only reads .path.
+                # Synthesized hit — the relevance filter provides no BM25 rank
+                # or score; downstream reads only .path.
                 hit=SearchHit(doc_id=page.path, path=page.path, title=None, snippet="", score=0.0),
                 body=body,
                 update_instruction=policy.update_instruction if policy else None,

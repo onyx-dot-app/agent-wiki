@@ -364,9 +364,12 @@ def test_ingestion_disabled_skips_candidate_before_llm(
         "app.tasks.wiki_update.update_policy.resolve_for_paths",
         lambda paths: {"page.md": ResolvedPolicy(ingestion_auto_update_disabled=True)},
     )
+    before = _outcome_count("ingestion_auto_update_disabled", "page.md")
     _run(_make_push())
     mock_reconcile.assert_not_called()
     mock_commit.assert_not_called()
+    # The policy exclusion is visible: the blocked would-be candidate is recorded.
+    assert _outcome_count("ingestion_auto_update_disabled", "page.md") - before == 1.0
 
 
 @patch("app.tasks.wiki_update.update_frequency.record_auto_update_capped")
