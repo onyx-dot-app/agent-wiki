@@ -1598,10 +1598,8 @@ function FileViewer({ path }: { path: string }) {
     void refreshComments();
   }, [refreshComments]);
 
-  // MarkdownRenderer is React.memo'd on body — reuses the same element across
-  // unrelated re-renders (panel open/close, active-comment change, …) so CSS
-  // Highlight API ranges painted over its text nodes are never silently
-  // invalidated (the bug where highlights vanished until a click re-ran the paint).
+  // MarkdownRenderer is React.memo'd on body — CSS Highlight API ranges painted
+  // over its text nodes stay valid across unrelated re-renders.
   const renderedBody = <MarkdownRenderer body={body} />;
 
   // Paint Google-Docs-style highlights over the rendered article for each
