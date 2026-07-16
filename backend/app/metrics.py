@@ -69,6 +69,15 @@ ingest_outcomes_total = Counter(
     ["outcome", "wiki_path"],
 )
 
+ingest_relevance_shadow_total = Counter(
+    "ingest_relevance_shadow_total",
+    "Shadow-mode relevance-filter decisions, one per candidate page. The filter "
+    "is evaluated before the LLM stages but never actually drops anything — "
+    "'dropped' counts pages it *would* filter out, 'kept' the rest. Lets us "
+    "measure the filter's effect on real traffic before enforcing it.",
+    ["decision", "wiki_path"],  # decision: kept | dropped
+)
+
 ingest_document_results_total = Counter(
     "ingest_document_results_total",
     "Per-document terminal outcome of ingest reconciliation, one increment per "

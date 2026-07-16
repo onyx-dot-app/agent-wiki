@@ -46,6 +46,10 @@ def log_sample(
         "filtered_by_selector",
         "filtered_by_bm25_score",
         "filtered_by_search_rank",
+        # Shadow only: the relevance filter would have dropped this pair before
+        # the LLM stages. The reconciler still processed it (shadow changes
+        # nothing) — so this label marks would-be drops, not actual ones.
+        "filtered_by_relevance",
     ],
     bm25_score: float | None,
     commit_sha: str | None,

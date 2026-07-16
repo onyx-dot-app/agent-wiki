@@ -25,12 +25,15 @@ import time
 from typing import Any, Literal
 
 from app.config import CONFIG
+from app.ingest import enrich as ingest_enrich
 from app.ingest import eval_sample as ingest_eval_sample
 from app.ingest import intent as ingest_intent
 from app.ingest import search as ingest_search
 from app.ingest import settings as ingest_settings
+from app.ingest.relevance import build_relevance_filter
 from app.ingest.source_tiers import is_filtered
 from app.ingest.models import WikiUpdateCandidate
+from app.ingest.types import CandidatePage, IngestionDocument
 from app.llm.agents import ingest_batch_reconciler, ingest_selector, nl_updater
 from app.llm.agents.common import IRRELEVANT_SENTINEL
 from app.wiki import utils as wiki_utils
@@ -45,6 +48,7 @@ from app.metrics import (
     ingest_llm_calls_per_doc,
     ingest_outcomes_total,
     ingest_queue_depth,
+    ingest_relevance_shadow_total,
     ingest_requests_total,
     ingest_selector_candidates_filtered,
     ingest_selector_duration_seconds,
@@ -264,6 +268,70 @@ def process_pushed_document(push: dict[str, Any]) -> None:
         _reconcile_pushed_document(push)
 
 
+def _shadow_relevance_filter(
+    push: dict[str, Any],
+    candidates: list[WikiUpdateCandidate],
+    *,
+    source_type: str | None,
+    title: str | None,
+    url: str,
+    content: str,
+) -> None:
+    """Shadow-run the relevance filter over ``candidates`` and record what it
+    *would* drop — without changing anything. The reconciler still sees every
+    candidate; this only emits a metric per page (kept/dropped) and, for would-be
+    drops, an eval sample tagged ``filtered_by_relevance``.
+
+    Whole thing is best-effort and fail-open: any failure (no embedding, scorer
+    error, DB hiccup) is swallowed so shadow observation never perturbs a live
+    ingest. The document embedding is computed once here.
+    """
+    try:
+        doc = ingest_enrich.with_document_embedding(
+            IngestionDocument(
+                content=content,
+                id=push.get("source_document_id"),
+                title=title,
+                source_type=source_type,
+                url=url or None,
+                metadata=push.get("metadata") or None,
+            )
+        )
+        pages = ingest_enrich.with_page_embeddings(
+            [CandidatePage(path=c.hit.path, body=c.body) for c in candidates]
+        )
+        kept_paths = {p.path for p in build_relevance_filter().keep_relevant(doc, pages)}
+    except Exception:
+        log.warning("relevance shadow: evaluation failed, skipping", exc_info=True)
+        return
+
+    for c in candidates:
+        dropped = c.hit.path not in kept_paths
+        ingest_relevance_shadow_total.labels(
+            decision="dropped" if dropped else "kept", wiki_path=c.hit.path
+        ).inc()
+        if not dropped:
+            continue
+        log.info("relevance shadow: would drop path=%s (bm25=%.3f)", c.hit.path, c.hit.score)
+        try:
+            ingest_eval_sample.log_sample(
+                source_document_id=push.get("source_document_id"),
+                source_type=source_type,
+                source_title=title,
+                source_url=url if url else None,
+                source_content=content,
+                wiki_path=c.hit.path,
+                wiki_body_before=c.body,
+                outcome="filtered_by_relevance",
+                bm25_score=c.hit.score,
+                commit_sha=None,
+            )
+        except Exception:
+            log.warning(
+                "ingest_eval_sample: failed to log filtered_by_relevance sample", exc_info=True
+            )
+
+
 def _reconcile_pushed_document(push: dict[str, Any]) -> None:
     """Reconcile a document pushed from an external system into the wiki.
 
@@ -465,6 +533,16 @@ def _reconcile_pushed_document(push: dict[str, Any]) -> None:
         ingest_outcomes_total.labels(outcome="no_candidates", wiki_path="").inc()
         ingest_document_results_total.labels(result="no_candidates").inc()
         return
+
+    # Shadow-mode relevance filter: score what the embedding filter *would* drop
+    # here, before the LLM stages, without changing the candidate set. Gated on
+    # eval logging (it pays one document-embed call) so only data-collecting
+    # deployments run it. Lets us validate the cosine / two-tower filter against
+    # real traffic before it's allowed to actually drop candidates.
+    if CONFIG.ingest_eval_logging:
+        _shadow_relevance_filter(
+            push, readable, source_type=source_type, title=title, url=url, content=content
+        )
 
     # Stage 3: weak-model pre-filter (skipped when selector_model is unset or
     # matches the main model).
