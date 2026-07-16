@@ -71,6 +71,16 @@ class Config(BaseModel):
     # filter that lands in later phases.
     ingest_embed_model: str
 
+    # Relevance filter (drops irrelevant candidate pages before the LLM reconcile).
+    # Empty model path => cosine cold-start filter; a path to an exported two-tower
+    # ONNX graph => the warm filter (per-deployment; the file is supplied at runtime,
+    # never in the repo). The two-tower's threshold ships with the model (its
+    # embedded cutoff); ``two_tower_threshold`` is an optional override (None =>
+    # use the model's cutoff). Cosine has its own scale, so its own threshold.
+    ingest_relevance_model_path: str
+    ingest_relevance_cosine_threshold: float
+    ingest_relevance_two_tower_threshold: float | None
+
     # Opt-in eval logging — captures reconciler inputs/outputs to ingest_eval_samples
     ingest_eval_logging: bool
     # Retention for ingest_eval_samples, in days; rows older than this are pruned
@@ -121,6 +131,32 @@ def _positive_float(name: str, default: float) -> float:
         raise ValueError(f"{name} must be a float, got {raw!r}") from e
     if value <= 0:
         raise ValueError(f"{name} must be a positive float, got {value}")
+    return value
+
+
+def _nonneg_float(name: str, default: float) -> float:
+    raw = os.environ.get(name)
+    if raw is None or raw == "":
+        return default
+    try:
+        value = float(raw)
+    except ValueError as e:
+        raise ValueError(f"{name} must be a float, got {raw!r}") from e
+    if value < 0:
+        raise ValueError(f"{name} must be >= 0, got {value}")
+    return value
+
+
+def _optional_nonneg_float(name: str) -> float | None:
+    raw = os.environ.get(name)
+    if raw is None or raw == "":
+        return None
+    try:
+        value = float(raw)
+    except ValueError as e:
+        raise ValueError(f"{name} must be a float, got {raw!r}") from e
+    if value < 0:
+        raise ValueError(f"{name} must be >= 0, got {value}")
     return value
 
 
@@ -178,6 +214,15 @@ def load_config() -> Config:
         ingest_bm25_limit=_positive_int("INGEST_BM25_LIMIT", 20),
         ingest_irrelevant_stop_n=_positive_int("INGEST_IRRELEVANT_STOP_N", 2),
         ingest_embed_model=os.environ.get("INGEST_EMBED_MODEL", "text-embedding-3-small"),
+        ingest_relevance_model_path=os.environ.get("INGEST_RELEVANCE_MODEL_PATH", ""),
+        # Cosine cold-start default: the study's 85%-filter operating point.
+        ingest_relevance_cosine_threshold=_nonneg_float(
+            "INGEST_RELEVANCE_COSINE_THRESHOLD", 0.4334
+        ),
+        # Optional override; unset => use the model's own embedded cutoff.
+        ingest_relevance_two_tower_threshold=_optional_nonneg_float(
+            "INGEST_RELEVANCE_TWO_TOWER_THRESHOLD"
+        ),
         auth_mode=os.environ.get("AUTH_MODE", "basic"),
         oidc_issuer=os.environ.get("OIDC_ISSUER", ""),
         oidc_client_id=os.environ.get("OIDC_CLIENT_ID", ""),

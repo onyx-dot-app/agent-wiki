@@ -15,6 +15,7 @@ cosine filter. Import it directly from ``app.ingest.relevance.two_tower_scorer``
 where the warm model is actually constructed (the ingest worker).
 """
 from app.ingest.relevance.cosine_filter import CosineSimilarityFilter
+from app.ingest.relevance.factory import build_relevance_filter
 from app.ingest.relevance.filter import RelevanceFilter
 from app.ingest.relevance.two_tower_filter import Scorer, TwoTowerFilter
 
@@ -23,4 +24,5 @@ __all__ = [
     "RelevanceFilter",
     "Scorer",
     "TwoTowerFilter",
+    "build_relevance_filter",
 ]

@@ -30,6 +30,13 @@ class TwoTowerScorer:
     def __init__(self, model_path: str) -> None:
         self._model = OnnxModel(model_path)
 
+    @property
+    def cutoff(self) -> float | None:
+        """The model's calibrated P(update) threshold, embedded at export time
+        (``None`` if the graph carries no cutoff)."""
+        raw = self._model.metadata().get("cutoff")
+        return float(raw) if raw else None
+
     def score_batch(
         self, doc_vec: Sequence[float], page_vecs: list[Sequence[float]]
     ) -> list[float]:
