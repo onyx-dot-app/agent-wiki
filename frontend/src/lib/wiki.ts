@@ -2,14 +2,81 @@ import useSWR from "swr";
 
 import { apiFetch } from "@/lib/api";
 import { SWR_KEYS } from "@/lib/swr-keys";
+import { getDeletedTombstone } from "@/lib/trash";
+import { resolveDocId, resolveIds } from "@/lib/wikiHref";
 
 /** Last path segment as a display name — drops a trailing `.md`. Shared by the
- * share + transfer dialogs so the two copies don't drift. */
+ * share + transfer dialogs so the two copies don't drift. See also
+ * {@link pageTitle}, which covers the FileView title case (a `.md` file path,
+ * always non-empty, no trailing-slash/root handling needed). */
 export function lastSegment(path: string): string {
   const clean = path.replace(/\/+$/, "");
   if (!clean) return "Wiki";
   const seg = clean.split("/").pop() ?? clean;
   return seg.endsWith(".md") ? seg.slice(0, -3) : seg;
+}
+
+/** Strip the directory prefix and `.md` extension from a wiki file path to
+ * get the human-readable page title. See also {@link lastSegment} for the
+ * generic (possibly folder/root) path case. */
+export function pageTitle(path: string): string {
+  return (path.split("/").pop() ?? path).replace(/\.md$/i, "");
+}
+
+/** Full flat listing of every wiki doc — the `/wiki` response, used to derive
+ * folder trees and directory listings. */
+export interface DocEntry {
+  path: string;
+  updated_at: string;
+}
+
+export interface ListResponse {
+  entries: DocEntry[];
+}
+
+/** The full flat wiki listing — backs the folder Explorer and the New Doc
+ * destination picker. */
+export function useWikiTree() {
+  const { data, error, isLoading, mutate } = useSWR<ListResponse>(
+    SWR_KEYS.wikiTree,
+  );
+  return { entries: data?.entries ?? [], error, isLoading, mutate };
+}
+
+/** Tombstone info for a deleted page/folder by its original path, for the
+ * deleted-URL panel. Enabled whenever `path` is non-null. */
+export function useDeletedTombstone(path: string | null) {
+  const { data, error, isLoading } = useSWR(
+    path ? SWR_KEYS.deletedTombstone(path) : null,
+    () => getDeletedTombstone(path as string),
+    { revalidateOnFocus: false },
+  );
+  return { entry: data, error, isLoading };
+}
+
+/** Resolve a doc id to its current binding (path/kind/deleted state).
+ * Enabled whenever `id` is non-null. */
+export function useDocIdResolve(id: string | null) {
+  const { data, error, isLoading } = useSWR(
+    id ? SWR_KEYS.docIdResolve(id) : null,
+    () => resolveDocId(id as string),
+    { revalidateOnFocus: false },
+  );
+  return { resolved: data, error, isLoading };
+}
+
+/** Resolve a single path to its live id. Enabled whenever `path` is non-null.
+ * `tag` namespaces the SWR cache key — callers resolving different concerns
+ * off the same `resolveIds` endpoint pass distinct tags (e.g. "id-fallback"
+ * vs "wiki-path-id"); keep any tag in sync with the key matcher in
+ * `wikiHref.ts:revalidateWiki`. */
+export function usePathToId(tag: string, path: string | null) {
+  const { data, error, isLoading } = useSWR(
+    path ? SWR_KEYS.pathToId(tag, path) : null,
+    () => resolveIds([path as string]).then((m) => m[path as string] ?? null),
+    { revalidateOnFocus: false },
+  );
+  return { id: data ?? null, error, isLoading };
 }
 
 /** Shape of a home "Recent Pages" card; the grid fetches `/wiki/recent` directly. */

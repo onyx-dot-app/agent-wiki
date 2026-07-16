@@ -52,7 +52,7 @@ import type {
   CommentDraft,
   CommentHighlightTarget,
 } from "@/lib/editor/comments";
-import { pageTitle } from "@/lib/fileview/utils";
+import { pageTitle } from "@/lib/wiki";
 import { useAuth } from "@/lib/auth";
 import {
   Coeditor,
