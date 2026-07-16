@@ -38,8 +38,8 @@ _BATCH = 128
 # limit. Rather than pick a char cap that's safe for every possible content
 # (impossible), shrink the input in fixed steps on a token-limit rejection and
 # retry — so no page is ever silently unembeddable.
-_STEP_DOWN_CHARS = 4_000
-_MIN_EMBED_CHARS = 4_000
+_STEP_DOWN_CHARS = 4_000  # stride per shrink-and-retry pass
+_MIN_EMBED_CHARS = 4_000  # give-up floor — independent of the stride; retune separately
 
 
 def model_name() -> str:
@@ -126,11 +126,21 @@ def embed_text(text: str) -> list[float] | None:
         try:
             return openai_provider.embed(key, model, [text[:limit]])[0]
         except Exception as e:
-            if _is_token_limit_error(e) and limit > _MIN_EMBED_CHARS:
-                limit = max(_MIN_EMBED_CHARS, limit - _STEP_DOWN_CHARS)
-                log.warning(
-                    "embeddings: input over the token limit, retrying at %d chars", limit
+            if _is_token_limit_error(e):
+                if limit > _MIN_EMBED_CHARS:
+                    limit = max(_MIN_EMBED_CHARS, limit - _STEP_DOWN_CHARS)
+                    log.warning(
+                        "embeddings: input over the token limit, retrying at %d chars", limit
+                    )
+                    continue
+                # Still over the limit at the floor: not transient — the content is too
+                # token-dense to embed. Distinct line so operators don't read this as a
+                # network/auth blip (that's the generic warning below).
+                log.error(
+                    "embeddings: content exceeds the token limit even at the %d-char floor; "
+                    "left unembedded",
+                    _MIN_EMBED_CHARS,
                 )
-                continue
+                return None
             log.warning("embeddings: embed_text failed", exc_info=True)
             return None
