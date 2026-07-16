@@ -1403,6 +1403,54 @@ class ChangeProposal(Base):
     )
 
 
+class DetectionRun(Base):
+    """One Wiki Auto Management detection run — a sweep or a single-page check.
+
+    The substrate stamps a run before detecting, records scan stats as it goes,
+    and closes it ``completed``/``failed`` at the end. ``id`` is the value
+    proposals carry in ``change_proposals.run_id``, so a run and everything it
+    emitted join on it (batched notifications, per-run detector-quality stats).
+    ``trigger`` mirrors ``app/wiki/automanage/detectors/base.py:TriggerKind``.
+    """
+
+    __tablename__ = "detection_runs"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    trigger: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'running'")
+    )
+    # Admin who triggered the sweep; NULL for system/scheduled runs.
+    triggered_by_user_id: Mapped[str | None] = mapped_column(
+        Text, ForeignKey("users.id", ondelete="SET NULL")
+    )
+    # Scan stats, filled in as the run progresses.
+    paths_scanned: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    proposals_emitted: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    # Populated when status='failed'.
+    error: Mapped[str | None] = mapped_column(Text)
+    started_at: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
+    )
+    finished_at: Mapped[str | None] = mapped_column(Text)
+
+    __table_args__ = (
+        CheckConstraint(
+            "trigger IN ('sweep', 'on_create', 'on_write')",
+            name="detection_runs_trigger_check",
+        ),
+        CheckConstraint(
+            "status IN ('running', 'completed', 'failed')",
+            name="detection_runs_status_check",
+        ),
+        Index("idx_detection_runs_status", "status", "started_at"),
+    )
+
+
 # --------------------------------------------------------------------------- #
 # Comments — human discussion anchored to wiki pages (Postgres-only)          #
 # --------------------------------------------------------------------------- #
