@@ -3,12 +3,19 @@
 /** React hook that owns a live co-edit session's lifecycle + presence.
  *
  * On `enabled` it joins the session for `path`, streams inbound frames, and
- * exposes presence (`participants`/`typing`/`peers`) and a `save` (checkpoint +
- * leave). The *document* is owned by the editor via `@codemirror/collab` (see
- * `CoeditEditor`), not here — the hook just hands the editor what it needs to
+ * exposes presence (`participants`/`typing`/`peers`), autosave (`saveStatus`),
+ * and a `leave` (checkpoint + leave, for the caller's own unmount/transition
+ * cleanup). The *document* is owned by the editor via `@codemirror/collab`
+ * (see `Coeditor`), not here — the hook just hands the editor what it needs to
  * run collab (`session` = id/clientId/start version+doc), forwards inbound
  * `op`/`resync` frames to it (`onServerFrame`), and keeps a read-only `buffer`
- * mirror for non-editor UI (the template gallery, the optimistic Done render).
+ * mirror for non-editor UI (the template gallery).
+ *
+ * Autosave: every `reportDoc` (called by the editor on each doc change) arms
+ * an idle timer (checkpoint `AUTOSAVE_IDLE_MS` after the last edit) and, if
+ * not already running, a hard-cap timer (`AUTOSAVE_MAX_INTERVAL_MS`) so a
+ * continuously-typing user still checkpoints periodically. There's no
+ * explicit Save — `leave` only runs on unmount/path-change/entering history.
  *
  * Offsets are UTF-16 (JS-native), matching the server — see `svc.ts`.
  */
@@ -20,19 +27,21 @@ import type {
   CoeditPeer,
   UseCoeditSession,
   CoeditSessionHandle,
-} from "@/lib/coeditor/types";
+} from "@/lib/editor/types";
 import {
   checkpointSession,
   joinSession,
   leaveSession,
   sendCursor,
   streamSession,
-} from "@/lib/coeditor/svc";
+} from "@/lib/editor/svc";
 import {
+  AUTOSAVE_IDLE_MS,
+  AUTOSAVE_MAX_INTERVAL_MS,
   CURSOR_THROTTLE_MS,
   TYPING_EXPIRY_MS,
   TYPING_IDLE_MS,
-} from "@/lib/coeditor/constants";
+} from "@/lib/editor/constants";
 
 /** Generate a fresh per-connection collab clientId (UUID v4).
  * Used to filter out our own op echoes from the SSE stream. */
@@ -57,6 +66,13 @@ export function useCoeditSession(opts: {
   const [peers, setPeers] = useState<CoeditPeer[]>([]);
   const [active, setActive] = useState(false);
   const [session, setSession] = useState<CoeditSessionHandle | null>(null);
+  const [saveStatus, setSaveStatus] =
+    useState<UseCoeditSession["saveStatus"]>("saved");
+
+  // Autosave timers: idle (reset on every edit) + a hard cap that fires
+  // regardless, so continuous typing still checkpoints periodically.
+  const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const maxIntervalTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const sessionId = useRef<number | null>(null);
   const clientId = useRef<string>("");
@@ -93,7 +109,55 @@ export function useCoeditSession(opts: {
     setDocFn.current = fn;
   }, []);
   const setDoc = useCallback((text: string) => setDocFn.current?.(text), []);
-  const reportDoc = useCallback((doc: string) => setBuffer(doc), []);
+
+  const clearAutosaveTimers = useCallback(() => {
+    if (idleTimer.current) {
+      clearTimeout(idleTimer.current);
+      idleTimer.current = null;
+    }
+    if (maxIntervalTimer.current) {
+      clearTimeout(maxIntervalTimer.current);
+      maxIntervalTimer.current = null;
+    }
+  }, []);
+
+  // Flush + checkpoint without leaving the session — the autosave action.
+  const checkpoint = useCallback(async () => {
+    const sid = sessionId.current;
+    if (sid === null) return;
+    setSaveStatus("saving");
+    try {
+      await flushFn.current?.();
+      await checkpointSession(sid);
+      setSaveStatus("saved");
+    } catch {
+      setSaveStatus("error");
+    }
+  }, []);
+
+  const runAutoCheckpoint = useCallback(() => {
+    clearAutosaveTimers();
+    void checkpoint();
+  }, [clearAutosaveTimers, checkpoint]);
+
+  const armAutosave = useCallback(() => {
+    if (idleTimer.current) clearTimeout(idleTimer.current);
+    idleTimer.current = setTimeout(runAutoCheckpoint, AUTOSAVE_IDLE_MS);
+    if (!maxIntervalTimer.current) {
+      maxIntervalTimer.current = setTimeout(
+        runAutoCheckpoint,
+        AUTOSAVE_MAX_INTERVAL_MS,
+      );
+    }
+  }, [runAutoCheckpoint]);
+
+  const reportDoc = useCallback(
+    (doc: string) => {
+      setBuffer(doc);
+      armAutosave();
+    },
+    [armAutosave],
+  );
 
   const reportSelection = useCallback(
     (anchor: number, head: number, isEdit: boolean) => {
@@ -181,6 +245,7 @@ export function useCoeditSession(opts: {
   );
 
   const stop = useCallback(() => {
+    clearAutosaveTimers();
     if (cursorThrottle.current) {
       clearTimeout(cursorThrottle.current);
       cursorThrottle.current = null;
@@ -201,9 +266,11 @@ export function useCoeditSession(opts: {
     setActive(false);
     setSession(null);
     if (sid !== null) void leaveSession(sid).catch(() => {});
-  }, []);
+  }, [clearAutosaveTimers]);
 
-  const save = useCallback(async () => {
+  // Flush + checkpoint + leave the session. Called on unmount, on a path
+  // change, and when switching into history view — never from a button.
+  const leave = useCallback(async () => {
     if (sessionId.current === null && joinPromise.current) {
       await joinPromise.current;
     }
@@ -213,16 +280,20 @@ export function useCoeditSession(opts: {
     // before we checkpoint the buffer to git. If the flush fails (network),
     // let it throw: don't checkpoint a stale buffer or leave the session —
     // the caller surfaces the error and the user stays in the editor to retry.
+    setSaveStatus("saving");
     await flushFn.current?.();
     try {
       await checkpointSession(sid);
+      setSaveStatus("saved");
     } finally {
       stop();
       onEnd?.();
     }
   }, [stop, onEnd]);
 
-  // Join + stream while enabled; leave on disable/unmount.
+  // Join + stream while enabled (the caller passes `!viewingVersion` — i.e.
+  // whenever the live/current doc is showing, not an old commit); leave on
+  // disable/path-change/unmount.
   useEffect(() => {
     if (!enabled) return;
     const ctrl = new AbortController();
@@ -256,10 +327,49 @@ export function useCoeditSession(opts: {
     return () => {
       cancelled = true;
       joinPromise.current = null;
+      // Capture before the synchronous `stop()` below clears them, so a
+      // trailing checkpoint can still cover the last idle-autosave window
+      // (the periodic autosave while mounted is the primary durability path;
+      // this is best-effort for the tail end of it, e.g. a path change or
+      // unmount mid-edit — small race against `stop()`'s own `leaveSession`
+      // call, not worth blocking teardown to sequence perfectly).
+      const sid = sessionId.current;
+      const flush = flushFn.current;
       stop();
+      if (sid !== null) {
+        void (async () => {
+          try {
+            await flush?.();
+          } catch {
+            return;
+          }
+          void checkpointSession(sid, { keepalive: true }).catch(() => {});
+        })();
+      }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled, path]);
+
+  // Best-effort checkpoint when the tab is backgrounded/closed — `keepalive`
+  // lets the request survive the page tearing down. Covers the gap between
+  // the last edit and the idle-autosave timer firing.
+  useEffect(() => {
+    if (!active) return;
+    const checkpointNow = () => {
+      const sid = sessionId.current;
+      if (sid === null) return;
+      void checkpointSession(sid, { keepalive: true }).catch(() => {});
+    };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "hidden") checkpointNow();
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    window.addEventListener("pagehide", checkpointNow);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      window.removeEventListener("pagehide", checkpointNow);
+    };
+  }, [active]);
 
   return {
     active,
@@ -268,12 +378,13 @@ export function useCoeditSession(opts: {
     typing,
     peers,
     session,
+    saveStatus,
     onServerFrame,
     reportDoc,
     registerFlush,
     registerSetDoc,
     setDoc,
     reportSelection,
-    save,
+    leave,
   };
 }

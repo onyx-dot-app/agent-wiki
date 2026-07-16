@@ -18,3 +18,9 @@ export const TYPING_IDLE_MS = 1500;
 
 /** Ms without a ping before a peer's "typing" badge is cleared (covers crash / lost tab). */
 export const TYPING_EXPIRY_MS = 4000;
+
+/** Ms of doc-change silence before an autosave checkpoint fires. */
+export const AUTOSAVE_IDLE_MS = 2000;
+
+/** Hard cap: force a checkpoint at least this often even under continuous typing. */
+export const AUTOSAVE_MAX_INTERVAL_MS = 30000;
