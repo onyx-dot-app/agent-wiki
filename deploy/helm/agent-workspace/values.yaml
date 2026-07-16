@@ -68,7 +68,7 @@ ingestEvalLogging: false
 # rather than blocking startup. Credentials come from the standard AWS env /
 # IAM role chain (same as backup.s3); any S3-compatible endpoint works.
 ingestRelevance:
-  model:
+  twoTower:
     # s3://<bucket>/<key> of the exported .onnx. Empty => cosine cold-start.
     s3Uri: ""
     # Optional endpoint URL for non-AWS backends (GCS interop, MinIO, R2).

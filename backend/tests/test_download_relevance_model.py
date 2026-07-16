@@ -70,14 +70,14 @@ def test_failed_download_leaves_no_partial_file(tmp_path: Path):
 
 
 def test_main_soft_fails_on_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("INGEST_RELEVANCE_MODEL_PATH", str(tmp_path / "model.onnx"))
-    monkeypatch.setenv("INGEST_RELEVANCE_MODEL_S3_URI", "s3://b/k.onnx")
+    monkeypatch.setenv("INGEST_RELEVANCE_TWO_TOWER_MODEL_PATH", str(tmp_path / "model.onnx"))
+    monkeypatch.setenv("INGEST_RELEVANCE_TWO_TOWER_S3_URI", "s3://b/k.onnx")
     monkeypatch.setattr(dl, "_s3_client", lambda cfg: (_ for _ in ()).throw(RuntimeError("no creds")))
     # A download failure must not crash the worker init — exit 0, run cosine.
     assert dl.main() == 0
 
 
 def test_main_skips_when_uri_unset(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("INGEST_RELEVANCE_MODEL_PATH", str(tmp_path / "model.onnx"))
-    monkeypatch.delenv("INGEST_RELEVANCE_MODEL_S3_URI", raising=False)
+    monkeypatch.setenv("INGEST_RELEVANCE_TWO_TOWER_MODEL_PATH", str(tmp_path / "model.onnx"))
+    monkeypatch.delenv("INGEST_RELEVANCE_TWO_TOWER_S3_URI", raising=False)
     assert dl.main() == 0

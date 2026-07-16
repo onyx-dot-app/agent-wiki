@@ -1,8 +1,8 @@
 """Download the two-tower relevance model (.onnx) from S3 to local disk.
 
 Runs as an init-container on the ``documents`` worker before the app starts, so
-the worker finds the warm model at ``INGEST_RELEVANCE_MODEL_PATH``. An empty
-``INGEST_RELEVANCE_MODEL_S3_URI`` means there's nothing to fetch — the worker
+the worker finds the warm model at ``INGEST_RELEVANCE_TWO_TOWER_MODEL_PATH``. An empty
+``INGEST_RELEVANCE_TWO_TOWER_S3_URI`` means there's nothing to fetch — the worker
 then runs the cosine cold-start filter (see ``app.ingest.relevance.factory``).
 
 Any S3-compatible endpoint works (AWS S3, GCS interop, MinIO, Cloudflare R2) via
@@ -17,10 +17,10 @@ in the logs and in which filter the worker reports building.
 
 Configuration is env-based (the Helm chart's init-container sets these):
 
-- ``INGEST_RELEVANCE_MODEL_S3_URI`` — s3://bucket/key of the exported .onnx.
-- ``INGEST_RELEVANCE_MODEL_PATH``   — local destination the app reads. Required.
-- ``INGEST_RELEVANCE_MODEL_S3_ENDPOINT`` — optional endpoint URL for non-AWS.
-- ``INGEST_RELEVANCE_MODEL_S3_REGION``   — optional region.
+- ``INGEST_RELEVANCE_TWO_TOWER_S3_URI`` — s3://bucket/key of the exported .onnx.
+- ``INGEST_RELEVANCE_TWO_TOWER_MODEL_PATH``   — local destination the app reads. Required.
+- ``INGEST_RELEVANCE_TWO_TOWER_S3_ENDPOINT`` — optional endpoint URL for non-AWS.
+- ``INGEST_RELEVANCE_TWO_TOWER_S3_REGION``   — optional region.
 - Credentials via the standard AWS env vars / IAM role chain.
 
 Usage:
@@ -54,14 +54,14 @@ class ModelDownloadConfig(BaseModel):
 
     @staticmethod
     def from_env() -> "ModelDownloadConfig":
-        download_to = os.environ.get("INGEST_RELEVANCE_MODEL_PATH", "")
+        download_to = os.environ.get("INGEST_RELEVANCE_TWO_TOWER_MODEL_PATH", "")
         if not download_to:
-            raise SystemExit("INGEST_RELEVANCE_MODEL_PATH is required")
+            raise SystemExit("INGEST_RELEVANCE_TWO_TOWER_MODEL_PATH is required")
         return ModelDownloadConfig(
-            s3_uri=os.environ.get("INGEST_RELEVANCE_MODEL_S3_URI", ""),
+            s3_uri=os.environ.get("INGEST_RELEVANCE_TWO_TOWER_S3_URI", ""),
             download_to=download_to,
-            endpoint_url=os.environ.get("INGEST_RELEVANCE_MODEL_S3_ENDPOINT") or None,
-            region=os.environ.get("INGEST_RELEVANCE_MODEL_S3_REGION") or None,
+            endpoint_url=os.environ.get("INGEST_RELEVANCE_TWO_TOWER_S3_ENDPOINT") or None,
+            region=os.environ.get("INGEST_RELEVANCE_TWO_TOWER_S3_REGION") or None,
         )
 
 
@@ -111,7 +111,7 @@ def main() -> int:
     setup_logging()
     cfg = ModelDownloadConfig.from_env()
     if not cfg.s3_uri:
-        log.info("INGEST_RELEVANCE_MODEL_S3_URI unset; skipping (cosine cold-start filter)")
+        log.info("INGEST_RELEVANCE_TWO_TOWER_S3_URI unset; skipping (cosine cold-start filter)")
         return 0
     try:
         download(_s3_client(cfg), cfg)
