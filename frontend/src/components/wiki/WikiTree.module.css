@@ -68,23 +68,38 @@
   width: 100%;
 }
 
-/* Row label: leading file/folder glyph inline with the name (the SidebarTab
-   icon slot holds the expand chevron for folders). */
+/* Row label: chevron column, then glyph inline with the name. Label color and
+   weight follow the mock's Main UI/Body on text-04 (705:142966). The glyph
+   strokes at text-03 and the chevron at text-02 match the mock's icon
+   opacities (0.55 / 0.45). */
 .rowLabel {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
   min-width: 0;
-  color: inherit;
+  color: var(--text-04);
+  font-weight: 500;
 }
 .rowLabel > svg {
   flex-shrink: 0;
   color: var(--text-03);
 }
-.rowLabel > span {
+.rowLabel > span:last-child {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  padding-left: 4px;
+}
+
+/* Fixed 12px chevron column (mock's Fold slot). The internal button centers
+   in it and overhangs without shifting the glyph column. */
+.chevronSlot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  flex-shrink: 0;
+  color: var(--text-02);
 }
 
 /* Expanded folder's children, indented one level per depth with the mock's

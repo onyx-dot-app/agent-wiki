@@ -12,7 +12,7 @@ import {
   Text,
 } from "@onyx-ai/opal/components";
 import {
-  SvgArrowWallRight,
+  SvgArrowWallLeft,
   SvgCheck,
   SvgChevronDown,
   SvgChevronRight,
@@ -20,9 +20,9 @@ import {
   SvgFolder,
   SvgFolderOpen,
   SvgFolderPlus,
+  SvgListTree,
   SvgMoreHorizontal,
   SvgPlus,
-  SvgTextLines,
 } from "@onyx-ai/opal/icons";
 
 import { apiFetch } from "@/lib/api";
@@ -66,31 +66,16 @@ function childrenOf(entries: Entry[], dir: string) {
   };
 }
 
-type IconComponent = NonNullable<
-  React.ComponentProps<typeof SidebarTab>["icon"]
->;
-
-/** The mock's `arrow-wall-left` collapse glyph. The published icon set ships
- * only the right-facing variant, whose 180° rotation is the exact mirror.
- * Swap for SvgArrowWallLeft once @onyx-ai/opal publishes it. */
-const ArrowWallLeft: IconComponent = (props) => (
-  <SvgArrowWallRight {...props} style={{ transform: "rotate(180deg)" }} />
-);
-
-/** Invisible icon-slot filler so file rows keep the chevron column's exact
- * geometry and their glyph aligns with folder glyphs. */
-const GlyphSpacer: IconComponent = (props) => (
-  <svg {...props} aria-hidden="true" />
-);
-
 /**
- * One tree row. Folders lead with an expand chevron (icon slot) + a folder
- * glyph inline with the label. Files fill the chevron slot with a spacer so
+ * One tree row. Folders lead with an internal-style chevron button that
+ * expands/collapses WITHOUT navigating (mock annotation on 705:142966), while
+ * the row itself opens the item. Files fill the chevron column with a spacer so
  * their glyph aligns with folder glyphs. The "⋯" menu sits in SidebarTab's
  * right slot, revealed on the tab's own group hover or while its menu is open.
  */
 function Row({
-  chevron,
+  expanded,
+  onToggle,
   glyph: Glyph,
   label,
   path,
@@ -98,7 +83,8 @@ function Row({
   active = false,
   onClick,
 }: {
-  chevron?: IconComponent;
+  expanded?: boolean;
+  onToggle?: () => void;
   glyph: React.ComponentType<{ size?: number }>;
   label: string;
   path: string;
@@ -110,7 +96,6 @@ function Row({
   return (
     <SidebarTab
       variant="sidebar-light"
-      icon={chevron ?? GlyphSpacer}
       selected={menuOpen || active}
       onClick={onClick}
       rightChildren={
@@ -140,6 +125,22 @@ function Row({
       }
     >
       <span className={styles.rowLabel}>
+        {isFolder && onToggle ? (
+          <span
+            className={styles.chevronSlot}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <Button
+              prominence="internal"
+              size="sm"
+              icon={expanded ? SvgChevronDown : SvgChevronRight}
+              aria-label={expanded ? "Collapse folder" : "Expand folder"}
+              onClick={onToggle}
+            />
+          </span>
+        ) : (
+          <span className={styles.chevronSlot} />
+        )}
         <Glyph size={16} />
         <span>{label}</span>
       </span>
@@ -254,7 +255,8 @@ function FolderNode({
   return (
     <>
       <Row
-        chevron={open ? SvgChevronDown : SvgChevronRight}
+        expanded={open}
+        onToggle={() => onToggle(full)}
         glyph={open ? SvgFolderOpen : SvgFolder}
         label={name}
         path={full}
@@ -263,7 +265,6 @@ function FolderNode({
         onClick={() => {
           onOpenFile(full); // navigate the main view to the folder listing
           onSetActive(full);
-          onToggle(full);
         }}
       />
       {open && (
@@ -384,16 +385,14 @@ export function WikiTree() {
     <div className={styles.panel}>
       <div className={styles.header}>
         <span className={styles.headerTitle}>
-          {/* Mock icon is `list-tree` (SvgListTree once @onyx-ai/opal ships it,
-              with SvgFold below becoming SvgArrowWallLeft). */}
-          <SvgTextLines size={16} />
+          <SvgListTree size={16} />
           <Text font="main-ui-action" color="text-05">
             Wiki Directory
           </Text>
         </span>
         <Button
           prominence="tertiary"
-          icon={ArrowWallLeft}
+          icon={SvgArrowWallLeft}
           tooltip="Close Panel"
           onClick={toggleTree}
         />

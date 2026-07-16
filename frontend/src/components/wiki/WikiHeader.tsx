@@ -3,7 +3,7 @@
 import Link from "next/link";
 import useSWR from "swr";
 import { Button } from "@onyx-ai/opal/components";
-import { SvgChevronRight, SvgTextLines } from "@onyx-ai/opal/icons";
+import { SvgChevronRight, SvgListTree } from "@onyx-ai/opal/icons";
 import { NotificationBell } from "@/components/common/NotificationBell";
 import { CraftNotifier } from "@/components/wiki/CraftNotifier";
 import { useAppFocus } from "@/hooks/useAppFocus";
@@ -50,7 +50,7 @@ export function WikiHeader() {
           open, the collapse control sits in the tree panel's own header. */}
       {!treeVisible && (
         <Button
-          icon={SvgTextLines}
+          icon={SvgListTree}
           prominence="tertiary"
           tooltip="Expand tree"
           onClick={toggleTree}

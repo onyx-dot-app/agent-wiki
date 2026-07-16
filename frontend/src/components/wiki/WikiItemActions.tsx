@@ -9,8 +9,8 @@ import {
   SvgLink,
   SvgPlus,
   SvgShare,
-  SvgSparkle,
   SvgTrash,
+  SvgZap,
 } from "@onyx-ai/opal/icons";
 import { useRowActions } from "@/providers/WikiItemActionsProvider";
 
@@ -102,7 +102,7 @@ export default function WikiItemMenu({
             <LineItemButton
               variant="body"
               sizePreset="main-ui"
-              icon={SvgSparkle}
+              icon={SvgZap}
               title="Launch Agent"
               onClick={run(actions.launchAgent)}
             />
