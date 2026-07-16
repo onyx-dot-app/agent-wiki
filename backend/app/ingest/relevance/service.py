@@ -18,6 +18,7 @@ import logging
 from dataclasses import dataclass
 
 from app.ingest import enrich
+from app.ingest.relevance.factory import build_relevance_filter
 from app.ingest.relevance.filter import RelevanceFilter
 from app.ingest.types import CandidatePage, IngestionDocument
 
@@ -71,3 +72,15 @@ class RelevanceService:
         kept = [p for p in pages if p.path in kept_paths]
         dropped = [p for p in pages if p.path not in kept_paths]
         return RelevanceResult(kept=kept, dropped=dropped)
+
+
+_service: RelevanceService | None = None
+
+
+def get_relevance_service() -> RelevanceService:
+    """The process-wide service, built lazily on first use so the underlying
+    filter (e.g. the two-tower ONNX model) is loaded once, not per document."""
+    global _service
+    if _service is None:
+        _service = RelevanceService(build_relevance_filter())
+    return _service
